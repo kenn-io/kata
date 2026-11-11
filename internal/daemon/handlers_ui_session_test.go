@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 )
 
@@ -46,6 +47,50 @@ func TestIssueLocalUISession(t *testing.T) {
 	assert.Equal(t, "/kata?view=today", session.ReturnPath)
 	assert.True(t, session.Writable)
 	assert.False(t, session.TokenAuditRead)
+}
+
+func TestWebLocalAttachmentRouteDirectAndGateway(t *testing.T) {
+	store := openAuthTestDB(t)
+	project, err := store.CreateProject(t.Context(), "attachments")
+	require.NoError(t, err)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/instance" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"web_ui_contract_version": api.UISnapshotContractVersion,
+				"web_ui_capabilities":     api.UICapabilities{Writable: true, Updates: "poll", ActorPolicy: "request"},
+			})
+			return
+		}
+		_, _ = w.Write([]byte(`{"route":null}`))
+	}))
+	t.Cleanup(upstream.Close)
+	manager := newDeterministicSessionManager(t, "http://127.0.0.1:27123", "instance_a")
+	server := NewServer(ServerConfig{DB: store, WebSessions: manager, WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
+	t.Cleanup(func() { _ = server.Close() })
+	handler, err := server.HandlerFor(ListenerPolicy{Kind: ListenerBrowser, Origin: "http://127.0.0.1:27123", RequireBrowserSession: true, AllowLocalSession: true})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name      string
+		path      string
+		principal PrincipalKind
+	}{
+		{"local", "/api/v1/ui/attachment-route", PrincipalWebLocal},
+		{"gateway local session", "/api/v1/ui/proxy/api/v1/ui/attachment-route", PrincipalWebLocal},
+		{"gateway token session", "/api/v1/ui/proxy/api/v1/ui/attachment-route", PrincipalStaticToken},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issued, err := manager.IssueSession(Principal{Kind: tc.principal}, "/kata")
+			require.NoError(t, err)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:27123"+tc.path+"?project_uid="+project.UID, nil)
+			request.AddCookie(manager.Cookie(issued.Cookie))
+			request.Header.Set(webSessionHeader, issued.Session)
+			request.Header.Set(webDaemonHeaderName, "example-remote")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		})
+	}
 }
 
 func TestBootstrapUISessionAdvertisesCredentialAuditWithoutIssueWrites(t *testing.T) {

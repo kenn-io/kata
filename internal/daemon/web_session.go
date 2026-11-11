@@ -477,7 +477,7 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 	switch r.URL.Path {
 	case "/api/v1/embeddings/local":
 		return r.Method == http.MethodGet || r.Method == http.MethodPost
-	case "/api/v1/ui/snapshot", "/api/v1/ui/references", "/api/v1/ui/issue-reference", "/api/v1/ui/daemons", pathEventsStreamPath:
+	case "/api/v1/ui/snapshot", "/api/v1/ui/references", "/api/v1/ui/issue-reference", "/api/v1/ui/daemons", "/api/v1/ui/attachment-route", pathEventsStreamPath:
 		return r.Method == http.MethodGet
 	case "/api/v1/ui/session":
 		return r.Method == http.MethodDelete

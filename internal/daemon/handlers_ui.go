@@ -97,7 +97,6 @@ type uiETagBasis struct {
 }
 
 func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
-	attachmentCache := newUIAttachmentCapabilityCache()
 	authorityCache := newUISnapshotAuthorityCache()
 	enrichmentCache := newUISnapshotEnrichmentCache()
 	huma.Register(humaAPI, huma.Operation{OperationID: "readUIAttachmentRoute", Method: http.MethodGet, Path: "/api/v1/ui/attachment-route"}, func(ctx context.Context, in *api.UIAttachmentRouteRequest) (*api.UIAttachmentRouteResponse, error) {
@@ -123,7 +122,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if binding.Role != db.FederationRoleSpoke {
 			return out, nil
 		}
-		out.Body.Route = uiAttachmentRoute(ctx, cfg, attachmentCache, binding)
+		out.Body.Route = uiAttachmentRoute(ctx, cfg, binding)
 		out.Body.Route.Write = out.Body.Route.Write && effectiveUIPolicy(ctx, cfg).Capabilities.Writable
 		return out, nil
 	})
@@ -793,7 +792,7 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 	return policy
 }
 
-func uiAttachmentRoute(ctx context.Context, cfg ServerConfig, cache *uiAttachmentCapabilityCache, binding db.FederationBinding) *api.UIAttachmentRoute {
+func uiAttachmentRoute(ctx context.Context, cfg ServerConfig, binding db.FederationBinding) *api.UIAttachmentRoute {
 	route := &api.UIAttachmentRoute{ProjectUID: binding.HubProjectUID, Read: binding.Enabled}
 	if binding.RelayConfig != nil {
 		route.Origin = binding.RelayConfig.AuthorityUID
@@ -801,9 +800,14 @@ func uiAttachmentRoute(ctx context.Context, cfg ServerConfig, cache *uiAttachmen
 	if binding.Enabled {
 		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		available, unavailable := cache.available(probeCtx, ctx, cfg, binding)
+		project, err := cfg.DB.ProjectByID(probeCtx, binding.ProjectID)
+		if err == nil {
+			_, err = docbankOriginCapabilities(probeCtx, cfg, project, &binding, "")
+		}
+		var apiErr *api.APIError
+		unavailable := errors.As(err, &apiErr) && apiErr != nil && (apiErr.Code == "docbank_not_configured" || apiErr.Code == "docbank_forward_unsupported")
 		route.Read = !unavailable
-		route.Write = binding.PushEnabled && available
+		route.Write = binding.PushEnabled && !unavailable
 	}
 	return route
 }
