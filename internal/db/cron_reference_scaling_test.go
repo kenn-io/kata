@@ -12,7 +12,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
-	"modernc.org/sqlite"
 )
 
 // The observer delegates SQL to real SQLite and counts consumed rows, rather
@@ -23,7 +22,14 @@ type referenceWork struct {
 }
 type referenceConnector struct{ work *referenceWork }
 
-func (c referenceConnector) Driver() driver.Driver { return &sqlite.Driver{} }
+func (c referenceConnector) Driver() driver.Driver {
+	pool, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = pool.Close() }()
+	return pool.Driver()
+}
 func (c referenceConnector) Connect(context.Context) (driver.Conn, error) {
 	conn, err := c.Driver().Open(":memory:")
 	if err != nil {

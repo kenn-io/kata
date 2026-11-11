@@ -565,6 +565,7 @@ func dropV10Additions(t *testing.T, raw *sql.DB) {
 		`DROP INDEX IF EXISTS idx_issues_assignment_expires_on`,
 		`ALTER TABLE issues DROP COLUMN assignment_expires_on`,
 		`DROP INDEX IF EXISTS issues_recurrence_occurrence_uniq`,
+		`DROP INDEX IF EXISTS idx_issues_recurring_delivery`,
 		`ALTER TABLE issues DROP COLUMN recurrence_id`,
 		`ALTER TABLE issues DROP COLUMN occurrence_key`,
 		`DROP TABLE recurrences`,

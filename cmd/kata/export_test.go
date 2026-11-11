@@ -136,17 +136,11 @@ func TestExportDoesNotReplaceExistingOutputOnFailure(t *testing.T) {
 	d := openKataTestDB(t, dbPath)
 	p, err := d.CreateProject(ctx, "kata")
 	require.NoError(t, err)
-	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: p.ID,
-		Title:     "invalid metadata",
-		Author:    "tester",
-	})
-	require.NoError(t, err)
 	conn, err := d.Conn(ctx)
 	require.NoError(t, err)
 	_, err = conn.ExecContext(ctx, `PRAGMA ignore_check_constraints = ON`)
 	require.NoError(t, err)
-	_, err = conn.ExecContext(ctx, `UPDATE issues SET metadata = '{' WHERE id = ?`, issue.ID)
+	_, err = conn.ExecContext(ctx, `UPDATE projects SET metadata = '{' WHERE id = ?`, p.ID)
 	require.NoError(t, err)
 	_, err = conn.ExecContext(ctx, `PRAGMA ignore_check_constraints = OFF`)
 	require.NoError(t, err)
