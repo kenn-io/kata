@@ -453,15 +453,19 @@ func (o *cronCLIOptions) decodeRequest(raw []byte) (map[string]jsontext.Value, e
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(raw, shape, json.RejectUnknownMembers(true)); err != nil {
-		return nil, cronCLIValidation("invalid cron request: " + err.Error())
-	}
 	if o.resource == "workflow" && (o.action == "create" || o.action == "update") {
 		if rawDefinition, ok := fields["definition"]; ok {
-			if _, err := cron.DecodeHistoricalWorkflow(rawDefinition); err != nil {
+			definition := rawDefinition.Clone()
+			if err := definition.Compact(); err != nil {
+				return nil, cronCLIValidation("invalid workflow definition: " + err.Error())
+			}
+			if _, err := cron.DecodeHistoricalWorkflow(definition); err != nil {
 				return nil, cronCLIValidation("invalid workflow definition: " + err.Error())
 			}
 		}
+	}
+	if err := json.Unmarshal(raw, shape, json.RejectUnknownMembers(true)); err != nil {
+		return nil, cronCLIValidation("invalid cron request: " + err.Error())
 	}
 	return fields, nil
 }
