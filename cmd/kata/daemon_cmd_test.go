@@ -1687,6 +1687,11 @@ func startDaemonWithFederationConfig(t *testing.T, configBody string) string {
 		filepath.Join(home, "config.toml"), []byte(configBody), 0o600,
 	))
 
+	return launchDaemon(t)
+}
+
+func launchDaemon(t *testing.T) string {
+	t.Helper()
 	originalTelemetry := newTelemetryReporter
 	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
 		return &fakeTelemetryReporter{}

@@ -1464,30 +1464,16 @@ func runDaemonProcess(
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
 	maps.Copy(rec.Metadata, restart.metadata())
 
-	var vectorReady func(context.Context) error
-	if pg, ok := store.(*pgstore.Store); ok {
-		vectorReady = func(ctx context.Context) error {
-			idx, err := vector.OpenPostgres(ctx, pg.DB)
-			if err != nil {
-				return fmt.Errorf("install pgvector in this daemon's database, then try again: %w", err)
-			}
-			return idx.Close()
-		}
-	}
 	originalEmbeddings := dcfg.Search.Embeddings
-	autoShared := false
-	chosen, choiceErr := applySharedEmbeddingChoice(ctx, originalEmbeddings)
-	if choiceErr == nil && chosen != dcfg.Search.Embeddings {
-		candidate, vectorsPath, err := preflightEmbeddingStartup(chosen, dbPath)
-		choiceErr = err
-		if choiceErr == nil {
-			startup.Embedder, startup.VectorsPath = candidate, vectorsPath
+	if chosen, err := applySharedEmbeddingChoice(ctx, originalEmbeddings); err != nil {
+		daemonLog.Printf("shared embeddings choice: %v", err)
+	} else if chosen != originalEmbeddings {
+		if candidate, path, err := preflightEmbeddingStartup(chosen, dbPath); err != nil {
+			daemonLog.Printf("shared embeddings choice: %v", err)
+		} else {
+			startup.Embedder, startup.VectorsPath = candidate, path
 			dcfg.Search.Embeddings = chosen
-			autoShared = true
 		}
-	}
-	if choiceErr != nil {
-		daemonLog.Printf("shared embeddings choice: %v", choiceErr)
 	}
 
 	broadcaster := daemon.NewEventBroadcaster()
@@ -1496,7 +1482,7 @@ func runDaemonProcess(
 		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog, publisher,
 	)
 	if err != nil {
-		if !autoShared {
+		if dcfg.Search.Embeddings == originalEmbeddings {
 			return err
 		}
 		daemonLog.Printf("shared embeddings choice: %v", err)
@@ -1657,7 +1643,15 @@ func runDaemonProcess(
 		embeddings: dcfg.Search.Embeddings, idle: idleAdmission,
 		start: func(work func(context.Context)) bool { return workers.Go(func() { work(ctx) }) },
 	}
-	localSetup.vectorReady = vectorReady
+	if pg, ok := store.(*pgstore.Store); ok {
+		localSetup.vectorReady = func(ctx context.Context) error {
+			idx, err := vector.OpenPostgres(ctx, pg.DB)
+			if err != nil {
+				return fmt.Errorf("install pgvector in this daemon's database, then try again: %w", err)
+			}
+			return idx.Close()
+		}
+	}
 
 	// Start the Events worker only after the last fallible startup step, so an
 	// earlier failure cannot leave it running past the store closing.
@@ -2171,13 +2165,10 @@ func embeddingClientConfig(ec config.EmbeddingsConfig) embedding.Config {
 		cfg.Endpoint = func(ctx context.Context) (string, error) {
 			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
 				chosen, err := embedlocal.ChoiceRecorded()
-				if err != nil {
-					return false, err
+				if err == nil && !chosen {
+					err = errors.New("run kata daemon local-embeddings to approve the download")
 				}
-				if !chosen {
-					return false, errors.New("run kata daemon local-embeddings to approve the download")
-				}
-				return true, nil
+				return chosen, err
 			})
 		}
 	}

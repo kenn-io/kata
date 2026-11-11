@@ -178,7 +178,11 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 		if _, err := localEmbeddingsEndpoint(ctx, embedlocal.Options{SkipOllama: true, Executable: installed.Executable}); err != nil {
 			return "", err
 		}
-		if err := recordLocalEmbeddingChoice(); err != nil {
+		chosen, err := embedlocal.ChoiceRecorded()
+		if err == nil && !chosen {
+			err = embedlocal.RecordChoice()
+		}
+		if err != nil {
 			return "", fmt.Errorf("record built-in embeddings choice: %w", err)
 		}
 	}
@@ -227,14 +231,6 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 		return "", err
 	}
 	return index, nil
-}
-
-func recordLocalEmbeddingChoice() error {
-	chosen, err := embedlocal.ChoiceRecorded()
-	if err != nil || chosen {
-		return err
-	}
-	return embedlocal.RecordChoice()
 }
 
 // applySharedEmbeddingChoice derives the active provider without changing the config file.

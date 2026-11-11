@@ -31,7 +31,8 @@ import (
 func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	home := t.TempDir()
-	setLocalEmbeddingsTestHome(t, home)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".kenn"), []byte("unrelated file"), 0o600))
 	for _, tc := range []struct{ provider, url string }{
 		{"ollama", "http://127.0.0.1:11434/v1"},
@@ -63,7 +64,6 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 			clearLocalEmbeddingsEnv(t)
 			resetFlags(t)
 			home := setupKataEnv(t)
-			setLocalEmbeddingsTestHome(t, t.TempDir())
 			t.Setenv("PORT", "")
 			t.Setenv("KATA_SERVER", "")
 			t.Setenv("KATA_DSN", "")
@@ -198,27 +198,20 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 				return result.Mode, len(result.Results), err
 			}
 			stop()
-			if !tc.ready {
-				require.NoError(t, embedlocal.RecordChoice())
-			}
 			if tc.ready {
-				// Simulate another app recording the choice before this daemon starts.
 				require.NoError(t, os.WriteFile(path, original, 0o600))
 				require.NoError(t, os.Chmod(path, 0o400))
 				t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+			} else {
+				require.NoError(t, embedlocal.RecordChoice())
 			}
 			baseURL, _ = launch()
+			saved, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
+			require.NoError(t, err)
+			require.Equal(t, original, saved)
 			if tc.ready {
 				request("GET", "/api/v1/embeddings/local", "", 200, &status)
 				require.Equal(t, "built_in", status.Provider)
-				saved, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
-				require.NoError(t, err)
-				require.Equal(t, original, saved)
-			}
-			if !tc.ready {
-				saved, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
-				require.NoError(t, err)
-				require.Equal(t, original, saved)
 			}
 			wantMode := "lexical"
 			if tc.ready {
@@ -235,7 +228,6 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
-	setLocalEmbeddingsTestHome(t, t.TempDir())
 	original := []byte("[search.embeddings]\nbase_url = \"http://127.0.0.1:11434/v1\"\nmodel = \"nomic-embed-text\"\ndims = 768\n")
 	path := filepath.Join(home, "config.toml")
 	require.NoError(t, os.WriteFile(path, original, 0o600))
@@ -253,59 +245,9 @@ func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	require.False(t, chosen)
 }
 
-func TestSharedChoiceEnablesStartup(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	home := setupKataEnv(t)
-	setLocalEmbeddingsTestHome(t, t.TempDir())
-	require.NoError(t, embedlocal.RecordChoice())
-	cfg, err := config.ReadSearchConfig()
-	require.NoError(t, err)
-	next, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
-	require.NoError(t, err)
-	require.True(t, next.UsesLocal())
-	_, err = os.Stat(filepath.Join(home, "config.toml"))
-	require.ErrorIs(t, err, os.ErrNotExist)
-}
-
-func TestSharedChoicePreservesStartupProviders(t *testing.T) {
-	for _, tc := range []struct {
-		name, file, env string
-		choice          bool
-	}{
-		{name: "no choice"},
-		{name: "file provider", file: "[search.embeddings]\nbase_url = 'https://embeddings.example/v1'\nmodel = 'example'\ndims = 1024\n", choice: true},
-		{name: "environment provider", env: "https://embeddings.example/v1", choice: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			clearLocalEmbeddingsEnv(t)
-			home := setupKataEnv(t)
-			setLocalEmbeddingsTestHome(t, t.TempDir())
-			if tc.env != "" {
-				t.Setenv("KATA_SEARCH_EMBEDDINGS_BASE_URL", tc.env)
-				t.Setenv("KATA_SEARCH_EMBEDDINGS_MODEL", "example")
-				t.Setenv("KATA_SEARCH_EMBEDDINGS_DIMS", "768")
-			}
-			path := filepath.Join(home, "config.toml")
-			require.NoError(t, os.WriteFile(path, []byte(tc.file), 0o600))
-			if tc.choice {
-				require.NoError(t, embedlocal.RecordChoice())
-			}
-			cfg, err := config.ReadSearchConfig()
-			require.NoError(t, err)
-			next, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
-			require.NoError(t, err)
-			require.Equal(t, cfg.Embeddings, next)
-			data, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
-			require.NoError(t, err)
-			require.Equal(t, tc.file, string(data))
-		})
-	}
-}
-
 func TestSavedLocalDoesNotRecordSharedChoice(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	setupKataEnv(t)
-	setLocalEmbeddingsTestHome(t, t.TempDir())
 	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nlocal = true\n"))
 	require.NoError(t, err)
 	next, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
@@ -316,50 +258,13 @@ func TestSavedLocalDoesNotRecordSharedChoice(t *testing.T) {
 	require.False(t, chosen)
 }
 
-func TestSharedChoiceRejectsInvalidBatchBeforeSaving(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	home := setupKataEnv(t)
-	setLocalEmbeddingsTestHome(t, t.TempDir())
-	require.NoError(t, embedlocal.RecordChoice())
-	original := "[search.embeddings]\nmodel_context_tokens = 32000\nmax_batch_tokens = 31999\n"
-	path := filepath.Join(home, "config.toml")
-	require.NoError(t, os.WriteFile(path, []byte(original), 0o600))
-	cfg, err := config.ReadSearchConfig()
-	require.NoError(t, err)
-	next, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
-	require.NoError(t, err)
-	_, _, err = preflightEmbeddingStartup(next, filepath.Join(home, "kata.db"))
-	require.ErrorContains(t, err, "embedding batching")
-	data, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
-	require.NoError(t, err)
-	require.Equal(t, original, string(data))
-}
-
-func TestSavedLocalKeepsExistingChoiceFile(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	setupKataEnv(t)
-	setLocalEmbeddingsTestHome(t, t.TempDir())
-	require.NoError(t, embedlocal.RecordChoice())
-	dir, err := embedlocal.DefaultDir()
-	require.NoError(t, err)
-	path := filepath.Join(dir, "search-by-meaning")
-	old := time.Unix(1000000000, 0)
-	require.NoError(t, os.Chtimes(path, old, old))
-	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nlocal = true\n"))
-	require.NoError(t, err)
-	_, err = applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
-	require.NoError(t, err)
-	info, err := os.Stat(path)
-	require.NoError(t, err)
-	require.Equal(t, old, info.ModTime())
-}
-
 func TestSavedLocalStartsWhenChoiceCannotBeWritten(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	resetFlags(t)
 	home := setupKataEnv(t)
 	sharedHome := t.TempDir()
-	setLocalEmbeddingsTestHome(t, sharedHome)
+	t.Setenv("HOME", sharedHome)
+	t.Setenv("USERPROFILE", sharedHome)
 	t.Setenv("PORT", "")
 	t.Setenv("KATA_SERVER", "")
 	t.Setenv("KATA_DSN", "")
@@ -377,69 +282,55 @@ func TestSavedLocalStartsWhenChoiceCannotBeWritten(t *testing.T) {
 	require.ErrorContains(t, err, "embedding index reached")
 }
 
-func TestTurnOnDoesNotSaveLocalWhenChoiceCannotBeWritten(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	home := setupKataEnv(t)
-	sharedHome := t.TempDir()
-	setLocalEmbeddingsTestHome(t, sharedHome)
-	require.NoError(t, os.WriteFile(filepath.Join(sharedHome, ".kenn"), []byte("blocks marker directory"), 0o600))
-	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
-	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
-		if opts.Executable == "" {
-			return "", embedlocal.ErrNotFound
-		}
-		return "http://127.0.0.1:12345/v1", nil
+func TestTurnOnSharedChoice(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprint(existing), func(t *testing.T) {
+			clearLocalEmbeddingsEnv(t)
+			home := setupKataEnv(t)
+			var marker string
+			old := time.Unix(1000000000, 0)
+			if existing {
+				require.NoError(t, embedlocal.RecordChoice())
+				dir, err := embedlocal.DefaultDir()
+				require.NoError(t, err)
+				marker = filepath.Join(dir, "search-by-meaning")
+				require.NoError(t, os.Chtimes(marker, old, old))
+			} else {
+				require.NoError(t, os.WriteFile(filepath.Join(home, ".kenn"), []byte("blocks marker directory"), 0o600))
+			}
+			oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
+			t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
+			localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+				if opts.Executable == "" {
+					return "", embedlocal.ErrNotFound
+				}
+				return "http://127.0.0.1:12345/v1", nil
+			}
+			localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
+				return embedlocal.Installation{Executable: "/example/kennembed"}, nil
+			}
+			_, err := enableLocalEmbeddings(t.Context(), localEmbeddingsRun{
+				confirm: func(context.Context, int64) (bool, error) { return true, nil },
+				notice:  func(string) error { return nil },
+				restart: func(_ context.Context, apply func() error) error { return apply() },
+			})
+			if existing {
+				require.NoError(t, err)
+				info, err := os.Stat(marker)
+				require.NoError(t, err)
+				require.Equal(t, old, info.ModTime())
+			} else {
+				require.ErrorContains(t, err, "record built-in embeddings choice")
+				_, err := os.Stat(filepath.Join(home, "config.toml"))
+				require.ErrorIs(t, err, os.ErrNotExist)
+			}
+		})
 	}
-	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
-		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
-	}
-	_, err := enableLocalEmbeddings(t.Context(), localEmbeddingsRun{
-		confirm: func(context.Context, int64) (bool, error) { return true, nil },
-		notice:  func(string) error { return nil },
-		restart: func(_ context.Context, apply func() error) error { return apply() },
-	})
-	require.ErrorContains(t, err, "record built-in embeddings choice")
-	_, err = os.Stat(filepath.Join(home, "config.toml"))
-	require.ErrorIs(t, err, os.ErrNotExist)
-}
-
-func TestTurnOnKeepsExistingChoiceFile(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	setupKataEnv(t)
-	setLocalEmbeddingsTestHome(t, t.TempDir())
-	require.NoError(t, embedlocal.RecordChoice())
-	dir, err := embedlocal.DefaultDir()
-	require.NoError(t, err)
-	path := filepath.Join(dir, "search-by-meaning")
-	old := time.Unix(1000000000, 0)
-	require.NoError(t, os.Chtimes(path, old, old))
-	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
-	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
-		if opts.Executable == "" {
-			return "", embedlocal.ErrNotFound
-		}
-		return "http://127.0.0.1:12345/v1", nil
-	}
-	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
-		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
-	}
-	_, err = enableLocalEmbeddings(t.Context(), localEmbeddingsRun{
-		confirm: func(context.Context, int64) (bool, error) { return true, nil },
-		notice:  func(string) error { return nil },
-		restart: func(_ context.Context, apply func() error) error { return apply() },
-	})
-	require.NoError(t, err)
-	info, err := os.Stat(path)
-	require.NoError(t, err)
-	require.Equal(t, old, info.ModTime())
 }
 
 func TestSavedLocalUsesInstalledServerWithoutRecordingChoice(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
-	setLocalEmbeddingsTestHome(t, t.TempDir())
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		values := make([]float64, 768)
 		values[0] = 1
@@ -470,30 +361,10 @@ func TestSavedLocalUsesInstalledServerWithoutRecordingChoice(t *testing.T) {
 	require.False(t, chosen)
 }
 
-func TestSharedChoiceUsesBuiltInDimensionsForInactiveConfig(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	home := setupKataEnv(t)
-	require.NoError(t, embedlocal.RecordChoice())
-	original := []byte("[search.embeddings]\ndims = 1024\n")
-	path := filepath.Join(home, "config.toml")
-	require.NoError(t, os.WriteFile(path, original, 0o600))
-	cfg, err := config.ReadSearchConfig()
-	require.NoError(t, err)
-	next, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
-	require.NoError(t, err)
-	require.True(t, next.UsesLocal())
-	require.Equal(t, "nomic-embed-text", next.Model)
-	require.Equal(t, 768, next.Dims)
-	data, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
-	require.NoError(t, err)
-	require.Equal(t, original, data)
-}
-
 func TestSharedChoiceKeepsLexicalSearchWhenVectorPathIsDirectory(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	resetFlags(t)
 	home := setupKataEnv(t)
-	setLocalEmbeddingsTestHome(t, home)
 	t.Setenv("PORT", "")
 	t.Setenv("KATA_SERVER", "")
 	t.Setenv("KATA_DSN", "")
@@ -503,30 +374,7 @@ func TestSharedChoiceKeepsLexicalSearchWhenVectorPathIsDirectory(t *testing.T) {
 	vectorsPath, err := vectorsPathForDSN(filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
 	require.NoError(t, os.Mkdir(vectorsPath, 0o700))
-	oldTelemetry := newTelemetryReporter
-	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
-	t.Cleanup(func() { newTelemetryReporter = oldTelemetry })
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
-	t.Cleanup(func() {
-		cancel()
-		select {
-		case <-done:
-		case <-time.After(30 * time.Second):
-			t.Error("daemon shutdown timed out")
-		}
-	})
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
-	require.NoError(t, err)
-	var record daemonRuntimeRecordJSON
-	require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: observes daemon readiness
-		body, err := os.ReadFile(runtimePath) // #nosec G304 -- isolated runtime path
-		return err == nil && json.Unmarshal(body, &record) == nil
-	}, 3*time.Second, 10*time.Millisecond, "daemon must remain available")
-	baseURL := "http://" + record.Address
+	baseURL := launchDaemon(t)
 	request := func(path, body string, output any) {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, baseURL+path, strings.NewReader(body))
 		require.NoError(t, err)

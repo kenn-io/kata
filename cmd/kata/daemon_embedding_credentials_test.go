@@ -147,7 +147,6 @@ func TestEmbeddingReloadDoesNotMisrouteChangedProviderKey(t *testing.T) {
 func TestEmbeddingReloadUsesSharedChoice(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
-	setLocalEmbeddingsTestHome(t, t.TempDir())
 	require.NoError(t, embedlocal.RecordChoice())
 	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nlocal = true\n"))
 	require.NoError(t, err)

@@ -21,6 +21,8 @@ import (
 // R7/R9: owners can export an exact preferred recipe from local configuration
 // without document generation, daemon connectivity, or credential disclosure.
 func TestFederationEmbeddingRecipeExport(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	require.NoError(t, embedlocal.RecordChoice())
 	var calls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	t.Cleanup(provider.Close)
@@ -77,19 +79,7 @@ func TestFederationEmbeddingRecipeUnconfigured(t *testing.T) {
 	err := cmd.Execute()
 	require.ErrorContains(t, err, "embeddings are not configured")
 	require.Empty(t, output.String())
-}
-
-func TestFederationEmbeddingRecipeUsesSharedChoice(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	setupKataEnv(t)
-	setLocalEmbeddingsTestHome(t, t.TempDir())
 	require.NoError(t, embedlocal.RecordChoice())
-	var output bytes.Buffer
-	cmd := newFederationCmd()
-	cmd.SilenceUsage = true
-	cmd.SetOut(&output)
-	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"embedding-recipe"})
 	require.NoError(t, cmd.Execute())
 	var recipe embedding.ArtifactIdentity
 	require.NoError(t, json.Unmarshal(output.Bytes(), &recipe))
