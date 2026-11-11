@@ -153,6 +153,16 @@ func TestScheduleCodecKataPatchCanonicalizesAndClears(t *testing.T) {
 	}
 }
 
+func TestScheduleCodecPinsFirstInstantInBundledAlias(t *testing.T) {
+	issue := db.Issue{Metadata: db.JSONBlob(`{"timezone":"US/Eastern","deadline_on":"2026-11-30"}`)}
+	value := connector.FieldValue{Kind: "instant", Value: "2026-11-12T02:30:00Z"}
+	patch, err := fieldCodecs["scheduled_on"].KataPatch(issue, value)
+	require.NoError(t, err)
+	require.Len(t, patch, 1)
+	saved, err := metadata.DecodeSavedSchedule(patch["scheduled_on"])
+	require.NoError(t, err)
+	require.Equal(t, &metadata.SavedSchedule{Value: value.Value, Timezone: "US/Eastern", TZDataVersion: metadata.ScheduleTZDataVersion}, saved)
+}
 func TestScheduleCodecValidatesExternalDescriptor(t *testing.T) {
 	codec := fieldCodecs["scheduled_on"]
 	valid := connector.FieldDescriptor{ID: "field-id", DisplayName: "Plan date", AcceptedKinds: []string{"date", "local_datetime", "instant"}, Nullable: true, Writable: true, SchemaRevision: "v1"}

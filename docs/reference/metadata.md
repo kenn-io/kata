@@ -105,8 +105,9 @@ keep working.
 `kata list --json`, `kata show --json` and `kata.list` rows carry
 `scheduled_on_date` and `deadline_on_date`: the `scheduled_on` and
 `deadline_on` values as `YYYY-MM-DD` calendar dates. A field is omitted when
-its key is absent or its stored value cannot be read, so one bad value never
-fails the list. These are the names and values the web UI's snapshot
+its key is absent or it contains a malformed legacy value. A saved descriptor
+with an unsupported rules version or object member causes list and show to
+return an error. These are the names and values the web UI's snapshot
 uses, resolved by one shared rule. A date-only value keeps its written date. A
 local date-time resolves with its saved zone and rules. Legacy strings use the
 issue `timezone`, then the daemon's top-level `timezone`, then UTC, as above. For a recurring occurrence without `timezone`
@@ -114,9 +115,8 @@ metadata, `scheduled_on` resolves in the recurrence's timezone before the
 daemon's; `deadline_on` does not. A saved RFC 3339 `Z` instant uses its saved zone for display.
 The web UI uses each saved value's zone. Legacy timed strings in its snapshot
 use the viewer's zone. For
-an unreadable stored value the snapshot returns an error, while a row omits the
-field; a row that has the metadata key but no date means the value could not be
-read.
+an unreadable stored value the snapshot returns an error. A row with a legacy
+metadata key and no date means the value could not be read.
 Requests carry no zone. A daemon older than API `0.36.0` omits both fields, so
 a client should treat a missing field as unsupported rather than as an
 absent date.

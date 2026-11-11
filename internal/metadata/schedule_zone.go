@@ -101,6 +101,13 @@ func decodeSavedSchedule(raw jsontext.Value) (*SavedSchedule, *time.Location, er
 	if len(raw) == 0 || raw[0] != '{' {
 		return nil, nil, nil
 	}
+	var members map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &members); err != nil {
+		return nil, nil, err
+	}
+	if members["tzdata_version"] == nil {
+		return nil, nil, nil
+	}
 	var obj SavedSchedule
 	if err := json.Unmarshal(raw, &obj, json.RejectUnknownMembers(true)); err != nil {
 		return nil, nil, err

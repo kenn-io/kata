@@ -1,6 +1,6 @@
 import { expect, test } from './fixtures'
 
-test.use({ timezoneId: 'Asia/Tokyo' })
+test.use({ timezoneId: 'Asia/Tokyo', screenshot: 'off', trace: 'off', video: 'off' })
 
 test('saved schedules use their zone and expose the due date to the editor', async ({
   page,
@@ -26,15 +26,19 @@ test('saved schedules use their zone and expose the due date to the editor', asy
   await expect(page.getByRole('button', { name: 'Edit due date' })).toContainText('Dec 31')
   await scheduled.click()
   await page.getByRole('button', { name: /Scheduled: Dec 31/ }).click()
-  const selected = page.getByRole('dialog', { name: 'Scheduled' }).locator('[aria-pressed="true"]')
+  const picker = page.getByRole('dialog', { name: 'Scheduled' })
+  const selected = picker.locator('[aria-pressed="true"]')
   await expect(selected).toHaveText('31')
   const writes: string[] = []
+  const metadataPath = `/api/v1/ui/proxy/api/v1/projects/${kata.projectID}/issues/${issue.uid}/metadata`
   page.on('request', (request) => {
-    if (request.method() === 'PATCH' && request.url().endsWith('/metadata'))
+    if (request.method() === 'POST' && new URL(request.url()).pathname === metadataPath)
       writes.push(request.url())
   })
   await selected.click()
-  await expect(scheduled).toBeVisible()
+  await expect(picker).toBeHidden()
+  // The edit pill returns when the selection is handled, including any submission.
+  await expect(scheduled).toBeEnabled()
   expect(writes).toEqual([])
   await page.getByRole('button', { name: 'Edit due date' }).click()
   await expect(page.getByRole('button', { name: /Due: Dec 31/ })).toBeVisible()

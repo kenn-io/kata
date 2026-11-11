@@ -24,3 +24,20 @@ func TestRowsRejectUnknownScheduleRules(t *testing.T) {
 		})
 	}
 }
+
+func TestRowsOmitOpaqueRestoredSchedule(t *testing.T) {
+	f := newRowDatesFixture(t)
+	_, err := f.env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, `{"scheduled_on":{"legacy":"opaque"}}`, f.nodate.ID)
+	require.NoError(t, err)
+	show := fmt.Sprintf("/api/v1/projects/%d/issues/%s", f.project.ID, f.nodate.ShortID)
+	for _, path := range []string{fmt.Sprintf("/api/v1/projects/%d/issues", f.project.ID), "/api/v1/issues", show} {
+		t.Run(path, func(t *testing.T) {
+			status, raw := cronHTTP(t, f.env, http.MethodGet, path, nil)
+			require.Equal(t, http.StatusOK, status, string(raw))
+			if path == show {
+				require.Contains(t, string(raw), `"legacy":"opaque"`)
+				require.NotContains(t, string(raw), `"scheduled_on_date"`)
+			}
+		})
+	}
+}

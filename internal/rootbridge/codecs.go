@@ -86,7 +86,7 @@ func (c scheduleCodec) kataPatch(
 	return db.PrepareIssueSchedules(jsontext.Value(issue.Metadata), patch, c.defaultTimezone, "")
 }
 
-// pinZone saves the zone a local date-time or first-saved date resolves to, so
+// pinZone saves the zone a local date-time or first saved value resolves to, so
 // an alias zone already on the issue or daemon survives without public
 // admission accepting it.
 func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, patch map[string]jsontext.Value) error {
@@ -99,8 +99,12 @@ func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, p
 		return err
 	}
 	zone := canonical.Timezone
-	if canonical.Kind == fieldKindDate && saved == nil {
+	firstInstant := canonical.Kind == fieldKindInstant && saved == nil
+	if firstInstant || (canonical.Kind == fieldKindDate && saved == nil) {
 		if zone, err = metadataTimezone(values, c.defaultTimezone); err != nil {
+			if firstInstant {
+				return nil // The absolute instant can fall back to UTC.
+			}
 			return err
 		}
 	}
@@ -111,7 +115,13 @@ func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, p
 	if saved != nil && saved.Timezone == zone {
 		version = saved.TZDataVersion
 	}
-	patch[c.key], err = metadata.NewScheduleValueWithVersion(canonical.Value, zone, version)
+	pinned, err := metadata.NewScheduleValueWithVersion(canonical.Value, zone, version)
+	if err != nil && firstInstant {
+		return nil // An unbundled zone cannot change the supplied instant.
+	}
+	if err == nil {
+		patch[c.key] = pinned
+	}
 	return err
 }
 

@@ -84,3 +84,17 @@ func TestRecurrenceLocalRejectsDifferentRules(t *testing.T) {
 	err = compareLocalSchedule("2026-05-19T09:00", saved)
 	require.ErrorContains(t, err, "Local timezone rules differ")
 }
+
+func TestRecurrenceLocalRejectsChangedDeadlineCalendarDate(t *testing.T) {
+	previous := time.Local
+	time.Local = time.FixedZone("America/Inuvik", -6*60*60)
+	t.Cleanup(func() { time.Local = previous })
+
+	const deadline = `{"deadline_on":"2026-11-12T06:30:00Z","timezone":"Local"}`
+	oldDate, present, err := metadata.CalendarDate(deadline, "deadline_on", nil, "")
+	require.NoError(t, err)
+	require.True(t, present)
+	require.Equal(t, "2026-11-12", oldDate)
+	_, err = ComposeRecurrenceIssueMetadata(jsontext.Value(deadline), "2026-07-01", "Local")
+	require.ErrorContains(t, err, "Local timezone rules differ")
+}
