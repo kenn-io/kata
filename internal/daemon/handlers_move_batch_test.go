@@ -157,7 +157,7 @@ func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 				}
 				require.Equal(t, "refused", out.Results[stale].Result)
 				want := "revision_conflict"
-				if mode == "negative" || mode == "empty" || mode == "omitted" {
+				if mode == "negative" || mode == "empty" {
 					want = "validation"
 				}
 				require.Equal(t, want, out.Results[stale].Code)

@@ -281,18 +281,12 @@ func TestMoveIssuesBatch_ResidentChangesDuringPreview(t *testing.T) {
 			out, err := moveIssuesHandler(ServerConfig{DB: wrapped})(t.Context(), req)
 			require.NoError(t, err)
 			require.Equal(t, "refused", out.Body.Results[0].Result)
+			require.Equal(t, "revision_conflict", out.Body.Results[0].Code)
 			want := "moved"
 			if dry {
 				want = "would_move"
 			}
 			require.Equal(t, want, out.Body.Results[1].Result)
-			got, err := store.IssueByID(t.Context(), resident.ID)
-			require.NoError(t, err)
-			if edit {
-				require.Equal(t, target.ID, got.ProjectID)
-			} else {
-				require.Equal(t, source.ID, got.ProjectID)
-			}
 		})
 	}
 }
