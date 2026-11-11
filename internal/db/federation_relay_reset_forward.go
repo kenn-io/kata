@@ -174,10 +174,6 @@ func (p RelayResetProtocol) AuthorizeCheckpointDownload(ctx context.Context, bin
 	if _, err := p.Backend.RelayGrant(ctx, bindingUID, "pull"); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
-	features, ok := RelayPeerFeatures(ctx, bindingUID)
-	if !ok && HasRelayPeerFeatures(ctx) {
-		return RelayResetCheckpoint{}, ErrNotFound
-	}
 	pin, err := p.Backend.RootPin(ctx, checkpoint.Manifest.ProjectUID, checkpoint.Manifest.KeyID)
 	if err != nil {
 		return RelayResetCheckpoint{}, err
@@ -186,7 +182,10 @@ func (p RelayResetProtocol) AuthorizeCheckpointDownload(ctx context.Context, bin
 	if err != nil {
 		return RelayResetCheckpoint{}, err
 	}
-	if err := requireResetRecipientFeatures(events, features); err != nil {
+	if err := requireUsableResetEvents(events); err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	if err := requireResetRecipientFeatures(ctx, bindingUID, events); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
 	return checkpoint, nil

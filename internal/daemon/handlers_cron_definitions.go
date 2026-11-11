@@ -346,12 +346,8 @@ func decodeCronWorkflowBody(raw []byte, body *api.PutCronWorkflowBody) error {
 }
 
 func requireWorkflowReadFeatures(features string, definition cron.WorkflowDefinition) error {
-	for _, step := range definition.Steps {
-		if step.Kind == "argv" {
-			if err := db.RequireEventFeatures(features, db.CronWorkflowArgvEventFeature); err != nil {
-				return federationFeatureError(err)
-			}
-		}
+	if err := db.RequireWorkflowFeatures(definition, features); err != nil {
+		return federationFeatureError(err)
 	}
 	return nil
 }

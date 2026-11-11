@@ -207,14 +207,15 @@ func requireResetPeerFeatures(ctx context.Context, bindingUID string, events []R
 }
 
 // requireResetRecipientFeatures checks the exact checkpoint before disclosure or activation.
-func requireResetRecipientFeatures(events []RemoteEvent, features string) error {
-	if err := requireUsableResetEvents(events); err != nil {
-		return err
+func requireResetRecipientFeatures(ctx context.Context, bindingUID string, events []RemoteEvent) error {
+	features, ok := RelayPeerFeatures(ctx, bindingUID)
+	if !ok && HasRelayPeerFeatures(ctx) {
+		return ErrNotFound
 	}
 	for _, event := range events {
-		argv, held := retainedWorkflowEvidence(event.Type, string(event.Payload))
-		if held {
-			return fmt.Errorf("%w: held workflow definition", ErrUnsupportedEventFeatures)
+		argv, err := payloadHasArgvWorkflow(event.Type, string(event.Payload))
+		if err != nil {
+			return err
 		}
 		if argv {
 			if err := RequireEventFeatures(features, CronWorkflowArgvEventFeature); err != nil {

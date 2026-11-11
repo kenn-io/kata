@@ -44,7 +44,12 @@ func TestResetEventFeaturesRequireRecipientSupport(t *testing.T) {
 		{"malformed even when capable", malformed, CronWorkflowArgvEventFeature, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := requireResetRecipientFeatures([]RemoteEvent{tc.event}, tc.features)
+			events := []RemoteEvent{tc.event}
+			err := requireUsableResetEvents(events)
+			if err == nil {
+				ctx := WithRelayPeerFeatures(t.Context(), "recipient", tc.features)
+				err = requireResetRecipientFeatures(ctx, "recipient", events)
+			}
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("error = %v, want error %t", err, tc.wantErr)
 			}

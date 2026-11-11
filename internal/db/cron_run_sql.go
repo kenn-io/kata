@@ -261,7 +261,7 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 				if !known {
 					return fmt.Errorf("%w: workflow revision document is unavailable", cron.ErrInvalid)
 				}
-				if err := checkRunWorkflowDocument(document, features, true); err != nil {
+				if err := checkRunWorkflowDocument(document, features); err != nil {
 					return err
 				}
 			}
@@ -281,7 +281,7 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 					return err
 				}
 				if err == nil {
-					if err := checkRunWorkflowDocument(workflowDocument, features, true); err != nil {
+					if err := checkRunWorkflowDocument(workflowDocument, features); err != nil {
 						return err
 					}
 				}
@@ -303,16 +303,19 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 
 // checkRunWorkflowDocument preserves the historical decode fence before
 // checking the capability needed to start a known valid argv workflow.
-func checkRunWorkflowDocument(document, features string, running bool) error {
+func checkRunWorkflowDocument(document, features string) error {
 	workflow, err := cron.DecodeWorkflow([]byte(document))
 	if err != nil {
 		return fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
 	}
-	if running {
-		for _, step := range workflow.Steps {
-			if step.Kind == "argv" {
-				return RequireEventFeatures(features, CronWorkflowArgvEventFeature)
-			}
+	return RequireWorkflowFeatures(workflow, features)
+}
+
+// RequireWorkflowFeatures checks whether a client can receive an argv workflow.
+func RequireWorkflowFeatures(workflow cron.WorkflowDefinition, features string) error {
+	for _, step := range workflow.Steps {
+		if step.Kind == "argv" {
+			return RequireEventFeatures(features, CronWorkflowArgvEventFeature)
 		}
 	}
 	return nil

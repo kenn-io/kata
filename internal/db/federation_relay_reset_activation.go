@@ -76,11 +76,7 @@ func (p RelayResetProtocol) ActivateCheckpoint(ctx context.Context, grant Federa
 	if err := requireUsableResetEvents(events); err != nil {
 		return grant, err
 	}
-	features, ok := RelayPeerFeatures(ctx, grant.RelayBindingUID)
-	if !ok && HasRelayPeerFeatures(ctx) {
-		return grant, ErrNotFound
-	}
-	if err := requireResetRecipientFeatures(events, features); err != nil {
+	if err := requireResetRecipientFeatures(ctx, grant.RelayBindingUID, events); err != nil {
 		return grant, err
 	}
 	// Writes committed after preparation remain owed. Reoffer them in the new

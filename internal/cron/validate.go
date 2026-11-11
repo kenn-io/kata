@@ -201,9 +201,6 @@ func (f WorkflowDefinition) Validate() error {
 	if err := CheckWorkflowSupported(f); err != nil {
 		return err
 	}
-	if f.Version != 1 {
-		return invalid("unsupported workflow version")
-	}
 	if len(f.Steps) == 0 {
 		return invalid("workflow requires steps")
 	}

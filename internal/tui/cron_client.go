@@ -261,7 +261,7 @@ func (c *Client) PutCronWorkflow(ctx context.Context, projectID int64, uid strin
 	wire, callErr := client.ReplaceCronWorkflowWithResponse(ctx, &generated.ReplaceCronWorkflowRequestOptions{
 		PathParams: &generated.ReplaceCronWorkflowPath{ProjectID: projectID, CronUID: uid},
 		Body:       &body,
-	}, kataclient.CronWorkflowArgvSupport)
+	})
 	if wire == nil {
 		return callErr
 	}

@@ -129,9 +129,6 @@ AND (e.payload LIKE '%argv%' OR e.payload LIKE '%null%' OR e.payload LIKE '%\u%'
 // Keep historical decode-only warnings unchanged. Only the reserved kind and
 // the explicit null shapes held by the old decoder affect negotiation.
 func retainedWorkflowEvidence(kind, payload string) (bool, bool) {
-	if !workflowDefinitionEvent(kind) {
-		return false, false
-	}
 	var envelope struct {
 		Definition jsontext.Value `json:"definition"`
 	}
