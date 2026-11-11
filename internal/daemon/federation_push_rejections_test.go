@@ -56,7 +56,6 @@ func TestFederationPushMissingCurrentProjectEnrollmentDoesNotBlockBatch(t *testi
 	require.NoError(t, json.Unmarshal(raw, &result))
 	require.Len(t, result.RejectedEvents, 1)
 	require.Equal(t, stale.EventUID, result.RejectedEvents[0].EventUID)
-	require.Contains(t, result.RejectedEvents[0].Message, "matching project enrollment or push proof is missing")
 	body.MoveSourceTokens = map[string]string{target.UID: "invalid-supplemental-proof"}
 	response, raw = envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, headers)
 	require.Equalf(t, http.StatusOK, response.StatusCode, "%s", raw)

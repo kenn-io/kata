@@ -40,8 +40,19 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 		require.Len(t, events, 1)
 		require.Equal(t, pending.UID, events[0].UID)
 	})
+	t.Run("advance prunes covered acknowledgments", func(t *testing.T) {
+		require.NoError(t, reopened.AdvanceFederationPushCursor(ctx, project.ID, event.ID))
+		covered, err := reopened.FederationPushAccepted(ctx, project.ID, event.ID)
+		require.NoError(t, err)
+		require.False(t, covered)
+		uncovered, err := reopened.FederationPushAccepted(ctx, project.ID, later.ID)
+		require.NoError(t, err)
+		require.True(t, uncovered)
+	})
 	t.Run("skip later poisoned event preserves pending work", func(t *testing.T) {
-		q, err := reopened.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{ProjectID: project.ID, Direction: db.FederationQuarantineDirectionPush, FirstEventID: later.ID, LastEventID: later.ID, EventUIDs: []string{later.UID}, Error: "poisoned event"})
+		_, poison, err := reopened.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "poison", Author: "tester"})
+		require.NoError(t, err)
+		q, err := reopened.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{ProjectID: project.ID, Direction: db.FederationQuarantineDirectionPush, FirstEventID: poison.ID, LastEventID: poison.ID, EventUIDs: []string{poison.UID}, Error: "poisoned event"})
 		require.NoError(t, err)
 		_, err = reopened.SkipFederationQuarantine(ctx, db.SkipFederationQuarantineParams{ID: q.ID, ProjectID: project.ID, Actor: "tester"})
 		require.NoError(t, err)
@@ -53,15 +64,7 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 		require.Len(t, events, 1)
 		require.Equal(t, pending.UID, events[0].UID)
 	})
-	t.Run("advance prunes covered acknowledgments", func(t *testing.T) {
-		require.NoError(t, reopened.AdvanceFederationPushCursor(ctx, project.ID, event.ID))
-		covered, err := reopened.FederationPushAccepted(ctx, project.ID, event.ID)
-		require.NoError(t, err)
-		require.False(t, covered)
-		uncovered, err := reopened.FederationPushAccepted(ctx, project.ID, later.ID)
-		require.NoError(t, err)
-		require.True(t, uncovered)
-	})
+
 	return nil
 }
 

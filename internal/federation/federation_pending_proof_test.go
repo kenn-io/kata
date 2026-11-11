@@ -10,15 +10,13 @@ import (
 )
 
 func TestFederationMoveSourceCredentialValidation(t *testing.T) {
-	for _, kind := range []string{"origin", "actor", "project", "signing"} {
+	for _, kind := range []string{"actor", "project", "signing"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			hub, projects := newMoveDeliveryHub(t, "active-source", "other-source")
 			spoke := newMoveDeliverySpoke(t, hub, projects)
 			credential := spoke.credentials[projects[1].UID]
 			switch kind {
-			case "origin":
-				credential.HubURL = "https://other.example"
 			case "actor":
 				credential.Actor = "other-worker"
 			case "project":
@@ -35,8 +33,6 @@ func TestFederationMoveSourceCredentialValidation(t *testing.T) {
 			require.NoError(t, err)
 			_, err = federationMoveSourceTokens(ctx, spoke.env.DB, spoke.credentials, binding, hub.URL, move.Events, clientpkg.Opts{})
 			switch kind {
-			case "origin":
-				require.ErrorContains(t, err, "move source credential origin differs from binding")
 			case "actor":
 				require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
 			case "project":

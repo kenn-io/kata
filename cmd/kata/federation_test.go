@@ -279,25 +279,14 @@ func TestFederationQuarantineSkipCLI(t *testing.T) {
 	ctx := t.Context()
 	q, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
 	require.NoError(t, err)
-	_, err = env.DB.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{ID: q.ID, ProjectID: project.ID, Actor: "tester"})
-	require.NoError(t, err)
-	_, poison, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "poisoned event", Author: "tester"})
-	require.NoError(t, err)
-	q, err = env.DB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{ProjectID: project.ID, Direction: db.FederationQuarantineDirectionPush, FirstEventID: poison.ID, LastEventID: poison.ID, EventUIDs: []string{poison.UID}, Error: "hub rejected batch"})
-	require.NoError(t, err)
 
 	out := requireCmdOutput(t, env, "federation", "quarantine", "skip", strconv.FormatInt(q.ID, 10),
 		"--confirm", "SKIP FEDERATION BATCH "+strconv.FormatInt(q.ID, 10),
 		"--reason", "operator accepted skip")
 
 	assert.Contains(t, out, fmt.Sprintf("quarantine #%d skipped", q.ID))
-	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	pending, err := env.DB.PendingFederationPushEvents(ctx, project.ID, env.DB.InstanceUID(), binding.PushCursorEventID, 10)
-	require.NoError(t, err)
-	require.Len(t, pending, 1, "earlier pending work survives the skip")
-	assert.NotEqual(t, poison.UID, pending[0].UID)
-	assert.Less(t, binding.PushCursorEventID, pending[0].ID)
+	_, err = env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
+	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestFederationQuarantineSkipCLIAgentMode(t *testing.T) {

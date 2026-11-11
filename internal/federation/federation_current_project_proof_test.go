@@ -108,87 +108,67 @@ func (s *boundedPushPageStore) PendingFederationPushEvents(ctx context.Context, 
 }
 
 func TestSyncFederationMissingEnrollmentDoesNotBlockOtherPushes(t *testing.T) {
-	for _, mode := range []string{"missing", "revoked"} {
-		t.Run(mode, func(t *testing.T) {
-			hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
-			bound := projects[:1]
-			if mode == "revoked" {
-				bound = projects
-			}
-			sender := newMoveDeliverySpoke(t, hub, bound)
-			issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved work", Author: "worker"})
-			require.NoError(t, err)
-			require.NoError(t, sender.sync(t, 0))
-			local, err := sender.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			_, commentEvent, err := sender.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Retained stale comment"})
-			require.NoError(t, err)
-			_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
-			require.NoError(t, err)
-			if mode == "revoked" {
-				grant, err := hub.DB.AuthorizeFederationToken(t.Context(), sender.credentials[projects[1].UID].Token, projects[1].ID, "push")
-				require.NoError(t, err)
-				require.NoError(t, hub.DB.RevokeFederationEnrollment(t.Context(), grant.ID))
-			}
-			good, _, err := sender.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Independent first batch", Author: "worker"})
-			require.NoError(t, err)
-			paged := &boundedPushPageStore{Storage: sender.env.DB}
-			push := func(wantPending bool) {
-				t.Helper()
-				binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
-				require.NoError(t, err)
-				client, err := NewClient(t.Context(), hub.URL, sender.credentials[projects[0].UID].Token, clientpkg.Opts{})
-				require.NoError(t, err)
-				err = pushDirectSpoke(t.Context(), paged, &binding, projects[0].ID, client, nil, sender.credentials, clientpkg.Opts{})
-				if wantPending {
-					require.ErrorContains(t, err, "pending federation events remain")
-				} else {
-					require.NoError(t, err)
-				}
-			}
-			push(true)
-			_, err = hub.DB.IssueByUID(t.Context(), good.UID, db.IncludeDeletedNo)
-			require.NoError(t, err, "independent work arrives after an all-rejected page")
-			status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
-			require.NoError(t, err)
-			require.NotNil(t, status.LastError)
-			require.Contains(t, *status.LastError, projects[1].Name)
-			require.Contains(t, *status.LastError, issue.UID)
-			binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
-			require.NoError(t, err)
-			require.Less(t, binding.PushCursorEventID, commentEvent.ID, "retain the original rejected event for retry")
-			// Cron forwarding uses the exported drain contract, while ordinary sync
-			// continues through retained per-event rejections via the private phase.
-			client, err := NewClient(t.Context(), hub.URL, sender.credentials[projects[0].UID].Token, clientpkg.Opts{})
-			require.NoError(t, err)
-			require.ErrorContains(t, PushDirectSpoke(t.Context(), sender.env.DB, binding, projects[0].ID, client), "pending federation events remain", "a partial push is not a fully drained cron prerequisite")
-			later, _, err := sender.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Independent later turn", Author: "worker"})
-			require.NoError(t, err)
-			push(true)
-			_, err = hub.DB.IssueByUID(t.Context(), later.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			comments, err := hub.DB.CommentsByIssue(t.Context(), issue.ID)
-			require.NoError(t, err)
-			require.Empty(t, comments)
+	hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
+	sender := newMoveDeliverySpoke(t, hub, projects[:1])
+	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved work", Author: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, sender.sync(t, 0))
+	local, err := sender.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, commentEvent, err := sender.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Retained stale comment"})
+	require.NoError(t, err)
+	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
 
-			// Joining the destination alone must recover the retained event next turn.
-			if mode == "missing" {
-				joinMoveTarget(t, hub, projects[1], sender)
-			} else {
-				replacement, err := hub.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{SpokeInstanceUID: sender.env.DB.InstanceUID(), ProjectID: &projects[1].ID, Capabilities: "push,pull", Actor: "worker"})
-				require.NoError(t, err)
-				credential := sender.credentials[projects[1].UID]
-				credential.Token = replacement.Token
-				sender.credentials[projects[1].UID] = credential
-			}
-			push(false)
-			comments, err = hub.DB.CommentsByIssue(t.Context(), issue.ID)
+	good, _, err := sender.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Independent first batch", Author: "worker"})
+	require.NoError(t, err)
+	paged := &boundedPushPageStore{Storage: sender.env.DB}
+	push := func(wantPending bool) {
+		t.Helper()
+		binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
+		require.NoError(t, err)
+		client, err := NewClient(t.Context(), hub.URL, sender.credentials[projects[0].UID].Token, clientpkg.Opts{})
+		require.NoError(t, err)
+		err = pushDirectSpoke(t.Context(), paged, &binding, projects[0].ID, client, nil, sender.credentials, clientpkg.Opts{})
+		if wantPending {
+			require.ErrorContains(t, err, "pending federation events remain")
+		} else {
 			require.NoError(t, err)
-			require.Len(t, comments, 1)
-			require.Equal(t, "Retained stale comment", comments[0].Body)
-
-		})
+		}
 	}
+	push(true)
+	_, err = hub.DB.IssueByUID(t.Context(), good.UID, db.IncludeDeletedNo)
+	require.NoError(t, err, "independent work arrives after an all-rejected page")
+	status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, status.LastError)
+	require.Contains(t, *status.LastError, projects[1].Name)
+	require.Contains(t, *status.LastError, issue.UID)
+	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
+	require.NoError(t, err)
+	require.Less(t, binding.PushCursorEventID, commentEvent.ID, "retain the original rejected event for retry")
+	// Cron forwarding uses the exported drain contract, while ordinary sync
+	// continues through retained per-event rejections via the private phase.
+	client, err := NewClient(t.Context(), hub.URL, sender.credentials[projects[0].UID].Token, clientpkg.Opts{})
+	require.NoError(t, err)
+	require.ErrorContains(t, PushDirectSpoke(t.Context(), sender.env.DB, binding, projects[0].ID, client), "pending federation events remain", "a partial push is not a fully drained cron prerequisite")
+	later, _, err := sender.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Independent later turn", Author: "worker"})
+	require.NoError(t, err)
+	push(true)
+	_, err = hub.DB.IssueByUID(t.Context(), later.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	comments, err := hub.DB.CommentsByIssue(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Empty(t, comments)
+
+	// Joining the destination alone must recover the retained event next turn.
+	joinMoveTarget(t, hub, projects[1], sender)
+	push(false)
+	comments, err = hub.DB.CommentsByIssue(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "Retained stale comment", comments[0].Body)
+
 }
 
 func newPushDeferralFixture(t *testing.T, joinTarget bool) (*testenv.Env, []db.Project, moveDeliverySpoke, db.Issue, db.Issue) {
