@@ -57,7 +57,7 @@ func TestPostgresAutomaticReconcilerYieldsToConfigured(t *testing.T) {
 	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "handoff", Author: "tester"})
 	require.NoError(t, err)
 	started, resume := make(chan struct{}, 1), make(chan struct{})
-	done := make(chan error, 3)
+	done := make(chan error, 4)
 	startedCount := 0
 	t.Cleanup(func() {
 		cancel()
@@ -90,25 +90,43 @@ func TestPostgresAutomaticReconcilerYieldsToConfigured(t *testing.T) {
 	require.Eventually(t, func() bool { return waiters(1) }, 5*time.Second, 10*time.Millisecond)
 	configuredCtx, stopConfigured := context.WithCancel(ctx)
 	defer stopConfigured()
-	configured := start(configuredCtx, handoffEmbedder{model: "configured"}, false)
+	configuredStarted, finishConfigured := make(chan struct{}, 1), make(chan struct{})
+	configured := start(configuredCtx, handoffEmbedder{model: "configured", started: configuredStarted, resume: finishConfigured}, false)
 	//nolint:kennlint // sleeptest: PostgreSQL exposes queued leases asynchronously.
 	require.Eventually(t, func() bool { return waiters(2) }, 5*time.Second, 10*time.Millisecond)
 	close(resume)
 	want := (kitvec.Generation{Model: "configured", Dimensions: 2}).Fingerprint()
 	idx, err := vector.OpenPostgres(ctx, store.DB)
 	require.NoError(t, err)
+	select {
+	case <-configuredStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("configured fill did not start")
+	}
+	active, ok, err := idx.ActiveGeneration(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, (kitvec.Generation{Model: "automatic", Dimensions: 2}).Fingerprint(), active)
+	close(finishConfigured)
 	//nolint:kennlint // sleeptest: Reconciliation and its database writes are asynchronous.
 	require.Eventually(t, func() bool {
 		active, ok, err := idx.ActiveGeneration(ctx)
 		return err == nil && ok && active == want && configured.Health().Embedded == 1
 	}, 5*time.Second, 10*time.Millisecond)
+	configuredFirst := start(ctx, handoffEmbedder{model: "automatic"}, true)
+	//nolint:kennlint // sleeptest: PostgreSQL exposes queued leases asynchronously.
+	require.Eventually(t, func() bool { return waiters(1) }, 5*time.Second, 10*time.Millisecond)
 	stopConfigured()
 	first.Wake()
 	//nolint:kennlint // sleeptest: The automatic reconciler must reacquire the lease.
 	require.Eventually(t, func() bool {
 		return first.Health().LastError == "shared embedding choice conflicts with the active generation"
 	}, 5*time.Second, 10*time.Millisecond)
-	active, ok, err := idx.ActiveGeneration(ctx)
+	//nolint:kennlint // sleeptest: The later automatic reconciler must acquire the released lease.
+	require.Eventually(t, func() bool {
+		return configuredFirst.Health().LastError == "shared embedding choice conflicts with the active generation"
+	}, 5*time.Second, 10*time.Millisecond)
+	active, ok, err = idx.ActiveGeneration(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, want, active)
