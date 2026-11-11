@@ -2814,10 +2814,8 @@ func federationGroupIssueIDs(
 	query := `
 		SELECT uid, id, project_id
 		  FROM issues
-		 WHERE project_id IN (` + placeholders + `)`
-	if stamp != nil {
-		query += ` ORDER BY project_id, id`
-	}
+		 WHERE project_id IN (` + placeholders + `)
+		 ORDER BY project_id, id`
 	//nolint:gosec // IN values use generated ? placeholders with separately bound integer IDs.
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {

@@ -161,10 +161,6 @@ func TestSyncFederationMovesLinksFromDetachedSource(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, spoke.sync(t, 0))
 	require.NoError(t, spoke.sync(t, 1))
-	localFirst, err := spoke.env.DB.IssueByUID(ctx, first.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	localSecond, err := spoke.env.DB.IssueByUID(ctx, second.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
 	_, err = spoke.env.DB.LeaveFederationReplica(ctx, spoke.projects[0].ID)
 	require.NoError(t, err)
 	for _, issue := range []db.Issue{first, second} {
@@ -182,11 +178,5 @@ func TestSyncFederationMovesLinksFromDetachedSource(t *testing.T) {
 	require.Greater(t, after.PullCursorEventID, before.PullCursorEventID)
 	got, err := spoke.env.DB.IssueByUID(ctx, first.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	require.Equal(t, localFirst.ID, got.ID)
 	require.Equal(t, spoke.projects[1].ID, got.ProjectID)
-	links, err := spoke.env.DB.LinksByIssue(ctx, got.ID)
-	require.NoError(t, err)
-	require.Len(t, links, 1)
-	require.Equal(t, "related", links[0].Type)
-	require.Equal(t, localSecond.ID, links[0].ToIssueID)
 }

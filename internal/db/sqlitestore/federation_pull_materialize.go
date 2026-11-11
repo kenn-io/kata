@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
@@ -258,11 +259,10 @@ func applyPulledFederationMaterialization(ctx context.Context, tx *sql.Tx, proje
 func scopedFederationRows(query string, projectID int64, column string, scope []string) (string, []any) {
 	args := []any{projectID}
 	if len(scope) > 0 {
-		//nolint:gosec // Only internal column names and generated placeholders; values are bound.
-		query += " AND " + column + " IN (?" + strings.Repeat(",?", len(scope)-1) + ")"
-		for _, uid := range scope {
-			args = append(args, uid)
-		}
+		encoded, _ := json.Marshal(scope)
+		//nolint:gosec // Only internal column names enter the query; values are bound.
+		query += " AND " + column + " IN (SELECT value FROM json_each(?))"
+		args = append(args, string(encoded))
 	}
 	return query, args
 }
