@@ -141,6 +141,14 @@ func checkArgvCompatRetainedMaterialization(t *testing.T, store db.Storage, back
 	// runnable definition eligible for materialization.
 	for _, kind := range []string{"cron.workflow.updated", "cron.workflow.deleted"} {
 		bad := argvCompatRemoteWorkflow(t, project, origin, `{"version":1,"steps":[{"kind":"command","future":true}]}`)
+		if kind == "cron.workflow.deleted" {
+			var body db.CronDefinitionEvent
+			require.NoError(t, json.Unmarshal(bad.Payload, &body))
+			deleted := body.UpdatedAt
+			body.DeletedAt = &deleted
+			bad.Payload, err = json.Marshal(body)
+			require.NoError(t, err)
+		}
 		fold := db.FoldEvents([]db.FoldEvent{{UID: bad.EventUID, ProjectUID: project.UID, OriginInstanceUID: origin, Type: kind, HLCPhysicalMS: bad.HLCPhysicalMS, Payload: bad.Payload}})
 		tx, err = q.BeginTx(ctx, nil)
 		require.NoError(t, err)
