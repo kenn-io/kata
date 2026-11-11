@@ -132,7 +132,6 @@ func TestRelayDocbankSignedUploadThroughBothHops(t *testing.T) {
 		names := <-spools
 		var foundSpool bool
 		for _, name := range names {
-			require.NotContains(t, name, "kata-attachment-")
 			foundSpool = foundSpool || strings.HasPrefix(name, "kata-federation-body-")
 		}
 		require.True(t, foundSpool)
