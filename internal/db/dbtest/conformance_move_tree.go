@@ -206,6 +206,33 @@ func checkMoveTreeExternalClaim(t *testing.T, store db.Storage) error {
 	return nil
 }
 
+func checkMoveTreeSourceProjectFence(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	source, err := store.CreateProject(ctx, "source-fence-source")
+	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "source-fence-target")
+	require.NoError(t, err)
+	other, err := store.CreateProject(ctx, "source-fence-other")
+	require.NoError(t, err)
+	root, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "root", Author: "worker"})
+	require.NoError(t, err)
+	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	require.NoError(t, err)
+	move := db.MoveIssueProjectIn{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, Actor: "worker", DryRun: true}
+	preview, err := store.MoveIssueProject(ctx, move)
+	require.NoError(t, err)
+	db.FenceIssueMove(&move, preview)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: child.ID, FromProjectID: source.ID, ToProjectID: other.ID, IfMatchRev: child.Revision, Actor: "worker", Single: true})
+	require.NoError(t, err)
+	move.DryRun = false
+	_, err = store.MoveIssueProject(ctx, move)
+	require.ErrorIs(t, err, db.ErrIssueMoveTreeChanged)
+	got, err := store.IssueByID(ctx, root.ID)
+	require.NoError(t, err)
+	require.Equal(t, source.ID, got.ProjectID)
+	return nil
+}
+
 // Contract: expanded descendant authorization must run its authoritative fence
 // inside the move transaction and finish rejection cleanup after rollback.
 // A fenced preview also rejects moved or detached destination-resident children.

@@ -131,10 +131,10 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 
 // FenceIssueMove records both logical membership and the set requiring claims.
 func FenceIssueMove(in *MoveIssueProjectIn, out MoveIssueProjectOut) {
-	in.ExpectedIssueIDs = out.TreeIssueIDs
-	in.ExpectedMovingIssueIDs = make([]int64, 0, len(out.Issues))
+	in.ExpectedIssueIDs = out.TreeMembers
+	in.ExpectedMovingIssueIDs = make([]IssueMoveMember, 0, len(out.Issues))
 	for _, issue := range out.Issues {
-		in.ExpectedMovingIssueIDs = append(in.ExpectedMovingIssueIDs, issue.ID)
+		in.ExpectedMovingIssueIDs = append(in.ExpectedMovingIssueIDs, IssueMoveMember{IssueID: issue.ID, ProjectID: issue.ProjectID})
 	}
 }
 
@@ -145,22 +145,23 @@ func validateIssueMoveMembership(in MoveIssueProjectIn, inputs []IssueMoveTreeIt
 	return nil
 }
 
-func matchesIssueMoveMembership(expected []int64, inputs []IssueMoveTreeItem, excludeProject int64) bool {
+func matchesIssueMoveMembership(expected []IssueMoveMember, inputs []IssueMoveTreeItem, excludeProject int64) bool {
 	if expected == nil {
 		return true
 	}
-	want := make(map[int64]struct{}, len(expected))
-	for _, id := range expected {
-		want[id] = struct{}{}
+	want := make(map[IssueMoveMember]struct{}, len(expected))
+	for _, member := range expected {
+		want[member] = struct{}{}
 	}
 	for _, item := range inputs {
 		if excludeProject != 0 && item.In.FromProjectID == excludeProject {
 			continue
 		}
-		if _, ok := want[item.In.IssueID]; !ok {
+		member := IssueMoveMember{IssueID: item.In.IssueID, ProjectID: item.In.FromProjectID}
+		if _, ok := want[member]; !ok {
 			return false
 		}
-		delete(want, item.In.IssueID)
+		delete(want, member)
 	}
 	return len(want) == 0
 }

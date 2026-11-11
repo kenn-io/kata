@@ -258,18 +258,18 @@ func checkMoveBatchLogicalMembership(t *testing.T, store db.Storage) error {
 	// Exceed SQLite's expression-depth bound if no-op descendants become
 	// individual OR terms in import-mapping validation.
 	children := make([]db.Issue, 0, 1001)
-	expectedIDs := []int64{root.ID}
+	expectedMembers := []db.IssueMoveMember{{IssueID: root.ID, ProjectID: source.ID}}
 	for range 1001 {
 		child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "already at target", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
 		require.NoError(t, err)
 		children = append(children, child)
-		expectedIDs = append(expectedIDs, child.ID)
+		expectedMembers = append(expectedMembers, db.IssueMoveMember{IssueID: child.ID, ProjectID: target.ID})
 	}
 	in := db.MoveIssuesBatchIn{Comment: "routed", DryRun: true, Items: []db.MoveIssueProjectIn{{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, Actor: "worker"}}}
 	preview, err := store.MoveIssuesBatch(ctx, in)
 	require.NoError(t, err)
 	require.NoError(t, preview.Results[0].Err)
-	require.ElementsMatch(t, expectedIDs, preview.Results[0].Out.TreeIssueIDs)
+	require.ElementsMatch(t, expectedMembers, preview.Results[0].Out.TreeMembers)
 	require.Len(t, preview.Results[0].Out.Issues, 1)
 	db.FenceIssueMove(&in.Items[0], preview.Results[0].Out)
 	in.DryRun = false
