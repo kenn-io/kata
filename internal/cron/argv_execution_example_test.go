@@ -87,7 +87,7 @@ func TestAdapterExplicitShell(t *testing.T) {
 	require.Equal(t, 1, adapter.launches)
 }
 
-func TestAdapterArgvChild(t *testing.T) {
+func TestAdapterArgvChild(_ *testing.T) {
 	if os.Getenv("KATA_ARGV_EXAMPLE_CHILD") != "1" {
 		return
 	}
