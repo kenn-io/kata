@@ -234,30 +234,30 @@ type batchMoveRaceStore struct {
 	beforeWrite func()
 }
 
-type batchPreviewHookStore struct {
+type batchResolveHookStore struct {
 	db.Storage
 	issueUID     string
-	afterPreview func()
+	afterResolve func()
 }
 
-func (s *batchPreviewHookStore) IssueByUID(ctx context.Context, uid string, include db.IncludeDeleted) (db.Issue, error) {
+func (s *batchResolveHookStore) IssueByUID(ctx context.Context, uid string, include db.IncludeDeleted) (db.Issue, error) {
 	out, err := s.Storage.IssueByUID(ctx, uid, include)
-	if err == nil && uid == s.issueUID && s.afterPreview != nil {
-		hook := s.afterPreview
-		s.afterPreview = nil
+	if err == nil && uid == s.issueUID && s.afterResolve != nil {
+		hook := s.afterResolve
+		s.afterResolve = nil
 		hook()
 	}
 	return out, err
 }
 
-func TestMoveIssuesBatch_ResidentChangesDuringPreview(t *testing.T) {
+func TestMoveIssuesBatch_ResidentChangesAfterResolution(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		edit bool
 		dry  bool
 	}{
-		{name: "move before write"},
-		{name: "edit before dry run", edit: true, dry: true},
+		{name: "write"},
+		{name: "dry", edit: true, dry: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			edit, dry := tc.edit, tc.dry
@@ -267,7 +267,7 @@ func TestMoveIssuesBatch_ResidentChangesDuringPreview(t *testing.T) {
 			require.NoError(t, err)
 			resident, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "resident", Author: "agent"})
 			require.NoError(t, err)
-			wrapped := &batchPreviewHookStore{Storage: store, issueUID: resident.UID, afterPreview: func() {
+			wrapped := &batchResolveHookStore{Storage: store, issueUID: resident.UID, afterResolve: func() {
 				if edit {
 					owner := "changed"
 					_, _, _, err = store.EditIssue(t.Context(), db.EditIssueParams{IssueID: resident.ID, Owner: &owner, Actor: "agent"})
@@ -482,7 +482,7 @@ func TestMoveIssuesBatch_DuplicateInterveningEdit(t *testing.T) {
 				require.NoError(t, err)
 				require.Greater(t, updated.Revision, issue.Revision)
 			}
-			var wrapped db.Storage = &batchPreviewHookStore{Storage: store, issueUID: issue.UID, afterPreview: edit}
+			var wrapped db.Storage = &batchResolveHookStore{Storage: store, issueUID: issue.UID, afterResolve: edit}
 			if afterWrite {
 				wrapped = &batchAfterWriteStore{Storage: store, afterWrite: edit}
 			}

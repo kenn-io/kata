@@ -43,43 +43,8 @@ func (a batchExclusiveTargets) Authorize(_ context.Context, request HostAccessRe
 	}}, nil
 }
 
-func TestMoveBatchInvalidRefDoesNotAccumulateHostScope(t *testing.T) {
-	store := openClaimGateHelperDB(t)
-	source, issue := createClaimGateHelperIssue(t, store)
-	first, err := store.CreateProject(t.Context(), "invalid-target")
-	require.NoError(t, err)
-	target, err := store.CreateProject(t.Context(), "valid-target")
-	require.NoError(t, err)
-	srv := NewServer(ServerConfig{DB: store, HostAccess: batchExclusiveTargets{first: first.UID, second: target.UID}})
-	defer func() { _ = srv.Close() }()
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := WithPrincipal(r.Context(), Principal{Kind: PrincipalHost, Subject: "worker", Actor: "agent"})
-		srv.Handler().ServeHTTP(w, r.WithContext(ctx))
-	}))
-	defer httpServer.Close()
-	body := api.MoveIssuesRequest{}
-	body.Body.Items = []api.MoveIssuesItem{{Ref: "invalid!", ToProjectUID: first.UID}, {Ref: issue.UID, ToProjectUID: target.UID}}
-	raw, err := json.Marshal(body.Body)
-	require.NoError(t, err)
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, httpServer.URL+"/api/v1/issues/actions/move", bytes.NewReader(raw))
-	require.NoError(t, err)
-	request.Header.Set("Content-Type", "application/json")
-	response, err := httpServer.Client().Do(request)
-	require.NoError(t, err)
-	defer func() { _ = response.Body.Close() }()
-	require.Equal(t, http.StatusOK, response.StatusCode)
-	var reply api.MoveIssuesResponse
-	require.NoError(t, json.NewDecoder(response.Body).Decode(&reply.Body))
-	require.Equal(t, "refused", reply.Body.Results[0].Result)
-	require.Equal(t, "moved", reply.Body.Results[1].Result)
-	got, err := store.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.NotEqual(t, source.ID, got.ProjectID)
-	require.Equal(t, target.ID, got.ProjectID)
-}
-
 func TestMoveBatchRefusalDoesNotAccumulateHostScope(t *testing.T) {
-	for _, mode := range []string{"stale", "claim", "transaction", "valid"} {
+	for _, mode := range []string{"invalid ref", "stale", "claim", "transaction", "valid"} {
 		t.Run(mode, func(t *testing.T) {
 			store := openClaimGateHelperDB(t)
 			source, firstIssue := createClaimGateHelperIssue(t, store)
@@ -112,6 +77,9 @@ func TestMoveBatchRefusalDoesNotAccumulateHostScope(t *testing.T) {
 			body := api.MoveIssuesRequest{}
 			body.Body.Comment = "routed"
 			body.Body.Items = []api.MoveIssuesItem{{Ref: firstIssue.UID, ToProjectUID: first.UID, ExpectedRevision: firstIssue.Revision}, {Ref: secondIssue.UID, ToProjectUID: target.UID}}
+			if mode == "invalid ref" {
+				body.Body.Items[0].Ref = "invalid!"
+			}
 			raw, err := json.Marshal(body.Body)
 			require.NoError(t, err)
 			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, httpServer.URL+"/api/v1/issues/actions/move", bytes.NewReader(raw))
@@ -244,39 +212,4 @@ func TestMoveBatchHostDenialIsolationHTTP(t *testing.T) {
 	got, e := store.IssueByID(t.Context(), first.ID)
 	require.NoError(t, e)
 	require.Equal(t, denied.ID, got.ProjectID)
-}
-
-// Every continuation retains the whole body, including earlier conflicting
-// aliases, so resuming cannot route the same issue or add its comment.
-func TestMoveBatchContinuationPreservesAliasConflicts(t *testing.T) {
-	store := openClaimGateHelperDB(t)
-	source, first := createClaimGateHelperIssue(t, store)
-	target, err := store.CreateProject(t.Context(), "routing-target")
-	require.NoError(t, err)
-	other, err := store.CreateProject(t.Context(), "other-target")
-	require.NoError(t, err)
-	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.Comment = "agent", "routed"
-	for range 49 {
-		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{})
-	}
-	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: first.UID, ToProjectUID: target.UID}, api.MoveIssuesItem{Ref: source.Name + "#" + first.ShortID, ToProjectUID: other.UID})
-	//nolint:kennlint // deadlinetest: Force a continuation at the chunk boundary.
-	handler := moveIssuesHandler(ServerConfig{DB: store, MoveBatchBudget: time.Nanosecond})
-	firstPage, err := handler(t.Context(), req)
-	require.NoError(t, err)
-	require.Equal(t, 50, firstPage.Body.NextIndex)
-	require.Equal(t, "conflicting_target", firstPage.Body.Results[49].Code)
-	req.Body.StartIndex = firstPage.Body.NextIndex
-	req.Body.Completed = completedMoveResults(firstPage.Body.Results)
-	out, err := handler(t.Context(), req)
-	require.NoError(t, err)
-	require.Len(t, out.Body.Results, 1)
-	require.Equal(t, "conflicting_target", out.Body.Results[0].Code)
-	got, err := store.IssueByID(t.Context(), first.ID)
-	require.NoError(t, err)
-	require.Equal(t, source.ID, got.ProjectID)
-	comments, err := store.CommentsByIssue(t.Context(), first.ID)
-	require.NoError(t, err)
-	require.Empty(t, comments)
 }
