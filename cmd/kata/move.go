@@ -181,10 +181,9 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bo
 	if dryRun {
 		return printMoveDryResponse(ctx, cmd, client, baseURL, pid, rawRef, ref.ProjectName, target.Name, target.ID, moved)
 	}
-	if err := printMove(cmd, bs, sourceProject, sourceIssue.ShortID, target.Name); err != nil {
-		return err
-	}
-	return postFollowupComment(ctx, client, baseURL, moved.Issue.ProjectID, moved.Issue.ShortID, actor, comment, handle)
+	printErr := printMove(cmd, bs, sourceProject, sourceIssue.ShortID, target.Name)
+	commentErr := postFollowupComment(ctx, client, baseURL, moved.Issue.ProjectID, moved.Issue.ShortID, actor, comment, handle)
+	return errors.Join(printErr, commentErr)
 }
 
 func moveRevisionHeader(dry bool, selected, current int64) *generated.MoveIssueHeaders {

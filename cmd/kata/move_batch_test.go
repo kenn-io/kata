@@ -856,6 +856,54 @@ func TestMoveBatchCLI_SubtreeCommentFailureShowsMove(t *testing.T) {
 	require.Equal(t, target.ID, got.ProjectID)
 }
 
+func TestMoveCLI_OutputFailureStillAttemptsComment(t *testing.T) {
+	for _, failComment := range []bool{false, true} {
+		t.Run(fmt.Sprint(failComment), func(t *testing.T) {
+			env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("synthetic-comment-token"))
+			source, err := env.DB.CreateProject(t.Context(), "source")
+			require.NoError(t, err)
+			target, err := env.DB.CreateProject(t.Context(), "target")
+			require.NoError(t, err)
+			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "root", Author: "tester"})
+			require.NoError(t, err)
+			origin, err := url.Parse(env.URL)
+			require.NoError(t, err)
+			proxy := httputil.NewSingleHostReverseProxy(origin)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if failComment && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments") {
+					http.Error(w, "unavailable", http.StatusInternalServerError)
+					return
+				}
+				r.Host = origin.Host
+				proxy.ServeHTTP(w, r)
+			}))
+			t.Cleanup(server.Close)
+			resetFlags(t)
+			cmd := newRootCmd()
+			cmd.SetOut(extraFailWriter{})
+			cmd.SetErr(io.Discard)
+			cmd.SetContext(contextWithBaseURL(t.Context(), server.URL))
+			cmd.SetArgs([]string{"--workspace", dir, "--project", source.Name, "move", issue.ShortID, target.Name, "--comment", "routed", "--json"})
+			err = cmd.Execute()
+			require.ErrorIs(t, err, io.ErrClosedPipe)
+			if failComment {
+				require.ErrorContains(t, err, "appending --comment failed")
+			}
+			got, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, target.ID, got.ProjectID)
+			comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+			require.NoError(t, err)
+			if failComment {
+				require.Empty(t, comments)
+			} else {
+				require.Len(t, comments, 1)
+				require.Equal(t, "routed", comments[0].Body)
+			}
+		})
+	}
+}
+
 func TestMoveBatchCLI_PreviewUIDFromAnotherProject(t *testing.T) {
 	env, dir, source, target, issue := setupMoveCLIProjects(t)
 	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--dry", "--json")
