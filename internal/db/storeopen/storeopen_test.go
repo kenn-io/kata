@@ -1,6 +1,7 @@
 package storeopen_test
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
@@ -227,6 +229,41 @@ func stageLegacyPreCutoverFixture(t *testing.T, path string, version int) {
 		`UPDATE meta SET value=? WHERE key='schema_version'`, strconv.Itoa(version))
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
+}
+
+func TestOpenLegacyCronWorkflowPreservesEvidence(t *testing.T) {
+	for _, document := range []string{`{"version":1,"steps":[{"key":"old","kind":"argv"}]}`, `null`, `{"steps":null}`, `{"steps":[null]}`, `{"steps":[{"kind":null}]}`} {
+		t.Run(document, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			ctx := t.Context()
+			path := filepath.Join(t.TempDir(), "kata.db")
+			source, err := sqlitestore.Open(ctx, path)
+			require.NoError(t, err)
+			project, err := source.CreateProject(ctx, "example-project")
+			require.NoError(t, err)
+			workflow, _, err := source.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Review", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "review", Kind: "command", Command: "true"}}}})
+			require.NoError(t, err)
+			_, err = source.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=? WHERE uid=?`, document, workflow.UID)
+			require.NoError(t, err)
+			_, err = source.ExecContext(ctx, `UPDATE meta SET value='40' WHERE key='schema_version'`)
+			require.NoError(t, err)
+			require.NoError(t, source.Close())
+
+			store, err := storeopen.Open(ctx, path)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = store.Close() })
+			_, err = store.ProjectByName(ctx, "example-project")
+			require.NoError(t, err)
+			_, err = store.CronWorkflow(ctx, project.ID, workflow.UID)
+			require.Error(t, err, "held workflow must not be exposed to adapters")
+			rows := store.(interface {
+				QueryRowContext(context.Context, string, ...any) *sql.Row
+			})
+			var got string
+			require.NoError(t, rows.QueryRowContext(ctx, `SELECT definition_json FROM cron_workflows WHERE uid=?`, workflow.UID).Scan(&got))
+			require.JSONEq(t, document, got)
+		})
+	}
 }
 
 // TestOpen_RejectsNewerThanBinary confirms that a DB stamped with a
