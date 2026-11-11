@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # CLI reference
@@ -2002,7 +2002,9 @@ resolved web UI URL on its own line after the daemon transport address.
 `daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
 `KATA_HOME` and reject `--daemon`. Set the home explicitly for those operations.
 `daemon status` reports current-home processes and a separate selected-daemon
-diagnosis. `daemon diagnose` inspects selection, home, database/project identity,
+diagnosis. For a live but unreachable selected daemon, the diagnosis includes
+its recovery action as `selected.next_action` in JSON, `next_action=` in
+`--agent` output, and a `next:` line in human output. `daemon diagnose` inspects selection, home, database/project identity,
 schema, process, and federation origin without starting or changing anything.
 `daemon recover` starts only a registered existing local profile, verifies its
 pinned database UID, and optionally checks `--expect-project-uid` before and

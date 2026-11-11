@@ -12,8 +12,9 @@ import (
 
 func TestProfileRecoveryCommandShells(t *testing.T) {
 	for _, tc := range []struct{ os, name, want string }{
-		{"windows", "work", "kata --daemon=work daemon recover"},
-		{"windows", "team's work", "in PowerShell: kata '--daemon=team''s work' daemon recover"},
+		{"windows", "work", "in PowerShell: & 'kata' '--daemon=work' 'daemon' 'recover'"},
+		{"windows", "team's work", "in PowerShell: & 'kata' '--daemon=team''s work' 'daemon' 'recover'"},
+		{"windows", "=work", "in PowerShell: & 'kata' '--daemon==work' 'daemon' 'recover'"},
 		{"linux", "work", "kata --daemon=work daemon recover"},
 		{"linux", "=work", "kata --daemon==work daemon recover"},
 		{"linux", "team's work", "kata '--daemon=team'\\''s work' daemon recover"},

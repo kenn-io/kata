@@ -83,8 +83,7 @@ After the process exits, choose the recovery command for its launch mode:
   `KATA_HOME` and storage environment.
 - For a named profile you normally start with Kata, run
   `kata --daemon <name> daemon recover`. This preserves its pinned storage and
-  instance identity. On Windows, quote profile names as PowerShell literal
-  strings when needed.
+  instance identity. On Windows, the command is printed in PowerShell syntax.
 
 ## Client setup
 
