@@ -66,14 +66,13 @@ export async function orvalFetch<T>(
 ): Promise<T> {
   const { retry, ...requestOptions } = options
   const read = () => fetcher(applicationURL(url), requestOptions)
-  const result =
-    retry && (requestOptions.method ?? 'GET').toUpperCase() === 'GET'
-      ? await retryTransientRead(
-          read,
-          requestOptions.signal ?? new AbortController().signal,
-          readRawResponseBody,
-        )
-      : { response: await read() }
+  const result = retry
+    ? await retryTransientRead(
+        read,
+        requestOptions.signal ?? new AbortController().signal,
+        readRawResponseBody,
+      )
+    : { response: await read() }
   const response = result.response
   const body = 'body' in result ? result.body : await readRawResponseBody(response)
   const data =

@@ -196,20 +196,6 @@ it.each([
   }
 })
 
-it('does not retry opted-in writes', async () => {
-  const fetcher = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('', { status: 503 }),
-  )
-  const result = await orvalFetch<{ status: number }>(
-    '/example',
-    { method: 'POST', retry: true },
-    fetcher,
-  )
-  expect(result.status).toBe(503)
-  expect(fetcher).toHaveBeenCalledTimes(1)
-  expect(fetcher.mock.calls[0]?.[1]).not.toHaveProperty('retry')
-})
-
 it('retries a generated read when the response body connection drops', async () => {
   vi.useFakeTimers()
   const fetcher = vi
