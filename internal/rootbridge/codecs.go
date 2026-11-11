@@ -85,9 +85,9 @@ func (c scheduleCodec) kataPatch(issue db.Issue, value connector.FieldValue, rec
 	return db.PrepareIssueSchedules(jsontext.Value(issue.Metadata), patch, c.defaultTimezone, recurrenceZone)
 }
 
-// pinZone saves the zone a local date-time or first saved value resolves to, so
-// an alias zone already on the issue or daemon survives without changing
-// the issue's public timezone setting.
+// pinZone saves an explicit local date-time zone or a first instant's effective
+// zone. Date-only values inherit their zone in PrepareIssueSchedules without
+// changing the issue's public timezone setting.
 func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, patch map[string]jsontext.Value, recurrenceZone string) error {
 	values, err := metadataObject(issue.Metadata)
 	if err != nil {
@@ -99,10 +99,8 @@ func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, p
 	}
 	zone := canonical.Timezone
 	firstInstant := canonical.Kind == fieldKindInstant && saved == nil
-	if saved == nil && (canonical.Kind == fieldKindDate || firstInstant) {
-		if zone, err = metadataTimezone(values, cmp.Or(recurrenceZone, c.defaultTimezone)); err != nil && !firstInstant {
-			return err
-		}
+	if firstInstant {
+		zone, _ = metadataTimezone(values, cmp.Or(recurrenceZone, c.defaultTimezone))
 	}
 	if zone == "" {
 		return nil

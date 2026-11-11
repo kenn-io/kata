@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/json/jsontext"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -1091,12 +1092,20 @@ func TestFieldReconcilePreservesConnectorErrorsWithoutAdvancingBaseline(t *testi
 
 func TestFieldReconcileLegacyDateWithAliasTimezone(t *testing.T) {
 	for _, tc := range []struct {
-		name, issueTimezone, daemonTimezone string
+		name, issueTimezone, daemonTimezone, wantZone string
 	}{
-		{"issue timezone", `"US/Eastern"`, "UTC"},
-		{"daemon timezone", ``, "US/Eastern"},
+		{"issue timezone", `"US/Eastern"`, "UTC", "US/Eastern"},
+		{"daemon timezone", ``, "US/Eastern", "US/Eastern"},
+		{"legacy Local", `"Local"`, "UTC", "America/New_York"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.issueTimezone == `"Local"` {
+				previous := time.Local
+				loc, err := metadata.ScheduleLocation(tc.wantZone, metadata.ScheduleTZDataVersion)
+				require.NoError(t, err)
+				time.Local = loc
+				t.Cleanup(func() { time.Local = previous })
+			}
 			h := newReconcileHarness(t)
 			h.reconciler = NewReconciler(h.store, h.registry, ReconcilerConfig{DefaultTimezone: tc.daemonTimezone, Now: func() time.Time { return h.now }})
 			h.mapField(t, "scheduled_on", "start-date")
@@ -1122,56 +1131,75 @@ func TestFieldReconcileLegacyDateWithAliasTimezone(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, saved)
 			require.Equal(t, "2026-08-21", saved.Value)
-			require.Equal(t, "US/Eastern", saved.Timezone)
+			require.Equal(t, tc.wantZone, saved.Timezone)
 			require.Equal(t, metadata.ScheduleTZDataVersion, saved.TZDataVersion)
 			require.JSONEq(t, string(sibling), string(values["deadline_on"]))
+			if tc.issueTimezone != "" {
+				require.JSONEq(t, tc.issueTimezone, string(values["timezone"]))
+			}
 		})
 	}
 }
 
 func TestFieldReconcilePreservesIndependentScheduleZones(t *testing.T) {
 	t.Run("first dates use the recurrence zone for scheduled only", func(t *testing.T) {
-		for _, legacy := range []bool{false, true} {
-			h := newReconcileHarness(t)
-			h.mapField(t, "scheduled_on", "start-date")
-			h.mapField(t, "deadline_on", "due-date")
-			_, err := h.store.CreateRecurrenceForIssue(t.Context(), db.CreateRecurrenceForIssueIn{
-				IssueID: h.issue.ID,
-				Recurrence: db.CreateRecurrenceIn{
-					ProjectID: h.project.ID, Actor: "tester", Rule: "FREQ=DAILY",
-					DTStart: "2026-08-20", Timezone: "America/New_York",
-					Template: db.RecurrenceTemplate{Title: h.issue.Title},
-				},
-			})
-			require.NoError(t, err)
-			_, err = h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-				IssueID: h.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{
-					"scheduled_on": jsontext.Value("null"), "timezone": jsontext.Value("null"),
-				},
-			})
-			require.NoError(t, err)
-			if legacy {
-				_, err = h.store.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, `{"scheduled_on":"2026-08-20"}`, h.issue.ID)
+		previous := time.Local
+		loc, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
+		require.NoError(t, err)
+		time.Local = loc
+		t.Cleanup(func() { time.Local = previous })
+		for _, tc := range []struct {
+			legacy, clearZone bool
+			zone              string
+		}{{false, true, "America/New_York"}, {true, true, "America/New_York"}, {false, false, "Local"}, {false, true, "Local"}} {
+			t.Run(fmt.Sprintf("%s/legacy_%t/clear_%t", tc.zone, tc.legacy, tc.clearZone), func(t *testing.T) {
+				h := newReconcileHarness(t)
+				h.mapField(t, "scheduled_on", "start-date")
+				h.mapField(t, "deadline_on", "due-date")
+				_, err := h.store.CreateRecurrenceForIssue(t.Context(), db.CreateRecurrenceForIssueIn{
+					IssueID: h.issue.ID,
+					Recurrence: db.CreateRecurrenceIn{
+						ProjectID: h.project.ID, Actor: "tester", Rule: "FREQ=DAILY",
+						DTStart: "2026-08-20", Timezone: tc.zone,
+						Template: db.RecurrenceTemplate{Title: h.issue.Title},
+					},
+				})
 				require.NoError(t, err)
-				h.seedBaseline(t, "scheduled_on", date("2026-08-20"))
-			}
-			h.client.fieldValues["start-date"] = date("2026-08-21")
-			h.client.fieldValues["due-date"] = date("2026-08-21")
+				clearPatch := map[string]jsontext.Value{"scheduled_on": jsontext.Value("null")}
+				if tc.clearZone {
+					clearPatch["timezone"] = jsontext.Value("null")
+				}
+				_, err = h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+					IssueID: h.issue.ID, Actor: "tester", Patch: clearPatch,
+				})
+				require.NoError(t, err)
+				if tc.legacy {
+					_, err = h.store.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, `{"scheduled_on":"2026-08-20"}`, h.issue.ID)
+					require.NoError(t, err)
+					h.seedBaseline(t, "scheduled_on", date("2026-08-20"))
+				}
+				h.client.fieldValues["start-date"] = date("2026-08-21")
+				h.client.fieldValues["due-date"] = date("2026-08-21")
 
-			result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
-			require.NoError(t, err)
-			require.Zero(t, result.FieldConflicts)
-			issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
-			require.NoError(t, err)
-			for key, want := range map[string]time.Time{
-				"scheduled_on": time.Date(2026, 8, 21, 4, 0, 0, 0, time.UTC),
-				"deadline_on":  time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC),
-			} {
-				_, _, at, present, err := metadata.ScheduleFieldInstant(string(issue.Metadata), key, "UTC")
+				result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
 				require.NoError(t, err)
-				require.True(t, present)
-				assert.Equal(t, want, at.UTC(), key)
-			}
+				require.Zero(t, result.FieldConflicts)
+				issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
+				require.NoError(t, err)
+				deadlineAt := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+				if !tc.clearZone {
+					deadlineAt = deadlineAt.Add(4 * time.Hour)
+				}
+				for key, want := range map[string]time.Time{
+					"scheduled_on": time.Date(2026, 8, 21, 4, 0, 0, 0, time.UTC),
+					"deadline_on":  deadlineAt,
+				} {
+					_, _, at, present, err := metadata.ScheduleFieldInstant(string(issue.Metadata), key, "UTC")
+					require.NoError(t, err)
+					require.True(t, present)
+					assert.Equal(t, want, at.UTC(), key)
+				}
+			})
 		}
 	})
 

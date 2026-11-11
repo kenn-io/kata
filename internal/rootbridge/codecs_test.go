@@ -88,6 +88,8 @@ func TestScheduleCodecKataPatchPreservesCivilTimesAcrossDST(t *testing.T) {
 		assert.Equal(t, "America/New_York", saved.Timezone)
 		assert.NotContains(t, patch, "timezone")
 	}
+	_, err := codec.KataPatch(db.Issue{Metadata: db.JSONBlob(`{"timezone":"Local"}`)}, connector.FieldValue{Kind: fieldKindLocalDateTime, Value: "2026-08-21T09:30", Timezone: "Local"})
+	require.ErrorContains(t, err, "unknown schedule timezone")
 }
 
 func TestScheduleCodecRecurrenceZonePrecedence(t *testing.T) {

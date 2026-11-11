@@ -30,7 +30,7 @@ func legacyScheduleZoneKnown(issueZone jsontext.Value, field, defaultZone, recur
 		return false
 	}
 	if field == "scheduled_on" && recurrenceZone != "" && (zone == "" || zone == recurrenceZone) {
-		return bundledScheduleZone(recurrenceZone)
+		zone = recurrenceZone
 	}
 	if zone == "Local" {
 		_, err := portableLocalZone()
@@ -147,7 +147,7 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		if zone == "" {
 			zone = "UTC"
 		}
-		legacyLocal := source == "issue timezone" && zone == "Local" && !changedZone
+		legacyLocal := zone == "Local" && (source == "recurrence timezone" || source == "issue timezone" && !changedZone)
 		if legacyLocal {
 			zone, err = portableLocalZone()
 			if err != nil {

@@ -131,8 +131,23 @@ func TestExistingLocalIssueScheduleUsesPortableHostRules(t *testing.T) {
 	saved, err := metadata.DecodeSavedSchedule(got["scheduled_on"])
 	require.NoError(t, err)
 	require.Equal(t, "America/New_York", saved.Timezone)
+	got, err = PrepareIssueSchedules(jsontext.Value(`{"timezone":"Local"}`), map[string]jsontext.Value{
+		"scheduled_on": jsontext.Value(`"2026-11-12T09:00"`), "timezone": jsontext.Value("null"),
+	}, "UTC", "Local")
+	require.NoError(t, err)
+	saved, err = metadata.DecodeSavedSchedule(got["scheduled_on"])
+	require.NoError(t, err)
+	require.Equal(t, "America/New_York", saved.Timezone)
+	got, err = PrepareIssueSchedules(jsontext.Value(`{"timezone":"Local","scheduled_on":"2026-11-12T09:00"}`), patch, "UTC", "Local")
+	require.NoError(t, err)
+	saved, err = metadata.DecodeSavedSchedule(got["scheduled_on"])
+	require.NoError(t, err)
+	require.NotNil(t, saved, "explicit legacy Local recurrence echo must freeze its usable zone")
+	require.Equal(t, "America/New_York", saved.Timezone)
 	time.Local = localInuvikRules(t)
 	_, err = PrepareIssueSchedules(jsontext.Value(`{"timezone":"Local"}`), patch, "UTC", "")
+	require.ErrorContains(t, err, "Local timezone rules differ")
+	_, err = PrepareIssueSchedules(jsontext.Value(`{"timezone":"Local"}`), patch, "UTC", "Local")
 	require.ErrorContains(t, err, "Local timezone rules differ")
 }
 
