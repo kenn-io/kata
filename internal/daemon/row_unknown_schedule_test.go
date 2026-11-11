@@ -19,6 +19,7 @@ func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 		unsupported     bool
 	}{
 		{"unsupported rules", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`, true},
+		{"unsupported members", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}`, true},
 		{"opaque legacy value", `{"legacy":"opaque"}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -36,6 +37,10 @@ func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 			for _, path := range []string{projectList, "/api/v1/issues", show} {
 				t.Run(path, func(t *testing.T) {
 					status, raw := cronHTTP(t, f.env, http.MethodGet, path, nil)
+					if tc.unsupported {
+						assertAPIError(t, status, raw, http.StatusInternalServerError, "internal")
+						return
+					}
 					require.Equal(t, http.StatusOK, status, string(raw))
 					var body struct {
 						Issue  map[string]any   `json:"issue"`

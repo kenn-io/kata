@@ -561,3 +561,49 @@ func TestDateToggle_DaemonCheckIgnoresSupersededFailure(t *testing.T) {
 	m, _ = stepModel(m, oldResult)
 	assert.Empty(t, m.list.status, "the current filter must ignore the superseded HTTP 503")
 }
+
+type legacyCountingAPI struct {
+	legacyDayAPI
+	calls int
+}
+
+func (a *legacyCountingAPI) ListIssues(ctx context.Context, project int64, filter ListFilter) ([]Issue, error) {
+	a.calls++
+	return a.legacyDayAPI.ListIssues(ctx, project, filter)
+}
+
+func TestLegacyDateDoesNotRefetchIdleList(t *testing.T) {
+	m := filterFormFixture()
+	issue := dated("example", "2026-11-12", "")
+	issue.Metadata.ScheduledOn = jsontext.Value(`"2026-11-12"`)
+	m.list.issues = []Issue{issue}
+	api := &legacyCountingAPI{}
+	m.api = api
+	for minute := 0; minute < 3; minute++ {
+		_, cmd := m.refreshPlanningDay(time.Date(2026, 11, 11, 12, minute, 0, 0, time.UTC))
+		runCmdTree(cmd)
+	}
+	require.Zero(t, api.calls, "unchanged day must avoid list reloads")
+}
+
+func TestEnablingDateFilterRefreshesLegacyRows(t *testing.T) {
+	m := filterFormFixture()
+	issue := dated("example", "2026-11-12", "")
+	issue.Metadata.ScheduledOn = jsontext.Value(`"2026-11-12"`)
+	issue.ScheduledOnToday = "2026-11-11"
+	updated := issue
+	updated.ScheduledOnToday = "2026-11-12"
+	m.list.issues = []Issue{issue}
+	api := &legacyCountingAPI{legacyDayAPI: legacyDayAPI{issues: []Issue{updated}}}
+	m.api = api
+	form := newFilterForm(ListFilter{}, m.scope)
+	form.field(fieldDate).radio.set(dateToday)
+	m, cmd := m.commitFilterForm(form)
+	for _, msg := range runCmdTree(cmd) {
+		if _, ok := msg.(refetchedMsg); ok {
+			m, _ = stepModel(m, msg)
+		}
+	}
+	require.Equal(t, 1, api.calls)
+	require.Equal(t, "2026-11-12", m.list.issues[0].ScheduledOnToday)
+}

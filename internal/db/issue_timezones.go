@@ -141,7 +141,7 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		if zone == "" {
 			zone = "UTC"
 		}
-		legacyLocal := zone == "Local" && (source == "recurrence timezone" || !changedZone)
+		legacyLocal := zone == "Local"
 		if legacyLocal {
 			zone, err = portableLocalZone()
 			if err != nil {

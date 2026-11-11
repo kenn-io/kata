@@ -2095,7 +2095,7 @@ func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
 	m.list.status = ""
 	m.input = inputState{}
 	m, cmd := m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
-	cmd = combineCmds(cmd, m.checkDateFilter())
+	cmd = combineCmds(cmd, combineCmds(m.checkDateFilter(), m.refetchLegacyDateFilter()))
 	if m.list.filter.Search != previousSearch {
 		var searchCmd tea.Cmd
 		m, searchCmd = m.submitSearch()
@@ -2126,6 +2126,17 @@ func (m *Model) checkDateFilter() tea.Cmd {
 		return nil
 	}
 	return dateFilterCheckCommand(api, dateFilterCheckedMsg{connGen: m.connGen, checkGen: m.dateFilterCheckGen, mode: m.list.filter.Date})
+}
+
+func (m Model) refetchLegacyDateFilter() tea.Cmd {
+	if m.api != nil && m.list.filter.Date != "" {
+		for _, issue := range m.list.issues {
+			if issue.hasLegacyDate() {
+				return withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen)
+			}
+		}
+	}
+	return nil
 }
 
 func dateFilterCheckCommand(api dateFilterAPI, result dateFilterCheckedMsg) tea.Cmd {
@@ -2694,13 +2705,11 @@ func (m Model) refreshPlanningDay(now time.Time) (Model, tea.Cmd) {
 			}
 			return lm
 		})
-	} else if changed {
-		for i := range m.list.issues {
-			m.list.issues[i].refreshSavedDays(now)
-		}
 	}
 	if legacy && m.api != nil {
-		cmd = combineCmds(cmd, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))
+		if m.list.filter.Date != "" {
+			cmd = combineCmds(cmd, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))
+		}
 		if m.input.kind == inputDatesForm {
 			cmd = combineCmds(cmd, fetchPlanningDay(m.api, m.input.target, m.input.formGen, m.connGen))
 		} else if m.detail.issue != nil && m.detail.issue.hasLegacyDate() && m.detailRefreshEligible() {

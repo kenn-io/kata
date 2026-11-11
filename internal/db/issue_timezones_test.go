@@ -146,3 +146,24 @@ func TestPrepareIssueSchedulesPreservesSuppliedObject(t *testing.T) {
 	_, err = db.PrepareIssueSchedules(jsontext.Value(`{}`), map[string]jsontext.Value{"scheduled_on": jsontext.Value(`{"value":"2026-01-01","timezone":"UTC","tzdata_version":"unknown"}`)}, "UTC", "")
 	require.ErrorContains(t, err, "unsupported schedule tzdata version")
 }
+
+func TestLocalDefaultClearingIssueTimezone(t *testing.T) {
+	location, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
+	require.NoError(t, err)
+	previous := time.Local
+	time.Local = location
+	t.Cleanup(func() { time.Local = previous })
+	for _, field := range []string{"scheduled_on", "deadline_on"} {
+		t.Run(field, func(t *testing.T) {
+			saved, err := metadata.NewScheduleValue("2026-11-12T09:00", "America/New_York")
+			require.NoError(t, err)
+			current := jsontext.Value(`{"timezone":"America/New_York","` + field + `":` + string(saved) + `}`)
+			out, err := db.PrepareIssueSchedules(current, map[string]jsontext.Value{"timezone": jsontext.Value(`null`)}, "Local", "")
+			require.NoError(t, err)
+			result, err := metadata.DecodeSavedSchedule(out[field])
+			require.NoError(t, err)
+			require.Equal(t, "America/New_York", result.Timezone)
+			require.Equal(t, metadata.ScheduleTZDataVersion, result.TZDataVersion)
+		})
+	}
+}

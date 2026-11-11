@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/metadata"
 )
 
 // planningDateResolver projects issue metadata into the scheduled_on_date and
@@ -24,8 +23,7 @@ func newPlanningDateResolver(store db.Storage, defaultTimezone string) *planning
 	return &planningDateResolver{store: store, defaultTimezone: defaultTimezone, recurrenceTimezone: map[int64]string{}, now: time.Now()}
 }
 
-// resolve omits a field whose stored value cannot be read; it fails when the
-// recurrence timezone lookup fails.
+// resolve omits malformed values and rejects unsupported saved rules.
 func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (scheduledOn, deadlineOn, scheduledToday, deadlineToday, scheduledDisplay, deadlineDisplay string, err error) {
 	raw := string(issue.Metadata)
 	if raw == "" {
@@ -46,9 +44,5 @@ func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (sch
 			scheduledDefault = zone
 		}
 	}
-	scheduledOn, deadlineOn, scheduledToday, deadlineToday, scheduledDisplay, deadlineDisplay, err = db.RowPlanningProjection(raw, scheduledDefault, r.defaultTimezone, r.now)
-	if metadata.IsUnsupportedSchedule(err) {
-		err = nil
-	}
-	return
+	return db.RowPlanningProjection(raw, scheduledDefault, r.defaultTimezone, r.now)
 }
