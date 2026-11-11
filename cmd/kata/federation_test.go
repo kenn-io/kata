@@ -293,7 +293,11 @@ func TestFederationQuarantineSkipCLI(t *testing.T) {
 	assert.Contains(t, out, fmt.Sprintf("quarantine #%d skipped", q.ID))
 	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	assert.Equal(t, q.LastEventID, binding.PushCursorEventID)
+	pending, err := env.DB.PendingFederationPushEvents(ctx, project.ID, env.DB.InstanceUID(), binding.PushCursorEventID, 10)
+	require.NoError(t, err)
+	require.Len(t, pending, 1, "earlier pending work survives the skip")
+	assert.NotEqual(t, poison.UID, pending[0].UID)
+	assert.Less(t, binding.PushCursorEventID, pending[0].ID)
 }
 
 func TestFederationQuarantineSkipCLIAgentMode(t *testing.T) {

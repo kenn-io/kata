@@ -11,6 +11,22 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// FederationPushAcceptedThrough returns the last acknowledged event above afterID
+// that precedes every pending push event, or 0 when none does.
+func (d *Store) FederationPushAcceptedThrough(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, error) {
+	var through sql.NullInt64
+	err := d.QueryRowContext(ctx, `
+		SELECT MAX(done.event_id)
+		  FROM federation_push_accepted done JOIN events x ON x.id = done.event_id
+		 WHERE done.project_id = ? AND x.origin_instance_uid = ? AND done.event_id > ?
+		   AND done.event_id < COALESCE((
+		     SELECT MIN(e.id) FROM events e
+		      WHERE e.project_id = ? AND e.origin_instance_uid = ? AND e.id > ?
+		        AND `+federationPushNotAccepted+` AND `+federationPushEventTypeCondition("e.type")+`
+		   ), 9223372036854775807)`, projectID, originInstanceUID, afterID, projectID, originInstanceUID, afterID).Scan(&through)
+	return through.Int64, err
+}
+
 // PendingFederationPushEvents returns local-origin events that have not yet
 // been acknowledged by the hub for a push-enabled spoke binding.
 func (d *Store) PendingFederationPushEvents(
@@ -27,7 +43,7 @@ func (d *Store) PendingFederationPushEvents(
 		WHERE e.project_id = ?
 		  AND e.origin_instance_uid = ?
 		  AND e.id > ?
-		  AND `+federationPushEventTypeCondition("e.type")+`
+		  AND `+federationPushNotAccepted+` AND `+federationPushEventTypeCondition("e.type")+`
 		ORDER BY e.id ASC
 		LIMIT ?`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
@@ -45,7 +61,7 @@ func (d *Store) PendingFederationPushEvents(
 			WHERE e.project_id = ?
 			  AND e.origin_instance_uid = ?
 			  AND e.id > ?
-			  AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
+			  AND `+federationPushNotAccepted+` AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  AND e.id <= COALESCE((
 			    SELECT MIN(barrier.id)
 			      FROM events barrier
@@ -119,8 +135,7 @@ func (d *Store) PendingFederationPushStats(
 		 WHERE e.project_id = ?
 		   AND e.origin_instance_uid = ?
 		   AND e.id > ?
-		   AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
-		   AND `+federationPushEventTypeCondition("e.type"),
+		   AND `+federationPushNotAccepted+` AND `+federationPushEventTypeCondition("e.type"),
 		projectID, originInstanceUID, afterID).Scan(&count, &maxID); err != nil {
 		return 0, 0, fmt.Errorf("count pending federation push: %w", err)
 	}
@@ -129,6 +144,9 @@ func (d *Store) PendingFederationPushStats(
 	}
 	return count, 0, nil
 }
+
+// federationPushNotAccepted excludes events the hub already acknowledged.
+const federationPushNotAccepted = `NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)`
 
 func federationPushEventTypeCondition(column string) string {
 	return column + " IN (" + db.FederationPushEventTypesSQL() + ")"

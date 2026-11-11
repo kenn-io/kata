@@ -282,7 +282,7 @@ func pushDirectSpoke(
 			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
-			pending, err := store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), scanCursor, federationPollLimit)
+			pending, err := pendingFederationPushPage(ctx, store, binding, scanCursor, validateLease)
 			if err != nil {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
@@ -384,6 +384,33 @@ func pushDirectSpoke(
 		}
 	}
 	return nil
+}
+
+// pendingFederationPushPage reads the next pending page. When none remains, it
+// moves the cursor over acknowledged events that no pending event precedes.
+func pendingFederationPushPage(
+	ctx context.Context,
+	store db.Storage,
+	binding *db.FederationBinding,
+	scanCursor int64,
+	validateLease func(context.Context) error,
+) ([]db.Event, error) {
+	pending, err := store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), scanCursor, federationPollLimit)
+	if err != nil || len(pending) > 0 {
+		return pending, err
+	}
+	through, err := store.FederationPushAcceptedThrough(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID)
+	if err != nil || through <= binding.PushCursorEventID {
+		return nil, err
+	}
+	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+		return nil, err
+	}
+	if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, through); err != nil {
+		return nil, err
+	}
+	binding.PushCursorEventID = through
+	return nil, nil
 }
 
 type rejectedFederationEvent struct {

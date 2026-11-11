@@ -239,7 +239,7 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 			require.ErrorContains(t, err, "pending federation events remain")
 			pending, pendingErr := sender.env.DB.PendingFederationPushEvents(t.Context(), binding.ProjectID, sender.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
 			require.NoError(t, pendingErr)
-			require.ErrorContains(t, err, fmt.Sprintf("%d events need project access", len(pending)-1))
+			require.ErrorContains(t, err, fmt.Sprintf("%d events need project access", len(pending)))
 			accepted, err := sender.env.DB.FederationPushAccepted(t.Context(), binding.ProjectID, independentEvent.ID)
 			require.NoError(t, err)
 			require.True(t, accepted)
