@@ -404,7 +404,48 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 			after, err := store.MaxEventID(ctx)
 			require.NoError(t, err)
 			require.Equal(t, cursor, after)
+			if kind == "different-hub" || kind == "recurrence" {
+				// The refused destination snapshot stays in that journal. It must not
+				// leak into the source's history and retry the refused relocation.
+				require.NoError(t, store.MaterializeFederatedProject(ctx, source.ID), "the source must keep rebuilding after a refused relocation")
+				got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				require.Equal(t, before.ID, got.ID)
+				require.Equal(t, source.ID, got.ProjectID, "the source keeps the issue it could not relocate")
+				if kind == "different-hub" {
+					require.Equal(t, before, got, "another hub's snapshot must not reach the source")
+				}
+				require.Error(t, store.MaterializeFederatedProject(ctx, target.ID), "the destination still refuses the relocation")
+			}
 		})
 	}
+	return nil
+}
+
+// Only issues a sibling project once held keep a leaving project's enrollment.
+// An ordinary cross-project link from that sibling does not block the leave.
+func checkFederatedLeaveIgnoresSiblingLinks(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	var projects []db.Project
+	for _, name := range []string{"leaving-project", "sibling-project"} {
+		project, err := store.CreateProject(ctx, name)
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
+		require.NoError(t, err)
+		projects = append(projects, project)
+	}
+	leaving, sibling := projects[0], projects[1]
+	peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: leaving.ID, Title: "link peer", Author: "worker"})
+	require.NoError(t, err)
+	acknowledgeFederatedRehomeSourceEvents(t, store, leaving)
+	acknowledgeFederatedRehomeSourceEvents(t, store, sibling)
+	_, pending, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: sibling.ID, Title: "cross-project link", Author: "worker", Links: []db.InitialLink{{Type: "blocks", ToNumber: peer.ID}}})
+	require.NoError(t, err)
+	require.Contains(t, pending.Payload, peer.UID, "the sibling's unpushed event references the leaving project's issue")
+	_, err = store.LeaveFederationReplica(ctx, leaving.ID)
+	require.NoError(t, err)
+	binding, err := store.FederationBindingByProject(ctx, sibling.ID)
+	require.NoError(t, err)
+	require.Less(t, binding.PushCursorEventID, pending.ID, "the sibling still has the link to push")
 	return nil
 }

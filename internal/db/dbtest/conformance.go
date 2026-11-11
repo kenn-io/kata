@@ -309,6 +309,7 @@ var storageScenarios = []scenario{
 	{name: "federated former project identity adoption", methods: []string{"AdoptProjectIntoFederation", "LeaveFederationReplica", "ResetFederatedProject"}, run: checkFederatedFormerProjectIdentityAdoption},
 	{name: "federated receiver departing references", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject", "IssueByShortID", "CreateIssue", "PurgeIssue", "MergeProjects"}, runWithBackend: checkFederatedReceiverDepartingReferences},
 	{name: "federated snapshot relocation boundaries", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject"}, run: checkFederatedSnapshotRelocationBoundaries},
+	{name: "federated leave ignores sibling links", methods: []string{"UpsertFederationBinding", "CreateIssue", "LeaveFederationReplica"}, run: checkFederatedLeaveIgnoresSiblingLinks},
 	{name: "federated snapshot relocates held issue", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject", "RefreshProjectFederationBaseline"}, runWithBackend: checkFederatedSnapshotRelocatesHeldIssue},
 	{name: "federated pulled move apply reset", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject", "PurgeResetCheck", "IssueByShortID"}, runWithBackend: checkFederatedPulledMoveApplyReset},
 	{name: "federated moved issue current project reset", methods: []string{"IngestFederationEvents", "ReadFederation", "PurgeResetCheck"}, runWithBackend: checkFederatedMovedIssueCurrentProjectReset},

@@ -25,10 +25,10 @@ func CheckFederationMoveSourceLifecycle(
 	ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string,
 	referencedIssues func(RemoteEvent, map[string]jsontext.Value) ([]string, error),
 ) error {
-	var sourceUID, hubURL, actor string
-	err := tx.QueryRowContext(ctx, `SELECT p.uid,b.hub_url,b.bound_actor FROM projects p
+	var sourceUID, hubURL string
+	err := tx.QueryRowContext(ctx, `SELECT p.uid,b.hub_url FROM projects p
  JOIN federation_bindings b ON b.project_id=p.id
- WHERE p.id=$1 AND b.role='spoke' AND b.relay_config IS NULL`, projectID).Scan(&sourceUID, &hubURL, &actor)
+ WHERE p.id=$1 AND b.role='spoke' AND b.relay_config IS NULL`, projectID).Scan(&sourceUID, &hubURL)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -70,13 +70,15 @@ func CheckFederationMoveSourceLifecycle(
 	if pending {
 		return fmt.Errorf("%w: sync pending events for moved issues before source leave or archive", ErrFederationResetBlockedByPendingPush)
 	}
-	return checkFederationMoveDestinationLifecycle(ctx, tx, projectID, originInstanceUID, hubURL, actor, referencedIssues)
+	return checkFederationMoveDestinationLifecycle(ctx, tx, projectID, originInstanceUID, hubURL, referencedIssues)
 }
 
 // A source stream still needs the current owner's enrollment to push its
-// pending updates. Pausing sync or archiving the source retains those updates.
+// pending updates for issues it once held. Pausing sync or archiving the source
+// retains those updates. Links to issues the source never held are ordinary
+// cross-project references and do not block the leave.
 func checkFederationMoveDestinationLifecycle(
-	ctx context.Context, tx *sql.Tx, projectID int64, instanceUID, hubURL, actor string,
+	ctx context.Context, tx *sql.Tx, projectID int64, instanceUID, hubURL string,
 	referencedIssues func(RemoteEvent, map[string]jsontext.Value) ([]string, error),
 ) error {
 	origin, err := httpurl.CanonicalHTTPOrigin(hubURL)
@@ -84,23 +86,28 @@ func checkFederationMoveDestinationLifecycle(
 		return nil
 	}
 	//nolint:gosec // G202: the event types come from a fixed list; runtime values are bound.
-	rows, err := tx.QueryContext(ctx, `SELECT b.hub_url,e.type,e.issue_uid,e.related_issue_uid,e.payload
+	rows, err := tx.QueryContext(ctx, `SELECT e.project_id,b.hub_url,e.type,e.issue_uid,e.related_issue_uid,e.payload
  FROM events e
  JOIN federation_bindings b ON b.project_id=e.project_id
- WHERE e.project_id<>$1 AND e.origin_instance_uid=$2 AND b.bound_actor=$3
+ WHERE e.project_id<>$1 AND e.origin_instance_uid=$2
  AND b.role='spoke' AND b.relay_config IS NULL AND e.id>b.push_cursor_event_id
  AND (e.type LIKE 'issue.%' OR e.type IN ('cron.run.observed','cron.run.snapshot'))
- AND e.type IN (`+FederationPushEventTypesSQL()+`)`, projectID, instanceUID, actor)
+ AND e.type IN (`+FederationPushEventTypesSQL()+`)`, projectID, instanceUID)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
-	var candidates []string
-	seen := map[string]bool{}
+	type sourceIssue struct {
+		project int64
+		uid     string
+	}
+	candidates := map[int64][]string{}
+	seen := map[sourceIssue]bool{}
 	for rows.Next() {
+		var sourceProject int64
 		var candidate, payload string
 		var event RemoteEvent
-		if err := rows.Scan(&candidate, &event.Type, &event.IssueUID, &event.RelatedIssueUID, &payload); err != nil {
+		if err := rows.Scan(&sourceProject, &candidate, &event.Type, &event.IssueUID, &event.RelatedIssueUID, &payload); err != nil {
 			return err
 		}
 		sourceOrigin, err := httpurl.CanonicalHTTPOrigin(candidate)
@@ -125,9 +132,9 @@ func checkFederationMoveDestinationLifecycle(
 			}
 		}
 		for _, uid := range refs {
-			if uid != "" && !seen[uid] {
-				seen[uid] = true
-				candidates = append(candidates, uid)
+			if key := (sourceIssue{sourceProject, uid}); uid != "" && !seen[key] {
+				seen[key] = true
+				candidates[sourceProject] = append(candidates[sourceProject], uid)
 			}
 		}
 	}
@@ -137,22 +144,25 @@ func checkFederationMoveDestinationLifecycle(
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	for chunk := range slices.Chunk(candidates, 500) {
-		slots := make([]string, len(chunk))
-		args := make([]any, 1, len(chunk)+1)
-		args[0] = projectID
-		for i, uid := range chunk {
-			slots[i] = fmt.Sprintf("$%d", i+2)
-			args = append(args, uid)
-		}
-		var pending bool
-		//nolint:gosec // G202: only generated placeholders enter the SQL; the UIDs are bound.
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE project_id=$1 AND uid IN (`+
-			strings.Join(slots, ",")+`))`, args...).Scan(&pending); err != nil {
-			return err
-		}
-		if pending {
-			return fmt.Errorf("%w: %w: restore any archived former project and sync pending updates for moved issues, then retry destination leave or archive", ErrFederationResetBlockedByPendingPush, ErrFederationMovedIssuePendingPush)
+	for sourceProject, uids := range candidates {
+		for chunk := range slices.Chunk(uids, 500) {
+			slots := make([]string, len(chunk))
+			args := make([]any, 2, len(chunk)+2)
+			args[0], args[1] = projectID, sourceProject
+			for i, uid := range chunk {
+				slots[i] = fmt.Sprintf("$%d", i+3)
+				args = append(args, uid)
+			}
+			var pending bool
+			//nolint:gosec // G202: only generated placeholders enter the SQL; the UIDs are bound.
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues i WHERE i.project_id=$1 AND i.uid IN (`+
+				strings.Join(slots, ",")+`) AND EXISTS(SELECT 1 FROM events h WHERE h.project_id=$2 AND h.issue_uid=i.uid
+ AND h.type IN ('issue.created','issue.snapshot','issue.moved')))`, args...).Scan(&pending); err != nil {
+				return err
+			}
+			if pending {
+				return fmt.Errorf("%w: %w: restore any archived former project and sync pending updates for moved issues, then retry destination leave or archive", ErrFederationResetBlockedByPendingPush, ErrFederationMovedIssuePendingPush)
+			}
 		}
 	}
 	return nil
@@ -401,7 +411,8 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, snapshotGroup []int64, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) ([]int64, error) {
+// projectID names the project being materialized.
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, projectID int64, snapshotGroup []int64, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) ([]int64, error) {
 	moved := map[string]FoldEvent{}
 	retainedMoves := map[string]FoldEvent{}
 	for _, e := range events {
@@ -527,28 +538,45 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 			}
 			continue
 		}
-		if winner.Type == "issue.snapshot" && (!slices.Contains(snapshotGroup, source) || !slices.Contains(snapshotGroup, target)) {
+		// A refused snapshot relocation stops the destination pull. The project
+		// still holding the row keeps the issue so its own sync can continue.
+		snapshotRelocation := winner.Type == "issue.snapshot"
+		refuse := func(err error) error {
+			if !snapshotRelocation || source != projectID {
+				return err
+			}
+			issue.ProjectUID = sourceProject.UID
+			p.Issues[issue.UID] = issue
+			return nil
+		}
+		if snapshotRelocation && (!slices.Contains(snapshotGroup, source) || !slices.Contains(snapshotGroup, target)) {
 			// A later baseline does not retire an already verified move to this
 			// destination. Its signed history still permits replay after leave.
 			move, known := retainedMoves[issue.UID]
 			to, _ := StringValue(PayloadMap(move.Payload)["to_project_uid"])
 			if !known || to != issue.ProjectUID {
-				return nil, errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported)
+				if err := refuse(errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported)); err != nil {
+					return nil, err
+				}
+				continue
 			}
-			winner = move
+			winner, snapshotRelocation = move, false
 		}
 		if !active {
 			return nil, ErrNotFound
 		}
-		projects[target] = true
 		// Move ingress has already checked its authority and endpoints. Replaying
 		// trusted history must also work after a former source has left.
 		if recurrence != nil {
-			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
+			if err := refuse(fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		if err := validate(id, source, target); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
 		}
+		projects[target] = true
 
 		short, err := assign(target, issue)
 		if err != nil {
