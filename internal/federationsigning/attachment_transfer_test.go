@@ -12,11 +12,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/yaronf/httpsign"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kata/internal/testfix"
 	"hegel.dev/go/hegel"
 )
 
@@ -258,7 +260,7 @@ func TestAttachmentTransferSpoolFailureCleanup(t *testing.T) {
 					t.Fatal("cancelled spool stayed blocked")
 				}
 			case "read error":
-				r.Body = io.NopCloser(signingErrorReader{})
+				r.Body = io.NopCloser(iotest.ErrReader(io.ErrUnexpectedEOF))
 			case "overflow":
 				r.ContentLength = 256<<20 + 1
 			case "length mismatch":
@@ -286,10 +288,6 @@ func TestAttachmentTransferSpoolFailureCleanup(t *testing.T) {
 	}
 }
 
-type signingErrorReader struct{}
-
-func (signingErrorReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
-
 type signingReadSignal struct {
 	io.ReadCloser
 	started chan struct{}
@@ -316,7 +314,7 @@ func TestAttachmentTransferLargeBoundedBinary(t *testing.T) {
 	v := testVerifier(t, "https://hub.example", s)
 	for _, size := range []int64{256 << 20, 256<<20 + 1} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
-			r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://hub.example"+uploadPath, io.NopCloser(io.LimitReader(signingZeroReader{}, size)))
+			r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://hub.example"+uploadPath, io.NopCloser(io.LimitReader(testfix.ZeroReader{}, size)))
 			require.NoError(t, err)
 			r.ContentLength = -1 // exercise actual EOF/overflow, never trust the header
 			r.Header.Set("Authorization", "Bearer enrollment")
@@ -344,10 +342,6 @@ func TestAttachmentTransferLargeBoundedBinary(t *testing.T) {
 		})
 	}
 }
-
-type signingZeroReader struct{}
-
-func (signingZeroReader) Read(p []byte) (int, error) { clear(p); return len(p), nil }
 
 func TestAttachmentTransferRejectsInFlightReplayBeforeBody(t *testing.T) {
 	s := testSource(t)

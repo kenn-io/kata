@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/testfix"
 )
 
 const linkVersion = "6f1c2e8a-2222-4222-8222-222222222222"
@@ -133,7 +134,7 @@ func TestFederatedAttachmentUploadPreservesBodyLimitError(t *testing.T) {
 	}))
 
 	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", spokeProject.ID, issue.ShortID)
-	status, raw := attachmentUpload(t, spoke, endpoint, "shot.png", io.LimitReader(attachmentZeros{}, (256<<20)+1))
+	status, raw := attachmentUpload(t, spoke, endpoint, "shot.png", io.LimitReader(testfix.ZeroReader{}, (256<<20)+1))
 	require.Equal(t, http.StatusRequestEntityTooLarge, status, string(raw))
 	require.Contains(t, string(raw), "attachment_too_large")
 	require.Empty(t, f.Requests(), "oversized upload must be rejected before reaching Docbank")

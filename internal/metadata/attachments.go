@@ -41,9 +41,7 @@ func Valid(raw jsontext.Value) (Attachment, bool) {
 		return e, false
 	}
 	var fields map[string]jsontext.Value
-	if json.Unmarshal(raw, &fields) != nil {
-		return e, false
-	}
+	_ = json.Unmarshal(raw, &fields)
 	if origin, exists := fields["origin"]; exists && (len(origin) == 0 || origin[0] != '"' || !uid.Valid(e.Origin)) {
 		return e, false
 	}

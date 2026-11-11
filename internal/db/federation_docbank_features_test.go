@@ -14,6 +14,7 @@ func TestDocbankOriginPayloadRequiresFeature(t *testing.T) {
 	const ref = `{"origin":"01ARZ3NDEKTSV4RRFFQ69G5FAV","docbank_version":"6f1c2e8a-2222-4222-8222-222222222222","name":"file.pdf","size":12,"media_type":"application/pdf"}`
 	for _, tc := range []struct{ kind, payload, required string }{
 		{"issue.created", `{"metadata":{"attachment.id":` + ref + `}}`, "docbank_origin_v1"},
+		{"issue.created", `{"metadata":{"cron.occurrence":{},"attachment.id":` + ref + `}}`, "cron_v1,docbank_origin_v1"},
 		{"issue.metadata_updated", `{"diff":{"attachment.id":{"from":null,"to":` + ref + `}}}`, "docbank_origin_v1"},
 		{"issue.metadata_updated", `{"diff":{"attachment.id":{"from":` + ref + `,"to":null}}}`, "docbank_origin_v1"},
 		{"issue.snapshot", `{"metadata":{"attachment.id":` + ref + `}}`, "docbank_origin_v1"},

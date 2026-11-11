@@ -18,40 +18,54 @@ func payloadHasDocbankOrigin(kind, payload string) (bool, error) {
 	if payload == "" {
 		return false, nil
 	}
-	var body struct {
+	var body map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(payload), &body); err != nil {
+		return false, err
+	}
+	return docbankOriginFromBody(kind, body)
+}
+
+func docbankOriginFromBody(kind string, body map[string]jsontext.Value) (bool, error) {
+	if kind != "projection.issue" && !strings.HasPrefix(kind, "issue.") {
+		return false, nil
+	}
+	var fields struct {
 		Metadata map[string]jsontext.Value `json:"metadata"`
 		Diff     map[string]struct {
 			From jsontext.Value `json:"from"`
 			To   jsontext.Value `json:"to"`
 		} `json:"diff"`
-		Snapshot jsontext.Value `json:"snapshot"`
 		Evidence []struct {
 			Type       string         `json:"type"`
 			Attachment jsontext.Value `json:"attachment"`
 		} `json:"evidence"`
 	}
-	if err := json.Unmarshal([]byte(payload), &body); err != nil {
-		return false, err
+	for key, target := range map[string]any{"metadata": &fields.Metadata, "diff": &fields.Diff, "evidence": &fields.Evidence} {
+		if raw := body[key]; len(raw) > 0 {
+			if err := json.Unmarshal(raw, target); err != nil {
+				return false, err
+			}
+		}
 	}
-	for key, value := range body.Metadata {
+	for key, value := range fields.Metadata {
 		if strings.HasPrefix(key, metadata.AttachmentPrefix) && docbankOriginReference(value) {
 			return true, nil
 		}
 	}
-	for key, value := range body.Diff {
+	for key, value := range fields.Diff {
 		if strings.HasPrefix(key, metadata.AttachmentPrefix) && (docbankOriginReference(value.From) || docbankOriginReference(value.To)) {
 			return true, nil
 		}
 	}
-	for _, evidence := range body.Evidence {
+	for _, evidence := range fields.Evidence {
 		if evidence.Type == "attachment" && docbankOriginReference(evidence.Attachment) {
 			return true, nil
 		}
 	}
 	// Moves carry one issue projection; do not recursively classify arbitrary
 	// user metadata or text as a transport document.
-	if kind == "issue.moved" && len(body.Snapshot) > 0 {
-		return payloadHasDocbankOrigin("projection.issue", string(body.Snapshot))
+	if kind == "issue.moved" && len(body["snapshot"]) > 0 {
+		return payloadHasDocbankOrigin("projection.issue", string(body["snapshot"]))
 	}
 	return false, nil
 }
