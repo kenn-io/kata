@@ -232,7 +232,7 @@ func stageLegacyPreCutoverFixture(t *testing.T, path string, version int) {
 }
 
 func TestOpenLegacyCronWorkflowPreservesEvidence(t *testing.T) {
-	for _, document := range []string{`{"version":1,"steps":[{"key":"old","kind":"argv"}]}`, `null`, `{"steps":null}`, `{"steps":[null]}`, `{"steps":[{"kind":null}]}`} {
+	for _, document := range []string{`{"version":1,"steps":[{"key":"old","kind":"argv"}]}`, `{"version":1,"steps":null}`, `{"version":1,"steps":[null]}`, `{"version":1,"steps":[{"kind":null}]}`} {
 		t.Run(document, func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			ctx := t.Context()

@@ -14,31 +14,44 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-// Unsupported imported rows fail on reads, lists and snapshot construction,
-// including tombstones. Test-local SQL does not define production state.
+// Held rows are omitted from ordinary lists but remain fenced from reads and
+// snapshots, including tombstones. Test-local SQL does not define production state.
 func checkArgvCompatStoredReads(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Legacy", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "first", Kind: "command", Command: "true"}}}})
 	require.NoError(t, err)
+	healthy, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Replacement", Actor: "worker", Definition: workflow.Definition})
+	require.NoError(t, err)
 	q := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 	})
-	for _, deleted := range []any{nil, "2026-11-08T12:00:00Z"} {
-		_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1,deleted_at=$2 WHERE uid=$3`, `{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`, deleted, workflow.UID)
-		require.NoError(t, err)
-		_, err = store.CronWorkflow(ctx, project.ID, workflow.UID)
-		require.Error(t, err)
-		_, err = store.ListCronWorkflows(ctx, db.CronList{ProjectID: project.ID, IncludeDeleted: true})
-		require.Error(t, err)
-		tx, err := q.BeginTx(ctx, nil)
-		require.NoError(t, err)
-		_, snapshotErr := db.CronDefinitionSnapshots(ctx, tx, project)
-		require.NoError(t, tx.Rollback())
-		require.Error(t, snapshotErr)
+	for _, document := range []string{`{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`, `null`, `{"version":1,"steps":null}`, `{"version":1,"steps":[null]}`, `{"version":1,"steps":[{"kind":null}]}`} {
+		for _, deleted := range []any{nil, "2026-11-08T12:00:00Z"} {
+			_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1,deleted_at=$2 WHERE uid=$3`, document, deleted, workflow.UID)
+			require.NoError(t, err)
+			_, err = store.CronWorkflow(ctx, project.ID, workflow.UID)
+			require.Error(t, err)
+			listed, err := store.ListCronWorkflows(ctx, db.CronList{ProjectID: project.ID, IncludeDeleted: true})
+			require.NoError(t, err)
+			require.Len(t, listed, 1)
+			require.Equal(t, healthy.UID, listed[0].UID)
+			tx, err := q.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			snapshot, snapshotErr := db.CronDefinitionSnapshots(ctx, tx, project)
+			require.NoError(t, tx.Rollback())
+			require.Error(t, snapshotErr)
+			require.Empty(t, snapshot)
+		}
 	}
+	_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1 WHERE uid=$2`, `{"version":1,"unexpected":true}`, workflow.UID)
+	require.NoError(t, err)
+	_, err = store.ListCronWorkflows(ctx, db.CronList{ProjectID: project.ID, IncludeDeleted: true})
+	require.Error(t, err, "unrelated decode errors must remain visible")
+	_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1 WHERE uid=$2`, `{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`, workflow.UID)
+	require.NoError(t, err)
 	_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET deleted_at=NULL WHERE uid=$1`, workflow.UID)
 	require.NoError(t, err)
 	olderUID, err := uid.New()
@@ -90,6 +103,15 @@ func checkArgvCompatRetainedMaterialization(t *testing.T, store db.Storage) erro
 	require.NoError(t, err)
 	require.NoError(t, db.MaterializeCronDefinitions(ctx, tx, other.ID, other.UID, fold, nil), "another project's history does not block this project")
 	require.NoError(t, tx.Rollback())
+	for _, document := range []string{`null`, `{"steps":[]}`} {
+		bad := argvCompatRemoteWorkflow(t, project, origin, document)
+		projection := db.FoldEvents([]db.FoldEvent{{UID: bad.EventUID, ProjectUID: project.UID, OriginInstanceUID: origin, Type: bad.Type, HLCPhysicalMS: bad.HLCPhysicalMS, Payload: bad.Payload}})
+		tx, err = q.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		err = db.MaterializeCronDefinitions(ctx, tx, project.ID, project.UID, projection, nil)
+		require.ErrorIs(t, err, db.ErrFederationIngestValidation, "unrepresentable historical document %s must fence replay before SQL", document)
+		require.NoError(t, tx.Rollback())
+	}
 	return nil
 }
 

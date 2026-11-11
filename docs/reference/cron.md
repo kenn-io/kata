@@ -593,16 +593,22 @@ and issue-scoped route restrictions apply.
 ### Held legacy workflows
 
 Older databases can contain workflows with a reserved `argv` step or a null
-definition, steps array, step, or step kind. Kata preserves these documents and
-their history during owner backup, restore, and SQLite upgrades. They remain
-unavailable to adapters and cannot be used in new jobs or runs. Workflow lists
-and federation snapshots for the affected project can also fail while a held
-workflow remains.
+definition, steps array, step, or step kind. Owner backup and restore preserve
+historically decodable documents and their event evidence; JSON formatting may
+change. These workflows remain unavailable to adapters and cannot be shown or
+used in new jobs or runs. Ordinary workflow lists omit held workflows and show
+supported siblings. Federation snapshots for the affected project fail while a
+held workflow remains; they do not omit held data.
 
-To recover, keep an [owner backup](../operations/backup-restore.md#full-backup)
-and find the old workflow UID and its evidence in the JSONL. Create a supported
-workflow with a new UID, then update affected jobs to use it. The original UID and
-its evidence remain held; do not reuse that UID. The remaining work for argv
+Retained events whose definitions cannot be represented in storage, or whose
+future fields cannot be decoded, can block cron rematerialization for their
+project even when a later supported event exists. Preserve the backup for
+recovery with a compatible version.
+
+To recover, take an [owner backup](../operations/backup-restore.md#full-backup)
+and find the `cron_workflow` record and its UID and definition in the JSONL.
+Create a supported workflow with a new UID, then update affected jobs to use it.
+The original UID and its evidence remain held; do not reuse that UID. The remaining work for argv
 support is tracked in [issue 1072](https://github.com/kenn-io/kata/issues/1072).
 
 ### Upgrade limits
