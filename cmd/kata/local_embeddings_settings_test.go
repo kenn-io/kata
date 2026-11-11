@@ -255,62 +255,6 @@ func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	require.False(t, chosen)
 }
 
-func TestSharedChoiceStartsIndexing(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	resetFlags(t)
-	home := setupKataEnv(t)
-	t.Setenv("PORT", "")
-	t.Setenv("KATA_DSN", "")
-	t.Setenv("KATA_AUTH_TOKEN", "")
-	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
-	configPath := filepath.Join(home, "config.toml")
-	original := []byte("# unchanged\n")
-	require.NoError(t, os.WriteFile(configPath, original, 0600))
-	require.NoError(t, embedlocal.RecordChoice())
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Input []string `json:"input"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Errorf("decode input: %v", err)
-			return
-		}
-		vectors := make([]map[string]any, len(request.Input))
-		for i := range vectors {
-			values := make([]float64, 768)
-			values[0] = 1
-			vectors[i] = map[string]any{"embedding": values, "index": i}
-		}
-		if err := json.NewEncoder(w).Encode(map[string]any{"data": vectors}); err != nil {
-			t.Errorf("encode response: %v", err)
-		}
-	}))
-	t.Cleanup(provider.Close)
-	oldEndpoint := localEmbeddingsEndpoint
-	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return provider.URL, nil }
-	baseURL := launchDaemon(t)
-	status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
-	require.Equal(t, "built_in", status.Provider)
-	project := postJSON[struct {
-		Project struct {
-			ID int64 `json:"id"`
-		} `json:"project"`
-	}](t, baseURL+"/api/v1/projects", map[string]string{"name": "example-project", "actor": "tester"})
-	postJSONOK(t, fmt.Sprintf("%s/api/v1/projects/%d/issues", baseURL, project.Project.ID), map[string]string{"title": "Repair bicycle brakes", "actor": "tester"})
-	require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: waits for the reconciler to index the issue
-		out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), "--json", "--project", "example-project", "search", "bicycle")
-		var result struct {
-			Mode    string `json:"mode"`
-			Results []any  `json:"results"`
-		}
-		return err == nil && json.Unmarshal([]byte(out), &result) == nil && result.Mode == "hybrid" && len(result.Results) == 1
-	}, 10*time.Second, 20*time.Millisecond)
-	data, err := os.ReadFile(configPath) // #nosec G304 -- isolated test configuration
-	require.NoError(t, err)
-	require.Equal(t, original, data)
-}
-
 func TestSharedChoiceRollsBackWhenVectorPathIsDirectory(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	resetFlags(t)

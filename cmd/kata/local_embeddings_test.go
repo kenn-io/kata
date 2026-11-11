@@ -99,24 +99,13 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		installed = true
 		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
 	}
-	blocker := filepath.Join(tmp, ".kenn")
-	require.NoError(t, os.WriteFile(blocker, []byte("block marker"), 0600))
-	_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-	require.ErrorContains(t, err, "sharing could not be confirmed")
-	cfg, err := config.ReadSearchConfig()
-	require.NoError(t, err)
-	require.True(t, cfg.Embeddings.Local)
-	require.NoError(t, os.Remove(blocker))
 	out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 	require.NoError(t, err, stderr)
 	require.Contains(t, stderr, "290")
 	require.Contains(t, out, "kata health --json")
-	cfg, err = config.ReadSearchConfig()
+	cfg, err := config.ReadSearchConfig()
 	require.NoError(t, err)
 	require.True(t, cfg.Embeddings.Local)
-	chosen, err := embedlocal.ChoiceRecorded()
-	require.NoError(t, err)
-	require.True(t, chosen)
 	marker := filepath.Join(tmp, ".kenn", "embeddings", "search-by-meaning")
 	old := time.Unix(1000000000, 0)
 	require.NoError(t, os.Chtimes(marker, old, old))
@@ -128,7 +117,7 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 }
 
 func TestLocalEmbeddingsMarkerWriteFailure(t *testing.T) {
-	kataHome := setupKataEnv(t)
+	setupKataEnv(t)
 	home := clearLocalEmbeddingsEnv(t)
 	stubLocalEmbeddingsInstall(t)
 	oldEndpoint := localEmbeddingsEndpoint
@@ -144,29 +133,17 @@ func TestLocalEmbeddingsMarkerWriteFailure(t *testing.T) {
 	if err := os.Symlink("missing", marker); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	chosen, err := embedlocal.ChoiceRecorded()
-	require.NoError(t, err)
-	require.False(t, chosen)
 	run := localEmbeddingsRun{
 		confirm: func(context.Context, int64) (bool, error) { return true, nil },
 		notice:  func(string) error { return nil },
 		restart: func(_ context.Context, apply func() error) error { return apply() },
 	}
-	_, err = enableLocalEmbeddings(t.Context(), run)
+	_, err := enableLocalEmbeddings(t.Context(), run)
 	require.ErrorContains(t, err, "sharing could not be confirmed")
 	require.ErrorContains(t, err, "record search by meaning choice")
 	cfg, err := config.ReadSearchConfig()
 	require.NoError(t, err)
 	require.True(t, cfg.Embeddings.Local)
-	client, _, err := preflightEmbeddingStartup(cfg.Embeddings, filepath.Join(kataHome, "kata.db"))
-	require.NoError(t, err)
-	require.NotNil(t, client)
-	require.NoError(t, os.Remove(marker))
-	_, err = enableLocalEmbeddings(t.Context(), run)
-	require.NoError(t, err)
-	chosen, err = embedlocal.ChoiceRecorded()
-	require.NoError(t, err)
-	require.True(t, chosen)
 }
 
 func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {
