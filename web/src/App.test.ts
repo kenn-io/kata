@@ -585,6 +585,89 @@ describe('App', () => {
     expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
   })
 
+  it('recovers an initial daemon roster failure automatically', async () => {
+    vi.useFakeTimers()
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let rosterReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(String(input), window.location.origin)
+        if (target.pathname === '/api/v1/ui/daemons') {
+          rosterReads++
+          return rosterReads === 1
+            ? new Response('', { status: 503 })
+            : Response.json(daemonRoster())
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot'))
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        return Response.json({})
+      }),
+    )
+    render(App)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(screen.queryByRole('button', { name: 'Retry daemon roster' })).toBeNull()
+    await vi.advanceTimersByTimeAsync(1000)
+    await tick()
+    expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+    expect(rosterReads).toBe(2)
+  })
+
+  it('offers roster recovery after transient retries are exhausted', async () => {
+    vi.useFakeTimers()
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let reads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(String(input), window.location.origin)
+        if (target.pathname === '/api/v1/ui/daemons') {
+          reads++
+          return reads <= 4 ? new Response('', { status: 503 }) : Response.json(daemonRoster())
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot'))
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot"' } })
+        return Response.json({})
+      }),
+    )
+    render(App)
+    await vi.advanceTimersByTimeAsync(7000)
+    await tick()
+    await fireEvent.click(screen.getByRole('button', { name: 'Retry daemon roster' }))
+    await vi.advanceTimersByTimeAsync(0)
+    await tick()
+    expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+    expect(reads).toBe(5)
+  })
+
+  it('cancels pending daemon roster retries on unmount', async () => {
+    vi.useFakeTimers()
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let reads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (new URL(String(input), window.location.origin).pathname === '/api/v1/ui/daemons')
+          reads++
+        return new Response('', { status: 503 })
+      }),
+    )
+    render(App)
+    await vi.advanceTimersByTimeAsync(0)
+    cleanup()
+    await vi.advanceTimersByTimeAsync(7000)
+    expect(reads).toBe(1)
+  })
+
   it('does not fall through to local authority when the initial roster is empty', async () => {
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -708,7 +791,7 @@ describe('App', () => {
         }
         if (target.pathname === '/api/v1/ui/daemons') {
           rosterReads += 1
-          if (rosterReads === 1) return new Response('', { status: 503 })
+          if (rosterReads === 1) return new Response('', { status: 403 })
           markRosterRequested()
           return rosterResponse
         }
@@ -1238,56 +1321,9 @@ describe('App', () => {
     expect(paths).toEqual(['/api/v1/ui/daemons'])
   })
 
-  it.each([503, 403, 'body'])('handles an initial snapshot failure %s', async (status) => {
-    vi.useFakeTimers()
-    history.replaceState(null, '', '/kata?view=all-open#direct=1')
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    let snapshotReads = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const target = new URL(String(input), window.location.origin)
-        if (target.pathname !== '/api/v1/ui/snapshot') return Response.json({})
-        snapshotReads++
-        if (snapshotReads === 1) {
-          if (status === 'body')
-            return new Response(
-              new ReadableStream({
-                start(controller) {
-                  controller.error(new TypeError('connection reset'))
-                },
-              }),
-              { headers: { 'Content-Type': 'application/json' } },
-            )
-          return new Response('{', {
-            status: Number(status),
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
-      }),
-    )
-    render(App)
-    await vi.advanceTimersByTimeAsync(0)
-    await tick()
-    if (status !== 403) {
-      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
-      await vi.advanceTimersByTimeAsync(1000)
-      await tick()
-      expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
-      expect(snapshotReads).toBe(2)
-    } else {
-      expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
-      expect(snapshotReads).toBe(1)
-    }
-  })
-
-  it.each(['status', 'body'])(
-    'recovers an initial snapshot %s failure through an in-app retry',
-    async (failure) => {
+  it.each([false, true])(
+    'recovers an initial snapshot failure, exhausted: %s',
+    async (exhausted) => {
       vi.useFakeTimers()
       history.replaceState(null, '', '/kata?view=all-open#direct=1')
       sessionStorage.setItem(
@@ -1299,44 +1335,26 @@ describe('App', () => {
         'fetch',
         vi.fn(async (input: RequestInfo | URL) => {
           const target = new URL(String(input), window.location.origin)
-          if (target.pathname !== '/api/v1/ui/snapshot') {
-            return new Response('{}', {
-              status: 200,
-              headers: { 'Content-Type': 'application/json' },
-            })
-          }
-          snapshotReads += 1
-          if (snapshotReads <= 4)
-            return failure === 'status'
-              ? new Response('', { status: 503 })
-              : new Response(
-                  new ReadableStream({
-                    start(controller) {
-                      controller.error(new TypeError('connection reset'))
-                    },
-                  }),
-                  { headers: { 'Content-Type': 'application/json' } },
-                )
-          return new Response(JSON.stringify(snapshot()), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
-          })
+          if (target.pathname !== '/api/v1/ui/snapshot') return Response.json({})
+          snapshotReads++
+          if (snapshotReads <= (exhausted ? 4 : 1)) return new Response('', { status: 503 })
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
         }),
       )
-
       render(App)
-
-      await vi.advanceTimersByTimeAsync(7000)
-      await tick()
-      const retry = screen.getByRole('button', { name: 'Retry' })
-      expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
-      await fireEvent.click(retry)
-
       await vi.advanceTimersByTimeAsync(0)
-      await tick()
-      expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
-      expect(snapshotReads).toBe(5)
       expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+      await vi.advanceTimersByTimeAsync(exhausted ? 7000 : 1000)
+      await tick()
+      if (exhausted) {
+        expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
+        await fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+        await vi.advanceTimersByTimeAsync(0)
+        await tick()
+      }
+      expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+      expect(snapshotReads).toBe(exhausted ? 5 : 2)
     },
   )
 

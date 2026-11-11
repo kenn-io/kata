@@ -130,6 +130,7 @@
   let daemonInfos = $state<WebDaemonInfo[]>([])
   let activeDaemonID = $state<string | undefined>()
   let daemonRosterLoaded = false
+  let daemonRosterAbort: AbortController | undefined
   let authenticationRecoveryPending = false
   let authenticationRecoveryCompletion: Promise<boolean> | undefined
   let daemonSwitching = $state(false)
@@ -357,6 +358,7 @@
       stream.stop()
       invalidations.stop()
       snapshots.abort()
+      daemonRosterAbort?.abort()
       referenceGeneration += 1
       referenceAbort?.abort()
       fenceCredentialAudit()
@@ -377,6 +379,7 @@
   }
 
   function invalidateDaemonRoster(): void {
+    daemonRosterAbort?.abort()
     if (!directDaemonTarget) daemonRosterLoaded = false
   }
 
@@ -1013,8 +1016,11 @@
       return true
     }
     const retainedDaemonID = activeDaemonID
+    daemonRosterAbort?.abort()
+    const abort = (daemonRosterAbort = new AbortController())
     try {
-      const loadedDaemons = await fetchWebDaemons(browserFetch)
+      const loadedDaemons = await fetchWebDaemons(browserFetch, abort.signal)
+      if (abort.signal.aborted || destroyed) return false
       const nextDaemonID =
         loadedDaemons.find(
           (daemon) => daemon.id === retainedDaemonID && daemon.health !== 'upgrade_required',
@@ -1051,6 +1057,7 @@
         }
       }
     } catch (error) {
+      if (abort.signal.aborted || destroyed) return false
       if (
         isAuthenticationRequiredError(error) &&
         error instanceof AuthenticationRequiredError &&
@@ -1067,6 +1074,8 @@
       mode = 'loading'
       daemonError = 'Configured daemons are unavailable'
       return false
+    } finally {
+      if (daemonRosterAbort === abort) daemonRosterAbort = undefined
     }
     return true
   }

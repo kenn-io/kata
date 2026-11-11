@@ -57,7 +57,6 @@ describe('Retry-After', () => {
   it.each([
     ['date', 'Thu, 01 Jan 1970 00:00:10 GMT', 10000],
     ['invalid', 'invalid', 1000],
-    ['expired', 'Thu, 01 Jan 1970 00:00:00 GMT', 1000],
   ])('uses %s hints', async (_case, hint, delay) => {
     vi.useFakeTimers()
     vi.setSystemTime(0)

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createCredentialedFetch, setGeneratedFetch } from '../api/client'
 import { parseRoute } from '../router'
 import {
   createUISnapshotRequest,
@@ -21,34 +20,6 @@ interface TestSnapshot {
 }
 
 describe('SnapshotController', () => {
-  it('returns a transient refresh failure without waiting after accepting a snapshot', async () => {
-    const fetcher = vi
-      .fn()
-      .mockResolvedValueOnce(
-        Response.json({ cursor: 1, capabilities: { writable: true, updates: 'poll' } }),
-      )
-      .mockResolvedValueOnce(new Response('', { status: 503 }))
-    setGeneratedFetch(fetcher)
-    try {
-      const controller = new SnapshotController(createUISnapshotRequest(), () => 'same')
-      const intent = {
-        view: 'all-open' as const,
-        statuses: [],
-        owners: [],
-        labels: [],
-        relationships: [],
-        includeGraph: false,
-        includeHistory: false,
-      }
-      expect(await controller.load(intent)).toBe(true)
-      expect(await controller.load(intent)).toBe(false)
-      expect(controller.state.snapshot?.cursor).toBe(1)
-      expect(fetcher).toHaveBeenCalledTimes(2)
-    } finally {
-      setGeneratedFetch(createCredentialedFetch())
-    }
-  })
-
   it('aborts the previous generation and rejects a slow old route', async () => {
     const pending: Array<ReturnType<typeof deferredSnapshot>> = []
     const request: SnapshotRequest<TestIntent, TestSnapshot> = (intent, options) => {
@@ -115,6 +86,7 @@ describe('SnapshotController', () => {
 
     expect(await controller.load({ key: 'same-route' })).toBe(true)
     expect(await controller.load({ key: 'same-route' })).toBe(false)
+    expect(request.mock.calls.map(([, options]) => options.retry)).toEqual([true, false])
 
     expect(controller.state.snapshot?.value).toBe('safe')
     expect(controller.state.stale).toBe(true)

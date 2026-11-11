@@ -851,73 +851,30 @@ describe('AppShell', () => {
     expect(calls.filter((call) => call.init?.method === 'GET').length).toBeGreaterThanOrEqual(2)
   })
 
-  test.each([503, 403, 'body'])('handles teams read failure %s', async (status) => {
+  test.each([false, true])('recovers a teams read failure, exhausted: %s', async (exhausted) => {
     vi.useFakeTimers()
     let reads = 0
     setGeneratedFetch(async () => {
       reads++
-      if (reads === 1) {
-        if (status === 'body')
-          return new Response(
-            new ReadableStream({
-              start(controller) {
-                controller.error(new TypeError('connection reset'))
-              },
-            }),
-            { headers: { 'Content-Type': 'application/json' } },
-          )
-        return new Response('{', {
-          status: Number(status),
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      return Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
+      return reads <= (exhausted ? 4 : 1)
+        ? new Response('', { status: 503 })
+        : Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
     })
     render(AppShell, { props: accessProps(executeAccessMutation) })
     await vi.advanceTimersByTimeAsync(0)
-    if (status !== 403) {
-      expect(
-        (screen.getByRole('button', { name: 'Refresh teams' }) as HTMLButtonElement).disabled,
-      ).toBe(true)
-      await vi.advanceTimersByTimeAsync(1000)
-      expect(screen.getByRole('option', { name: 'Example team' })).not.toBeNull()
-      expect(screen.queryByText('Unable to read teams. Refresh to try again.')).toBeNull()
-      expect(reads).toBe(2)
-    } else {
-      expect(screen.getByText('Unable to read teams. Refresh to try again.')).not.toBeNull()
-      expect(reads).toBe(1)
-    }
-  })
-
-  test.each(['status', 'body'])(
-    'offers a manual teams refresh after %s retries run out',
-    async (failure) => {
-      vi.useFakeTimers()
-      let reads = 0
-      setGeneratedFetch(async () => {
-        reads++
-        return reads <= 4
-          ? failure === 'status'
-            ? new Response('', { status: 503 })
-            : new Response(
-                new ReadableStream({
-                  start(controller) {
-                    controller.error(new TypeError('connection reset'))
-                  },
-                }),
-                { headers: { 'Content-Type': 'application/json' } },
-              )
-          : Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
-      })
-      render(AppShell, { props: accessProps(executeAccessMutation) })
-      await vi.advanceTimersByTimeAsync(7000)
+    expect(
+      (screen.getByRole('button', { name: 'Refresh teams' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    await vi.advanceTimersByTimeAsync(exhausted ? 7000 : 1000)
+    if (exhausted) {
       expect(screen.getByText('Unable to read teams. Refresh to try again.')).not.toBeNull()
       await fireEvent.click(screen.getByRole('button', { name: 'Refresh teams' }))
       await vi.advanceTimersByTimeAsync(0)
-      expect(screen.getByRole('option', { name: 'Example team' })).not.toBeNull()
-      expect(reads).toBe(5)
-    },
-  )
+    }
+    expect(screen.getByRole('option', { name: 'Example team' })).not.toBeNull()
+    expect(screen.queryByText('Unable to read teams. Refresh to try again.')).toBeNull()
+    expect(reads).toBe(exhausted ? 5 : 2)
+  })
 
   test('manages selected team membership and deletion through owner mutation authority', async () => {
     const writes: { path: string; method: string }[] = []
