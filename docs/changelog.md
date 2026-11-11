@@ -66,6 +66,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   build finishes, and an opener waiting for another opener's migration keeps
   waiting. Ordinary queries keep the 30-second limit. See
   [PostgreSQL operations](operations/postgres.md).
+- Keep syncing a joined project when issue history references projects the spoke has not joined.
 
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and
