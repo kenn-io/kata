@@ -49,7 +49,6 @@ type Store struct {
 	idempotencyLocks             *idempotencyLockSet
 	rotationStage                func(context.Context) error
 	uiReadStage                  func(context.Context) error
-	cronDeliveryReadStage        func(context.Context) error
 	uiProjectStatsRead           func()
 	uiLinkDetailRead             func()
 	externalRootNow              func() time.Time

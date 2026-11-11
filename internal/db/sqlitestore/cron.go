@@ -85,8 +85,8 @@ func (d *Store) RecurringCronDelivery(ctx context.Context, query db.CronDelivery
 	a := d.cronSQL()
 	a.Query = tx
 	a.RecurringChild = func(ctx context.Context, parentID int64, jobUID string) (*db.RecurringChild, error) {
-		if d.cronDeliveryReadStage != nil {
-			if err := d.cronDeliveryReadStage(ctx); err != nil {
+		if d.uiReadStage != nil {
+			if err := d.uiReadStage(ctx); err != nil {
 				return nil, err
 			}
 		}
@@ -102,12 +102,10 @@ func (d *Store) RecurringCronDelivery(ctx context.Context, query db.CronDelivery
 	return out, nil
 }
 
-func (d *Store) recurringChildTx(ctx context.Context, q interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, parentID int64, jobUID string) (*db.RecurringChild, error) {
+func (d *Store) recurringChildTx(ctx context.Context, tx *sql.Tx, parentID int64, jobUID string) (*db.RecurringChild, error) {
 	args := []any{parentID, jobUID}
 	query := `SELECT i.id, i.uid, json_extract(i.metadata,'$."cron.occurrence"') FROM issues i JOIN projects p ON p.id=i.project_id JOIN links l ON l.from_issue_id=i.id WHERE l.type='parent' AND l.to_issue_id=? AND json_extract(i.metadata,'$."cron.occurrence".job_uid')=? AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND ` + authorizedLinkPredicate(ctx, "l.", &args)
-	rows, err := q.QueryContext(ctx, query, args...)
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

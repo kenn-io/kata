@@ -71,10 +71,7 @@ func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, e
 			return nil, ErrRecurringOccurrenceVersion
 		}
 		var value recurringOccurrence
-		if err := json.Unmarshal([]byte(occurrence), &value); err != nil {
-			continue
-		}
-		if value.Version != 1 || value.ScheduledAt.IsZero() {
+		if err := json.Unmarshal([]byte(occurrence), &value); err != nil || value.Version != 1 || value.ScheduledAt.IsZero() {
 			continue
 		}
 		child := RecurringChild{UID: uid, ScheduledAt: value.ScheduledAt.UTC()}
@@ -128,19 +125,16 @@ func (a CronSQL) RecurringDelivery(ctx context.Context, query CronDeliveryQuery,
 			return nil, err
 		}
 	}
-	projectID := query.ProjectID
 	out := make([]CronDeliveryJob, len(jobs))
-	for i, job := range jobs {
-		out[i].Job = job
-	}
 	native := false
-	for _, j := range jobs {
+	for i, j := range jobs {
+		out[i].Job = j
 		native = native || cron.IsRecurringIssueJob(j.Definition)
 	}
 	if !native {
 		return out, nil
 	}
-	delivers, role, err := recurringAuthority(ctx, a.Query, projectID)
+	delivers, role, err := recurringAuthority(ctx, a.Query, query.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +156,7 @@ func (a CronSQL) RecurringDelivery(ctx context.Context, query CronDeliveryQuery,
 		d := &RecurringDelivery{State: "active", Authority: authority, DeliversHere: delivers, EvaluatedAt: now}
 		out[i].Delivery = d
 		// Unlike dispatch this projection must not lock the parent.
-		parent, deleted, err := a.recurringParent(ctx, a.Query, projectID, j.Definition.Issue.ParentUID, false)
+		parent, deleted, err := a.recurringParent(ctx, a.Query, query.ProjectID, j.Definition.Issue.ParentUID, false)
 		missing := errors.Is(err, ErrNotFound)
 		if err != nil && !missing {
 			return nil, err
