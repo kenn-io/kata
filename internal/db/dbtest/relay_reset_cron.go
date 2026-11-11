@@ -1,7 +1,9 @@
 package dbtest
 
 import (
+	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"strings"
@@ -86,6 +88,29 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 			require.NoError(t, err)
 			require.Equal(t, int64(1), binding.RelayConfig.ResetEpoch)
 		}
+	}
+
+	// A compatible checkpoint must not erase older held or future workflow evidence.
+	q := downstream.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	for _, definition := range []string{`{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`, `{"definition":null}`} {
+		event := argvCompatRemoteWorkflow(t, replica, downstream.InstanceUID(), definition)
+		if definition == `{"definition":null}` {
+			event.Payload = jsontext.Value(definition)
+		}
+		_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, downstream.InstanceUID(), replica.ID, replica.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, 0, event.ContentHash)
+		require.NoError(t, err)
+		err = installer.InstallRelayReset(ctx, bindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation)
+		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		binding, err := downstream.FederationBindingByProject(ctx, replica.ID)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), binding.RelayConfig.ResetEpoch)
+		events, err := downstream.EventsByUIDs(ctx, replica.ID, []string{event.EventUID})
+		require.NoError(t, err)
+		require.Len(t, events, 1)
+		_, err = q.ExecContext(ctx, `DELETE FROM events WHERE uid=$1`, event.EventUID)
+		require.NoError(t, err)
 	}
 	require.NoError(t, installer.InstallRelayReset(ctx, bindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation))
 

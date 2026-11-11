@@ -233,3 +233,61 @@ func checkArgvRetainedFeatureProbe(t *testing.T, store db.Storage) error {
 	require.Equal(t, db.CronEventFeature, features)
 	return nil
 }
+
+// Destructive replacement must preserve unsupported retained history even when
+// the current workflow projection is a newer, readable definition.
+func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	for _, operation := range []string{"adopt", "reset", "conditional reset"} {
+		for _, definition := range []string{`{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`, `{"version":1,"steps":null}`} {
+			project, err := store.CreateProject(ctx, "guard-"+operation+"-"+uidForGuard(t))
+			require.NoError(t, err)
+			workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Current", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "command", Command: "true"}}}})
+			require.NoError(t, err)
+			event := argvCompatRemoteWorkflow(t, project, store.InstanceUID(), definition)
+			_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, 0, event.ContentHash)
+			require.NoError(t, err)
+			if operation == "adopt" {
+				target, err := uid.New()
+				require.NoError(t, err)
+				_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: target, ReplayHorizonEventID: 1, Actor: "worker"})
+			} else {
+				_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, Enabled: true})
+				require.NoError(t, err)
+				if operation == "reset" {
+					err = store.ResetFederatedProject(ctx, project.ID, 20, 19)
+				} else {
+					err = store.ResetFederatedProjectIfNoPendingPush(ctx, project.ID, 20, 19, store.InstanceUID(), 0)
+				}
+			}
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures, operation)
+			current, err := store.ProjectByID(ctx, project.ID)
+			require.NoError(t, err)
+			require.Equal(t, project.UID, current.UID)
+			_, err = store.CronWorkflow(ctx, project.ID, workflow.UID)
+			require.NoError(t, err)
+			events, err := store.EventsByUIDs(ctx, project.ID, []string{event.EventUID})
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+			if operation == "adopt" {
+				_, err = store.FederationBindingByProject(ctx, project.ID)
+				require.ErrorIs(t, err, db.ErrNotFound)
+			} else {
+				binding, err := store.FederationBindingByProject(ctx, project.ID)
+				require.NoError(t, err)
+				require.NotEqual(t, int64(19), binding.PullCursorEventID)
+			}
+		}
+	}
+	return nil
+}
+
+func uidForGuard(t *testing.T) string {
+	t.Helper()
+	id, err := uid.New()
+	require.NoError(t, err)
+	return id
+}

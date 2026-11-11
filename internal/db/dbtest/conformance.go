@@ -52,6 +52,7 @@ type scenario struct {
 
 var storageScenarios = []scenario{
 	{name: "argv retained feature probe", run: checkArgvRetainedFeatureProbe},
+	{name: "argv destructive guards", run: checkArgvDestructiveGuards},
 	{name: "argv compatibility stored reads", methods: []string{"CronWorkflow", "ListCronWorkflows"}, run: checkArgvCompatStoredReads},
 	{name: "argv retained materialization", methods: []string{"CreateProject"}, run: checkArgvCompatRetainedMaterialization},
 	{name: "argv compatibility remote rollback", methods: []string{"InsertRemoteEvents", "IngestFederationEvents"}, run: checkArgvCompatRemoteRollback},
