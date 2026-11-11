@@ -33,14 +33,14 @@ func daemonRecoveryAdvice(e *client.LocalDaemonUnreachableError, goos string) st
 }
 
 // profileRecoveryCommand quotes any catalog name, which is free-form text, for
-// the shell that will run the command; Windows output is labeled PowerShell.
+// the shell that will run the command. Windows output is labeled PowerShell.
 func profileRecoveryCommand(name, goos string) string {
 	arg := "--daemon=" + name
 	if goos != "windows" {
 		return "kata " + shellQuoteArg(arg) + " daemon recover"
 	}
 	commands, _ := agenthook.BuildCommand("kata", arg, "daemon", "recover") // the executable is never blank
-	return "in PowerShell: " + commands.PowerShell
+	return "in PowerShell " + commands.PowerShell
 }
 
 func localDaemonGuidance(e *client.LocalDaemonUnreachableError) string {
@@ -48,7 +48,7 @@ func localDaemonGuidance(e *client.LocalDaemonUnreachableError) string {
 }
 
 // diagnosisMessage keeps an unreachable daemon's PID, endpoint and cause in the
-// text users read; other states report only their next action.
+// text users read. Other states report only their next action.
 func diagnosisMessage(result daemonDiagnosis) string {
 	if result.State == "local_unreachable" && result.Message != "" {
 		return result.State + ": " + result.Message + ". " + result.NextAction
