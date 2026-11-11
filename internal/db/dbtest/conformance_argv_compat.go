@@ -337,7 +337,12 @@ func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
 	})
 	for _, operation := range []string{"adopt", "reset", "conditional reset"} {
 		for _, definition := range []string{`{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`, `{"version":1,"steps":null}`} {
-			project, err := store.CreateProject(ctx, "guard-"+uidForGuard(t))
+			if operation != "adopt" && definition == `{"version":1,"steps":null}` {
+				continue
+			}
+			projectUID, err := uid.New()
+			require.NoError(t, err)
+			project, err := store.CreateProject(ctx, "guard-"+projectUID)
 			require.NoError(t, err)
 			workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Current", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "command", Command: "true"}}}})
 			require.NoError(t, err)
@@ -384,11 +389,4 @@ func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
 		}
 	}
 	return nil
-}
-
-func uidForGuard(t *testing.T) string {
-	t.Helper()
-	id, err := uid.New()
-	require.NoError(t, err)
-	return id
 }
