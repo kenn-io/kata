@@ -790,7 +790,7 @@ func TestFieldReconcileSavedSchedules(t *testing.T) {
 	})
 	t.Run("connector writes freeze the daemon zone", func(t *testing.T) {
 		h := newReconcileHarness(t)
-		h.reconciler.fieldCodecs = fieldCodecsForTimezone("America/New_York")
+		h.reconciler = NewReconciler(h.store, h.registry, ReconcilerConfig{DefaultTimezone: "America/New_York", Now: func() time.Time { return h.now }})
 		h.mapField(t, "scheduled_on", "start-date")
 		h.client.fieldValues["start-date"] = date("2026-08-20")
 		result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})

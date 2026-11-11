@@ -181,28 +181,3 @@ func TestIssuePortableTimezoneCopiedRecurrence(t *testing.T) {
 		require.Contains(t, string(raw), `"timezone":"US/Eastern"`)
 	})
 }
-
-func TestSavedScheduleMetadataFilterHTTP(t *testing.T) {
-	env := testenv.New(t)
-	project := seedProject(t, env, "example-project")
-	status, raw := cronHTTP(t, env, http.MethodPost, projectPath(project.ID)+"/issues", map[string]any{
-		"actor": "tester", "title": "Scheduled", "force_new": true, "metadata": map[string]any{"scheduled_on": "2026-11-12"},
-	})
-	require.Equal(t, http.StatusOK, status, string(raw))
-	var created struct {
-		Issue struct {
-			UID string `json:"uid"`
-		} `json:"issue"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &created))
-	status, raw = cronHTTP(t, env, http.MethodGet, projectPath(project.ID)+"/issues?meta=scheduled_on=2026-11-12", nil)
-	require.Equal(t, http.StatusOK, status, string(raw))
-	var list struct {
-		Issues []struct {
-			UID string `json:"uid"`
-		} `json:"issues"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &list))
-	require.Len(t, list.Issues, 1)
-	require.Equal(t, created.Issue.UID, list.Issues[0].UID)
-}

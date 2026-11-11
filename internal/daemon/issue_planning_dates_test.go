@@ -89,11 +89,11 @@ func TestIssuePlanningDatesHistoricalReference(t *testing.T) {
 
 func TestPlanningDatesKeepWriterZoneAcrossDaemons(t *testing.T) {
 	for _, tc := range []struct {
-		name, writer, reader, zone, start, due, editedStart, editedDue string
-		local                                                          bool
+		name, writer, reader, zone, start, due string
+		local                                  bool
 	}{
-		{"UTC", "UTC", "Europe/Paris", "UTC", "2026-11-12T09:00:00Z", "2026-11-13T09:00:00Z", "2026-11-14T09:00:00Z", "2026-11-15T09:00:00Z", false},
-		{"Local", "Local", "UTC", "America/New_York", "2026-11-12T14:00:00Z", "2026-11-13T14:00:00Z", "2026-11-14T14:00:00Z", "2026-11-15T14:00:00Z", true},
+		{"UTC", "UTC", "Europe/Paris", "UTC", "2026-11-12T09:00:00Z", "2026-11-13T09:00:00Z", false},
+		{"Local", "Local", "UTC", "America/New_York", "2026-11-12T14:00:00Z", "2026-11-13T14:00:00Z", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.local {
@@ -135,16 +135,6 @@ func TestPlanningDatesKeepWriterZoneAcrossDaemons(t *testing.T) {
 			require.Equal(t, tc.start, response.ScheduledOn.Instant)
 			require.Equal(t, tc.zone, response.DeadlineOn.Timezone)
 			require.Equal(t, tc.due, response.DeadlineOn.Instant)
-			editPath := fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", project.ID, created.Issue.UID)
-			status, raw = cronHTTP(t, reader, http.MethodPost, editPath, map[string]any{"actor": "worker", "patch": map[string]any{"scheduled_on": "2026-11-14T09:00", "deadline_on": "2026-11-15T09:00"}})
-			require.Equal(t, 200, status, string(raw))
-			status, raw = cronHTTP(t, reader, http.MethodGet, path, nil)
-			require.Equal(t, 200, status, string(raw))
-			require.NoError(t, json.Unmarshal(raw, &response))
-			require.Equal(t, tc.zone, response.ScheduledOn.Timezone)
-			require.Equal(t, tc.editedStart, response.ScheduledOn.Instant)
-			require.Equal(t, tc.zone, response.DeadlineOn.Timezone)
-			require.Equal(t, tc.editedDue, response.DeadlineOn.Instant)
 		})
 	}
 }

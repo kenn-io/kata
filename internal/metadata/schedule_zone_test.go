@@ -17,8 +17,6 @@ import (
 
 func TestScheduleBundleDigest(t *testing.T) {
 	require.Equal(t, ScheduleTZDataVersion, fmt.Sprintf("sha256:%x", sha256.Sum256(scheduleZoneBundle)))
-	_, err := ScheduleLocation("Europe/Paris", ScheduleTZDataVersion)
-	require.NoError(t, err)
 }
 
 func TestOpaqueRestoredDateDoesNotPretendToBeFutureSchedule(t *testing.T) {

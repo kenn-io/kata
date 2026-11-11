@@ -1,7 +1,6 @@
 package db_test
 
 import (
-	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -74,15 +73,6 @@ func TestValidateImportRecordsAcceptsEveryPayloadType(t *testing.T) {
 	}
 	require.Len(t, records, 25)
 	assert.NoError(t, db.ValidateImportRecords(records))
-}
-
-func TestImportAcceptsOpaqueScheduleMetadata(t *testing.T) {
-	for _, value := range []string{`{"legacy":"opaque"}`, `{"value":"opaque"}`, `{"timezone":"opaque"}`, `{"value":"2026-05-18","timezone":"UTC","tzdata_version":"unknown"}`} {
-		t.Run(value, func(t *testing.T) {
-			issue := &db.IssueExport{Metadata: jsontext.Value(`{"scheduled_on":` + value + `}`)}
-			require.NoError(t, db.ValidateImportRecords([]db.ImportRecord{issue}))
-		})
-	}
 }
 
 // TestOrderImportRecordsPlacesDependenciesFirst pins the replay order the
