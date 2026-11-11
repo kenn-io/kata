@@ -9,13 +9,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // A late destination baseline must relocate an issue already held in the source,
 // even when the spoke never received the intervening issue.moved event.
 func checkFederatedSnapshotRelocatesHeldIssue(t *testing.T, _ db.Storage, backend Backend) error {
-	for _, lifecycle := range []string{"active replicas", "pausing the source retains discussion", "source paused before destination joins", "source leave retains discussion", "destination leave preserves standalone issue", "destination leave waits for pending link peer"} {
+	for _, lifecycle := range []string{
+		"active replicas", "pausing the source retains discussion", "source paused before destination joins",
+		"source leave retains discussion", "destination leave preserves standalone issue",
+		"destination leave waits for pending initial link", "destination leave waits for pending cron observation",
+	} {
 		t.Run(lifecycle, func(t *testing.T) {
 			hub := backend.Open(t)
 			t.Cleanup(func() { require.NoError(t, hub.Close()) })
@@ -98,17 +104,39 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		_, err = spoke.UpsertFederationBinding(ctx, binding)
 		require.NoError(t, err)
 	}
-	var pendingLink db.Event
-	if lifecycle == "destination leave waits for pending link peer" {
+	var pending db.Event
+	switch lifecycle {
+	case "destination leave waits for pending initial link":
 		acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
-		localPeer, err := spoke.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
+		var linked db.Issue
+		linked, pending, err = spoke.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: localSource.ID, Title: "new issue with a link", Author: "worker",
+			Links: []db.InitialLink{{Type: "blocks", ToNumber: before.ID}},
+		})
 		require.NoError(t, err)
-		_, pendingLink, err = spoke.CreateLinkAndEvent(ctx,
-			db.CreateLinkParams{FromIssueID: localPeer.ID, ToIssueID: before.ID, Type: "blocks", Author: "worker"},
-			db.LinkEventParams{EventType: "issue.linked", EventIssueID: localPeer.ID, FromShortID: localPeer.ShortID, FromUID: localPeer.UID, ToShortID: before.ShortID, ToUID: before.UID, Actor: "worker"})
+		require.Equal(t, "issue.created", pending.Type)
+		require.Equal(t, &linked.UID, pending.IssueUID)
+		require.Nil(t, pending.RelatedIssueUID, "the initial link peer is present only in the payload")
+		require.Contains(t, pending.Payload, before.UID)
+	case "destination leave waits for pending cron observation":
+		job, _ := nativeFederationDefinitions(t, spoke, localSource)
+		acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
+		runUID, err := uid.New()
 		require.NoError(t, err)
-		require.Equal(t, &localPeer.UID, pendingLink.IssueUID)
-		require.Equal(t, &before.UID, pendingLink.RelatedIssueUID)
+		observed, err := spoke.ObserveCronRun(ctx, db.ObserveCronRun{
+			ProjectID: localSource.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID,
+			IssueUID: &before.UID, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1},
+		})
+		require.NoError(t, err)
+		require.Len(t, observed.Events, 1)
+		pending = observed.Events[0]
+		require.Equal(t, "cron.run.observed", pending.Type)
+		require.Nil(t, pending.IssueUID, "the observation references the issue only in its payload")
+		var payload db.CronRunObservation
+		require.NoError(t, json.Unmarshal([]byte(pending.Payload), &payload))
+		require.Equal(t, runUID, payload.UID)
+		require.NotEqual(t, before.UID, payload.UID)
+		require.Equal(t, &before.UID, payload.IssueUID)
 	}
 	localTarget := join(target)
 	blocker, _, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: localTarget.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EX", Title: "local short ID reservation", Author: "worker"})
@@ -138,7 +166,7 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.Empty(t, labels)
 	links, err := spoke.LinksByIssue(ctx, got.ID)
 	require.NoError(t, err)
-	if pendingLink.ID != 0 {
+	if lifecycle == "destination leave waits for pending initial link" {
 		require.Len(t, links, 2)
 	} else {
 		require.Len(t, links, 1)
@@ -199,14 +227,14 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		retained, err := spoke.CommentsByIssue(ctx, got.ID)
 		require.NoError(t, err)
 		require.Equal(t, comments, retained)
-	case "destination leave waits for pending link peer":
+	case "destination leave waits for pending initial link", "destination leave waits for pending cron observation":
 		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
 		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
 		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
-			"the source's pending link requires the current owner's enrollment")
-		require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, localSource.ID, pendingLink.ID))
+			"the pending %s requires the current owner's enrollment", pending.Type)
+		require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, localSource.ID, pending.ID))
 		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
-		require.NoError(t, err, "acknowledging the link releases the destination enrollment")
+		require.NoError(t, err, "acknowledging the pending event releases the destination enrollment")
 	case "destination leave preserves standalone issue":
 		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
 		_, err := spoke.LeaveFederationReplica(ctx, localTarget.ID)
