@@ -146,7 +146,7 @@
   // Adopts every successful read and keeps the last one through failed reads.
   async function refresh(): Promise<void> {
     clearTimeout(timer)
-    if (!page || page.signal.aborted || posting) return
+    if (!page || page.signal.aborted || (posting && !restartPending)) return
     const signal = page.signal
     const post = posts
     let next: LocalEmbeddingsStatus | undefined
@@ -194,7 +194,7 @@
 
   function poll(): void {
     clearTimeout(timer)
-    if (page?.signal.aborted || posting || (!active(status) && !restartPending)) return
+    if (page?.signal.aborted || (!restartPending && (posting || !active(status)))) return
     timer = setTimeout(() => void refresh(), pollMs)
   }
 
@@ -212,7 +212,7 @@
     restartDeadline = Date.now() + restartWaitMs
     requestError = undefined
     posts++
-    clearTimeout(timer)
+    poll()
     try {
       const postSignal = AbortSignal.any([signal, AbortSignal.timeout(restartWaitMs)])
       const response = await postFetch(getRestartLocalEmbeddingsUrl(), {
@@ -224,7 +224,7 @@
         requestError = "Couldn't restart the daemon. Try again or run kata daemon restart."
       }
     } catch {
-      if (!signal.aborted && !originStable)
+      if (!signal.aborted && !originStable && restartPending)
         requestError = `Couldn't confirm restart. ${recoveryGuidance}`
     } finally {
       posting = false

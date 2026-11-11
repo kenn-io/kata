@@ -129,6 +129,34 @@ describe('SearchSettings', () => {
     expect(read).toHaveBeenCalledTimes(3)
   })
 
+  test('observes completion while the restart response hangs', async () => {
+    vi.useFakeTimers()
+    const pending = status({
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+    })
+    setGeneratedFetch(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(pending))
+        .mockResolvedValue(Response.json(status({ provider: 'built_in', can_change: false }))),
+    )
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    const postFetch = vi.fn<typeof fetch>((_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new TypeError('disconnected')))
+      }),
+    )
+    renderSettings({ postFetch, originStable: true })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(8000)
+    expect(screen.getByText('On', { exact: true })).not.toBeNull()
+  })
+
   test('reconnects when a stable daemon returns after a long outage', async () => {
     vi.useFakeTimers()
     let available = false
