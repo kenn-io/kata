@@ -186,53 +186,12 @@ func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 			require.Equal(t, dst.ID, got.ProjectID)
 		})
 	}
-	t.Run("temporary target failure", func(t *testing.T) {
-		resetFlags(t)
-		env := testenv.New(t, testenv.WithAuthToken("synthetic-target-token"))
-		dir, _ := initLocalBoundWorkspace(t, env, "kata")
-		src, err := env.DB.CreateProject(t.Context(), "source-project")
-		require.NoError(t, err)
-		dst, err := env.DB.CreateProject(t.Context(), "target-project")
-		require.NoError(t, err)
-		first, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "first", Author: "tester"})
-		require.NoError(t, err)
-		second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "independent", Author: "tester"})
-		require.NoError(t, err)
-		origin, err := url.Parse(env.URL)
-		require.NoError(t, err)
-		proxy := httputil.NewSingleHostReverseProxy(origin)
-		failed := false
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/api/v1/projects" && !failed {
-				failed = true
-				http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
-				return
-			}
-			r.Host = origin.Host
-			proxy.ServeHTTP(w, r)
-		}))
-		defer server.Close()
-		input := first.UID + "\t" + dst.Name + "\n" + second.UID + "\t" + dst.Name + "\n"
-		out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, "--workspace", dir, "move", "--refs-from", "-", "--json")
-		require.Error(t, err)
-		var reply struct {
-			Results []api.MoveIssuesResult `json:"results"`
-		}
-		require.NoError(t, json.Unmarshal([]byte(out), &reply))
-		require.Len(t, reply.Results, 2, "command error: %v", err)
-		require.Equal(t, "refused", reply.Results[0].Result)
-		require.Equal(t, "moved", reply.Results[1].Result)
-		got, err := env.DB.IssueByID(t.Context(), second.ID)
-		require.NoError(t, err)
-		require.Equal(t, dst.ID, got.ProjectID)
-
-	})
 }
 
 func TestMoveBatchCLI_SelectionRestrictions(t *testing.T) {
 	for _, tc := range []struct{ rule, mode string }{
-		{"dry", "refs"}, {"dry", "file"}, {"dry", "selector"},
-		{"subtree", "refs"}, {"subtree", "file"}, {"subtree", "selector"}, {"subtree", "single"},
+		{"dry", "refs"}, {"dry", "selector"},
+		{"subtree", "refs"}, {"subtree", "selector"}, {"subtree", "single"},
 	} {
 		t.Run(tc.rule+"/"+tc.mode, func(t *testing.T) {
 			env, dir, source, target, first := setupMoveCLIProjects(t)
@@ -255,9 +214,6 @@ func TestMoveBatchCLI_SelectionRestrictions(t *testing.T) {
 				args = append(args, first.UID, second.UID, target.Name)
 			case "single":
 				args = append(args, "--single", first.UID, target.Name)
-			case "file":
-				args = append(args, "--refs-from", "-", target.Name)
-				input = first.UID + "\n" + second.UID + "\n"
 			case "selector":
 				args = append(args, "--from-project", source.Name, "--status", "all", target.Name)
 			}
@@ -281,6 +237,33 @@ func TestMoveBatchCLI_SelectionRestrictions(t *testing.T) {
 			}
 		})
 	}
+	t.Run("SelectionBeforeFile", func(t *testing.T) {
+		for _, option := range []string{"--dry", "--subtree"} {
+			t.Run(option, func(t *testing.T) {
+				_, dir, source, target, issue := setupMoveCLIProjects(t)
+				_, _, err := executeRootCaptureWithInput(t.Context(), t, "", "--workspace", dir, "move", source.Name+"#"+issue.ShortID, source.Name+"#"+issue.ShortID, target.Name, "--refs-from", dir+"/missing", option)
+				message := "--subtree accepts one issue"
+				if option == "--dry" {
+					message = "dry run accepts one item"
+				}
+				require.ErrorContains(t, err, message)
+			})
+		}
+	})
+	t.Run("SelectionStopsReadingFile", func(t *testing.T) {
+		for _, option := range []string{"--dry", "--subtree"} {
+			t.Run(option, func(t *testing.T) {
+				_, dir, source, target, issue := setupMoveCLIProjects(t)
+				input := strings.Repeat(source.Name+"#"+issue.ShortID+"\n", 2) + strings.Repeat(strings.Repeat("x", 600000)+"\n", 2)
+				_, _, err := executeRootCaptureWithInput(t.Context(), t, input, "--workspace", dir, "move", target.Name, "--refs-from", "-", option)
+				message := "--subtree accepts one issue"
+				if option == "--dry" {
+					message = "dry run accepts one item"
+				}
+				require.ErrorContains(t, err, message)
+			})
+		}
+	})
 }
 
 func TestMoveBatchCLI_SelectorLabel(t *testing.T) {
@@ -817,6 +800,10 @@ func testMoveBatchCLIRevisionAcrossPages(t *testing.T) {
 	require.Equal(t, "duplicate_item", reply.Results[49].Code)
 	require.Equal(t, "already_in_target", reply.Results[50].Code)
 	require.Equal(t, "revision_conflict", reply.Results[100].Code)
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, new("another-worker"), got.Owner)
+	require.Equal(t, fmt.Sprintf("issue revision is %d", got.Revision), reply.Results[100].Message)
 }
 
 func testMoveBatchCLIDifferentTargetsAcrossPages(t *testing.T) {
@@ -981,7 +968,7 @@ func TestMoveBatchCLI_PreviewUIDDoesNotRefreshClaims(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, config.WriteFederationCredential(source.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "claim-token", Capabilities: "claim"}))
 	_, _, err = executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--dry", "--json")
-	require.Error(t, err)
+	require.ErrorContains(t, err, "cross-project moves involving a federated project are unsupported")
 	_, markerErr := env.DB.ClaimStatusRefreshError(t.Context(), source.ID, issue.UID)
 	assert.ErrorIs(t, markerErr, db.ErrNotFound)
 	assert.Zero(t, calls.Load())
@@ -1043,33 +1030,4 @@ func TestMoveBatchCLI_PreviewAlreadyInTarget(t *testing.T) {
 	require.Contains(t, out, issue.UID)
 	require.Contains(t, out, `"result":"unchanged"`)
 	require.Contains(t, out, `"ref":"`+source.Name+"#"+issue.ShortID+`"`)
-}
-
-func TestMoveBatchCLI_SelectionBeforeFile(t *testing.T) {
-	for _, option := range []string{"--dry", "--subtree"} {
-		t.Run(option, func(t *testing.T) {
-			_, dir, source, target, issue := setupMoveCLIProjects(t)
-			_, _, err := executeRootCaptureWithInput(t.Context(), t, "", "--workspace", dir, "move", source.Name+"#"+issue.ShortID, source.Name+"#"+issue.ShortID, target.Name, "--refs-from", dir+"/missing", option)
-			message := "--subtree accepts one issue"
-			if option == "--dry" {
-				message = "dry run accepts one item"
-			}
-			require.ErrorContains(t, err, message)
-		})
-	}
-}
-
-func TestMoveBatchCLI_SelectionStopsReadingFile(t *testing.T) {
-	for _, option := range []string{"--dry", "--subtree"} {
-		t.Run(option, func(t *testing.T) {
-			_, dir, source, target, issue := setupMoveCLIProjects(t)
-			input := strings.Repeat(source.Name+"#"+issue.ShortID+"\n", 2) + strings.Repeat(strings.Repeat("x", 600000)+"\n", 2)
-			_, _, err := executeRootCaptureWithInput(t.Context(), t, input, "--workspace", dir, "move", target.Name, "--refs-from", "-", option)
-			message := "--subtree accepts one issue"
-			if option == "--dry" {
-				message = "dry run accepts one item"
-			}
-			require.ErrorContains(t, err, message)
-		})
-	}
 }

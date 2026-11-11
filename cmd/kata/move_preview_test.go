@@ -49,17 +49,8 @@ func TestMoveCLI_PreviewRejectsFederationWithoutRefreshingClaims(t *testing.T) {
 
 func TestMoveCLI_PreviewRejectsSameProject(t *testing.T) {
 	env, dir, source, _, issue := setupMoveCLIProjects(t)
-	_, _, err := runCLIWithErr(t, env, dir, "--project", source.Name, "move", issue.ShortID, source.Name, "--dry")
-	require.Error(t, err)
-}
-
-func TestMoveCLI_SinglePreviewMatchesSameProjectWrite(t *testing.T) {
-	env, dir, source, _, issue := setupMoveCLIProjects(t)
-	for _, dry := range []bool{true, false} {
-		args := []string{"--project", source.Name, "move", issue.ShortID, source.Name, "--single"}
-		if dry {
-			args = append(args, "--dry")
-		}
+	for _, flags := range [][]string{{"--dry"}, {"--single", "--dry"}, {"--single"}} {
+		args := append([]string{"--project", source.Name, "move", issue.ShortID, source.Name}, flags...)
 		_, _, err := runCLIWithErr(t, env, dir, args...)
 		var cliErr *cliError
 		require.ErrorAs(t, err, &cliErr)
