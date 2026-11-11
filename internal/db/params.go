@@ -589,13 +589,15 @@ type MoveIssueProjectOut struct {
 type MoveIssuesBatchIn struct {
 	Items             []MoveIssueProjectIn
 	DryRun            bool
+	Rehearse          bool
 	Comment, Teammate string
 }
 
 // MoveIssueBatchResult retains one root move or its isolated refusal.
 type MoveIssueBatchResult struct {
-	Out MoveIssueProjectOut
-	Err error
+	Out       MoveIssueProjectOut
+	Err       error
+	Duplicate bool
 }
 
 // MoveIssuesBatchOut preserves input ordering after the chunk commits.

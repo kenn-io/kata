@@ -26,12 +26,15 @@ func (s *Store) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (d
 				return err
 			}
 		}
-		if in.DryRun {
+		if in.DryRun || in.Rehearse {
 			return errMovePreview
 		}
 		return nil
 	}
 	finish := func(err, rollbackErr error) error {
+		if in.Rehearse && rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			err = errors.Join(err, db.ErrTransactionFinalizationFailed, rollbackErr)
+		}
 		if pending {
 			pending = false
 			return db.FinishMoveBatchAttempt(ctx, &out, err, rollbackErr)

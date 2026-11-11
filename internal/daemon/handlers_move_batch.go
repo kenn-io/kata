@@ -17,6 +17,7 @@ import (
 const moveBatchBudget = 4 * time.Second
 const moveBatchChunkIssues = 50
 const moveBatchClaimConcurrency = 16
+const moveBatchPreviewTimeout = 45 * time.Second
 
 type moveBatchItem struct {
 	ctx    context.Context
@@ -133,8 +134,23 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 	if _, err := rand.Read(proofKey); err != nil {
 		panic(err)
 	}
-	return func(ctx context.Context, in *api.MoveIssuesRequest) (*api.MoveIssuesResponse, error) {
+	return func(ctx context.Context, in *api.MoveIssuesRequest) (out *api.MoveIssuesResponse, resultErr error) {
 		started := time.Now()
+		if in.Body.DryRun {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, moveBatchPreviewTimeout)
+			defer cancel()
+			defer func() {
+				apiErr, _ := errors.AsType[*api.APIError](resultErr)
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) && (apiErr == nil || apiErr.Code != "access_unavailable") {
+					out = nil
+					resultErr = api.NewError(http.StatusRequestTimeout, "move_preview_timeout", "move preview timed out", "Reduce the number of items and retry.", nil)
+				}
+			}()
+			if in.Body.StartIndex != 0 || len(in.Body.Completed) != 0 {
+				return nil, api.NewError(400, "validation", "dry runs do not support continuation", "", nil)
+			}
+		}
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err
@@ -219,7 +235,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			items[j].move = db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: issue.ProjectID, ToProjectID: target.ID, IfMatchRev: rev, Actor: actor, Single: !in.Body.Subtree, AuthorizeProjects: authorize, BindContext: func(ctx context.Context) context.Context { return bindBatchItemHostContext(ctx, itemCtx) }}
 		}
 		cache := &claimClientCache{}
-		succeeded, priorMoves, conflicts, err := seedMoveBatchContinuations(ctx, cfg, in, items, results, actor, cache)
+		succeeded, priorMoves, conflicts, err := seedMoveBatchContinuations(ctx, cfg, in, items, results)
 		if err != nil {
 			return nil, moveBatchError(err, results[in.Body.StartIndex:], in.Body.StartIndex)
 		}
@@ -294,7 +310,10 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				results[j].Result, results[j].Code, results[j].Message = "refused", "conflicting_target", "issue requested for different targets"
 			}
 		}
-		out := &api.MoveIssuesResponse{}
+		if in.Body.DryRun {
+			return rehearseMoveBatch(ctx, cfg, in, items, results, actor, cache)
+		}
+		out = &api.MoveIssuesResponse{}
 		out.Body.NextIndex = in.Body.StartIndex
 		budget := cfg.MoveBatchBudget
 		if budget <= 0 {
@@ -309,13 +328,8 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 					continue
 				}
 				item := &items[j]
-				if prior, ok := succeeded[item.issue.ID]; ok {
-					if prior.Result == "would_move" {
-						r := &results[j]
-						r.Result, r.Code, r.NewShortID, r.To = "would_move", "duplicate_item", prior.NewShortID, prior.To
-					} else {
-						noops = append(noops, j)
-					}
+				if _, ok := succeeded[item.issue.ID]; ok {
+					noops = append(noops, j)
 					continue
 				}
 				if pending[item.issue.ID] {
@@ -332,8 +346,10 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 					continue
 				}
 				indexes = append(indexes, j)
-				if len(item.tree) == 0 {
+				if len(item.tree) == 0 && in.Body.Subtree {
 					chunkPreviews = append(chunkPreviews, j)
+				} else if len(item.tree) == 0 {
+					item.tree = []db.Issue{item.issue}
 				}
 			}
 			if err := previewMoveBatch(ctx, cfg.DB, items, results, chunkPreviews); err != nil {
@@ -344,12 +360,6 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			var written []int
 			for _, j := range indexes {
 				if results[j].Result != "" {
-					continue
-				}
-				if in.Body.DryRun {
-					results[j].Result = "would_move"
-					results[j].Descendants = items[j].tree[1:]
-					succeeded[items[j].issue.ID] = results[j]
 					continue
 				}
 				write = append(write, items[j].move)
@@ -406,6 +416,75 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		}
 		return out, nil
 	}
+}
+
+func rehearseMoveBatch(ctx context.Context, cfg ServerConfig, in *api.MoveIssuesRequest, items []moveBatchItem, results []api.MoveIssuesResult, actor string, cache *claimClientCache) (*api.MoveIssuesResponse, error) {
+	var indexes, previews []int
+	for j := range items {
+		if results[j].Result != "" {
+			continue
+		}
+		item := &items[j]
+		if item.issue.ProjectID == item.target.ID {
+			if in.Body.Subtree {
+				moveBatchShouldPreview(&results[j], *item, true)
+			} else if err := finishUnchangedMove(item.ctx, cfg.DB, *item, &results[j], api.MoveIssuesResult{}); err != nil {
+				return nil, internalAPIError(err)
+			}
+			continue
+		}
+		indexes = append(indexes, j)
+		if len(item.tree) == 0 {
+			if in.Body.Subtree {
+				previews = append(previews, j)
+			} else {
+				item.tree = []db.Issue{item.issue}
+			}
+		}
+	}
+	if err := previewMoveBatch(ctx, cfg.DB, items, results, previews); err != nil {
+		return nil, internalAPIError(err)
+	}
+	checkMoveBatchClaims(ctx, cfg, items, results, indexes, actor, cache, false)
+	var moves []db.MoveIssueProjectIn
+	var selected []int
+	for _, j := range indexes {
+		if results[j].Result == "" {
+			moves = append(moves, items[j].move)
+			selected = append(selected, j)
+		}
+	}
+	if len(moves) > 0 {
+		rehearsal, err := cfg.DB.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: moves, Rehearse: true, Comment: in.Body.Comment, Teammate: in.Body.Teammate})
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		for k, j := range selected {
+			item := rehearsal.Results[k]
+			if item.Err != nil {
+				moveBatchRefusal(&results[j], item.Err)
+				continue
+			}
+			results[j].Result = "would_move"
+			if item.Duplicate {
+				results[j].Code = "duplicate_item"
+			}
+			results[j].Descendants = item.Out.Issues[1:]
+		}
+	}
+	out := &api.MoveIssuesResponse{}
+	out.Body.Results, out.Body.NextIndex = results, len(results)
+	for _, result := range results {
+		switch result.Result {
+		case "would_move":
+			out.Body.Summary.WouldMove++
+		case "unchanged":
+			out.Body.Summary.Unchanged++
+		case "refused":
+			out.Body.Summary.Refused++
+		}
+	}
+	return out, nil
 }
 
 func moveBatchError(err error, results []api.MoveIssuesResult, next int) error {

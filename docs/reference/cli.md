@@ -1012,6 +1012,10 @@ contains `dry_run`, `summary`, and `results`, including each input's `index`,
 `ref`, result code, new short ID, collision extension flag, and event ID.
 Human output summarizes the batch and lists every result. Descendants are listed under their selected root.
 
+Batch previews rehearse moves and comments in input order, then roll them back.
+They hold database write locks for the rehearsal and return a complete result or
+`move_preview_timeout` after 45 seconds. Reduce the input and retry on timeout.
+
 If the daemon restarts between batch pages, the command stops and reports the
 results already received. Start a new batch for the remaining issues.
 

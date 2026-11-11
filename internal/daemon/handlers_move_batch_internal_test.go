@@ -236,12 +236,13 @@ type batchMoveRaceStore struct {
 
 type batchPreviewHookStore struct {
 	db.Storage
+	issueUID     string
 	afterPreview func()
 }
 
-func (s *batchPreviewHookStore) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (db.MoveIssuesBatchOut, error) {
-	out, err := s.Storage.MoveIssuesBatch(ctx, in)
-	if err == nil && in.DryRun && s.afterPreview != nil {
+func (s *batchPreviewHookStore) IssueByUID(ctx context.Context, uid string, include db.IncludeDeleted) (db.Issue, error) {
+	out, err := s.Storage.IssueByUID(ctx, uid, include)
+	if err == nil && uid == s.issueUID && s.afterPreview != nil {
 		hook := s.afterPreview
 		s.afterPreview = nil
 		hook()
@@ -266,7 +267,7 @@ func TestMoveIssuesBatch_ResidentChangesDuringPreview(t *testing.T) {
 			require.NoError(t, err)
 			resident, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "resident", Author: "agent"})
 			require.NoError(t, err)
-			wrapped := &batchPreviewHookStore{Storage: store, afterPreview: func() {
+			wrapped := &batchPreviewHookStore{Storage: store, issueUID: resident.UID, afterPreview: func() {
 				if edit {
 					owner := "changed"
 					_, _, _, err = store.EditIssue(t.Context(), db.EditIssueParams{IssueID: resident.ID, Owner: &owner, Actor: "agent"})
@@ -409,7 +410,7 @@ type batchFirstRefusal struct {
 }
 
 func (s *batchFirstRefusal) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (db.MoveIssuesBatchOut, error) {
-	if in.DryRun == s.preview && !s.refused {
+	if in.Rehearse == s.preview && !s.refused {
 		s.refused = true
 		in.Items[0].AuthorizeProjects = func([]string) error {
 			return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
@@ -427,15 +428,20 @@ func TestMoveIssuesBatch_DuplicateAfterRefusal(t *testing.T) {
 			require.NoError(t, err)
 			req := &api.MoveIssuesRequest{}
 			req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
+			req.Body.DryRun = preview
 			req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID}, {Ref: issue.UID}}
 			out, err := moveIssuesHandler(ServerConfig{DB: &batchFirstRefusal{Storage: store, preview: preview}})(t.Context(), req)
 			require.NoError(t, err)
 			require.Equal(t, "refused", out.Body.Results[0].Result)
 			require.Equal(t, "not_found", out.Body.Results[0].Code)
-			require.Equal(t, "moved", out.Body.Results[1].Result)
+			want, project := "moved", target.ID
+			if preview {
+				want, project = "would_move", issue.ProjectID
+			}
+			require.Equal(t, want, out.Body.Results[1].Result)
 			got, err := store.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
-			require.Equal(t, target.ID, got.ProjectID)
+			require.Equal(t, project, got.ProjectID)
 		})
 	}
 }
@@ -476,7 +482,7 @@ func TestMoveIssuesBatch_DuplicateInterveningEdit(t *testing.T) {
 				require.NoError(t, err)
 				require.Greater(t, updated.Revision, issue.Revision)
 			}
-			var wrapped db.Storage = &batchPreviewHookStore{Storage: store, afterPreview: edit}
+			var wrapped db.Storage = &batchPreviewHookStore{Storage: store, issueUID: issue.UID, afterPreview: edit}
 			if afterWrite {
 				wrapped = &batchAfterWriteStore{Storage: store, afterWrite: edit}
 			}
@@ -520,7 +526,7 @@ func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
 		}
 		require.Equal(t, 0, apiErr.Data["next_index"])
 	})
-	for _, mode := range []string{"preview", "write", "read after chunk", "preview refusal", "write refusal", "read before neighbor"} {
+	for _, mode := range []string{"write", "read after chunk", "write refusal", "read before neighbor"} {
 		t.Run(mode, func(t *testing.T) {
 			store := openClaimGateHelperDB(t)
 			source, first := createClaimGateHelperIssue(t, store)
@@ -528,8 +534,8 @@ func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
 			require.NoError(t, err)
 			req := &api.MoveIssuesRequest{}
 			req.Body.Actor, req.Body.Comment, req.Body.ToProjectUID = "agent", "routed", target.UID
-			chunk := mode == "preview" || mode == "write" || mode == "read after chunk"
-			refusal := mode == "preview refusal" || mode == "write refusal"
+			chunk := mode == "write" || mode == "read after chunk"
+			refusal := mode == "write refusal"
 			var wrapped db.Storage
 			var failed db.Issue
 			if refusal {
@@ -567,7 +573,7 @@ func TestMoveIssuesBatch_ChunkErrors(t *testing.T) {
 				if refusal {
 					calls = 1
 				}
-				wrapped = &batchFailureStore{Storage: store, calls: calls, failPreview: mode == "preview" || mode == "preview refusal"}
+				wrapped = &batchFailureStore{Storage: store, calls: calls}
 			}
 			lastIndex := len(req.Body.Items)
 			req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{})
@@ -629,4 +635,103 @@ func completedMoveResults(results []api.MoveIssuesResult) []api.MoveIssuesComple
 		completed = append(completed, entry)
 	}
 	return completed
+}
+
+type rehearsalDeadlineStore struct{ db.Storage }
+
+func (s rehearsalDeadlineStore) MoveIssuesBatch(ctx context.Context, in db.MoveIssuesBatchIn) (db.MoveIssuesBatchOut, error) {
+	if in.Rehearse {
+		bind := in.Items[1].BindContext
+		in.Items[1].BindContext = func(ctx context.Context) context.Context {
+			return db.WithAdditionalTransactionFence(bind(ctx), func(ctx context.Context, _ db.Transaction) error {
+				<-ctx.Done()
+				return ctx.Err()
+			})
+		}
+	}
+	return s.Storage.MoveIssuesBatch(ctx, in)
+}
+
+func TestMoveBatchRehearsalDeadlineRollsBack(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	source, first := createClaimGateHelperIssue(t, store)
+	second, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "second", Author: "agent"})
+	require.NoError(t, err)
+	target, err := store.CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	before, err := store.MaxEventID(t.Context())
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond) //nolint:kennlint // deadlinetest: Exercise timeout during an open transaction.
+	defer cancel()
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor, req.Body.ToProjectUID, req.Body.DryRun, req.Body.Comment = "agent", target.UID, true, "comment"
+	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID}, {Ref: second.UID}}
+	_, err = moveIssuesHandler(ServerConfig{DB: rehearsalDeadlineStore{store}})(ctx, req)
+	var apiErr *api.APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, "move_preview_timeout", apiErr.Code)
+	for _, issue := range []db.Issue{first, second} {
+		got, err := store.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		require.Equal(t, source.ID, got.ProjectID)
+		comments, err := store.CommentsByIssue(t.Context(), issue.ID)
+		require.NoError(t, err)
+		require.Empty(t, comments)
+	}
+	after, err := store.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: first.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: first.Revision, Actor: "agent", Single: true})
+	require.NoError(t, err)
+}
+
+type claimDeadlineStore struct{ db.Storage }
+
+func (s claimDeadlineStore) CheckClaimGate(ctx context.Context, _ db.ClaimGateParams) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestMoveBatchClaimDeadline(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	source, issue := createClaimGateHelperIssue(t, store)
+	target, err := store.CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	enableClaimGateHelperHub(t, store, source.ID)
+	enableClaimGateHelperHub(t, store, target.ID)
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor, req.Body.ToProjectUID, req.Body.DryRun = "agent", target.UID, true
+	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID}}
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond) //nolint:kennlint // deadlinetest: Exercise timeout during a claim check.
+	defer cancel()
+	_, err = moveIssuesHandler(ServerConfig{DB: claimDeadlineStore{store}})(ctx, req)
+	var apiErr *api.APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, "move_preview_timeout", apiErr.Code)
+	got, err := store.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, source.ID, got.ProjectID)
+}
+
+func TestMoveBatchDryContinuationAndRevisions(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	_, issue := createClaimGateHelperIssue(t, store)
+	target, err := store.CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	req := &api.MoveIssuesRequest{}
+	req.Body.Actor, req.Body.ToProjectUID, req.Body.DryRun = "agent", target.UID, true
+	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ExpectedRevision: issue.Revision + 1}, {Ref: issue.UID, ExpectedRevision: issue.Revision}, {Ref: issue.UID, ExpectedRevision: issue.Revision}, {Ref: issue.UID, ExpectedRevision: issue.Revision + 1}}
+	handler := moveIssuesHandler(ServerConfig{DB: store})
+	out, err := handler(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, "revision_conflict", out.Body.Results[0].Code)
+	require.Equal(t, "would_move", out.Body.Results[1].Result)
+	require.Equal(t, "duplicate_item", out.Body.Results[2].Code)
+	require.Equal(t, "revision_conflict", out.Body.Results[3].Code)
+	req.Body.StartIndex = 1
+	req.Body.Completed = []api.MoveIssuesCompleted{{Result: "refused"}}
+	_, err = handler(t.Context(), req)
+	var apiErr *api.APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, "validation", apiErr.Code)
 }

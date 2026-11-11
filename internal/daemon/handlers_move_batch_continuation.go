@@ -35,7 +35,7 @@ type moveBatchPrior struct {
 	revision int64
 }
 
-func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.MoveIssuesRequest, items []moveBatchItem, results []api.MoveIssuesResult, actor string, cache *claimClientCache) (map[int64]api.MoveIssuesResult, map[int64]moveBatchPrior, map[int64]bool, error) {
+func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.MoveIssuesRequest, items []moveBatchItem, results []api.MoveIssuesResult) (map[int64]api.MoveIssuesResult, map[int64]moveBatchPrior, map[int64]bool, error) {
 	succeeded := map[int64]api.MoveIssuesResult{}
 	moves := map[int64]moveBatchPrior{}
 	conflicts := map[int64]bool{}
@@ -48,7 +48,7 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 	for j, completed := range in.Body.Completed {
 		itemCtx := items[j].ctx
 		switch completed.Result {
-		case "moved", "unchanged", "refused", "would_move":
+		case "moved", "unchanged", "refused":
 		default:
 			return nil, nil, nil, api.NewError(400, "validation", "invalid completed outcome", "", nil)
 		}
@@ -93,26 +93,6 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 		}
 		if completed.Result == "refused" && completed.Code == "conflicting_target" {
 			conflicts[current.ID] = true
-			continue
-		}
-		if completed.Result == "would_move" && in.Body.DryRun && current.ProjectID != target.ID {
-			items[j] = moveBatchItem{ctx: itemCtx, issue: current, target: target, move: db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: current.ProjectID, ToProjectID: target.ID, IfMatchRev: current.Revision, Actor: actor, Single: !in.Body.Subtree, AuthorizeProjects: func(uids []string) error { _, err := authorizeHostProjectScope(itemCtx, nil, uids, false); return err }, BindContext: func(ctx context.Context) context.Context { return bindBatchItemHostContext(ctx, itemCtx) }}}
-			results[j].Result = ""
-			if err := previewMoveBatch(ctx, cfg.DB, items, results, []int{j}); err != nil {
-				return nil, nil, nil, err
-			}
-			if results[j].Result == "" {
-				refusals := requireFederatedIssueClaimsConcurrently(itemCtx, cfg, items[j].tree, actor, cache, moveBatchClaimConcurrency, false)
-				for _, member := range items[j].tree {
-					if err := refusals[member.UID]; err != nil {
-						moveBatchRefusal(&results[j], err)
-						break
-					}
-				}
-			}
-			if results[j].Result == "" {
-				succeeded[current.ID] = api.MoveIssuesResult{Result: "would_move"}
-			}
 			continue
 		}
 		if completed.Result == "unchanged" && current.ProjectID == target.ID {

@@ -265,6 +265,11 @@ this acknowledgement on every page: older daemons can ignore the query and
 return unfiltered project events. The TUI stops pagination with an upgrade
 daemon message when the acknowledgement is missing or changes between pages.
 
+Batch move dry runs rehearse moves and comments in input order in one transaction,
+then roll it back. They hold database write locks until the rehearsal ends. A dry
+run returns all results or `move_preview_timeout` after 45 seconds; reduce the
+input and retry on timeout. Dry runs do not accept continuation input.
+
 ### Version history
 
 | Version | Change |
