@@ -97,10 +97,13 @@ func DecodeHistoricalWorkflow(input []byte) (WorkflowDefinition, error) {
 		return workflow, nil
 	}
 	var workflow WorkflowDefinition
-	err := decode(input, &workflow, DefinitionLimit)
-	if err == nil {
-		err = rejectWorkflowArgvMember(input)
+	if len(input) > DefinitionLimit {
+		return workflow, invalid("document exceeds size limit")
 	}
+	if err := rejectWorkflowArgvMember(input); err != nil {
+		return workflow, err
+	}
+	err := decode(input, &workflow, DefinitionLimit)
 	return workflow, err
 }
 

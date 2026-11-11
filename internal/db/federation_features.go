@@ -145,7 +145,9 @@ var ErrHeldWorkflowEvidence error = heldWorkflowEvidenceError{}
 
 type heldWorkflowEvidenceError struct{}
 
-func (heldWorkflowEvidenceError) Error() string        { return "held workflow definition in retained history" }
+func (heldWorkflowEvidenceError) Error() string {
+	return "held workflow definition in retained history"
+}
 func (heldWorkflowEvidenceError) Is(target error) bool { return target == ErrUnsupportedEventFeatures }
 
 // RequireEventFeatures rejects any required format absent from the advertised set.
