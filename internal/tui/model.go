@@ -2656,6 +2656,11 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if m.list.filter.Date != "" && m.list.filter.Day != renderNow().Format(time.DateOnly) {
 			m, cmd = m.refreshListDay(nil)
 		}
+		if m.list.filter.Date != "" && m.api != nil {
+			// Saved zones can reach midnight before the host's calendar day changes.
+			m.cache.markStale()
+			cmd = combineCmds(cmd, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))
+		}
 		return m, combineCmds(cmd, dayTick()), true
 	case toastExpiredMsg:
 		next, cmd := m.handleToastExpired()

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -99,14 +100,9 @@ type uiETagBasis struct {
 func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 	authorityCache := newUISnapshotAuthorityCache()
 	enrichmentCache := newUISnapshotEnrichmentCache()
-	// Scoped validators retain no response rows, only their calendar expiry.
-	validatorCache := newUISnapshotCache(func(data db.UISnapshotData) db.UISnapshotData {
-		return db.UISnapshotData{CalendarBoundary: data.CalendarBoundary}
-	})
 	if cfg.UIClock != nil {
 		authorityCache.clock = cfg.UIClock
 		enrichmentCache.clock = cfg.UIClock
-		validatorCache.clock = cfg.UIClock
 	}
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "resolveUIIssueReference",
@@ -174,20 +170,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if err != nil {
 					return nil, internalAPIError(err)
 				}
-				observedCursor = &cursor
-				if intent.ScopeRootIssueUID != "" {
-					for candidate := range strings.SplitSeq(in.IfNoneMatch, ",") {
-						candidate = strings.TrimSpace(candidate)
-						key, err := uiSnapshotValidatorKey(intent, cursor, policy, candidate)
-						if err != nil {
-							return nil, internalAPIError(err)
-						}
-						if _, dependencies, ok := validatorCache.get(key); ok {
-							recordUISnapshotDependencies(ctx, dependencies)
-							return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: candidate}, nil
-						}
-					}
+				if validator, ok := uiSnapshotValidatorMatches(intent, cursor, policy, in.IfNoneMatch, now); ok {
+					return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: validator}, nil
 				}
+				observedCursor = &cursor
 			}
 			_, scopedIssueIDs, err := applyIssueScopeToUISnapshot(ctx, cfg.DB, &intent)
 			if err != nil {
@@ -261,9 +247,6 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 						return nil, internalAPIError(err)
 					}
 					recordUISnapshotDependencies(ctx, cachedDependencies)
-					if matchesStrongETag(in.IfNoneMatch, validator) {
-						return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: validator}, nil
-					}
 					return snapshotResponse(ctx, cachedResponse, intent, policy, validator)
 				}
 			}
@@ -301,17 +284,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
-			if scopedIssueIDs != nil {
-				key, err := uiSnapshotValidatorKey(intent, data.Cursor, policy, validator)
-				if err != nil {
-					return nil, internalAPIError(err)
-				}
-				validatorCache.put(key, data, dependencies)
-			}
 			recordUISnapshotDependencies(ctx, dependencies)
-			if matchesStrongETag(in.IfNoneMatch, validator) {
-				return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: validator}, nil
-			}
 			return snapshotResponse(ctx, data, intent, policy, validator)
 		})
 
@@ -793,29 +766,46 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 	return policy
 }
 
-func uiSnapshotValidatorKey(intent normalizedUISnapshotIntent, cursor int64, policy uiPolicy, validator string) (string, error) {
-	intent.CalendarAt = ""
-	return makeUIETag(struct {
-		Intent    normalizedUISnapshotIntent
-		Validator string
-	}{intent, validator}, cursor, policy)
+func uiSnapshotValidatorMatches(intent normalizedUISnapshotIntent, cursor int64, policy uiPolicy, header string, now time.Time) (string, bool) {
+	for candidate := range strings.SplitSeq(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" {
+			return "", true
+		}
+		if strings.HasPrefix(candidate, "W/") {
+			continue
+		}
+		_, suffix, ok := strings.Cut(strings.TrimSuffix(candidate, `"`), ".")
+		until, err := strconv.ParseInt(suffix, 10, 64)
+		if !ok || err != nil || (until != 0 && !now.Before(time.Unix(until, 0))) {
+			continue
+		}
+		data := db.UISnapshotData{Cursor: cursor}
+		if until != 0 {
+			data.CalendarBoundary = time.Unix(until, 0)
+		}
+		validator, err := makeUISnapshotETag(intent, data, policy)
+		if err == nil && candidate == validator {
+			return candidate, true
+		}
+	}
+	return "", false
 }
 
 func makeUISnapshotETag(intent normalizedUISnapshotIntent, data db.UISnapshotData, policy uiPolicy) (string, error) {
 	intent.CalendarAt = ""
-	type calendarRow struct{ UID, ScheduledToday, DeadlineToday string }
-	rows := make([]calendarRow, 0, len(data.Issues)+1)
-	for _, issue := range data.Issues {
-		rows = append(rows, calendarRow{issue.UID, issue.ScheduledOnToday, issue.DeadlineOnToday})
+	var until int64
+	if !data.CalendarBoundary.IsZero() {
+		until = data.CalendarBoundary.Unix()
 	}
-	if data.SelectedIssue != nil {
-		issue := data.SelectedIssue
-		rows = append(rows, calendarRow{issue.UID, issue.ScheduledOnToday, issue.DeadlineOnToday})
+	validator, err := makeUIETag(struct {
+		Intent        normalizedUISnapshotIntent
+		CalendarUntil int64
+	}{intent, until}, data.Cursor, policy)
+	if err != nil {
+		return "", err
 	}
-	return makeUIETag(struct {
-		Intent   normalizedUISnapshotIntent
-		Calendar []calendarRow
-	}{intent, rows}, data.Cursor, policy)
+	return strings.TrimSuffix(validator, `"`) + "." + strconv.FormatInt(until, 10) + `"`, nil
 }
 
 func makeUIETag(intent any, cursor int64, policy uiPolicy) (string, error) {

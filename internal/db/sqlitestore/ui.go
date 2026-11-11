@@ -661,7 +661,7 @@ func readUIIssues(
 	}
 	limit := min(query.Limit, 1000)
 	statement += ` ORDER BY i.updated_at DESC, i.id DESC`
-	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules && !filterDelegated && query.CalendarBoundary == nil {
+	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules && !filterDelegated {
 		statement += ` LIMIT ?`
 		args = append(args, limit)
 	}
@@ -685,7 +685,7 @@ func readUIIssues(
 				string(issue.Metadata), readyAt,
 				scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
 			)
-			if err != nil && (limit == 0 || len(issues) < limit) {
+			if err != nil {
 				return nil, fmt.Errorf("read UI issue %s schedule: %w", issue.UID, err)
 			}
 			if !due {
@@ -701,10 +701,10 @@ func readUIIssues(
 			string(issue.Metadata), query,
 			scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
 		)
-		if err != nil && (limit == 0 || len(issues) < limit) {
+		if err != nil {
 			return nil, fmt.Errorf("read UI issue %s calendar schedule: %w", issue.UID, err)
 		}
-		if !matches || (limit > 0 && len(issues) >= limit) {
+		if !matches {
 			continue
 		}
 		uiIssue := makeUIIssue(issue, projectNames[issue.ProjectID], nil)
@@ -712,6 +712,9 @@ func readUIIssues(
 		uiIssue.DeadlineOnDate = deadlineOnDate
 		uiIssue.ScheduledOnToday, uiIssue.DeadlineOnToday = scheduledToday, deadlineToday
 		issues = append(issues, uiIssue)
+		if limit > 0 && len(issues) == limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate UI issues: %w", err)

@@ -15,14 +15,17 @@ func RunRecurrenceAttachmentKeepsDeadlineZone(t *testing.T, open func(*testing.T
 		name        string
 		issueZone   jsontext.Value
 		defaultZone string
+		deadline    string
+		wantZone    string
 	}{
-		{"issue zone", jsontext.Value(`"America/New_York"`), "UTC"},
+		{"issue zone", jsontext.Value(`"America/New_York"`), "UTC", `"2026-05-19T09:00"`, "America/New_York"},
+		{"legacy Local instant", jsontext.Value(`"Local"`), "UTC", `"2026-05-19T09:00:00Z"`, "UTC"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := open(t)
 			ctx := t.Context()
 			project := createCursorProject(ctx, t, store)
-			fields := map[string]jsontext.Value{"deadline_on": jsontext.Value(`"2026-05-19T09:00"`)}
+			fields := map[string]jsontext.Value{"deadline_on": jsontext.Value(tc.deadline)}
 			if tc.issueZone != nil {
 				fields["timezone"] = tc.issueZone
 			}
@@ -36,7 +39,7 @@ func RunRecurrenceAttachmentKeepsDeadlineZone(t *testing.T, open func(*testing.T
 			require.NoError(t, err)
 			_, zone, after, _, err := metadata.ScheduleFieldInstant(string(saved.Metadata), "deadline_on", tc.defaultZone)
 			require.NoError(t, err)
-			require.Equal(t, "America/New_York", zone)
+			require.Equal(t, tc.wantZone, zone)
 			require.Equal(t, before, after)
 		})
 	}

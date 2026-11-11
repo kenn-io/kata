@@ -151,8 +151,11 @@ func freezeRecurrenceDeadline(object map[string]jsontext.Value, recurrenceZone, 
 		}
 	}
 	object["deadline_on"], err = metadata.NewScheduleValue(deadline, zone)
+	if err != nil && strings.HasSuffix(deadline, "Z") {
+		object["deadline_on"], err = metadata.NewScheduleValue(deadline, "UTC")
+	}
 	if err != nil {
-		return fmt.Errorf("%w: deadline_on: %v", ErrInvalidRecurrence, err)
+		return fmt.Errorf("%w: deadline_on: %v; change the issue timezone to a named IANA timezone", ErrInvalidRecurrence, err)
 	}
 	if template && local {
 		return compareLocalSchedule(deadline, object["deadline_on"])

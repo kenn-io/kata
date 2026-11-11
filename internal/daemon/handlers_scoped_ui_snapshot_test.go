@@ -3,7 +3,9 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -45,6 +47,8 @@ func (s *projectionCountingUIStore) IssueScopedMembers(
 // before any projection read; a moved cursor invalidates it.
 func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 	instrumented := &projectionCountingUIStore{}
+	now := time.Date(2026, 8, 1, 23, 59, 0, 0, time.UTC)
+	var serverConfig daemon.ServerConfig
 	env := testenv.New(t,
 		testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity(),
 		testenv.Option(func(cfg *daemon.ServerConfig) {
@@ -52,12 +56,19 @@ func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 			instrumented.UIStore = cfg.DB.(db.UIStore)
 			cfg.DB = instrumented
 			cfg.UIStore = instrumented
+			cfg.UIClock = func() time.Time { return now }
+			serverConfig = *cfg
 		}),
 	)
 	project, err := env.DB.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", nil)
-	child := createScopedHTTPTestIssue(t, env, project.ID, "Child", &root)
+	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Child", Author: "coordinator",
+		Links:    []db.InitialLink{{Type: "parent", ToNumber: root.ID}},
+		Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-08-02"`)},
+	})
+	require.NoError(t, err)
 	expiresAt := time.Now().UTC().Add(time.Hour)
 	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
@@ -68,7 +79,7 @@ func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 	})
 	require.NoError(t, err)
 	headers := map[string]string{"Authorization": "Bearer worker-token"}
-	query := "/api/v1/ui/snapshot?view=all-open"
+	query := "/api/v1/ui/snapshot?view=all-open&time_zone=UTC"
 
 	resp, body := envDoRaw(t, env, http.MethodGet, query, nil, headers)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
@@ -86,6 +97,27 @@ func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 		"a matching scoped If-None-Match must not perform projection reads")
 	require.Zero(t, instrumented.subtreeReads.Load(),
 		"a matching scoped If-None-Match must not traverse subtree membership")
+
+	now = now.Add(6 * time.Second)
+	cold := httptest.NewServer(daemon.NewServer(serverConfig).Handler())
+	t.Cleanup(cold.Close)
+	coldEnv := *env
+	coldEnv.URL, coldEnv.HTTP = cold.URL, cold.Client()
+	for _, current := range []*testenv.Env{env, &coldEnv} {
+		instrumented.snapshotReads.Store(0)
+		instrumented.subtreeReads.Store(0)
+		resp, body = envDoRaw(t, current, http.MethodGet, query, nil,
+			map[string]string{"Authorization": "Bearer worker-token", "If-None-Match": etag})
+		require.Equal(t, http.StatusNotModified, resp.StatusCode, string(body))
+		require.Zero(t, instrumented.snapshotReads.Load(), "expired or cold validator must not build a projection")
+		require.Zero(t, instrumented.subtreeReads.Load(), "expired or cold validator must not traverse membership")
+	}
+	now = time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+	resp, body = envDoRaw(t, env, http.MethodGet, query, nil,
+		map[string]string{"Authorization": "Bearer worker-token", "If-None-Match": etag})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.NotEqual(t, etag, resp.Header.Get("ETag"), "midnight changes the calendar validity window")
+	etag = resp.Header.Get("ETag")
 
 	// The scoped validator is scope-normalized: the same request shape under
 	// broad authority derives a different ETag.

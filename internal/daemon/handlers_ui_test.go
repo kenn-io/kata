@@ -132,10 +132,10 @@ func TestUISnapshotReadyTimeAdvanceInvalidatesETagAndAuthorityCache(t *testing.T
 }
 
 func TestUISnapshotCalendarMidnightInvalidatesCacheWithoutEvent(t *testing.T) {
-	now := time.Date(2026, 1, 1, 4, 59, 59, 0, time.UTC)
+	now := time.Date(2026, 1, 1, 4, 59, 50, 0, time.UTC)
 	store := &countingUIStore{cursor: 41, snapshotCursor: 41, snapshot: db.UISnapshotData{
-		CalendarBoundary: now.Add(time.Second),
-		Issues:           []db.UIIssue{{Issue: {UID: "issue-1"}, ScheduledOnToday: "2025-12-31"}},
+		CalendarBoundary: now.Add(10 * time.Second),
+		Issues:           []db.UIIssue{{UID: "issue-1", ScheduledOnToday: "2025-12-31"}},
 	}}
 	ts := newUISnapshotServerWithClock(t, store, true, func() time.Time { return now })
 	query := url.Values{"view": {"all-open"}}
@@ -144,7 +144,14 @@ func TestUISnapshotCalendarMidnightInvalidatesCacheWithoutEvent(t *testing.T) {
 	second, _ := getUISnapshot(t, ts, query, first.Header.Get("ETag"))
 	require.Equal(t, http.StatusNotModified, second.StatusCode)
 	require.Equal(t, 1, store.snapshotReads)
-	now = now.Add(time.Second)
+	now = now.Add(6 * time.Second)
+	cold := newUISnapshotServerWithClock(t, store, true, func() time.Time { return now })
+	for _, current := range []*httptest.Server{ts, cold} {
+		second, body := getUISnapshot(t, current, query, first.Header.Get("ETag"))
+		require.Equal(t, http.StatusNotModified, second.StatusCode, string(body))
+		require.Equal(t, 1, store.snapshotReads, "expired or cold validators must not rebuild the projection")
+	}
+	now = now.Add(4 * time.Second)
 	store.snapshot.Issues[0].ScheduledOnToday = "2026-01-01"
 	store.snapshot.CalendarBoundary = now.Add(24 * time.Hour)
 	third, body := getUISnapshot(t, ts, query, first.Header.Get("ETag"))

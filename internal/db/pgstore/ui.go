@@ -602,7 +602,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 	}
 	limit := min(query.Limit, 1000)
 	statement += ` ORDER BY i.updated_at DESC, i.id DESC`
-	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules && !filterDelegated && query.CalendarBoundary == nil {
+	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules && !filterDelegated {
 		args = append(args, limit)
 		statement += fmt.Sprintf(` LIMIT $%d`, len(args)) // #nosec G202 -- only a generated placeholder number is interpolated.
 	}
@@ -626,7 +626,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 				string(issue.Metadata), readyAt,
 				scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
 			)
-			if err != nil && (limit == 0 || len(issues) < limit) {
+			if err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("read UI issue %s schedule: %w", issue.UID, err)
 			}
@@ -643,11 +643,11 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 			string(issue.Metadata), query,
 			scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
 		)
-		if err != nil && (limit == 0 || len(issues) < limit) {
+		if err != nil {
 			_ = rows.Close()
 			return nil, fmt.Errorf("read UI issue %s calendar schedule: %w", issue.UID, err)
 		}
-		if !matches || (limit > 0 && len(issues) >= limit) {
+		if !matches {
 			continue
 		}
 		uiIssue := makeUIIssue(issue, projectNames[issue.ProjectID], nil)
@@ -655,6 +655,9 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 		uiIssue.DeadlineOnDate = deadlineOnDate
 		uiIssue.ScheduledOnToday, uiIssue.DeadlineOnToday = scheduledToday, deadlineToday
 		issues = append(issues, uiIssue)
+		if limit > 0 && len(issues) == limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
