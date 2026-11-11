@@ -261,7 +261,7 @@ func checkMoveBatchLogicalMembership(t *testing.T, store db.Storage) error {
 	preview, err := store.MoveIssuesBatch(ctx, in)
 	require.NoError(t, err)
 	require.NoError(t, preview.Results[0].Err)
-	require.ElementsMatch(t, []int64{root.ID, child.ID}, preview.Results[0].Out.TreeIssueIDs)
+	require.ElementsMatch(t, []db.IssueMoveMember{{IssueID: root.ID, ProjectID: source.ID}, {IssueID: child.ID, ProjectID: target.ID}}, preview.Results[0].Out.TreeMembers)
 	require.Len(t, preview.Results[0].Out.Issues, 1)
 	db.FenceIssueMove(&in.Items[0], preview.Results[0].Out)
 	in.DryRun = false

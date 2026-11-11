@@ -546,6 +546,11 @@ type ProjectMergeResult struct {
 	Event             Event              `json:"-"`
 }
 
+// IssueMoveMember identifies an issue and its project at preview time.
+type IssueMoveMember struct {
+	IssueID, ProjectID int64
+}
+
 // MoveIssueProjectIn carries inputs for MoveIssueProject.
 type MoveIssueProjectIn struct {
 	// Savepoint keeps authorization refusal inside the batch item transaction.
@@ -553,9 +558,9 @@ type MoveIssueProjectIn struct {
 	// AuthorizeProjects checks source project UIDs resolved inside the transaction.
 	AuthorizeProjects func([]string) error
 	// ExpectedIssueIDs fences externally validated subtree membership.
-	ExpectedIssueIDs []int64
+	ExpectedIssueIDs []IssueMoveMember
 	// ExpectedMovingIssueIDs fences the issues whose claims were checked.
-	ExpectedMovingIssueIDs []int64
+	ExpectedMovingIssueIDs []IssueMoveMember
 	// DryRun validates inside the move transaction, then rolls back without moving.
 	DryRun bool
 	// Single moves only the selected issue; the default includes descendants.
@@ -569,15 +574,15 @@ type MoveIssueProjectIn struct {
 
 // MoveIssueProjectOut carries results from a successful MoveIssueProject call.
 type MoveIssueProjectOut struct {
-	// TreeIssueIDs includes logical descendants already in the destination.
-	TreeIssueIDs []int64 `json:"-"`
-	Issues       []Issue
-	Events       []Event
-	Issue        Issue
-	Event        *Event `json:"-"`
-	EventID      int64
-	NewShortID   string
-	NewRevision  int64
+	// TreeMembers includes logical descendants already in the destination.
+	TreeMembers []IssueMoveMember `json:"-"`
+	Issues      []Issue
+	Events      []Event
+	Issue       Issue
+	Event       *Event `json:"-"`
+	EventID     int64
+	NewShortID  string
+	NewRevision int64
 }
 
 // MoveIssuesBatchIn moves independent roots in one transaction.

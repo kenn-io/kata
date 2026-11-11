@@ -71,7 +71,7 @@ func (s *Store) moveTreeTx(ctx context.Context, tx *sql.Tx, input db.MoveIssuePr
 			output.Events = append(output.Events, result.Events...)
 		}
 		for _, item := range inputs {
-			output.TreeIssueIDs = append(output.TreeIssueIDs, item.In.IssueID)
+			output.TreeMembers = append(output.TreeMembers, db.IssueMoveMember{IssueID: item.In.IssueID, ProjectID: item.In.FromProjectID})
 		}
 		return nil
 	}()
