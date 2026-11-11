@@ -93,7 +93,7 @@ func TestParseRefsFrom(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 5001)
 	require.Greater(t, reader.Len(), 1<<20)
-	reader = strings.NewReader(strings.Repeat(strings.Repeat("a", 600000)+"\n", 4))
+	reader = strings.NewReader(strings.Repeat(strings.Repeat("a", 600000)+"#abc4\n", 4))
 	_, err = parseRefsFrom(reader, "dst", 5001)
 	require.ErrorContains(t, err, "1 MiB")
 	require.Greater(t, reader.Len(), 1<<20)
@@ -120,6 +120,28 @@ func TestMoveBatchCLI_RefusedRowsDoNotConsumeInputBudget(t *testing.T) {
 	got, err := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, dst.ID, got.ProjectID)
+}
+
+func TestMoveBatchCLI_InvalidRefDoesNotConsumeInputBudget(t *testing.T) {
+	env, dir, src, dst, first := setupMoveCLIProjects(t)
+	refs := []string{first.UID}
+	for i := 0; i < 3; i++ {
+		issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "issue", Author: "tester"})
+		require.NoError(t, err)
+		refs = append(refs, issue.UID)
+	}
+	input := strings.Repeat("x", 1048500) + "\n" + strings.Join(refs, "\n") + "\n"
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, "--workspace", dir, "move", dst.Name, "--refs-from", "-", "--json")
+	require.Error(t, err)
+	var reply struct {
+		Results []api.MoveIssuesResult `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &reply))
+	require.Len(t, reply.Results, 5)
+	require.Equal(t, "refused", reply.Results[0].Result)
+	for _, result := range reply.Results[1:] {
+		require.Equal(t, "moved", result.Result)
+	}
 }
 
 func TestMoveBatchCLI_PreflightFailureReportsAll(t *testing.T) {

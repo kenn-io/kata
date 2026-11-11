@@ -66,8 +66,13 @@ func parseRefsFrom(r io.Reader, defaultTarget string, maxItems int) ([]moveBatch
 				if len(fields) >= 2 {
 					item.TargetProject = strings.TrimSpace(fields[1])
 				}
+				_, refErr := shortid.Parse(item.Ref)
 				if len(fields) > 2 || item.Ref == "" || item.TargetProject == "" {
 					item.ParseError = fmt.Sprintf("line %d: expected ref and target project", line)
+				} else if refErr != nil {
+					item.ParseError = fmt.Sprintf("line %d: invalid issue ref", line)
+				}
+				if item.ParseError != "" {
 					invalidRetained += len(item.Ref)
 					if invalidRetained > 1<<20 {
 						item.Ref = ""
