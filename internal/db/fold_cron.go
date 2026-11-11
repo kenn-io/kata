@@ -204,13 +204,6 @@ func validateCronEvent(event RemoteEvent, applyRules, historical bool) error {
 	in, _, err := parseCronDefinitionEvent(FoldEvent{UID: event.EventUID, ProjectUID: event.ProjectUID, OriginInstanceUID: event.OriginInstanceUID, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, Payload: event.Payload, Type: event.Type})
 	if err == nil && historical && strings.HasPrefix(event.Type, "cron.workflow.") {
 		_, err = cron.DecodeHistoricalWorkflow(in.Definition)
-		if err != nil && len(in.Definition) <= cron.DefinitionLimit {
-			// Preserve a reserved future document as evidence. Materialization
-			// fences its project instead of reviving an older winner.
-			if reserved, classifyErr := payloadHasArgvWorkflow(event.Type, string(event.Payload)); classifyErr == nil && reserved {
-				err = nil
-			}
-		}
 	} else if err == nil {
 		err = validateCronDefinitionDocument(strings.HasPrefix(event.Type, "cron.job."), in.DeletedAt != nil || !applyRules, in.Definition)
 	}
