@@ -138,9 +138,9 @@ func ResolveZone(explicit, recurrenceZone, issueZone string, localZone func() st
 // DefaultLocaltimePath is the system zone link.
 const DefaultLocaltimePath = "/etc/localtime"
 
-// LocalZone names the caller's local IANA zone: TZ first, then the
-// link at localtimePath. It returns "" when nothing names a zone, so the
-// daemon falls back to its own timezone.
+// LocalZone names the caller's local IANA zone from native OS settings on
+// Windows, or TZ then the link at localtimePath on other platforms. It returns
+// "" when nothing names a zone, so the daemon falls back to its own timezone.
 func LocalZone(localtimePath string) string {
 	if zone, native := nativeLocalZone(); native {
 		return zone

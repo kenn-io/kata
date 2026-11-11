@@ -129,6 +129,7 @@ func TestUISnapshotReadyTimeAdvanceInvalidatesETagAndAuthorityCache(t *testing.T
 	require.NotEqual(t, first.Header.Get("ETag"), second.Header.Get("ETag"))
 	require.Equal(t, "2026-08-09T00:01:00Z", store.lastSnapshot.ReadyAt)
 	require.Equal(t, 2, store.snapshotReads)
+
 }
 
 func TestUISnapshotCalendarMidnightInvalidatesCacheWithoutEvent(t *testing.T) {
@@ -152,12 +153,20 @@ func TestUISnapshotCalendarMidnightInvalidatesCacheWithoutEvent(t *testing.T) {
 		require.Equal(t, 1, store.snapshotReads, "expired or cold validators must not rebuild the projection")
 	}
 	now = now.Add(4 * time.Second)
-	store.snapshot.Issues[0].ScheduledOnToday = "2026-01-01"
 	store.snapshot.CalendarBoundary = now.Add(24 * time.Hour)
 	third, body := getUISnapshot(t, ts, query, first.Header.Get("ETag"))
 	require.Equal(t, http.StatusOK, third.StatusCode, string(body))
 	require.NotEqual(t, first.Header.Get("ETag"), third.Header.Get("ETag"))
 	require.Equal(t, 2, store.snapshotReads)
+	store.snapshot.CalendarBoundary = now.Add(2 * time.Second)
+	cold = newUISnapshotServerWithClock(t, store, true, func() time.Time { return now })
+	fourth, _ := getUISnapshot(t, cold, query, "")
+	require.Equal(t, http.StatusOK, fourth.StatusCode)
+	now = now.Add(2 * time.Second)
+	store.snapshot.CalendarBoundary = now.Add(24 * time.Hour)
+	fifth, _ := getUISnapshot(t, cold, query, "")
+	require.Equal(t, http.StatusOK, fifth.StatusCode)
+	require.Equal(t, 4, store.snapshotReads, "calendar boundary must expire cached rows before the cache TTL")
 }
 
 func getUISnapshot(t *testing.T, ts *httptest.Server, query url.Values, etag string) (*http.Response, []byte) {
@@ -195,6 +204,9 @@ func TestUISnapshotETagFastPath(t *testing.T) {
 	require.Empty(t, body)
 	require.Equal(t, 1, store.cursorReads)
 	require.Zero(t, store.snapshotReads, "matching ETag must not build the projection")
+	wildcard, _ := getUISnapshot(t, ts, query, "*")
+	require.Equal(t, http.StatusNotModified, wildcard.StatusCode)
+	require.Equal(t, etag, wildcard.Header.Get("ETag"), "wildcard 304 must carry the current representation validator")
 }
 
 func TestUISnapshotWithoutLimitRequestsCompleteAuthority(t *testing.T) {

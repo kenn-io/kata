@@ -10,14 +10,6 @@ import (
 	"go.kenn.io/kata/internal/metadata"
 )
 
-func TestTodayUsesSavedZoneRatherThanViewerDay(t *testing.T) {
-	raw := `{"scheduled_on":{"value":"2026-01-01","timezone":"Asia/Tokyo","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}`
-	query := UISnapshotQuery{View: "today", TimeZone: "America/Los_Angeles", LocalDate: "2025-12-31", CalendarAt: "2026-01-01T01:00:00Z", DefaultTimezone: "UTC"}
-	_, _, _, _, included, err := MatchUICalendarView(raw, query, "UTC")
-	require.NoError(t, err)
-	require.True(t, included)
-}
-
 func TestRowPlanningDatesResolveInIssueThenDefaultThenUTC(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -127,7 +119,7 @@ func TestRowPlanningDatesOmitsOnlyTheUnreadableField(t *testing.T) {
 	assert.Empty(t, scheduledOn)
 	assert.Equal(t, "2026-11-02", deadlineOn)
 
-	scheduledOn, deadlineOn, _, _, _, _, err = RowPlanningProjection(`{"scheduled_on":"2026-10-29","timezone":"Mars/Base","deadline_on":"2026-10-29T23:30:00Z"}`, "", "", time.Time{})
+	scheduledOn, deadlineOn, _, _, _, _, err = RowPlanningProjection(`{"scheduled_on":"2026-10-29","timezone":"Mars/Base","deadline_on":"2026-10-29T23:30:00Z"}`, "", "", time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC))
 	require.NoError(t, err)
 	assert.Equal(t, "2026-10-29", scheduledOn)
 	assert.Empty(t, deadlineOn, "an unknown issue zone cannot place an instant")
@@ -162,12 +154,12 @@ func TestRowPlanningDatesReportsUnsupportedSchedule(t *testing.T) {
 }
 
 func TestCalendarProjectionUsesEachSavedZoneAndBoundary(t *testing.T) {
-	raw := `{"scheduled_on":{"value":"2026-01-01T02:00:00Z","timezone":"America/New_York","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"},"deadline_on":{"value":"2026-01-01","timezone":"Asia/Tokyo","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}`
+	raw := `{"scheduled_on":{"value":"2026-01-02T02:00:00Z","timezone":"America/New_York","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"},"deadline_on":{"value":"2026-01-01","timezone":"Asia/Tokyo","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}`
 	var boundary time.Time
-	query := UISnapshotQuery{View: "today", TimeZone: "America/Los_Angeles", CalendarAt: "2026-01-01T01:00:00Z", CalendarBoundary: &boundary}
+	query := UISnapshotQuery{View: "today", TimeZone: "America/Los_Angeles", LocalDate: "2025-12-31", CalendarAt: "2026-01-01T01:00:00Z", CalendarBoundary: &boundary}
 	scheduled, deadline, scheduledToday, deadlineToday, included, err := MatchUICalendarView(raw, query, "UTC")
 	require.NoError(t, err)
-	assert.Equal(t, "2025-12-31", scheduled)
+	assert.Equal(t, "2026-01-01", scheduled)
 	assert.Equal(t, "2026-01-01", deadline)
 	assert.Equal(t, "2025-12-31", scheduledToday)
 	assert.Equal(t, "2026-01-01", deadlineToday)

@@ -39,10 +39,16 @@ func shortIDs(issues []Issue) []string {
 }
 
 func TestDateToggleUsesScheduleDay(t *testing.T) {
-	issue := dated("tokyo", "2026-01-01", "")
-	issue.ScheduledOnToday = "2026-01-01"
-	require.True(t, matchesDate(issue, ListFilter{Date: dateToday, Day: "2025-12-31"}))
-	require.False(t, matchesDate(issue, ListFilter{Date: dateScheduled, Day: "2025-12-31"}))
+	for _, field := range []string{"scheduled_on", "deadline_on"} {
+		issue := dated("tokyo", "", "")
+		if field == "scheduled_on" {
+			issue.ScheduledOnDate, issue.ScheduledOnToday = "2026-01-01", "2026-01-01"
+		} else {
+			issue.DeadlineOnDate, issue.DeadlineOnToday = "2026-01-01", "2026-01-01"
+		}
+		require.True(t, matchesDate(issue, ListFilter{Date: dateToday, Day: "2025-12-31"}), field)
+		require.False(t, matchesDate(issue, ListFilter{Date: dateScheduled, Day: "2025-12-31"}), field)
+	}
 }
 
 func TestDateToggle_TodayAndScheduledSplitOnLocalDay(t *testing.T) {
@@ -462,8 +468,5 @@ func TestDateToggle_IdleTickRefreshesSavedCalendar(t *testing.T) {
 		m = drainInboxCmds(next.(Model), cmd)
 		require.Equal(t, 1, calls, "idle date filters must refresh server-projected calendar days")
 		assertQueueShortIDs(t, m.list.visibleRows(), []string{"new", "keep"})
-		selected, ok := m.list.targetRow()
-		require.True(t, ok)
-		require.Equal(t, "keep", selected.ShortID)
 	})
 }

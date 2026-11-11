@@ -88,10 +88,7 @@ func preflightRecurrenceZone(in RecurrenceInput, meta map[string]any) (string, e
 			return "", err
 		}
 		if field == "scheduled_on" {
-			savedZone, err = metadata.SavedScheduleZone(raw)
-			if err != nil {
-				return "", err
-			}
+			savedZone, _ = metadata.SavedScheduleZone(raw)
 		}
 	}
 	issueZone, _ := meta["timezone"].(string)

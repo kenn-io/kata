@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"flag"
 	"fmt"
 	"io"
@@ -62,14 +63,17 @@ func TestPostRecurrence_HappyPath(t *testing.T) {
 }
 
 func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	project := seedProject(t, env, "example-project")
-	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
-		ProjectID: project.ID, Title: "Weekly review", Author: "user-a",
-	})
-	require.NoError(t, err)
+	for _, defaultZone := range []string{"UTC", "America/New_York"} {
+		t.Run(defaultZone, func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("tok"), func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = defaultZone })
+			project := seedProject(t, env, "example-project")
+			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+				ProjectID: project.ID, Title: "Weekly review", Author: "user-a",
+				Metadata: map[string]jsontext.Value{"deadline_on": jsontext.Value(`"2026-08-04T09:00"`)},
+			})
+			require.NoError(t, err)
 
-	body := fmt.Sprintf(`{
+			body := fmt.Sprintf(`{
 		"actor":"user-a",
 		"initial_issue_ref":%q,
 		"rrule":"FREQ=WEEKLY",
@@ -77,28 +81,33 @@ func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
 		"timezone":"UTC",
 		"template":{"title":"Weekly review"}
 	}`, issue.ShortID)
-	resp := doPost(t, env,
-		fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, project.ID), body)
-	raw := readClose(t, resp)
-	require.Equalf(t, http.StatusCreated, resp.StatusCode, "body: %s", raw)
+			resp := doPost(t, env,
+				fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, project.ID), body)
+			raw := readClose(t, resp)
+			require.Equalf(t, http.StatusCreated, resp.StatusCode, "body: %s", raw)
 
-	attached, err := env.DB.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.NotNil(t, attached.RecurrenceID)
-	require.NotNil(t, attached.OccurrenceKey)
-	assert.Equal(t, "2026-08-03", *attached.OccurrenceKey)
+			attached, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			_, zone, _, _, err := metadata.ScheduleFieldInstant(string(attached.Metadata), "deadline_on", "")
+			require.NoError(t, err)
+			require.Equal(t, defaultZone, zone)
+			require.NotNil(t, attached.RecurrenceID)
+			require.NotNil(t, attached.OccurrenceKey)
+			assert.Equal(t, "2026-08-03", *attached.OccurrenceKey)
 
-	_, events, changed, err := env.DB.CloseIssueWithEvents(
-		t.Context(), issue.ID, "done", "user-a", "Completed the scheduled review and recorded its outcome.", nil)
-	require.NoError(t, err)
-	require.True(t, changed)
-	require.GreaterOrEqual(t, len(events), 3)
-	assert.Equal(t, "issue.created", events[len(events)-2].Type)
-	assert.Equal(t, "recurrence.materialized", events[len(events)-1].Type)
-	created, err := env.DB.IssueByID(t.Context(), *events[len(events)-2].IssueID)
-	require.NoError(t, err)
-	require.NotNil(t, created.OccurrenceKey)
-	assert.Equal(t, "2026-08-10", *created.OccurrenceKey)
+			_, events, changed, err := env.DB.CloseIssueWithEvents(
+				t.Context(), issue.ID, "done", "user-a", "Completed the scheduled review and recorded its outcome.", nil)
+			require.NoError(t, err)
+			require.True(t, changed)
+			require.GreaterOrEqual(t, len(events), 3)
+			assert.Equal(t, "issue.created", events[len(events)-2].Type)
+			assert.Equal(t, "recurrence.materialized", events[len(events)-1].Type)
+			created, err := env.DB.IssueByID(t.Context(), *events[len(events)-2].IssueID)
+			require.NoError(t, err)
+			require.NotNil(t, created.OccurrenceKey)
+			assert.Equal(t, "2026-08-10", *created.OccurrenceKey)
+		})
+	}
 }
 
 func TestPostRecurrence_InitialIssueRequiresFederatedClaim(t *testing.T) {

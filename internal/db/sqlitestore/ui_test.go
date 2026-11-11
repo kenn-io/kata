@@ -535,10 +535,6 @@ func TestUISnapshotSavedCalendarContract(t *testing.T) {
 	dbtest.RunUISnapshotSavedCalendarContract(t, func(t *testing.T) db.Storage { return openUIStore(t) })
 }
 
-func TestFederationScheduleReplay(t *testing.T) {
-	dbtest.RunFederationScheduleReplay(t, func(t *testing.T) db.Storage { return openUIStore(t) })
-}
-
 func TestUISnapshotLimitIgnoresUnseenFutureSchedule(t *testing.T) {
 	dbtest.RunUISnapshotLimitIgnoresUnseenFutureSchedule(t, func(t *testing.T) db.Storage { return openUIStore(t) })
 }

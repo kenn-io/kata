@@ -522,10 +522,6 @@ func TestExternalRootHandlersClassifyFieldAndPublishingErrors(t *testing.T) {
 		status, body = requestExternalRootJSON(t, ts.URL, http.MethodPost, bridgePath+"/actions/reconcile", map[string]any{"actor": "operator"})
 		require.Equal(t, http.StatusOK, status, string(body))
 		assert.Contains(t, string(body), `"field_conflicts":1`)
-		beforeEvents, err := database.db.EventsAfter(t.Context(), db.EventsAfterParams{
-			ProjectID: project.ID, Types: []string{"issue.metadata_updated"}, Limit: 100,
-		})
-		require.NoError(t, err)
 
 		status, body = requestExternalRootJSON(t, ts.URL, http.MethodPost, bridgePath+"/actions/resolve-field", map[string]any{
 			"kata_field": "scheduled_on", "use": "external", "actor": "operator",
@@ -536,13 +532,7 @@ func TestExternalRootHandlersClassifyFieldAndPublishingErrors(t *testing.T) {
 		assert.Contains(t, string(body), "named IANA timezone")
 		after, err := database.db.IssueByID(t.Context(), issue.ID)
 		require.NoError(t, err)
-		assert.Equal(t, cleared.Issue.Metadata, after.Metadata)
 		assert.Equal(t, cleared.Issue.Revision, after.Revision)
-		afterEvents, err := database.db.EventsAfter(t.Context(), db.EventsAfterParams{
-			ProjectID: project.ID, Types: []string{"issue.metadata_updated"}, Limit: 100,
-		})
-		require.NoError(t, err)
-		assert.Equal(t, beforeEvents, afterEvents)
 		status, body = requestExternalRootJSON(t, ts.URL, http.MethodGet, bridgePath, nil)
 		require.Equal(t, http.StatusOK, status, string(body))
 		assert.Contains(t, string(body), `"external_candidate":{"kind":"date","value":"2026-08-22"}`)

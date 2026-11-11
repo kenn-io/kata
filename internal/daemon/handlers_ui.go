@@ -247,7 +247,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 						return nil, internalAPIError(err)
 					}
 					recordUISnapshotDependencies(ctx, cachedDependencies)
-					return snapshotResponse(ctx, cachedResponse, intent, policy, validator)
+					return snapshotResponseIfChanged(ctx, cachedResponse, intent, policy, validator, in.IfNoneMatch)
 				}
 			}
 			query := intent.storeQuery()
@@ -285,7 +285,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, internalAPIError(err)
 			}
 			recordUISnapshotDependencies(ctx, dependencies)
-			return snapshotResponse(ctx, data, intent, policy, validator)
+			return snapshotResponseIfChanged(ctx, data, intent, policy, validator, in.IfNoneMatch)
 		})
 
 	referencesOperation := huma.Operation{
@@ -769,27 +769,29 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 func uiSnapshotValidatorMatches(intent normalizedUISnapshotIntent, cursor int64, policy uiPolicy, header string, now time.Time) (string, bool) {
 	for candidate := range strings.SplitSeq(header, ",") {
 		candidate = strings.TrimSpace(candidate)
-		if candidate == "*" {
-			return "", true
-		}
-		if strings.HasPrefix(candidate, "W/") {
-			continue
-		}
-		_, suffix, ok := strings.Cut(strings.TrimSuffix(candidate, `"`), ".")
+		_, suffix, _ := strings.Cut(strings.TrimSuffix(candidate, `"`), ".")
 		until, err := strconv.ParseInt(suffix, 10, 64)
-		if !ok || err != nil || (until != 0 && !now.Before(time.Unix(until, 0))) {
+		if err != nil || (until != 0 && !now.Before(time.Unix(until, 0))) {
 			continue
 		}
-		data := db.UISnapshotData{Cursor: cursor}
-		if until != 0 {
-			data.CalendarBoundary = time.Unix(until, 0)
-		}
-		validator, err := makeUISnapshotETag(intent, data, policy)
+		validator, err := makeUISnapshotETag(intent, db.UISnapshotData{Cursor: cursor, CalendarBoundary: time.Unix(until, 0)}, policy)
 		if err == nil && candidate == validator {
 			return candidate, true
 		}
 	}
 	return "", false
+}
+
+// snapshotResponseIfChanged answers 304 with the current validator when
+// If-None-Match is "*" or names it. A wildcard needs the built snapshot's
+// calendar boundary, so it cannot take the projection-free tag shortcut.
+func snapshotResponseIfChanged(ctx context.Context, data db.UISnapshotData, intent normalizedUISnapshotIntent,
+	policy uiPolicy, validator, ifNoneMatch string,
+) (*api.UISnapshotResponse, error) {
+	if matchesStrongETag(ifNoneMatch, validator) {
+		return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: validator}, nil
+	}
+	return snapshotResponse(ctx, data, intent, policy, validator)
 }
 
 func makeUISnapshotETag(intent normalizedUISnapshotIntent, data db.UISnapshotData, policy uiPolicy) (string, error) {

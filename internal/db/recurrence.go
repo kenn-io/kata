@@ -1,8 +1,10 @@
 package db
 
 import (
+	"cmp"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -78,15 +80,9 @@ func composeRecurrenceIssueMetadata(
 	issueTimezone := timezone
 	local := timezone == "Local"
 	if local {
-		timezone = time.Local.String()
-		if timezone == "Local" {
-			timezone = recurrenceclient.LocalZone(recurrenceclient.DefaultLocaltimePath)
-		}
-		if timezone == "" || timezone == "Local" {
-			return nil, fmt.Errorf("%w: cannot identify Local timezone; change the recurrence to a named IANA timezone", ErrInvalidRecurrence)
-		}
-		if _, err := metadata.ScheduleLocation(timezone, metadata.ScheduleTZDataVersion); err != nil {
-			return nil, fmt.Errorf("%w: cannot save Local timezone %q; change the recurrence to a named IANA timezone: %v", ErrInvalidRecurrence, timezone, err)
+		var err error
+		if timezone, err = localZoneName(); err != nil {
+			return nil, fmt.Errorf("%w: %v; change the recurrence to a named IANA timezone", ErrInvalidRecurrence, err)
 		}
 	}
 	object, err := decodeRecurrenceTemplateMetadata(metadataValue)
@@ -126,6 +122,9 @@ func composeRecurrenceIssueMetadata(
 	return value, nil
 }
 
+// freezeRecurrenceDeadline saves a legacy string deadline with its zone. An
+// unchanged civil deadline under legacy Local keeps its meaning when the host
+// zone is identifiable and its rules match the bundle.
 func freezeRecurrenceDeadline(object map[string]jsontext.Value, recurrenceZone, defaultZone string, local, template bool) error {
 	raw := object["deadline_on"]
 	if len(raw) == 0 || string(raw) == "null" {
@@ -140,27 +139,53 @@ func freezeRecurrenceDeadline(object map[string]jsontext.Value, recurrenceZone, 
 	}
 	zone := recurrenceZone
 	if !template {
-		zone = defaultZone
-		if len(object["timezone"]) > 0 && string(object["timezone"]) != "null" && string(object["timezone"]) != `""` {
-			if err := json.Unmarshal(object["timezone"], &zone); err != nil {
-				return fmt.Errorf("%w: deadline timezone: %v", ErrInvalidRecurrence, err)
-			}
-		}
-		if zone == "" {
-			zone = "UTC"
+		if zone, err = issueDeadlineZone(object, defaultZone); err != nil {
+			return err
 		}
 	}
-	object["deadline_on"], err = metadata.NewScheduleValue(deadline, zone)
+	legacyLocal := zone == "Local" && !strings.HasSuffix(deadline, "Z")
+	if legacyLocal {
+		zone, err = localZoneName()
+	}
+	if err == nil {
+		object["deadline_on"], err = metadata.NewScheduleValue(deadline, zone)
+	}
 	if err != nil && strings.HasSuffix(deadline, "Z") {
 		object["deadline_on"], err = metadata.NewScheduleValue(deadline, "UTC")
 	}
 	if err != nil {
 		return fmt.Errorf("%w: deadline_on: %v; change the issue timezone to a named IANA timezone", ErrInvalidRecurrence, err)
 	}
-	if template && local {
+	if legacyLocal || template && local {
 		return compareLocalSchedule(deadline, object["deadline_on"])
 	}
 	return nil
+}
+
+// issueDeadlineZone is the zone an existing issue's legacy deadline resolves in.
+func issueDeadlineZone(object map[string]jsontext.Value, defaultZone string) (string, error) {
+	zone := defaultZone
+	if raw := object["timezone"]; len(raw) > 0 && string(raw) != "null" && string(raw) != `""` {
+		if err := json.Unmarshal(raw, &zone); err != nil {
+			return "", fmt.Errorf("%w: deadline timezone: %v", ErrInvalidRecurrence, err)
+		}
+	}
+	return cmp.Or(zone, "UTC"), nil
+}
+
+// localZoneName names the bundled zone behind the host's legacy "Local".
+func localZoneName() (string, error) {
+	name := time.Local.String()
+	if name == "Local" {
+		name = recurrenceclient.LocalZone(recurrenceclient.DefaultLocaltimePath)
+	}
+	if name == "" || name == "Local" {
+		return "", errors.New("cannot identify Local timezone")
+	}
+	if _, err := metadata.ScheduleLocation(name, metadata.ScheduleTZDataVersion); err != nil {
+		return "", fmt.Errorf("cannot save Local timezone %q: %w", name, err)
+	}
+	return name, nil
 }
 
 func compareLocalSchedule(value string, saved jsontext.Value) error {
