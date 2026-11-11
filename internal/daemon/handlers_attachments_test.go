@@ -397,7 +397,7 @@ func TestUIAttachmentRoutesAreProjectSpecific(t *testing.T) {
 	spoke, _ := seedProjectAndIssue(t, env)
 	_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: spoke.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: spoke.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
 	require.NoError(t, err)
-	seedProject(t, env, "local-project")
+	local := seedProject(t, env, "local-project")
 	code, raw := env.Get(t, "/api/v1/ui/attachment-route?project_uid="+spoke.UID)
 	require.Equal(t, http.StatusOK, code, string(raw))
 	var result struct {
@@ -408,7 +408,10 @@ func TestUIAttachmentRoutesAreProjectSpecific(t *testing.T) {
 	require.Equal(t, spoke.UID, result.Route.ProjectUID)
 	require.True(t, result.Route.Read)
 	require.False(t, result.Route.Write)
-
+	code, raw = env.Get(t, "/api/v1/ui/attachment-route?project_uid="+local.UID)
+	require.Equal(t, http.StatusOK, code, string(raw))
+	require.NoError(t, json.Unmarshal(raw, &result))
+	require.Nil(t, result.Route)
 }
 
 func TestUIAttachmentRouteAuthorizationBeforeProbe(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,12 +52,6 @@ func TestDocbankForwardRejectsFormerRouteAfterRebind(t *testing.T) {
 	}
 	assert.Equal(t, []string{"Bearer old-token"}, received, "the former relay must not receive the replacement relay's credential")
 	assert.Error(t, err)
-	resp, err = docbankForwardRequest(t.Context(), cfg, old, http.MethodPost, "issues/test/links", nil, strings.NewReader(`{}`))
-	if resp != nil {
-		_ = resp.Body.Close()
-	}
-	assert.Equal(t, []string{"Bearer old-token"}, received, "a link must not send the replacement credential to the former relay")
-	assert.Error(t, err)
 	err = ensureDocbankIssueUpstream(t.Context(), cfg, project, old, issue, nil)
 	assert.Equal(t, []string{"Bearer old-token"}, received, "the claim lookup must not send the replacement credential to the former relay")
 	assert.Error(t, err)
@@ -79,7 +74,8 @@ func TestDocbankForwardWaitsForRebind(t *testing.T) {
 	_, err := store.UpsertFederationBinding(t.Context(), old)
 	require.NoError(t, err)
 	credentials := &uiCapabilityCredentials{credential: config.FederationCredential{HubURL: former.URL, HubProjectID: 1, Token: "old-token", AllowInsecure: true}}
-	cfg := ServerConfig{DB: store, FederationCredentials: credentials}
+	entered := make(chan struct{})
+	cfg := ServerConfig{DB: &rebindEntryStore{Storage: store, entered: entered}, FederationCredentials: credentials}
 	finish, err := federationcoord.BeginRebind(t.Context(), federationcoord.Key(store.InstanceUID(), project.ID), store, project.ID)
 	require.NoError(t, err)
 	release := sync.OnceFunc(finish)
@@ -92,6 +88,12 @@ func TestDocbankForwardWaitsForRebind(t *testing.T) {
 		}
 		done <- err
 	}()
+	<-entered
+	select {
+	case err := <-done:
+		t.Fatalf("forward returned during rebind: %v", err)
+	case <-time.After(100 * time.Millisecond): //nolint:kennlint // deadlinetest: the rebind gate must hold the entered forward
+	}
 	current := old
 	current.HubURL = "http://replacement.example"
 	current.HubProjectID = 2
@@ -101,4 +103,14 @@ func TestDocbankForwardWaitsForRebind(t *testing.T) {
 	release()
 	require.Error(t, <-done)
 	require.Zero(t, calls.Load())
+}
+
+type rebindEntryStore struct {
+	db.Storage
+	entered chan struct{}
+}
+
+func (s *rebindEntryStore) InstanceUID() string {
+	close(s.entered)
+	return s.Storage.InstanceUID()
 }

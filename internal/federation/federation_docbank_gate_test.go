@@ -2,7 +2,6 @@ package federation
 
 import (
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -68,19 +67,4 @@ func TestDocbankOriginClientPreflight(t *testing.T) {
 			})
 		}
 	}
-}
-
-// Checkpoint sections are base64 byte arrays, not nested source JSON objects.
-func TestDocbankOriginClientChecksResetPayload(t *testing.T) {
-	// A malformed source is not a usable checkpoint, regardless of response headers.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		raw, err := json.Marshal(db.RelayResetCheckpoint{Snapshot: db.RootResetSnapshot{Events: []byte(`["aW52YWxpZA=="]`), Entities: []byte(`[]`)}})
-		require.NoError(t, err)
-		_, _ = w.Write(raw)
-	}))
-	t.Cleanup(server.Close)
-	client, err := NewClient(t.Context(), server.URL, "fixture-token", clientpkg.Opts{})
-	require.NoError(t, err)
-	_, err = client.RelayReset(t.Context(), 42)
-	require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 }

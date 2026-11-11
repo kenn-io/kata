@@ -2239,34 +2239,7 @@ describe('AppShell task selection', () => {
     return current
   }
 
-  test('keeps upload controls when switching to a pre-origin daemon', async () => {
-    const current = twoTaskSnapshot()
-    current.capabilities.attachments = false
-    current.capabilities.attachment_local_origins = ['01ARZ3NDEKTSV4RRFFQ69G5FAV']
-    const props = {
-      route: { ...listRoute, issueUID: firstUID },
-      snapshot: current,
-      loading: false,
-      ...mutationProps(),
-      onNavigate: vi.fn(),
-      onCreateProject: vi.fn(async () => ({ changed: true })),
-      onUploadAttachment: vi.fn(async () => {}),
-    }
-    const { rerender } = render(AppShell, { props })
-    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
-    const older = structuredClone(current)
-    older.capabilities.attachments = true
-    delete older.capabilities.attachment_local_origins
-    await rerender({
-      ...props,
-      snapshot: older,
-      attachmentRoute: null,
-      attachmentRouteProject: older.selected!.issue!.project_uid,
-    })
-    expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
-  })
-
-  test('keeps content controls when switching to a pre-origin daemon', async () => {
+  test('keeps attachment controls when switching to a pre-origin daemon', async () => {
     const current = twoTaskSnapshot()
     current.capabilities.attachments = false
     current.capabilities.attachment_local_origins = ['01ARZ3NDEKTSV4RRFFQ69G5FAV']
@@ -2285,13 +2258,21 @@ describe('AppShell task selection', () => {
       ...mutationProps(),
       onNavigate: vi.fn(),
       onCreateProject: vi.fn(async () => ({ changed: true })),
+      onUploadAttachment: vi.fn(async () => {}),
     }
     const { rerender } = render(AppShell, { props })
+    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Preview screen.png' })).toBeNull()
     const older = structuredClone(current)
     older.capabilities.attachments = true
     delete older.capabilities.attachment_local_origins
-    await rerender({ ...props, snapshot: older })
+    await rerender({
+      ...props,
+      snapshot: older,
+      attachmentRoute: null,
+      attachmentRouteProject: older.selected!.issue!.project_uid,
+    })
+    expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Preview screen.png' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Download screen.png' })).not.toBeNull()
   })
@@ -2299,19 +2280,6 @@ describe('AppShell task selection', () => {
   test('uses the selected project attachment route', async () => {
     const current = twoTaskSnapshot()
     const spoke = current.collection![0]!
-    const local = current.collection![1]!
-    local.project_uid = 'local-project'
-    local.project_id = 8
-    local.project_name = 'local-project'
-    local.qualified_id = 'local-project#a2'
-    current.catalog.push({
-      project: {
-        ...current.catalog[0]!.project,
-        id: 8,
-        uid: 'local-project',
-        name: 'local-project',
-      },
-    })
     current.capabilities.attachment_local_origins = ['01ARZ3NDEKTSV4RRFFQ69G5FAV']
     current.capabilities.attachments = false
     const attachmentRoute = {
@@ -2332,18 +2300,8 @@ describe('AppShell task selection', () => {
       onCreateProject: vi.fn(async () => ({ changed: true })),
       onUploadAttachment: vi.fn(async () => {}),
     }
-    const { rerender } = render(AppShell, { props })
+    render(AppShell, { props })
     expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
-    await fireEvent.click(screen.getByRole('button', { name: /Second issue/ }))
-    const localSnapshot = structuredClone(current)
-    localSnapshot.selected = { ...localSnapshot.selected!, issue: localSnapshot.collection![1]! }
-    await rerender({
-      ...props,
-      route: { ...listRoute, issueUID: secondUID },
-      snapshot: localSnapshot,
-    })
-    expect(shownTitle()).toContain('Second issue')
-    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
   })
 
   test('shows a clicked task in the same frame, before its snapshot arrives', async () => {

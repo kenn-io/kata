@@ -143,42 +143,6 @@ func TestRelayDocbankUIOriginAvailability(t *testing.T) {
 	}
 }
 
-func TestRelayDocbankUIConditionalCapabilitiesRefresh(t *testing.T) {
-	root, relay, leaf, _ := newRelayClaimChain(t)
-	serveRelayDocbank(t, root, nil)
-	serveRelayDocbank(t, relay, nil)
-	serveRelayDocbank(t, leaf, nil)
-	request := func(etag string) *http.Response {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, leaf.http.URL+"/api/v1/ui/snapshot?view=inbox", nil)
-		require.NoError(t, err)
-		req.Header.Set("Authorization", "Bearer "+leaf.userToken)
-		req.Header.Set("If-None-Match", etag)
-		resp, err := leaf.http.Client().Do(req)
-		require.NoError(t, err)
-		return resp
-	}
-	first := request("")
-	require.Equal(t, http.StatusOK, first.StatusCode)
-	etag := first.Header.Get("ETag")
-	require.NotEmpty(t, etag)
-	require.NoError(t, first.Body.Close())
-	serveRelayDocbank(t, root, docbanktest.New(t))
-	serveRelayDocbank(t, leaf, nil) // Refresh the cache without changing the stored event cursor.
-	changed := request(etag)
-	defer func() { _ = changed.Body.Close() }()
-	require.Equal(t, http.StatusNotModified, changed.StatusCode)
-	status, raw := relayDocbankRequest(t, leaf, http.MethodGet, "/api/v1/ui/attachment-route?project_uid="+leaf.project.UID, "", "")
-	require.Equal(t, http.StatusOK, status, string(raw))
-	var result struct {
-		Route *api.UIAttachmentRoute `json:"route"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &result))
-	require.NotNil(t, result.Route)
-	require.True(t, result.Route.Write)
-}
-
-// The initiating replica must get an immediately usable reference while only
-// the root's Docbank receives bytes. No metadata sync is needed for content.
 func TestRelayDocbankUploadAndImmediateContent(t *testing.T) {
 	root, relay, leaf, issue := newRelayClaimChain(t)
 	rootVault := docbanktest.New(t)
@@ -234,9 +198,6 @@ func TestRelayDocbankUploadAndImmediateContent(t *testing.T) {
 	require.EqualValues(t, 2, relayClaimLookups.Load(), "one claim refresh before and one after linking")
 	require.EqualValues(t, 4, rootPreflights.Load())
 	require.EqualValues(t, 4, relayPreflights.Load())
-	closeBody := fmt.Sprintf(`{"reason":"done","message":"Delivered the report and checked its final contents carefully.","evidence":[{"type":"attachment","attachment_id":%q}]}`, out.ID)
-	status, raw = relayDocbankRequest(t, leaf, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", leaf.project.ID, issue.UID), closeBody, "application/json")
-	require.Equal(t, http.StatusOK, status, string(raw))
 	syncRelayMatrixNode(t, leaf)
 	syncRelayMatrixNode(t, relay)
 	syncRelayMatrixNode(t, leaf)

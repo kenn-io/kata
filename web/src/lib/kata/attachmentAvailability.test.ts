@@ -27,7 +27,10 @@ describe('attachment availability', () => {
     expect(attachmentWritable(capabilities, project, undefined)).toBe(false)
     expect(attachmentAvailable(capabilities, project, undefined, file)).toBe(true)
     expect(
-      attachmentAvailable(capabilities, project, undefined, { ...file, origin: '01ARZ3NDEKTSV4RRFFQ69G5FAU' }),
+      attachmentAvailable(capabilities, project, undefined, {
+        ...file,
+        origin: '01ARZ3NDEKTSV4RRFFQ69G5FAU',
+      }),
     ).toBe(true)
     expect(
       attachmentAvailable(capabilities, project, undefined, { ...file, origin: route.origin }),
@@ -39,7 +42,10 @@ describe('attachment availability', () => {
       attachmentAvailable(capabilities, project, route, { ...file, origin: route.origin }),
     ).toBe(true)
     expect(
-      attachmentAvailable(capabilities, project, route, { ...file, origin: 'another-origin' }),
+      attachmentAvailable(capabilities, project, route, {
+        ...file,
+        origin: '01ARZ3NDEKTSV4RRFFQ69G5FAT',
+      }),
     ).toBe(false)
     expect(attachmentWritable(capabilities, project, { ...route, write: false })).toBe(false)
     expect(attachmentAvailable(capabilities, project, { ...route, read: false }, file)).toBe(true)

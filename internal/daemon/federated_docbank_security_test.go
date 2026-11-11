@@ -106,19 +106,25 @@ func TestFederatedDocbankContentRejectsRelayLocalOrigin(t *testing.T) {
 	require.Empty(t, vault.Requests(), "a downstream request cannot select the relay-local vault")
 }
 
-func TestDocbankOriginServiceRejectsHostFenceBeforeIO(t *testing.T) {
-	for _, operation := range []string{"uploads", "links"} {
-		t.Run(operation, func(t *testing.T) {
-			testDocbankServiceDenial(t, operation, false)
-		})
-	}
-}
-
-func TestDocbankOriginServiceRejectsUnexpectedOriginBeforeIO(t *testing.T) {
-	for _, operation := range []string{"uploads", "links"} {
-		t.Run(operation, func(t *testing.T) {
-			testDocbankServiceDenial(t, operation, true)
-		})
+func TestDocbankOriginServiceRejectsBeforeIO(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		wrongOrigin bool
+		access      daemon.HostFederationAccessController
+	}{
+		{name: "host fence"},
+		{name: "wrong origin", wrongOrigin: true},
+		{name: "finalization failure", access: unavailableDocbankFinalization{}},
+	} {
+		for _, operation := range []string{"uploads", "links"} {
+			t.Run(tc.name+"/"+operation, func(t *testing.T) {
+				if tc.access != nil {
+					testDocbankServiceDenial(t, operation, tc.wrongOrigin, tc.access)
+				} else {
+					testDocbankServiceDenial(t, operation, tc.wrongOrigin)
+				}
+			})
+		}
 	}
 }
 
@@ -179,10 +185,4 @@ func (unavailableDocbankFinalization) AuthorizeFederation(context.Context, daemo
 	return daemon.HostFederationAccessDecision{TransactionFence: func(context.Context, db.Transaction) error {
 		return db.AfterTransactionRollback(daemon.ErrHostAccessDenied, func(context.Context) error { return errors.New("fixture recording unavailable") })
 	}}, nil
-}
-
-func TestDocbankOriginServiceRejectsFinalizationFailureBeforeIO(t *testing.T) {
-	for _, operation := range []string{"uploads", "links"} {
-		t.Run(operation, func(t *testing.T) { testDocbankServiceDenial(t, operation, false, unavailableDocbankFinalization{}) })
-	}
 }

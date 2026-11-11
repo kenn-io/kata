@@ -71,75 +71,6 @@ describe('App', () => {
     expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
   })
 
-  it('keeps the selected issue usable while its attachment route loads and refreshes on 304', async () => {
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    const base = snapshot()
-    Object.assign(base.capabilities, { attachments: true })
-    const selected = {
-      ...base,
-      selected: {
-        state: 'available',
-        issue: base.collection[0],
-        comments: [],
-        labels: [],
-        links: [],
-        recurrences: [],
-        history: [],
-      },
-    }
-    let release!: (response: Response) => void
-    const pending = new Promise<Response>((resolve) => {
-      release = resolve
-    })
-    let routeReads = 0
-    let snapshotReads = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request = requestOf(input, init)
-        const url = new URL(request.url)
-        if (url.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
-        if (url.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
-        if (url.pathname.endsWith('/references'))
-          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-        if (url.pathname.endsWith('/attachment-route')) {
-          routeReads++
-          if (routeReads === 1) return pending
-          return Response.json({
-            route: {
-              project_uid: base.collection[0]!.project_uid,
-              read: true,
-              write: true,
-              origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
-            },
-          })
-        }
-        snapshotReads++
-        if (request.headers.get('If-None-Match')) return new Response(null, { status: 304 })
-        return Response.json(selected, { headers: { ETag: '"snapshot-1"' } })
-      }),
-    )
-    render(App)
-    await screen.findByText('Example issue', { selector: 'h1, h2' })
-    await waitFor(() => expect(routeReads).toBe(1))
-    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
-    release(
-      Response.json({
-        route: { project_uid: base.collection[0]!.project_uid, read: false, write: false },
-      }),
-    )
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await tick()
-    await fireEvent(window, new Event('focus'))
-    await waitFor(() => expect(snapshotReads).toBeGreaterThan(1))
-    await screen.findByRole('button', { name: 'Attach files' })
-  })
-
   it.each([304, 200])(
     'keeps attachment controls and previews during a %s route refresh',
     async (status) => {
@@ -158,7 +89,7 @@ describe('App', () => {
       )
       const base = snapshot()
       const issue = base.collection[0]!
-      Object.assign(base.capabilities, { attachments: false })
+      Object.assign(base.capabilities, { attachments: true })
       issue.metadata = {
         'attachment.file': {
           name: 'screen.png',
@@ -168,6 +99,10 @@ describe('App', () => {
           origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
         },
       }
+      let releaseFirst!: (response: Response) => void
+      const first = new Promise<Response>((resolve) => {
+        releaseFirst = resolve
+      })
       let release!: (response: Response) => void
       const pending = new Promise<Response>((resolve) => {
         release = resolve
@@ -187,16 +122,7 @@ describe('App', () => {
             return new Response(new Blob(['x'], { type: 'image/png' }))
           if (url.pathname.endsWith('/attachment-route')) {
             routeReads++
-            return routeReads === 1
-              ? Response.json({
-                  route: {
-                    project_uid: issue.project_uid,
-                    read: true,
-                    write: true,
-                    origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
-                  },
-                })
-              : pending
+            return routeReads === 1 ? first : pending
           }
           snapshotReads++
           if (request.headers.get('If-None-Match') && status === 304)
@@ -219,6 +145,19 @@ describe('App', () => {
         }),
       )
       render(App)
+      await screen.findByText('Example issue', { selector: 'h1, h2' })
+      await waitFor(() => expect(routeReads).toBe(1))
+      expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
+      releaseFirst(
+        Response.json({
+          route: {
+            project_uid: issue.project_uid,
+            read: true,
+            write: true,
+            origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
+          },
+        }),
+      )
       await fireEvent.click(await screen.findByRole('button', { name: 'Preview screen.png' }))
       await screen.findByRole('img', { name: 'screen.png' })
       expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
@@ -322,10 +261,10 @@ describe('App', () => {
     await tick()
     expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
     releaseSecond(
-      Response.json({ route: { project_uid: second.project_uid, read: false, write: false } }),
+      Response.json({ route: { project_uid: second.project_uid, read: true, write: true } }),
     )
     await tick()
-    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
+    expect(await screen.findByRole('button', { name: 'Attach files' })).not.toBeNull()
   })
 
   it.each([

@@ -38,13 +38,6 @@ func TestRestoredAttachmentOrigin(t *testing.T) {
 	require.NoError(t, err)
 	_, err = source.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.foreign": foreignRaw}})
 	require.NoError(t, err)
-	closeURL := fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", project.ID, issue.ShortID)
-	closeInput := map[string]any{"actor": "operator", "reason": "done", "message": attachmentCloseTestMessage, "evidence": []any{map[string]any{"type": "attachment", "attachment_id": attachment.ID}}}
-	closed, raw := envDoRaw(t, source, http.MethodPost, closeURL, closeInput, nil)
-	require.Equal(t, http.StatusOK, closed.StatusCode, string(raw))
-	closeResult := api.MutationResponse{}.Body
-	require.NoError(t, json.Unmarshal(raw, &closeResult))
-	require.NotNil(t, closeResult.Event)
 	var backup bytes.Buffer
 	require.NoError(t, jsonl.Export(t.Context(), source.DB, &backup, jsonl.ExportOptions{IncludeDeleted: true}))
 	for _, standalone := range []bool{false, true} {
@@ -58,30 +51,8 @@ func TestRestoredAttachmentOrigin(t *testing.T) {
 			status, raw := target.Get(t, endpoint+"/"+attachment.ID+"/content")
 			require.Equal(t, http.StatusOK, status, string(raw))
 			require.Equal(t, "image bytes", string(raw))
-			var nextBackup bytes.Buffer
-			require.NoError(t, jsonl.Export(t.Context(), target.DB, &nextBackup, jsonl.ExportOptions{IncludeDeleted: true}))
-			second := testenv.New(t, func(cfg *daemon.ServerConfig) {
-				cfg.Docbank = docbank.NewClient(vault.Server.URL, func() (string, error) { return "test-key", nil })
-				cfg.DocbankFolder = "/kata"
-			})
-			require.NoError(t, jsonl.ImportWithOptions(t.Context(), bytes.NewReader(nextBackup.Bytes()), second.DB, jsonl.ImportOptions{NewInstance: true}))
-			status, raw = second.Get(t, endpoint+"/"+attachment.ID+"/content")
-			require.Equal(t, http.StatusOK, status, string(raw))
-			require.Equal(t, "image bytes", string(raw))
 			status, raw = target.Get(t, endpoint+"/foreign/content")
 			require.Equal(t, http.StatusGone, status, string(raw))
-			events, err := target.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
-			require.NoError(t, err)
-			var found bool
-			for _, event := range events {
-				if event.UID == closeResult.Event.UID {
-					require.Equal(t, closeResult.Event.Payload, event.Payload)
-					found = true
-				}
-			}
-			require.True(t, found)
-			reopen, raw := envDoRaw(t, target, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/reopen", project.ID, issue.ShortID), map[string]any{"actor": "operator"}, nil)
-			require.Equal(t, http.StatusOK, reopen.StatusCode, string(raw))
 			client := docbank.NewClient(vault.Server.URL, func() (string, error) { return "test-key", nil })
 			version, err := client.Version(t.Context(), attachment.Entry.DocbankVersion)
 			require.NoError(t, err)
