@@ -327,8 +327,10 @@ type CatalogDaemonConfig struct {
 	// Home and InstanceUID bind a local entry to an existing spoke database.
 	Home        string `toml:"home"`
 	InstanceUID string `toml:"instance_uid"`
-	// Token is the inline bearer token, mutually exclusive with TokenEnv.
+	// Token is the inline bearer token; it wins over TokenFile and TokenEnv.
 	Token string `toml:"token"`
+	// TokenFile names an owner-only credential file.
+	TokenFile string `toml:"token_file"`
 	// TokenEnv names an environment variable holding the bearer token, so
 	// the secret stays out of the config file. Resolved by clients only when
 	// they select this daemon target.
@@ -848,6 +850,7 @@ func trimDaemonCatalog(cfg *DaemonConfig) {
 		cfg.Daemons[i].Name = strings.TrimSpace(cfg.Daemons[i].Name)
 		cfg.Daemons[i].URL = strings.TrimSpace(cfg.Daemons[i].URL)
 		cfg.Daemons[i].Token = strings.TrimSpace(cfg.Daemons[i].Token)
+		cfg.Daemons[i].TokenFile = strings.TrimSpace(cfg.Daemons[i].TokenFile)
 		cfg.Daemons[i].TokenEnv = strings.TrimSpace(cfg.Daemons[i].TokenEnv)
 	}
 }
@@ -904,9 +907,6 @@ func normalizeDaemonCatalog(cfg *DaemonConfig) error {
 		names[d.Name] = struct{}{}
 		if d.Local == (d.URL != "") {
 			return fmt.Errorf("daemon %q: exactly one of local or url is required", d.Name)
-		}
-		if d.Token != "" && d.TokenEnv != "" {
-			return fmt.Errorf("daemon %q: token and token_env are mutually exclusive", d.Name)
 		}
 		if err := normalizeLocalProfileEntry(d); err != nil {
 			return err

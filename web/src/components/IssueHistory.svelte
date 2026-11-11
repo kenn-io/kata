@@ -10,9 +10,10 @@
     events: readonly KataTaskEvent[]
     metadata?: Record<string, unknown> | undefined
     attachmentLinks?: boolean | undefined
+    pending?: boolean | undefined
   }
 
-  let { events, metadata = {}, attachmentLinks = true }: Props = $props()
+  let { events, metadata = {}, attachmentLinks = true, pending = false }: Props = $props()
 
   const fullTimestamp = new Intl.DateTimeFormat(undefined, {
     dateStyle: 'full',
@@ -65,7 +66,9 @@
 
 <section class="events" aria-labelledby="kata-events-title">
   <h3 id="kata-events-title">Events</h3>
-  {#if events.length === 0}
+  {#if pending}
+    <p role="status" aria-label="Loading events">Loading events…</p>
+  {:else if events.length === 0}
     <p>No events</p>
   {:else}
     <ul>

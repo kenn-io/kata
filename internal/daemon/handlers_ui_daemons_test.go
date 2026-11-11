@@ -84,7 +84,9 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 			api.UISnapshotContractVersion)
 	}))
 	t.Cleanup(connected.Close)
+	var authCalls atomic.Int64
 	authRequired := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		authCalls.Add(1)
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	t.Cleanup(authRequired.Close)
@@ -129,6 +131,7 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 	assert.True(t, roster.Daemons[1].Default)
 	assert.Equal(t, "token", roster.Daemons[1].Auth)
 	assert.Equal(t, "auth_required", roster.Daemons[2].Health)
+	assert.Zero(t, authCalls.Load(), "roster must not probe with an unavailable credential")
 }
 
 func TestWebDaemonRosterReportsTargetsWithoutWebUIContract(t *testing.T) {

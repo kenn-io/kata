@@ -3,8 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
@@ -71,15 +69,10 @@ func newHubAdminClient(ctx context.Context, target daemonTarget) (*Client, daemo
 // selected hub target. In particular, KATA_AUTH_TOKEN authenticates the local
 // daemon and is never a fallback or override for a catalog hub.
 func federationHubTargetToken(target daemonTarget) (string, error) {
-	if target.TokenEnv == "" {
-		return target.resolved.Token, nil
-	}
-	token := strings.TrimSpace(os.Getenv(target.TokenEnv))
-	if token == "" {
-		return "", fmt.Errorf("daemon %q: token_env %q is unset or empty",
-			daemonTargetDisplay(target), target.TokenEnv)
-	}
-	return token, nil
+	return (config.CatalogDaemonConfig{
+		Name: daemonTargetDisplay(target), Token: target.Token,
+		TokenFile: target.TokenFile, TokenEnv: target.TokenEnv,
+	}).ClientToken()
 }
 
 func validateFederationHubTargetCredential(target daemonTarget) error {

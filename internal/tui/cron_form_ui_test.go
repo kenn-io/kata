@@ -171,12 +171,25 @@ func TestCronCtrlSSavesEditedJob(t *testing.T) {
 	require.NoError(t, err)
 	rec := executeRecord(`{}`)
 	require.NoError(t, c.PutCronJob(t.Context(), project.ID, rec.UID, kataapi.PutCronJobBody{Name: "Original", Actor: "alice", Definition: kataapi.CronJobDefinitionFrom(rec.Definition)}))
+	stale := rec.Definition
+	stale.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
+	raw, err := json.Marshal(stale)
+	require.NoError(t, err)
+	_, err = env.DB.ExecContext(t.Context(), `UPDATE cron_jobs SET definition_json=? WHERE uid=?`, string(raw), rec.UID)
+	require.NoError(t, err)
 	rec, err = c.ShowCronJob(t.Context(), project.ID, rec.UID)
 	require.NoError(t, err)
 	m := cronFixture(t)
 	m.api, m.scope.projectID, m.list.actor = c, project.ID, "alice"
 	m.cron.form, err = cronFormFor(rec, nil)
 	require.NoError(t, err)
+	require.Contains(t, stripANSI(m.viewBody()), "never fires")
+	m, refused := press(m, ctrlKey('s'))
+	require.Nil(t, refused)
+	unchanged, err := c.ShowCronJob(t.Context(), project.ID, rec.UID)
+	require.NoError(t, err)
+	require.Equal(t, rec.DefinitionEventUID, unchanged.DefinitionEventUID)
+	m.cron.form.val[cfCron] = "0 0 28 2 *"
 	m.cron.form.val[cfName] = "Renamed"
 	m, cmd := press(m, ctrlKey('s'))
 	if cmd != nil {
@@ -185,6 +198,8 @@ func TestCronCtrlSSavesEditedJob(t *testing.T) {
 	saved, err := c.ShowCronJob(t.Context(), project.ID, rec.UID)
 	require.NoError(t, err)
 	require.Equal(t, "Renamed", saved.Name)
+	require.NotEqual(t, rec.DefinitionEventUID, saved.DefinitionEventUID)
+	require.Equal(t, "0 0 28 2 *", saved.Definition.Trigger.Cron)
 	require.Nil(t, m.cron.form)
 }
 
@@ -225,6 +240,7 @@ func TestCronEditConflictKeepsDraftAndAppliesToCurrent(t *testing.T) {
 	m.cron.form.val[cfTitle] = "My edit"
 	api.shown.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FB8"
 	api.shown.Definition.Enabled = false
+	api.shown.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
 	api.showErr = errors.New("current job must come from the conflict response")
 	api.putErrs = []error{&APIError{Status: http.StatusConflict, Code: "cron_conflict"}, nil}
 
