@@ -138,16 +138,20 @@ func TestRowPlanningDatesKeepsAValidDateBesideANonStringOne(t *testing.T) {
 }
 
 func TestRowPlanningDatesReportsUnsupportedSchedule(t *testing.T) {
-	for _, tc := range []struct{ name, raw string }{
-		{"unknown member", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1}`},
-		{"unknown version", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`},
+	for _, tc := range []struct {
+		name, raw string
+		want      error
+		wantText  string
+	}{
+		{"unknown member", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1}`, json.ErrUnknownName, ""},
+		{"unknown version", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`, nil, "unsupported schedule tzdata version"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, _, _, _, _, err := RowPlanningProjection(`{"scheduled_on":`+tc.raw+`}`, "", "", time.Time{})
-			if tc.name == "unknown member" {
-				require.ErrorIs(t, err, json.ErrUnknownName)
+			if tc.want != nil {
+				require.ErrorIs(t, err, tc.want)
 			} else {
-				require.ErrorContains(t, err, "unsupported schedule tzdata version")
+				require.ErrorContains(t, err, tc.wantText)
 			}
 		})
 	}

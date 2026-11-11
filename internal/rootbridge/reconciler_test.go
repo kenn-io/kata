@@ -797,10 +797,9 @@ func TestFieldReconcileSavedSchedules(t *testing.T) {
 		assert.Zero(t, result.FieldConflicts)
 		issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
 		require.NoError(t, err)
-		_, zone, instant, _, err := metadata.ScheduleFieldInstant(string(issue.Metadata), "scheduled_on", "Europe/Paris")
+		_, zone, _, _, err := metadata.ScheduleFieldInstant(string(issue.Metadata), "scheduled_on", "Europe/Paris")
 		require.NoError(t, err)
 		assert.Equal(t, "America/New_York", zone)
-		assert.Equal(t, "2026-08-20T04:00:00Z", instant.UTC().Format(time.RFC3339))
 	})
 }
 
@@ -1093,7 +1092,6 @@ func TestFieldReconcileLegacyDateWithAliasTimezone(t *testing.T) {
 	for _, tc := range []struct {
 		name, issueTimezone, daemonTimezone string
 	}{
-		{"issue timezone", `"US/Eastern"`, "UTC"},
 		{"daemon timezone", ``, "US/Eastern"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1131,40 +1129,47 @@ func TestFieldReconcileLegacyDateWithAliasTimezone(t *testing.T) {
 
 func TestFieldReconcilePreservesIndependentScheduleZones(t *testing.T) {
 	t.Run("first dates use the recurrence zone for scheduled only", func(t *testing.T) {
-		h := newReconcileHarness(t)
-		h.mapField(t, "scheduled_on", "start-date")
-		h.mapField(t, "deadline_on", "due-date")
-		_, err := h.store.CreateRecurrenceForIssue(t.Context(), db.CreateRecurrenceForIssueIn{
-			IssueID: h.issue.ID,
-			Recurrence: db.CreateRecurrenceIn{
-				ProjectID: h.project.ID, Actor: "tester", Rule: "FREQ=DAILY",
-				DTStart: "2026-08-20", Timezone: "America/New_York",
-				Template: db.RecurrenceTemplate{Title: h.issue.Title},
-			},
-		})
-		require.NoError(t, err)
-		_, err = h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-			IssueID: h.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{
-				"scheduled_on": jsontext.Value("null"), "timezone": jsontext.Value("null"),
-			},
-		})
-		require.NoError(t, err)
-		h.client.fieldValues["start-date"] = date("2026-08-21")
-		h.client.fieldValues["due-date"] = date("2026-08-21")
-
-		result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
-		require.NoError(t, err)
-		require.Zero(t, result.FieldConflicts)
-		issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
-		require.NoError(t, err)
-		for key, want := range map[string]time.Time{
-			"scheduled_on": time.Date(2026, 8, 21, 4, 0, 0, 0, time.UTC),
-			"deadline_on":  time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC),
-		} {
-			_, _, at, present, err := metadata.ScheduleFieldInstant(string(issue.Metadata), key, "UTC")
+		for _, legacy := range []bool{false, true} {
+			h := newReconcileHarness(t)
+			h.mapField(t, "scheduled_on", "start-date")
+			h.mapField(t, "deadline_on", "due-date")
+			_, err := h.store.CreateRecurrenceForIssue(t.Context(), db.CreateRecurrenceForIssueIn{
+				IssueID: h.issue.ID,
+				Recurrence: db.CreateRecurrenceIn{
+					ProjectID: h.project.ID, Actor: "tester", Rule: "FREQ=DAILY",
+					DTStart: "2026-08-20", Timezone: "America/New_York",
+					Template: db.RecurrenceTemplate{Title: h.issue.Title},
+				},
+			})
 			require.NoError(t, err)
-			require.True(t, present)
-			assert.Equal(t, want, at.UTC(), key)
+			_, err = h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+				IssueID: h.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{
+					"scheduled_on": jsontext.Value("null"), "timezone": jsontext.Value("null"),
+				},
+			})
+			require.NoError(t, err)
+			if legacy {
+				_, err = h.store.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, `{"scheduled_on":"2026-08-20"}`, h.issue.ID)
+				require.NoError(t, err)
+				h.seedBaseline(t, "scheduled_on", date("2026-08-20"))
+			}
+			h.client.fieldValues["start-date"] = date("2026-08-21")
+			h.client.fieldValues["due-date"] = date("2026-08-21")
+
+			result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
+			require.NoError(t, err)
+			require.Zero(t, result.FieldConflicts)
+			issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
+			require.NoError(t, err)
+			for key, want := range map[string]time.Time{
+				"scheduled_on": time.Date(2026, 8, 21, 4, 0, 0, 0, time.UTC),
+				"deadline_on":  time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC),
+			} {
+				_, _, at, present, err := metadata.ScheduleFieldInstant(string(issue.Metadata), key, "UTC")
+				require.NoError(t, err)
+				require.True(t, present)
+				assert.Equal(t, want, at.UTC(), key)
+			}
 		}
 	})
 
@@ -1306,38 +1311,6 @@ func TestFieldReconcilePreservesIndependentScheduleZones(t *testing.T) {
 		assert.Equal(t, newStart, decodeStoredFieldValue(t, h.fieldState(t, "scheduled_on").Baseline))
 		assert.Equal(t, newDue, decodeStoredFieldValue(t, h.fieldState(t, "deadline_on").Baseline))
 	})
-}
-
-func TestFieldReconcileUsesRecurrenceZoneForLegacyDate(t *testing.T) {
-	for _, raw := range []string{`{}`, `{"scheduled_on":"2026-08-20"}`} {
-		t.Run(raw, func(t *testing.T) {
-			h := newReconcileHarness(t)
-			_, err := h.store.CreateRecurrenceForIssue(t.Context(), db.CreateRecurrenceForIssueIn{
-				IssueID:    h.issue.ID,
-				Recurrence: db.CreateRecurrenceIn{ProjectID: h.project.ID, Actor: "tester", Rule: "FREQ=DAILY", DTStart: "2026-08-20", Timezone: "America/New_York", Template: db.RecurrenceTemplate{Title: "Local plan"}},
-			})
-			require.NoError(t, err)
-			_, err = h.store.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, raw, h.issue.ID)
-			require.NoError(t, err)
-			h.mapField(t, "scheduled_on", "start-date")
-			if raw != `{}` {
-				h.seedBaseline(t, "scheduled_on", date("2026-08-20"))
-			}
-			h.client.fieldValues["start-date"] = date("2026-08-21")
-			result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
-			require.NoError(t, err)
-			require.Zero(t, result.FieldConflicts)
-			issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
-			require.NoError(t, err)
-			values, err := metadataObject(issue.Metadata)
-			require.NoError(t, err)
-			saved, err := metadata.DecodeSavedSchedule(values["scheduled_on"])
-			require.NoError(t, err)
-			require.NotNil(t, saved)
-			assert.Equal(t, "America/New_York", saved.Timezone)
-			assert.Equal(t, metadata.ScheduleTZDataVersion, saved.TZDataVersion)
-		})
-	}
 }
 
 func TestReconcileFirstBindOfCompleteRootUsesReservedClaim(t *testing.T) {

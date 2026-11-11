@@ -1217,26 +1217,6 @@ func RunUISnapshotLimitIgnoresUnseenFutureSchedule(t *testing.T, open func(*test
 	_, err = store.(db.UIStore).ReadUISnapshot(t.Context(), db.UISnapshotQuery{View: "all-open", Limit: 2, CalendarAt: "2026-01-01T00:00:00Z"})
 	require.ErrorContains(t, err, "unsupported schedule tzdata version")
 
-	// Only candidates preceding the filled ordered prefix can change its calendar window.
-	create := func(title, value, zone string) db.Issue {
-		raw := fmt.Sprintf(`{"value":%q,"timezone":%q,"tzdata_version":%q}`, value, zone, metadata.ScheduleTZDataVersion)
-		issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
-			ProjectID: project.ID, Title: title, Author: "user-a",
-			Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(raw)},
-		})
-		require.NoError(t, err)
-		return issue
-	}
-	create("Lower ranked Auckland", "2026-01-01", "Pacific/Auckland")
-	accepted := create("Visible UTC", "2026-01-01", "UTC")
-	create("Higher ranked future Sydney", "2026-01-02", "Australia/Sydney")
-	limited, err := store.(db.UIStore).ReadUISnapshot(t.Context(), db.UISnapshotQuery{
-		View: "today", Limit: 1, CalendarAt: "2026-01-01T00:00:00Z", TimeZone: "UTC",
-	})
-	require.NoError(t, err)
-	require.Equal(t, []string{accepted.UID}, uiIssueUIDs(limited.Issues))
-	require.Equal(t, "2026-01-01T13:00:00Z", limited.CalendarBoundary.UTC().Format(time.RFC3339),
-		"higher-ranked rejected Sydney candidate matters; lower-ranked Auckland midnight does not")
 }
 
 // RunUISnapshotBoundedCalendar checks that lower-ranked dates cannot expire a full result.

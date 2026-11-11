@@ -511,20 +511,6 @@ func TestDetailStripShowsBothDates(t *testing.T) {
 	assert.NotContains(t, got, "deadline:")
 }
 
-func TestDatesFormReadsSavedSchedule(t *testing.T) {
-	h := newDatesHarness(t, nil, viewDetail)
-	scheduled, err := metadata.NewScheduleValue("2026-06-01", "America/New_York")
-	require.NoError(t, err)
-	deadline, err := metadata.NewScheduleValue("2026-06-02", "Europe/Paris")
-	require.NoError(t, err)
-	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": scheduled, "deadline_on": deadline}})
-	require.NoError(t, err)
-	h.reload()
-	h.openForm()
-	assert.Equal(t, "2026-06-01", h.m.input.fieldValue(fieldScheduled))
-	assert.Equal(t, "2026-06-02", h.m.input.fieldValue(fieldDeadline))
-}
-
 func TestDatesFormShowsSavedInstantInItsZoneAndKeepsUndo(t *testing.T) {
 	h := newDatesHarness(t, nil, viewDetail)
 	saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
@@ -552,6 +538,17 @@ func TestDatesFormShowsSavedInstantInItsZoneAndKeepsUndo(t *testing.T) {
 	var fields map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(issue.Metadata), &fields))
 	require.JSONEq(t, string(saved), string(fields["scheduled_on"]))
+	scheduled, err := metadata.NewScheduleValue("2026-06-01", "America/New_York")
+	require.NoError(t, err)
+	deadline, err := metadata.NewScheduleValue("2026-06-02", "Europe/Paris")
+	require.NoError(t, err)
+	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": scheduled, "deadline_on": deadline}})
+	require.NoError(t, err)
+	h.reload()
+	h.openForm()
+	assert.Equal(t, "2026-06-01", h.m.input.fieldValue(fieldScheduled))
+	assert.Equal(t, "2026-06-02", h.m.input.fieldValue(fieldDeadline))
+
 }
 
 func TestDatesFormTodayAdvancesInSavedZone(t *testing.T) {

@@ -295,7 +295,7 @@ describe('kata task view builder', () => {
         expect(result.groups.flatMap((group) => group.issues.map((item) => item.title))).toContain(
           'Tokyo',
         )
-        if (view === 'scheduled') expect(result.groups[0]?.id).toBe(groupID)
+        expect(result.groups[0]?.id).toBe(view === 'inbox' ? 'inbox' : groupID)
       }
     }
   })

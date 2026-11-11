@@ -123,26 +123,6 @@ func (h *recurrenceHarness) save() {
 	h.send(h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}))
 }
 
-func TestRecurrenceFormUsesSavedScheduleZone(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	saved, err := metadata.NewScheduleValue("2026-11-09", "America/New_York")
-	require.NoError(t, err)
-	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-		IssueID: h.issue.ID, Actor: "alice", Patch: map[string]jsontext.Value{
-			"scheduled_on": saved, "timezone": jsontext.Value(`"Europe/Paris"`),
-		},
-	})
-	require.NoError(t, err)
-	h.reload()
-	h.open()
-	assert.Equal(t, "America/New_York", h.m.input.fieldValue(fieldZone))
-	h.fill("FREQ=DAILY", "2026-11-09", "")
-	h.save()
-	recs := h.rows()
-	require.Len(t, recs, 1)
-	assert.Equal(t, "America/New_York", recs[0].Timezone)
-}
-
 func TestRecurrenceTodayUsesSelectedZone(t *testing.T) {
 	h := newRecurrenceHarness(t, viewDetail)
 	now := time.Date(2026, 11, 10, 1, 0, 0, 0, time.UTC)
@@ -232,6 +212,7 @@ func TestRecurrenceTodayUsesSavedZoneWhenZoneBlank(t *testing.T) {
 	require.NoError(t, err)
 	h.reload()
 	h.open()
+	assert.Equal(t, "America/New_York", h.m.input.fieldValue(fieldZone))
 	h.fill("FREQ=DAILY", "today", "")
 	assert.Contains(t, stripANSI(renderRecurrenceForm(h.m.input, 80, 30, h.m.toastNow())), "2026-11-09 Mon")
 	h.save()

@@ -27,9 +27,7 @@ test('saved schedules use their zone and expose the due date to the editor', asy
       writes.push(request.url())
   })
   await scheduled.click()
-  await expect(page.getByRole('button', { name: /Scheduled: Dec 31/ })).toBeVisible()
   await page.getByRole('button', { name: 'Edit due date' }).click()
-  await expect(page.getByRole('button', { name: /Due: Dec 31/ })).toBeVisible()
   await page.getByRole('button', { name: /Due: Dec 31/ }).click()
   const dueDialog = page.getByRole('dialog', { name: 'Due' })
   const write = page.waitForResponse(

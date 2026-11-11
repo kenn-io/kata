@@ -946,6 +946,22 @@ func TestResolveFieldConflictsPreserveScheduleZones(t *testing.T) {
 	assert.Equal(t, "2026-08-22T09:30", saved.Value)
 	assert.Equal(t, "America/Los_Angeles", saved.Timezone)
 
+	changed := oldDue
+	changed.Timezone = newDue.Timezone
+	h.setKataField(t, "deadline_on", changed)
+	_, rejectedEvents, err := service.ResolveFieldConflict(t.Context(), h.issue.ID, "deadline_on", "external", "operator")
+	require.ErrorIs(t, err, ErrFieldConflictChanged)
+	require.Empty(t, rejectedEvents)
+	issue, err = h.store.IssueByID(t.Context(), h.issue.ID)
+	require.NoError(t, err)
+	values, err = metadataObject(issue.Metadata)
+	require.NoError(t, err)
+	saved, err = metadata.DecodeSavedSchedule(values["deadline_on"])
+	require.NoError(t, err)
+	require.Equal(t, changed.Value, saved.Value)
+	require.Equal(t, changed.Timezone, saved.Timezone)
+	h.setKataField(t, "deadline_on", oldDue)
+
 	dueState, dueEvents, err := service.ResolveFieldConflict(
 		t.Context(), h.issue.ID, "deadline_on", "external", "operator",
 	)
@@ -1979,89 +1995,4 @@ func (c *fakeConnectorClient) WriteFields(_ context.Context, params connector.Wr
 		result.Fields[fieldID] = stored
 	}
 	return result, nil
-}
-
-func TestResolveFieldConflictRejectsInterveningScheduleZoneEdit(t *testing.T) {
-	h := newReconcileHarness(t)
-	startMapping := h.mapField(t, "scheduled_on", "start-date")
-	dueMapping := h.mapField(t, "deadline_on", "due-date")
-	oldStart := connector.FieldValue{
-		Kind: fieldKindLocalDateTime, Value: "2026-08-21T09:30", Timezone: "America/New_York",
-	}
-	oldDue := connector.FieldValue{
-		Kind: fieldKindLocalDateTime, Value: "2026-08-21T10:30", Timezone: "America/New_York",
-	}
-	h.setKataField(t, "scheduled_on", oldStart)
-	h.setKataField(t, "deadline_on", oldDue)
-	h.seedBaseline(t, "scheduled_on", oldStart)
-	h.seedBaseline(t, "deadline_on", oldDue)
-	newStart := connector.FieldValue{
-		Kind: fieldKindLocalDateTime, Value: "2026-08-22T09:30", Timezone: "America/Los_Angeles",
-	}
-	newDue := connector.FieldValue{
-		Kind: fieldKindLocalDateTime, Value: "2026-08-22T10:30", Timezone: "America/Los_Angeles",
-	}
-	h.client.fieldValues["start-date"] = newStart
-	h.client.fieldValues["due-date"] = newDue
-	claimToken := "seed-coordinated-conflicts"
-	_, acquired, err := h.store.ClaimExternalRootBinding(
-		t.Context(), h.binding.ID, claimToken, h.now, h.now.Add(-time.Minute),
-	)
-	require.NoError(t, err)
-	require.True(t, acquired)
-	for _, pair := range []struct {
-		mapping  db.ExternalFieldMapping
-		baseline connector.FieldValue
-		external connector.FieldValue
-	}{
-		{mapping: startMapping, baseline: oldStart, external: newStart},
-		{mapping: dueMapping, baseline: oldDue, external: newDue},
-	} {
-		baseline, marshalErr := json.Marshal(pair.baseline)
-		require.NoError(t, marshalErr)
-		external, marshalErr := json.Marshal(pair.external)
-		require.NoError(t, marshalErr)
-		_, _, err = h.store.UpsertExternalFieldState(t.Context(), db.ExternalFieldStateParams{
-			BindingID: h.binding.ID, MappingID: pair.mapping.ID, ClaimToken: claimToken,
-			Baseline: baseline, ConflictKata: baseline, ConflictExternal: external,
-			Conflicted: true, At: h.now, Actor: integrationActor(h.binding),
-		})
-		require.NoError(t, err)
-	}
-	_, err = h.store.ReleaseExternalRootClaim(t.Context(), h.binding.ID, claimToken)
-	require.NoError(t, err)
-	service := NewService(h.store, h.registry, nil)
-
-	state, events, err := service.ResolveFieldConflict(
-		t.Context(), h.issue.ID, "scheduled_on", "external", "operator",
-	)
-
-	require.NoError(t, err)
-	assert.False(t, state.Conflicted)
-	assert.Equal(t, newStart, decodeStoredFieldValue(t, state.Baseline))
-	assert.Contains(t, eventTypes(events), "issue.external_field_resolved")
-	assert.True(t, h.fieldState(t, "deadline_on").Conflicted)
-	issue, readErr := h.store.IssueByID(t.Context(), h.issue.ID)
-	require.NoError(t, readErr)
-	values, readErr := metadataObject(issue.Metadata)
-	require.NoError(t, readErr)
-	saved, err := metadata.DecodeSavedSchedule(values["scheduled_on"])
-	require.NoError(t, err)
-	assert.Equal(t, "2026-08-22T09:30", saved.Value)
-	assert.Equal(t, "America/Los_Angeles", saved.Timezone)
-
-	changed := oldDue
-	changed.Timezone = newDue.Timezone
-	h.setKataField(t, "deadline_on", changed)
-	_, dueEvents, err := service.ResolveFieldConflict(t.Context(), h.issue.ID, "deadline_on", "external", "operator")
-	require.ErrorIs(t, err, ErrFieldConflictChanged)
-	require.Empty(t, dueEvents)
-	issue, err = h.store.IssueByID(t.Context(), h.issue.ID)
-	require.NoError(t, err)
-	values, err = metadataObject(issue.Metadata)
-	require.NoError(t, err)
-	saved, err = metadata.DecodeSavedSchedule(values["deadline_on"])
-	require.NoError(t, err)
-	require.Equal(t, changed.Value, saved.Value)
-	require.Equal(t, changed.Timezone, saved.Timezone)
 }

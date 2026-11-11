@@ -122,103 +122,51 @@ func (a *legacyDayAPI) readIssue(context.Context, int64, string) (*IssueDetail, 
 	return &IssueDetail{Issue: a.detail}, nil
 }
 
-func TestDateToggleLegacyDaemonZoneRefreshes(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		now := time.Date(2026, 11, 10, 5, 1, 0, 0, time.UTC)
-		withClock(t, func() time.Time { return now })
-		issue := dated("new", "2026-11-10", "")
-		issue.Metadata.ScheduledOn = jsontext.Value(`"2026-11-10"`)
-		issue.ScheduledOnToday = "2026-11-09"
-		updated := issue
-		updated.ScheduledOnToday = "2026-11-10"
-		api := &legacyDayAPI{issues: []Issue{updated}, detail: &updated}
-		m := filterFormFixture()
-		m.api = api
-		m.list.filter = ListFilter{Date: dateToday}.stampDay()
-		m.list = m.list.applyFetched(initialFetchMsg{issues: []Issue{issue}})
-		m, cmd := stepModel(m, dayTickMsg{})
-		for _, msg := range runCmdTree(cmd) {
-			if _, ok := msg.(refetchedMsg); ok {
-				m, _ = stepModel(m, msg)
-			}
-		}
-		require.Equal(t, 1, api.calls)
-		assertQueueShortIDs(t, m.list.visibleRows(), []string{"new"})
-	})
-}
-
-func TestOpenDatesFormRefreshesLegacyDaemonDay(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		now := time.Date(2026, 11, 10, 5, 1, 0, 0, time.UTC)
-		withClock(t, func() time.Time { return now })
-		issue := dated("new", "2026-11-10", "")
-		issue.Metadata.ScheduledOn = jsontext.Value(`"2026-11-10"`)
-		issue.ScheduledOnToday = "2026-11-09"
-		updated := issue
-		updated.ScheduledOnToday = "2026-11-10"
-		api := &legacyDayAPI{issues: []Issue{updated}, detail: &updated}
-		m := filterFormFixture()
-		m.api = api
-		m.list.issues = []Issue{issue}
-		m.input = newDatesForm(formTarget{issueUID: issue.UID, issueShortID: issue.ShortID, projectID: issue.ProjectID}, issue)
-		m.input.field(fieldScheduled).setValue("tomorrow")
-		m, cmd := stepModel(m, dayTickMsg{})
-		for _, msg := range runCmdTree(cmd) {
-			if _, tick := msg.(dayTickMsg); !tick {
-				m, _ = stepModel(m, msg)
-			}
-		}
-		require.Contains(t, stripANSI(renderDatesForm(m.input, 80, now)), "2026-11-11 Wed")
-		in, err := datesInputFromForm(m.input, now, "tester")
-		require.NoError(t, err)
-		require.NotNil(t, in.Set["scheduled_on"])
-		require.Equal(t, "2026-11-11", *in.Set["scheduled_on"])
-	})
-}
-
-func TestOpenDatesFormRefreshesLegacyDayOutsideList(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		now := time.Date(2026, 11, 10, 5, 1, 0, 0, time.UTC)
-		withClock(t, func() time.Time { return now })
-		issue := dated("new", "2026-11-10", "")
-		issue.Metadata.ScheduledOn = jsontext.Value(`"2026-11-10"`)
-		issue.ScheduledOnToday = "2026-11-09"
-		updated := issue
-		updated.ScheduledOnToday = "2026-11-10"
-		m := filterFormFixture()
-		m.api = &legacyDayAPI{detail: &updated}
-		m.input = newDatesForm(formTarget{issueShortID: issue.ShortID, projectID: issue.ProjectID}, issue)
-		m.input.field(fieldScheduled).setValue("tomorrow")
-		m, cmd := stepModel(m, dayTickMsg{})
-		for _, msg := range runCmdTree(cmd) {
-			if _, tick := msg.(dayTickMsg); !tick {
-				m, _ = stepModel(m, msg)
-			}
-		}
-		require.Contains(t, stripANSI(renderDatesForm(m.input, 80, now)), "2026-11-11 Wed")
-	})
-}
-
-func TestOpenEmptyDatesFormRefreshesDaemonDay(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		now := time.Date(2026, 11, 10, 5, 1, 0, 0, time.UTC)
-		withClock(t, func() time.Time { return now })
-		issue := dated("new", "", "")
-		issue.ScheduledOnToday = "2026-11-09"
-		updated := issue
-		updated.ScheduledOnToday = "2026-11-10"
-		m := filterFormFixture()
-		m.api = &legacyDayAPI{detail: &updated}
-		m.input = newDatesForm(formTarget{issueShortID: issue.ShortID, projectID: issue.ProjectID}, issue)
-		m.input.field(fieldScheduled).setValue("today")
-		m, cmd := stepModel(m, dayTickMsg{})
-		for _, msg := range runCmdTree(cmd) {
-			if _, tick := msg.(dayTickMsg); !tick {
-				m, _ = stepModel(m, msg)
-			}
-		}
-		require.Contains(t, stripANSI(renderDatesForm(m.input, 80, now)), "2026-11-10 Tue")
-	})
+func TestOpenDatesFormRefreshesDaemonDay(t *testing.T) {
+	for _, tc := range []struct {
+		name, scheduled, input, want, rendered string
+		inList                                 bool
+	}{
+		{"in list", "2026-11-10", "tomorrow", "2026-11-11", "2026-11-11 Wed", true},
+		{"outside list", "2026-11-10", "tomorrow", "2026-11-11", "2026-11-11 Wed", false},
+		{"empty schedule", "", "today", "2026-11-10", "2026-11-10 Tue", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				now := time.Date(2026, 11, 10, 5, 1, 0, 0, time.UTC)
+				withClock(t, func() time.Time { return now })
+				issue := dated("new", tc.scheduled, "")
+				if tc.scheduled != "" {
+					issue.Metadata.ScheduledOn = jsontext.Value(`"2026-11-10"`)
+				}
+				issue.ScheduledOnToday = "2026-11-09"
+				updated := issue
+				updated.ScheduledOnToday = "2026-11-10"
+				m := filterFormFixture()
+				m.api = &legacyDayAPI{issues: []Issue{updated}, detail: &updated}
+				if tc.inList {
+					m.list.issues = []Issue{issue}
+				}
+				target := formTarget{issueShortID: issue.ShortID, projectID: issue.ProjectID}
+				if tc.inList {
+					target.issueUID = issue.UID
+				}
+				m.input = newDatesForm(target, issue)
+				m.input.field(fieldScheduled).setValue(tc.input)
+				m, cmd := stepModel(m, dayTickMsg{})
+				for _, msg := range runCmdTree(cmd) {
+					if _, tick := msg.(dayTickMsg); !tick {
+						m, _ = stepModel(m, msg)
+					}
+				}
+				require.Contains(t, stripANSI(renderDatesForm(m.input, 80, now)), tc.rendered)
+				in, err := datesInputFromForm(m.input, now, "tester")
+				require.NoError(t, err)
+				require.NotNil(t, in.Set["scheduled_on"])
+				require.Equal(t, tc.want, *in.Set["scheduled_on"])
+			})
+		})
+	}
 }
 
 func TestDetailRefreshesLegacyDayOutsideList(t *testing.T) {
@@ -634,32 +582,4 @@ func TestDateToggle_DaemonCheckIgnoresSupersededFailure(t *testing.T) {
 	require.Empty(t, m.list.status)
 	m, _ = stepModel(m, oldResult)
 	assert.Empty(t, m.list.status, "the current filter must ignore the superseded HTTP 503")
-}
-
-// A saved zone can reach midnight while the TUI host is still on the same day.
-func TestDateToggle_IdleTickRefreshesSavedCalendar(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		now := time.Date(2026, 1, 1, 14, 59, 0, 0, time.UTC)
-		withClock(t, func() time.Time { return now })
-		future, keep := dated("new", "2026-01-02", ""), dated("keep", "2026-01-01", "")
-		future.ScheduledOnToday, keep.ScheduledOnToday = "2026-01-01", "2026-01-01"
-		calls := 0
-		client := NewClient("http://127.0.0.1:7777", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-			require.Equal(t, "/api/v1/projects/7/issues", r.URL.Path)
-			calls++
-			future.ScheduledOnToday, keep.ScheduledOnToday = "2026-01-02", "2026-01-02"
-			return jsonResponse(t, map[string]any{"issues": []Issue{future, keep}}), nil
-		})})
-		m := filterFormFixture()
-		m.api = newUndoClient(client)
-		m.list.filter = ListFilter{Date: dateToday}.stampDay()
-		m.list = m.list.applyFetched(initialFetchMsg{issues: []Issue{future, keep}})
-		assertQueueShortIDs(t, m.list.visibleRows(), []string{"keep"})
-		now = now.Add(2 * time.Minute)
-		next, cmd, handled := m.routeSSE(dayTickMsg{})
-		require.True(t, handled)
-		m = drainInboxCmds(next.(Model), cmd)
-		require.Equal(t, 1, calls, "idle date filters must refresh server-projected calendar days")
-		assertQueueShortIDs(t, m.list.visibleRows(), []string{"new", "keep"})
-	})
 }

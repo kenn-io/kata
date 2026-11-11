@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
-	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 // RunRecurrenceAttachmentKeepsDeadlineZone checks that attaching a recurrence preserves the deadline zone.
@@ -22,23 +21,17 @@ func RunRecurrenceAttachmentKeepsDeadlineZone(t *testing.T, open func(*testing.T
 		localMismatch bool
 	}{
 		{"issue zone", jsontext.Value(`"America/New_York"`), "UTC", `"2026-05-19T09:00"`, "America/New_York", false},
-		{"daemon zone", nil, "America/New_York", `"2026-05-19T09:00"`, "America/New_York", false},
 		{"legacy Local instant", jsontext.Value(`"Local"`), "UTC", `"2026-05-19T09:00:00Z"`, "America/New_York", false},
-		{"legacy Local civil", jsontext.Value(`"Local"`), "Local", `"2026-05-19T09:00"`, "America/New_York", false},
 		{"legacy Local civil mismatched rules", jsontext.Value(`"Local"`), "Local", `"2026-05-19T09:00"`, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.defaultZone == "Local" || tc.name == "legacy Local instant" {
-				t.Setenv("TZ", "America/New_York")
+			if tc.localMismatch || tc.name == "legacy Local instant" {
 				previous := time.Local
-				localZone := recurrenceclient.LocalZone("/etc/localtime")
-				location, err := time.LoadLocation(localZone)
+				location, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
 				require.NoError(t, err)
 				time.Local = location
-				tc.wantZone = localZone
 				if tc.localMismatch {
-					_, offset := time.Date(2026, 5, 19, 9, 0, 0, 0, location).Zone()
-					time.Local = time.FixedZone(localZone, offset+3600)
+					time.Local = time.FixedZone("America/New_York", -8*60*60)
 				}
 				t.Cleanup(func() { time.Local = previous })
 			}

@@ -224,7 +224,7 @@ describe('IssueProperties', () => {
     {
       value: '2026-06-01',
       timezone: 'UTC',
-      projected: undefined,
+      projected: '2026-06-01',
       display: 'Jun 1',
       picker: 'Jun 1, 2026',
     },
