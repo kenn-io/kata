@@ -36,7 +36,7 @@ func TestApplySharedEmbeddingChoice(t *testing.T) {
 	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
 }
 
-func TestDaemonPreflightValidatesSharedChoice(t *testing.T) {
+func TestDaemonPreflightFallsBackFromInvalidSharedChoice(t *testing.T) {
 	home := setupKataEnv(t)
 	clearLocalEmbeddingsEnv(t)
 	resetFlags(t)
@@ -45,7 +45,14 @@ func TestDaemonPreflightValidatesSharedChoice(t *testing.T) {
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nmodel_context_tokens=32000\nmax_batch_tokens=31999\n"), 0600))
 	require.NoError(t, embedlocal.RecordChoice())
-	_, err := preflightDaemonStartup(t.Context(), "", false, true)
+	startup, err := preflightDaemonStartup(t.Context(), "", false, true)
+	require.NoError(t, err)
+	require.Equal(t, startup.SavedEmbeddings, startup.Config.Search.Embeddings)
+	require.Nil(t, startup.Embedder)
+	require.ErrorContains(t, startup.SharedChoiceErr, "embedding batching")
+
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nlocal=true\nmodel_context_tokens=32000\nmax_batch_tokens=31999\n"), 0600))
+	_, err = preflightDaemonStartup(t.Context(), "", false, true)
 	require.ErrorContains(t, err, "embedding batching")
 }
 

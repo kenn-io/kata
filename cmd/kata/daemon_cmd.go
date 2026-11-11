@@ -1081,6 +1081,11 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		dcfg.Search.Embeddings = chosen
 	}
 	embedder, vectorsPath, err := preflightEmbeddingStartup(dcfg.Search.Embeddings, dbPath)
+	if err != nil && chosen != savedEmbeddings {
+		choiceErr = fmt.Errorf("preflight: %w", err)
+		dcfg.Search.Embeddings = savedEmbeddings
+		embedder, vectorsPath, err = preflightEmbeddingStartup(savedEmbeddings, dbPath)
+	}
 	if err != nil {
 		return daemonStartupPreflight{}, err
 	}
