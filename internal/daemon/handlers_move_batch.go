@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"go.kenn.io/kata/internal/api"
@@ -18,6 +19,7 @@ const moveBatchChunkIssues = 50
 const moveBatchClaimConcurrency = 16
 
 type moveBatchItem struct {
+	ctx    context.Context
 	move   db.MoveIssueProjectIn
 	issue  db.Issue
 	target db.Project
@@ -72,24 +74,29 @@ func previewMoveBatch(ctx context.Context, store db.Storage, items []moveBatchIt
 }
 
 func checkMoveBatchClaims(ctx context.Context, cfg ServerConfig, items []moveBatchItem, results []api.MoveIssuesResult, indexes []int, actor string, cache *claimClientCache, refresh bool) {
-	var claimed []db.Issue
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, moveBatchClaimConcurrency)
 	for _, j := range indexes {
-		if results[j].Result == "" {
-			claimed = append(claimed, items[j].tree...)
-		}
-	}
-	refusals := requireFederatedIssueClaimsConcurrently(ctx, cfg, claimed, actor, cache, moveBatchClaimConcurrency, refresh)
-	for _, j := range indexes {
-		if results[j].Result != "" {
+		if results[j].Result != "" || len(items[j].tree) == 0 {
 			continue
 		}
-		for _, issue := range items[j].tree {
-			if err := refusals[issue.UID]; err != nil {
-				moveBatchRefusal(&results[j], err)
-				break
+		slots <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-slots }()
+			itemCtx := items[j].ctx
+			if itemCtx == nil {
+				itemCtx = ctx
 			}
-		}
+			refusals := requireFederatedIssueClaimsConcurrently(itemCtx, cfg, items[j].tree, actor, cache, moveBatchClaimConcurrency, refresh)
+			for _, issue := range items[j].tree {
+				if err := refusals[issue.UID]; err != nil {
+					moveBatchRefusal(&results[j], err)
+					break
+				}
+			}
+		})
 	}
+	wg.Wait()
 }
 
 func finishUnchangedMove(ctx context.Context, store db.Storage, item moveBatchItem, result *api.MoveIssuesResult, prior api.MoveIssuesResult) error {
@@ -152,11 +159,17 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		}
 		n := len(in.Body.Items)
 		items := make([]moveBatchItem, n)
+		for j := range items {
+			//nolint:fatcontext // Each item derives from the same request, not the previous item.
+			items[j].ctx = batchItemHostContext(ctx)
+		}
+		ctx = context.WithValue(ctx, deferBatchHostFenceKey{}, true)
 		results := make([]api.MoveIssuesResult, n)
 		targets := map[string]db.Project{}
-		authorize := func(uids []string) error { _, err := authorizeHostProjectScope(ctx, nil, uids, false); return err }
 		for j := in.Body.StartIndex; j < n; j++ {
 			input := in.Body.Items[j]
+			itemCtx := items[j].ctx
+			authorize := func(uids []string) error { _, err := authorizeHostProjectScope(itemCtx, nil, uids, false); return err }
 			r := &results[j]
 			r.Index = j
 			r.Ref = input.Ref
@@ -176,16 +189,17 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				} else {
 					target, err = activeProjectByUID(ctx, cfg.DB, uid)
 				}
-				if err == nil {
-					err = authorize([]string{uid})
-				}
 				if err != nil {
 					moveBatchRefusal(r, err)
 					continue
 				}
 				targets[uid] = target
 			}
-			issue, source, err := resolveMoveBatchIssue(ctx, cfg.DB, in.Body.DefaultProjectID, input.Ref)
+			if err := authorize([]string{uid}); err != nil {
+				moveBatchRefusal(r, err)
+				continue
+			}
+			issue, source, err := resolveMoveBatchIssue(itemCtx, cfg.DB, in.Body.DefaultProjectID, input.Ref)
 			if err != nil {
 				moveBatchRefusal(r, err)
 				continue
@@ -202,7 +216,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			}
 			items[j].issue = issue
 			items[j].target = target
-			items[j].move = db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: issue.ProjectID, ToProjectID: target.ID, IfMatchRev: rev, Actor: actor, Single: !in.Body.Subtree, AuthorizeProjects: authorize}
+			items[j].move = db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: issue.ProjectID, ToProjectID: target.ID, IfMatchRev: rev, Actor: actor, Single: !in.Body.Subtree, AuthorizeProjects: authorize, BindContext: func(ctx context.Context) context.Context { return bindBatchItemHostContext(ctx, itemCtx) }}
 		}
 		cache := &claimClientCache{}
 		succeeded, priorMoves, conflicts, err := seedMoveBatchContinuations(ctx, cfg, in, items, results, actor, cache)
@@ -363,7 +377,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				cfg.Publish().EventsByProject(events)
 			}
 			for _, j := range noops {
-				if err := finishUnchangedMove(ctx, cfg.DB, items[j], &results[j], succeeded[items[j].issue.ID]); err != nil {
+				if err := finishUnchangedMove(items[j].ctx, cfg.DB, items[j], &results[j], succeeded[items[j].issue.ID]); err != nil {
 					return nil, moveBatchError(err, results[in.Body.StartIndex:], start)
 				}
 				if results[j].Result == "unchanged" {

@@ -46,6 +46,7 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 		}
 	}
 	for j, completed := range in.Body.Completed {
+		itemCtx := items[j].ctx
 		switch completed.Result {
 		case "moved", "unchanged", "refused", "would_move":
 		default:
@@ -61,32 +62,32 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 		if targetUID == "" {
 			targetUID = in.Body.ToProjectUID
 		}
-		target, err := activeProjectByUID(ctx, cfg.DB, targetUID)
+		target, err := activeProjectByUID(itemCtx, cfg.DB, targetUID)
 		if err != nil {
 			continue
 		}
-		if _, err := authorizeHostProjectScope(ctx, nil, []string{targetUID}, false); err != nil {
+		if _, err := authorizeHostProjectScope(itemCtx, nil, []string{targetUID}, false); err != nil {
 			continue
 		}
-		current, _, err := resolveMoveBatchIssue(ctx, cfg.DB, 0, issue.UID)
+		current, _, err := resolveMoveBatchIssue(itemCtx, cfg.DB, 0, issue.UID)
 		if err != nil || current.ID != issue.ID {
 			continue
 		}
 		if completed.Result == "moved" {
-			valid, err := verifyMoveBatchEvent(ctx, cfg.DB, in.Body.DefaultProjectID, input, completed, current, target)
+			valid, err := verifyMoveBatchEvent(itemCtx, cfg.DB, in.Body.DefaultProjectID, input, completed, current, target)
 			if err != nil {
 				return nil, nil, nil, err
 			}
 			if !valid {
 				continue
 			}
-			items[j] = moveBatchItem{issue: current, target: target}
+			items[j] = moveBatchItem{ctx: itemCtx, issue: current, target: target}
 			results[j].Result = ""
 			moves[current.ID] = moveBatchPrior{targetID: target.ID, revision: completed.Revision}
 			succeeded[current.ID] = api.MoveIssuesResult{Result: "moved", Revision: completed.Revision}
 			continue
 		}
-		resolved, _, err := resolveMoveBatchIssue(ctx, cfg.DB, in.Body.DefaultProjectID, input.Ref)
+		resolved, _, err := resolveMoveBatchIssue(itemCtx, cfg.DB, in.Body.DefaultProjectID, input.Ref)
 		if err != nil || resolved.ID != current.ID || (input.ExpectedRevision != 0 && input.ExpectedRevision != current.Revision) {
 			continue
 		}
@@ -95,13 +96,13 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 			continue
 		}
 		if completed.Result == "would_move" && in.Body.DryRun && current.ProjectID != target.ID {
-			items[j] = moveBatchItem{issue: current, target: target, move: db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: current.ProjectID, ToProjectID: target.ID, IfMatchRev: current.Revision, Actor: actor, Single: !in.Body.Subtree, AuthorizeProjects: func(uids []string) error { _, err := authorizeHostProjectScope(ctx, nil, uids, false); return err }}}
+			items[j] = moveBatchItem{ctx: itemCtx, issue: current, target: target, move: db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: current.ProjectID, ToProjectID: target.ID, IfMatchRev: current.Revision, Actor: actor, Single: !in.Body.Subtree, AuthorizeProjects: func(uids []string) error { _, err := authorizeHostProjectScope(itemCtx, nil, uids, false); return err }, BindContext: func(ctx context.Context) context.Context { return bindBatchItemHostContext(ctx, itemCtx) }}}
 			results[j].Result = ""
 			if err := previewMoveBatch(ctx, cfg.DB, items, results, []int{j}); err != nil {
 				return nil, nil, nil, err
 			}
 			if results[j].Result == "" {
-				refusals := requireFederatedIssueClaimsConcurrently(ctx, cfg, items[j].tree, actor, cache, moveBatchClaimConcurrency, false)
+				refusals := requireFederatedIssueClaimsConcurrently(itemCtx, cfg, items[j].tree, actor, cache, moveBatchClaimConcurrency, false)
 				for _, member := range items[j].tree {
 					if err := refusals[member.UID]; err != nil {
 						moveBatchRefusal(&results[j], err)
@@ -115,7 +116,7 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 			continue
 		}
 		if completed.Result == "unchanged" && current.ProjectID == target.ID {
-			items[j] = moveBatchItem{issue: current, target: target}
+			items[j] = moveBatchItem{ctx: itemCtx, issue: current, target: target}
 			results[j].Result = ""
 			succeeded[current.ID] = api.MoveIssuesResult{Result: "unchanged", Revision: current.Revision}
 		}

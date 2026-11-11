@@ -16,10 +16,19 @@ func RunMoveBatchTx(ctx context.Context, tx *sql.Tx, in MoveIssuesBatchIn, move 
 		}
 		item.DryRun = in.DryRun
 		item.Savepoint = true
-		result, err := move(ctx, tx, item)
+		itemCtx := ctx
+		var err error
+		if item.BindContext != nil {
+			itemCtx = item.BindContext(ctx)
+			err = ApplyTransactionFence(itemCtx, tx)
+		}
+		var result MoveIssueProjectOut
+		if err == nil {
+			result, err = move(itemCtx, tx, item)
+		}
 		if err == nil && !in.DryRun && in.Comment != "" {
 			var events []Event
-			commentCtx := WithCommentMetadataHook(ctx, CommentMetadataPolicy(ctx), &events)
+			commentCtx := WithCommentMetadataHook(itemCtx, CommentMetadataPolicy(itemCtx), &events)
 			for _, issue := range result.Issues {
 				_, _, err = comment(commentCtx, tx, CreateCommentParams{IssueID: issue.ID, Author: item.Actor, Body: in.Comment, Teammate: in.Teammate})
 				if err != nil {

@@ -553,6 +553,8 @@ type IssueMoveMember struct {
 
 // MoveIssueProjectIn carries inputs for MoveIssueProject.
 type MoveIssueProjectIn struct {
+	// BindContext selects the item's authorization state inside a batch savepoint.
+	BindContext func(context.Context) context.Context
 	// Savepoint keeps authorization refusal inside the batch item transaction.
 	Savepoint bool
 	// AuthorizeProjects checks source project UIDs resolved inside the transaction.
