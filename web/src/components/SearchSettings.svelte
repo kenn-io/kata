@@ -181,7 +181,12 @@
         restartDeadline = 0
     }
     if (restartPending && Date.now() >= restartDeadline) {
-      requestError = originStable ? `Couldn't reconnect. ${recoveryGuidance}` : recoveryGuidance
+      if (next?.job?.state === 'restart') {
+        restartDeadline = 0
+        requestError = "Couldn't confirm restart. Try again or run kata daemon restart."
+      } else {
+        requestError = originStable ? `Couldn't reconnect. ${recoveryGuidance}` : recoveryGuidance
+      }
     }
     loading = false
     poll()

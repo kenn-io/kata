@@ -163,6 +163,27 @@ describe('SearchSettings', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+  test('allows retry after a restart request is lost while the daemon stays up', async () => {
+    vi.useFakeTimers()
+    const pending = status({
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+    })
+    setGeneratedFetch(vi.fn(async () => Response.json(pending)))
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    const postFetch = vi.fn<typeof fetch>().mockRejectedValue(new TypeError('disconnected'))
+    renderSettings({ postFetch, originStable: true })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(122_000)
+    expect(screen.getByRole('alert').textContent).toContain("Couldn't confirm restart")
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    expect(postFetch).toHaveBeenCalledTimes(2)
+  })
+
   test.each([
     [true, "Couldn't reconnect. Run kata daemon status, then reopen kata ui."],
     [false, 'Run kata daemon status, then reopen kata ui.'],
