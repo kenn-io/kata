@@ -66,7 +66,7 @@ func TestPostgresLegacyReplayRecovery(t *testing.T) {
 			binding, err = store.FederationBindingByProject(ctx, binding.ProjectID)
 			require.NoError(t, err)
 			envelope := eventEnvelopeForSyncTest(event, 100)
-			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{Events: []api.EventEnvelope{envelope}, NextAfterID: 101}))
 			}))
 			t.Cleanup(hub.Close)
