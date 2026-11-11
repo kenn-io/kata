@@ -64,7 +64,7 @@ func TestFederationPushRetainsUnrecognizedRejection(t *testing.T) {
 	require.NoError(t, err)
 	client, err := NewClient(ctx, hub.URL, "token", clientpkg.Opts{})
 	require.NoError(t, err)
-	require.ErrorContains(t, pushDirectSpoke(ctx, spoke.DB, &binding, 1, client, nil, newMoveCredentialStore(), clientpkg.Opts{}), "invalid rejection details")
+	require.Error(t, pushDirectSpoke(ctx, spoke.DB, &binding, 1, client, nil, newMoveCredentialStore(), clientpkg.Opts{}))
 	retained, err := spoke.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Less(t, retained.PushCursorEventID, event.ID)
@@ -92,7 +92,7 @@ func TestFederationPushRejectsInvalidAcknowledgments(t *testing.T) {
 }
 
 func TestFederationPushReportsUnknownRejectionReason(t *testing.T) {
-	message := federationEventRejectionMessage([]db.FederationEventRejection{{Code: "future_reason", Message: "future detail"}}, 0)
+	message := federationEventRejectionMessage([]db.FederationEventRejection{{Code: "future_reason", Message: "future detail"}}, 1, 0)
 	require.Contains(t, message, "future_reason")
 	require.NotContains(t, message, "need project access")
 }

@@ -1489,8 +1489,12 @@ func checkFederationResetLifecycle(t *testing.T, store db.Storage, backend Backe
 	assert.Equal(t, int64(9), binding.ReplayHorizonEventID)
 	assert.Equal(t, int64(8), binding.PullCursorEventID)
 
+	require.NoError(t, store.RecordFederationPushAccepted(ctx, project.ID, []int64{issueEvent.ID}))
+	pendingEvents, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), 0, 10)
+	require.NoError(t, err)
+	require.Empty(t, pendingEvents)
 	if err := store.ResetFederatedProjectIfNoPendingPush(ctx, project.ID, 20, 19,
-		store.InstanceUID(), issueEvent.ID); err != nil {
+		store.InstanceUID(), 0); err != nil {
 		return fmt.Errorf("reset acknowledged projection: %w", err)
 	}
 	_, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)

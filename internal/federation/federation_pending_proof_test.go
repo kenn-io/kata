@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
@@ -33,20 +34,10 @@ func TestSyncFederationInterruptedLeaveDoesNotBlockUnrelatedPush(t *testing.T) {
 	}
 }
 
-func TestSyncFederationInvalidOptionalSigningCredentialReturnsError(t *testing.T) {
-	hub, projects := newMoveDeliveryHub(t, "active-source", "other-source")
-	spoke := newMoveDeliverySpoke(t, hub, projects)
-	credential := spoke.credentials[projects[1].UID]
-	credential.Signing = &signingpolicy.Source{HubURL: "https://other.example"}
-	spoke.credentials[projects[1].UID] = credential
-	_, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Independent work", Author: "worker"})
-	require.NoError(t, err)
-	require.ErrorIs(t, spoke.sync(t, 0), signingpolicy.ErrInvalid)
-}
-
-func TestSyncFederationUnusableOptionalProofDoesNotBlockPush(t *testing.T) {
-	for _, kind := range []string{"origin", "actor", "project", "binding-project"} {
+func TestFederationMoveSourceCredentialValidation(t *testing.T) {
+	for _, kind := range []string{"origin", "actor", "project", "binding-project", "signing"} {
 		t.Run(kind, func(t *testing.T) {
+			ctx := t.Context()
 			hub, projects := newMoveDeliveryHub(t, "active-source", "other-source")
 			spoke := newMoveDeliverySpoke(t, hub, projects)
 			credential := spoke.credentials[projects[1].UID]
@@ -58,22 +49,31 @@ func TestSyncFederationUnusableOptionalProofDoesNotBlockPush(t *testing.T) {
 			case "project":
 				credential.HubProjectID = projects[1].ID + 100
 			case "binding-project":
-				binding, err := spoke.env.DB.FederationBindingByProject(t.Context(), spoke.projects[1].ID)
+				binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[1].ID)
 				require.NoError(t, err)
 				binding.HubProjectUID = "01HZNQ7VFPK1XGD8R5MABCD4EX"
-				_, err = spoke.env.DB.UpsertFederationBinding(t.Context(), binding)
+				_, err = spoke.env.DB.UpsertFederationBinding(ctx, binding)
 				require.NoError(t, err)
+			case "signing":
+				credential.Signing = &signingpolicy.Source{HubURL: "https://other.example"}
 			}
 			spoke.credentials[projects[1].UID] = credential
-			issue, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Independent work", Author: "worker"})
+			_, event, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Independent work", Author: "worker"})
 			require.NoError(t, err)
-			require.NoError(t, spoke.sync(t, 0))
-			_, err = hub.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+			binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 			require.NoError(t, err)
-			local, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "Required source", Author: "worker"})
+			tokens, err := federationMoveSourceTokens(ctx, spoke.env.DB, spoke.credentials, binding, hub.URL, []db.Event{event}, clientpkg.Opts{})
+			if kind == "signing" {
+				require.ErrorIs(t, err, signingpolicy.ErrInvalid)
+				return
+			}
 			require.NoError(t, err)
-			spoke.move(t, local, 1, 0)
-			err = spoke.sync(t, 0)
+			require.NotContains(t, tokens, projects[1].UID)
+			local, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "Required source", Author: "worker"})
+			require.NoError(t, err)
+			move, err := spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: local.ID, FromProjectID: spoke.projects[1].ID, ToProjectID: spoke.projects[0].ID, IfMatchRev: local.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			_, err = federationMoveSourceTokens(ctx, spoke.env.DB, spoke.credentials, binding, hub.URL, move.Events, clientpkg.Opts{})
 			switch kind {
 			case "origin":
 				require.ErrorContains(t, err, "move source credential origin differs from binding")
@@ -84,6 +84,19 @@ func TestSyncFederationUnusableOptionalProofDoesNotBlockPush(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSyncFederationUnusableOptionalProofDoesNotBlockPush(t *testing.T) {
+	hub, projects := newMoveDeliveryHub(t, "active-source", "other-source")
+	spoke := newMoveDeliverySpoke(t, hub, projects)
+	credential := spoke.credentials[projects[1].UID]
+	credential.HubURL = "https://other.example"
+	spoke.credentials[projects[1].UID] = credential
+	issue, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Independent work", Author: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	_, err = hub.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
 }
 
 func TestSyncFederationPendingProofCannotAuthorizeCurrentOwner(t *testing.T) {

@@ -427,7 +427,7 @@ func pushDirectSpokeTracked(
 			}
 		}
 		if len(rejections) > 0 {
-			err := &federationPartialPushError{message: "pending federation events remain: " + federationEventRejectionMessage(rejections, acknowledged)}
+			err := &federationPartialPushError{message: "pending federation events remain: " + federationEventRejectionMessage(rejections, len(rejectedEvents), acknowledged)}
 			return errors.Join(err, store.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
 		}
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
@@ -482,7 +482,7 @@ func validateFederationPushAcknowledgment(batch []db.Event, ack api.FederationIn
 	return rejected, nil
 }
 
-func federationEventRejectionMessage(rejected []db.FederationEventRejection, acknowledged int) string {
+func federationEventRejectionMessage(rejected []db.FederationEventRejection, pending, acknowledged int) string {
 	messages := make([]string, 0, 5)
 	seen := map[[2]string]bool{}
 	unknown := false
@@ -511,9 +511,9 @@ func federationEventRejectionMessage(rejected []db.FederationEventRejection, ack
 		}
 	}
 	if unknown {
-		return fmt.Sprintf("%d events rejected, including unknown reasons (showing up to five): %s; hub acknowledged %d other events", len(rejected), strings.Join(messages, "; "), acknowledged)
+		return fmt.Sprintf("%d events pending, including unknown rejection reasons (showing up to five): %s; hub acknowledged %d other events", pending, strings.Join(messages, "; "), acknowledged)
 	}
-	return fmt.Sprintf("%d events need project access (showing up to five issues): %s; hub acknowledged %d other events", len(rejected), strings.Join(messages, "; "), acknowledged)
+	return fmt.Sprintf("%d events need project access (showing up to five issues): %s; hub acknowledged %d other events", pending, strings.Join(messages, "; "), acknowledged)
 }
 
 // PushDirectSpoke drains pending direct-spoke events without requiring pull authority.

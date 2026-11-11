@@ -341,11 +341,12 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		 WHERE project_id = ?
 		   AND NOT EXISTS (
 		       SELECT 1
-		         FROM events
-		        WHERE project_id = ?
-		          AND origin_instance_uid = ?
-		          AND id > ?
-		          AND `+federationPushEventTypeCondition("type")+`
+		         FROM events e
+		        WHERE e.project_id = ?
+		          AND e.origin_instance_uid = ?
+		          AND e.id > ?
+		          AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
+		          AND `+federationPushEventTypeCondition("e.type")+`
 		   )
 		   AND NOT EXISTS (
 		       SELECT 1
