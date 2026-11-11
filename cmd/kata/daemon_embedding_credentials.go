@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"go.kenn.io/kata/internal/config"
@@ -9,7 +10,7 @@ import (
 
 // reloadEmbeddingCredentials changes only credentials on the running provider.
 // Applying a new provider's key to the existing origin would misroute secrets.
-func reloadEmbeddingCredentials(initial config.EmbeddingsConfig, client *embedding.Client, wake func()) error {
+func reloadEmbeddingCredentials(ctx context.Context, initial config.EmbeddingsConfig, client *embedding.Client, wake func()) error {
 	if client == nil {
 		return nil
 	}
@@ -17,7 +18,10 @@ func reloadEmbeddingCredentials(initial config.EmbeddingsConfig, client *embeddi
 	if err != nil {
 		return err
 	}
-	current := cfg.Search.Embeddings
+	current, err := applySharedEmbeddingChoice(ctx, cfg.Search.Embeddings, nil, "")
+	if err != nil {
+		return err
+	}
 	providerOnly := func(ec config.EmbeddingsConfig) config.EmbeddingsConfig {
 		ec.APIKey = ""
 		ec.APIKeyFile = ""

@@ -291,12 +291,6 @@
     color: var(--accent-red);
   }
 
-  /* Kata's light inset and muted border nearly match the page, so the
-     unfilled track takes the stronger border to stay visible. */
-  :global(:root:not(.dark)) .row-actions :global(.kit-search-by-meaning__progress) {
-    border-color: var(--border-default);
-  }
-
   /* An error sits apart from the details above it, but no farther below a
      bare title than any other detail. */
   .row-actions:has(

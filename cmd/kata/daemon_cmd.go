@@ -1509,7 +1509,7 @@ func runDaemonProcess(
 	sigs, reloadCleanup := installReloadSource(ctx, ns.DBHash)
 	workers.Go(func() {
 		runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog, func() {
-			if err := reloadEmbeddingCredentials(dcfg.Search.Embeddings, embedder, embeddingWake); err != nil {
+			if err := reloadEmbeddingCredentials(ctx, dcfg.Search.Embeddings, embedder, embeddingWake); err != nil {
 				daemonLog.Printf("embedding credential reload failed: %v", err)
 			}
 		})

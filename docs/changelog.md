@@ -16,6 +16,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   build finishes, and an opener waiting for another opener's migration keeps
   waiting. Ordinary queries keep the 30-second limit. See
   [PostgreSQL operations](operations/postgres.md).
+- Start search by meaning on the next daemon start after enabling the built-in server in a supported app on the same computer. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and

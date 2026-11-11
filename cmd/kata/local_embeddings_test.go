@@ -143,6 +143,7 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := setupKataEnv(t)
+			t.Setenv("HOME", t.TempDir())
 			t.Setenv("KATA_SERVER", "")
 			path := filepath.Join(home, "config.toml")
 			if tc.exists {
@@ -171,6 +172,10 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 			require.NoError(t, readErr)
 			require.Equal(t, tc.edited, string(got))
 			require.ErrorContains(t, err, "changed")
+			require.ErrorContains(t, err, "built-in choice recorded")
+			chosen, err := embedlocal.ChoiceRecorded()
+			require.NoError(t, err)
+			require.True(t, chosen)
 		})
 	}
 }
@@ -189,11 +194,25 @@ func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
 		require.False(t, approved)
 		return embedlocal.Installation{}, err
 	}
-	ec := config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text"}
+	original := []byte("[search.embeddings]\nlocal = true\n")
+	path := filepath.Join(home, "config.toml")
+	require.NoError(t, os.WriteFile(path, original, 0o600))
+	cfg, err := config.ReadSearchConfig()
+	require.NoError(t, err)
+	ec := cfg.Embeddings
+	saved, err := applySharedEmbeddingChoice(t.Context(), ec, nil, filepath.Join(home, "kata.db"))
+	require.NoError(t, err)
+	require.Equal(t, ec, saved)
+	chosen, err := embedlocal.ChoiceRecorded()
+	require.NoError(t, err)
+	require.False(t, chosen)
 	client, _, err := preflightEmbeddingStartup(ec, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
 	_, err = client.Embed(t.Context(), []string{"x"})
 	require.ErrorContains(t, err, "kata daemon local-embeddings")
+	data, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
+	require.NoError(t, err)
+	require.Equal(t, original, data)
 }
 
 func TestLocalEmbeddingsSwitchRecipe(t *testing.T) {

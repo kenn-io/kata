@@ -19,6 +19,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kit/embedlocal"
 )
 
 func TestEmbeddingCredentialStartupAndReload(t *testing.T) {
@@ -51,7 +52,7 @@ func TestEmbeddingCredentialStartupAndReload(t *testing.T) {
 	}
 	writePrivateCredentialFixture(t, path, "file-secret\n")
 	woke := false
-	if err := reloadEmbeddingCredentials(ec, c, func() { woke = true }); err != nil {
+	if err := reloadEmbeddingCredentials(t.Context(), ec, c, func() { woke = true }); err != nil {
 		t.Fatal(err)
 	}
 	if !woke {
@@ -111,7 +112,7 @@ func TestEmbeddingCredentialReloadRetriesRejectedBacklog(t *testing.T) {
 
 	body := fmt.Sprintf("[search.embeddings]\nbase_url=%q\nmodel=\"m\"\ndims=2\napi_key=\"reloaded-key\"\n", srv.URL)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0600))
-	require.NoError(t, reloadEmbeddingCredentials(ec, client, retry))
+	require.NoError(t, reloadEmbeddingCredentials(t.Context(), ec, client, retry))
 	select {
 	case <-cycles:
 	case <-time.After(time.Second):
@@ -134,11 +135,25 @@ func TestEmbeddingReloadDoesNotMisrouteChangedProviderKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	woke := false
-	err = reloadEmbeddingCredentials(ec, c, func() { woke = true })
+	err = reloadEmbeddingCredentials(t.Context(), ec, c, func() { woke = true })
 	if err == nil || !strings.Contains(err.Error(), "restart") || woke {
 		t.Fatalf("unexpected reload: %v woke=%t", err, woke)
 	}
 	if c.CredentialHealth().Credential != "ok" {
 		t.Fatal("provider change mutated running credential")
 	}
+}
+
+func TestEmbeddingReloadUsesSharedChoice(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	home := setupKataEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, embedlocal.RecordChoice())
+	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nlocal = true\n"))
+	require.NoError(t, err)
+	client, _, err := preflightEmbeddingStartup(cfg.Embeddings, filepath.Join(home, "kata.db"))
+	require.NoError(t, err)
+	woke := false
+	require.NoError(t, reloadEmbeddingCredentials(t.Context(), cfg.Embeddings, client, func() { woke = true }))
+	require.True(t, woke)
 }

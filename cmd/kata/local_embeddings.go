@@ -178,6 +178,9 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 		if _, err := localEmbeddingsEndpoint(ctx, embedlocal.Options{SkipOllama: true, Executable: installed.Executable}); err != nil {
 			return "", err
 		}
+		if err := recordLocalEmbeddingChoice(); err != nil {
+			return "", fmt.Errorf("record built-in embeddings choice: %w", err)
+		}
 	}
 	applied := false
 	err = run.restart(ctx, func() error {
@@ -200,6 +203,9 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 		return nil
 	})
 	if err != nil {
+		if next.Embeddings.UsesLocal() {
+			err = fmt.Errorf("built-in choice recorded; %w", err)
+		}
 		if applied && !bytes.Equal(original, proposed) {
 			latest, readErr := os.ReadFile(path) // #nosec G304 -- compare the snapshot before restoring it
 			if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
@@ -220,11 +226,6 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 		}
 		return "", err
 	}
-	if next.Embeddings.UsesLocal() {
-		if err := recordLocalEmbeddingChoice(); err != nil {
-			return "", fmt.Errorf("record built-in embeddings choice: %w", err)
-		}
-	}
 	return index, nil
 }
 
@@ -236,11 +237,8 @@ func recordLocalEmbeddingChoice() error {
 	return embedlocal.RecordChoice()
 }
 
-// applySharedEmbeddingChoice persists the shared built-in choice before startup.
+// applySharedEmbeddingChoice derives the active provider without changing the config file.
 func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsConfig, vectorReady func(context.Context) error, dbPath string) (config.EmbeddingsConfig, error) {
-	if current.UsesLocal() {
-		return current, recordLocalEmbeddingChoice()
-	}
 	if current.Enabled() {
 		return current, nil
 	}
@@ -248,51 +246,23 @@ func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsCo
 	if err != nil || !chosen {
 		return current, err
 	}
+	next := current
+	next.Local = true
+	if next.Model == "" {
+		next.Model = "nomic-embed-text"
+	}
+	if !next.LocalRecipeCompatible() {
+		return current, errors.New("search.embeddings: local requires a nomic-embed-text model and dims 768, or request_dimensions for a smaller width")
+	}
+	if _, _, err := preflightEmbeddingStartup(next, dbPath); err != nil {
+		return current, err
+	}
 	if vectorReady != nil {
 		if err := vectorReady(ctx); err != nil {
 			return current, err
 		}
 	}
-	path, err := config.DaemonConfigPath()
-	if err != nil {
-		return current, err
-	}
-	original, exists, err := readLocalEmbeddingsConfig(path)
-	if err != nil {
-		return current, err
-	}
-	observed, err := config.ParseSearchConfig(original)
-	if err != nil {
-		return current, err
-	}
-	if observed.Embeddings != current {
-		return current, fmt.Errorf("configuration %q changed during startup", path)
-	}
-	proposed, err := localEmbeddingsConfig(original, current, "")
-	if err != nil {
-		return current, err
-	}
-	next, err := config.ParseSearchConfig(proposed)
-	if err != nil {
-		return current, err
-	}
-	if _, _, err := preflightEmbeddingStartup(next.Embeddings, dbPath); err != nil {
-		return current, err
-	}
-	latest, latestExists, err := readLocalEmbeddingsConfig(path)
-	if err != nil {
-		return current, err
-	}
-	if exists != latestExists || !bytes.Equal(original, latest) {
-		return current, fmt.Errorf("configuration %q changed during setup", path)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return current, err
-	}
-	if err := atomicfile.WriteFile(path, proposed, atomicfile.WithPreserveMode(), atomicfile.WithFollowLink()); err != nil {
-		return current, err
-	}
-	return next.Embeddings, nil
+	return next, nil
 }
 
 type preparedLocalEmbeddingsConfig struct {

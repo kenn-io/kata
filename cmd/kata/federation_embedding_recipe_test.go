@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
+	"go.kenn.io/kit/embedlocal"
 )
 
 // R7/R9: owners can export an exact preferred recipe from local configuration
@@ -75,4 +76,21 @@ func TestFederationEmbeddingRecipeUnconfigured(t *testing.T) {
 	err := cmd.Execute()
 	require.ErrorContains(t, err, "embeddings are not configured")
 	require.Empty(t, output.String())
+}
+
+func TestFederationEmbeddingRecipeUsesSharedChoice(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	setupKataEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, embedlocal.RecordChoice())
+	var output bytes.Buffer
+	cmd := newFederationCmd()
+	cmd.SilenceUsage = true
+	cmd.SetOut(&output)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"embedding-recipe"})
+	require.NoError(t, cmd.Execute())
+	var recipe embedding.ArtifactIdentity
+	require.NoError(t, json.Unmarshal(output.Bytes(), &recipe))
+	require.Equal(t, "nomic-embed-text", recipe.Model)
 }
