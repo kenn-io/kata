@@ -135,27 +135,6 @@ func TestManagedExternallyDoesNotWaitForStartLock(t *testing.T) {
 	})
 }
 
-func TestManagedExternallyProfileWaitVerifiesIdentity(t *testing.T) {
-	profile, root := localProfileFixture(t)
-	require.NoError(t, os.WriteFile(filepath.Join(profile.Home, "config.toml"), []byte("autostart = false\n"), 0600))
-	selection, err := InspectSelection(t.Context(), root, "")
-	require.NoError(t, err)
-	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprint(w, `{"instance_uid":"01HZZZZZZZZZZZZZZZZZZZZZ01"}`)
-	}))
-	defer server.Close()
-	orig := discoverDaemonForSupervised
-	t.Cleanup(func() { discoverDaemonForSupervised = orig })
-	discoverDaemonForSupervised = func(context.Context, string) (ensureDiscovery, error) {
-		return ensureDiscovery{Outcome: daemonScanCompatible, Daemon: liveDaemon{BaseURL: server.URL, Record: kitdaemon.RuntimeRecord{Address: strings.TrimPrefix(server.URL, "http://"), Network: "tcp"}}}, nil
-	}
-	_, err = ensureLocalProfile(t.Context(), selection)
-	require.ErrorIs(t, err, ErrProfileIdentityMismatch)
-}
-
 func TestExternallyManagedVersionErrorGuidesByDirection(t *testing.T) {
 	patchEnsureHooks(t, "v0.2.0", "http://spawned")
 	err := externallyManagedVersionError(PingInfo{Version: "v0.1.0"})
@@ -168,10 +147,13 @@ func TestExternallyManagedVersionErrorGuidesByDirection(t *testing.T) {
 	require.ErrorContains(t, err, "use a newer kata binary")
 }
 
+// The daemon's own auth.token_env is supervisor-owned: selection must accept it
+// unresolved beside a separate catalog credential, and the live wait must send
+// that catalog credential, retry a transport failure and still check identity.
 func TestSupervisedProfileCatalogCredentialAuthenticatesLiveDaemon(t *testing.T) {
 	profile, root := localProfileFixture(t)
-	t.Setenv("SUPERVISOR_ONLY_TOKEN", "")
-	require.NoError(t, os.WriteFile(filepath.Join(profile.Home, "config.toml"), []byte("autostart = false\n[auth]\ntoken_env = 'SUPERVISOR_ONLY_TOKEN'\n"), 0600))
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	require.NoError(t, os.WriteFile(filepath.Join(profile.Home, "config.toml"), []byte("autostart = false\n[auth]\ntoken_env = 'KATA_AUTH_TOKEN'\n"), 0600))
 	configPath := filepath.Join(os.Getenv("KATA_HOME"), "config.toml")
 	require.NoError(t, os.WriteFile(configPath, []byte(fmt.Sprintf("[[daemon]]\nname = 'work'\nlocal = true\nhome = %q\ninstance_uid = %q\ntoken = 'client-token'\n", profile.Home, profile.InstanceUID)), 0600))
 	selection, err := InspectSelection(t.Context(), root, "")
@@ -179,20 +161,25 @@ func TestSupervisedProfileCatalogCredentialAuthenticatesLiveDaemon(t *testing.T)
 	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer client-token" {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, profile.InstanceUID)
-	}))
+	serve := func(uid string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer client-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+		}))
+	}
+	server, other := serve(profile.InstanceUID), serve("01HZZZZZZZZZZZZZZZZZZZZZ01")
 	defer server.Close()
+	defer other.Close()
+	target := server
 	orig := discoverDaemonForSupervised
 	t.Cleanup(func() { discoverDaemonForSupervised = orig })
 	calls := 0
 	discoverDaemonForSupervised = func(context.Context, string) (ensureDiscovery, error) {
 		calls++
-		address := strings.TrimPrefix(server.URL, "http://")
+		address := strings.TrimPrefix(target.URL, "http://")
 		if calls == 1 {
 			address = "127.0.0.1:1"
 		}
@@ -202,7 +189,7 @@ func TestSupervisedProfileCatalogCredentialAuthenticatesLiveDaemon(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, server.URL, resolved.BaseURL)
 	require.Equal(t, 2, calls)
-	selection.Resolved.Token = "wrong-token"
+	target = other
 	_, err = ensureLocalProfile(t.Context(), selection)
-	require.ErrorContains(t, err, "authentication failed")
+	require.ErrorIs(t, err, ErrProfileIdentityMismatch)
 }

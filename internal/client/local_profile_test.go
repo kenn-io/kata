@@ -696,17 +696,17 @@ func TestLocalProfileWithoutInstalledStorageDiscoversButCannotStart(t *testing.T
 	assert.Zero(t, calls)
 }
 
-func TestLocalProfileReplacesCapableDaemonInPlace(t *testing.T) {
-	for _, supervised := range []bool{false, true} {
-		t.Run(fmt.Sprintf("supervised=%t", supervised), func(t *testing.T) {
-			testLocalProfileReplacesCapableDaemonInPlace(t, supervised)
+func TestLocalProfileStaleCapableDaemonByAutostart(t *testing.T) {
+	for _, autostart := range []bool{true, false} {
+		t.Run(fmt.Sprintf("autostart=%t", autostart), func(t *testing.T) {
+			testLocalProfileStaleCapableDaemon(t, autostart)
 		})
 	}
 }
 
-func testLocalProfileReplacesCapableDaemonInPlace(t *testing.T, supervised bool) {
+func testLocalProfileStaleCapableDaemon(t *testing.T, autostart bool) {
 	profile, root := localProfileFixture(t)
-	if supervised {
+	if !autostart {
 		require.NoError(t, os.WriteFile(filepath.Join(profile.Home, "config.toml"), []byte("autostart = false\n"), 0600))
 	}
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
@@ -755,7 +755,7 @@ func testLocalProfileReplacesCapableDaemonInPlace(t *testing.T, supervised bool)
 
 	resolved, err := EnsureResolvedInWorkspace(t.Context(), root)
 
-	if supervised {
+	if !autostart {
 		require.ErrorIs(t, err, ErrDaemonNotReplaceable)
 		assert.Zero(t, requests)
 		assert.Zero(t, state.stopCalls)

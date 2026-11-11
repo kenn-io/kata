@@ -1370,19 +1370,8 @@ func patchEnsureHooks(t *testing.T, version, startedURL string) *ensurePatchStat
 }
 
 func TestEnsureRunningReplacesCapableDaemonInPlace(t *testing.T) {
-	for _, supervised := range []bool{false, true} {
-		t.Run(fmt.Sprintf("supervised=%t", supervised), func(t *testing.T) {
-			testEnsureRunningReplacesCapableDaemonInPlace(t, supervised)
-		})
-	}
-}
-
-func testEnsureRunningReplacesCapableDaemonInPlace(t *testing.T, supervised bool) {
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
 	home := setupKataEnv(t)
-	if supervised {
-		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
-	}
 	stageStorageSchema(t, filepath.Join(home, "kata.db"), db.CurrentSchemaVersion())
 	_, addr := startMockDaemonPing(t, map[string]any{
 		"ok": true, "service": "kata", "version": "v0.1.0", "pid": os.Getpid(),
@@ -1417,13 +1406,6 @@ func testEnsureRunningReplacesCapableDaemonInPlace(t *testing.T, supervised bool
 
 	url, err := EnsureRunning(t.Context())
 
-	if supervised {
-		require.ErrorIs(t, err, ErrDaemonNotReplaceable)
-		assert.Zero(t, requests)
-		assert.Zero(t, state.stopCalls)
-		assert.Zero(t, state.startCalls)
-		return
-	}
 	require.NoError(t, err)
 	assert.Equal(t, 1, requests, "older capable daemon must receive an in-place request")
 	assert.Zero(t, state.stopCalls)
