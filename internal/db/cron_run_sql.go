@@ -258,15 +258,10 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 			}
 			if ref.kind == "workflow" && value.Status == "running" {
 				document, known := validator.idx.documents[cronDefinitionReference{projectID: project.ID, kind: ref.kind, uid: *ref.id, event: *ref.event}]
-				var seed []byte
-				if known {
-					seed = []byte(document)
+				if !known {
+					return fmt.Errorf("%w: workflow revision document is unavailable", cron.ErrInvalid)
 				}
-				support, err := workflowRevisionSupport(ctx, tx, a.Postgres, project.ID, []workflowRevision{{*ref.id, *ref.event, seed}})
-				if err != nil {
-					return err
-				}
-				if err := support[*ref.event]; err != nil {
+				if _, err := cron.DecodeWorkflow([]byte(document)); err != nil {
 					return fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
 				}
 			}

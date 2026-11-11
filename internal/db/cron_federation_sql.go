@@ -72,20 +72,15 @@ func checkRetainedWorkflowSnapshots(ctx context.Context, tx *sql.Tx, project Pro
 		if !workflowDefinitionEvent(kind) {
 			continue
 		}
-		if err := retainedWorkflowEventSupported(payload); err != nil {
+		var body CronDefinitionEvent
+		if err := json.Unmarshal([]byte(payload), &body, json.RejectUnknownMembers(true)); err != nil {
+			return fmt.Errorf("%w: retained workflow event %s: %v", ErrFederationIngestValidation, uid, err)
+		}
+		if _, err := cron.DecodeWorkflow(body.Definition); err != nil {
 			return fmt.Errorf("%w: retained workflow event %s: %v", ErrFederationIngestValidation, uid, err)
 		}
 	}
 	return rows.Err()
-}
-
-func retainedWorkflowEventSupported(payload string) error {
-	var body CronDefinitionEvent
-	if err := json.Unmarshal([]byte(payload), &body, json.RejectUnknownMembers(true)); err != nil {
-		return err
-	}
-	_, err := cron.DecodeWorkflow(body.Definition)
-	return err
 }
 
 // CronMaterializationNeeded reports whether a federated rebuild must rewrite

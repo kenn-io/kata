@@ -176,6 +176,61 @@ func checkArgvOwnerRestoreSupportedWinner(t *testing.T, source db.Storage, backe
 // Job-only running evidence and new jobs must use the effective raw workflow,
 // including when an older projection normalized an unsupported retained event.
 func checkArgvJobWorkflowAdmission(t *testing.T, source db.Storage, backend Backend) error {
+	t.Run("historical run admission", func(t *testing.T) {
+		project, err := source.CreateProject(t.Context(), "held-project")
+		require.NoError(t, err)
+		job, workflow := nativeFederationDefinitions(t, source, project)
+		runningUID, err := uid.New()
+		require.NoError(t, err)
+		running := db.ObserveCronRun{ProjectID: project.ID, UID: runningUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1}}
+		_, err = source.ObserveCronRun(t.Context(), running)
+		require.NoError(t, err)
+		q := source.(interface {
+			ExecContext(context.Context, string, ...any) (sql.Result, error)
+			QueryRowContext(context.Context, string, ...any) *sql.Row
+		})
+		oldWorkflowEvent := workflow.DefinitionEventUID
+		workflow, _, err = source.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, UID: workflow.UID, ExpectedEventUID: oldWorkflowEvent, Name: "Edited workflow", Actor: "worker", Definition: workflow.Definition})
+		require.NoError(t, err)
+		var oldPayload string
+		require.NoError(t, q.QueryRowContext(t.Context(), `SELECT payload FROM events WHERE uid=$1`, oldWorkflowEvent).Scan(&oldPayload))
+		historical := running
+		historical.WorkflowUID, historical.WorkflowDefinitionEventUID = &workflow.UID, &oldWorkflowEvent
+		historical.UID, err = uid.New()
+		require.NoError(t, err)
+		_, err = source.ObserveCronRun(t.Context(), historical)
+		require.NoError(t, err, "a known supported historical workflow remains admissible")
+		var oldBody db.CronDefinitionEvent
+		require.NoError(t, json.Unmarshal([]byte(oldPayload), &oldBody))
+		oldBody.Definition = []byte(`{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`)
+		heldPayload, err := json.Marshal(oldBody)
+		require.NoError(t, err)
+		_, err = q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE uid=$2`, string(heldPayload), oldWorkflowEvent)
+		require.NoError(t, err)
+		historical.UID, err = uid.New()
+		require.NoError(t, err)
+		_, err = source.ObserveCronRun(t.Context(), historical)
+		require.ErrorIs(t, err, cron.ErrInvalid, "the exact historical workflow document must be supported")
+		historical.UID, err = uid.New()
+		require.NoError(t, err)
+		historical.Status = "succeeded"
+		_, err = source.ObserveCronRun(t.Context(), historical)
+		require.NoError(t, err, "terminal evidence can cite the exact held historical revision")
+		_, err = q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE uid=$2`, oldPayload, oldWorkflowEvent)
+		require.NoError(t, err)
+		for _, document := range []string{`{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`, `{"version":1,"steps":null}`} {
+			_, err = q.ExecContext(t.Context(), `UPDATE cron_workflows SET definition_json=$1 WHERE uid=$2`, document, workflow.UID)
+			require.NoError(t, err)
+			fresh := running
+			fresh.UID, err = uid.New()
+			require.NoError(t, err)
+			_, err = source.ObserveCronRun(t.Context(), fresh)
+			require.ErrorIs(t, err, cron.ErrInvalid, "a fresh running job cannot use its held workflow")
+		}
+		running.Status, running.ExpectedRevision = "succeeded", 1
+		_, err = source.ObserveCronRun(t.Context(), running)
+		require.NoError(t, err, "an existing run can finish after its workflow is held")
+	})
 	ctx := t.Context()
 	project, err := source.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -281,13 +336,13 @@ func checkArgvSnapshotHeldRevision(t *testing.T, store db.Storage, _ Backend) er
 	require.NoError(t, err)
 
 	_, _, err = store.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Held workflow job", Actor: "worker", Definition: job.Definition})
-	assert.ErrorIs(t, err, cron.ErrInvalid, "new job must reject held snapshot")
+	require.ErrorIs(t, err, cron.ErrInvalid, "new job must reject held snapshot")
 	fresh := run
 	fresh.UID, err = uid.New()
 	require.NoError(t, err)
 	fresh.WorkflowUID, fresh.WorkflowDefinitionEventUID = nil, nil
 	_, err = store.ObserveCronRun(ctx, fresh)
-	assert.ErrorIs(t, err, cron.ErrInvalid, "job-only running must reject held snapshot")
+	require.ErrorIs(t, err, cron.ErrInvalid, "job-only running must reject held snapshot")
 	fresh.UID, err = uid.New()
 	require.NoError(t, err)
 	fresh.Status = "succeeded"
@@ -298,7 +353,7 @@ func checkArgvSnapshotHeldRevision(t *testing.T, store db.Storage, _ Backend) er
 	fresh.WorkflowUID, fresh.WorkflowDefinitionEventUID = &workflow.UID, &workflow.DefinitionEventUID
 	fresh.Status = "running"
 	_, err = store.ObserveCronRun(ctx, fresh)
-	assert.ErrorIs(t, err, cron.ErrInvalid, "workflow-named running must reject held snapshot")
+	require.ErrorIs(t, err, cron.ErrInvalid, "workflow-named running must reject held snapshot")
 	run.Status, run.ExpectedRevision = "succeeded", observed.Run.Revision
 	_, err = store.ObserveCronRun(ctx, run)
 	assert.NoError(t, err, "existing run can finish")

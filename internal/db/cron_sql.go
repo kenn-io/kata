@@ -134,14 +134,11 @@ func (a CronSQL) Workflow(ctx context.Context, project int64, id string) (CronWo
 	if err != nil {
 		return CronWorkflow{}, err
 	}
-	support, err := workflowRevisionSupport(ctx, a.Query, a.Postgres, project, []workflowRevision{{row.UID, row.DefinitionEventUID, row.document}})
-	if err != nil {
-		return CronWorkflow{}, err
+	support, err := workflowRevisionSupport(ctx, a.Query, a.Postgres, project, map[string]string{row.DefinitionEventUID: row.UID})
+	if err == nil {
+		err = support[row.DefinitionEventUID]
 	}
-	if err := support[row.DefinitionEventUID]; err != nil {
-		return CronWorkflow{}, err
-	}
-	return value, nil
+	return value, err
 }
 
 func (a CronSQL) list(ctx context.Context, in CronList, job bool) ([]cronRow, error) {
@@ -196,7 +193,7 @@ func (a CronSQL) workflows(ctx context.Context, in CronList, strict bool) ([]Cro
 		return nil, err
 	}
 	result := []CronWorkflow{}
-	revisions := []workflowRevision{}
+	revisions := map[string]string{}
 	for _, row := range rows {
 		value, err := workflowFromRow(row)
 		if err != nil {
@@ -208,7 +205,7 @@ func (a CronSQL) workflows(ctx context.Context, in CronList, strict bool) ([]Cro
 			return nil, err
 		}
 		result = append(result, value)
-		revisions = append(revisions, workflowRevision{row.UID, row.DefinitionEventUID, row.document})
+		revisions[row.DefinitionEventUID] = row.UID
 	}
 	// CronDefinitionSnapshots has already checked retained events for strict callers.
 	if strict {

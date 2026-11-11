@@ -6,6 +6,8 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
 	"go.kenn.io/kata/internal/cron"
 )
@@ -47,32 +49,14 @@ func CheckCronDependencies(ctx context.Context, q interface {
 	return check("issues", "issue", issueUID)
 }
 
-type workflowRevision struct {
-	uid, revision string
-	seed          []byte
-}
-
-// workflowRevisionSupport checks all retained evidence for each exact revision.
+// workflowRevisionSupport reports held retained evidence by exact revision.
 func workflowRevisionSupport(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, postgres bool, projectID int64, in []workflowRevision) (map[string]error, error) {
-	result := make(map[string]error, len(in))
-	if len(in) == 0 {
-		return result, nil
-	}
-	requested := make(map[string]workflowRevision, len(in))
-	versions := make([]string, 0, len(in))
-	for _, ref := range in {
-		requested[ref.revision] = ref
-		versions = append(versions, ref.revision)
-		if ref.seed != nil {
-			_, err := cron.DecodeWorkflow(ref.seed)
-			result[ref.revision] = err
-		}
-	}
+}, postgres bool, projectID int64, revisions map[string]string) (map[string]error, error) {
+	held, versions := map[string]error{}, slices.Collect(maps.Keys(revisions))
 	raw, err := json.Marshal(versions)
-	if err != nil {
-		return nil, err
+	if err != nil || len(versions) == 0 {
+		return held, err
 	}
 	rows, err := q.QueryContext(ctx, cronRetainedWorkflowRevisionQuery(postgres), projectID, string(raw))
 	if err != nil {
@@ -86,42 +70,27 @@ func workflowRevisionSupport(ctx context.Context, q interface {
 		if err := rows.Scan(&e.UID, &e.Type, &e.OriginInstanceUID, &e.HLCPhysicalMS, &e.HLCCounter, &version, &payload); err != nil {
 			return nil, err
 		}
-		if !workflowDefinitionEvent(e.Type) {
-			continue
-		}
 		revision := e.UID
-		if _, ok := requested[version.String]; version.Valid && ok {
+		if _, ok := revisions[version.String]; ok {
 			revision = version.String
 		}
-		ref, ok := requested[revision]
-		if !ok {
+		uid, ok := revisions[revision]
+		if !ok || !workflowDefinitionEvent(e.Type) {
 			continue
 		}
 		e.Payload = []byte(payload)
-		_, value, err := parseCronDefinitionEvent(e)
-		if err != nil {
-			result[revision] = fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
+		body, value, err := parseCronDefinitionEvent(e)
+		if err == nil && (value.DefinitionEventUID != revision || value.UID != uid) {
 			continue
 		}
-		if value.DefinitionEventUID != revision || value.UID != ref.uid {
-			continue
+		if err == nil {
+			_, err = cron.DecodeWorkflow(body.Definition)
 		}
-		err = retainedWorkflowEventSupported(payload)
 		if err != nil {
-			result[revision] = err
-		} else if _, seen := result[revision]; !seen {
-			result[revision] = nil
+			held[revision] = fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for revision := range requested {
-		if _, seen := result[revision]; !seen {
-			result[revision] = fmt.Errorf("%w: workflow revision document is unavailable", cron.ErrInvalid)
-		}
-	}
-	return result, nil
+	return held, rows.Err()
 }
 
 // cronDependency checks project ownership, tombstones and workflow evidence.
@@ -148,7 +117,10 @@ func cronDependency(ctx context.Context, q interface {
 		return false, fmt.Errorf("%w: %s dependency belongs to another project", cron.ErrInvalid, kind)
 	}
 	if table == "cron_workflows" {
-		support, err := workflowRevisionSupport(ctx, q, postgres, projectID, []workflowRevision{{id, revision, []byte(row)}})
+		if _, err := cron.DecodeWorkflow([]byte(row)); err != nil {
+			return false, fmt.Errorf("%w: workflow dependency is unsupported: %v", cron.ErrInvalid, err)
+		}
+		support, err := workflowRevisionSupport(ctx, q, postgres, projectID, map[string]string{revision: id})
 		if err != nil {
 			return false, err
 		}
