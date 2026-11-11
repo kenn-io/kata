@@ -687,12 +687,12 @@ func (s *Service) ResolveFieldConflict(
 	}
 	projected := issue
 	if !fieldValuesEqual(kataValue, selected) {
-		patch, patchErr := codec.KataPatch(issue, selected)
+		projectionCtx, patch, patchErr := fieldProjectionPatch(ctx, codec, issue, selected)
 		if patchErr != nil {
 			return resolved, events, patchErr
 		}
 		var event *db.Event
-		projected, event, _, err = s.store.ApplyExternalFieldProjection(ctx, db.ExternalFieldProjectionParams{
+		projected, event, _, err = s.store.ApplyExternalFieldProjection(projectionCtx, db.ExternalFieldProjectionParams{
 			BindingID: claimed.ID, MappingID: mapping.ID, ClaimToken: claimToken,
 			KataField: kataField, Patch: patch, ExpectedIssueRevision: issue.Revision,
 			IntegrationActor: integrationActor(claimed),

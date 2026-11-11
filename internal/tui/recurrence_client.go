@@ -2,9 +2,11 @@ package tui
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -50,6 +52,13 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 	if in.Stop {
 		err = recurrenceclient.Stop(ctx, apiClient, issue.ProjectID, *in.Recurrence, in.Actor)
 	} else {
+		raw, marshalErr := json.Marshal(issue.Metadata["scheduled_on"])
+		if marshalErr != nil {
+			return nil, &mutationPreflightError{marshalErr}
+		}
+		if _, err := metadata.SavedScheduleZone(raw); err != nil {
+			return nil, &mutationPreflightError{err}
+		}
 		issueZone, _ := issue.Metadata["timezone"].(string)
 		zone, zoneErr := recurrenceclient.ResolveZone(in.Zone, in.Recurrence.Zone(), issueZone, localZone)
 		switch {

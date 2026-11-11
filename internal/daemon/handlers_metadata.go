@@ -94,13 +94,9 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		}
 		if issueTimezoneWriteRelevant(in.Body.Patch) {
 			ctx = db.WithMetadataPatchHook(ctx, func(ctx context.Context, tx *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
-				// scheduled_on alone can inherit the occurrence's recurrence zone.
-				var recurrenceZone string
-				if current.RecurrenceID != nil {
-					err := tx.QueryRowContext(ctx, `SELECT timezone FROM recurrences WHERE id = $1 AND project_id = $2`, *current.RecurrenceID, current.ProjectID).Scan(&recurrenceZone)
-					if err != nil && !errors.Is(err, sql.ErrNoRows) {
-						return nil, err
-					}
+				recurrenceZone, err := db.IssueRecurrenceTimezone(ctx, tx, current)
+				if err != nil {
+					return nil, err
 				}
 				return db.PrepareIssueSchedules(jsontext.Value(current.Metadata), in.Body.Patch, cfg.DefaultTimezone, recurrenceZone)
 			})

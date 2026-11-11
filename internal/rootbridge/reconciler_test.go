@@ -1126,6 +1126,44 @@ func TestFieldReconcileLegacyDateWithAliasTimezone(t *testing.T) {
 }
 
 func TestFieldReconcilePreservesIndependentScheduleZones(t *testing.T) {
+	t.Run("first dates use the recurrence zone for scheduled only", func(t *testing.T) {
+		h := newReconcileHarness(t)
+		h.mapField(t, "scheduled_on", "start-date")
+		h.mapField(t, "deadline_on", "due-date")
+		_, err := h.store.CreateRecurrenceForIssue(t.Context(), db.CreateRecurrenceForIssueIn{
+			IssueID: h.issue.ID,
+			Recurrence: db.CreateRecurrenceIn{
+				ProjectID: h.project.ID, Actor: "tester", Rule: "FREQ=DAILY",
+				DTStart: "2026-08-20", Timezone: "America/New_York",
+				Template: db.RecurrenceTemplate{Title: h.issue.Title},
+			},
+		})
+		require.NoError(t, err)
+		_, err = h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+			IssueID: h.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value("null"), "timezone": jsontext.Value("null"),
+			},
+		})
+		require.NoError(t, err)
+		h.client.fieldValues["start-date"] = date("2026-08-21")
+		h.client.fieldValues["due-date"] = date("2026-08-21")
+
+		result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
+		require.NoError(t, err)
+		require.Zero(t, result.FieldConflicts)
+		issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
+		require.NoError(t, err)
+		for key, want := range map[string]time.Time{
+			"scheduled_on": time.Date(2026, 8, 21, 4, 0, 0, 0, time.UTC),
+			"deadline_on":  time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC),
+		} {
+			_, _, at, present, err := metadata.ScheduleFieldInstant(string(issue.Metadata), key, "UTC")
+			require.NoError(t, err)
+			require.True(t, present)
+			assert.Equal(t, want, at.UTC(), key)
+		}
+	})
+
 	t.Run("date instant and clear preserve issue timezone", func(t *testing.T) {
 		for _, value := range []connector.FieldValue{
 			date("2026-08-21"),

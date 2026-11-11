@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -125,11 +127,66 @@ func TestRecurrenceFormUsesSavedScheduleZone(t *testing.T) {
 }
 
 func TestRecurrenceFormRejectsUnknownScheduleRules(t *testing.T) {
-	t.Setenv("TZ", "Asia/Tokyo")
-	issue := Issue{Metadata: issueMetadata{ScheduledOn: jsontext.Value(`{"value":"2026-01-01","timezone":"America/New_York","tzdata_version":"unknown"}`)}}
-	form := newRecurrenceForm(formTarget{}, issue, nil)
-	assert.Contains(t, form.err, "unknown")
-	assert.Empty(t, form.fieldValue(fieldZone))
+	const saved = `{"value":"2026-01-01","timezone":"America/New_York","tzdata_version":"unknown"}`
+	const refusal = "unsupported schedule tzdata version"
+	for _, name := range []string{"start", "change"} {
+		t.Run(name, func(t *testing.T) {
+			h := newRecurrenceHarness(t, viewDetail)
+			var current *recurrenceclient.View
+			if name == "change" {
+				rec := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+				current = &rec
+			}
+			// A cached issue or a peer that returns the raw metadata can expose
+			// rules this client cannot read.
+			h.m.detail.issue.Metadata.ScheduledOn = jsontext.Value(saved)
+			h.open()
+			h.fill("FREQ=DAIL", "2026-11-09", "Europe/Paris")
+			h.key(runeKey('Y'))
+			assert.Contains(t, h.m.input.err, refusal)
+			assert.Nil(t, h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}))
+
+			var writes []string
+			hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.Method != http.MethodGet {
+					writes = append(writes, r.Method)
+				}
+				resp, err := h.env.HTTP.Do(r)
+				if err != nil || !strings.HasSuffix(r.URL.Path, "/issues/"+h.issue.UID) {
+					return resp, err
+				}
+				body, err := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				require.NoError(t, err)
+				var shown generated.ShowIssueResponse
+				require.NoError(t, json.Unmarshal(body, &shown))
+				if shown.Issue.Metadata == nil {
+					shown.Issue.Metadata = map[string]any{}
+				}
+				shown.Issue.Metadata["scheduled_on"] = jsontext.Value(saved)
+				body, err = json.Marshal(shown)
+				require.NoError(t, err)
+				resp.Body = io.NopCloser(bytes.NewReader(body))
+				return resp, nil
+			})}
+			client := NewClient(h.env.URL, hc)
+			in := RecurrenceInput{
+				Terms:         recurrenceclient.Terms{Rule: "FREQ=DAILY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "alice"},
+				IssueRevision: h.issue.Revision,
+				Recurrence:    current,
+			}
+			_, err := client.SaveRecurrence(t.Context(), h.issue.ProjectID, h.issue.UID, in)
+			require.ErrorContains(t, err, refusal)
+			require.Empty(t, writes)
+			if current != nil {
+				h.m.api = client
+				h.fill("", "", "")
+				h.save()
+				assert.Equal(t, []string{http.MethodDelete}, writes)
+				assert.Empty(t, h.rows())
+			}
+		})
+	}
 }
 
 func TestRecurrenceDetailScheduleFieldsAt80Columns(t *testing.T) {

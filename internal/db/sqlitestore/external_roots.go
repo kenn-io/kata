@@ -1726,11 +1726,6 @@ func (d *Store) ApplyExternalFieldProjection(
 	if err := db.ValidateExternalFieldProjectionParams(params); err != nil {
 		return db.Issue{}, nil, false, err
 	}
-	for key, raw := range params.Patch {
-		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
-			return db.Issue{}, nil, false, fmt.Errorf("validate %q: %w", key, err)
-		}
-	}
 	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
 		tx, err := d.BeginTx(ctx, nil)
 		if err != nil {
@@ -1754,7 +1749,16 @@ func (d *Store) ApplyExternalFieldProjection(
 		if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
 			return db.Issue{}, nil, false, err
 		}
-		updated, err := db.ApplyMetadataPatch(jsontext.Value(issue.Metadata), params.Patch)
+		patch, err := db.ResolveMetadataPatch(ctx, tx, issue, params.Patch)
+		if err != nil {
+			return db.Issue{}, nil, false, err
+		}
+		resolved := params
+		resolved.Patch = patch
+		if err := db.ValidateExternalFieldProjectionParams(resolved); err != nil {
+			return db.Issue{}, nil, false, err
+		}
+		updated, err := db.ApplyMetadataPatch(jsontext.Value(issue.Metadata), patch)
 		if err != nil {
 			return db.Issue{}, nil, false, fmt.Errorf("apply external field projection: %w", err)
 		}

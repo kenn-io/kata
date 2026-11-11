@@ -3,6 +3,8 @@
 package rootbridge
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -67,21 +69,25 @@ func (c scheduleCodec) ReadKata(issue db.Issue) (connector.FieldValue, error) {
 }
 
 func (c scheduleCodec) KataPatch(issue db.Issue, value connector.FieldValue) (map[string]jsontext.Value, error) {
+	return c.kataPatch(issue, value, "")
+}
+
+func (c scheduleCodec) kataPatch(issue db.Issue, value connector.FieldValue, recurrenceZone string) (map[string]jsontext.Value, error) {
 	canonical, err := canonicalFieldValue(value)
 	if err != nil {
 		return nil, err
 	}
 	patch := map[string]jsontext.Value{c.key: mustJSON(canonicalScheduleValue(canonical))}
-	if err := c.pinZone(issue, canonical, patch); err != nil {
+	if err := c.pinZone(issue, canonical, patch, recurrenceZone); err != nil {
 		return nil, err
 	}
-	return db.PrepareIssueSchedules(jsontext.Value(issue.Metadata), patch, c.defaultTimezone, "")
+	return db.PrepareIssueSchedules(jsontext.Value(issue.Metadata), patch, c.defaultTimezone, recurrenceZone)
 }
 
 // pinZone saves the zone a local date-time or first saved value resolves to, so
 // an alias zone already on the issue or daemon survives without public
 // admission accepting it.
-func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, patch map[string]jsontext.Value) error {
+func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, patch map[string]jsontext.Value, recurrenceZone string) error {
 	values, err := metadataObject(issue.Metadata)
 	if err != nil {
 		return err
@@ -93,7 +99,11 @@ func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, p
 	zone := canonical.Timezone
 	firstInstant := canonical.Kind == fieldKindInstant && saved == nil
 	if saved == nil && (canonical.Kind == fieldKindDate || firstInstant) {
-		if zone, err = metadataTimezone(values, c.defaultTimezone); err != nil && !firstInstant {
+		fallback := c.defaultTimezone
+		if c.key == "scheduled_on" && recurrenceZone != "" {
+			fallback = recurrenceZone
+		}
+		if zone, err = metadataTimezone(values, fallback); err != nil && !firstInstant {
 			return err
 		}
 	}
@@ -112,6 +122,33 @@ func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, p
 		patch[c.key] = pinned
 	}
 	return err
+}
+
+// fieldProjectionPatch defers occurrence-zone resolution to the existing
+// claim-fenced projection transaction, alongside its issue revision check.
+func fieldProjectionPatch(ctx context.Context, codec FieldCodec, issue db.Issue, value connector.FieldValue) (context.Context, map[string]jsontext.Value, error) {
+	c, ok := codec.(scheduleCodec)
+	if !ok || c.key != "scheduled_on" || issue.RecurrenceID == nil {
+		patch, err := codec.KataPatch(issue, value)
+		return ctx, patch, err
+	}
+	canonical, err := canonicalFieldValue(value)
+	if err != nil {
+		return ctx, nil, err
+	}
+	patch := map[string]jsontext.Value{c.key: mustJSON(canonicalScheduleValue(canonical))}
+	ctx = db.WithMetadataPatchHook(ctx, func(ctx context.Context, tx *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
+		zone, err := db.IssueRecurrenceTimezone(ctx, tx, current)
+		if err != nil {
+			return nil, err
+		}
+		resolved, err := c.kataPatch(current, canonical, zone)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", metadata.ErrInvalidValue, err)
+		}
+		return resolved, nil
+	})
+	return ctx, patch, nil
 }
 
 func (c scheduleCodec) ValidateExternalDescriptor(descriptor connector.FieldDescriptor) error {
