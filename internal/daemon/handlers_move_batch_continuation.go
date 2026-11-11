@@ -35,14 +35,21 @@ type moveBatchPrior struct {
 	revision int64
 }
 
+func transientMoveBatchError(err error) bool {
+	return err != nil && moveIssueAPIError(err).(*api.APIError).Status >= 500
+}
+
 func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.MoveIssuesRequest, items []moveBatchItem, results []api.MoveIssuesResult) (map[int64]api.MoveIssuesResult, map[int64]moveBatchPrior, map[int64]bool, error) {
 	succeeded := map[int64]api.MoveIssuesResult{}
 	moves := map[int64]moveBatchPrior{}
 	conflicts := map[int64]bool{}
 	pending := map[string]db.Issue{}
+	pendingIndexes := map[string][]int{}
 	for j := in.Body.StartIndex; j < len(items); j++ {
 		if results[j].Result == "" {
-			pending[strings.ToUpper(items[j].issue.UID)] = items[j].issue
+			uid := strings.ToUpper(items[j].issue.UID)
+			pending[uid] = items[j].issue
+			pendingIndexes[uid] = append(pendingIndexes[uid], j)
 		}
 	}
 	for j, completed := range in.Body.Completed {
@@ -63,13 +70,22 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 			targetUID = in.Body.ToProjectUID
 		}
 		if _, err := authorizeHostProjectScope(itemCtx, nil, []string{targetUID}, false); err != nil {
+			if transientMoveBatchError(err) {
+				return nil, nil, nil, err
+			}
 			continue
 		}
 		target, err := activeProjectByUID(itemCtx, cfg.DB, targetUID)
 		if err != nil {
+			if transientMoveBatchError(err) {
+				return nil, nil, nil, err
+			}
 			continue
 		}
 		current, _, err := resolveMoveBatchIssue(itemCtx, cfg.DB, 0, issue.UID)
+		if transientMoveBatchError(err) {
+			return nil, nil, nil, err
+		}
 		if err != nil || current.ID != issue.ID {
 			continue
 		}
@@ -81,6 +97,16 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 			if !valid {
 				continue
 			}
+			for _, k := range pendingIndexes[strings.ToUpper(current.UID)] {
+				expected := in.Body.Items[k].ExpectedRevision
+				if items[k].target.ID != target.ID && (expected == 0 || expected == current.Revision) {
+					conflicts[current.ID] = true
+					break
+				}
+			}
+			if current.Revision != completed.Revision || current.ProjectID != target.ID {
+				continue
+			}
 			items[j] = moveBatchItem{ctx: itemCtx, issue: current, target: target}
 			results[j].Result = ""
 			moves[current.ID] = moveBatchPrior{targetID: target.ID, revision: completed.Revision}
@@ -88,6 +114,9 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 			continue
 		}
 		resolved, _, err := resolveMoveBatchIssue(itemCtx, cfg.DB, in.Body.DefaultProjectID, input.Ref)
+		if transientMoveBatchError(err) {
+			return nil, nil, nil, err
+		}
 		if err != nil || resolved.ID != current.ID || (input.ExpectedRevision != 0 && input.ExpectedRevision != current.Revision) {
 			continue
 		}
@@ -105,7 +134,7 @@ func seedMoveBatchContinuations(ctx context.Context, cfg ServerConfig, in *api.M
 }
 
 func verifyMoveBatchEvent(ctx context.Context, store db.Storage, defaultProjectID int64, input api.MoveIssuesItem, completed api.MoveIssuesCompleted, issue db.Issue, target db.Project) (bool, error) {
-	if completed.EventID <= 0 || completed.Revision <= 1 || completed.Revision != issue.Revision || issue.ProjectID != target.ID || (input.ExpectedRevision != 0 && input.ExpectedRevision != completed.Revision-1) {
+	if completed.EventID <= 0 || completed.Revision <= 1 || (input.ExpectedRevision != 0 && input.ExpectedRevision != completed.Revision-1) {
 		return false, nil
 	}
 	events, err := store.EventsAfter(ctx, db.EventsAfterParams{AfterID: completed.EventID - 1, ThroughID: completed.EventID, IssueUID: issue.UID, Types: []string{"issue.moved"}, Limit: 1})
@@ -137,9 +166,15 @@ func verifyMoveBatchEvent(ctx context.Context, store db.Storage, defaultProjectI
 		project, err = store.ProjectByID(ctx, defaultProjectID)
 	}
 	if err != nil {
+		if transientMoveBatchError(err) {
+			return false, err
+		}
 		return false, nil
 	}
 	if _, err := authorizeHostProjectScope(ctx, []int64{project.ID}, []string{payload.FromProjectUID}, false); err != nil {
+		if transientMoveBatchError(err) {
+			return false, err
+		}
 		return false, nil
 	}
 	// Resolve live or retained aliases to the stable UID, rejecting reassignment.
