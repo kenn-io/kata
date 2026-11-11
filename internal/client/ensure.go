@@ -380,7 +380,7 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 	var unreachable error
 	for candidate, err := range liveDaemons(ctx, dataDir) {
 		if err != nil {
-			if errors.Is(err, ErrLocalDaemonUnreachable) {
+			if errors.Is(err, ErrLocalDaemonUnreachable) && ctx.Err() == nil {
 				unreachable = err
 				continue
 			}

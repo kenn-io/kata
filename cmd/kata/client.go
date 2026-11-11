@@ -13,6 +13,7 @@ import (
 	"net/http/httptrace"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -176,7 +177,7 @@ func resolvedProfileName(resolved client.ResolvedDaemon) string {
 
 func cliDaemonTargetError(err error, profile string) error {
 	if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-		return &cliError{Message: err.Error(), Hint: localDaemonGuidance(unreachable, profile), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+		return &cliError{Message: err.Error(), Hint: daemonRecoveryAdvice(unreachable, profile, runtime.GOOS), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
 	}
 	code := ""
 	switch {

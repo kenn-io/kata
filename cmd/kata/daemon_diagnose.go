@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -122,12 +123,24 @@ func diagnoseDaemon(ctx context.Context, expectedProject string, firstFailure *c
 		return selectionErrorDiagnosis(err), selection, nil
 	}
 	result, selection, err := diagnoseDaemonSelection(ctx, expectedProject, selection, firstFailure)
+	return finalizeDiagnosis(result, err, firstFailure), selection, nil
+}
+
+// finalizeDiagnosis normalizes a selection failure and keeps any probe failure
+// this invocation already observed. A storage or project blocker keeps its own
+// action first and gains only the evidence to read, never a stop or restart.
+func finalizeDiagnosis(result daemonDiagnosis, err error, firstFailure *client.LocalDaemonUnreachableError) daemonDiagnosis {
 	if err != nil {
 		result.State = "selection_error"
 		result.Message = err.Error()
 		result = withDiagnosisAction(result)
 	}
-	return result, selection, nil
+	if firstFailure != nil && result.State != "local_unreachable" {
+		result.PID = firstFailure.PID
+		result.Endpoint = firstFailure.Address
+		result.NextAction += ". This probe failed: " + firstFailure.Error() + ". To investigate, " + daemonCaptureAdvice(firstFailure) + "."
+	}
+	return result
 }
 
 func selectionErrorDiagnosis(err error) daemonDiagnosis {
@@ -349,7 +362,7 @@ func probeDaemonSelection(
 	if err != nil {
 		result.Message = err.Error()
 		if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-			result.NextAction = localDaemonGuidance(unreachable, result.Profile)
+			result.NextAction = daemonRecoveryAdvice(unreachable, result.Profile, runtime.GOOS)
 		}
 		if errors.Is(err, client.ErrProfileIdentityMismatch) {
 			result.State = "wrong_database"

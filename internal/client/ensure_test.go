@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -1411,4 +1412,48 @@ func TestEnsureRunningReplacesCapableDaemonInPlace(t *testing.T) {
 	assert.Zero(t, state.stopCalls)
 	assert.Zero(t, state.startCalls)
 	assert.Equal(t, "http://127.0.0.1:27777", url)
+}
+
+func TestStopRunningDaemonsDoesNotSignalAfterProbeDeadline(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	child, _ := startLongLivedTestProcess(t)
+	_, firstAddr := startMockDaemonPing(t, map[string]any{"ok": true, "service": "kata", "version": "old-version", "pid": child.Process.Pid})
+	entered := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		entered <- struct{}{}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	for i, rec := range []kitdaemon.RuntimeRecord{
+		{PID: child.Process.Pid, Network: "tcp", Address: firstAddr},
+		{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")},
+	} {
+		rec.ProcessIdentityV2, _ = kitdaemon.ReadProcessIdentity(rec.PID)
+		rec.StartedAt = time.Unix(int64(i+1), 0).UTC()
+		rec.Metadata = map[string]string{"db_path": filepath.Join(tmp, "kata.db")}
+		_, err := store.Write(rec)
+		require.NoError(t, err)
+	}
+	original := signalDaemonStopForEnsure
+	var signals int
+	signalDaemonStopForEnsure = func(kitdaemon.RuntimeRecord, string) error { signals++; return nil }
+	t.Cleanup(func() { signalDaemonStopForEnsure = original })
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; the second probe withholds its response until it ends
+	defer cancel()
+	err = stopRunningDaemons(ctx, ns.DataDir, ns.DBHash)
+	select {
+	case <-entered:
+	default:
+		t.Fatal("second probe did not start")
+	}
+	assert.True(t, errors.Is(err, context.DeadlineExceeded), "%v", err)
+	assert.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	assert.Contains(t, err.Error(), server.Listener.Addr().String())
+	assert.Contains(t, err.Error(), fmt.Sprintf("pid %d", os.Getpid()))
+	assert.Zero(t, signals, "deadline must prevent signaling collected daemons")
 }

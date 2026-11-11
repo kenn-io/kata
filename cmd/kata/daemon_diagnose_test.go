@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
@@ -805,11 +807,16 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 	home, _, uid, _ := stoppedProfileCLI(t)
 	entered := make(chan struct{}, 1)
 	var healthProbe atomic.Bool
+	var hangProbe atomic.Bool
 	var healthPings atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if healthProbe.Load() && healthPings.Add(1) > 1 {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"test","instance_uid":%q}`, uid)
+			return
+		}
+		if !hangProbe.Load() {
+			http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		select {
@@ -834,6 +841,8 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 	}
 
 	t.Run("diagnose", func(t *testing.T) {
+		hangProbe.Store(true)
+		t.Cleanup(func() { hangProbe.Store(false) })
 		t.Setenv("KATA_HTTP_TIMEOUT", "100ms")
 		out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 		require.NoError(t, err)
@@ -852,7 +861,7 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 			_, _, err := executeRootCapture(t, t.Context(), args...)
 			var cliErr *cliError
 			require.ErrorAs(t, err, &cliErr)
-			require.Contains(t, cliErr.Message, "context deadline exceeded")
+			require.Contains(t, cliErr.Message, "503")
 			require.Contains(t, cliErr.Hint, fmt.Sprintf("%q", logPath))
 			require.Contains(t, cliErr.Hint, recoverCmd)
 		}
@@ -868,8 +877,8 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		var result daemonDiagnosis
 		require.NoError(t, json.Unmarshal(cliErr.Data, &result))
 		require.Equal(t, "local_unreachable", result.State)
-		require.Contains(t, result.Message, "context deadline exceeded")
-		for _, evidence := range []string{fmt.Sprintf("pid %d", os.Getpid()), server.Listener.Addr().String(), "context deadline exceeded"} {
+		require.Contains(t, result.Message, "503")
+		for _, evidence := range []string{fmt.Sprintf("pid %d", os.Getpid()), server.Listener.Addr().String(), "503"} {
 			require.Contains(t, cliErr.Message, evidence)
 		}
 		healthNextAction := result.NextAction
@@ -877,4 +886,97 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		require.Contains(t, cliErr.Message, healthNextAction)
 		require.Contains(t, stderr, healthNextAction)
 	})
+}
+
+// A storage blocker must keep the failure observed by the health invocation.
+func TestHealthBlockedProfileRetainsProbeEvidence(t *testing.T) {
+	home, _, uid, _ := stoppedProfileCLI(t)
+	var pings atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		pings.Add(1)
+		http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	_, err = store.Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Metadata: map[string]string{"web_origin": server.URL, "web_origin_stable": "true", "web_capabilities": "pprof"}})
+	require.NoError(t, err)
+	before, err := store.List()
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(filepath.Join(home, "kata.db")))
+	baseline, _, err := diagnoseDaemon(t.Context(), "", nil)
+	require.NoError(t, err)
+	_, _, err = executeRootCapture(t, t.Context(), "--daemon", "work", "health")
+	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+	var result daemonDiagnosis
+	require.NoError(t, json.Unmarshal(cliErr.Data, &result))
+	assert.Equal(t, "missing_profile_storage", result.State)
+	assert.Contains(t, result.NextAction, baseline.NextAction)
+	assert.Equal(t, os.Getpid(), result.PID)
+	assert.Contains(t, result.Endpoint, server.Listener.Addr().String())
+	for _, evidence := range []string{fmt.Sprintf("pid %d", os.Getpid()), server.Listener.Addr().String(), "503", fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")), server.URL + "/debug/pprof/goroutine?debug=2"} {
+		assert.Contains(t, cliErr.Message, evidence)
+		assert.Contains(t, result.NextAction, evidence)
+	}
+	for _, forbidden := range []string{"kill -QUIT", "taskkill", "After the process exits", "daemon recover", "daemon restart"} {
+		assert.NotContains(t, result.NextAction, forbidden)
+	}
+	assert.EqualValues(t, 1, pings.Load())
+	_, err = os.Stat(filepath.Join(home, "kata.db"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	after, err := store.List()
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+}
+
+func TestDiagnoseBlockersRetainObservedProbe(t *testing.T) {
+	for _, kind := range []string{"wrong_database", "version_mismatch", "unreadable_storage"} {
+		t.Run(kind, func(t *testing.T) {
+			home, _, uid, projectUID := stoppedProfileCLI(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
+			}))
+			t.Cleanup(server.Close)
+			profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+			require.NoError(t, err)
+			ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+			require.NoError(t, err)
+			require.NoError(t, ns.EnsureDirs())
+			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+			require.NoError(t, err)
+			_, _, err = client.DiscoverSelected(t.Context(), client.DiscoverRequest{WorkspaceStart: workspaceStartForRemote()})
+			var failure *client.LocalDaemonUnreachableError
+			require.True(t, errors.As(err, &failure), "%v", err)
+			if kind == "wrong_database" {
+				require.NoError(t, os.WriteFile(filepath.Join(os.Getenv("KATA_HOME"), "config.toml"), []byte(fmt.Sprintf("[[daemon]]\nname = \"work\"\nlocal = true\nhome = %q\ninstance_uid = \"01HZZZZZZZZZZZZZZZZZZZZZ01\"\n", home)), 0600)) //nolint:gosec // G703: the config lives in the test-owned temporary KATA_HOME
+			} else {
+				store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
+				require.NoError(t, err)
+				if kind == "version_mismatch" {
+					_, err = store.ExecContext(t.Context(), "UPDATE meta SET value=? WHERE key='schema_version'", fmt.Sprint(db.CurrentSchemaVersion()+1))
+				} else {
+					_, err = store.ExecContext(t.Context(), "ALTER TABLE projects RENAME TO unavailable_projects")
+				}
+				require.NoError(t, err)
+				require.NoError(t, store.Close())
+			}
+			baseline, _, err := diagnoseDaemon(t.Context(), projectUID, nil)
+			require.NoError(t, err)
+			result, _, err := diagnoseDaemon(t.Context(), projectUID, failure)
+			require.NoError(t, err)
+			assert.Equal(t, kind, result.State)
+			assert.Equal(t, baseline.Message, result.Message)
+			assert.Equal(t, baseline.ObservedInstanceUID, result.ObservedInstanceUID)
+			assert.Equal(t, baseline.SchemaVersion, result.SchemaVersion)
+			assert.Contains(t, result.NextAction, baseline.NextAction)
+			assert.Equal(t, os.Getpid(), result.PID)
+			assert.Contains(t, result.Endpoint, server.Listener.Addr().String())
+			assert.Contains(t, result.NextAction, "503")
+			assert.Contains(t, result.NextAction, fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
+		})
+	}
 }

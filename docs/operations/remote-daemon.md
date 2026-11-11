@@ -63,7 +63,7 @@ thread-creation, command-line, symbol, and execution-trace endpoints. Capture
 
 ## Recover an unresponsive local daemon
 
-If a local process is alive but did not answer this CLI probe, errors report its PID,
+If a local process is alive but this CLI probe failed, errors report its PID,
 endpoint, log path, and recovery steps. If the advertised web origin responds,
 capture `/debug/pprof/goroutine?debug=2` there before stopping the process. These
 handlers require daemon-owner authority. When authentication is configured, use
@@ -72,11 +72,17 @@ the owner's bearer credential from the daemon's authentication configuration
 The profiling listener may be the same listener that failed, so capture can also
 time out.
 
+`kata health` keeps the failed probe it observed first. When a storage or project
+problem blocks the selected profile, the same PID, endpoint, and capture advice
+follow that problem's own action. Recheck the daemon's current responsiveness
+before any terminating fallback.
+
 Check the reported `daemon.log`, if present, or retained foreground or supervisor
 stderr. Immediately before using a terminating fallback, verify that the PID
 still identifies this daemon and that the selected endpoint remains unresponsive.
-If both hold and you choose to stop it, Unix operators can use `kill -QUIT <pid>`
-to write goroutine stacks to stderr and terminate the daemon. On Windows,
+Unix operators can then choose to stop it with `kill -QUIT <pid>`, but only if
+the daemon's stderr is retained. SIGQUIT writes goroutine stacks to that stderr and
+terminates the daemon. If the stderr is discarded, the dump is lost. On Windows,
 `taskkill /PID <pid> /F` stops the recorded process.
 
 After the process exits, choose the recovery command for its launch mode:
