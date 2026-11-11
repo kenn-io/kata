@@ -229,7 +229,7 @@ func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	require.False(t, chosen)
 }
 
-func TestSharedChoiceKeepsProviderWhenVectorPathIsDirectory(t *testing.T) {
+func TestSharedChoiceRollsBackWhenVectorPathIsDirectory(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	resetFlags(t)
 	home := setupKataEnv(t)
