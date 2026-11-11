@@ -84,7 +84,7 @@ func referenceWorkFixture(t *testing.T, history int) (*sql.Tx, *referenceWork, R
 	for _, q := range []string{
 		`CREATE TABLE projects(id INTEGER PRIMARY KEY,uid TEXT,name TEXT,deleted_at TEXT)`,
 		`CREATE TABLE cron_jobs(project_id INTEGER,uid TEXT PRIMARY KEY,definition_event_uid TEXT)`,
-		`CREATE TABLE cron_workflows(project_id INTEGER,uid TEXT PRIMARY KEY,definition_event_uid TEXT)`,
+		`CREATE TABLE cron_workflows(project_id INTEGER,uid TEXT PRIMARY KEY,definition_event_uid TEXT,definition_json TEXT)`,
 		`CREATE TABLE events(project_id INTEGER,uid TEXT PRIMARY KEY,type TEXT,origin_instance_uid TEXT,hlc_physical_ms INTEGER,hlc_counter INTEGER,payload TEXT)`,
 		`CREATE TABLE cron_runs(id INTEGER PRIMARY KEY,uid TEXT UNIQUE,project_id INTEGER,job_uid TEXT,definition_event_uid TEXT,workflow_uid TEXT,workflow_definition_event_uid TEXT,occurrence_key TEXT,issue_uid TEXT,actor TEXT,teammate TEXT,executor_label TEXT,status TEXT,summary_json TEXT,revision INTEGER,created_at TEXT,started_at TEXT,ended_at TEXT,updated_at TEXT)`,
 	} {
@@ -96,7 +96,7 @@ func referenceWorkFixture(t *testing.T, history int) (*sql.Tx, *referenceWork, R
 	require.NoError(t, err)
 	_, err = pool.ExecContext(t.Context(), `INSERT INTO cron_jobs VALUES(1,$1,$2)`, job, version)
 	require.NoError(t, err)
-	_, err = pool.ExecContext(t.Context(), `INSERT INTO cron_workflows VALUES(1,$1,$2)`, workflow, workflowVersion)
+	_, err = pool.ExecContext(t.Context(), `INSERT INTO cron_workflows VALUES(1,$1,$2,$3)`, workflow, workflowVersion, `{"version":1,"steps":[{"key":"review","kind":"command","command":"true"}]}`)
 	require.NoError(t, err)
 	at := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
 	run := CronRun{UID: "01M40000000000000000000004", ProjectID: 1, JobUID: &job, DefinitionEventUID: &version, WorkflowUID: &workflow, WorkflowDefinitionEventUID: &workflowVersion, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1}, Revision: 1, CreatedAt: at, UpdatedAt: at}
@@ -139,8 +139,8 @@ func TestCronReferenceWorkIgnoresUnrelatedHistory(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, observed.Replayed)
 			t.Logf("history=%d queries=%d rows=%d", history, w.queries, w.rows)
-			require.LessOrEqual(t, w.queries, 12)
-			require.LessOrEqual(t, w.rows, 8)
+			require.LessOrEqual(t, w.queries, 13)
+			require.LessOrEqual(t, w.rows, 9)
 		})
 	}
 }

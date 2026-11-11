@@ -277,9 +277,19 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 // A run may name an older revision, including one retained only by a snapshot.
 // Check that exact document without changing the historical reference rules.
 func checkRunnableWorkflowRevision(ctx context.Context, tx *sql.Tx, postgres bool, projectID int64, workflowUID, eventUID string) error {
-	var document string
-	err := tx.QueryRowContext(ctx, `SELECT definition_json FROM cron_workflows WHERE project_id=$1 AND uid=$2 AND definition_event_uid=$3`, projectID, workflowUID, eventUID).Scan(&document)
-	if errors.Is(err, sql.ErrNoRows) {
+	var document, currentEvent string
+	err := tx.QueryRowContext(ctx, `SELECT definition_json,definition_event_uid FROM cron_workflows WHERE project_id=$1 AND uid=$2`, projectID, workflowUID).Scan(&document, &currentEvent)
+	if err == nil {
+		if _, err := cron.DecodeWorkflow([]byte(document)); err != nil {
+			return fmt.Errorf("%w: workflow is unsupported: %v", cron.ErrInvalid, err)
+		}
+		if currentEvent == eventUID {
+			return nil
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	{
 		var payload string
 		err = tx.QueryRowContext(ctx, `SELECT payload FROM events WHERE project_id=$1 AND uid=$2`, projectID, eventUID).Scan(&payload)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -296,6 +306,11 @@ func checkRunnableWorkflowRevision(ctx context.Context, tx *sql.Tx, postgres boo
 				document = string(body.Definition)
 			}
 		}
+	}
+	// A compacted revision may be known only through a run observation. The
+	// existing reference validator has already established its identity.
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
 	}
 	if err != nil {
 		return err
