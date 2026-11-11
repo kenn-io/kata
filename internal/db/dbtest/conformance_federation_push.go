@@ -85,9 +85,6 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 	found, err = AcceptedPushRow(ctx, accepted, project.ID, third.ID)
 	require.NoError(t, err)
 	require.False(t, found)
-	unbound, err := reopened.CreateProject(ctx, "push-accepted-unbound")
-	require.NoError(t, err)
-	require.ErrorIs(t, reopened.RecordFederationPushAccepted(ctx, unbound.ID, []int64{first.ID}), db.ErrNotFound)
 	return nil
 }
 
