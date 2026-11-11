@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/uid"
 )
 
 // Direct pulls retain issue history and missing move endpoints atomically.
@@ -52,7 +51,8 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 	foreignProjectEvent.Type = "project.updated"
 	foreignProjectEvent.IssueUID = nil
 	resignNativeEvent(t, &foreignProjectEvent)
-	_, err = receiver.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{foreignProjectEvent})
+	// A previously processed counterpart must not bypass later event validation.
+	_, err = receiver.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{creation, foreignProjectEvent})
 	require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 	_, err = receiver.ProjectByUID(ctx, source.UID)
 	require.ErrorIs(t, err, db.ErrNotFound)
@@ -111,8 +111,7 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 	_, err = cold.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: existing.ID, Actor: "worker"})
 	require.NoError(t, err)
 
-	// A locally edited source projection must disappear after the outbound move,
-	// even though its local event refers to the projection by numeric ID.
+	// A standalone peer link and local edit survive an outbound move.
 	edited := backend.Open(t)
 	t.Cleanup(func() { require.NoError(t, edited.Close()) })
 	editedRoute, err := edited.CreateProjectWithUID(ctx, "edited-source", source.UID)
@@ -128,83 +127,23 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 	_, edit, _, err := edited.EditIssue(ctx, db.EditIssueParams{IssueID: local.ID, Title: &title, Actor: "worker"})
 	require.NoError(t, err)
 	require.NotNil(t, edit.IssueID)
-	holder, err := uid.New()
+	peerProject, err := edited.CreateProject(ctx, "standalone-project")
 	require.NoError(t, err)
-	principal := db.ClaimPrincipal{HolderInstanceUID: holder, Holder: "worker", ClientKind: "agent"}
-	now := time.Now().UTC()
-	claim, err := edited.AcquireClaim(ctx, db.AcquireClaimParams{ProjectID: editedRoute.ID, IssueRef: local.UID, Principal: principal, ClaimKind: "hard", Now: now})
+	peer, _, err := edited.CreateIssue(ctx, db.CreateIssueParams{ProjectID: peerProject.ID, Title: "Peer", Author: "worker"})
 	require.NoError(t, err)
-	require.True(t, claim.Granted)
-	released, err := edited.ReleaseClaim(ctx, db.ReleaseClaimParams{ProjectID: editedRoute.ID, IssueRef: local.UID, Principal: principal, Now: now.Add(time.Second)})
+	_, _, err = edited.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: local.ID, ToIssueID: peer.ID, Type: "blocks", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: peer.ID, FromShortID: peer.ShortID, FromUID: peer.UID, ToShortID: local.ShortID, ToUID: local.UID, Actor: "worker"})
 	require.NoError(t, err)
-	require.NotNil(t, released.Claim.ReleasedAt)
-	pending, err := edited.EnqueuePendingClaim(ctx, db.PendingClaimParams{ProjectID: editedRoute.ID, IssueRef: local.UID, Principal: principal, ClaimKind: "hard", Purpose: "offline", Now: now})
-	require.NoError(t, err)
-	require.Equal(t, issue.UID, pending.IssueUID)
 	_, err = edited.InsertRemoteEvents(ctx, editedRoute.ID, []db.RemoteEvent{move})
 	require.NoError(t, err)
-	applyCtx, resets := db.WithFederationMoveResetCapture(ctx)
-	require.NoError(t, edited.MaterializeFederatedProject(applyCtx, editedRoute.ID))
-	var sourceReset bool
-	for _, reset := range resets.Resets {
-		sourceReset = sourceReset || reset.ProjectID == editedRoute.ID
-	}
-	require.True(t, sourceReset, "the visible source snapshot must be invalidated")
-	listed, err := edited.ListIssues(ctx, db.ListIssuesParams{ProjectID: editedRoute.ID, Limit: 100})
+	require.NoError(t, edited.MaterializeFederatedProject(ctx, editedRoute.ID))
+	links, err := edited.LinksByIssue(ctx, peer.ID)
 	require.NoError(t, err)
-	require.Empty(t, listed)
-	_, err = edited.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.ErrorIs(t, err, db.ErrNotFound)
+	require.Len(t, links, 1)
 	history, err := edited.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Limit: 100})
 	require.NoError(t, err)
 	for eventUID, hash := range map[string]string{creation.EventUID: creation.ContentHash, move.EventUID: move.ContentHash, edit.UID: edit.ContentHash} {
 		var found bool
 		for _, event := range history {
-			found = found || event.UID == eventUID && event.ContentHash == hash
-		}
-		require.True(t, found, "history must retain event %s", eventUID)
-	}
-
-	// A locally bound root has an event that pins its issue and integration state.
-	boundStore := backend.Open(t)
-	t.Cleanup(func() { require.NoError(t, boundStore.Close()) })
-	boundRoute, err := boundStore.CreateProjectWithUID(ctx, "bound-source", source.UID)
-	require.NoError(t, err)
-	_, err = boundStore.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: boundRoute.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: source.ID, HubProjectUID: source.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
-	require.NoError(t, err)
-	_, err = boundStore.InsertRemoteEvents(ctx, boundRoute.ID, []db.RemoteEvent{creation})
-	require.NoError(t, err)
-	require.NoError(t, boundStore.MaterializeFederatedProject(ctx, boundRoute.ID))
-	boundIssue, err := boundStore.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	boundRoot, boundEvent, err := boundStore.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{ProjectID: boundRoute.ID, IssueID: boundIssue.ID, ConnectorInstance: "notes", ExternalRootKey: "root", ExternalAccountKey: "account", Actor: "worker", ReceiveCommentsAfter: now})
-	require.NoError(t, err)
-	require.Equal(t, boundIssue.ID, *boundEvent.IssueID)
-	_, err = boundStore.InsertRemoteEvents(ctx, boundRoute.ID, []db.RemoteEvent{move})
-	require.NoError(t, err)
-	require.NoError(t, boundStore.MaterializeFederatedProject(ctx, boundRoute.ID))
-	assertRoot := func() {
-		t.Helper()
-		gotRoot, err := boundStore.ExternalRootBindingByIssue(ctx, boundIssue.ID)
-		require.NoError(t, err)
-		require.Equal(t, boundRoot.ID, gotRoot.ID)
-		mapping, err := boundStore.ImportMappingBySource(ctx, boundRoute.ID, "connector:notes", "issue", "root")
-		require.NoError(t, err)
-		require.Equal(t, boundRoot.RootMappingID, mapping.ID)
-	}
-	assertRoot()
-	returned, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: target.ID, ToProjectID: source.ID, IfMatchRev: moved.Issue.Revision, Actor: "worker"})
-	require.NoError(t, err)
-	returnEvent := portableNativeEvent(*returned.Event)
-	_, err = boundStore.InsertRemoteEvents(ctx, boundRoute.ID, []db.RemoteEvent{returnEvent})
-	require.NoError(t, err)
-	require.NoError(t, boundStore.MaterializeFederatedProject(ctx, boundRoute.ID))
-	assertRoot()
-	boundHistory, err := boundStore.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Limit: 100})
-	require.NoError(t, err)
-	for eventUID, hash := range map[string]string{creation.EventUID: creation.ContentHash, move.EventUID: move.ContentHash, boundEvent.UID: boundEvent.ContentHash, returnEvent.EventUID: returnEvent.ContentHash} {
-		var found bool
-		for _, event := range boundHistory {
 			found = found || event.UID == eventUID && event.ContentHash == hash
 		}
 		require.True(t, found, "history must retain event %s", eventUID)

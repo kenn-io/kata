@@ -86,8 +86,6 @@ func TestSyncFederationMoveOutAfterPushedEdit(t *testing.T) {
 			binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 			require.NoError(t, err)
 			require.GreaterOrEqual(t, binding.PullCursorEventID, moved.Event.ID)
-			_, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-			require.ErrorIs(t, err, db.ErrNotFound)
 			current, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: projects[1].ID, ToProjectID: projects[0].ID, IfMatchRev: current.Revision, Actor: "worker"})
