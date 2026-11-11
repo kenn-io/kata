@@ -81,9 +81,11 @@ func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, e
 		value, err := decodeRecurringOccurrence(occurrence)
 		if err != nil || value != nil {
 			RecordExposedIssue(ctx, id)
-			if err != nil {
-				return nil, err
-			}
+		}
+		if err != nil {
+			return nil, err
+		}
+		if value != nil {
 			stamp := value.ScheduledAt.UTC()
 			// Keep the original offset when UTC would exceed JSON's year range.
 			if stamp.Year() < 0 || stamp.Year() > 9999 {

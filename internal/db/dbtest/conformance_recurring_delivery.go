@@ -314,10 +314,7 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 		}
 		deliveryStampText(t, s, children[0], "2025-01-01T01:00:00.100+01:00")
 		deliveryStampText(t, s, children[1], "2025-01-01T00:00:00.1Z")
-		winner := children[0].UID
-		if children[1].UID > winner {
-			winner = children[1].UID
-		}
+		winner := max(children[0].UID, children[1].UID)
 		require.Equal(t, winner, deliveryRead(t, s, p, j, now).LastChild.UID)
 		deliveryStampText(t, s, children[1], "2025-01-01T00:00:00Z")
 		// Restored metadata may contain invalid timestamps.

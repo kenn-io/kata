@@ -401,7 +401,7 @@ func TestCronDeliveryResponseRelease(t *testing.T) {
 				path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s?include=delivery", f.private.ID, j.UID)
 				status, _, raw := f.request(t, http.MethodGet, path, "member", nil, nil)
 				require.Equal(t, http.StatusOK, status, string(raw))
-				evidence := child.UID
+				var evidence string
 				if futureVersion {
 					evidence = "unsupported recurring occurrence version"
 				} else {

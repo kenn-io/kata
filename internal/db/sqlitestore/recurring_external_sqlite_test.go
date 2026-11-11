@@ -43,7 +43,7 @@ func TestRecurringDeliveryExternalSQLite(t *testing.T) {
 			}
 			run := func(database, command string) string {
 				t.Helper()
-				out, err := exec.CommandContext(ctx, sqlite, database, command).CombinedOutput()
+				out, err := exec.CommandContext(ctx, sqlite, database, command).CombinedOutput() // #nosec G204 -- executable and arguments are test fixtures.
 				require.NoError(t, err, "%s: %s", command, out)
 				return string(out)
 			}
@@ -55,6 +55,10 @@ func TestRecurringDeliveryExternalSQLite(t *testing.T) {
 			run(path, fmt.Sprintf(`INSERT INTO issues(uid,project_id,short_id,title,author) VALUES('00000000000000000000000001',%d,'000001','Extra','operator')`, p.ID))
 			// Restored metadata can contain malformed occurrence values.
 			run(path, `UPDATE issues SET metadata='{"cron.occurrence":"not an object"}' WHERE uid='00000000000000000000000001'`)
+			out, err := exec.CommandContext(ctx, sqlite, path, `EXPLAIN QUERY PLAN SELECT uid FROM issues INDEXED BY idx_issues_recurring_delivery WHERE deleted_at IS NULL AND json_extract(metadata,'$."cron.occurrence".job_uid') IS NULL`).CombinedOutput() // #nosec G204 -- executable and arguments are test fixtures.
+			require.ErrorContains(t, err, "exit status")
+			require.Contains(t, string(out), "no query solution")
+			require.Contains(t, run(path, fmt.Sprintf(`EXPLAIN QUERY PLAN SELECT uid FROM issues WHERE deleted_at IS NULL AND json_extract(metadata,'$."cron.occurrence".job_uid')='%s'`, job.UID)), "idx_issues_recurring_delivery")
 			run(path, fmt.Sprintf(`UPDATE issues SET metadata=json_set(metadata,'$."cron.occurrence".scheduled_at','2025-01-01T00:00:00.123456789Z') WHERE id=%d`, children[0].ID))
 			backup := filepath.Join(t.TempDir(), "backup.db")
 			run(path, fmt.Sprintf(".backup %q", backup))
