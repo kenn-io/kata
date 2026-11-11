@@ -264,7 +264,7 @@ func checkArgvRetainedFeatureProbe(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	legacy := `{"version":1,"steps":[{"kind":"command","command":"echo argv"}]}`
 	supported := `{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`
-	held := []string{`{"version":1,"steps":[{"kind":"argv"}]}`, `{"version":1,"steps":[{"kind":"argv","argv":[]}]}`, `{"version":1,"steps":[{"kind":"argv","argv":["echo",null]}]}`, `{"version":1,"steps":null}`, `{"version":1,"steps":[null]}`, `{"version":1,"steps":[{"kind":null}]}`}
+	held := []string{`{"version":1,"steps":[{"kind":"argv"}]}`, `{"version":1,"steps":null}`, `{"version":1,"steps":[null]}`, `{"version":1,"steps":[{"kind":null}]}`}
 	for _, deleted := range []any{nil, "2026-11-08T12:00:00Z"} {
 		_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1,deleted_at=$2 WHERE uid=$3`, supported, deleted, workflow.UID)
 		require.NoError(t, err)

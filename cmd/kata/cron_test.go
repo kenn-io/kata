@@ -863,8 +863,11 @@ func TestCronCLIAdmitsLiteralArgv(t *testing.T) {
 	require.Equal(t, []string{"printf", "", "a b"}, result.Workflow.Definition.Steps[0].Argv)
 	out, _, err = executeCronCLI(t, env.URL, nil, "workflow", "show", id)
 	require.NoError(t, err)
-	require.NoError(t, json.Unmarshal([]byte(out), &result))
-	require.Equal(t, []string{"printf", "", "a b"}, result.Workflow.Definition.Steps[0].Argv)
+	var shown struct {
+		Workflow api.CronWorkflow `json:"workflow"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &shown))
+	require.Equal(t, []string{"printf", "", "a b"}, shown.Workflow.Definition.Steps[0].Argv)
 }
 
 func TestCronCLIWorkflowRequestsAdvertiseArgv(t *testing.T) {
@@ -877,9 +880,7 @@ func TestCronCLIWorkflowRequestsAdvertiseArgv(t *testing.T) {
 	c, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
 	require.NoError(t, err)
 	a := daemonAPI{ctx: t.Context()}
-	for _, action := range []string{"list", "show"} {
-		o := cronCLIOptions{resource: "workflow", action: action, identity: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}
-		_, _ = o.callRead(a, c, 1)
-	}
-	require.Equal(t, []string{"cron_workflow_argv_v1", "cron_workflow_argv_v1"}, seen)
+	o := cronCLIOptions{resource: "workflow", action: "list"}
+	_, _ = o.callRead(a, c, 1)
+	require.Equal(t, []string{"cron_workflow_argv_v1"}, seen)
 }

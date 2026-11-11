@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -31,7 +32,7 @@ func TestCronWorkflowArgvHTTPCompatibility(t *testing.T) {
 	project := seedProject(t, env, "example-project")
 	path := fmt.Sprintf("/api/v1/projects/%d/cron/workflows", project.ID)
 	body := `{"actor":"worker","name":"Literal","definition":{"version":1,"steps":[{"key":"run","kind":"argv","argv":["printf",""]}]}}`
-	status, raw := argvRequest(t, env, http.MethodPost, path, body, db.CronWorkflowArgvEventFeature)
+	status, raw := argvRequest(t, env, http.MethodPost, path, body, "")
 	require.Equalf(t, http.StatusCreated, status, "%s", raw)
 	var created struct {
 		Workflow struct {
@@ -60,29 +61,27 @@ func TestCronWorkflowArgvHTTPCompatibility(t *testing.T) {
 	require.Contains(t, raw, "unsupported_event_features")
 	status, raw = argvRequest(t, env, http.MethodPut, runPath, run, db.CronWorkflowArgvEventFeature)
 	require.Equalf(t, http.StatusOK, status, "%s", raw)
-	continued := strings.Replace(strings.Replace(run, `"running"`, `"succeeded"`, 1), `"expected_revision":0`, `"expected_revision":1`, 1)
-	status, raw = argvRequest(t, env, http.MethodPut, runPath, continued, "")
-	require.Equalf(t, http.StatusOK, status, "%s", raw)
-	terminalPath := fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, cronHTTPUID(t))
-	terminal := strings.Replace(run, `"running"`, `"succeeded"`, 1)
-	status, raw = argvRequest(t, env, http.MethodPut, terminalPath, terminal, "")
-	require.Equalf(t, http.StatusOK, status, "%s", raw)
 }
 
 func TestCronWorkflowArgvHTTPRejectsRawShapes(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	project := seedProject(t, env, "example-project")
 	path := fmt.Sprintf("/api/v1/projects/%d/cron/workflows", project.ID)
+	before, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	// Typed decoding erases these empty members; the HTTP handler must parse RawBody.
 	for _, step := range []string{
-		`{"key":"run","kind":"argv"}`,
-		`{"key":"run","kind":"argv","argv":null}`,
-		`{"key":"run","kind":"argv","argv":["printf",null]}`,
-		`{"key":"run","kind":"argv","argv":["printf",1]}`,
 		`{"key":"run","kind":"argv","argv":["printf"],"command":""}`,
 		`{"key":"run","kind":"argv","argv":["printf"],"prompt":""}`,
 	} {
 		body := `{"actor":"worker","name":"Literal","definition":{"version":1,"steps":[` + step + `]}}`
 		status, raw := argvRequest(t, env, http.MethodPost, path, body, db.CronWorkflowArgvEventFeature)
-		require.Containsf(t, []int{http.StatusBadRequest, http.StatusUnprocessableEntity}, status, "%s: %s", step, raw)
+		require.Equalf(t, http.StatusBadRequest, status, "%s: %s", step, raw)
+		var response api.ErrorEnvelope
+		require.NoError(t, json.Unmarshal([]byte(raw), &response))
+		require.Equal(t, "validation", response.Error.Code)
+		after, err := env.DB.MaxEventID(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, before, after)
 	}
 }

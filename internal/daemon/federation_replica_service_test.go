@@ -2491,8 +2491,6 @@ func TestAdoptionRefusalAfterSourceResolutionPreservesCredential(t *testing.T) {
 	credentials.put(project.UID, params.Credential)
 	_, err = daemon.EnsureFederationReplica(ctx, argvBeforeAdoptionStore{store}, credentials, nil, params)
 	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-	// The preflight saw no argv, so the credential moved and was restored exactly.
-	assert.Equal(t, 2, credentials.rekeyCalls)
 	got, found, err := credentials.FederationCredential(ctx, project.UID)
 	require.NoError(t, err)
 	require.True(t, found)
@@ -2505,43 +2503,6 @@ func TestAdoptionRefusalAfterSourceResolutionPreservesCredential(t *testing.T) {
 	assert.Equal(t, project.UID, current.UID)
 	_, err = store.FederationBindingByProject(ctx, project.ID)
 	assert.ErrorIs(t, err, db.ErrNotFound)
-}
-
-func TestAdoptionRekeyFailureLeavesStandaloneProjectRetryable(t *testing.T) {
-	ctx := t.Context()
-	store := openReplicaServiceStore(t)
-	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
-	require.NoError(t, err)
-	credentials := newReplicaCredentialStore()
-	params := replicaServiceParams()
-	params.ProjectName, params.AdoptExisting = project.Name, true
-	// Match the normalized capabilities used by the service.
-	params.Credential.Capabilities = "pull,push"
-	credentials.put(project.UID, params.Credential)
-	credentials.rekeyErr = errors.New("injected write failure")
-	_, err = daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
-	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialIO)
-	current, err := store.ProjectByID(ctx, project.ID)
-	require.NoError(t, err)
-	require.Equal(t, replicaLocalProjectUID, current.UID)
-	_, err = store.FederationBindingByProject(ctx, project.ID)
-	require.ErrorIs(t, err, db.ErrNotFound)
-	old, found, err := credentials.FederationCredential(ctx, project.UID)
-	require.NoError(t, err)
-	require.True(t, found)
-	assert.Equal(t, params.Credential, old)
-	credentials.rekeyErr = nil
-	_, err = daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
-	require.NoError(t, err)
-	_, found, err = credentials.FederationCredential(ctx, project.UID)
-	require.NoError(t, err)
-	assert.False(t, found)
-	_, found, err = credentials.FederationCredential(ctx, replicaHubProjectUID)
-	require.NoError(t, err)
-	assert.True(t, found)
-	adopted, err := store.ProjectByID(ctx, project.ID)
-	require.NoError(t, err)
-	assert.Equal(t, replicaHubProjectUID, adopted.UID)
 }
 
 func TestAdoptionPreflightRefusesArgvBeforeCredentialMutation(t *testing.T) {

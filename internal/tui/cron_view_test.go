@@ -676,6 +676,8 @@ func TestCronSearchClickGuards(t *testing.T) {
 
 func TestCronWorkflowDetailShowsLiteralArgv(t *testing.T) {
 	m := cronFixture(t)
+	m.cron.data.workflows[0].Definition.Steps[0].Kind = "argv"
+	m.cron.data.workflows[0].Definition.Steps[0].Command = nil
 	m.cron.data.workflows[0].Definition.Steps[0].Argv = []string{"printf", "", "a b"}
 	m = sendRune(m, '4')
 	m = sendKey(m, tea.KeyEnter)
@@ -683,8 +685,8 @@ func TestCronWorkflowDetailShowsLiteralArgv(t *testing.T) {
 	var rendered strings.Builder
 	for _, line := range lines {
 		rendered.WriteString(line.text)
+		rendered.WriteByte('\n')
 	}
-	require.Contains(t, rendered.String(), `"printf"`)
-	require.Contains(t, rendered.String(), `""`)
+	require.Contains(t, rendered.String(), "\"printf\",\n  \"\"")
 	require.Contains(t, rendered.String(), `"a b"`)
 }

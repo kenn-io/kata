@@ -1,9 +1,6 @@
 package dbtest
 
 import (
-	"context"
-	"database/sql"
-	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,40 +31,14 @@ func checkRunArgvAdmission(t *testing.T, store db.Storage) error {
 	_, err = store.ObserveCronRun(ctx, promptRun)
 	require.NoError(t, err)
 
-	// Keep an older workflow revision after a later command edit.
-	historical, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Historical workflow", Actor: "worker", Definition: other.Definition})
+	argv := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "exec", Kind: "argv", Argv: []string{"echo", "hello"}}}}
+	workflow, _, err = store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, UID: workflow.UID, ExpectedEventUID: workflow.DefinitionEventUID, Name: workflow.Name, Actor: "worker", Definition: argv})
+	require.NoError(t, err)
+	// Keep an argv revision after a later command edit.
+	historical, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Historical workflow", Actor: "worker", Definition: argv})
 	require.NoError(t, err)
 	oldEvent := historical.DefinitionEventUID
 	_, _, err = store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, UID: historical.UID, ExpectedEventUID: oldEvent, Name: "Edited workflow", Actor: "worker", Definition: other.Definition})
-	require.NoError(t, err)
-
-	// Install a valid future-format document in the existing revision, simulating
-	// a persisted workflow from an argv-capable peer without changing schema.
-	q := store.(interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-		QueryRowContext(context.Context, string, ...any) *sql.Row
-	})
-	const document = `{"version":1,"steps":[{"key":"exec","kind":"argv","argv":["echo","hello"]}]}`
-	var payload string
-	require.NoError(t, q.QueryRowContext(ctx, `SELECT payload FROM events WHERE uid=$1`, workflow.DefinitionEventUID).Scan(&payload))
-	var body db.CronDefinitionEvent
-	require.NoError(t, json.Unmarshal([]byte(payload), &body))
-	body.Definition = []byte(document)
-	encoded, err := json.Marshal(body)
-	require.NoError(t, err)
-	_, err = q.ExecContext(ctx, `UPDATE events SET payload=$1 WHERE uid=$2`, string(encoded), workflow.DefinitionEventUID)
-	require.NoError(t, err)
-	_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1 WHERE uid=$2`, document, workflow.UID)
-	require.NoError(t, err)
-
-	var historicalPayload string
-	require.NoError(t, q.QueryRowContext(ctx, `SELECT payload FROM events WHERE uid=$1`, oldEvent).Scan(&historicalPayload))
-	var historicalBody db.CronDefinitionEvent
-	require.NoError(t, json.Unmarshal([]byte(historicalPayload), &historicalBody))
-	historicalBody.Definition = []byte(document)
-	historicalEncoded, err := json.Marshal(historicalBody)
-	require.NoError(t, err)
-	_, err = q.ExecContext(ctx, `UPDATE events SET payload=$1 WHERE uid=$2`, string(historicalEncoded), oldEvent)
 	require.NoError(t, err)
 
 	for _, path := range []string{"direct", "historical", "job", "job with unrelated workflow"} {

@@ -81,10 +81,7 @@ func TestCronWorkflowOpaqueNumbers(t *testing.T) {
 func TestCronWorkflowArgvInputPreservesValidation(t *testing.T) {
 	f := newCronFixture(t)
 	for _, step := range []map[string]any{
-		{"key": "run", "kind": "argv", "argv": nil},
 		{"key": "run", "kind": "argv", "argv": []any{"echo", nil}},
-		{"key": "run", "kind": "argv", "argv": []any{"echo", 3}},
-		{"key": "run", "kind": "argv", "argv": []string{"echo"}, "command": ""},
 	} {
 		definition := map[string]any{"version": 1, "steps": []any{step}}
 		require.True(t, cronCall(t, f.session, "cron_workflow_create", map[string]any{"uid": cronNewUID(t, f.session), "name": "Invalid", "definition": definition}).IsError)

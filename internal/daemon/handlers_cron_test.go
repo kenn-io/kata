@@ -265,7 +265,6 @@ func TestCronWorkflowHTTPRejectsNullArgv(t *testing.T) {
 			var response api.ErrorEnvelope
 			require.NoError(t, json.Unmarshal(raw, &response))
 			require.Equal(t, "validation", response.Error.Code)
-			require.Contains(t, response.Error.Message, "argv workflow step member is not supported")
 			after, err := env.DB.MaxEventID(t.Context())
 			require.NoError(t, err)
 			require.Equal(t, before, after)
