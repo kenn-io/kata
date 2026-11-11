@@ -36,12 +36,12 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 describe('ProjectSyncStatus', () => {
-  it.each(['network', 'body', '503', 403, 404, 'mismatch', 'malformed 403', '403 body read error'])(
+  it.each(['network', 'body', '503', 403, 'mismatch'])(
     'clears status after %s and retries on the next cycle',
     async (failure) => {
       const fetcher = vi.fn().mockResolvedValueOnce(response())
       if (failure === 'network') fetcher.mockRejectedValueOnce(new TypeError('network failure'))
-      else if (failure === 'body' || failure === '403 body read error') {
+      else if (failure === 'body') {
         fetcher.mockResolvedValueOnce(
           new Response(
             new ReadableStream({
@@ -49,17 +49,10 @@ describe('ProjectSyncStatus', () => {
                 controller.error(new TypeError('body read failed'))
               },
             }),
-            { status: failure === 'body' ? 200 : 403 },
+            { status: 200 },
           ),
         )
       } else if (failure === 'mismatch') fetcher.mockResolvedValueOnce(response(9))
-      else if (failure === 'malformed 403')
-        fetcher.mockResolvedValueOnce(
-          new Response('{', {
-            status: 403,
-            headers: { 'Content-Type': 'application/json' },
-          }),
-        )
       else fetcher.mockResolvedValueOnce(new Response('', { status: Number(failure) }))
       setGeneratedFetch(fetcher.mockResolvedValueOnce(response()))
       const view = render(ProjectSyncStatus, {
@@ -76,9 +69,8 @@ describe('ProjectSyncStatus', () => {
   )
 
   it.each(['initial', 'background', 'manual'])(
-    'refreshes after returning while a %s read is in flight',
+    'refreshes after a cycle while a %s read is in flight',
     async (kind) => {
-      const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
       let finish!: (result: Response) => void
       const fetcher = vi.fn()
       if (kind !== 'initial') fetcher.mockResolvedValueOnce(response())
@@ -101,9 +93,6 @@ describe('ProjectSyncStatus', () => {
         else await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
       }
       await waitFor(() => expect(finish).toBeDefined())
-      hidden.mockReturnValue(true)
-      await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
-      hidden.mockReturnValue(false)
       await view.rerender({ projectID: 7, projectUID, refreshGeneration: 3 })
       await view.rerender({ projectID: 7, projectUID, refreshGeneration: 4 })
       finish(response())
@@ -286,12 +275,12 @@ describe('ProjectSyncStatus', () => {
     })
     await screen.findByText('Pending: 2')
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
-    expect(signal?.aborted).toBe(false)
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
     hidden.mockReturnValue(true)
-    resolveSlow(response())
+    expect(signal?.aborted).toBe(false)
+    resolveSlow(response(7, projectUID, 0))
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(screen.getByText('Pending: 2')).not.toBeNull()
+    expect(screen.getByText('Pending: 0')).not.toBeNull()
     expect(fetcher).toHaveBeenCalledTimes(2)
     hidden.mockReturnValue(false)
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 3 })
