@@ -206,7 +206,8 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 			pending, pendingErr := sender.env.DB.PendingFederationPushEvents(t.Context(), binding.ProjectID, sender.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
 			require.NoError(t, pendingErr)
 			require.ErrorContains(t, err, fmt.Sprintf("%d events need project access", len(pending)))
-			accepted, err := sender.env.DB.FederationPushAccepted(t.Context(), binding.ProjectID, independentEvent.ID)
+			var accepted bool
+			err = sender.env.DB.QueryRowContext(t.Context(), `SELECT EXISTS(SELECT 1 FROM federation_push_accepted WHERE project_id=$1 AND event_id=$2)`, binding.ProjectID, independentEvent.ID).Scan(&accepted)
 			require.NoError(t, err)
 			require.True(t, accepted)
 			_, err = hub.DB.IssueByUID(t.Context(), independent.UID, db.IncludeDeletedNo)
@@ -309,7 +310,6 @@ func TestSyncFederationPartialPushAndPull(t *testing.T) {
 	require.NoError(t, err)
 	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
 	require.NoError(t, err)
-	delete(sender.credentials, projects[1].UID)
 	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
 	runner := &Runner{DB: sender.env.DB, Credentials: sender.credentials}
@@ -413,6 +413,9 @@ func TestFederationSuppressesAcceptedLocalEcho(t *testing.T) {
 				binding, err = reopened.FederationBindingByProject(ctx, binding.ProjectID)
 				require.NoError(t, err)
 				require.NoError(t, syncDirectSpoke(ctx, reopened, binding, false, projects[0].ID, client, callback, nil, sender.credentials, clientpkg.Opts{}))
+				binding, err = reopened.FederationBindingByProject(ctx, binding.ProjectID)
+				require.NoError(t, err)
+				require.Greater(t, binding.PullCursorEventID, previousPull)
 			} else {
 				err = SyncFederationOnceWithPulledEvents(ctx, sender.env.DB, binding, sender.credentials[projects[0].UID], clientpkg.Opts{}, callback, sender.credentials)
 				require.ErrorContains(t, err, "pending federation events remain")

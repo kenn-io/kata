@@ -197,12 +197,6 @@ func (d *Store) RecordFederationPushAccepted(ctx context.Context, projectID int6
 }
 
 // FederationPushAccepted reports whether a binding has acknowledged an event.
-func (d *Store) FederationPushAccepted(ctx context.Context, projectID, eventID int64) (bool, error) {
-	var found bool
-	err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_push_accepted WHERE project_id=? AND event_id=?)`, projectID, eventID).Scan(&found)
-	return found, err
-}
-
 func pruneFederationPushAccepted(ctx context.Context, tx *sql.Tx, projectID int64) error {
 	_, err := tx.ExecContext(ctx, `DELETE FROM federation_push_accepted WHERE project_id=? AND event_id <= (SELECT push_cursor_event_id FROM federation_bindings WHERE project_id=?)`, projectID, projectID)
 	return err

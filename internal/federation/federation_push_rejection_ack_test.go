@@ -54,9 +54,11 @@ func TestFederationPushRetainsUnrecognizedRejection(t *testing.T) {
 	require.NoError(t, err)
 	_, event, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Pending", Author: "worker"})
 	require.NoError(t, err)
+	_, independent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Independent", Author: "worker"})
+	require.NoError(t, err)
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		require.NoError(t, json.MarshalWrite(w, api.FederationIngestEventsBody{
-			PushCursorEventID: event.ID, RejectedEvents: []db.FederationEventRejection{{EventUID: "unknown", SourceEventID: event.ID}},
+			Accepted: 1, PushCursorEventID: independent.ID, RejectedEvents: []db.FederationEventRejection{{EventUID: event.UID, SourceEventID: event.ID, Code: "future_reason", Message: "future detail"}},
 		}))
 	}))
 	t.Cleanup(hub.Close)
@@ -64,13 +66,15 @@ func TestFederationPushRetainsUnrecognizedRejection(t *testing.T) {
 	require.NoError(t, err)
 	client, err := NewClient(ctx, hub.URL, "token", clientpkg.Opts{})
 	require.NoError(t, err)
-	require.Error(t, pushDirectSpoke(ctx, spoke.DB, &binding, 1, client, nil, newMoveCredentialStore(), clientpkg.Opts{}))
+	err = pushDirectSpoke(ctx, spoke.DB, &binding, 1, client, nil, newMoveCredentialStore(), clientpkg.Opts{})
+	require.ErrorContains(t, err, "future_reason")
+	require.ErrorContains(t, err, "future detail")
 	retained, err := spoke.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Less(t, retained.PushCursorEventID, event.ID)
 	pending, err := spoke.DB.PendingFederationPushEvents(ctx, project.ID, spoke.DB.InstanceUID(), retained.PushCursorEventID, 10)
 	require.NoError(t, err)
-	require.Len(t, pending, 1)
+	require.Len(t, pending, 2)
 	require.Equal(t, event.UID, pending[0].UID)
 }
 
@@ -89,10 +93,4 @@ func TestFederationPushRejectsInvalidAcknowledgments(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
-}
-
-func TestFederationPushReportsUnknownRejectionReason(t *testing.T) {
-	message := federationEventRejectionMessage([]db.FederationEventRejection{{Code: "future_reason", Message: "future detail"}}, 1, 0)
-	require.Contains(t, message, "future_reason")
-	require.NotContains(t, message, "need project access")
 }

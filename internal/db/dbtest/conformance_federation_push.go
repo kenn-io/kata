@@ -1,6 +1,8 @@
 package dbtest
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"fmt"
 	"testing"
@@ -25,17 +27,17 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 	_, second, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "second", Author: "tester"})
 	require.NoError(t, err)
 	require.Error(t, accepted.RecordFederationPushAccepted(ctx, project.ID, []int64{first.ID, 9223372036854775807}))
-	found, err := accepted.FederationPushAccepted(ctx, project.ID, first.ID)
+	found, err := acceptedPushRow(ctx, accepted, project.ID, first.ID)
 	require.NoError(t, err)
 	require.False(t, found)
 	require.NoError(t, accepted.RecordFederationPushAccepted(ctx, project.ID, []int64{second.ID}))
 	require.NoError(t, accepted.RecordFederationPushAccepted(ctx, project.ID, []int64{second.ID}))
 	reopened := backend.OpenSame(t, store)
 	accepted = reopened
-	found, err = accepted.FederationPushAccepted(ctx, project.ID, second.ID)
+	found, err = acceptedPushRow(ctx, accepted, project.ID, second.ID)
 	require.NoError(t, err)
 	require.True(t, found)
-	found, err = accepted.FederationPushAccepted(ctx, other.ID, second.ID)
+	found, err = acceptedPushRow(ctx, accepted, other.ID, second.ID)
 	require.NoError(t, err)
 	require.False(t, found)
 	require.NoError(t, accepted.RecordFederationPushAccepted(ctx, other.ID, []int64{second.ID}))
@@ -57,18 +59,18 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 	through, err = reopened.FederationPushAcceptedThrough(ctx, project.ID, reopened.InstanceUID(), first.ID)
 	require.NoError(t, err)
 	require.Equal(t, second.ID, through)
-	found, err = accepted.FederationPushAccepted(ctx, project.ID, second.ID)
+	found, err = acceptedPushRow(ctx, accepted, project.ID, second.ID)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.NoError(t, reopened.AdvanceFederationPushCursor(ctx, project.ID, second.ID))
-	found, err = accepted.FederationPushAccepted(ctx, project.ID, second.ID)
+	found, err = acceptedPushRow(ctx, accepted, project.ID, second.ID)
 	require.NoError(t, err)
 	require.False(t, found)
-	found, err = accepted.FederationPushAccepted(ctx, other.ID, second.ID)
+	found, err = acceptedPushRow(ctx, accepted, other.ID, second.ID)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.NoError(t, accepted.RecordFederationPushAccepted(ctx, project.ID, []int64{first.ID}))
-	found, err = accepted.FederationPushAccepted(ctx, project.ID, first.ID)
+	found, err = acceptedPushRow(ctx, accepted, project.ID, first.ID)
 	require.NoError(t, err)
 	require.False(t, found)
 	_, third, err := reopened.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "third", Author: "tester"})
@@ -76,7 +78,7 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 	require.NoError(t, accepted.RecordFederationPushAccepted(ctx, project.ID, []int64{third.ID}))
 	_, err = reopened.EnableFederationPush(ctx, project.ID, third.ID)
 	require.NoError(t, err)
-	found, err = accepted.FederationPushAccepted(ctx, project.ID, third.ID)
+	found, err = acceptedPushRow(ctx, accepted, project.ID, third.ID)
 	require.NoError(t, err)
 	require.False(t, found)
 	return nil
@@ -163,4 +165,13 @@ func checkFederationPushSnapshotRuns(t *testing.T, store db.Storage) error {
 	require.Len(t, pending, 4)
 	require.Equal(t, []string{uids[0], uids[1], uids[3], uids[4]}, []string{pending[0].UID, pending[1].UID, pending[2].UID, pending[3].UID})
 	return nil
+}
+
+func acceptedPushRow(ctx context.Context, store db.Storage, projectID, eventID int64) (bool, error) {
+	q := store.(interface {
+		QueryRowContext(context.Context, string, ...any) *sql.Row
+	})
+	var found bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_push_accepted WHERE project_id=$1 AND event_id=$2)`, projectID, eventID).Scan(&found)
+	return found, err
 }

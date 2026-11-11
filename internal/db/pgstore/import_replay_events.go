@@ -58,7 +58,6 @@ $8,COALESCE($9,(SELECT uid FROM issues WHERE id=$8)),$10,$11,$12,$13,$14,$15,$16
 			event.UID, boolInt(*event.FederationReplayDue))
 	}
 	return pgReplayError(db.ImportKindEvent, err)
-
 }
 
 func pgReplayFillEventIssueUIDs(ctx context.Context, tx *sql.Tx, event *db.EventExport) error {

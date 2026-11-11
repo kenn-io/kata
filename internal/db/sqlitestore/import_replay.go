@@ -1302,7 +1302,6 @@ func importEvent(ctx context.Context, tx *sql.Tx, e *db.EventExport, opts db.Imp
 			e.UID, boolInt(*e.FederationReplayDue))
 	}
 	return wrapImportErr(db.ImportKindEvent, err)
-
 }
 
 func importPurgeLog(ctx context.Context, tx *sql.Tx, pl *db.PurgeLogExport) error {

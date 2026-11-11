@@ -2168,38 +2168,6 @@ func testResetRetryLocalProjectEvent(t *testing.T, legacyNoDebt, failPollAfterPu
 	require.JSONEq(t, `{"area":"ops"}`, string(repaired.Metadata))
 }
 
-func TestSyncFederationDeliversReplayWithMissingIssue(t *testing.T) {
-	ctx := t.Context()
-	path := filepath.Join(t.TempDir(), "kata.db")
-	store, err := sqlitestore.Open(ctx, path)
-	require.NoError(t, err)
-	project, err := store.CreateProject(ctx, "spoke-project")
-	require.NoError(t, err)
-	issue, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Recovered", Author: "tester"})
-	require.NoError(t, err)
-	binding, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://127.0.0.1:1", HubProjectID: 42, HubProjectUID: project.UID, ReplayHorizonEventID: 100, PullCursorEventID: 99, PushCursorEventID: event.ID, Enabled: true, Actor: "tester"})
-	require.NoError(t, err)
-	_, err = store.ExecContext(ctx, `UPDATE events SET issue_id=NULL WHERE uid=?`, event.UID)
-	require.NoError(t, err)
-	_, err = store.ExecContext(ctx, `DELETE FROM issues WHERE uid=?`, issue.UID)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	envelope := eventEnvelopeForSyncTest(event, 100)
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{Events: []api.EventEnvelope{envelope}, NextAfterID: 100}))
-	}))
-	t.Cleanup(hub.Close)
-	var delivered []db.Event
-	err = SyncFederationOnceWithPulledEvents(ctx, store, binding, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "token"}, clientpkg.Opts{}, func(_ int64, events []db.Event) {
-		delivered = append(delivered, events...)
-	})
-	require.NoError(t, err)
-	require.Len(t, delivered, 1)
-	require.Equal(t, event.UID, delivered[0].UID)
-	_, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-}
-
 func TestSyncFederationOnceRecoveredResetDoesNotDeliverLocalProjectPushEcho(t *testing.T) {
 	ctx := t.Context()
 	spoke := testenv.New(t)

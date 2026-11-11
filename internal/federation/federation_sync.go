@@ -460,6 +460,9 @@ func validateFederationPushAcknowledgment(batch []db.Event, ack api.FederationIn
 		if !ok || id != rejection.SourceEventID || duplicate {
 			return nil, errors.New("hub returned invalid rejection details")
 		}
+		if rejection.Code != db.FederationProjectNotEnrolledCode {
+			return nil, fmt.Errorf("unknown rejection reason %.256s: %.1024s", rejection.Code, rejection.Message)
+		}
 		byUID[rejection.EventUID] = rejection
 	}
 	var rejected []rejectedFederationEvent
@@ -474,21 +477,7 @@ func validateFederationPushAcknowledgment(batch []db.Event, ack api.FederationIn
 func federationEventRejectionMessage(rejected []db.FederationEventRejection, pending, acknowledged int) string {
 	messages := make([]string, 0, 5)
 	seen := map[[2]string]bool{}
-	unknown := false
 	for _, rejection := range rejected {
-		if rejection.Code != db.FederationProjectNotEnrolledCode {
-			unknown = true
-			break
-		}
-	}
-	for _, rejection := range rejected {
-		if rejection.Code != db.FederationProjectNotEnrolledCode {
-			messages = append(messages, fmt.Sprintf("unknown rejection reason %.256s: %.1024s", rejection.Code, rejection.Message))
-			if len(messages) == 5 {
-				break
-			}
-			continue
-		}
 		key := [2]string{rejection.IssueUID, rejection.CurrentProjectUID}
 		if seen[key] {
 			continue
@@ -498,9 +487,6 @@ func federationEventRejectionMessage(rejected []db.FederationEventRejection, pen
 		if len(messages) == 5 {
 			break
 		}
-	}
-	if unknown {
-		return fmt.Sprintf("%d events pending, including unknown rejection reasons (showing up to five): %s; hub acknowledged %d other events", pending, strings.Join(messages, "; "), acknowledged)
 	}
 	return fmt.Sprintf("%d events need project access (showing up to five issues): %s; hub acknowledged %d other events", pending, strings.Join(messages, "; "), acknowledged)
 }

@@ -2266,7 +2266,7 @@ batch. Quarantine blocks further push and can block reset.
 A direct spoke continues independent pushes when an
 issue has moved into a project it has not joined. Both peers must support
 per-event rejections. Upgrade the hub first so it understands partial acknowledgments.
-A schema 51 spoke needs a schema 51 hub: a schema 50 hub rejects the newer schema before ingest.
+The spoke declares the version required by each batch's event payloads, rather than its local database schema version. For schema compatibility, a hub rejects a batch whose required version exceeds its own.
 The status error names the issue and its current project and asks for matching
 push access and actor. Independent events reach the hub across later pages,
 while events that depend on a rejected creation or move wait for enrollment. Push rejection

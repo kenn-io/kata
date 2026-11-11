@@ -478,7 +478,6 @@ type Storage interface {
 	PendingFederationPushEvents(ctx context.Context, projectID int64, originInstanceUID string, afterID int64, limit int) ([]Event, error)
 	PendingFederationPushStats(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, int64, error)
 	RecordFederationPushAccepted(ctx context.Context, projectID int64, eventIDs []int64) error
-	FederationPushAccepted(ctx context.Context, projectID, eventID int64) (bool, error)
 	FederationPushAcceptedThrough(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, error)
 	AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error
 	EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (FederationBinding, error)

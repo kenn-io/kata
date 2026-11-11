@@ -181,7 +181,7 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 
 // AdvanceFederationPullCursor records the highest consumed hub event id.
 func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error {
-	return updateFederationPullCursor(ctx, s, projectID, nextCursor)
+	return updateFederationCursor(ctx, s, projectID, nextCursor, false)
 }
 
 // CompleteFederationPullPage advances the cursor and claims local replay
@@ -189,7 +189,7 @@ func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 func (s *Store) CompleteFederationPullPage(ctx context.Context, projectID, nextCursor int64, replayUIDs []string) ([]string, error) {
 	var claimed []string
 	err := s.withTx(ctx, sql.LevelDefault, func(tx *sql.Tx) error {
-		if err := updateFederationPullCursor(ctx, tx, projectID, nextCursor); err != nil {
+		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, false); err != nil {
 			return err
 		}
 		var err error
@@ -205,18 +205,8 @@ func (s *Store) CompleteFederationPullPage(ctx context.Context, projectID, nextC
 // AdvanceFederationPushCursor advances the acknowledged local event id monotonically.
 func (s *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET push_cursor_event_id=GREATEST(push_cursor_event_id,$1),
-last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') WHERE project_id=$2`, nextCursor, projectID)
-		if err != nil {
-			return mapSQLError(err, nil)
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
+		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
 			return err
-		}
-		if n == 0 {
-			return db.ErrNotFound
 		}
 		return pruneFederationPushAccepted(ctx, tx, projectID)
 	})
@@ -249,15 +239,13 @@ func (s *Store) RecordFederationPushAccepted(ctx context.Context, projectID int6
 	})
 }
 
-// FederationPushAccepted reports whether a binding has acknowledged an event.
-func (s *Store) FederationPushAccepted(ctx context.Context, projectID, eventID int64) (bool, error) {
-	var found bool
-	err := s.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_push_accepted WHERE project_id=$1 AND event_id=$2)`, projectID, eventID).Scan(&found)
-	return found, mapSQLError(err, nil)
-}
-
-func updateFederationPullCursor(ctx context.Context, execer contextExecer, projectID, nextCursor int64) error {
-	query := `UPDATE federation_bindings SET pull_cursor_event_id=GREATEST(pull_cursor_event_id,$1),
+func updateFederationCursor(ctx context.Context, execer contextExecer, projectID, nextCursor int64, push bool) error {
+	column := "pull_cursor_event_id"
+	if push {
+		column = "push_cursor_event_id"
+	}
+	//nolint:gosec // column is selected from the fixed cases above.
+	query := `UPDATE federation_bindings SET ` + column + `=GREATEST(` + column + `,$1),
 last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 WHERE project_id=$2`
