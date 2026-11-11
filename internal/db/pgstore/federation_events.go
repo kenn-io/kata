@@ -83,17 +83,6 @@ ORDER BY e.id ASC`, projectID, originInstanceUID, output[len(output)-1].ID, outp
 		}
 		output = append(output, extra...)
 	}
-	for index, event := range output {
-		if !db.IsFederationSnapshotEvent(event.Type) {
-			continue
-		}
-		for next := index + 1; next < len(output); next++ {
-			if !db.IsFederationSnapshotEvent(output[next].Type) {
-				return output[:next], nil
-			}
-		}
-		break
-	}
 	return output, nil
 }
 

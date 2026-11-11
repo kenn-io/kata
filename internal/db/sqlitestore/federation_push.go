@@ -73,17 +73,6 @@ func (d *Store) PendingFederationPushEvents(
 		}
 		out = append(out, extra...)
 	}
-	for i, ev := range out {
-		if !db.IsFederationSnapshotEvent(ev.Type) {
-			continue
-		}
-		for j := i + 1; j < len(out); j++ {
-			if !db.IsFederationSnapshotEvent(out[j].Type) {
-				return out[:j], nil
-			}
-		}
-		break
-	}
 	return out, nil
 }
 
