@@ -1095,3 +1095,21 @@ func TestCronEditRedirectIsNotASavedDefinition(t *testing.T) {
 		}
 	}
 }
+
+func TestCronWorkflowEditRefusesArgvWithoutMutation(t *testing.T) {
+	for _, member := range []string{`"argv":null`, `"argv":[]`, `"argv":["printf",""]`} {
+		env, project, id, original := cronEditTestDefinition(t, "workflow")
+		session := cronEditTestEditor(t, func(call int, raw []byte) ([]byte, error) {
+			if call == 1 {
+				return bytes.Replace(raw, []byte(`"kind":"command"`), []byte(`"kind":"command",`+member), 1), nil
+			}
+			return nil, nil
+		})
+		_, _, err := executeCronCLI(t, env.URL, nil, "workflow", "edit", id)
+		requireCronEditExit(t, err, ExitValidation)
+		require.Equal(t, 2, session.calls)
+		workflow, err := env.DB.CronWorkflow(t.Context(), project, id)
+		require.NoError(t, err)
+		require.Equal(t, original, workflow.DefinitionEventUID)
+	}
+}
