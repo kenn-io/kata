@@ -27,17 +27,17 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 	_, second, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "second", Author: "tester"})
 	require.NoError(t, err)
 	require.Error(t, accepted.RecordFederationPushAccepted(ctx, project.ID, []int64{first.ID, 9223372036854775807}))
-	found, err := acceptedPushRow(ctx, accepted, project.ID, first.ID)
+	found, err := AcceptedPushRow(ctx, accepted, project.ID, first.ID)
 	require.NoError(t, err)
 	require.False(t, found)
 	require.NoError(t, accepted.RecordFederationPushAccepted(ctx, project.ID, []int64{second.ID}))
 	require.NoError(t, accepted.RecordFederationPushAccepted(ctx, project.ID, []int64{second.ID}))
 	reopened := backend.OpenSame(t, store)
 	accepted = reopened
-	found, err = acceptedPushRow(ctx, accepted, project.ID, second.ID)
+	found, err = AcceptedPushRow(ctx, accepted, project.ID, second.ID)
 	require.NoError(t, err)
 	require.True(t, found)
-	found, err = acceptedPushRow(ctx, accepted, other.ID, second.ID)
+	found, err = AcceptedPushRow(ctx, accepted, other.ID, second.ID)
 	require.NoError(t, err)
 	require.False(t, found)
 	require.NoError(t, accepted.RecordFederationPushAccepted(ctx, other.ID, []int64{second.ID}))
@@ -59,18 +59,18 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 	through, err = reopened.FederationPushAcceptedThrough(ctx, project.ID, reopened.InstanceUID(), first.ID)
 	require.NoError(t, err)
 	require.Equal(t, second.ID, through)
-	found, err = acceptedPushRow(ctx, accepted, project.ID, second.ID)
+	found, err = AcceptedPushRow(ctx, accepted, project.ID, second.ID)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.NoError(t, reopened.AdvanceFederationPushCursor(ctx, project.ID, second.ID))
-	found, err = acceptedPushRow(ctx, accepted, project.ID, second.ID)
+	found, err = AcceptedPushRow(ctx, accepted, project.ID, second.ID)
 	require.NoError(t, err)
 	require.False(t, found)
-	found, err = acceptedPushRow(ctx, accepted, other.ID, second.ID)
+	found, err = AcceptedPushRow(ctx, accepted, other.ID, second.ID)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.NoError(t, accepted.RecordFederationPushAccepted(ctx, project.ID, []int64{first.ID}))
-	found, err = acceptedPushRow(ctx, accepted, project.ID, first.ID)
+	found, err = AcceptedPushRow(ctx, accepted, project.ID, first.ID)
 	require.NoError(t, err)
 	require.False(t, found)
 	_, third, err := reopened.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "third", Author: "tester"})
@@ -78,7 +78,7 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 	require.NoError(t, accepted.RecordFederationPushAccepted(ctx, project.ID, []int64{third.ID}))
 	_, err = reopened.EnableFederationPush(ctx, project.ID, third.ID)
 	require.NoError(t, err)
-	found, err = acceptedPushRow(ctx, accepted, project.ID, third.ID)
+	found, err = AcceptedPushRow(ctx, accepted, project.ID, third.ID)
 	require.NoError(t, err)
 	require.False(t, found)
 	return nil
@@ -167,7 +167,8 @@ func checkFederationPushSnapshotRuns(t *testing.T, store db.Storage) error {
 	return nil
 }
 
-func acceptedPushRow(ctx context.Context, store db.Storage, projectID, eventID int64) (bool, error) {
+// AcceptedPushRow reports whether a binding retains an event acknowledgment.
+func AcceptedPushRow(ctx context.Context, store db.Storage, projectID, eventID int64) (bool, error) {
 	q := store.(interface {
 		QueryRowContext(context.Context, string, ...any) *sql.Row
 	})

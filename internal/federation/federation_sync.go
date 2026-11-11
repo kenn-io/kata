@@ -1895,11 +1895,7 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		if err != nil {
 			return nil, err
 		}
-		if !found || credential.Token == "" {
-			continue
-		}
-		if credential.LeavePending || credential.RelayEnrollmentPending {
-			// Let the hub reject dependent events while accepting independent work.
+		if !found || credential.Token == "" || credential.LeavePending || credential.RelayEnrollmentPending {
 			continue
 		}
 		if credential.HubProjectID != 0 && credential.HubProjectID != source.HubProjectID {
@@ -1935,22 +1931,11 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		// Validate the source's own plaintext policy before including its token.
 		// The destination credential's opt-in does not authorize source transport.
 		sourceCredential := config.FederationTransportCredential(source.HubURL, source.HubProjectID, source.AllowInsecure, credential)
-		sourceOpts := clientOptsForCredential(opts, sourceCredential)
-		transportOpts := sourceOpts
-		transportOpts.FederationSigning = nil
-		if _, err := NewClient(ctx, sourceCredential.HubURL, sourceCredential.Token, transportOpts); err != nil {
+		if _, err := NewClient(ctx, sourceCredential.HubURL, sourceCredential.Token, clientOptsForCredential(opts, sourceCredential)); err != nil {
 			if !requiredSources[fromUID] {
 				continue
 			}
 			return nil, err
-		}
-		if sourceOpts.FederationSigning != nil {
-			if _, err := NewClient(ctx, sourceCredential.HubURL, sourceCredential.Token, sourceOpts); err != nil {
-				if !requiredSources[fromUID] {
-					continue
-				}
-				return nil, err
-			}
 		}
 		if tokens == nil {
 			tokens = map[string]string{}

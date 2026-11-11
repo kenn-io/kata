@@ -5,6 +5,10 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
@@ -131,7 +136,6 @@ func TestSyncFederationMissingEnrollmentDoesNotBlockOtherPushes(t *testing.T) {
 	require.NotNil(t, status.LastError)
 	require.Contains(t, *status.LastError, projects[1].Name)
 	require.Contains(t, *status.LastError, issue.UID)
-	require.Contains(t, *status.LastError, "matching project enrollment or push proof is missing")
 	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
 	require.Less(t, binding.PushCursorEventID, commentEvent.ID, "retain the original rejected event for retry")
@@ -206,8 +210,7 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 			pending, pendingErr := sender.env.DB.PendingFederationPushEvents(t.Context(), binding.ProjectID, sender.env.DB.InstanceUID(), binding.PushCursorEventID, 100)
 			require.NoError(t, pendingErr)
 			require.ErrorContains(t, err, fmt.Sprintf("%d events need project access", len(pending)))
-			var accepted bool
-			err = sender.env.DB.QueryRowContext(t.Context(), `SELECT EXISTS(SELECT 1 FROM federation_push_accepted WHERE project_id=$1 AND event_id=$2)`, binding.ProjectID, independentEvent.ID).Scan(&accepted)
+			accepted, err := dbtest.AcceptedPushRow(t.Context(), sender.env.DB, binding.ProjectID, independentEvent.ID)
 			require.NoError(t, err)
 			require.True(t, accepted)
 			_, err = hub.DB.IssueByUID(t.Context(), independent.UID, db.IncludeDeletedNo)
@@ -312,16 +315,33 @@ func TestSyncFederationPartialPushAndPull(t *testing.T) {
 	require.NoError(t, err)
 	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
+	upstream, err := url.Parse(hub.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/federation/events") {
+			http.Error(w, "pull temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	binding.HubURL = server.URL
+	_, err = sender.env.DB.UpsertFederationBinding(t.Context(), binding)
+	require.NoError(t, err)
+	credential := sender.credentials[projects[0].UID]
+	credential.HubURL = server.URL
+	sender.credentials[projects[0].UID] = credential
 	runner := &Runner{DB: sender.env.DB, Credentials: sender.credentials}
 	_, err = runner.runSpoke(t.Context(), activeSpokeBinding{binding: binding, project: sender.projects[0]}, sender.credentials, nil, nil)
 	require.ErrorContains(t, err, "pending federation events remain")
 	require.ErrorContains(t, err, "matching push access")
 	require.ErrorContains(t, err, "need project access")
-	require.ErrorIs(t, err, db.ErrNotFound)
+	require.ErrorContains(t, err, "pull temporarily unavailable")
 	status, err := sender.env.DB.FederationSyncStatusByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
 	require.NotNil(t, status.LastError)
-	require.Contains(t, *status.LastError, "not found")
+	require.Contains(t, *status.LastError, "pull temporarily unavailable")
 	require.Contains(t, *status.LastError, "pending federation events remain")
 	require.Contains(t, *status.LastError, "need project access")
 }

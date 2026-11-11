@@ -86,11 +86,11 @@ func TestFederationPushRejectsInvalidAcknowledgments(t *testing.T) {
 		"duplicate rejection":     {PushCursorEventID: 2, RejectedEvents: []db.FederationEventRejection{{EventUID: "one", SourceEventID: 1, Code: db.FederationProjectNotEnrolledCode}, {EventUID: "one", SourceEventID: 1, Code: db.FederationProjectNotEnrolledCode}}},
 		"missing accounting":      {Accepted: 1, PushCursorEventID: 2},
 		"negative count":          {Accepted: -1, Duplicates: 3, PushCursorEventID: 2},
-		"rejection beyond cursor": {Accepted: 1, PushCursorEventID: 1, RejectedEvents: []db.FederationEventRejection{{EventUID: "two", SourceEventID: 2}}},
+		"rejection beyond cursor": {PushCursorEventID: 1, RejectedEvents: []db.FederationEventRejection{{EventUID: "two", SourceEventID: 2, Code: db.FederationProjectNotEnrolledCode}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := validateFederationPushAcknowledgment(batch, ack)
-			require.Error(t, err)
+			require.EqualError(t, err, "hub returned invalid rejection details")
 		})
 	}
 }

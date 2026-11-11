@@ -2,14 +2,13 @@ package jsonl_test
 
 import (
 	"bytes"
-	"context"
-	"database/sql"
 	"path/filepath"
 	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
@@ -54,30 +53,30 @@ func TestBackupPreservesFederationPushAccepted(t *testing.T) {
 			data := bytes.Clone(backup.Bytes())
 			target := open()
 			require.NoError(t, jsonl.Import(ctx, &backup, target))
-			found, err := acceptedPushRow(ctx, target, project.ID, accepted.ID)
+			found, err := dbtest.AcceptedPushRow(ctx, target, project.ID, accepted.ID)
 			require.NoError(t, err)
 			require.True(t, found)
-			found, err = acceptedPushRow(ctx, target, other.ID, accepted.ID)
+			found, err = dbtest.AcceptedPushRow(ctx, target, other.ID, accepted.ID)
 			require.NoError(t, err)
 			require.True(t, found)
-			found, err = acceptedPushRow(ctx, target, other.ID, pending.ID)
+			found, err = dbtest.AcceptedPushRow(ctx, target, other.ID, pending.ID)
 			require.NoError(t, err)
 			require.False(t, found)
-			found, err = acceptedPushRow(ctx, target, project.ID, pending.ID)
+			found, err = dbtest.AcceptedPushRow(ctx, target, project.ID, pending.ID)
 			require.NoError(t, err)
 			require.False(t, found)
 			var scoped bytes.Buffer
 			require.NoError(t, jsonl.Export(ctx, source, &scoped, jsonl.ExportOptions{IncludeDeleted: true, ProjectID: project.ID}))
 			scopedTarget := open()
 			require.NoError(t, jsonl.Import(ctx, &scoped, scopedTarget))
-			found, err = acceptedPushRow(ctx, scopedTarget, project.ID, accepted.ID)
+			found, err = dbtest.AcceptedPushRow(ctx, scopedTarget, project.ID, accepted.ID)
 			require.NoError(t, err)
 			require.True(t, found)
 			// Backups made before accepted IDs existed leave those events pending.
 			legacyData := regexp.MustCompile(`,"accepted_project_ids":\[[0-9,]+\]`).ReplaceAll(data, nil)
 			legacy := open()
 			require.NoError(t, jsonl.Import(ctx, bytes.NewReader(legacyData), legacy))
-			found, err = acceptedPushRow(ctx, legacy, project.ID, accepted.ID)
+			found, err = dbtest.AcceptedPushRow(ctx, legacy, project.ID, accepted.ID)
 			require.NoError(t, err)
 			require.False(t, found)
 			legacyBinding, err := legacy.FederationBindingByProject(ctx, project.ID)
@@ -87,18 +86,9 @@ func TestBackupPreservesFederationPushAccepted(t *testing.T) {
 			require.Len(t, legacyPending, 2)
 			clone := open()
 			require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(data), clone, jsonl.ImportOptions{NewInstance: true}))
-			found, err = acceptedPushRow(ctx, clone, project.ID, accepted.ID)
+			found, err = dbtest.AcceptedPushRow(ctx, clone, project.ID, accepted.ID)
 			require.NoError(t, err)
 			require.False(t, found)
 		})
 	}
-}
-
-func acceptedPushRow(ctx context.Context, store db.Storage, projectID, eventID int64) (bool, error) {
-	q := store.(interface {
-		QueryRowContext(context.Context, string, ...any) *sql.Row
-	})
-	var found bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_push_accepted WHERE project_id=$1 AND event_id=$2)`, projectID, eventID).Scan(&found)
-	return found, err
 }
