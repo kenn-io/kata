@@ -1,13 +1,15 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Continue an incomplete lexical search by copying the command printed with its results.
 
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 
