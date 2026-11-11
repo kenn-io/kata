@@ -81,9 +81,10 @@ After the process exits, choose the recovery command for its launch mode:
 - Relaunch foreground and supervised daemons using the original command or supervisor.
 - For an auto-started current home, run `kata daemon restart` with the original
   `KATA_HOME` and storage environment.
-- For a named local profile, run `kata --daemon <name> daemon recover`. This
-  preserves its pinned storage and instance identity. On Windows, quote profile
-  names as PowerShell literal strings when needed.
+- For a named profile you normally start with Kata, run
+  `kata --daemon <name> daemon recover`. This preserves its pinned storage and
+  instance identity. On Windows, quote profile names as PowerShell literal
+  strings when needed.
 
 ## Client setup
 
