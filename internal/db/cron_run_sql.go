@@ -267,7 +267,7 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 			}
 		}
 	}
-	if value.Status == "running" && value.WorkflowUID == nil && value.JobUID != nil {
+	if value.Status == "running" && value.JobUID != nil {
 		ref := cronDefinitionReference{projectID: project.ID, kind: "job", uid: *value.JobUID, event: *value.DefinitionEventUID}
 		if document, known := validator.idx.documents[ref]; known {
 			job, err := cron.DecodeJob([]byte(document))
