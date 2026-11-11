@@ -95,16 +95,10 @@ func joinMoveTarget(t *testing.T, hub *testenv.Env, project db.Project, sender m
 
 type boundedPushPageStore struct {
 	db.Storage
-	limit int
 }
 
 func (s *boundedPushPageStore) PendingFederationPushEvents(ctx context.Context, projectID int64, origin string, after int64, limit int) ([]db.Event, error) {
-	if s.limit > 0 {
-		limit = min(limit, s.limit)
-	} else {
-		limit = 1
-	}
-	return s.Storage.PendingFederationPushEvents(ctx, projectID, origin, after, limit)
+	return s.Storage.PendingFederationPushEvents(ctx, projectID, origin, after, 1)
 }
 
 func TestSyncFederationMissingEnrollmentDoesNotBlockOtherPushes(t *testing.T) {

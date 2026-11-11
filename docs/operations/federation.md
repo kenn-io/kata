@@ -2473,8 +2473,8 @@ brings a project back under the
 [relay checkpoint capacity](#relay-checkpoint-capacity); the purged events'
 receipts remain in it.
 
-A direct, push-enabled spoke refuses reset while it has local-origin events above
-its push cursor or active quarantine. Negotiated relays use the full
+A direct, push-enabled spoke refuses reset while it has unaccepted local-origin
+events or active quarantine. Negotiated relays use the full
 [reset blocker checks](#reset-recovery).
 
 ## Consistency limitations

@@ -54,6 +54,7 @@ func TestFederationPushMissingCurrentProjectEnrollmentDoesNotBlockBatch(t *testi
 	require.Equalf(t, http.StatusOK, response.StatusCode, "reject only the stale comment: %s", raw)
 	var result api.FederationIngestEventsBody
 	require.NoError(t, json.Unmarshal(raw, &result))
+	require.Equal(t, 1, result.Accepted)
 	require.Len(t, result.RejectedEvents, 1)
 	require.Equal(t, stale.EventUID, result.RejectedEvents[0].EventUID)
 	body.MoveSourceTokens = map[string]string{target.UID: "invalid-supplemental-proof"}

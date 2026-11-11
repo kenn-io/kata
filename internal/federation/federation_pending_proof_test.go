@@ -9,6 +9,25 @@ import (
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
 
+func TestSyncFederationInterruptedLeaveDoesNotBlockUnrelatedPush(t *testing.T) {
+	for _, pending := range []string{"leave", "enrollment"} {
+		t.Run(pending, func(t *testing.T) {
+			hub, projects := newMoveDeliveryHub(t, "active-source", "pending-source")
+			spoke := newMoveDeliverySpoke(t, hub, projects)
+			credential := spoke.credentials[projects[1].UID]
+			credential.LeavePending = pending == "leave"
+			credential.RelayEnrollmentPending = pending == "enrollment"
+			spoke.credentials[projects[1].UID] = credential
+			issue, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Unrelated ordinary push", Author: "worker"})
+			require.NoError(t, err)
+			require.NoError(t, spoke.sync(t, 0), "an unfinished operation on another project must not stall ordinary work")
+			retained, err := hub.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, projects[0].ID, retained.ProjectID)
+		})
+	}
+}
+
 func TestFederationMoveSourceCredentialValidation(t *testing.T) {
 	for _, kind := range []string{"actor", "project", "signing"} {
 		t.Run(kind, func(t *testing.T) {

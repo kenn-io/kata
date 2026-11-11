@@ -149,9 +149,8 @@ func (d *Store) ingestFederationEventsOnce(
 		if ev.Type == "issue.moved" && ev.IssueUID != nil {
 			knownIssueUIDs[*ev.IssueUID] = struct{}{}
 		}
-		validationErr := validateFederationProjectEvent(projectUID, p.SpokeInstanceUID, ev, rejectedCreations.ValidationUIDs(knownIssueUIDs))
-		if validationErr != nil {
-			return db.FederationIngestResult{}, validationErr
+		if err := validateFederationProjectEvent(projectUID, p.SpokeInstanceUID, ev, rejectedCreations.ValidationUIDs(knownIssueUIDs)); err != nil {
+			return db.FederationIngestResult{}, err
 		}
 		if err := db.ValidateEmbeddingProducerEvent(ev, ""); err != nil {
 			return db.FederationIngestResult{}, err
@@ -159,7 +158,7 @@ func (d *Store) ingestFederationEventsOnce(
 		if err := validateFederationEventHash(ev); err != nil {
 			return db.FederationIngestResult{}, err
 		}
-		if hash, ok := observedBatch[ev.EventUID]; ok && !strings.EqualFold(hash, ev.ContentHash) {
+		if hash, ok := observedBatch[ev.EventUID]; ok && p.AllowEventRejections && !strings.EqualFold(hash, ev.ContentHash) {
 			return db.FederationIngestResult{}, fmt.Errorf("%w: event %s", db.ErrRemoteEventConflict, ev.EventUID)
 		}
 		observedBatch[ev.EventUID] = ev.ContentHash
