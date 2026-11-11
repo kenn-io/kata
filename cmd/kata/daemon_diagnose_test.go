@@ -358,7 +358,7 @@ func TestDaemonStatusEmptyHomeDoesNotInitialize(t *testing.T) {
 	t.Setenv("KATA_DSN", "")
 	t.Setenv("KATA_SERVER", "")
 	t.Chdir(t.TempDir())
-	executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	_, _, _ = executeRootCapture(t, t.Context(), "daemon", "status", "--json")
 	_, err := os.Stat(filepath.Join(home, "runtime"))
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
