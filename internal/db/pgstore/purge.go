@@ -80,6 +80,9 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 (SELECT e.id FROM events e WHERE `+eventsWhere+`)`, issue.ID, issue.UID); err != nil {
 			return mapSQLError(err, nil)
 		}
+		if err := db.RetirePurgedFederationIdentityDependencies(ctx, tx); err != nil {
+			return fmt.Errorf("retire purged federation identity dependencies: %w", err)
+		}
 		_, err = tx.ExecContext(ctx, `UPDATE events SET related_issue_id = NULL
 		  WHERE related_issue_id = $1 AND type = 'issue.links_changed'`, issue.ID)
 		if err != nil {
