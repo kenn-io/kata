@@ -1966,9 +1966,29 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
 	binding, err = spoke.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+	onPulledEvents := func(_ int64, events []db.Event) {
 		delivered = append(delivered, events...)
-	}))
+	}
+	if recovery == "legacy-backup" {
+		validateLease := func(ctx context.Context) error {
+			comments, err := spoke.CommentIssueIDsByUIDs(ctx, []string{earlierIssueCommentUID})
+			if err != nil {
+				return err
+			}
+			if len(comments) > 0 {
+				return errTestFederationLeaseLost
+			}
+			return nil
+		}
+		_, err := syncFederationOnceWithFence(ctx, spoke, binding, creds, false,
+			clientOptsWithDefault(clientpkg.Opts{}), onPulledEvents, validateLease)
+		require.ErrorIs(t, err, errTestFederationLeaseLost)
+		require.Empty(t, delivered, "the interrupted pull must not deliver the page")
+		binding, err = spoke.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		require.Equal(t, earlier.EventID, binding.PullCursorEventID, "projection committed before the cursor")
+	}
+	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, onPulledEvents))
 
 	mirrored, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err, "retry must project the retained issue creation")
