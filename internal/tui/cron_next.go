@@ -42,14 +42,10 @@ func cronNextRuns(p cronData, j generated.CronJob, now time.Time) (label string,
 		return label, []string{"unavailable"}
 	}
 	var parent *cron.PreviewParent
-	if native {
-		open, known := p.parentOpen[cronNativeParent(j)]
-		progress, ok := p.progress[j.UID]
-		if known {
-			parent = &cron.PreviewParent{Open: open}
-			if ok {
-				parent.Progress = &progress
-			}
+	if open, known := p.parentOpen[cronNativeParent(j)]; native && known {
+		parent = &cron.PreviewParent{Open: open}
+		if progress, ok := p.progress[j.UID]; ok {
+			parent.Progress = &progress
 		}
 	}
 	preview, err := cron.PreviewJob(def, parent, now, cronNextCount)
@@ -63,12 +59,9 @@ func cronNextRuns(p cronData, j generated.CronJob, now time.Time) (label string,
 		return label, []string{"none while the parent is closed"}
 	case "unavailable":
 		return label, []string{"unavailable"}
-	case "unsupported", "exhausted":
-		return "", nil
 	}
-	times := preview.Times
 	zone := cron.TriggerLocation(def.Trigger)
-	for _, t := range times {
+	for _, t := range preview.Times {
 		layout := "2006-01-02 15:04 MST"
 		if def.Trigger.Kind == "interval" && def.Trigger.IntervalSeconds%60 != 0 || t.Second() != 0 {
 			layout = "2006-01-02 15:04:05 MST"

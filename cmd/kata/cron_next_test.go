@@ -48,9 +48,6 @@ func TestCronNextSavedSchedules(t *testing.T) {
 		{"paused legacy", strings.Replace(legacy, `"enabled":true`, `"enabled":false`, 1), "", `"status":"paused"`, false},
 		{"deleted legacy", legacy, "", `"status":"deleted"`, false},
 		{"enabled legacy", legacy, parent, "", true},
-		{"malformed parent UID", native, `{}`, "", true},
-		{"malformed parent project", native, strings.Replace(parent, `"project_id":1`, `"project_id":2`, 1), "", true},
-		{"malformed parent status", native, strings.Replace(parent, `"status":"open"`, `"status":"unknown"`, 1), "", true},
 		{"paused future definition", strings.Replace(strings.Replace(native, `"version":1`, `"version":2`, 1), `"enabled":true`, `"enabled":false`, 1), "", "", true},
 		{"paused unknown field", strings.Replace(strings.Replace(native, `"enabled":true`, `"enabled":false`, 1), `"version":1`, `"version":1,"future":true`, 1), "", "", true},
 		{"deleted unknown field", strings.Replace(native, `"version":1`, `"version":1,"future":true`, 1), "", "", true},
@@ -87,11 +84,7 @@ func TestCronNextSavedSchedules(t *testing.T) {
 			if tc.invalid {
 				require.Error(t, err)
 				require.Empty(t, out)
-				if strings.HasPrefix(tc.name, "malformed parent") {
-					require.ErrorContains(t, err, "incomplete cron parent response")
-				} else {
-					require.ErrorContains(t, err, "cannot preview saved job with this kata")
-				}
+				require.ErrorContains(t, err, "cannot preview saved job with this kata")
 				return
 			}
 			require.NoError(t, err)
@@ -157,7 +150,7 @@ func TestCronNextParentReadErrors(t *testing.T) {
 			if code == "issue_not_found" {
 				require.Equal(t, "cron_preview_unavailable", got.Code)
 				require.Contains(t, string(got.Data), `"status":"unavailable"`)
-				require.Contains(t, got.Message, "native parent is unavailable")
+				require.Contains(t, got.Message, "native parent or stored progress is unavailable")
 			} else {
 				require.Equal(t, code, got.Code)
 			}

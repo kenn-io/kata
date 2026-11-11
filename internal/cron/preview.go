@@ -30,23 +30,25 @@ func PreviewJob(def JobDefinition, parent *PreviewParent, after time.Time, count
 		if !parent.Open {
 			return JobPreview{Status: "parent_closed"}, nil
 		}
-		if parent.Progress == nil {
+		if parent.Progress == nil || parent.Progress.Validate() != nil {
 			return JobPreview{Status: "unavailable"}, nil
 		}
 		progress = *parent.Progress
-	}
-	if err := def.Validate(); err != nil {
-		return JobPreview{}, err
-	}
-	occurrences, supported, err := recurringOccurrences(def, progress, after, count)
-	if err != nil {
-		if IsRecurringIssueJob(def) {
-			return JobPreview{Status: "unavailable"}, nil
+	} else if def.Trigger.Kind != "once" {
+		if def.Trigger.Kind != "cron" {
+			return JobPreview{Status: "unsupported"}, nil
 		}
-		return JobPreview{}, err
+		schedule, err := adapterCronSchedule(def.Trigger)
+		if err != nil {
+			return JobPreview{}, err
+		}
+		if schedule == nil {
+			return JobPreview{Status: "unsupported"}, nil
+		}
 	}
-	if !supported {
-		return JobPreview{Status: "unsupported"}, nil
+	occurrences, err := RecurringOccurrences(def, progress, after, count)
+	if err != nil {
+		return JobPreview{}, err
 	}
 	status := "ready"
 	if len(occurrences) == 0 {

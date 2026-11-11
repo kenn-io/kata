@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -72,9 +73,6 @@ func (o cronNextOptions) execute(cmd *cobra.Command, id string) error {
 		}
 		from = from.UTC()
 	}
-	if _, err := from.MarshalText(); err != nil {
-		return cronCLIValidation("from must represent an RFC3339 UTC instant")
-	}
 	daemon, err := dialDaemon(cmd.Context())
 	if err != nil {
 		return err
@@ -125,10 +123,10 @@ func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string,
 	}
 	job := envelope.Job
 	def, err := cron.DecodeJob(job.Definition)
-	if err != nil {
-		return cronNextResult{}, fmt.Errorf("cannot preview saved job with this kata: %w", err)
+	if err == nil {
+		err = def.ValidateVersion()
 	}
-	if err := def.ValidateVersion(); err != nil {
+	if err != nil {
 		return cronNextResult{}, fmt.Errorf("cannot preview saved job with this kata: %w", err)
 	}
 	zone := cron.TriggerLocation(def.Trigger)
@@ -166,34 +164,23 @@ func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string,
 	}
 	result.Status = preview.Status
 	if preview.Status == "unavailable" || preview.Status == "unsupported" {
-		reason := "native parent is unavailable"
+		reason := "native parent or stored progress is unavailable"
 		if preview.Status == "unsupported" {
 			result.Basis = "adapter_defined"
 			reason = "this adapter trigger cannot be previewed"
-		} else if parent != nil {
-			reason = "native stored progress is missing or invalid"
 		}
-		return cronNextUnavailable(result, reason)
+		result.Status = "unavailable"
+		result.Warnings = append(result.Warnings, reason)
+		raw, err := json.Marshal(result)
+		if err != nil {
+			return cronNextResult{}, err
+		}
+		return result, &cliError{Kind: kindValidation, Code: "cron_preview_unavailable", ExitCode: ExitValidation, Message: "cron preview unavailable: " + reason, Data: raw}
 	}
 	for _, at := range preview.Times {
-		local, err := at.In(zone).MarshalText()
-		if err != nil {
-			return result, err
-		}
-		result.Occurrences = append(result.Occurrences, cronNextOccurrence{At: at.UTC(), Local: string(local)})
+		result.Occurrences = append(result.Occurrences, cronNextOccurrence{At: at.UTC(), Local: at.In(zone).Format(time.RFC3339Nano)})
 	}
 	return result, nil
-}
-
-func cronNextUnavailable(result cronNextResult, reason string) (cronNextResult, error) {
-	result.Status = "unavailable"
-	result.Warnings = append(result.Warnings, reason)
-	raw, err := json.Marshal(result)
-	if err != nil {
-		return cronNextResult{}, err
-	}
-	return result, &cliError{Kind: kindValidation, Code: "cron_preview_unavailable", ExitCode: ExitValidation,
-		Message: "cron preview unavailable: " + reason, Data: raw}
 }
 
 func emitCronNext(cmd *cobra.Command, result cronNextResult) error {
@@ -207,23 +194,14 @@ func emitCronNext(cmd *cobra.Command, result cronNextResult) error {
 	if result.Delivery == "adapter" {
 		label = "Adapter trigger times"
 	}
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s (%s, %s):\n", label, result.Timezone, result.Status); err != nil {
-		return err
-	}
+	lines := []string{fmt.Sprintf("%s (%s, %s):", label, result.Timezone, result.Status)}
 	if len(result.Occurrences) == 0 {
-		if _, err := fmt.Fprintln(cmd.OutOrStdout(), "  "+result.Status); err != nil {
-			return err
-		}
+		lines = append(lines, "  "+result.Status)
 	}
 	for _, occurrence := range result.Occurrences {
-		if _, err := fmt.Fprintln(cmd.OutOrStdout(), "  "+occurrence.Local); err != nil {
-			return err
-		}
+		lines = append(lines, "  "+occurrence.Local)
 	}
-	for _, warning := range result.Warnings {
-		if _, err := fmt.Fprintln(cmd.OutOrStdout(), warning); err != nil {
-			return err
-		}
-	}
-	return nil
+	lines = append(lines, result.Warnings...)
+	_, err := fmt.Fprintln(cmd.OutOrStdout(), strings.Join(lines, "\n"))
+	return err
 }

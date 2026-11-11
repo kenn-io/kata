@@ -204,8 +204,6 @@ func statusErr(status int, body []byte, httpResp *http.Response, callErr error) 
 
 // CronParent is the observed parent and its retained cron metadata.
 type CronParent struct {
-	UID       string                    `json:"uid"`
-	ProjectID int64                     `json:"project_id"`
 	Status    string                    `json:"status"`
 	Revision  int64                     `json:"revision"`
 	DeletedAt *time.Time                `json:"deleted_at"`
@@ -222,16 +220,12 @@ func ReadCronParent(ctx context.Context, api *generated.Client, projectID int64,
 		return CronParent{}, err
 	}
 	var envelope struct {
-		Issue *CronParent `json:"issue"`
+		Issue CronParent `json:"issue"`
 	}
 	if err := json.Unmarshal(response.Body, &envelope); err != nil {
 		return CronParent{}, fmt.Errorf("decode cron parent: %w", err)
 	}
-	p := envelope.Issue
-	if p == nil || p.UID != uid || p.ProjectID != projectID || (p.Status != "open" && p.Status != "closed") {
-		return CronParent{}, fmt.Errorf("incomplete cron parent response")
-	}
-	return *p, nil
+	return envelope.Issue, nil
 }
 
 // List reads the project's live recurrences.
