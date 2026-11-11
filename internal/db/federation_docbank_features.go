@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/metadata"
@@ -12,17 +13,8 @@ import (
 const DocbankOriginEventFeature = "docbank_origin_v1"
 
 func payloadHasDocbankOrigin(kind, payload string) (bool, error) {
-	if kind != "projection.issue" && !strings.HasPrefix(kind, "issue.") {
-		return false, nil
-	}
-	if payload == "" {
-		return false, nil
-	}
-	var body map[string]jsontext.Value
-	if err := json.Unmarshal([]byte(payload), &body); err != nil {
-		return false, err
-	}
-	return docbankOriginFromBody(kind, body)
+	features, err := PayloadRequiredFeatures(kind, payload)
+	return slices.Contains(strings.Split(features, ","), DocbankOriginEventFeature), err
 }
 
 func docbankOriginFromBody(kind string, body map[string]jsontext.Value) (bool, error) {

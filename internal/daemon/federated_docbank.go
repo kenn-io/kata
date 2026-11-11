@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"io"
@@ -287,15 +288,15 @@ func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.
 		return metadata.Attachment{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	var descriptor api.DocbankDescriptor
-	if json.UnmarshalRead(io.LimitReader(resp.Body, 64<<10), &descriptor) != nil || descriptor.ProjectUID != project.UID || descriptor.Attachment.Origin != origin {
+	var descriptor struct {
+		ProjectUID string         `json:"project_uid"`
+		Attachment jsontext.Value `json:"attachment"`
+	}
+	if json.UnmarshalRead(io.LimitReader(resp.Body, 64<<10), &descriptor) != nil || descriptor.ProjectUID != project.UID {
 		return metadata.Attachment{}, attachmentError(502, "attachment_invalid")
 	}
-	raw, err := json.Marshal(descriptor.Attachment)
-	if err != nil {
-		return metadata.Attachment{}, internalAPIError(err)
-	}
-	if _, valid := metadata.Valid(raw); !valid {
+	attachment, valid := metadata.Valid(descriptor.Attachment)
+	if !valid || attachment.Origin != origin {
 		return metadata.Attachment{}, attachmentError(502, "attachment_invalid")
 	}
 	// A rebind during the transfer must not attach a descriptor from a former
@@ -307,7 +308,7 @@ func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.
 	if current == nil || !sameClaimRefreshRoute(*current, *binding) {
 		return metadata.Attachment{}, attachmentError(409, "attachment_origin_mismatch")
 	}
-	return descriptor.Attachment, nil
+	return attachment, nil
 }
 
 func exposedDocbankNode(cfg ServerConfig, node docbank.Node) error {
