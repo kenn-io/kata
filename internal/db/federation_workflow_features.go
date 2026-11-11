@@ -6,6 +6,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"strings"
 )
 
 // CronWorkflowArgvEventFeature is reserved for literal argument workflow steps.
@@ -13,12 +14,9 @@ import (
 // keep it out of SupportedEventFeatures until the complete contract is supported.
 const CronWorkflowArgvEventFeature = "cron_workflow_argv_v1"
 
+// workflowDefinitionEvent derives membership from the declared event registry.
 func workflowDefinitionEvent(kind string) bool {
-	switch kind {
-	case "cron.workflow.created", "cron.workflow.updated", "cron.workflow.deleted", "cron.workflow.restored", "cron.workflow.snapshot":
-		return true
-	}
-	return false
+	return isCronDefinitionEvent(kind) && strings.HasPrefix(kind, "cron.workflow.")
 }
 
 // Classify raw envelopes independently of typed decoding: an unsupported kind
@@ -189,12 +187,17 @@ func retainedWorkflowEvidence(kind, payload string) (bool, bool) {
 }
 
 // RequireLocalProjectWorkflows protects retained evidence before destructive replacement.
-func RequireLocalProjectWorkflows(ctx context.Context, q interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, projectUID string) error {
-	required, err := ProjectWorkflowRequiredFeatures(ctx, q, projectUID)
+func RequireLocalProjectWorkflows(ctx context.Context, tx *sql.Tx, projectUID string) error {
+	required, err := ProjectWorkflowRequiredFeatures(ctx, tx, projectUID)
 	if err != nil {
 		return err
 	}
-	return RequireEventFeatures(SupportedEventFeatures, required)
+	if err := RequireEventFeatures(SupportedEventFeatures, required); err != nil {
+		return err
+	}
+	var project Project
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1`, projectUID).Scan(&project.ID); err != nil {
+		return err
+	}
+	return checkRetainedWorkflowSnapshots(ctx, tx, project)
 }
