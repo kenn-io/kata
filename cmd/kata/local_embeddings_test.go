@@ -23,22 +23,15 @@ func TestApplySharedEmbeddingChoice(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	require.NoError(t, embedlocal.RecordChoice())
 	configured := config.EmbeddingsConfig{BaseURL: "https://embeddings.example/v1", Model: "example-model", Dims: 1024}
-	for _, tc := range []struct {
-		name          string
-		current, want config.EmbeddingsConfig
-	}{
-		{name: "configured provider", current: configured, want: configured},
-		{name: "incompatible recipe", current: config.EmbeddingsConfig{
-			Dims: 1024, DocumentPrefix: "document prefix", DocumentSuffix: "document suffix",
-			QueryPrefix: "query prefix", QuerySuffix: "query suffix", FingerprintSalt: "salt", RequestDimensions: true,
-		}, want: config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := applySharedEmbeddingChoice(t.Context(), tc.current)
-			require.NoError(t, err)
-			require.Equal(t, tc.want, got)
-		})
-	}
+	got, err := applySharedEmbeddingChoice(t.Context(), configured)
+	require.NoError(t, err)
+	require.Equal(t, configured, got)
+	got, err = applySharedEmbeddingChoice(t.Context(), config.EmbeddingsConfig{
+		Dims: 1024, DocumentPrefix: "document prefix", DocumentSuffix: "document suffix",
+		QueryPrefix: "query prefix", QuerySuffix: "query suffix", FingerprintSalt: "salt", RequestDimensions: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
 }
 
 func TestLocalEmbeddingsSetup(t *testing.T) {
@@ -81,9 +74,7 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 	cfg, err := config.ReadSearchConfig()
 	require.NoError(t, err)
 	require.True(t, cfg.Embeddings.Local)
-	dir, err := embedlocal.DefaultDir()
-	require.NoError(t, err)
-	marker := filepath.Join(dir, "search-by-meaning")
+	marker := filepath.Join(filepath.Dir(home), ".kenn", "embeddings", "search-by-meaning")
 	old := time.Unix(1000000000, 0)
 	require.NoError(t, os.Chtimes(marker, old, old))
 	_, stderr, err = executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")

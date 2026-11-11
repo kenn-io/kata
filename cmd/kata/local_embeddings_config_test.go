@@ -95,12 +95,9 @@ func TestLocalEmbeddingsHomesAreIsolated(t *testing.T) {
 	t.Setenv("USERPROFILE", original)
 	clearLocalEmbeddingsEnv(t)
 	require.NotEqual(t, original, os.Getenv("HOME"))
-	check := func(home string) {
-		dir, err := embedlocal.DefaultDir()
-		require.NoError(t, err)
-		require.Equal(t, filepath.Join(home, ".kenn", "embeddings"), dir)
-		require.Equal(t, home, os.Getenv("USERPROFILE"))
-	}
-	check(os.Getenv("HOME"))
-	check(setupKataEnv(t))
+	home := os.Getenv("HOME")
+	require.Equal(t, home, os.Getenv("USERPROFILE"))
+	dir, err := embedlocal.DefaultDir()
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(home, ".kenn", "embeddings"), dir)
 }

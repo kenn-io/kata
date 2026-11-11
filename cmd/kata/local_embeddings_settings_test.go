@@ -237,7 +237,6 @@ func TestSharedChoiceKeepsProviderWhenVectorPathIsDirectory(t *testing.T) {
 	resetFlags(t)
 	home := setupKataEnv(t)
 	t.Setenv("PORT", "")
-	t.Setenv("KATA_SERVER", "")
 	t.Setenv("KATA_DSN", "")
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
@@ -246,13 +245,6 @@ func TestSharedChoiceKeepsProviderWhenVectorPathIsDirectory(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.Mkdir(vectorsPath, 0o700))
 	baseURL := launchDaemon(t)
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/v1/embeddings/local", nil)
-	require.NoError(t, err)
-	response, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer func() { _ = response.Body.Close() }()
-	require.Equal(t, http.StatusOK, response.StatusCode)
-	var status api.LocalEmbeddingsStatus
-	require.NoError(t, json.NewDecoder(response.Body).Decode(&status))
+	status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
 	require.Equal(t, "none", status.Provider)
 }
