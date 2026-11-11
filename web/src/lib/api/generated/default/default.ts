@@ -834,7 +834,7 @@ export const turnOnLocalEmbeddings = async (
 }
 
 export type restartLocalEmbeddingsResponse202 = {
-  data: LocalEmbeddingsStatus
+  data: void
   status: 202
 }
 

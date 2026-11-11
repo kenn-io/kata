@@ -781,20 +781,6 @@ func (c *Client) RestartLocalEmbeddingsWithResponse(ctx context.Context, reqEdit
 
 	switch resp.StatusCode {
 	case 202:
-		out.JSON202 = new(RestartLocalEmbeddingsResponse)
-		bodyBytes := resp.Content
-		if len(bodyBytes) > 0 {
-			if err := json.Unmarshal(bodyBytes, out.JSON202); err != nil {
-				return out, &runtime.ResponseDecodeError{
-					StatusCode:    resp.StatusCode,
-					ContentType:   resp.Headers.Get("Content-Type"),
-					ContentLength: len(bodyBytes),
-					TargetType:    "RestartLocalEmbeddingsResponse",
-					Body:          bodyBytes,
-					Err:           err,
-				}
-			}
-		}
 		return out, nil
 	case 403:
 		out.JSON403 = new(RestartLocalEmbeddingsErrorResponse)

@@ -7648,10 +7648,6 @@ paths:
       operationId: restartLocalEmbeddings
       responses:
         "202":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LocalEmbeddingsStatus"
           description: Accepted
         "403":
           content:

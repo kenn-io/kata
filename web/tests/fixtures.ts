@@ -57,6 +57,7 @@ export interface KataFixture {
   restartReadonly(): Promise<void>
   restartIdentity(enabled?: boolean): Promise<void>
   prepareSearch(baseURL: string): Promise<void>
+  searchConfig(): Promise<string>
 }
 
 interface RunningFixture {
@@ -101,6 +102,7 @@ async function startProductionFixture(): Promise<RunningFixture> {
     }),
     KATA_AUTH_TOKEN: 'example-local-token',
     KATA_SERVER: '',
+    KATA_BROWSER_EMBEDDINGS_FIXTURE: join(home, 'embedding-fixture'),
     HOME: home,
     USERPROFILE: home,
   }
@@ -246,14 +248,12 @@ listen = "127.0.0.1:${port}"
       return ((await response.json()) as { issue: SeededIssue }).issue
     },
     async prepareSearch(baseURL) {
-      const configPath = join(home, 'config.toml')
-      const original = await readFile(configPath, 'utf8')
-      await writeFile(
-        configPath,
-        `${original}\n[search.embeddings]\nbase_url = ${JSON.stringify(baseURL)}\nmodel = "nomic-embed-text"\ndims = 768\n`,
-        { mode: 0o600 },
-      )
+      await writeFile(join(home, 'embedding-fixture'), baseURL, { mode: 0o600 })
       preparedSearch = true
+    },
+    async searchConfig() {
+      await readFile(join(home, 'embedding-fixture.installed'))
+      return readFile(join(home, 'config.toml'), 'utf8')
     },
     async restart() {
       await stopDaemon(daemon)

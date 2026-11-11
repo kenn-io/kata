@@ -56,8 +56,6 @@ type TurnOnLocalEmbeddingsErrorResponseJSON409 = ErrorEnvelope
 
 type TurnOnLocalEmbeddingsErrorResponseJSON500 = ErrorEnvelope
 
-type RestartLocalEmbeddingsResponse = LocalEmbeddingsStatus
-
 type RestartLocalEmbeddingsErrorResponse = ErrorEnvelope
 
 type RestartLocalEmbeddingsErrorResponseJSON = ErrorEnvelope
@@ -729,7 +727,6 @@ type RestartLocalEmbeddingsResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
-	JSON202      *RestartLocalEmbeddingsResponse
 	JSON403      *RestartLocalEmbeddingsErrorResponse
 	JSON404      *RestartLocalEmbeddingsErrorResponseJSON
 	JSON409      *RestartLocalEmbeddingsErrorResponseJSON409

@@ -61,6 +61,28 @@ func TestLocalEmbeddingsRestartOnce(t *testing.T) {
 	require.Equal(t, 1, calls)
 }
 
+func TestLocalEmbeddingsStatusDuringRestartStart(t *testing.T) {
+	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nbase_url = \"https://embeddings.example/v1\"\nmodel = \"model\"\ndims = 768\n"))
+	require.NoError(t, err)
+	started, release, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	setup := &localEmbeddingsSetup{embeddings: cfg.Embeddings, job: &api.LocalEmbeddingsJob{State: "restart"}, restart: func() error {
+		close(started)
+		<-release
+		return nil
+	}}
+	go func() { finished <- setup.Restart(t.Context()) }()
+	defer func() { close(release); <-finished }()
+	<-started
+	statusDone := make(chan api.LocalEmbeddingsStatus, 1)
+	go func() { status, _ := setup.Status(t.Context()); statusDone <- status }()
+	select {
+	case status := <-statusDone:
+		require.Equal(t, "restarting", status.Job.State)
+	case <-time.After(time.Second):
+		t.Fatal("status blocked while restart was starting")
+	}
+}
+
 func TestLocalEmbeddingsRestartWithoutCallback(t *testing.T) {
 	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nbase_url = \"https://embeddings.example/v1\"\nmodel = \"model\"\ndims = 768\n"))
 	require.NoError(t, err)

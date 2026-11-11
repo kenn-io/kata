@@ -11,7 +11,7 @@ const off = {
   can_change: true,
 }
 
-test('restarts a provider saved after startup and reconnects', async ({ page, kata }) => {
+test('installs built-in search, restarts, and reconnects', async ({ page, kata }) => {
   const provider = createServer((request, response) => {
     const chunks: Buffer[] = []
     request.on('data', (chunk: Buffer) => chunks.push(chunk))
@@ -35,6 +35,7 @@ test('restarts a provider saved after startup and reconnects', async ({ page, ka
     await page.getByRole('button', { name: 'Turn on' }).click()
     const button = page.getByRole('button', { name: 'Restart daemon' })
     await expect(button).toBeVisible()
+    expect(await kata.searchConfig()).toContain('local = true')
     page.once('dialog', (dialog) => dialog.accept())
     await button.click()
     await expect

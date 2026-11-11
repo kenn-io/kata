@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,9 +19,13 @@ type localEmbeddingsFixture struct {
 	calls      int
 	busy       bool
 	restartErr error
+	statusErr  error
 }
 
 func (f *localEmbeddingsFixture) Status(context.Context) (api.LocalEmbeddingsStatus, error) {
+	if f.statusErr != nil {
+		return api.LocalEmbeddingsStatus{}, f.statusErr
+	}
 	return api.LocalEmbeddingsStatus{Provider: "none", CanChange: !f.busy, DownloadBytes: 290_000_000, Job: &api.LocalEmbeddingsJob{State: "failed", Error: "setup provider detail"}}, nil
 }
 func (f *localEmbeddingsFixture) TurnOn(context.Context) error {
@@ -73,6 +78,17 @@ func TestLocalEmbeddingsRestartAdministration(t *testing.T) {
 			require.Equal(t, tc.want, response.Code)
 		})
 	}
+}
+
+func TestLocalEmbeddingsRestartWhenStatusUnavailable(t *testing.T) {
+	fixture := &localEmbeddingsFixture{statusErr: errors.New("installation inspection unavailable")}
+	mux := http.NewServeMux()
+	registerLocalEmbeddingsHandlers(humago.New(mux, huma.DefaultConfig("test", "1")), ServerConfig{LocalEmbeddings: fixture})
+	req := httptest.NewRequestWithContext(WithPrincipal(t.Context(), Principal{Kind: PrincipalWebLocal}), http.MethodPost, "/api/v1/embeddings/local/restart", nil)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, req)
+	require.Equal(t, http.StatusAccepted, response.Code)
+	require.Equal(t, 1, fixture.calls)
 }
 
 func TestLocalEmbeddingsAdministration(t *testing.T) {

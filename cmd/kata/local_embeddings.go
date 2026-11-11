@@ -545,16 +545,20 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 
 func (s *localEmbeddingsSetup) Restart(_ context.Context) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.job != nil && s.job.State == "restarting" {
+		s.mu.Unlock()
 		return nil
 	}
 	if s.restart == nil || s.job == nil || s.job.State != "restart" {
+		s.mu.Unlock()
 		return daemon.ErrLocalEmbeddingsBusy
 	}
 	s.job.State, s.job.Error = "restarting", ""
+	s.mu.Unlock()
 	if err := s.restart(); err != nil {
+		s.mu.Lock()
 		s.job.State, s.job.Error = "restart", err.Error()
+		s.mu.Unlock()
 		return err
 	}
 	return nil

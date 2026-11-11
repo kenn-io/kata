@@ -182,7 +182,7 @@ type ClientInterface interface {
 	TurnOnLocalEmbeddings(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*TurnOnLocalEmbeddingsResponse, error)
 	TurnOnLocalEmbeddingsWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*TurnOnLocalEmbeddingsResp, error)
 
-	RestartLocalEmbeddings(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*RestartLocalEmbeddingsResponse, error)
+	RestartLocalEmbeddings(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*struct{}, error)
 	RestartLocalEmbeddingsWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*RestartLocalEmbeddingsResp, error)
 
 	PollEvents(ctx context.Context, options *PollEventsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PollEventsResponse, error)
@@ -1322,7 +1322,7 @@ func (c *Client) TurnOnLocalEmbeddings(ctx context.Context, reqEditors ...runtim
 	return responseParser(ctx, resp)
 }
 
-func (c *Client) RestartLocalEmbeddings(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*RestartLocalEmbeddingsResponse, error) {
+func (c *Client) RestartLocalEmbeddings(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*struct{}, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/embeddings/local/restart",
@@ -1334,7 +1334,7 @@ func (c *Client) RestartLocalEmbeddings(ctx context.Context, reqEditors ...runti
 		return nil, fmt.Errorf("error creating request: %w", err)
 	}
 
-	responseParser := func(ctx context.Context, resp *runtime.Response) (*RestartLocalEmbeddingsResponse, error) {
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*struct{}, error) {
 		bodyBytes := resp.Content
 		if resp.StatusCode != 202 {
 			target := new(RestartLocalEmbeddingsErrorResponse)
@@ -1358,7 +1358,7 @@ func (c *Client) RestartLocalEmbeddings(ctx context.Context, reqEditors ...runti
 			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
 				runtime.WithStatusCode(resp.StatusCode))
 		}
-		target := new(RestartLocalEmbeddingsResponse)
+		target := new(struct{})
 		// Handle empty response body gracefully
 		if len(bodyBytes) == 0 {
 			return target, nil
@@ -1368,7 +1368,7 @@ func (c *Client) RestartLocalEmbeddings(ctx context.Context, reqEditors ...runti
 				StatusCode:    resp.StatusCode,
 				ContentType:   resp.Headers.Get("Content-Type"),
 				ContentLength: len(bodyBytes),
-				TargetType:    "RestartLocalEmbeddingsResponse",
+				TargetType:    "struct{}",
 				Body:          bodyBytes,
 				Err:           err,
 			}
