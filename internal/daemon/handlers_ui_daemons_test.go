@@ -561,9 +561,7 @@ func TestWebDaemonGatewayOmitsUnixTargetsAndKeepsSupportedDefault(t *testing.T) 
 			d := openTestDB(t)
 			entries := []config.CatalogDaemonConfig{{
 				Name: tc.socketName, URL: "unix://" + t.TempDir() + "/api.sock",
-				TokenEnv: "UNSELECTED_UNIX_WEB_TOKEN",
 			}}
-			t.Setenv("UNSELECTED_UNIX_WEB_TOKEN", "")
 			switch tc.target {
 			case "http":
 				target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
