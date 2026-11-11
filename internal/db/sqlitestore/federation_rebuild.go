@@ -81,7 +81,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			return preparedFederationRebuild{}, err
 		}
 		m := federationMaterialization{binding: binding}
-		if err := m.prepareFullHistory(ctx, tx, p.id, p.events, true); err != nil {
+		if err := m.prepareFullHistory(ctx, tx, p.events, true); err != nil {
 			return preparedFederationRebuild{}, err
 		}
 		if err := m.foldLinks(ctx, tx, nil, true); err != nil {
@@ -158,8 +158,6 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		if err := p.materialization.prepareLinks(ctx, tx, p.id, nil, included, excluded); err != nil {
 			return preparedFederationRebuild{}, err
 		}
-		p.materialization.rowStamp = p.materialization.rowFingerprint.sum()
-		p.materialization.rowFingerprint = nil
 	}
 	return result, nil
 }

@@ -4,12 +4,165 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
+
+func TestFederationGenerationTracksProjectChanges(t *testing.T) {
+	ctx := t.Context()
+	d, source, issue := incrementalTestStore(t)
+	other, err := d.CreateProject(ctx, "other")
+	require.NoError(t, err)
+	writer, err := Open(ctx, d.Path())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+	generation := func(id int64) int64 {
+		var value int64
+		require.NoError(t, d.QueryRowContext(ctx, `SELECT generation FROM federation_project_generations WHERE project_id=?`, id).Scan(&value))
+		return value
+	}
+	before, untouched := generation(source.ID), generation(other.ID)
+	tx, err := writer.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `UPDATE issues SET title='rolled back' WHERE id=?`, issue.ID)
+	require.NoError(t, err)
+	require.NoError(t, tx.Rollback())
+	require.Equal(t, before, generation(source.ID))
+	_, err = writer.ExecContext(ctx, `UPDATE issues SET title='changed' WHERE id=?`, issue.ID)
+	require.NoError(t, err)
+	require.Greater(t, generation(source.ID), before)
+	require.Equal(t, untouched, generation(other.ID))
+	before = generation(source.ID)
+	_, err = writer.ExecContext(ctx, `UPDATE issues SET project_id=? WHERE id=?`, other.ID, issue.ID)
+	require.NoError(t, err)
+	require.Greater(t, generation(source.ID), before)
+	require.Greater(t, generation(other.ID), untouched)
+	before = generation(other.ID)
+	tx, err = writer.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, db.LockCronProject(ctx, tx, other.ID))
+	require.NoError(t, tx.Commit())
+	require.Equal(t, before, generation(other.ID))
+}
+
+func TestFederationGenerationUpgradeFrom50(t *testing.T) {
+	ctx := t.Context()
+	d, project, _ := incrementalTestStore(t)
+	path := d.Path()
+	rows, err := d.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'federation_generation_%'`)
+	require.NoError(t, err)
+	var names []string
+	for rows.Next() {
+		var name string
+		require.NoError(t, rows.Scan(&name))
+		names = append(names, name)
+	}
+	require.NoError(t, rows.Err())
+	require.NoError(t, rows.Close())
+	for _, name := range names {
+		_, err := d.ExecContext(ctx, `DROP TRIGGER "`+name+`"`)
+		require.NoError(t, err)
+	}
+	_, err = d.ExecContext(ctx, `DROP TABLE federation_project_generations`)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `UPDATE meta SET value='50' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, UpgradeInPlace(ctx, path))
+	var version, generation int64
+	require.NoError(t, d.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='schema_version'`).Scan(&version))
+	require.EqualValues(t, 51, version)
+	require.NoError(t, d.QueryRowContext(ctx, `SELECT generation FROM federation_project_generations WHERE project_id=?`, project.ID).Scan(&generation))
+	require.Zero(t, generation)
+	_, err = d.ExecContext(ctx, `UPDATE projects SET name='updated' WHERE id=?`, project.ID)
+	require.NoError(t, err)
+	require.NoError(t, d.QueryRowContext(ctx, `SELECT generation FROM federation_project_generations WHERE project_id=?`, project.ID).Scan(&generation))
+	require.Positive(t, generation)
+}
+
+func TestFederationGenerationSurvivesProjectIDReuse(t *testing.T) {
+	ctx := t.Context()
+	d, _, _ := incrementalTestStore(t)
+	project, err := d.CreateProject(ctx, "temporary")
+	require.NoError(t, err)
+	var before, after int64
+	require.NoError(t, d.QueryRowContext(ctx, `SELECT generation FROM federation_project_generations WHERE project_id=?`, project.ID).Scan(&before))
+	_, err = d.ExecContext(ctx, `DELETE FROM events WHERE project_id=?`, project.ID)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `DELETE FROM projects WHERE id=?`, project.ID)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `INSERT INTO projects(id,uid,name) VALUES(?,'01HZNQ7VFPK1XGD8R5MABCD4EC','replacement')`, project.ID)
+	require.NoError(t, err)
+	require.NoError(t, d.QueryRowContext(ctx, `SELECT generation FROM federation_project_generations WHERE project_id=?`, project.ID).Scan(&after))
+	require.Greater(t, after, before)
+}
+
+func TestFederationGenerationsRejectChangedRows(t *testing.T) {
+	for _, change := range []string{"issue", "issue-insert", "comment", "comment-insert", "comment-delete", "label", "label-insert", "label-delete", "link", "link-insert", "link-delete", "event", "event-delete", "binding", "project", "provenance", "provenance-delete"} {
+		t.Run(change, func(t *testing.T) {
+			ctx := t.Context()
+			d, project, issue := incrementalTestStore(t)
+			peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "peer", Author: "tester"})
+			require.NoError(t, err)
+			comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "comment"})
+			require.NoError(t, err)
+			_, _, err = d.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "label", Actor: "tester"})
+			require.NoError(t, err)
+			_, _, err = d.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "related", Author: "tester"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, FromShortID: issue.ShortID, FromUID: issue.UID, ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "tester"})
+			require.NoError(t, err)
+			_, err = d.ExecContext(ctx, `INSERT INTO federation_root_keys(project_uid,authority_uid,key_id,public_key) VALUES(?,'authority','key','public')`, project.UID)
+			require.NoError(t, err)
+			_, err = d.ExecContext(ctx, `INSERT INTO federation_event_provenance(project_uid,event_uid,content_hash,reset_epoch,sequence,key_id,receipt) VALUES(?,'event','hash',1,1,'key','{"ingress_instance_uid":"other"}')`, project.UID)
+			require.NoError(t, err)
+			prepared, err := d.prepareFederationRebuild(ctx, project.ID)
+			require.NoError(t, err)
+			writer, err := Open(ctx, d.Path())
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, writer.Close()) })
+			switch change {
+			case "issue":
+				_, err = writer.ExecContext(ctx, `UPDATE issues SET title='changed' WHERE id=?`, issue.ID)
+			case "issue-insert":
+				_, err = writer.ExecContext(ctx, `INSERT INTO issues(uid,project_id,short_id,title,author) VALUES('01HZNQ7VFPK1XGD8R5MABCD4EC',?,'d4ec','new','tester')`, project.ID)
+			case "comment":
+				_, err = writer.ExecContext(ctx, `UPDATE comments SET body='changed' WHERE id=?`, comment.ID)
+			case "comment-insert":
+				_, err = writer.ExecContext(ctx, `INSERT INTO comments(uid,issue_id,author,body) VALUES('01HZNQ7VFPK1XGD8R5MABCD4EC',?,'tester','new')`, issue.ID)
+			case "comment-delete":
+				_, err = writer.ExecContext(ctx, `DELETE FROM comments WHERE id=?`, comment.ID)
+			case "label":
+				_, err = writer.ExecContext(ctx, `UPDATE issue_labels SET author='changed' WHERE issue_id=?`, issue.ID)
+			case "label-insert":
+				_, err = writer.ExecContext(ctx, `INSERT INTO issue_labels(issue_id,label,author) VALUES(?,'new','tester')`, issue.ID)
+			case "label-delete":
+				_, err = writer.ExecContext(ctx, `DELETE FROM issue_labels WHERE issue_id=?`, issue.ID)
+			case "link":
+				_, err = writer.ExecContext(ctx, `UPDATE links SET author='changed' WHERE from_issue_id=? OR to_issue_id=?`, issue.ID, issue.ID)
+			case "link-insert":
+				_, err = writer.ExecContext(ctx, `INSERT INTO links(from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author) VALUES(?,?,?,?,'blocks','tester')`, issue.ID, peer.ID, issue.UID, peer.UID)
+			case "link-delete":
+				_, err = writer.ExecContext(ctx, `DELETE FROM links WHERE from_issue_id=? OR to_issue_id=?`, issue.ID, issue.ID)
+			case "event":
+				_, err = writer.ExecContext(ctx, `UPDATE events SET content_hash=? WHERE id=(SELECT MIN(id) FROM events WHERE project_id=?)`, strings.Repeat("a", 64), project.ID)
+			case "event-delete":
+				_, err = writer.ExecContext(ctx, `DELETE FROM events WHERE id=(SELECT MIN(id) FROM events WHERE project_id=?)`, project.ID)
+			case "binding":
+				_, err = writer.ExecContext(ctx, `UPDATE federation_bindings SET enabled=0 WHERE project_id=?`, project.ID)
+			case "project":
+				_, err = writer.ExecContext(ctx, `UPDATE projects SET name='changed' WHERE id=?`, project.ID)
+			case "provenance":
+				_, err = writer.ExecContext(ctx, `UPDATE federation_event_provenance SET receipt='{"ingress_instance_uid":"changed"}' WHERE project_uid=?`, project.UID)
+			case "provenance-delete":
+				_, err = writer.ExecContext(ctx, `DELETE FROM federation_event_provenance WHERE project_uid=?`, project.UID)
+			}
+			require.NoError(t, err)
+			require.ErrorIs(t, d.applyFederationRebuild(ctx, prepared), errStaleFederationPreparation)
+		})
+	}
+}
 
 func TestMoveRebuildPreparesLargeIssueScope(t *testing.T) {
 	ctx := t.Context()
@@ -35,11 +188,8 @@ func TestMoveRebuildPreparesLargeIssueScope(t *testing.T) {
 	tx, err := d.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
-	m := federationMaterialization{rowFingerprint: &federationRowsFingerprint{}}
+	m := federationMaterialization{}
 	require.NoError(t, m.prepareRows(ctx, tx, project.ID, scope))
-	small := federationMaterialization{rowFingerprint: &federationRowsFingerprint{}}
-	require.NoError(t, small.prepareRows(ctx, tx, project.ID, []string{first.UID, second.UID, third.UID}))
-	require.Equal(t, small.rowFingerprint.sum(), m.rowFingerprint.sum())
 	require.Len(t, m.issueRows, 3)
 	require.Len(t, m.commentRows, 3)
 	require.Len(t, m.labelRows, 3)
@@ -102,7 +252,7 @@ func TestMoveRebuildLeavesWriterAvailableDuringPreparation(t *testing.T) {
 }
 
 func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
-	for _, change := range []string{"history", "binding", "unrelated", "fallback", "move", "destination-binding"} {
+	for _, change := range []string{"history", "binding", "unrelated", "unrelated-move", "fallback", "move", "destination-binding"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := t.Context()
 			d, source, issue := incrementalTestStore(t)
@@ -114,6 +264,14 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 			require.NoError(t, err)
 			other, err := d.CreateProject(ctx, "unrelated")
 			require.NoError(t, err)
+			var otherDestination db.Project
+			var unrelatedIssue db.Issue
+			if change == "unrelated-move" {
+				otherDestination, err = d.CreateProject(ctx, "other-destination")
+				require.NoError(t, err)
+				unrelatedIssue, _, err = d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "unrelated", Author: "tester"})
+				require.NoError(t, err)
+			}
 			_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
 			require.NoError(t, err)
 			_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?, short_id=? WHERE id=?`, source.ID, issue.ShortID, issue.ID)
@@ -148,6 +306,9 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 				case "unrelated":
 					_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "concurrent", Author: "tester"})
 					require.NoError(t, err)
+				case "unrelated-move":
+					_, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: unrelatedIssue.ID, FromProjectID: other.ID, ToProjectID: otherDestination.ID, IfMatchRev: unrelatedIssue.Revision, Actor: "tester"})
+					require.NoError(t, err)
 				}
 			}
 			projectID := destination.ID
@@ -155,7 +316,7 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 				projectID = source.ID
 			}
 			require.NoError(t, d.MaterializeFederatedProject(ctx, projectID))
-			if change == "unrelated" {
+			if change == "unrelated" || change == "unrelated-move" {
 				require.Equal(t, 1, attempts)
 			} else {
 				require.Equal(t, 2, attempts)

@@ -907,3 +907,87 @@ CREATE TABLE mcp_event_subscriptions (
 CREATE INDEX idx_mcp_event_subscriptions_due ON mcp_event_subscriptions(state, next_attempt_at);
 CREATE INDEX idx_mcp_event_subscriptions_principal_callback ON mcp_event_subscriptions(principal_key, callback_url);
 CREATE INDEX idx_mcp_event_subscriptions_ended ON mcp_event_subscriptions(state, ended_at);
+
+-- Generations track project-scoped rows read by prepared federation rebuilds.
+CREATE TABLE federation_project_generations (project_id INTEGER PRIMARY KEY, generation INTEGER NOT NULL);
+CREATE TRIGGER federation_generation_projects_insert AFTER INSERT ON projects BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT NEW.id,1 WHERE NEW.id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_projects_update AFTER UPDATE ON projects WHEN OLD.uid IS NOT NEW.uid OR OLD.name IS NOT NEW.name OR OLD.deleted_at IS NOT NEW.deleted_at OR OLD.metadata IS NOT NEW.metadata OR OLD.revision IS NOT NEW.revision OR OLD.id IS NOT NEW.id BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT OLD.id,1 WHERE OLD.id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+  INSERT INTO federation_project_generations(project_id,generation) SELECT NEW.id,1 WHERE NEW.id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_projects_delete AFTER DELETE ON projects BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT OLD.id,1 WHERE OLD.id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_issues_insert AFTER INSERT ON issues BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT NEW.project_id,1 WHERE NEW.project_id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_issues_update AFTER UPDATE ON issues BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT OLD.project_id,1 WHERE OLD.project_id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+  INSERT INTO federation_project_generations(project_id,generation) SELECT NEW.project_id,1 WHERE NEW.project_id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_issues_delete AFTER DELETE ON issues BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT OLD.project_id,1 WHERE OLD.project_id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_comments_insert AFTER INSERT ON comments BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=NEW.issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=NEW.issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_comments_update AFTER UPDATE ON comments BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=OLD.issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=OLD.issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=NEW.issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=NEW.issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_comments_delete AFTER DELETE ON comments BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=OLD.issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=OLD.issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_issue_labels_insert AFTER INSERT ON issue_labels BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=NEW.issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=NEW.issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_issue_labels_update AFTER UPDATE ON issue_labels BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=OLD.issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=OLD.issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=NEW.issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=NEW.issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_issue_labels_delete AFTER DELETE ON issue_labels BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=OLD.issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=OLD.issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_links_insert AFTER INSERT ON links BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=NEW.from_issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=NEW.from_issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=NEW.to_issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=NEW.to_issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_links_update AFTER UPDATE ON links BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=OLD.from_issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=OLD.from_issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=OLD.to_issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=OLD.to_issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=NEW.from_issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=NEW.from_issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=NEW.to_issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=NEW.to_issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_links_delete AFTER DELETE ON links BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=OLD.from_issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=OLD.from_issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT project_id FROM issues WHERE id=OLD.to_issue_id),1 WHERE (SELECT project_id FROM issues WHERE id=OLD.to_issue_id) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_federation_bindings_insert AFTER INSERT ON federation_bindings BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT NEW.project_id,1 WHERE NEW.project_id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_federation_bindings_update AFTER UPDATE ON federation_bindings WHEN OLD.project_id IS NOT NEW.project_id OR OLD.role IS NOT NEW.role OR OLD.hub_url IS NOT NEW.hub_url OR OLD.hub_project_uid IS NOT NEW.hub_project_uid OR OLD.enabled IS NOT NEW.enabled OR OLD.relay_config IS NOT NEW.relay_config BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT OLD.project_id,1 WHERE OLD.project_id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+  INSERT INTO federation_project_generations(project_id,generation) SELECT NEW.project_id,1 WHERE NEW.project_id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_federation_bindings_delete AFTER DELETE ON federation_bindings BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT OLD.project_id,1 WHERE OLD.project_id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_federation_event_provenance_insert AFTER INSERT ON federation_event_provenance BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT id FROM projects WHERE uid=NEW.project_uid),1 WHERE (SELECT id FROM projects WHERE uid=NEW.project_uid) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_federation_event_provenance_update AFTER UPDATE ON federation_event_provenance BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT id FROM projects WHERE uid=OLD.project_uid),1 WHERE (SELECT id FROM projects WHERE uid=OLD.project_uid) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT id FROM projects WHERE uid=NEW.project_uid),1 WHERE (SELECT id FROM projects WHERE uid=NEW.project_uid) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_federation_event_provenance_delete AFTER DELETE ON federation_event_provenance BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT (SELECT id FROM projects WHERE uid=OLD.project_uid),1 WHERE (SELECT id FROM projects WHERE uid=OLD.project_uid) IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_events_update AFTER UPDATE ON events BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT OLD.project_id,1 WHERE OLD.project_id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+  INSERT INTO federation_project_generations(project_id,generation) SELECT NEW.project_id,1 WHERE NEW.project_id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;
+CREATE TRIGGER federation_generation_events_delete AFTER DELETE ON events BEGIN
+  INSERT INTO federation_project_generations(project_id,generation) SELECT OLD.project_id,1 WHERE OLD.project_id IS NOT NULL ON CONFLICT(project_id) DO UPDATE SET generation=generation+1;
+END;

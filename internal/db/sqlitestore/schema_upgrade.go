@@ -24,6 +24,7 @@ var inPlaceUpgrades = []struct {
 	{47, 48, nil, []string{"idx_events_moved_from_id"}},
 	{48, 49, nil, []string{"idx_events_cron_run_uid"}},
 	{49, 50, []string{"mcp_event_subscriptions"}, []string{"idx_mcp_event_subscriptions_due", "idx_mcp_event_subscriptions_principal_callback", "idx_mcp_event_subscriptions_ended"}},
+	{50, 51, []string{"federation_project_generations"}, nil},
 }
 
 // UpgradesInPlace reports whether in-place steps reach the current schema.
@@ -69,7 +70,7 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 		if !UpgradesInPlace(version) {
 			return fmt.Errorf("no in-place upgrade path from schema_version %d to %d", version, db.CurrentSchemaVersion())
 		}
-		tables, indexes, err := canonicalSQL(ctx)
+		tables, indexes, triggers, err := canonicalSQL(ctx)
 		if err != nil {
 			return err
 		}
@@ -95,6 +96,16 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 					return fmt.Errorf("add index %s: %w", name, err)
 				}
 			}
+			if step.To == 51 {
+				if _, err := tx.ExecContext(ctx, `INSERT INTO federation_project_generations(project_id,generation) SELECT id,0 FROM projects`); err != nil {
+					return fmt.Errorf("seed federation generations: %w", err)
+				}
+				for name, ddl := range triggers {
+					if _, err := tx.ExecContext(ctx, ddl); err != nil {
+						return fmt.Errorf("add trigger %s: %w", name, err)
+					}
+				}
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value=? WHERE key='schema_version'`, db.CurrentSchemaVersion()); err != nil {
 			return fmt.Errorf("stamp index upgrade: %w", err)
@@ -104,32 +115,34 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 }
 
 // canonicalSQL reads the canonical schema's table and index DDL by name.
-func canonicalSQL(ctx context.Context) (tables, indexes map[string]string, err error) {
+func canonicalSQL(ctx context.Context) (tables, indexes, triggers map[string]string, err error) {
 	canonical, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
-		return nil, nil, fmt.Errorf("open canonical schema: %w", err)
+		return nil, nil, nil, fmt.Errorf("open canonical schema: %w", err)
 	}
 	defer func() { _ = canonical.Close() }()
 	canonical.SetMaxOpenConns(1)
 	if _, err := canonical.ExecContext(ctx, schemaSQL); err != nil {
-		return nil, nil, fmt.Errorf("create canonical schema: %w", err)
+		return nil, nil, nil, fmt.Errorf("create canonical schema: %w", err)
 	}
-	rows, err := canonical.QueryContext(ctx, `SELECT type,name,sql FROM sqlite_master WHERE type IN ('table','index') AND sql IS NOT NULL`)
+	rows, err := canonical.QueryContext(ctx, `SELECT type,name,sql FROM sqlite_master WHERE (type IN ('table','index') OR (type='trigger' AND name LIKE 'federation_generation_%')) AND sql IS NOT NULL`)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read canonical schema: %w", err)
+		return nil, nil, nil, fmt.Errorf("read canonical schema: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	tables, indexes = map[string]string{}, map[string]string{}
+	tables, indexes, triggers = map[string]string{}, map[string]string{}, map[string]string{}
 	for rows.Next() {
 		var kind, name, statement string
 		if err := rows.Scan(&kind, &name, &statement); err != nil {
-			return nil, nil, fmt.Errorf("read canonical schema entry: %w", err)
+			return nil, nil, nil, fmt.Errorf("read canonical schema entry: %w", err)
 		}
 		if kind == "table" {
 			tables[name] = statement
-		} else {
+		} else if kind == "index" {
 			indexes[name] = statement
+		} else {
+			triggers[name] = statement
 		}
 	}
-	return tables, indexes, rows.Err()
+	return tables, indexes, triggers, rows.Err()
 }
