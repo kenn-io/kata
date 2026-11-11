@@ -76,6 +76,7 @@ func checkFederationMoveDestinationLifecycle(ctx context.Context, tx *sql.Tx, pr
 	if err != nil {
 		return nil
 	}
+	//nolint:gosec // G202: the event types come from a fixed list; runtime values are bound.
 	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT b.hub_url FROM events e
  JOIN federation_bindings b ON b.project_id=e.project_id
  JOIN projects p ON p.id=b.project_id AND p.deleted_at IS NULL
