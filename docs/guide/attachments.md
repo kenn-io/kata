@@ -89,9 +89,9 @@ Docbank operations; they do not provide an atomic folder ACL during moves.
 
 An origin service uploads or resolves the file and returns a pinned descriptor.
 The requesting daemon saves the issue reference locally, so it can be cited in
-an immediate close before metadata synchronization reaches the root. A new
-issue that has not reached the root returns `attachment_issue_not_synced`;
-sync the project and retry. The issue is not created at the root by uploading.
+an immediate close before metadata synchronization reaches the root. For a new
+issue, the replica synchronizes pending project events before forwarding an
+upload or link when its upstream has not seen the issue yet.
 
 Shared-project references carry the root Kata instance UID in `origin`. Every
 replica stores the same value. Standalone references have no origin marker and

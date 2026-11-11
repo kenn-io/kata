@@ -511,6 +511,9 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		StartedAt:       startedAt,
 		Broadcaster:     broadcaster,
 		FederationWake:  wakeFederation,
+		FederationSyncOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+			return federation.SyncFederationOnceWithPulledEvents(ctx, store, binding, credential, clientpkg.Opts{}, publisher.Events, federationCredentials)
+		},
 		FederationPullOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
 			return federation.SyncFederationPullOnlyOnceWithPulledEvents(ctx, store, binding, credential, clientpkg.Opts{}, publisher.Events, federationCredentials)
 		},

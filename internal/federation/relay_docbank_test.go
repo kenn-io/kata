@@ -1,8 +1,10 @@
 package federation_test
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,13 +22,19 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
+	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/metadata"
 )
 
-func serveRelayDocbank(t *testing.T, node *relayMatrixNode, f *docbanktest.Fake) {
+func serveRelayDocbank(t *testing.T, node *relayMatrixNode, f *docbanktest.Fake, syncOverride ...func(context.Context, db.FederationBinding, config.FederationCredential) error) {
 	t.Helper()
-	cfg := daemon.ServerConfig{DB: node.store, FederationCredentials: node.credentials,
+	cfg := daemon.ServerConfig{FederationSyncOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+		return federation.SyncFederationOnce(ctx, node.store, binding, credential, node.credentials)
+	}, DB: node.store, FederationCredentials: node.credentials,
 		RootSigning: daemon.NewRootSigning(node.signer), Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}, DocbankFolder: "/kata"}
+	if len(syncOverride) > 0 {
+		cfg.FederationSyncOnce = syncOverride[0]
+	}
 	if f != nil {
 		cfg.Docbank = docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })
 	}
@@ -209,8 +217,8 @@ func TestRelayDocbankUploadAndImmediateContent(t *testing.T) {
 	}
 }
 
-func TestRelayDocbankPendingIssueAndOfflineNeverUseLocalVault(t *testing.T) {
-	root, relay, leaf, issue := newRelayClaimChain(t)
+func TestRelayDocbankOfflineNeverUsesLocalVault(t *testing.T) {
+	root, _, leaf, issue := newRelayClaimChain(t)
 	rootVault, localVault := docbanktest.New(t), docbanktest.New(t)
 	serveRelayDocbank(t, root, rootVault)
 	serveRelayDocbank(t, leaf, localVault)
@@ -218,15 +226,6 @@ func TestRelayDocbankPendingIssueAndOfflineNeverUseLocalVault(t *testing.T) {
 	require.NoError(t, err)
 	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, pending.UID)
 	status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=report.pdf", "pending document", "application/octet-stream")
-	require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
-	require.Contains(t, string(raw), "attachment_issue_not_synced")
-	require.Contains(t, string(raw), "sync the project and retry")
-	require.Empty(t, rootVault.Requests())
-	require.Empty(t, localVault.Requests())
-	// Replication makes the issue known; the retry now succeeds at the origin.
-	syncRelayMatrixNode(t, leaf)
-	syncRelayMatrixNode(t, relay)
-	status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=report.pdf", "pending document", "application/octet-stream")
 	require.Equal(t, http.StatusOK, status, string(raw))
 	var out api.AddAttachmentResponseBody
 	require.NoError(t, json.Unmarshal(raw, &out))
@@ -399,6 +398,71 @@ func TestRelayDocbankReadRejectsUnsupportedCapabilities(t *testing.T) {
 			status, raw = relayDocbankRequest(t, leaf, http.MethodGet, endpoint+"/"+out.ID+"/content", "", "")
 			require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
 			require.Contains(t, string(raw), "docbank_forward_unsupported")
+		})
+	}
+}
+
+func TestRelayDocbankNewIssueCanAttachImmediately(t *testing.T) {
+	for _, operation := range []string{"upload", "link"} {
+		t.Run(operation, func(t *testing.T) {
+			root, _, leaf, _ := newRelayClaimChain(t)
+			vault := docbanktest.New(t)
+			serveRelayDocbank(t, root, vault)
+			pending, _, err := leaf.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: leaf.project.ID, Author: leaf.account, Title: "new shared issue"})
+			require.NoError(t, err)
+			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, pending.UID)
+			var status int
+			var raw []byte
+			if operation == "upload" {
+				status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=report.pdf", "new report", "application/octet-stream")
+			} else {
+				version := uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222")
+				vault.Seed("/kata/report.pdf", docbank.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("linked report")})
+				status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"/links", `{"path":"/kata/report.pdf"}`, "application/json")
+			}
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var out api.AddAttachmentResponseBody
+			require.NoError(t, json.Unmarshal(raw, &out))
+			require.Equal(t, root.store.InstanceUID(), out.Attachment.Origin)
+			status, raw = relayDocbankRequest(t, leaf, http.MethodGet, endpoint+"/"+out.ID+"/content", "", "")
+			require.Equal(t, http.StatusOK, status, string(raw))
+			if operation == "upload" {
+				require.Equal(t, "new report", string(raw))
+			} else {
+				require.Equal(t, "linked report", string(raw))
+			}
+			closeBody := fmt.Sprintf(`{"reason":"done","message":"Delivered and checked the new report for this issue.","evidence":[{"type":"attachment","attachment_id":%q}]}`, out.ID)
+			status, raw = relayDocbankRequest(t, leaf, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", leaf.project.ID, pending.UID), closeBody, "application/json")
+			require.Equal(t, http.StatusOK, status, string(raw))
+		})
+	}
+}
+
+func TestRelayDocbankNewIssueSyncFailureAndRebind(t *testing.T) {
+	for _, mode := range []string{"failure", "rebind"} {
+		t.Run(mode, func(t *testing.T) {
+			root, _, leaf, _ := newRelayClaimChain(t)
+			vault := docbanktest.New(t)
+			serveRelayDocbank(t, root, vault)
+			serveRelayDocbank(t, leaf, nil, func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+				if mode == "failure" {
+					return errors.New("fixture sync failure")
+				}
+				if err := federation.SyncFederationOnce(ctx, leaf.store, binding, credential, leaf.credentials); err != nil {
+					return err
+				}
+				_, err := leaf.store.RebindFederationBinding(ctx, db.RebindFederationBindingParams{ProjectID: binding.ProjectID, ExpectedHubURL: binding.HubURL, ExpectedAllowInsecure: binding.AllowInsecure, HubProjectID: binding.HubProjectID, HubProjectUID: binding.HubProjectUID, TargetHubURL: "http://127.0.0.1:1"})
+				return err
+			})
+			issue, _, err := leaf.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: leaf.project.ID, Author: leaf.account, Title: "pending issue"})
+			require.NoError(t, err)
+			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments?name=report.pdf", leaf.project.ID, issue.UID)
+			status, raw := relayDocbankRequest(t, leaf, http.MethodPost, endpoint, "fixture bytes", "application/octet-stream")
+			require.Equal(t, http.StatusServiceUnavailable, status, string(raw))
+			require.Empty(t, vault.Requests())
+			stored, err := leaf.store.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.JSONEq(t, "{}", string(stored.Metadata))
 		})
 	}
 }

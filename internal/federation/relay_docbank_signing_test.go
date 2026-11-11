@@ -1,6 +1,7 @@
 package federation_test
 
 import (
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -17,8 +18,10 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
+	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 )
@@ -90,7 +93,9 @@ func TestRelayDocbankSignedUploadThroughBothHops(t *testing.T) {
 			require.NoError(t, hop.downstream.credentials.StoreFederationCredential(t.Context(), hop.downstream.project.UID, hop.downstream.credential))
 		}
 		for _, node := range []*relayMatrixNode{root, relay, leaf} {
-			server := daemon.NewServer(daemon.ServerConfig{DB: node.store, FederationCredentials: node.credentials, RootSigning: daemon.NewRootSigning(node.signer), Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}, FederationSigning: verifiers[node], FederationSigningRequired: verifiers[node] != nil, Docbank: docbank.NewClient(vaults[node].Server.URL, func() (string, error) { return "test-key", nil }), DocbankFolder: "/kata"})
+			server := daemon.NewServer(daemon.ServerConfig{FederationSyncOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+				return federation.SyncFederationOnce(ctx, node.store, binding, credential, node.credentials)
+			}, DB: node.store, FederationCredentials: node.credentials, RootSigning: daemon.NewRootSigning(node.signer), Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}, FederationSigning: verifiers[node], FederationSigningRequired: verifiers[node] != nil, Docbank: docbank.NewClient(vaults[node].Server.URL, func() (string, error) { return "test-key", nil }), DocbankFolder: "/kata"})
 			t.Cleanup(func() { require.NoError(t, server.Close()) })
 			handler := server.Handler()
 			node.handler.Store(&handler)
@@ -112,5 +117,10 @@ func TestRelayDocbankSignedUploadThroughBothHops(t *testing.T) {
 		require.NotEmpty(t, vaults[root].Requests())
 		require.Empty(t, vaults[relay].Requests())
 		require.Empty(t, vaults[leaf].Requests())
+		newIssue, _, err := leaf.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: leaf.project.ID, Author: leaf.account, Title: "new signed issue"})
+		require.NoError(t, err)
+		endpoint = fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, newIssue.UID)
+		status, raw = relayDocbankRequest(t, leaf, http.MethodPost, endpoint+"?name=signed.pdf", "new signed bytes", "application/octet-stream")
+		require.Equal(t, http.StatusOK, status, string(raw))
 	})
 }

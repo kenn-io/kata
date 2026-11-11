@@ -83,6 +83,8 @@ type ServerConfig struct {
 	// supplied binding and credential. It is used when a forwarded claim
 	// discovers that the issue has moved into another joined hub project.
 	FederationPullOnce func(context.Context, db.FederationBinding, config.FederationCredential) error
+	// FederationSyncOnce exchanges pending project events before an origin write.
+	FederationSyncOnce func(context.Context, db.FederationBinding, config.FederationCredential) error
 	// EmbeddingWake notifies the existing local worker after artifact commit.
 	EmbeddingWake                 func()
 	FederationCredentials         config.FederationCredentialStore
