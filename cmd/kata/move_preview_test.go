@@ -53,6 +53,20 @@ func TestMoveCLI_PreviewRejectsSameProject(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestMoveCLI_SinglePreviewMatchesSameProjectWrite(t *testing.T) {
+	env, dir, source, _, issue := setupMoveCLIProjects(t)
+	for _, dry := range []bool{true, false} {
+		args := []string{"--project", source.Name, "move", issue.ShortID, source.Name, "--single"}
+		if dry {
+			args = append(args, "--dry")
+		}
+		_, _, err := runCLIWithErr(t, env, dir, args...)
+		var cliErr *cliError
+		require.ErrorAs(t, err, &cliErr)
+		require.Equal(t, "same_project", cliErr.Code)
+	}
+}
+
 func TestMoveCLI_PreviewOutputAndNoComment(t *testing.T) {
 	for _, mode := range []string{"human", "agent", "json", "quiet"} {
 		t.Run(mode, func(t *testing.T) {

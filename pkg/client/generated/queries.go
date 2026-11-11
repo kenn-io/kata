@@ -110,6 +110,9 @@ type ShowIssueByUIDQuery struct {
 	Kind           *ShowIssueByUIDQueryKind `json:"kind,omitempty"`
 	Since          *string                  `json:"since,omitempty"`
 	IncludeDeleted *bool                    `json:"include_deleted,omitempty"`
+
+	// NoClaimRefresh Return cached claim status without refreshing it from the hub
+	NoClaimRefresh *bool `json:"no_claim_refresh,omitempty"`
 }
 
 func (s ShowIssueByUIDQuery) Validate() error {

@@ -709,6 +709,7 @@ type ShowIssueByUIDRequest struct {
 	CommentSelectors
 	UID            string `path:"uid" required:"true"`
 	IncludeDeleted bool   `query:"include_deleted,omitempty"`
+	NoClaimRefresh bool   `query:"no_claim_refresh,omitempty" doc:"Return cached claim status without refreshing it from the hub"`
 }
 
 // ReachableGraphRequest is GET /api/v1/projects/{id}/issues/{ref}/graph.

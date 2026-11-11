@@ -199,7 +199,7 @@ func moveRevisionHeader(dry bool, selected, current int64) *generated.MoveIssueH
 
 func printMoveDryResponse(ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, pid int64, rawRef, source, target string, targetID int64, moved moveResponseWire) error {
 	if moved.Issue.ProjectID == targetID {
-		return printMoveBatch(cmd, []api.MoveIssuesResult{{Ref: rawRef, UID: moved.Issue.UID, Result: "unchanged", Code: "already_in_target"}}, 1)
+		return printSameProjectPreview(cmd, rawRef, moved.Issue.UID)
 	}
 	name, err := moveSourceProjectName(ctx, client, baseURL, pid, moved.Issue.ProjectID, source)
 	if err != nil {
@@ -214,6 +214,13 @@ func printMoveDryResponse(ctx context.Context, cmd *cobra.Command, client *http.
 		return err
 	}
 	return printMovePreview(cmd, name, moved.Issue.ShortID, target, moved.Issues, refs)
+}
+
+func printSameProjectPreview(cmd *cobra.Command, ref, uid string) error {
+	if !cmd.Flags().Changed("refs-from") && !cmd.Flags().Changed("from-project") {
+		return &cliError{Code: "same_project", Message: "to_project_uid resolves to the issue's current project", Kind: kindValidation, ExitCode: ExitValidation}
+	}
+	return printMoveBatch(cmd, []api.MoveIssuesResult{{Ref: ref, UID: uid, Result: "unchanged", Code: "already_in_target"}}, 1)
 }
 
 func moveSourceProjectName(ctx context.Context, client *http.Client, baseURL string, requestedProjectID, currentProjectID int64, requestedName string) (string, error) {

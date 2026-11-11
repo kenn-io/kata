@@ -116,6 +116,26 @@ func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string)
 	return uid, nil
 }
 
+func moveBatchTargetError(index int, ref string, err error) (api.MoveIssuesResult, error) {
+	ce, ok := errors.AsType[*cliError](err)
+	if !ok || ce.Kind == kindDaemonUnavail || ce.Kind == kindInternal && ce.HTTPStatus < 500 {
+		return api.MoveIssuesResult{}, err
+	}
+	if ce.HTTPStatus >= 500 {
+		return api.MoveIssuesResult{}, &cliError{Message: ce.Message, Code: ce.Code, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+	}
+	return api.MoveIssuesResult{Index: index, Ref: ref, Result: "refused", Code: ce.Code, Message: ce.Message, Hint: ce.Hint}, nil
+}
+
+func showMoveIssueByUID(a daemonAPI, client *kataclient.Client, uid string, dry bool) (*generated.ShowIssueByUIDResp, error) {
+	if dry {
+		if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, apiVersionMoveBatch, "batch move preview"); err != nil {
+			return nil, err
+		}
+	}
+	return client.ShowIssueByUIDWithResponse(a.ctx, &generated.ShowIssueByUIDRequestOptions{PathParams: &generated.ShowIssueByUIDPath{UID: uid}, Query: &generated.ShowIssueByUIDQuery{NoClaimRefresh: &dry}})
+}
+
 func moveBatchReadLimit(items []moveBatchItem, opts moveBatchOptions) int {
 	if opts.DryRun || opts.Subtree {
 		return 2 - len(items)
@@ -215,7 +235,7 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 			if err != nil {
 				return err
 			}
-			response, callErr := client.ShowIssueByUIDWithResponse(a.ctx, &generated.ShowIssueByUIDRequestOptions{PathParams: &generated.ShowIssueByUIDPath{UID: parsed.ULID}})
+			response, callErr := showMoveIssueByUID(a, client, parsed.ULID, opts.DryRun)
 			if response == nil {
 				return externalCLITransportError(response, callErr)
 			}
@@ -392,11 +412,10 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		results[i] = api.MoveIssuesResult{Index: i, Ref: item.Ref}
 		uid, err := moveBatchTarget(a, item, targets)
 		if err != nil {
-			r := api.MoveIssuesResult{Index: i, Ref: item.Ref, Result: "refused", Message: err.Error()}
-			if ce, ok := errors.AsType[*cliError](err); ok {
-				r.Code, r.Message, r.Hint = ce.Code, ce.Message, ce.Hint
+			results[i], err = moveBatchTargetError(i, item.Ref, err)
+			if err != nil {
+				return err
 			}
-			results[i] = r
 			continue
 		}
 		indexes = append(indexes, i)

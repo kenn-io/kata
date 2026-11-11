@@ -8639,6 +8639,13 @@ paths:
           name: include_deleted
           schema:
             type: boolean
+        - description: Return cached claim status without refreshing it from the hub
+          explode: false
+          in: query
+          name: no_claim_refresh
+          schema:
+            description: Return cached claim status without refreshing it from the hub
+            type: boolean
       responses:
         "200":
           content:

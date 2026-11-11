@@ -11,12 +11,14 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -962,6 +964,73 @@ func TestMoveBatchCLI_PreviewUIDFromAnotherProject(t *testing.T) {
 	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--dry", "--json")
 	require.NoError(t, err)
 	require.Contains(t, out, issue.UID)
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, source.ID, got.ProjectID)
+}
+
+func TestMoveBatchCLI_PreviewUIDDoesNotRefreshClaims(t *testing.T) {
+	env, dir, source, target, issue := setupMoveCLIProjects(t)
+	var calls atomic.Int32
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(w, "unavailable", http.StatusForbidden)
+	}))
+	t.Cleanup(hub.Close)
+	_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: source.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: 42, HubProjectUID: source.UID, Enabled: true})
+	require.NoError(t, err)
+	require.NoError(t, config.WriteFederationCredential(source.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "claim-token", Capabilities: "claim"}))
+	_, _, err = executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--dry", "--json")
+	require.Error(t, err)
+	_, markerErr := env.DB.ClaimStatusRefreshError(t.Context(), source.ID, issue.UID)
+	assert.ErrorIs(t, markerErr, db.ErrNotFound)
+	assert.Zero(t, calls.Load())
+}
+
+func TestMoveBatchCLI_PreviewUIDRequiresReadOnlyLookup(t *testing.T) {
+	env, dir, _, target, issue := setupMoveCLIProjects(t)
+	origin, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(origin)
+	var lookups atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"ok":true,"api_schema_version":"0.44.0"}`)
+			return
+		}
+		if r.URL.Path == "/api/v1/issues/"+issue.UID {
+			lookups.Add(1)
+		}
+		r.Host = origin.Host
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	_, _, err = executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--dry")
+	var cliErr *cliError
+	require.ErrorAs(t, err, &cliErr)
+	require.Equal(t, "daemon_api_too_old", cliErr.Code)
+	require.Zero(t, lookups.Load())
+}
+
+func TestMoveBatchCLI_ProjectLookupFailureIsNotRefusal(t *testing.T) {
+	env, dir, source, target, issue := setupMoveCLIProjects(t)
+	origin, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(origin)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects" {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Host = origin.Host
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, issue.UID+"\n"+issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--json")
+	require.Error(t, err)
+	require.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
+	require.NotContains(t, out, `"result":"refused"`)
 	got, err := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, source.ID, got.ProjectID)

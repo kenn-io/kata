@@ -517,7 +517,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := authorizeIssueScopedIssue(ctx, cfg.DB, issue); err != nil {
 			return nil, err
 		}
-		return buildShowIssueResponse(ctx, cfg, issue, in.IncludeDeleted, commentref.Options{Thread: in.Thread, Inbound: in.Inbound, Kind: in.Kind, Since: in.Since})
+		return buildShowIssueResponse(showIssueReadContext(ctx, in.NoClaimRefresh), cfg, issue, in.IncludeDeleted, commentref.Options{Thread: in.Thread, Inbound: in.Inbound, Kind: in.Kind, Since: in.Since})
 	})
 
 	huma.Register(humaAPI, huma.Operation{
@@ -540,6 +540,22 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "PATCH",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}",
 	}, withResolvedProject(cfg, editIssueHandler(cfg)))
+}
+
+type noShowClaimRefreshKey struct{}
+
+func showIssueReadContext(ctx context.Context, skipRefresh bool) context.Context {
+	if !skipRefresh {
+		return ctx
+	}
+	return context.WithValue(ctx, noShowClaimRefreshKey{}, true)
+}
+
+func refreshShowClaimStatusForRead(ctx context.Context, cfg ServerConfig, issue db.Issue) (*time.Time, error) {
+	if skip, _ := ctx.Value(noShowClaimRefreshKey{}).(bool); skip {
+		return nil, nil
+	}
+	return refreshShowClaimStatus(ctx, cfg, issue)
 }
 
 // editIssueHandler dispatches a PATCH /issues/{ref} call. It applies any
@@ -1125,7 +1141,7 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	if cfg.Auth.Token == "" && cfg.InsecureReadonly {
 		return out, nil
 	}
-	refreshedHubNow, err := refreshShowClaimStatus(ctx, cfg, issue)
+	refreshedHubNow, err := refreshShowClaimStatusForRead(ctx, cfg, issue)
 	if err != nil {
 		return nil, err
 	}
