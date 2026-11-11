@@ -67,6 +67,7 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 		History: []db.Event{}, GraphIssues: []db.UIIssue{}, GraphLinks: []db.UILink{},
 		GraphEdges: []db.UIGraphEdge{}, GraphUnresolvedRefs: []db.UIGraphUnresolvedRef{},
 	}
+	query.CalendarBoundary = &data.CalendarBoundary
 	if reuseAuthority {
 		data.AuthorityReused = true
 	} else {
@@ -95,9 +96,9 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 				}
 			}
 		} else {
-			if err := db.ProjectUIDeadlineDate(&selected, query); err != nil {
+			if err := db.ProjectUIPlanningDates(ctx, tx, &selected, query); err != nil {
 				return db.UISnapshotData{}, fmt.Errorf(
-					"read UI selected issue %s deadline: %w", selected.UID, err,
+					"read UI selected issue %s planning dates: %w", selected.UID, err,
 				)
 			}
 			data.SelectedState = "available"
@@ -572,7 +573,7 @@ func readUIIssues(
 		}
 	}
 	filterReadySchedules := false
-	filterCalendarSchedules := query.View == "today" || query.View == "upcoming" || query.View == "deadlines"
+	filterCalendarSchedules := query.View == "today" || query.View == "upcoming"
 	filterDelegated := query.View == "delegated"
 	readyRequested := false
 	if len(statuses) > 0 && !slices.Contains(statuses, "all") {
@@ -696,7 +697,7 @@ func readUIIssues(
 				continue
 			}
 		}
-		scheduledOnDate, deadlineOnDate, matches, err := db.MatchUICalendarView(
+		scheduledOnDate, deadlineOnDate, scheduledToday, deadlineToday, matches, err := db.MatchUICalendarView(
 			string(issue.Metadata), query,
 			scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
 		)
@@ -709,6 +710,7 @@ func readUIIssues(
 		uiIssue := makeUIIssue(issue, projectNames[issue.ProjectID], nil)
 		uiIssue.ScheduledOnDate = scheduledOnDate
 		uiIssue.DeadlineOnDate = deadlineOnDate
+		uiIssue.ScheduledOnToday, uiIssue.DeadlineOnToday = scheduledToday, deadlineToday
 		issues = append(issues, uiIssue)
 		if limit > 0 && len(issues) == limit {
 			break

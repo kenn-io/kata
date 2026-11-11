@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 func checkSnapshotReplayRejectsMalformedEventEntries(t *testing.T, store db.Storage) error {
@@ -508,4 +509,110 @@ func CollectImportRecords(
 		}
 	}
 	return records, nil
+}
+
+func checkAttachedScheduleFederationReplay(t *testing.T, target db.Storage, backend Backend) error {
+	ctx := t.Context()
+	source := backend.Open(t)
+	t.Cleanup(func() { _ = source.Close() })
+	project, err := source.CreateProject(ctx, "recurrence-source")
+	require.NoError(t, err)
+	binding, err := source.EnableProjectFederation(ctx, project.ID, "worker")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Scheduled", Author: "worker"})
+	require.NoError(t, err)
+	_, err = source.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{IssueID: issue.ID, Recurrence: db.CreateRecurrenceIn{ProjectID: project.ID, Actor: "worker", Rule: "FREQ=DAILY", DTStart: "2026-11-12", Timezone: "America/New_York", Template: db.RecurrenceTemplate{Title: "Scheduled"}}})
+	require.NoError(t, err)
+	want, err := source.IssueByID(ctx, issue.ID)
+	require.NoError(t, err)
+	local, err := target.CreateProject(ctx, "recurrence-peer")
+	require.NoError(t, err)
+	_, err = target.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: local.ID, HubURL: "https://daemon.example", HubProjectID: project.ID, HubProjectUID: project.UID, ReplayHorizonEventID: binding.ReplayHorizonEventID, Actor: "worker", EmptyOnly: true})
+	require.NoError(t, err)
+	events, err := source.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, AfterID: binding.ReplayHorizonEventID - 1, Limit: 100})
+	require.NoError(t, err)
+	for _, event := range events {
+		if event.Type != "issue.created" && event.Type != "issue.metadata_updated" {
+			continue
+		}
+		inserted, err := target.InsertRemoteEvent(ctx, local.ID, portableNativeEvent(event))
+		require.NoError(t, err)
+		require.True(t, inserted)
+	}
+	require.NoError(t, target.MaterializeFederatedProject(ctx, local.ID))
+	got, err := target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.JSONEq(t, string(want.Metadata), string(got.Metadata))
+	return nil
+}
+
+func checkScheduleReplay(t *testing.T, target db.Storage, backend Backend) error {
+	ctx := t.Context()
+	source := backend.Open(t)
+	t.Cleanup(func() { _ = source.Close() })
+	project, err := source.CreateProject(ctx, "schedule-replay")
+	require.NoError(t, err)
+	saved, err := metadata.NewScheduleValue("2026-11-12T09:00", "Europe/Paris")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "scheduled", Author: "worker", Metadata: map[string]jsontext.Value{"scheduled_on": saved}})
+	require.NoError(t, err)
+	records, err := CollectImportRecords(ctx, source, db.ExportFilter{IncludeDeleted: true})
+	require.NoError(t, err)
+	require.NoError(t, target.ImportReplay(ctx, records, db.ImportOptions{}))
+	restored, err := target.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.JSONEq(t, string(issue.Metadata), string(restored.Metadata))
+	_, err = target.EnableProjectFederation(ctx, restored.ProjectID, "worker")
+	require.NoError(t, err)
+	before, err := target.MaxEventID(ctx)
+	require.NoError(t, err)
+	_, err = target.ReadFederation(ctx, db.FederationReadParams{ProjectID: restored.ProjectID, Metadata: true})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	after, err := target.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	result, err := target.ReadFederation(ctx, db.FederationReadParams{ProjectID: restored.ProjectID, Metadata: true, Features: db.SupportedEventFeatures})
+	require.NoError(t, err)
+	require.Contains(t, result.RequiredFeatures, db.IssueScheduleEventFeature)
+	return nil
+}
+
+func checkLocalRecurrenceReplay(t *testing.T, target db.Storage, backend Backend) error {
+	ctx := t.Context()
+	const zone = "America/New_York"
+	local, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion)
+	require.NoError(t, err)
+	previous := time.Local
+	time.Local = local
+	t.Cleanup(func() { time.Local = previous })
+	source := backend.Open(t)
+	t.Cleanup(func() { _ = source.Close() })
+	project, err := source.CreateProject(ctx, "local-recurrence")
+	require.NoError(t, err)
+	rule, _, err := source.CreateRecurrence(ctx, db.CreateRecurrenceIn{ProjectID: project.ID, Actor: "worker", Rule: "FREQ=DAILY", DTStart: "2026-05-18", Timezone: zone, Template: db.RecurrenceTemplate{Title: "Local recurrence", Metadata: jsontext.Value(`{"deadline_on":"2026-05-20T09:00"}`)}})
+	require.NoError(t, err)
+	records, err := CollectImportRecords(ctx, source, db.ExportFilter{})
+	require.NoError(t, err)
+	for _, record := range records {
+		if rec, ok := record.(*db.RecurrenceExport); ok && rec.UID == rule.UID {
+			rec.Timezone = "Local"
+		}
+	}
+	require.NoError(t, target.ImportReplay(ctx, records, db.ImportOptions{}))
+	restored, err := target.GetRecurrenceByUID(ctx, rule.UID)
+	require.NoError(t, err)
+	require.Equal(t, "Local", restored.Timezone)
+	out, err := target.MaterializeNext(ctx, restored.ID, "2026-05-18", "worker")
+	require.NoError(t, err)
+	require.Equal(t, "2026-05-19", out.OccurrenceKey)
+	issue, err := target.IssueByUID(ctx, out.NewIssueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, savedZone, _, present, err := metadata.ScheduleFieldInstant(string(issue.Metadata), "scheduled_on", "UTC")
+	require.NoError(t, err)
+	require.True(t, present)
+	require.Equal(t, zone, savedZone)
+	restored, err = target.GetRecurrenceByUID(ctx, rule.UID)
+	require.NoError(t, err)
+	require.Equal(t, "2026-05-20", *restored.NextOccurrenceKey)
+	return nil
 }

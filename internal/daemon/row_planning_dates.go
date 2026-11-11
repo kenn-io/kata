@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -15,18 +16,18 @@ type planningDateResolver struct {
 	store              db.Storage
 	defaultTimezone    string
 	recurrenceTimezone map[int64]string
+	now                time.Time
 }
 
 func newPlanningDateResolver(store db.Storage, defaultTimezone string) *planningDateResolver {
-	return &planningDateResolver{store: store, defaultTimezone: defaultTimezone, recurrenceTimezone: map[int64]string{}}
+	return &planningDateResolver{store: store, defaultTimezone: defaultTimezone, recurrenceTimezone: map[int64]string{}, now: time.Now()}
 }
 
-// resolve omits a field whose stored value cannot be read; it fails only when
-// the recurrence timezone lookup itself fails.
-func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (scheduledOn, deadlineOn string, err error) {
+// resolve omits malformed values and rejects unsupported saved rules.
+func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (scheduledOn, deadlineOn, scheduledToday, deadlineToday, scheduledDisplay, deadlineDisplay string, err error) {
 	raw := string(issue.Metadata)
 	if raw == "" {
-		return "", "", nil
+		return "", "", "", "", "", "", nil
 	}
 	scheduledDefault := r.defaultTimezone
 	if issue.RecurrenceID != nil {
@@ -34,7 +35,7 @@ func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (sch
 		if !ok {
 			recurrence, err := r.store.GetRecurrenceByID(ctx, *issue.RecurrenceID)
 			if err != nil && !errors.Is(err, db.ErrNotFound) {
-				return "", "", fmt.Errorf("read recurrence timezone for issue %s: %w", issue.UID, err)
+				return "", "", "", "", "", "", fmt.Errorf("read recurrence timezone for issue %s: %w", issue.UID, err)
 			}
 			zone = recurrence.Timezone
 			r.recurrenceTimezone[*issue.RecurrenceID] = zone
@@ -43,6 +44,5 @@ func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (sch
 			scheduledDefault = zone
 		}
 	}
-	scheduledOn, deadlineOn = db.RowPlanningDates(raw, scheduledDefault, r.defaultTimezone)
-	return scheduledOn, deadlineOn, nil
+	return db.RowPlanningProjection(raw, scheduledDefault, r.defaultTimezone, r.now)
 }

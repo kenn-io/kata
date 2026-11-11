@@ -2,8 +2,8 @@ package db
 
 import (
 	"context"
-
-	"go.kenn.io/kata/internal/metadata"
+	"database/sql"
+	"time"
 )
 
 // UIStore is the narrow coherent-read contract used by the browser API.
@@ -34,9 +34,11 @@ type UISnapshotQuery struct {
 	// ReadyAt is the daemon-selected time used by the synthetic ready status.
 	// It is part of the snapshot cache identity so timed readiness can change
 	// without a database event.
-	ReadyAt         string
-	DefaultTimezone string
-	Limit           int
+	ReadyAt          string
+	CalendarAt       string
+	CalendarBoundary *time.Time
+	DefaultTimezone  string
+	Limit            int
 	// AllowedIssueIDs is nil for unrestricted callers. A non-nil slice is
 	// applied before ordering and limiting every issue collection.
 	AllowedIssueIDs []int64
@@ -55,52 +57,76 @@ type UIProject struct {
 // UIIssue is an issue plus the display identity and labels needed by the SPA.
 type UIIssue struct {
 	Issue
-	ProjectName     string   `json:"project_name"`
-	QualifiedID     string   `json:"qualified_id"`
-	Labels          []string `json:"labels"`
-	ScheduledOnDate string   `json:"scheduled_on_date,omitempty"`
-	DeadlineOnDate  string   `json:"deadline_on_date,omitempty"`
+	ProjectName        string   `json:"project_name"`
+	QualifiedID        string   `json:"qualified_id"`
+	Labels             []string `json:"labels"`
+	ScheduledOnDate    string   `json:"scheduled_on_date,omitempty"`
+	DeadlineOnDate     string   `json:"deadline_on_date,omitempty"`
+	ScheduledOnDisplay string   `json:"scheduled_on_display,omitempty"`
+	DeadlineOnDisplay  string   `json:"deadline_on_display,omitempty"`
+	ScheduledOnToday   string   `json:"scheduled_on_today,omitempty"`
+	DeadlineOnToday    string   `json:"deadline_on_today,omitempty"`
 }
 
 // MatchUICalendarView evaluates date-sensitive browser collection predicates
-// after planning dates have been projected into the browser timezone.
+// after planning dates have been projected into their saved zones, or the
+// browser timezone for legacy strings.
 // scheduledDefaultTimezone can include the legacy recurrence fallback;
 // deadlines always use the daemon default from query.
 func MatchUICalendarView(
 	raw string,
 	query UISnapshotQuery,
 	scheduledDefaultTimezone string,
-) (string, string, bool, error) {
-	dates := resolvePlanningCalendarDates(raw, &query.TimeZone, scheduledDefaultTimezone, query.DefaultTimezone)
-	if err := dates.err(); err != nil {
-		return "", "", false, err
+) (string, string, string, string, bool, error) {
+	now, _ := time.Parse(time.RFC3339Nano, query.CalendarAt)
+	dates := resolvePlanningCalendarDates(raw, &query.TimeZone, scheduledDefaultTimezone, query.DefaultTimezone, now, query.CalendarBoundary)
+	if err := dates.unsupported(); err != nil {
+		return "", "", "", "", false, err
 	}
 	scheduledDate, scheduled := dates.scheduledOn, dates.hasScheduledOn
 	deadlineDate, deadline := dates.deadlineOn, dates.hasDeadlineOn
+	scheduledToday, deadlineToday := dates.scheduledToday, dates.deadlineToday
+	if scheduledToday == "" {
+		scheduledToday = query.LocalDate
+	}
+	if deadlineToday == "" {
+		deadlineToday = query.LocalDate
+	}
 	switch query.View {
 	case "upcoming":
-		return scheduledDate, deadlineDate, scheduled && scheduledDate > query.LocalDate, nil
+		return scheduledDate, deadlineDate, scheduledToday, deadlineToday, scheduled && scheduledDate > scheduledToday, nil
 	case "today":
-		scheduleDue := scheduled && scheduledDate <= query.LocalDate
-		deadlineDue := deadline && deadlineDate <= query.LocalDate
-		return scheduledDate, deadlineDate, scheduleDue || deadlineDue, nil
+		scheduleDue := scheduled && scheduledDate <= scheduledToday
+		deadlineDue := deadline && deadlineDate <= deadlineToday
+		return scheduledDate, deadlineDate, scheduledToday, deadlineToday, scheduleDue || deadlineDue, nil
 	case "deadlines":
-		return "", deadlineDate, true, nil
+		return "", deadlineDate, scheduledToday, deadlineToday, true, nil
 	default:
-		return scheduledDate, deadlineDate, true, nil
+		return scheduledDate, deadlineDate, scheduledToday, deadlineToday, true, nil
 	}
 }
 
-// ProjectUIDeadlineDate gives a selected issue the same browser-calendar
-// deadline projection as collection rows.
-func ProjectUIDeadlineDate(issue *UIIssue, query UISnapshotQuery) error {
-	deadlineDate, _, err := metadata.DeadlineOnCalendarDate(
-		string(issue.Metadata), query.TimeZone, query.DefaultTimezone,
-	)
-	if err != nil {
+// ProjectUIPlanningDates gives a selected issue the same dates as collection rows.
+func ProjectUIPlanningDates(ctx context.Context, tx *sql.Tx, issue *UIIssue, query UISnapshotQuery) error {
+	scheduledDefault := query.DefaultTimezone
+	if issue.RecurrenceID != nil {
+		zone, err := IssueRecurrenceTimezone(ctx, tx, issue.Issue)
+		if err != nil {
+			return err
+		}
+		if zone != "" {
+			scheduledDefault = zone
+		}
+	}
+	now, _ := time.Parse(time.RFC3339Nano, query.CalendarAt)
+	dates := resolvePlanningCalendarDates(string(issue.Metadata), &query.TimeZone, scheduledDefault, query.DefaultTimezone, now, query.CalendarBoundary)
+	if err := dates.unsupported(); err != nil {
 		return err
 	}
-	issue.DeadlineOnDate = deadlineDate
+	issue.ScheduledOnDate = dates.scheduledOn
+	issue.DeadlineOnDate = dates.deadlineOn
+	issue.ScheduledOnToday, issue.DeadlineOnToday = dates.scheduledToday, dates.deadlineToday
+	issue.ScheduledOnDisplay, issue.DeadlineOnDisplay = dates.scheduledDisplay, dates.deadlineDisplay
 	return nil
 }
 
@@ -132,6 +158,7 @@ type UIGraphUnresolvedRef struct {
 
 // UISnapshotData is captured wholly inside one backend read transaction.
 type UISnapshotData struct {
+	CalendarBoundary    time.Time              `json:"-"`
 	CommentGraph        CommentGraphData       `json:"-"`
 	Cursor              int64                  `json:"cursor"`
 	Projects            []UIProject            `json:"projects"`

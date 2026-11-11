@@ -21,6 +21,7 @@ type uiSnapshotAuthorityCacheEntry struct {
 	// event payload references included. A cache hit registers them again
 	// instead of rediscovering them from the response fields.
 	dependencies []int64
+	createdAt    time.Time
 	expiresAt    time.Time
 	sequence     uint64
 }
@@ -56,7 +57,8 @@ func (c *uiSnapshotCache) get(key string) (db.UISnapshotData, []int64, bool) {
 	if !ok {
 		return db.UISnapshotData{}, nil, false
 	}
-	if !c.clock().Before(entry.expiresAt) {
+	now := c.clock()
+	if now.Before(entry.createdAt) || !now.Before(entry.expiresAt) {
 		delete(c.entries, key)
 		return db.UISnapshotData{}, nil, false
 	}
@@ -84,10 +86,15 @@ func (c *uiSnapshotCache) put(key string, data db.UISnapshotData, dependencies [
 		delete(c.entries, oldestKey)
 	}
 	c.sequence++
+	expiresAt := now.Add(uiSnapshotAuthorityCacheTTL)
+	if !data.CalendarBoundary.IsZero() && data.CalendarBoundary.Before(expiresAt) {
+		expiresAt = data.CalendarBoundary
+	}
 	c.entries[key] = uiSnapshotAuthorityCacheEntry{
 		data:         c.clone(data),
 		dependencies: slices.Clone(dependencies),
-		expiresAt:    now.Add(uiSnapshotAuthorityCacheTTL),
+		createdAt:    now.Round(0),
+		expiresAt:    expiresAt,
 		sequence:     c.sequence,
 	}
 }
@@ -125,14 +132,16 @@ func projectUISnapshotAuthority(data db.UISnapshotData, projectUID string) db.UI
 		}
 	}
 	return db.UISnapshotData{
-		Cursor:          data.Cursor,
-		Projects:        slices.Clone(data.Projects),
-		Issues:          issues,
-		CollectionLinks: links,
+		Cursor:           data.Cursor,
+		CalendarBoundary: data.CalendarBoundary,
+		Projects:         slices.Clone(data.Projects),
+		Issues:           issues,
+		CollectionLinks:  links,
 	}
 }
 
 func uiSnapshotKey(intent normalizedUISnapshotIntent) (string, error) {
+	intent.CalendarAt = ""
 	encoded, err := json.Marshal(intent)
 	if err != nil {
 		return "", err
@@ -142,9 +151,10 @@ func uiSnapshotKey(intent normalizedUISnapshotIntent) (string, error) {
 
 func cloneUISnapshotEnrichment(data db.UISnapshotData) db.UISnapshotData {
 	cloned := db.UISnapshotData{
-		Cursor:          data.Cursor,
-		SelectedState:   data.SelectedState,
-		AuthorityReused: false,
+		Cursor:           data.Cursor,
+		CalendarBoundary: data.CalendarBoundary,
+		SelectedState:    data.SelectedState,
+		AuthorityReused:  false,
 	}
 	cloned.Comments = slices.Clone(data.Comments)
 	cloned.CommentGraph.Comments = slices.Clone(data.CommentGraph.Comments)
@@ -182,14 +192,18 @@ func uiSnapshotHasEnrichment(intent normalizedUISnapshotIntent) bool {
 
 func cloneUISnapshotAuthority(data db.UISnapshotData) db.UISnapshotData {
 	return db.UISnapshotData{
-		Cursor:          data.Cursor,
-		Projects:        slices.Clone(data.Projects),
-		Issues:          slices.Clone(data.Issues),
-		CollectionLinks: slices.Clone(data.CollectionLinks),
+		Cursor:           data.Cursor,
+		CalendarBoundary: data.CalendarBoundary,
+		Projects:         slices.Clone(data.Projects),
+		Issues:           slices.Clone(data.Issues),
+		CollectionLinks:  slices.Clone(data.CollectionLinks),
 	}
 }
 
 func mergeUISnapshotAuthority(data *db.UISnapshotData, authority db.UISnapshotData) {
+	if data.CalendarBoundary.IsZero() || (!authority.CalendarBoundary.IsZero() && authority.CalendarBoundary.Before(data.CalendarBoundary)) {
+		data.CalendarBoundary = authority.CalendarBoundary
+	}
 	data.Projects = authority.Projects
 	data.Issues = authority.Issues
 	data.CollectionLinks = authority.CollectionLinks

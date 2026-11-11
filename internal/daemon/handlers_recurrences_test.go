@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"flag"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -61,10 +63,12 @@ func TestPostRecurrence_HappyPath(t *testing.T) {
 }
 
 func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	const defaultZone = "America/New_York"
+	env := testenv.New(t, testenv.WithAuthToken("tok"), func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = defaultZone })
 	project := seedProject(t, env, "example-project")
 	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID, Title: "Weekly review", Author: "user-a",
+		Metadata: map[string]jsontext.Value{"deadline_on": jsontext.Value(`"2026-08-04T09:00"`)},
 	})
 	require.NoError(t, err)
 
@@ -83,6 +87,9 @@ func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
 
 	attached, err := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
+	_, zone, _, _, err := metadata.ScheduleFieldInstant(string(attached.Metadata), "deadline_on", "")
+	require.NoError(t, err)
+	require.Equal(t, defaultZone, zone)
 	require.NotNil(t, attached.RecurrenceID)
 	require.NotNil(t, attached.OccurrenceKey)
 	assert.Equal(t, "2026-08-03", *attached.OccurrenceKey)
@@ -639,10 +646,13 @@ func TestPatchRecurrenceLocalAdvancement(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, next.OccurrenceKey)
 	assert.Equal(t, "2026-08-05", *next.OccurrenceKey)
-	var metadata map[string]any
-	require.NoError(t, json.Unmarshal([]byte(next.Metadata), &metadata))
-	assert.Equal(t, "Local", metadata["timezone"])
-	assert.Equal(t, "2026-08-05", metadata["scheduled_on"])
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal([]byte(next.Metadata), &fields))
+	value, _, _, present, err := metadata.ScheduleFieldInstant(string(next.Metadata), "scheduled_on", "")
+	require.NoError(t, err)
+	require.True(t, present)
+	assert.Equal(t, "2026-08-05", value)
+	assert.Equal(t, "Local", fields["timezone"])
 	require.NotNil(t, current.NextOccurrenceKey)
 	assert.Equal(t, "2026-08-07", *current.NextOccurrenceKey)
 }

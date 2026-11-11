@@ -109,12 +109,12 @@ func (p *FoldProjection) apply(e FoldEvent) {
 	case "issue.metadata_updated":
 		uid := issueUID(e, payload)
 		if uid != "" {
-			p.IssueMetadata[uid] = applyMetadataDiff(p.IssueMetadata[uid], payload["diff"])
+			p.IssueMetadata[uid] = applyMetadataDiff(p.IssueMetadata[uid], payload["diff"], true)
 			p.touchIssue(uid, issueUpdatedAt(e, payload))
 		}
 	case "project.metadata_updated":
 		if e.ProjectUID != "" {
-			p.ProjectMetadata[e.ProjectUID] = applyMetadataDiff(p.ProjectMetadata[e.ProjectUID], payload["diff"])
+			p.ProjectMetadata[e.ProjectUID] = applyMetadataDiff(p.ProjectMetadata[e.ProjectUID], payload["diff"], false)
 		}
 	case "project.author_rewritten":
 		p.applyAuthorRewritten(e, payload)
@@ -845,7 +845,7 @@ func StringSlice(raw jsontext.Value) []string {
 // stringSlice is the internal alias for fold.go's existing callers.
 func stringSlice(raw jsontext.Value) []string { return StringSlice(raw) }
 
-func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.Value {
+func applyMetadataDiff(current, diffRaw jsontext.Value, issue bool) jsontext.Value {
 	var currentMap map[string]jsontext.Value
 	if len(current) > 0 && string(current) != "null" {
 		_ = json.Unmarshal(current, &currentMap)
@@ -861,6 +861,10 @@ func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.
 	for key, d := range diff {
 		if len(d.To) == 0 || string(d.To) == "null" {
 			delete(currentMap, key)
+			continue
+		}
+		if issue && (key == "scheduled_on" || key == "deadline_on") {
+			currentMap[key] = canonicalJSON(d.To)
 			continue
 		}
 		currentMap[key] = applyMetadataValueDiff(currentMap[key], d.From, d.To)

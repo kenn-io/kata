@@ -8,15 +8,25 @@ import (
 	"time"
 
 	"github.com/teambition/rrule-go"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 const dateFmt = "2006-01-02"
+
+// loadZone reads named zones from the bundled rules schedules are saved with;
+// "" and "Local" keep time.LoadLocation's host behavior.
+func loadZone(tz string) (*time.Location, error) {
+	if tz == "" || tz == "Local" {
+		return time.LoadLocation(tz)
+	}
+	return metadata.ScheduleLocation(tz, metadata.ScheduleTZDataVersion)
+}
 
 // Walk returns the next occurrence date strictly after `after`.
 // Returns (nil, nil) when the series is exhausted (UNTIL/COUNT reached).
 // Returns (nil, err) when the rule cannot be parsed.
 func Walk(rule, dtstart, tz, after string) (*string, error) {
-	loc, err := time.LoadLocation(tz)
+	loc, err := loadZone(tz)
 	if err != nil {
 		return nil, fmt.Errorf("load timezone %q: %w", tz, err)
 	}
@@ -62,7 +72,7 @@ func Walk(rule, dtstart, tz, after string) (*string, error) {
 // Next returns the first occurrence on or after dtstart — useful when
 // materializing the initial instance of a fresh recurrence.
 func Next(rule, dtstart, tz string) (*string, error) {
-	loc, err := time.LoadLocation(tz)
+	loc, err := loadZone(tz)
 	if err != nil {
 		return nil, err
 	}

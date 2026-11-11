@@ -2,6 +2,8 @@ import type { KataCommentLink, KataCreationAttributionWire, KataReplyKind } from
 
 export type KataTaskViewName = 'inbox' | 'today' | 'delegated' | 'scheduled' | 'all' | 'logbook'
 
+export type ScheduleValue = string | { value: string; timezone: string; tzdata_version: string }
+
 export interface KataTaskChecklistItem {
   id: string
   text: string
@@ -9,8 +11,8 @@ export interface KataTaskChecklistItem {
 }
 
 export interface KataTaskMetadata {
-  scheduled_on?: string | undefined
-  deadline_on?: string | undefined
+  scheduled_on?: ScheduleValue | undefined
+  deadline_on?: ScheduleValue | undefined
   today_bucket?: 'day' | 'evening' | undefined
   checklist?: KataTaskChecklistItem[] | undefined
   area?: string | undefined
@@ -64,6 +66,10 @@ export interface KataTaskSummary extends KataCreationAttributionWire {
   project_name: string
   scheduled_on_date?: string | undefined
   deadline_on_date?: string | undefined
+  scheduled_on_today?: string | undefined
+  deadline_on_today?: string | undefined
+  scheduled_on_display?: string | undefined
+  deadline_on_display?: string | undefined
   metadata: KataTaskMetadata
   revision: number
   owner?: string | undefined

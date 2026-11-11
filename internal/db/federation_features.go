@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // CronEventFeature identifies support for all cron definitions, runs and native delivery state.
@@ -18,8 +20,11 @@ const CronEventFeature = "cron_v1"
 // IssueMoveEventFeature identifies support for moving issues between projects.
 const IssueMoveEventFeature = "issue_move_v1"
 
+// IssueScheduleEventFeature identifies support for saved issue schedules.
+const IssueScheduleEventFeature = "issue_schedule_v1"
+
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + IssueScheduleEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -46,6 +51,9 @@ func MergeEventFeatures(values ...string) string {
 
 // PayloadRequiredFeatures supplements type classification with native delivery state.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
+	if payload == "" {
+		payload = "{}"
+	}
 	required := EventRequiredFeatures(kind)
 	native, err := payloadHasNativeRecurringState(kind, payload)
 	if err != nil {
@@ -53,6 +61,65 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	}
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
+	}
+	schedules, err := issueScheduleRequiredFeature(kind, payload)
+	if err != nil {
+		return "", err
+	}
+	if schedules != "" {
+		required = MergeEventFeatures(required, schedules)
+	}
+	return required, nil
+}
+
+// issueScheduleRequiredFeature validates saved schedule descriptors while
+// classifying their wire format, including both sides of a metadata diff.
+func issueScheduleRequiredFeature(kind, payload string) (string, error) {
+	if payload == "" {
+		return "", nil
+	}
+	required := ""
+	if strings.HasPrefix(kind, "issue.") || kind == "projection.issue" {
+		var body map[string]jsontext.Value
+		if err := json.Unmarshal([]byte(payload), &body); err != nil {
+			return "", err
+		}
+		if kind == "issue.moved" && len(body["snapshot"]) > 0 {
+			if err := json.Unmarshal(body["snapshot"], &body); err != nil {
+				return "", err
+			}
+		}
+		for _, name := range []string{"metadata", "diff"} {
+			var fields map[string]jsontext.Value
+			if len(body[name]) == 0 || string(body[name]) == "null" {
+				continue
+			}
+			if err := json.Unmarshal(body[name], &fields); err != nil {
+				return "", err
+			}
+			for _, field := range []string{"scheduled_on", "deadline_on"} {
+				raw := fields[field]
+				values := []jsontext.Value{raw}
+				if name == "diff" && len(raw) > 0 {
+					var change struct {
+						From jsontext.Value `json:"from"`
+						To   jsontext.Value `json:"to"`
+					}
+					if err := json.Unmarshal(raw, &change); err != nil {
+						return "", err
+					}
+					values = []jsontext.Value{change.From, change.To}
+				}
+				for _, value := range values {
+					// Imports keep opaque objects; only saved rules need the feature.
+					if saved, err := metadata.DecodeSavedSchedule(value); metadata.IsUnsupportedSchedule(err) {
+						return "", fmt.Errorf("%w: %s: %w", ErrUnsupportedEventFeatures, IssueScheduleEventFeature, err)
+					} else if saved != nil {
+						required = IssueScheduleEventFeature
+					}
+				}
+			}
+		}
 	}
 	return required, nil
 }
@@ -171,10 +238,13 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	 EXISTS(SELECT 1 FROM events WHERE project_id=p.id AND type LIKE 'cron.%'))),
  EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND p.name<>$2 AND EXISTS(
   SELECT 1 FROM events e WHERE e.project_id=p.id AND e.type='issue.moved'))`, projectUID, SystemProjectName).Scan(&cronPresent, &issueMoved)
+	required := ""
+	if err == nil {
+		required, err = issueScheduleFeatures(ctx, q, projectUID)
+	}
 	if err != nil {
 		return "", err
 	}
-	required := ""
 	if issueMoved {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
 	}
@@ -212,6 +282,31 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		}
 	}
 	return required, nil
+}
+
+// issueScheduleFeatures requires issue_schedule_v1 when any issue in the
+// project stores a saved schedule.
+func issueScheduleFeatures(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, projectUID string) (string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT i.metadata FROM issues i JOIN projects p ON p.id=i.project_id WHERE p.uid=$1 AND (i.metadata LIKE '%"scheduled_on"%' OR i.metadata LIKE '%"deadline_on"%' OR i.metadata LIKE '%\u%' ESCAPE '!')`, projectUID)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	required := ""
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return "", err
+		}
+		feature, err := PayloadRequiredFeatures("projection.issue", `{"metadata":`+raw+`}`)
+		if err != nil {
+			return "", err
+		}
+		required = MergeEventFeatures(required, feature)
+	}
+	return required, rows.Err()
 }
 
 const nativeCronJobsQuery = `SELECT 'projection.job',j.definition_json FROM cron_jobs j JOIN projects p ON p.id=j.project_id WHERE p.uid=$1 AND ((j.definition_json LIKE '%"notify"%' AND j.definition_json LIKE '%"per-run"%') OR j.definition_json LIKE '%\u%' ESCAPE '!')`

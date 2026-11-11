@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
@@ -53,8 +55,10 @@ type Issue struct {
 	RecurrenceID        *int64        `json:"recurrence_id,omitempty"`
 	Metadata            issueMetadata `json:"metadata,omitzero"`
 	// Resolved YYYY-MM-DD planning dates from the daemon.
-	ScheduledOnDate string `json:"scheduled_on_date,omitempty"`
-	DeadlineOnDate  string `json:"deadline_on_date,omitempty"`
+	ScheduledOnDate  string `json:"scheduled_on_date,omitempty"`
+	DeadlineOnDate   string `json:"deadline_on_date,omitempty"`
+	ScheduledOnToday string `json:"scheduled_on_today,omitempty"`
+	DeadlineOnToday  string `json:"deadline_on_today,omitempty"`
 }
 
 // issueMetadata keeps the two planning-date keys and the timezone of an
@@ -67,9 +71,79 @@ type issueMetadata struct {
 
 // scheduledOn, deadlineOn and timezone are the raw stored values, "" when
 // absent.
-func (i Issue) scheduledOn() string { return rawString(i.Metadata.ScheduledOn) }
-func (i Issue) deadlineOn() string  { return rawString(i.Metadata.DeadlineOn) }
-func (i Issue) timezone() string    { return rawString(i.Metadata.Timezone) }
+func (i Issue) scheduledOn() string {
+	value, _ := metadata.ScheduleValueText(i.Metadata.ScheduledOn)
+	return value
+}
+func (i Issue) deadlineOn() string {
+	value, _ := metadata.ScheduleValueText(i.Metadata.DeadlineOn)
+	return value
+}
+
+// datesState is what the Dates form opens with; unreadable says why a stored
+// date cannot be edited safely.
+func (i Issue) datesState() datesFormState {
+	scheduled, serr := metadata.ScheduleValueText(i.Metadata.ScheduledOn)
+	deadline, derr := metadata.ScheduleValueText(i.Metadata.DeadlineOn)
+	if serr == nil {
+		scheduled = metadata.ScheduleClockText(i.Metadata.ScheduledOn)
+	}
+	if derr == nil {
+		deadline = metadata.ScheduleClockText(i.Metadata.DeadlineOn)
+	}
+	d := datesFormState{revision: i.Revision, scheduled: scheduled, deadline: deadline, scheduledToday: i.ScheduledOnToday, deadlineToday: i.DeadlineOnToday}
+	d.scheduledZone = savedDateLocation(i.Metadata.ScheduledOn)
+	d.deadlineZone = savedDateLocation(i.Metadata.DeadlineOn)
+	if err := errors.Join(serr, derr); metadata.IsUnsupportedSchedule(err) {
+		d.unreadable = err.Error()
+	}
+	return d
+}
+
+func (i Issue) timezone() string { return rawString(i.Metadata.Timezone) }
+
+func (i Issue) hasLegacyDate() bool {
+	for _, raw := range []jsontext.Value{i.Metadata.ScheduledOn, i.Metadata.DeadlineOn} {
+		if len(raw) > 0 && raw[0] == '"' {
+			return true
+		}
+	}
+	return false
+}
+
+func (i *Issue) refreshSavedDays(now time.Time) bool {
+	changed := false
+	for _, field := range []struct {
+		raw jsontext.Value
+		day *string
+	}{{i.Metadata.ScheduledOn, &i.ScheduledOnToday}, {i.Metadata.DeadlineOn, &i.DeadlineOnToday}} {
+		if loc := savedDateLocation(field.raw); loc != nil {
+			day := now.In(loc).Format(time.DateOnly)
+			if *field.day != day {
+				*field.day = day
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+// scheduledText and deadlineText are the dates the detail strip shows: the
+// saved text when it carries the daemon's resolved date (keeping a saved clock
+// time), else the resolved date, so a saved instant reads in its zone.
+func (i Issue) scheduledText() string {
+	return savedOrResolved(i.Metadata.ScheduledOn, i.ScheduledOnDate)
+}
+func (i Issue) deadlineText() string {
+	return savedOrResolved(i.Metadata.DeadlineOn, i.DeadlineOnDate)
+}
+
+func savedOrResolved(raw jsontext.Value, resolved string) string {
+	if saved := metadata.ScheduleClockText(raw); strings.HasPrefix(saved, resolved) {
+		return saved
+	}
+	return resolved
+}
 
 func rawString(v jsontext.Value) string {
 	var s string

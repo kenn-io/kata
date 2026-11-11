@@ -16,6 +16,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -36,15 +39,19 @@ func listRecurrencesViaHTTP(t *testing.T, env *testenv.Env, pid int64) []recurre
 	return body.Recurrences
 }
 
-// isolateCallerZone points both caller-zone sources at nothing so a test sees
-// only the zone it sets itself, whatever the machine running it is set to.
+// isolateCallerZone uses the test's TZ independently of the host's timezone
+// settings, including the Windows registry.
 func isolateCallerZone(t *testing.T) {
 	t.Helper()
 	t.Setenv("TZ", "")
 	require.NoError(t, os.Unsetenv("TZ"))
-	prev := localtimePath
-	localtimePath = filepath.Join(t.TempDir(), "no-localtime")
-	t.Cleanup(func() { localtimePath = prev })
+	previous := localTimeZoneName
+	localtimePath := filepath.Join(t.TempDir(), "no-localtime")
+	localTimeZoneName = func() string {
+		tz, set := os.LookupEnv("TZ")
+		return recurrenceclient.ResolveLocalZone(tz, set, localtimePath)
+	}
+	t.Cleanup(func() { localTimeZoneName = previous })
 }
 
 func TestScheduleRepeatStartsRecurrenceFromTheIssue(t *testing.T) {
@@ -77,7 +84,12 @@ func TestScheduleRepeatStartsRecurrenceFromTheIssue(t *testing.T) {
 	assert.Nil(t, recs[0].TemplateOwner, "the owner must not carry to later occurrences")
 
 	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
-	require.JSONEq(t, `{"scheduled_on":"2026-11-02","timezone":"Europe/Paris"}`, string(issue.Issue.Metadata))
+	var fields map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(issue.Issue.Metadata, &fields))
+	value, err := metadata.ScheduleValueText(fields["scheduled_on"])
+	require.NoError(t, err)
+	require.Equal(t, "2026-11-02", value)
+	require.JSONEq(t, `"Europe/Paris"`, string(fields["timezone"]))
 }
 
 // A daemon older than API 0.24.0 returns labels only in the top-level labels
@@ -127,12 +139,12 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 		setup func(t *testing.T, env *testenv.Env, dir, ref string)
 		args  []string
 		want  string
+		saved bool
 	}{
 		{
 			name: "flag wins over everything",
 			setup: func(t *testing.T, env *testenv.Env, dir, ref string) {
 				setIssueTimezoneMeta(t, env, dir, ref, "America/Chicago")
-				t.Setenv("TZ", "Asia/Tokyo")
 			},
 			args: []string{"--timezone", "Europe/Paris"},
 			want: "Europe/Paris",
@@ -141,31 +153,36 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 			name: "issue metadata wins over the caller zone",
 			setup: func(t *testing.T, env *testenv.Env, dir, ref string) {
 				setIssueTimezoneMeta(t, env, dir, ref, "America/Chicago")
-				t.Setenv("TZ", "Asia/Tokyo")
 			},
 			want: "America/Chicago",
 		},
 		{
-			name:  "TZ environment",
-			setup: func(t *testing.T, _ *testenv.Env, _, _ string) { t.Setenv("TZ", ":Asia/Tokyo") },
-			want:  "Asia/Tokyo",
+			name:  "saved schedule wins over caller zone",
+			want:  "America/New_York",
+			saved: true,
 		},
 		{
-			name: "localtime link",
-			setup: func(t *testing.T, _ *testenv.Env, _, _ string) {
-				link := filepath.Join(t.TempDir(), "localtime")
-				require.NoError(t, os.Symlink("/usr/share/zoneinfo/Australia/Sydney", link))
-				localtimePath = link
-			},
-			want: "Australia/Sydney",
+			name: "caller zone fallback",
+			want: "Asia/Tokyo",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateCallerZone(t)
+			localTimeZoneName = func() string { return "Asia/Tokyo" }
 			env, dir, pid := setupCLIWorkspace(t)
 			ref := createIssue(t, env, pid, "zone source")
-			tc.setup(t, env, dir, ref)
+			if tc.setup != nil {
+				tc.setup(t, env, dir, ref)
+			}
+			if tc.saved {
+				issue, err := env.DB.IssueByShortID(t.Context(), pid, ref, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				value, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
+				require.NoError(t, err)
+				_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{"scheduled_on": value}})
+				require.NoError(t, err)
+			}
 
 			args := append([]string{"schedule", ref, "2026-11-02", "--repeat", "FREQ=DAILY"}, tc.args...)
 			runCLI(t, env, dir, args...)
@@ -175,6 +192,11 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 			assert.Equal(t, tc.want, recs[0].Timezone)
 		})
 	}
+}
+
+func TestRepeatZoneRejectsUnknownScheduleRules(t *testing.T) {
+	_, err := repeatZone("", "", map[string]jsontext.Value{"scheduled_on": jsontext.Value(`{"value":"2026-01-01","timezone":"America/New_York","tzdata_version":"unknown"}`)})
+	require.ErrorContains(t, err, "unsupported schedule tzdata version")
 }
 
 func setIssueTimezoneMeta(t *testing.T, env *testenv.Env, dir, ref, zone string) {

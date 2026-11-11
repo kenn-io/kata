@@ -9,6 +9,16 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Keep each issue date on the same day and time on every daemon and client.
+  New and edited dates save their timezone and timezone-data version; older
+  dates keep their prior behavior until saved. New issue timezone selections
+  require a bundled geographic name, `UTC`, or `Etc/UTC`; existing aliases stay
+  usable. A `Local` daemon default can save dates when its host zone is named
+  and its rules match the bundle. A date saved with timezone data this version
+  lacks reports an error. Stop older daemons sharing the database
+  before upgrading; their notification sweeps skip saved dates. See
+  [schedule metadata](reference/metadata.md).
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 
 - Upgrade a large PostgreSQL database without the schema migration rolling

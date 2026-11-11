@@ -207,6 +207,12 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return reuse, nil
 		}
 
+		// Matching retries are stored operations, not new timezone choices.
+		frozenMetadata, err := db.PrepareIssueSchedules(nil, in.Body.Metadata, cfg.DefaultTimezone, "")
+		if err != nil {
+			return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
+		}
+
 		// Fresh create (no reuse): now run the state-dependent link-target
 		// gates. A target in an archived project (link_target_archived) or a
 		// federated peer claimed by another actor (claim_denied) blocks the
@@ -239,7 +245,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			// Metadata is validated above (validateCreateMetadata); the store
 			// re-validates defensively. On idempotent reuse this handler
 			// returns before reaching here, so replayed metadata is ignored.
-			Metadata: in.Body.Metadata,
+			Metadata: frozenMetadata,
 		})
 		switch {
 		case errors.Is(err, metadata.ErrInvalidValue):
@@ -1075,13 +1081,15 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 		labelNames = append(labelNames, label.Label)
 	}
 	out := &api.ShowIssueResponse{}
-	scheduledOnDate, deadlineOnDate, err := newPlanningDateResolver(cfg.DB, cfg.DefaultTimezone).resolve(ctx, issue)
+	scheduledOnDate, deadlineOnDate, scheduledToday, deadlineToday, scheduledOnDisplay, deadlineOnDisplay, err := newPlanningDateResolver(cfg.DB, cfg.DefaultTimezone).resolve(ctx, issue)
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
 	out.Body.Issue = api.ShowIssueOut{
 		Issue: issue, Labels: labelNames,
 		ScheduledOnDate: scheduledOnDate, DeadlineOnDate: deadlineOnDate,
+		ScheduledOnToday: scheduledToday, DeadlineOnToday: deadlineToday,
+		ScheduledOnDisplay: scheduledOnDisplay, DeadlineOnDisplay: deadlineOnDisplay,
 	}
 	var includeDeletedSourceIssueID int64
 	if includeDeleted && issue.DeletedAt != nil {
@@ -1400,7 +1408,7 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, defaultTimezone str
 	out := make([]api.IssueOut, len(issues))
 	for i, iss := range issues {
 		rel := relationships[iss.ID]
-		scheduledOnDate, deadlineOnDate, err := dates.resolve(ctx, iss)
+		scheduledOnDate, deadlineOnDate, scheduledToday, deadlineToday, _, _, err := dates.resolve(ctx, iss)
 		if err != nil {
 			return nil, err
 		}
@@ -1413,9 +1421,11 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, defaultTimezone str
 			Related:     peerSlice(peerCache, rel.Related),
 			// Blocked is server-computed display state (ready predicate),
 			// kept separate from the full blocked_by hydration above.
-			Blocked:         rel.ActivelyBlocked,
-			ScheduledOnDate: scheduledOnDate,
-			DeadlineOnDate:  deadlineOnDate,
+			Blocked:          rel.ActivelyBlocked,
+			ScheduledOnDate:  scheduledOnDate,
+			DeadlineOnDate:   deadlineOnDate,
+			ScheduledOnToday: scheduledToday,
+			DeadlineOnToday:  deadlineToday,
 		}
 		if rel.ParentIssueID != nil {
 			if peer, ok := peerCache[*rel.ParentIssueID]; ok {

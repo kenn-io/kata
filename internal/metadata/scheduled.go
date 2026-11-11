@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"cmp"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -20,12 +21,6 @@ const (
 	localMinuteLayout = "2006-01-02T15:04"
 	localSecondLayout = "2006-01-02T15:04:05"
 )
-
-type scheduleMetadata struct {
-	ScheduledOn *string `json:"scheduled_on"`
-	DeadlineOn  *string `json:"deadline_on"`
-	Timezone    string  `json:"timezone"`
-}
 
 // ScheduleDueCutoff returns a byte-order upper bound for dates that may be due.
 // A planning value sorting after it cannot be due at now in any timezone.
@@ -62,28 +57,17 @@ func ScheduleFieldDue(
 	if len(raw) == 0 {
 		return "", false, false, nil
 	}
-	values, err := decodeScheduleMetadata(raw)
-	if err != nil {
-		return "", false, false, err
+	value, _, at, present, err := ScheduleFieldInstant(raw, field, defaultTimezone)
+	if err != nil || !present {
+		return "", present, false, err
 	}
-	value := values.ScheduledOn
-	if field == "deadline_on" {
-		value = values.DeadlineOn
-	}
-	if value == nil {
-		return "", false, false, nil
-	}
-	due, err := scheduleValueDue(*value, values.Timezone, now, defaultTimezone)
-	if err != nil {
-		return "", false, false, err
-	}
-	return *value, true, due, nil
+	return value, true, !now.Before(at), nil
 }
 
 // ScheduleFieldInstant resolves a planning field with the same civil-time
 // policy as readiness. A skipped midnight (including a skipped civil day)
 // opens at the first valid instant after the gap; an overlap uses the first
-// occurrence. UTC input has UTC identity regardless of configured timezones.
+// occurrence. UTC input remains an absolute instant and reports its saved zone.
 func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone string, at time.Time, present bool, err error) {
 	if field != "scheduled_on" && field != "deadline_on" {
 		err = fmt.Errorf("unsupported planning field %q", field)
@@ -92,16 +76,9 @@ func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone s
 	if raw == "" {
 		return
 	}
-	values, err := decodeScheduleMetadata(raw)
-	if err != nil {
-		return
-	}
-	input := values.ScheduledOn
-	if field == "deadline_on" {
-		input = values.DeadlineOn
-	}
-	if input == nil {
-		return
+	input, issueTimezone, savedLocation, err := decodePlanningField(raw, field)
+	if err != nil || input == nil {
+		return "", "", time.Time{}, false, err
 	}
 	value, present = *input, true
 	kind, layout, instant, err := classifyScheduledOn(value)
@@ -109,9 +86,15 @@ func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone s
 		return
 	}
 	if kind == scheduledOnInstant {
+		if savedLocation != nil {
+			return value, savedLocation.String(), instant.UTC(), true, nil
+		}
 		return value, "UTC", instant.UTC(), true, nil
 	}
-	location, err := loadScheduleLocation(values.Timezone, defaultTimezone)
+	location := savedLocation
+	if location == nil {
+		location, err = loadScheduleLocation(issueTimezone, defaultTimezone)
+	}
 	if err != nil {
 		return
 	}
@@ -125,32 +108,10 @@ func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone s
 	return
 }
 
-func scheduleValueDue(value, issueTimezone string, now time.Time, defaultTimezone string) (bool, error) {
-	kind, layout, instant, err := classifyScheduledOn(value)
-	if err != nil {
-		return false, err
-	}
-	if kind == scheduledOnDate || kind == scheduledOnLocalTime {
-		location, err := loadScheduleLocation(issueTimezone, defaultTimezone)
-		if err != nil {
-			return false, err
-		}
-		if kind == scheduledOnDate {
-			return value <= now.In(location).Format(layout), nil
-		}
-		resolved, err := resolveLocalSchedule(value, layout, location)
-		if err != nil {
-			return false, err
-		}
-		return !now.Before(resolved), nil
-	}
-	return !now.Before(instant), nil
-}
-
 // ScheduledOnCalendarDate returns the display calendar date for scheduled_on.
 // Date-only values keep their written civil date. Local date-times are first
-// resolved in the issue or daemon timezone, while UTC values are already
-// instants; both timed forms are then projected into displayTimezone.
+// resolved in their saved zone. Legacy timed values resolve in the issue or
+// daemon timezone and are projected into displayTimezone.
 func ScheduledOnCalendarDate(
 	raw string,
 	displayTimezone string,
@@ -172,92 +133,128 @@ func DeadlineOnCalendarDate(
 
 // CalendarDate projects one planning field ("scheduled_on" or "deadline_on")
 // to a YYYY-MM-DD calendar date, reporting whether the key is present. A
-// non-nil displayTimezone is the viewer's zone, with "" meaning UTC. A nil
-// displayTimezone reads the value in its own schedule zone: the issue
-// timezone, then defaultTimezone, then UTC.
+// Saved values use their own zone. For legacy strings, a non-nil
+// displayTimezone is the viewer's zone, with "" meaning UTC. A nil
+// displayTimezone uses the issue timezone, then defaultTimezone, then UTC.
 func CalendarDate(
 	raw string,
 	field string,
 	displayTimezone *string,
 	defaultTimezone string,
 ) (string, bool, error) {
+	date, _, present, err := CalendarDateAndToday(raw, field, displayTimezone, defaultTimezone, time.Time{}, nil, nil)
+	return date, present, err
+}
+
+// CalendarDateAndToday resolves the date and today's date in the same zone.
+func CalendarDateAndToday(
+	raw, field string, displayTimezone *string, defaultTimezone string, now time.Time, boundary *time.Time, wall *string,
+) (string, string, bool, error) {
 	if field != "scheduled_on" && field != "deadline_on" {
-		return "", false, fmt.Errorf("unsupported planning field %q", field)
+		return "", "", false, fmt.Errorf("unsupported planning field %q", field)
 	}
 	if len(raw) == 0 {
-		return "", false, nil
+		return "", "", false, nil
 	}
-	value, issueTimezone, err := decodePlanningField(raw, field)
+	value, issueTimezone, savedLocation, err := decodePlanningField(raw, field)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
 	if value == nil {
-		return "", false, nil
+		return "", "", false, nil
 	}
 
 	scheduleValue := *value
 	kind, layout, instant, err := classifyScheduledOn(scheduleValue)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
-	if kind == scheduledOnDate {
-		return scheduleValue, true, nil
+	if wall != nil && kind == scheduledOnInstant && savedLocation != nil {
+		*wall = instant.In(savedLocation).Format("2006-01-02T15:04:05.999999999")
 	}
 	if kind == scheduledOnLocalTime {
-		location, err := loadScheduleLocation(issueTimezone, defaultTimezone)
+		location := savedLocation
+		if location == nil {
+			location, err = loadScheduleLocation(issueTimezone, defaultTimezone)
+		}
 		if err != nil {
-			return "", false, err
+			return "", "", false, err
 		}
 		instant, err = resolveLocalSchedule(scheduleValue, layout, location)
 		if err != nil {
-			return "", false, err
+			return "", "", false, err
 		}
 	}
-	var display string
-	switch {
-	case displayTimezone != nil:
+	display := defaultTimezone
+	if displayTimezone != nil {
 		display = *displayTimezone
-	case issueTimezone != "":
+	} else if issueTimezone != "" {
 		display = issueTimezone
-	default:
-		display = defaultTimezone
 	}
-	if display == "" {
-		display = "UTC"
+	displayLocation := savedLocation
+	if displayLocation == nil && (kind != scheduledOnDate || !now.IsZero()) {
+		displayLocation, err = time.LoadLocation(cmp.Or(display, "UTC"))
+		if err != nil && kind == scheduledOnDate {
+			return scheduleValue, "", true, nil // a calendar date needs no zone
+		}
+		if err != nil {
+			return "", "", false, fmt.Errorf("load display timezone %q: %w", display, err)
+		}
 	}
-	displayLocation, err := time.LoadLocation(display)
-	if err != nil {
-		return "", false, fmt.Errorf("load display timezone %q: %w", display, err)
+	date := scheduleValue
+	if kind != scheduledOnDate {
+		date = instant.In(displayLocation).Format(time.DateOnly)
 	}
-	return instant.In(displayLocation).Format(time.DateOnly), true, nil
+	today := ""
+	if !now.IsZero() {
+		today = now.In(displayLocation).Format(time.DateOnly)
+		if boundary != nil {
+			next := nextCalendarDay(now, displayLocation, today)
+			if boundary.IsZero() || next.Before(*boundary) {
+				*boundary = next
+			}
+		}
+	}
+	return date, today, true, nil
+}
+
+// nextCalendarDay finds the first second after now with a different local day.
+func nextCalendarDay(now time.Time, location *time.Location, today string) time.Time {
+	current := now.In(location)
+	for {
+		_, offset := current.Zone()
+		year, month, day := current.Date()
+		midnight := time.Date(year, month, day+1, 0, 0, 0, 0, time.UTC).Add(-time.Duration(offset) * time.Second)
+		_, transition := current.ZoneBounds()
+		if transition.IsZero() || !transition.Before(midnight) {
+			return midnight
+		}
+		current = transition.In(location)
+		if current.Format(time.DateOnly) != today {
+			return transition
+		}
+	}
 }
 
 // decodePlanningField reads one planning field and the issue timezone, so a
 // non-string sibling field cannot hide a valid date.
-func decodePlanningField(raw, field string) (value *string, timezone string, err error) {
+func decodePlanningField(raw, field string) (value *string, timezone string, location *time.Location, err error) {
 	var members map[string]jsontext.Value
-	if err := json.Unmarshal([]byte(raw), &members); err != nil {
-		return nil, "", fmt.Errorf("decode schedule metadata: %w", err)
+	if err = json.Unmarshal([]byte(raw), &members); err != nil {
+		return nil, "", nil, fmt.Errorf("decode schedule metadata: %w", err)
 	}
-	if member, ok := members[field]; ok {
-		if err := json.Unmarshal(member, &value); err != nil {
-			return nil, "", fmt.Errorf("decode schedule metadata %s: %w", field, err)
+	value, location, err = decodeScheduleValue(members[field])
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("decode schedule metadata %s: %w", field, err)
+	}
+	if location == nil && value != nil {
+		if member, ok := members["timezone"]; ok {
+			if err = json.Unmarshal(member, &timezone); err != nil {
+				return nil, "", nil, fmt.Errorf("decode schedule metadata timezone: %w", err)
+			}
 		}
 	}
-	if member, ok := members["timezone"]; ok {
-		if err := json.Unmarshal(member, &timezone); err != nil {
-			return nil, "", fmt.Errorf("decode schedule metadata timezone: %w", err)
-		}
-	}
-	return value, timezone, nil
-}
-
-func decodeScheduleMetadata(raw string) (scheduleMetadata, error) {
-	var values scheduleMetadata
-	if err := json.Unmarshal([]byte(raw), &values); err != nil {
-		return scheduleMetadata{}, fmt.Errorf("decode schedule metadata: %w", err)
-	}
-	return values, nil
+	return
 }
 
 func loadScheduleLocation(issueTimezone, defaultTimezone string) (*time.Location, error) {
@@ -315,7 +312,7 @@ func resolveLocalSchedule(value, layout string, location *time.Location) (time.T
 	var earliest time.Time
 	for offset := range offsets {
 		candidate := wall.Add(-time.Duration(offset) * time.Second)
-		if candidate.In(location).Format(layout) != value {
+		if !wallClock(candidate, location).Equal(wall) {
 			continue
 		}
 		if earliest.IsZero() || candidate.Before(earliest) {

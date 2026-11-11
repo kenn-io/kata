@@ -628,8 +628,10 @@ type IssueOut struct {
 	Blocked bool `json:"blocked,omitempty,omitzero"`
 	// ScheduledOnDate and DeadlineOnDate are the issue's planning dates as
 	// calendar dates, resolved by the same rule as the browser snapshot.
-	ScheduledOnDate string `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable."`
-	DeadlineOnDate  string `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable."`
+	ScheduledOnDate  string `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request."`
+	DeadlineOnDate   string `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request."`
+	ScheduledOnToday string `json:"scheduled_on_today,omitempty" doc:"Today's date in the scheduled field's timezone."`
+	DeadlineOnToday  string `json:"deadline_on_today,omitempty" doc:"Today's date in the deadline field's timezone."`
 	// Oversized marks a compact row too large to send whole. It then carries
 	// only the issue's identity and status.
 	Oversized bool `json:"oversized,omitempty,omitzero" doc:"Set on a compact row too large to send whole; the row then carries only the issue's identity and status."`
@@ -805,9 +807,13 @@ type ReachableGraphResponse struct {
 // author and timestamp detail.
 type ShowIssueOut struct {
 	db.Issue
-	Labels          []string `json:"labels"`
-	ScheduledOnDate string   `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable."`
-	DeadlineOnDate  string   `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable."`
+	Labels             []string `json:"labels"`
+	ScheduledOnDate    string   `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request."`
+	DeadlineOnDate     string   `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request."`
+	ScheduledOnToday   string   `json:"scheduled_on_today,omitempty" doc:"Today's date in the scheduled field's timezone."`
+	DeadlineOnToday    string   `json:"deadline_on_today,omitempty" doc:"Today's date in the deadline field's timezone."`
+	ScheduledOnDisplay string   `json:"scheduled_on_display,omitempty" doc:"Saved scheduled instant as a local date and time using its saved timezone rules."`
+	DeadlineOnDisplay  string   `json:"deadline_on_display,omitempty" doc:"Saved deadline instant as a local date and time using its saved timezone rules."`
 }
 
 // ShowIssueResponse is the per-issue read payload (Plan 2: + links, + labels).

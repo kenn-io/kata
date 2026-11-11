@@ -1,5 +1,6 @@
 import { localDateString } from './dates'
 import type {
+  ScheduleValue,
   KataProjectSummary,
   KataTaskGroup,
   KataTaskSummary,
@@ -17,8 +18,16 @@ interface BuildKataTaskViewOptions {
 
 type ProjectLookup = Map<string, KataProjectSummary>
 
-function issueDate(value: string | undefined): string | undefined {
-  return value?.slice(0, 10)
+export function scheduleText(value: ScheduleValue | undefined): string | undefined {
+  return typeof value === 'string'
+    ? value
+    : typeof value?.value === 'string'
+      ? value.value
+      : undefined
+}
+
+function issueDate(value: ScheduleValue | undefined): string | undefined {
+  return typeof value === 'string' ? value.slice(0, 10) : undefined
 }
 
 function scheduledDate(issue: KataTaskSummary): string | undefined {
@@ -43,7 +52,7 @@ export function kataViewIncludesDates(
   if (view === 'scheduled') return Boolean(scheduledDate(issue) || deadlineDate(issue))
   if (view === 'inbox') {
     const scheduledOn = scheduledDate(issue)
-    return scheduledOn === undefined || scheduledOn <= today
+    return scheduledOn === undefined || scheduledOn <= (issue.scheduled_on_today ?? today)
   }
   return true
 }
@@ -105,13 +114,15 @@ function buildToday(issues: KataTaskSummary[], today: string): KataTaskGroup[] {
     if (issue.status !== 'open') continue
     const scheduledOn = scheduledDate(issue)
     const deadlineOn = deadlineDate(issue)
-    const scheduledDue = scheduledOn !== undefined && scheduledOn <= today
-    const deadlineDue = deadlineOn !== undefined && deadlineOn <= today
+    const scheduledToday = issue.scheduled_on_today ?? today
+    const deadlineToday = issue.deadline_on_today ?? today
+    const scheduledDue = scheduledOn !== undefined && scheduledOn <= scheduledToday
+    const deadlineDue = deadlineOn !== undefined && deadlineOn <= deadlineToday
     if (!scheduledDue && !deadlineDue) continue
 
     if (
-      (deadlineOn !== undefined && deadlineOn < today) ||
-      (scheduledOn !== undefined && scheduledOn < today)
+      (deadlineOn !== undefined && deadlineOn < deadlineToday) ||
+      (scheduledOn !== undefined && scheduledOn < scheduledToday)
     ) {
       groups[0]!.issues.push(issue)
     } else if (issue.metadata.today_bucket === 'evening') {
@@ -183,12 +194,15 @@ function buildScheduled(issues: KataTaskSummary[], today: string): KataTaskGroup
     if (!kataViewIncludesDates('scheduled', issue, today)) continue
     const dates = [scheduledOn, deadlineOn].filter((date): date is string => Boolean(date))
 
-    if (deadlineOn !== undefined && deadlineOn < today) {
+    if (deadlineOn !== undefined && deadlineOn < (issue.deadline_on_today ?? today)) {
       overdue.issues.push(issue)
       continue
     }
     const keyDate = dates.sort()[0]!
-    if (keyDate <= today) {
+    if (
+      (scheduledOn !== undefined && scheduledOn <= (issue.scheduled_on_today ?? today)) ||
+      (deadlineOn !== undefined && deadlineOn <= (issue.deadline_on_today ?? today))
+    ) {
       dueToday.issues.push(issue)
       continue
     }

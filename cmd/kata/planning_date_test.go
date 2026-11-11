@@ -1,11 +1,23 @@
 package main
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/metadata"
 )
+
+func requirePlanningValue(t *testing.T, raw jsontext.Value, field, want string) {
+	t.Helper()
+	var values map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(raw, &values))
+	value, err := metadata.ScheduleValueText(values[field])
+	require.NoError(t, err)
+	require.Equal(t, want, value)
+}
 
 func TestDeadlineSetsTimedDeadlineAndClearsIt(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
@@ -14,7 +26,7 @@ func TestDeadlineSetsTimedDeadlineAndClearsIt(t *testing.T) {
 	out := runCLI(t, env, dir, "deadline", ref, "2026-09-01T09:30")
 	assert.Contains(t, out, "deadline_on")
 	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
-	require.JSONEq(t, `{"deadline_on":"2026-09-01T09:30"}`, string(issue.Issue.Metadata))
+	requirePlanningValue(t, issue.Issue.Metadata, "deadline_on", "2026-09-01T09:30")
 
 	out = runCLI(t, env, dir, "deadline", ref, "-")
 	assert.Contains(t, out, "deadline_on")
@@ -28,7 +40,7 @@ func TestDeadlineAcceptsUTCInstantAndRejectsNumericOffset(t *testing.T) {
 
 	runCLI(t, env, dir, "deadline", ref, "2026-09-01T16:30:00Z")
 	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
-	require.JSONEq(t, `{"deadline_on":"2026-09-01T16:30:00Z"}`, string(issue.Issue.Metadata))
+	requirePlanningValue(t, issue.Issue.Metadata, "deadline_on", "2026-09-01T16:30:00Z")
 
 	_, stderr, err := runCLIWithErr(t, env, dir, "deadline", ref, "2026-09-01T09:30:00-07:00")
 	ce := requireCLIError(t, err, ExitValidation)
@@ -47,7 +59,7 @@ func TestDeadlineHonorsIfMatch(t *testing.T) {
 
 	runCLI(t, env, dir, "deadline", "--if-match", "1", ref, "2026-09-01")
 	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
-	require.JSONEq(t, `{"deadline_on":"2026-09-01"}`, string(issue.Issue.Metadata))
+	requirePlanningValue(t, issue.Issue.Metadata, "deadline_on", "2026-09-01")
 }
 
 func TestScheduleSetsTimedGateAndClearsIt(t *testing.T) {
@@ -57,7 +69,7 @@ func TestScheduleSetsTimedGateAndClearsIt(t *testing.T) {
 	out := runCLI(t, env, dir, "schedule", ref, "2026-09-01T09:30")
 	assert.Contains(t, out, "scheduled_on")
 	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
-	require.JSONEq(t, `{"scheduled_on":"2026-09-01T09:30"}`, string(issue.Issue.Metadata))
+	requirePlanningValue(t, issue.Issue.Metadata, "scheduled_on", "2026-09-01T09:30")
 
 	out = runCLI(t, env, dir, "schedule", ref, "-")
 	assert.Contains(t, out, "scheduled_on")
@@ -76,5 +88,5 @@ func TestScheduleHonorsIfMatch(t *testing.T) {
 
 	runCLI(t, env, dir, "schedule", "--if-match", "1", ref, "2026-09-01")
 	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
-	require.JSONEq(t, `{"scheduled_on":"2026-09-01"}`, string(issue.Issue.Metadata))
+	requirePlanningValue(t, issue.Issue.Metadata, "scheduled_on", "2026-09-01")
 }

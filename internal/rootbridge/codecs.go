@@ -3,6 +3,9 @@
 package rootbridge
 
 import (
+	"cmp"
+	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -59,19 +62,7 @@ func (c scheduleCodec) ReadKata(issue db.Issue) (connector.FieldValue, error) {
 	if err != nil {
 		return connector.FieldValue{}, err
 	}
-	raw, ok := values[c.key]
-	if !ok || string(raw) == "null" {
-		return nullFieldValue(), nil
-	}
-	if err := metadata.Validate(metadata.IssueRegistry, c.key, raw); err != nil {
-		return connector.FieldValue{}, fmt.Errorf("validate %s: %w", c.key, err)
-	}
-
-	var value string
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return connector.FieldValue{}, fmt.Errorf("decode %s: %w", c.key, err)
-	}
-	field, err := kataScheduleFieldValue(value, values, c.defaultTimezone)
+	field, err := kataScheduleFieldValueFromMetadata(c.key, values, c.defaultTimezone)
 	if err != nil {
 		return connector.FieldValue{}, fmt.Errorf("decode %s: %w", c.key, err)
 	}
@@ -82,57 +73,77 @@ func (c scheduleCodec) KataPatch(issue db.Issue, value connector.FieldValue) (ma
 	return c.kataPatch(issue, value, "")
 }
 
-func (c scheduleCodec) kataPatch(
-	issue db.Issue,
-	value connector.FieldValue,
-	coordinatedTimezone string,
-) (map[string]jsontext.Value, error) {
+func (c scheduleCodec) kataPatch(issue db.Issue, value connector.FieldValue, recurrenceZone string) (map[string]jsontext.Value, error) {
 	canonical, err := canonicalFieldValue(value)
 	if err != nil {
 		return nil, err
 	}
 	patch := map[string]jsontext.Value{c.key: mustJSON(canonicalScheduleValue(canonical))}
-	if canonical.Kind != fieldKindLocalDateTime {
-		return patch, nil
-	}
-
-	values, err := metadataObject(issue.Metadata)
-	if err != nil {
+	if err := c.pinZone(issue, canonical, patch, recurrenceZone); err != nil {
 		return nil, err
 	}
-	otherKey := "scheduled_on"
-	if c.key == otherKey {
-		otherKey = "deadline_on"
-	}
-	if other, err := kataScheduleFieldValueFromMetadata(otherKey, values, c.defaultTimezone); err != nil {
-		return nil, err
-	} else if other.Kind == fieldKindLocalDateTime {
-		if other.Timezone != canonical.Timezone && coordinatedTimezone != canonical.Timezone {
-			return nil, fmt.Errorf("%s local timezone %q conflicts with %s timezone %q", c.key, canonical.Timezone, otherKey, other.Timezone)
-		}
-	} else if other.Kind == fieldKindDate {
-		timezone, present, err := optionalMetadataTimezone(values)
-		if err != nil {
-			return nil, fmt.Errorf("read %s timezone: %w", otherKey, err)
-		}
-		if present && timezone != canonical.Timezone && coordinatedTimezone != canonical.Timezone {
-			return nil, fmt.Errorf("%s local timezone %q conflicts with %s timezone %q", c.key, canonical.Timezone, otherKey, timezone)
-		}
-	}
-	patch["timezone"] = mustJSON(canonical.Timezone)
-	return patch, nil
+	return db.PrepareIssueSchedules(jsontext.Value(issue.Metadata), patch, c.defaultTimezone, recurrenceZone)
 }
 
-func kataPatchWithCoordinatedTimezone(
-	codec FieldCodec,
-	issue db.Issue,
-	value connector.FieldValue,
-	coordinatedTimezone string,
-) (map[string]jsontext.Value, error) {
-	if schedule, ok := codec.(scheduleCodec); ok {
-		return schedule.kataPatch(issue, value, coordinatedTimezone)
+// pinZone saves an explicit local date-time zone or a first instant's effective
+// zone. Date-only values inherit their zone in PrepareIssueSchedules without
+// changing the issue's public timezone setting.
+func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, patch map[string]jsontext.Value, recurrenceZone string) error {
+	values, err := metadataObject(issue.Metadata)
+	if err != nil {
+		return err
 	}
-	return codec.KataPatch(issue, value)
+	saved, err := metadata.DecodeSavedSchedule(values[c.key])
+	if err != nil {
+		return err
+	}
+	zone := canonical.Timezone
+	firstInstant := canonical.Kind == fieldKindInstant && saved == nil
+	if firstInstant {
+		zone, _ = metadataTimezone(values, cmp.Or(recurrenceZone, c.defaultTimezone))
+	}
+	if zone == "" {
+		return nil
+	}
+	version := metadata.ScheduleTZDataVersion
+	if saved != nil && saved.Timezone == zone {
+		version = saved.TZDataVersion
+	}
+	pinned, err := metadata.NewScheduleValueWithVersion(canonical.Value, zone, version)
+	if err != nil && firstInstant {
+		return nil // An unbundled zone cannot change the supplied instant.
+	}
+	if err == nil {
+		patch[c.key] = pinned
+	}
+	return err
+}
+
+// fieldProjectionPatch defers occurrence-zone resolution to the existing
+// claim-fenced projection transaction, alongside its issue revision check.
+func fieldProjectionPatch(ctx context.Context, codec FieldCodec, issue db.Issue, value connector.FieldValue) (context.Context, map[string]jsontext.Value, error) {
+	c, ok := codec.(scheduleCodec)
+	if !ok || c.key != "scheduled_on" || issue.RecurrenceID == nil {
+		patch, err := codec.KataPatch(issue, value)
+		return ctx, patch, err
+	}
+	canonical, err := canonicalFieldValue(value)
+	if err != nil {
+		return ctx, nil, err
+	}
+	patch := map[string]jsontext.Value{c.key: mustJSON(canonicalScheduleValue(canonical))}
+	ctx = db.WithMetadataPatchHook(ctx, func(ctx context.Context, tx *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
+		zone, err := db.IssueRecurrenceTimezone(ctx, tx, current)
+		if err != nil {
+			return nil, err
+		}
+		resolved, err := c.kataPatch(current, canonical, zone)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", metadata.ErrInvalidValue, err)
+		}
+		return resolved, nil
+	})
+	return ctx, patch, nil
 }
 
 func (c scheduleCodec) ValidateExternalDescriptor(descriptor connector.FieldDescriptor) error {
@@ -211,6 +222,13 @@ func kataScheduleFieldValueFromMetadata(
 	raw, ok := values[key]
 	if !ok || string(raw) == "null" {
 		return nullFieldValue(), nil
+	}
+	saved, err := metadata.DecodeSavedSchedule(raw)
+	if err != nil {
+		return connector.FieldValue{}, fmt.Errorf("decode %s: %w", key, err)
+	}
+	if saved != nil {
+		return kataScheduleFieldValue(saved.Value, nil, saved.Timezone)
 	}
 	if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
 		return connector.FieldValue{}, fmt.Errorf("validate %s: %w", key, err)

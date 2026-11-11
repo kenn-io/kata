@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // DatesInput is one dates save: the keys to write and the revision the form
@@ -19,6 +21,7 @@ type DatesInput struct {
 	Actor           string
 	IfMatchRevision int64
 	Set             map[string]*string
+	Raw             map[string]jsontext.Value
 }
 
 type datesAPI interface {
@@ -29,9 +32,22 @@ type datesAPI interface {
 // read and the raw dates it was opened with (a field left alone is never written,
 // so a stored time keeps its time).
 type datesFormState struct {
-	revision  int64
-	scheduled string
-	deadline  string
+	revision       int64
+	scheduled      string
+	deadline       string
+	scheduledToday string
+	deadlineToday  string
+	scheduledZone  *time.Location
+	deadlineZone   *time.Location
+	// unreadable is why a stored date cannot be edited; a save is refused.
+	unreadable string
+}
+
+func (d datesFormState) refusal() error {
+	if d.unreadable == "" {
+		return nil
+	}
+	return errors.New(d.unreadable)
 }
 
 const datesChangedMessage = "The issue changed since the form opened; nothing was written. The form now shows the current dates."
@@ -60,8 +76,8 @@ func newDatesForm(target formTarget, issue Issue) inputState {
 // loadDates fills the form from issue and records the revision a save is
 // guarded on.
 func (s inputState) loadDates(issue Issue) inputState {
-	s.dates.revision = issue.Revision
-	s.dates.scheduled, s.dates.deadline = issue.scheduledOn(), issue.deadlineOn()
+	s.dates = issue.datesState()
+	s.err = s.dates.unreadable
 	for i := range s.fields {
 		switch s.fields[i].id {
 		case fieldScheduled:
@@ -82,15 +98,17 @@ func datesInputFromForm(s inputState, now time.Time, actor string) (DatesInput, 
 		label  string
 		key    string
 		opened string
+		today  string
+		zone   *time.Location
 	}{
-		{fieldScheduled, "Scheduled", api.MetadataKeyScheduledOn, s.dates.scheduled},
-		{fieldDeadline, "Deadline", api.MetadataKeyDeadlineOn, s.dates.deadline},
+		{fieldScheduled, "Scheduled", api.MetadataKeyScheduledOn, s.dates.scheduled, s.dates.scheduledToday, s.dates.scheduledZone},
+		{fieldDeadline, "Deadline", api.MetadataKeyDeadlineOn, s.dates.deadline, s.dates.deadlineToday, s.dates.deadlineZone},
 	} {
 		text := s.fieldValue(f.id)
 		if text == f.opened {
 			continue
 		}
-		value, err := resolveDateInput(text, now)
+		value, err := resolveDateInput(text, dateFieldNow(now, f.today, f.zone))
 		if err != nil {
 			return DatesInput{}, errors.New(f.label + " " + err.Error() + ".")
 		}
@@ -103,7 +121,7 @@ func datesInputFromForm(s inputState, now time.Time, actor string) (DatesInput, 
 			in.Set[f.key] = &value
 		}
 	}
-	return in, nil
+	return in, s.dates.refusal()
 }
 
 func (m Model) routeDatesKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
@@ -126,31 +144,45 @@ func (m Model) commitDatesForm() (Model, tea.Cmd) {
 		m.input.err = err.Error()
 		return m, nil
 	}
-	if len(in.Set) == 0 {
+	if m.input.fieldValue(fieldScheduled) == m.input.dates.scheduled && m.input.fieldValue(fieldDeadline) == m.input.dates.deadline {
 		return m.cancelInput()
 	}
 	m.input.saving = true
 	m.input.err = ""
-	return m, withConnGen(dispatchFormSetDates(m.api, m.input.target, in, m.input.formGen), m.connGen)
+	return m, withConnGen(dispatchFormSetDates(m.api, m.input.target, in, m.input, m.toastNow), m.connGen)
 }
 
-func dispatchFormSetDates(apiClient any, target formTarget, in DatesInput, formGen int64) tea.Cmd {
+func dispatchFormSetDates(apiClient KataAPI, target formTarget, in DatesInput, form inputState, now func() time.Time) tea.Cmd {
 	return func() tea.Msg {
 		writer, ok := apiClient.(datesAPI)
 		if !ok {
 			return mutationDoneMsg{
-				origin: "form", kind: "dates", formGen: formGen,
+				origin: "form", kind: "dates", formGen: form.formGen,
 				err: errors.New("TUI client does not support editing dates"),
 			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		resp, err := writer.SetDates(ctx, target.projectID, target.issueShortID, in)
+		var resp *MutationResp
+		detail, err := apiClient.readIssue(ctx, target.projectID, target.issueShortID)
+		if err == nil && (detail == nil || detail.Issue == nil) {
+			err = errors.New("could not refresh planning dates")
+		}
+		if err == nil {
+			form.dates.scheduledToday, form.dates.deadlineToday = detail.Issue.ScheduledOnToday, detail.Issue.DeadlineOnToday
+			in, err = datesInputFromForm(form, now(), in.Actor)
+		}
+		if err == nil {
+			resp = &MutationResp{}
+			if len(in.Set) > 0 {
+				resp, err = writer.SetDates(ctx, target.projectID, target.issueShortID, in)
+			}
+		}
 		if isRevisionConflict(err) {
 			resp = withCurrentIssue(ctx, apiClient, target, resp)
 		}
 		return mutationDoneMsg{
-			origin: "form", gen: target.detailGen, kind: "dates", formGen: formGen,
+			origin: "form", gen: target.detailGen, kind: "dates", formGen: form.formGen,
 			resp: resp, err: err,
 		}
 	}
@@ -209,6 +241,7 @@ func (issue Issue) withCurrentDates(current Issue) Issue {
 	issue.Metadata, issue.Revision = current.Metadata, current.Revision
 	issue.Status, issue.ClosedAt = current.Status, current.ClosedAt
 	issue.ScheduledOnDate, issue.DeadlineOnDate = current.ScheduledOnDate, current.DeadlineOnDate
+	issue.ScheduledOnToday, issue.DeadlineOnToday = current.ScheduledOnToday, current.DeadlineOnToday
 	return issue
 }
 
@@ -218,13 +251,38 @@ func renderDatesForm(s inputState, innerW int, now time.Time) string {
 	parts := []string{titleStyle.Render(s.title)}
 	for idx := range s.fields {
 		parts = append(parts, renderNewIssueField(s, idx, innerW))
-		parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), now))))
+		today := s.dates.scheduledToday
+		zone := s.dates.scheduledZone
+		if s.fields[idx].id == fieldDeadline {
+			today = s.dates.deadlineToday
+			zone = s.dates.deadlineZone
+		}
+		parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), dateFieldNow(now, today, zone)))))
 	}
 	if status := renderFormStatus(s); status != "" {
 		parts = append(parts, status)
 	}
 	parts = append(parts, renderDatesFooter(s, innerW))
 	return modalBoxStyle.Width(innerW+2).Padding(0, 1).Render(strings.Join(parts, "\n"))
+}
+
+func dateFieldNow(now time.Time, today string, zone *time.Location) time.Time {
+	if zone != nil {
+		return now.In(zone)
+	}
+	if day, err := time.Parse(time.DateOnly, today); err == nil {
+		return day
+	}
+	return now
+}
+
+func savedDateLocation(raw jsontext.Value) *time.Location {
+	obj, err := metadata.DecodeSavedSchedule(raw)
+	if err != nil || obj == nil {
+		return nil
+	}
+	loc, _ := metadata.ScheduleLocation(obj.Timezone, obj.TZDataVersion)
+	return loc
 }
 
 func renderDatesFooter(s inputState, innerW int) string {

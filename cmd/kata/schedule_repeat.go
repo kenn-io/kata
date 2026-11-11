@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -187,6 +189,10 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 }
 
 func metadataString(md map[string]jsontext.Value, key string) string {
+	if (key == "scheduled_on" || key == "deadline_on") && len(md[key]) > 0 {
+		value, _ := metadata.ScheduleValueText(md[key])
+		return value
+	}
 	var s string
 	if raw, ok := md[key]; ok && json.Unmarshal(raw, &s) == nil {
 		return s
@@ -211,10 +217,15 @@ func checkIssueIfMatch(raw string, revision int64) error {
 }
 
 // repeatZone picks the zone for the recurrence: --timezone, then the zone the
-// recurrence already has, then the issue's timezone metadata, then the
-// caller's own zone.
-func repeatZone(flagZone, recurrenceZone string, metadata map[string]jsontext.Value) (string, error) {
-	zone, err := recurrenceclient.ResolveZone(flagZone, recurrenceZone, metadataString(metadata, "timezone"), localTimeZoneName)
+// recurrence already has, then the zone saved with scheduled_on, then the
+// issue's timezone metadata, then the caller's own zone. Saved rules this
+// build cannot read are an error.
+func repeatZone(flagZone, recurrenceZone string, md map[string]jsontext.Value) (string, error) {
+	saved, err := metadata.SavedScheduleZone(md["scheduled_on"])
+	if err != nil {
+		return "", err
+	}
+	zone, err := recurrenceclient.ResolveZone(flagZone, recurrenceZone, cmp.Or(saved, metadataString(md, "timezone")), localTimeZoneName)
 	switch {
 	case errors.Is(err, recurrenceclient.ErrLocalZone):
 		return "", &cliError{Message: `"Local" is not an IANA zone; pass --timezone with a name like Europe/Paris`, Kind: kindValidation, ExitCode: ExitValidation}

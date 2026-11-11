@@ -445,12 +445,12 @@ func TestExternalRootHandlersClassifyFieldAndPublishingErrors(t *testing.T) {
 		ID: "example-connector", Command: testExternalRootCommand(t),
 	}}, func(config.ConnectorConfig) connectorclient.Client { return client })
 	require.NoError(t, err)
-	reconciler := rootbridge.NewReconciler(database.db, registry, rootbridge.ReconcilerConfig{Now: func() time.Time { return now }})
-	service := rootbridge.NewService(database.db, registry,
+	reconciler := rootbridge.NewReconciler(database.db, registry, rootbridge.ReconcilerConfig{Now: func() time.Time { return now }, DefaultTimezone: "Local"})
+	service := rootbridge.NewServiceWithEventSinkAndDefaultTimezone(database.db, registry,
 		func(ctx context.Context, bindingID int64, claimToken string) ([]db.Event, error) {
 			result, err := reconciler.Run(ctx, bindingID, rootbridge.RunOptions{ClaimToken: claimToken})
 			return result.Events, err
-		})
+		}, nil, "Local")
 	ts := startTestServer(t, daemon.ServerConfig{
 		DB: database.db, StartedAt: now, ExternalRootRegistry: registry,
 		ExternalRootService: service, ExternalRootReconciler: reconciler,
@@ -495,6 +495,38 @@ func TestExternalRootHandlersClassifyFieldAndPublishingErrors(t *testing.T) {
 		"connector": "example-connector", "external": "opaque-locator", "actor": "operator", "publish_comments": true,
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
+	t.Run("daemon Local default keeps a rejected field conflict", func(t *testing.T) {
+		previous := time.Local
+		time.Local = time.FixedZone("Mars/Olympus_Mons", 0)
+		t.Cleanup(func() { time.Local = previous })
+		status, body := requestExternalRootJSON(t, ts.URL, http.MethodPut,
+			"/api/v1/connectors/example-connector/fields/scheduled_on", map[string]any{"external_field": "start-date"})
+		require.Equal(t, http.StatusOK, status, string(body))
+		cleared, err := database.db.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+			IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value("null"), "timezone": jsontext.Value("null"),
+			},
+		})
+		require.NoError(t, err)
+		client.fieldValues["start-date"] = connector.FieldValue{Kind: "date", Value: "2026-08-22"}
+		status, body = requestExternalRootJSON(t, ts.URL, http.MethodPost, bridgePath+"/actions/reconcile", map[string]any{"actor": "operator"})
+		require.Equal(t, http.StatusOK, status, string(body))
+		assert.Contains(t, string(body), `"field_conflicts":1`)
+
+		status, body = requestExternalRootJSON(t, ts.URL, http.MethodPost, bridgePath+"/actions/resolve-field", map[string]any{
+			"kata_field": "scheduled_on", "use": "external", "actor": "operator",
+		})
+		assert.Equal(t, http.StatusBadRequest, status, string(body))
+		assert.Contains(t, string(body), `"code":"invalid_metadata_value"`)
+		assert.Contains(t, string(body), "named IANA timezone")
+		after, err := database.db.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		assert.Equal(t, cleared.Issue.Revision, after.Revision)
+		status, body = requestExternalRootJSON(t, ts.URL, http.MethodGet, bridgePath, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+		assert.Contains(t, string(body), `"external_candidate":{"kind":"date","value":"2026-08-22"}`)
+	})
+
 	status, body = requestExternalRootJSON(t, ts.URL, http.MethodPost, bridgePath+"/actions/pause", map[string]any{
 		"actor": "operator", "reason": "operator_pause",
 	})

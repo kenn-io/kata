@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -37,7 +38,7 @@ func TestCreateIssue_AcceptsMetadata(t *testing.T) {
 	var m map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(got.Metadata), &m))
 	assert.JSONEq(t, `"feature/x"`, string(m["work.branch"]))
-	assert.JSONEq(t, `"2026-01-02"`, string(m["scheduled_on"]))
+	assert.JSONEq(t, `{"value":"2026-01-02","timezone":"UTC","tzdata_version":"`+metadata.ScheduleTZDataVersion+`"}`, string(m["scheduled_on"]))
 }
 
 // TestCreateIssue_RejectsInvalidReservedMetadata pins the 400

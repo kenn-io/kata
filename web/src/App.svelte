@@ -277,8 +277,7 @@
     openEvents: () => {
       if (authority?.snapshot) stream.start(authority.cursor)
     },
-    wallClockSensitive: () =>
-      route.kind !== 'route-error' && route.filters.status.includes('ready'),
+    wallClockSensitive: () => route.kind !== 'route-error',
   })
   function reportOutcome(event: 'search_empty' | 'error_shown', kind?: string): void {
     if (!loadSessionCredentials()) return

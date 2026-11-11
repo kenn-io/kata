@@ -4,6 +4,8 @@ import type { KataTaskDetail } from '../lib/kata/types'
 
 import IssueProperties from './IssueProperties.svelte'
 
+const tzdataVersion = 'sha256:fixture'
+
 function makeIssue(overrides: Partial<KataTaskDetail['issue']> = {}): KataTaskDetail {
   return {
     issue: {
@@ -217,6 +219,42 @@ describe('IssueProperties', () => {
 
     expect(onPatchMetadata).not.toHaveBeenCalled()
   })
+
+  it.each([
+    {
+      value: '2026-06-01',
+      timezone: 'UTC',
+      projected: '2026-06-01',
+      display: 'Jun 1',
+      picker: 'Jun 1, 2026',
+    },
+    {
+      value: '2026-01-01T02:00:00Z',
+      timezone: 'America/New_York',
+      projected: '2025-12-31',
+      display: 'Dec 31',
+      picker: 'Dec 31, 2025',
+    },
+  ])(
+    'keeps saved $value when its displayed date is reselected',
+    async ({ value, timezone, projected, display, picker }) => {
+      const onPatchMetadata = vi.fn(async () => true)
+      renderProperties({
+        issue: makeIssue({
+          scheduled_on_date: projected,
+          metadata: { scheduled_on: { value, timezone, tzdata_version: tzdataVersion } },
+        }),
+        onPatchMetadata,
+      })
+      expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toContain(display)
+      await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+      const editor = screen.getByRole('button', { name: new RegExp(`Scheduled: ${display}`) })
+      expect(editor).toBeTruthy()
+      await fireEvent.click(editor)
+      await fireEvent.click(screen.getByRole('button', { name: picker }))
+      expect(onPatchMetadata).not.toHaveBeenCalled()
+    },
+  )
 
   it('patches scheduled and due dates and closes editors on accepted replacement', async () => {
     const onPatchMetadata = vi.fn(async () => true)

@@ -1264,6 +1264,7 @@ func (h toolHandlers) summaryFromIssue(project ProjectIdentity, issue generated.
 		Revision:            issue.Revision,
 		UpdatedAt:           formatTime(issue.UpdatedAt),
 		ScheduledOn:         metadataString(issue.Metadata, "scheduled_on"),
+		ScheduledOnTimezone: savedScheduleTimezone(issue.Metadata, "scheduled_on"),
 		Timezone:            metadataString(issue.Metadata, "timezone"),
 		updatedAt:           issue.UpdatedAt,
 	}
@@ -1301,6 +1302,7 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 		Revision:            issue.Revision,
 		UpdatedAt:           formatTime(issue.UpdatedAt),
 		ScheduledOn:         metadataString(issue.Metadata, "scheduled_on"),
+		ScheduledOnTimezone: savedScheduleTimezone(issue.Metadata, "scheduled_on"),
 		Timezone:            metadataString(issue.Metadata, "timezone"),
 		ScheduledOnDate:     issue.ScheduledOnDate,
 		DeadlineOnDate:      issue.DeadlineOnDate,
@@ -1330,7 +1332,8 @@ func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 		Labels: new(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
 		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
-		ScheduledOnDate: issue.ScheduledOnDate, DeadlineOnDate: issue.DeadlineOnDate,
+		ScheduledOnTimezone: savedScheduleTimezone(issue.Metadata, "scheduled_on"),
+		ScheduledOnDate:     issue.ScheduledOnDate, DeadlineOnDate: issue.DeadlineOnDate,
 		updatedAt: issue.UpdatedAt, metadata: issue.Metadata,
 	}
 }
@@ -1350,13 +1353,31 @@ func summaryFromReadyGlobalIssue(issue generated.ReadyGlobalIssueOut) IssueSumma
 		Labels: new(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
 		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
-		ScheduledOnDate: issue.ScheduledOnDate, DeadlineOnDate: issue.DeadlineOnDate,
+		ScheduledOnTimezone: savedScheduleTimezone(issue.Metadata, "scheduled_on"),
+		ScheduledOnDate:     issue.ScheduledOnDate, DeadlineOnDate: issue.DeadlineOnDate,
 		updatedAt: issue.UpdatedAt,
 	}
 }
 
+func savedScheduleTimezone(values map[string]any, key string) *string {
+	object, ok := values[key].(map[string]any)
+	if !ok {
+		return nil
+	}
+	zone, ok := object["timezone"].(string)
+	if !ok {
+		return nil
+	}
+	return &zone
+}
+
 func metadataString(values map[string]any, key string) *string {
 	value, ok := values[key].(string)
+	if !ok && (key == "scheduled_on" || key == "deadline_on") {
+		if object, valid := values[key].(map[string]any); valid {
+			value, ok = object["value"].(string)
+		}
+	}
 	if !ok {
 		return nil
 	}

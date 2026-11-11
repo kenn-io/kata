@@ -320,6 +320,19 @@ describe('normalizeKataUISnapshot', () => {
     )
   })
 
+  test('retains saved-zone clock times in the selected issue', () => {
+    const source = snapshot()
+    source.selected!.issue!.scheduled_on_display = '2025-12-31T21:00:00'
+    source.selected!.issue!.deadline_on_display = '2025-12-31T21:00:00'
+
+    const projection = normalizeKataUISnapshot(source)
+
+    expect(projection.selected_detail?.issue).toMatchObject({
+      scheduled_on_display: '2025-12-31T21:00:00',
+      deadline_on_display: '2025-12-31T21:00:00',
+    })
+  })
+
   test('preserves selected-link endpoint authority outside the filtered collection', () => {
     const authority = snapshot()
     authority.collection = authority.collection!.filter((issue) => issue.uid !== 'issue-parent')

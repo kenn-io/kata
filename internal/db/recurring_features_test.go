@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -80,12 +82,21 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	if strings.Contains(query, "SELECT EXISTS") {
 		return &featureProbeRows{presence: true}, nil
 	}
+	if strings.Contains(query, "SELECT i.metadata FROM issues") {
+		return &emptyFeatureRows{}, nil
+	}
 	if strings.Contains(query, "'projection.job'") {
 		c.state.probeQueries++
 		return &featureProbeRows{}, nil
 	}
 	return nil, errors.New("unexpected feature probe query")
 }
+
+type emptyFeatureRows struct{}
+
+func (*emptyFeatureRows) Columns() []string         { return []string{"metadata"} }
+func (*emptyFeatureRows) Close() error              { return nil }
+func (*emptyFeatureRows) Next([]driver.Value) error { return io.EOF }
 
 type featureProbeRows struct{ presence, seen bool }
 
@@ -139,4 +150,41 @@ func FuzzRecurringMetadataFeatures(f *testing.F) {
 			require.ErrorIs(t, db.RequireEventFeatures("", features), db.ErrUnsupportedEventFeatures)
 		}
 	})
+}
+
+func TestSchedulePayloadFeatures(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, payload string
+		wantFeature         bool
+		wantErr             error
+	}{
+		{"created", "issue.created", `{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}`, true, nil},
+		{"snapshot", "issue.snapshot", `{"metadata":{"deadline_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}`, true, nil},
+		{"updated", "issue.metadata_updated", `{"diff":{"deadline_on":{"from":null,"to":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}}`, true, nil},
+		{"projection", "projection.issue", `{"metadata":{"deadline_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}`, true, nil},
+		{"moved", "issue.moved", `{"snapshot":{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}}`, true, nil},
+		{"unknown rules", "issue.created", `{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"unknown"}}}`, false, metadata.ErrUnsupportedScheduleTZData},
+		{"unknown member", "issue.created", `{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1}}}`, false, db.ErrUnsupportedEventFeatures},
+		{"opaque legacy", "issue.created", `{"metadata":{"scheduled_on":{"value":"opaque"}}}`, false, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := db.PayloadRequiredFeatures(tc.kind, tc.payload)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+				require.ErrorIs(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			if tc.wantFeature {
+				require.Contains(t, got, db.IssueScheduleEventFeature)
+				if tc.kind != "projection.issue" {
+					_, wireFeatures, err := db.FederationEventPayloadWireVersion(tc.kind, jsontext.Value(tc.payload))
+					require.NoError(t, err)
+					require.Contains(t, wireFeatures, db.IssueScheduleEventFeature)
+				}
+			} else {
+				require.Empty(t, got)
+			}
+		})
+	}
 }

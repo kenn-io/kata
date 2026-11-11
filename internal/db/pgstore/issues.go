@@ -390,20 +390,7 @@ func buildListIssuesQuery(ctx context.Context, params db.ListIssuesParams, count
 	for _, label := range params.ExcludeLabels {
 		add("NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = $%d)", strings.ToLower(label))
 	}
-	for _, filter := range params.Meta {
-		args = append(args, filter.Key)
-		keyPosition := len(args)
-		if filter.HasValue {
-			args = append(args, filter.Value)
-			conditions = append(conditions, fmt.Sprintf(
-				`EXISTS (SELECT 1 FROM jsonb_each(i.metadata::jsonb) entry
-                  WHERE entry.key = $%d AND jsonb_typeof(entry.value) = 'string'
-                    AND entry.value #>> '{}' = $%d)`,
-				keyPosition, len(args)))
-		} else {
-			conditions = append(conditions, fmt.Sprintf(`i.metadata::jsonb ? $%d`, keyPosition))
-		}
-	}
+	appendIssueMetaFiltersPostgres(&conditions, &args, params.Meta)
 	if count {
 		return `SELECT COUNT(*) FROM issues i JOIN projects p ON p.id = i.project_id WHERE ` + strings.Join(conditions, " AND "), args
 	}
@@ -454,6 +441,24 @@ func (s *Store) ListIssues(ctx context.Context, params db.ListIssuesParams) ([]d
 		return nil, mapSQLError(err, nil)
 	}
 	return issues, nil
+}
+
+func appendIssueMetaFiltersPostgres(conditions *[]string, args *[]any, filters []db.MetaFilter) {
+	for _, filter := range filters {
+		*args = append(*args, filter.Key)
+		keyPosition := len(*args)
+		if !filter.HasValue {
+			*conditions = append(*conditions, fmt.Sprintf(`i.metadata::jsonb ? $%d`, keyPosition))
+			continue
+		}
+		*args = append(*args, filter.Value)
+		valuePosition := len(*args)
+		*conditions = append(*conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM jsonb_each(i.metadata::jsonb) entry
+			WHERE entry.key = $%d AND ((jsonb_typeof(entry.value) = 'string' AND entry.value #>> '{}' = $%d)
+			OR (entry.key IN ('scheduled_on', 'deadline_on') AND jsonb_typeof(entry.value) = 'object'
+			AND jsonb_typeof(entry.value->'value') = 'string' AND jsonb_typeof(entry.value->'timezone') = 'string' AND jsonb_typeof(entry.value->'tzdata_version') = 'string'
+			AND entry.value->>'value' = $%d)))`, keyPosition, valuePosition, valuePosition))
+	}
 }
 
 // CountIssues counts matching project issues independently of the cursor and limit.
@@ -517,20 +522,7 @@ func buildListAllIssuesQuery(ctx context.Context, params db.ListAllIssuesParams,
 	for _, label := range params.ExcludeLabels {
 		add("NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = $%d)", strings.ToLower(label))
 	}
-	for _, filter := range params.Meta {
-		args = append(args, filter.Key)
-		keyPosition := len(args)
-		if filter.HasValue {
-			args = append(args, filter.Value)
-			conditions = append(conditions, fmt.Sprintf(
-				`EXISTS (SELECT 1 FROM jsonb_each(i.metadata::jsonb) entry
-                  WHERE entry.key = $%d AND jsonb_typeof(entry.value) = 'string'
-                    AND entry.value #>> '{}' = $%d)`,
-				keyPosition, len(args)))
-		} else {
-			conditions = append(conditions, fmt.Sprintf(`i.metadata::jsonb ? $%d`, keyPosition))
-		}
-	}
+	appendIssueMetaFiltersPostgres(&conditions, &args, params.Meta)
 	if count {
 		return `SELECT COUNT(*) FROM issues i JOIN projects p ON p.id = i.project_id WHERE ` + strings.Join(conditions, " AND "), args
 	}

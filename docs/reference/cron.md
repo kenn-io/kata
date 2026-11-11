@@ -702,9 +702,10 @@ Each present object contains `field`, raw `value`, resolved `timezone`, and a
 UTC `instant`. The flat response also contains `project_id`, `issue_uid`, and
 ordinary `revision`.
 
-Native date parsing applies the issue timezone first, then the recurrence
-fallback for scheduled dates, then daemon default timezone and UTC. Deadline
-dates have no recurrence fallback. Explicit UTC values resolve to UTC. The read
+Saved planning dates use their own timezone and timezone-data version. Legacy
+dates use the issue timezone, then the recurrence fallback for scheduled dates,
+then the daemon default and UTC. A resolvable `Local` daemon default uses the host zone when its rules match the bundle. Deadline dates have no recurrence fallback. A repeating rule uses the current bundle to plan future occurrences; each generated issue retains the bundle used for its saved dates.
+Legacy UTC values resolve to UTC. The read
 uses native civil-time and DST behavior; it evaluates no clock and changes no
 readiness or persisted state. Normal project and issue-subtree read policy applies.
 

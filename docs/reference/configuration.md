@@ -620,9 +620,14 @@ GitHub/Notion/Plane/Linear/Twenty/TickTick sync, federation, or timed-claim main
 scheduled without a client present.
 
 The optional top-level `timezone` is the IANA timezone for date-only and local
-date-time `scheduled_on` values that do not have an issue-level `timezone`. If
-both are unset, Kata uses UTC. RFC 3339 `scheduled_on` values ending in `Z` are
-UTC instants and do not use this setting.
+date-time `scheduled_on` and `deadline_on` values without an issue-level
+`timezone`. If no zone is set, Kata uses UTC. RFC 3339 values ending in `Z`
+specify an absolute UTC instant. When Kata saves one without an issue timezone,
+this setting can determine its calendar date for display.
+
+New civil writes using this default require a zone in the bundled timezone data, including existing aliases. `Local` works when the host zone can be named and its rules match the bundle for that date. New schedules retain the effective zone and its timezone-data version when this default changes.
+If rejected, set a portable issue `timezone`, or change this setting to `UTC`
+and restart the daemon. Existing configurations keep loading.
 
 The web UI's daemon selector lists URL entries and home-less local entries.
 Home-bearing profiles are omitted and cannot alias the serving daemon. A plain

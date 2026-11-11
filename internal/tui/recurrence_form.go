@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kit/tui/termtext"
 )
@@ -19,6 +20,8 @@ import (
 type recurrenceFormState struct {
 	issueRevision int64
 	rec           *recurrenceclient.View
+	issueZone     string
+	unreadable    string
 }
 
 func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.View) inputState {
@@ -42,14 +45,10 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.Vie
 		input.Blur()
 		s.fields = append(s.fields, inputField{id: f.id, kind: fieldSingleLine, input: input, label: f.label})
 	}
-	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec}
-	var rule, start, zone string
-	if rec != nil {
-		rule, start, zone = rec.RRule, rec.DTStart, rec.Timezone
-	} else {
-		start = cmp.Or(issue.ScheduledOnDate, issue.scheduledOn())
-		zone, _ = recurrenceclient.ResolveZone("", "", issue.timezone(), localZone)
-	}
+	issueZone, _ := savedFormZone(issue)
+	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec, issueZone: issueZone, unreadable: issue.datesState().unreadable}
+	rule, start, zone, errText := recurrenceFormSeed(issue, rec, state.unreadable)
+	s.err = errText
 	s.recurrence, s.target.projectID = state, issue.ProjectID
 	for i := range s.fields {
 		switch s.fields[i].id {
@@ -63,6 +62,28 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.Vie
 	}
 	_ = s.fields[0].focus()
 	return s
+}
+
+// recurrenceFormSeed is the rule, start, zone, and error text a Repeat form
+// opens with; unreadable saved dates take precedence over a zone error.
+func recurrenceFormSeed(issue Issue, rec *recurrenceclient.View, unreadable string) (rule, start, zone, errText string) {
+	if rec != nil {
+		return rec.RRule, rec.DTStart, rec.Timezone, unreadable
+	}
+	zone, zoneErr := savedFormZone(issue)
+	return "", cmp.Or(issue.ScheduledOnDate, issue.scheduledOn()), zone, cmp.Or(unreadable, zoneErr)
+}
+
+// savedFormZone is the zone a new Repeat form starts in: the one the saved
+// schedule carries, else the issue's timezone, else this host's. It returns the
+// error text, and no zone, when the saved rules are unreadable here.
+func savedFormZone(issue Issue) (string, string) {
+	zone, err := metadata.SavedScheduleZone(issue.Metadata.ScheduledOn)
+	if err != nil {
+		return "", err.Error()
+	}
+	zone, _ = recurrenceclient.ResolveZone("", "", cmp.Or(zone, issue.timezone()), localZone)
+	return zone, ""
 }
 
 func (m Model) routeRecurrenceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
@@ -103,19 +124,41 @@ func (m Model) commitRecurrenceForm() (Model, tea.Cmd) {
 	if state.rec != nil && rule == "" {
 		return m.saveRecurrence(RecurrenceInput{Stop: true, Recurrence: state.rec, Actor: m.list.actor})
 	}
-	start, err := resolveDateInput(m.input.fieldValue(fieldStart), m.toastNow())
-	if err == nil && start == "" {
-		m.input.err = "Start is required."
+	if state.unreadable != "" {
+		m.input.err = state.unreadable
 		return m, nil
 	}
-	if _, dateErr := time.Parse(time.DateOnly, start); err != nil || dateErr != nil {
-		m.input.err = "Start must be YYYY-MM-DD, today, tomorrow, +Nd or +Nw."
+	start, errText := m.recurrenceStart()
+	if errText != "" {
+		m.input.err = errText
 		return m, nil
 	}
 	return m.saveRecurrence(RecurrenceInput{
 		Rule: rule, Start: start, Zone: zone, Actor: m.list.actor,
 		IssueRevision: state.issueRevision, Recurrence: state.rec,
 	})
+}
+
+// recurrenceStart is the Start field as a date, or the error text for it.
+func (m Model) recurrenceStart() (string, string) {
+	start, err := resolveDateInput(m.input.fieldValue(fieldStart), recurrenceFormNow(m.input, m.toastNow()))
+	if err == nil && start == "" {
+		return "", "Start is required."
+	}
+	if _, dateErr := time.Parse(time.DateOnly, start); err != nil || dateErr != nil {
+		return "", "Start must be YYYY-MM-DD, today, tomorrow, +Nd or +Nw."
+	}
+	return start, ""
+}
+
+func recurrenceFormNow(s inputState, now time.Time) time.Time {
+	zone, err := recurrenceclient.ResolveZone(s.fieldValue(fieldZone), s.recurrence.rec.Zone(), s.recurrence.issueZone, localZone)
+	if err == nil {
+		if loc, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion); err == nil {
+			return now.In(loc)
+		}
+	}
+	return now
 }
 
 func (m Model) saveRecurrence(in RecurrenceInput) (Model, tea.Cmd) {
@@ -166,7 +209,7 @@ func renderRecurrenceForm(s inputState, innerW, height int, now time.Time) strin
 			parts = append(parts, subtleStyle.Render("blank rule stops repeating"))
 		}
 		if s.fields[idx].id == fieldStart {
-			parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), now))))
+			parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), recurrenceFormNow(s, now)))))
 		}
 	}
 	footer := renderRecurrenceFooter(s, innerW)

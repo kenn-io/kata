@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -91,6 +92,16 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		if err != nil {
 			return nil, err
 		}
+		if issueTimezoneWriteRelevant(in.Body.Patch) {
+			ctx = db.WithMetadataPatchHook(ctx, func(ctx context.Context, tx *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
+				recurrenceZone, err := db.IssueRecurrenceTimezone(ctx, tx, current)
+				if err != nil {
+					return nil, err
+				}
+				return db.PrepareIssueSchedules(jsontext.Value(current.Metadata), in.Body.Patch, cfg.DefaultTimezone, recurrenceZone)
+			})
+		}
+
 		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 			IssueID:    iss.ID,
 			IfMatchRev: rev,

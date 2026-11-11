@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -83,4 +85,129 @@ func TestIssuePlanningDatesHistoricalReference(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &response))
 	require.Equal(t, issue.UID, response.IssueUID)
 	require.Equal(t, moved.NewRevision, response.Revision)
+}
+
+func TestPlanningDatesKeepWriterZoneAcrossDaemons(t *testing.T) {
+	for _, tc := range []struct {
+		name, writer, reader, zone, start, due string
+		local                                  bool
+	}{
+		{"UTC", "UTC", "Europe/Paris", "UTC", "2026-11-12T09:00:00Z", "2026-11-13T09:00:00Z", false},
+		{"Local", "Local", "UTC", "America/New_York", "2026-11-12T14:00:00Z", "2026-11-13T14:00:00Z", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.local {
+				loc, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
+				require.NoError(t, err)
+				previous := time.Local
+				time.Local = loc
+				t.Cleanup(func() { time.Local = previous })
+			}
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = tc.writer })
+			project := seedProject(t, env, "example-project")
+			status, raw := cronHTTP(t, env, http.MethodPost, projectPath(project.ID)+"/issues", map[string]any{"actor": "worker", "title": "portable", "force_new": true, "metadata": map[string]any{"scheduled_on": "2026-11-12T09:00", "deadline_on": "2026-11-13T09:00"}})
+			require.Equal(t, 200, status, string(raw))
+			var created struct {
+				Issue struct {
+					UID string `json:"uid"`
+				} `json:"issue"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &created))
+			require.NotEmpty(t, created.Issue.UID)
+			server := httptest.NewServer(daemon.NewServer(daemon.ServerConfig{DB: env.DB, DefaultTimezone: tc.reader, Broadcaster: daemon.NewEventBroadcaster()}).Handler())
+			t.Cleanup(server.Close)
+			reader := &testenv.Env{URL: server.URL, HTTP: server.Client()}
+			path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/planning-dates", project.ID, created.Issue.UID)
+			status, raw = cronHTTP(t, reader, http.MethodGet, path, nil)
+			require.Equal(t, 200, status, string(raw))
+			var response struct {
+				ScheduledOn struct {
+					Timezone string `json:"timezone"`
+					Instant  string `json:"instant"`
+				} `json:"scheduled_on"`
+				DeadlineOn struct {
+					Timezone string `json:"timezone"`
+					Instant  string `json:"instant"`
+				} `json:"deadline_on"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &response))
+			require.Equal(t, tc.zone, response.ScheduledOn.Timezone)
+			require.Equal(t, tc.start, response.ScheduledOn.Instant)
+			require.Equal(t, tc.zone, response.DeadlineOn.Timezone)
+			require.Equal(t, tc.due, response.DeadlineOn.Instant)
+		})
+	}
+}
+
+func TestSavedInstantDatesUseSelectedZoneAcrossViews(t *testing.T) {
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = "UTC" })
+	project := seedProject(t, env, "example-project")
+	status, raw := cronHTTP(t, env, http.MethodPost, projectPath(project.ID)+"/issues", map[string]any{"actor": "worker", "title": "New York dates", "force_new": true, "metadata": map[string]any{"timezone": "America/New_York", "scheduled_on": "2026-01-01T02:00:00Z", "deadline_on": "2026-01-01T02:00:00Z"}})
+	require.Equal(t, 200, status, string(raw))
+	var created struct {
+		Issue struct {
+			UID string `json:"uid"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &created))
+	path := fmt.Sprintf("/api/v1/projects/%d/issues/%s", project.ID, created.Issue.UID)
+	check := func(row rowDates) {
+		t.Helper()
+		require.Equal(t, "2025-12-31", row.ScheduledOnDate)
+		require.Equal(t, "2025-12-31", row.DeadlineOnDate)
+	}
+	status, raw = cronHTTP(t, env, http.MethodGet, path, nil)
+	require.Equal(t, 200, status, string(raw))
+	var show struct {
+		Issue struct {
+			rowDates
+			ScheduledOnDisplay string `json:"scheduled_on_display"`
+			DeadlineOnDisplay  string `json:"deadline_on_display"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &show))
+	check(show.Issue.rowDates)
+	require.Equal(t, "2025-12-31T21:00:00", show.Issue.ScheduledOnDisplay)
+	require.Equal(t, "2025-12-31T21:00:00", show.Issue.DeadlineOnDisplay)
+	status, raw = cronHTTP(t, env, http.MethodGet, projectPath(project.ID)+"/issues", nil)
+	require.Equal(t, 200, status, string(raw))
+	var list struct {
+		Issues []rowDates `json:"issues"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &list))
+	require.Len(t, list.Issues, 1)
+	check(list.Issues[0])
+	status, raw = cronHTTP(t, env, http.MethodGet, path+"/planning-dates", nil)
+	require.Equal(t, 200, status, string(raw))
+	var planning struct {
+		ScheduledOn, DeadlineOn struct {
+			Timezone string `json:"timezone"`
+			Instant  string `json:"instant"`
+		}
+	}
+	var fields map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(raw, &fields))
+	require.NoError(t, json.Unmarshal(fields["scheduled_on"], &planning.ScheduledOn))
+	require.NoError(t, json.Unmarshal(fields["deadline_on"], &planning.DeadlineOn))
+	require.Equal(t, "America/New_York", planning.ScheduledOn.Timezone)
+	require.Equal(t, "2026-01-01T02:00:00Z", planning.ScheduledOn.Instant)
+	require.Equal(t, planning.ScheduledOn, planning.DeadlineOn)
+	status, raw = cronHTTP(t, env, http.MethodGet, "/api/v1/ui/snapshot?view=all-open&time_zone=Asia%2FTokyo&selected_issue_uid="+created.Issue.UID, nil)
+	require.Equal(t, 200, status, string(raw))
+	var snapshot struct {
+		Selected struct {
+			Issue struct {
+				rowDates
+				ScheduledOnDisplay string `json:"scheduled_on_display"`
+				DeadlineOnDisplay  string `json:"deadline_on_display"`
+			} `json:"issue"`
+		} `json:"selected"`
+		Collection []rowDates `json:"collection"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &snapshot))
+	check(snapshot.Selected.Issue.rowDates)
+	require.Equal(t, "2025-12-31T21:00:00", snapshot.Selected.Issue.ScheduledOnDisplay)
+	require.Equal(t, "2025-12-31T21:00:00", snapshot.Selected.Issue.DeadlineOnDisplay)
+	require.Len(t, snapshot.Collection, 1)
+	check(snapshot.Collection[0])
 }

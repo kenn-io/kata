@@ -218,17 +218,10 @@ func (s *Store) CreateRecurrenceForIssue(
 		if err != nil {
 			return fmt.Errorf("walk after initial occurrence: %w", err)
 		}
-		updatedMetadata, err := db.ComposeExistingRecurrenceIssueMetadata(
-			jsontext.Value(issue.Metadata), *firstOccurrence, create.Timezone,
-		)
+		updatedAt := mutationTimestamp()
+		attached, err := s.attachIssueToRecurrenceTx(ctx, tx, project, issue, recurrenceID, create, *firstOccurrence, updatedAt, input.DefaultTimezone)
 		if err != nil {
-			return fmt.Errorf("compose initial recurrence issue metadata: %w", err)
-		}
-		updatedAt := storedTime(time.Now())
-		if _, err := tx.ExecContext(ctx, `UPDATE issues SET recurrence_id=$1, occurrence_key=$2,
-metadata=$3, revision=revision+1, updated_at=$4 WHERE id=$5`, recurrenceID,
-			*firstOccurrence, string(updatedMetadata), updatedAt, issue.ID); err != nil {
-			return mapSQLError(err, nil)
+			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE recurrences SET next_occurrence_key=$1,
 last_materialized_uid=$2, revision=revision+1, updated_at=$3 WHERE id=$4`,
@@ -255,11 +248,42 @@ last_materialized_uid=$2, revision=revision+1, updated_at=$3 WHERE id=$4`,
 			return err
 		}
 		output = db.CreateRecurrenceForIssueOut{
-			Recurrence: result, Events: []db.Event{created, materialized},
+			Recurrence: result, Events: append(append([]db.Event{created}, attached...), materialized),
 		}
 		return nil
 	})
 	return output, err
+}
+
+// attachIssueToRecurrenceTx stamps the recurrence onto the issue and returns the
+// issue.metadata_updated event that carries its saved schedule to replay.
+func (s *Store) attachIssueToRecurrenceTx(
+	ctx context.Context, tx *sql.Tx, project db.Project, issue db.Issue, recurrenceID int64,
+	create db.CreateRecurrenceIn, key, updatedAt, defaultZone string,
+) ([]db.Event, error) {
+	updated, err := db.ComposeExistingRecurrenceIssueMetadata(jsontext.Value(issue.Metadata), key, create.Timezone, defaultZone)
+	if err != nil {
+		return nil, fmt.Errorf("compose initial recurrence issue metadata: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE issues SET recurrence_id=$1, occurrence_key=$2,
+metadata=$3, revision=revision+1, updated_at=$4 WHERE id=$5`, recurrenceID,
+		key, string(updated), updatedAt, issue.ID); err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	diff, err := metadataDiffPayload(jsontext.Value(issue.Metadata), updated)
+	if err != nil || len(diff) == 0 {
+		return nil, err
+	}
+	payload, err := json.Marshal(struct {
+		Diff        map[string]metadataKeyDiffPayload `json:"diff"`
+		RevisionNew int64                             `json:"revision_new"`
+		UpdatedAt   string                            `json:"updated_at"`
+	}{Diff: diff, RevisionNew: issue.Revision + 1, UpdatedAt: updatedAt})
+	if err != nil {
+		return nil, fmt.Errorf("marshal issue metadata event: %w", err)
+	}
+	event, err := s.insertEventTx(ctx, tx, issueEventInput(issue, project, "issue.metadata_updated", create.Actor, string(payload)))
+	return []db.Event{event}, err
 }
 
 // GetRecurrenceByID returns a recurrence, including a soft-deleted row.

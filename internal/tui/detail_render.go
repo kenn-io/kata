@@ -213,7 +213,7 @@ func renderDocumentMetadata(
 	}
 	priorityText := metadataLabel("priority:") + " " + priorityDocumentText(iss.Priority)
 	rows = append(rows, truncate(priorityText, width))
-	if scheduled, deadline := iss.scheduledOn(), iss.deadlineOn(); scheduled != "" || deadline != "" {
+	if scheduled, deadline := iss.scheduledText(), iss.deadlineText(); scheduled != "" || deadline != "" {
 		rows = append(rows, joinMetadataRow(
 			metadataLabel("scheduled:")+" "+datesDocumentText(scheduled),
 			metadataLabel("deadline:")+" "+datesDocumentText(deadline), width)...)

@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"context"
+	"encoding/json/jsontext"
+	"fmt"
 	"net/http"
 	"testing"
 	"testing/synctest"
@@ -10,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
@@ -38,16 +42,168 @@ func shortIDs(issues []Issue) []string {
 	return out
 }
 
+func TestDateToggleSavedAndLegacyZoneMidnightKeepsSelection(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy %t", legacy), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				now := time.Date(2026, 11, 10, 4, 59, 0, 0, time.UTC)
+				withClock(t, func() time.Time { return now })
+				issue := dated("new", "2026-11-10", "")
+				saved, err := metadata.NewScheduleValue("2026-11-10", "America/New_York")
+				require.NoError(t, err)
+				issue.Metadata.ScheduledOn = saved
+				issue.ScheduledOnToday = "2026-11-09"
+				keep := dated("keep", "2026-11-09", "")
+				m := filterFormFixture()
+				if legacy {
+					issue.Metadata.ScheduledOn = jsontext.Value(`"2026-11-10"`)
+					issue.Metadata.Timezone = jsontext.Value(`"America/New_York"`)
+					updated := issue
+					updated.ScheduledOnToday = "2026-11-10"
+					m.api = &legacyDayAPI{issues: []Issue{updated, keep}}
+				}
+				m.list.filter = ListFilter{Date: dateToday}.stampDay()
+				m.list = m.list.applyFetched(initialFetchMsg{issues: []Issue{issue, keep}})
+				assertQueueShortIDs(t, m.list.visibleRows(), []string{"keep"})
+				now = now.Add(2 * time.Minute)
+				m, cmd := stepModel(m, dayTickMsg{})
+				for _, msg := range runCmdTree(cmd) {
+					if _, ok := msg.(refetchedMsg); ok {
+						m, _ = stepModel(m, msg)
+					}
+				}
+				assertQueueShortIDs(t, m.list.visibleRows(), []string{"new", "keep"})
+				selected, ok := m.list.targetRow()
+				require.True(t, ok)
+				assert.Equal(t, "keep", selected.ShortID)
+			})
+		})
+	}
+}
+
+func TestDateFilterAfterUnfilteredScheduleMidnight(t *testing.T) {
+	for _, tc := range []struct {
+		filter string
+		want   []string
+	}{
+		{dateToday, []string{"new"}},
+		{dateScheduled, nil},
+	} {
+		t.Run(tc.filter, func(t *testing.T) {
+			now := time.Date(2026, 11, 10, 4, 59, 0, 0, time.UTC)
+			withClock(t, func() time.Time { return now })
+			issue := dated("new", "2026-11-10", "")
+			saved, err := metadata.NewScheduleValue("2026-11-10", "America/New_York")
+			require.NoError(t, err)
+			issue.Metadata.ScheduledOn = saved
+			issue.ScheduledOnToday = "2026-11-09"
+			m := filterFormFixture()
+			m.list = m.list.applyFetched(initialFetchMsg{issues: []Issue{issue}})
+			now = now.Add(2 * time.Minute)
+			m, _ = m.refreshPlanningDay(now)
+			form := newFilterForm(ListFilter{}, m.scope)
+			form.field(fieldDate).radio.set(tc.filter)
+			m, _ = m.commitFilterForm(form)
+			assertQueueShortIDs(t, m.list.visibleRows(), tc.want)
+		})
+	}
+}
+
+type legacyDayAPI struct {
+	KataAPI
+	issues []Issue
+	detail *Issue
+}
+
+func (a *legacyDayAPI) ListIssues(context.Context, int64, ListFilter) ([]Issue, error) {
+	return a.issues, nil
+}
+
+func (a *legacyDayAPI) readIssue(context.Context, int64, string) (*IssueDetail, error) {
+	return &IssueDetail{Issue: a.detail}, nil
+}
+
+func TestOpenDatesFormRefreshesDaemonDay(t *testing.T) {
+	for _, tc := range []struct {
+		name, scheduled, input, want, rendered string
+	}{
+		{"outside list", "2026-11-10", "tomorrow", "2026-11-11", "2026-11-11 Wed"},
+		{"empty schedule", "", "today", "2026-11-10", "2026-11-10 Tue"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				now := time.Date(2026, 11, 10, 5, 1, 0, 0, time.UTC)
+				withClock(t, func() time.Time { return now })
+				issue := dated("new", tc.scheduled, "")
+				if tc.scheduled != "" {
+					issue.Metadata.ScheduledOn = jsontext.Value(`"2026-11-10"`)
+				}
+				issue.ScheduledOnToday = "2026-11-09"
+				updated := issue
+				updated.ScheduledOnToday = "2026-11-10"
+				m := filterFormFixture()
+				m.api = &legacyDayAPI{detail: &updated}
+				target := formTarget{issueShortID: issue.ShortID, projectID: issue.ProjectID}
+				m.input = newDatesForm(target, issue)
+				m.input.field(fieldScheduled).setValue(tc.input)
+				m, cmd := stepModel(m, dayTickMsg{})
+				for _, msg := range runCmdTree(cmd) {
+					if _, tick := msg.(dayTickMsg); !tick {
+						m, _ = stepModel(m, msg)
+					}
+				}
+				require.Contains(t, stripANSI(renderDatesForm(m.input, 80, now)), tc.rendered)
+				in, err := datesInputFromForm(m.input, now, "tester")
+				require.NoError(t, err)
+				require.NotNil(t, in.Set["scheduled_on"])
+				require.Equal(t, tc.want, *in.Set["scheduled_on"])
+			})
+		})
+	}
+}
+
+func TestDetailRefreshesLegacyDayOutsideList(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Date(2026, 11, 10, 5, 1, 0, 0, time.UTC)
+		withClock(t, func() time.Time { return now })
+		issue := dated("new", "2026-11-10", "")
+		issue.Metadata.ScheduledOn = jsontext.Value(`"2026-11-10"`)
+		issue.ScheduledOnToday = "2026-11-09"
+		updated := issue
+		updated.ScheduledOnToday = "2026-11-10"
+		m := filterFormFixture()
+		m.api = &legacyDayAPI{detail: &updated}
+		m.detail.issue, m.detail.scopePID = &issue, issue.ProjectID
+		m.view = viewDetail
+		m, cmd := stepModel(m, dayTickMsg{})
+		for _, msg := range runCmdTree(cmd) {
+			if _, tick := msg.(dayTickMsg); !tick {
+				m, _ = stepModel(m, msg)
+			}
+		}
+		require.Equal(t, "2026-11-10", m.detail.issue.ScheduledOnToday)
+	})
+}
+
 func TestDateToggle_TodayAndScheduledSplitOnLocalDay(t *testing.T) {
 	instant := time.Date(2026, 11, 10, 23, 30, 0, 0, time.UTC)
 	closed := dated("done", "2026-11-01", "2026-11-01")
 	closed.Status = "closed"
+	scheduledTokyo := dated("scheduled-tokyo", "2026-01-01", "")
+	scheduledTokyo.ScheduledOnToday = "2026-01-01"
+	deadlineTokyo := dated("deadline-tokyo", "", "2026-01-01")
+	deadlineTokyo.DeadlineOnToday = "2026-01-01"
 	for _, tc := range []struct {
 		name             string
 		now              time.Time
 		issues           []Issue
 		today, scheduled []string
 	}{
+		{
+			name: "saved schedule days differ from local day", now: time.Date(2025, 12, 31, 12, 0, 0, 0, time.UTC),
+			issues: []Issue{scheduledTokyo, deadlineTokyo},
+			today:  []string{"scheduled-tokyo", "deadline-tokyo"}, scheduled: []string{},
+		},
 		{
 			name: "scheduled and deadline dates", now: instant,
 			issues: []Issue{
@@ -428,4 +584,50 @@ func TestDateToggle_DaemonCheckIgnoresSupersededFailure(t *testing.T) {
 	require.Empty(t, m.list.status)
 	m, _ = stepModel(m, oldResult)
 	assert.Empty(t, m.list.status, "the current filter must ignore the superseded HTTP 503")
+}
+
+type legacyCountingAPI struct {
+	legacyDayAPI
+	calls int
+}
+
+func (a *legacyCountingAPI) ListIssues(ctx context.Context, project int64, filter ListFilter) ([]Issue, error) {
+	a.calls++
+	return a.legacyDayAPI.ListIssues(ctx, project, filter)
+}
+
+func TestLegacyDateDoesNotRefetchIdleList(t *testing.T) {
+	m := filterFormFixture()
+	issue := dated("example", "2026-11-12", "")
+	issue.Metadata.ScheduledOn = jsontext.Value(`"2026-11-12"`)
+	m.list.issues = []Issue{issue}
+	api := &legacyCountingAPI{}
+	m.api = api
+	for minute := range 3 {
+		_, cmd := m.refreshPlanningDay(time.Date(2026, 11, 11, 12, minute, 0, 0, time.UTC))
+		runCmdTree(cmd)
+	}
+	require.Zero(t, api.calls, "unchanged day must avoid list reloads")
+}
+
+func TestEnablingDateFilterRefreshesLegacyRows(t *testing.T) {
+	m := filterFormFixture()
+	issue := dated("example", "2026-11-12", "")
+	issue.Metadata.ScheduledOn = jsontext.Value(`"2026-11-12"`)
+	issue.ScheduledOnToday = "2026-11-11"
+	updated := issue
+	updated.ScheduledOnToday = "2026-11-12"
+	m.list.issues = []Issue{issue}
+	api := &legacyCountingAPI{issues: []Issue{updated}}
+	m.api = api
+	form := newFilterForm(ListFilter{}, m.scope)
+	form.field(fieldDate).radio.set(dateToday)
+	m, cmd := m.commitFilterForm(form)
+	for _, msg := range runCmdTree(cmd) {
+		if _, ok := msg.(refetchedMsg); ok {
+			m, _ = stepModel(m, msg)
+		}
+	}
+	require.Equal(t, 1, api.calls)
+	require.Equal(t, "2026-11-12", m.list.issues[0].ScheduledOnToday)
 }

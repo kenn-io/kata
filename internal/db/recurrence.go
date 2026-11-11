@@ -1,14 +1,17 @@
 package db
 
 import (
+	"cmp"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/recurrence"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 // ValidateRecurrenceCore validates a rule, start date, and timezone together
@@ -54,7 +57,7 @@ func ComposeRecurrenceIssueMetadata(
 	occurrenceKey string,
 	timezone string,
 ) (jsontext.Value, error) {
-	return composeRecurrenceIssueMetadata(templateMetadata, occurrenceKey, timezone, true)
+	return composeRecurrenceIssueMetadata(templateMetadata, occurrenceKey, timezone, "", true)
 }
 
 // ComposeExistingRecurrenceIssueMetadata updates recurrence fields on an
@@ -62,31 +65,54 @@ func ComposeRecurrenceIssueMetadata(
 func ComposeExistingRecurrenceIssueMetadata(
 	issueMetadata jsontext.Value,
 	occurrenceKey string,
-	timezone string,
+	timezone, defaultZone string,
 ) (jsontext.Value, error) {
-	return composeRecurrenceIssueMetadata(issueMetadata, occurrenceKey, timezone, false)
+	return composeRecurrenceIssueMetadata(issueMetadata, occurrenceKey, timezone, defaultZone, false)
 }
 
 func composeRecurrenceIssueMetadata(
 	metadataValue jsontext.Value,
 	occurrenceKey string,
-	timezone string,
+	timezone, defaultZone string,
 	template bool,
 ) (jsontext.Value, error) {
+	issueTimezone := timezone
+	local := timezone == "Local"
+	if local {
+		var err error
+		timezone, err = portableLocalZone()
+		if err != nil {
+			return nil, err
+		}
+	}
 	object, err := decodeRecurrenceTemplateMetadata(metadataValue)
 	if err != nil {
 		return nil, err
 	}
-	scheduledOn, err := json.Marshal(occurrenceKey)
+	if !template {
+		if _, err := metadata.DecodeSavedSchedule(object["scheduled_on"]); metadata.IsUnsupportedSchedule(err) {
+			return nil, fmt.Errorf("%w: scheduled_on: %v", ErrInvalidRecurrence, err)
+		}
+	}
+	scheduledOn, err := metadata.NewScheduleValue(occurrenceKey, timezone)
 	if err != nil {
 		return nil, fmt.Errorf("marshal recurrence scheduled_on: %w", err)
 	}
-	timezoneValue, err := json.Marshal(timezone)
+	timezoneValue, err := json.Marshal(issueTimezone)
 	if err != nil {
 		return nil, fmt.Errorf("marshal recurrence timezone: %w", err)
 	}
+	if local {
+		if err := compareLocalSchedule(occurrenceKey, scheduledOn); err != nil {
+			return nil, err
+		}
+	}
+	if err := freezeRecurrenceDeadline(object, timezone, defaultZone, local, template); err != nil {
+		return nil, err
+	}
 	object["scheduled_on"] = scheduledOn
 	object["timezone"] = timezoneValue
+
 	validate := validateRecurrenceIssueMetadataObject
 	if template {
 		validate = validateRecurrenceTemplateMetadataObject
@@ -99,6 +125,97 @@ func composeRecurrenceIssueMetadata(
 		return nil, fmt.Errorf("marshal recurrence issue metadata: %w", err)
 	}
 	return value, nil
+}
+
+func portableLocalZone() (string, error) {
+	zone := time.Local.String()
+	if zone == "Local" {
+		zone = recurrenceclient.LocalZone(recurrenceclient.DefaultLocaltimePath)
+	}
+	if zone == "" || zone == "Local" {
+		return "", fmt.Errorf("%w: cannot identify Local timezone; change it to a named IANA timezone", ErrInvalidRecurrence)
+	}
+	if _, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion); err != nil {
+		return "", fmt.Errorf("%w: cannot save Local timezone %q: %v", ErrInvalidRecurrence, zone, err)
+	}
+	return zone, nil
+}
+
+func freezeRecurrenceDeadline(object map[string]jsontext.Value, recurrenceZone, defaultZone string, local, template bool) error {
+	raw := object["deadline_on"]
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	deadline, err := metadata.ScheduleValueText(raw)
+	if err != nil {
+		return fmt.Errorf("%w: deadline_on: %v", ErrInvalidRecurrence, err)
+	}
+	if raw[0] != '"' {
+		return nil
+	}
+	zone := recurrenceZone
+	if !template {
+		if zone, err = issueDeadlineZone(object, defaultZone); err != nil {
+			return err
+		}
+	}
+	legacyLocal := zone == "Local"
+	if legacyLocal {
+		zone, err = portableLocalZone()
+	}
+	if err == nil {
+		object["deadline_on"], err = metadata.NewScheduleValue(deadline, zone)
+	}
+	if err != nil && strings.HasSuffix(deadline, "Z") {
+		object["deadline_on"], err = metadata.NewScheduleValue(deadline, "UTC")
+		legacyLocal = false
+	}
+	if err != nil {
+		return fmt.Errorf("%w: deadline_on: %v; change the issue timezone to a named IANA timezone", ErrInvalidRecurrence, err)
+	}
+	if legacyLocal || template && local {
+		return compareLocalSchedule(deadline, object["deadline_on"])
+	}
+	return nil
+}
+
+// issueDeadlineZone is the zone an existing issue's legacy deadline resolves in.
+func issueDeadlineZone(object map[string]jsontext.Value, defaultZone string) (string, error) {
+	zone := defaultZone
+	if raw := object["timezone"]; len(raw) > 0 && string(raw) != "null" && string(raw) != `""` {
+		if err := json.Unmarshal(raw, &zone); err != nil {
+			return "", fmt.Errorf("%w: deadline timezone: %v", ErrInvalidRecurrence, err)
+		}
+	}
+	return cmp.Or(zone, "UTC"), nil
+}
+
+func compareLocalSchedule(value string, saved jsontext.Value) error {
+	legacy, err := json.Marshal(map[string]any{"scheduled_on": value, "timezone": "Local"})
+	if err != nil {
+		return err
+	}
+	frozen := `{"scheduled_on":` + string(saved) + `}`
+	_, _, oldAt, _, err := metadata.ScheduleFieldInstant(string(legacy), "scheduled_on", "")
+	if err != nil {
+		return fmt.Errorf("%w: resolve Local schedule: %v", ErrInvalidRecurrence, err)
+	}
+	_, _, newAt, _, err := metadata.ScheduleFieldInstant(frozen, "scheduled_on", "")
+	if err != nil {
+		return fmt.Errorf("%w: resolve saved schedule: %v", ErrInvalidRecurrence, err)
+	}
+	oldDate, _, err := metadata.CalendarDate(string(legacy), "scheduled_on", nil, "")
+	if err != nil {
+		return fmt.Errorf("%w: resolve Local schedule date: %v", ErrInvalidRecurrence, err)
+	}
+	newDate, _, err := metadata.CalendarDate(frozen, "scheduled_on", nil, "")
+	if err != nil {
+		return fmt.Errorf("%w: resolve saved schedule date: %v", ErrInvalidRecurrence, err)
+	}
+	if !oldAt.Equal(newAt) || oldDate != newDate {
+		return fmt.Errorf("%w: Local timezone rules differ from the bundled rules for %q; change the recurrence to a named IANA timezone", ErrInvalidRecurrence, value)
+	}
+	return nil
 }
 
 func validatedRecurrenceTemplateMetadata(value jsontext.Value) (map[string]jsontext.Value, error) {

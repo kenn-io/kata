@@ -1124,18 +1124,8 @@ func buildListIssuesQuery(ctx context.Context, p db.ListIssuesParams, count bool
 	// key (e.g. "work.branch") is compared as a literal key and never
 	// traverses into a nested object like {"work":{"branch":...}}. The key is
 	// a bound parameter, so there is no path syntax and no injection surface.
-	// Equality targets string-valued keys (the common conventions case):
-	// json_each.value yields the JSON string's text, matched against the raw
-	// bound value.
-	for _, mf := range p.Meta {
-		if mf.HasValue {
-			q.WriteString(` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ? AND je.value = ?)`)
-			args = append(args, mf.Key, mf.Value)
-		} else {
-			q.WriteString(` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ?)`)
-			args = append(args, mf.Key)
-		}
-	}
+	// Equality uses the string value, including the text in saved schedules.
+	appendIssueMetaFiltersSQLite(&q, &args, p.Meta)
 	if count {
 		return q.String(), args
 	}
@@ -1183,6 +1173,18 @@ func (d *Store) ListIssues(ctx context.Context, p db.ListIssuesParams) ([]db.Iss
 		out = append(out, i)
 	}
 	return out, rows.Err()
+}
+
+func appendIssueMetaFiltersSQLite(q *strings.Builder, args *[]any, filters []db.MetaFilter) {
+	for _, filter := range filters {
+		if !filter.HasValue {
+			q.WriteString(` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ?)`)
+			*args = append(*args, filter.Key)
+			continue
+		}
+		q.WriteString(` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ? AND (je.value = ? OR (je.key IN ('scheduled_on', 'deadline_on') AND je.type = 'object' AND json_type(je.value, '$.value') = 'text' AND json_type(je.value, '$.timezone') = 'text' AND json_type(je.value, '$.tzdata_version') = 'text' AND json_extract(je.value, '$.value') = ?)))`)
+		*args = append(*args, filter.Key, filter.Value, filter.Value)
+	}
 }
 
 // CountIssues counts matching project issues independently of the cursor and limit.
@@ -1253,15 +1255,7 @@ func buildListAllIssuesQuery(ctx context.Context, p db.ListAllIssuesParams, coun
 		q.WriteString(` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`)
 		args = append(args, strings.ToLower(label))
 	}
-	for _, mf := range p.Meta {
-		if mf.HasValue {
-			q.WriteString(` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ? AND je.value = ?)`)
-			args = append(args, mf.Key, mf.Value)
-		} else {
-			q.WriteString(` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ?)`)
-			args = append(args, mf.Key)
-		}
-	}
+	appendIssueMetaFiltersSQLite(&q, &args, p.Meta)
 	if count {
 		return q.String(), args
 	}

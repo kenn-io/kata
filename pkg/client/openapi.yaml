@@ -3500,7 +3500,10 @@ components:
           format: date-time
           type: string
         deadline_on_date:
-          description: deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+          description: deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
+          type: string
+        deadline_on_today:
+          description: Today's date in the deadline field's timezone.
           type: string
         deleted_at:
           format: date-time
@@ -3545,7 +3548,10 @@ components:
           format: int64
           type: integer
         scheduled_on_date:
-          description: scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+          description: scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
+          type: string
+        scheduled_on_today:
+          description: Today's date in the scheduled field's timezone.
           type: string
         short_id:
           type: string
@@ -4116,7 +4122,10 @@ components:
           format: date-time
           type: string
         deadline_on_date:
-          description: deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+          description: deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
+          type: string
+        deadline_on_today:
+          description: Today's date in the deadline field's timezone.
           type: string
         deleted_at:
           format: date-time
@@ -4163,7 +4172,10 @@ components:
           format: int64
           type: integer
         scheduled_on_date:
-          description: scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+          description: scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
+          type: string
+        scheduled_on_today:
+          description: Today's date in the scheduled field's timezone.
           type: string
         short_id:
           type: string
@@ -5525,7 +5537,10 @@ components:
           format: date-time
           type: string
         deadline_on_date:
-          description: deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+          description: deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
+          type: string
+        deadline_on_today:
+          description: Today's date in the deadline field's timezone.
           type: string
         deleted_at:
           format: date-time
@@ -5572,7 +5587,10 @@ components:
           format: int64
           type: integer
         scheduled_on_date:
-          description: scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+          description: scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
+          type: string
+        scheduled_on_today:
+          description: Today's date in the scheduled field's timezone.
           type: string
         short_id:
           type: string
@@ -6542,7 +6560,13 @@ components:
           format: date-time
           type: string
         deadline_on_date:
-          description: deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+          description: deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
+          type: string
+        deadline_on_display:
+          description: Saved deadline instant as a local date and time using its saved timezone rules.
+          type: string
+        deadline_on_today:
+          description: Today's date in the deadline field's timezone.
           type: string
         deleted_at:
           format: date-time
@@ -6576,7 +6600,13 @@ components:
           format: int64
           type: integer
         scheduled_on_date:
-          description: scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+          description: scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
+          type: string
+        scheduled_on_display:
+          description: Saved scheduled instant as a local date and time using its saved timezone rules.
+          type: string
+        scheduled_on_today:
+          description: Today's date in the scheduled field's timezone.
           type: string
         short_id:
           type: string
@@ -7025,6 +7055,10 @@ components:
           type: string
         deadline_on_date:
           type: string
+        deadline_on_display:
+          type: string
+        deadline_on_today:
+          type: string
         deleted_at:
           format: date-time
           type: string
@@ -7061,6 +7095,10 @@ components:
           format: int64
           type: integer
         scheduled_on_date:
+          type: string
+        scheduled_on_display:
+          type: string
+        scheduled_on_today:
           type: string
         short_id:
           type: string
@@ -7325,7 +7363,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.44.0
+  version: 0.45.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -12556,7 +12594,7 @@ paths:
       summary: Read bounded browser reference choices
   /api/v1/ui/snapshot:
     get:
-      description: Returns 304 without projection reads when If-None-Match matches the current durable cursor, normalized intent, and effective capabilities.
+      description: Returns 304 when the snapshot and its calendar projections are unchanged.
       operationId: readUISnapshot
       parameters:
         - in: header

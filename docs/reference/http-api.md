@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # HTTP API schema
@@ -73,6 +73,9 @@ message names it:
 The CLI preserves the hint in human, agent, and JSON errors. See
 [agent output](agent-output.md#errors) for its stderr format.
 
+Issue scheduling writes that violate the [portable timezone rules](metadata.md)
+return HTTP 400 `invalid_metadata_value`. Schedule metadata stores the input text, effective zone, and timezone-data version together, such as `{"value":"2026-11-12T09:00","timezone":"Europe/Paris","tzdata_version":"sha256:..."}`. A supplied saved object retains its own zone and rules. Unknown versions are unreadable and the planning-date endpoint returns HTTP 422.
+
 ## Recurrence timezones
 
 Use an IANA time zone such as `America/New_York` or `UTC` when creating a
@@ -93,7 +96,9 @@ value `Local` with HTTP 400 and error code `validation`. Changing another
 timezone to `Local` through PATCH returns the same error. `Local` depends on
 the daemon host, so moving the daemon could change the schedule's timezone.
 
-Existing recurrences stored with `Local` still run and remain readable. PATCH
+Existing recurrences stored with `Local` can materialize when their host zone
+can be named and its rules match the bundled rules for the occurrence and
+inherited deadline. Otherwise, change the recurrence to a named zone. PATCH
 may omit `timezone` or echo `Local` while editing their schedule or template.
 To make an existing schedule portable, PATCH its timezone to an IANA zone or
 `UTC`. PATCH requires the current `If-Match: "rev-N"` revision; stale requests
@@ -270,6 +275,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 | Version | Change |
 | --- | --- |
 | `0.44.0` | Attachment routes return `503 docbank_key_unavailable` instead of `502 docbank_unauthorized` when the daemon cannot resolve its own Docbank key. Health diagnostics add a `docbank` block. |
+| `0.45.0` | Schedule and deadline metadata may contain saved values with their timezone and timezone-data version. Issue rows add `scheduled_on_today` and `deadline_on_today`; issue detail and browser snapshot rows also add `scheduled_on_display` and `deadline_on_display` for saved instants. |
 | `0.43.0` | Adds the daemon-owned MCP Events routes `POST /api/v1/mcp-events/list`, `POST /api/v1/mcp-events/subscribe`, `POST /api/v1/mcp-events/unsubscribe`, and `GET /api/v1/mcp-events/subscriptions` (status). Subscribe and unsubscribe arguments name either a non-empty `project_uids` list or `all_projects: true`. Failures return an `mcp_events` error whose `data` carries `mcp_code` and `mcp_data`. Older daemons do not serve these routes. Both issue list routes accept `compact=true`. |
 | `0.42.0` | Adds daemon-wide local embeddings setup and status at `GET` and `POST /embeddings/local`, and the `X-Kata-Embeddings-Configured` search response header. |
 | `0.41.0` | Adds `sort=priority` to both ready routes. `kata next` and MCP `kata.next` request one priority-ordered row; older daemons retain the full-queue fetch and client-side selection. |
@@ -277,7 +283,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 | `0.39.0` | `POST /projects/{project_id}/issues/{ref}/attachments/links` accepts `reuse_existing=true` to reuse the smallest existing attachment reference for the resolved Docbank version, creating one if none exists. Omission keeps creating a new reference. |
 | `0.38.0` | Publishes `POST /projects/{project_id}/issues/{ref}/attachments/links`, which saves a reference to an existing Docbank file version without uploading its bytes. `kata docbank attachments link` refuses older daemons. |
 | `0.37.0` | `POST /projects/{project_id}/recurrences` accepts `If-Match: "rev-N"` with `initial_issue_ref`; a different issue revision returns 412 `revision_conflict` and writes nothing. An empty `If-Match` returns 400. Older daemons ignore the header. |
-| `0.36.0` | Issue list rows, show output and ready rows carry `scheduled_on_date` and `deadline_on_date`, the `scheduled_on` and `deadline_on` metadata as `YYYY-MM-DD` calendar dates, each omitted when its key is absent or its value cannot be read. Older daemons omit both fields. |
+| `0.36.0` | Issue list rows, show output and ready rows carry `scheduled_on_date` and `deadline_on_date`, the `scheduled_on` and `deadline_on` metadata as `YYYY-MM-DD` calendar dates, each omitted when its key is absent or contains a malformed legacy value. An unsupported saved descriptor causes the request to fail. Older daemons omit both fields. |
 | `0.35.0` | Moves include the issue subtree by default; `single` keeps the move to one issue. `X-Kata-Project-Scope` narrows requests to fixed projects and is enforced in the transaction, including historical issue references. Older daemons do not enforce this header. |
 | `0.34.0` | Close transcripts accept agent names beyond Claude Code and Codex, with non-UUID session IDs for those agents. Claude Code and Codex session IDs remain UUIDs. |
 | `0.33.0` | Publishes the issue attachment upload and content routes, and UI capabilities include `attachments` when the daemon has Docbank configured. Older daemons omit the field. |
@@ -771,10 +777,10 @@ whose snapshot reports `contract_version` `2`. The daemon-switcher proxy
 lists, so `collection_links` is how to get child counts through it.
 
 A matching snapshot `If-None-Match` returns `304` without rebuilding the
-projection. The response cursor is captured in the same consistent storage
-read as a newly built projection. Browser events are invalidations; the SPA
-refreshes the snapshot instead of constructing a second authority from event
-payloads.
+projection while the validator's calendar interval remains valid. The response
+cursor is captured in the same consistent storage read as a newly built
+projection. Browser events are invalidations; the SPA refreshes the snapshot
+instead of constructing a second authority from event payloads.
 
 The browser-session routes are deliberately outside the generated client
 contract. A fresh tab on a direct-loopback origin uses

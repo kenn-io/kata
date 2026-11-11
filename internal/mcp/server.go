@@ -728,7 +728,7 @@ type CreateInput struct {
 	Labels         []string       `json:"labels,omitempty" jsonschema:"Initial project labels"`
 	Metadata       map[string]any `json:"metadata,omitempty" jsonschema:"Initial issue metadata"`
 	ScheduledOn    string         `json:"scheduled_on,omitempty" jsonschema:"Schedule as YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or an RFC 3339 UTC instant ending in Z"`
-	Timezone       string         `json:"timezone,omitempty" jsonschema:"IANA timezone for date-only and local scheduled_on values"`
+	Timezone       string         `json:"timezone,omitempty" jsonschema:"Portable issue timezone: UTC, Etc/UTC, or an exact bundled geographic IANA name"`
 	ForceNew       bool           `json:"force_new,omitempty" jsonschema:"Create even when Kata finds a likely duplicate"`
 	Parent         string         `json:"parent,omitempty" jsonschema:"Parent issue reference"`
 	Blocks         []string       `json:"blocks,omitempty" jsonschema:"Issues this new issue blocks"`
@@ -748,7 +748,7 @@ type EditInput struct {
 	ClearPriority    bool           `json:"clear_priority,omitempty" jsonschema:"Remove the current priority"`
 	Metadata         map[string]any `json:"metadata,omitempty" jsonschema:"Issue metadata merge patch; JSON null removes a key"`
 	ScheduledOn      *string        `json:"scheduled_on,omitempty" jsonschema:"Schedule as YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or an RFC 3339 UTC instant ending in Z"`
-	Timezone         *string        `json:"timezone,omitempty" jsonschema:"IANA timezone for date-only and local scheduled_on values"`
+	Timezone         *string        `json:"timezone,omitempty" jsonschema:"Portable issue timezone: UTC, Etc/UTC, or an exact bundled geographic IANA name"`
 	ClearScheduledOn bool           `json:"clear_scheduled_on,omitempty" jsonschema:"Remove scheduled_on"`
 	ClearTimezone    bool           `json:"clear_timezone,omitempty" jsonschema:"Remove timezone"`
 	Parent           *string        `json:"parent,omitempty" jsonschema:"Replacement parent reference"`
@@ -795,7 +795,7 @@ type SetDeadlineInput struct {
 	Revision      *int64  `json:"revision,omitempty" jsonschema:"Required current issue revision for a conditional write"`
 }
 
-// SetScheduleInput sets or clears the scheduled_on metadata primitive.
+// SetScheduleInput sets or clears the scheduled_on metadata value.
 type SetScheduleInput struct {
 	Ref           string  `json:"ref" jsonschema:"Issue reference in the bound project"`
 	Schedule      *string `json:"schedule,omitempty" jsonschema:"Schedule date, local date-time, or RFC 3339 UTC instant ending in Z"`
@@ -869,9 +869,10 @@ type IssueSummary struct {
 	Revision            int64     `json:"revision"`
 	UpdatedAt           string    `json:"updated_at"`
 	ScheduledOn         *string   `json:"scheduled_on,omitempty"`
+	ScheduledOnTimezone *string   `json:"scheduled_on_timezone,omitempty" jsonschema:"Timezone saved with the scheduled date."`
 	Timezone            *string   `json:"timezone,omitempty"`
-	ScheduledOnDate     *string   `json:"scheduled_on_date,omitempty" jsonschema:"scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable or the daemon predates API 0.36.0"`
-	DeadlineOnDate      *string   `json:"deadline_on_date,omitempty" jsonschema:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable or the daemon predates API 0.36.0"`
+	ScheduledOnDate     *string   `json:"scheduled_on_date,omitempty" jsonschema:"scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable or the daemon predates API 0.36.0"`
+	DeadlineOnDate      *string   `json:"deadline_on_date,omitempty" jsonschema:"deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable or the daemon predates API 0.36.0"`
 	updatedAt           time.Time
 	metadata            map[string]any
 	// oversized marks a compact row the daemon sent as identity only.

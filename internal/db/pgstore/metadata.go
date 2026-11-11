@@ -297,13 +297,18 @@ func patchedMetadata(
 	if err != nil {
 		return nil, nil, fmt.Errorf("apply metadata patch: %w", err)
 	}
-	diff, err := metadata.Diff(jsontext.Value(current), updated)
+	diff, err := metadataDiffPayload(jsontext.Value(current), updated)
+	return updated, diff, err
+}
+
+func metadataDiffPayload(before, after jsontext.Value) (map[string]metadataKeyDiffPayload, error) {
+	diff, err := metadata.Diff(before, after)
 	if err != nil {
-		return nil, nil, fmt.Errorf("compute metadata diff: %w", err)
+		return nil, fmt.Errorf("compute metadata diff: %w", err)
 	}
 	payload := make(map[string]metadataKeyDiffPayload, len(diff))
 	for key, value := range diff {
 		payload[key] = metadataKeyDiffPayload{From: value.From, To: value.To}
 	}
-	return updated, payload, nil
+	return payload, nil
 }

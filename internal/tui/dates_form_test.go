@@ -3,6 +3,8 @@ package tui
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kit/tui/splitlayout"
 )
@@ -78,8 +81,20 @@ func (h *datesHarness) stored() map[string]string {
 	h.t.Helper()
 	current, err := h.env.DB.IssueByUID(h.t.Context(), h.issue.UID, db.IncludeDeletedNo)
 	require.NoError(h.t, err)
+	var fields map[string]jsontext.Value
+	require.NoError(h.t, json.Unmarshal([]byte(current.Metadata), &fields))
 	out := map[string]string{}
-	require.NoError(h.t, json.Unmarshal([]byte(current.Metadata), &out))
+	for key, raw := range fields {
+		if key == "scheduled_on" || key == "deadline_on" {
+			value, err := metadata.ScheduleValueText(raw)
+			require.NoError(h.t, err)
+			out[key] = value
+			continue
+		}
+		var value string
+		require.NoError(h.t, json.Unmarshal(raw, &value))
+		out[key] = value
+	}
 	return out
 }
 
@@ -124,19 +139,26 @@ func (h *datesHarness) undo() {
 }
 
 func TestDatesFormWritesRelativeAndLocalTimeForms(t *testing.T) {
-	for _, tt := range []struct{ name, typed, want string }{
-		{"local minute", "2026-11-15T09:00", "2026-11-15T09:00"},
-		{"weeks", "+2w", "2026-11-16"},
+	for _, tt := range []struct {
+		name, typed string
+		want        func(string) string
+	}{
+		{"local minute", "2026-11-15T09:00", func(string) string { return "2026-11-15T09:00" }},
+		{"weeks", "+2w", func(today string) string {
+			day, _ := time.Parse(time.DateOnly, today)
+			return day.AddDate(0, 0, 14).Format(time.DateOnly)
+		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newDatesHarness(t, nil, viewDetail)
 			before := h.revision()
 			h.openForm()
+			want := tt.want(h.m.input.dates.scheduledToday)
 			h.fill(tt.typed, "")
 			h.save()
 
 			assert.Equal(t, inputNone, h.m.input.kind, "a saved form closes")
-			assert.Equal(t, map[string]string{"scheduled_on": tt.want}, h.stored())
+			assert.Equal(t, map[string]string{"scheduled_on": want}, h.stored())
 			assert.Equal(t, before+1, h.revision())
 		})
 	}
@@ -155,10 +177,13 @@ func TestDatesFormWritesOnlyChangedKeysInOneRequest(t *testing.T) {
 	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-09-01T09:00", "deadline_on": "2026-11-20"}, viewList)
 	before := h.revision()
 	h.openForm()
+	day, err := time.Parse(time.DateOnly, h.m.input.dates.deadlineToday)
+	require.NoError(t, err)
+	deadline := day.AddDate(0, 0, 7).Format(time.DateOnly)
 	h.fill("2026-09-01T09:00", "+1w")
 	h.save()
 
-	assert.Equal(t, map[string]string{"scheduled_on": "2026-09-01T09:00", "deadline_on": "2026-11-09"}, h.stored(),
+	assert.Equal(t, map[string]string{"scheduled_on": "2026-09-01T09:00", "deadline_on": deadline}, h.stored(),
 		"the untouched Scheduled keeps its time")
 	assert.Equal(t, before+1, h.revision(), "both keys travel in one patch")
 }
@@ -363,9 +388,11 @@ func TestDatesFormConflictRemovesRemotelyClosedIssueFromToday(t *testing.T) {
 func TestDatesUndoWritesThePreviousDatesBack(t *testing.T) {
 	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-20"}, viewDetail)
 	h.openForm()
+	day, err := time.Parse(time.DateOnly, h.m.input.dates.scheduledToday)
+	require.NoError(t, err)
 	h.fill("tomorrow", "")
 	h.save()
-	require.Equal(t, map[string]string{"scheduled_on": "2026-11-03"}, h.stored())
+	require.Equal(t, map[string]string{"scheduled_on": day.AddDate(0, 0, 1).Format(time.DateOnly)}, h.stored())
 	changed := h.revision()
 
 	h.undo()
@@ -373,6 +400,40 @@ func TestDatesUndoWritesThePreviousDatesBack(t *testing.T) {
 	assert.Equal(t, map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-20"}, h.stored())
 	assert.Equal(t, changed+1, h.revision(), "one patch")
 	assert.Empty(t, h.m.undoHistory.entries)
+}
+
+func TestDatesUndoRestoresSavedScheduleRules(t *testing.T) {
+	h := newDatesHarness(t, nil, viewDetail)
+	saved, err := metadata.NewScheduleValue("2026-11-02T09:00", "America/New_York")
+	require.NoError(t, err)
+	_, err = h.env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, `{"scheduled_on":`+string(saved)+`}`, h.issue.ID)
+	require.NoError(t, err)
+	h.reload()
+	h.openForm()
+	h.fill("", "")
+	h.save()
+	h.undo()
+	current, err := h.env.DB.IssueByUID(t.Context(), h.issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	var values map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(current.Metadata), &values))
+	require.JSONEq(t, string(saved), string(values["scheduled_on"]))
+}
+
+func TestDateUndoDetectsChangedScheduleZone(t *testing.T) {
+	first, err := metadata.NewScheduleValue("2026-11-02T09:00", "America/New_York")
+	require.NoError(t, err)
+	second, err := metadata.NewScheduleValue("2026-11-02T09:00", "Europe/Paris")
+	require.NoError(t, err)
+	before := Issue{Metadata: issueMetadata{ScheduledOn: first}}
+	after := Issue{Metadata: issueMetadata{ScheduledOn: second}}
+	require.Equal(t, []string{"scheduled_on"}, changedDateKeys(&before, &after))
+	require.False(t, sameDates(&before, &after, []string{"scheduled_on"}))
+	var saved map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(first, &saved))
+	reordered := Issue{Metadata: issueMetadata{ScheduledOn: jsontext.Value(fmt.Sprintf(`{"tzdata_version":%s,"timezone":"America/New_York","value":"2026-11-02T09:00"}`, saved["tzdata_version"]))}}
+	require.Empty(t, changedDateKeys(&before, &reordered))
+	require.True(t, sameDates(&before, &reordered, []string{"scheduled_on"}))
 }
 
 func TestDatesUndoRestoresDatesSetOnAnIssueWithNone(t *testing.T) {
@@ -449,4 +510,227 @@ func TestDetailStripShowsBothDates(t *testing.T) {
 	got = render(Issue{})
 	assert.NotContains(t, got, "scheduled:")
 	assert.NotContains(t, got, "deadline:")
+}
+
+func TestDatesFormShowsSavedInstantInItsZone(t *testing.T) {
+	t.Run("fractional seconds", func(t *testing.T) {
+		h := newDatesHarness(t, nil, viewDetail)
+		saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00.123456789Z", "America/New_York")
+		require.NoError(t, err)
+		_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": saved, "deadline_on": saved}})
+		require.NoError(t, err)
+		h.reload()
+		h.openForm()
+		h.fill(strings.Replace(h.m.input.fieldValue(fieldScheduled), "2025-12-31", "2026-01-02", 1), strings.Replace(h.m.input.fieldValue(fieldDeadline), "2025-12-31", "2026-01-02", 1))
+		h.save()
+		issue, err := h.env.DB.IssueByID(t.Context(), h.issue.ID)
+		require.NoError(t, err)
+		for _, field := range []string{"scheduled_on", "deadline_on"} {
+			text, _, at, _, err := metadata.ScheduleFieldInstant(string(issue.Metadata), field, "UTC")
+			assert.NoError(t, err, field)
+			assert.Equal(t, "2026-01-02T21:00:00.123456789", text, field)
+			assert.Equal(t, time.Date(2026, 1, 3, 2, 0, 0, 123456789, time.UTC), at.UTC(), field)
+		}
+	})
+	h := newDatesHarness(t, nil, viewDetail)
+	saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
+	require.NoError(t, err)
+	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": saved}})
+	require.NoError(t, err)
+	h.reload()
+	h.openForm()
+	require.Equal(t, "2025-12-31T21:00:00", h.m.input.fieldValue(fieldScheduled))
+	before := h.revision()
+	h.save()
+	require.Equal(t, before, h.revision())
+	h.openForm()
+	h.fill("2025-12-31T22:00:00", "")
+	h.save()
+	issue, err := h.env.DB.IssueByID(t.Context(), h.issue.ID)
+	require.NoError(t, err)
+	_, zone, at, _, err := metadata.ScheduleFieldInstant(string(issue.Metadata), "scheduled_on", "")
+	require.NoError(t, err)
+	require.Equal(t, "America/New_York", zone)
+	require.Equal(t, time.Date(2026, 1, 1, 3, 0, 0, 0, time.UTC), at.UTC())
+}
+
+func TestDatesFormShowsDateOnlyValues(t *testing.T) {
+	h := newDatesHarness(t, nil, viewDetail)
+	scheduled, err := metadata.NewScheduleValue("2026-06-01", "America/New_York")
+	require.NoError(t, err)
+	deadline, err := metadata.NewScheduleValue("2026-06-02", "Europe/Paris")
+	require.NoError(t, err)
+	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": scheduled, "deadline_on": deadline}})
+	require.NoError(t, err)
+	h.reload()
+	h.openForm()
+	assert.Equal(t, "2026-06-01", h.m.input.fieldValue(fieldScheduled))
+	assert.Equal(t, "2026-06-02", h.m.input.fieldValue(fieldDeadline))
+}
+
+func TestDatesFormTodayAdvancesInSavedZone(t *testing.T) {
+	h := newDatesHarness(t, nil, viewDetail)
+	saved, err := metadata.NewScheduleValue("2026-11-08", "America/New_York")
+	require.NoError(t, err)
+	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": saved}})
+	require.NoError(t, err)
+	h.reload()
+	now := time.Date(2026, 11, 10, 4, 59, 0, 0, time.UTC)
+	h.m.toastNow = func() time.Time { return now }
+	h.openForm()
+	h.fill("today", "")
+	assert.Contains(t, stripANSI(renderDatesForm(h.m.input, 80, now)), "2026-11-09 Mon")
+	now = now.Add(2 * time.Minute)
+	assert.Contains(t, stripANSI(renderDatesForm(h.m.input, 80, now)), "2026-11-10 Tue")
+	h.save()
+	assert.Equal(t, "2026-11-10", h.stored()["scheduled_on"])
+}
+
+func TestDetailStripShowsSavedSchedule(t *testing.T) {
+	for _, tc := range []struct {
+		name, value, resolved, want string
+	}{
+		{"instant across date boundary", "2026-01-01T02:00:00Z", "2025-12-31", "scheduled: 2025-12-31T21:00:00"},
+		{"civil time", "2026-01-01T09:30", "2026-01-01", "scheduled: 2026-01-01T09:30"},
+		{"instant with seconds", "2026-01-01T15:00:42Z", "2026-01-01", "scheduled: 2026-01-01T10:00:42"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			saved, err := metadata.NewScheduleValue(tc.value, "America/New_York")
+			require.NoError(t, err)
+			issue := Issue{Metadata: issueMetadata{ScheduledOn: saved}, ScheduledOnDate: tc.resolved}
+			got := stripANSI(strings.Join(renderDocumentMetadata(100, issue, nil, nil, scope{}, uidDisplayNone), "\n"))
+			assert.Contains(t, got, tc.want)
+		})
+	}
+}
+
+func TestDetailStripReportsUnknownScheduleRules(t *testing.T) {
+	issue := Issue{Metadata: issueMetadata{ScheduledOn: jsontext.Value(`{"value":"2026-01-01","timezone":"UTC","tzdata_version":"unknown"}`)}}
+	got := stripANSI(strings.Join(renderDocumentMetadata(100, issue, nil, nil, scope{}, uidDisplayNone), "\n"))
+	assert.Contains(t, got, "unsupported schedule tzdata version")
+}
+
+func TestDatesFormRelativeInputsUseEachScheduleDay(t *testing.T) {
+	issue := Issue{ScheduledOnToday: "2026-01-01", DeadlineOnToday: "2025-12-31"}
+	form := newDatesForm(formTarget{}, issue)
+	form.field(fieldScheduled).setValue("tomorrow")
+	form.field(fieldDeadline).setValue("tomorrow")
+	input, err := datesInputFromForm(form, time.Date(2025, 12, 31, 23, 0, 0, 0, time.UTC), "alice")
+	require.NoError(t, err)
+	require.Equal(t, "2026-01-02", *input.Set["scheduled_on"])
+	require.Equal(t, "2026-01-01", *input.Set["deadline_on"])
+
+	for _, tc := range []struct {
+		name, scheduled, deadline string
+		readFail, noChange        bool
+	}{
+		{"new day", "2026-06-01", "2026-06-02", false, false},
+		{"opened tomorrow becomes a change", "2026-01-01", "2026-01-02", false, false},
+		{"day refresh fails", "", "", true, false},
+		{"refreshed no-op", "2026-01-01", "2026-01-01", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Date(2026, 1, 1, 4, 59, 0, 0, time.UTC)
+			scheduledZone, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
+			require.NoError(t, err)
+			if tc.readFail {
+				tc.scheduled, tc.deadline = "2026-06-01", "2026-06-02"
+			}
+			scheduled, err := metadata.NewScheduleValue(tc.scheduled, "America/New_York")
+			require.NoError(t, err)
+			deadline := jsontext.Value(fmt.Sprintf("%q", tc.deadline))
+			current := Issue{UID: "issue-1", ShortID: "example", ProjectID: 7, Revision: 3,
+				Metadata:         issueMetadata{ScheduledOn: scheduled, DeadlineOn: deadline},
+				ScheduledOnToday: now.In(scheduledZone).Format(time.DateOnly), DeadlineOnToday: now.In(scheduledZone).Format(time.DateOnly)}
+			writes := 0
+			client := NewClient("http://daemon.example", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.Method == http.MethodGet {
+					if tc.readFail {
+						return nil, fmt.Errorf("refresh unavailable")
+					}
+					now = now.Add(2 * time.Minute)
+					fresh := current
+					fresh.ScheduledOnToday = now.In(scheduledZone).Format(time.DateOnly)
+					fresh.DeadlineOnToday = now.In(scheduledZone).Format(time.DateOnly)
+					return jsonResponse(t, map[string]any{"issue": fresh}), nil
+				}
+				require.Equal(t, http.MethodPost, r.Method)
+				require.True(t, strings.HasSuffix(r.URL.Path, "/metadata"))
+				require.Equal(t, `"rev-3"`, r.Header.Get("If-Match"))
+				var body struct {
+					Patch map[string]string `json:"patch"`
+				}
+				require.NoError(t, json.UnmarshalRead(r.Body, &body))
+				assert.Equal(t, "2026-01-02", body.Patch["scheduled_on"], "tomorrow must use the saved zone's new day even before the host's midnight")
+				if tc.deadline == "2026-01-02" {
+					assert.NotContains(t, body.Patch, "deadline_on", "an unchanged deadline must not be written")
+				} else {
+					assert.Equal(t, "2026-01-02", body.Patch["deadline_on"])
+				}
+				writes++
+				return jsonResponse(t, map[string]any{"changed": true, "issue": current}), nil
+			})})
+			m := filterFormFixture()
+			m.api = client
+			m.toastNow = func() time.Time { return now }
+			m.input = newDatesForm(formTarget{projectID: 7, issueShortID: "example", origin: "list"}, current)
+			m.input.field(fieldScheduled).setValue("tomorrow")
+			m.input.field(fieldDeadline).setValue("tomorrow")
+			if tc.noChange {
+				m.input.field(fieldScheduled).setValue("today")
+				m.input.field(fieldDeadline).setValue("today")
+			}
+			m, cmd := m.commitDatesForm()
+			require.NotNil(t, cmd)
+			done := cmd().(mutationDoneMsg)
+			if tc.readFail {
+				require.ErrorContains(t, done.err, "refresh unavailable")
+				require.Zero(t, writes, "a failed day refresh must not send a stale-day write")
+			} else if tc.noChange {
+				require.NoError(t, done.err)
+				require.Zero(t, writes)
+				routed, followup := m.routeFormMutation(done)
+				next := routed.(Model)
+				require.Equal(t, inputNone, next.input.kind)
+				require.Empty(t, next.list.status, "no write must not report updated dates")
+				require.Nil(t, followup)
+			} else {
+				require.NoError(t, done.err)
+				require.Equal(t, 1, writes)
+			}
+		})
+	}
+	t.Run("empty legacy Local uses daemon day", func(t *testing.T) {
+		now := time.Date(2026, 1, 1, 2, 0, 0, 0, time.UTC)
+		current := Issue{UID: "issue-1", ShortID: "example", ProjectID: 7, Revision: 3, ScheduledOnToday: "2025-12-31", DeadlineOnToday: "2025-12-31", Metadata: issueMetadata{Timezone: jsontext.Value(`"Local"`)}}
+		writes := 0
+		client := NewClient("http://daemon.example", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method == http.MethodGet {
+				return jsonResponse(t, map[string]any{"issue": current}), nil
+			}
+			require.Equal(t, http.MethodPost, r.Method)
+			require.True(t, strings.HasSuffix(r.URL.Path, "/metadata"))
+			require.Equal(t, `"rev-3"`, r.Header.Get("If-Match"))
+			var body struct {
+				Patch map[string]jsontext.Value `json:"patch"`
+			}
+			require.NoError(t, json.UnmarshalRead(r.Body, &body))
+			for _, field := range []string{"scheduled_on", "deadline_on"} {
+				assert.JSONEq(t, `"2025-12-31"`, string(body.Patch[field]))
+			}
+			writes++
+			return jsonResponse(t, map[string]any{"changed": true, "issue": current}), nil
+		})})
+		m := filterFormFixture()
+		m.api = client
+		m.toastNow = func() time.Time { return now }
+		m.input = newDatesForm(formTarget{projectID: 7, issueShortID: "example", origin: "list"}, current)
+		m.input.field(fieldScheduled).setValue("today")
+		m.input.field(fieldDeadline).setValue("today")
+		_, cmd := m.commitDatesForm()
+		require.NotNil(t, cmd)
+		done := cmd().(mutationDoneMsg)
+		require.NoError(t, done.err)
+		require.Equal(t, 1, writes)
+	})
 }

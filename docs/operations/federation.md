@@ -2228,6 +2228,13 @@ not require coordinated upgrades for projects that only synchronize ordinary
 issues. A newer CLI feature may also need a newer daemon API; see the
 [API version history](../reference/http-api.md#version-history).
 
+Saved issue dates have their own requirement. After a daemon upgrade, explicitly
+saving `scheduled_on` or `deadline_on`, including unchanged legacy text, stores
+it with its timezone rules. Every peer receiving that project's events, including
+relay hops and signed checkpoints, must support saved dates. An older peer's sync for that project
+stays pending, without quarantine, until it is upgraded. Untouched legacy string
+dates stay compatible. See [Reserved keys](../reference/metadata.md#reserved-keys-vs-opaque-pass-through).
+
 ### When a spoke is newer than its hub
 
 Push requests declare the schema version required by their event payloads.

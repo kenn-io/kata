@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"fmt"
 	"slices"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // RunUISnapshotGraphReachContract checks that graph traversal stays within visible issues.
@@ -807,14 +809,21 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 	t.Run("selected issues project timed deadline dates", func(t *testing.T) {
 		for _, test := range []struct {
 			name     string
+			want     string
 			metadata map[string]jsontext.Value
 		}{
-			{name: "UTC instant", metadata: map[string]jsontext.Value{
-				"deadline_on": jsontext.Value(`"2026-09-01T00:30:00Z"`),
+			{name: "saved rules", want: "2026-09-01", metadata: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value(`{"value":"2026-09-01T09:00","timezone":"Asia/Tokyo","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}`),
+				"deadline_on":  jsontext.Value(`{"value":"2026-09-01T09:00","timezone":"Asia/Tokyo","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}`),
 			}},
-			{name: "local time", metadata: map[string]jsontext.Value{
-				"deadline_on": jsontext.Value(`"2026-09-01T09:00"`),
-				"timezone":    jsontext.Value(`"Asia/Tokyo"`),
+			{name: "UTC instant", want: "2026-08-31", metadata: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value(`"2026-09-01T00:30:00Z"`),
+				"deadline_on":  jsontext.Value(`"2026-09-01T00:30:00Z"`),
+			}},
+			{name: "local time", want: "2026-08-31", metadata: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value(`"2026-09-01T09:00"`),
+				"deadline_on":  jsontext.Value(`"2026-09-01T09:00"`),
+				"timezone":     jsontext.Value(`"Asia/Tokyo"`),
 			}},
 		} {
 			t.Run(test.name, func(t *testing.T) {
@@ -834,7 +843,8 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 				})
 				require.NoError(t, err)
 				require.NotNil(t, snapshot.SelectedIssue)
-				require.Equal(t, "2026-08-31", snapshot.SelectedIssue.DeadlineOnDate)
+				require.Equal(t, test.want, snapshot.SelectedIssue.ScheduledOnDate)
+				require.Equal(t, test.want, snapshot.SelectedIssue.DeadlineOnDate)
 			})
 		}
 	})
@@ -1158,4 +1168,79 @@ func requireCursorUnchanged(ctx context.Context, t *testing.T, store db.UIStore,
 	got, err := store.UIEventCursor(ctx)
 	require.NoError(t, err)
 	require.Equal(t, want, got, "no-op or rejected write must not advance cursor")
+}
+
+// RunUISnapshotSavedCalendarContract checks the calendar projection without a new event.
+func RunUISnapshotSavedCalendarContract(t *testing.T, open func(*testing.T) db.Storage) {
+	t.Helper()
+	store := open(t)
+	uiStore := store.(db.UIStore)
+	ctx := t.Context()
+	project := createCursorProject(ctx, t, store)
+	raw := fmt.Sprintf(`{"value":"2026-01-01","timezone":"Asia/Tokyo","tzdata_version":%q}`, metadata.ScheduleTZDataVersion)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Tokyo schedule", Author: "user-a", Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(raw)}})
+	require.NoError(t, err)
+	query := db.UISnapshotQuery{View: "today", TimeZone: "America/Los_Angeles", LocalDate: "2025-12-31", CalendarAt: "2025-12-31T14:59:59Z"}
+	before, err := uiStore.ReadUISnapshot(ctx, query)
+	require.NoError(t, err)
+	require.NotContains(t, uiIssueUIDs(before.Issues), issue.UID)
+	require.Equal(t, "2025-12-31T15:00:00Z", before.CalendarBoundary.UTC().Format(time.RFC3339))
+	query.CalendarAt = "2025-12-31T15:00:00Z"
+	after, err := uiStore.ReadUISnapshot(ctx, query)
+	require.NoError(t, err)
+	require.Equal(t, before.Cursor, after.Cursor)
+	require.Contains(t, uiIssueUIDs(after.Issues), issue.UID)
+	query.View = "all-open"
+	all, err := uiStore.ReadUISnapshot(ctx, query)
+	require.NoError(t, err)
+	require.Equal(t, "2026-01-01", all.Issues[0].ScheduledOnToday)
+}
+
+// RunUISnapshotLimitIgnoresUnseenFutureSchedule checks that unreadable schedules outside the limit do not fail a snapshot.
+func RunUISnapshotLimitIgnoresUnseenFutureSchedule(t *testing.T, open func(*testing.T) db.Storage) {
+	t.Helper()
+	store := open(t)
+	project := createCursorProject(t.Context(), t, store)
+	unseen := createCursorIssue(t.Context(), t, store, project.ID, "Unseen")
+	queryer := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	_, err := queryer.ExecContext(t.Context(), `UPDATE issues SET metadata=$1 WHERE id=$2`, `{"scheduled_on":{"value":"2026-01-01","timezone":"UTC","tzdata_version":"future"}}`, unseen.ID)
+	require.NoError(t, err)
+	visible := createCursorIssue(t.Context(), t, store, project.ID, "Visible")
+	snapshot, err := store.(db.UIStore).ReadUISnapshot(t.Context(), db.UISnapshotQuery{View: "all-open", Limit: 1, CalendarAt: "2026-01-01T00:00:00Z"})
+	require.NoError(t, err)
+	require.Equal(t, []string{visible.UID}, uiIssueUIDs(snapshot.Issues))
+	ready, err := store.(db.UIStore).ReadUISnapshot(t.Context(), db.UISnapshotQuery{View: "all-open", Statuses: []string{"ready"}, Limit: 1, ReadyAt: "2026-01-01T00:00:00Z", CalendarAt: "2026-01-01T00:00:00Z"})
+	require.NoError(t, err)
+	require.Equal(t, []string{visible.UID}, uiIssueUIDs(ready.Issues))
+	_, err = store.(db.UIStore).ReadUISnapshot(t.Context(), db.UISnapshotQuery{View: "all-open", Limit: 2, CalendarAt: "2026-01-01T00:00:00Z"})
+	require.ErrorContains(t, err, "unsupported schedule tzdata version")
+}
+
+// RunUISnapshotBoundedCalendar checks that lower-ranked dates cannot expire a full result.
+func RunUISnapshotBoundedCalendar(t *testing.T, open func(*testing.T) db.Storage) {
+	store := open(t)
+	ctx := t.Context()
+	project := createCursorProject(ctx, t, store)
+	create := func(title, date, zone string) db.Issue {
+		raw, err := metadata.NewScheduleValue(date, zone)
+		require.NoError(t, err)
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: title, Author: "user-a", Metadata: map[string]jsontext.Value{"scheduled_on": raw}})
+		require.NoError(t, err)
+		return issue
+	}
+	create("older excluded", "2026-01-03", "America/New_York")
+	visible := create("visible", "2026-01-01", "UTC")
+	create("newer excluded", "2026-01-03", "Asia/Tokyo")
+	query := db.UISnapshotQuery{ProjectUID: project.UID, View: "today", TimeZone: "UTC", LocalDate: "2026-01-01", CalendarAt: "2026-01-01T04:00:00Z", Limit: 1}
+	bounded, err := store.(db.UIStore).ReadUISnapshot(ctx, query)
+	require.NoError(t, err)
+	require.Equal(t, []string{visible.UID}, uiIssueUIDs(bounded.Issues))
+	require.Equal(t, "2026-01-01T15:00:00Z", bounded.CalendarBoundary.UTC().Format(time.RFC3339))
+	query.Limit = 0
+	unlimited, err := store.(db.UIStore).ReadUISnapshot(ctx, query)
+	require.NoError(t, err)
+	require.Equal(t, uiIssueUIDs(unlimited.Issues), uiIssueUIDs(bounded.Issues))
+	require.Equal(t, "2026-01-01T05:00:00Z", unlimited.CalendarBoundary.UTC().Format(time.RFC3339))
 }

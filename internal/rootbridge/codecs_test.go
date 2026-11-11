@@ -1,12 +1,12 @@
 package rootbridge
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/pkg/connector"
 )
 
@@ -82,103 +82,77 @@ func TestScheduleCodecKataPatchPreservesCivilTimesAcrossDST(t *testing.T) {
 	} {
 		patch, err := codec.KataPatch(db.Issue{}, value)
 		require.NoError(t, err)
-		assert.JSONEq(t, `"`+value.Value+`"`, string(patch["scheduled_on"]))
-		assert.JSONEq(t, `"America/New_York"`, string(patch["timezone"]))
+		saved, err := metadata.DecodeSavedSchedule(patch["scheduled_on"])
+		require.NoError(t, err)
+		assert.Equal(t, value.Value, saved.Value)
+		assert.Equal(t, "America/New_York", saved.Timezone)
+		assert.NotContains(t, patch, "timezone")
 	}
+	_, err := codec.KataPatch(db.Issue{Metadata: db.JSONBlob(`{"timezone":"Local"}`)}, connector.FieldValue{Kind: fieldKindLocalDateTime, Value: "2026-08-21T09:30", Timezone: "Local"})
+	require.ErrorContains(t, err, "unknown schedule timezone")
 }
 
-func TestScheduleCodecKataPatchRejectsIncompatibleMappedLocalTimezone(t *testing.T) {
-	issue := db.Issue{Metadata: db.JSONBlob(`{"deadline_on":"2026-08-20T09:30","timezone":"America/New_York"}`)}
-	_, err := fieldCodecs["scheduled_on"].KataPatch(issue, connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "America/Los_Angeles"})
-	require.Error(t, err)
-}
-
-func TestScheduleCodecKataPatchRejectsIncompatibleTimezoneWithOtherDate(t *testing.T) {
-	cases := []struct {
-		name     string
-		codec    string
-		metadata string
+func TestScheduleCodecRecurrenceZonePrecedence(t *testing.T) {
+	saved, err := metadata.NewScheduleValue("2026-08-20", "Europe/Paris")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, field, raw, want string
+		value                  connector.FieldValue
 	}{
-		{
-			name:     "scheduled date pins deadline local timezone",
-			codec:    "deadline_on",
-			metadata: `{"scheduled_on":"2026-08-20","timezone":"America/New_York"}`,
-		},
-		{
-			name:     "deadline date pins scheduled local timezone",
-			codec:    "scheduled_on",
-			metadata: `{"deadline_on":"2026-08-20","timezone":"America/New_York"}`,
-		},
-	}
-	for _, tc := range cases {
+		{"legacy", "scheduled_on", `{"scheduled_on":"2026-08-20"}`, "America/New_York", date("2026-08-21")},
+		{"saved", "scheduled_on", `{"scheduled_on":` + string(saved) + `}`, "Europe/Paris", date("2026-08-21")},
+		{"issue zone", "scheduled_on", `{"timezone":"Europe/Paris"}`, "Europe/Paris", date("2026-08-21")},
+		{"deadline", "deadline_on", `{}`, "UTC", date("2026-08-21")},
+		{"connector zone", "scheduled_on", `{}`, "Asia/Tokyo", connector.FieldValue{Kind: fieldKindLocalDateTime, Value: "2026-08-21T09:30", Timezone: "Asia/Tokyo"}},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := fieldCodecs[tc.codec].KataPatch(
-				db.Issue{Metadata: db.JSONBlob(tc.metadata)},
-				connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "America/Los_Angeles"},
-			)
-			require.Error(t, err)
+			codec := scheduleCodec{key: tc.field, defaultTimezone: "UTC"}
+			recurrenceZone := ""
+			if tc.field == "scheduled_on" {
+				recurrenceZone = "America/New_York"
+			}
+			patch, err := codec.kataPatch(db.Issue{Metadata: db.JSONBlob(tc.raw)}, tc.value, recurrenceZone)
+			require.NoError(t, err)
+			got, err := metadata.DecodeSavedSchedule(patch[tc.field])
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.want, got.Timezone)
 		})
 	}
 }
 
-func TestScheduleCodecKataPatchAdoptsTimezoneWithOtherDateWithoutTimezone(t *testing.T) {
-	cases := []struct {
-		name     string
-		codec    string
-		metadata string
-		want     string
+func TestScheduleCodecUpdatesAliasBackedSchedule(t *testing.T) {
+	original, err := metadata.NewScheduleValue("2026-08-20T09:30", "US/Eastern")
+	require.NoError(t, err)
+	issue := db.Issue{Metadata: db.JSONBlob(`{"scheduled_on":` + string(original) + `}`)}
+	patch, err := fieldCodecs["scheduled_on"].KataPatch(issue, connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T10:30", Timezone: "US/Eastern"})
+	require.NoError(t, err)
+	saved, err := metadata.DecodeSavedSchedule(patch["scheduled_on"])
+	require.NoError(t, err)
+	require.Equal(t, "US/Eastern", saved.Timezone)
+	require.Equal(t, metadata.ScheduleTZDataVersion, saved.TZDataVersion)
+	require.Equal(t, "2026-08-20T10:30", saved.Value)
+}
+
+func TestScheduleCodecKataPatchKeepsOtherSchedule(t *testing.T) {
+	for _, tc := range []struct {
+		name, codec, metadata string
 	}{
-		{
-			name:     "scheduled date permits first deadline local timezone",
-			codec:    "deadline_on",
-			metadata: `{"scheduled_on":"2026-08-20"}`,
-			want:     `{"deadline_on":"2026-08-20T09:30","timezone":"America/Los_Angeles"}`,
-		},
-		{
-			name:     "deadline date permits first scheduled local timezone",
-			codec:    "scheduled_on",
-			metadata: `{"deadline_on":"2026-08-20"}`,
-			want:     `{"scheduled_on":"2026-08-20T09:30","timezone":"America/Los_Angeles"}`,
-		},
-	}
-	for _, tc := range cases {
+		{"other local with zone", "scheduled_on", `{"deadline_on":"2026-08-20T09:30","timezone":"America/New_York"}`},
+		{"scheduled local without zone", "deadline_on", `{"scheduled_on":"2026-08-20T09:30"}`},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			patch, err := fieldCodecs[tc.codec].KataPatch(
 				db.Issue{Metadata: db.JSONBlob(tc.metadata)},
-				connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "America/Los_Angeles"},
-			)
-			require.NoError(t, err)
-			got, err := json.Marshal(patch)
-			require.NoError(t, err)
-			assert.JSONEq(t, tc.want, string(got))
-		})
-	}
-}
-
-func TestScheduleCodecKataPatchRejectsTimezoneWithOtherLocalWithoutTimezone(t *testing.T) {
-	cases := []struct {
-		name     string
-		codec    string
-		metadata string
-	}{
-		{
-			name:     "scheduled local blocks deadline local timezone",
-			codec:    "deadline_on",
-			metadata: `{"scheduled_on":"2026-08-20T09:30"}`,
-		},
-		{
-			name:     "deadline local blocks scheduled local timezone",
-			codec:    "scheduled_on",
-			metadata: `{"deadline_on":"2026-08-20T09:30"}`,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := fieldCodecs[tc.codec].KataPatch(
-				db.Issue{Metadata: db.JSONBlob(tc.metadata)},
 				connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T10:30", Timezone: "America/Los_Angeles"},
 			)
-			require.Error(t, err)
+			require.NoError(t, err)
+			require.Len(t, patch, 1)
+			saved, err := metadata.DecodeSavedSchedule(patch[tc.codec])
+			require.NoError(t, err)
+			require.NotNil(t, saved)
+			assert.Equal(t, "2026-08-20T10:30", saved.Value)
+			assert.Equal(t, "America/Los_Angeles", saved.Timezone)
 		})
 	}
 }
@@ -190,21 +164,36 @@ func TestScheduleCodecKataPatchCanonicalizesAndClears(t *testing.T) {
 		value connector.FieldValue
 		want  string
 	}{
-		{"date", date("2026-08-20"), `{"deadline_on":"2026-08-20"}`},
-		{"instant", connector.FieldValue{Kind: "instant", Value: "2026-08-20T09:30:45.120000000Z"}, `{"deadline_on":"2026-08-20T09:30:45.12Z"}`},
-		{"clear", nullValue(), `{"deadline_on":null}`},
+		{"date", date("2026-08-20"), "2026-08-20"},
+		{"instant", connector.FieldValue{Kind: "instant", Value: "2026-08-20T09:30:45.120000000Z"}, "2026-08-20T09:30:45.12Z"},
+		{"clear", nullValue(), ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			patch, err := codec.KataPatch(db.Issue{}, tc.value)
 			require.NoError(t, err)
-			got, err := json.Marshal(patch)
-			require.NoError(t, err)
-			assert.JSONEq(t, tc.want, string(got))
+			if tc.want == "" {
+				assert.JSONEq(t, `null`, string(patch["deadline_on"]))
+			} else {
+				saved, err := metadata.DecodeSavedSchedule(patch["deadline_on"])
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, saved.Value)
+				assert.Equal(t, "UTC", saved.Timezone)
+			}
 		})
 	}
 }
 
+func TestScheduleCodecPinsFirstInstantInBundledAlias(t *testing.T) {
+	issue := db.Issue{Metadata: db.JSONBlob(`{"timezone":"US/Eastern","deadline_on":"2026-11-30"}`)}
+	value := connector.FieldValue{Kind: "instant", Value: "2026-11-12T02:30:00Z"}
+	patch, err := fieldCodecs["scheduled_on"].KataPatch(issue, value)
+	require.NoError(t, err)
+	require.Len(t, patch, 1)
+	saved, err := metadata.DecodeSavedSchedule(patch["scheduled_on"])
+	require.NoError(t, err)
+	require.Equal(t, &metadata.SavedSchedule{Value: value.Value, Timezone: "US/Eastern", TZDataVersion: metadata.ScheduleTZDataVersion}, saved)
+}
 func TestScheduleCodecValidatesExternalDescriptor(t *testing.T) {
 	codec := fieldCodecs["scheduled_on"]
 	valid := connector.FieldDescriptor{ID: "field-id", DisplayName: "Plan date", AcceptedKinds: []string{"date", "local_datetime", "instant"}, Nullable: true, Writable: true, SchemaRevision: "v1"}

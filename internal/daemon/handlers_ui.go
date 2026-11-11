@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +41,7 @@ type normalizedUISnapshotIntent struct {
 	LocalDate          string   `json:"local_date,omitempty"`
 	TimeZone           string   `json:"time_zone,omitempty"`
 	ReadyAt            string   `json:"ready_at,omitempty"`
+	CalendarAt         string   `json:"calendar_at,omitempty"`
 	DefaultTimezone    string   `json:"default_timezone,omitempty"`
 	Limit              int      `json:"limit"`
 	ProjectAccessActor string   `json:"project_access_actor,omitempty"`
@@ -58,7 +60,7 @@ func (in normalizedUISnapshotIntent) storeQuery() db.UISnapshotQuery {
 		Relationships: append([]string(nil), in.Relationships...),
 		Text:          in.Text, SelectedIssueUID: in.SelectedIssueUID,
 		IncludeGraph: in.IncludeGraph, IncludeHistory: in.IncludeHistory,
-		LocalDate: in.LocalDate, TimeZone: in.TimeZone, ReadyAt: in.ReadyAt,
+		LocalDate: in.LocalDate, TimeZone: in.TimeZone, ReadyAt: in.ReadyAt, CalendarAt: in.CalendarAt,
 		DefaultTimezone: in.DefaultTimezone, Limit: in.Limit,
 	}
 	if len(in.Statuses) == 1 {
@@ -98,6 +100,10 @@ type uiETagBasis struct {
 func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 	authorityCache := newUISnapshotAuthorityCache()
 	enrichmentCache := newUISnapshotEnrichmentCache()
+	if cfg.UIClock != nil {
+		authorityCache.clock = cfg.UIClock
+		enrichmentCache.clock = cfg.UIClock
+	}
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "resolveUIIssueReference",
 		Method:      http.MethodGet,
@@ -123,7 +129,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      http.MethodGet,
 		Path:        "/api/v1/ui/snapshot",
 		Summary:     "Read a coherent browser snapshot",
-		Description: "Returns 304 without projection reads when If-None-Match matches the current durable cursor, normalized intent, and effective capabilities.",
+		Description: "Returns 304 when the snapshot and its calendar projections are unchanged.",
 		Responses: map[string]*huma.Response{
 			"304": {Description: "Snapshot unchanged"},
 		},
@@ -142,7 +148,13 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				intent.ProjectAccessEpoch = decision.PolicyRevision
 				intent.ProjectAccessUIDs = slices.Clone(decision.ProjectUIDs)
 			}
-			intent.ReadyAt = effectiveUIReadyAt(intent.Statuses, cfg.UIClock)
+			clock := cfg.UIClock
+			if clock == nil {
+				clock = time.Now
+			}
+			now := clock()
+			intent.ReadyAt = effectiveUIReadyAt(intent.Statuses, func() time.Time { return now })
+			intent.CalendarAt = now.UTC().Format(time.RFC3339Nano)
 			intent.DefaultTimezone = cfg.DefaultTimezone
 			if err := normalizeIssueScopeForUISnapshot(ctx, &intent); err != nil {
 				return nil, err
@@ -158,14 +170,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if err != nil {
 					return nil, internalAPIError(err)
 				}
-				validator, err := makeUIETag(intent, cursor, policy)
-				if err != nil {
-					return nil, internalAPIError(err)
-				}
-				if matchesStrongETag(in.IfNoneMatch, validator) {
-					return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: validator}, nil
-				}
 				observedCursor = &cursor
+				if tag := matchingSnapshotETag(in.IfNoneMatch, intent, cursor, policy, now); tag != "" {
+					return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: tag}, nil
+				}
 			}
 			_, scopedIssueIDs, err := applyIssueScopeToUISnapshot(ctx, cfg.DB, &intent)
 			if err != nil {
@@ -234,12 +242,12 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 					observedCursor = &cursor
 				}
 				if *observedCursor == cachedAuthority.Cursor {
-					validator, err := makeUIETag(intent, cachedResponse.Cursor, policy)
+					validator, err := makeUISnapshotETag(intent, cachedResponse, policy)
 					if err != nil {
 						return nil, internalAPIError(err)
 					}
 					recordUISnapshotDependencies(ctx, cachedDependencies)
-					return snapshotResponse(ctx, cachedResponse, intent, policy, validator)
+					return snapshotResponseIfChanged(ctx, cachedResponse, intent, policy, validator, in.IfNoneMatch)
 				}
 			}
 			query := intent.storeQuery()
@@ -272,12 +280,12 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if scopedIssueIDs == nil && uiSnapshotHasEnrichment(intent) {
 				enrichmentCache.put(enrichmentKey, data, dependencies)
 			}
-			validator, err := makeUIETag(intent, data.Cursor, policy)
+			validator, err := makeUISnapshotETag(intent, data, policy)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
 			recordUISnapshotDependencies(ctx, dependencies)
-			return snapshotResponse(ctx, data, intent, policy, validator)
+			return snapshotResponseIfChanged(ctx, data, intent, policy, validator, in.IfNoneMatch)
 		})
 
 	referencesOperation := huma.Operation{
@@ -756,6 +764,67 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 		}
 	}
 	return policy
+}
+
+// snapshotResponseIfChanged answers 304 with the current validator when
+// If-None-Match is "*" or names it. A wildcard needs the built snapshot's
+// calendar boundary, so it cannot take the projection-free tag shortcut.
+func snapshotResponseIfChanged(ctx context.Context, data db.UISnapshotData, intent normalizedUISnapshotIntent,
+	policy uiPolicy, validator, ifNoneMatch string,
+) (*api.UISnapshotResponse, error) {
+	if matchesStrongETag(ifNoneMatch, validator) {
+		return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: validator}, nil
+	}
+	return snapshotResponse(ctx, data, intent, policy, validator)
+}
+
+func makeUISnapshotETag(intent normalizedUISnapshotIntent, data db.UISnapshotData, policy uiPolicy) (string, error) {
+	start, err := time.Parse(time.RFC3339Nano, intent.CalendarAt)
+	if err != nil {
+		return "", err
+	}
+	end := int64(0)
+	if !data.CalendarBoundary.IsZero() {
+		end = data.CalendarBoundary.UnixNano()
+	}
+	return snapshotIntervalETag(intent, data.Cursor, policy, start.UnixNano(), end)
+}
+
+// The interval and its hash let a later request validate the projection
+// without rebuilding it. A zero end means there is no known day boundary.
+func snapshotIntervalETag(intent normalizedUISnapshotIntent, cursor int64, policy uiPolicy, start, end int64) (string, error) {
+	intent.CalendarAt = ""
+	digest, err := makeUIETag(struct {
+		Intent     normalizedUISnapshotIntent
+		Start, End int64
+	}{intent, start, end}, cursor, policy)
+	if err != nil {
+		return "", err
+	}
+	return `"` + strconv.FormatInt(start, 10) + "." + strconv.FormatInt(end, 10) + "." + strings.Trim(digest, `"`) + `"`, nil
+}
+
+func matchingSnapshotETag(header string, intent normalizedUISnapshotIntent, cursor int64, policy uiPolicy, now time.Time) string {
+	for value := range strings.SplitSeq(header, ",") {
+		candidate := strings.TrimSpace(value)
+		parts := strings.Split(strings.Trim(candidate, `"`), ".")
+		if len(parts) != 3 {
+			continue
+		}
+		start, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			continue
+		}
+		end, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || now.UnixNano() < start || (end != 0 && now.UnixNano() >= end) {
+			continue
+		}
+		current, err := snapshotIntervalETag(intent, cursor, policy, start, end)
+		if err == nil && candidate == current {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func makeUIETag(intent any, cursor int64, policy uiPolicy) (string, error) {

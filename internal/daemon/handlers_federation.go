@@ -324,7 +324,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			handshake.PendingArtifactOffers = len(pendingArtifacts) > 0
 			body.Relay = handshake
-			return &api.ProjectFederationResponse{Body: body}, nil
+			return &api.ProjectFederationResponse{Body: body, EventFeatures: db.SupportedEventFeatures}, nil
 		}
 		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, Metadata: true})
 		if err != nil {

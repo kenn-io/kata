@@ -693,6 +693,9 @@ type recurringCountingProbe struct {
 }
 
 func (p *recurringCountingProbe) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if strings.HasPrefix(query, "SELECT i.metadata FROM issues") {
+		return p.recurringProbeQuerier.QueryContext(ctx, query, args...)
+	}
 	rows, err := p.recurringProbeQuerier.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

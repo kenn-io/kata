@@ -9,6 +9,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCalendarBoundaryFindsDateRollback(t *testing.T) {
+	for _, tc := range []struct{ zone, now, today, want string }{
+		{"America/St_Johns", "2000-10-29T02:30:58Z", "2000-10-29", "2000-10-29T02:31:00Z"},
+		{"Pacific/Apia", "2011-12-30T09:59:58Z", "2011-12-29", "2011-12-30T10:00:00Z"},
+		{"America/New_York", "2026-03-08T06:00:00Z", "2026-03-08", "2026-03-09T04:00:00Z"},
+	} {
+		t.Run(tc.zone, func(t *testing.T) {
+			loc, err := ScheduleLocation(tc.zone, ScheduleTZDataVersion)
+			require.NoError(t, err)
+			now, err := time.Parse(time.RFC3339, tc.now)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, nextCalendarDay(now, loc, tc.today).UTC().Format(time.RFC3339))
+		})
+	}
+}
+
 func TestScheduledOnDueDateUsesIssueTimezone(t *testing.T) {
 	now := time.Date(2026, 9, 1, 0, 30, 0, 0, time.UTC)
 
@@ -334,5 +350,33 @@ func TestScheduleDueCutoffCoversEveryZone(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestSavedScheduleRulesAndProjection(t *testing.T) {
+	for _, tc := range []struct {
+		name, value, zone, instant, date, viewer string
+	}{
+		{"paris midnight", "2026-11-12T00:30", "Europe/Paris", "2026-11-11T23:30:00Z", "2026-11-12", "America/Los_Angeles"},
+		{"gap", "2026-03-08T02:30", "America/New_York", "2026-03-08T07:00:00Z", "2026-03-08", "America/Los_Angeles"},
+		{"overlap", "2026-11-01T01:30", "America/New_York", "2026-11-01T05:30:00Z", "2026-11-01", "America/Los_Angeles"},
+		{"instant", "2026-01-01T02:00:00Z", "America/New_York", "2026-01-01T02:00:00Z", "2025-12-31", "Asia/Tokyo"},
+		{"date only", "2026-11-12", "Europe/Paris", "2026-11-11T23:00:00Z", "2026-11-12", "America/Los_Angeles"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := NewScheduleValue(tc.value, tc.zone)
+			require.NoError(t, err)
+			doc := `{"scheduled_on":` + string(raw) + `}`
+			value, zone, at, present, err := ScheduleFieldInstant(doc, "scheduled_on", "UTC")
+			require.NoError(t, err)
+			require.True(t, present)
+			require.Equal(t, tc.value, value)
+			require.Equal(t, tc.zone, zone)
+			require.Equal(t, tc.instant, at.Format(time.RFC3339))
+			date, present, err := CalendarDate(doc, "scheduled_on", &tc.viewer, "UTC")
+			require.NoError(t, err)
+			require.True(t, present)
+			require.Equal(t, tc.date, date)
+		})
 	}
 }

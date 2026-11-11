@@ -71,8 +71,21 @@ function validAttachment(value: unknown): value is KataAttachment {
   )
 }
 
+function scheduleDisplay(raw: unknown, projectedDate: string | undefined): string | undefined {
+  const value = typeof raw === 'string' ? raw : (raw as { value?: unknown } | undefined)?.value
+  if (typeof value === 'string' && /^\d{4}-\d\d-\d\dT.*Z$/.test(value)) return value
+  if (typeof value === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?$/.test(value)) return value
+  return projectedDate ?? (typeof value === 'string' ? value : undefined)
+}
+
 export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailModel {
   const { issue } = wire
+  const scheduled =
+    issue.scheduled_on_display ??
+    scheduleDisplay(issue.metadata?.scheduled_on, issue.scheduled_on_date)
+  const deadline =
+    issue.deadline_on_display ??
+    scheduleDisplay(issue.metadata?.deadline_on, issue.deadline_on_date)
   const labels = issue.labels ?? wire.labels?.map((label) => label.label) ?? []
   const parent = wire.parent == null ? undefined : projectReference(wire.parent)
   const children = (wire.children ?? []).map(projectReference)
@@ -112,12 +125,8 @@ export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailMo
       ...creationFor(issue),
       ...(issue.owner === undefined ? {} : { owner: issue.owner }),
       ...(issue.priority === undefined ? {} : { priority: issue.priority }),
-      ...(issue.metadata?.scheduled_on === undefined
-        ? {}
-        : { scheduledOn: issue.metadata.scheduled_on }),
-      ...(issue.metadata?.deadline_on === undefined
-        ? {}
-        : { deadlineOn: issue.metadata.deadline_on }),
+      ...(scheduled === undefined ? {} : { scheduledOn: scheduled }),
+      ...(deadline === undefined ? {} : { deadlineOn: deadline }),
       checklist: (issue.metadata?.checklist ?? []).map((item) => ({ ...item })),
       labels: [...labels],
       ...(issue.updated_at === undefined ? {} : { updatedAt: issue.updated_at }),

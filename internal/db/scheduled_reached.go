@@ -135,8 +135,8 @@ func eventClock(event Event) FoldClock {
 }
 
 func scheduledString(raw jsontext.Value) string {
-	var value string
-	if json.Unmarshal(raw, &value) != nil {
+	value, err := metadata.ScheduleValueText(raw)
+	if err != nil {
 		return ""
 	}
 	return value

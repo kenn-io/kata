@@ -369,7 +369,8 @@ func (h toolHandlers) graph(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 			AssignmentExpiresOn: formatOptionalTime(node.AssignmentExpiresOn),
 			Priority:            node.Priority, Revision: node.Revision,
 			UpdatedAt: formatTime(node.UpdatedAt), ScheduledOn: metadataString(node.Metadata, "scheduled_on"),
-			Timezone: metadataString(node.Metadata, "timezone"),
+			ScheduledOnTimezone: savedScheduleTimezone(node.Metadata, "scheduled_on"),
+			Timezone:            metadataString(node.Metadata, "timezone"),
 		})
 	}
 	edges := make([]generated.ReachableGraphEdge, 0, len(response.Edges))

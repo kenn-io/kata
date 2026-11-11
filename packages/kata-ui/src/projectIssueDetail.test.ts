@@ -5,6 +5,7 @@ import { projectIssueDetail } from './projectIssueDetail.js'
 import type { KataIssueDetailWire } from './types.js'
 
 const versionID = '6f1c2e8a-2222-4222-8222-222222222222'
+const tzdataVersion = 'sha256:fixture'
 const attachment = {
   name: 'shot.png',
   media_type: 'image/png',
@@ -17,6 +18,59 @@ function acceptCanonicalWire(wire: ShowIssueResponseBody): KataIssueDetailWire {
 }
 
 describe('projectIssueDetail', () => {
+  it.each([
+    ['legacy', '2026-11-12T09:30', '2026-11-12', '2026-11-12T09:30'],
+    ['saved', { value: '2026-11-12T09:30', timezone: 'America/New_York', tzdata_version: tzdataVersion }, '2026-11-12', '2026-11-12T09:30'],
+    ['legacy instant', '2026-01-01T02:00:00Z', '2026-01-01', '2026-01-01T02:00:00Z'],
+  ])('retains the time in %s schedules', (_name, value, date, expected) => {
+    const detail = projectIssueDetail({
+      issue: {
+        uid: '01TASK',
+        title: 'Scheduled',
+        status: 'open',
+        scheduled_on_date: date,
+        deadline_on_date: date,
+        metadata: { scheduled_on: value, deadline_on: value },
+      },
+    })
+    expect(detail.issue.scheduledOn).toBe(expected)
+    expect(detail.issue.deadlineOn).toBe(expected)
+  })
+  it('prefers projected dates for schedule formats it cannot interpret', () => {
+    const detail = projectIssueDetail({
+      issue: {
+        uid: '01TASK',
+        title: 'Scheduled',
+        status: 'open',
+        scheduled_on_date: '2026-11-12',
+        deadline_on_date: '2026-11-13',
+        metadata: { scheduled_on: 'future-format', deadline_on: { value: 'future-format', timezone: 'UTC', tzdata_version: tzdataVersion } },
+      },
+    } as unknown as KataIssueDetailWire)
+    expect(detail.issue.scheduledOn).toBe('2026-11-12')
+    expect(detail.issue.deadlineOn).toBe('2026-11-13')
+  })
+  it('shows saved schedules on their resolved calendar dates', () => {
+    const saved = {
+      value: '2026-01-01T02:00:00Z',
+      timezone: 'America/New_York',
+      tzdata_version: tzdataVersion,
+    }
+    const detail = projectIssueDetail({
+      issue: {
+        uid: '01TASK',
+        title: 'Scheduled',
+        status: 'open',
+        scheduled_on_date: '2025-12-31',
+        deadline_on_date: '2025-12-31',
+        scheduled_on_display: '2025-12-31T21:00:00',
+        deadline_on_display: '2025-12-31T21:00:00',
+        metadata: { scheduled_on: saved, deadline_on: saved },
+      },
+    })
+    expect(detail.issue.scheduledOn).toBe('2025-12-31T21:00:00')
+    expect(detail.issue.deadlineOn).toBe('2025-12-31T21:00:00')
+  })
   it.each([
     ['non-object entry', 'junk'],
     ['missing name', { ...attachment, name: undefined }],

@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 func testEvent(eventType string, n int64, payload string) FoldEvent {
@@ -392,6 +393,25 @@ func TestFold_MetadataDiffsMergeNestedObjectPaths(t *testing.T) {
 
 	got := FoldEvents(events)
 	require.JSONEq(t, `{"settings":{"theme":"dark","size":2}}`, string(got.IssueMetadata["issue-1"]))
+}
+
+func TestFold_ConcurrentScheduleEditsReplaceWholeDescriptor(t *testing.T) {
+	schedule := func(value, zone string) string {
+		raw, err := metadata.NewScheduleValue(value, zone)
+		require.NoError(t, err)
+		return string(raw)
+	}
+	before := schedule("2026-11-12T09:00", "UTC")
+	edited := schedule("2026-11-12T10:00", "UTC")
+	rebound := schedule("2026-11-12T09:00", "America/New_York")
+	events := []FoldEvent{
+		testEvent("issue.created", 1, `{"uid":"issue-1","metadata":{"scheduled_on":`+before+`}}`),
+		testEvent("issue.metadata_updated", 2, `{"diff":{"scheduled_on":{"from":`+before+`,"to":`+edited+`}}}`),
+		testEvent("issue.metadata_updated", 3, `{"diff":{"scheduled_on":{"from":`+before+`,"to":`+rebound+`}}}`),
+	}
+	events[2].OriginInstanceUID = "spoke-b"
+	got := FoldEvents(events)
+	require.JSONEq(t, `{"scheduled_on":`+rebound+`}`, string(got.IssueMetadata["issue-1"]))
 }
 
 func TestFold_MetadataDiffsProduceDeterministicJSON(t *testing.T) {

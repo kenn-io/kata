@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-11-06
+last_edited: 2026-11-10
 ---
 
 # Metadata
@@ -58,32 +58,65 @@ rejected. Everything else is stored verbatim.
 A date-only `scheduled_on` value becomes ready on that calendar day. A local
 date-time (`YYYY-MM-DDTHH:MM` or `YYYY-MM-DDTHH:MM:SS`) becomes ready at that
 wall-clock time. Both use the issue `timezone`, then the daemon's top-level
-`timezone`, then UTC. An RFC 3339 value ending in `Z` is an exact UTC instant
-and does not use those timezones. If a local time repeats during a daylight
+`timezone`, then UTC. An RFC 3339 value ending in `Z` is an exact UTC instant;
+its selected zone determines the calendar date shown. If the selected zone is
+unusable, the supplied UTC zone is retained. If a local time repeats during a daylight
 saving transition, the first occurrence opens the gate. If a local time does
 not exist, the gate opens at the first valid instant after the gap. Numeric
 offsets are rejected because they pin an instant while duplicating the named
 timezone. `deadline_on` accepts the same three forms and uses the same timezone
 rules. It is a deadline only; it does not control `ready` or `next`.
 
+New writes store each date with its effective zone and an immutable timezone-data
+bundle version. For example, `scheduled_on` is stored as
+`{"value":"2026-11-12T09:00","timezone":"Europe/Paris","tzdata_version":"sha256:..."}`.
+The `value` retains the supplied text; UTC instants retain their selected zone
+for calendar dates while keeping their exact instant. Older stored
+strings remain readable using the issue and daemon defaults; they keep their original form until that field is saved. Older published bundles remain available when new rules are added. A saved date keeps its original rules even if a later timezone update changes the local clock. An unknown bundle
+version makes the date unreadable and the planning-date endpoint returns HTTP
+422. Changing or removing an issue timezone rebinds existing dates unless the
+same write supplies a saved date object with its own rules. Echoing an already
+saved date preserves its rules.
+
+Stop every older daemon sharing a database before starting the new version,
+and keep those older daemons stopped. Older versions skip object-backed dates
+in notification sweeps. Older clients may also show object-backed dates as
+empty; upgrade clients that read schedule metadata. An existing recurrence using `Local` can create an
+occurrence when the host's named zone is bundled and its rules agree for the
+occurrence and inherited deadline. Otherwise, change the recurrence to a named
+IANA timezone. On Windows, Kata maps the system timezone setting to an IANA name.
+
+New or changed issue `timezone` values from API, CLI, MCP, TUI and web writes
+must be `UTC`, `Etc/UTC`, or exact case-sensitive bundled names under `Africa/`,
+`America/`, `Antarctica/`, `Arctic/`, `Asia/`, `Atlantic/`, `Australia/`,
+`Europe/`, `Indian/` or `Pacific/`, including aliases such as `Asia/Calcutta`.
+`Local`, fixed offsets, non-geographic aliases such as `US/Eastern`, and wrong
+case are rejected. Connector ingest retains its existing validation.
+New civil dates, including deadlines, and zone removals exposing them require
+a bundled issue zone or daemon default. A `Local` daemon default works when the
+host zone can be named and its rules match the bundled rules for that date.
+Existing aliases such as `US/Eastern` remain usable. Recurrence-owned
+`scheduled_on` keeps its behavior when the issue zone is absent or matches the
+recurrence zone.
+Set a portable issue `timezone` or change the [daemon default](configuration.md)
+and restart if rejected. Stored values, reads, replay, unrelated edits, clears,
+UTC `Z` instants and matching idempotent create retries keep working. Echoing
+a legacy civil date with a `Local` zone requires matching portable host rules.
+
 ### Calendar dates on issue rows
 
 `kata list --json`, `kata show --json` and `kata.list` rows carry
 `scheduled_on_date` and `deadline_on_date`: the `scheduled_on` and
 `deadline_on` values as `YYYY-MM-DD` calendar dates. A field is omitted when
-its key is absent or its stored value cannot be read, so one bad value never
-fails the list. These are the names and values the web UI's snapshot
+its key is absent or it contains a malformed legacy value. A saved descriptor
+with an unsupported rules version or object member causes list and show to
+return an error. These are the names and values the web UI's snapshot
 uses, resolved by one shared rule. A date-only value keeps its written date. A
-local date-time resolves in the issue `timezone`, then the daemon's top-level
-`timezone`, then UTC, as above. For a recurring occurrence without `timezone`
+local date-time resolves with its saved zone and rules. Legacy strings use the
+issue `timezone`, then the daemon's top-level `timezone`, then UTC, as above. For a recurring occurrence without `timezone`
 metadata, `scheduled_on` resolves in the recurrence's timezone before the
-daemon's; `deadline_on` does not. An RFC 3339 `Z` instant is read in that same
-zone chain, so it can fall on a different calendar date than its UTC date.
-The web UI snapshot uses the same field names but reads instants in the
-viewer's zone, so it differs only when that zone differs from the issue's. For
-an unreadable stored value the snapshot returns an error, while a row omits the
-field; a row that has the metadata key but no date means the value could not be
-read.
+daemon's; `deadline_on` does not. A saved RFC 3339 `Z` instant uses its saved zone for display.
+The web UI uses each saved value's zone to display the date and decide whether it is due today. Legacy timed strings in its snapshot use the viewer's zone. Unreadable legacy values are omitted; unsupported saved rules return an error.
 Requests carry no zone. A daemon older than API `0.36.0` omits both fields, so
 a client should treat a missing field as unsupported rather than as an
 absent date.
