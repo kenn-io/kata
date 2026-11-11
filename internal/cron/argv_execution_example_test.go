@@ -32,6 +32,7 @@ func TestAdapterArgvLiteralProcess(t *testing.T) {
 	require.Equal(t, argv, workflow.Steps[0].Argv)
 
 	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "literal-match.txt"), []byte("fixture"), 0o600))
 	adapter := exampleAdapter{supportsArgv: true, dir: dir}
 	outcome := adapter.run(t.Context(), workflow)
 	require.NoError(t, outcome.err)
@@ -41,6 +42,8 @@ func TestAdapterArgvLiteralProcess(t *testing.T) {
 	var received []string
 	require.NoError(t, json.Unmarshal(outcome.output, &received))
 	require.Equal(t, args, received)
+	_, err = os.Stat(filepath.Join(dir, "side-effect"))
+	require.True(t, os.IsNotExist(err))
 }
 
 func TestAdapterPreflightsAllSteps(t *testing.T) {
@@ -51,7 +54,7 @@ func TestAdapterPreflightsAllSteps(t *testing.T) {
 	adapter := exampleAdapter{dir: t.TempDir()}
 	outcome := adapter.run(t.Context(), workflow)
 	require.Equal(t, "failed", outcome.status)
-	require.Equal(t, "reason: unsupported_step\nstep: later", outcome.message)
+	require.Equal(t, "reason: unsupported_step\nstep: later\nkind: argv", outcome.message)
 	require.Zero(t, adapter.admissions)
 	require.Zero(t, adapter.launches)
 }
