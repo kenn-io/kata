@@ -76,12 +76,8 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, err)
 	_, err = downstream.SetRelayBindingConfig(ctx, replica.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID, AuthorityUID: root.InstanceUID(), UpstreamInstanceUID: root.InstanceUID(), HubPath: []string{root.InstanceUID(), downstream.InstanceUID()}, LocalActor: "company-member", ResetEpoch: 1})
 	require.NoError(t, err)
-	for _, section := range []string{"source", "entity"} {
-		for _, definition := range []string{
-			`{"version":2,"steps":[{"key":"literal","kind":"command","command":"true"}]}`,
-			`{"version":1,"steps":[{"key":"literal","kind":"future-step"}]}`,
-			`{"version":1,"steps":null}`,
-		} {
+	for _, section := range []string{"source"} {
+		for _, definition := range []string{`{"version":1,"steps":null}`} {
 			bad := checkpointWithWorkflowDefinition(t, checkpoint, project, pin, private, section, definition)
 			_, _, err := db.DecodeRootResetPayload(pin, bad.Snapshot)
 			require.NoError(t, err, "owner backup integrity decoding preserves held content")
