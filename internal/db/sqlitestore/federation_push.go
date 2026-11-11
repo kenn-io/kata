@@ -114,12 +114,13 @@ func (d *Store) PendingFederationPushStats(
 	var count int64
 	var maxID sql.NullInt64
 	if err := d.QueryRowContext(ctx, `
-		SELECT COUNT(*), MAX(id)
-		  FROM events
-		 WHERE project_id = ?
-		   AND origin_instance_uid = ?
-		   AND id > ?
-		   AND `+federationPushEventTypeCondition("type"),
+		SELECT COUNT(*), MAX(e.id)
+		  FROM events e
+		 WHERE e.project_id = ?
+		   AND e.origin_instance_uid = ?
+		   AND e.id > ?
+		   AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
+		   AND `+federationPushEventTypeCondition("e.type"),
 		projectID, originInstanceUID, afterID).Scan(&count, &maxID); err != nil {
 		return 0, 0, fmt.Errorf("count pending federation push: %w", err)
 	}
@@ -173,7 +174,12 @@ func pruneFederationPushAccepted(ctx context.Context, tx *sql.Tx, projectID int6
 // the hub for a spoke binding.
 func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return d.RetryTransient(ctx, func() error {
-		res, err := d.ExecContext(ctx, `
+		tx, err := d.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		res, err := tx.ExecContext(ctx, `
 			UPDATE federation_bindings
 			   SET push_cursor_event_id = CASE
 			         WHEN push_cursor_event_id < ? THEN ?
@@ -193,7 +199,10 @@ func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, next
 		if n == 0 {
 			return db.ErrNotFound
 		}
-		return nil
+		if err := pruneFederationPushAccepted(ctx, tx, projectID); err != nil {
+			return err
+		}
+		return tx.Commit()
 	})
 }
 

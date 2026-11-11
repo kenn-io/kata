@@ -181,12 +181,17 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 
 // AdvanceFederationPullCursor records the highest consumed hub event id.
 func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error {
-	return s.updateFederationCursor(ctx, projectID, nextCursor, false)
+	return updateFederationCursor(ctx, s, projectID, nextCursor, false)
 }
 
 // AdvanceFederationPushCursor advances the acknowledged local event id monotonically.
 func (s *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
-	return s.updateFederationCursor(ctx, projectID, nextCursor, true)
+	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
+			return err
+		}
+		return pruneFederationPushAccepted(ctx, tx, projectID)
+	})
 }
 
 func pruneFederationPushAccepted(ctx context.Context, tx *sql.Tx, projectID int64) error {
@@ -216,7 +221,7 @@ func (s *Store) RecordFederationPushAccepted(ctx context.Context, projectID int6
 	})
 }
 
-func (s *Store) updateFederationCursor(ctx context.Context, projectID, nextCursor int64, push bool) error {
+func updateFederationCursor(ctx context.Context, execer contextExecer, projectID, nextCursor int64, push bool) error {
 	column := "pull_cursor_event_id"
 	if push {
 		column = "push_cursor_event_id"
@@ -227,7 +232,7 @@ func (s *Store) updateFederationCursor(ctx context.Context, projectID, nextCurso
 last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 WHERE project_id=$2`
-	result, err := s.ExecContext(ctx, query, nextCursor, projectID)
+	result, err := execer.ExecContext(ctx, query, nextCursor, projectID)
 	if err != nil {
 		return mapSQLError(err, nil)
 	}

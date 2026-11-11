@@ -25,6 +25,29 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 	accepted, err = reopened.FederationPushAccepted(ctx, project.ID, event.ID)
 	require.NoError(t, err)
 	require.True(t, accepted)
+	_, pending, err := reopened.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "pending", Author: "tester"})
+	require.NoError(t, err)
+	_, later, err := reopened.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later accepted", Author: "tester"})
+	require.NoError(t, err)
+	require.NoError(t, reopened.RecordFederationPushAccepted(ctx, project.ID, []int64{later.ID}))
+	t.Run("pending stats", func(t *testing.T) {
+		count, high, err := reopened.PendingFederationPushStats(ctx, project.ID, reopened.InstanceUID(), 0)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), count)
+		require.Equal(t, pending.ID, high)
+		events, err := reopened.PendingFederationPushEvents(ctx, project.ID, reopened.InstanceUID(), 0, 10)
+		require.NoError(t, err)
+		require.Len(t, events, 3)
+	})
+	t.Run("advance prunes covered acknowledgments", func(t *testing.T) {
+		require.NoError(t, reopened.AdvanceFederationPushCursor(ctx, project.ID, event.ID))
+		covered, err := reopened.FederationPushAccepted(ctx, project.ID, event.ID)
+		require.NoError(t, err)
+		require.False(t, covered)
+		uncovered, err := reopened.FederationPushAccepted(ctx, project.ID, later.ID)
+		require.NoError(t, err)
+		require.True(t, uncovered)
+	})
 	return nil
 }
 

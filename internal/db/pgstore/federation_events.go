@@ -104,8 +104,8 @@ func (s *Store) PendingFederationPushStats(
 
 	var count int64
 	var highWater sql.NullInt64
-	err := s.QueryRowContext(ctx, `SELECT COUNT(*),MAX(id) FROM events
-WHERE project_id=$1 AND origin_instance_uid=$2 AND id>$3 AND `+pgFederationPushEventTypeCondition("type"),
+	err := s.QueryRowContext(ctx, `SELECT COUNT(*),MAX(e.id) FROM events e
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id) AND `+pgFederationPushEventTypeCondition("e.type"),
 		projectID, originInstanceUID, afterID).Scan(&count, &highWater)
 	if err != nil {
 		return 0, 0, mapSQLError(err, nil)
