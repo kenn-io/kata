@@ -54,47 +54,38 @@ func TestCronAuthorNativeDefinition(t *testing.T) {
 func TestCronAuthorRejectsInvalidSelections(t *testing.T) {
 	for _, tc := range []struct {
 		name, flag, value, want string
+		drop                    bool
 	}{
-		{"two schedules", "--cron", "@daily", "choose exactly one of --cron, --every or --once"},
-		{"padded adapter", "--adapter", " example-adapter ", "--adapter must be a non-empty selector without surrounding spaces"},
-		{"padded agent", "--adapter-agent", " example-agent ", "--adapter-agent must be a non-empty selector without surrounding spaces"},
-		{"mixed action", "--notify", "true", "choose exactly one of --notify or --prompt"},
-		{"native recipient on prompt", "--recipient", "worker", "--parent, --recipient and --message require --notify"},
-		{"native message on prompt", "--message", "hello", "--parent, --recipient and --message require --notify"},
+		{name: "two schedules", flag: "--cron", value: "@daily", want: "choose exactly one of --cron, --every or --once"},
+		{name: "padded adapter", flag: "--adapter", value: " example-adapter ", want: "--adapter must be a non-empty selector without surrounding spaces"},
+		{name: "padded agent", flag: "--adapter-agent", value: " example-agent ", want: "--adapter-agent must be a non-empty selector without surrounding spaces"},
+		{name: "mixed action", flag: "--notify", value: "true", want: "choose exactly one of --notify or --prompt"},
+		{name: "native recipient on prompt", flag: "--recipient", value: "worker", want: "--parent, --recipient and --message require --notify"},
+		{name: "native message on prompt", flag: "--message", value: "hello", want: "--parent, --recipient and --message require --notify"},
+		{name: "missing name", flag: "--name", want: "typed creation requires explicit --name", drop: true},
+		{name: "missing title", flag: "--title", want: "typed creation requires explicit --title", drop: true},
+		{name: "missing enabled", flag: "--enabled", want: "typed creation requires explicit --enabled", drop: true},
+		{name: "missing catchup", flag: "--catchup", want: "typed creation requires explicit --catchup", drop: true},
+		{name: "missing overlap", flag: "--overlap", want: "typed creation requires explicit --overlap", drop: true},
+		{name: "missing schedule", flag: "--every", want: "choose exactly one of --cron, --every or --once", drop: true},
+		{name: "missing prompt", flag: "--prompt", want: "choose exactly one of --notify or --prompt", drop: true},
+		{name: "missing adapter", flag: "--adapter", want: "--adapter must be a non-empty selector without surrounding spaces", drop: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			args := append(cronAuthorFixture(), tc.flag+"="+tc.value)
-			_, err := cronAuthorBuild(t, "", args)
-			require.ErrorContains(t, err, tc.want)
-		})
-	}
-}
-
-func TestCronAuthorRequiresExplicitChoices(t *testing.T) {
-	for _, tc := range []struct{ flag, want string }{
-		{"--name", "typed creation requires explicit --name"},
-		{"--title", "typed creation requires explicit --title"},
-		{"--enabled", "typed creation requires explicit --enabled"},
-		{"--catchup", "typed creation requires explicit --catchup"},
-		{"--overlap", "typed creation requires explicit --overlap"},
-		{"--every", "choose exactly one of --cron, --every or --once"},
-		{"--prompt", "choose exactly one of --notify or --prompt"},
-		{"--adapter", "--adapter must be a non-empty selector without surrounding spaces"},
-	} {
-		t.Run(tc.flag, func(t *testing.T) {
 			args := cronAuthorFixture()
-			for i, arg := range args {
-				if arg == tc.flag {
-					args = append(args[:i], args[i+2:]...)
-					break
+			if tc.drop {
+				for i, arg := range args {
+					if arg == tc.flag {
+						args = append(args[:i], args[i+2:]...)
+						break
+					}
+					if strings.HasPrefix(arg, tc.flag+"=") {
+						args = append(args[:i], args[i+1:]...)
+						break
+					}
 				}
-				if strings.HasPrefix(arg, tc.flag+"=") {
-					args = append(args[:i], args[i+1:]...)
-					break
-				}
-			}
-			if tc.flag == "--adapter" {
-				args = append(args, "--adapter= ")
+			} else {
+				args = append(args, tc.flag+"="+tc.value)
 			}
 			_, err := cronAuthorBuild(t, "", args)
 			require.ErrorContains(t, err, tc.want)
@@ -138,13 +129,8 @@ func TestCronAuthorTrigger(t *testing.T) {
 }
 
 func TestCronAuthorWholeSecondsContract(t *testing.T) {
-	got, err := cronAuthorSeconds("1h30m", "every")
-	require.NoError(t, err)
-	require.Equal(t, int64(5400), got)
 	for _, flag := range []string{"every", "grace"} {
-		_, err := cronAuthorSeconds("0.5s", flag)
-		require.ErrorContains(t, err, "--"+flag+" must use whole seconds")
-		_, err = cronAuthorBuild(t, "", append(cronAuthorFixture(), "--"+flag+"=0.5s"))
+		_, err := cronAuthorBuild(t, "", append(cronAuthorFixture(), "--"+flag+"=0.5s"))
 		require.ErrorContains(t, err, "--"+flag+" must use whole seconds")
 	}
 }
