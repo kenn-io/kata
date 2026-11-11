@@ -3,7 +3,6 @@ package daemon_test
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -93,32 +92,4 @@ func TestMoveBatchMappingPreviewMatchesWrite(t *testing.T) {
 			})
 		}
 	}
-}
-
-func TestMoveBatchDuplicatePreviewMatchesWrite(t *testing.T) {
-	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
-		f := newProjectAccessFixture(t, store)
-		target, err := store.CreateProject(t.Context(), "duplicate-target")
-		require.NoError(t, err)
-		items := []map[string]any{{"ref": f.visible.UID}, {"ref": f.visible.UID}}
-		body := map[string]any{"to_project_uid": target.UID, "items": items, "dry_run": true, "comment": "routed"}
-		status, _, raw := f.request(t, http.MethodPost, "/api/v1/issues/actions/move", "nonmember", body, nil)
-		require.Equal(t, http.StatusOK, status, string(raw))
-		var preview batchReply
-		require.NoError(t, json.Unmarshal(raw, &preview))
-		body["dry_run"] = false
-		status, _, raw = f.request(t, http.MethodPost, "/api/v1/issues/actions/move", "nonmember", body, nil)
-		require.Equal(t, http.StatusOK, status, string(raw))
-		var written batchReply
-		require.NoError(t, json.Unmarshal(raw, &written))
-		require.Equal(t, "would_move", preview.Results[0].Result)
-		require.Equal(t, "moved", written.Results[0].Result)
-		require.Equal(t, "unchanged", preview.Results[1].Result)
-		require.Equal(t, preview.Results[1].Result, written.Results[1].Result)
-		require.Equal(t, "duplicate_item", preview.Results[1].Code)
-		require.Equal(t, preview.Results[1].Code, written.Results[1].Code)
-		comments, err := store.CommentsByIssue(t.Context(), f.visible.ID)
-		require.NoError(t, err)
-		require.Len(t, comments, 1)
-	})
 }

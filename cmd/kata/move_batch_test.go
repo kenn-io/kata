@@ -50,6 +50,8 @@ func TestMoveBatchCLI_ContinuationAfterCompletedDuplicate(t *testing.T) {
 				return
 			}
 			if body.Body.StartIndex > 0 {
+				require.NotContains(t, string(raw), `"proof"`)
+				require.NotContains(t, string(raw), `"event_id"`)
 				continuation = body
 			}
 			r.Body = io.NopCloser(bytes.NewReader(raw))
@@ -69,10 +71,7 @@ func TestMoveBatchCLI_ContinuationAfterCompletedDuplicate(t *testing.T) {
 	require.Equal(t, "unchanged", reply.Results[1].Result)
 	require.Equal(t, 1, continuation.Body.StartIndex)
 	require.Len(t, continuation.Body.Completed, 1)
-	require.Equal(t, reply.Results[0].EventID, continuation.Body.Completed[0].EventID)
 	require.Equal(t, reply.Results[0].Revision, continuation.Body.Completed[0].Revision)
-	require.NotEmpty(t, reply.Results[0].Proof)
-	require.Equal(t, reply.Results[0].Proof, continuation.Body.Completed[0].Proof)
 	require.Equal(t, issue.Revision, continuation.Body.Items[1].ExpectedRevision)
 }
 
@@ -461,6 +460,29 @@ func TestMoveBatchCLI_Limits(t *testing.T) {
 		})
 	}
 }
+
+func TestMoveBatchCLI_ContinuationReservationWithinLimit(t *testing.T) {
+	env, dir, _, target, issue := setupMoveCLIProjects(t)
+	origin, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(origin)
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/issues/actions/move" {
+			called = true
+			http.Error(w, "stop before writes", http.StatusInternalServerError)
+			return
+		}
+		r.Host = origin.Host
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	input := strings.Repeat(issue.UID+"\n", 5000)
+	_, _, err = executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, "--workspace", dir, "move", target.Name, "--refs-from", "-", "--json")
+	require.Error(t, err)
+	require.True(t, called, "5,000 items must reach the move endpoint: %v", err)
+}
+
 func TestMoveBatchCLI_OldDaemonGate(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -534,7 +556,7 @@ func TestMoveBatchCLI_LongMutationAndCancellation(t *testing.T) {
 }
 
 func TestMoveBatchCLI_PreservesResultsOnError(t *testing.T) {
-	for _, mode := range []string{"partial", "decode", "continuation", "expired_proof", "transport"} {
+	for _, mode := range []string{"partial", "decode", "continuation", "transport"} {
 		t.Run(mode, func(t *testing.T) {
 			env, dir, source, target, issue := setupMoveCLIProjects(t)
 			issues := []db.Issue{issue}
@@ -557,7 +579,7 @@ func TestMoveBatchCLI_PreservesResultsOnError(t *testing.T) {
 				}
 				calls++
 				w.Header().Set("Content-Type", "application/json")
-				moved := api.MoveIssuesResult{Ref: issue.UID, Result: "moved", UID: issue.UID, Revision: issue.Revision + 1, EventID: 1, Proof: strings.Repeat("a", 64)}
+				moved := api.MoveIssuesResult{Ref: issue.UID, Result: "moved", UID: issue.UID, Revision: issue.Revision + 1, EventID: 1}
 				if mode == "partial" {
 					w.WriteHeader(http.StatusInternalServerError)
 					require.NoError(t, json.MarshalWrite(w, map[string]any{"status": 500, "error": map[string]any{"code": "internal", "message": "database unavailable", "data": map[string]any{"results": []api.MoveIssuesResult{moved, {Index: 50, Ref: "invalid!", Result: "refused", Code: "issue_not_found"}}, "next_index": 1}}}))
@@ -586,9 +608,6 @@ func TestMoveBatchCLI_PreservesResultsOnError(t *testing.T) {
 				case "continuation":
 					_, err := io.WriteString(w, `{"results":[],"next_index":1}`)
 					require.NoError(t, err)
-				case "expired_proof":
-					w.WriteHeader(http.StatusBadRequest)
-					require.NoError(t, json.MarshalWrite(w, map[string]any{"status": 400, "error": map[string]any{"code": "invalid_continuation", "message": "continuation proof is invalid or expired", "data": map[string]any{"results": []api.MoveIssuesResult{}, "next_index": 1}}}))
 				case "transport":
 					conn, _, err := w.(http.Hijacker).Hijack()
 					require.NoError(t, err)

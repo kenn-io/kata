@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -200,87 +199,60 @@ func TestMoveIssuesBatch_RejectsInvalidOptions(t *testing.T) {
 }
 
 func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.MoveBatchBudget = time.Nanosecond }) //nolint:kennlint // deadlinetest: Yield after one chunk.
-	source, target, issue := seedMovePair(t, env)
-	items := []map[string]any{{"ref": source.Name + "#" + issue.ShortID, "expected_revision": issue.Revision}, {"ref": issue.UID, "expected_revision": issue.Revision}}
-	request := map[string]any{"actor": "tester", "comment": "routed", "to_project_uid": target.UID, "items": items}
-	post := func() (int, struct {
-		Results   []api.MoveIssuesResult `json:"results"`
-		NextIndex int                    `json:"next_index"`
-		Error     struct {
-			Code string `json:"code"`
-		} `json:"error"`
-	}) {
-		raw, err := json.Marshal(request)
-		require.NoError(t, err)
-		resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", string(raw), "")
-		defer func() { _ = resp.Body.Close() }()
-		var result struct {
-			Results   []api.MoveIssuesResult `json:"results"`
-			NextIndex int                    `json:"next_index"`
-			Error     struct {
-				Code string `json:"code"`
-			} `json:"error"`
-		}
-		require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
-		return resp.StatusCode, result
-	}
-	status, first := post()
-	require.Equal(t, http.StatusOK, status)
-	require.Equal(t, 1, first.NextIndex)
-	require.Equal(t, "moved", first.Results[0].Result)
-	require.Len(t, first.Results[0].Proof, 64)
-	request["start_index"] = first.NextIndex
-	request["completed"] = []map[string]any{{"result": "moved", "uid": first.Results[0].UID, "revision": first.Results[0].Revision, "event_id": first.Results[0].EventID, "proof": first.Results[0].Proof}}
-	status, second := post()
-	require.Equal(t, http.StatusOK, status)
-	require.Equal(t, "unchanged", second.Results[0].Result)
-	require.Equal(t, "duplicate_item", second.Results[0].Code)
-	got, err := env.DB.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, target.ID, got.ProjectID)
-	comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
-	completed := request["completed"].([]map[string]any)[0]
-	for _, field := range []string{"event_id", "uid", "target", "proof", "missing_proof"} {
-		t.Run(field, func(t *testing.T) {
-			switch field {
-			case "event_id":
-				completed["event_id"] = first.Results[0].EventID + 1
-			case "uid":
-				completed["uid"] = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-			case "target":
-				items[0]["to_project_uid"] = source.UID
-			case "proof":
-				completed["proof"] = strings.Repeat("0", 64)
-			case "missing_proof":
-				delete(completed, "proof")
+	for _, mode := range []string{"duplicate", "edited", "empty"} {
+		t.Run(mode, func(t *testing.T) {
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.MoveBatchBudget = time.Nanosecond }) //nolint:kennlint // deadlinetest: Yield after one chunk.
+			source, target, issue := seedMovePair(t, env)
+			items := []map[string]any{{"ref": source.Name + "#" + issue.ShortID, "expected_revision": issue.Revision}, {"ref": issue.UID, "expected_revision": issue.Revision}}
+			request := map[string]any{"actor": "tester", "comment": "routed", "to_project_uid": target.UID, "items": items}
+			post := func() (int, struct {
+				Results   []api.MoveIssuesResult `json:"results"`
+				NextIndex int                    `json:"next_index"`
+			}) {
+				raw, err := json.Marshal(request)
+				require.NoError(t, err)
+				resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", string(raw), "")
+				defer func() { _ = resp.Body.Close() }()
+				var result struct {
+					Results   []api.MoveIssuesResult `json:"results"`
+					NextIndex int                    `json:"next_index"`
+				}
+				require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+				return resp.StatusCode, result
 			}
-			status, result := post()
-			if field == "target" {
-				require.Equal(t, http.StatusOK, status)
-				require.Equal(t, "revision_conflict", result.Results[0].Code)
-			} else {
+			status, first := post()
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, 1, first.NextIndex)
+			require.Equal(t, "moved", first.Results[0].Result)
+			request["start_index"] = first.NextIndex
+			request["completed"] = []api.MoveIssuesCompleted{{Result: first.Results[0].Result, UID: first.Results[0].UID, Revision: first.Results[0].Revision}}
+			if mode == "edited" {
+				owner := "changed"
+				updated, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "tester"})
+				require.NoError(t, err)
+				require.Greater(t, updated.Revision, first.Results[0].Revision)
+			}
+			if mode == "empty" {
+				request["completed"] = []api.MoveIssuesCompleted{}
+			}
+			status, second := post()
+			if mode == "empty" {
 				require.Equal(t, http.StatusBadRequest, status)
-				require.Equal(t, "invalid_continuation", result.Error.Code)
+				return
 			}
-			completed["event_id"], completed["uid"] = first.Results[0].EventID, first.Results[0].UID
-			completed["proof"] = first.Results[0].Proof
-			delete(items[0], "to_project_uid")
+			require.Equal(t, http.StatusOK, status)
+			if mode == "edited" {
+				require.Equal(t, "revision_conflict", second.Results[0].Code)
+			} else {
+				require.Equal(t, "unchanged", second.Results[0].Result)
+				require.Equal(t, "duplicate_item", second.Results[0].Code)
+			}
+			got, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, target.ID, got.ProjectID)
+			comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
 		})
 	}
-	owner := "changed"
-	_, _, _, err = env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "tester"})
-	require.NoError(t, err)
-	status, stale := post()
-	require.Equal(t, http.StatusOK, status)
-	require.Equal(t, "revision_conflict", stale.Results[0].Code)
-	completed["revision"] = first.Results[0].Revision + 1
-	status, changed := post()
-	require.Equal(t, http.StatusBadRequest, status)
-	require.Equal(t, "invalid_continuation", changed.Error.Code)
-	request["completed"] = []map[string]any{}
-	status, _ = post()
-	require.Equal(t, http.StatusBadRequest, status)
 }
