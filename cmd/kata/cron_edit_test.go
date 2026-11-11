@@ -107,6 +107,76 @@ func requireCronEditExit(t *testing.T, err error, code int) {
 	require.Equal(t, code, ce.ExitCode)
 }
 
+func cronEditTestStaleJob(t *testing.T, env *testenv.Env, project int64, id string) {
+	t.Helper()
+	job, err := env.DB.CronJob(t.Context(), project, id)
+	require.NoError(t, err)
+	job.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
+	raw, err := json.Marshal(job.Definition)
+	require.NoError(t, err)
+	_, err = env.DB.ExecContext(t.Context(), `UPDATE cron_jobs SET definition_json=? WHERE uid=?`, string(raw), id)
+	require.NoError(t, err)
+}
+
+func TestCronEditStaleJobRepair(t *testing.T) {
+	for _, repair := range []bool{false, true} {
+		t.Run(fmt.Sprintf("repair=%t", repair), func(t *testing.T) {
+			env, project, id, original := cronEditTestDefinition(t, "job")
+			cronEditTestStaleJob(t, env, project, id)
+			session := cronEditTestEditor(t, func(_ int, raw []byte) ([]byte, error) {
+				if repair {
+					return bytes.ReplaceAll(raw, []byte("0 0 30 2 *"), []byte("0 0 28 2 *")), nil
+				}
+				return nil, nil
+			})
+			out, _, err := executeCronCLI(t, env.URL, nil, "job", "edit", id)
+			if repair {
+				require.NoError(t, err)
+				require.Equal(t, 1, session.calls)
+				require.Contains(t, out, "9007199254740993")
+				require.Contains(t, out, "1.2300e+02")
+			} else {
+				requireCronEditExit(t, err, ExitValidation)
+				require.Equal(t, 2, session.calls)
+				require.ErrorContains(t, err, "never fires")
+			}
+			stored, err := env.DB.CronJob(t.Context(), project, id)
+			require.NoError(t, err)
+			if repair {
+				require.NotEqual(t, original, stored.DefinitionEventUID)
+				require.Equal(t, "0 0 28 2 *", stored.Definition.Trigger.Cron)
+				require.Contains(t, string(stored.Definition.Options), `"empty":{}`)
+			} else {
+				require.Equal(t, original, stored.DefinitionEventUID)
+			}
+		})
+	}
+	// Stored-read tolerance must never swallow unrelated domain errors. These
+	// rules precede occurrence validation, so removing tolerance does not fail
+	// these cases; accepting every ErrInvalid does.
+	for _, fault := range []string{"version", "overlap"} {
+		t.Run(fault, func(t *testing.T) {
+			raw := cronEditValidTestBody("job", jsontext.Value(`{}`))
+			var envelope map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal(raw, &envelope))
+			var definition map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal(envelope["definition"], &definition))
+			definition["trigger"] = jsontext.Value(`{"kind":"cron","cron":"0 0 30 2 *"}`)
+			if fault == "version" {
+				definition["version"] = jsontext.Value(`2`)
+			} else {
+				definition["overlap"] = jsontext.Value(`"unsupported"`)
+			}
+			envelope["definition"], _ = json.Marshal(definition)
+			raw, _ = json.Marshal(envelope)
+			for _, stored := range []bool{false, true} {
+				_, err := parseCronEdit("job", raw, stored)
+				require.ErrorContains(t, err, fault)
+			}
+		})
+	}
+}
+
 func TestCronEditSavesDefinitions(t *testing.T) {
 	for _, resource := range []string{"job", "workflow"} {
 		t.Run(resource, func(t *testing.T) {
@@ -847,6 +917,7 @@ func TestCronEditConflictFallsBackToShow(t *testing.T) {
 						next, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{UID: id, ProjectID: project, Name: "Other writer", Definition: job.Definition, ExpectedEventUID: original, Actor: "other"})
 						require.NoError(t, err)
 						current = next.DefinitionEventUID
+						cronEditTestStaleJob(t, env, project, id)
 					} else {
 						workflow, err := env.DB.CronWorkflow(t.Context(), project, id)
 						require.NoError(t, err)

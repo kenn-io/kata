@@ -51,10 +51,10 @@ type DiscoveredDaemon struct {
 // uses its own auth configuration and any catalog client credential.
 //
 // DiscoverOptions.Daemon selects one catalog entry instead, as the CLI's
-// global --daemon flag does. The entry's token or token_env is the
-// credential, except that KATA_AUTH_TOKEN overrides it for a remote entry.
-// Otherwise an unset or empty token_env variable is an error. An unknown name
-// returns an error matching ErrDaemonNotInCatalog.
+// global --daemon flag does. The entry resolves token > token_file > token_env,
+// except that KATA_AUTH_TOKEN overrides it for a remote entry. Otherwise a
+// failed selected file or an unset or empty token_env variable is an error.
+// An unknown name returns an error matching ErrDaemonNotInCatalog.
 //
 // Like `kata daemon locate`, Discover never starts the selected daemon unless
 // DiscoverOptions.StartWith is set. Use `kata daemon diagnose` and `kata
