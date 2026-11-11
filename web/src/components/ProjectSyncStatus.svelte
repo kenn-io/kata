@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte'
-  import { getProjectFederationStatus, type FederationProjectStatus } from '../lib/api/generated'
+  import type { FederationProjectStatus } from '../lib/api/generated'
+  import { readProjectSync } from '../lib/projectSyncRead'
 
   interface Props {
     projectID: number
@@ -11,6 +12,8 @@
   let status = $state<FederationProjectStatus>()
   let loading = $state(true)
   let error = $state(false)
+  let stale = $state(false)
+  let queued = false
   let refresh: (() => void) | undefined
   let identity = $derived(`${projectID}:${projectUID}`)
   let counts = $derived.by(() => {
@@ -22,19 +25,35 @@
     return result
   })
 
+  function resetView(): void {
+    status = undefined
+    loading = true
+    error = false
+    stale = false
+    queued = false
+  }
+
+  function runQueued(): void {
+    const next = queued
+    queued = false
+    if (next) refresh?.()
+  }
+
   $effect(() => {
     void identity
     const [id, uid] = untrack(() => [projectID, projectUID] as const)
     let current: AbortController | undefined
     let disposed = false
-    status = undefined
-    loading = true
-    error = false
+    resetView()
 
     async function read(): Promise<void> {
-      if (document.hidden || current) return
-      status = undefined
+      if (document.hidden) return
+      if (current) {
+        queued = true
+        return
+      }
       error = false
+      stale = false
       loading = true
       const abort = new AbortController()
       current = abort
@@ -44,35 +63,31 @@
         current = undefined
         if (disposed) return
         loading = false
+        runQueued()
       }
       const timeout = setTimeout(() => {
+        status = undefined
         error = true
         abort.abort()
         finish()
       }, 120_000)
       abort.signal.addEventListener('abort', () => clearTimeout(timeout), { once: true })
       try {
-        const response = await getProjectFederationStatus(
-          { projectId: id },
-          { compact: true },
-          { signal: abort.signal },
-        )
+        const result = await readProjectSync(id, uid, abort.signal, status, () => {
+          if (!abort.signal.aborted && !disposed) status = undefined
+        })
         if (abort.signal.aborted || disposed) return
-        if (response.status !== 200) throw new Error()
-        const found = response.data.statuses.find(
-          (entry) => entry.project_id === id && entry.project_uid === uid,
-        )
-        if (response.data.statuses.length && !found) throw new Error()
-        status = found
+        ;({ status, stale } = result)
       } catch {
-        if (!abort.signal.aborted && !disposed) error = true
+        if (!abort.signal.aborted && !disposed) {
+          status = undefined
+          error = true
+        }
       } finally {
         finish()
       }
     }
-    refresh = () => {
-      void read()
-    }
+    refresh = () => void read()
     return () => {
       disposed = true
       current?.abort()
@@ -98,6 +113,7 @@
     <span>Local project</span>
   {:else}
     <span>{status.enabled ? status.role : 'Sync disabled'}</span>
+    {#if stale}<span role="status">Sync status may be out of date.</span>{/if}
     <span>Pending: {status.pending_push_count}</span>
     {#if status.last_successful_sync_at}
       <span

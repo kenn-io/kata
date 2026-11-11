@@ -87,6 +87,23 @@ describe('ProjectSyncStatus', () => {
     expect(screen.queryByText('Pending: 2')).toBeNull()
   })
 
+  it.each(['network', 408, 429])(
+    'keeps the last summary after a transient %s failure',
+    async (failure) => {
+      const fetcher = vi.fn().mockResolvedValueOnce(response())
+      if (failure === 'network') fetcher.mockRejectedValueOnce(new TypeError('network failure'))
+      else fetcher.mockResolvedValueOnce(new Response('', { status: Number(failure) }))
+      setGeneratedFetch(fetcher)
+      const view = render(ProjectSyncStatus, {
+        props: { projectID: 7, projectUID, refreshGeneration: 0 },
+      })
+      await screen.findByText('Pending: 2')
+      await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+      await screen.findByText('Sync status may be out of date.')
+      expect(screen.getByText('Pending: 2')).not.toBeNull()
+    },
+  )
+
   it('clears the prior summary while a denied response body is stalled, then retries', async () => {
     let closeBody!: () => void
     const body = new ReadableStream({
@@ -114,6 +131,26 @@ describe('ProjectSyncStatus', () => {
     await screen.findByText('Sync status unavailable. Refresh to retry.')
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
     await screen.findByText('Pending: 2')
+  })
+
+  it('clears the prior summary when a denied response body fails to read', async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.error(new TypeError('body read failed'))
+      },
+    })
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockResolvedValueOnce(new Response(body, { status: 403 }))
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Pending: 2')
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await screen.findByText('Sync status unavailable. Refresh to retry.')
+    expect(screen.queryByText('Pending: 2')).toBeNull()
   })
 
   it('waits until visible for its initial read', async () => {
