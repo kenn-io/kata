@@ -601,7 +601,7 @@ func (s *Service) activate(ctx context.Context, c subscribeCall, prior *db.MCPEv
 		row.VerifiedAt = consentAt
 	} else {
 		if err := s.challenges.verify(ctx, principalKey, c.ident.url, c.ident.parsed, func(ctx context.Context) error {
-			if err := s.webhook.verify(ctx, c.ident.parsed, row.ID, c.req.Delivery.Secret); err != nil {
+			if err := s.webhook.Verify(ctx, c.ident.parsed, row.ID, c.req.Delivery.Secret); err != nil {
 				if ctx.Err() != nil {
 					// The caller gave up; the endpoint did not fail.
 					return ctx.Err()

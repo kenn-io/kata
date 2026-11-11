@@ -242,7 +242,7 @@ type receiver struct {
 	deliver func(http.ResponseWriter, *http.Request, []byte)
 }
 
-func newReceiver(t *testing.T, entries ...mcpevents.TrustedCallback) *receiver {
+func newReceiver(t *testing.T) *receiver {
 	t.Helper()
 	r := &receiver{}
 	client, _ := mcpevents.FixtureWebhook(t, func(w http.ResponseWriter, req *http.Request) {
@@ -275,7 +275,7 @@ func newReceiver(t *testing.T, entries ...mcpevents.TrustedCallback) *receiver {
 			return
 		}
 		_ = json.MarshalWrite(w, map[string]string{"challenge": body.Challenge})
-	}, entries...)
+	})
 	r.client = client
 	return r
 }

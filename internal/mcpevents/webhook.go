@@ -402,9 +402,9 @@ func (w *WebhookClient) request(ctx context.Context, callback *url.URL, eventID,
 	return resp, nil
 }
 
-// verify authenticates the receiver using one fresh signed challenge. Activation,
+// Verify authenticates the receiver using one fresh signed challenge. Activation,
 // verification caching and durable key rotation are the caller's responsibility.
-func (w *WebhookClient) verify(ctx context.Context, callback *url.URL, subscriptionID, secret string) error {
+func (w *WebhookClient) Verify(ctx context.Context, callback *url.URL, subscriptionID, secret string) error {
 	if err := ValidateWebhookSecret(secret); err != nil {
 		return err
 	}

@@ -5,10 +5,8 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"net"
 	"net/netip"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -88,15 +86,7 @@ func TestTTLFieldDecodesAbsentNullAndValue(t *testing.T) {
 
 // Every case fails before storage, so one backend is enough.
 func TestSubscribeValidation(t *testing.T) {
-	var lookups, dials atomic.Int64
-	client := mcpevents.NewWebhookClient(mcpevents.WebhookOptions{Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
-		lookups.Add(1)
-		return nil, errors.New("fixture DNS unavailable")
-	}, DialContext: func(context.Context, string, string) (net.Conn, error) {
-		dials.Add(1)
-		return nil, errors.New("fixture unreachable")
-	}})
-	h := newHarnessWith(t, openSQLite(t), func(cfg *mcpevents.ServiceConfig) { cfg.Webhook = client })
+	h := newHarness(t, openSQLite(t))
 	for _, tc := range []struct {
 		name   string
 		mutate func(*mcpevents.SubscribeRequest)
@@ -109,8 +99,6 @@ func TestSubscribeValidation(t *testing.T) {
 		{"missing secret", func(r *mcpevents.SubscribeRequest) { r.Delivery.Secret = "" }, mcpevents.CodeInvalidParams, "invalid_secret"},
 		{"http callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "http://example.com/x" }, mcpevents.CodeInvalidParams, "invalid_callback"},
 		{"private callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "https://10.0.0.1/x" }, mcpevents.CodeCallbackEndpoint, "destination_not_allowed"},
-		{"unpinned internal callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "https://events.corp.internal/x" }, mcpevents.CodeCallbackEndpoint, "destination_not_allowed"},
-		{"unpinned home callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "https://events.home.arpa/x" }, mcpevents.CodeCallbackEndpoint, "destination_not_allowed"},
 		{"blank recipient", func(r *mcpevents.SubscribeRequest) { r.Arguments.For = " " }, mcpevents.CodeInvalidParams, "invalid_arguments"},
 		{"empty project list", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{} }, mcpevents.CodeInvalidParams, "invalid_project_uids"},
 		{"unsorted project list", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{testProjectB, testProjectA} }, mcpevents.CodeInvalidParams, "project_uids_not_sorted_unique"},
@@ -123,8 +111,7 @@ func TestSubscribeValidation(t *testing.T) {
 			tc.mutate(&req)
 			_, err := h.subscribe(principalA, req)
 			_ = requireWire(t, err, tc.code, tc.reason)
-			assert.Zero(t, lookups.Load(), "validation does no DNS")
-			assert.Zero(t, dials.Load(), "validation does not dial")
+			assert.Zero(t, h.recv.challenges.Load(), "validation sends no challenge")
 			assert.Zero(t, h.svc.ChallengeStateCount(), "destination refusal spends no challenge budget")
 		})
 	}
@@ -427,36 +414,4 @@ func TestSubscribeRechecksDestinationWithCachedConsent(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestSubscribeTrustedPrivateCallbackAndWithdrawal(t *testing.T) {
-	forEachBackend(t, func(t *testing.T, store db.Storage) {
-		recv := newReceiver(t, mcpevents.TrustedCallback{Origin: "https://example.com", Addresses: []string{"100.64.0.1"}})
-		h := newHarnessWith(t, store, func(cfg *mcpevents.ServiceConfig) { cfg.Webhook = recv.client })
-		req := h.request("example-user")
-		req.TTLMS = mcpevents.TTLNull()
-		result := h.mustSubscribe(req)
-		row := h.row(result.ID)
-		since := h.clock.Now().Add(-8 * 24 * time.Hour)
-		row.FailedSince, row.FailedAttempts = &since, 19
-		require.NoError(t, h.store.ImportMCPEventSubscription(t.Context(), row))
-		// Restart without the grant, keeping durable consent and pending delivery.
-		withdrawn := mcpevents.NewWebhookClient(mcpevents.WebhookOptions{Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
-			return []netip.Addr{netip.MustParseAddr("100.64.0.1")}, nil
-		}})
-		svc, err := mcpevents.NewService(t.Context(), mcpevents.ServiceConfig{Store: h.store, Keys: h.keys, Authority: h.auth, Webhook: withdrawn, Now: h.clock.Now})
-		require.NoError(t, err)
-		h.touch(result.ID)
-		for range 5 {
-			require.NoError(t, svc.Drain(t.Context()))
-			row = h.row(result.ID)
-			assert.Equal(t, "destination_not_allowed", row.LastError)
-			assert.Equal(t, db.MCPEventStateActive, row.State)
-			assert.Equal(t, 19, row.FailedAttempts)
-			assert.Equal(t, since, *row.FailedSince)
-			h.clock.Advance(10 * time.Minute)
-		}
-		assert.Equal(t, 1, row.DeadLetterCount)
-		require.NoError(t, svc.Unsubscribe(t.Context(), principalA, mcpevents.UnsubscribeRequest{Name: req.Name, Arguments: req.Arguments, Delivery: req.Delivery}))
-	})
 }

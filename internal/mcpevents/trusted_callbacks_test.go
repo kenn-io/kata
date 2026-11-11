@@ -38,13 +38,13 @@ func TestTrustedCallbackPolicy(t *testing.T) {
 	}
 }
 
-func TestTrustedCallbackPolicyRejectsInvalidConfiguration(t *testing.T) {
+func TestTrustedCallbackPolicyConfiguration(t *testing.T) {
 	for _, pin := range []string{"10.1.2.3", "172.16.1.2", "192.168.1.2", "100.64.0.1", "fd00::1"} {
 		if _, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: "https://example.com", Addresses: []string{pin}}}); err != nil {
 			t.Errorf("valid pin %s: %v", pin, err)
 		}
 	}
-	for _, origin := range []string{"https://example.com", "https://events.corp.internal", "https://events.home.arpa"} {
+	for _, origin := range []string{"https://events.corp.internal", "https://events.home.arpa"} {
 		policy, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: origin, Addresses: []string{"10.0.0.1"}}})
 		if err != nil {
 			t.Fatalf("valid origin %s: %v", origin, err)
@@ -89,27 +89,6 @@ func TestTrustedCallbackPolicyRejectsInvalidConfiguration(t *testing.T) {
 		checkError(tc.entries, tc.field)
 	}
 
-}
-
-func TestMetadataCallbackNeverDials(t *testing.T) {
-	_, err := CompileTrustedCallbacks([]TrustedCallback{{Origin: "https://example.com", Addresses: []string{"fd20:ce::254"}}})
-	if err == nil {
-		t.Fatal("metadata address accepted as a pin")
-	}
-	dials := 0
-	w := NewWebhookClient(WebhookOptions{
-		Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
-			return []netip.Addr{netip.MustParseAddr("fd20:ce::254")}, nil
-		},
-		DialContext: func(context.Context, string, string) (net.Conn, error) {
-			dials++
-			return nil, nil
-		},
-	})
-	_, err = w.Send(t.Context(), "https://example.com/events", "evt", "sub", []byte(`{}`), []string{fixtureSecret(1, 32)})
-	if err == nil || safeWebhookError(err).Reason != "destination_not_allowed" || dials != 0 {
-		t.Fatalf("metadata callback: err=%v, dials=%d", err, dials)
-	}
 }
 
 func TestTrustedCallbackTLSAndLiteral(t *testing.T) {

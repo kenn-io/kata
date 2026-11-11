@@ -382,7 +382,7 @@ func (s *Service) failed(ctx context.Context, c *claim, row db.MCPEventSubscript
 		if number >= maxAttempts {
 			zero := 0
 			in := db.MCPEventDeliveryUpdate{
-				PendingMessageID: row.PendingMessageID, RecordFailure: receiverFailure, LastError: &category,
+				PendingMessageID: row.PendingMessageID, RecordFailure: receiverFailure, ClearFailure: !receiverFailure, LastError: &category,
 				ClearPending: true, AttemptCount: &zero, ClearNextAttempt: true,
 				IncrementDeadLetter: row.PendingKind == db.MCPEventPendingEvent,
 			}
@@ -397,7 +397,7 @@ func (s *Service) failed(ctx context.Context, c *claim, row db.MCPEventSubscript
 		delay = max(delay, retryAfter)
 		next := now.Add(delay)
 		ok, err := s.write(ctx, c, db.MCPEventDeliveryUpdate{
-			PendingMessageID: row.PendingMessageID, RecordFailure: receiverFailure, LastError: &category,
+			PendingMessageID: row.PendingMessageID, RecordFailure: receiverFailure, ClearFailure: !receiverFailure, LastError: &category,
 			NextAttemptAt: &next, ReleaseClaim: true,
 		})
 		if err != nil || !ok {

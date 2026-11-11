@@ -135,7 +135,7 @@ func TestWebhookVerificationChallenge(t *testing.T) {
 		_ = json.NewEncoder(rw).Encode(map[string]string{"challenge": challenge.Challenge})
 	})
 	for range 2 {
-		if err := w.verify(t.Context(), fixtureURL(t, fixtureTLSCallback), "sub_fixture", key); err != nil {
+		if err := w.Verify(t.Context(), fixtureURL(t, fixtureTLSCallback), "sub_fixture", key); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -243,13 +243,13 @@ func TestWebhookValidationBeforeNetwork(t *testing.T) {
 		return nil, errors.New("secret callback details")
 	}})
 	key := fixtureSecret(1, 32)
-	for _, callback := range []string{"http://receiver.example/events", "https://user:pass@receiver.example/events", fixtureCallback + "#", fixtureCallback + "#fragment", "https://127.0.0.1/", "https://[::1]/", "https://localhost/", "https://2130706433/", "https://receiver.example:0/", "https://receiver.example:65536/"} {
+	for _, callback := range []string{"http://receiver.example/events", "https://user:pass@receiver.example/events", fixtureCallback + "#", fixtureCallback + "#fragment", "https://127.0.0.1/", "https://[::1]/", "https://events.corp.internal/x", "https://events.home.arpa/x", "https://localhost/", "https://2130706433/", "https://receiver.example:0/", "https://receiver.example:65536/"} {
 		if _, err := w.Send(t.Context(), callback, "evt", "sub", []byte(`{}`), []string{key}); err == nil {
 			t.Errorf("accepted callback %q", callback)
 		}
 	}
 	for _, secret := range []string{"", "secret", fixtureSecret(1, 23), fixtureSecret(1, 65), key + "\n", "whsec_!!!!"} {
-		if err := w.verify(t.Context(), fixtureURL(t, fixtureCallback), "sub", secret); err == nil {
+		if err := w.Verify(t.Context(), fixtureURL(t, fixtureCallback), "sub", secret); err == nil {
 			t.Error("accepted invalid signing secret")
 		}
 	}
@@ -286,7 +286,7 @@ func TestWebhookVerificationFailureIsBoundedAndSanitized(t *testing.T) {
 					rw.WriteHeader(500)
 				}
 			})
-			err := w.verify(t.Context(), fixtureURL(t, fixtureTLSCallback), "sub", key)
+			err := w.Verify(t.Context(), fixtureURL(t, fixtureTLSCallback), "sub", key)
 			if err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "example.com") || strings.Contains(err.Error(), key) {
 				t.Fatalf("unsafe or absent error: %v", err)
 			}
@@ -299,7 +299,7 @@ func TestWebhookVerificationFailureIsBoundedAndSanitized(t *testing.T) {
 	w := NewWebhookClient(WebhookOptions{Resolve: func(context.Context, string, string) ([]netip.Addr, error) {
 		return nil, errors.New("secret DNS callback body")
 	}})
-	if err := w.verify(t.Context(), fixtureURL(t, fixtureCallback), "sub", key); err == nil || strings.Contains(err.Error(), "secret") {
+	if err := w.Verify(t.Context(), fixtureURL(t, fixtureCallback), "sub", key); err == nil || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("resolver error leaked: %v", err)
 	}
 }
@@ -429,7 +429,7 @@ func TestWebhookDialSharesTheDeadlineAcrossAddresses(t *testing.T) {
 		},
 		RootCAs: roots,
 	})
-	if err := w.verify(t.Context(), fixtureURL(t, fixtureTLSCallback), "sub_fixture", fixtureSecret(7, 32)); err != nil {
+	if err := w.Verify(t.Context(), fixtureURL(t, fixtureTLSCallback), "sub_fixture", fixtureSecret(7, 32)); err != nil {
 		t.Fatal(err)
 	}
 	if len(budgets) != 2 {
