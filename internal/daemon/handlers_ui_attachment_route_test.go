@@ -40,12 +40,14 @@ func TestUIAttachmentRouteOriginAvailability(t *testing.T) {
 		name   string
 		status int
 		body   string
-		want   bool
+		read   bool
+		write  bool
 	}{
-		{"temporary upstream failure", http.StatusBadGateway, `{"error":{"code":"upstream_failed"}}`, true},
-		{"no docbank", http.StatusServiceUnavailable, `{"error":{"code":"docbank_not_configured"}}`, false},
-		{"unsupported", http.StatusNotFound, ``, false},
-		{"recovered", http.StatusOK, fmt.Sprintf(`{"version":1,"project_uid":%q,"origin":%q}`, project.UID, store.InstanceUID()), true},
+		{"temporary upstream failure", http.StatusBadGateway, `{"error":{"code":"upstream_failed"}}`, true, true},
+		{"no docbank", http.StatusServiceUnavailable, `{"error":{"code":"docbank_not_configured"}}`, false, false},
+		{"unsupported", http.StatusNotFound, ``, false, false},
+		{"origin mismatch", http.StatusConflict, `{"error":{"code":"attachment_origin_mismatch"}}`, true, false},
+		{"recovered", http.StatusOK, fmt.Sprintf(`{"version":1,"project_uid":%q,"origin":%q}`, project.UID, store.InstanceUID()), true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			status, body = tc.status, tc.body
@@ -57,8 +59,8 @@ func TestUIAttachmentRouteOriginAvailability(t *testing.T) {
 			var response api.UIAttachmentRouteResponseBody
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 			require.NotNil(t, response.Route)
-			require.Equal(t, tc.want, response.Route.Read)
-			require.Equal(t, tc.want, response.Route.Write)
+			require.Equal(t, tc.read, response.Route.Read)
+			require.Equal(t, tc.write, response.Route.Write)
 		})
 	}
 }

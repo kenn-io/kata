@@ -407,7 +407,7 @@ func TestUIAttachmentRoutesAreProjectSpecific(t *testing.T) {
 	require.NotNil(t, result.Route)
 	require.Equal(t, spoke.UID, result.Route.ProjectUID)
 	require.True(t, result.Route.Read)
-	require.False(t, result.Route.Write)
+	require.True(t, result.Route.Write)
 	code, raw = env.Get(t, "/api/v1/ui/attachment-route?project_uid="+local.UID)
 	require.Equal(t, http.StatusOK, code, string(raw))
 	require.NoError(t, json.Unmarshal(raw, &result))

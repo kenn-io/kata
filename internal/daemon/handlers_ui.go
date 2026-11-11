@@ -807,7 +807,7 @@ func uiAttachmentRoute(ctx context.Context, cfg ServerConfig, binding db.Federat
 		var apiErr *api.APIError
 		unavailable := errors.As(err, &apiErr) && apiErr != nil && (apiErr.Code == "docbank_not_configured" || apiErr.Code == "docbank_forward_unsupported")
 		route.Read = !unavailable
-		route.Write = binding.PushEnabled && !unavailable
+		route.Write = binding.PushEnabled && !unavailable && (apiErr == nil || apiErr.Code != "attachment_origin_mismatch")
 	}
 	return route
 }
