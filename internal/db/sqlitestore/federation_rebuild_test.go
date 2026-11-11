@@ -1,13 +1,48 @@
 package sqlitestore
 
 import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"modernc.org/sqlite"
 )
+
+type moveQueryCounter struct {
+	path   string
+	counts map[string]int
+}
+
+func (c *moveQueryCounter) Driver() driver.Driver { return &sqlite.Driver{} }
+func (c *moveQueryCounter) Connect(context.Context) (driver.Conn, error) {
+	conn, err := c.Driver().Open(c.path)
+	if err != nil {
+		return nil, err
+	}
+	return &moveQueryConn{Conn: conn, counter: c}, nil
+}
+
+type moveQueryConn struct {
+	driver.Conn
+	counter *moveQueryCounter
+}
+
+func (c *moveQueryConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	return c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
+}
+
+func (c *moveQueryConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	if strings.Contains(query, "SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues") {
+		c.counter.counts[args[0].Value.(string)]++
+	}
+	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+}
 
 func TestFederationGenerationSurvivesProjectIDReuse(t *testing.T) {
 	ctx := t.Context()
@@ -369,6 +404,43 @@ func TestMoveRebuildDoesNotResurrectArchivedDestination(t *testing.T) {
 	require.Equal(t, 1, attempts)
 	_, err = prepared.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.ErrorIs(t, err, db.ErrNotFound)
+}
+
+func TestMoveRebuildRefreshesChangedDecisions(t *testing.T) {
+	ctx := t.Context()
+	d, source, moving := incrementalTestStore(t)
+	destination, err := d.CreateProject(ctx, "destination")
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
+	require.NoError(t, err)
+	settled, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "already moved", Author: "tester"})
+	require.NoError(t, err)
+	for _, issue := range []db.Issue{moving, settled} {
+		_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+		require.NoError(t, err)
+	}
+	_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?,short_id=? WHERE id=?`, source.ID, moving.ShortID, moving.ID)
+	require.NoError(t, err)
+	locked := cloneIncrementalStore(t, d)
+	require.NoError(t, locked.materializeFederatedProject(ctx, source.ID))
+	prepared, err := d.prepareFederationRebuild(ctx, source.ID)
+	require.NoError(t, err)
+	count := &moveQueryCounter{path: "file:" + d.Path() + "?_pragma=foreign_keys(1)", counts: map[string]int{}}
+	raw := sql.OpenDB(count)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	store := *d
+	store.DB = raw
+	require.NoError(t, store.applyFederationRebuild(ctx, prepared))
+	for _, issue := range []db.Issue{moving, settled} {
+		got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		want, err := locked.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		require.Equal(t, destination.ID, got.ProjectID)
+		require.Equal(t, want, got)
+	}
+	require.Equal(t, 3, count.counts[moving.UID], "the moved row needs one fresh decision after both validations")
+	require.Equal(t, 2, count.counts[settled.UID], "an unchanged row needs only the two validations")
 }
 
 func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {

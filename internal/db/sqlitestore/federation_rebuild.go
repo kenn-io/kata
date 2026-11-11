@@ -183,8 +183,7 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 		if stamp != prepared.moveStamp {
 			return errStaleFederationPreparation
 		}
-		var firstDecisions []db.FederatedMoveDecision
-		for i, p := range prepared.projects {
+		for _, p := range prepared.projects {
 			if err := db.LockCronProject(ctx, tx, p.id); err != nil {
 				return err
 			}
@@ -198,23 +197,39 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 			if !slices.Equal(decisions, p.decisions) {
 				return errStaleFederationPreparation
 			}
-			if i == 0 {
-				firstDecisions = decisions
-			}
 		}
 		// The existing move routine keeps its live claim, recurrence, and import guards.
-		// Earlier rehomes can change the decisions for later projects.
-		for i, p := range prepared.projects {
-			decisions := firstDecisions
-			if i > 0 {
-				var err error
-				decisions, _, err = db.PlanFederatedMovedIssues(ctx, tx, p.events, p.moveProjection)
+		// Refresh only issues changed by earlier rehomes.
+		changed := map[string]bool{}
+		for _, p := range prepared.projects {
+			decisions := p.decisions
+			affected := db.FoldProjection{Issues: map[string]db.FoldIssue{}}
+			for _, decision := range decisions {
+				if changed[decision.IssueUID] {
+					affected.Issues[decision.IssueUID] = p.moveProjection.Issues[decision.IssueUID]
+				}
+			}
+			if len(affected.Issues) > 0 {
+				refreshed, _, err := db.PlanFederatedMovedIssues(ctx, tx, p.events, affected)
 				if err != nil {
 					return err
+				}
+				decisions = slices.Clone(decisions)
+				j := 0
+				for i := range decisions {
+					if changed[decisions[i].IssueUID] {
+						decisions[i] = refreshed[j]
+						j++
+					}
 				}
 			}
 			if err := d.rehomeFederatedMovedIssues(ctx, tx, p.events, p.moveProjection, decisions, nil); err != nil {
 				return err
+			}
+			for _, decision := range decisions {
+				if isFederationRehome(decision) {
+					changed[decision.IssueUID] = true
+				}
 			}
 		}
 		validator := db.NewCronReplayValidator(tx, false)
