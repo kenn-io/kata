@@ -81,11 +81,6 @@ type LocalDaemonUnreachableError struct {
 }
 
 func (e *LocalDaemonUnreachableError) Error() string {
-	return e.Summary()
-}
-
-// Summary describes the probe failure without assuming a recovery target.
-func (e *LocalDaemonUnreachableError) Summary() string {
 	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %v", e.PID, e.Address, e.cause)
 }
 

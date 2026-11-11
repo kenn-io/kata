@@ -56,9 +56,6 @@ func doctorDiscoveryCheck(err error) diagnostics.Check {
 	if errors.Is(err, errDoctorNoRunningDaemon) {
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "No local daemon is running", Fix: "Run kata daemon start, or when autostart is disabled start it through its service manager; then rerun kata doctor."}
 	}
-	if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Selected local daemon is unreachable", Fix: err.Error() + ". " + localDaemonGuidance(unreachable, true)}
-	}
 	if _, ok := errors.AsType[*client.LocalProfileDirError](err); ok {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Selected local profile's runtime directory is not private", Fix: "Restrict the profile's directory under <profile home>/runtime to its owner, for example with chmod 700 on Unix. Kata does not repair local profile directories."}
 	}

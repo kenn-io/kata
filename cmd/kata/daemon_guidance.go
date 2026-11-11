@@ -9,15 +9,12 @@ import (
 	"go.kenn.io/kata/internal/client"
 )
 
-// daemonRecoveryAdvice presents the evidence retained by discovery. Blockers
-// receive evidence only; no recovery action should bypass their checks.
-func daemonRecoveryAdvice(e *client.LocalDaemonUnreachableError, recovery bool, goos string) string {
+// daemonRecoveryAdvice presents the evidence retained by discovery and the
+// recovery commands that fit the launch mode.
+func daemonRecoveryAdvice(e *client.LocalDaemonUnreachableError, goos string) string {
 	advice := fmt.Sprintf("inspect \"%s\" or the supervisor stderr log", filepath.Join(e.DataDir, "daemon.log"))
 	if e.WebOrigin != "" {
 		advice += ". If responsive, capture " + e.WebOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner access. With configured authentication use the owner's credential"
-	}
-	if !recovery {
-		return advice + "."
 	}
 	if e.VerifiedProcess && goos == "windows" {
 		advice += fmt.Sprintf(". Stop the failed process with taskkill /PID %d /F", e.PID)
@@ -35,6 +32,8 @@ func daemonRecoveryAdvice(e *client.LocalDaemonUnreachableError, recovery bool, 
 	return advice + "."
 }
 
+// profileRecoveryCommand quotes any catalog name, which is free-form text, for
+// the shell that will run the command.
 func profileRecoveryCommand(name, goos string) string {
 	arg := "--daemon=" + name
 	if goos != "windows" {
@@ -48,6 +47,15 @@ func profileRecoveryCommand(name, goos string) string {
 	return "in PowerShell: kata '" + strings.ReplaceAll(arg, "'", "''") + "' daemon recover"
 }
 
-func localDaemonGuidance(e *client.LocalDaemonUnreachableError, recovery bool) string {
-	return daemonRecoveryAdvice(e, recovery, runtime.GOOS)
+func localDaemonGuidance(e *client.LocalDaemonUnreachableError) string {
+	return daemonRecoveryAdvice(e, runtime.GOOS)
+}
+
+// diagnosisMessage keeps an unreachable daemon's PID, endpoint and cause in the
+// text users read; other states report only their next action.
+func diagnosisMessage(result daemonDiagnosis) string {
+	if result.State == "local_unreachable" && result.Message != "" {
+		return result.State + ": " + result.Message + ". " + result.NextAction
+	}
+	return result.State + ": " + result.NextAction
 }

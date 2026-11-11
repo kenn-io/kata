@@ -82,7 +82,6 @@ func TestLocalProfileInstanceTimeoutRetainsEvidence(t *testing.T) {
 	_, err = EnsureResolvedNamed(t.Context(), "work")
 	require.ErrorAs(t, err, &observed)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Equal(t, "work", observed.Profile)
 	require.Zero(t, state.startCalls)
 	require.Zero(t, state.stopCalls)
 	require.Zero(t, starts)

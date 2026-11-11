@@ -129,7 +129,7 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 	}
 	resp, err := apiClient.InstanceWithResponse(ctx)
 	if resp == nil {
-		return &instanceTransportError{cause: err}
+		return fmt.Errorf("local profile instance is unavailable: %w: %w", ErrLocalDaemonUnreachable, err)
 	}
 	if resp.StatusCode != 200 {
 		if resp.StatusCode == 401 || resp.StatusCode == 403 {
@@ -149,16 +149,8 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 	return nil
 }
 
-type instanceTransportError struct{ cause error }
-
-func (e *instanceTransportError) Error() string {
-	return fmt.Sprintf("local profile instance is unavailable: %v", e.cause)
-}
-func (e *instanceTransportError) Unwrap() error        { return e.cause }
-func (e *instanceTransportError) Is(target error) bool { return target == ErrLocalDaemonUnreachable }
-
 func withInstanceFailureEvidence(err error, candidate liveDaemon, dataDir string) error {
-	if _, ok := errors.AsType[*instanceTransportError](err); ok {
+	if errors.Is(err, ErrLocalDaemonUnreachable) {
 		return unreachableRuntime(candidate.Record, dataDir, err)
 	}
 	return err
@@ -294,26 +286,8 @@ func profileCutoverLocked(profile config.LocalProfileConfig) func(context.Contex
 
 // scopeProfileUnreachable attaches the selected profile without dropping wrapping.
 func scopeProfileUnreachable(err error, name string) error {
-	unreachable, ok := errors.AsType[*LocalDaemonUnreachableError](err)
-	if !ok {
-		return err
+	if unreachable, ok := errors.AsType[*LocalDaemonUnreachableError](err); ok {
+		unreachable.Profile = name
 	}
-	scoped := *unreachable
-	scoped.Profile = name
-	return &scopedProfileError{err: err, observed: &scoped}
-}
-
-type scopedProfileError struct {
-	err      error
-	observed *LocalDaemonUnreachableError
-}
-
-func (e *scopedProfileError) Error() string { return e.err.Error() }
-func (e *scopedProfileError) Unwrap() error { return e.err }
-func (e *scopedProfileError) As(target any) bool {
-	if p, ok := target.(**LocalDaemonUnreachableError); ok {
-		*p = e.observed
-		return true
-	}
-	return false
+	return err
 }

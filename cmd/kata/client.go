@@ -67,7 +67,8 @@ func ensureDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
 		}
 		return resolved, nil
 	}
-	resolved, err := client.PrepareResolvedInWorkspace(ctx, workspaceStartForRemote())
+	workspaceStart := workspaceStartForRemote()
+	resolved, err := client.PrepareResolvedInWorkspace(ctx, workspaceStart)
 	if err != nil {
 		return client.ResolvedDaemon{}, cliDaemonTargetError(err)
 	}
@@ -135,18 +136,6 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 	})
 	if err != nil || !found {
 		if resolved.LocalProfile != nil {
-			if _, typed := errors.AsType[*client.LocalDaemonUnreachableError](err); typed {
-				if selection, ok := resolved.LocalProfileSelection(); ok {
-					diagnosis, _, diagnoseErr := diagnoseDaemonSelection(ctx, "", selection, err)
-					if diagnoseErr != nil {
-						diagnosis.State = "selection_error"
-						diagnosis.Message = diagnoseErr.Error()
-						diagnosis = withDiagnosisAction(diagnosis)
-					}
-					return resolved, diagnosisError(diagnosis)
-				}
-				return resolved, cliDaemonTargetError(err)
-			}
 			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
 			if diagnoseErr != nil {
 				return resolved, diagnoseErr
@@ -178,7 +167,7 @@ func noDaemonRunningError() error {
 
 func cliDaemonTargetError(err error) error {
 	if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-		return &cliError{Message: err.Error(), Hint: localDaemonGuidance(unreachable, true), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+		return &cliError{Message: err.Error(), Hint: localDaemonGuidance(unreachable), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
 	}
 	code := ""
 	switch {
