@@ -19,7 +19,11 @@ interface BuildKataTaskViewOptions {
 type ProjectLookup = Map<string, KataProjectSummary>
 
 export function scheduleText(value: ScheduleValue | undefined): string | undefined {
-  return typeof value === 'string' ? value : value?.value
+  return typeof value === 'string'
+    ? value
+    : typeof value?.value === 'string'
+      ? value.value
+      : undefined
 }
 
 function issueDate(value: ScheduleValue | undefined): string | undefined {

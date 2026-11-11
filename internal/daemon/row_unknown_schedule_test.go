@@ -21,6 +21,7 @@ func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 		{"unsupported rules", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`, true},
 		{"unsupported members", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}`, true},
 		{"opaque legacy value", `{"legacy":"opaque"}`, false},
+		{"opaque numeric value", `{"value":123}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newRowDatesFixture(t)
@@ -48,7 +49,7 @@ func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 					}
 					require.NoError(t, json.Unmarshal(raw, &body))
 					row := body.Issue
-					if path == show && !tc.unsupported {
+					if path == show && tc.name == "opaque legacy value" {
 						require.Contains(t, string(raw), `"legacy":"opaque"`)
 					} else if path != show {
 						var sibling map[string]any

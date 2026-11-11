@@ -79,6 +79,22 @@ describe('IssueDetail', () => {
     vi.useRealTimers()
   })
 
+  it('renders and replaces a restored malformed scheduled date', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-01T12:00:00Z'))
+    const onPatchMetadata = vi.fn(async () => true)
+    renderDetail({
+      issue: makeIssue({ metadata: { scheduled_on: { value: 123 } as never } }),
+      onPatchMetadata,
+    })
+    expect(screen.getByRole('heading', { name: 'Ship the thing' })).toBeTruthy()
+    await openEditor()
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Jun 10, 2026' }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { scheduled_on: '2026-06-10' })
+  })
+
   it('renders the package-owned presentation before entering Kata editing mode', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-01T13:00:00Z'))

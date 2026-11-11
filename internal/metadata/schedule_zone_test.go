@@ -30,6 +30,9 @@ func TestOpaqueRestoredDateDoesNotPretendToBeFutureSchedule(t *testing.T) {
 
 func TestSavedScheduleIgnoresHostZoneinfo(t *testing.T) {
 	if os.Getenv("KATA_SCHEDULE_ZONE_CHILD") == "1" {
+		host, err := time.LoadLocation("Europe/Paris")
+		require.NoError(t, err)
+		require.Equal(t, "2026-11-12T09:00:00Z", time.Date(2026, 11, 12, 9, 0, 0, 0, host).UTC().Format(time.RFC3339))
 		raw, err := NewScheduleValue("2026-11-12T09:00", "Europe/Paris")
 		require.NoError(t, err)
 		_, _, at, _, err := ScheduleFieldInstant(`{"scheduled_on":`+string(raw)+`}`, "scheduled_on", "UTC")
@@ -53,7 +56,7 @@ func TestSavedScheduleIgnoresHostZoneinfo(t *testing.T) {
 	require.NotEmpty(t, utc)
 	var b bytes.Buffer
 	z := zip.NewWriter(&b)
-	entry, err := z.Create("Europe/Paris")
+	entry, err := z.CreateHeader(&zip.FileHeader{Name: "Europe/Paris", Method: zip.Store})
 	require.NoError(t, err)
 	_, err = entry.Write(utc)
 	require.NoError(t, err)
