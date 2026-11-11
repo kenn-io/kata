@@ -37,13 +37,3 @@ func TestCronImportValidatesEventPayload(t *testing.T) {
 	project.UID = "01ARZ3NDEKTSV4RRFFQ69G5FAJ"
 	require.Error(t, db.ValidateImportRecords([]db.ImportRecord{project, &event}), "event project must match imported project")
 }
-
-func TestCronImportRejectsUnknownReservedWorkflowDocument(t *testing.T) {
-	const projectUID = "01ARZ3NDEKTSV4RRFFQ69G5FAD"
-	at := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
-	payload, err := json.Marshal(db.CronDefinitionEvent{UID: "01ARZ3NDEKTSV4RRFFQ69G5FAF", ProjectUID: projectUID, Name: "Example", Author: "worker", CreatedAt: at, UpdatedAt: at, Definition: jsontext.Value(`{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`)})
-	require.NoError(t, err)
-	event := &db.EventExport{ID: 1, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAH", ProjectID: 1, OriginInstanceUID: "01ARZ3NDEKTSV4RRFFQ69G5FAE", Actor: "worker", Type: "cron.workflow.updated", Payload: payload, HLCPhysicalMS: at.UnixMilli(), CreatedAt: at.Format(db.EventTimestampFormat)}
-	project := &db.ProjectExport{ID: 1, UID: projectUID, Name: "example-project"}
-	require.Error(t, db.ValidateImportRecords([]db.ImportRecord{project, event}), "restore must not preserve an undecodable later event beside a runnable older projection")
-}

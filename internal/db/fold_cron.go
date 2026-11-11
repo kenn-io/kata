@@ -148,6 +148,14 @@ func (p *FoldProjection) applyCronDefinition(e FoldEvent) {
 			p.Warnings = append(p.Warnings, err.Error())
 			return
 		}
+		// Historical decoding accepts null and missing or non-v1 versions,
+		// but neither store can represent them in a workflow row.
+		if definition.Version != 1 && cronUID(e.ProjectUID) {
+			if p.cronBlockedProjects == nil {
+				p.cronBlockedProjects = make(map[string]error)
+			}
+			p.cronBlockedProjects[e.ProjectUID] = fmt.Errorf("workflow definition cannot be represented in storage")
+		}
 		value.Author = p.cronDefinitionAuthor("workflow:"+in.UID, e, value)
 		current, exists := p.CronWorkflows[in.UID]
 		if !exists || compareClock(cronDefinitionClock(value), cronDefinitionClock(current.CronDefinition)) > 0 {
