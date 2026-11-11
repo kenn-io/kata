@@ -144,7 +144,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		var e metadata.Attachment
-		if binding != nil {
+		if isDocbankSpoke(binding) {
 			project, err := activeProjectByID(ctx, cfg.DB, iss.ProjectID)
 			if err != nil {
 				return nil, err
@@ -162,7 +162,9 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
-			e.Origin = cfg.DB.InstanceUID()
+			if binding != nil {
+				e.Origin = cfg.DB.InstanceUID()
+			}
 		}
 		return saveAttachment(ctx, cfg, iss.ProjectID, iss, actor, e, nil)
 	})
@@ -184,7 +186,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			return nil, attachmentError(400, "attachment_invalid")
 		}
 		var resp *http.Response
-		if e.Origin == "" {
+		if e.Origin == "" || e.Origin == cfg.DB.InstanceUID() {
 			if cfg.Docbank == nil {
 				return nil, attachmentError(503, "docbank_not_configured")
 			}
@@ -224,7 +226,6 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 }
 
 func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss db.Issue, actor string, e metadata.Attachment, reuseVersion *uuid.UUID) (*api.AddAttachmentResponse, error) {
-	e.MediaType = attachmentMediaType(e.Name)
 	id, err := uid.New()
 	if err != nil {
 		return nil, internalAPIError(err)
@@ -241,7 +242,7 @@ func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss 
 		// Recheck under the metadata write transaction so concurrent retries
 		// cannot each observe an absent reference and create a second one.
 		ctx = db.WithMetadataPatchHook(ctx, func(_ context.Context, _ *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
-			existingID, _, err := attachmentForVersion(current, docbank.Version{ID: *reuseVersion}, e.Origin)
+			existingID, _, err := attachmentForVersion(current, docbank.Version{ID: *reuseVersion}, e.Origin, cfg.DB.InstanceUID())
 			if err != nil {
 				return nil, err
 			}
@@ -262,7 +263,7 @@ func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss 
 		cfg.Publish().Event(res.Event.ProjectID, res.Event)
 	}
 	if reuseVersion != nil {
-		id, e, err = attachmentForVersion(res.Issue, docbank.Version{ID: *reuseVersion}, e.Origin)
+		id, e, err = attachmentForVersion(res.Issue, docbank.Version{ID: *reuseVersion}, e.Origin, cfg.DB.InstanceUID())
 		if err != nil {
 			return nil, internalAPIError(err)
 		}

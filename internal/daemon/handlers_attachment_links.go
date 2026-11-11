@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"errors"
 	"path"
 	"strings"
 	"uuid"
@@ -39,7 +38,7 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 		return nil, err
 	}
 	var attachment metadata.Attachment
-	if binding != nil {
+	if isDocbankSpoke(binding) {
 		project, err := activeProjectByID(ctx, cfg.DB, iss.ProjectID)
 		if err != nil {
 			return nil, err
@@ -53,16 +52,14 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 			return nil, err
 		}
 	} else {
-		root, rootErr := cfg.DB.FederationBindingByProject(ctx, iss.ProjectID)
-		if rootErr != nil && !errors.Is(rootErr, db.ErrNotFound) {
-			return nil, internalAPIError(rootErr)
-		}
-		scoped := rootErr == nil && root.Role == db.FederationRoleHub
+		scoped := binding != nil && binding.Role == db.FederationRoleHub
 		attachment, err = resolveDocbankAttachment(ctx, cfg, input, scoped)
 		if err != nil {
 			return nil, err
 		}
-		attachment.Origin = cfg.DB.InstanceUID()
+		if scoped {
+			attachment.Origin = cfg.DB.InstanceUID()
+		}
 	}
 	if input.ReuseExisting {
 		return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, attachment, &attachment.DocbankVersion)
@@ -70,7 +67,7 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 	return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, attachment, nil)
 }
 
-func attachmentForVersion(iss db.Issue, version docbank.Version, origin string) (string, metadata.Attachment, error) {
+func attachmentForVersion(iss db.Issue, version docbank.Version, origin, localOrigin string) (string, metadata.Attachment, error) {
 	var values map[string]jsontext.Value
 	if err := json.Unmarshal([]byte(iss.Metadata), &values); err != nil {
 		return "", metadata.Attachment{}, err
@@ -83,7 +80,11 @@ func attachmentForVersion(iss db.Issue, version docbank.Version, origin string) 
 			continue
 		}
 		attachment, valid := metadata.Valid(raw)
-		if !valid || attachment.DocbankVersion != version.ID || attachment.Origin != origin {
+		if !valid || attachment.DocbankVersion != version.ID {
+			continue
+		}
+		sameOrigin := attachment.Origin == origin || (origin == localOrigin && attachment.Origin == "") || (origin == "" && attachment.Origin == localOrigin)
+		if !sameOrigin {
 			continue
 		}
 		if bestID == "" || id < bestID {

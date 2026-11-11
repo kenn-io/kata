@@ -63,8 +63,8 @@ func TestDocbankRootBindingLookupFailsClosed(t *testing.T) {
 			} else {
 				version := uuid.MustParse(linkVersion)
 				vault.Seed("/private/file.pdf", docbank.Node{ID: 42, Name: "file.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("fixture")})
-				// The claim gate and routing lookup succeed; the repeated root lookup fails.
-				fault.failAt.Store(3)
+				// The claim gate succeeds; the route lookup fails.
+				fault.failAt.Store(2)
 				status, body, err = postAttachmentLink(t, env, endpoint+"/links", `{"path":"/private/file.pdf","actor":"operator"}`)
 				require.NoError(t, err)
 			}

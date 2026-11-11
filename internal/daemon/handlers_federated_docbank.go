@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -91,7 +90,7 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		var descriptor metadata.Attachment
-		if binding != nil {
+		if isDocbankSpoke(binding) {
 			descriptor, err = forwardDocbankDescriptor(ctx, cfg, project, binding, issue, boundSpokeClaimPrincipal(*binding, principal, cfg.DB.InstanceUID()), in.Origin, in.Name, nil, ctx.Value(attachmentUploadContextKey{}).(io.Reader))
 		} else {
 			descriptor, err = uploadDocbankAttachment(ctx, cfg, issue, in.Name, ctx.Value(attachmentUploadContextKey{}).(io.Reader), recheck)
@@ -123,7 +122,7 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		var descriptor metadata.Attachment
-		if binding != nil {
+		if isDocbankSpoke(binding) {
 			descriptor, err = forwardDocbankDescriptor(ctx, cfg, project, binding, issue, boundSpokeClaimPrincipal(*binding, principal, cfg.DB.InstanceUID()), in.Origin, "", &in.Body, nil)
 		} else {
 			descriptor, err = resolveDocbankAttachment(ctx, cfg, in.Body, true)
@@ -170,7 +169,7 @@ func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Proj
 	if err != nil {
 		return nil, err
 	}
-	if binding == nil {
+	if !isDocbankSpoke(binding) {
 		// Only projects without an upstream may use this daemon's Docbank origin.
 		if attachment.Origin != cfg.DB.InstanceUID() {
 			return nil, attachmentError(410, "attachment_origin_unavailable")
@@ -178,22 +177,16 @@ func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Proj
 		if cfg.Docbank == nil {
 			return nil, attachmentError(503, "docbank_not_configured")
 		}
-		root, rootErr := cfg.DB.FederationBindingByProject(ctx, project.ID)
-		if rootErr != nil && !errors.Is(rootErr, db.ErrNotFound) {
-			return nil, internalAPIError(rootErr)
+		version, err := cfg.Docbank.Version(ctx, attachment.DocbankVersion)
+		if err != nil {
+			return nil, docbankError(err, docbankContentErrors)
 		}
-		if rootErr == nil && root.Role == db.FederationRoleHub {
-			version, err := cfg.Docbank.Version(ctx, attachment.DocbankVersion)
-			if err != nil {
-				return nil, docbankError(err, docbankContentErrors)
-			}
-			node, err := cfg.Docbank.Node(ctx, version.NodeID)
-			if err != nil {
-				return nil, docbankError(err, docbankContentErrors)
-			}
-			if err := exposedDocbankNode(cfg, node); err != nil {
-				return nil, err
-			}
+		node, err := cfg.Docbank.Node(ctx, version.NodeID)
+		if err != nil {
+			return nil, docbankError(err, docbankContentErrors)
+		}
+		if err := exposedDocbankNode(cfg, node); err != nil {
+			return nil, err
 		}
 		resp, err := cfg.Docbank.Content(ctx, attachment.DocbankVersion)
 		if err != nil {
@@ -212,7 +205,7 @@ func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Proj
 }
 
 func checkDocbankOrigin(cfg ServerConfig, binding *db.FederationBinding, origin string) error {
-	if binding == nil {
+	if !isDocbankSpoke(binding) {
 		if origin != cfg.DB.InstanceUID() {
 			return attachmentError(409, "attachment_origin_mismatch")
 		}

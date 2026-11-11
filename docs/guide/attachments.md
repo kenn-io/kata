@@ -71,7 +71,7 @@ Without Docbank configured, references still appear in lists, and the web UI sho
 
 ## Use attachments through project relays
 
-New attachments for a shared project use the root hub's Docbank. Before sharing a local project, place linked files inside the configured folder. A folder of `/` exposes the entire vault. Adopting local data into another root requires copying or linking those files into that root's vault. Add and link
+New attachments for a shared project use the root hub's Docbank. Hub links must be inside the configured folder; move a file there before linking it. A folder of `/` exposes the entire vault. Add and link
 commands stay the same on a leaf or intermediate relay. Only the root needs
 the Docbank key; every connection uses its own project enrollment credential.
 Upgrade the CLI and every daemon on the path before using this feature.
@@ -83,7 +83,7 @@ under that same subtree. Use a separate Docbank instance or folder audience
 when those files must not be shared. Forwarded links accept only files whose
 live canonical path is inside the exposed folder, including links selected by
 node ID or historical version. Moving a file outside that folder makes its
-origin references unreadable. Membership checks and content reads are separate
+origin references unreadable to replicas; the owner can still read them. Membership checks and content reads are separate
 Docbank operations; they do not provide an atomic folder ACL during moves.
 
 An origin service uploads or resolves the file and returns a pinned descriptor.
@@ -92,9 +92,11 @@ an immediate close before metadata synchronization reaches the root. A new
 issue that has not reached the root returns `attachment_issue_not_synced`;
 sync the project and retry. The issue is not created at the root by uploading.
 
-New references carry the serving Kata instance UID in `origin`. Every replica
-stores the same value. References without this marker, including history from
-before relay adoption, keep using each serving daemon's local Docbank. A marked
+Shared-project references carry the root Kata instance UID in `origin`. Every
+replica stores the same value. Standalone references have no origin marker and
+continue to use the serving daemon's local Docbank after sharing or adoption.
+To make those files available on other replicas, copy or link them into the
+root's vault and add new shared references. A marked
 reference never falls back to a different local vault: an unreachable upstream
 returns `federation_offline`; a missing or changed route is an explicit origin
 error; a missing version at a reachable origin remains
@@ -176,7 +178,7 @@ that version. Removed or changed references retain their frozen description.
 
 ## Read references as metadata
 
-Each file uses an `attachment.<ULID>` key with `name`, `media_type`, `size`, and `docbank_version` fields, plus optional `origin` for origin-routed references. An absent marker or explicit `local` keeps local resolution. These are ordinary opaque metadata keys. The browser checks field types for display; the daemon validates the full reference when serving content. Version reuse compares both origin and content version.
+Each file uses an `attachment.<ULID>` key with `name`, `media_type`, `size`, and `docbank_version` fields, plus optional `origin` for origin-routed references. An absent marker keeps local resolution. These are ordinary opaque metadata keys. The browser checks field types for display; the daemon validates the full reference when serving content. Version reuse compares both origin and content version.
 
 ```sh
 kata meta get abc4

@@ -203,8 +203,16 @@ func TestAttachmentLinkReuseChoosesSmallestExistingID(t *testing.T) {
 func TestAttachmentLinkReuseHandlesConcurrentRequests(t *testing.T) {
 	env, f := attachmentEnv(t)
 	p, iss := seedProjectAndIssue(t, env)
-	seedLinkFile(f)
+	version := uuid.MustParse(linkVersion)
+	f.Seed("/kata/report.pdf", docbank.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("sample bytes")})
+	legacy := jsontext.Value(`{"name":"report.pdf","media_type":"application/pdf","size":12,"docbank_version":"` + linkVersion + `"}`)
+	_, err := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.legacy": legacy}})
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(t.Context(), p.ID, "operator")
+	require.NoError(t, err)
 	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/links", p.ID, iss.ShortID)
+	beforeIssue, err := env.DB.IssueByID(t.Context(), iss.ID)
+	require.NoError(t, err)
 	before, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
 
@@ -251,10 +259,13 @@ func TestAttachmentLinkReuseHandlesConcurrentRequests(t *testing.T) {
 		require.NoError(t, json.Unmarshal(got.body, &result))
 		ids = append(ids, result.ID)
 	}
-	require.Equal(t, ids[0], ids[1], "concurrent retries must reuse one attachment reference")
+	require.Equal(t, []string{"legacy", "legacy"}, ids)
 	after, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
-	require.Equal(t, before+1, after, "concurrent reuse must emit one metadata event total")
+	require.Equal(t, before, after, "reusing the legacy reference emits no metadata event")
+	afterIssue, err := env.DB.IssueByID(t.Context(), iss.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, string(beforeIssue.Metadata), string(afterIssue.Metadata))
 }
 
 func TestAttachmentLinkReuseRefreshesReferenceAfterConcurrentRemoval(t *testing.T) {
@@ -413,12 +424,12 @@ func TestAttachmentOriginBeforeSharing(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, string(raw))
 	var linked api.AddAttachmentResponseBody
 	require.NoError(t, json.Unmarshal(raw, &linked))
-	require.Equal(t, env.DB.InstanceUID(), linked.Attachment.Origin)
+	require.Empty(t, linked.Attachment.Origin)
 	status, raw = attachmentUpload(t, env, endpoint, "report.pdf", strings.NewReader("upload"))
 	require.Equal(t, http.StatusOK, status, string(raw))
 	var uploaded api.AddAttachmentResponseBody
 	require.NoError(t, json.Unmarshal(raw, &uploaded))
-	require.Equal(t, env.DB.InstanceUID(), uploaded.Attachment.Origin)
+	require.Empty(t, uploaded.Attachment.Origin)
 	read := func(id string) *http.Response {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, env.URL+endpoint+"/"+id+"/content", nil)
 		require.NoError(t, err)
@@ -430,8 +441,14 @@ func TestAttachmentOriginBeforeSharing(t *testing.T) {
 	require.Equal(t, http.StatusOK, read(linked.ID).StatusCode)
 	_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "operator")
 	require.NoError(t, err)
-	require.Equal(t, http.StatusForbidden, read(linked.ID).StatusCode)
+	require.Equal(t, http.StatusOK, read(linked.ID).StatusCode)
 	require.Equal(t, http.StatusOK, read(uploaded.ID).StatusCode)
+	linked.Attachment.Origin = env.DB.InstanceUID()
+	marked, err := json.Marshal(linked.Attachment)
+	require.NoError(t, err)
+	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment." + linked.ID: marked}})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, read(linked.ID).StatusCode)
 	binding, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	binding.Enabled = false
@@ -439,7 +456,64 @@ func TestAttachmentOriginBeforeSharing(t *testing.T) {
 	require.NoError(t, err)
 	status, raw = attachmentUpload(t, env, endpoint, "disabled.pdf", strings.NewReader("upload"))
 	require.Equal(t, http.StatusOK, status, string(raw))
+	var disabled api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &disabled))
+	require.Equal(t, env.DB.InstanceUID(), disabled.Attachment.Origin)
 	status, raw, err = postAttachmentLink(t, env, endpoint+"/links", `{"path":"/reports/report.pdf","actor":"operator"}`)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusForbidden, status, string(raw))
+	require.Contains(t, string(raw), "move the file into the configured folder")
+	binding.Enabled = true
+	_, err = env.DB.UpsertFederationBinding(t.Context(), binding)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, read(linked.ID).StatusCode)
+}
+
+func TestAttachmentLinkReuseLegacyOnHub(t *testing.T) {
+	env, vault := attachmentEnv(t)
+	project, issue := seedProjectAndIssue(t, env)
+	version := uuid.MustParse(linkVersion)
+	vault.Seed("/kata/report.pdf", docbank.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("sample bytes")})
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/links", project.ID, issue.ShortID)
+	status, raw, err := postAttachmentLink(t, env, endpoint, `{"path":"/kata/report.pdf","actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var original api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &original))
+	original.Attachment.Origin = ""
+	legacy, err := json.Marshal(original.Attachment)
+	require.NoError(t, err)
+	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment." + original.ID: legacy}})
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "operator")
+	require.NoError(t, err)
+	before, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	status, raw, err = postAttachmentLink(t, env, endpoint, `{"node_id":42,"reuse_existing":true,"actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var reused api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &reused))
+	require.Equal(t, original, reused)
+	after, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, string(before.Metadata), string(after.Metadata))
+}
+
+func TestStandaloneAttachmentAfterAdoption(t *testing.T) {
+	env, vault := attachmentEnv(t)
+	project, issue := seedProjectAndIssue(t, env)
+	seedLinkFile(vault)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", project.ID, issue.ShortID)
+	status, raw, err := postAttachmentLink(t, env, endpoint+"/links", `{"path":"/reports/report.pdf","actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var linked api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &linked))
+	require.Empty(t, linked.Attachment.Origin)
+	_, err = env.DB.AdoptProjectIntoFederation(t.Context(), db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "http://hub.example", HubProjectID: 42, HubProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Actor: "operator"})
+	require.NoError(t, err)
+	status, raw = env.Get(t, endpoint+"/"+linked.ID+"/content")
+	require.Equal(t, http.StatusOK, status, string(raw))
+	require.Equal(t, "sample bytes", string(raw))
 }
