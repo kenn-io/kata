@@ -1,6 +1,7 @@
 package dbtest
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,8 +42,9 @@ func checkProjectPurgeRetiresHubBinding(t *testing.T, store db.Storage) error {
 	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "operator", Force: true})
 	require.NoError(t, err)
 	_, err = store.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: project.ID, Actor: "operator"})
-	var federated *db.ProjectFederatedError
-	require.ErrorAs(t, err, &federated, "the ordinary purge still refuses a federated project")
+	federated, ok := errors.AsType[*db.ProjectFederatedError](err)
+	require.True(t, ok, "the ordinary purge still refuses a federated project: %v", err)
+	require.NotNil(t, federated)
 	require.Equal(t, db.FederationRoleHub, federated.Role)
 
 	log, err := store.PurgeProject(ctx, retire)
@@ -89,8 +91,9 @@ func checkProjectPurgeKeepsSpokeRefusal(t *testing.T, store db.Storage) error {
 	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "operator", Force: true})
 	require.NoError(t, err)
 	_, err = store.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: project.ID, Actor: "operator", RetireHubBinding: true})
-	var federated *db.ProjectFederatedError
-	require.ErrorAs(t, err, &federated)
+	federated, ok := errors.AsType[*db.ProjectFederatedError](err)
+	require.True(t, ok, "a spoke replica is refused: %v", err)
+	require.NotNil(t, federated)
 	require.Equal(t, db.FederationRoleSpoke, federated.Role)
 	return nil
 }
