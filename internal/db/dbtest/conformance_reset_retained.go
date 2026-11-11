@@ -60,7 +60,9 @@ func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend 
 				var count int
 				require.NoError(t, q.QueryRowContext(ctx, `SELECT COUNT(*) FROM cron_workflows WHERE uid=$1`, bad.UID).Scan(&count))
 				require.Zero(t, count)
-				_, err = target.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: restored.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true, PullCursorEventID: 17, ReplayHorizonEventID: 13})
+				acknowledged, err := target.MaxEventID(ctx)
+				require.NoError(t, err)
+				_, err = target.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: restored.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true, PushCursorEventID: acknowledged, PullCursorEventID: 17, ReplayHorizonEventID: 13})
 				require.NoError(t, err)
 				var manifest db.RootResetManifest
 				var snapshot db.RootResetSnapshot
@@ -94,7 +96,7 @@ func checkResetRetainedWorkflowRestore(t *testing.T, source db.Storage, backend 
 				case "signed":
 					err = target.(db.RelayResetStore).InstallRelayReset(ctx, bindingUID, manifest, snapshot, translation)
 				}
-				require.Error(t, err)
+				require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 				after, err := target.FederationBindingByProject(ctx, restored.ID)
 				require.NoError(t, err)
 				require.Equal(t, before, after)
