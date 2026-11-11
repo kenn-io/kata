@@ -8,19 +8,13 @@ import (
 	"go.kenn.io/kit/agenthook"
 )
 
-// daemonCaptureAdvice lists the evidence to read without stopping the daemon.
-func daemonCaptureAdvice(e *client.LocalDaemonUnreachableError) string {
-	advice := fmt.Sprintf("read %q, if present, or the daemon's retained stderr", filepath.Join(e.DataDir, "daemon.log"))
-	if e.WebOrigin != "" {
-		advice += fmt.Sprintf(". If %[1]s responds, capture %[1]s/debug/pprof/goroutine?debug=2 with daemon-owner access, using the owner's credential when authentication is configured", e.WebOrigin)
-	}
-	return advice
-}
-
 // daemonRecoveryAdvice presents the evidence retained by discovery and the
 // recovery commands that fit the launch mode.
 func daemonRecoveryAdvice(e *client.LocalDaemonUnreachableError, profile, goos string) string {
-	advice := "This probe failed, so " + daemonCaptureAdvice(e)
+	advice := fmt.Sprintf("This probe failed, so read %q, if present, or the daemon's retained stderr", filepath.Join(e.DataDir, "daemon.log"))
+	if e.WebOrigin != "" {
+		advice += fmt.Sprintf(". If %[1]s responds, capture %[1]s/debug/pprof/goroutine?debug=2 with daemon-owner access, using the owner's credential when authentication is configured", e.WebOrigin)
+	}
 	advice += fmt.Sprintf(". If you choose to stop it, immediately recheck that PID %d is still this daemon and the selected endpoint still fails", e.PID)
 	if e.VerifiedProcess && goos == "windows" {
 		advice += fmt.Sprintf(". Then taskkill /PID %d /F stops it", e.PID)

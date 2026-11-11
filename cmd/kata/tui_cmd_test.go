@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/tui"
 )
 
@@ -213,5 +215,44 @@ func TestTUI_MouseFlagOverridesConfigToml(t *testing.T) {
 	}
 	if !got.Mouse {
 		t.Fatal("mouse option = false, want true from --mouse")
+	}
+}
+
+// A failed TUI boot must give recovery advice for the selected local profile.
+func TestTUI_UnreachableBootUsesSelectedProfile(t *testing.T) {
+	for _, route := range []string{"explicit", "workspace", "active", "inspection failure"} {
+		t.Run(route, func(t *testing.T) {
+			home, workspace, uid, _ := stoppedProfileCLI(t)
+			if route == "active" {
+				require.NoError(t, os.Remove(filepath.Join(workspace, ".kata.local.toml")))
+				personal := t.TempDir()
+				t.Setenv("KATA_HOME", personal)
+				catalog := fmt.Sprintf("active_daemon = \"work\"\n[[daemon]]\nname = \"work\"\nlocal = true\nhome = %q\ninstance_uid = %q\n", home, uid)
+				require.NoError(t, os.WriteFile(filepath.Join(personal, "config.toml"), []byte(catalog), 0600))
+			}
+			bootErr := &client.LocalDaemonUnreachableError{PID: 42, Address: "127.0.0.1:1", DataDir: t.TempDir()}
+			old := runTUI
+			runTUI = func(_ context.Context, _ tui.Options) error {
+				if route == "inspection failure" {
+					require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte("invalid = ["), 0600))
+				}
+				return bootErr
+			}
+			t.Cleanup(func() { runTUI = old })
+			args := []string{"--workspace", workspace}
+			if route == "explicit" {
+				args = append(args, "--daemon", "work")
+			}
+			args = append(args, "tui")
+			_, _, err := executeRootCapture(t, t.Context(), args...)
+			if route == "inspection failure" {
+				require.ErrorIs(t, err, bootErr)
+				return
+			}
+			ce := requireCLIError(t, err, ExitDaemonUnavail)
+			require.Contains(t, ce.Hint, "--daemon=work")
+			require.Contains(t, ce.Hint, "daemon")
+			require.Contains(t, ce.Hint, "recover")
+		})
 	}
 }

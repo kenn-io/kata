@@ -122,18 +122,12 @@ func diagnoseDaemon(ctx context.Context, expectedProject string) (daemonDiagnosi
 		return selectionErrorDiagnosis(err), selection, err
 	}
 	result, selection, err := diagnoseDaemonSelection(ctx, expectedProject, selection)
-	return withSelectionError(result, err), selection, err
-}
-
-// withSelectionError reports a failure of the selection step over the
-// diagnosis gathered before it.
-func withSelectionError(result daemonDiagnosis, err error) daemonDiagnosis {
-	if err == nil {
-		return result
+	if err != nil {
+		result.State = "selection_error"
+		result.Message = err.Error()
+		result = withDiagnosisAction(result)
 	}
-	result.State = "selection_error"
-	result.Message = err.Error()
-	return withDiagnosisAction(result)
+	return result, selection, err
 }
 
 func selectionErrorDiagnosis(err error) daemonDiagnosis {
