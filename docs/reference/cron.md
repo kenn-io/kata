@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-08
+last_edited: 2026-11-10
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -387,6 +387,7 @@ options). Each step has these fields:
 | --- | --- |
 | `key` | Required portable name, unique within the workflow. |
 | `kind` | `command` (requires `command`, no `prompt`) or `prompt` (requires `prompt`, no `command`). |
+| `argv` | Reserved string array; any presence, including `null` or an empty array, is refused until argv steps are enabled. |
 | `after` | Optional keys of earlier steps this step depends on. |
 | `retries` | Optional; 0–100. |
 | `options` | Optional JSON object for the adapter. |

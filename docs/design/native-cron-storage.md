@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-11-08
+last_edited: 2026-11-10
 ---
 
 # Dormant native cron storage
@@ -67,7 +67,10 @@ history and startup validation.
 ## Reserved argv step kind
 
 The event feature `cron_workflow_argv_v1` is reserved for a future `argv`
-workflow step kind. Kata does not advertise it or accept argv steps. Workflow
+workflow step kind and the `argv` string-array step member. Kata does not
+accept the kind or the member, even when the member is empty or null. Client
+representations reserve the member without granting execution. Historical
+decoding continues to reject raw documents containing the member. Workflow
 decoding rejects any argv step, including one that carries only its kind, on
 reads, lists, snapshots and remote admission. Legacy federation push inspects the raw
 workflow payload and sends an argv workflow only to a target that advertises

@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -49,19 +50,28 @@ func (h toolHandlers) cronWorkflow(ctx context.Context, _ *sdkmcp.CallToolReques
 	}
 	return cronResult(h.options.Client.ShowCronWorkflow(ctx, &generated.ShowCronWorkflowRequestOptions{PathParams: &generated.ShowCronWorkflowPath{ProjectID: p.ID, CronUID: id}}))
 }
-func (h toolHandlers) cronWorkflowCreate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronWorkflowCreateInput) (*sdkmcp.CallToolResult, generated.ReplaceCronWorkflowResponse, error) {
-	return h.cronPutWorkflow(ctx, in, nil)
+func (h toolHandlers) cronWorkflowCreate(ctx context.Context, req *sdkmcp.CallToolRequest, in CronWorkflowCreateInput) (*sdkmcp.CallToolResult, generated.ReplaceCronWorkflowResponse, error) {
+	return h.cronPutWorkflow(ctx, req, in, nil)
 }
-func (h toolHandlers) cronWorkflowUpdate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronWorkflowUpdateInput) (*sdkmcp.CallToolResult, generated.ReplaceCronWorkflowResponse, error) {
+func (h toolHandlers) cronWorkflowUpdate(ctx context.Context, req *sdkmcp.CallToolRequest, in CronWorkflowUpdateInput) (*sdkmcp.CallToolResult, generated.ReplaceCronWorkflowResponse, error) {
 	expected, err := cronExpected(in.ExpectedEventUID)
 	if err != nil {
 		return nil, generated.ReplaceCronWorkflowResponse{}, err
 	}
-	return h.cronPutWorkflow(ctx, in.CronWorkflowCreateInput, &expected)
+	return h.cronPutWorkflow(ctx, req, in.CronWorkflowCreateInput, &expected)
 }
-func (h toolHandlers) cronPutWorkflow(ctx context.Context, in CronWorkflowCreateInput, expected *string) (*sdkmcp.CallToolResult, generated.ReplaceCronWorkflowResponse, error) {
+func (h toolHandlers) cronPutWorkflow(ctx context.Context, req *sdkmcp.CallToolRequest, in CronWorkflowCreateInput, expected *string) (*sdkmcp.CallToolResult, generated.ReplaceCronWorkflowResponse, error) {
 	id, err := cronUID(in.UID)
 	if err != nil {
+		return nil, generated.ReplaceCronWorkflowResponse{}, err
+	}
+	var arguments struct {
+		Definition jsontext.Value `json:"definition"`
+	}
+	if err := json.Unmarshal(req.Params.Arguments, &arguments); err != nil {
+		return nil, generated.ReplaceCronWorkflowResponse{}, err
+	}
+	if _, err := cron.DecodeHistoricalWorkflow(arguments.Definition); err != nil {
 		return nil, generated.ReplaceCronWorkflowResponse{}, err
 	}
 	raw, err := json.Marshal(in.Definition)

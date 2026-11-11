@@ -46,6 +46,9 @@ func ParseWorkflow(input []byte) (WorkflowDefinition, error) {
 	if err := decode(input, &workflow, DefinitionLimit); err != nil {
 		return workflow, err
 	}
+	if err := rejectWorkflowArgvMember(input); err != nil {
+		return workflow, err
+	}
 	return workflow, workflow.Validate()
 }
 
@@ -205,6 +208,9 @@ func (f WorkflowDefinition) Validate() error {
 	for i, step := range f.Steps {
 		stepError := func(message string) error {
 			return invalid(fmt.Sprintf("step %d %q: %s", i+1, step.Key, message))
+		}
+		if step.Argv != nil {
+			return stepError("argv workflow step member is not supported")
 		}
 		if !portableKey(step.Key) || seen[step.Key] {
 			return stepError("step keys must be unique portable names")

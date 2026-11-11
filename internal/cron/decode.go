@@ -33,7 +33,31 @@ func DecodeWorkflow(input []byte) (WorkflowDefinition, error) {
 func DecodeHistoricalWorkflow(input []byte) (WorkflowDefinition, error) {
 	var workflow WorkflowDefinition
 	err := decode(input, &workflow, DefinitionLimit)
+	if err == nil {
+		err = rejectWorkflowArgvMember(input)
+	}
 	return workflow, err
+}
+
+// The historical decoder accepted kind-only argv, but never the argv member.
+// Check raw presence because null and empty arrays can disappear in typed JSON.
+func rejectWorkflowArgvMember(input []byte) error {
+	var document struct {
+		Steps []jsontext.Value `json:"steps"`
+	}
+	if err := json.Unmarshal(input, &document); err != nil {
+		return err
+	}
+	for _, raw := range document.Steps {
+		var step map[string]jsontext.Value
+		if err := json.Unmarshal(raw, &step); err != nil {
+			return err
+		}
+		if _, exists := step["argv"]; exists {
+			return invalid("argv workflow step member is not supported")
+		}
+	}
+	return nil
 }
 
 // Nulls decode to zero values, but cannot pass federation feature
@@ -79,7 +103,7 @@ func checkWorkflowNullShapes(input []byte) error {
 // authoring rules. It also applies to already-decoded backup records.
 func CheckWorkflowSupported(workflow WorkflowDefinition) error {
 	for _, step := range workflow.Steps {
-		if step.Kind == "argv" {
+		if step.Kind == "argv" || step.Argv != nil {
 			return invalid("argv workflow steps are not supported")
 		}
 	}
