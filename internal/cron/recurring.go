@@ -293,43 +293,47 @@ func RecurringOccurrences(j JobDefinition, progress RecurringProgress, after tim
 	if err := j.Validate(); err != nil {
 		return nil, err
 	}
-	return recurringOccurrences(j, progress, after, n)
+	times, _, err := recurringOccurrences(j, progress, after, n)
+	return times, err
 }
 
-func recurringOccurrences(j JobDefinition, progress RecurringProgress, after time.Time, n int) ([]time.Time, error) {
+func recurringOccurrences(j JobDefinition, progress RecurringProgress, after time.Time, n int) ([]time.Time, bool, error) {
 	if !j.Enabled || n <= 0 {
-		return nil, nil
+		return nil, true, nil
 	}
 	after = after.UTC()
 	var next func(time.Time) time.Time
 	switch {
 	case IsRecurringIssueJob(j):
 		if err := progress.Validate(); err != nil {
-			return nil, err
+			return nil, true, err
 		}
 		after = laterOf(after, progress.Through)
 		step, err := recurringNext(j.Trigger, progress.Anchor)
 		if err != nil {
-			return nil, err
+			return nil, true, err
 		}
 		next = step
 	case j.Trigger.Kind == "cron":
 		schedule, err := adapterCronSchedule(j.Trigger)
-		if err != nil || schedule == nil {
-			return nil, err
+		if err != nil {
+			return nil, true, err
+		}
+		if schedule == nil {
+			return nil, false, nil
 		}
 		next = schedule.Next
 	case j.Trigger.Kind == "once":
 		at, err := time.Parse(time.RFC3339, j.Trigger.At)
 		if err != nil {
-			return nil, invalid("once requires an RFC3339 instant")
+			return nil, true, invalid("once requires an RFC3339 instant")
 		}
 		if at = at.UTC(); at.After(after) {
-			return []time.Time{at}, nil
+			return []time.Time{at}, true, nil
 		}
-		return nil, nil
+		return nil, true, nil
 	default:
-		return nil, nil
+		return nil, false, nil
 	}
 	var out []time.Time
 	for cursor := after; len(out) < n; {
@@ -340,7 +344,7 @@ func recurringOccurrences(j JobDefinition, progress RecurringProgress, after tim
 		out = append(out, due.UTC())
 		cursor = due
 	}
-	return out, nil
+	return out, true, nil
 }
 
 func laterOf(a, b time.Time) time.Time {

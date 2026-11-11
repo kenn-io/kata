@@ -5,11 +5,14 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -108,7 +111,20 @@ func (o cronNextOptions) execute(cmd *cobra.Command, id string) error {
 }
 
 func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string, from time.Time, count int) (cronNextResult, error) {
-	raw, err := (cronCLIOptions{resource: "job", action: "show", identity: id}).callRead(a, c, projectID)
+	raw, err := (cronCLIOptions{}).callCapabilities(a, c, projectID)
+	if err != nil {
+		return cronNextResult{}, err
+	}
+	var capabilities struct {
+		EventFeatures []string `json:"event_features"`
+	}
+	if err := json.Unmarshal(raw, &capabilities); err != nil {
+		return cronNextResult{}, fmt.Errorf("decode cron capabilities: %w", err)
+	}
+	if !slices.Contains(capabilities.EventFeatures, db.CronEventFeature) {
+		return cronNextResult{}, &cliError{Kind: kindValidation, Code: "cron_preview_unsupported", ExitCode: ExitValidation, Message: "saved-job preview is unsupported by this daemon"}
+	}
+	raw, err = (cronCLIOptions{resource: "job", action: "show", identity: id}).callRead(a, c, projectID)
 	if err != nil {
 		return cronNextResult{}, err
 	}
@@ -137,6 +153,9 @@ func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string,
 		result.Warnings = append(result.Warnings, "adapter trigger times do not promise execution")
 	}
 	if job.DeletedAt != nil {
+		if err := def.Validate(); err != nil {
+			return result, fmt.Errorf("cannot preview saved job with this kata: %w", err)
+		}
 		result.Status = "deleted"
 		return result, nil
 	}
@@ -161,7 +180,7 @@ func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string,
 			if p := response.Issue; p != nil && p.UID == def.Issue.ParentUID && p.ProjectID == projectID && (p.Status == "open" || p.Status == "closed") {
 				result.ParentRevision = p.Revision
 				parent = &cron.PreviewParent{Open: p.Status == "open" && p.DeletedAt == nil}
-				if progress, err := cron.DecodeRecurringProgress(p.Metadata["cron.progress."+job.UID]); err == nil {
+				if progress, err := cron.DecodeRecurringProgress(p.Metadata[recurrenceclient.CronProgressPrefix+job.UID]); err == nil {
 					parent.Progress = &progress
 				}
 			}
@@ -173,10 +192,14 @@ func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string,
 	}
 	result.Status = preview.Status
 	if preview.Status == "unavailable" || preview.Status == "unsupported" {
+		reason := "native parent is unavailable"
 		if preview.Status == "unsupported" {
 			result.Basis = "adapter_defined"
+			reason = "this adapter trigger cannot be previewed"
+		} else if parent != nil {
+			reason = "native stored progress is missing or invalid"
 		}
-		return cronNextUnavailable(result, "saved schedule or parent is unavailable")
+		return cronNextUnavailable(result, reason)
 	}
 	for _, at := range preview.Times {
 		local, err := at.In(zone).MarshalText()

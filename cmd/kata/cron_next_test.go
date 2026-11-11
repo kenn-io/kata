@@ -33,6 +33,7 @@ func TestCronNextSavedSchedules(t *testing.T) {
 		{"native interval", native, parent, "2026-06-01T08:00:00Z", false},
 		{"archived parent", native, strings.Replace(parent, `"status":"open"`, `"status":"open","deleted_at":"2026-01-01T00:00:00Z"`, 1), `"status":"parent_closed"`, false},
 		{"future definition", strings.Replace(native, `"version":1`, `"version":2`, 1), parent, "", true},
+		{"deleted future definition", strings.Replace(native, `"version":1`, `"version":2`, 1), parent, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -41,8 +42,15 @@ func TestCronNextSavedSchedules(t *testing.T) {
 					fmt.Fprint(w, `{"projects":[{"id":1,"name":"spoke-project"}]}`)
 				case r.URL.Path == "/api/v1/projects/1":
 					fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"aliases":[]}`)
+				case strings.HasSuffix(r.URL.Path, "/cron/capabilities"):
+					w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
+					fmt.Fprint(w, `{}`)
 				case strings.Contains(r.URL.Path, "/cron/jobs/"):
-					fmt.Fprintf(w, `{"job":{"uid":"%s","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","definition":%s}}`, id, tc.definition)
+					deleted := ""
+					if tc.name == "deleted future definition" {
+						deleted = `,"deleted_at":"2026-01-01T00:00:00Z"`
+					}
+					fmt.Fprintf(w, `{"job":{"uid":"%s","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","definition":%s%s}}`, id, tc.definition, deleted)
 				case strings.Contains(r.URL.Path, "/issues/"):
 					fmt.Fprintf(w, `{"issue":%s}`, tc.parent)
 				default:
@@ -92,6 +100,9 @@ func TestCronNextParentReadErrors(t *testing.T) {
 					fmt.Fprint(w, `{"projects":[{"id":1,"name":"spoke-project"}]}`)
 				case r.URL.Path == "/api/v1/projects/1":
 					fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"aliases":[]}`)
+				case strings.HasSuffix(r.URL.Path, "/cron/capabilities"):
+					w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
+					fmt.Fprint(w, `{}`)
 				case strings.Contains(r.URL.Path, "/cron/jobs/"):
 					fmt.Fprintf(w, `{"job":{"uid":"%s","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","definition":{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"interval","interval_seconds":7200},"action":{"kind":"notify","recipient":"current-owner-or-author"},"issue":{"kind":"per-run","parent_uid":"01ARZ3NDEKTSV4RRFFQ69G5FB9","title":"Review"},"overlap":"allow","catchup":"all"}}}`, id)
 				case strings.Contains(r.URL.Path, "/issues/"):
@@ -111,6 +122,7 @@ func TestCronNextParentReadErrors(t *testing.T) {
 			if code == "issue_not_found" {
 				require.Equal(t, "cron_preview_unavailable", got.Code)
 				require.Contains(t, string(got.Data), `"status":"unavailable"`)
+				require.Contains(t, got.Message, "native parent is unavailable")
 			} else {
 				require.Equal(t, code, got.Code)
 			}
@@ -158,6 +170,45 @@ func TestCronNextModes(t *testing.T) {
 			} else {
 				require.Contains(t, out, tc.want)
 			}
+		})
+	}
+}
+
+func TestCronNextRequiresCapability(t *testing.T) {
+	for _, tc := range []struct {
+		name, feature, code string
+		status              int
+	}{
+		{"absent", "", "cron_preview_unsupported", 200},
+		{"unknown", "future_v2", "cron_preview_unsupported", 200},
+		{"denied", "", "forbidden", 403},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/projects":
+					fmt.Fprint(w, `{"projects":[{"id":1,"name":"spoke-project"}]}`)
+				case "/api/v1/projects/1":
+					fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"aliases":[]}`)
+				case "/api/v1/projects/1/cron/capabilities":
+					w.Header().Set(db.EventFeaturesHeader, tc.feature)
+					w.WriteHeader(tc.status)
+					if tc.status == 200 {
+						fmt.Fprint(w, `{}`)
+					} else {
+						fmt.Fprintf(w, `{"error":{"code":%q,"message":"denied"}}`, tc.code)
+					}
+				default:
+					t.Errorf("unexpected request: %s", r.URL)
+					w.WriteHeader(404)
+				}
+			}))
+			t.Cleanup(server.Close)
+			out, _, err := executeCronCLI(t, server.URL, nil, "job", "next", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+			require.Empty(t, out)
+			var cli *cliError
+			require.ErrorAs(t, err, &cli)
+			require.Equal(t, tc.code, cli.Code)
 		})
 	}
 }
