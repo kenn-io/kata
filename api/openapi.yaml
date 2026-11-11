@@ -7545,7 +7545,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.44.0
+  version: 0.45.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -9832,6 +9832,10 @@ paths:
     get:
       operationId: offerRelayDeliveries
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9892,6 +9896,10 @@ paths:
     get:
       operationId: getRelayReset
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9919,6 +9927,10 @@ paths:
     post:
       operationId: acceptRelayDeliveries
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9952,6 +9964,10 @@ paths:
     post:
       operationId: ackRelayDeliveries
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
