@@ -274,9 +274,6 @@ func newFederationRowHasher(only bool) *federationRowHasher {
 }
 
 func (s *federationRowHasher) write(kind byte, values ...any) {
-	if s == nil {
-		return
-	}
 	_, _ = s.h.Write([]byte{kind})
 	for _, value := range values {
 		var data []byte

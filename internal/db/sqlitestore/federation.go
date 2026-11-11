@@ -2165,7 +2165,9 @@ func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, s
  CAST(updated_at AS TEXT), CAST(closed_at AS TEXT), CAST(deleted_at AS TEXT), metadata
  FROM issues WHERE project_id = ?`
 	query, args := scopedFederationRows(query, projectID, "uid", issueScope)
-	query += " ORDER BY id"
+	if stamp != nil {
+		query += " ORDER BY id"
+	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated issue rows: %w", err)
@@ -2296,7 +2298,9 @@ func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64,
 		  JOIN issues i ON i.id = c.issue_id
 		 WHERE i.project_id = ?`
 	query, args := scopedFederationRows(query, projectID, "i.uid", issueScope)
-	query += " ORDER BY c.id"
+	if stamp != nil {
+		query += " ORDER BY c.id"
+	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated comments: %w", err)
@@ -2374,7 +2378,9 @@ func federatedLabelKeys(ctx context.Context, tx *sql.Tx, projectID int64, stamp 
 		  JOIN issues i ON i.id = il.issue_id
 		 WHERE i.project_id = ?`
 	query, args := scopedFederationRows(query, projectID, "i.uid", issueScope)
-	query += " ORDER BY il.issue_id,il.label"
+	if stamp != nil {
+		query += " ORDER BY il.issue_id,il.label"
+	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated labels: %w", err)
@@ -2805,12 +2811,15 @@ func federationGroupIssueIDs(
 		return map[string]int64{}, nil
 	}
 	placeholders, args := projectIDPlaceholders(projectIDs)
-	//nolint:gosec // IN values use generated ? placeholders with separately bound integer IDs.
-	rows, err := tx.QueryContext(ctx, `
+	query := `
 		SELECT uid, id, project_id
 		  FROM issues
-		 WHERE project_id IN (`+placeholders+`)
-		 ORDER BY project_id, id`, args...)
+		 WHERE project_id IN (` + placeholders + `)`
+	if stamp != nil {
+		query += ` ORDER BY project_id, id`
+	}
+	//nolint:gosec // IN values use generated ? placeholders with separately bound integer IDs.
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federation group issues: %w", err)
 	}
@@ -2860,14 +2869,18 @@ func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64, stam
 	queryArgs := make([]any, 0, len(args)*2)
 	queryArgs = append(queryArgs, args...)
 	queryArgs = append(queryArgs, args...)
-	//nolint:gosec // IN values use generated ? placeholders with separately bound integer IDs.
-	rows, err := tx.QueryContext(ctx, `
+	query := `
 		SELECT l.id, l.from_issue_id, l.to_issue_id, l.from_issue_uid, l.to_issue_uid, l.type, l.author, CAST(l.created_at AS TEXT)
 		  FROM links l
 		  JOIN issues f ON f.id = l.from_issue_id
 		  JOIN issues t ON t.id = l.to_issue_id
-		 WHERE f.project_id IN (`+placeholders+`)
-		   AND t.project_id IN (`+placeholders+`) ORDER BY l.id`, queryArgs...)
+		 WHERE f.project_id IN (` + placeholders + `)
+		   AND t.project_id IN (` + placeholders + `)`
+	if stamp != nil {
+		query += ` ORDER BY l.id`
+	}
+	//nolint:gosec // IN values use generated ? placeholders with separately bound integer IDs.
+	rows, err := tx.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated links: %w", err)
 	}
