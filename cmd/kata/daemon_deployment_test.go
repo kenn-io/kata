@@ -38,7 +38,7 @@ func TestDeploymentStatusReportsConfigSources(t *testing.T) {
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777", Metadata: map[string]string{"config_listen_source": "KATA_LISTEN", "config_auth_source": "persisted_file", "db_path": "database", "unrelated": "ignored"}})
 	require.NoError(t, err)
 	out, _, statusErr := executeRootCapture(t, t.Context(), "--json", "daemon", "status")
-	requireDaemonUnavailable(t, statusErr)
+	require.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
 	var response struct {
 		Daemons []struct {
 			ConfigSources map[string]string `json:"config_sources"`
