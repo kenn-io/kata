@@ -1829,6 +1829,7 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 	acknowledged := localEvent.ID
 	var laterPage []api.EventEnvelope
 	var earlierIssueCommentUID string
+	var projectEventUID string
 	if legacy {
 		_, comment, err := spoke.CreateComment(ctx, db.CreateCommentParams{
 			IssueID: issue.ID, Body: "Comment before reset", Author: "tester",
@@ -1842,14 +1843,18 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		_, earlierIssueUpdate, changed, err := spoke.EditIssue(ctx, db.EditIssueParams{IssueID: earlierIssue.ID, Title: &title, Actor: "tester"})
 		require.NoError(t, err)
 		require.True(t, changed)
+		updated, err := spoke.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: project.ID, IfMatchRev: new(project.Revision), Actor: "tester", Patch: map[string]jsontext.Value{"area": jsontext.Value(`"ops"`)}})
+		require.NoError(t, err)
+		projectEventUID = updated.Event.UID
 		earlierIssueCommentUID = commentOnEarlierIssue.UID
-		acknowledged = earlierIssueUpdate.ID
-		lastID = 104
+		acknowledged = updated.Event.ID
+		lastID = 105
 		laterPage = []api.EventEnvelope{
 			eventEnvelopeForSyncTest(localEvent, 101),
 			eventEnvelopeForSyncTest(comment, 102),
 			eventEnvelopeForSyncTest(earlierIssueComment, 103),
-			eventEnvelopeForSyncTest(*earlierIssueUpdate, lastID),
+			eventEnvelopeForSyncTest(*earlierIssueUpdate, 104),
+			eventEnvelopeForSyncTest(updated.Event, lastID),
 		}
 	}
 	envelope := eventEnvelopeForSyncTest(localEvent, 100)
@@ -1955,7 +1960,13 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		require.ErrorIs(t, err, db.ErrNotFound, "reopening preserves the interrupted projection")
 	}
 	if legacy {
-		_, err := spoke.IssueByUID(ctx, earlierIssue.UID, db.IncludeDeletedYes)
+		replayed, err := spoke.EventsByUIDs(ctx, project.ID, []string{projectEventUID})
+		require.NoError(t, err)
+		require.Len(t, replayed, 1)
+		binding, err = spoke.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		require.Greater(t, replayed[0].ID, binding.PushCursorEventID)
+		_, err = spoke.IssueByUID(ctx, earlierIssue.UID, db.IncludeDeletedYes)
 		require.NoError(t, err, "the earlier page's issue is already projected")
 		commentIssueIDs, err := spoke.CommentIssueIDsByUIDs(ctx, []string{earlierIssueCommentUID})
 		require.NoError(t, err)
@@ -1995,7 +2006,11 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		require.NoError(t, err)
 		require.Equal(t, earlier.EventID, binding.PullCursorEventID, "projection committed before the cursor")
 	}
-	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, onPulledEvents))
+	if legacy {
+		require.NoError(t, SyncFederationPullOnlyOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, onPulledEvents))
+	} else {
+		require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, onPulledEvents))
+	}
 
 	mirrored, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err, "retry must project the retained issue creation")
@@ -2014,7 +2029,10 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		commentIssueIDs, err := spoke.CommentIssueIDsByUIDs(ctx, []string{earlierIssueCommentUID})
 		require.NoError(t, err)
 		assert.Equal(t, earlier.ID, commentIssueIDs[earlierIssueCommentUID], "retry projects the later comment on the existing issue")
-		assert.ElementsMatch(t, []string{laterPage[0].EventUID, laterPage[1].EventUID, laterPage[2].EventUID, laterPage[3].EventUID}, deliveredUIDs)
+		assert.ElementsMatch(t, []string{laterPage[0].EventUID, laterPage[1].EventUID, laterPage[2].EventUID, laterPage[3].EventUID, projectEventUID}, deliveredUIDs)
+		repairedProject, err := spoke.ProjectByID(ctx, project.ID)
+		require.NoError(t, err)
+		require.JSONEq(t, `{"area":"ops"}`, string(repairedProject.Metadata))
 		return
 	}
 	require.NotEmpty(t, delivered)

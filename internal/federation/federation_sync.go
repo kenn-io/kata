@@ -868,6 +868,15 @@ func shouldDeliverDuplicateLocalEcho(
 	}
 	event := events[0]
 	if event.IssueUID == nil {
+		if projectID == binding.ProjectID && strings.HasPrefix(event.Type, "project.") && event.ID > binding.PushCursorEventID {
+			status, err := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
+			if err != nil {
+				return false, err
+			}
+			if status.LastResetAt != nil && !event.CreatedAt.After(*status.LastResetAt) {
+				return true, store.RecordFederationLocalReplayDue(ctx, ev.EventUID)
+			}
+		}
 		return false, nil
 	}
 	_, err = store.IssueByUID(ctx, *event.IssueUID, db.IncludeDeletedYes)
