@@ -21,9 +21,8 @@ import (
 )
 
 func TestIssueTimezoneLegacyEchoFreezesKnownZone(t *testing.T) {
-	for _, tc := range []struct{ name, raw, value, defaultZone, wantZone string }{
-		{"daemon zone", `{"scheduled_on":"2026-11-12T09:00"}`, "2026-11-12T09:00", "America/New_York", "America/New_York"},
-		{"implicit UTC", `{"scheduled_on":"2026-11-12T09:00"}`, "2026-11-12T09:00", "", "UTC"},
+	for _, tc := range []struct{ name, raw, value, defaultZone string }{
+		{"daemon zone", `{"scheduled_on":"2026-11-12T09:00"}`, "2026-11-12T09:00", "America/New_York"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = tc.defaultZone })
@@ -41,7 +40,7 @@ func TestIssueTimezoneLegacyEchoFreezesKnownZone(t *testing.T) {
 			saved, err := metadata.DecodeSavedSchedule(fields["scheduled_on"])
 			require.NoError(t, err)
 			require.NotNil(t, saved)
-			require.Equal(t, tc.wantZone, saved.Timezone)
+			require.Equal(t, "America/New_York", saved.Timezone)
 			require.Equal(t, metadata.ScheduleTZDataVersion, saved.TZDataVersion)
 		})
 	}

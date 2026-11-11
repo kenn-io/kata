@@ -144,7 +144,7 @@ func (m Model) commitDatesForm() (Model, tea.Cmd) {
 		m.input.err = err.Error()
 		return m, nil
 	}
-	if len(in.Set) == 0 && m.input.fieldValue(fieldScheduled) == m.input.dates.scheduled && m.input.fieldValue(fieldDeadline) == m.input.dates.deadline {
+	if m.input.fieldValue(fieldScheduled) == m.input.dates.scheduled && m.input.fieldValue(fieldDeadline) == m.input.dates.deadline {
 		return m.cancelInput()
 	}
 	m.input.saving = true
@@ -152,7 +152,7 @@ func (m Model) commitDatesForm() (Model, tea.Cmd) {
 	return m, withConnGen(dispatchFormSetDates(m.api, m.input.target, in, m.input, m.toastNow()), m.connGen)
 }
 
-func dispatchFormSetDates(apiClient any, target formTarget, in DatesInput, form inputState, now time.Time) tea.Cmd {
+func dispatchFormSetDates(apiClient KataAPI, target formTarget, in DatesInput, form inputState, now time.Time) tea.Cmd {
 	return func() tea.Msg {
 		writer, ok := apiClient.(datesAPI)
 		if !ok {
@@ -164,19 +164,13 @@ func dispatchFormSetDates(apiClient any, target formTarget, in DatesInput, form 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		var resp *MutationResp
-		var err error
-		if reader, ok := apiClient.(interface {
-			readIssue(context.Context, int64, string) (*IssueDetail, error)
-		}); ok {
-			var detail *IssueDetail
-			detail, err = reader.readIssue(ctx, target.projectID, target.issueShortID)
-			if err == nil && (detail == nil || detail.Issue == nil) {
-				err = errors.New("could not refresh planning dates")
-			}
-			if err == nil {
-				form.dates.scheduledToday, form.dates.deadlineToday = detail.Issue.ScheduledOnToday, detail.Issue.DeadlineOnToday
-				in, err = datesInputFromForm(form, now, in.Actor)
-			}
+		detail, err := apiClient.readIssue(ctx, target.projectID, target.issueShortID)
+		if err == nil && (detail == nil || detail.Issue == nil) {
+			err = errors.New("could not refresh planning dates")
+		}
+		if err == nil {
+			form.dates.scheduledToday, form.dates.deadlineToday = detail.Issue.ScheduledOnToday, detail.Issue.DeadlineOnToday
+			in, err = datesInputFromForm(form, now, in.Actor)
 		}
 		if err == nil {
 			resp = &MutationResp{}

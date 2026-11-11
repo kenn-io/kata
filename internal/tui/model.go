@@ -1886,6 +1886,9 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.reportShownError(mut.kind)
 	}
+	if m.input.kind == inputDatesForm && mut.resp != nil && !mut.resp.Changed {
+		return m.cancelInput()
+	}
 	if m.input.kind == inputNewIssueForm {
 		m.input = inputState{}
 		var cmd tea.Cmd

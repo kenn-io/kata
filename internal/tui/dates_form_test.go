@@ -562,11 +562,12 @@ func TestDatesFormRelativeInputsUseEachScheduleDay(t *testing.T) {
 
 	for _, tc := range []struct {
 		name, scheduled, deadline string
-		readFail                  bool
+		readFail, noChange        bool
 	}{
-		{"new day", "2026-06-01", "2026-06-02", false},
-		{"opened tomorrow becomes a change", "2026-01-01", "2026-01-02", false},
-		{"day refresh fails", "2026-06-01", "2026-06-02", true},
+		{"new day", "2026-06-01", "2026-06-02", false, false},
+		{"opened tomorrow becomes a change", "2026-01-01", "2026-01-02", false, false},
+		{"day refresh fails", "", "", true, false},
+		{"refreshed no-op", "2026-01-01", "2026-01-01", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			now := time.Date(2026, 1, 1, 4, 59, 0, 0, time.UTC)
@@ -574,6 +575,9 @@ func TestDatesFormRelativeInputsUseEachScheduleDay(t *testing.T) {
 			require.NoError(t, err)
 			deadlineZone, err := metadata.ScheduleLocation("Asia/Tokyo", metadata.ScheduleTZDataVersion)
 			require.NoError(t, err)
+			if tc.readFail {
+				tc.scheduled, tc.deadline = "2026-06-01", "2026-06-02"
+			}
 			scheduled, err := metadata.NewScheduleValue(tc.scheduled, "America/New_York")
 			require.NoError(t, err)
 			deadline, err := metadata.NewScheduleValue(tc.deadline, "Asia/Tokyo")
@@ -611,16 +615,28 @@ func TestDatesFormRelativeInputsUseEachScheduleDay(t *testing.T) {
 			m := filterFormFixture()
 			m.api = client
 			m.toastNow = func() time.Time { return now }
-			m.input = newDatesForm(formTarget{projectID: 7, issueShortID: "example"}, current)
+			m.input = newDatesForm(formTarget{projectID: 7, issueShortID: "example", origin: "list"}, current)
 			m.input.field(fieldScheduled).setValue("tomorrow")
 			m.input.field(fieldDeadline).setValue("tomorrow")
+			if tc.noChange {
+				m.input.field(fieldScheduled).setValue("today")
+				m.input.field(fieldDeadline).setValue("today")
+			}
 			now = now.Add(2 * time.Minute)
-			_, cmd := m.commitDatesForm()
+			m, cmd := m.commitDatesForm()
 			require.NotNil(t, cmd)
 			done := cmd().(mutationDoneMsg)
 			if tc.readFail {
 				require.ErrorContains(t, done.err, "refresh unavailable")
 				require.Zero(t, writes, "a failed day refresh must not send a stale-day write")
+			} else if tc.noChange {
+				require.NoError(t, done.err)
+				require.Zero(t, writes)
+				routed, followup := m.routeFormMutation(done)
+				next := routed.(Model)
+				require.Equal(t, inputNone, next.input.kind)
+				require.Empty(t, next.list.status, "no write must not report updated dates")
+				require.Nil(t, followup)
 			} else {
 				require.NoError(t, done.err)
 				require.Equal(t, 1, writes)

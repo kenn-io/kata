@@ -28,12 +28,12 @@ func legacyScheduleZoneKnown(issueZone jsontext.Value, field, defaultZone, recur
 	if len(issueZone) > 0 && json.Unmarshal(issueZone, &zone) != nil {
 		return false
 	}
-	if zone != "" {
-		return portableIssueTimezone(zone)
-	}
-	if field == "scheduled_on" && recurrenceZone != "" {
+	if field == "scheduled_on" && recurrenceZone != "" && (zone == "" || zone == recurrenceZone) {
 		_, err := metadata.ScheduleLocation(recurrenceZone, metadata.ScheduleTZDataVersion)
 		return err == nil
+	}
+	if zone != "" {
+		return portableIssueTimezone(zone)
 	}
 	return defaultZone == "" || portableIssueTimezone(defaultZone)
 }
