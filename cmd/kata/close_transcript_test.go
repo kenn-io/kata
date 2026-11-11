@@ -238,7 +238,7 @@ func TestCloseTranscript_UnconfiguredProjectOnOlderDaemon(t *testing.T) {
 		{"unkeyed configured opt-out", "example-project", "0.45.0", false, false, true, false, false, false},
 		{"lookup failure", "other", "0.44.0", true, false, false, false, false, false},
 		{"global disabled", "other", "0.44.0", false, false, false, true, false, true},
-		{"global disabled on 0.45", "other", "0.45.0", false, false, true, true, false, false},
+		{"keyed global disabled on 0.45", "other", "0.45.0", false, true, true, true, false, true},
 		{"process enables global", "other", "0.44.0", false, true, false, true, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

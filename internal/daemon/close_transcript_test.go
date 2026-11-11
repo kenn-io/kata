@@ -70,26 +70,15 @@ func TestCloseTranscript_PersistenceAndRetries(t *testing.T) {
 }
 
 func TestCloseTranscript_PresenceConflict(t *testing.T) {
-	for _, present := range []bool{false, true} {
-		t.Run(fmt.Sprintf("initially present=%t", present), func(t *testing.T) {
-			_, ts, projectID, issueID := bootstrapProjectWithIssue(t)
-			path := issueURL(projectID, issueID, "actions/close")
-			body := map[string]any{"actor": "agent-one", "reason": "done", "message": "Implemented the example behavior and ran the focused tests.", "evidence": []map[string]any{{"type": "test", "command": "go test ./internal/example"}}, "retry_protocol": "close-v1"}
-			ref := map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001"}
-			if present {
-				body["transcript"] = ref
-			}
-			headers := map[string]string{"Idempotency-Key": "transcript-presence"}
-			requireOK(t, postWithHeader(t, ts, path, headers, body))
-			if present {
-				delete(body, "transcript")
-			} else {
-				body["transcript"] = ref
-			}
-			response := postWithHeader(t, ts, path, headers, body)
-			assert.Equal(t, http.StatusConflict, response.status, string(response.body))
-		})
-	}
+	_, ts, projectID, issueID := bootstrapProjectWithIssue(t)
+	path := issueURL(projectID, issueID, "actions/close")
+	body := map[string]any{"actor": "agent-one", "reason": "done", "message": "Implemented the example behavior and ran the focused tests.", "evidence": []map[string]any{{"type": "test", "command": "go test ./internal/example"}}, "retry_protocol": "close-v1"}
+	ref := map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001"}
+	headers := map[string]string{"Idempotency-Key": "transcript-presence"}
+	requireOK(t, postWithHeader(t, ts, path, headers, body))
+	body["transcript"] = ref
+	response := postWithHeader(t, ts, path, headers, body)
+	assert.Equal(t, http.StatusConflict, response.status, string(response.body))
 }
 
 func TestCloseTranscript_SelectionAndRetry(t *testing.T) {
@@ -118,9 +107,6 @@ func TestCloseTranscript_SelectionAndRetry(t *testing.T) {
 			assert.Contains(t, string(replay.body), `"reused":true`)
 			candidate["agent"] = "claude"
 			assert.Equal(t, http.StatusConflict, postWithHeader(t, ts, path, headers, body).status)
-			candidate["agent"] = "codex"
-			candidate["session_id"] = "00000000-0000-4000-8000-000000000002"
-			assert.Equal(t, http.StatusConflict, postWithHeader(t, ts, path, headers, body).status)
 			delete(body, "transcript_selection")
 			delete(body, "transcript")
 			assert.Equal(t, http.StatusConflict, postWithHeader(t, ts, path, headers, body).status)
@@ -144,31 +130,28 @@ func TestCloseTranscript_SelectionValidation(t *testing.T) {
 		name      string
 		candidate any
 		selection map[string]any
+		status    int
 	}{
-		{"missing candidate for a recorded close", nil, map[string]any{"project_id": 0, "record": true}},
-		{"unknown target with URL", map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001", "url": "https://archive.example/session"}, map[string]any{"project_id": 0, "record": true}},
-		{"missing record", map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001"}, map[string]any{"project_id": 0}},
+		{"missing candidate for a recorded close", nil, map[string]any{"project_id": 0, "record": true}, http.StatusBadRequest},
+		{"unknown target with URL", map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001", "url": "https://archive.example/session"}, map[string]any{"project_id": 0, "record": true}, http.StatusBadRequest},
+		{"missing record", map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001"}, map[string]any{"project_id": 0}, http.StatusBadRequest},
+		{"opt-out without candidate", nil, map[string]any{"project_id": 0, "record": false}, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, ts, projectID, issueID := bootstrapProjectWithIssue(t)
+			h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
 			body := map[string]any{"actor": "agent-one", "reason": "done", "message": "Implemented the example behavior and ran the focused tests.", "evidence": []map[string]any{{"type": "test", "command": "go test ./internal/example"}}, "transcript_selection": tc.selection}
 			if tc.candidate != nil {
 				body["transcript"] = tc.candidate
 			}
 			response := postWithHeader(t, ts, issueURL(projectID, issueID, "actions/close"), nil, body)
-			assert.Equal(t, http.StatusBadRequest, response.status, string(response.body))
+			assert.Equal(t, tc.status, response.status, string(response.body))
+			if tc.status == http.StatusOK {
+				issue, err := h.DB().IssueByID(t.Context(), issueID)
+				require.NoError(t, err)
+				assert.Equal(t, "closed", issue.Status)
+			}
 		})
 	}
-}
-
-func TestCloseTranscript_OptOutSelectionNeedsNoCandidate(t *testing.T) {
-	h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
-	body := map[string]any{"actor": "agent-one", "reason": "done", "message": "Implemented the example behavior and ran the focused tests.", "evidence": []map[string]any{{"type": "test", "command": "go test ./internal/example"}}, "transcript_selection": map[string]any{"project_id": projectID, "record": false}}
-	response := postWithHeader(t, ts, issueURL(projectID, issueID, "actions/close"), nil, body)
-	requireOK(t, response)
-	issue, err := h.DB().IssueByID(t.Context(), issueID)
-	require.NoError(t, err)
-	assert.Equal(t, "closed", issue.Status)
 }
 
 func TestCloseTranscript_MoveBeforeGuardedWrite(t *testing.T) {

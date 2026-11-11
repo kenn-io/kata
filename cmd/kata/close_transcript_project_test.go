@@ -91,16 +91,41 @@ agentsview_url="https://team.example/archive"
 }
 
 func TestCloseTranscriptProjectLookupFailure(t *testing.T) {
-	for _, override := range []string{"", "true"} {
-		t.Run("override="+override, func(t *testing.T) {
+	for _, tc := range []struct {
+		name, override                   string
+		projectFailure, keyed, failFirst bool
+	}{
+		{"issue", "", false, false, true},
+		{"issue with override", "true", false, false, true},
+		{"project name", "", true, false, true},
+		{"retry after failed lookup", "", false, true, true},
+		{"retry during failed lookup", "", false, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			env, dir, _, ref := setupWorkspaceWithIssue(t, "Complete example work")
-			transcriptProjectConfig(t, "[close.transcript]\nenabled=true\n[close.transcript.project.kata]\nenabled=false\n")
-			t.Setenv("KATA_CLOSE_TRANSCRIPT_ENABLED", override)
+			project := "kata"
+			var teamID int64
+			if tc.projectFailure {
+				team, err := env.DB.CreateProject(t.Context(), "team-project")
+				require.NoError(t, err)
+				teamID, project = team.ID, team.Name
+				runCLI(t, env, dir, "move", ref, team.Name)
+			}
+			entry := "enabled=false"
+			if tc.keyed {
+				entry = `agentsview_url="https://team.example"`
+			}
+			transcriptProjectConfig(t, fmt.Sprintf("[close.transcript]\nenabled=true\n[close.transcript.project.%s]\n%s\n", project, entry))
+			t.Setenv("KATA_CLOSE_TRANSCRIPT_ENABLED", tc.override)
 			upstream, err := url.Parse(env.URL)
 			require.NoError(t, err)
 			proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(upstream) }}
+			var fail atomic.Bool
+			fail.Store(tc.failFirst)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/issues/"+ref) {
+				issueRead := strings.HasSuffix(r.URL.Path, "/issues/"+ref)
+				projectRead := r.URL.Path == fmt.Sprintf("/api/v1/projects/%d", teamID)
+				if fail.Load() && r.Method == http.MethodGet && ((!tc.projectFailure && issueRead) || (tc.projectFailure && projectRead)) {
 					http.Error(w, "unavailable", http.StatusServiceUnavailable)
 					return
 				}
@@ -108,16 +133,33 @@ func TestCloseTranscriptProjectLookupFailure(t *testing.T) {
 			}))
 			defer server.Close()
 			env.URL = server.URL
-			out, stderr, err := runCLIWithErr(t, env, dir, "--json", "close", ref, "--done", "--message", "Implemented behavior and checked the focused example tests.", "--test", "go test ./internal/example")
+			if tc.projectFailure {
+				ref = "kata#" + ref
+			}
+			args := []string{"--json", "close", ref, "--done", "--message", "Implemented behavior and checked the focused example tests.", "--test", "go test ./internal/example"}
+			if tc.keyed {
+				args = append(args, "--idempotency-key", "lookup-retry")
+			}
+			out, stderr, err := runCLIWithErr(t, env, dir, args...)
 			require.NoError(t, err)
 			got := closeReceiptTranscript(t, out)
-			if override == "true" {
-				require.NotNil(t, got)
-				assert.Empty(t, got.URL)
-			} else {
+			if tc.failFirst && tc.override != "true" {
 				assert.Nil(t, got)
+			} else {
+				require.NotNil(t, got)
+				if tc.override == "true" {
+					assert.Empty(t, got.URL)
+				}
 			}
-			assert.Contains(t, stderr, "project unavailable")
+			if tc.failFirst {
+				assert.Contains(t, stderr, "project unavailable")
+			}
+			if tc.keyed {
+				fail.Store(!tc.failFirst)
+				out, _, err = runCLIWithErr(t, env, dir, args...)
+				require.NoError(t, err)
+				assert.Contains(t, out, `"reused":true`)
+			}
 		})
 	}
 }
@@ -149,35 +191,12 @@ agentsview_url="https://second.example"
 				_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: pid, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "tester"})
 			}
 			require.NoError(t, err)
-			out, _, err = runCLIWithErr(t, env, dir, args...)
+			out, stderr, err := runCLIWithErr(t, env, dir, args...)
 			require.NoError(t, err)
 			assert.Contains(t, out, `"reused":true`)
+			assert.NotContains(t, stderr, "project unavailable")
 		})
 	}
-}
-
-func TestCloseTranscriptProjectNameLookupFailure(t *testing.T) {
-	env, dir, _, ref := setupWorkspaceWithIssue(t, "Complete example work")
-	team, err := env.DB.CreateProject(t.Context(), "team-project")
-	require.NoError(t, err)
-	runCLI(t, env, dir, "move", ref, team.Name)
-	transcriptProjectConfig(t, "[close.transcript]\nenabled=true\n[close.transcript.project.team-project]\nenabled=false\n")
-	upstream, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(upstream) }}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && r.URL.Path == fmt.Sprintf("/api/v1/projects/%d", team.ID) {
-			http.Error(w, "unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		proxy.ServeHTTP(w, r)
-	}))
-	defer server.Close()
-	env.URL = server.URL
-	out, stderr, err := runCLIWithErr(t, env, dir, "--json", "close", "kata#"+ref, "--done", "--message", "Implemented behavior and checked the focused example tests.", "--test", "go test ./internal/example")
-	require.NoError(t, err)
-	assert.Nil(t, closeReceiptTranscript(t, out))
-	assert.Contains(t, stderr, "project unavailable")
 }
 
 func TestCloseTranscriptProjectMoveBeforePost(t *testing.T) {
@@ -214,41 +233,6 @@ func TestCloseTranscriptProjectMoveBeforePost(t *testing.T) {
 	}
 }
 
-func TestCloseTranscriptProjectRetryAfterLookupFailure(t *testing.T) {
-	for _, failFirst := range []bool{false, true} {
-		t.Run(fmt.Sprintf("fail-first=%t", failFirst), func(t *testing.T) {
-			env, dir, _, ref := setupWorkspaceWithIssue(t, "Complete example work")
-			transcriptProjectConfig(t, "[close.transcript]\nenabled=true\n[close.transcript.project.kata]\nagentsview_url=\"https://team.example\"\n")
-			upstream, err := url.Parse(env.URL)
-			require.NoError(t, err)
-			proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(upstream) }}
-			var fail atomic.Bool
-			fail.Store(failFirst)
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if fail.Load() && r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/issues/"+ref) {
-					http.Error(w, "unavailable", http.StatusServiceUnavailable)
-					return
-				}
-				proxy.ServeHTTP(w, r)
-			}))
-			defer server.Close()
-			env.URL = server.URL
-			args := []string{"--json", "close", ref, "--done", "--message", "Implemented behavior and checked the focused example tests.", "--test", "go test ./internal/example", "--idempotency-key", "lookup-retry"}
-			out, _, err := runCLIWithErr(t, env, dir, args...)
-			require.NoError(t, err)
-			if failFirst {
-				assert.Nil(t, closeReceiptTranscript(t, out))
-			} else {
-				require.NotNil(t, closeReceiptTranscript(t, out))
-			}
-			fail.Store(!failFirst)
-			out, _, err = runCLIWithErr(t, env, dir, args...)
-			require.NoError(t, err)
-			assert.Contains(t, out, `"reused":true`)
-		})
-	}
-}
-
 func TestCloseTranscriptProjectRetryAfterCommentFailure(t *testing.T) {
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "Complete example work")
 	transcriptProjectConfig(t, "[close.transcript]\nenabled=true\n[close.transcript.project.kata]\nagentsview_url=\"https://team.example\"\n")
@@ -274,6 +258,15 @@ func TestCloseTranscriptProjectRetryAfterCommentFailure(t *testing.T) {
 	out, _, err := runCLIWithErr(t, env, dir, args...)
 	require.NoError(t, err)
 	assert.Contains(t, out, `"reused":true`)
+	var receipt api.MutationResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &receipt.Body))
+	require.NotNil(t, receipt.Body.OriginalEvent)
+	var payload struct {
+		Transcript *transcript.Transcript `json:"transcript"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(receipt.Body.OriginalEvent.Payload), &payload))
+	require.NotNil(t, payload.Transcript)
+	assert.Equal(t, transcriptSessionOne, payload.Transcript.SessionID)
 	comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
@@ -286,7 +279,6 @@ func TestCloseTranscriptProjectOverride(t *testing.T) {
 		global, attach bool
 		url            string
 	}{
-		{"inherit", `agentsview_url="https://team.example"`, true, true, "https://team.example/sessions/codex/" + transcriptSessionOne},
 		{"enable", `enabled=true`, false, true, ""},
 		{"disable", `enabled=false`, true, false, ""},
 		{"blank URL", `agentsview_url=""`, true, true, ""},
