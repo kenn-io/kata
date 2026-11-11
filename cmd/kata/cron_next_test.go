@@ -123,6 +123,11 @@ func TestCronNextSavedSchedules(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Contains(t, out, tc.want)
+			if tc.name == "archived parent" {
+				out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "--project", "spoke-project", "cron", "job", "next", id)
+				require.NoError(t, err)
+				require.Equal(t, "Next native occurrences (UTC, parent closed)\n", out)
+			}
 			if tc.name == "local once" || tc.name == "native interval" || tc.name == "native local cron" {
 				previous := time.Local
 				t.Cleanup(func() { time.Local = previous })
