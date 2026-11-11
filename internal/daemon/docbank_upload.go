@@ -28,9 +28,6 @@ func uploadDocbankAttachment(ctx context.Context, cfg ServerConfig, iss db.Issue
 		return metadata.Attachment{}, attachmentError(503, "docbank_not_configured")
 	}
 	e := metadata.Attachment{Name: name}
-	if !metadata.ValidAttachmentName(e.Name) {
-		return metadata.Attachment{}, attachmentError(400, "attachment_invalid")
-	}
 	file, err := os.CreateTemp("", "kata-attachment-*")
 	if err != nil {
 		return metadata.Attachment{}, internalAPIError(err)
