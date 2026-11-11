@@ -169,6 +169,11 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 		payload["labels"] = []string{"bug", "shipped"}
 		payload["metadata"] = map[string]any{"team": "core"}
 		comments := payload["comments"].([]any)
+		// The current copy re-saved the known comment without changing its text.
+		require.NotEmpty(t, comments)
+		known, ok := comments[0].(map[string]any)
+		require.True(t, ok)
+		known["edited_at"] = laterComment
 		payload["comments"] = append(comments, map[string]any{
 			"comment_uid": "01ARZ3NDEKTSV4RRFFQ69G5FC2", "author": "carol",
 			"body": "second", "created_at": laterComment,
@@ -209,6 +214,8 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 	require.Equal(t, "alice", comments[0].Author)
 	require.Equal(t, "first", comments[0].Body)
 	require.True(t, h.commentAt.Equal(comments[0].CreatedAt), "a known comment keeps its created time")
+	require.NotNil(t, comments[0].EditedAt, "a newer copy's edit time is stored even when the text is unchanged")
+	require.Equal(t, laterComment, comments[0].EditedAt.UTC().Format(db.EventTimestampFormat))
 	require.Equal(t, "carol", comments[1].Author)
 	require.Equal(t, laterComment, comments[1].CreatedAt.UTC().Format(db.EventTimestampFormat))
 	added, err := hub.IssueByUID(ctx, newIssueUID, db.IncludeDeletedNo)

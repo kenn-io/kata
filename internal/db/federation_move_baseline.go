@@ -8,9 +8,9 @@ import (
 // FederationMoveBaselineEvents assembles moved-issue replay from the effective
 // source enrollment baseline. Earlier initializers cannot restore an author
 // rewritten before enrollment. Only comment records covered by that baseline
-// are omitted; moves and other deltas remain. Earlier snapshots from another
-// origin also remain, because they are repeated imports the fold orders by
-// updated_at. Retained events and feeds do not change.
+// are omitted; moves and other deltas remain. An earlier creation or snapshot
+// from another origin also remains, because the baseline is then a repeated
+// import that the fold orders by updated_at. Retained events and feeds do not change.
 func FederationMoveBaselineEvents(events []FoldEvent) []FoldEvent {
 	type sourceKey struct{ issue, project string }
 	departures := map[sourceKey]FoldClock{}
@@ -44,13 +44,12 @@ func FederationMoveBaselineEvents(events []FoldEvent) []FoldEvent {
 		baseline, exists := baselines[event.IssueUID]
 		if exists && compareClock(clockOf(event), clockOf(baseline)) < 0 {
 			switch event.Type {
-			case "issue.created":
-				continue
-			case "issue.snapshot":
-				// A snapshot from another origin is a repeated import of the
-				// issue, not an earlier enrollment of this baseline's node. Keep
-				// it so the fold can compare the copies by updated_at; the
-				// latest snapshot by clock may be the stale one.
+			case "issue.created", "issue.snapshot":
+				// An initializer from another origin is not an earlier state of
+				// this baseline's node: the baseline is a repeated import of an
+				// issue that already existed. Keep the initializer so the fold
+				// can compare the copies by updated_at; the latest snapshot by
+				// clock may be the stale one.
 				if event.OriginInstanceUID == baseline.OriginInstanceUID {
 					continue
 				}
