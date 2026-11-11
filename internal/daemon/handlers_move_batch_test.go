@@ -244,6 +244,8 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 	comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
+	unrelated, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "unrelated issue", Author: "tester"})
+	require.NoError(t, err)
 	completed := request["completed"].([]map[string]any)[0]
 	for _, field := range []string{"event_id", "uid", "target", "actor", "alias", "proof", "missing_proof"} {
 		t.Run(field, func(t *testing.T) {
@@ -257,7 +259,7 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 			case "actor":
 				request["actor"] = "another-actor"
 			case "alias":
-				items[0]["ref"] = target.Name + "#" + issue.ShortID
+				items[0]["ref"] = source.Name + "#" + unrelated.ShortID
 			case "proof":
 				completed["proof"] = strings.Repeat("0", 64)
 			case "missing_proof":
