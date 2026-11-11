@@ -39,8 +39,8 @@ func nextRunsDetailParent(t *testing.T, now string, edit func(*generated.CronJob
 	m.cron.data.jobs[0].Definition = def
 	if progress != nil {
 		m.cron.data.progress = map[string]cron.RecurringProgress{nextJobUID: *progress}
-		m.cron.data.parentOpen = map[string]bool{nextParentUID: parentOpen}
 	}
+	m.cron.data.parentOpen = map[string]bool{nextParentUID: parentOpen}
 	m = sendKey(m, tea.KeyEnter)
 	return ansi.Strip(m.viewBody())
 }
@@ -163,6 +163,8 @@ func TestCronJobDetailNativeClosedParentHasNoNextRuns(t *testing.T) {
 	got := nextRunsDetailParent(t, "2026-06-01T05:00:00Z", nativeNotify(generated.TriggerResponse{Kind: "cron", Cron: new("0 7 * * *")}), &progress, false)
 	require.Regexp(t, `Next:\s+none while the parent is closed`, got)
 	require.NotContains(t, got, "2026-06-02 07:00")
+	got = nextRunsDetailParent(t, "2026-06-01T05:00:00Z", nativeNotify(generated.TriggerResponse{Kind: "cron", Cron: new("0 7 * * *")}), nil, false)
+	require.Regexp(t, `Next:\s+unavailable`, got)
 }
 
 func TestCronJobDetailAdapterCronUsesOwnGrammar(t *testing.T) {

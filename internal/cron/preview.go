@@ -27,11 +27,11 @@ func PreviewJob(def JobDefinition, parent *PreviewParent, after time.Time, count
 		if parent == nil {
 			return JobPreview{Status: "unavailable"}, nil
 		}
-		if !parent.Open {
-			return JobPreview{Status: "parent_closed"}, nil
-		}
 		if parent.Progress == nil {
 			return JobPreview{Status: "unavailable"}, nil
+		}
+		if !parent.Open {
+			return JobPreview{Status: "parent_closed"}, nil
 		}
 		progress = *parent.Progress
 	} else if def.Trigger.Kind != "once" {

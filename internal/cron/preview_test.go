@@ -21,7 +21,7 @@ func TestPreviewJobStates(t *testing.T) {
 	invalid.Version = 2
 	_, err = PreviewJob(j, &PreviewParent{Open: true, Progress: &invalid}, now, 1)
 	require.Error(t, err)
-	got, err = PreviewJob(j, &PreviewParent{Open: false}, now, 1)
+	got, err = PreviewJob(j, &PreviewParent{Open: false, Progress: &p}, now, 1)
 	require.NoError(t, err)
 	require.Equal(t, "parent_closed", got.Status)
 	j.Enabled = false
@@ -39,7 +39,7 @@ func TestPreviewJobStates(t *testing.T) {
 		want   string
 	}{
 		{"missing", nil, "unavailable"},
-		{"closed", &PreviewParent{Open: false}, "parent_closed"},
+		{"closed", &PreviewParent{Open: false, Progress: &p}, "parent_closed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := PreviewJob(job, tc.parent, now, 3)

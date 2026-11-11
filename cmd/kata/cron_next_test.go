@@ -44,6 +44,9 @@ func TestCronNextSavedSchedules(t *testing.T) {
 		{"local once", `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"once","at":"2026-06-01T08:00:00Z","timezone":"Local"},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Inspection"},"overlap":"forbid","catchup":"all"}`, "", "2026-06-01T08:00:00Z", false, false},
 		{"native interval", native, parent, "2026-06-01T08:00:00Z", false, false},
 		{"archived parent", native, strings.Replace(parent, `"status":"open"`, `"status":"open","deleted_at":"2026-01-01T00:00:00Z"`, 1), `"status":"parent_closed"`, false, false},
+		{"closed parent without progress", native, strings.Replace(parent, `"status":"open","revision":7,"metadata":{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{"version":1,"anchor":"2026-06-01T00:00:00Z","through":"2026-06-01T06:00:00Z"}}`, `"status":"closed","metadata":{}`, 1), "cron_preview_unavailable", true, false},
+		{"closed parent with newer progress", native, strings.Replace(strings.Replace(parent, `"status":"open"`, `"status":"closed"`, 1), `"version":1`, `"version":2`, 1), "cron_preview_unavailable", true, false},
+		{"closed parent with corrupt progress", native, strings.Replace(strings.Replace(parent, `"status":"open"`, `"status":"closed"`, 1), `"version":1`, `"version":"bad"`, 1), "cron_preview_unavailable", true, false},
 		{"future definition", strings.Replace(native, `"version":1`, `"version":2`, 1), parent, "", true, false},
 		{"paused legacy", strings.Replace(legacy, `"enabled":true`, `"enabled":false`, 1), "", `"status":"paused"`, false, false},
 		{"deleted legacy", legacy, "", `"status":"deleted"`, false, true},
@@ -84,6 +87,12 @@ func TestCronNextSavedSchedules(t *testing.T) {
 			if tc.invalid {
 				require.Error(t, err)
 				require.Empty(t, out)
+				if tc.want == "cron_preview_unavailable" {
+					var cli *cliError
+					require.ErrorAs(t, err, &cli)
+					require.Equal(t, tc.want, cli.Code)
+					return
+				}
 				require.ErrorContains(t, err, "cannot preview saved job with this kata")
 				return
 			}
