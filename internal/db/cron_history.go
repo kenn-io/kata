@@ -51,6 +51,7 @@ type ObserveCronRun struct {
 	StartedAt                  *time.Time
 	EndedAt                    *time.Time
 	ExpectedRevision           int64
+	EventFeatures              string
 }
 
 // CronRunObservationResult retains the row and exact events of one write.
