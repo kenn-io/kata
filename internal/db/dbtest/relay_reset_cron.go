@@ -102,7 +102,7 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 		event.Payload, err = json.Marshal(payload)
 		require.NoError(t, err)
 		event = newRemoteEvent(t, replica, nil, "cron.workflow.deleted", "worker", downstream.InstanceUID(), event.HLCPhysicalMS, event.Payload)
-		_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, downstream.InstanceUID(), replica.ID, replica.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash)
+		_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, event.EventUID, downstream.InstanceUID(), replica.ID, replica.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash, event.CreatedAt.UTC().Format(db.EventTimestampFormat))
 		require.NoError(t, err)
 		err = installer.InstallRelayReset(ctx, bindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation)
 		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
