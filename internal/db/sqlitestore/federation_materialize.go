@@ -26,12 +26,12 @@ type federationMaterialization struct {
 	eventStamp       [32]byte
 	rowStamp         [32]byte
 	rowHasher        *federationRowHasher
-	linkStamps       map[int64][32]byte
-	relayOrigins     relayOriginClassifier
 	shortIDChecks    []federatedShortIDCheck
+	linkStamps       map[int64][32]byte
 	linkReadProjects []int64
 	maxEventID       int64
 	moveIssueUIDs    map[string]struct{}
+	relayOrigins     relayOriginClassifier
 	projection       db.FoldProjection
 	cronAffected     bool
 	status           []federatedStatusIntentUpdate
