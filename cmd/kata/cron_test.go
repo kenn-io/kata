@@ -811,45 +811,12 @@ func TestCronCLIParentUpdateKeepsBindingProtections(t *testing.T) {
 	require.Equal(t, parents[0].UID, stored.Definition.Issue.ParentUID)
 }
 
-func TestCronJobShowPrintsDelivery(t *testing.T) {
-	t.Setenv("KATA_AUTHOR", "worker")
-	env := testenv.New(t)
-	p, err := env.DB.CreateProject(t.Context(), "spoke-project")
-	require.NoError(t, err)
-	parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Recurring parent", Author: "worker"})
-	require.NoError(t, err)
-	j, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Check service", Actor: "worker", Definition: cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Check service"}, Overlap: "allow", Catchup: "latest"}})
-	require.NoError(t, err)
-	for _, tc := range []struct {
-		name string
-		args []string
-	}{{"show", []string{"job", "show", j.UID}}, {"list", []string{"job", "list"}}} {
-		t.Run(tc.name, func(t *testing.T) {
-			out, _, err := executeCronCLI(t, env.URL, nil, tc.args...)
-			require.NoError(t, err)
-			type jobView struct {
-				Delivery *struct{} `json:"delivery"`
-			}
-			var response struct {
-				Job  jobView   `json:"job"`
-				Jobs []jobView `json:"jobs"`
-			}
-			require.NoError(t, json.Unmarshal([]byte(out), &response))
-			if tc.name == "show" {
-				require.NotNil(t, response.Job.Delivery)
-			} else {
-				require.Len(t, response.Jobs, 1)
-				require.NotNil(t, response.Jobs[0].Delivery)
-			}
-		})
-	}
-}
-
 func TestCronJobDeliveryDaemonVersion(t *testing.T) {
 	for _, action := range []string{"show", "list"} {
 		for _, version := range []string{"0.44.0", "0.45.0"} {
 			t.Run(action+"/"+version, func(t *testing.T) {
 				var reads atomic.Int32
+				var include atomic.Value
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					switch {
@@ -861,8 +828,8 @@ func TestCronJobDeliveryDaemonVersion(t *testing.T) {
 						_, _ = io.WriteString(w, `{"api_schema_version":"`+version+`"}`)
 					case strings.Contains(r.URL.Path, "/cron/jobs"):
 						reads.Add(1)
-						require.Equal(t, "delivery", r.URL.Query().Get("include"))
-						_, _ = io.WriteString(w, `{"job":{},"jobs":[]}`)
+						include.Store(r.URL.Query().Get("include"))
+						_, _ = io.WriteString(w, `{"job":{"delivery":{"state":"behind"}},"jobs":[{"delivery":{"state":"behind"}}]}`)
 					default:
 						t.Errorf("unexpected request: %s", r.URL.Path)
 					}
@@ -872,13 +839,29 @@ func TestCronJobDeliveryDaemonVersion(t *testing.T) {
 				if action == "show" {
 					args = append(args, cronCLIUID(t))
 				}
-				_, _, err := executeCronCLI(t, server.URL, nil, args...)
+				out, _, err := executeCronCLI(t, server.URL, nil, args...)
 				if version == "0.44.0" {
 					require.ErrorContains(t, err, "upgrade the daemon")
 					require.Zero(t, reads.Load())
 				} else {
 					require.NoError(t, err)
 					require.EqualValues(t, 1, reads.Load())
+					require.Equal(t, "delivery", include.Load())
+					var response struct {
+						Job struct {
+							Delivery map[string]string `json:"delivery"`
+						} `json:"job"`
+						Jobs []struct {
+							Delivery map[string]string `json:"delivery"`
+						} `json:"jobs"`
+					}
+					require.NoError(t, json.Unmarshal([]byte(out), &response))
+					if action == "show" {
+						require.Equal(t, "behind", response.Job.Delivery["state"])
+					} else {
+						require.Len(t, response.Jobs, 1)
+						require.Equal(t, "behind", response.Jobs[0].Delivery["state"])
+					}
 				}
 			})
 		}
