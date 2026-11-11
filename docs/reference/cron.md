@@ -626,6 +626,11 @@ downloaded, forwarded, installed, or activated. Taking an owner backup retains
 the evidence; it does not make the checkpoint usable by an older version.
 Use a version that understands the retained format for recovery. A newer
 supported workflow does not clear older retained evidence.
+Legacy replay-horizon resets and signed checkpoint installation also refuse when
+local workflow rows or retained events are unsupported. The reset remains
+blocked on later polls until that evidence can be handled safely. The owner
+backup and replacement workflow above preserve recovery options; they do not
+authorize deleting evidence or bypassing the reset refusal.
 
 ### Upgrade limits
 
