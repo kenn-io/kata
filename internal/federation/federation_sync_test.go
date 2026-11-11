@@ -729,6 +729,55 @@ func TestSyncFederationOncePushPoisonLeavesCursorUnchanged(t *testing.T) {
 	assert.Equal(t, localEvent.ID, pending[0].ID)
 }
 
+func TestPushRefusesUnmatchedRejectionIdentities(t *testing.T) {
+	for _, invalid := range []string{"unknown UID", "wrong source ID", "duplicate rejection"} {
+		t.Run(invalid, func(t *testing.T) {
+			ctx := t.Context()
+			spoke := testenv.New(t)
+			project, err := spoke.DB.CreateProject(ctx, "spoke-project")
+			require.NoError(t, err)
+			_, event, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Pending issue", Author: "worker"})
+			require.NoError(t, err)
+			rejection := db.FederationEventRejection{
+				SourceEventID: event.ID, EventUID: event.UID, Code: db.FederationProjectNotEnrolledCode,
+			}
+			switch invalid {
+			case "unknown UID":
+				rejection.EventUID = project.UID
+			case "wrong source ID":
+				rejection.SourceEventID++
+			}
+			rejected := []db.FederationEventRejection{rejection}
+			if invalid == "duplicate rejection" {
+				rejected = append(rejected, rejection)
+			}
+			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v1/projects/42/federation/events:ingest" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.FederationIngestEventsBody{
+					RejectedEvents: rejected, PushCursorEventID: event.ID,
+				})
+			}))
+			t.Cleanup(hub.Close)
+			binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+				ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL,
+				HubProjectID: 42, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "worker",
+			})
+			require.NoError(t, err)
+			client, err := NewClient(ctx, hub.URL, "token", clientpkg.Opts{})
+			require.NoError(t, err)
+			err = PushDirectSpoke(ctx, spoke.DB, binding, binding.HubProjectID, client)
+			restored, readErr := spoke.DB.FederationBindingByProject(ctx, binding.ProjectID)
+			require.NoError(t, readErr)
+			assert.Equal(t, binding.PushCursorEventID, restored.PushCursorEventID, "invalid acknowledgment cannot advance progress")
+			require.ErrorContains(t, err, "invalid federation push acknowledgment")
+		})
+	}
+}
+
 func TestSyncFederationOncePushPoisonRecordsQuarantine(t *testing.T) {
 	ctx := t.Context()
 	spoke := testenv.New(t)
