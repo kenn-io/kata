@@ -248,6 +248,20 @@ func TestSharedChoiceRollsBackWhenVectorPathIsDirectory(t *testing.T) {
 			baseURL := launchDaemon(t)
 			status := getJSON[api.LocalEmbeddingsStatus](t, baseURL+"/api/v1/embeddings/local")
 			require.Equal(t, "none", status.Provider)
+			project := postJSON[struct {
+				Project struct {
+					ID int64 `json:"id"`
+				} `json:"project"`
+			}](t, baseURL+"/api/v1/projects", map[string]string{"name": "example-project", "actor": "user-a"})
+			projectURL := fmt.Sprintf("%s/api/v1/projects/%d", baseURL, project.Project.ID)
+			postJSONOK(t, projectURL+"/issues", map[string]string{"title": "Repair bicycle", "actor": "user-a"})
+			result := getJSON[struct {
+				Mode    string          `json:"mode"`
+				Results []api.SearchHit `json:"results"`
+			}](t, projectURL+"/search?q=bicycle")
+			require.Equal(t, "lexical", result.Mode)
+			require.Len(t, result.Results, 1)
+			require.Equal(t, "Repair bicycle", result.Results[0].Issue.Title)
 		})
 	}
 }
