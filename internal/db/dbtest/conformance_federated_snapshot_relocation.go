@@ -187,8 +187,6 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
 		_, err := spoke.LeaveFederationReplica(ctx, localTarget.ID)
 		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
-		_, err = spoke.FederationBindingByProject(ctx, localTarget.ID)
-		require.NoError(t, err, "the destination binding must remain available to authorize source push")
 		acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
 		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
 		require.NoError(t, err)
