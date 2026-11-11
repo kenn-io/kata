@@ -174,6 +174,12 @@ func (a CronSQL) Jobs(ctx context.Context, in CronList) ([]CronJob, error) {
 
 // Workflows lists project-scoped workflow documents under the requested tombstone policy.
 func (a CronSQL) Workflows(ctx context.Context, in CronList) ([]CronWorkflow, error) {
+	return a.workflows(ctx, in, false)
+}
+
+// workflows keeps federation snapshots strict while ordinary lists omit only
+// documents accepted by the historical decoder and fenced by the strict one.
+func (a CronSQL) workflows(ctx context.Context, in CronList, strict bool) ([]CronWorkflow, error) {
 	rows, err := a.list(ctx, in, false)
 	if err != nil {
 		return nil, err
@@ -182,6 +188,11 @@ func (a CronSQL) Workflows(ctx context.Context, in CronList) ([]CronWorkflow, er
 	for _, row := range rows {
 		value, err := workflowFromRow(row)
 		if err != nil {
+			if !strict {
+				if _, historicalErr := cron.DecodeHistoricalWorkflow(row.document); historicalErr == nil {
+					continue
+				}
+			}
 			return nil, err
 		}
 		result = append(result, value)
