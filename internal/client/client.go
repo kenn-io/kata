@@ -98,12 +98,18 @@ func (e *LocalDaemonUnreachableError) Is(target error) bool {
 	return target == ErrLocalDaemonUnreachable
 }
 
-// RecoveryAdvice describes manual evidence capture and recovery for the selected daemon.
-func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
-	advice := fmt.Sprintf("inspect %q or the supervisor stderr log", filepath.Join(e.dataDir, "daemon.log"))
+// EvidenceAdvice describes evidence that can be collected without stopping the daemon.
+func (e *LocalDaemonUnreachableError) EvidenceAdvice() string {
+	advice := fmt.Sprintf("inspect \"%s\" or the supervisor stderr log", filepath.Join(e.dataDir, "daemon.log"))
 	if validWebOrigin(e.webOrigin) {
 		advice += ". If responsive, capture " + e.webOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner access. With configured authentication use the owner's credential"
 	}
+	return advice
+}
+
+// RecoveryAdvice describes manual evidence capture and recovery for the selected daemon.
+func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
+	advice := e.EvidenceAdvice()
 	if e.verifiedProcess && goruntime.GOOS != "windows" {
 		advice += fmt.Sprintf(". As a fallback, kill -QUIT %d dumps goroutines to stderr and terminates the daemon", e.PID)
 	} else if e.verifiedProcess && goruntime.GOOS == "windows" {

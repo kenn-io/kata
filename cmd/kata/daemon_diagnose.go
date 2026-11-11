@@ -266,7 +266,15 @@ func diagnoseDaemonSelectionObserved(
 			return withDiagnosisAction(result), selection, nil
 		}
 		if !inspectDiagnosisProject(ctx, store, &result) {
-			return withDiagnosisAction(result), selection, nil
+			result = withDiagnosisAction(result)
+			if observed != nil {
+				result.PID, result.Endpoint = observed.PID, observed.Address
+				if result.Message != "" {
+					result.NextAction = result.Message + ". " + result.NextAction
+				}
+				result.NextAction += ". " + observed.Summary() + ". " + observed.EvidenceAdvice() + "."
+			}
+			return result, selection, nil
 		}
 	}
 	result, selection, err = probeDaemonSelectionObserved(ctx, result, selection, observed)
