@@ -424,6 +424,8 @@ file is unavailable. Named catalog entries and pinned local profiles use their
 own selected credentials. An active legacy `local = true` entry without a
 profile home also uses its catalog credential for the current home's daemon,
 over either TCP or Unix. An unavailable selected credential remains an error.
+Unix catalog entries can select spokes but are excluded from HTTP hub matching;
+`--hub-url` still requires an HTTP(S) endpoint.
 
 Without a project argument or `--project`, `enroll` finds the project from the
 client's `.kata.toml` or Git alias and sends only that name or alias to the

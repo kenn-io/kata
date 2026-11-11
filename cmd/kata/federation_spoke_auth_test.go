@@ -103,3 +103,40 @@ func TestFederationEnrollSelectedSpokeCredentialFailureIsNotDiscarded(t *testing
 	require.NoError(t, err)
 	assert.Empty(t, enrollments)
 }
+
+func TestFederationEnrollUnixCatalogSpokeKeepsIndependentHubAuth(t *testing.T) {
+	for _, hubSource := range []string{"environment", "catalog"} {
+		t.Run(hubSource, func(t *testing.T) {
+			resetFlags(t)
+			flags.Workspace = t.TempDir()
+			hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
+			spoke := testenv.New(t, testenv.WithAuthToken("spoke-token"))
+			_, err := spoke.DB.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			socket, _ := unixConsumerEndpoint(t, spoke.URL)
+			configBody := fmt.Sprintf("[[daemon]]\nname = \"spoke\"\nurl = %q\ntoken = \"spoke-token\"\n", "unix://"+socket)
+			if hubSource == "catalog" {
+				configBody += fmt.Sprintf("[[daemon]]\nname = \"hub\"\nurl = %q\ntoken = \"hub-token\"\n", hub.URL)
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(spoke.Home, "config.toml"), []byte(configBody), 0600))
+			t.Setenv("KATA_AUTH_TOKEN", "hub-token")
+			args := []string{"--daemon", "spoke", "--project", "spoke-project", "federation", "enroll", "--spoke-instance", spoke.DB.InstanceUID(), "--hub-url", hub.URL, "--actor", "operator"}
+			if hubSource == "environment" {
+				t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
+				args = append(args, "--hub-token-env", "EXAMPLE_HUB_TOKEN")
+			}
+			cmd := newRootCmd()
+			var output strings.Builder
+			cmd.SetOut(&output)
+			cmd.SetErr(&output)
+			cmd.SetArgs(args)
+
+			require.NoError(t, cmd.Execute())
+			assert.Contains(t, output.String(), "--adopt-existing")
+			enrollments, err := hub.DB.ListFederationEnrollments(t.Context())
+			require.NoError(t, err)
+			require.Len(t, enrollments, 1)
+			assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors)
+		})
+	}
+}
