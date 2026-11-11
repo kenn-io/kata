@@ -857,8 +857,6 @@ process: the first element is the executable and the remaining elements are
 separate arguments. It does not join arguments, interpolate or expand them, or
 retry through a shell if launch fails. A workflow can explicitly request a shell
 by naming it in the vector; then that shell interprets its own arguments.
-Adapters must advertise `cron_workflow_argv_v1` only when they support this
-contract.
 
 A job may name its adapter in `options.adapter`. An adapter neither schedules
 nor manually runs a job whose key names another adapter, and says why in its own
