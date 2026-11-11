@@ -323,8 +323,8 @@ version = 1
 url = "http://100.64.0.5:7777"
 ```
 
-Not in the latest release yet: `KATA_SERVER` and workspace `server.url`
-also accept `unix:///absolute/path/daemon.sock`. An explicit socket is dialed
+Not in the latest release yet: `KATA_SERVER`, workspace `server.url`, and
+catalog `url` entries also accept `unix:///absolute/path/daemon.sock`. An explicit socket is dialed
 without a runtime record and never starts a detached daemon or falls back to
 another database. Requests fail if the selected socket is unavailable. Use the
 existing `KATA_AUTH_TOKEN_FILE` or global auth configuration when it requires a
@@ -333,6 +333,10 @@ bearer credential.
 An explicit socket is not a pinned local-home profile: clients do not assume it
 can access the caller's filesystem. `kata ui` requires an HTTP(S) browser origin
 and does not substitute a local gateway for an explicit Unix API target.
+Named socket entries remain URL targets, not `local = true` profiles. Their
+credentials use the existing catalog precedence; a separate
+`KATA_AUTH_TOKEN_FILE` does not replace a selected catalog token file. The
+existing deliberate `KATA_AUTH_TOKEN` override still applies.
 
 `KATA_SERVER` wins over the local file unless a command passes
 `--daemon <name>`.

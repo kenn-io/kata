@@ -73,83 +73,81 @@ func TestUnixConsumerFederationKeepsSelectedTransportAndCredentialPolicy(t *test
 
 func testUnixConsumerFederationTarget(t *testing.T, selection string) {
 	t.Helper()
-	for _, selection := range []string{selection} {
-		t.Run(selection, func(t *testing.T) {
-			resetFlags(t)
-			spoke := testenv.New(t, testenv.WithAuthToken("spoke-token"))
-			_, err := spoke.DB.CreateProject(t.Context(), "only-spoke")
+	t.Run(selection, func(t *testing.T) {
+		resetFlags(t)
+		spoke := testenv.New(t, testenv.WithAuthToken("spoke-token"))
+		_, err := spoke.DB.CreateProject(t.Context(), "only-spoke")
+		require.NoError(t, err)
+		hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
+		_, err = hub.DB.CreateProject(t.Context(), "only-hub")
+		require.NoError(t, err)
+		path, stop := unixConsumerEndpoint(t, spoke.URL)
+		t.Setenv("KATA_SERVER", "")
+		t.Setenv("KATA_AUTH_TOKEN", "hub-token")
+		body := fmt.Sprintf("[[daemon]]\nname = \"spoke\"\nurl = %q\ntoken = \"spoke-token\"\n", "unix://"+path)
+		switch selection {
+		case "named":
+			flags.Daemon = "spoke"
+		case "active":
+			body = "active_daemon = \"spoke\"\n" + body
+		case "environment":
+			t.Setenv("KATA_SERVER", "unix://"+path)
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(hub.Home, "config.toml"), []byte(body), 0600))
+		ctx, base, err := ensureSpokeDaemonContext(t.Context())
+		require.NoError(t, err)
+		hc, err := federationSpokeHTTPClient(ctx, base)
+		require.NoError(t, err)
+		mutation, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/v1/projects", bytes.NewBufferString(`{"name":"written-spoke","actor":"operator"}`))
+		require.NoError(t, err)
+		mutation.Header.Set("Content-Type", "application/json")
+		created, err := hc.Do(mutation)
+		require.NoError(t, err)
+		if selection == "environment" {
+			assert.Equal(t, http.StatusUnauthorized, created.StatusCode)
+		} else {
+			assert.Equal(t, http.StatusOK, created.StatusCode)
+		}
+		require.NoError(t, created.Body.Close())
+		readBack := func(env *testenv.Env, token string) string {
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, env.URL+"/api/v1/projects", nil)
 			require.NoError(t, err)
-			hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
-			_, err = hub.DB.CreateProject(t.Context(), "only-hub")
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp, err := env.HTTP.Do(req)
 			require.NoError(t, err)
-			path, stop := unixConsumerEndpoint(t, spoke.URL)
-			t.Setenv("KATA_SERVER", "")
-			t.Setenv("KATA_AUTH_TOKEN", "hub-token")
-			body := fmt.Sprintf("[[daemon]]\nname = \"spoke\"\nurl = %q\ntoken = \"spoke-token\"\n", "unix://"+path)
-			switch selection {
-			case "named":
-				flags.Daemon = "spoke"
-			case "active":
-				body = "active_daemon = \"spoke\"\n" + body
-			case "environment":
-				t.Setenv("KATA_SERVER", "unix://"+path)
-			}
-			require.NoError(t, os.WriteFile(filepath.Join(hub.Home, "config.toml"), []byte(body), 0600))
-			ctx, base, err := ensureSpokeDaemonContext(t.Context())
+			defer func() { _ = resp.Body.Close() }()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			body, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			hc, err := federationSpokeHTTPClient(ctx, base)
-			require.NoError(t, err)
-			mutation, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/v1/projects", bytes.NewBufferString(`{"name":"written-spoke","actor":"operator"}`))
-			require.NoError(t, err)
-			mutation.Header.Set("Content-Type", "application/json")
-			created, err := hc.Do(mutation)
-			require.NoError(t, err)
-			if selection == "environment" {
-				assert.Equal(t, http.StatusUnauthorized, created.StatusCode)
-			} else {
-				assert.Equal(t, http.StatusCreated, created.StatusCode)
-			}
-			require.NoError(t, created.Body.Close())
-			readBack := func(env *testenv.Env, token string) string {
-				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, env.URL+"/api/v1/projects", nil)
-				require.NoError(t, err)
-				req.Header.Set("Authorization", "Bearer "+token)
-				resp, err := env.HTTP.Do(req)
-				require.NoError(t, err)
-				defer func() { _ = resp.Body.Close() }()
-				require.Equal(t, http.StatusOK, resp.StatusCode)
-				body, err := io.ReadAll(resp.Body)
-				require.NoError(t, err)
-				return string(body)
-			}
-			spokeState := readBack(spoke, "spoke-token")
-			hubState := readBack(hub, "hub-token")
-			if selection == "environment" {
-				assert.NotContains(t, spokeState, "written-spoke")
-			} else {
-				assert.Contains(t, spokeState, "written-spoke")
-			}
-			assert.NotContains(t, hubState, "written-spoke")
-			read := func(ctx context.Context) (*http.Response, error) {
-				req, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/v1/projects", nil)
-				require.NoError(t, requestErr)
-				return hc.Do(req)
-			}
-			resp, err := read(ctx)
-			require.NoError(t, err)
-			if selection == "environment" {
-				assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "ambient hub credentials must not authorize the spoke")
-			} else {
-				assert.Equal(t, http.StatusOK, resp.StatusCode)
-				output, readErr := io.ReadAll(resp.Body)
-				require.NoError(t, readErr)
-				assert.Contains(t, string(output), "only-spoke")
-				assert.NotContains(t, string(output), "only-hub")
-			}
-			require.NoError(t, resp.Body.Close())
-			stop()
-			_, err = read(ctx)
-			require.Error(t, err, "stopped selected socket must not fall back to a local daemon")
-		})
-	}
+			return string(body)
+		}
+		spokeState := readBack(spoke, "spoke-token")
+		hubState := readBack(hub, "hub-token")
+		if selection == "environment" {
+			assert.NotContains(t, spokeState, "written-spoke")
+		} else {
+			assert.Contains(t, spokeState, "written-spoke")
+		}
+		assert.NotContains(t, hubState, "written-spoke")
+		read := func(ctx context.Context) (*http.Response, error) {
+			req, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/v1/projects", nil)
+			require.NoError(t, requestErr)
+			return hc.Do(req)
+		}
+		resp, err := read(ctx)
+		require.NoError(t, err)
+		if selection == "environment" {
+			assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "ambient hub credentials must not authorize the spoke")
+		} else {
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			output, readErr := io.ReadAll(resp.Body)
+			require.NoError(t, readErr)
+			assert.Contains(t, string(output), "only-spoke")
+			assert.NotContains(t, string(output), "only-hub")
+		}
+		require.NoError(t, resp.Body.Close())
+		stop()
+		_, err = read(ctx)
+		require.Error(t, err, "stopped selected socket must not fall back to a local daemon")
+	})
 }

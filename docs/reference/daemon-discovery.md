@@ -49,8 +49,8 @@ current home. None auto-start during discovery. A named remote,
 `KATA_SERVER`, workspace override, or active remote is normalized and probed
 but never replaced with another target.
 
-Not in the latest release yet: `KATA_SERVER` and workspace `server.url`
-accept `unix:///absolute/path/daemon.sock`. Explicit socket selection does not
+Not in the latest release yet: `KATA_SERVER`, workspace `server.url`, and named
+catalog URLs accept `unix:///absolute/path/daemon.sock`. Explicit socket selection does not
 read a local runtime record or start a detached daemon; an unavailable socket
 is an error, never permission to choose another target. A socket connection
 can still trigger an operating-system service manager configured for activation.

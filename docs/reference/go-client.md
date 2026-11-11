@@ -61,8 +61,8 @@ Discover does not probe configured remotes, including one selected by name.
 The first request reports whether a remote is reachable; call
 `api.PingWithResponse(ctx)` to check sooner.
 
-Not in the latest release yet: `KATA_SERVER` and workspace `server.url`
-accept explicit `unix:///absolute/path/daemon.sock` endpoints. Discover does not
+Not in the latest release yet: `KATA_SERVER`, workspace `server.url`, and named
+catalog URLs accept explicit `unix:///absolute/path/daemon.sock` endpoints. Discover does not
 require a runtime record or probe that socket. The first request reports
 reachability. `StartWith` is never used for an explicit endpoint, even when the
 socket is missing.

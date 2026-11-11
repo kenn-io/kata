@@ -29,11 +29,10 @@ const remoteServerEnvVar = "KATA_SERVER"
 // equivalent there is `[server].allow_insecure = true`.
 const allowInsecureEnvVar = "KATA_ALLOW_INSECURE"
 
-// activeRemoteTarget is the active_daemon catalog entry when it is a remote,
-// with its normalized URL.
+// activeRemoteTarget retains the active catalog entry's exact transport.
 type activeRemoteTarget struct {
-	entry   config.CatalogDaemonConfig
-	BaseURL string
+	entry    config.CatalogDaemonConfig
+	resolved ResolvedDaemon
 }
 
 // ErrRemoteUnavailable wraps probe failures against an explicitly
@@ -218,14 +217,11 @@ func resolveActiveRemoteSelection(
 			return ResolvedDaemon{}, false, err
 		}
 	}
-	if mode != remoteRequestTarget && !probeRemote(ctx, target.BaseURL) {
+	resolved := target.resolved
+	if mode != remoteRequestTarget && !probeConfigured(ctx, resolved) {
 		return ResolvedDaemon{}, false, fmt.Errorf("%w: %s (%s active_daemon %q)",
-			ErrRemoteUnavailable, target.BaseURL, daemonConfigSource(), target.entry.Name)
+			ErrRemoteUnavailable, resolved.Address, daemonConfigSource(), target.entry.Name)
 	}
-	resolved := resolvedForRunning(
-		DaemonSourceActiveDaemon, target.entry.Name, remoteRunningDaemon(target.BaseURL, true),
-	)
-	resolved.AllowInsecure = target.entry.AllowInsecure
 	if mode != remoteEndpointOnly {
 		resolved = resolved.withRemoteTargetAuth(token, target.entry.AllowInsecure)
 	}
@@ -297,13 +293,13 @@ func activeRemoteFromConfig() (activeRemoteTarget, bool, error) {
 	if !ok || entry.Local {
 		return activeRemoteTarget{}, false, nil
 	}
-	baseURL, err := normalizeRemoteURL(entry.URL, entry.AllowInsecure)
+	resolved, err := configuredEndpoint(DaemonSourceActiveDaemon, entry.Name, entry.URL, entry.AllowInsecure)
 	if err != nil {
 		return activeRemoteTarget{}, false,
 			fmt.Errorf("%s daemon %q url %q: %w",
 				daemonConfigSource(), entry.Name, remoteURLForError(entry.URL), err)
 	}
-	return activeRemoteTarget{entry: entry, BaseURL: baseURL}, true, nil
+	return activeRemoteTarget{entry: entry, resolved: resolved}, true, nil
 }
 
 // activeRemoteTargetAuthForBaseURL is the compatibility bridge for callers
@@ -318,7 +314,7 @@ func activeRemoteTargetAuthForBaseURL(ctx context.Context, baseURL, workspaceSta
 	if err != nil || !ok {
 		return TargetAuth{}, false, err
 	}
-	if target.BaseURL != strings.TrimRight(baseURL, "/") {
+	if target.resolved.BaseURL != strings.TrimRight(baseURL, "/") {
 		return TargetAuth{}, false, nil
 	}
 	token, err := target.entry.ClientToken()
@@ -379,7 +375,7 @@ func envAllowInsecure() bool {
 func remoteAllowInsecureForBaseURL(ctx context.Context, baseURL, workspaceStart string) bool {
 	activeAllows := func() bool {
 		target, ok, err := activeRemoteFromConfig()
-		return err == nil && ok && target.BaseURL == baseURL && target.entry.AllowInsecure
+		return err == nil && ok && target.resolved.BaseURL == baseURL && target.entry.AllowInsecure
 	}
 	if v := os.Getenv(remoteServerEnvVar); v != "" {
 		allow := envAllowInsecure()
