@@ -394,6 +394,16 @@ func TestFold_MetadataDiffsMergeNestedObjectPaths(t *testing.T) {
 	require.JSONEq(t, `{"settings":{"theme":"dark","size":2}}`, string(got.IssueMetadata["issue-1"]))
 }
 
+func TestFold_ConcurrentScheduleEditsReplaceWholeDescriptor(t *testing.T) {
+	events := []FoldEvent{
+		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{"scheduled_on":{"value":"2026-01-01","timezone":"UTC","tzdata_version":"v1"}},"created_at":"2026-05-23T12:00:00.000Z"}`),
+		testEvent("issue.metadata_updated", 2, `{"diff":{"scheduled_on":{"from":{"value":"2026-01-01","timezone":"UTC","tzdata_version":"v1"},"to":{"value":"2026-01-02","timezone":"Europe/Paris","tzdata_version":"v2"}}}}`),
+		testEvent("issue.metadata_updated", 3, `{"diff":{"scheduled_on":{"from":{"value":"2026-01-01","timezone":"UTC","tzdata_version":"v1"},"to":{"value":"2026-01-01","timezone":"Asia/Tokyo","tzdata_version":"v1"}}}}`),
+	}
+	got := FoldEvents(events)
+	require.JSONEq(t, `{"scheduled_on":{"value":"2026-01-01","timezone":"Asia/Tokyo","tzdata_version":"v1"}}`, string(got.IssueMetadata["issue-1"]))
+}
+
 func TestFold_MetadataDiffsProduceDeterministicJSON(t *testing.T) {
 	events := []FoldEvent{
 		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{"z":1},"created_at":"2026-05-23T12:00:00.000Z"}`),

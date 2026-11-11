@@ -17,6 +17,8 @@ export interface ShowIssueOut {
   deadline_on_date?: string
   /** Saved deadline instant as a local date and time using its saved timezone rules. */
   deadline_on_display?: string
+  /** Today's date in the deadline field's timezone. */
+  deadline_on_today?: string
   deleted_at?: string
   id: number
   labels: string[]
@@ -32,6 +34,8 @@ export interface ShowIssueOut {
   scheduled_on_date?: string
   /** Saved scheduled instant as a local date and time using its saved timezone rules. */
   scheduled_on_display?: string
+  /** Today's date in the scheduled field's timezone. */
+  scheduled_on_today?: string
   short_id: string
   source_actor?: string
   status: string

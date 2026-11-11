@@ -1,6 +1,8 @@
 package db
 
 import (
+	"time"
+
 	"go.kenn.io/kata/internal/metadata"
 )
 
@@ -8,6 +10,7 @@ import (
 // resolves independently, so one unreadable value leaves the other usable.
 type planningCalendarDates struct {
 	scheduledOn, deadlineOn       string
+	scheduledToday, deadlineToday string
 	hasScheduledOn, hasDeadlineOn bool
 	scheduledErr, deadlineErr     error
 }
@@ -37,14 +40,14 @@ func (d planningCalendarDates) unsupported() error {
 // Each field takes its own default timezone for date-times that carry no issue
 // timezone; scheduled dates can include the legacy recurrence fallback.
 func resolvePlanningCalendarDates(
-	raw string, display *string, scheduledDefaultTimezone, deadlineDefaultTimezone string,
+	raw string, display *string, scheduledDefaultTimezone, deadlineDefaultTimezone string, now time.Time, boundary *time.Time,
 ) planningCalendarDates {
 	var out planningCalendarDates
-	out.scheduledOn, out.hasScheduledOn, out.scheduledErr = metadata.CalendarDate(
-		raw, "scheduled_on", display, scheduledDefaultTimezone,
+	out.scheduledOn, out.scheduledToday, out.hasScheduledOn, out.scheduledErr = metadata.CalendarDateAndToday(
+		raw, "scheduled_on", display, scheduledDefaultTimezone, now, boundary,
 	)
-	out.deadlineOn, out.hasDeadlineOn, out.deadlineErr = metadata.CalendarDate(
-		raw, "deadline_on", display, deadlineDefaultTimezone,
+	out.deadlineOn, out.deadlineToday, out.hasDeadlineOn, out.deadlineErr = metadata.CalendarDateAndToday(
+		raw, "deadline_on", display, deadlineDefaultTimezone, now, boundary,
 	)
 	return out
 }
@@ -57,6 +60,12 @@ func resolvePlanningCalendarDates(
 // an unsupported tzdata version or member returns an error. scheduledDefaultTimezone can
 // include the legacy recurrence fallback; deadlines use the daemon timezone.
 func RowPlanningDates(raw, scheduledDefaultTimezone, deadlineDefaultTimezone string) (scheduledOn, deadlineOn string, err error) {
-	dates := resolvePlanningCalendarDates(raw, nil, scheduledDefaultTimezone, deadlineDefaultTimezone)
+	dates := resolvePlanningCalendarDates(raw, nil, scheduledDefaultTimezone, deadlineDefaultTimezone, time.Time{}, nil)
 	return dates.scheduledOn, dates.deadlineOn, dates.unsupported()
+}
+
+// RowPlanningProjection resolves each field and the current day in its zone.
+func RowPlanningProjection(raw, scheduledDefaultTimezone, deadlineDefaultTimezone string, now time.Time) (scheduledOn, deadlineOn, scheduledToday, deadlineToday string, err error) {
+	dates := resolvePlanningCalendarDates(raw, nil, scheduledDefaultTimezone, deadlineDefaultTimezone, now, nil)
+	return dates.scheduledOn, dates.deadlineOn, dates.scheduledToday, dates.deadlineToday, dates.unsupported()
 }

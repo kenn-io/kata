@@ -449,3 +449,7 @@ func createUIProject(t *testing.T, store *Store, name string) db.Project {
 	require.NoError(t, err)
 	return project
 }
+
+func TestUISnapshotSavedCalendarContract(t *testing.T) {
+	dbtest.RunUISnapshotSavedCalendarContract(t, func(t *testing.T) db.Storage { return openUIStore(t) })
+}

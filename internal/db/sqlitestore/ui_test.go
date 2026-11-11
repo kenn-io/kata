@@ -530,3 +530,7 @@ func TestReadUISnapshotOrdersLegacyCommentTimestamps(t *testing.T) {
 	}
 	assert.Equal(t, []string{"canonical", "legacy"}, bodies)
 }
+
+func TestUISnapshotSavedCalendarContract(t *testing.T) {
+	dbtest.RunUISnapshotSavedCalendarContract(t, func(t *testing.T) db.Storage { return openUIStore(t) })
+}

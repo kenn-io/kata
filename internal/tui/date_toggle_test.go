@@ -38,6 +38,13 @@ func shortIDs(issues []Issue) []string {
 	return out
 }
 
+func TestDateToggleUsesScheduleDay(t *testing.T) {
+	issue := dated("tokyo", "2026-01-01", "")
+	issue.ScheduledOnToday = "2026-01-01"
+	require.True(t, matchesDate(issue, ListFilter{Date: dateToday, Day: "2025-12-31"}))
+	require.False(t, matchesDate(issue, ListFilter{Date: dateScheduled, Day: "2025-12-31"}))
+}
+
 func TestDateToggle_TodayAndScheduledSplitOnLocalDay(t *testing.T) {
 	instant := time.Date(2026, 11, 10, 23, 30, 0, 0, time.UTC)
 	closed := dated("done", "2026-11-01", "2026-11-01")

@@ -62,6 +62,7 @@ func (s *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 		History: []db.Event{}, GraphIssues: []db.UIIssue{}, GraphLinks: []db.UILink{},
 		GraphEdges: []db.UIGraphEdge{}, GraphUnresolvedRefs: []db.UIGraphUnresolvedRef{},
 	}
+	query.CalendarBoundary = &data.CalendarBoundary
 	if reuseAuthority {
 		data.AuthorityReused = true
 	} else {
@@ -601,7 +602,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 	}
 	limit := min(query.Limit, 1000)
 	statement += ` ORDER BY i.updated_at DESC, i.id DESC`
-	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules && !filterDelegated {
+	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules && !filterDelegated && query.CalendarBoundary == nil {
 		args = append(args, limit)
 		statement += fmt.Sprintf(` LIMIT $%d`, len(args)) // #nosec G202 -- only a generated placeholder number is interpolated.
 	}
@@ -638,7 +639,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 				continue
 			}
 		}
-		scheduledOnDate, deadlineOnDate, matches, err := db.MatchUICalendarView(
+		scheduledOnDate, deadlineOnDate, scheduledToday, deadlineToday, matches, err := db.MatchUICalendarView(
 			string(issue.Metadata), query,
 			scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
 		)
@@ -646,16 +647,14 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 			_ = rows.Close()
 			return nil, fmt.Errorf("read UI issue %s calendar schedule: %w", issue.UID, err)
 		}
-		if !matches {
+		if !matches || (limit > 0 && len(issues) >= limit) {
 			continue
 		}
 		uiIssue := makeUIIssue(issue, projectNames[issue.ProjectID], nil)
 		uiIssue.ScheduledOnDate = scheduledOnDate
 		uiIssue.DeadlineOnDate = deadlineOnDate
+		uiIssue.ScheduledOnToday, uiIssue.DeadlineOnToday = scheduledToday, deadlineToday
 		issues = append(issues, uiIssue)
-		if limit > 0 && len(issues) == limit {
-			break
-		}
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()

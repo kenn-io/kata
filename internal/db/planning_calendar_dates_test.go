@@ -3,11 +3,20 @@ package db
 import (
 	"encoding/json/v2"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/metadata"
 )
+
+func TestTodayUsesSavedZoneRatherThanViewerDay(t *testing.T) {
+	raw := `{"scheduled_on":{"value":"2026-01-01","timezone":"Asia/Tokyo","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}`
+	query := UISnapshotQuery{View: "today", TimeZone: "America/Los_Angeles", LocalDate: "2025-12-31", CalendarAt: "2026-01-01T01:00:00Z", DefaultTimezone: "UTC"}
+	_, _, _, _, included, err := MatchUICalendarView(raw, query, "UTC")
+	require.NoError(t, err)
+	require.True(t, included)
+}
 
 func TestRowPlanningDatesResolveInIssueThenDefaultThenUTC(t *testing.T) {
 	tests := []struct {
@@ -146,4 +155,28 @@ func TestRowPlanningDatesReportsUnknownScheduleMember(t *testing.T) {
 	raw := `{"scheduled_on":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1},"deadline_on":"2026-11-02"}`
 	_, _, err := RowPlanningDates(raw, "", "")
 	require.ErrorIs(t, err, json.ErrUnknownName)
+}
+
+func TestCalendarProjectionUsesEachSavedZoneAndBoundary(t *testing.T) {
+	raw := `{"scheduled_on":{"value":"2026-01-01T02:00:00Z","timezone":"America/New_York","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"},"deadline_on":{"value":"2026-01-01","timezone":"Asia/Tokyo","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}`
+	var boundary time.Time
+	query := UISnapshotQuery{View: "today", TimeZone: "America/Los_Angeles", CalendarAt: "2026-01-01T01:00:00Z", CalendarBoundary: &boundary}
+	scheduled, deadline, scheduledToday, deadlineToday, included, err := MatchUICalendarView(raw, query, "UTC")
+	require.NoError(t, err)
+	assert.Equal(t, "2025-12-31", scheduled)
+	assert.Equal(t, "2026-01-01", deadline)
+	assert.Equal(t, "2025-12-31", scheduledToday)
+	assert.Equal(t, "2026-01-01", deadlineToday)
+	assert.True(t, included)
+	assert.Equal(t, "2026-01-01T05:00:00Z", boundary.UTC().Format(time.RFC3339))
+}
+
+func TestCalendarProjectionOmitsOpaqueField(t *testing.T) {
+	raw := `{"scheduled_on":{"note":"opaque"},"deadline_on":"2026-01-01"}`
+	query := UISnapshotQuery{View: "today", TimeZone: "UTC", CalendarAt: "2026-01-01T01:00:00Z"}
+	scheduled, deadline, _, _, included, err := MatchUICalendarView(raw, query, "UTC")
+	require.NoError(t, err)
+	assert.Empty(t, scheduled)
+	assert.Equal(t, "2026-01-01", deadline)
+	assert.True(t, included)
 }

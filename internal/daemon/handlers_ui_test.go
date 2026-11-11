@@ -131,6 +131,28 @@ func TestUISnapshotReadyTimeAdvanceInvalidatesETagAndAuthorityCache(t *testing.T
 	require.Equal(t, 2, store.snapshotReads)
 }
 
+func TestUISnapshotCalendarMidnightInvalidatesCacheWithoutEvent(t *testing.T) {
+	now := time.Date(2026, 1, 1, 4, 59, 59, 0, time.UTC)
+	store := &countingUIStore{cursor: 41, snapshotCursor: 41, snapshot: db.UISnapshotData{
+		CalendarBoundary: now.Add(time.Second),
+		Issues:           []db.UIIssue{{Issue: db.Issue{UID: "issue-1"}, ScheduledOnToday: "2025-12-31"}},
+	}}
+	ts := newUISnapshotServerWithClock(t, store, true, func() time.Time { return now })
+	query := url.Values{"view": {"all-open"}}
+	first, _ := getUISnapshot(t, ts, query, "")
+	require.Equal(t, http.StatusOK, first.StatusCode)
+	second, _ := getUISnapshot(t, ts, query, first.Header.Get("ETag"))
+	require.Equal(t, http.StatusNotModified, second.StatusCode)
+	require.Equal(t, 1, store.snapshotReads)
+	now = now.Add(time.Second)
+	store.snapshot.Issues[0].ScheduledOnToday = "2026-01-01"
+	store.snapshot.CalendarBoundary = now.Add(24 * time.Hour)
+	third, body := getUISnapshot(t, ts, query, first.Header.Get("ETag"))
+	require.Equal(t, http.StatusOK, third.StatusCode, string(body))
+	require.NotEqual(t, first.Header.Get("ETag"), third.Header.Get("ETag"))
+	require.Equal(t, 2, store.snapshotReads)
+}
+
 func getUISnapshot(t *testing.T, ts *httptest.Server, query url.Values, etag string) (*http.Response, []byte) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/api/v1/ui/snapshot?"+query.Encode(), nil)

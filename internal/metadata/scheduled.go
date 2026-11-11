@@ -141,27 +141,32 @@ func CalendarDate(
 	displayTimezone *string,
 	defaultTimezone string,
 ) (string, bool, error) {
+	date, _, present, err := CalendarDateAndToday(raw, field, displayTimezone, defaultTimezone, time.Time{})
+	return date, present, err
+}
+
+// CalendarDateAndToday resolves the date and today's date in the same zone.
+func CalendarDateAndToday(
+	raw, field string, displayTimezone *string, defaultTimezone string, now time.Time, boundary ...*time.Time,
+) (string, string, bool, error) {
 	if field != "scheduled_on" && field != "deadline_on" {
-		return "", false, fmt.Errorf("unsupported planning field %q", field)
+		return "", "", false, fmt.Errorf("unsupported planning field %q", field)
 	}
 	if len(raw) == 0 {
-		return "", false, nil
+		return "", "", false, nil
 	}
 	value, issueTimezone, savedLocation, err := decodePlanningField(raw, field)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
 	if value == nil {
-		return "", false, nil
+		return "", "", false, nil
 	}
 
 	scheduleValue := *value
 	kind, layout, instant, err := classifyScheduledOn(scheduleValue)
 	if err != nil {
-		return "", false, err
-	}
-	if kind == scheduledOnDate {
-		return scheduleValue, true, nil
+		return "", "", false, err
 	}
 	if kind == scheduledOnLocalTime {
 		location := savedLocation
@@ -169,15 +174,12 @@ func CalendarDate(
 			location, err = loadScheduleLocation(issueTimezone, defaultTimezone)
 		}
 		if err != nil {
-			return "", false, err
+			return "", "", false, err
 		}
 		instant, err = resolveLocalSchedule(scheduleValue, layout, location)
 		if err != nil {
-			return "", false, err
+			return "", "", false, err
 		}
-	}
-	if savedLocation != nil {
-		return instant.In(savedLocation).Format(time.DateOnly), true, nil
 	}
 	var display string
 	switch {
@@ -191,11 +193,43 @@ func CalendarDate(
 	if display == "" {
 		display = "UTC"
 	}
-	displayLocation, err := time.LoadLocation(display)
-	if err != nil {
-		return "", false, fmt.Errorf("load display timezone %q: %w", display, err)
+	displayLocation := savedLocation
+	if displayLocation == nil && (kind != scheduledOnDate || !now.IsZero()) {
+		displayLocation, err = time.LoadLocation(display)
+		if err != nil {
+			return "", "", false, fmt.Errorf("load display timezone %q: %w", display, err)
+		}
 	}
-	return instant.In(displayLocation).Format(time.DateOnly), true, nil
+	date := scheduleValue
+	if kind != scheduledOnDate {
+		date = instant.In(displayLocation).Format(time.DateOnly)
+	}
+	today := ""
+	if !now.IsZero() {
+		today = now.In(displayLocation).Format(time.DateOnly)
+		if len(boundary) > 0 && boundary[0] != nil {
+			next := nextCalendarDay(now, displayLocation, today)
+			if boundary[0].IsZero() || next.Before(*boundary[0]) {
+				*boundary[0] = next
+			}
+		}
+	}
+	return date, today, true, nil
+}
+
+// nextCalendarDay finds the first second after now with a different local day.
+func nextCalendarDay(now time.Time, location *time.Location, today string) time.Time {
+	start := now.Unix()
+	end := start + 48*60*60
+	for start+1 < end {
+		middle := start + (end-start)/2
+		if time.Unix(middle, 0).In(location).Format(time.DateOnly) == today {
+			start = middle
+		} else {
+			end = middle
+		}
+	}
+	return time.Unix(end, 0)
 }
 
 // decodePlanningField reads one planning field and the issue timezone, so a

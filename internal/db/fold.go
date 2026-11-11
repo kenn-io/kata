@@ -863,6 +863,10 @@ func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.
 			delete(currentMap, key)
 			continue
 		}
+		if (key == "scheduled_on" || key == "deadline_on") && (isScheduleDescriptor(d.From) || isScheduleDescriptor(d.To) || isScheduleDescriptor(currentMap[key])) {
+			currentMap[key] = canonicalJSON(d.To)
+			continue
+		}
 		currentMap[key] = applyMetadataValueDiff(currentMap[key], d.From, d.To)
 	}
 	out, err := json.Marshal(currentMap, json.Deterministic(true))
@@ -870,6 +874,14 @@ func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.
 		return jsontext.Value(`{}`)
 	}
 	return out
+}
+
+func isScheduleDescriptor(raw jsontext.Value) bool {
+	if !rawJSONObject(raw) {
+		return false
+	}
+	fields := parseRawObject(raw)
+	return fields["value"] != nil && fields["timezone"] != nil && fields["tzdata_version"] != nil
 }
 
 func applyMetadataValueDiff(current, from, to jsontext.Value) jsontext.Value {

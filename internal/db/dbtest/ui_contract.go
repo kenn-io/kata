@@ -1168,3 +1168,29 @@ func requireCursorUnchanged(ctx context.Context, t *testing.T, store db.UIStore,
 	require.NoError(t, err)
 	require.Equal(t, want, got, "no-op or rejected write must not advance cursor")
 }
+
+// RunUISnapshotSavedCalendarContract checks the calendar projection without a new event.
+func RunUISnapshotSavedCalendarContract(t *testing.T, open func(*testing.T) db.Storage) {
+	t.Helper()
+	store := open(t)
+	uiStore := store.(db.UIStore)
+	ctx := t.Context()
+	project := createCursorProject(ctx, t, store)
+	raw := fmt.Sprintf(`{"value":"2026-01-01","timezone":"Asia/Tokyo","tzdata_version":%q}`, metadata.ScheduleTZDataVersion)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Tokyo schedule", Author: "user-a", Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(raw)}})
+	require.NoError(t, err)
+	query := db.UISnapshotQuery{View: "today", TimeZone: "America/Los_Angeles", LocalDate: "2025-12-31", CalendarAt: "2025-12-31T14:59:59Z"}
+	before, err := uiStore.ReadUISnapshot(ctx, query)
+	require.NoError(t, err)
+	require.NotContains(t, uiIssueUIDs(before.Issues), issue.UID)
+	require.Equal(t, "2025-12-31T15:00:00Z", before.CalendarBoundary.UTC().Format(time.RFC3339))
+	query.CalendarAt = "2025-12-31T15:00:00Z"
+	after, err := uiStore.ReadUISnapshot(ctx, query)
+	require.NoError(t, err)
+	require.Equal(t, before.Cursor, after.Cursor)
+	require.Contains(t, uiIssueUIDs(after.Issues), issue.UID)
+	query.View = "all-open"
+	all, err := uiStore.ReadUISnapshot(ctx, query)
+	require.NoError(t, err)
+	require.Equal(t, "2026-01-01", all.Issues[0].ScheduledOnToday)
+}

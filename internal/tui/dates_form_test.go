@@ -536,3 +536,14 @@ func TestDetailStripReportsUnknownScheduleRules(t *testing.T) {
 	got := stripANSI(strings.Join(renderDocumentMetadata(100, issue, nil, nil, scope{}, uidDisplayNone), "\n"))
 	assert.Contains(t, got, "unsupported schedule tzdata version")
 }
+
+func TestDatesFormRelativeInputsUseEachScheduleDay(t *testing.T) {
+	issue := Issue{ScheduledOnToday: "2026-01-01", DeadlineOnToday: "2025-12-31"}
+	form := newDatesForm(formTarget{}, issue)
+	form.field(fieldScheduled).setValue("tomorrow")
+	form.field(fieldDeadline).setValue("tomorrow")
+	input, err := datesInputFromForm(form, time.Date(2025, 12, 31, 23, 0, 0, 0, time.UTC), "alice")
+	require.NoError(t, err)
+	require.Equal(t, "2026-01-02", *input.Set["scheduled_on"])
+	require.Equal(t, "2026-01-01", *input.Set["deadline_on"])
+}

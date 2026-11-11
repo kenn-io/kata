@@ -1081,7 +1081,7 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 		labelNames = append(labelNames, label.Label)
 	}
 	out := &api.ShowIssueResponse{}
-	scheduledOnDate, deadlineOnDate, err := newPlanningDateResolver(cfg.DB, cfg.DefaultTimezone).resolve(ctx, issue)
+	scheduledOnDate, deadlineOnDate, scheduledToday, deadlineToday, err := newPlanningDateResolver(cfg.DB, cfg.DefaultTimezone).resolve(ctx, issue)
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
@@ -1089,6 +1089,7 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	out.Body.Issue = api.ShowIssueOut{
 		Issue: issue, Labels: labelNames,
 		ScheduledOnDate: scheduledOnDate, DeadlineOnDate: deadlineOnDate,
+		ScheduledOnToday: scheduledToday, DeadlineOnToday: deadlineToday,
 		ScheduledOnDisplay: scheduledOnDisplay, DeadlineOnDisplay: deadlineOnDisplay,
 	}
 	var includeDeletedSourceIssueID int64
@@ -1408,7 +1409,7 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, defaultTimezone str
 	out := make([]api.IssueOut, len(issues))
 	for i, iss := range issues {
 		rel := relationships[iss.ID]
-		scheduledOnDate, deadlineOnDate, err := dates.resolve(ctx, iss)
+		scheduledOnDate, deadlineOnDate, scheduledToday, deadlineToday, err := dates.resolve(ctx, iss)
 		if err != nil {
 			return nil, err
 		}
@@ -1421,9 +1422,11 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, defaultTimezone str
 			Related:     peerSlice(peerCache, rel.Related),
 			// Blocked is server-computed display state (ready predicate),
 			// kept separate from the full blocked_by hydration above.
-			Blocked:         rel.ActivelyBlocked,
-			ScheduledOnDate: scheduledOnDate,
-			DeadlineOnDate:  deadlineOnDate,
+			Blocked:          rel.ActivelyBlocked,
+			ScheduledOnDate:  scheduledOnDate,
+			DeadlineOnDate:   deadlineOnDate,
+			ScheduledOnToday: scheduledToday,
+			DeadlineOnToday:  deadlineToday,
 		}
 		if rel.ParentIssueID != nil {
 			if peer, ok := peerCache[*rel.ParentIssueID]; ok {
