@@ -54,7 +54,7 @@ type daemonDiagnosis struct {
 	// RootSigning is present when the live daemon cannot sign for a root project.
 	RootSigning *api.RootSigningHealth `json:"root_signing,omitempty"`
 	NextAction  string                 `json:"next_action"`
-	observed    error
+	observed    *client.LocalDaemonUnreachableError
 }
 
 func daemonDiagnoseCmd() *cobra.Command {
@@ -95,7 +95,7 @@ func daemonRecoverCmd() *cobra.Command {
 		if _, err := client.EnsureLocalProfileSelection(cmd.Context(), selection); err != nil {
 			return cliDaemonTargetError(err)
 		}
-		result, _, err = diagnoseDaemonSelection(cmd.Context(), expected, selection, nil)
+		result, _, err = diagnoseDaemonSelection(cmd.Context(), expected, selection)
 		if err != nil {
 			return err
 		}
@@ -122,7 +122,7 @@ func diagnoseDaemon(ctx context.Context, expectedProject string) (daemonDiagnosi
 	if err != nil {
 		return selectionErrorDiagnosis(err), selection, nil
 	}
-	result, selection, err := diagnoseDaemonSelection(ctx, expectedProject, selection, nil)
+	result, selection, err := diagnoseDaemonSelection(ctx, expectedProject, selection)
 	if err != nil {
 		result.State = "selection_error"
 		result.Message = err.Error()
@@ -175,13 +175,12 @@ func currentHomeStorageIsAbsent(dsn string, openErr error) bool {
 }
 
 func diagnoseDaemonSelection(
-	ctx context.Context, expectedProject string, selection client.DaemonSelection, observed error,
+	ctx context.Context, expectedProject string, selection client.DaemonSelection,
 ) (daemonDiagnosis, client.DaemonSelection, error) {
 	ctx, cancel := context.WithTimeout(ctx, envHTTPTimeout(defaultHTTPTimeout))
 	defer cancel()
 	var err error
 	result := selectedDaemonDiagnosis(selection, expectedProject)
-	result.observed = observed
 	result.Project = strings.TrimSpace(flags.Project)
 	if result.Project == "" {
 		start, err := resolveStartPath(flags.Workspace)
@@ -321,9 +320,7 @@ func probeDaemonSelection(
 	var err error
 	var resolved client.ResolvedDaemon
 	var found bool
-	if result.observed != nil {
-		err = result.observed
-	} else if selection.Profile != nil {
+	if selection.Profile != nil {
 		resolved, found, err = client.DiscoverLocalProfileSelection(ctx, selection)
 	} else if result.Kind == "remote" {
 		resolved = selection.Resolved
@@ -350,9 +347,7 @@ func probeDaemonSelection(
 	}
 	if err != nil {
 		result.Message = err.Error()
-		if _, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-			result.observed = err
-		}
+		result.observed, _ = errors.AsType[*client.LocalDaemonUnreachableError](err)
 		if errors.Is(err, client.ErrProfileIdentityMismatch) {
 			result.State = "wrong_database"
 			if mismatch, ok := errors.AsType[*client.LocalProfileIdentityError](err); ok {
@@ -483,8 +478,6 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	switch result.State {
 	case "ready":
 		result.NextAction = "selected daemon is ready"
-	case "local_unreachable":
-		result.NextAction = "inspect the selected process and its credentials; do not switch databases"
 	case "unhealthy":
 		result.NextAction = "inspect the selected daemon's health report and logs"
 	case "stopped_local_profile":
@@ -509,7 +502,7 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 		result.NextAction = "project UID assertion requires readable local storage; restore it or select its pinned local profile"
 	case "version_mismatch":
 		result.NextAction = "use a binary compatible with the storage schema"
-		if result.Kind == "local_profile" && result.observed == nil {
+		if result.Kind == "local_profile" {
 			result.NextAction += "; recover may replace a compatible profile process"
 		}
 	case "selection_error":
@@ -517,23 +510,15 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	default:
 		result.NextAction = "inspect the selected process and its credentials; do not switch databases"
 	}
-	if observed, ok := errors.AsType[*client.LocalDaemonUnreachableError](result.observed); ok {
-		result.PID, result.Endpoint = observed.PID, observed.Address
-		if result.State == "local_unreachable" {
-			result.NextAction = localDaemonGuidance(observed, true)
-		} else {
-			if result.Message != "" {
-				result.NextAction = result.Message + ". " + result.NextAction
-			}
-			result.NextAction += ". " + result.observed.Error() + ". " + localDaemonGuidance(observed, false)
-		}
+	if result.State == "local_unreachable" && result.observed != nil {
+		result.NextAction = localDaemonGuidance(result.observed)
 	}
 	return result
 }
 
 func diagnosisError(result daemonDiagnosis) error {
 	data, _ := json.Marshal(result)
-	return &cliError{Message: result.State + ": " + result.NextAction, Code: result.State, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail, Data: data}
+	return &cliError{Message: diagnosisMessage(result), Code: result.State, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail, Data: data}
 }
 
 func printDaemonDiagnosis(cmd *cobra.Command, result daemonDiagnosis) error {

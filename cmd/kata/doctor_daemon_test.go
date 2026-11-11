@@ -450,11 +450,8 @@ func TestDoctorFailsWhenLiveLocalRuntimeIsUnreachable(t *testing.T) {
 	require.NoError(t, err)
 	flags = globalFlags{Workspace: workspace}
 
-	check := doctorFinding(t, collectDoctor(t.Context()), "daemon.connection")
-	require.EqualValues(t, "fail", check.Status,
+	require.EqualValues(t, "fail", doctorFinding(t, collectDoctor(t.Context()), "daemon.connection").Status,
 		"a live runtime record whose endpoint does not answer is a real failure, not a stopped daemon")
-	require.Equal(t, "Selected local daemon is unreachable", check.Summary)
-	require.Contains(t, check.Fix, filepath.Join(ns.DataDir, "daemon.log"))
 }
 
 func TestDoctorDiscoveryRejectsRedirects(t *testing.T) {

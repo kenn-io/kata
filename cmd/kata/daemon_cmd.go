@@ -699,7 +699,7 @@ func daemonStatusCmd() *cobra.Command {
 				if selected.Message != "" {
 					message = " message=" + agentValue(selected.Message)
 				}
-				if selected.State == "local_unreachable" || selected.observed != nil {
+				if selected.State == "local_unreachable" {
 					message += " next_action=" + agentValue(selected.NextAction)
 				}
 				if selected.RootSigning != nil {
@@ -718,7 +718,7 @@ func daemonStatusCmd() *cobra.Command {
 					return err
 				}
 			}
-			if selected.State == "local_unreachable" || selected.observed != nil {
+			if selected.State == "local_unreachable" {
 				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  next: %s\n", selected.NextAction); err != nil {
 					return err
 				}

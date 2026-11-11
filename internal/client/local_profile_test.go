@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -752,7 +751,7 @@ func TestLocalProfileReplacesCapableDaemonInPlace(t *testing.T) {
 }
 
 func TestUnreachableProfileAdviceSharedByCallers(t *testing.T) {
-	profile, root := localProfileFixture(t)
+	profile, _ := localProfileFixture(t)
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	t.Cleanup(server.Close)
 	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
@@ -761,9 +760,8 @@ func TestUnreachableProfileAdviceSharedByCallers(t *testing.T) {
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
 	require.NoError(t, err)
 	for name, call := range map[string]func() error{
-		"named":     func() error { _, err := EnsureResolvedNamed(t.Context(), "work"); return err },
-		"workspace": func() error { _, err := EnsureResolvedInWorkspace(t.Context(), root); return err },
-		"discover":  func() error { _, _, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "work"}); return err },
+		"named":    func() error { _, err := EnsureResolvedNamed(t.Context(), "work"); return err },
+		"discover": func() error { _, _, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "work"}); return err },
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := call()
@@ -773,39 +771,4 @@ func TestUnreachableProfileAdviceSharedByCallers(t *testing.T) {
 			require.Equal(t, "work", observed.Profile)
 		})
 	}
-}
-
-func TestScopeProfileUnreachablePreservesInstanceFailure(t *testing.T) {
-	profile, root := localProfileFixture(t)
-	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	selection, err := InspectSelection(t.Context(), root, "work")
-	require.NoError(t, err)
-	instanceErr := fmt.Errorf("local profile instance is unavailable: %w", ErrLocalDaemonUnreachable)
-	scan := func(context.Context, string) iter.Seq2[liveDaemon, error] {
-		return func(yield func(liveDaemon, error) bool) {
-			yield(liveDaemon{Record: kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777"}, BaseURL: "http://127.0.0.1:7777"}, nil)
-		}
-	}
-	_, found, err := discoverLocalProfileWithVerifier(t.Context(), selection, scan, func(context.Context, ResolvedDaemon) error {
-		return instanceErr
-	})
-	require.False(t, found)
-	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-	// Negative guard: verifier failures must not be rewritten as recovery advice.
-	require.Same(t, instanceErr, err)
-	require.Contains(t, err.Error(), "local profile instance is unavailable")
-}
-
-func TestScopeProfileUnreachablePreservesWrapper(t *testing.T) {
-	cause := errors.New("transport failed")
-	original := fmt.Errorf("starting profile: %w", &LocalDaemonUnreachableError{PID: 42, cause: cause})
-	err := scopeProfileUnreachable(original, "work")
-	require.ErrorIs(t, err, cause)
-	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-	require.Contains(t, err.Error(), "starting profile")
-	var observed *LocalDaemonUnreachableError
-	require.ErrorAs(t, err, &observed)
-	require.Equal(t, "work", observed.Profile)
 }

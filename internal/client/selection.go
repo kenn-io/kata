@@ -27,14 +27,6 @@ type DaemonSelection struct {
 	credentialErr error
 }
 
-// LocalProfileSelection restores the profile snapshot captured during resolution.
-func (d ResolvedDaemon) LocalProfileSelection() (DaemonSelection, bool) {
-	if d.profileConfig == nil || d.LocalProfile == nil {
-		return DaemonSelection{}, false
-	}
-	return DaemonSelection{Resolved: d, Profile: d.profileConfig}, true
-}
-
 // InspectSelection snapshots target configuration without probing or starting it.
 func InspectSelection(ctx context.Context, start, name string) (DaemonSelection, error) {
 	return inspectSelection(ctx, start, name, false)

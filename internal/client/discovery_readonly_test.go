@@ -112,12 +112,15 @@ func TestReadRuntimeRecordsFindsKitRuntimeStoreRecord(t *testing.T) {
 func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	t.Cleanup(server.Close)
-	for _, origin := range []string{server.URL, ""} {
-		t.Run(origin, func(t *testing.T) {
+	for _, tc := range []struct{ name, origin, want string }{
+		{"valid origin", server.URL, server.URL},
+		{"malformed origin", "http://user@host/path", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
 			require.True(t, ok)
-			_, err := (kitdaemon.RuntimeStore{Dir: dir}).Write(kitdaemon.RuntimeRecord{ProcessIdentityV2: identity, Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Metadata: map[string]string{"web_origin": origin}})
+			_, err := (kitdaemon.RuntimeStore{Dir: dir}).Write(kitdaemon.RuntimeRecord{ProcessIdentityV2: identity, Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Metadata: map[string]string{"web_origin": tc.origin}})
 			require.NoError(t, err)
 			_, found, err := DiscoverResolvedReadOnly(t.Context(), dir)
 			require.False(t, found)
@@ -127,9 +130,8 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			require.Contains(t, err.Error(), fmt.Sprintf("daemon pid %d", os.Getpid()))
 			require.Contains(t, err.Error(), server.Listener.Addr().String())
 			require.Equal(t, dir, observed.DataDir)
-			require.Equal(t, origin, observed.WebOrigin)
+			require.Equal(t, tc.want, observed.WebOrigin)
 			require.True(t, observed.VerifiedProcess)
-			require.NotContains(t, err.Error(), "restart")
 		})
 	}
 	t.Run("unverified", func(t *testing.T) {

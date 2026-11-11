@@ -499,11 +499,24 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
 	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
 	assert.Contains(t, string(out), "unreachable")
+}
+
+func TestDaemonStatusShowsUnreachableNextAction(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777"})
+	require.NoError(t, err)
+	logPath := filepath.Join(ns.DataDir, "daemon.log")
+
+	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
 	assert.Contains(t, string(out), "next_action=")
+	assert.Contains(t, string(out), "daemon.log")
 	resetFlags(t)
 	human := executeRoot(t, newRootCmd(), "daemon", "status")
-	assert.Contains(t, string(human), "  next:")
-	assert.Contains(t, string(human), "kata running at")
+	assert.Contains(t, string(human), "  next: inspect \""+logPath+"\"")
 }
 
 func TestDaemonStatusReportsMCPState(t *testing.T) {

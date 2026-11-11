@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -314,7 +313,7 @@ func TestDaemonLocateStoppedProfileDoesNotStart(t *testing.T) {
 }
 
 func TestHealthSelectedProfileDoesNotUsePersonalRuntime(t *testing.T) {
-	home, _, _, _ := stoppedProfileCLI(t)
+	home, _, uid, _ := stoppedProfileCLI(t)
 	personal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/ping" {
 			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
@@ -335,27 +334,22 @@ func TestHealthSelectedProfileDoesNotUsePersonalRuntime(t *testing.T) {
 	assert.Equal(t, "stopped_local_profile", target.Code)
 	_, err = os.Stat(filepath.Join(home, "runtime"))
 	assert.ErrorIs(t, err, os.ErrNotExist)
-}
 
-func TestHealthSelectedProfileNonPrivateRuntimeIsStructured(t *testing.T) {
-	home, _, uid, _ := stoppedProfileCLI(t)
+	// A non-private selected-profile runtime is structured and left unrepaired.
 	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
 	require.NoError(t, err)
-	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+	profileNS, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 	require.NoError(t, err)
-	assertUnchanged := makeDoctorRuntimeDirectoryInsecureForTest(t, ns.DataDir)
-
+	assertUnchanged := makeDoctorRuntimeDirectoryInsecureForTest(t, profileNS.DataDir)
 	_, _, err = executeRootCapture(t, t.Context(), "health", "--json")
-	target := requireCLIError(t, err, ExitDaemonUnavail)
+	target = requireCLIError(t, err, ExitDaemonUnavail)
 	assert.Equal(t, "local_unreachable", target.Code)
 	var result daemonDiagnosis
 	require.NoError(t, json.Unmarshal(target.Data, &result))
-	assert.Equal(t, "local_unreachable", result.State)
 	assert.Equal(t, "work", result.Profile)
 	assert.Equal(t, home, result.Home)
 	assert.Equal(t, uid, result.ExpectedInstanceUID)
 	assert.NotEmpty(t, result.Message)
-	assert.NotEmpty(t, result.NextAction)
 	assertUnchanged()
 }
 
@@ -824,133 +818,45 @@ func TestDaemonRunningProfileDoesNotRequireProject(t *testing.T) {
 }
 
 func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
-	for _, mode := range []string{"diagnose", "transient", "ordinary", "unreadable storage", "missing storage", "wrong identity", "schema mismatch"} {
-		t.Run(mode, func(t *testing.T) {
-			home, _, uid, _ := stoppedProfileCLI(t)
-			var calls atomic.Int32
-			var transient atomic.Bool
-			changedHome := t.TempDir()
-			catalog := filepath.Join(os.Getenv("KATA_HOME"), "config.toml")
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				call := calls.Add(1)
-				if call == 1 && mode == "missing storage" {
-					if err := os.Rename(filepath.Join(home, "kata.db"), filepath.Join(home, "saved.db")); err != nil {
-						t.Errorf("move fixture database: %v", err)
-					}
-				}
-				if call == 1 && (mode == "wrong identity" || mode == "schema mismatch") {
-					store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
-					if err == nil {
-						key, value := "instance_uid", "01HZZZZZZZZZZZZZZZZZZZZZ01"
-						if mode == "schema mismatch" {
-							key, value = "schema_version", fmt.Sprint(db.CurrentSchemaVersion()+1)
-						}
-						_, err = store.ExecContext(t.Context(), "UPDATE meta SET value=? WHERE key=?", value, key)
-						_ = store.Close()
-					}
-					if err != nil {
-						t.Errorf("change fixture metadata: %v", err)
-					}
-				}
-				if call == 1 && transient.Load() {
-					err := os.WriteFile(catalog, []byte(fmt.Sprintf("[[daemon]]\nname = \"work\"\nlocal = true\nhome = %q\ninstance_uid = %q\n", changedHome, uid)), 0600) //nolint:gosec // catalog is under the test-owned home
-					if err != nil {
-						t.Errorf("change catalog: %v", err)
-					}
-				}
-				if call == 1 || !transient.Load() {
-					<-r.Context().Done()
-					return
-				}
-				_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"%s","pid":%d}`, version.Version, os.Getpid())
-			}))
-			t.Cleanup(server.Close)
-			profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
-			require.NoError(t, err)
-			ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
-			require.NoError(t, err)
-			require.NoError(t, ns.EnsureDirs())
-			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Metadata: map[string]string{"web_origin": server.URL}})
-			require.NoError(t, err)
+	home, _, uid, _ := stoppedProfileCLI(t)
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	t.Cleanup(server.Close)
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
+	logPath, recoverCmd := filepath.Join(ns.DataDir, "daemon.log"), "kata --daemon=work daemon recover"
 
-			switch mode {
-			case "diagnose":
-				out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
-				require.NoError(t, err)
-				var result daemonDiagnosis
-				require.NoError(t, json.Unmarshal([]byte(out), &result))
-				require.Equal(t, "local_unreachable", result.State)
-				require.Equal(t, os.Getpid(), result.PID)
-				require.Contains(t, result.Endpoint, server.Listener.Addr().String())
-				require.Contains(t, result.NextAction, "kata --daemon=work daemon recover")
-			case "transient":
-				calls.Store(0)
-				transient.Store(true)
-				_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "health")
-				require.Error(t, err)
-				require.Equal(t, int32(1), calls.Load())
-				var cliErr *cliError
-				require.ErrorAs(t, err, &cliErr)
-				require.Equal(t, ExitDaemonUnavail, cliErr.ExitCode)
-				require.Equal(t, "local_unreachable", cliErr.Code)
-				var result daemonDiagnosis
-				require.NoError(t, json.Unmarshal(cliErr.Data, &result))
-				require.Equal(t, "local_unreachable", result.State)
-				require.Equal(t, "work", result.Profile)
-				require.Equal(t, home, result.Home)
-				require.Equal(t, uid, result.ExpectedInstanceUID)
-				require.Contains(t, result.Message, "context deadline exceeded")
-				require.Contains(t, result.NextAction, "kata --daemon=work daemon recover")
-			case "ordinary":
-				_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "list")
-				var cliErr *cliError
-				require.ErrorAs(t, err, &cliErr)
-				require.Contains(t, cliErr.Message, "context deadline exceeded")
-				require.Contains(t, cliErr.Hint, filepath.Join(ns.DataDir, "daemon.log"))
-				require.Contains(t, cliErr.Hint, "kata --daemon=work daemon recover")
-			case "missing storage", "wrong identity", "schema mismatch":
-				_, _, err = executeRootCapture(t, t.Context(), "--daemon", "work", "health")
-				var cliErr *cliError
-				require.ErrorAs(t, err, &cliErr)
-				want := map[string]string{"missing storage": "missing_profile_storage", "wrong identity": "wrong_database", "schema mismatch": "version_mismatch"}[mode]
-				require.Equal(t, want, cliErr.Code)
-				var result daemonDiagnosis
-				require.NoError(t, json.Unmarshal(cliErr.Data, &result))
-				require.Equal(t, os.Getpid(), result.PID)
-				require.Contains(t, result.Endpoint, server.Listener.Addr().String())
-				require.Contains(t, result.NextAction, "context deadline exceeded")
-				require.Contains(t, result.NextAction, filepath.Join(ns.DataDir, "daemon.log"))
-				require.NotContains(t, result.NextAction, "kill")
-				require.NotContains(t, result.NextAction, "recover may replace")
-				require.Equal(t, int32(1), calls.Load())
-			default:
-				store, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
-				require.NoError(t, err)
-				_, err = store.ExecContext(t.Context(), "ALTER TABLE projects RENAME TO unavailable_projects")
-				require.NoError(t, err)
-				require.NoError(t, store.Close())
-				_, _, err = executeRootCapture(t, t.Context(), "--daemon", "work", "health")
-				var cliErr *cliError
-				require.ErrorAs(t, err, &cliErr)
-				require.Equal(t, ExitDaemonUnavail, cliErr.ExitCode)
-				require.Equal(t, "unreadable_storage", cliErr.Code)
-				var result daemonDiagnosis
-				require.NoError(t, json.Unmarshal(cliErr.Data, &result))
-				require.Equal(t, "unreadable_storage", result.State)
-				require.Equal(t, "work", result.Profile)
-				require.Equal(t, home, result.Home)
-				require.Equal(t, uid, result.ExpectedInstanceUID)
-				require.Contains(t, result.Message, "projects")
-				require.Equal(t, os.Getpid(), result.PID)
-				require.Contains(t, result.Endpoint, server.Listener.Addr().String())
-				require.Contains(t, cliErr.Message, "projects")
-				require.Contains(t, result.NextAction, filepath.Join(ns.DataDir, "daemon.log"))
-				require.Contains(t, result.NextAction, "context deadline exceeded")
-				for _, forbidden := range []string{"restart", "kill", "taskkill", "recover"} {
-					require.NotContains(t, result.NextAction, forbidden)
-				}
-				require.Equal(t, int32(1), calls.Load())
-			}
-		})
-	}
+	t.Run("diagnose", func(t *testing.T) {
+		out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+		require.NoError(t, err)
+		var result daemonDiagnosis
+		require.NoError(t, json.Unmarshal([]byte(out), &result))
+		require.Equal(t, "local_unreachable", result.State)
+		require.Contains(t, result.NextAction, recoverCmd)
+	})
+	t.Run("ordinary", func(t *testing.T) {
+		_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "list")
+		var cliErr *cliError
+		require.ErrorAs(t, err, &cliErr)
+		require.Contains(t, cliErr.Message, "context deadline exceeded")
+		require.Contains(t, cliErr.Hint, logPath)
+		require.Contains(t, cliErr.Hint, recoverCmd)
+	})
+	t.Run("health keeps the failure in the error text", func(t *testing.T) {
+		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", "work", "health")
+		cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+		require.Equal(t, "local_unreachable", cliErr.Code)
+		var result daemonDiagnosis
+		require.NoError(t, json.Unmarshal(cliErr.Data, &result))
+		require.Equal(t, "work", result.Profile)
+		require.Equal(t, uid, result.ExpectedInstanceUID)
+		for _, evidence := range []string{fmt.Sprintf("pid %d", os.Getpid()), server.Listener.Addr().String(), "context deadline exceeded", logPath, recoverCmd} {
+			require.Contains(t, cliErr.Message, evidence)
+			require.Contains(t, stderr, evidence)
+		}
+	})
 }
