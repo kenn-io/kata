@@ -616,6 +616,12 @@ continue to block federation snapshots and adoption. Preserve that evidence
 for recovery with a compatible version. The remaining work for argv
 support is tracked in [issue 1072](https://github.com/kenn-io/kata/issues/1072).
 
+Signed federation checkpoints with unsupported workflow evidence cannot be
+downloaded, forwarded, installed, or activated. Taking an owner backup retains
+the evidence; it does not make the checkpoint usable by an older version.
+Use a version that understands the retained format for recovery. A newer
+supported workflow does not clear older retained evidence.
+
 ### Upgrade limits
 
 These limits apply to projects with cron data and the adapters that consume
