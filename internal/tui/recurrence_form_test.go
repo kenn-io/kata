@@ -31,7 +31,9 @@ type recurrenceHarness struct {
 
 func newRecurrenceHarness(t *testing.T, view viewID) *recurrenceHarness {
 	t.Helper()
-	t.Setenv("TZ", "Asia/Tokyo")
+	previous := localZone
+	localZone = func() string { return "Asia/Tokyo" }
+	t.Cleanup(func() { localZone = previous })
 	h := &recurrenceHarness{datesHarness: newDatesHarness(t, nil, view)}
 	api, err := NewClient(h.env.URL, h.env.HTTP).generatedClient()
 	require.NoError(t, err)

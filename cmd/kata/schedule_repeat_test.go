@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -45,8 +46,13 @@ func isolateCallerZone(t *testing.T) {
 	t.Setenv("TZ", "")
 	require.NoError(t, os.Unsetenv("TZ"))
 	prev := localtimePath
+	prevLookup := localTimeZoneName
 	localtimePath = filepath.Join(t.TempDir(), "no-localtime")
-	t.Cleanup(func() { localtimePath = prev })
+	localTimeZoneName = func() string {
+		tz, set := os.LookupEnv("TZ")
+		return recurrenceclient.ResolveLocalZone(tz, set, localtimePath)
+	}
+	t.Cleanup(func() { localtimePath, localTimeZoneName = prev, prevLookup })
 }
 
 func TestScheduleRepeatStartsRecurrenceFromTheIssue(t *testing.T) {

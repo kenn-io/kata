@@ -7,9 +7,7 @@ import (
 // localtimePath is the system zone link; tests override it.
 var localtimePath = recurrenceclient.DefaultLocaltimePath
 
-// localTimeZoneName names the CLI's local IANA zone: TZ first, then the
-// /etc/localtime link. It returns "" when nothing names a zone, so the daemon
-// falls back to its own timezone.
-func localTimeZoneName() string {
+// localTimeZoneName names the CLI's local IANA zone, or returns "" if unknown.
+var localTimeZoneName = func() string {
 	return recurrenceclient.LocalZone(localtimePath)
 }
