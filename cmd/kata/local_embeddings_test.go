@@ -19,6 +19,15 @@ import (
 	"go.kenn.io/kit/embedlocal"
 )
 
+func TestApplySharedEmbeddingChoiceKeepsConfiguredProvider(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	require.NoError(t, embedlocal.RecordChoice())
+	configured := config.EmbeddingsConfig{BaseURL: "https://embeddings.example/v1", Model: "example-model", Dims: 1024}
+	got, err := applySharedEmbeddingChoice(t.Context(), configured)
+	require.NoError(t, err)
+	require.Equal(t, configured, got)
+}
+
 func TestLocalEmbeddingsSetup(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	tmp := setupKataEnv(t)
