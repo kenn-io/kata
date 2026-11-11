@@ -206,7 +206,7 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.MoveBatchBudget = time.Nanosecond }) //nolint:kennlint // deadlinetest: Yield after one chunk.
 	source, target, issue := seedMovePair(t, env)
 	items := []map[string]any{{"ref": source.Name + "#" + issue.ShortID, "expected_revision": issue.Revision}, {"ref": issue.UID, "expected_revision": issue.Revision}}
-	request := map[string]any{"actor": "tester", "to_project_uid": target.UID, "items": items}
+	request := map[string]any{"actor": "tester", "comment": "routed", "to_project_uid": target.UID, "items": items}
 	post := func() (int, struct {
 		Results   []api.MoveIssuesResult `json:"results"`
 		NextIndex int                    `json:"next_index"`
@@ -232,6 +232,12 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, "unchanged", second.Results[0].Result)
 	require.Equal(t, "duplicate_item", second.Results[0].Code)
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, target.ID, got.ProjectID)
+	comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
 	completed := request["completed"].([]map[string]any)[0]
 	for _, field := range []string{"event_id", "uid", "target", "actor", "alias"} {
 		t.Run(field, func(t *testing.T) {
@@ -257,8 +263,11 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 		})
 	}
 	owner := "changed"
-	_, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "tester"})
+	_, _, _, err = env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "tester"})
 	require.NoError(t, err)
+	status, stale := post()
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, "revision_conflict", stale.Results[0].Code)
 	completed["revision"] = first.Results[0].Revision + 1
 	status, changed := post()
 	require.Equal(t, http.StatusOK, status)

@@ -149,7 +149,7 @@ func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 	for _, mode := range []string{"missing target", "invalid ref", "no workspace", "oversized"} {
 		t.Run(mode, func(t *testing.T) {
 			env, dir, src, dst, issue := setupMoveCLIProjects(t)
-			input := "\tdst\n" + issue.UID + "\t" + dst.Name + "\n"
+			var input string
 			args := []string{"--workspace", dir, "move", "--refs-from", "-", "--json"}
 			switch mode {
 			case "missing target":
@@ -198,7 +198,7 @@ func TestMoveBatchCLI_SelectorLabel(t *testing.T) {
 }
 
 // Contract: line-specific targets, global UIDs and qualified refs work together;
-// preview returns machine-readable rows and never creates a routing comment.
+// preview returns machine-readable rows.
 func TestMoveBatchCLI_StdinMixedTargetsDryRun(t *testing.T) {
 	env, dir, src, dst, first := setupMoveCLIProjects(t)
 	other, err := env.DB.CreateProject(t.Context(), "second-target")
@@ -218,6 +218,8 @@ func TestMoveBatchCLI_StdinMixedTargetsDryRun(t *testing.T) {
 	require.True(t, reply.DryRun)
 	require.Equal(t, 2, reply.Summary.WouldMove)
 	require.Len(t, reply.Results, 2)
+	require.Equal(t, dst.Name, reply.Results[0].ToProjectName)
+	require.Equal(t, other.Name, reply.Results[1].ToProjectName)
 	for _, issue := range []db.Issue{first, second} {
 		got, err := env.DB.IssueByID(t.Context(), issue.ID)
 		require.NoError(t, err)

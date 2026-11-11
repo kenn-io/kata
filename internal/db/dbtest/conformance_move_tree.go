@@ -61,6 +61,25 @@ func checkMoveTree(t *testing.T, store db.Storage) error {
 		}
 		require.Equal(t, 1, count)
 	}
+	root2, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "second root", Author: "worker"})
+	require.NoError(t, err)
+	child2, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "second child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root2.ID}}})
+	require.NoError(t, err)
+	move := db.MoveIssueProjectIn{IssueID: root2.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root2.Revision, Actor: "worker", DryRun: true}
+	previewSingle, err := store.MoveIssueProject(ctx, move)
+	require.NoError(t, err)
+	db.FenceIssueMove(&move, previewSingle)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: child2.ID, FromProjectID: target.ID, ToProjectID: source.ID, IfMatchRev: child2.Revision, Actor: "worker", Single: true})
+	require.NoError(t, err)
+	move.DryRun = false
+	_, err = store.MoveIssueProject(ctx, move)
+	require.ErrorIs(t, err, db.ErrIssueMoveTreeChanged)
+	links, err := store.LinksByIssue(ctx, child2.ID)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	require.NoError(t, store.DeleteLinkByID(ctx, links[0].ID))
+	_, err = store.MoveIssueProject(ctx, move)
+	require.ErrorIs(t, err, db.ErrIssueMoveTreeChanged)
 	return nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
@@ -25,7 +26,7 @@ func TestSyncFederationBatchMoveConverges(t *testing.T) {
 		credential.Token = grant.Token
 		spoke.credentials[project.UID] = credential
 	}
-	server := daemon.NewServer(daemon.ServerConfig{DB: spoke.env.DB, FederationCredentials: spoke.credentials})
+	server := daemon.NewServer(daemon.ServerConfig{DB: spoke.env.DB, FederationCredentials: spoke.credentials, MoveBatchBudget: time.Hour})
 	defer func() { _ = server.Close() }()
 	local := httptest.NewServer(server.Handler())
 	defer local.Close()
@@ -35,30 +36,26 @@ func TestSyncFederationBatchMoveConverges(t *testing.T) {
 		for n, issue := range issues {
 			items = append(items, map[string]any{"ref": issue.UID, "to_project_uid": spoke.projects[1+n%2].UID})
 		}
-		start := 0
-		for start < len(items) {
-			body, err := json.Marshal(map[string]any{"actor": "worker", "comment": "routed", "items": items, "start_index": start})
-			require.NoError(t, err)
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, local.URL+"/api/v1/issues/actions/move", bytes.NewReader(body))
-			require.NoError(t, err)
-			req.Header.Set("Content-Type", "application/json")
-			resp, err := local.Client().Do(req)
-			require.NoError(t, err)
-			raw, err := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			require.NoError(t, err)
-			require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-			var out struct {
-				NextIndex int `json:"next_index"`
-				Summary   struct {
-					Refused int `json:"refused"`
-				} `json:"summary"`
-			}
-			require.NoError(t, json.Unmarshal(raw, &out))
-			require.Zero(t, out.Summary.Refused, string(raw[:min(len(raw), 1200)]))
-			require.Greater(t, out.NextIndex, start)
-			start = out.NextIndex
+		body, err := json.Marshal(map[string]any{"actor": "worker", "comment": "routed", "items": items})
+		require.NoError(t, err)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, local.URL+"/api/v1/issues/actions/move", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := local.Client().Do(req)
+		require.NoError(t, err)
+		raw, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+		var out struct {
+			NextIndex int `json:"next_index"`
+			Summary   struct {
+				Refused int `json:"refused"`
+			} `json:"summary"`
 		}
+		require.NoError(t, json.Unmarshal(raw, &out))
+		require.Zero(t, out.Summary.Refused, string(raw[:min(len(raw), 1200)]))
+		require.Equal(t, len(items), out.NextIndex)
 	}
 	var issues []db.Issue
 	for n := range 210 {
