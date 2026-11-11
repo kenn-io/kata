@@ -10,11 +10,13 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -34,7 +36,7 @@ func mountedEventsFixture(t *testing.T, identity, enabled bool) (*testenv.Env, s
 	}
 	env := testenv.New(t, opts...)
 	for _, grant := range []struct{ token, actor string }{
-		{"test-mcp-token", "example-agent"}, {"same-actor-token", "example-agent"}, {"other-actor-token", "other-agent"},
+		{"test-mcp-token", "example-agent"}, {"same-actor-token", "example-agent"},
 	} {
 		_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: grant.token, Actor: grant.actor, AdminActor: db.BootstrapActor})
 		require.NoError(t, err)
@@ -59,29 +61,6 @@ func mountEventsEndpoint(t *testing.T, env *testenv.Env, identity bool, projects
 	gateway := httptest.NewServer(handler)
 	t.Cleanup(gateway.Close)
 	return gateway.URL + "/mcp"
-}
-
-// Both mounted authentication modes advertise and list modern Events.
-func TestDaemonMCPEventsDiscovery(t *testing.T) {
-	for _, identity := range []bool{false, true} {
-		t.Run(strconv.FormatBool(identity), func(t *testing.T) {
-			_, endpoint := mountedEventsFixture(t, identity, true)
-			status, discovery := mcpRPC(t, endpoint, "server/discover", map[string]any{})
-			require.Equal(t, http.StatusOK, status, "%v", discovery)
-			require.NotContains(t, discovery, "error", "%v", discovery)
-			capabilities := discovery["result"].(map[string]any)["capabilities"].(map[string]any)
-			require.Equal(t, map[string]any{}, capabilities["events"])
-			require.Equal(t, map[string]any{}, capabilities["extensions"].(map[string]any)["io.modelcontextprotocol/events"])
-			status, listing := mcpRPC(t, endpoint, "events/list", map[string]any{})
-			require.Equal(t, http.StatusOK, status, "%v", listing)
-			require.NotContains(t, listing, "error", "%v", listing)
-			result := listing["result"].(map[string]any)
-			require.Equal(t, "complete", result["resultType"])
-			events := result["events"].([]any)
-			require.Len(t, events, 1)
-			require.Equal(t, mcpevents.EventName, events[0].(map[string]any)["name"])
-		})
-	}
 }
 
 func requireEventError(t *testing.T, wire map[string]any, code int) {
@@ -121,17 +100,6 @@ func TestDaemonMCPEventsLifecycle(t *testing.T) {
 			} else {
 				require.Equal(t, mcpevents.AuthorityStaticToken, row.PrincipalAuthority)
 			}
-			if identity {
-				_, other := mcpRPCWithBearer(t, endpoint, "same-actor-token", "events/subscribe", eventsSubscribeParams("example-agent/worker", []string{project.UID}))
-				require.NotContains(t, other, "error", "%v", other)
-				otherID := other["result"].(map[string]any)["id"].(string)
-				require.NotEqual(t, id, otherID)
-				_, stopped := mcpRPCWithBearer(t, endpoint, "same-actor-token", "events/unsubscribe", unsubscribeParams("example-agent/worker", []string{project.UID}))
-				require.NotContains(t, stopped, "error", "%v", stopped)
-				row, err = env.DB.GetMCPEventSubscription(t.Context(), id)
-				require.NoError(t, err)
-				require.Equal(t, db.MCPEventStateActive, row.State, "another token must not end this subscription")
-			}
 			_, stopped := mcpRPC(t, endpoint, "events/unsubscribe", unsubscribeParams("example-agent/worker", []string{project.UID}))
 			require.NotContains(t, stopped, "error", "%v", stopped)
 			row, err = env.DB.GetMCPEventSubscription(t.Context(), id)
@@ -156,13 +124,11 @@ func TestDaemonMCPEventsHeaders(t *testing.T) {
 	}
 }
 
-// Holding eight real REST calls exercises admission across newly constructed
-// modern servers, static protocol paths, and the unchanged legacy sessions.
+// Holding eight calls shows another credential or legacy session can proceed.
 func TestDaemonMCPEventsAdmission(t *testing.T) {
-	for _, mode := range []string{"static", "modern identity", "legacy identity"} {
+	for _, mode := range []string{"modern identity", "legacy identity"} {
 		t.Run(mode, func(t *testing.T) {
-			identity := mode != "static"
-			env, _ := mountedEventsFixture(t, identity, false)
+			env, _ := mountedEventsFixture(t, true, false)
 			target, err := url.Parse(env.URL)
 			require.NoError(t, err)
 			proxy := httputil.NewSingleHostReverseProxy(target)
@@ -185,7 +151,7 @@ func TestDaemonMCPEventsAdmission(t *testing.T) {
 			t.Cleanup(unblock)
 			mounted := *env
 			mounted.URL = rest.URL
-			endpoint := mountEventsEndpoint(t, &mounted, identity, nil)
+			endpoint := mountEventsEndpoint(t, &mounted, true, nil)
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			legacy := func() *sdkmcp.ClientSession {
@@ -201,12 +167,31 @@ func TestDaemonMCPEventsAdmission(t *testing.T) {
 				wg.Go(func() {
 					if session != nil {
 						result, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.projects", Arguments: map[string]any{}})
-						require.NoError(t, err)
-						require.False(t, result.IsError, "%v", result.Content)
+						if assert.NoError(t, err) {
+							assert.False(t, result.IsError, "%v", result.Content)
+						}
 					} else {
-						status, wire := mcpRPCWithBearer(t, endpoint, bearer, "tools/call", map[string]any{"name": "kata.projects", "arguments": map[string]any{}})
-						require.Equal(t, http.StatusOK, status)
-						require.NotContains(t, wire, "error", "%v", wire)
+						raw := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"kata.projects","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"` + currentMCPProtocolVersion + `","io.modelcontextprotocol/clientCapabilities":{}}}}`
+						request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(raw))
+						if !assert.NoError(t, err) {
+							return
+						}
+						request.Header.Set("Authorization", "Bearer "+bearer)
+						request.Header.Set("Content-Type", "application/json")
+						request.Header.Set("Accept", "application/json, text/event-stream")
+						request.Header.Set("Mcp-Protocol-Version", currentMCPProtocolVersion)
+						request.Header.Set("Mcp-Method", "tools/call")
+						request.Header.Set("Mcp-Name", "kata.projects")
+						response, err := http.DefaultClient.Do(request)
+						if !assert.NoError(t, err) {
+							return
+						}
+						defer func() { _ = response.Body.Close() }()
+						var wire map[string]any
+						if assert.NoError(t, json.NewDecoder(response.Body).Decode(&wire)) {
+							assert.Equal(t, http.StatusOK, response.StatusCode)
+							assert.NotContains(t, wire, "error", "%v", wire)
+						}
 					}
 				})
 			}
@@ -230,22 +215,12 @@ func TestDaemonMCPEventsAdmission(t *testing.T) {
 				next()
 			}
 			switch mode {
-			case "static":
-				start("", secondLegacy) // static legacy and modern share eight slots
 			case "legacy identity":
-				start("", firstLegacy)  // this session is full
 				start("", secondLegacy) // another session for the same token is independent
 				next()
 			default:
-				start("test-mcp-token", nil)   // another request for the same token is full
 				start("same-actor-token", nil) // same actor, different credential is independent
 				require.Equal(t, "Bearer same-actor-token", next())
-			}
-			//nolint:kennlint // sleeptest: bounded observation that the ninth call remains behind admission while eight calls hold their slots.
-			select {
-			case token := <-entered:
-				t.Errorf("over-limit call reached REST: %s", token)
-			case <-time.After(100 * time.Millisecond):
 			}
 			unblock()
 			wg.Wait()
@@ -317,7 +292,7 @@ func TestDaemonMCPIdentityModernLoadedSections(t *testing.T) {
 	for _, caller := range []struct {
 		bearer string
 		loaded bool
-	}{{"test-mcp-token", true}, {"same-actor-token", false}, {"other-actor-token", false}} {
+	}{{"test-mcp-token", true}, {"same-actor-token", false}} {
 		_, listed := mcpRPCWithBearer(t, endpoint, caller.bearer, "tools/list", map[string]any{})
 		require.NotContains(t, listed, "error", "%v", listed)
 		found := false

@@ -64,7 +64,7 @@ func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
 		identity                             bool
 	}{
 		{name: "shared TCP", listen: "127.0.0.1:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "application/json", checkMountPolicy: true},
-		{name: "identity TCP", listen: "127.0.0.1:0", contentType: "application/json", checkMountPolicy: true, identity: true},
+		{name: "identity TCP", listen: "127.0.0.1:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "application/json", checkMountPolicy: true, identity: true},
 		{name: "identity Unix with web listener", web: "listen = '127.0.0.1:0'\n", contentType: "application/json", checkMountPolicy: true, identity: true},
 		{name: "mixed-case JSON", listen: "127.0.0.1:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "Application/JSON"},
 		{name: "Unix with web listener", web: "listen = '127.0.0.1:0'\n", contentType: "application/json"},
