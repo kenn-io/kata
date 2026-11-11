@@ -96,4 +96,4 @@ func startRecurrence(ctx context.Context, apiClient *generated.Client, projectID
 }
 
 // localZone names this host's zone for a recurrence that has none yet.
-func localZone() string { return recurrenceclient.LocalZone(recurrenceclient.DefaultLocaltimePath) }
+var localZone = func() string { return recurrenceclient.LocalZone(recurrenceclient.DefaultLocaltimePath) }
