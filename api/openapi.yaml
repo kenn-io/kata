@@ -9235,6 +9235,10 @@ paths:
           required: true
           schema:
             type: string
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
@@ -9269,6 +9273,10 @@ paths:
           name: include_deleted
           schema:
             type: boolean
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
       responses:
         "200":
           content:
@@ -9356,6 +9364,10 @@ paths:
         - in: path
           name: cron_uid
           required: true
+          schema:
+            type: string
+        - in: header
+          name: X-Kata-Event-Features
           schema:
             type: string
       responses:

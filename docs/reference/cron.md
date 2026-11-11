@@ -386,8 +386,8 @@ options). Each step has these fields:
 | Field | Rule |
 | --- | --- |
 | `key` | Required portable name, unique within the workflow. |
-| `kind` | `command` (requires `command`, no `prompt`) or `prompt` (requires `prompt`, no `command`). |
-| `argv` | Reserved string array; any presence, including `null` or an empty array, is refused until argv steps are enabled. |
+| `kind` | `command`, `prompt`, or `argv`. Each requires its matching field. An `argv` step cannot include `command` or `prompt`. |
+| `argv` | For an `argv` step, a non-empty array of strings with a non-empty executable as its first element. Later arguments may be empty. |
 | `after` | Optional keys of earlier steps this step depends on. |
 | `retries` | Optional; 0–100. |
 | `options` | Optional JSON object for the adapter. |
@@ -400,6 +400,23 @@ options). Each step has these fields:
     "steps": [
       {"key": "check", "kind": "command", "command": "git diff --check"},
       {"key": "test", "kind": "command", "command": "go test ./...", "after": ["check"]}
+    ]
+  }
+}
+```
+
+An `argv` step passes arguments literally. For example, this definition runs a
+program with a single argument containing a space, then explicitly invokes a
+shell for the second step:
+
+```json
+{
+  "name": "literal-arguments",
+  "definition": {
+    "version": 1,
+    "steps": [
+      {"key": "literal", "kind": "argv", "argv": ["printf", "%s", "hello world"]},
+      {"key": "shell", "kind": "argv", "argv": ["sh", "-c", "printf '%s' \"$HOME\""], "after": ["literal"]}
     ]
   }
 }
@@ -585,17 +602,20 @@ daemon. `kata.load_recurrence` is a separate RRULE issue-template interface.
 `kata cron capabilities --json` reads the project's UID and advertised
 `event_features` without changing state. The corresponding GET is
 `/api/v1/projects/{project_id}/cron/capabilities`; the
-`X-Kata-Event-Features` header advertises only `cron_v1`, covering portable
-definitions, run observations, and native recurring child delivery. Missing,
-unknown, or failed advertisements remain distinct outcomes. This is an ordinary project
+`X-Kata-Event-Features` header advertises daemon features. The `event_features`
+body lists cron features: `cron_v1` and, when enabled,
+`cron_workflow_argv_v1`. Clients must advertise
+`cron_workflow_argv_v1` in the request header to read argv workflows or start
+new runs that reference them. Missing, unknown, or failed advertisements remain
+distinct outcomes. This is an ordinary project
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
 
 ### Held legacy workflows
 
-Older databases can contain workflows with a reserved `argv` step or a null
-definition, steps array, step, or step kind. Owner backup and restore preserve
-historically decodable documents and their event evidence; JSON formatting may
+Older databases can contain unsupported workflows, including malformed `argv`
+steps or a null definition, steps array, step, or step kind. Owner backup and
+restore preserve historically decodable documents and their event evidence; JSON formatting may
 change. These workflows remain unavailable to adapters and cannot be shown or
 used in new jobs or runs. Ordinary workflow lists omit held workflows and show
 supported siblings. Federation snapshots for the affected project fail while a
@@ -609,8 +629,7 @@ recovery with a compatible version.
 To recover, take an [owner backup](../operations/backup-restore.md#full-backup)
 and find the `cron_workflow` record and its UID and definition in the JSONL.
 Create a supported workflow with a new UID, then update affected jobs to use it.
-The original UID and its evidence remain held; do not reuse that UID. The remaining work for argv
-support is tracked in [issue 1072](https://github.com/kenn-io/kata/issues/1072).
+The original UID and its evidence remain held; do not reuse that UID.
 
 ### Upgrade limits
 
@@ -782,8 +801,9 @@ An adapter that supports an `argv` step passes the vector literally to the
 process: the first element is the executable and the remaining elements are
 separate arguments. It does not join arguments, interpolate or expand them, or
 retry through a shell if launch fails. A workflow can explicitly request a shell
-by naming it in the vector; then that shell interprets its own arguments. The
-`argv` kind remains reserved until workflow authoring and reads enable it.
+by naming it in the vector; then that shell interprets its own arguments.
+Adapters must advertise `cron_workflow_argv_v1` only when they support this
+contract.
 
 A job may name its adapter in `options.adapter`. An adapter neither schedules
 nor manually runs a job whose key names another adapter, and says why in its own

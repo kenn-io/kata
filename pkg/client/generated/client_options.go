@@ -2330,6 +2330,7 @@ func (o *ShowCronRunRequestOptions) GetHeader() (map[string]string, error) {
 type ObserveCronRunRequestOptions struct {
 	PathParams *ObserveCronRunPath
 	Body       *ObserveCronRunBody
+	Header     *ObserveCronRunHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -2349,6 +2350,13 @@ func (o *ObserveCronRunRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2376,13 +2384,14 @@ func (o *ObserveCronRunRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ObserveCronRunRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // ListCronWorkflowsRequestOptions is the options needed to make a request to ListCronWorkflows.
 type ListCronWorkflowsRequestOptions struct {
 	PathParams *ListCronWorkflowsPath
 	Query      *ListCronWorkflowsQuery
+	Header     *ListCronWorkflowsHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -2402,6 +2411,13 @@ func (o *ListCronWorkflowsRequestOptions) Validate() error {
 		if v, ok := any(o.Query).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Query", err)
+			}
+		}
+	}
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2429,7 +2445,7 @@ func (o *ListCronWorkflowsRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ListCronWorkflowsRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // CreateCronWorkflowRequestOptions is the options needed to make a request to CreateCronWorkflow.
@@ -2541,6 +2557,7 @@ func (o *ArchiveCronWorkflowRequestOptions) GetHeader() (map[string]string, erro
 // ShowCronWorkflowRequestOptions is the options needed to make a request to ShowCronWorkflow.
 type ShowCronWorkflowRequestOptions struct {
 	PathParams *ShowCronWorkflowPath
+	Header     *ShowCronWorkflowHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -2552,6 +2569,13 @@ func (o *ShowCronWorkflowRequestOptions) Validate() error {
 		if v, ok := any(o.PathParams).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2579,7 +2603,7 @@ func (o *ShowCronWorkflowRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ShowCronWorkflowRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // ReplaceCronWorkflowRequestOptions is the options needed to make a request to ReplaceCronWorkflow.
