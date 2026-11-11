@@ -74,5 +74,5 @@ func TestDocbankOriginClientChecksResetPayload(t *testing.T) {
 	client, err := NewClient(t.Context(), server.URL, "fixture-token", clientpkg.Opts{})
 	require.NoError(t, err)
 	_, err = client.RelayReset(t.Context(), 42)
-	require.Error(t, err)
+	require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 }
