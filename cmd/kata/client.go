@@ -60,15 +60,16 @@ func envHTTPTimeout(def time.Duration) time.Duration {
 // Configured remotes are not pinged before ordinary API requests. Discovery
 // and health commands use discoverDaemonResolved when liveness is the result.
 func ensureDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
-	var resolved client.ResolvedDaemon
-	var err error
 	if flags.Daemon != "" {
-		resolved, err = client.PrepareResolvedNamed(ctx, flags.Daemon)
-	} else {
-		resolved, err = client.PrepareResolvedInWorkspace(ctx, workspaceStartForRemote())
+		resolved, err := client.PrepareResolvedNamed(ctx, flags.Daemon)
+		if err != nil {
+			return client.ResolvedDaemon{}, cliDaemonTargetError(err)
+		}
+		return resolved, nil
 	}
+	resolved, err := client.PrepareResolvedInWorkspace(ctx, workspaceStartForRemote())
 	if err != nil {
-		return resolved, cliDaemonTargetError(err)
+		return client.ResolvedDaemon{}, cliDaemonTargetError(err)
 	}
 	return resolved, nil
 }
@@ -134,9 +135,9 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 	})
 	if err != nil || !found {
 		if resolved.LocalProfile != nil {
-			if unreachable, typed := errors.AsType[*client.LocalDaemonUnreachableError](err); typed {
+			if _, typed := errors.AsType[*client.LocalDaemonUnreachableError](err); typed {
 				if selection, ok := resolved.LocalProfileSelection(); ok {
-					diagnosis, _, diagnoseErr := diagnoseDaemonSelectionObserved(ctx, "", selection, unreachable)
+					diagnosis, _, diagnoseErr := diagnoseDaemonSelection(ctx, "", selection, err)
 					if diagnoseErr != nil {
 						diagnosis.State = "selection_error"
 						diagnosis.Message = diagnoseErr.Error()
@@ -176,6 +177,9 @@ func noDaemonRunningError() error {
 }
 
 func cliDaemonTargetError(err error) error {
+	if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
+		return &cliError{Message: err.Error(), Hint: localDaemonGuidance(unreachable, true), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+	}
 	code := ""
 	switch {
 	case errors.Is(err, client.ErrProfileStorageUnavailable):

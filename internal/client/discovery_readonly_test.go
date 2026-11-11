@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -123,37 +122,16 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			_, found, err := DiscoverResolvedReadOnly(t.Context(), dir)
 			require.False(t, found)
 			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-			message := err.Error()
-			require.Contains(t, message, fmt.Sprintf("daemon pid %d", os.Getpid()))
-			require.Contains(t, message, server.Listener.Addr().String())
-			require.Contains(t, message, filepath.Join(dir, "daemon.log"))
-			require.Contains(t, message, "supervisor stderr")
-			require.Contains(t, message, "kata daemon restart")
-			require.Contains(t, message, "After it exits")
-			require.Contains(t, message, "original foreground launch command")
-			require.Contains(t, message, "auto-started")
-			require.Contains(t, message, "original KATA_HOME and storage environment")
-			if origin != "" {
-				require.Contains(t, message, origin+"/debug/pprof/goroutine?debug=2")
-				require.Contains(t, message, "daemon-owner access")
-				require.Contains(t, message, "configured authentication use the owner's credential")
-				require.Contains(t, message, "If responsive")
-			} else {
-				require.NotContains(t, message, "/debug/pprof/")
-			}
-			if runtime.GOOS != "windows" {
-				require.Contains(t, message, fmt.Sprintf("kill -QUIT %d", os.Getpid()))
-				require.Contains(t, message, "terminates the daemon")
-			} else {
-				require.NotContains(t, message, "kill -QUIT")
-				require.Contains(t, message, fmt.Sprintf("taskkill /PID %d /F", os.Getpid()))
-			}
+			var observed *LocalDaemonUnreachableError
+			require.ErrorAs(t, err, &observed)
+			require.Contains(t, err.Error(), fmt.Sprintf("daemon pid %d", os.Getpid()))
+			require.Contains(t, err.Error(), server.Listener.Addr().String())
+			require.Equal(t, dir, observed.DataDir)
+			require.Equal(t, origin, observed.WebOrigin)
+			require.True(t, observed.VerifiedProcess)
+			require.NotContains(t, err.Error(), "restart")
 		})
 	}
-	t.Run("Windows path", func(t *testing.T) {
-		err := &LocalDaemonUnreachableError{dataDir: `C:\Users\example\kata`}
-		require.Contains(t, err.RecoveryAdvice(), `C:\Users\example\kata`)
-	})
 	t.Run("unverified", func(t *testing.T) {
 		record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: "future-v1:12345", Network: "tcp", Address: "127.0.0.1:1"}
 		reader := func(string) ([]kitdaemon.RuntimeRecord, error) { return []kitdaemon.RuntimeRecord{record}, nil }
@@ -166,8 +144,8 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			break
 		}
 		require.ErrorIs(t, observed, ErrLocalDaemonUnreachable)
-		require.Contains(t, observed.Error(), "Verify the process identity before stopping it")
-		require.NotContains(t, observed.Error(), "kill -QUIT")
-		require.NotContains(t, observed.Error(), "taskkill")
+		var evidence *LocalDaemonUnreachableError
+		require.ErrorAs(t, observed, &evidence)
+		require.False(t, evidence.VerifiedProcess)
 	})
 }

@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/client"
 )
 
 // globalFlags carries the universal flags applied on every command. Sel is the
@@ -341,6 +342,9 @@ func emitHumanError(w io.Writer, err error, runEReached bool) {
 func cliErrorForErr(err error, runEReached bool) *cliError {
 	var cli *cliError
 	if !errors.As(err, &cli) {
+		if _, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
+			return cliDaemonTargetError(err).(*cliError)
+		}
 		if transportErr, ok := errors.AsType[*daemonTransportError](err); ok {
 			message := transportErr.Error()
 			if transportErr.mutationOutcomeUnknown() {
@@ -371,6 +375,9 @@ func cliErrorForErr(err error, runEReached bool) *cliError {
 func exitCodeForErr(err error, runEReached bool) int {
 	if cli, ok := errors.AsType[*cliError](err); ok {
 		return cli.ExitCode
+	}
+	if _, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
+		return ExitDaemonUnavail
 	}
 	// Only the selected daemon's transport marks unavailable errors. Hub and
 	// other external dial failures retain their command's error classification.
