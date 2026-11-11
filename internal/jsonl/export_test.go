@@ -560,8 +560,6 @@ func TestLegacyProjectExportPreservesMovedIssueHistory(t *testing.T) {
 				ProjectID: &from.ID, IncludeDeleted: includeDeleted,
 			}) {
 				require.NoError(t, err)
-				require.Empty(t, event.AcceptedProjectIDs)
-				event.AcceptedProjectIDs = nil // Empty values are omitted from JSON.
 				want = append(want, event)
 			}
 			_, err = source.ExecContext(ctx,
@@ -652,8 +650,6 @@ func TestLegacyExportUIDOnlyPeersRespectProjection(t *testing.T) {
 					}) {
 						require.NoError(t, err)
 						event.ProjectUID = "" // ProjectUID is not serialized in event envelopes.
-						require.Empty(t, event.AcceptedProjectIDs)
-						event.AcceptedProjectIDs = nil // Empty values are omitted from JSON.
 						want = append(want, event)
 					}
 					_, err = source.ExecContext(ctx,

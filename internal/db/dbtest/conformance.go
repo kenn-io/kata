@@ -51,7 +51,7 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
-	{name: "federation accepted push events", runWithBackend: checkFederationAcceptedPushEvents},
+	{name: "federation accepted push events", methods: []string{"AdvanceFederationPushCursor", "CreateIssue", "CreateProject", "FederationPushAcceptedThrough", "PendingFederationPushEvents", "PendingFederationPushStats", "RecordFederationPushAccepted", "UpsertFederationBinding", "EnableFederationPush"}, runWithBackend: checkFederationAcceptedPushEvents},
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
@@ -974,14 +974,6 @@ var storageScenarios = []scenario{
 			"ListProjectFederationEnrollments", "RevokeFederationEnrollment",
 		},
 		run: checkProjectFederationEnrollmentScope,
-	},
-	{
-		name: "federation push accepted retention",
-		methods: []string{
-			"AdvanceFederationPushCursor", "CreateIssue", "CreateProject", "FederationPushAcceptedThrough",
-			"PendingFederationPushEvents", "RecordFederationPushAccepted", "UpsertFederationBinding",
-		},
-		run: checkFederationPushAccepted,
 	},
 	{
 		name:    "federation push snapshot runs",

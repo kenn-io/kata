@@ -244,8 +244,9 @@ func updateFederationCursor(ctx context.Context, execer contextExecer, projectID
 	if push {
 		column = "push_cursor_event_id"
 	}
-	//nolint:gosec // column is selected from the fixed cases above.
-	query := `UPDATE federation_bindings SET ` + column + `=GREATEST(` + column + `,$1),
+	expression := `GREATEST(` + column + `,$1)`
+	//nolint:gosec // column and expression are selected from the fixed cases above.
+	query := `UPDATE federation_bindings SET ` + column + `=` + expression + `,
 last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 WHERE project_id=$2`

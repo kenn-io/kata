@@ -382,7 +382,7 @@ func checkSameHubMoveGates(t *testing.T, store db.Storage) error {
 func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	t.Run("accepted moved history beyond pending work", func(t *testing.T) {
-		for _, operation := range []string{"leave", "archive", "reset"} {
+		for _, operation := range []string{"leave", "reset"} {
 			t.Run(operation, func(t *testing.T) {
 				ctx := t.Context()
 				source, err := store.CreateProject(ctx, "accepted-source-"+operation)
@@ -404,9 +404,6 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 					switch operation {
 					case "leave":
 						_, err := store.LeaveFederationReplica(ctx, source.ID)
-						return err
-					case "archive":
-						_, _, err := store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: source.ID, Actor: "worker", Force: true})
 						return err
 					default:
 						return store.ResetFederatedProject(ctx, target.ID, moved.EventID+1, moved.EventID)

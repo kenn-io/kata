@@ -55,6 +55,10 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 	require.NoError(t, err)
 	require.Equal(t, int64(1), count)
 	require.Equal(t, first.ID, high)
+	require.NoError(t, reopened.RecordFederationPushAccepted(ctx, project.ID, []int64{first.ID}))
+	through, err = reopened.FederationPushAcceptedThrough(ctx, project.ID, reopened.InstanceUID(), 0)
+	require.NoError(t, err)
+	require.Equal(t, second.ID, through)
 	require.NoError(t, reopened.AdvanceFederationPushCursor(ctx, project.ID, first.ID))
 	through, err = reopened.FederationPushAcceptedThrough(ctx, project.ID, reopened.InstanceUID(), first.ID)
 	require.NoError(t, err)
@@ -81,6 +85,9 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 	found, err = AcceptedPushRow(ctx, accepted, project.ID, third.ID)
 	require.NoError(t, err)
 	require.False(t, found)
+	unbound, err := reopened.CreateProject(ctx, "push-accepted-unbound")
+	require.NoError(t, err)
+	require.ErrorIs(t, reopened.RecordFederationPushAccepted(ctx, unbound.ID, []int64{first.ID}), db.ErrNotFound)
 	return nil
 }
 

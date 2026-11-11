@@ -12,56 +12,44 @@ import (
 )
 
 func TestFederationReplayJSONLRoundTrip(t *testing.T) {
-	ctx := t.Context()
-	source, events := federationReplayJSONLFixture(t, true)
-	backup := exportToBuffer(ctx, t, source).Bytes()
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := t.Context()
+			open := func() db.Storage {
+				if backend == "postgres" {
+					return openPostgresImportTarget(t)
+				}
+				return openImportTargetDB(t)
+			}
+			source, events := federationReplayJSONLFixture(t, true)
+			backup := exportToBuffer(ctx, t, source)
+			restored := open()
+			require.NoError(t, jsonl.Import(ctx, backup, restored))
+			requireFederationReplayJSONL(t, restored, events)
 
-	restored := openImportTargetDB(t)
-	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(backup), restored))
-	requireFederationReplayJSONL(t, restored, events)
+			if backend == "postgres" {
+				var back bytes.Buffer
+				require.NoError(t, jsonl.Export(ctx, restored, &back, jsonl.ExportOptions{IncludeDeleted: true}))
+				roundTrip := openImportTargetDB(t)
+				require.NoError(t, jsonl.Import(ctx, &back, roundTrip))
+				requireFederationReplayJSONL(t, roundTrip, events)
+			}
 
-	var scoped bytes.Buffer
-	require.NoError(t, jsonl.Export(ctx, source, &scoped, jsonl.ExportOptions{ProjectID: events[0].ProjectID}))
-	scopedData := bytes.Clone(scoped.Bytes())
-	scopedRestore := openImportTargetDB(t)
-	require.NoError(t, jsonl.Import(ctx, &scoped, scopedRestore))
-	requireFederationReplayJSONL(t, scopedRestore, events)
-	merged := openImportTargetDB(t)
-	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(scopedData), merged, jsonl.ImportOptions{MergeProject: true}))
-	_, recorded, err := merged.FederationLocalReplayStatus(ctx, events[0].UID)
-	require.NoError(t, err)
-	require.False(t, recorded, "project merges do not inherit replay markers")
-
-	newInstance := openImportTargetDB(t)
-	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(scopedData), newInstance, jsonl.ImportOptions{NewInstance: true}))
-	_, recorded, err = newInstance.FederationLocalReplayStatus(ctx, events[0].UID)
-	require.NoError(t, err)
-	require.False(t, recorded, "a new instance does not inherit local replay markers")
-}
-
-func TestFederationReplayJSONLRoundTripAcrossPostgres(t *testing.T) {
-	postgres := openPostgresImportTarget(t)
-	ctx := t.Context()
-	source, events := federationReplayJSONLFixture(t, true)
-	backup := exportToBuffer(ctx, t, source)
-	require.NoError(t, jsonl.Import(ctx, backup, postgres))
-
-	var back bytes.Buffer
-	require.NoError(t, jsonl.Export(ctx, postgres, &back, jsonl.ExportOptions{IncludeDeleted: true}))
-	requireFederationReplayJSONL(t, postgres, events)
-
-	restored := openImportTargetDB(t)
-	require.NoError(t, jsonl.Import(ctx, &back, restored))
-	requireFederationReplayJSONL(t, restored, events)
-
-	var scoped bytes.Buffer
-	require.NoError(t, jsonl.Export(ctx, postgres, &scoped, jsonl.ExportOptions{IncludeDeleted: true, ProjectID: events[0].ProjectID}))
-	for _, opts := range []jsonl.ImportOptions{{NewInstance: true}, {MergeProject: true}} {
-		target := openPostgresImportTarget(t)
-		require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(scoped.Bytes()), target, opts))
-		_, recorded, err := target.FederationLocalReplayStatus(ctx, events[0].UID)
-		require.NoError(t, err)
-		require.False(t, recorded, "new instances and project merges do not inherit replay markers")
+			var scoped bytes.Buffer
+			require.NoError(t, jsonl.Export(ctx, restored, &scoped, jsonl.ExportOptions{IncludeDeleted: true, ProjectID: events[0].ProjectID}))
+			if backend == "sqlite" {
+				scopedRestore := open()
+				require.NoError(t, jsonl.Import(ctx, bytes.NewReader(scoped.Bytes()), scopedRestore))
+				requireFederationReplayJSONL(t, scopedRestore, events)
+			}
+			for _, opts := range []jsonl.ImportOptions{{NewInstance: true}, {MergeProject: true}} {
+				target := open()
+				require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(scoped.Bytes()), target, opts))
+				_, recorded, err := target.FederationLocalReplayStatus(ctx, events[0].UID)
+				require.NoError(t, err)
+				require.False(t, recorded, "new instances and project merges do not inherit replay markers")
+			}
+		})
 	}
 }
 
