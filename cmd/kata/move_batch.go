@@ -231,6 +231,9 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 		}
 		for _, issue := range page.Issues {
 			selected = append(selected, moveBatchItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
+			if sel.Query == "" && len(selected) > 5000 {
+				return selected, nil
+			}
 		}
 		if page.NextCursor == "" {
 			break

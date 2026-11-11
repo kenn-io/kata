@@ -368,6 +368,58 @@ func TestMoveBatchCLI_SelectorPagingRevisionFence(t *testing.T) {
 	require.Equal(t, 5, cliErr.ExitCode)
 }
 
+func TestMoveBatchCLI_SelectorStopsAtLimit(t *testing.T) {
+	for _, query := range []bool{false, true} {
+		t.Run(fmt.Sprintf("query=%t", query), func(t *testing.T) {
+			env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("synthetic-selector-token"))
+			source, err := env.DB.CreateProject(t.Context(), "selector-source")
+			require.NoError(t, err)
+			target, err := env.DB.CreateProject(t.Context(), "selector-target")
+			require.NoError(t, err)
+			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "unique search term", Author: "tester"})
+			require.NoError(t, err)
+			origin, err := url.Parse(env.URL)
+			require.NoError(t, err)
+			proxy := httputil.NewSingleHostReverseProxy(origin)
+			pages := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/issues", source.ID) {
+					pages++
+					items := make([]map[string]any, 200)
+					for i := range items {
+						items[i] = map[string]any{"uid": fmt.Sprintf("%026d", (pages-1)*200+i+1), "revision": 1}
+					}
+					cursor := fmt.Sprint(pages)
+					if pages == 27 {
+						items = []map[string]any{{"uid": issue.UID, "revision": issue.Revision}}
+						cursor = ""
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.MarshalWrite(w, map[string]any{"issues": items, "next_cursor": cursor})
+					return
+				}
+				r.Host = origin.Host
+				proxy.ServeHTTP(w, r)
+			}))
+			t.Cleanup(server.Close)
+			args := []string{"move", "--from-project", source.Name, "--status", "all", "--dry"}
+			if query {
+				args = append(args, "--query", "unique")
+			}
+			args = append(args, target.Name, "--json")
+			out, _, err := runCLIAgainst(t, server.URL, dir, args...)
+			if query {
+				require.NoError(t, err)
+				require.Equal(t, 27, pages)
+				require.Contains(t, out, "would_move")
+			} else {
+				require.ErrorContains(t, err, "5,000")
+				require.Equal(t, 26, pages)
+			}
+		})
+	}
+}
+
 // Oversized invocations stop before any write.
 func TestMoveBatchCLI_Limits(t *testing.T) {
 	for _, mode := range []string{"count", "bytes", "bytes-escaped"} {
