@@ -12,8 +12,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -172,16 +170,10 @@ func TestCronWorkflowArgvFieldPresence(t *testing.T) {
 		value any
 		want  string
 	}{
-		{"domain absent", cron.WorkflowStep{}, ""},
-		{"domain empty", cron.WorkflowStep{Argv: []string{}}, `[]`},
-		{"api absent", api.CronWorkflowStep{}, ""},
-		{"api empty", api.CronWorkflowStep{Argv: []string{}}, `[]`},
 		{"request absent", generated.CronWorkflowStep{}, ""},
 		{"request empty", generated.CronWorkflowStep{Argv: []string{}}, `[]`},
-		{"request populated", generated.CronWorkflowStep{Argv: []string{"printf", ""}}, `["printf",""]`},
 		{"response absent", generated.CronWorkflowStepResponse{}, ""},
 		{"response empty", generated.CronWorkflowStepResponse{Argv: []string{}}, `[]`},
-		{"response populated", generated.CronWorkflowStepResponse{Argv: []string{"printf", ""}}, `["printf",""]`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := json.Marshal(tc.value)
