@@ -145,7 +145,7 @@ func TestCloseTranscript_SelectionValidation(t *testing.T) {
 		candidate any
 		selection map[string]any
 	}{
-		{"missing candidate", nil, map[string]any{"project_id": 0, "record": false}},
+		{"missing candidate for a recorded close", nil, map[string]any{"project_id": 0, "record": true}},
 		{"unknown target with URL", map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001", "url": "https://archive.example/session"}, map[string]any{"project_id": 0, "record": true}},
 		{"missing record", map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001"}, map[string]any{"project_id": 0}},
 	} {
@@ -161,6 +161,16 @@ func TestCloseTranscript_SelectionValidation(t *testing.T) {
 	}
 }
 
+func TestCloseTranscript_OptOutSelectionNeedsNoCandidate(t *testing.T) {
+	h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
+	body := map[string]any{"actor": "agent-one", "reason": "done", "message": "Implemented the example behavior and ran the focused tests.", "evidence": []map[string]any{{"type": "test", "command": "go test ./internal/example"}}, "transcript_selection": map[string]any{"project_id": projectID, "record": false}}
+	response := postWithHeader(t, ts, issueURL(projectID, issueID, "actions/close"), nil, body)
+	requireOK(t, response)
+	issue, err := h.DB().IssueByID(t.Context(), issueID)
+	require.NoError(t, err)
+	assert.Equal(t, "closed", issue.Status)
+}
+
 func TestCloseTranscript_MoveBeforeGuardedWrite(t *testing.T) {
 	for _, record := range []bool{false, true} {
 		t.Run(fmt.Sprintf("record=%t", record), func(t *testing.T) {
@@ -174,6 +184,9 @@ func TestCloseTranscript_MoveBeforeGuardedWrite(t *testing.T) {
 			store := &closeMoveRaceStore{Storage: database.db, toProjectID: target.ID, moveNext: true}
 			ts := startTestServer(t, daemon.ServerConfig{DB: store, StartedAt: database.now})
 			body := map[string]any{"actor": "agent-one", "reason": "done", "message": "Implemented the example behavior and ran the focused tests.", "evidence": []map[string]any{{"type": "test", "command": "go test ./internal/example"}}, "transcript": map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001"}, "transcript_selection": map[string]any{"project_id": source.ID, "record": record}}
+			if !record {
+				delete(body, "transcript")
+			}
 			response := postWithHeader(t, ts, issueURLRef(source.ID, issue.ShortID, "actions/close"), nil, body)
 			assertAPIError(t, response.status, response.body, http.StatusConflict, "issue_moved")
 			current, err := database.db.IssueByID(t.Context(), issue.ID)

@@ -114,7 +114,7 @@ func dropUnsupportedTranscript(
 		if !ok || tooOld.Code != "daemon_api_too_old" {
 			return err
 		}
-		if !unconfigured {
+		if !unconfigured || !body["transcript_selection"].(*api.TranscriptSelection).Record {
 			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "close: transcript: "+tooOld.Message+"; skipping attachment")
 			delete(body, "transcript")
 			delete(body, "transcript_selection")

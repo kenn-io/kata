@@ -200,8 +200,9 @@ not. The object is preserved in scoped responses and history. Automatic capture 
 not daemon-side session discovery. See that reference for AgentsView compatibility.
 
 API `0.45.0` accepts `transcript_selection` with `project_id` and required
-`record`. It requires a candidate `transcript`; the candidate's agent and
-session identify keyed retries even when `record` is false. A positive project
+`record`. A recorded selection requires a candidate `transcript`; an opt-out
+can omit it. When supplied, the candidate's agent and session identify keyed
+retries even when `record` is false. A positive project
 ID binds the policy to that project. A changed project returns `issue_moved`
 before a fresh close commits. Use project ID zero for an unknown target and
 omit the candidate URL. Selection and URL do not change retry identity.

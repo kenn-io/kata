@@ -314,7 +314,7 @@ func runActionWithHeaders(
 				}
 			}
 		}
-		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body, unconfigured); err != nil {
+		if err := dropUnrecordedTranscript(ctx, cmd, client, baseURL, body, unconfigured, headers["Idempotency-Key"] != ""); err != nil {
 			return err
 		}
 	}

@@ -42,8 +42,8 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 		if selection := in.Body.TranscriptSelection; selection != nil {
-			if in.Body.Transcript == nil || (selection.ProjectID == 0 && in.Body.Transcript.URL != "") {
-				return nil, api.NewError(400, "validation", "transcript selection requires a candidate and an unknown project requires an empty URL", "", nil)
+			if (in.Body.Transcript == nil && selection.Record) || (selection.ProjectID == 0 && in.Body.Transcript != nil && in.Body.Transcript.URL != "") {
+				return nil, api.NewError(400, "validation", "a recorded transcript selection requires a candidate and an unknown project requires an empty URL", "", nil)
 			}
 		}
 		// Owner-local TUI closes bypass substance / evidence validation:
