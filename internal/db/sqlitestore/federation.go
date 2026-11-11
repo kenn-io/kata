@@ -1290,7 +1290,7 @@ func (d *Store) materializeFederatedProjectTxScoped(
 		}
 	}
 	projection := db.FoldEvents(events)
-	destinations, err := d.rehomeFederatedMovedIssues(ctx, tx, events, projection, acceptedEventUIDs)
+	destinations, err := d.rehomeFederatedMovedIssues(ctx, tx, events, projection, acceptedEventUIDs, nil)
 	if err != nil {
 		return err
 	}
@@ -1346,7 +1346,7 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	return updateFederatedProjectMetadataTx(ctx, tx, projectID, projection.ProjectMetadata[binding.HubProjectUID])
 }
 
-func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []db.FoldEvent, projection db.FoldProjection, acceptedEventUIDs []string) ([]int64, error) {
+func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []db.FoldEvent, projection db.FoldProjection, acceptedEventUIDs []string, planned *[]db.FederatedMoveDecision) ([]int64, error) {
 	return db.RehomeFederatedMovedIssues(ctx, tx, events, projection, func(pid int64, issue db.FoldIssue) (string, error) {
 		return resolveFederatedIssueShortID(ctx, tx, pid, issue.UID, issue.ShortID, nil)
 	}, func(id, source, target int64) error {
@@ -1386,7 +1386,7 @@ func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, even
 		}
 		event, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, IssueUID: issueUID, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: payload, SkipRelay: true})
 		return event.ID, err
-	})
+	}, planned)
 }
 
 func updateFederatedProjectMetadataTx(ctx context.Context, tx *sql.Tx, projectID int64, raw jsontext.Value) error {

@@ -683,3 +683,15 @@ func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, wantWorkflow, actualWorkflow)
 }
+
+func TestCanonicalSchemaExcludesSimilarTriggerNames(t *testing.T) {
+	original := schemaSQL
+	t.Cleanup(func() { schemaSQL = original })
+	schemaSQL += `
+CREATE TRIGGER federationXgenerationYunrelated AFTER INSERT ON projects BEGIN SELECT 1; END;
+`
+	_, _, triggers, err := canonicalSQL(t.Context())
+	require.NoError(t, err)
+	require.NotContains(t, triggers, "federationXgenerationYunrelated")
+	require.Contains(t, triggers, "federation_generation_projects_insert")
+}

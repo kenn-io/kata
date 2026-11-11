@@ -518,6 +518,7 @@ func seedV1DBWithOrphanRelatedEvent(t *testing.T, path string) {
 // first.
 func dropV10Additions(t *testing.T, raw *sql.DB) {
 	t.Helper()
+	dropGenerationSchema(t, raw)
 	stmts := []string{
 		`DROP TABLE IF EXISTS federation_bindings`,
 		`DROP TABLE comments`,
@@ -819,4 +820,25 @@ func captureStderr(t *testing.T) (*bytes.Buffer, func() *bytes.Buffer) {
 	}
 	t.Cleanup(func() { _ = restore() })
 	return buf, restore
+}
+
+func dropGenerationSchema(t *testing.T, d *sql.DB) {
+	t.Helper()
+	ctx := t.Context()
+	rows, err := d.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'federation_generation_*'`)
+	require.NoError(t, err)
+	var names []string
+	for rows.Next() {
+		var name string
+		require.NoError(t, rows.Scan(&name))
+		names = append(names, name)
+	}
+	require.NoError(t, rows.Err())
+	require.NoError(t, rows.Close())
+	for _, name := range names {
+		_, err = d.ExecContext(ctx, `DROP TRIGGER "`+name+`"`)
+		require.NoError(t, err)
+	}
+	_, err = d.ExecContext(ctx, `DROP TABLE federation_project_generations`)
+	require.NoError(t, err)
 }

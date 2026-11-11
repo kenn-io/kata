@@ -80,6 +80,7 @@ func TestAutoCutoverPreservesIssueContentRevision(t *testing.T) {
 			require.Equal(t, int64(0), before[zeroEdits.UID].ContentRevision)
 			require.NotNil(t, before[deleted.UID].DeletedAt)
 
+			dropGenerationSchema(t, source.DB)
 			_, err = source.ExecContext(ctx,
 				`UPDATE meta SET value = ? WHERE key = 'schema_version'`, version)
 			require.NoError(t, err)
@@ -117,6 +118,7 @@ func TestAutoCutoverWithoutSourceContentRevisionColumn(t *testing.T) {
 
 			_, err = source.ExecContext(ctx, `ALTER TABLE issues DROP COLUMN content_revision`)
 			require.NoError(t, err)
+			dropGenerationSchema(t, source.DB)
 			_, err = source.ExecContext(ctx,
 				`UPDATE meta SET value = ? WHERE key = 'schema_version'`, tc.version)
 			require.NoError(t, err)
@@ -184,6 +186,7 @@ func TestAutoCutoverPreservesMovedIssueHistory(t *testing.T) {
 	_, err = source.ExecContext(ctx, `ALTER TABLE comments DROP COLUMN teammate`)
 	require.NoError(t, err)
 	// Version 26 is the last schema without comment teammate attribution.
+	dropGenerationSchema(t, source.DB)
 	_, err = source.ExecContext(ctx,
 		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, 26)
 	require.NoError(t, err)
@@ -241,6 +244,7 @@ func TestAutoCutoverPreservesUIDOnlyHistory(t *testing.T) {
 	require.NoError(t, err)
 	_, err = source.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, issue.ID)
 	require.NoError(t, err)
+	dropGenerationSchema(t, source.DB)
 	_, err = source.ExecContext(ctx,
 		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, preIndexOnlySchemaVersion)
 	require.NoError(t, err)
@@ -298,6 +302,7 @@ func TestAutoCutoverFoldsUncheckpointedWAL(t *testing.T) {
 	ctx := t.Context()
 	live := filepath.Join(t.TempDir(), "kata.db")
 	source := openCutoverTargetDB(t, ctx, live)
+	dropGenerationSchema(t, source.DB)
 	_, err := source.ExecContext(ctx,
 		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, preIndexOnlySchemaVersion)
 	require.NoError(t, err)
@@ -339,6 +344,7 @@ func TestAutoCutoverRefusesDatabaseInUse(t *testing.T) {
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	source := openCutoverTargetDB(t, ctx, path)
+	dropGenerationSchema(t, source.DB)
 	_, err := source.ExecContext(ctx,
 		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, preIndexOnlySchemaVersion)
 	require.NoError(t, err)
@@ -505,6 +511,7 @@ func TestAutoCutover_ReconstructsAPITokensFromEvents(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = d.RevokeAPIToken(ctx, revoked.ID, db.BootstrapActor)
 	require.NoError(t, err)
+	dropGenerationSchema(t, d.DB)
 	_, err = d.ExecContext(ctx,
 		`UPDATE meta SET value = ? WHERE key = 'schema_version'`,
 		preIndexOnlySchemaVersion)
@@ -1209,6 +1216,7 @@ func trimCurrentDBToV11Shape(t *testing.T, path string) {
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
 	defer func() { _ = raw.Close() }()
+	dropGenerationSchema(t, raw)
 
 	_, err = raw.ExecContext(ctx, `
 		PRAGMA foreign_keys = OFF;
@@ -1305,6 +1313,7 @@ func trimCurrentDBToV19Shape(t *testing.T, path string) {
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
 	defer func() { _ = raw.Close() }()
+	dropGenerationSchema(t, raw)
 
 	_, err = raw.ExecContext(ctx, `
 		DROP TABLE project_purge_log;

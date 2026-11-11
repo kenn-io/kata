@@ -222,8 +222,9 @@ SQLite upgrades that only add indexes, or add a table that starts empty, registe
 a complete version chain in `inPlaceUpgrades` in
 `internal/db/sqlitestore/schema_upgrade.go`. Startup applies the canonical
 tables and indexes and the schema-version stamp in one transaction under the
-cutover lock. Schemas 41 through 49 can reach schema 50 this way; the 49→50
-step adds the empty `mcp_event_subscriptions` table and its indexes.
+cutover lock. Schemas 41 through 50 can reach schema 51 this way; the 49→50
+step adds the empty `mcp_event_subscriptions` table and its indexes, and 50→51
+adds project generations and triggers for federation rebuild freshness.
 
 Changes to existing tables, triggers, or FTS use JSONL cutover. Kata exports the current
 database to JSONL exactly as stored, imports that JSONL

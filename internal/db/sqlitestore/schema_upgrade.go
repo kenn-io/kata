@@ -125,7 +125,7 @@ func canonicalSQL(ctx context.Context) (tables, indexes, triggers map[string]str
 	if _, err := canonical.ExecContext(ctx, schemaSQL); err != nil {
 		return nil, nil, nil, fmt.Errorf("create canonical schema: %w", err)
 	}
-	rows, err := canonical.QueryContext(ctx, `SELECT type,name,sql FROM sqlite_master WHERE (type IN ('table','index') OR (type='trigger' AND name LIKE 'federation_generation_%')) AND sql IS NOT NULL`)
+	rows, err := canonical.QueryContext(ctx, `SELECT type,name,sql FROM sqlite_master WHERE (type IN ('table','index') OR (type='trigger' AND name GLOB 'federation_generation_*')) AND sql IS NOT NULL`)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("read canonical schema: %w", err)
 	}

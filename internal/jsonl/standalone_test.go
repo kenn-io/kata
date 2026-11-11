@@ -269,3 +269,19 @@ func standaloneContent(t *testing.T, data []byte) []string {
 	}
 	return content
 }
+
+func TestStandaloneImportIntoFreshSQLite(t *testing.T) {
+	ctx := t.Context()
+	source := openExportTestDB(t)
+	project, err := source.CreateProject(ctx, "source")
+	require.NoError(t, err)
+	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "restored", Author: "tester"})
+	require.NoError(t, err)
+	var input bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &input, jsonl.ExportOptions{IncludeDeleted: true}))
+	target := openImportTargetDB(t)
+	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(input.Bytes()), target, jsonl.ImportOptions{AsStandalone: true}))
+	var title string
+	require.NoError(t, target.QueryRowContext(ctx, `SELECT title FROM issues WHERE uid=?`, issue.UID).Scan(&title))
+	require.Equal(t, "restored", title)
+}
