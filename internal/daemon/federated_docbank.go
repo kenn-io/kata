@@ -26,7 +26,7 @@ import (
 const federatedDocbankPath = "/api/v1/projects/{project_id}/federation/docbank"
 
 func localAttachmentOrigin(ctx context.Context, cfg ServerConfig, origin string) (bool, error) {
-	if origin == cfg.DB.InstanceUID() {
+	if origin == "" || origin == cfg.DB.InstanceUID() {
 		return true, nil
 	}
 	former, err := cfg.DB.FormerInstanceUIDs(ctx)
