@@ -45,28 +45,3 @@ func (c *claimClientCache) get(ctx context.Context, cfg ServerConfig, binding db
 	c.entries[key] = claimClientEntry{client: client, credential: credential}
 	return client, credential, nil
 }
-
-func requireFederatedIssueClaimsConcurrently(ctx context.Context, cfg ServerConfig, issues []db.Issue, actor string, cache *claimClientCache, limit int, refresh bool) map[string]error {
-	failures := map[string]error{}
-	seen := map[string]bool{}
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	slots := make(chan struct{}, limit)
-	for _, issue := range issues {
-		if seen[issue.UID] {
-			continue
-		}
-		seen[issue.UID] = true
-		slots <- struct{}{}
-		wg.Go(func() {
-			defer func() { <-slots }()
-			if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, refresh, cache); err != nil {
-				mu.Lock()
-				failures[issue.UID] = err
-				mu.Unlock()
-			}
-		})
-	}
-	wg.Wait()
-	return failures
-}

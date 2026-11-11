@@ -92,7 +92,7 @@ func TestMoveIssuesBatch_UnsupportedPairLeavesValidMoves(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "moved", out.Body.Results[0].Result)
 	require.Equal(t, "refused", out.Body.Results[1].Result)
-	require.Equal(t, "issue_move_tree_changed", out.Body.Results[1].Code)
+	require.Equal(t, "duplicate_conflicting_target", out.Body.Results[1].Code)
 	require.Equal(t, "moved", out.Body.Results[2].Result)
 	got, err := store.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)

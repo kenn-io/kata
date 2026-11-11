@@ -23,9 +23,6 @@ func RunMoveBatch(ctx context.Context, in MoveIssuesBatchIn, withTx func(context
 				return err
 			}
 		}
-		if in.DryRun {
-			return errBatchMovePreview
-		}
 		return nil
 	}
 	finish := func(err, rollbackErr error) error {
@@ -36,25 +33,29 @@ func RunMoveBatch(ctx context.Context, in MoveIssuesBatchIn, withTx func(context
 		return err
 	}
 	err := withTx(ctx, run, finish)
-	if errors.Is(err, errBatchMovePreview) && !errors.Is(err, ErrTransactionFinalizationFailed) {
-		err = nil
-	}
 	if err != nil {
 		return MoveIssuesBatchOut{}, err
 	}
 	return out, nil
 }
 
-var errBatchMovePreview = errors.New("batch move preview complete")
+// ErrDuplicateMoveTarget reports a repeated issue with a different destination.
+var ErrDuplicateMoveTarget = errors.New("issue requested for different targets")
 
 func runMoveBatchTx(ctx context.Context, tx *sql.Tx, in MoveIssuesBatchIn, move func(context.Context, *sql.Tx, MoveIssueProjectIn) (MoveIssueProjectOut, error), comment func(context.Context, *sql.Tx, CreateCommentParams) (Comment, Event, error), isTransient func(error) bool) (MoveIssuesBatchOut, bool, error) {
 	out := MoveIssuesBatchOut{Results: make([]MoveIssueBatchResult, len(in.Items))}
 	moved := false
+	type settledMove struct {
+		target, expected int64
+		out              MoveIssueProjectOut
+	}
+	settled := map[int64]settledMove{}
 	for n, item := range in.Items {
 		if _, err := tx.ExecContext(ctx, "SAVEPOINT move_item"); err != nil {
 			return out, false, err
 		}
-		item.DryRun = in.DryRun
+		item.Single = true
+		item.DryRun = false
 		item.Savepoint = true
 		itemCtx := ctx
 		var err error
@@ -63,10 +64,42 @@ func runMoveBatchTx(ctx context.Context, tx *sql.Tx, in MoveIssuesBatchIn, move 
 			err = ApplyTransactionFence(itemCtx, tx)
 		}
 		var result MoveIssueProjectOut
-		if err == nil {
+		prior, duplicate := settled[item.IssueID]
+		unchanged := duplicate || item.FromProjectID == item.ToProjectID
+		if err == nil && unchanged {
+			if item.AuthorizeProjects != nil {
+				err = authorizeIssueMoveProjects(itemCtx, tx, item, []int64{item.FromProjectID, item.ToProjectID})
+			}
+			var current Issue
+			if err == nil {
+				err = tx.QueryRowContext(itemCtx, `SELECT id, project_id, revision, short_id, uid FROM issues WHERE id=$1 AND deleted_at IS NULL`, item.IssueID).Scan(&current.ID, &current.ProjectID, &current.Revision, &current.ShortID, &current.UID)
+				if errors.Is(err, sql.ErrNoRows) {
+					err = ErrNotFound
+				}
+			}
+			if err == nil && duplicate && item.IfMatchRev != prior.expected {
+				err = &RevisionConflictError{CurrentRevision: current.Revision}
+			}
+			if err == nil && duplicate && item.ToProjectID != prior.target {
+				err = ErrDuplicateMoveTarget
+			}
+			want := item.IfMatchRev
+			if duplicate {
+				want = prior.out.NewRevision
+			}
+			if err == nil && current.Revision != want {
+				err = &RevisionConflictError{CurrentRevision: current.Revision}
+			}
+			if err == nil && current.ProjectID != item.ToProjectID {
+				err = ErrIssueMoveTreeChanged
+			}
+			if err == nil {
+				result = MoveIssueProjectOut{Issue: current, NewShortID: current.ShortID, NewRevision: current.Revision}
+			}
+		} else if err == nil {
 			result, err = move(itemCtx, tx, item)
 		}
-		if err == nil && !item.DryRun && in.Comment != "" {
+		if err == nil && !unchanged && in.Comment != "" {
 			var events []Event
 			commentCtx := WithCommentMetadataHook(itemCtx, CommentMetadataPolicy(itemCtx), &events)
 			for _, issue := range result.Issues {
@@ -90,7 +123,18 @@ func runMoveBatchTx(ctx context.Context, tx *sql.Tx, in MoveIssuesBatchIn, move 
 			}
 		} else {
 			out.Results[n].Out = result
-			moved = moved || !item.DryRun
+			if unchanged {
+				out.Results[n].Outcome = "already_in_target"
+				if duplicate {
+					out.Results[n].Outcome = "duplicate_item"
+				}
+			} else {
+				out.Results[n].Outcome = "moved"
+				moved = true
+			}
+			if !duplicate {
+				settled[item.IssueID] = settledMove{target: item.ToProjectID, expected: item.IfMatchRev, out: result}
+			}
 		}
 		if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT move_item"); err != nil {
 			return out, false, err

@@ -1848,18 +1848,20 @@ type LocalEmbeddingsIndexing struct {
 // LocalEmbeddingsResponse carries the daemon-wide setup status.
 type LocalEmbeddingsResponse struct{ Body LocalEmbeddingsStatus }
 
+// MoveBatchMaxItems limits one batch request.
+const MoveBatchMaxItems = 50
+
 // MoveIssuesRequest moves independent refs to one or more target projects.
-type MoveIssuesRequest struct {
-	Body struct {
-		Actor            string           `json:"actor,omitempty"`
-		Teammate         string           `json:"teammate,omitempty"`
-		DryRun           bool             `json:"dry_run,omitempty" doc:"Preview one item."`
-		Subtree          bool             `json:"subtree,omitempty" doc:"Include descendants; requires exactly one item."`
-		Comment          string           `json:"comment,omitempty"`
-		DefaultProjectID int64            `json:"default_project_id,omitempty"`
-		ToProjectUID     string           `json:"to_project_uid,omitempty"`
-		Items            []MoveIssuesItem `json:"items" minItems:"1" maxItems:"50"`
-	}
+type MoveIssuesRequest struct{ Body MoveIssuesBody }
+
+// MoveIssuesBody is one independent batch.
+type MoveIssuesBody struct {
+	Actor            string           `json:"actor,omitempty"`
+	Teammate         string           `json:"teammate,omitempty"`
+	Comment          string           `json:"comment,omitempty"`
+	DefaultProjectID int64            `json:"default_project_id,omitempty"`
+	ToProjectUID     string           `json:"to_project_uid,omitempty"`
+	Items            []MoveIssuesItem `json:"items" minItems:"1"`
 }
 
 // MoveIssuesItem selects an issue and its destination project.
@@ -1871,24 +1873,23 @@ type MoveIssuesItem struct {
 
 // MoveIssuesResult reports the outcome for one indexed input.
 type MoveIssuesResult struct {
-	Index           int        `json:"index"`
-	Ref             string     `json:"ref"`
-	UID             string     `json:"uid,omitempty"`
-	Result          string     `json:"result"`
-	Code            string     `json:"code,omitempty"`
-	Message         string     `json:"message,omitempty"`
-	Hint            string     `json:"hint,omitempty"`
-	From            string     `json:"from,omitempty"`
-	To              string     `json:"to,omitempty"`
-	FromProjectUID  string     `json:"from_project_uid,omitempty"`
-	ToProjectUID    string     `json:"to_project_uid,omitempty"`
-	ToProjectName   string     `json:"to_project_name,omitempty"`
-	OldShortID      string     `json:"old_short_id,omitempty"`
-	NewShortID      string     `json:"new_short_id,omitempty"`
-	ShortIDExtended bool       `json:"short_id_extended"`
-	EventID         int64      `json:"event_id,omitempty"`
-	Revision        int64      `json:"revision,omitempty"`
-	Descendants     []db.Issue `json:"descendants,omitempty"`
+	Index           int    `json:"index"`
+	Ref             string `json:"ref"`
+	UID             string `json:"uid,omitempty"`
+	Result          string `json:"result"`
+	Code            string `json:"code,omitempty"`
+	Message         string `json:"message,omitempty"`
+	Hint            string `json:"hint,omitempty"`
+	From            string `json:"from,omitempty"`
+	To              string `json:"to,omitempty"`
+	FromProjectUID  string `json:"from_project_uid,omitempty"`
+	ToProjectUID    string `json:"to_project_uid,omitempty"`
+	ToProjectName   string `json:"to_project_name,omitempty"`
+	OldShortID      string `json:"old_short_id,omitempty"`
+	NewShortID      string `json:"new_short_id,omitempty"`
+	ShortIDExtended bool   `json:"short_id_extended"`
+	EventID         int64  `json:"event_id,omitempty"`
+	Revision        int64  `json:"revision,omitempty"`
 }
 
 // MoveIssuesSummary counts the outcomes returned in this response.
@@ -1896,7 +1897,6 @@ type MoveIssuesSummary struct {
 	Moved     int `json:"moved"`
 	Unchanged int `json:"unchanged"`
 	Refused   int `json:"refused"`
-	WouldMove int `json:"would_move"`
 }
 
 // MoveIssuesResponse contains batch outcomes.

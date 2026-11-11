@@ -1005,18 +1005,17 @@ defaults to `all`, including closed history. `--query` adds lexical search;
 these selector flags require `--from-project`. Supply at least one filter. To move
 a whole project, use `kata projects merge`.
 
-Each input returns `moved`, `unchanged`, or `refused`; previews return
-`would_move`. Agent output prints every result in input order. JSON output
-contains `dry_run`, `summary`, and `results`, including each input's `index`,
-`ref`, result code, new short ID, collision extension flag, and event ID.
-Human output summarizes the batch and lists every result. Descendants are listed under their selected root.
+Each batch input returns `moved`, `unchanged`, or `refused`. Results appear in input order in human, agent, and JSON output, along with a summary. A single-issue preview uses the single-move output.
 
-Batch previews accept one item.
+Within a request, an earlier successful input reserves its issue and target. A later input for that issue and another target is refused as `duplicate_conflicting_target`; the same target returns `duplicate_item`. Each request checks its own revisions, so a selected duplicate on a later page may be refused as `revision_conflict` after an earlier page moves it.
+
+If a request fails, confirmed results remain visible. Submitted items without a confirmed result are `unknown`, while later items that were not submitted are `unattempted`. Check unknown items before retrying.
 
 | Result code | Meaning |
 | --- | --- |
 | `already_in_target` | The issue is already in its requested target. |
-| `duplicate_item` | An earlier input names the same issue and target. |
+| `duplicate_item` | An earlier successful input names the same issue and target in this request. |
+| `duplicate_conflicting_target` | An earlier successful input names the same issue and another target in this request. |
 | `revision_conflict` | A selected issue changed after selection. Rerun to select its current revision. |
 | `issue_move_tree_changed` | Subtree membership changed after validation. Retry to validate every member. |
 

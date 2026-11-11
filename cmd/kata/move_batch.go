@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -75,10 +75,7 @@ func parseRefsFrom(r io.Reader, defaultTarget string) ([]moveBatchItem, error) {
 				items = append(items, item)
 			}
 		}
-		if len(items) > 5000 {
-			return nil, moveBatchUsage("batch move accepts at most 5,000 items; split the input into separate runs")
-		}
-		if err == io.EOF {
+		if err == io.EOF || len(items) > 5000 {
 			break
 		}
 	}
@@ -175,6 +172,47 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 			selected[j].TargetProject = defaultTarget
 		}
 		items = append(items, selected...)
+	}
+	if len(items) > 5000 {
+		return moveBatchUsage("batch move accepts at most 5,000 items; split the input into separate runs")
+	}
+	if (opts.DryRun || opts.Subtree) && len(items) > 1 {
+		if opts.DryRun {
+			return moveBatchUsage("dry run accepts one item")
+		}
+		return moveBatchUsage("--subtree accepts one issue")
+	}
+	if (opts.DryRun || opts.Subtree) && len(items) == 1 && items[0].ParseError == "" {
+		previousProject := flags.Project
+		defer func() { flags.Project = previousProject }()
+		if sel.Project != "" && items[0].ExpectedRevision != 0 {
+			flags.Project = sel.Project
+		} else if parsed, err := shortid.Parse(items[0].Ref); err == nil && parsed.ULID != "" {
+			a, err := dialDaemon(cmd.Context())
+			if err != nil {
+				return err
+			}
+			client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			response, callErr := client.ShowIssueByUIDWithResponse(a.ctx, &generated.ShowIssueByUIDRequestOptions{PathParams: &generated.ShowIssueByUIDPath{UID: parsed.ULID}})
+			if response == nil {
+				return externalCLITransportError(response, callErr)
+			}
+			if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+				return err
+			}
+			if response.JSON200 == nil {
+				return errors.New("daemon returned an invalid issue response")
+			}
+			project, err := resolveProjectSelector(a, strconv.FormatInt(response.JSON200.Issue.ProjectID, 10))
+			if err != nil {
+				return err
+			}
+			flags.Project = project.Name
+		}
+		return runMove(cmd, items[0].Ref, items[0].TargetProject, opts.DryRun, !opts.Subtree)
 	}
 	if len(items) == 0 && sel.Project == "" {
 		return moveBatchUsage("move requires issue refs and a target project")
@@ -292,15 +330,6 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 }
 
 func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptions) error {
-	if len(items) > 5000 {
-		return moveBatchUsage("batch move accepts at most 5,000 items; split the input into separate runs")
-	}
-	if opts.DryRun && len(items) > 1 {
-		return moveBatchUsage("dry run accepts one item")
-	}
-	if opts.Subtree && len(items) > 1 {
-		return moveBatchUsage("--subtree accepts one issue")
-	}
 	a, err := dialDaemon(cmd.Context())
 	if err != nil {
 		return err
@@ -319,8 +348,6 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	actor, _ := resolveActor(a.ctx, flags.As, nil)
 	request := api.MoveIssuesRequest{}
 	request.Body.Actor = actor
-	request.Body.DryRun = opts.DryRun
-	request.Body.Subtree = opts.Subtree
 	request.Body.Comment = opts.Comment
 	request.Body.Teammate = opts.Teammate
 	needsDefault := false
@@ -341,22 +368,23 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	}
 	targets := map[string]string{}
 	indexes := make([]int, 0, len(items))
-	var results []api.MoveIssuesResult
+	results := make([]api.MoveIssuesResult, len(items))
 	for i, item := range items {
+		results[i] = api.MoveIssuesResult{Index: i, Ref: item.Ref}
 		uid, err := moveBatchTarget(a, item, targets)
 		if err != nil {
 			r := api.MoveIssuesResult{Index: i, Ref: item.Ref, Result: "refused", Message: err.Error()}
 			if ce, ok := errors.AsType[*cliError](err); ok {
 				r.Code, r.Message, r.Hint = ce.Code, ce.Message, ce.Hint
 			}
-			results = append(results, r)
+			results[i] = r
 			continue
 		}
 		indexes = append(indexes, i)
 		request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{Ref: item.Ref, ToProjectUID: uid, ExpectedRevision: item.ExpectedRevision})
 	}
 	if len(request.Body.Items) == 0 {
-		if err := printMoveBatch(cmd, results, len(items), opts); err != nil {
+		if err := printMoveBatch(cmd, results, len(items)); err != nil {
 			return err
 		}
 		if len(results) > 0 {
@@ -366,9 +394,9 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	}
 	// Encode every page before sending any mutation.
 	var pages []generated.MoveIssuesBody
-	for start := 0; start < len(request.Body.Items); start += 50 {
+	for start := 0; start < len(request.Body.Items); start += api.MoveBatchMaxItems {
 		page := request.Body
-		page.Items = request.Body.Items[start:min(start+50, len(request.Body.Items))]
+		page.Items = request.Body.Items[start:min(start+api.MoveBatchMaxItems, len(request.Body.Items))]
 		raw, err := json.Marshal(page)
 		if err != nil {
 			return err
@@ -387,17 +415,29 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		pages = append(pages, body)
 	}
 	printResults := func() error {
-		slices.SortFunc(results, func(a, b api.MoveIssuesResult) int { return a.Index - b.Index })
-		return printMoveBatch(cmd, results, len(items), opts)
+		return printMoveBatch(cmd, results, len(items))
 	}
 	for pageIndex, body := range pages {
-		start := pageIndex * 50
+		start := pageIndex * api.MoveBatchMaxItems
+		classify := func() {
+			for i := range results {
+				if results[i].Result == "" {
+					results[i].Result = "unattempted"
+				}
+			}
+			for _, i := range indexes[start : start+len(body.Items)] {
+				if results[i].Result == "unattempted" {
+					results[i].Result = "unknown"
+				}
+			}
+		}
 		response, callErr := client.MoveIssuesWithResponse(a.ctx, &generated.MoveIssuesRequestOptions{Body: &body})
 		if response == nil {
+			classify()
 			if err := printResults(); err != nil {
 				return err
 			}
-			message := "Connection failed; rerun the same input to continue"
+			message := "Connection failed; check unknown results before retrying"
 			if callErr != nil {
 				message += ": " + callErr.Error()
 			}
@@ -410,13 +450,14 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 				}
 				if json.Unmarshal(ce.Data, &partial) == nil {
 					for _, r := range partial.Results {
-						if r.Index >= 0 && r.Index < len(body.Items) {
+						if r.Index >= 0 && r.Index < len(body.Items) && r.Ref == request.Body.Items[start+r.Index].Ref && (r.Result == "moved" || r.Result == "unchanged" || r.Result == "refused") && results[indexes[start+r.Index]].Result == "" {
 							r.Index = indexes[start+r.Index]
-							results = append(results, r)
+							results[r.Index] = r
 						}
 					}
 				}
 			}
+			classify()
 			if printErr := printResults(); printErr != nil {
 				return printErr
 			}
@@ -426,19 +467,22 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			Results []api.MoveIssuesResult `json:"results"`
 		}
 		if err := json.Unmarshal(response.Body, &reply); err != nil {
+			classify()
 			if printErr := printResults(); printErr != nil {
 				return printErr
 			}
 			return err
 		}
 		if len(reply.Results) != len(body.Items) {
+			classify()
 			if printErr := printResults(); printErr != nil {
 				return printErr
 			}
 			return fmt.Errorf("invalid batch move result count")
 		}
 		for j, r := range reply.Results {
-			if r.Index != j || r.Index >= len(body.Items) || !slices.Contains([]string{"moved", "unchanged", "refused", "would_move"}, r.Result) {
+			if r.Index != j || r.Index >= len(body.Items) || r.Ref != request.Body.Items[start+j].Ref || (r.Result != "moved" && r.Result != "unchanged" && r.Result != "refused") {
+				classify()
 				if printErr := printResults(); printErr != nil {
 					return printErr
 				}
@@ -447,7 +491,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		}
 		for _, r := range reply.Results {
 			r.Index = indexes[start+r.Index]
-			results = append(results, r)
+			results[r.Index] = r
 		}
 	}
 	if err := printResults(); err != nil {
@@ -461,8 +505,15 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	return nil
 }
 
-func printMoveBatch(cmd *cobra.Command, results []api.MoveIssuesResult, requested int, opts moveBatchOptions) error {
-	summary := api.MoveIssuesSummary{}
+func printMoveBatch(cmd *cobra.Command, results []api.MoveIssuesResult, requested int) error {
+	type summaryCounts struct {
+		Moved       int `json:"moved"`
+		Unchanged   int `json:"unchanged"`
+		Refused     int `json:"refused"`
+		Unknown     int `json:"unknown"`
+		Unattempted int `json:"unattempted"`
+	}
+	summary := summaryCounts{}
 	for _, r := range results {
 		switch r.Result {
 		case "moved":
@@ -471,39 +522,27 @@ func printMoveBatch(cmd *cobra.Command, results []api.MoveIssuesResult, requeste
 			summary.Unchanged++
 		case "refused":
 			summary.Refused++
-		case "would_move":
-			summary.WouldMove++
+		case "unknown":
+			summary.Unknown++
+		case "unattempted":
+			summary.Unattempted++
 		}
-	}
-	if results == nil {
-		results = []api.MoveIssuesResult{}
 	}
 	if currentOutputMode() == outputJSON {
 		return json.MarshalWrite(cmd.OutOrStdout(), struct {
-			DryRun  bool                   `json:"dry_run"`
-			Summary api.MoveIssuesSummary  `json:"summary"`
+			Summary summaryCounts          `json:"summary"`
 			Results []api.MoveIssuesResult `json:"results"`
-		}{opts.DryRun, summary, results})
+		}{summary, results})
 	}
 	var out bytes.Buffer
 	if currentOutputMode() == outputAgent {
-		fmt.Fprintf(&out, "OK move-batch requested=%d moved=%d unchanged=%d refused=%d dry_run=%t", requested, summary.Moved, summary.Unchanged, summary.Refused, opts.DryRun)
-		if opts.DryRun {
-			fmt.Fprintf(&out, " would_move=%d", summary.WouldMove)
-		}
-		out.WriteByte('\n')
+		fmt.Fprintf(&out, "OK move-batch requested=%d moved=%d unchanged=%d refused=%d unknown=%d unattempted=%d\n", requested, summary.Moved, summary.Unchanged, summary.Refused, summary.Unknown, summary.Unattempted)
 	} else {
-		fmt.Fprintf(&out, "Move batch: %d moved, %d unchanged, %d refused", summary.Moved, summary.Unchanged, summary.Refused)
-		if opts.DryRun {
-			fmt.Fprintf(&out, ", %d would move (dry-run)", summary.WouldMove)
-		}
-		out.WriteByte('\n')
+		fmt.Fprintf(&out, "Move batch: %d moved, %d unchanged, %d refused, %d unknown, %d unattempted\n", summary.Moved, summary.Unchanged, summary.Refused, summary.Unknown, summary.Unattempted)
 	}
 	for _, r := range results {
 		fmt.Fprintf(&out, "- ref=%s result=%s", agentValue(r.Ref), r.Result)
-		if r.Result == "would_move" {
-			fmt.Fprintf(&out, " to_project=%s", agentValue(r.ToProjectName))
-		} else if r.To != "" {
+		if r.To != "" {
 			fmt.Fprintf(&out, " to=%s", agentValue(r.To))
 		}
 		if r.Code != "" {
@@ -522,15 +561,7 @@ func printMoveBatch(cmd *cobra.Command, results []api.MoveIssuesResult, requeste
 			fmt.Fprintf(&out, " hint=%s", agentValue(r.Hint))
 		}
 		out.WriteByte('\n')
-		for _, child := range r.Descendants {
-			fmt.Fprintf(&out, "- uid=%s result=%s descendant_of=%s", child.UID, r.Result, agentValue(r.Ref))
-			if opts.DryRun {
-				fmt.Fprintf(&out, " to_project=%s", agentValue(r.ToProjectName))
-			} else {
-				fmt.Fprintf(&out, " to=%s", agentValue(r.ToProjectName+"#"+child.ShortID))
-			}
-			out.WriteByte('\n')
-		}
+
 	}
 	_, err := io.Copy(cmd.OutOrStdout(), &out)
 	return err

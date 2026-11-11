@@ -16,8 +16,7 @@ func (batchRetryProbe) Error() string    { return "synthetic transient transacti
 func (batchRetryProbe) Code() int        { return 5 } // SQLITE_BUSY
 func (batchRetryProbe) SQLState() string { return "40001" }
 
-// Contract: a batch isolates refusals and commits moves and comments together,
-// while previews leave both events and access authority unchanged.
+// Contract: a batch isolates refusals and commits moves and comments together.
 func checkMoveBatch(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	src, err := store.CreateProject(ctx, "batch-source")
@@ -39,7 +38,7 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 	pinned, err := store.IssueByID(ctx, mat.NewIssueID)
 	require.NoError(t, err)
 	issues = append(issues[:1], append([]db.Issue{pinned}, issues[1:]...)...)
-	in := db.MoveIssuesBatchIn{Comment: "routed", DryRun: true}
+	in := db.MoveIssuesBatchIn{Comment: "routed"}
 	for n, i := range issues {
 		target := a.ID
 		if n == 3 {
@@ -47,29 +46,8 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 		}
 		in.Items = append(in.Items, db.MoveIssueProjectIn{IssueID: i.ID, FromProjectID: src.ID, ToProjectID: target, IfMatchRev: i.Revision, Single: true, Actor: "worker"})
 	}
-	cursor, err := store.MaxEventID(ctx)
-	require.NoError(t, err)
 	revision, err := store.ProjectAccessRevision(ctx)
 	require.NoError(t, err)
-	preview, err := store.MoveIssuesBatch(ctx, in)
-	require.NoError(t, err)
-	require.Len(t, preview.Results, 4)
-	require.ErrorAs(t, preview.Results[1].Err, new(*db.RecurrencePinnedError))
-	after, err := store.MaxEventID(ctx)
-	require.NoError(t, err)
-	require.Equal(t, cursor, after)
-	access, err := store.ProjectAccessRevision(ctx)
-	require.NoError(t, err)
-	require.Equal(t, revision, access)
-	for _, issue := range issues {
-		got, err := store.IssueByID(ctx, issue.ID)
-		require.NoError(t, err)
-		require.Equal(t, src.ID, got.ProjectID)
-		comments, err := store.CommentsByIssue(ctx, issue.ID)
-		require.NoError(t, err)
-		require.Empty(t, comments)
-	}
-	in.DryRun = false
 	out, err := store.MoveIssuesBatch(ctx, in)
 	require.NoError(t, err)
 	require.Len(t, out.Results, 4)
@@ -91,7 +69,7 @@ func checkMoveBatch(t *testing.T, store db.Storage) error {
 		require.Len(t, out.Results[n].Out.Events, 2)
 		require.Greater(t, out.Results[n].Out.Events[1].ID, out.Results[n].Out.EventID)
 	}
-	access, err = store.ProjectAccessRevision(ctx)
+	access, err := store.ProjectAccessRevision(ctx)
 	require.NoError(t, err)
 	require.Equal(t, revision+1, access)
 	// Contract: an authorization refusal rolls back only its savepoint, even
@@ -208,6 +186,26 @@ func checkMoveBatchCollision(t *testing.T, store db.Storage) error {
 	}
 	require.NotEqual(t, out.Results[0].Out.NewShortID, out.Results[1].Out.NewShortID)
 	require.Greater(t, len(out.Results[1].Out.NewShortID), len(out.Results[0].Out.NewShortID))
+
+	candidate, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: a.ID, Title: "mapped", Author: "worker"})
+	require.NoError(t, err)
+	resident, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "mapped resident", Author: "worker"})
+	require.NoError(t, err)
+	for _, issue := range []db.Issue{candidate, resident} {
+		_, err = store.UpsertImportMapping(ctx, db.ImportMappingParams{Source: "connector", ExternalID: "same", ObjectType: "issue", ProjectID: issue.ProjectID, IssueID: &issue.ID})
+		require.NoError(t, err)
+	}
+	out, err = store.MoveIssuesBatch(ctx, db.MoveIssuesBatchIn{Items: []db.MoveIssueProjectIn{
+		{IssueID: candidate.ID, FromProjectID: a.ID, ToProjectID: target.ID, IfMatchRev: candidate.Revision, Actor: "worker"},
+		{IssueID: candidate.ID, FromProjectID: a.ID, ToProjectID: b.ID, IfMatchRev: candidate.Revision, Actor: "worker"},
+	}})
+	require.NoError(t, err)
+	require.ErrorAs(t, out.Results[0].Err, new(*db.ProjectMergeImportMappingCollisionError))
+	require.NoError(t, out.Results[1].Err)
+	require.Equal(t, "moved", out.Results[1].Outcome)
+	got, err := store.IssueByID(ctx, candidate.ID)
+	require.NoError(t, err)
+	require.Equal(t, b.ID, got.ProjectID)
 	return nil
 }
 
@@ -249,43 +247,3 @@ func checkMoveBatchSelectedRevisions(t *testing.T, store db.Storage) error {
 
 // Logical membership includes no-op descendants. Both stores must return the
 // same discovery fence without moving, revising or commenting those members.
-func checkMoveBatchLogicalMembership(t *testing.T, store db.Storage) error {
-	ctx := t.Context()
-	source, err := store.CreateProject(ctx, "logical-source")
-	require.NoError(t, err)
-	target, err := store.CreateProject(ctx, "logical-target")
-	require.NoError(t, err)
-	root, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "root", Author: "worker"})
-	require.NoError(t, err)
-	// Exceed SQLite's expression-depth bound if no-op descendants become
-	// individual OR terms in import-mapping validation.
-	children := make([]db.Issue, 0, 1001)
-	expectedMembers := []db.IssueMoveMember{{IssueID: root.ID, ProjectID: source.ID}}
-	for range 1001 {
-		child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "already at target", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
-		require.NoError(t, err)
-		children = append(children, child)
-		expectedMembers = append(expectedMembers, db.IssueMoveMember{IssueID: child.ID, ProjectID: target.ID})
-	}
-	in := db.MoveIssuesBatchIn{Comment: "routed", DryRun: true, Items: []db.MoveIssueProjectIn{{IssueID: root.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: root.Revision, Actor: "worker"}}}
-	preview, err := store.MoveIssuesBatch(ctx, in)
-	require.NoError(t, err)
-	require.NoError(t, preview.Results[0].Err)
-	require.ElementsMatch(t, expectedMembers, preview.Results[0].Out.TreeMembers)
-	require.Len(t, preview.Results[0].Out.Issues, 1)
-	db.FenceIssueMove(&in.Items[0], preview.Results[0].Out)
-	in.DryRun = false
-	out, err := store.MoveIssuesBatch(ctx, in)
-	require.NoError(t, err)
-	require.NoError(t, out.Results[0].Err)
-	for _, child := range children {
-		got, err := store.IssueByID(ctx, child.ID)
-		require.NoError(t, err)
-		require.Equal(t, child, got)
-		comments, err := store.CommentsByIssue(ctx, child.ID)
-		require.NoError(t, err)
-		require.Empty(t, comments)
-	}
-
-	return nil
-}

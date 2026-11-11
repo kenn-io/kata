@@ -4783,6 +4783,29 @@ components:
         - event_id
         - changed
       type: object
+    MoveIssuesBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        comment:
+          type: string
+        default_project_id:
+          format: int64
+          type: integer
+        items:
+          items:
+            $ref: "#/components/schemas/MoveIssuesItem"
+          maxItems: 50
+          minItems: 1
+          type: array
+        teammate:
+          type: string
+        to_project_uid:
+          type: string
+      required:
+        - items
+      type: object
     MoveIssuesItem:
       additionalProperties: false
       properties:
@@ -4793,35 +4816,6 @@ components:
           type: string
         to_project_uid:
           type: string
-      type: object
-    MoveIssuesRequestBody:
-      additionalProperties: false
-      properties:
-        actor:
-          type: string
-        comment:
-          type: string
-        default_project_id:
-          format: int64
-          type: integer
-        dry_run:
-          description: Preview one item.
-          type: boolean
-        items:
-          items:
-            $ref: "#/components/schemas/MoveIssuesItem"
-          maxItems: 50
-          minItems: 1
-          type: array
-        subtree:
-          description: Include descendants; requires exactly one item.
-          type: boolean
-        teammate:
-          type: string
-        to_project_uid:
-          type: string
-      required:
-        - items
       type: object
     MoveIssuesResponseBody:
       additionalProperties: true
@@ -4841,10 +4835,6 @@ components:
       properties:
         code:
           type: string
-        descendants:
-          items:
-            $ref: "#/components/schemas/Issue"
-          type: array
         event_id:
           format: int64
           type: integer
@@ -4898,14 +4888,10 @@ components:
         unchanged:
           format: int64
           type: integer
-        would_move:
-          format: int64
-          type: integer
       required:
         - moved
         - unchanged
         - refused
-        - would_move
       type: object
     MutationResponseBody:
       additionalProperties: true
@@ -8599,7 +8585,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/MoveIssuesRequestBody"
+              $ref: "#/components/schemas/MoveIssuesBody"
         required: true
       responses:
         "200":

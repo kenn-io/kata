@@ -147,31 +147,6 @@ func TestMoveBatchPreservesInheritedTransactionFence(t *testing.T) {
 	require.Equal(t, source.ID, got.ProjectID)
 }
 
-// Existing single-move errors identify the failing descendant so its rule can be resolved.
-func TestMoveBatchDescendantRefusalNamesIssue(t *testing.T) {
-	store := openClaimGateHelperDB(t)
-	src, root := createClaimGateHelperIssue(t, store)
-	target, err := store.CreateProject(t.Context(), "routing-target")
-	require.NoError(t, err)
-	rec, _, err := store.CreateRecurrence(t.Context(), db.CreateRecurrenceIn{ProjectID: src.ID, Actor: "agent", Rule: "FREQ=WEEKLY", DTStart: "2026-10-12", Timezone: "UTC", Template: db.RecurrenceTemplate{Title: "pinned child"}})
-	require.NoError(t, err)
-	mat, err := store.MaterializeNext(t.Context(), rec.ID, "2026-10-12", "agent")
-	require.NoError(t, err)
-	child, err := store.IssueByID(t.Context(), mat.NewIssueID)
-	require.NoError(t, err)
-	_, err = store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: root.ID, Type: "parent", Author: "agent"})
-	require.NoError(t, err)
-	req := &api.MoveIssuesRequest{}
-	req.Body.Actor = "agent"
-	req.Body.Subtree = true
-	req.Body.ToProjectUID = target.UID
-	req.Body.Items = []api.MoveIssuesItem{{Ref: root.UID}}
-	out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
-	require.NoError(t, err)
-	require.Equal(t, "recurrence_pinned", out.Body.Results[0].Code)
-	require.Contains(t, out.Body.Results[0].Message, src.Name+"#"+child.ShortID, "batch must retain the descendant needed to resolve a refusal")
-}
-
 func TestMoveBatchHostDenialIsolationHTTP(t *testing.T) {
 	store := openClaimGateHelperDB(t)
 	denied, first := createClaimGateHelperIssue(t, store)

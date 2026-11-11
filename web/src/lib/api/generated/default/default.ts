@@ -183,7 +183,7 @@ import type {
   MoveIssuePathParameters,
   MoveIssueRequestBody,
   MoveIssueResponseBody,
-  MoveIssuesRequestBody,
+  MoveIssuesBody,
   MoveIssuesResponseBody,
   MutationResponseBody,
   NotifyIssuePathParameters,
@@ -1725,7 +1725,7 @@ export const getMoveIssuesUrl = () => {
  * Move independent issues. On an execution error, error.data contains completed results.
  */
 export const moveIssues = async (
-  moveIssuesRequestBody: MoveIssuesRequestBody,
+  moveIssuesBody: MoveIssuesBody,
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<moveIssuesResponse> => {
   const getHeaders = (
@@ -1740,7 +1740,7 @@ export const moveIssues = async (
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
-    body: JSON.stringify(moveIssuesRequestBody),
+    body: JSON.stringify(moveIssuesBody),
   })
 }
 

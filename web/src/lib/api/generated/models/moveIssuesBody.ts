@@ -3,19 +3,15 @@
  */
 import type { MoveIssuesItem } from './moveIssuesItem.ts'
 
-export interface MoveIssuesRequestBody {
+export interface MoveIssuesBody {
   actor?: string
   comment?: string
   default_project_id?: number
-  /** Preview one item. */
-  dry_run?: boolean
   /**
    * @minItems 1
    * @maxItems 50
    */
   items: MoveIssuesItem[]
-  /** Include descendants; requires exactly one item. */
-  subtree?: boolean
   teammate?: string
   to_project_uid?: string
 }

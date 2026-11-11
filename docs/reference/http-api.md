@@ -265,7 +265,7 @@ this acknowledgement on every page: older daemons can ignore the query and
 return unfiltered project events. The TUI stops pagination with an upgrade
 daemon message when the acknowledgement is missing or changes between pages.
 
-Batch moves accept up to 50 items per request; dry runs accept one item.
+Batch moves accept up to 50 items per request. Use the single-issue move endpoint for previews. Duplicate decisions apply within each request; a stale expected revision is refused on a later request.
 
 ### Version history
 

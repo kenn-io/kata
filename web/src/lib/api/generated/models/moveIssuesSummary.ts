@@ -6,6 +6,5 @@ export interface MoveIssuesSummary {
   moved: number
   refused: number
   unchanged: number
-  would_move: number
   [key: string]: unknown
 }

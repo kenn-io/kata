@@ -4908,28 +4908,16 @@ func (m MoveIssueResponseBody) Validate() error {
 	return errors
 }
 
-type MoveIssuesItem struct {
-	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
-	Ref              *string `json:"ref,omitempty"`
-	ToProjectUID     *string `json:"to_project_uid,omitempty"`
+type MoveIssuesBody struct {
+	Actor            *string          `json:"actor,omitempty"`
+	Comment          *string          `json:"comment,omitempty"`
+	DefaultProjectID *int64           `json:"default_project_id,omitempty"`
+	Items            []MoveIssuesItem `json:"items" validate:"required"`
+	Teammate         *string          `json:"teammate,omitempty"`
+	ToProjectUID     *string          `json:"to_project_uid,omitempty"`
 }
 
-type MoveIssuesRequestBody struct {
-	Actor            *string `json:"actor,omitempty"`
-	Comment          *string `json:"comment,omitempty"`
-	DefaultProjectID *int64  `json:"default_project_id,omitempty"`
-
-	// DryRun Preview one item.
-	DryRun *bool            `json:"dry_run,omitempty"`
-	Items  []MoveIssuesItem `json:"items" validate:"required"`
-
-	// Subtree Include descendants; requires exactly one item.
-	Subtree      *bool   `json:"subtree,omitempty"`
-	Teammate     *string `json:"teammate,omitempty"`
-	ToProjectUID *string `json:"to_project_uid,omitempty"`
-}
-
-func (m MoveIssuesRequestBody) Validate() error {
+func (m MoveIssuesBody) Validate() error {
 	var errors runtime.ValidationErrors
 	if err := typesValidator.Var(m.Items, "required"); err != nil {
 		errors = errors.Append("Items", err)
@@ -4951,6 +4939,12 @@ func (m MoveIssuesRequestBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type MoveIssuesItem struct {
+	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
+	Ref              *string `json:"ref,omitempty"`
+	ToProjectUID     *string `json:"to_project_uid,omitempty"`
 }
 
 type MoveIssuesResponseBody struct {
@@ -4983,7 +4977,6 @@ func (m MoveIssuesResponseBody) Validate() error {
 
 type MoveIssuesResult struct {
 	Code            *string `json:"code,omitempty"`
-	Descendants     []Issue `json:"descendants,omitempty"`
 	EventID         *int64  `json:"event_id,omitempty"`
 	From            *string `json:"from,omitempty"`
 	FromProjectUID  *string `json:"from_project_uid,omitempty"`
@@ -5003,31 +4996,13 @@ type MoveIssuesResult struct {
 }
 
 func (m MoveIssuesResult) Validate() error {
-	var errors runtime.ValidationErrors
-	for i, item := range m.Descendants {
-		if v, ok := any(item).(runtime.Validator); ok {
-			if err := v.Validate(); err != nil {
-				errors = errors.Append(fmt.Sprintf("Descendants[%d]", i), err)
-			}
-		}
-	}
-	if err := typesValidator.Var(m.Ref, "required"); err != nil {
-		errors = errors.Append("Ref", err)
-	}
-	if err := typesValidator.Var(m.Result, "required"); err != nil {
-		errors = errors.Append("Result", err)
-	}
-	if len(errors) == 0 {
-		return nil
-	}
-	return errors
+	return runtime.ConvertValidatorError(typesValidator.Struct(m))
 }
 
 type MoveIssuesSummary struct {
 	Moved     int64 `json:"moved"`
 	Refused   int64 `json:"refused"`
 	Unchanged int64 `json:"unchanged"`
-	WouldMove int64 `json:"would_move"`
 }
 
 type MutationResponseBody struct {

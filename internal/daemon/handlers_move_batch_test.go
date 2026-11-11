@@ -54,6 +54,59 @@ func TestMoveIssuesBatch_HTTPRejectsMoreThan50(t *testing.T) {
 	require.Equal(t, source.ID, got.ProjectID)
 }
 
+func TestMoveIssuesBatch_RejectsSubtreeAndDryRun(t *testing.T) {
+	for _, field := range []string{"subtree", "dry_run"} {
+		t.Run(field, func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("tok"))
+			source, target, issue := seedMovePair(t, env)
+			body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q,"%s":true,"items":[{"ref":%q}]}`, target.UID, field, issue.UID)
+			resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", body, "")
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+			require.NoError(t, resp.Body.Close())
+			got, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, source.ID, got.ProjectID)
+		})
+	}
+}
+
+func TestMoveIssuesBatch_DuplicateDifferentTargets(t *testing.T) {
+	for _, reversed := range []bool{false, true} {
+		t.Run(fmt.Sprint(reversed), func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("tok"))
+			source, firstTarget, issue := seedMovePair(t, env)
+			secondTarget, err := env.DB.CreateProject(t.Context(), "other-target")
+			require.NoError(t, err)
+			if reversed {
+				firstTarget, secondTarget = secondTarget, firstTarget
+			}
+			before, err := env.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			body := fmt.Sprintf(`{"actor":"tester","comment":"routed","items":[{"ref":%q,"to_project_uid":%q},{"ref":%q,"to_project_uid":%q}]}`, issue.UID, firstTarget.UID, source.Name+"#"+issue.ShortID, secondTarget.UID)
+			out := postMoveBatch(t, env, body)
+			require.Len(t, out.Results, 2)
+			require.Equal(t, "moved", out.Results[0].Result)
+			require.Equal(t, "refused", out.Results[1].Result)
+			require.Equal(t, "duplicate_conflicting_target", out.Results[1].Code)
+			got, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, firstTarget.ID, got.ProjectID)
+			comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
+			events, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: firstTarget.ID, AfterID: before, Limit: 100})
+			require.NoError(t, err)
+			moves := 0
+			for _, event := range events {
+				if event.Type == "issue.moved" {
+					moves++
+				}
+			}
+			require.Equal(t, 1, moves)
+		})
+	}
+}
+
 func TestMoveIssuesBatch_MixedTargetsAndRerun(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	src, a, first := seedMovePair(t, env)
@@ -113,7 +166,6 @@ func TestMoveIssuesBatch_RejectMultipleSubtreeInputs(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
-	require.Contains(t, string(raw), "subtree move accepts one item")
 	for _, issue := range []db.Issue{root, child} {
 		got, err := env.DB.IssueByID(t.Context(), issue.ID)
 		require.NoError(t, err)
