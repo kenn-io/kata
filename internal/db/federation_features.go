@@ -19,7 +19,7 @@ const CronEventFeature = "cron_v1"
 const IssueMoveEventFeature = "issue_move_v1"
 
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + CronWorkflowArgvEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.

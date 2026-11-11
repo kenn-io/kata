@@ -33,10 +33,10 @@ func TestResetEventFeaturesRequireRecipientSupport(t *testing.T) {
 	legacy := RemoteEvent{Type: "cron.workflow.snapshot", Payload: []byte(`{"definition":{"version":1,"steps":[{"key":"run","kind":"command","command":"echo"}]}}`)}
 	malformed := RemoteEvent{Type: "cron.workflow.snapshot", Payload: []byte(`{"definition":{"version":1,"steps":[{"key":"run","kind":"argv","argv":[]}]}}`)}
 	for _, tc := range []struct {
-		name string
-		event RemoteEvent
+		name     string
+		event    RemoteEvent
 		features string
-		wantErr bool
+		wantErr  bool
 	}{
 		{"legacy peer", legacy, "", false},
 		{"old peer", valid, CronEventFeature, true},

@@ -180,6 +180,25 @@ func requireUsableResetEvents(events []RemoteEvent) error {
 	return nil
 }
 
+// requireResetRecipientFeatures checks the exact checkpoint before disclosure or activation.
+func requireResetRecipientFeatures(events []RemoteEvent, features string) error {
+	if err := requireUsableResetEvents(events); err != nil {
+		return err
+	}
+	for _, event := range events {
+		argv, held := retainedWorkflowEvidence(event.Type, string(event.Payload))
+		if held {
+			return fmt.Errorf("%w: held workflow definition", ErrUnsupportedEventFeatures)
+		}
+		if argv {
+			if err := RequireEventFeatures(features, CronWorkflowArgvEventFeature); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func remoteResetFoldEvents(events []RemoteEvent) []FoldEvent {
 	result := make([]FoldEvent, 0, len(events))
 	for _, event := range events {

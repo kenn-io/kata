@@ -6,11 +6,11 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+
+	"go.kenn.io/kata/internal/cron"
 )
 
-// CronWorkflowArgvEventFeature is reserved for literal argument workflow steps.
-// Recognizing a required format does not make this daemon a supported decoder;
-// keep it out of SupportedEventFeatures until the complete contract is supported.
+// CronWorkflowArgvEventFeature identifies literal argument workflow steps.
 const CronWorkflowArgvEventFeature = "cron_workflow_argv_v1"
 
 func workflowDefinitionEvent(kind string) bool {
@@ -129,6 +129,9 @@ AND (e.payload LIKE '%argv%' OR e.payload LIKE '%null%' OR e.payload LIKE '%\u%'
 // Keep historical decode-only warnings unchanged. Only the reserved kind and
 // the explicit null shapes held by the old decoder affect negotiation.
 func retainedWorkflowEvidence(kind, payload string) (bool, bool) {
+	if !workflowDefinitionEvent(kind) {
+		return false, false
+	}
 	var envelope struct {
 		Definition jsontext.Value `json:"definition"`
 	}
@@ -174,7 +177,10 @@ func retainedWorkflowEvidence(kind, payload string) (bool, bool) {
 			return false, true
 		}
 		var stepKind string
-		if err := json.Unmarshal(step.Kind, &stepKind); err == nil && stepKind == "argv" {
+		if err := json.Unmarshal(step.Kind, &stepKind); err == nil && stepKind != "argv" && len(step.Argv) != 0 {
+			return false, true
+		}
+		if stepKind == "argv" {
 			reserved = true
 			if len(step.Argv) == 0 || step.Argv.Kind() == 'n' {
 				return false, true
@@ -184,6 +190,11 @@ func retainedWorkflowEvidence(kind, payload string) (bool, bool) {
 	argv, err := payloadHasArgvWorkflow(kind, payload)
 	if err != nil {
 		return false, reserved
+	}
+	if argv {
+		if _, err := cron.DecodeWorkflow(definition); err != nil {
+			return false, true
+		}
 	}
 	return argv, false
 }
