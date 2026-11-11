@@ -26,10 +26,7 @@ import (
 )
 
 func TestLocalEmbeddingsSetupStatus(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	home := clearLocalEmbeddingsEnv(t)
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".kenn"), []byte("unrelated file"), 0o600))
 	for _, tc := range []struct{ provider, url string }{
 		{"ollama", "http://127.0.0.1:11434/v1"},
