@@ -3977,6 +3977,7 @@ describe('App', () => {
               })
             if (path.endsWith('/references'))
               return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+            if (path.endsWith('/attachment-route')) return Response.json({ route: null })
             snapshotReads += 1
             if (removeProject) delete accepted.catalog[0]!.project.metadata.role
             return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
