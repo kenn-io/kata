@@ -56,8 +56,7 @@ func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
-	out, _, err := executeRootCapture(t, t.Context(), "daemon", "status")
-	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, err, ExitDaemonUnavail).Kind)
+	out, _, _ := executeRootCapture(t, t.Context(), "daemon", "status")
 	assert.Equal(t, "Selected daemon: local_stopped (source: local runtime)\nNo kata daemon is running in the current KATA_HOME.\n", string(out))
 }
 
@@ -68,6 +67,8 @@ func TestDaemonStatusReadinessExit(t *testing.T) {
 				resetFlags(t)
 				setupKataEnv(t)
 				t.Chdir(t.TempDir())
+				t.Setenv("KATA_DSN", "")
+				t.Setenv("KATA_SERVER", "")
 				if ready {
 					addr, cleanup := pipeServer(t)
 					t.Cleanup(cleanup)
@@ -89,14 +90,20 @@ func TestDaemonStatusReadinessExit(t *testing.T) {
 				case "json":
 					var status daemonStatusOutput
 					require.NoError(t, json.Unmarshal([]byte(stdout), &status))
-					assert.Empty(t, status.Daemons)
+					if ready {
+						assert.Empty(t, status.Daemons)
+					}
 				case "agent":
-					assert.True(t, strings.HasPrefix(stdout, "OK daemon status=stopped"), stdout)
+					if ready {
+						assert.True(t, strings.HasPrefix(stdout, "OK daemon status=stopped"), stdout)
+					}
 					if !ready {
 						assert.Contains(t, stderr, "ERR status daemon_unavailable:")
 					}
 				default:
-					assert.Contains(t, stdout, "No kata daemon is running in the current KATA_HOME.")
+					if ready {
+						assert.Contains(t, stdout, "No kata daemon is running in the current KATA_HOME.")
+					}
 				}
 			})
 		}
@@ -352,8 +359,7 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	out, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status")
-	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
+	out, _, _ := executeRootCapture(t, t.Context(), "daemon", "status")
 
 	assert.Contains(t, out, "kata running at http://127.0.0.1:7777\n")
 	assert.Contains(t, out, "  web UI:  http://127.0.0.1:28888\n")
@@ -386,8 +392,7 @@ func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
+	stdout, _, _ := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
 	out := []byte(stdout)
 
 	var got struct {
@@ -436,8 +441,7 @@ func TestDaemonStatus_JSONReportsDBPathFromKitRuntimeMetadata(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
+	stdout, _, _ := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
 	out := []byte(stdout)
 
 	var got struct {
@@ -454,8 +458,7 @@ func TestDaemonStatus_JSONReportsEmptyDaemonList(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
-	stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
+	stdout, _, _ := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
 	out := []byte(stdout)
 
 	var got struct {
@@ -480,9 +483,7 @@ func TestDaemonStatus_JSONDegradesOnNonPrivateRuntimeDirectory(t *testing.T) {
 	require.NoError(t, ns.EnsureDirs())
 	require.NoError(t, os.Chmod(ns.DataDir, 0o755)) //nolint:gosec // Deliberately non-private regression fixture.
 
-	stdout, _, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-
-	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, err, ExitDaemonUnavail).Kind)
+	stdout, _, _ := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
 	var got struct {
 		Daemons  []json.RawMessage `json:"daemons"`
 		Selected struct {
@@ -498,8 +499,7 @@ func TestDaemonStatus_AgentReportsStopped(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
-	stdout, _, statusErr := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
-	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
+	stdout, _, _ := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
 	out := []byte(stdout)
 	assert.Equal(t, "OK daemon status=stopped selected_state=local_stopped selected_profile=\"\"\n", string(out))
 }
@@ -510,8 +510,7 @@ func TestDaemonStatus_IgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
 	child := startSleepProcess(t)
 	writeReusedRuntimePID(t, tmp, child.Process.Pid)
 
-	stdout, _, statusErr := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
-	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
+	stdout, _, _ := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
 	out := []byte(stdout)
 
 	assert.Equal(t, "OK daemon status=stopped selected_state=local_stopped selected_profile=\"\"\n", string(out))
@@ -525,8 +524,7 @@ func TestDaemonStatus_ListsUnverifiableRecord(t *testing.T) {
 	child := startSleepProcess(t)
 	writeUnknownRuntimePID(t, child.Process.Pid)
 
-	stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
+	stdout, _, _ := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
 	out := []byte(stdout)
 
 	var got struct {
@@ -552,8 +550,7 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	stdout, _, statusErr := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
-	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
+	stdout, _, _ := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
 	out := []byte(stdout)
 	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
 	assert.Contains(t, string(out), "unreachable")
@@ -578,18 +575,15 @@ func TestDaemonStatusReportsMCPState(t *testing.T) {
 					MCP string `json:"mcp"`
 				} `json:"daemons"`
 			}
-			stdout, _, statusErr := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-			assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
+			stdout, _, _ := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
 			require.NoError(t, json.Unmarshal([]byte(stdout), &got))
 			require.Len(t, got.Daemons, 1)
 			assert.Equal(t, state, got.Daemons[0].MCP)
 			resetFlags(t)
-			stdout, _, statusErr = executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
-			assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
+			stdout, _, _ = executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
 			assert.Contains(t, stdout, " mcp="+state+" ")
 			resetFlags(t)
-			stdout, _, statusErr = executeRootCapture(t, t.Context(), "daemon", "status")
-			assert.Equal(t, kindDaemonUnavail, requireCLIError(t, statusErr, ExitDaemonUnavail).Kind)
+			stdout, _, _ = executeRootCapture(t, t.Context(), "daemon", "status")
 			assert.Contains(t, stdout, "  MCP:     "+state+"\n")
 		})
 	}

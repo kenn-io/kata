@@ -94,9 +94,8 @@ Diagnosis, status, health, and locate never start the selected daemon.
 `daemon status` lists current-home processes and reports `selected` separately.
 Use that selected state to distinguish a healthy personal process from a
 stopped work profile. Diagnose returns the state even when it is not ready.
-For an unavailable selection, `daemon status` exits 7; an unknown named daemon
-exits 3. See the [CLI reference](../reference/cli.md) for other errors. Failed
-recovery, health, and locate also return an error.
+A non-ready `daemon status`, failed recovery, health, and locate return an
+error. See the [CLI reference](../reference/cli.md) for exit codes.
 
 If routing configuration is invalid, diagnose reports `state=selection_error`
 and a `message` explaining the failure. Status still lists current-home processes
