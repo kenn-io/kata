@@ -29,9 +29,21 @@ func TestRetainedWorkflowArgvActivation(t *testing.T) {
 }
 
 func TestResetEventFeaturesRequireRecipientSupport(t *testing.T) {
-	valid := RemoteEvent{Type: "cron.workflow.snapshot", Payload: []byte(`{"definition":{"version":1,"steps":[{"key":"run","kind":"argv","argv":["echo",""]}]}}`)}
-	legacy := RemoteEvent{Type: "cron.workflow.snapshot", Payload: []byte(`{"definition":{"version":1,"steps":[{"key":"run","kind":"command","command":"echo"}]}}`)}
-	malformed := RemoteEvent{Type: "cron.workflow.snapshot", Payload: []byte(`{"definition":{"version":1,"steps":[{"key":"run","kind":"argv","argv":[]}]}}`)}
+	snapshot := func(definition string) RemoteEvent {
+		return RemoteEvent{
+			EventUID: "01ARZ3NDEKTSV4RRFFQ69G5FAD", OriginInstanceUID: "01ARZ3NDEKTSV4RRFFQ69G5FAC",
+			ProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAB", Actor: "worker", HLCPhysicalMS: 2,
+			Type: "cron.workflow.snapshot",
+			Payload: []byte(`{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","project_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAB",` +
+				`"name":"Review","author":"worker","created_at":"2026-10-03T12:00:00Z","updated_at":"2026-10-03T12:00:01Z",` +
+				`"definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAE",` +
+				`"definition_hlc":{"version":1,"physical_ms":1,"counter":0,"origin_instance_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAC"},` +
+				`"definition":` + definition + `}`),
+		}
+	}
+	valid := snapshot(`{"version":1,"steps":[{"key":"run","kind":"argv","argv":["echo",""]}]}`)
+	legacy := snapshot(`{"version":1,"steps":[{"key":"run","kind":"command","command":"echo"}]}`)
+	malformed := snapshot(`{"version":1,"steps":[{"key":"run","kind":"argv","argv":[]}]}`)
 	for _, tc := range []struct {
 		name     string
 		event    RemoteEvent
