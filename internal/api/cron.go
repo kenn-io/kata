@@ -107,6 +107,18 @@ type ListCronDefinitionsRequest struct {
 	IncludeDeleted bool  `query:"include_deleted"`
 }
 
+// CronWorkflowReadRequest declares the caller's supported workflow formats.
+type CronWorkflowReadRequest struct {
+	CronDefinitionRequest
+	EventFeatures string `header:"X-Kata-Event-Features"`
+}
+
+// ListCronWorkflowsRequest declares formats supported by the catalog reader.
+type ListCronWorkflowsRequest struct {
+	ListCronDefinitionsRequest
+	EventFeatures string `header:"X-Kata-Event-Features"`
+}
+
 // CronDefinitionActionBody attributes a lifecycle change and supplies its expected revision.
 type CronDefinitionActionBody struct {
 	Actor            string `json:"actor,omitempty"`
@@ -158,6 +170,7 @@ type ReplaceCronJobRequest struct {
 // CreateCronWorkflowRequest creates a workflow in the selected project.
 type CreateCronWorkflowRequest struct {
 	ProjectID int64 `path:"project_id"`
+	RawBody   []byte
 	Body      PutCronWorkflowBody
 }
 

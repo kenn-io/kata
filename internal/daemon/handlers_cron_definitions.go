@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"net/http"
 	"strings"
@@ -22,6 +24,8 @@ func cronAPIError(ctx context.Context, cfg ServerConfig, err error, projectID in
 		return apiErr
 	}
 	switch {
+	case errors.Is(err, db.ErrUnsupportedEventFeatures):
+		return federationFeatureError(err)
 	case errors.Is(err, db.ErrNotFound):
 		return api.NewError(404, "not_found", "cron not found", "", nil)
 	case errors.Is(err, cron.ErrInvalid):
@@ -258,12 +262,18 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 		return out, nil
 	}
 	huma.Register(h, huma.Operation{OperationID: "createCronWorkflow", Method: http.MethodPost, Path: path, DefaultStatus: 201}, func(ctx context.Context, in *api.CreateCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
+		if err := decodeCronWorkflowBody(in.RawBody, &in.Body); err != nil {
+			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", false)
+		}
 		return put(ctx, in.ProjectID, "", in.Body, false)
 	})
 	huma.Register(h, huma.Operation{OperationID: "replaceCronWorkflow", Method: http.MethodPut, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.ReplaceCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
+		if err := decodeCronWorkflowBody(in.RawBody, &in.Body); err != nil {
+			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, false)
+		}
 		return put(ctx, in.ProjectID, in.UID, in.Body, false)
 	})
-	huma.Register(h, huma.Operation{OperationID: "showCronWorkflow", Method: http.MethodGet, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.CronDefinitionRequest) (*api.CronWorkflowResponse, error) {
+	huma.Register(h, huma.Operation{OperationID: "showCronWorkflow", Method: http.MethodGet, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.CronWorkflowReadRequest) (*api.CronWorkflowResponse, error) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
@@ -271,11 +281,14 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, false)
 		}
+		if err := requireWorkflowReadFeatures(in.EventFeatures, value.Definition); err != nil {
+			return nil, err
+		}
 		out := &api.CronWorkflowResponse{}
 		out.Body.Workflow = api.CronWorkflowFrom(value)
 		return out, nil
 	})
-	huma.Register(h, huma.Operation{OperationID: "listCronWorkflows", Method: http.MethodGet, Path: path}, func(ctx context.Context, in *api.ListCronDefinitionsRequest) (*api.ListCronWorkflowsResponse, error) {
+	huma.Register(h, huma.Operation{OperationID: "listCronWorkflows", Method: http.MethodGet, Path: path}, func(ctx context.Context, in *api.ListCronWorkflowsRequest) (*api.ListCronWorkflowsResponse, error) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
@@ -286,6 +299,9 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 		out := &api.ListCronWorkflowsResponse{}
 		out.Body.Workflows = []api.CronWorkflow{}
 		for _, value := range values {
+			if err := requireWorkflowReadFeatures(in.EventFeatures, value.Definition); err != nil {
+				return nil, err
+			}
 			out.Body.Workflows = append(out.Body.Workflows, api.CronWorkflowFrom(value))
 		}
 		return out, nil
@@ -311,4 +327,31 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 			return put(ctx, in.ProjectID, in.UID, api.PutCronWorkflowBody{Actor: in.Body.Actor, Name: value.Name, Definition: api.CronWorkflowDefinitionFrom(value.Definition), ExpectedEventUID: in.Body.ExpectedEventUID}, action.deleted)
 		})
 	}
+}
+
+// Parse the original definition before typed input can erase member presence.
+func decodeCronWorkflowBody(raw []byte, body *api.PutCronWorkflowBody) error {
+	var envelope struct {
+		Definition jsontext.Value `json:"definition"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return errors.Join(cron.ErrInvalid, err)
+	}
+	definition, err := cron.ParseWorkflow(envelope.Definition)
+	if err != nil {
+		return err
+	}
+	body.Definition = api.CronWorkflowDefinitionFrom(definition)
+	return nil
+}
+
+func requireWorkflowReadFeatures(features string, definition cron.WorkflowDefinition) error {
+	for _, step := range definition.Steps {
+		if step.Kind == "argv" {
+			if err := db.RequireEventFeatures(features, db.CronWorkflowArgvEventFeature); err != nil {
+				return federationFeatureError(err)
+			}
+		}
+	}
+	return nil
 }

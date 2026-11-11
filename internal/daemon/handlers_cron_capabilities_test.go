@@ -27,7 +27,11 @@ func TestCronCapabilitiesEmptyProjectReadOnly(t *testing.T) {
 		EventFeatures []string `json:"event_features"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &body))
-	require.Equal(t, []string{"cron_v1"}, body.EventFeatures)
+	want := []string{db.CronEventFeature}
+	if db.RequireEventFeatures(db.SupportedEventFeatures, db.CronWorkflowArgvEventFeature) == nil {
+		want = append(want, db.CronWorkflowArgvEventFeature)
+	}
+	require.Equal(t, want, body.EventFeatures)
 	require.Contains(t, string(raw), project.UID)
 	after, err := env.DB.UIEventCursor(t.Context())
 	require.NoError(t, err)

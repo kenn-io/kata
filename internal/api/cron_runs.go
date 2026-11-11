@@ -59,7 +59,8 @@ type CronRunRequest struct {
 // ObserveCronRunRequest pairs immutable run identity with reported evidence.
 type ObserveCronRunRequest struct {
 	CronRunRequest
-	Body ObserveCronRunBody
+	EventFeatures string `header:"X-Kata-Event-Features"`
+	Body          ObserveCronRunBody
 }
 
 // CronRunResponse returns one flat observation without execution authority.
