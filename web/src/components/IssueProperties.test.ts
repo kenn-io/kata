@@ -255,7 +255,7 @@ describe('IssueProperties', () => {
     })
     await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
     await fireEvent.click(screen.getByRole('button', { name: /Scheduled: Dec 31/ }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Dec 31, 2025', exact: true }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Dec 31, 2025' }))
     expect(onPatchMetadata).not.toHaveBeenCalled()
   })
 

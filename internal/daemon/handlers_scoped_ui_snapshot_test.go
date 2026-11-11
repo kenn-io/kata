@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -45,9 +47,11 @@ func (s *projectionCountingUIStore) IssueScopedMembers(
 // before any projection read; a moved cursor invalidates it.
 func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 	instrumented := &projectionCountingUIStore{}
+	now := time.Date(2026, 1, 1, 4, 59, 59, 0, time.UTC)
 	env := testenv.New(t,
 		testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity(),
 		testenv.Option(func(cfg *daemon.ServerConfig) {
+			cfg.UIClock = func() time.Time { return now }
 			instrumented.Storage = cfg.DB
 			instrumented.UIStore = cfg.DB.(db.UIStore)
 			cfg.DB = instrumented
@@ -58,6 +62,10 @@ func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 	require.NoError(t, err)
 	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", nil)
 	child := createScopedHTTPTestIssue(t, env, project.ID, "Child", &root)
+	saved, err := metadata.NewScheduleValue("2025-12-31", "America/New_York")
+	require.NoError(t, err)
+	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: root.ID, Actor: "user-a", Patch: map[string]jsontext.Value{"scheduled_on": saved}})
+	require.NoError(t, err)
 	expiresAt := time.Now().UTC().Add(time.Hour)
 	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
@@ -93,6 +101,16 @@ func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 		map[string]string{"Authorization": "Bearer bootstrap-token"})
 	require.Equalf(t, http.StatusOK, wideResp.StatusCode, "body: %s", wideBody)
 	require.NotEqual(t, etag, wideResp.Header.Get("ETag"))
+
+	// A saved zone's midnight changes the projection even without an event.
+	now = now.Add(time.Second)
+	resp, body = envDoRaw(t, env, http.MethodGet, query, nil,
+		map[string]string{"Authorization": "Bearer worker-token", "If-None-Match": etag})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
+	require.NotEqual(t, etag, resp.Header.Get("ETag"))
+	etag = resp.Header.Get("ETag")
+	instrumented.snapshotReads.Store(0)
+	instrumented.subtreeReads.Store(0)
 
 	// A moved durable cursor invalidates the scoped validator: the next
 	// conditional request rebuilds the snapshot instead of returning 304.

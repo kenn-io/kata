@@ -46,6 +46,33 @@ func TestIssueTimezoneLegacyEchoFreezesKnownZone(t *testing.T) {
 	}
 }
 
+func TestIssueScheduleUsesExistingAliasTimezone(t *testing.T) {
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = "US/Eastern" })
+	p := seedProject(t, env, "example-project")
+	for _, tc := range []struct{ name, metadata, zone string }{
+		{"daemon default", `{}`, "US/Eastern"},
+		{"existing issue timezone", `{"timezone":"US/Pacific"}`, "US/Pacific"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Legacy", Author: "tester"})
+			require.NoError(t, err)
+			_, err = env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, tc.metadata, issue.ID)
+			require.NoError(t, err)
+			status, raw := cronHTTP(t, env, http.MethodPost, fmt.Sprintf("%s/issues/%s/metadata", projectPath(p.ID), issue.ShortID), map[string]any{"actor": "tester", "patch": map[string]any{"scheduled_on": "2026-11-12T09:00"}})
+			require.Equal(t, http.StatusOK, status, string(raw))
+			stored, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			var fields map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal([]byte(stored.Metadata), &fields))
+			saved, err := metadata.DecodeSavedSchedule(fields["scheduled_on"])
+			require.NoError(t, err)
+			require.NotNil(t, saved)
+			require.Equal(t, tc.zone, saved.Timezone)
+			require.Equal(t, metadata.ScheduleTZDataVersion, saved.TZDataVersion)
+		})
+	}
+}
+
 func TestIssueCreatePreservesSuppliedScheduleRules(t *testing.T) {
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = "Europe/Paris" })
 	p := seedProject(t, env, "example-project")

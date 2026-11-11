@@ -45,7 +45,7 @@ describe('projectIssueDetail', () => {
         status: 'open',
         scheduled_on_date: '2026-11-12',
         deadline_on_date: '2026-11-13',
-        metadata: { scheduled_on: 'future-format', deadline_on: { value: 'future-format' } },
+        metadata: { scheduled_on: 'future-format', deadline_on: { value: 'future-format', timezone: 'UTC', tzdata_version: tzdataVersion } },
       },
     })
     expect(detail.issue.scheduledOn).toBe('2026-11-12')

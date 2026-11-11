@@ -9,6 +9,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCalendarBoundaryFindsDateRollback(t *testing.T) {
+	for _, tc := range []struct{ zone, now, today, want string }{
+		{"America/St_Johns", "2000-10-29T02:30:58Z", "2000-10-29", "2000-10-29T02:31:00Z"},
+		{"Pacific/Apia", "2011-12-30T09:59:58Z", "2011-12-29", "2011-12-30T10:00:00Z"},
+		{"America/New_York", "2026-03-08T06:00:00Z", "2026-03-08", "2026-03-09T04:00:00Z"},
+	} {
+		t.Run(tc.zone, func(t *testing.T) {
+			loc, err := ScheduleLocation(tc.zone, ScheduleTZDataVersion)
+			require.NoError(t, err)
+			now, err := time.Parse(time.RFC3339, tc.now)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, nextCalendarDay(now, loc, tc.today).UTC().Format(time.RFC3339))
+		})
+	}
+}
+
 func TestScheduledOnDueDateUsesIssueTimezone(t *testing.T) {
 	now := time.Date(2026, 9, 1, 0, 30, 0, 0, time.UTC)
 

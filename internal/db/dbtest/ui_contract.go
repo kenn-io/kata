@@ -1196,6 +1196,7 @@ func RunUISnapshotSavedCalendarContract(t *testing.T, open func(*testing.T) db.S
 	require.Equal(t, "2026-01-01", all.Issues[0].ScheduledOnToday)
 }
 
+// RunUISnapshotLimitIgnoresUnseenFutureSchedule checks calendar membership beyond the limit.
 func RunUISnapshotLimitIgnoresUnseenFutureSchedule(t *testing.T, open func(*testing.T) db.Storage) {
 	t.Helper()
 	store := open(t)

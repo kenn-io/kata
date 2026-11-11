@@ -3,12 +3,14 @@ package dbtest
 import (
 	"encoding/json/jsontext"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
 )
 
+// RunRecurrenceAttachmentKeepsDeadlineZone checks the existing deadline after attachment.
 func RunRecurrenceAttachmentKeepsDeadlineZone(t *testing.T, open func(*testing.T) db.Storage) {
 	for _, tc := range []struct {
 		name        string
@@ -16,8 +18,16 @@ func RunRecurrenceAttachmentKeepsDeadlineZone(t *testing.T, open func(*testing.T
 		defaultZone string
 	}{
 		{"issue zone", jsontext.Value(`"America/New_York"`), "UTC"},
+		{"legacy Local issue zone", jsontext.Value(`"Local"`), "UTC"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "legacy Local issue zone" {
+				zone, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
+				require.NoError(t, err)
+				previous := time.Local
+				time.Local = zone
+				t.Cleanup(func() { time.Local = previous })
+			}
 			store := open(t)
 			ctx := t.Context()
 			project := createCursorProject(ctx, t, store)

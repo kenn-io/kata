@@ -104,6 +104,56 @@ func TestAttachRecurrencePreservesDeadlineZone(t *testing.T) {
 	}
 }
 
+func TestAttachRecurrencePreservesLocalDeadline(t *testing.T) {
+	local, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	previous := time.Local
+	time.Local = local
+	t.Cleanup(func() { time.Local = previous })
+	raw := jsontext.Value(`{"timezone":"Local","deadline_on":"2026-05-19T09:00"}`)
+	got, err := ComposeExistingRecurrenceIssueMetadata(raw, "2026-05-18", "Europe/London", "UTC")
+	require.NoError(t, err)
+	_, zone, at, _, err := metadata.ScheduleFieldInstant(string(got), "deadline_on", "")
+	require.NoError(t, err)
+	assert.Equal(t, "America/New_York", zone)
+	assert.Equal(t, time.Date(2026, 5, 19, 13, 0, 0, 0, time.UTC), at.UTC())
+}
+
+func TestAttachRecurrenceRejectsUnportableLocalDeadline(t *testing.T) {
+	previous := time.Local
+	t.Cleanup(func() { time.Local = previous })
+	for _, tc := range []struct {
+		name, zone, want string
+		offset           int
+	}{
+		{"different rules", "America/New_York", "Local timezone rules differ", -8 * 60 * 60},
+		{"unknown zone", "Unmapped/Zone", "cannot save Local timezone", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			time.Local = time.FixedZone(tc.zone, tc.offset)
+			_, err := ComposeExistingRecurrenceIssueMetadata(jsontext.Value(`{"timezone":"Local","deadline_on":"2026-05-19T09:00"}`), "2026-05-18", "Europe/London", "UTC")
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestExistingLocalIssueScheduleUsesPortableHostRules(t *testing.T) {
+	zone, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
+	require.NoError(t, err)
+	previous := time.Local
+	time.Local = zone
+	t.Cleanup(func() { time.Local = previous })
+	patch := map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-05-19T09:00"`)}
+	got, err := PrepareIssueSchedules(jsontext.Value(`{"timezone":"Local"}`), patch, "UTC", "")
+	require.NoError(t, err)
+	saved, err := metadata.DecodeSavedSchedule(got["scheduled_on"])
+	require.NoError(t, err)
+	require.Equal(t, "America/New_York", saved.Timezone)
+	time.Local = time.FixedZone("America/New_York", -8*60*60)
+	_, err = PrepareIssueSchedules(jsontext.Value(`{"timezone":"Local"}`), patch, "UTC", "")
+	require.ErrorContains(t, err, "Local timezone rules differ")
+}
+
 func TestRecurrenceLocalRejectsChangedDeadlineCalendarDate(t *testing.T) {
 	previous := time.Local
 	time.Local = time.FixedZone("America/Inuvik", -6*60*60)

@@ -661,7 +661,7 @@ func readUIIssues(
 	}
 	limit := min(query.Limit, 1000)
 	statement += ` ORDER BY i.updated_at DESC, i.id DESC`
-	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules && !filterDelegated && query.CalendarBoundary == nil {
+	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules && !filterDelegated {
 		statement += ` LIMIT ?`
 		args = append(args, limit)
 	}

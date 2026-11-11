@@ -222,17 +222,20 @@ func CalendarDateAndToday(
 
 // nextCalendarDay finds the first second after now with a different local day.
 func nextCalendarDay(now time.Time, location *time.Location, today string) time.Time {
-	start := now.Unix()
-	end := start + 48*60*60
-	for start+1 < end {
-		middle := start + (end-start)/2
-		if time.Unix(middle, 0).In(location).Format(time.DateOnly) == today {
-			start = middle
-		} else {
-			end = middle
+	current := now.In(location)
+	for {
+		_, offset := current.Zone()
+		year, month, day := current.Date()
+		midnight := time.Date(year, month, day+1, 0, 0, 0, 0, time.UTC).Add(-time.Duration(offset) * time.Second)
+		_, transition := current.ZoneBounds()
+		if transition.IsZero() || !transition.Before(midnight) {
+			return midnight
+		}
+		current = transition.In(location)
+		if current.Format(time.DateOnly) != today {
+			return transition
 		}
 	}
-	return time.Unix(end, 0)
 }
 
 // decodePlanningField reads one planning field and the issue timezone, so a

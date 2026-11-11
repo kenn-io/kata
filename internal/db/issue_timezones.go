@@ -25,8 +25,14 @@ func portableIssueTimezone(zone string) bool {
 // legacyScheduleZoneKnown reports whether a legacy string schedule resolves to a usable zone.
 func legacyScheduleZoneKnown(issueZone jsontext.Value, field, defaultZone, recurrenceZone string) bool {
 	var zone string
-	if json.Unmarshal(issueZone, &zone) == nil && portableIssueTimezone(zone) {
-		return true
+	if json.Unmarshal(issueZone, &zone) == nil {
+		if zone == "Local" {
+			_, err := portableLocalZone()
+			return err == nil
+		}
+		if bundledScheduleZone(zone) {
+			return true
+		}
 	}
 	if len(issueZone) > 0 {
 		return false
@@ -35,7 +41,12 @@ func legacyScheduleZoneKnown(issueZone jsontext.Value, field, defaultZone, recur
 		_, err := metadata.ScheduleLocation(recurrenceZone, metadata.ScheduleTZDataVersion)
 		return err == nil
 	}
-	return portableIssueTimezone(defaultZone)
+	return bundledScheduleZone(defaultZone)
+}
+
+func bundledScheduleZone(zone string) bool {
+	_, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion)
+	return err == nil
 }
 
 // PrepareIssueSchedules validates and freezes schedule changes together.
@@ -138,7 +149,18 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		if zone == "" {
 			zone = "UTC"
 		}
-		if source != "recurrence timezone" && !portableIssueTimezone(zone) {
+		legacyLocal := source == "issue timezone" && zone == "Local" && !changedZone
+		if legacyLocal {
+			zone, err = portableLocalZone()
+			if err != nil {
+				if !utcInstant {
+					return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
+				}
+				zone = "UTC"
+				legacyLocal = false
+			}
+		}
+		if source != "recurrence timezone" && !bundledScheduleZone(zone) {
 			if !utcInstant {
 				return nil, fmt.Errorf("%w: %s requires a portable issue timezone or daemon timezone in config.toml (effective %s %q)", metadata.ErrInvalidValue, field, source, zone)
 			}
@@ -152,6 +174,11 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		result[field], err = metadata.NewScheduleValue(value, zone)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
+		}
+		if legacyLocal {
+			if err := compareLocalSchedule(value, result[field]); err != nil {
+				return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
+			}
 		}
 	}
 	return result, nil

@@ -78,15 +78,10 @@ func composeRecurrenceIssueMetadata(
 	issueTimezone := timezone
 	local := timezone == "Local"
 	if local {
-		timezone = time.Local.String()
-		if timezone == "Local" {
-			timezone = recurrenceclient.LocalZone(recurrenceclient.DefaultLocaltimePath)
-		}
-		if timezone == "" || timezone == "Local" {
-			return nil, fmt.Errorf("%w: cannot identify Local timezone; change the recurrence to a named IANA timezone", ErrInvalidRecurrence)
-		}
-		if _, err := metadata.ScheduleLocation(timezone, metadata.ScheduleTZDataVersion); err != nil {
-			return nil, fmt.Errorf("%w: cannot save Local timezone %q; change the recurrence to a named IANA timezone: %v", ErrInvalidRecurrence, timezone, err)
+		var err error
+		timezone, err = portableLocalZone()
+		if err != nil {
+			return nil, err
 		}
 	}
 	object, err := decodeRecurrenceTemplateMetadata(metadataValue)
@@ -126,6 +121,20 @@ func composeRecurrenceIssueMetadata(
 	return value, nil
 }
 
+func portableLocalZone() (string, error) {
+	zone := time.Local.String()
+	if zone == "Local" {
+		zone = recurrenceclient.LocalZone(recurrenceclient.DefaultLocaltimePath)
+	}
+	if zone == "" || zone == "Local" {
+		return "", fmt.Errorf("%w: cannot identify Local timezone; change it to a named IANA timezone", ErrInvalidRecurrence)
+	}
+	if _, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion); err != nil {
+		return "", fmt.Errorf("%w: cannot save Local timezone %q: %v", ErrInvalidRecurrence, zone, err)
+	}
+	return zone, nil
+}
+
 func freezeRecurrenceDeadline(object map[string]jsontext.Value, recurrenceZone, defaultZone string, local, template bool) error {
 	raw := object["deadline_on"]
 	if len(raw) == 0 || string(raw) == "null" {
@@ -150,11 +159,18 @@ func freezeRecurrenceDeadline(object map[string]jsontext.Value, recurrenceZone, 
 			zone = "UTC"
 		}
 	}
+	localDeadline := template && local || zone == "Local"
+	if zone == "Local" {
+		zone, err = portableLocalZone()
+		if err != nil {
+			return err
+		}
+	}
 	object["deadline_on"], err = metadata.NewScheduleValue(deadline, zone)
 	if err != nil {
 		return fmt.Errorf("%w: deadline_on: %v", ErrInvalidRecurrence, err)
 	}
-	if template && local {
+	if localDeadline {
 		return compareLocalSchedule(deadline, object["deadline_on"])
 	}
 	return nil

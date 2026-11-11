@@ -31,15 +31,16 @@ func TestPrepareIssueSchedules(t *testing.T) {
 		{"portable override", "{}", `{"$field":"2026-11-12","timezone":"UTC"}`, "Local", "", "UTC", false},
 		{"UTC unusable default", "{}", `{"$field":"2026-11-12T10:30:00Z"}`, "Local", "", "UTC", false},
 		{"omitted default", "{}", `{"$field":"2026-11-12"}`, "UTC", "", "UTC", false},
+		{"existing alias", `{"timezone":"US/Eastern"}`, `{"$field":"2026-11-12"}`, "UTC", "", "US/Eastern", false},
+		{"default alias", "{}", `{"$field":"2026-11-12"}`, "US/Eastern", "", "US/Eastern", false},
 		{"legacy echo", `{"timezone":"Local","scheduled_on":"2026-11-12"}`, `{"timezone":"Local"}`, "Local", "", "", false},
-		{"legacy schedule edit", `{"timezone":"Local"}`, `{"$field":"2026-11-12"}`, "UTC", "", "", true},
 		{"unrelated invalid zone", `{"timezone":17}`, `{"topic":"x"}`, "Local", "", "", false},
 		{"restored clear", `{"timezone":17,"$field":"2026-11-12"}`, `{"$field":null}`, "Local", "", "", false},
 		{"restored no-op", `{"timezone":17,"$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "Local", "", "", false},
 		{"legacy no-op with known zone", `{"timezone":"America/New_York","$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "UTC", "", "America/New_York", false},
 		{"legacy no-op with daemon zone", `{"$field":"2026-11-12T09:00"}`, `{"$field":"2026-11-12T09:00"}`, "America/New_York", "", "America/New_York", false},
 		{"legacy no-op with recurrence zone", `{"$field":"2026-11-12"}`, `{"$field":"2026-11-12"}`, "UTC", "US/Eastern", "US/Eastern", false},
-		{"deadline needs portable default", `{"timezone":"US/Eastern","scheduled_on":"2026-11-12"}`, `{"deadline_on":"2026-11-14"}`, "Local", "US/Eastern", "", true},
+		{"deadline uses existing alias", `{"timezone":"US/Eastern","scheduled_on":"2026-11-12"}`, `{"deadline_on":"2026-11-14"}`, "Local", "US/Eastern", "US/Eastern", false},
 		{"clear recurrence zone", `{"timezone":"US/Eastern","scheduled_on":"2026-11-12"}`, `{"timezone":null,"scheduled_on":"2026-11-15"}`, "Local", "US/Eastern", "US/Eastern", false},
 		{"restored UTC", `{"timezone":17}`, `{"$field":"2026-11-12T10:30:00Z"}`, "Local", "", "UTC", false},
 		{"restored civil", `{"timezone":17}`, `{"$field":"2026-11-12"}`, "UTC", "", "", true},
@@ -53,6 +54,9 @@ func TestPrepareIssueSchedules(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fields := []string{"scheduled_on"}
+			if strings.Contains(tc.patch, `"deadline_on"`) {
+				fields = []string{"deadline_on"}
+			}
 			if strings.Contains(tc.current+tc.patch, "$field") && tc.recurrence == "" {
 				fields = append(fields, "deadline_on")
 			}

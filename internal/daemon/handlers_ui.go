@@ -170,6 +170,15 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 					return nil, internalAPIError(err)
 				}
 				observedCursor = &cursor
+				if issueScopeFromContext(ctx) != nil {
+					key, err := scopedSnapshotValidatorKey(intent, cursor, policy, in.IfNoneMatch)
+					if err != nil {
+						return nil, internalAPIError(err)
+					}
+					if _, _, ok := authorityCache.get(key); ok {
+						return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: in.IfNoneMatch}, nil
+					}
+				}
 			}
 			_, scopedIssueIDs, err := applyIssueScopeToUISnapshot(ctx, cfg.DB, &intent)
 			if err != nil {
@@ -283,6 +292,13 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
+			if scopedIssueIDs != nil {
+				key, err := scopedSnapshotValidatorKey(intent, data.Cursor, policy, validator)
+				if err != nil {
+					return nil, internalAPIError(err)
+				}
+				authorityCache.put(key, db.UISnapshotData{Cursor: data.Cursor, CalendarBoundary: data.CalendarBoundary}, nil)
+			}
 			recordUISnapshotDependencies(ctx, dependencies)
 			if matchesStrongETag(in.IfNoneMatch, validator) {
 				return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: validator}, nil
@@ -386,6 +402,13 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return referencesResponse(data, policy, validator), nil
 		})
+}
+
+// scopedSnapshotValidatorKey caches only a scoped validator, never its projection.
+func scopedSnapshotValidatorKey(intent normalizedUISnapshotIntent, cursor int64, policy uiPolicy, validator string) (string, error) {
+	intent.CalendarAt = ""
+	key, err := makeUIETag(intent, cursor, policy)
+	return "scoped-validator:" + key + ":" + validator, err
 }
 
 func applyIssueScopeToUISnapshot(

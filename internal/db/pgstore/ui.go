@@ -602,7 +602,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 	}
 	limit := min(query.Limit, 1000)
 	statement += ` ORDER BY i.updated_at DESC, i.id DESC`
-	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules && !filterDelegated && query.CalendarBoundary == nil {
+	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules && !filterDelegated {
 		args = append(args, limit)
 		statement += fmt.Sprintf(` LIMIT $%d`, len(args)) // #nosec G202 -- only a generated placeholder number is interpolated.
 	}
