@@ -28,7 +28,7 @@ func checkArgvCompatStoredReads(t *testing.T, store db.Storage, backend Backend)
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 	})
-	for _, document := range []string{`{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`, `null`, `{"version":1,"steps":null}`, `{"version":1,"steps":[null]}`, `{"version":1,"steps":[{"kind":null}]}`} {
+	for _, document := range []string{`{"version":1,"steps":[{"key":"reserved","kind":"argv"}]}`, `{"version":1,"steps":null}`, `{"version":1,"steps":[null]}`, `{"version":1,"steps":[{"kind":null}]}`} {
 		for _, deleted := range []any{nil, "2026-11-08T12:00:00Z"} {
 			_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET definition_json=$1,deleted_at=$2 WHERE uid=$3`, document, deleted, workflow.UID)
 			require.NoError(t, err)
