@@ -62,7 +62,7 @@ func TestFederationRebuildRetriesChangedRows(t *testing.T) {
 	}
 }
 
-func TestMoveRebuildPreparesLargeIssueScope(t *testing.T) {
+func TestFederationMaterializationPreparesLargeIssueScope(t *testing.T) {
 	ctx := t.Context()
 	d, project, first := incrementalTestStore(t)
 	second, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "second", Author: "tester"})
@@ -77,6 +77,7 @@ func TestMoveRebuildPreparesLargeIssueScope(t *testing.T) {
 		_, _, err = d.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{EventType: "issue.labeled", Label: issue.Title, Actor: "tester"})
 		require.NoError(t, err)
 	}
+	// SQLite's default parameter limit is 32,766; the project ID adds one more.
 	scope := make([]string, 32_767)
 	for i := range scope {
 		scope[i] = fmt.Sprintf("absent-%05d", i)
