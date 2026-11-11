@@ -16,6 +16,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -263,6 +264,12 @@ func TestRelayHTTPTransportPrefixAndRevocation(t *testing.T) {
 		require.NoError(t, err)
 		status, _, raw = f.request(t, http.MethodPost, base+":accept", "", db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{heldEnvelope}}, headers)
 		require.Equal(t, http.StatusConflict, status, string(raw))
+		var heldResponse api.ErrorEnvelope
+		require.NoError(t, json.Unmarshal(raw, &heldResponse))
+		require.Equal(t, "unsupported_event_features", heldResponse.Error.Code)
+		require.Contains(t, heldResponse.Error.Hint, "backup")
+		require.Contains(t, heldResponse.Error.Hint, "retained history")
+		require.NotContains(t, heldResponse.Error.Hint, "Upgrade the peer")
 		status, _, raw = f.request(t, http.MethodPost, base+":accept", "", batch, headers)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var accepted db.RelayAcceptance

@@ -1752,6 +1752,9 @@ func issueSyncFederationConflict() error {
 }
 
 func federationFeatureError(err error) error {
+	if errors.Is(err, db.ErrHeldWorkflowEvidence) {
+		return api.NewError(http.StatusConflict, "unsupported_event_features", err.Error(), "Take an owner backup and consult the held legacy workflows recovery procedure; retained history may continue to block relay.", nil)
+	}
 	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
 		return api.NewError(http.StatusConflict, "unsupported_event_features", err.Error(), "Upgrade the peer to support the required event features listed in this error", nil)
 	}

@@ -256,15 +256,13 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 			if err := validator.validateLocalReference(ctx, project, ref.kind, *ref.id, *ref.event); err != nil {
 				return err
 			}
-			if ref.kind == "workflow" {
+			if ref.kind == "workflow" && value.Status == "running" {
 				document, known := validator.idx.documents[cronDefinitionReference{projectID: project.ID, kind: ref.kind, uid: *ref.id, event: *ref.event}]
-				if !known && value.Status == "running" {
+				if !known {
 					return fmt.Errorf("%w: workflow revision document is unavailable", cron.ErrInvalid)
 				}
-				if known {
-					if _, err := cron.DecodeWorkflow([]byte(document)); err != nil {
-						return fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
-					}
+				if _, err := cron.DecodeWorkflow([]byte(document)); err != nil {
+					return fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
 				}
 			}
 		}

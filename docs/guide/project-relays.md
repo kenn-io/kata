@@ -15,6 +15,17 @@ can reach each other again.
 participating daemon.
 The connection preview checks the upstream daemon's protocol support.
 
+## Workflow compatibility
+
+Relay peers refuse synchronization when the project's retained workflow history
+requires a format they cannot support. Upgrade the affected peer before retrying.
+A held legacy workflow also blocks relay, even if the peer advertises support.
+Take an [owner backup](../operations/backup-restore.md#full-backup) and follow
+[held legacy workflow recovery](../reference/cron.md#held-legacy-workflows).
+Creating a supported replacement does not remove the original retained history,
+so the refusal can remain until a compatible version can recover that evidence.
+The refusal does not advance relay cursors or revoke the enrollment.
+
 ## Choose the shape you need
 
 Connect directly to a root hub when you only need a local replica. Add an

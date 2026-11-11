@@ -77,8 +77,8 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, err)
 	for _, section := range []string{"source", "entity"} {
 		for _, definition := range []string{
-			`{"version":1,"steps":[{"key":"literal","kind":"argv","argv":["echo","hi"]}]}`,
-			`{"version":1,"steps":[{"key":"literal","kind":"argv"}]}`,
+			`{"version":2,"steps":[{"key":"literal","kind":"command","command":"true"}]}`,
+			`{"version":1,"steps":[{"key":"literal","kind":"future-step"}]}`,
 			`{"version":1,"steps":null}`,
 		} {
 			bad := checkpointWithWorkflowDefinition(t, checkpoint, project, pin, private, section, definition)

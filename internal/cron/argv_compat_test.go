@@ -12,6 +12,8 @@ import (
 func TestArgvCompatStoredDecodeRefusesReservedKind(t *testing.T) {
 	for _, input := range []string{
 		`null`,
+		`{"version":2,"steps":[]}`,
+		`{"version":1,"steps":[{"kind":"future"}]}`,
 		`{"steps":null}`,
 		`{"steps":[null]}`,
 		`{"steps":[{"kind":null}]}`,

@@ -215,9 +215,6 @@ func syncRelayStreams(ctx context.Context, store db.Storage, binding db.Federati
 			if len(batch.Envelopes) == 0 {
 				break
 			}
-			if err := db.CheckRelayBatchFeatures(batch, db.SupportedEventFeatures); err != nil {
-				return err
-			}
 			accepted, err := store.AcceptRelayDeliveries(ctx, c.BindingUID, batch)
 			if err != nil {
 				return recordRelayEventQuarantine(ctx, store, binding, db.FederationQuarantineDirectionPull, batch, err, validateLease)
