@@ -976,6 +976,14 @@ var storageScenarios = []scenario{
 		run: checkProjectFederationEnrollmentScope,
 	},
 	{
+		name: "federation push accepted retention",
+		methods: []string{
+			"AdvanceFederationPushCursor", "CreateIssue", "CreateProject", "FederationPushAcceptedThrough",
+			"PendingFederationPushEvents", "RecordFederationPushAccepted", "UpsertFederationBinding",
+		},
+		run: checkFederationPushAccepted,
+	},
+	{
 		name:    "federation push snapshot runs",
 		methods: []string{"CreateProject", "CreateIssue", "InsertRemoteEvent", "PendingFederationPushEvents"},
 		run:     checkFederationPushSnapshotRuns,

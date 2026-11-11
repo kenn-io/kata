@@ -37,7 +37,8 @@ func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, project
  JOIN federation_bindings b ON b.project_id=e.project_id
  WHERE e.type='issue.moved' AND e.origin_instance_uid=$1
  AND b.role='spoke' AND b.relay_config IS NULL
- AND e.id>b.push_cursor_event_id`, originInstanceUID)
+ AND e.id>b.push_cursor_event_id
+ AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)`, originInstanceUID)
 	if err != nil {
 		return err
 	}
@@ -84,6 +85,7 @@ func federationMoveSourceHasPendingEvents(
  WHERE e.project_id=$1 AND e.origin_instance_uid=$2`
 	var pending bool
 	if err := tx.QueryRowContext(ctx, movedIssueEvents+` AND e.id>b.push_cursor_event_id
+ AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
  AND e.type IN (`+FederationPushEventTypesSQL()+`))`,
 		projectID, originInstanceUID).Scan(&pending); err != nil {
 		return false, err
@@ -521,6 +523,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
  WHERE e.project_id<>$1 AND e.origin_instance_uid=$2
  AND `+issueUIDExpr+` IN (SELECT uid FROM issues WHERE project_id=$1)
  AND e.id>b.push_cursor_event_id
+ AND NOT EXISTS (SELECT 1 FROM federation_push_accepted a WHERE a.project_id=e.project_id AND a.event_id=e.id)
  AND e.type IN (`+FederationPushEventTypesSQL()+`))`, projectID, originInstanceUID).Scan(&pending); err != nil {
 		return err
 	}
