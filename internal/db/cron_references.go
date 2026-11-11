@@ -444,3 +444,14 @@ SELECT project_id,uid,type,origin_instance_uid,hlc_physical_ms,hlc_counter,paylo
 WHERE type LIKE 'cron.%' AND (((type LIKE 'cron.job.%' OR type LIKE 'cron.workflow.%') AND (json_extract(payload,'$.uid') IN (SELECT value FROM requested_uids) OR json_extract(payload,'$.definition_event_uid') IN (SELECT value FROM requested_versions))) OR (type IN ('cron.run.observed','cron.run.snapshot') AND (json_extract(payload,'$.job_uid') IN (SELECT value FROM requested_uids) OR json_extract(payload,'$.workflow_uid') IN (SELECT value FROM requested_uids) OR json_extract(payload,'$.definition_event_uid') IN (SELECT value FROM requested_versions) OR json_extract(payload,'$.workflow_definition_event_uid') IN (SELECT value FROM requested_versions))))`,
 	}
 }
+
+// cronRetainedWorkflowRevisionQuery finds only project-scoped definition evidence.
+func cronRetainedWorkflowRevisionQuery(postgres bool) string {
+	versions, reference := "SELECT value FROM json_each($2)", "json_extract(payload,'$.definition_event_uid')"
+	if postgres {
+		versions, reference = "SELECT jsonb_array_elements_text($2::jsonb) AS value", "(payload::jsonb ->> 'definition_event_uid')"
+	}
+	return `WITH requested_versions AS (` + versions + `)
+SELECT uid,type,origin_instance_uid,hlc_physical_ms,hlc_counter,` + reference + `,payload FROM events
+WHERE project_id=$1 AND type LIKE 'cron.%' AND type LIKE 'cron.workflow.%' AND (uid IN (SELECT value FROM requested_versions) OR ` + reference + ` IN (SELECT value FROM requested_versions))`
+}

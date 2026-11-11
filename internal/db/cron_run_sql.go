@@ -275,7 +275,7 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 				return fmt.Errorf("%w: job revision is unsupported: %v", cron.ErrInvalid, err)
 			}
 			if job.Action.WorkflowUID != "" {
-				if _, err := cronDependency(ctx, tx, project.ID, "cron_workflows", "workflow", job.Action.WorkflowUID); err != nil {
+				if _, err := cronDependency(ctx, tx, a.Postgres, project.ID, "cron_workflows", "workflow", job.Action.WorkflowUID); err != nil {
 					return err
 				}
 			}
