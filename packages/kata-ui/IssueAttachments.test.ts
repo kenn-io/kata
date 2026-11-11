@@ -325,6 +325,7 @@ it('shows actions only for references the host can read', async () => {
     attachments: { local: entry, remote },
     baseURL: '/attachments',
     fetchAttachment: async () => new Blob(['data']),
+    uploadAttachment: async () => {},
   })
   expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
   expect(screen.getAllByRole('button', { name: 'Download screen.png' })).toHaveLength(1)
@@ -334,5 +335,6 @@ it('shows actions only for references the host can read', async () => {
     attachments: { local: entry, remote },
     baseURL: '/attachments',
   })
+  expect(screen.getByRole('button', { name: 'Attach files' })).toBeTruthy()
   expect(screen.getAllByRole('button', { name: 'Download screen.png' })).toHaveLength(1)
 })

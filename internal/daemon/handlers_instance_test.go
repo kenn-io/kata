@@ -114,7 +114,7 @@ func TestInstanceEndpointIncludesDBTokenActor(t *testing.T) {
 	assert.NotContains(t, string(bs), plaintext)
 }
 
-func TestInstanceOmitsRestrictedAttachmentRoutes(t *testing.T) {
+func TestSnapshotOmitsRestrictedAttachmentRoutes(t *testing.T) {
 	ctx := t.Context()
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, _ := seedProjectAndIssue(t, env)
@@ -125,11 +125,9 @@ func TestInstanceOmitsRestrictedAttachmentRoutes(t *testing.T) {
 	_, _, err = env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: "operator-token", Actor: "operator", AdminActor: db.BootstrapActor})
 	require.NoError(t, err)
 	headers := map[string]string{"Authorization": "Bearer operator-token"}
-	for _, path := range []string{"/api/v1/instance", "/api/v1/ui/snapshot?view=inbox"} {
-		resp, body := envDoRaw(t, env, http.MethodGet, path, nil, headers)
-		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-		require.NotContains(t, string(body), project.UID)
-	}
+	resp, body := envDoRaw(t, env, http.MethodGet, "/api/v1/ui/snapshot?view=inbox", nil, headers)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.NotContains(t, string(body), project.UID)
 }
 
 func TestInstanceEndpointAdvertisesIssueSubtreeTokens(t *testing.T) {

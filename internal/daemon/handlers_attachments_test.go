@@ -420,5 +420,4 @@ func TestUIAttachmentRoutesAreProjectSpecific(t *testing.T) {
 	require.Equal(t, spoke.UID, snapshot.Capabilities.Routes[0].ProjectUID)
 	require.True(t, snapshot.Capabilities.Routes[0].Read)
 	require.False(t, snapshot.Capabilities.Routes[0].Write)
-
 }
