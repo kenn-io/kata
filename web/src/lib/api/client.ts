@@ -67,11 +67,7 @@ export async function orvalFetch<T>(
   const { retry, ...requestOptions } = options
   const read = () => fetcher(applicationURL(url), requestOptions)
   const result = retry
-    ? await retryTransientRead(
-        read,
-        options.signal,
-        readRawResponseBody,
-      )
+    ? await retryTransientRead(read, options.signal, readRawResponseBody)
     : { response: await read() }
   const response = result.response
   const body = 'body' in result ? result.body : await readRawResponseBody(response)
