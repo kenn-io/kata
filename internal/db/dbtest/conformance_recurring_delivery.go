@@ -42,7 +42,7 @@ func deliveryStamp(t *testing.T, s db.Storage, child db.Issue, stamp time.Time) 
 
 func deliveryRead(t *testing.T, s db.Storage, p db.Project, j db.CronJob, now time.Time) *db.RecurringDelivery {
 	t.Helper()
-	out, err := s.RecurringCronDelivery(t.Context(), db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}, JobUID: j.UID}, now)
+	out, err := s.RecurringCronDelivery(t.Context(), db.CronDeliveryQuery{ProjectID: p.ID, JobUID: j.UID}, now)
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	require.NotNil(t, out[0].Delivery)
@@ -140,7 +140,7 @@ func checkRecurringDeliveryStatus(t *testing.T, s db.Storage) error {
 		def.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: second.UID, Title: "Other work"}
 		_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Other schedule", Actor: "operator", Definition: def})
 		require.NoError(t, err)
-		out, err = s.RecurringCronDelivery(ctx, db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}}, now)
+		out, err = s.RecurringCronDelivery(ctx, db.CronDeliveryQuery{ProjectID: p.ID}, now)
 		require.NoError(t, err)
 		if out[0].Job.UID != j.UID {
 			out[0], out[1] = out[1], out[0]
@@ -193,7 +193,7 @@ func checkRecurringDeliveryStatus(t *testing.T, s db.Storage) error {
 		adapterDefinition.Issue = &cron.IssuePolicy{Kind: "per-run", Title: "Adapter work"}
 		_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Adapter", Actor: "operator", Definition: adapterDefinition})
 		require.NoError(t, err)
-		out, err = s.RecurringCronDelivery(ctx, db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}}, now)
+		out, err = s.RecurringCronDelivery(ctx, db.CronDeliveryQuery{ProjectID: p.ID}, now)
 		require.NoError(t, err)
 		found := false
 		for _, row := range out {
@@ -257,7 +257,7 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 					d := deliveryRead(t, s, p, j, now)
 					require.Equal(t, "error", d.State)
 					require.Nil(t, d.LastChild)
-					rows, err := s.RecurringCronDelivery(ctx, db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}}, now)
+					rows, err := s.RecurringCronDelivery(ctx, db.CronDeliveryQuery{ProjectID: p.ID}, now)
 					require.NoError(t, err)
 					found := false
 					for _, row := range rows {
@@ -295,7 +295,7 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 		}
 		require.Equal(t, children[0].UID, deliveryRead(t, s, p, j, now).LastChild.UID)
 		readCtx := db.WithExposedIssues(db.WithAuthorizedProjects(ctx, []string{p.UID}))
-		_, err = s.RecurringCronDelivery(readCtx, db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}, JobUID: j.UID}, now)
+		_, err = s.RecurringCronDelivery(readCtx, db.CronDeliveryQuery{ProjectID: p.ID, JobUID: j.UID}, now)
 		require.NoError(t, err)
 		require.ElementsMatch(t, []int64{parent.ID, children[0].ID}, db.ExposedIssues(readCtx))
 		tied, err := time.Parse(time.RFC3339Nano, stamps[0])
@@ -311,7 +311,7 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 		_, err = s.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: children[0].ID, FromProjectID: p.ID, ToProjectID: hidden.ID, IfMatchRev: children[0].Revision, Actor: "operator"})
 		require.NoError(t, err)
 		scoped := db.WithExposedIssues(db.WithAuthorizedProjects(ctx, []string{p.UID}))
-		out, err := s.RecurringCronDelivery(scoped, db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}, JobUID: j.UID}, now)
+		out, err := s.RecurringCronDelivery(scoped, db.CronDeliveryQuery{ProjectID: p.ID, JobUID: j.UID}, now)
 		require.NoError(t, err)
 		require.Equal(t, children[1].UID, out[0].Delivery.LastChild.UID)
 		require.ElementsMatch(t, []int64{parent.ID, children[1].ID}, db.ExposedIssues(scoped))
@@ -388,7 +388,6 @@ func checkRecurringDeliveryDurableScan(t *testing.T, s db.Storage) error {
 	return nil
 }
 
-// Only supported occurrence metadata is delivery evidence, including after restore.
 // CheckCronDeliveryConsistent commits delivery and a definition change after the parent read.
 func CheckCronDeliveryConsistent(t *testing.T, s db.Storage, setStage func(func(context.Context) error)) {
 	p, _, j, progress := recurringFixture(t, s, "all")
@@ -409,7 +408,7 @@ func CheckCronDeliveryConsistent(t *testing.T, s db.Storage, setStage func(func(
 		}).ExecContext(ctx, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, string(raw), j.UID)
 		return err
 	})
-	rows, err := s.RecurringCronDelivery(t.Context(), db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}, JobUID: j.UID}, now)
+	rows, err := s.RecurringCronDelivery(t.Context(), db.CronDeliveryQuery{ProjectID: p.ID, JobUID: j.UID}, now)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.True(t, rows[0].Job.Definition.Enabled)

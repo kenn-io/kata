@@ -104,6 +104,7 @@ func (d *Store) RecurringCronDelivery(ctx context.Context, query db.CronDelivery
 
 func (d *Store) recurringChildTx(ctx context.Context, tx *sql.Tx, parentID int64, jobUID string) (*db.RecurringChild, error) {
 	args := []any{parentID, jobUID}
+	//nolint:gosec // The authorization predicate is generated from fixed SQL and bound parameters.
 	query := `SELECT i.id, i.uid, json_extract(i.metadata,'$."cron.occurrence"') FROM issues i JOIN projects p ON p.id=i.project_id JOIN links l ON l.from_issue_id=i.id WHERE l.type='parent' AND l.to_issue_id=? AND json_extract(i.metadata,'$."cron.occurrence".job_uid')=? AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND ` + authorizedLinkPredicate(ctx, "l.", &args)
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {

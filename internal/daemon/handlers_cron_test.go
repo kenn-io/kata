@@ -379,7 +379,7 @@ func TestCronDeliveryResponseRelease(t *testing.T) {
 		children, err := store.ChildrenOfIssue(t.Context(), f.issue.ID)
 		require.NoError(t, err)
 		require.Len(t, children, 1)
-		delivery, err := store.RecurringCronDelivery(t.Context(), db.CronDeliveryQuery{CronList: db.CronList{ProjectID: f.private.ID}, JobUID: j.UID}, now)
+		delivery, err := store.RecurringCronDelivery(t.Context(), db.CronDeliveryQuery{ProjectID: f.private.ID, JobUID: j.UID}, now)
 		require.NoError(t, err)
 		selected := delivery[0].Delivery.LastChild.UID
 		var child db.Issue

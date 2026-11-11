@@ -47,7 +47,7 @@ type RecurringChild struct {
 	ScheduledAt time.Time `json:"scheduled_at"`
 }
 
-var ErrRecurringOccurrenceVersion = errors.New("unsupported recurring occurrence version")
+var errRecurringOccurrenceVersion = errors.New("unsupported recurring occurrence version")
 
 // LastRecurringChild consumes authorized child rows, retaining only the newest
 // supported occurrence. Only the returned evidence participates in response release.
@@ -68,7 +68,7 @@ func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, e
 			continue
 		}
 		if header.Version > 1 {
-			return nil, ErrRecurringOccurrenceVersion
+			return nil, errRecurringOccurrenceVersion
 		}
 		var value recurringOccurrence
 		if err := json.Unmarshal([]byte(occurrence), &value); err != nil || value.Version != 1 || value.ScheduledAt.IsZero() {
@@ -99,11 +99,13 @@ func recurringRecipient(j cron.JobDefinition, parent Issue) (string, error) {
 	return notification.NormalizeRecipient(recipient)
 }
 
+// CronDeliveryQuery selects jobs whose delivery status is read together.
 type CronDeliveryQuery struct {
 	CronList
 	JobUID string
 }
 
+// CronDeliveryJob pairs a job with its delivery status.
 type CronDeliveryJob struct {
 	Job      CronJob
 	Delivery *RecurringDelivery
@@ -205,7 +207,7 @@ func (a CronSQL) RecurringDelivery(ctx context.Context, query CronDeliveryQuery,
 				d.Error = evalErr.Error()
 			}
 			d.LastChild, err = a.RecurringChild(ctx, parent.ID, j.UID)
-			if errors.Is(err, ErrRecurringOccurrenceVersion) {
+			if errors.Is(err, errRecurringOccurrenceVersion) {
 				d.Error = err.Error()
 			} else if err != nil {
 				return nil, err

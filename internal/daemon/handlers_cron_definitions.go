@@ -188,7 +188,7 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		var err error
 		if includeContains(in.Include, "delivery") {
 			var rows []db.CronDeliveryJob
-			rows, err = cfg.DB.RecurringCronDelivery(ctx, db.CronDeliveryQuery{CronList: db.CronList{ProjectID: in.ProjectID}, JobUID: in.UID}, tokenObservationTime(cfg))
+			rows, err = cfg.DB.RecurringCronDelivery(ctx, db.CronDeliveryQuery{ProjectID: in.ProjectID, JobUID: in.UID}, tokenObservationTime(cfg))
 			if err == nil {
 				value, delivery = rows[0].Job, rows[0].Delivery
 			}
