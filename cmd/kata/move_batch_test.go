@@ -480,7 +480,15 @@ func TestMoveBatchCLI_LongMutationAndCancellation(t *testing.T) {
 func TestMoveBatchCLI_PreservesResultsOnError(t *testing.T) {
 	for _, mode := range []string{"partial", "decode", "continuation", "expired_proof", "transport"} {
 		t.Run(mode, func(t *testing.T) {
-			env, dir, _, target, issue := setupMoveCLIProjects(t)
+			env, dir, source, target, issue := setupMoveCLIProjects(t)
+			issues := []db.Issue{issue}
+			if mode == "transport" {
+				for range 49 {
+					created, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "other", Author: "tester"})
+					require.NoError(t, err)
+					issues = append(issues, created)
+				}
+			}
 			origin, err := url.Parse(env.URL)
 			require.NoError(t, err)
 			proxy := httputil.NewSingleHostReverseProxy(origin)
@@ -496,7 +504,7 @@ func TestMoveBatchCLI_PreservesResultsOnError(t *testing.T) {
 				moved := api.MoveIssuesResult{Ref: issue.UID, Result: "moved", UID: issue.UID, Revision: issue.Revision + 1, EventID: 1, Proof: strings.Repeat("a", 64)}
 				if mode == "partial" {
 					w.WriteHeader(http.StatusInternalServerError)
-					require.NoError(t, json.MarshalWrite(w, map[string]any{"status": 500, "error": map[string]any{"code": "internal", "message": "database unavailable", "data": map[string]any{"results": []api.MoveIssuesResult{moved, {Index: 50, Ref: issue.UID, Result: "refused", Code: "validation"}}, "next_index": 1}}}))
+					require.NoError(t, json.MarshalWrite(w, map[string]any{"status": 500, "error": map[string]any{"code": "internal", "message": "database unavailable", "data": map[string]any{"results": []api.MoveIssuesResult{moved, {Index: 50, Ref: "invalid!", Result: "refused", Code: "issue_not_found"}}, "next_index": 1}}}))
 					return
 				}
 				if calls == 1 {
@@ -508,6 +516,9 @@ func TestMoveBatchCLI_PreservesResultsOnError(t *testing.T) {
 					for j := range results {
 						results[j] = moved
 						results[j].Index = j
+						results[j].Ref, results[j].UID = issues[j].UID, issues[j].UID
+						results[j].Revision = issues[j].Revision + 1
+						results[j].EventID = int64(j + 1)
 					}
 					require.NoError(t, json.MarshalWrite(w, map[string]any{"results": results, "next_index": count}))
 					return
@@ -533,10 +544,14 @@ func TestMoveBatchCLI_PreservesResultsOnError(t *testing.T) {
 			args := []string{"--workspace", dir, "move", target.Name, "--refs-from", "-", "--json"}
 			switch mode {
 			case "partial":
-				input = issue.UID + "\tmissing-project\n" + strings.Repeat(issue.UID+"\t"+target.Name+"\n", 51)
+				input = issue.UID + "\tmissing-project\n" + strings.Repeat(issue.UID+"\t"+target.Name+"\n", 50) + "invalid!\t" + target.Name + "\n"
 				args = []string{"--workspace", dir, "move", "--refs-from", "-", "--json"}
 			case "transport":
-				input = strings.Repeat(issue.UID+"\n", 120)
+				input = ""
+				for _, item := range issues {
+					input += item.UID + "\n"
+				}
+				input += issue.UID + "\n"
 			}
 			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, args...)
 			require.Error(t, err)
