@@ -288,7 +288,7 @@ func TestMoveIssuesBatch_DestinationResidentChild(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "child", Author: "agent", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
 	require.NoError(t, err)
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		_, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "resident", Author: "agent", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
 		require.NoError(t, err)
 	}
