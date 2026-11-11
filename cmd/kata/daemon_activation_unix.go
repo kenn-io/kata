@@ -70,7 +70,7 @@ func adoptActivatedFiles(ctx context.Context, files []*os.File) (net.Listener, e
 		return nil, fmt.Errorf("socket activation socket path: %w", err)
 	}
 	owner, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || owner.Uid != uint32(os.Geteuid()) || info.Mode()&os.ModeSocket == 0 {
+	if !ok || int64(owner.Uid) != int64(os.Geteuid()) || info.Mode()&os.ModeSocket == 0 {
 		return nil, errors.New("socket activation path must be a socket owned by the current user")
 	}
 	listener, err := net.FileListener(file)

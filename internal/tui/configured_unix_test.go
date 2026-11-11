@@ -25,7 +25,7 @@ func tuiUnixBackend(t *testing.T, name, token string) (clientpkg.ResolvedDaemon,
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	socket := filepath.Join(dir, "api.sock")
-	listener, err := net.Listen("unix", socket)
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "unix", socket)
 	require.NoError(t, err)
 	calls := new(atomic.Int64)
 	srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -29,7 +29,7 @@ func unixConsumerEndpoint(t *testing.T, target string) (string, func()) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	path := filepath.Join(dir, "api.sock")
-	listener, err := net.Listen("unix", path)
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "unix", path)
 	require.NoError(t, err)
 	upstream, err := url.Parse(target)
 	require.NoError(t, err)

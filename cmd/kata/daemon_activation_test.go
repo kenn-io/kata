@@ -40,7 +40,7 @@ func TestSocketActivationConfigSaveRefusesBeforeWrite(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, original, 0600))
 	err := writeDaemonConfigAndRestart(t.Context(), new(bytes.Buffer), path, original, true, []byte("socket_activation = \"systemd\"\nlisten = \"127.0.0.1:7777\"\n"))
 	require.Error(t, err)
-	got, err := os.ReadFile(path)
+	got, err := os.ReadFile(path) //nolint:gosec // G304: fixture config under the test-owned temporary home.
 	require.NoError(t, err)
 	require.Equal(t, original, got)
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"

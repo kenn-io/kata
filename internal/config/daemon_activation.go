@@ -30,7 +30,7 @@ func ReadSocketActivationForHome(ctx context.Context, home string) (string, erro
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	data, err := os.ReadFile(filepath.Join(home, "config.toml")) //nolint:gosec // G304: fixed config file in the operator-selected home, consistent with daemon config.
 	if errors.Is(err, os.ErrNotExist) {
 		return "", nil
 	}
