@@ -54,6 +54,37 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 	resets, ok := store.(db.RelayResetStore)
 	require.True(t, ok)
 	signer := db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: signingKey}
+	metadataKey := db.RelayResetMetadataPrefix + selected.UID + "." + binding
+	// Capture the prepared bytes and delivery state without offering any envelopes.
+	state := func() (string, int64, []db.ImportRecord) {
+		t.Helper()
+		var metadata string
+		found := false
+		for record, err := range store.ExportMeta(ctx) {
+			require.NoError(t, err)
+			if record.Key == metadataKey {
+				metadata, found = record.Value, true
+			}
+		}
+		require.True(t, found, "prepared checkpoint must remain present")
+		var epoch int64
+		found = false
+		for record, err := range store.ExportFederationEnrollments(ctx, db.ExportFilter{}) {
+			require.NoError(t, err)
+			if record.RelayBindingUID != nil && *record.RelayBindingUID == binding {
+				epoch, found = record.RelayResetEpoch, true
+			}
+		}
+		require.True(t, found, "relay grant must remain present")
+		var deliveries []db.ImportRecord
+		for record, err := range store.ExportRelayState(ctx) {
+			require.NoError(t, err)
+			if db.RelayDeliveryRecordBindingUID(record) == binding {
+				deliveries = append(deliveries, record)
+			}
+		}
+		return metadata, epoch, deliveries
+	}
 	_, _, err = store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: selected.ID, Name: "Checks", Actor: "member", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "check", Kind: "command", Command: "true"}}}})
 	require.NoError(t, err)
 	checkpoint, err := resets.CreateRelayReset(ctx, binding, signer)
@@ -69,7 +100,7 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 			bad := checkpointWithWorkflowDefinition(t, checkpoint, selected, pin, signingKey, section, tc.definition)
 			raw, err := json.Marshal(bad)
 			require.NoError(t, err)
-			require.NoError(t, writeMeta(ctx, db.RelayResetMetadataPrefix+selected.UID+"."+binding, string(raw)))
+			require.NoError(t, writeMeta(ctx, metadataKey, string(raw)))
 			_, _, err = db.DecodeRootResetPayload(pin, bad.Snapshot)
 			require.NoError(t, err)
 			_, err = resets.CreateRelayReset(ctx, binding, signer)
@@ -79,8 +110,15 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 			} else {
 				require.NotErrorIs(t, err, db.ErrHeldWorkflowEvidence)
 			}
-			_, err = store.PendingRelayDeliveries(db.WithRelayRequestedEpoch(ctx, checkpoint.Translation.Authority.Epoch), binding, db.RelayStreamEvent, 1024)
+			beforeMeta, beforeEpoch, beforeDeliveries := state()
+			require.Equal(t, string(raw), beforeMeta)
+			emitted, err := store.PendingRelayDeliveries(db.WithRelayRequestedEpoch(ctx, checkpoint.Translation.Authority.Epoch), binding, db.RelayStreamEvent, 1024)
 			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures, "held checkpoint cannot activate the next epoch")
+			require.Empty(t, emitted)
+			afterMeta, afterEpoch, afterDeliveries := state()
+			require.Equal(t, beforeMeta, afterMeta)
+			require.Equal(t, beforeEpoch, afterEpoch)
+			require.ElementsMatch(t, beforeDeliveries, afterDeliveries)
 			if tc.held {
 				require.ErrorIs(t, err, db.ErrHeldWorkflowEvidence)
 			} else {
@@ -93,12 +131,19 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 		argv := checkpointWithWorkflowDefinition(t, checkpoint, selected, pin, signingKey, section, `{"version":1,"steps":[{"key":"literal","kind":"argv","argv":["printf",""]}]}`)
 		raw, err := json.Marshal(argv)
 		require.NoError(t, err)
-		require.NoError(t, writeMeta(ctx, db.RelayResetMetadataPrefix+selected.UID+"."+binding, string(raw)))
+		require.NoError(t, writeMeta(ctx, metadataKey, string(raw)))
 		oldPeer := db.WithRelayPeerFeatures(ctx, binding, "")
 		_, err = resets.CreateRelayReset(oldPeer, binding, signer)
 		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-		_, err = store.PendingRelayDeliveries(db.WithRelayRequestedEpoch(oldPeer, checkpoint.Translation.Authority.Epoch), binding, db.RelayStreamEvent, 1024)
+		beforeMeta, beforeEpoch, beforeDeliveries := state()
+		require.Equal(t, string(raw), beforeMeta)
+		emitted, err := store.PendingRelayDeliveries(db.WithRelayRequestedEpoch(oldPeer, checkpoint.Translation.Authority.Epoch), binding, db.RelayStreamEvent, 1024)
 		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		require.Empty(t, emitted)
+		afterMeta, afterEpoch, afterDeliveries := state()
+		require.Equal(t, beforeMeta, afterMeta)
+		require.Equal(t, beforeEpoch, afterEpoch)
+		require.ElementsMatch(t, beforeDeliveries, afterDeliveries)
 		wrongPeer := db.WithRelayPeerFeatures(ctx, "different-binding", db.CronWorkflowArgvEventFeature)
 		_, err = resets.CreateRelayReset(wrongPeer, binding, signer)
 		require.ErrorIs(t, err, db.ErrNotFound)
@@ -106,17 +151,23 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 		served, err := resets.CreateRelayReset(peer, binding, signer)
 		require.NoError(t, err)
 		require.Equal(t, argv.Snapshot, served.Snapshot)
+		retained, _, _ := state()
+		require.Equal(t, beforeMeta, retained)
 	}
-	rawCheckpoint, err := json.Marshal(checkpoint)
-	require.NoError(t, err)
-	require.NoError(t, writeMeta(ctx, db.RelayResetMetadataPrefix+selected.UID+"."+binding, string(rawCheckpoint)))
-	_, err = store.PendingRelayDeliveries(db.WithRelayRequestedEpoch(ctx, checkpoint.Translation.Authority.Epoch), binding, db.RelayStreamEvent, 1024)
-	require.NoError(t, err, "the spoke activates the prepared checkpoint")
+	// Retry the unchanged final argv checkpoint after the recipient advertises support.
+	prepared, oldEpoch, _ := state()
+	peer := db.WithRelayPeerFeatures(ctx, binding, db.CronWorkflowArgvEventFeature)
+	_, err = store.PendingRelayDeliveries(db.WithRelayRequestedEpoch(peer, checkpoint.Translation.Authority.Epoch), binding, db.RelayStreamEvent, 1024)
+	require.NoError(t, err, "the spoke activates the same prepared argv checkpoint")
+	retained, newEpoch, _ := state()
+	require.Equal(t, prepared, retained)
+	require.Equal(t, oldEpoch+1, newEpoch)
+	require.Equal(t, checkpoint.Translation.Authority.Epoch, newEpoch)
 
 	legacy := legacyCheckpointWithEvent(t, checkpoint, pin, signingKey, remoteEventFromStored(unlinkEvent))
 	raw, err := json.Marshal(legacy)
 	require.NoError(t, err)
-	require.NoError(t, writeMeta(ctx, db.RelayResetMetadataPrefix+selected.UID+"."+binding, string(raw)))
+	require.NoError(t, writeMeta(ctx, metadataKey, string(raw)))
 	served, err := resets.CreateRelayReset(ctx, binding, signer)
 	require.NoError(t, err)
 	requireResetOmitsIssue(t, served, private)

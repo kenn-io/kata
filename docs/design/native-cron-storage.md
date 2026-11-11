@@ -70,8 +70,8 @@ Workflow definitions support `argv` steps with a literal string vector. Clients
 advertise the exact `cron_workflow_argv_v1` event feature in
 `X-Kata-Event-Features` to read these workflows or start new runs that reference
 them. Federation peers negotiate the same feature before receiving argv workflow
-evidence. Client format support does not grant adapter execution: adapters must
-preflight the workflow and report unsupported steps before starting a run. See
+evidence. Adapters must preflight the workflow and report unsupported steps
+before starting a run, including when clients support the format. See
 [Capabilities](../reference/cron.md#capabilities) for the read and write rules.
 
 Malformed argv steps, including legacy kind-only steps, and definitions with a
