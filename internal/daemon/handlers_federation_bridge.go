@@ -106,9 +106,9 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if cfg.RootSigning != nil {
 			ctx = db.WithRootAttribution(ctx, cfg.RootSigning.Signer(), principal.Actor)
 		}
-		result, err := acceptFencedRelayBatch(ctx, cfg, principal.RelayBindingUID, in)
+		result, err := cfg.DB.AcceptRelayDeliveries(ctx, principal.RelayBindingUID, in.Body)
 		if err != nil {
-			return nil, err
+			return nil, relayTransportError(err)
 		}
 		if len(result.InsertedEvents) > 0 {
 			cfg.Publish().Events(in.ProjectID, result.InsertedEvents)
@@ -135,23 +135,6 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Acknowledged = true
 		return out, nil
 	})
-}
-
-// acceptFencedRelayBatch refuses a batch whose gated payload the sender did not
-// declare support for, before durable acceptance can advance.
-func acceptFencedRelayBatch(ctx context.Context, cfg ServerConfig, bindingUID string, in *api.RelayAcceptRequest) (db.RelayAcceptance, error) {
-	required, err := db.RelayBatchRequiredFeatures(in.Body)
-	if err != nil {
-		return db.RelayAcceptance{}, relayTransportError(err)
-	}
-	if err := db.RequireEventFeatures(in.EventFeatures, required); err != nil {
-		return db.RelayAcceptance{}, federationFeatureError(err)
-	}
-	result, err := cfg.DB.AcceptRelayDeliveries(ctx, bindingUID, in.Body)
-	if err != nil {
-		return db.RelayAcceptance{}, relayTransportError(err)
-	}
-	return result, nil
 }
 
 func authorizeRelayRequest(ctx context.Context, cfg ServerConfig, auth string, projectID int64, capability, operation string) (context.Context, federationPrincipal, error) {

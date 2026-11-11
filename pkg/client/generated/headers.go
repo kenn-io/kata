@@ -85,8 +85,7 @@ type GetRelayResetHeaders struct {
 }
 
 type AcceptRelayDeliveriesHeaders struct {
-	Authorization      *string `json:"Authorization,omitempty"`
-	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
+	Authorization *string `json:"Authorization,omitempty"`
 }
 
 type AckRelayDeliveriesHeaders struct {

@@ -115,7 +115,7 @@ func recheckAttachmentWrite(ctx context.Context, cfg ServerConfig, projectID int
 	if _, err := activeProjectByID(ctx, cfg.DB, projectID); err != nil {
 		return err
 	}
-	return requireFederatedIssueClaimWithRefresh(ctx, cfg, iss, actor, true)
+	return requireFederatedIssueClaim(ctx, cfg, projectID, iss, actor)
 }
 
 func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
