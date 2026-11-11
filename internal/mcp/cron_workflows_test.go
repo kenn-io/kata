@@ -50,8 +50,10 @@ func TestCronWorkflowLifecycleAndInUseConflict(t *testing.T) {
 				raw := mustJSON(t, args)
 				var input CronWorkflowUpdateInput
 				require.NoError(t, json.Unmarshal(raw, &input))
-				h := toolHandlers{options: Options{Client: f.client, ProjectID: f.project.ID, ProjectName: f.project.Name, Actor: "example-agent"}}
-				_, _, err := h.cronWorkflowUpdate(t.Context(), &sdkmcp.CallToolRequest{Params: &sdkmcp.CallToolParamsRaw{Arguments: raw}}, input)
+				scope, err := NewBoundScope(ProjectIdentity{ID: f.project.ID, Name: f.project.Name})
+				require.NoError(t, err)
+				h := toolHandlers{options: Options{Client: f.client, Scope: scope, ProjectID: f.project.ID, ProjectName: f.project.Name, Actor: "example-agent"}}
+				_, _, err = h.cronWorkflowUpdate(t.Context(), &sdkmcp.CallToolRequest{Params: &sdkmcp.CallToolParamsRaw{Arguments: raw}}, input)
 				var envelope generated.ErrorEnvelope
 				require.ErrorAs(t, err, &envelope)
 				require.EqualValues(t, 409, envelope.Status)

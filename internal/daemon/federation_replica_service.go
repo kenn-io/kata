@@ -1737,21 +1737,7 @@ func ensureFederationReplicaCredentialRekey(
 	}
 	managed, ok := credentials.(config.FederationCredentialRekeyUndoer)
 	if !ok {
-		// Non-adoption callers need no rollback and retain the original interface.
-		if !p.AdoptExisting && !p.AttachEmpty {
-			legacy, err := managedCredentialStore(credentials)
-			if err != nil {
-				return nil, err
-			}
-			if err := legacy.RekeyFederationCredential(ctx, rekey); err != nil {
-				if errors.Is(err, config.ErrFederationCredentialConflict) {
-					return nil, federationReplicaError(ErrFederationReplicaCredentialConflict, "federation credential rekey lost a concurrent update", "")
-				}
-				return nil, credentialIOError("rekey federation replica credential")
-			}
-			return nil, nil
-		}
-		return nil, credentialIOError("atomic federation credential rekey unavailable")
+		return nil, credentialIOError("rekey federation replica credential")
 	}
 	undo, err := managed.RekeyFederationCredentialWithUndo(ctx, rekey)
 	if err != nil {

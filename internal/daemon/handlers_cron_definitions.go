@@ -261,22 +261,19 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 		out.Body.Events = events
 		return out, nil
 	}
-	attributedWrite := func(ctx huma.Context, next func(huma.Context)) {
-		if err := ensureAttributedWriteAllowed(ctx.Context()); err != nil {
-			if apiErr, ok := errors.AsType[*api.APIError](err); ok {
-				writeHostAccessError(ctx, apiErr.Status, apiErr.Code, apiErr.Message)
-				return
-			}
+	huma.Register(h, huma.Operation{OperationID: "createCronWorkflow", Method: http.MethodPost, Path: path, DefaultStatus: 201}, func(ctx context.Context, in *api.CreateCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
+		if err := ensureAttributedWriteAllowed(ctx); err != nil {
+			return nil, err
 		}
-		next(ctx)
-	}
-	huma.Register(h, huma.Operation{OperationID: "createCronWorkflow", Method: http.MethodPost, Path: path, DefaultStatus: 201, Middlewares: huma.Middlewares{attributedWrite}}, func(ctx context.Context, in *api.CreateCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
 		if err := decodeCronWorkflowBody(in.RawBody, &in.Body); err != nil {
 			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", false)
 		}
 		return put(ctx, in.ProjectID, "", in.Body, false, in.EventFeatures)
 	})
-	huma.Register(h, huma.Operation{OperationID: "replaceCronWorkflow", Method: http.MethodPut, Path: path + "/{cron_uid}", Middlewares: huma.Middlewares{attributedWrite}}, func(ctx context.Context, in *api.ReplaceCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
+	huma.Register(h, huma.Operation{OperationID: "replaceCronWorkflow", Method: http.MethodPut, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.ReplaceCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
+		if err := ensureAttributedWriteAllowed(ctx); err != nil {
+			return nil, err
+		}
 		if err := decodeCronWorkflowBody(in.RawBody, &in.Body); err != nil {
 			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, false, in.EventFeatures)
 		}

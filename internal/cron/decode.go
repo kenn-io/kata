@@ -24,9 +24,6 @@ func DecodeWorkflow(input []byte) (WorkflowDefinition, error) {
 	if err != nil {
 		return workflow, err
 	}
-	if err := checkWorkflowNullShapes(input); err != nil {
-		return workflow, err
-	}
 	if err := CheckWorkflowRawSteps(input); err != nil {
 		return workflow, err
 	}
@@ -36,13 +33,26 @@ func DecodeWorkflow(input []byte) (WorkflowDefinition, error) {
 // CheckWorkflowRawSteps checks exact JSON member presence and argv element types.
 // Call it before typed decoding can discard nulls or explicitly empty members.
 func CheckWorkflowRawSteps(input []byte) error {
+	if jsontext.Value(input).Kind() == 'n' {
+		return invalid("workflow definition must be an object")
+	}
 	var document struct {
-		Steps []jsontext.Value `json:"steps"`
+		Steps jsontext.Value `json:"steps"`
 	}
 	if err := json.Unmarshal(input, &document); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
-	for _, raw := range document.Steps {
+	if document.Steps.Kind() == 'n' {
+		return invalid("workflow steps must be an array")
+	}
+	if len(document.Steps) == 0 {
+		return nil
+	}
+	var steps []jsontext.Value
+	if err := json.Unmarshal(document.Steps, &steps); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	for _, raw := range steps {
 		if err := CheckWorkflowStepJSON(raw); err != nil {
 			return err
 		}
@@ -52,12 +62,18 @@ func CheckWorkflowRawSteps(input []byte) error {
 
 // CheckWorkflowStepJSON checks the raw argv shape of one workflow step.
 func CheckWorkflowStepJSON(raw []byte) error {
+	if jsontext.Value(raw).Kind() == 'n' {
+		return invalid("workflow step must be an object")
+	}
 	var step map[string]jsontext.Value
 	if err := json.Unmarshal(raw, &step); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	var kind string
 	if rawKind, ok := step["kind"]; ok {
+		if rawKind.Kind() == 'n' {
+			return invalid("workflow step kind must be a string")
+		}
 		if err := json.Unmarshal(rawKind, &kind); err != nil {
 			return fmt.Errorf("%w: %v", ErrInvalid, err)
 		}
@@ -128,58 +144,19 @@ func rejectWorkflowArgvMember(input []byte) error {
 	return nil
 }
 
-// Nulls decode to zero values, but cannot pass federation feature
-// classification. Reject them before admitting historical event documents.
-func checkWorkflowNullShapes(input []byte) error {
-	if jsontext.Value(input).Kind() == 'n' {
-		return invalid("workflow definition must be an object")
-	}
-	var document struct {
-		Steps jsontext.Value `json:"steps"`
-	}
-	if err := json.Unmarshal(input, &document); err != nil {
-		return err
-	}
-	if document.Steps.Kind() == 'n' {
-		return invalid("workflow steps must be an array")
-	}
-	if len(document.Steps) == 0 {
-		return nil
-	}
-	var steps []jsontext.Value
-	if err := json.Unmarshal(document.Steps, &steps); err != nil {
-		return err
-	}
-	for _, raw := range steps {
-		if raw.Kind() == 'n' {
-			return invalid("workflow step must be an object")
-		}
-		var step struct {
-			Kind jsontext.Value `json:"kind"`
-		}
-		if err := json.Unmarshal(raw, &step); err != nil {
-			return err
-		}
-		if step.Kind.Kind() == 'n' {
-			return invalid("workflow step kind must be a string")
-		}
-	}
-	return nil
-}
-
 // CheckWorkflowSupported checks supported versions and steps without applying
 // modern authoring rules to historical documents.
 func CheckWorkflowSupported(workflow WorkflowDefinition) error {
 	if workflow.Version != 1 {
 		return invalid("workflow version is not supported")
 	}
-	for _, step := range workflow.Steps {
+	for i, step := range workflow.Steps {
 		if step.Kind != "argv" {
 			if step.Argv != nil {
 				return invalid("argv member requires argv kind")
 			}
 			if step.Kind != "command" && step.Kind != "prompt" {
-				return invalid("workflow step kind is not supported")
+				return invalid(fmt.Sprintf("step %d %q: unknown step kind", i+1, step.Key))
 			}
 			continue
 		}

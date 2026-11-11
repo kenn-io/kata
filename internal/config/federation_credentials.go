@@ -123,7 +123,6 @@ type FederationCredentialRekey struct {
 type FederationCredentialRekeyUndo struct {
 	Rekey       FederationCredentialRekey
 	Source      FederationCredential
-	SourceFound bool
 	Target      FederationCredential
 	TargetFound bool
 }
@@ -659,7 +658,7 @@ func ApplyFederationCredentialRekey(projects map[string]FederationCredential, re
 	if !source.Equal(rekey.Expected) || (targetFound && !target.Equal(rekey.Expected) && !target.Equal(rekey.Replacement)) {
 		return nil, fmt.Errorf("%w: source or target credential changed", ErrFederationCredentialConflict)
 	}
-	undo := &FederationCredentialRekeyUndo{Rekey: rekey, Source: source, SourceFound: sourceFound, Target: target, TargetFound: targetFound}
+	undo := &FederationCredentialRekeyUndo{Rekey: rekey, Source: source, Target: target, TargetFound: targetFound}
 	projects[rekey.ToProjectUID] = rekey.Replacement
 	delete(projects, rekey.FromProjectUID)
 	return undo, nil
@@ -673,11 +672,7 @@ func UndoFederationCredentialRekey(projects map[string]FederationCredential, und
 	if sourceFound || !targetFound || !target.Equal(undo.Rekey.Replacement) {
 		return fmt.Errorf("%w: credential changed before undo", ErrFederationCredentialConflict)
 	}
-	if undo.SourceFound {
-		projects[undo.Rekey.FromProjectUID] = undo.Source
-	} else {
-		delete(projects, undo.Rekey.FromProjectUID)
-	}
+	projects[undo.Rekey.FromProjectUID] = undo.Source
 	if undo.TargetFound {
 		projects[undo.Rekey.ToProjectUID] = undo.Target
 	} else {

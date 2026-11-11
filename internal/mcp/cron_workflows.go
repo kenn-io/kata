@@ -79,7 +79,7 @@ func (h toolHandlers) cronPutWorkflow(ctx context.Context, req *sdkmcp.CallToolR
 	if err != nil {
 		return nil, generated.ReplaceCronWorkflowResponse{}, err
 	}
-	return cronResult(h.options.Client.ReplaceCronWorkflow(ctx, &generated.ReplaceCronWorkflowRequestOptions{PathParams: &generated.ReplaceCronWorkflowPath{ProjectID: p.ID, CronUID: id}, Body: &generated.ReplaceCronWorkflowBody{Actor: &h.options.Actor, Name: in.Name, Definition: in.Definition, ExpectedEventUID: expected}}))
+	return cronResult(h.options.Client.ReplaceCronWorkflow(ctx, &generated.ReplaceCronWorkflowRequestOptions{PathParams: &generated.ReplaceCronWorkflowPath{ProjectID: p.ID, CronUID: id}, Body: &generated.ReplaceCronWorkflowBody{Actor: &h.options.Actor, Name: in.Name, Definition: in.Definition, ExpectedEventUID: expected}}, kataclient.CronWorkflowArgvSupport))
 }
 func (h toolHandlers) cronWorkflowDelete(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronActionInput) (*sdkmcp.CallToolResult, generated.ArchiveCronWorkflowResponse, error) {
 	id, err := cronUID(in.UID)
@@ -94,7 +94,7 @@ func (h toolHandlers) cronWorkflowDelete(ctx context.Context, _ *sdkmcp.CallTool
 	if err != nil {
 		return nil, generated.ArchiveCronWorkflowResponse{}, err
 	}
-	return cronResult(h.options.Client.ArchiveCronWorkflow(ctx, &generated.ArchiveCronWorkflowRequestOptions{PathParams: &generated.ArchiveCronWorkflowPath{ProjectID: p.ID, CronUID: id}, Body: &generated.ArchiveCronWorkflowBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
+	return cronResult(h.options.Client.ArchiveCronWorkflow(ctx, &generated.ArchiveCronWorkflowRequestOptions{PathParams: &generated.ArchiveCronWorkflowPath{ProjectID: p.ID, CronUID: id}, Body: &generated.ArchiveCronWorkflowBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}, kataclient.CronWorkflowArgvSupport))
 }
 func (h toolHandlers) cronWorkflowRestore(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronActionInput) (*sdkmcp.CallToolResult, generated.RestoreCronWorkflowResponse, error) {
 	id, err := cronUID(in.UID)
@@ -109,5 +109,5 @@ func (h toolHandlers) cronWorkflowRestore(ctx context.Context, _ *sdkmcp.CallToo
 	if err != nil {
 		return nil, generated.RestoreCronWorkflowResponse{}, err
 	}
-	return cronResult(h.options.Client.RestoreCronWorkflow(ctx, &generated.RestoreCronWorkflowRequestOptions{PathParams: &generated.RestoreCronWorkflowPath{ProjectID: p.ID, CronUID: id}, Body: &generated.RestoreCronWorkflowBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
+	return cronResult(h.options.Client.RestoreCronWorkflow(ctx, &generated.RestoreCronWorkflowRequestOptions{PathParams: &generated.RestoreCronWorkflowPath{ProjectID: p.ID, CronUID: id}, Body: &generated.RestoreCronWorkflowBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}, kataclient.CronWorkflowArgvSupport))
 }
