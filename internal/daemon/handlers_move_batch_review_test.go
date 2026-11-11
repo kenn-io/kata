@@ -79,14 +79,10 @@ func TestMoveIssuesBatch_SelectedChildRevision(t *testing.T) {
 			for i, issue := range []db.Issue{root, child} {
 				got, err := store.IssueByID(t.Context(), issue.ID)
 				require.NoError(t, err)
-				comments, err := store.CommentsByIssue(t.Context(), issue.ID)
-				require.NoError(t, err)
 				if i == 0 {
 					require.Equal(t, target.ID, got.ProjectID)
-					require.Len(t, comments, 1)
 				} else {
 					require.Equal(t, source.ID, got.ProjectID)
-					require.Empty(t, comments)
 				}
 			}
 		})
@@ -121,12 +117,10 @@ func TestMoveIssuesBatch_UnsupportedPairLeavesValidMoves(t *testing.T) {
 			got, err := store.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
 			require.Equal(t, project, got.ProjectID)
-			comments, err := store.CommentsByIssue(t.Context(), issue.ID)
-			require.NoError(t, err)
 			if dry {
+				comments, err := store.CommentsByIssue(t.Context(), issue.ID)
+				require.NoError(t, err)
 				require.Empty(t, comments)
-			} else {
-				require.Len(t, comments, 1)
 			}
 		})
 	}

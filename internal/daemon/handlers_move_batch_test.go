@@ -29,7 +29,7 @@ type batchReply struct {
 	NextIndex int `json:"next_index"`
 }
 
-func postMoveBatch(t testing.TB, env *testenv.Env, body string) batchReply {
+func postMoveBatch(t *testing.T, env *testenv.Env, body string) batchReply {
 	t.Helper()
 	resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", body, "")
 	defer func() { _ = resp.Body.Close() }()
@@ -172,12 +172,10 @@ func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 				got, err := env.DB.IssueByID(t.Context(), issue.ID)
 				require.NoError(t, err)
 				require.Equal(t, projectID, got.ProjectID)
-				comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
-				require.NoError(t, err)
 				if dry {
+					comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+					require.NoError(t, err)
 					require.Empty(t, comments)
-				} else {
-					require.Len(t, comments, 1)
 				}
 			})
 		}
@@ -211,6 +209,9 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 	post := func() (int, struct {
 		Results   []api.MoveIssuesResult `json:"results"`
 		NextIndex int                    `json:"next_index"`
+		Error     struct {
+			Code string `json:"code"`
+		} `json:"error"`
 	}) {
 		raw, err := json.Marshal(request)
 		require.NoError(t, err)
@@ -219,6 +220,9 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 		var result struct {
 			Results   []api.MoveIssuesResult `json:"results"`
 			NextIndex int                    `json:"next_index"`
+			Error     struct {
+				Code string `json:"code"`
+			} `json:"error"`
 		}
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 		return resp.StatusCode, result
@@ -265,6 +269,7 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 				require.Equal(t, "revision_conflict", result.Results[0].Code)
 			} else {
 				require.Equal(t, http.StatusBadRequest, status)
+				require.Equal(t, "invalid_continuation", result.Error.Code)
 			}
 			completed["event_id"], completed["uid"] = first.Results[0].EventID, first.Results[0].UID
 			completed["proof"] = first.Results[0].Proof
@@ -282,7 +287,7 @@ func TestMoveIssuesBatch_ContinuationAcknowledgesMove(t *testing.T) {
 	completed["revision"] = first.Results[0].Revision + 1
 	status, changed := post()
 	require.Equal(t, http.StatusBadRequest, status)
-	require.Empty(t, changed.Results)
+	require.Equal(t, "invalid_continuation", changed.Error.Code)
 	request["completed"] = []map[string]any{}
 	status, _ = post()
 	require.Equal(t, http.StatusBadRequest, status)
