@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # PostgreSQL operations
@@ -80,6 +80,11 @@ The command takes a transaction-scoped advisory lock, installs a fresh schema
 or applies every registered forward migration, records the version in the same
 transaction, and completes the required installation metadata. It is safe to
 retry after interruption. It never prints the DSN.
+
+Migration statements have no time limit, so an index build on a large table
+finishes instead of rolling the upgrade back. Ordinary queries keep their
+30-second limit. Stopping the command cancels the upgrade, and PostgreSQL rolls
+back every migration in it.
 
 PostgreSQL support first ships with one canonical current schema. There are no
 pretend migrations for development-only schema versions that were never
