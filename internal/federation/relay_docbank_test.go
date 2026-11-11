@@ -345,9 +345,6 @@ func TestRelayDocbankNewIssueCanAttachImmediately(t *testing.T) {
 			serveRelayDocbank(t, root, vault)
 			pending, _, err := leaf.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: leaf.project.ID, Author: leaf.account, Title: "new shared issue"})
 			require.NoError(t, err)
-			if operation == "link" {
-				syncRelayMatrixNode(t, leaf)
-			}
 			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, pending.UID)
 			var status int
 			var raw []byte

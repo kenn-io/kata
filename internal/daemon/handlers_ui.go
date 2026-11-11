@@ -731,7 +731,7 @@ func selectedIssueIsSpoke(ctx context.Context, cfg ServerConfig, issueUID string
 		return false
 	}
 	binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
-	return err == nil && binding.Role == db.FederationRoleSpoke
+	return err == nil && binding.Role == db.FederationRoleSpoke && binding.Enabled
 }
 
 func effectiveUIPolicy(ctx context.Context, cfg ServerConfig, selectedIssueUID string) uiPolicy {

@@ -18,6 +18,7 @@ import (
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/docbank"
 )
 
 func TestBrowserSessionSurvivesRemoteAttachmentAuthenticationFailure(t *testing.T) {
@@ -87,6 +88,12 @@ func TestUIAttachmentCapabilityWithoutLocalVault(t *testing.T) {
 	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
 	require.NoError(t, err)
 	require.True(t, effectiveUIPolicy(t.Context(), cfg, issue.UID).Capabilities.Attachments)
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Enabled: false, PushEnabled: true, Actor: "operator"})
+	require.NoError(t, err)
+	require.False(t, effectiveUIPolicy(t.Context(), cfg, issue.UID).Capabilities.Attachments)
+	cfg.Docbank = &docbank.Client{}
+	require.True(t, effectiveUIPolicy(t.Context(), cfg, issue.UID).Capabilities.Attachments)
+	cfg.Docbank = nil
 	require.False(t, effectiveUIPolicy(t.Context(), cfg, "").Capabilities.Attachments)
 }
 
