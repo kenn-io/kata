@@ -773,7 +773,7 @@ type daemonStatusOutput struct {
 }
 
 type daemonStatusEntry struct {
-	AutoStarted   bool              `json:"auto_started,omitempty"`
+	AutoStarted   bool              `json:"auto_started,omitzero"`
 	PID           int               `json:"pid"`
 	Version       string            `json:"version"`
 	Address       string            `json:"address"`
