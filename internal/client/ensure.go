@@ -186,32 +186,19 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 	if err != nil {
 		return RunningDaemon{}, err
 	}
-	// Bound discovery and lock acquisition too, while retaining normal auto-start
-	// migration waiting when the home permits implicit starts.
-	supervisedCtx, cancel := context.WithTimeout(ctx, daemonStartupWait)
-	defer cancel()
-	found, err := discoverForEnsure(supervisedCtx, ns.DataDir)
-	if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
-		return RunningDaemon{}, err
-	}
-	if found.Outcome == daemonScanCompatible {
-		return runningDaemonForLive(found.Daemon), nil
-	}
-	enabled, err := config.ReadAutostartEnabled()
-	if err != nil {
-		return RunningDaemon{}, err
-	}
-	configPath, err := config.DaemonConfigPath()
+	enabled, configPath, err := config.ReadAutostartEnabled()
 	if err != nil {
 		return RunningDaemon{}, err
 	}
 	if !enabled {
-		ctx = supervisedCtx
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, daemonStartupWait)
+		defer cancel()
 	}
 	found, release, err := discoverForStart(ctx, ns.DataDir)
 	if err != nil {
 		if !enabled && (errors.Is(err, ErrLocalDaemonUnreachable) || ctx.Err() != nil) {
-			return waitForSupervisedDaemon(ctx, ns.DataDir, configPath, "")
+			return waitForSupervisedDaemon(ctx, ns.DataDir, configPath, true)
 		}
 		return RunningDaemon{}, err
 	}
@@ -236,7 +223,7 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 	}
 	if !enabled {
 		release()
-		return waitForSupervisedDaemon(ctx, ns.DataDir, configPath, "")
+		return waitForSupervisedDaemon(ctx, ns.DataDir, configPath, true)
 	}
 	return startDaemonForEnsure(ctx, ns.DataDir)
 }
@@ -245,9 +232,7 @@ func externallyManagedVersionError(info PingInfo) error {
 	return fmt.Errorf("%w: running kata daemon %s differs from this kata binary %s; restart it with your service manager (autostart = false)", ErrDaemonNotReplaceable, daemonVersionLabel(info), currentVersionForEnsure())
 }
 
-func waitForSupervisedDaemon(ctx context.Context, dataDir, configPath, dsn string) (RunningDaemon, error) {
-	ctx, cancel := context.WithTimeout(ctx, daemonStartupWait)
-	defer cancel()
+func waitForSupervisedDaemon(ctx context.Context, dataDir, configPath string, migrationAllowed bool) (RunningDaemon, error) {
 	var running RunningDaemon
 	var unreachable error
 	err := waitForDaemonStartup(ctx, nil, daemonStartupWait, nil, func(ctx context.Context) (bool, error) {
@@ -278,13 +263,7 @@ func waitForSupervisedDaemon(ctx context.Context, dataDir, configPath, dsn strin
 	}
 	// This nonblocking lock probe distinguishes a still-running migration without
 	// extending the readiness budget or resolving supervisor-only credentials.
-	migrating := false
-	if dsn != "" {
-		migrating = sqliteCutoverLockedForPath(ctx, dsn)
-	} else {
-		migrating = sqliteCutoverLocked(ctx)
-	}
-	if migrating {
+	if migrationAllowed && sqliteCutoverLocked(ctx) {
 		return RunningDaemon{}, fmt.Errorf("%w: storage migration is in progress; retry after the service manager's daemon becomes ready (%s)", ErrLocalDaemonUnreachable, configPath)
 	}
 	if unreachable != nil {

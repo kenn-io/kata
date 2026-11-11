@@ -73,7 +73,7 @@ func TestManagedExternallyStaleWaitDoesNotReplace(t *testing.T) {
 	discoverDaemonForAutoStart = func(context.Context, string) (ensureDiscovery, error) {
 		return ensureDiscovery{Outcome: daemonScanStale, Daemon: liveDaemon{Info: PingInfo{Version: "v0.1.0"}}}, nil
 	}
-	_, err := waitForSupervisedDaemon(t.Context(), t.TempDir(), "/example/config.toml", "")
+	_, err := waitForSupervisedDaemon(t.Context(), t.TempDir(), "/example/config.toml", false)
 	require.ErrorContains(t, err, "v0.1.0")
 	require.ErrorContains(t, err, "service manager")
 }
@@ -91,7 +91,7 @@ func TestManagedExternallyCutoverReportsMigration(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 		defer cancel()
 		started := time.Now()
-		_, err := waitForSupervisedDaemon(ctx, t.TempDir(), "/example/config.toml", path)
+		_, err := waitForSupervisedDaemon(ctx, t.TempDir(), "/example/config.toml", true)
 		require.Error(t, err)
 		require.True(t, strings.Contains(err.Error(), "migration"), err.Error())
 		require.False(t, errors.Is(err, ErrDaemonManagedExternally))

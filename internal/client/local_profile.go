@@ -262,7 +262,7 @@ func EnsureSameLocalProfile(ctx context.Context, resolved ResolvedDaemon) (Resol
 }
 
 func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, profile config.LocalProfileConfig) (ResolvedDaemon, error) {
-	running, err := waitForSupervisedDaemon(ctx, resolved.LocalProfile.DataDir, filepath.Join(profile.Home, "config.toml"), profile.DSN)
+	running, err := waitForSupervisedDaemon(ctx, resolved.LocalProfile.DataDir, filepath.Join(profile.Home, "config.toml"), false)
 	if err != nil {
 		return resolved, err
 	}

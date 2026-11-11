@@ -101,14 +101,15 @@ func (c DaemonConfig) AutostartEnabled() bool {
 
 // ReadAutostartEnabled reads only the home startup policy, without resolving
 // daemon credentials or applying the caller's deployment environment.
-func ReadAutostartEnabled() (bool, error) {
+func ReadAutostartEnabled() (bool, string, error) {
 	var file struct {
 		Autostart *bool `toml:"autostart"`
 	}
-	if _, err := decodeConfigSection("autostart", &file); err != nil {
-		return false, err
+	path, err := decodeConfigSection("autostart", &file)
+	if err != nil {
+		return false, path, err
 	}
-	return (DaemonConfig{Autostart: file.Autostart}).AutostartEnabled(), nil
+	return (DaemonConfig{Autostart: file.Autostart}).AutostartEnabled(), path, nil
 }
 
 // MinAutostartIdleTimeout leaves enough time for detached startup discovery

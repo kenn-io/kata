@@ -184,13 +184,6 @@ func sqliteCutoverLocked(ctx context.Context) bool {
 	if err != nil || strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		return false
 	}
-	return sqliteCutoverLockedForPath(ctx, dsn)
-}
-
-func sqliteCutoverLockedForPath(_ context.Context, dsn string) bool {
-	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
-		return false
-	}
 	lock := flock.New(strings.TrimPrefix(dsn, "sqlite://")+".import.lock", flock.SetFlag(os.O_RDONLY))
 	locked, err := lock.TryLock()
 	if err != nil {
