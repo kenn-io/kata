@@ -2,7 +2,6 @@ package dbtest
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"testing"
@@ -76,6 +75,18 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		require.NotEmpty(t, events)
 		_, err = spoke.InsertRemoteEvents(ctx, local.ID, events)
 		require.NoError(t, err)
+		if lifecycle == "destination leave preserves standalone issue" && after != 0 {
+			if scoped, ok := spoke.(interface {
+				MaterializeFederatedEvents(context.Context, int64, []string) error
+			}); ok {
+				var uids []string
+				for _, event := range events {
+					uids = append(uids, event.EventUID)
+				}
+				require.NoError(t, scoped.MaterializeFederatedEvents(ctx, local.ID, uids))
+				return
+			}
+		}
 		require.NoError(t, spoke.MaterializeFederatedProject(ctx, local.ID), "a destination snapshot must reuse the issue held in the source")
 	}
 	localSource := join(source)
@@ -338,9 +349,9 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 			if kind == "recurrence" {
 				r, _, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{ProjectID: source.ID, Actor: "worker", Rule: "FREQ=WEEKLY", DTStart: "2026-10-12", Timezone: "UTC", Template: db.RecurrenceTemplate{Title: "pinned"}})
 				require.NoError(t, err)
-				_, err = store.(interface {
-					ExecContext(context.Context, string, ...any) (sql.Result, error)
-				}).ExecContext(ctx, `UPDATE issues SET recurrence_id=$1 WHERE id=$2`, r.ID, issue.ID)
+				next, err := store.MaterializeNext(ctx, r.ID, "2026-10-12", "worker")
+				require.NoError(t, err)
+				issue, err = store.IssueByID(ctx, next.NewIssueID)
 				require.NoError(t, err)
 			}
 			prepareRehomePull(t, store, source, target, "pull")
@@ -360,6 +371,11 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 			}
 			var payload map[string]jsontext.Value
 			require.NoError(t, json.Unmarshal(move.Payload, &payload))
+			if kind == "recurrence" {
+				snapshotPayload, err := json.Marshal(map[string]string{"uid": issue.UID, "short_id": issue.ShortID, "title": issue.Title, "author": issue.Author, "status": issue.Status})
+				require.NoError(t, err)
+				payload["snapshot"] = snapshotPayload
+			}
 			snapshot := newRemoteEvent(t, target, &issue.UID, "issue.snapshot", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+1, payload["snapshot"])
 			_, err := store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{snapshot})
 			require.NoError(t, err)
