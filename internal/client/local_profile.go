@@ -256,7 +256,7 @@ func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, prof
 		if err := safefileio.ValidatePrivateDir(dir); err != nil {
 			return ensureDiscovery{}, &LocalProfileDirError{Err: err}
 		}
-		found, err := discoverDaemonForSupervised(ctx, dir)
+		found, err := discoverForEnsure(ctx, dir)
 		if err != nil || found.Outcome == daemonScanNone {
 			return found, err
 		}

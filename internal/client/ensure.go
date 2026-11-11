@@ -190,7 +190,7 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 	}
 	if !enabled {
 		return waitForSupervisedDaemon(ctx, configPath, func(ctx context.Context) (ensureDiscovery, error) {
-			return discoverDaemonForSupervised(ctx, ns.DataDir)
+			return discoverForEnsure(ctx, ns.DataDir)
 		})
 	}
 	found, release, err := discoverForStart(ctx, ns.DataDir)
@@ -387,10 +387,6 @@ const (
 type ensureDiscovery struct {
 	Outcome daemonScanOutcome
 	Daemon  liveDaemon
-}
-
-var discoverDaemonForSupervised = func(ctx context.Context, dir string) (ensureDiscovery, error) {
-	return discoverForEnsureUsing(ctx, dir, liveDaemonsReadOnly)
 }
 
 func discoverForEnsure(ctx context.Context, dataDir string) (ensureDiscovery, error) {

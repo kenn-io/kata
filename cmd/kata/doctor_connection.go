@@ -60,7 +60,7 @@ func doctorDiscoveryCheck(err error) diagnostics.Check {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Selected local profile's runtime directory is not private", Fix: "Restrict the profile's directory under <profile home>/runtime to its owner, for example with chmod 700 on Unix. Kata does not repair local profile directories."}
 	}
 	if _, ok := errors.AsType[*client.PrivateDirError](err); ok {
-		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Local runtime directory is not private; doctor did not inspect it", Fix: "Restrict <KATA_HOME>/runtime to its owner, for example with chmod 700 on Unix. Check its ownership and that it is not a symlink."}
+		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Local runtime directory is not private; doctor did not inspect it", Fix: "Run any kata command, such as kata list, to restore owner-only permissions. If the warning remains, check the ownership of <KATA_HOME>/runtime and that it is not a symlink."}
 	}
 	return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Selected daemon is unavailable or its target configuration is invalid", Fix: "Check --daemon, KATA_SERVER, .kata.local.toml and active_daemon; for an unreachable local daemon, inspect kata daemon status and its logs."}
 }
