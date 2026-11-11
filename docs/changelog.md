@@ -12,6 +12,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Keep moved issues and their discussion when a spoke joins the destination late,
   pauses or leaves the source, or leaves the destination.
 
+- Upgrade a large PostgreSQL database without the schema migration rolling
+  back. A migration statement no longer stops after 30 seconds, so a long index
+  build finishes, and an opener waiting for another opener's migration keeps
+  waiting. Ordinary queries keep the 30-second limit. See
+  [PostgreSQL operations](operations/postgres.md).
+
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and
   stop on a failed selected source without fallback. See
