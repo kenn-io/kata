@@ -2241,7 +2241,7 @@ func reconcileFederatedCommentsFromRows(ctx context.Context, tx *sql.Tx, issueID
 			return err
 		}
 		if owned {
-			return fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, db.ErrExternalCommentContentOwned)
+			continue
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM comments WHERE id = ?`, row.id); err != nil {
 			return fmt.Errorf("delete stale federated comment %s: %w", uid, err)
