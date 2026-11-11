@@ -357,11 +357,7 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEven
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) ([]int64, error) {
-	decisions, destinations, err := PlanFederatedMovedIssues(ctx, tx, events, p)
-	if err != nil {
-		return nil, err
-	}
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) error {
 	moved := map[string]FoldEvent{}
 	for _, e := range events {
 		if e.Type == "issue.moved" {
@@ -389,10 +385,10 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 				// cursor before this fold creates the destination issue row.
 				from, _ := StringValue(PayloadMap(winner.Payload)["from_project_uid"])
 				if err := tx.QueryRowContext(ctx, `SELECT id,uid,name FROM projects WHERE uid=$1`, from).Scan(&sourceProject.ID, &sourceProject.UID, &sourceProject.Name); err != nil {
-					return nil, err
+					return err
 				}
 				if err := recordFederationMoveDisplacement(ctx, tx, sourceProject, issue.ProjectUID, winner, acceptedEventUIDs, nil, insertResetControl); err != nil {
-					return nil, err
+					return err
 				}
 			} else {
 				delete(p.Issues, issue.UID)
@@ -403,26 +399,26 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 			continue
 		}
 		if !active {
-			return nil, ErrNotFound
+			return ErrNotFound
 		}
 		// Move ingress has already checked its authority and endpoints. Replaying
 		// trusted history must also work after a former source has left.
 		if decision.RecurrenceID.Valid {
-			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
+			return fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
 		}
 		if err := validate(id, source, target); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
+			return fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
 		}
 
 		short, err := assign(target, issue)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE issues SET project_id=$1,short_id=$2,revision=revision+1 WHERE id=$3`, target, short, id); err != nil {
-			return nil, err
+			return err
 		}
 		if err := afterRehome(issue.UID, issue.ProjectUID); err != nil {
-			return nil, err
+			return err
 		}
 		sourceProject.ID = source
 		payload := PayloadMap(winner.Payload)
@@ -433,7 +429,7 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 			reference = &FederationMovedReference{IssueUID: issue.UID, FromProjectUID: sourceProject.UID, FromShortID: sourceShort, MoveEventUID: winner.UID}
 		}
 		if err := recordFederationMoveDisplacement(ctx, tx, sourceProject, issue.ProjectUID, winner, acceptedEventUIDs, reference, insertResetControl); err != nil {
-			return nil, err
+			return err
 		}
 		for _, query := range []string{
 			`UPDATE issue_claims SET project_id=$1 WHERE issue_id=$2`,
@@ -442,11 +438,11 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 			`UPDATE external_root_bindings SET project_id=$1 WHERE issue_id=$2`,
 		} {
 			if _, err := tx.ExecContext(ctx, query, target, id); err != nil {
-				return nil, err
+				return err
 			}
 		}
 	}
-	return destinations, nil
+	return nil
 }
 
 type movedProjectPassKey struct{}

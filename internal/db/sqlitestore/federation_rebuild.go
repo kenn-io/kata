@@ -183,7 +183,8 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 		if stamp != prepared.moveStamp {
 			return errStaleFederationPreparation
 		}
-		for _, p := range prepared.projects {
+		var firstDecisions []db.FederatedMoveDecision
+		for i, p := range prepared.projects {
 			if err := db.LockCronProject(ctx, tx, p.id); err != nil {
 				return err
 			}
@@ -197,10 +198,22 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 			if !slices.Equal(decisions, p.decisions) {
 				return errStaleFederationPreparation
 			}
+			if i == 0 {
+				firstDecisions = decisions
+			}
 		}
 		// The existing move routine keeps its live claim, recurrence, and import guards.
-		for _, p := range prepared.projects {
-			if _, err := d.rehomeFederatedMovedIssues(ctx, tx, p.events, p.moveProjection, nil); err != nil {
+		// Earlier rehomes can change the decisions for later projects.
+		for i, p := range prepared.projects {
+			decisions := firstDecisions
+			if i > 0 {
+				var err error
+				decisions, _, err = db.PlanFederatedMovedIssues(ctx, tx, p.events, p.moveProjection)
+				if err != nil {
+					return err
+				}
+			}
+			if err := d.rehomeFederatedMovedIssues(ctx, tx, p.events, p.moveProjection, decisions, nil); err != nil {
 				return err
 			}
 		}

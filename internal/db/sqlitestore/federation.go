@@ -1290,8 +1290,11 @@ func (d *Store) materializeFederatedProjectTxScoped(
 		}
 	}
 	projection := db.FoldEvents(events)
-	destinations, err := d.rehomeFederatedMovedIssues(ctx, tx, events, projection, acceptedEventUIDs)
+	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, events, projection)
 	if err != nil {
+		return err
+	}
+	if err := d.rehomeFederatedMovedIssues(ctx, tx, events, projection, decisions, acceptedEventUIDs); err != nil {
 		return err
 	}
 	if !db.FollowingMovedProjects(ctx) {
@@ -1346,8 +1349,8 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	return updateFederatedProjectMetadataTx(ctx, tx, projectID, projection.ProjectMetadata[binding.HubProjectUID])
 }
 
-func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []db.FoldEvent, projection db.FoldProjection, acceptedEventUIDs []string) ([]int64, error) {
-	return db.RehomeFederatedMovedIssues(ctx, tx, events, projection, func(pid int64, issue db.FoldIssue) (string, error) {
+func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []db.FoldEvent, projection db.FoldProjection, decisions []db.FederatedMoveDecision, acceptedEventUIDs []string) error {
+	return db.RehomeFederatedMovedIssues(ctx, tx, events, projection, decisions, func(pid int64, issue db.FoldIssue) (string, error) {
 		return resolveFederatedIssueShortID(ctx, tx, pid, issue.UID, issue.ShortID, nil)
 	}, func(id, source, target int64) error {
 		if err := lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil {
