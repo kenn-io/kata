@@ -570,10 +570,11 @@ func TestMoveBatchCLI_PreservesResultsOnError(t *testing.T) {
 			t.Cleanup(server.Close)
 			input := issue.UID + "\n" + issue.UID + "\n"
 			args := []string{"--workspace", dir, "move", target.Name, "--refs-from", "-", "--json"}
-			if mode == "partial" {
+			switch mode {
+			case "partial":
 				input = issue.UID + "\tmissing-project\n" + strings.Repeat(issue.UID+"\t"+target.Name+"\n", 51)
 				args = []string{"--workspace", dir, "move", "--refs-from", "-", "--json"}
-			} else if mode == "transport" {
+			case "transport":
 				input = strings.Repeat(issue.UID+"\n", 120)
 			}
 			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, args...)
