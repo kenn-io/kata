@@ -124,6 +124,7 @@ func (d *Store) ingestFederationEventsOnce(
 	}
 	prepared := make([]preparedFederationIngestEvent, 0, len(p.Events))
 	seenBatch := map[string]string{}
+	observedBatch := map[string]string{}
 	rejectedCreations := db.FederationRejectedCreations{}
 	// Projection writes happen after validation; later moves can depend on
 	// fully validated creations earlier in this batch.
@@ -158,6 +159,10 @@ func (d *Store) ingestFederationEventsOnce(
 		if err := validateFederationEventHash(ev); err != nil {
 			return db.FederationIngestResult{}, err
 		}
+		if hash, ok := observedBatch[ev.EventUID]; ok && !strings.EqualFold(hash, ev.ContentHash) {
+			return db.FederationIngestResult{}, fmt.Errorf("%w: event %s", db.ErrRemoteEventConflict, ev.EventUID)
+		}
+		observedBatch[ev.EventUID] = ev.ContentHash
 		if existingHash, ok := seenBatch[ev.EventUID]; ok {
 			matches, err := federationEventHashMatches(ev, existingHash, boundActor, adoptionSnapshotAuthorState.overrideSnapshotAuthors)
 			if err != nil {

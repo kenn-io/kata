@@ -1284,6 +1284,13 @@ func importEvent(ctx context.Context, tx *sql.Tx, e *db.EventExport, opts db.Imp
 		stringPtrValue(e.RelatedIssueUID), e.RelatedIssueID,
 		e.Type, e.Actor, string(e.Payload),
 		e.HLCPhysicalMS, e.HLCCounter, e.ContentHash, e.CreatedAt)
+	if err == nil && !opts.NewInstance && !opts.MergeProject {
+		for _, projectID := range e.AcceptedProjectIDs {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO federation_push_accepted(project_id,event_id) VALUES($1,$2)`, projectID, e.ID); err != nil {
+				return wrapImportErr(db.ImportKindEvent, err)
+			}
+		}
+	}
 	return wrapImportErr(db.ImportKindEvent, err)
 }
 

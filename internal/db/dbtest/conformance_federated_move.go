@@ -381,6 +381,23 @@ func checkSameHubMoveGates(t *testing.T, store db.Storage) error {
 // fresh bridge claim, even if that local guard is absent from a spoke snapshot.
 func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
+	t.Run("destination reset ignores accepted former source history", func(t *testing.T) {
+		source, err := store.CreateProject(ctx, "reset-accepted-source")
+		require.NoError(t, err)
+		target, err := store.CreateProject(ctx, "reset-accepted-target")
+		require.NoError(t, err)
+		for _, project := range []db.Project{source, target} {
+			_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
+			require.NoError(t, err)
+		}
+		issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "moved", Author: "worker"})
+		require.NoError(t, err)
+		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
+		require.NoError(t, err)
+		require.ErrorIs(t, store.ResetFederatedProject(ctx, target.ID, 1, 0), db.ErrFederationResetBlockedByPendingPush)
+		require.NoError(t, store.RecordFederationPushAccepted(ctx, source.ID, []int64{created.ID}))
+		require.NoError(t, store.ResetFederatedProject(ctx, target.ID, 1, 0))
+	})
 	t.Run("source lifecycle awaits destination move", func(t *testing.T) {
 		for _, operation := range []string{"leave", "archive", "prepare-fence"} {
 			t.Run(operation, func(t *testing.T) {
@@ -398,6 +415,8 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 				require.NoError(t, err)
 				require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, created.ID),
 					"the issue creation was already accepted before its later move")
+				_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "earlier rejected work", Author: "worker"})
+				require.NoError(t, err)
 				move, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
 				require.NoError(t, err)
 				lifecycle := store.(db.RelayLifecycleStore)
@@ -429,7 +448,7 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 				project, err := store.ProjectByID(ctx, source.ID)
 				require.NoError(t, err)
 				require.Nil(t, project.DeletedAt)
-				require.NoError(t, store.AdvanceFederationPushCursor(ctx, target.ID, move.EventID))
+				require.NoError(t, store.RecordFederationPushAccepted(ctx, target.ID, []int64{move.EventID}))
 				require.NoError(t, lifecycle.ValidateRelayLifecycle(ctx, source.ID))
 				require.NoError(t, teardown(), "acknowledgment releases the source for ordinary teardown")
 				if operation == "prepare-fence" {
@@ -482,7 +501,7 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 		_, err = store.LeaveFederationReplica(ctx, source.ID)
 		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
 			"the source binding must remain until its pending comment is accepted")
-		require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, comment.ID))
+		require.NoError(t, store.RecordFederationPushAccepted(ctx, source.ID, []int64{editEvent.ID, comment.ID}))
 		_, err = store.LeaveFederationReplica(ctx, source.ID)
 		require.NoError(t, err, "acknowledging the source history releases the credential dependency")
 	})

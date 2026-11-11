@@ -50,7 +50,7 @@ func (d *Store) PendingFederationPushEvents(
 		return nil, err
 	}
 	if len(out) == limit && len(out) > 0 && db.IsFederationSnapshotEvent(out[len(out)-1].Type) {
-		runStartAfterID := afterID
+		runStartAfterID := out[0].ID - 1
 		for _, o := range slices.Backward(out) {
 			if !db.IsFederationSnapshotEvent(o.Type) {
 				runStartAfterID = o.ID
@@ -321,11 +321,11 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		 WHERE project_id = ?
 		   AND NOT EXISTS (
 		       SELECT 1
-		         FROM events
-		        WHERE project_id = ?
-		          AND origin_instance_uid = ?
-		          AND id > ?
-		          AND `+federationPushEventTypeCondition("type")+`
+		         FROM events e
+		        WHERE e.project_id = ?
+		          AND e.origin_instance_uid = ?
+		          AND e.id > ?
+		          AND `+federationPushNotAccepted+` AND `+federationPushEventTypeCondition("e.type")+`
 		   )
 		   AND NOT EXISTS (
 		       SELECT 1

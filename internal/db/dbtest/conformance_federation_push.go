@@ -137,5 +137,23 @@ func checkFederationPushSnapshotRuns(t *testing.T, store db.Storage) error {
 			require.Equal(t, []string{uids[8], uids[9], uids[10]}, []string{continued[0].UID, continued[1].UID, continued[2].UID})
 		}
 	}
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, PushEnabled: true, Actor: "tester", Enabled: true})
+	require.NoError(t, err)
+	before, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	metadata := newRemoteEvent(t, project, nil, "project.metadata_updated", "tester", store.InstanceUID(), 300, []byte(`{"metadata":{}}`))
+	_, err = store.InsertRemoteEvent(ctx, project.ID, metadata)
+	require.NoError(t, err)
+	stored, err := store.EventsByUIDs(ctx, project.ID, []string{metadata.EventUID})
+	require.NoError(t, err)
+	require.NoError(t, store.RecordFederationPushAccepted(ctx, project.ID, []int64{stored[0].ID}))
+	for i := range 3 {
+		event := newRemoteEvent(t, project, &issue.UID, "issue.snapshot", "tester", store.InstanceUID(), int64(301+i), []byte(`{"uid":"`+issue.UID+`","title":"work","author":"tester","status":"open"}`))
+		_, err = store.InsertRemoteEvent(ctx, project.ID, event)
+		require.NoError(t, err)
+	}
+	snapshots, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), before, 2)
+	require.NoError(t, err)
+	require.Len(t, snapshots, 3, "accepted metadata must not truncate a snapshot run")
 	return nil
 }

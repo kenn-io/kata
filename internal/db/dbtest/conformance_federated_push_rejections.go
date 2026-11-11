@@ -11,7 +11,7 @@ import (
 )
 
 func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage) error {
-	for _, kind := range []string{"mixed", "revoked-race", "all-rejected", "payload-only", "moved-peer", "dependent-on-rejected-create", "rejected-move", "malformed-comment"} {
+	for _, kind := range []string{"mixed", "revoked-race", "all-rejected", "payload-only", "moved-peer", "dependent-on-rejected-create", "rejected-move", "malformed-comment", "conflicting-rejected", "repeated-rejected"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			rejectedMove := kind == "rejected-move"
@@ -59,9 +59,17 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 			bad.ContentHash, err = db.RemoteEventContentHash(bad)
 			require.NoError(t, err)
 			valid := newRemoteEvent(t, source, &good.UID, "issue.updated", "worker", origin, at, []byte(`{"uid":"`+good.UID+`","title":"Arrived"}`))
+			if kind == "conflicting-rejected" {
+				valid.EventUID = bad.EventUID
+				valid.ContentHash, err = db.RemoteEventContentHash(valid)
+				require.NoError(t, err)
+			}
 			params := db.FederationIngestParams{AllowEventRejections: true, ProjectID: source.ID, FederationEnrollmentID: grant.Enrollment.ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: bad}, {SourceEventID: 2, Event: valid}}}
 			if kind == "all-rejected" {
 				params.Events = params.Events[:1]
+			}
+			if kind == "repeated-rejected" {
+				params.Events[1].Event = bad
 			}
 			if kind == "dependent-on-rejected-create" {
 				dependent := newRemoteEvent(t, source, &freshUID, "issue.updated", "worker", origin, at, []byte(`{"uid":"`+freshUID+`","title":"Must not be known"}`))
@@ -83,6 +91,20 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: current.Enrollment.ID}
 			}
 			result, err := store.IngestFederationEvents(ctx, params)
+			if kind == "repeated-rejected" {
+				require.NoError(t, err)
+				require.Len(t, result.RejectedEvents, 2)
+				require.Zero(t, result.Accepted)
+				require.Zero(t, result.Duplicates)
+				return
+			}
+			if kind == "conflicting-rejected" {
+				require.ErrorIs(t, err, db.ErrRemoteEventConflict)
+				after, err := store.MaxEventID(ctx)
+				require.NoError(t, err)
+				require.Equal(t, before, after)
+				return
+			}
 			if kind == "malformed-comment" {
 				require.ErrorIs(t, err, db.ErrFederationIngestValidation, "independent payload validation remains atomic despite missing enrollment")
 				after, err := store.MaxEventID(ctx)

@@ -54,7 +54,7 @@ ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 		return nil, err
 	}
 	if len(output) == limit && len(output) > 0 && db.IsFederationSnapshotEvent(output[len(output)-1].Type) {
-		runStartAfterID := afterID
+		runStartAfterID := output[0].ID - 1
 		for _, o := range slices.Backward(output) {
 			if !db.IsFederationSnapshotEvent(o.Type) {
 				runStartAfterID = o.ID
