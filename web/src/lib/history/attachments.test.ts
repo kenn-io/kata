@@ -34,5 +34,4 @@ describe('closingAttachments', () => {
 
     expect(closingAttachments(event, {})).toEqual([{ label: 'Attachment removed' }])
   })
-
 })

@@ -905,7 +905,8 @@
     attachmentRouteAbort = undefined
     attachmentRoute = undefined
     attachmentRouteProject = projectUID
-    if (projectUID && issueUID === requestedUID) untrack(() => void refreshAttachmentRoute(projectUID, daemonID))
+    if (projectUID && issueUID === requestedUID)
+      untrack(() => void refreshAttachmentRoute(projectUID, daemonID))
     return () => {
       attachmentRouteGeneration += 1
       attachmentRouteAbort?.abort()
