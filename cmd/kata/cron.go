@@ -126,7 +126,6 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 		command.Flags().StringVar(&options.jobUID, "job-uid", "", "list only runs of this job")
 	}
 	if resource == "job" && action == "next" {
-		options.limit = 3
 		command.Short = "preview future occurrences of a saved job without changing it"
 		command.Flags().Int64Var(&options.limit, "count", 3, "number of future occurrences (1–100)")
 		command.Flags().StringVar(&options.from, "from", "", "RFC3339 lower bound (defaults to now)")
