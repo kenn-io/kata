@@ -141,8 +141,6 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 	pending, err := edited.EnqueuePendingClaim(ctx, db.PendingClaimParams{ProjectID: editedRoute.ID, IssueRef: local.UID, Principal: principal, ClaimKind: "hard", Purpose: "offline", Now: now})
 	require.NoError(t, err)
 	require.Equal(t, issue.UID, pending.IssueUID)
-	_, err = edited.UpsertImportMapping(ctx, db.ImportMappingParams{Source: "connector", ObjectType: "issue", ExternalID: "external-issue", ProjectID: editedRoute.ID, IssueID: &local.ID})
-	require.NoError(t, err)
 	_, err = edited.InsertRemoteEvents(ctx, editedRoute.ID, []db.RemoteEvent{move})
 	require.NoError(t, err)
 	applyCtx, resets := db.WithFederationMoveResetCapture(ctx)
@@ -166,8 +164,51 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		}
 		require.True(t, found, "history must retain event %s", eventUID)
 	}
-	_, err = edited.ImportMappingBySource(ctx, editedRoute.ID, "connector", "issue", "external-issue")
-	require.ErrorIs(t, err, db.ErrNotFound)
+
+	// A locally bound root has an event that pins its issue and integration state.
+	boundStore := backend.Open(t)
+	t.Cleanup(func() { require.NoError(t, boundStore.Close()) })
+	boundRoute, err := boundStore.CreateProjectWithUID(ctx, "bound-source", source.UID)
+	require.NoError(t, err)
+	_, err = boundStore.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: boundRoute.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: source.ID, HubProjectUID: source.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+	require.NoError(t, err)
+	_, err = boundStore.InsertRemoteEvents(ctx, boundRoute.ID, []db.RemoteEvent{creation})
+	require.NoError(t, err)
+	require.NoError(t, boundStore.MaterializeFederatedProject(ctx, boundRoute.ID))
+	boundIssue, err := boundStore.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	boundRoot, boundEvent, err := boundStore.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{ProjectID: boundRoute.ID, IssueID: boundIssue.ID, ConnectorInstance: "notes", ExternalRootKey: "root", ExternalAccountKey: "account", Actor: "worker", ReceiveCommentsAfter: now})
+	require.NoError(t, err)
+	require.Equal(t, boundIssue.ID, *boundEvent.IssueID)
+	_, err = boundStore.InsertRemoteEvents(ctx, boundRoute.ID, []db.RemoteEvent{move})
+	require.NoError(t, err)
+	require.NoError(t, boundStore.MaterializeFederatedProject(ctx, boundRoute.ID))
+	assertRoot := func() {
+		t.Helper()
+		gotRoot, err := boundStore.ExternalRootBindingByIssue(ctx, boundIssue.ID)
+		require.NoError(t, err)
+		require.Equal(t, boundRoot.ID, gotRoot.ID)
+		mapping, err := boundStore.ImportMappingBySource(ctx, boundRoute.ID, "connector:notes", "issue", "root")
+		require.NoError(t, err)
+		require.Equal(t, boundRoot.RootMappingID, mapping.ID)
+	}
+	assertRoot()
+	returned, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: target.ID, ToProjectID: source.ID, IfMatchRev: moved.Issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	returnEvent := portableNativeEvent(*returned.Event)
+	_, err = boundStore.InsertRemoteEvents(ctx, boundRoute.ID, []db.RemoteEvent{returnEvent})
+	require.NoError(t, err)
+	require.NoError(t, boundStore.MaterializeFederatedProject(ctx, boundRoute.ID))
+	assertRoot()
+	boundHistory, err := boundStore.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Limit: 100})
+	require.NoError(t, err)
+	for eventUID, hash := range map[string]string{creation.EventUID: creation.ContentHash, move.EventUID: move.ContentHash, boundEvent.UID: boundEvent.ContentHash, returnEvent.EventUID: returnEvent.ContentHash} {
+		var found bool
+		for _, event := range boundHistory {
+			found = found || event.UID == eventUID && event.ContentHash == hash
+		}
+		require.True(t, found, "history must retain event %s", eventUID)
+	}
 
 	// A joined counterpart does not create an identity hold on its project.
 	purged := backend.Open(t)
