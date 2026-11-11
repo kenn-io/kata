@@ -46,7 +46,15 @@ func TestDocbankOriginClientPreflight(t *testing.T) {
 					var body []byte
 					body, err = db.EncodeRelaySourceEvent(event)
 					require.NoError(t, err)
-					_, err = client.AcceptRelayDeliveries(t.Context(), 42, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{{Stream: db.RelayStreamEvent, Body: body}}})
+					envelope, sealErr := db.SealRelayEnvelope(db.RelayEnvelope{
+						Version: 1, BindingUID: "01HZNQ7VFPK1XGD8R5MABCD4EA", ProjectUID: event.ProjectUID,
+						AuthorityUID: "01HZNQ7VFPK1XGD8R5MABCD4EC", SenderInstanceUID: event.OriginInstanceUID,
+						ReceiverInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EE", Epoch: 1, Sequence: 1,
+						Stream: db.RelayStreamEvent, Path: []string{event.OriginInstanceUID},
+						SourceUID: event.EventUID, SourceHash: event.ContentHash, Body: body,
+					})
+					require.NoError(t, sealErr)
+					_, err = client.AcceptRelayDeliveries(t.Context(), 42, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}})
 				} else {
 					_, err = client.IngestProjectEvents(t.Context(), 42, []api.FederationIngestEventEnvelope{{Type: "issue.created", Payload: payload}})
 				}

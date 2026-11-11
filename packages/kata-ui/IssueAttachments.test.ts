@@ -318,7 +318,7 @@ it('gives each reference a stable history anchor', () => {
 })
 
 it('shows actions only for references the host can read', async () => {
-  const remote = { ...entry, origin: 'root-instance' }
+  const remote = { ...entry, origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW' }
   const { rerender } = render(IssueAttachments, {
     attachmentsEnabled: false,
     attachmentReadable: (value) => !value.origin,

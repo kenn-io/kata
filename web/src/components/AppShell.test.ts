@@ -2242,7 +2242,7 @@ describe('AppShell task selection', () => {
   test('keeps upload controls when switching to a pre-origin daemon', async () => {
     const current = twoTaskSnapshot()
     current.capabilities.attachments = false
-    current.capabilities.attachment_instance_uid = 'leaf'
+    current.capabilities.attachment_instance_uid = '01ARZ3NDEKTSV4RRFFQ69G5FAV'
     const props = {
       route: { ...listRoute, issueUID: firstUID },
       snapshot: current,
@@ -2264,7 +2264,7 @@ describe('AppShell task selection', () => {
   test('keeps content controls when switching to a pre-origin daemon', async () => {
     const current = twoTaskSnapshot()
     current.capabilities.attachments = false
-    current.capabilities.attachment_instance_uid = 'leaf'
+    current.capabilities.attachment_instance_uid = '01ARZ3NDEKTSV4RRFFQ69G5FAV'
     current.selected!.issue!.metadata = {
       'attachment.file': {
         name: 'screen.png',
@@ -2307,10 +2307,15 @@ describe('AppShell task selection', () => {
         name: 'local-project',
       },
     })
-    current.capabilities.attachment_instance_uid = 'leaf'
+    current.capabilities.attachment_instance_uid = '01ARZ3NDEKTSV4RRFFQ69G5FAV'
     current.capabilities.attachments = false
     current.capabilities.attachment_routes = [
-      { project_uid: spoke.project_uid!, read: true, write: true, origin: 'root' },
+      {
+        project_uid: spoke.project_uid!,
+        read: true,
+        write: true,
+        origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
+      },
     ]
     const onNavigate = vi.fn()
     const props = {

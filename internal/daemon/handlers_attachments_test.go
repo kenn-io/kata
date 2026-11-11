@@ -399,10 +399,8 @@ func TestUIAttachmentRoutesAreProjectSpecific(t *testing.T) {
 	spoke, _ := seedProjectAndIssue(t, env)
 	_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: spoke.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: spoke.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
 	require.NoError(t, err)
-	local := seedProject(t, env, "local-project")
-	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: local.ID, Title: "Local issue", Author: "tester"})
-	require.NoError(t, err)
-	code, raw := env.Get(t, "/api/v1/ui/snapshot?view=inbox&selected_issue_uid="+issue.UID)
+	seedProject(t, env, "local-project")
+	code, raw := env.Get(t, "/api/v1/ui/snapshot?view=inbox")
 	require.Equal(t, http.StatusOK, code, string(raw))
 	var snapshot struct {
 		Capabilities struct {
