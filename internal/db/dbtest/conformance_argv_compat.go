@@ -360,7 +360,7 @@ func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
 			raw, err := json.Marshal(payload)
 			require.NoError(t, err)
 			event = newRemoteEvent(t, project, nil, "cron.workflow.deleted", "worker", store.InstanceUID(), event.HLCPhysicalMS, raw)
-			_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash)
+			_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash, event.CreatedAt.UTC().Format(db.EventTimestampFormat))
 			require.NoError(t, err)
 			if operation == "adopt" {
 				target, uidErr := uid.New()
