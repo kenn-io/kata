@@ -443,7 +443,7 @@ func commentEvidenceLines(c CommentEntry, width, cursor int) []string {
 		}
 		body := link.Body
 		if body == "" {
-			body = "Open reply to read its evidence"
+			body = "Open the reply to read its text"
 		}
 		for _, line := range renderMarkdownLines(body, max(width-4, 1)) {
 			lines = append(lines, "    "+line)
