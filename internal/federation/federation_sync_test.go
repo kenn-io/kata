@@ -1787,26 +1787,47 @@ func TestSyncFederationOnceCanonicalizesLocalAdoptionPushEcho(t *testing.T) {
 }
 
 func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing.T) {
-	testResetRetryLocalOriginEvent(t, false)
+	testResetRetryLocalOriginEvent(t, "")
 }
 
 func TestSyncFederationOnceResetRetryRestoresUnprojectedLocalIssueFromBackup(t *testing.T) {
-	testResetRetryLocalOriginEvent(t, true)
+	testResetRetryLocalOriginEvent(t, "current-backup")
 }
 
-func testResetRetryLocalOriginEvent(t *testing.T, restore bool) {
+func TestSyncFederationOnceResetRetryRecoversLaterLegacyPage(t *testing.T) {
+	for _, recovery := range []string{"upgrade", "legacy-backup"} {
+		t.Run(recovery, func(t *testing.T) {
+			testResetRetryLocalOriginEvent(t, recovery)
+		})
+	}
+}
+
+func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 	t.Helper()
 	ctx := t.Context()
 	spoke := testenv.New(t).DB
 	project, err := spoke.CreateProject(ctx, "hub")
 	require.NoError(t, err)
+	legacy := recovery == "upgrade" || recovery == "legacy-backup"
+	var earlier api.EventEnvelope
+	if legacy {
+		_, event, err := spoke.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "Completed reset page", Author: "tester",
+		})
+		require.NoError(t, err)
+		earlier = eventEnvelopeForSyncTest(event, 100)
+	}
 	issue, localEvent, err := spoke.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "acked before reset",
 		Author:    "tester",
 	})
 	require.NoError(t, err)
-	envelope := eventEnvelopeForSyncTest(localEvent, 100)
+	lastID := int64(100)
+	if legacy {
+		lastID++
+	}
+	envelope := eventEnvelopeForSyncTest(localEvent, lastID)
 	binding, err := spoke.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID:            project.ID,
 		Role:                 db.FederationRoleSpoke,
@@ -1840,12 +1861,19 @@ func testResetRetryLocalOriginEvent(t *testing.T, restore bool) {
 					NextAfterID:   99,
 				}))
 			case "99":
-				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
-					Events:      []api.EventEnvelope{envelope},
-					NextAfterID: 100,
-				}))
+				first := envelope
+				if legacy {
+					first = earlier
+				}
+				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{Events: []api.EventEnvelope{first}, NextAfterID: first.EventID}))
+			case "100":
+				page := api.PollEventsBody{NextAfterID: lastID}
+				if legacy {
+					page.Events = []api.EventEnvelope{envelope}
+				}
+				require.NoError(t, json.NewEncoder(w).Encode(page))
 			default:
-				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{NextAfterID: 100}))
+				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{NextAfterID: lastID}))
 			}
 		case "/api/v1/projects/42/federation/metadata":
 			require.NoError(t, json.NewEncoder(w).Encode(api.ProjectFederationBody{
@@ -1853,7 +1881,7 @@ func testResetRetryLocalOriginEvent(t *testing.T, restore bool) {
 				ProjectUID:             project.UID,
 				ProjectName:            project.Name,
 				ReplayHorizonEventID:   100,
-				BaselineThroughEventID: 100,
+				BaselineThroughEventID: lastID,
 			}))
 		default:
 			http.NotFound(w, r)
@@ -1861,6 +1889,12 @@ func testResetRetryLocalOriginEvent(t *testing.T, restore bool) {
 	}))
 	t.Cleanup(hub.Close)
 	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "token"}
+	if legacy {
+		require.NoError(t, SyncFederationOnce(ctx, spoke, binding, creds))
+		binding, err = spoke.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		require.Equal(t, earlier.EventID, binding.PullCursorEventID, "the first reset page completed")
+	}
 	var delivered []db.Event
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "during_spoke_pull_apply_before_materialize=unexpected")
 	require.Error(t, SyncFederationOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
@@ -1870,7 +1904,21 @@ func testResetRetryLocalOriginEvent(t *testing.T, restore bool) {
 	_, err = spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.ErrorIs(t, err, db.ErrNotFound)
 
-	if restore {
+	if legacy {
+		_, err = spoke.ExecContext(ctx, `DROP TABLE federation_local_replays`)
+		require.NoError(t, err)
+		_, err = spoke.ExecContext(ctx, `UPDATE meta SET value='50' WHERE key='schema_version'`)
+		require.NoError(t, err)
+	}
+	switch recovery {
+	case "upgrade":
+		path := spoke.Path()
+		require.NoError(t, spoke.Close())
+		require.NoError(t, sqlitestore.UpgradeInPlace(ctx, path))
+		spoke, err = sqlitestore.Open(ctx, path)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, spoke.Close()) })
+	case "current-backup", "legacy-backup":
 		var backup bytes.Buffer
 		require.NoError(t, jsonl.Export(ctx, spoke, &backup, jsonl.ExportOptions{IncludeDeleted: true}))
 		restored, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "restored.db"))
@@ -1878,8 +1926,20 @@ func testResetRetryLocalOriginEvent(t *testing.T, restore bool) {
 		t.Cleanup(func() { require.NoError(t, restored.Close()) })
 		require.NoError(t, jsonl.Import(ctx, &backup, restored))
 		spoke = restored
+	}
+	if recovery != "" {
 		_, err = spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-		require.ErrorIs(t, err, db.ErrNotFound, "restore preserves the interrupted projection")
+		require.ErrorIs(t, err, db.ErrNotFound, "reopening preserves the interrupted projection")
+	}
+	if legacy {
+		status, err := spoke.FederationSyncStatusByProject(ctx, project.ID)
+		require.NoError(t, err)
+		require.NotNil(t, status.LastPullStartedAt)
+		require.NotNil(t, status.LastPullSuccessAt)
+		require.True(t, status.LastPullStartedAt.After(*status.LastPullSuccessAt), "the later page was interrupted")
+		due, err := spoke.FederationLocalReplayDue(ctx, localEvent.UID, true)
+		require.NoError(t, err)
+		require.False(t, due, "legacy inference has no marker after the first reset page")
 	}
 
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
