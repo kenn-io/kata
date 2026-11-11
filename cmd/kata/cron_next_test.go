@@ -39,19 +39,19 @@ func TestCronNextSavedSchedules(t *testing.T) {
 	parent := `{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FB9","project_id":1,"status":"open","revision":7,"metadata":{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{"version":1,"anchor":"2026-06-01T00:00:00Z","through":"2026-06-01T06:00:00Z"}}}`
 	for _, tc := range []struct {
 		name, definition, parent, want string
-		invalid                        bool
+		invalid, deleted               bool
 	}{
-		{"local once", `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"once","at":"2026-06-01T08:00:00Z","timezone":"Local"},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Inspection"},"overlap":"forbid","catchup":"all"}`, "", "2026-06-01T08:00:00Z", false},
-		{"native interval", native, parent, "2026-06-01T08:00:00Z", false},
-		{"archived parent", native, strings.Replace(parent, `"status":"open"`, `"status":"open","deleted_at":"2026-01-01T00:00:00Z"`, 1), `"status":"parent_closed"`, false},
-		{"future definition", strings.Replace(native, `"version":1`, `"version":2`, 1), parent, "", true},
-		{"paused legacy", strings.Replace(legacy, `"enabled":true`, `"enabled":false`, 1), "", `"status":"paused"`, false},
-		{"deleted legacy", legacy, "", `"status":"deleted"`, false},
-		{"enabled legacy", legacy, parent, "", true},
-		{"paused future definition", strings.Replace(strings.Replace(native, `"version":1`, `"version":2`, 1), `"enabled":true`, `"enabled":false`, 1), "", "", true},
-		{"paused unknown field", strings.Replace(strings.Replace(native, `"enabled":true`, `"enabled":false`, 1), `"version":1`, `"version":1,"future":true`, 1), "", "", true},
-		{"deleted unknown field", strings.Replace(native, `"version":1`, `"version":1,"future":true`, 1), "", "", true},
-		{"deleted future definition", strings.Replace(native, `"version":1`, `"version":2`, 1), parent, "", true},
+		{"local once", `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"once","at":"2026-06-01T08:00:00Z","timezone":"Local"},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Inspection"},"overlap":"forbid","catchup":"all"}`, "", "2026-06-01T08:00:00Z", false, false},
+		{"native interval", native, parent, "2026-06-01T08:00:00Z", false, false},
+		{"archived parent", native, strings.Replace(parent, `"status":"open"`, `"status":"open","deleted_at":"2026-01-01T00:00:00Z"`, 1), `"status":"parent_closed"`, false, false},
+		{"future definition", strings.Replace(native, `"version":1`, `"version":2`, 1), parent, "", true, false},
+		{"paused legacy", strings.Replace(legacy, `"enabled":true`, `"enabled":false`, 1), "", `"status":"paused"`, false, false},
+		{"deleted legacy", legacy, "", `"status":"deleted"`, false, true},
+		{"enabled legacy", legacy, parent, "", true, false},
+		{"paused future definition", strings.Replace(strings.Replace(native, `"version":1`, `"version":2`, 1), `"enabled":true`, `"enabled":false`, 1), "", "", true, false},
+		{"paused unknown field", strings.Replace(strings.Replace(native, `"enabled":true`, `"enabled":false`, 1), `"version":1`, `"version":1,"future":true`, 1), "", "", true, false},
+		{"deleted unknown field", strings.Replace(native, `"version":1`, `"version":1,"future":true`, 1), "", "", true, true},
+		{"deleted future definition", strings.Replace(native, `"version":1`, `"version":2`, 1), parent, "", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +65,7 @@ func TestCronNextSavedSchedules(t *testing.T) {
 					fmt.Fprint(w, `{}`)
 				case strings.Contains(r.URL.Path, "/cron/jobs/"):
 					deleted := ""
-					if strings.HasPrefix(tc.name, "deleted ") {
+					if tc.deleted {
 						deleted = `,"deleted_at":"2026-01-01T00:00:00Z"`
 					}
 					fmt.Fprintf(w, `{"job":{"uid":"%s","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","definition":%s%s}}`, id, tc.definition, deleted)
@@ -193,7 +193,7 @@ func TestCronNextModes(t *testing.T) {
 			args := append(tc.flags, "--project", project.Name, "cron", "job", "next", jobID, "--from", "2089-01-01T00:00:00Z")
 			out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), args...)
 			require.NoError(t, err)
-			if tc.name == "quiet" {
+			if tc.want == "" {
 				require.Empty(t, out)
 			} else {
 				require.Contains(t, out, tc.want)

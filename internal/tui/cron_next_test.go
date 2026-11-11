@@ -138,6 +138,12 @@ func TestCronJobDetailPausedJobHasNoNextRuns(t *testing.T) {
 	got = nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) { d.Enabled = false }, nil)
 	require.Regexp(t, `Triggers:\s+none while paused`, got)
 
+	got = nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
+		d.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new("0 0 30 2 *")}
+		d.Enabled = false
+	}, nil)
+	require.Regexp(t, `Triggers:\s+none while paused`, got)
+
 	for _, native := range []bool{false, true} {
 		t.Run(map[bool]string{false: "adapter", true: "native"}[native], func(t *testing.T) {
 			got := nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
@@ -439,12 +445,4 @@ func TestCronReloadsWhenNativeParentChanges(t *testing.T) {
 			require.Len(t, api.parents, tc.want)
 		})
 	}
-}
-
-func TestCronJobDetailPausedLegacySchedule(t *testing.T) {
-	got := nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
-		d.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new("0 0 30 2 *")}
-		d.Enabled = false
-	}, nil)
-	require.Regexp(t, `Triggers:\s+none while paused`, got)
 }
