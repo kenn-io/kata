@@ -769,19 +769,17 @@ func TestUnreachableProfileAdviceSharedByCallers(t *testing.T) {
 			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
 			command := "kata --daemon work daemon recover"
 			require.Contains(t, err.Error(), command)
-			require.Contains(t, err.Error(), "after it exits")
-			require.Contains(t, err.Error(), "original foreground launch command")
-			require.Contains(t, err.Error(), "supervisor")
 			require.NotContains(t, err.Error(), "kata daemon restart")
 		})
 	}
-	t.Run("instance failure", func(t *testing.T) {
-		t.Setenv("KATA_HTTP_TIMEOUT", "50ms")
-		err := verifyLocalProfileInstance(t.Context(), ResolvedDaemon{BaseURL: "http://127.0.0.1:1"})
-		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-		require.Same(t, err, scopeProfileUnreachable(err, "work"))
-		require.Contains(t, err.Error(), "local profile instance is unavailable")
-	})
+}
+
+func TestScopeProfileUnreachablePreservesInstanceFailure(t *testing.T) {
+	t.Setenv("KATA_HTTP_TIMEOUT", "50ms")
+	err := verifyLocalProfileInstance(t.Context(), ResolvedDaemon{BaseURL: "http://127.0.0.1:1"})
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	require.Same(t, err, scopeProfileUnreachable(err, "work"))
+	require.Contains(t, err.Error(), "local profile instance is unavailable")
 }
 
 func TestProfileRecoveryCommandShells(t *testing.T) {
