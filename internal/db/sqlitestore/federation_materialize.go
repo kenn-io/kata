@@ -575,16 +575,8 @@ func federatedMovingLinkRows(ctx context.Context, tx *sql.Tx, issueIDs []int64) 
 	}
 	defer func() { _ = rows.Close() }()
 	stamp := newFederationRowHasher(false)
-	result := map[db.FoldLinkKey]federatedLinkRow{}
-	for rows.Next() {
-		var row federatedLinkRow
-		if err := rows.Scan(&row.id, &row.fromID, &row.toID, &row.fromUID, &row.toUID, &row.typ, &row.author, &row.createdAt); err != nil {
-			return nil, [32]byte{}, err
-		}
-		stamp.write(5, row.id, row.fromID, row.toID, row.fromUID, row.toUID, row.typ, row.author, row.createdAt)
-		result[row.key()] = row
-	}
-	if err := rows.Err(); err != nil {
+	result, err := scanFederatedLinkRows(rows, stamp)
+	if err != nil {
 		return nil, [32]byte{}, err
 	}
 	return result, stamp.sum(), nil
