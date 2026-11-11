@@ -246,7 +246,8 @@ func EnsureSameLocalProfile(ctx context.Context, resolved ResolvedDaemon) (Resol
 }
 
 func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, profile config.LocalProfileConfig) (ResolvedDaemon, error) {
-	scan := func(ctx context.Context, dir string) (ensureDiscovery, error) {
+	dir := resolved.LocalProfile.DataDir
+	scan := func(ctx context.Context) (ensureDiscovery, error) {
 		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 			return ensureDiscovery{}, nil
 		} else if err != nil {
@@ -267,6 +268,6 @@ func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, prof
 		resolved = selected
 		return found, nil
 	}
-	_, err := waitForSupervisedDaemon(ctx, resolved.LocalProfile.DataDir, filepath.Join(profile.Home, "config.toml"), false, scan)
+	_, err := waitForSupervisedDaemon(ctx, filepath.Join(profile.Home, "config.toml"), scan)
 	return resolved, err
 }

@@ -13,7 +13,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
@@ -21,18 +20,33 @@ import (
 )
 
 func TestManagedExternallyDoesNotAutostart(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		home := setupKataEnv(t)
-		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n[auth]\ntoken_env = 'SUPERVISOR_ONLY_TOKEN'\n"), 0600))
-		state := patchEnsureHooks(t, "v0.2.0", "http://spawned")
-		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-		defer cancel()
-		_, err := ensureLocalRunningTarget(ctx)
-		require.ErrorContains(t, err, "managed externally")
-		require.Zero(t, state.startCalls)
-		require.Zero(t, state.stopCalls)
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-	})
+	// A zero deadline keeps the default context: the documented limit is 30s.
+	for _, tc := range []struct{ deadline, waited time.Duration }{
+		{100 * time.Millisecond, 100 * time.Millisecond}, {0, 30 * time.Second},
+	} {
+		t.Run(tc.waited.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				home := setupKataEnv(t)
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n[auth]\ntoken_env = 'SUPERVISOR_ONLY_TOKEN'\n"), 0600))
+				state := patchEnsureHooks(t, "v0.2.0", "http://spawned")
+				ctx := t.Context()
+				if tc.deadline > 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, tc.deadline)
+					defer cancel()
+				}
+				start := time.Now()
+				_, err := ensureLocalRunningTarget(ctx)
+				require.ErrorContains(t, err, "managed externally")
+				require.Equal(t, tc.waited, time.Since(start))
+				require.Zero(t, state.startCalls)
+				require.Zero(t, state.stopCalls)
+				if tc.deadline > 0 {
+					require.ErrorIs(t, err, context.DeadlineExceeded)
+				}
+			})
+		})
+	}
 }
 
 func TestManagedExternallyUnreachableDetail(t *testing.T) {
@@ -41,7 +55,7 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				cause := fmt.Errorf("daemon endpoint unreachable: %w", ErrLocalDaemonUnreachable)
 				calls := 0
-				scan := func(context.Context, string) (ensureDiscovery, error) {
+				scan := func(context.Context) (ensureDiscovery, error) {
 					calls++
 					if clear && calls > 1 {
 						return ensureDiscovery{}, nil
@@ -50,7 +64,7 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 				defer cancel()
-				_, err := waitForSupervisedDaemon(ctx, t.TempDir(), "/example/config.toml", false, scan)
+				_, err := waitForSupervisedDaemon(ctx, "/example/config.toml", scan)
 				require.ErrorIs(t, err, ErrDaemonManagedExternally)
 				if clear {
 					require.NotErrorIs(t, err, cause)
@@ -62,38 +76,6 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 			})
 		})
 	}
-}
-
-func TestManagedExternallyStaleWaitDoesNotReplace(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		patchEnsureHooks(t, "v0.2.0", "http://spawned")
-		scan := func(context.Context, string) (ensureDiscovery, error) {
-			return ensureDiscovery{Outcome: daemonScanStale, Daemon: liveDaemon{Info: PingInfo{Service: "kata", Version: "v0.1.0"}}}, nil
-		}
-		_, err := waitForSupervisedDaemon(t.Context(), t.TempDir(), "/example/config.toml", false, scan)
-		require.ErrorIs(t, err, ErrDaemonNotReplaceable)
-		require.ErrorContains(t, err, "v0.1.0")
-		require.ErrorContains(t, err, "v0.2.0")
-		require.ErrorContains(t, err, "service manager")
-	})
-}
-
-func TestManagedExternallyCutoverReportsMigration(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		home := setupKataEnv(t)
-		path := filepath.Join(home, "kata.db")
-		lock := flock.New(path + ".import.lock")
-		require.NoError(t, lock.Lock())
-		t.Cleanup(func() { require.NoError(t, lock.Close()) })
-		orig := discoverDaemonForSupervised
-		t.Cleanup(func() { discoverDaemonForSupervised = orig })
-		discoverDaemonForSupervised = func(context.Context, string) (ensureDiscovery, error) { return ensureDiscovery{}, nil }
-		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
-		defer cancel()
-		_, err := waitForSupervisedDaemon(ctx, t.TempDir(), "/example/config.toml", true, discoverDaemonForSupervised)
-		require.ErrorContains(t, err, "migration")
-		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-	})
 }
 
 func TestManagedExternallyProfileDoesNotAutostart(t *testing.T) {
@@ -174,9 +156,14 @@ func TestManagedExternallyProfileWaitVerifiesIdentity(t *testing.T) {
 	require.ErrorIs(t, err, ErrProfileIdentityMismatch)
 }
 
-func TestSupervisedNewerDaemonRecommendsNewBinary(t *testing.T) {
+func TestExternallyManagedVersionErrorGuidesByDirection(t *testing.T) {
 	patchEnsureHooks(t, "v0.2.0", "http://spawned")
-	err := externallyManagedVersionError(PingInfo{Version: "v0.3.0"})
+	err := externallyManagedVersionError(PingInfo{Version: "v0.1.0"})
+	require.ErrorIs(t, err, ErrDaemonNotReplaceable)
+	require.ErrorContains(t, err, "v0.1.0")
+	require.ErrorContains(t, err, "v0.2.0")
+	require.ErrorContains(t, err, "service manager")
+	err = externallyManagedVersionError(PingInfo{Version: "v0.3.0"})
 	require.ErrorIs(t, err, ErrDaemonNotReplaceable)
 	require.ErrorContains(t, err, "use a newer kata binary")
 }

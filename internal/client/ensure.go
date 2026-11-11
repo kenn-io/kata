@@ -189,7 +189,9 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 		return RunningDaemon{}, err
 	}
 	if !enabled {
-		return waitForSupervisedDaemon(ctx, ns.DataDir, configPath, true, discoverDaemonForSupervised)
+		return waitForSupervisedDaemon(ctx, configPath, func(ctx context.Context) (ensureDiscovery, error) {
+			return discoverDaemonForSupervised(ctx, ns.DataDir)
+		})
 	}
 	found, release, err := discoverForStart(ctx, ns.DataDir)
 	if err != nil {
@@ -220,13 +222,13 @@ func externallyManagedVersionError(info PingInfo) error {
 	return fmt.Errorf("%w: running kata daemon %s differs from this kata binary %s; restart it with your service manager (autostart = false)", ErrDaemonNotReplaceable, daemonVersionLabel(info), currentVersionForEnsure())
 }
 
-func waitForSupervisedDaemon(ctx context.Context, dataDir, configPath string, migrationAllowed bool, scan func(context.Context, string) (ensureDiscovery, error)) (RunningDaemon, error) {
+func waitForSupervisedDaemon(ctx context.Context, configPath string, scan func(context.Context) (ensureDiscovery, error)) (RunningDaemon, error) {
 	ctx, cancel := context.WithTimeout(ctx, daemonStartupWait)
 	defer cancel()
 	var running RunningDaemon
 	var unreachable error
 	err := waitForDaemonStartup(ctx, nil, daemonStartupWait, nil, func(ctx context.Context) (bool, error) {
-		found, err := scan(ctx, dataDir)
+		found, err := scan(ctx)
 		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
 			return false, err
 		}
@@ -245,11 +247,6 @@ func waitForSupervisedDaemon(ctx context.Context, dataDir, configPath string, mi
 	}
 	if !errors.Is(err, ErrLocalDaemonUnreachable) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		return RunningDaemon{}, err
-	}
-	// This nonblocking lock probe distinguishes a still-running migration without
-	// extending the readiness budget or resolving supervisor-only credentials.
-	if migrationAllowed && sqliteCutoverLocked(ctx) {
-		return RunningDaemon{}, fmt.Errorf("%w: storage migration is in progress; retry after the service manager's daemon becomes ready (%s)", ErrLocalDaemonUnreachable, configPath)
 	}
 	message := fmt.Errorf("%w; did not become ready (limit %s or the caller's deadline); start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
 	if unreachable != nil {

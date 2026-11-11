@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"go.kenn.io/kata/internal/config"
@@ -147,8 +148,7 @@ type executableStart struct {
 
 func (s executableStart) profile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
 	if !s.request.ReadOnly && !selection.Profile.Config.AutostartEnabled() {
-		live := liveDiscovery{scan: liveDaemonsReadOnly, verify: verifyLocalProfileInstance}
-		return supervisedExecutableDiscovery(ctx, selection, live.profile, inProcessStart{}.profile)
+		return supervisedDiscovery(ctx, filepath.Join(selection.Profile.Home, "config.toml"), selection, s.discover.profile)
 	}
 	args := []string{"daemon", "recover"}
 	switch {
@@ -162,29 +162,29 @@ func (s executableStart) profile(ctx context.Context, selection DaemonSelection)
 
 func (s executableStart) local(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
 	if !s.request.ReadOnly {
-		if enabled, _, err := config.ReadAutostartEnabled(); err != nil {
+		if enabled, configPath, err := config.ReadAutostartEnabled(); err != nil {
 			return ResolvedDaemon{}, false, err
 		} else if !enabled {
-			live := liveDiscovery{scan: liveDaemonsReadOnly, verify: verifyLocalProfileInstance}
-			return supervisedExecutableDiscovery(ctx, selection, live.local, inProcessStart{}.local)
+			return supervisedDiscovery(ctx, configPath, selection, s.discover.local)
 		}
 	}
 	return s.startIfStopped(ctx, selection, s.discover.local, []string{"daemon", "start"})
 }
 
-// An SDK's build version need not match an already-running daemon. Discover it
-// first, then use the normal supervised wait only during a restart gap.
-func supervisedExecutableDiscovery(
-	ctx context.Context, selection DaemonSelection,
-	discover, wait func(context.Context, DaemonSelection) (ResolvedDaemon, bool, error),
-) (ResolvedDaemon, bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, daemonStartupWait)
-	defer cancel()
-	resolved, ok, err := discover(ctx, selection)
-	if ok || err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) && ctx.Err() == nil {
-		return resolved, ok, err
-	}
-	return wait(ctx, selection)
+// supervisedDiscovery polls the selection's own discovery, which accepts any
+// daemon version, through the supervised waiter's bound and error handling.
+func supervisedDiscovery(
+	ctx context.Context, configPath string, selection DaemonSelection,
+	discover func(context.Context, DaemonSelection) (ResolvedDaemon, bool, error),
+) (resolved ResolvedDaemon, ok bool, err error) {
+	_, err = waitForSupervisedDaemon(ctx, configPath, func(ctx context.Context) (ensureDiscovery, error) {
+		resolved, ok, err = discover(ctx, selection)
+		if ok {
+			return ensureDiscovery{Outcome: daemonScanCompatible}, nil
+		}
+		return ensureDiscovery{}, err
+	})
+	return resolved, ok, err
 }
 
 func (s executableStart) startIfStopped(

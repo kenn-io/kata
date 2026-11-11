@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -181,41 +182,52 @@ func TestDiscoverStartWithRespectsDisabledAutostart(t *testing.T) {
 }
 
 // StartWith only affects a stopped daemon; an existing daemon remains usable
-// even when the embedding application's version differs from its version.
+// even when the embedding application's version differs from its version. In
+// the delayed case the first ping fails, as during a supervisor restart, so
+// the wait must accept the same daemon the first probe would have.
 func TestDiscoverStartWithUsesExistingSupervisedDaemon(t *testing.T) {
 	for _, profile := range []bool{false, true} {
-		t.Run(fmt.Sprintf("profile=%t", profile), func(t *testing.T) {
-			home := isolateKataHome(t)
-			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
-			uid := "01HZZZZZZZZZZZZZZZZZZZZZ01"
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/api/v1/instance" {
-					_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
-					return
+		for _, delayed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("profile=%t/delayed=%t", profile, delayed), func(t *testing.T) {
+				home := isolateKataHome(t)
+				t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+				uid := "01HZZZZZZZZZZZZZZZZZZZZZ01"
+				var pings atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch {
+					case r.URL.Path == "/api/v1/instance":
+						_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+					case delayed && pings.Add(1) == 1:
+						w.WriteHeader(http.StatusServiceUnavailable)
+					default:
+						_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version+"-other", os.Getpid())
+					}
+				}))
+				defer srv.Close()
+				options := client.DiscoverOptions{StartWith: "unused"}
+				var ns *daemonruntime.Namespace
+				var err error
+				if profile {
+					profileHome := t.TempDir()
+					require.NoError(t, os.WriteFile(filepath.Join(profileHome, "config.toml"), []byte("autostart = false\n"), 0600))
+					writeDaemonCatalog(t, home, fmt.Sprintf("[[daemon]]\nname = 'work'\nlocal = true\nhome = %q\ninstance_uid = %q\n", profileHome, uid))
+					selected, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: profileHome, InstanceUID: uid})
+					require.NoError(t, err)
+					ns, err = daemonruntime.NewNamespaceForHome(selected.Home, selected.StorageID)
+					require.NoError(t, err)
+					options.Daemon = "work"
+				} else {
+					require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+					ns, err = daemonruntime.NewNamespace()
+					require.NoError(t, err)
 				}
-				_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version+"-other", os.Getpid())
-			}))
-			defer srv.Close()
-			var options client.DiscoverOptions
-			if profile {
-				profileHome := t.TempDir()
-				require.NoError(t, os.WriteFile(filepath.Join(profileHome, "config.toml"), []byte("autostart = false\n"), 0600))
-				writeDaemonCatalog(t, home, fmt.Sprintf("[[daemon]]\nname = 'work'\nlocal = true\nhome = %q\ninstance_uid = %q\n", profileHome, uid))
-				selected, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: profileHome, InstanceUID: uid})
-				require.NoError(t, err)
-				ns, err := daemonruntime.NewNamespaceForHome(selected.Home, selected.StorageID)
-				require.NoError(t, err)
 				publishRuntime(t, ns, srv.Listener.Addr().String(), nil)
-				options.Daemon = "work"
-			} else {
-				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
-				publishLocalRuntime(t, home, srv.Listener.Addr().String())
-			}
-			_, err := client.Discover(t.Context(), options)
-			require.NoError(t, err)
-			options.StartWith = "unused"
-			_, err = client.Discover(t.Context(), options)
-			require.NoError(t, err)
-		})
+				_, err = client.Discover(t.Context(), options)
+				require.NoError(t, err)
+				if delayed {
+					require.GreaterOrEqual(t, pings.Load(), int32(2))
+				}
+			})
+		}
 	}
 }
