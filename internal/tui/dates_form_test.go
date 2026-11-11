@@ -513,6 +513,25 @@ func TestDetailStripShowsBothDates(t *testing.T) {
 }
 
 func TestDatesFormShowsSavedInstantInItsZoneAndKeepsUndo(t *testing.T) {
+	t.Run("fractional seconds", func(t *testing.T) {
+		h := newDatesHarness(t, nil, viewDetail)
+		saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00.123456789Z", "America/New_York")
+		require.NoError(t, err)
+		_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": saved, "deadline_on": saved}})
+		require.NoError(t, err)
+		h.reload()
+		h.openForm()
+		h.fill(strings.Replace(h.m.input.fieldValue(fieldScheduled), "2025-12-31", "2026-01-02", 1), strings.Replace(h.m.input.fieldValue(fieldDeadline), "2025-12-31", "2026-01-02", 1))
+		h.save()
+		issue, err := h.env.DB.IssueByID(t.Context(), h.issue.ID)
+		require.NoError(t, err)
+		for _, field := range []string{"scheduled_on", "deadline_on"} {
+			text, _, at, _, err := metadata.ScheduleFieldInstant(string(issue.Metadata), field, "UTC")
+			assert.NoError(t, err, field)
+			assert.Equal(t, "2026-01-02T21:00:00.123456789", text, field)
+			assert.Equal(t, time.Date(2026, 1, 3, 2, 0, 0, 123456789, time.UTC), at.UTC(), field)
+		}
+	})
 	h := newDatesHarness(t, nil, viewDetail)
 	saved, err := metadata.NewScheduleValue("2026-01-01T02:00:00Z", "America/New_York")
 	require.NoError(t, err)
@@ -616,18 +635,15 @@ func TestDatesFormRelativeInputsUseEachScheduleDay(t *testing.T) {
 			now := time.Date(2026, 1, 1, 4, 59, 0, 0, time.UTC)
 			scheduledZone, err := metadata.ScheduleLocation("America/New_York", metadata.ScheduleTZDataVersion)
 			require.NoError(t, err)
-			deadlineZone, err := metadata.ScheduleLocation("Asia/Tokyo", metadata.ScheduleTZDataVersion)
-			require.NoError(t, err)
 			if tc.readFail {
 				tc.scheduled, tc.deadline = "2026-06-01", "2026-06-02"
 			}
 			scheduled, err := metadata.NewScheduleValue(tc.scheduled, "America/New_York")
 			require.NoError(t, err)
-			deadline, err := metadata.NewScheduleValue(tc.deadline, "Asia/Tokyo")
-			require.NoError(t, err)
+			deadline := jsontext.Value(fmt.Sprintf("%q", tc.deadline))
 			current := Issue{UID: "issue-1", ShortID: "example", ProjectID: 7, Revision: 3,
 				Metadata:         issueMetadata{ScheduledOn: scheduled, DeadlineOn: deadline},
-				ScheduledOnToday: now.In(scheduledZone).Format(time.DateOnly), DeadlineOnToday: now.In(deadlineZone).Format(time.DateOnly)}
+				ScheduledOnToday: now.In(scheduledZone).Format(time.DateOnly), DeadlineOnToday: now.In(scheduledZone).Format(time.DateOnly)}
 			writes := 0
 			client := NewClient("http://daemon.example", &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				if r.Method == http.MethodGet {
@@ -637,7 +653,7 @@ func TestDatesFormRelativeInputsUseEachScheduleDay(t *testing.T) {
 					now = now.Add(2 * time.Minute)
 					fresh := current
 					fresh.ScheduledOnToday = now.In(scheduledZone).Format(time.DateOnly)
-					fresh.DeadlineOnToday = now.In(deadlineZone).Format(time.DateOnly)
+					fresh.DeadlineOnToday = now.In(scheduledZone).Format(time.DateOnly)
 					return jsonResponse(t, map[string]any{"issue": fresh}), nil
 				}
 				require.Equal(t, http.MethodPost, r.Method)

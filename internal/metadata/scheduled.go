@@ -312,7 +312,7 @@ func resolveLocalSchedule(value, layout string, location *time.Location) (time.T
 	var earliest time.Time
 	for offset := range offsets {
 		candidate := wall.Add(-time.Duration(offset) * time.Second)
-		if candidate.In(location).Format(layout) != value {
+		if !wallClock(candidate, location).Equal(wall) {
 			continue
 		}
 		if earliest.IsZero() || candidate.Before(earliest) {

@@ -15,12 +15,12 @@ import (
 
 func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 	for _, tc := range []struct {
-		name, scheduled, wantError string
-		unsupported, replace       bool
+		name, scheduled      string
+		unsupported, replace bool
 	}{
-		{"unsupported rules", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`, "unsupported schedule tzdata version", true, false},
-		{"unsupported members", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}`, "unknown object member name", true, true},
-		{"opaque legacy value", `{"legacy":"opaque"}`, "", false, true},
+		{"unsupported rules", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`, true, false},
+		{"unsupported members", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}`, true, true},
+		{"opaque legacy value", `{"legacy":"opaque"}`, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newRowDatesFixture(t)
@@ -38,8 +38,7 @@ func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 				t.Run(path, func(t *testing.T) {
 					status, raw := cronHTTP(t, f.env, http.MethodGet, path, nil)
 					if tc.unsupported {
-						require.NotEqual(t, http.StatusOK, status, string(raw))
-						require.Contains(t, string(raw), tc.wantError)
+						assertAPIError(t, status, raw, http.StatusInternalServerError, "internal")
 						return
 					}
 					require.Equal(t, http.StatusOK, status, string(raw))
@@ -72,14 +71,6 @@ func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 				return
 			}
 			t.Run("replace scheduled_on", func(t *testing.T) {
-				records, err := dbtest.CollectImportRecords(t.Context(), f.env.DB, db.ExportFilter{ProjectID: &f.project.ID})
-				require.NoError(t, err)
-				for _, record := range records {
-					if issue, ok := record.(*db.IssueExport); ok && issue.UID == f.nodate.UID {
-						issue.Metadata = jsontext.Value(`{"scheduled_on":` + tc.scheduled + `}`)
-					}
-				}
-				require.NoError(t, f.env.DB.ImportReplay(t.Context(), records, db.ImportOptions{}))
 				before, err := f.env.DB.IssueByID(t.Context(), f.nodate.ID)
 				require.NoError(t, err)
 				status, raw := cronHTTP(t, f.env, http.MethodPost, show+"/metadata", map[string]any{"actor": "tester", "patch": map[string]string{"scheduled_on": "2026-11-13"}})

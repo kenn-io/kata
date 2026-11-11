@@ -71,7 +71,13 @@ func TestPrepareIssueSchedules(t *testing.T) {
 				require.NoError(t, json.Unmarshal([]byte(strings.ReplaceAll(tc.patch, "$field", field)), &patch))
 				out, err := db.PrepareIssueSchedules(jsontext.Value(strings.ReplaceAll(tc.current, "$field", field)), patch, tc.fallback, tc.recurrence)
 				if tc.wantError {
-					require.Error(t, err)
+					require.ErrorIs(t, err, metadata.ErrInvalidValue)
+					var current map[string]jsontext.Value
+					require.NoError(t, json.Unmarshal([]byte(strings.ReplaceAll(tc.current, "$field", field)), &current))
+					if raw := current[field]; len(raw) > 0 && raw[0] == '{' {
+						_, cause := metadata.DecodeSavedSchedule(raw)
+						require.ErrorContains(t, err, field+": "+cause.Error())
+					}
 					continue
 				}
 				require.NoError(t, err)
