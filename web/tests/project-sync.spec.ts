@@ -45,6 +45,7 @@ test('local project readers see native sync status with bounded embedding summar
   await page.route(`**${statusPath}`, async (route) => {
     const response = await route.fetch()
     const data = await response.json()
+    data.statuses[0].project_name = "spoke project's"
     data.statuses[0].last_error = 'example sync failure'
     data.statuses[0].embedding = {
       state: 'reused',
@@ -60,7 +61,20 @@ test('local project readers see native sync status with bounded embedding summar
   })
   await region.getByRole('button', { name: 'Refresh sync' }).click()
   await expect(region.getByText('Reused: 1')).toBeVisible()
-  await expect(region.getByRole('button', { name: 'Copy sync status command' })).toBeVisible()
+  await expect(
+    region.getByRole('button', { name: 'Copy Bash/Zsh sync status command' }),
+  ).toBeVisible()
+  await expect(
+    region.getByRole('button', { name: 'Copy PowerShell sync status command' }),
+  ).toBeVisible()
+  await expect(region.getByText(`Use a CLI configured for ${kata.origin}.`)).toBeVisible()
+  await expect(
+    region.getByText("kata federation status --project 'spoke project'\\''s'"),
+  ).toBeVisible()
+  await expect(
+    region.getByText("kata federation status --project 'spoke project''s'"),
+  ).toBeVisible()
+  await expect(region.getByText('example sync failure')).toHaveCount(0)
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 1000 })
     await expect(region.getByText('Retained without index: 1')).toBeVisible()

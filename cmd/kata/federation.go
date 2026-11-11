@@ -1348,7 +1348,21 @@ func federationStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			callResp, callErr := apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{})
+			var callResp *generated.GetFederationStatusResp
+			var callErr error
+			if flags.Project != "" {
+				project, err := resolveFederationProjectByName(a, flags.Project)
+				if err != nil {
+					return err
+				}
+				resp, err := apiClient.GetProjectFederationStatusWithResponse(a.ctx, &generated.GetProjectFederationStatusRequestOptions{PathParams: &generated.GetProjectFederationStatusPath{ProjectID: project.ID}})
+				callErr = err
+				if resp != nil {
+					callResp = &generated.GetFederationStatusResp{HTTPResponse: resp.HTTPResponse, StatusCode: resp.StatusCode, Body: resp.Body}
+				}
+			} else {
+				callResp, callErr = apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{})
+			}
 			if err := externalCLITransportError(callResp, callErr); err != nil {
 				return err
 			}
@@ -1356,37 +1370,12 @@ func federationStatusCmd() *cobra.Command {
 				return err
 			}
 			if flags.Project != "" {
-				var response map[string]jsontext.Value
+				var response api.FederationStatusBody
 				if err := json.Unmarshal(callResp.Body, &response); err != nil {
 					return err
 				}
-				var statuses []jsontext.Value
-				if err := json.Unmarshal(response["statuses"], &statuses); err != nil {
-					return err
-				}
-				filtered := make([]jsontext.Value, 0, 1)
-				for _, status := range statuses {
-					var project struct {
-						Name string `json:"project_name"`
-					}
-					if err := json.Unmarshal(status, &project); err != nil {
-						return err
-					}
-					if project.Name == flags.Project {
-						filtered = append(filtered, status)
-					}
-				}
-				if len(filtered) == 0 {
+				if len(response.Statuses) == 0 {
 					return &cliError{Message: fmt.Sprintf("no federation status for project %q", flags.Project), Kind: kindNotFound, ExitCode: ExitNotFound}
-				}
-				var err error
-				response["statuses"], err = json.Marshal(filtered)
-				if err != nil {
-					return err
-				}
-				callResp.Body, err = json.Marshal(response)
-				if err != nil {
-					return err
 				}
 			}
 			bs, emitted, err := emitPassthrough(cmd, callResp.Body)

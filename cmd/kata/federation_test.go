@@ -117,6 +117,32 @@ func TestFederationStatusProjectFilter(t *testing.T) {
 		assert.Empty(t, out)
 		assert.Contains(t, err.Error(), "missing-project")
 	}
+	local, err := env.DB.CreateProject(t.Context(), "local-project")
+	require.NoError(t, err)
+	_, err = runCmdOutput(t, env, "federation", "status", "--project", local.Name)
+	_ = requireCLIError(t, err, ExitNotFound)
+	assert.Contains(t, err.Error(), "no federation status for project")
+}
+
+func TestFederationStatusProjectMember(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("owner-token"), testenv.WithRequireTokenIdentity())
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "owner")
+	require.NoError(t, err)
+	team, _, err := env.DB.CreateTeam(t.Context(), "project-team", "owner")
+	require.NoError(t, err)
+	_, err = env.DB.SetTeamMembership(t.Context(), team.UID, "member", true, "owner")
+	require.NoError(t, err)
+	_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{team.UID}}, "owner")
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "member-token", Actor: "member", AdminActor: db.BootstrapActor})
+	require.NoError(t, err)
+	t.Setenv("KATA_AUTH_TOKEN", "member-token")
+	_, err = runCmdOutput(t, env, "federation", "status")
+	require.Error(t, err)
+	out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name, "--format", "json")
+	assert.Contains(t, out, project.Name)
 }
 
 func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {

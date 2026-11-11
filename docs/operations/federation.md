@@ -775,6 +775,10 @@ entry. Remote workspaces do not delegate federation reads through their target
 credentials. Retained-window counts describe stored artifacts, not provider
 requests or billing.
 
+When sync needs attention, copy the diagnostic command for Bash/Zsh or
+PowerShell. Configure the CLI to use the source daemon shown in the summary.
+Select a catalog entry with `--daemon`, or set `KATA_SERVER` for a remote daemon.
+
 ### Embedding transfer and reuse
 
 The artifact stream accepts bounded manifest offers separately from issue

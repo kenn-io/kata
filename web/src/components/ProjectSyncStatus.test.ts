@@ -43,8 +43,12 @@ describe('ProjectSyncStatus', () => {
     render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
     const command = "kata federation status --project 'spoke project'\\''s'"
     await screen.findByText(command)
-    await fireEvent.click(screen.getByRole('button', { name: 'Copy sync status command' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Copy Bash/Zsh sync status command' }))
     expect(writeText).toHaveBeenCalledWith(command)
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Copy PowerShell sync status command' }),
+    )
+    expect(writeText).toHaveBeenCalledWith("kata federation status --project 'spoke project''s'")
     expect(screen.queryByText('private-token-never-display')).toBeNull()
   })
 
@@ -164,6 +168,7 @@ describe('ProjectSyncStatus', () => {
       }),
     )
     await screen.findByText('Pending: 0')
+    expect(screen.queryByRole('button', { name: /Copy .* sync status command/ })).toBeNull()
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 4 })
     expect(fetcher).toHaveBeenCalledTimes(3)
     await fireEvent.click(screen.getByRole('button', { name: 'Refresh sync' }))
@@ -209,6 +214,7 @@ describe('ProjectSyncStatus', () => {
       props: { projectID: 7, projectUID, refreshGeneration: 0 },
     })
     await screen.findByText('Local project')
+    expect(screen.queryByRole('button', { name: /Copy .* sync status command/ })).toBeNull()
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
     await screen.findByText('Pending: 2')
   })

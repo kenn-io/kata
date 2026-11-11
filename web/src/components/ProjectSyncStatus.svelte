@@ -17,9 +17,6 @@
   let refresh: ((manual: boolean, returning?: boolean) => void) | undefined
   let seenVisibility = untrack(() => visibilityGeneration)
   let identity = $derived(`${projectID}:${projectUID}`)
-  let statusCommand = $derived(
-    `kata federation status --project '${status?.project_name.replaceAll("'", "'\\''")}'`,
-  )
   let counts = $derived.by(() => {
     const result: Record<string, number> = {}
     for (const artifact of status?.embedding?.artifacts ?? []) {
@@ -153,13 +150,22 @@
       >
     {/if}
     {#if status.last_error}
+      {@const bashCommand = `kata federation status --project '${status.project_name.replaceAll("'", "'\\''")}'`}
+      {@const powershellCommand = `kata federation status --project '${status.project_name.replaceAll("'", "''")}'`}
       <span class="sync-attention">
         Sync needs attention
-        <code>{statusCommand}</code>
+        <span>Use a CLI configured for {window.location.origin}.</span>
+        <span>Bash/Zsh: <code>{bashCommand}</code></span>
         <CopyButton
-          text={statusCommand}
-          ariaLabel="Copy sync status command"
-          copiedAriaLabel="Copied sync status command"
+          text={bashCommand}
+          ariaLabel="Copy Bash/Zsh sync status command"
+          copiedAriaLabel="Copied Bash/Zsh sync status command"
+        />
+        <span>PowerShell: <code>{powershellCommand}</code></span>
+        <CopyButton
+          text={powershellCommand}
+          ariaLabel="Copy PowerShell sync status command"
+          copiedAriaLabel="Copied PowerShell sync status command"
         />
       </span>
     {/if}
