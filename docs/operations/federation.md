@@ -83,9 +83,11 @@ the per-issue restrictions.
 
 To author a federated move, a spoke must join both projects. A direct spoke
 pulling move history retains an archived, unbound identity for a missing
-counterpart without subscribing to that project. The archived identity has no destination issue projection. To subscribe later,
-first run `kata projects restore` for the generated project, optionally rename it,
-then explicitly join using `--project <current-local-name>`. Upgrade both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
+counterpart without subscribing to that project. The archived identity has no
+destination issue projection. To subscribe later, first run `kata projects restore`
+for the generated project, optionally rename it, then explicitly join using
+`--project <current-local-name>`. Upgrade both hub and spokes for the
+`issue_move_v1` event feature. Older peers refuse
 move history instead of applying a payload they cannot understand. Moves preserve
 stable UIDs, nesting, state, comments, and links. Established author and
 teammate attribution must match trusted history, and a spoke cannot change

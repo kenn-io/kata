@@ -119,6 +119,68 @@ func TestSyncFederationMoveOutToAbsentProject(t *testing.T) {
 	require.ErrorIs(t, err, db.ErrNotFound)
 }
 
+func TestSyncFederationMoveOutAfterPushedEdit(t *testing.T) {
+	for _, archived := range []bool{false, true} {
+		t.Run(map[bool]string{false: "absent", true: "operator-archive"}[archived], func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "subscribed-project", "target-project")
+			spoke := newMoveDeliverySpoke(t, hub, projects[:1])
+			if archived {
+				target, err := spoke.env.DB.CreateProjectWithUID(ctx, "target-project", projects[1].UID)
+				require.NoError(t, err)
+				_, _, err = spoke.env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: target.ID, Actor: "worker"})
+				require.NoError(t, err)
+			}
+			issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Initial", Author: "worker"})
+			require.NoError(t, err)
+			require.NoError(t, spoke.sync(t, 0))
+			local, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			title := "Edited on spoke"
+			_, edit, _, err := spoke.env.DB.EditIssue(ctx, db.EditIssueParams{IssueID: local.ID, Title: &title, Actor: "worker"})
+			require.NoError(t, err)
+			require.NotNil(t, edit.IssueID)
+			require.NoError(t, spoke.sync(t, 0))
+			current, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, title, current.Title)
+			moved, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: current.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			require.NoError(t, spoke.sync(t, 0))
+			binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, binding.PullCursorEventID, moved.Event.ID)
+			listed, err := spoke.env.DB.ListIssues(ctx, db.ListIssuesParams{ProjectID: spoke.projects[0].ID, Limit: 100})
+			require.NoError(t, err)
+			require.Empty(t, listed)
+			_, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.ErrorIs(t, err, db.ErrNotFound)
+			history, err := spoke.env.DB.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Limit: 100})
+			require.NoError(t, err)
+			var retained bool
+			for _, event := range history {
+				if event.UID == edit.UID {
+					retained = true
+					require.Equal(t, edit.ContentHash, event.ContentHash)
+					require.Equal(t, edit.ProjectUID, event.ProjectUID)
+					require.Equal(t, edit.IssueUID, event.IssueUID)
+					require.JSONEq(t, edit.Payload, event.Payload)
+				}
+			}
+			require.True(t, retained)
+			current, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: projects[1].ID, ToProjectID: projects[0].ID, IfMatchRev: current.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			require.NoError(t, spoke.sync(t, 0))
+			restored, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, spoke.projects[0].ID, restored.ProjectID)
+			require.Equal(t, title, restored.Title)
+		})
+	}
+}
+
 func TestSyncFederationMoveOutToOperatorArchive(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "subscribed-project", "target-project")
@@ -140,4 +202,31 @@ func TestSyncFederationMoveOutToOperatorArchive(t *testing.T) {
 	require.Equal(t, "target-project", restored.Name)
 	_, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.ErrorIs(t, err, db.ErrNotFound)
+}
+
+func TestSyncFederationPurgedHistoryReleasesPulledIdentityHold(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects)
+	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Issue", Author: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	require.NoError(t, spoke.sync(t, 1))
+	_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	require.NoError(t, spoke.sync(t, 1))
+	_, err = spoke.env.DB.LeaveFederationReplica(ctx, spoke.projects[1].ID)
+	require.NoError(t, err)
+	local, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = spoke.env.DB.PurgeIssue(ctx, local.ID, "worker", nil)
+	require.NoError(t, err)
+	history, err := spoke.env.DB.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Limit: 100})
+	require.NoError(t, err)
+	_, _, err = spoke.env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: spoke.projects[1].ID, Actor: "worker"})
+	require.NoError(t, err)
+	_, err = spoke.env.DB.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: spoke.projects[1].ID, Actor: "worker"})
+	require.Empty(t, history)
+	require.NoError(t, err, "purged history must not keep a pull-only identity hold")
 }

@@ -386,6 +386,9 @@ func purgeCascade(
 		`DELETE FROM events WHERE id IN (SELECT e.id FROM events e WHERE `+eventsWhere+")", eventsArgs...); err != nil {
 		return 0, fmt.Errorf("delete events: %w", err)
 	}
+	if err := db.RetirePurgedFederationIdentityDependencies(ctx, c); err != nil {
+		return 0, fmt.Errorf("retire purged federation identity dependencies: %w", err)
+	}
 	// Detach surviving aggregated issue.links_changed events from the
 	// purged issue by clearing only the local FK. The UID is part of the
 	// immutable event envelope and may also be covered by a retained root

@@ -303,13 +303,14 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 	}
 	dependencies := []string{e.ProjectUID}
 	if e.Type == "issue.moved" {
-		if _, _, err := federationMoveProjects(ctx, tx, route, e, true); err != nil {
+		_, destination, err := federationMoveProjects(ctx, tx, route, e, true)
+		if err != nil {
 			return 0, err
 		}
+		project, missing = destination, false
 		payload := PayloadMap(e.Payload)
 		from, _ := StringValue(payload["from_project_uid"])
-		to, _ := StringValue(payload["to_project_uid"])
-		dependencies = append(dependencies, from, to)
+		dependencies = append(dependencies, from)
 	}
 	if missing || project != route || e.Type == "issue.moved" {
 		var routeUID string
@@ -317,7 +318,7 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 			return 0, err
 		}
 		for _, uid := range dependencies {
-			if err := recordFederationProjectIdentityDependency(ctx, tx, routeUID, uid); err != nil {
+			if err := recordPulledFederationProjectIdentityDependency(ctx, tx, routeUID, uid); err != nil {
 				return 0, err
 			}
 		}
