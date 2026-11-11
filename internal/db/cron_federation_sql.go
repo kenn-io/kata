@@ -107,7 +107,7 @@ func MaterializeCronDefinitions(ctx context.Context, tx *sql.Tx, projectID int64
 				}
 			}
 		}
-		document, err := json.Marshal(definition)
+		document, err := cronDefinitionJSON(definition)
 		if err != nil {
 			return err
 		}

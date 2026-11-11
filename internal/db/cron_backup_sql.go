@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"iter"
@@ -207,7 +208,7 @@ func ReplayCronRecord(ctx context.Context, tx *sql.Tx, record ImportRecord, post
 	}
 }
 func replayCronDefinition(ctx context.Context, tx *sql.Tx, value CronDefinition, definition any, job bool, postgres bool) error {
-	document, err := json.Marshal(definition)
+	document, err := cronDefinitionJSON(definition)
 	if err != nil {
 		return err
 	}
@@ -227,4 +228,11 @@ func replayCronDefinition(ctx context.Context, tx *sql.Tx, value CronDefinition,
 	}
 	_, err = tx.ExecContext(ctx, "INSERT INTO "+cronTable(job)+"("+columns+")"+override+" VALUES("+strings.Join(slots, ",")+")", args...) //nolint:gosec // Only fixed schema columns, Boolean-selected tables/identity syntax and generated placeholders enter SQL; row values are bound.
 	return err
+}
+
+func cronDefinitionJSON(definition any) ([]byte, error) {
+	if raw, ok := definition.(jsontext.Value); ok {
+		return raw, nil
+	}
+	return json.Marshal(definition)
 }
