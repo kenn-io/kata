@@ -302,6 +302,10 @@ func checkMoveTreeExpandedFence(t *testing.T, store db.Storage) error {
 	move.DryRun = false
 	_, err = store.MoveIssueProject(ctx, move)
 	require.ErrorIs(t, err, db.ErrIssueMoveTreeChanged)
+	resident, err = store.IssueByID(ctx, resident.ID)
+	require.NoError(t, err)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: resident.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: resident.Revision, Actor: "worker", Single: true})
+	require.NoError(t, err)
 	links, err := store.LinksByIssue(ctx, resident.ID)
 	require.NoError(t, err)
 	require.Len(t, links, 1)

@@ -718,9 +718,13 @@ func TestMoveBatchDryContinuationAndRevisions(t *testing.T) {
 	_, issue := createClaimGateHelperIssue(t, store)
 	target, err := store.CreateProject(t.Context(), "target")
 	require.NoError(t, err)
+	owner := "changed"
+	updated, _, _, err := store.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "agent"})
+	require.NoError(t, err)
+	require.Greater(t, updated.Revision, issue.Revision)
 	req := &api.MoveIssuesRequest{}
 	req.Body.Actor, req.Body.ToProjectUID, req.Body.DryRun = "agent", target.UID, true
-	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ExpectedRevision: issue.Revision + 1}, {Ref: issue.UID, ExpectedRevision: issue.Revision}, {Ref: issue.UID, ExpectedRevision: issue.Revision}, {Ref: issue.UID, ExpectedRevision: issue.Revision + 1}}
+	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ExpectedRevision: issue.Revision}, {Ref: issue.UID, ExpectedRevision: updated.Revision}, {Ref: issue.UID, ExpectedRevision: updated.Revision}, {Ref: issue.UID, ExpectedRevision: issue.Revision}}
 	handler := moveIssuesHandler(ServerConfig{DB: store})
 	out, err := handler(t.Context(), req)
 	require.NoError(t, err)

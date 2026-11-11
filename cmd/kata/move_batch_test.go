@@ -321,6 +321,8 @@ func TestMoveBatchCLI_SelectorPagingRevisionFence(t *testing.T) {
 	}
 	_, _, _, err = env.DB.CloseIssue(t.Context(), first.ID, "done", "tester", "Verified fixture completion", []db.Evidence{{Type: "test", Command: "synthetic fixture"}})
 	require.NoError(t, err)
+	first, err = env.DB.IssueByID(t.Context(), first.ID)
+	require.NoError(t, err)
 	origin, err := url.Parse(env.URL)
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(origin)
