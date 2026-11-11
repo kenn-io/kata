@@ -6,6 +6,7 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -85,6 +86,21 @@ func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend B
 	found, err = AcceptedPushRow(ctx, accepted, project.ID, third.ID)
 	require.NoError(t, err)
 	require.False(t, found)
+	_, blocked, err := reopened.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "blocked", Author: "tester"})
+	require.NoError(t, err)
+	_, poison, err := reopened.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "poison", Author: "tester"})
+	require.NoError(t, err)
+	quarantine, err := reopened.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{ProjectID: project.ID, Direction: db.FederationQuarantineDirectionPush, FirstEventID: poison.ID, LastEventID: poison.ID, EventUIDs: []string{poison.UID}, Error: "poison", CreatedAt: time.Now().UTC()})
+	require.NoError(t, err)
+	_, err = reopened.SkipFederationQuarantine(ctx, db.SkipFederationQuarantineParams{ID: quarantine.ID, ProjectID: project.ID, Actor: "tester", Reason: "skip"})
+	require.NoError(t, err)
+	binding, err := reopened.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Less(t, binding.PushCursorEventID, blocked.ID)
+	pending, err = reopened.PendingFederationPushEvents(ctx, project.ID, reopened.InstanceUID(), binding.PushCursorEventID, 10)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, blocked.UID, pending[0].UID)
 	return nil
 }
 

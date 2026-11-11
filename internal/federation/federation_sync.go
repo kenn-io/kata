@@ -1,7 +1,6 @@
 package federation
 
 import (
-	"cmp"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -253,6 +252,12 @@ func pushDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	if binding.PushEnabled {
+		status, err := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return err
+		}
+		interruptedReset := status.LastResetAt != nil && status.LastPullStartedAt != nil &&
+			(status.LastPullSuccessAt == nil || status.LastPullStartedAt.After(*status.LastPullSuccessAt))
 		scanCursor := binding.PushCursorEventID
 		acknowledged := 0
 		var rejectedEvents []db.Event
@@ -260,6 +265,7 @@ func pushDirectSpoke(
 		var firstRejected int64
 		retained := db.FederationRejectedCreations{}
 		for {
+			scanCursor = max(scanCursor, binding.PushCursorEventID)
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
 				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
 				if eventErr != nil {
@@ -288,6 +294,18 @@ func pushDirectSpoke(
 				ctx, binding.ProjectID, store.InstanceUID(), scanCursor, federationPollLimit)
 			if err != nil {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+			}
+			if interruptedReset {
+				for _, event := range pending {
+					if strings.HasPrefix(event.Type, "project.") && !event.CreatedAt.After(*status.LastResetAt) {
+						if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+							return err
+						}
+						if err := store.RecordFederationLocalReplayDue(ctx, event.UID); err != nil {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+						}
+					}
+				}
 			}
 			if len(pending) == 0 {
 				through, err := store.FederationPushAcceptedThrough(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID)
@@ -352,9 +370,7 @@ func pushDirectSpoke(
 					})
 				if err != nil {
 					if isPoisonedFederationPushError(err) {
-						quarantined := append(rejectedEvents, batch...)
-						slices.SortFunc(quarantined, func(a, b db.Event) int { return cmp.Compare(a.ID, b.ID) })
-						if qErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, quarantined, err); qErr != nil {
+						if qErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, batch, err); qErr != nil {
 							return recordFederationSyncError(ctx, store, binding.ProjectID, errors.Join(err, qErr))
 						}
 					}

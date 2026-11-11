@@ -1872,6 +1872,7 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		Enabled:              true,
 	})
 	require.NoError(t, err)
+	var legacyPollFailure atomic.Bool
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/projects/42/federation/events:ingest":
@@ -1883,6 +1884,10 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 				PushCursorEventID: body.Events[len(body.Events)-1].EventID,
 			}))
 		case "/api/v1/projects/42/federation/events":
+			if legacyPollFailure.Load() {
+				http.Error(w, "poll unavailable", http.StatusServiceUnavailable)
+				return
+			}
 			switch r.URL.Query().Get("after_id") {
 			case "50":
 				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
@@ -1987,6 +1992,18 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 	onPulledEvents := func(_ int64, events []db.Event) {
 		delivered = append(delivered, events...)
 	}
+	if recovery == "upgrade" {
+		legacyPollFailure.Store(true)
+		err := SyncFederationOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, onPulledEvents)
+		require.ErrorContains(t, err, "poll unavailable")
+		due, recorded, err := spoke.FederationLocalReplayStatus(ctx, projectEventUID)
+		require.NoError(t, err)
+		require.True(t, recorded)
+		require.True(t, due)
+		legacyPollFailure.Store(false)
+		binding, err = spoke.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+	}
 	if recovery == "legacy-backup" {
 		validateLease := func(ctx context.Context) error {
 			comments, err := spoke.CommentIssueIDsByUIDs(ctx, []string{earlierIssueCommentUID})
@@ -2006,11 +2023,7 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		require.NoError(t, err)
 		require.Equal(t, earlier.EventID, binding.PullCursorEventID, "projection committed before the cursor")
 	}
-	if legacy {
-		require.NoError(t, SyncFederationPullOnlyOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, onPulledEvents))
-	} else {
-		require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, onPulledEvents))
-	}
+	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke, binding, creds, clientpkg.Opts{}, onPulledEvents))
 
 	mirrored, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err, "retry must project the retained issue creation")

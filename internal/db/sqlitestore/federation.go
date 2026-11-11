@@ -366,6 +366,10 @@ func (d *Store) skipFederationQuarantine(ctx context.Context, p db.SkipFederatio
 	}
 	switch q.Direction {
 	case db.FederationQuarantineDirectionPush:
+		cursor, err := db.SkipFederationPushBatch(ctx, tx, q, d.InstanceUID())
+		if err != nil {
+			return db.FederationQuarantine{}, err
+		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE federation_bindings
 			   SET push_cursor_event_id = CASE
@@ -375,7 +379,7 @@ func (d *Store) skipFederationQuarantine(ctx context.Context, p db.SkipFederatio
 			       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
 			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 			 WHERE project_id = ?`,
-			q.LastEventID, q.LastEventID, q.ProjectID); err != nil {
+			cursor, cursor, q.ProjectID); err != nil {
 			return db.FederationQuarantine{}, fmt.Errorf("advance quarantine push cursor: %w", err)
 		}
 		if err := pruneFederationPushAccepted(ctx, tx, q.ProjectID); err != nil {

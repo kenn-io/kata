@@ -413,6 +413,12 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 				require.NoError(t, store.RecordFederationPushAccepted(ctx, target.ID, []int64{moved.EventID}))
 				require.ErrorIs(t, act(), db.ErrFederationResetBlockedByPendingPush)
 				require.NoError(t, store.RecordFederationPushAccepted(ctx, source.ID, []int64{created.ID}))
+				binding, err := store.FederationBindingByProject(ctx, source.ID)
+				require.NoError(t, err)
+				pending, err := store.PendingFederationPushEvents(ctx, source.ID, store.InstanceUID(), binding.PushCursorEventID, 10)
+				require.NoError(t, err)
+				require.Len(t, pending, 1)
+				require.Equal(t, rejected.UID, pending[0].UID)
 				require.NoError(t, act())
 			})
 		}

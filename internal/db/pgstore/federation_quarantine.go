@@ -126,11 +126,15 @@ func (s *Store) SkipFederationQuarantine(
 		if quarantine.Direction != db.FederationQuarantineDirectionPush {
 			return fmt.Errorf("skip federation quarantine: unsupported direction %q", quarantine.Direction)
 		}
+		cursor, err := db.SkipFederationPushBatch(ctx, tx, quarantine, s.InstanceUID())
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET
 push_cursor_event_id=GREATEST(push_cursor_event_id,$1),
 last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-WHERE project_id=$2`, quarantine.LastEventID, quarantine.ProjectID); err != nil {
+WHERE project_id=$2`, cursor, quarantine.ProjectID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		if err := pruneFederationPushAccepted(ctx, tx, quarantine.ProjectID); err != nil {
