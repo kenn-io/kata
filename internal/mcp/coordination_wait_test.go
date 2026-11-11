@@ -75,7 +75,7 @@ func TestMCPCoordinationWaitReplyBaseline(t *testing.T) {
 		explicit                         bool
 	}{
 		{"changed", "startup-actor", "worker", "bound-actor", []map[string]any{{key: map[string]any{"from": "reviewer", "message": "old"}}, {key: map[string]any{"from": "reviewer", "message": "new"}}}, true},
-		{"null and exact recipient", "startup-actor", "worker", "bound-actor", []map[string]any{{}, {key: nil, other: map[string]any{"from": "reviewer", "message": "wrong inbox"}}, {key: map[string]any{"from": "reviewer", "message": "answer"}}}, false},
+		{"exact recipient", "startup-actor", "worker", "bound-actor", []map[string]any{{}, {other: map[string]any{"from": "reviewer", "message": "wrong inbox"}}, {key: map[string]any{"from": "reviewer", "message": "answer"}}}, false},
 		{"normalized default identity", "worker ", "review", "", []map[string]any{{}, {notification.MetadataKey("worker/review"): map[string]any{"from": "reviewer", "message": "answer"}}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

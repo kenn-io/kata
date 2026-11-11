@@ -64,7 +64,7 @@ func TestMCPNotifyValidation(t *testing.T) {
 	}
 }
 
-func TestMCPNotifyTeammateDefaults(t *testing.T) {
+func TestMCPNotifyForwardsFieldsToDaemon(t *testing.T) {
 	requests := make(chan map[string]any, 1)
 	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
