@@ -796,12 +796,12 @@ func uiAttachmentRoutes(ctx context.Context, cfg ServerConfig, cache *uiAttachme
 			route.Origin = binding.RelayConfig.AuthorityUID
 		}
 		routes = append(routes, route)
-		if binding.Enabled && binding.PushEnabled {
+		if binding.Enabled {
 			route := &routes[len(routes)-1]
 			probes.Go(func() {
-				if cache.available(probeCtx, ctx, cfg, binding) {
-					route.Write = true
-				}
+				available, unavailable := cache.available(probeCtx, ctx, cfg, binding)
+				route.Read = !unavailable
+				route.Write = binding.PushEnabled && available
 			})
 		}
 	}

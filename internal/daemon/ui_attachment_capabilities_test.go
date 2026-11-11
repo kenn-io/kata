@@ -32,7 +32,9 @@ func TestUIAttachmentCapabilityCacheLifecycle(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		if !configured.Load() {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprint(w, `{"status":503,"error":{"code":"docbank_not_configured","message":"Docbank is not configured"}}`)
 			return
 		}
 		_, _ = fmt.Fprintf(w, `{"version":1,"project_uid":%q,"origin":%q}`, project.UID, store.InstanceUID())
@@ -55,19 +57,30 @@ func TestUIAttachmentCapabilityCacheLifecycle(t *testing.T) {
 	require.Equal(t, []bool{true, true}, routes())
 	require.EqualValues(t, 1, calls.Load())
 	now = now.Add(5 * time.Second)
-	require.Equal(t, []bool{true, false}, routes())
+	require.Equal(t, []bool{false, false}, routes())
 	require.EqualValues(t, 2, calls.Load())
+	binding.PushEnabled = false
+	_, err = store.UpsertFederationBinding(t.Context(), binding)
+	require.NoError(t, err)
+	now = now.Add(5 * time.Second)
+	require.Equal(t, []bool{false, false}, routes())
+	require.EqualValues(t, 3, calls.Load())
+	configured.Store(true)
+	now = now.Add(5 * time.Second)
+	require.Equal(t, []bool{true, false}, routes())
+	require.EqualValues(t, 4, calls.Load())
+	binding.PushEnabled = true
 	binding.HubProjectID = 2
 	_, err = store.UpsertFederationBinding(t.Context(), binding)
 	require.NoError(t, err)
 	configured.Store(true)
 	require.Equal(t, []bool{true, true}, routes())
-	require.EqualValues(t, 3, calls.Load())
+	require.EqualValues(t, 5, calls.Load())
 	binding.Enabled = false
 	_, err = store.UpsertFederationBinding(t.Context(), binding)
 	require.NoError(t, err)
 	require.Equal(t, []bool{false, false}, routes())
-	require.EqualValues(t, 3, calls.Load())
+	require.EqualValues(t, 5, calls.Load())
 }
 
 func TestUIAttachmentCapabilityParallelTimeout(t *testing.T) {
