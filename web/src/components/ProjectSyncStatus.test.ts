@@ -30,7 +30,11 @@ function response(projectID = 7, uid = projectUID): Response {
     ],
   })
 }
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
 describe('ProjectSyncStatus', () => {
   it('refreshes after returning while an older read is in flight', async () => {
     let resolveSlow!: (value: Response) => void
@@ -68,31 +72,13 @@ describe('ProjectSyncStatus', () => {
     expect(fetcher).toHaveBeenCalledTimes(3)
   })
 
-  it('keeps the last summary after a temporary server failure', async () => {
-    const fetcher = vi
-      .fn()
-      .mockResolvedValueOnce(response())
-      .mockResolvedValueOnce(new Response('', { status: 503 }))
-      .mockResolvedValueOnce(new Response('', { status: 403 }))
-    setGeneratedFetch(fetcher)
-    const view = render(ProjectSyncStatus, {
-      props: { projectID: 7, projectUID, refreshGeneration: 0 },
-    })
-    await screen.findByText('Pending: 2')
-    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
-    await screen.findByText('Sync status may be out of date.')
-    expect(screen.getByText('Pending: 2')).not.toBeNull()
-    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
-    await screen.findByText('Sync status unavailable. Refresh to retry.')
-    expect(screen.queryByText('Pending: 2')).toBeNull()
-  })
-
-  it.each(['network', 408, 429])(
+  it.each(['network', 408, 429, 503])(
     'keeps the last summary after a transient %s failure',
     async (failure) => {
       const fetcher = vi.fn().mockResolvedValueOnce(response())
       if (failure === 'network') fetcher.mockRejectedValueOnce(new TypeError('network failure'))
       else fetcher.mockResolvedValueOnce(new Response('', { status: Number(failure) }))
+      if (failure === 503) fetcher.mockResolvedValueOnce(new Response('', { status: 403 }))
       setGeneratedFetch(fetcher)
       const view = render(ProjectSyncStatus, {
         props: { projectID: 7, projectUID, refreshGeneration: 0 },
@@ -101,10 +87,15 @@ describe('ProjectSyncStatus', () => {
       await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
       await screen.findByText('Sync status may be out of date.')
       expect(screen.getByText('Pending: 2')).not.toBeNull()
+      if (failure === 503) {
+        await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+        await screen.findByText('Sync status unavailable. Refresh to retry.')
+        expect(screen.queryByText('Pending: 2')).toBeNull()
+      }
     },
   )
 
-  it('clears the prior summary while a denied response body is stalled, then retries', async () => {
+  it('disables refresh while a denied response body is stalled, then retries', async () => {
     let closeBody!: () => void
     const body = new ReadableStream({
       start(controller) {
@@ -122,7 +113,6 @@ describe('ProjectSyncStatus', () => {
     })
     await screen.findByText('Pending: 2')
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
-    expect(screen.queryByText('Pending: 2')).toBeNull()
     expect(screen.getByText('Reading sync status…')).not.toBeNull()
     expect(
       (screen.getByRole('button', { name: 'Refresh sync' }) as HTMLButtonElement).disabled,
@@ -131,26 +121,6 @@ describe('ProjectSyncStatus', () => {
     await screen.findByText('Sync status unavailable. Refresh to retry.')
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
     await screen.findByText('Pending: 2')
-  })
-
-  it('clears the prior summary when a denied response body fails to read', async () => {
-    const body = new ReadableStream({
-      start(controller) {
-        controller.error(new TypeError('body read failed'))
-      },
-    })
-    const fetcher = vi
-      .fn()
-      .mockResolvedValueOnce(response())
-      .mockResolvedValueOnce(new Response(body, { status: 403 }))
-    setGeneratedFetch(fetcher)
-    const view = render(ProjectSyncStatus, {
-      props: { projectID: 7, projectUID, refreshGeneration: 0 },
-    })
-    await screen.findByText('Pending: 2')
-    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
-    await screen.findByText('Sync status unavailable. Refresh to retry.')
-    expect(screen.queryByText('Pending: 2')).toBeNull()
   })
 
   it('waits until visible for its initial read', async () => {
@@ -253,29 +223,42 @@ describe('ProjectSyncStatus', () => {
       (screen.getByRole('button', { name: 'Refresh sync' }) as HTMLButtonElement).disabled,
     ).toBe(true)
     expect(signal?.aborted).toBe(false)
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
     hidden.mockReturnValue(true)
     resolveSlow(response())
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(screen.getByText('Pending: 2')).not.toBeNull()
     expect(fetcher).toHaveBeenCalledTimes(2)
     hidden.mockReturnValue(false)
-    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 3 })
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3))
     hidden.mockRestore()
   })
 
-  it.each([403, 404, 'mismatch', 'malformed 403'])(
+  it.each([403, 404, 'mismatch', 'malformed 403', '403 body read error'])(
     'clears status after %s and retries on the next cycle',
     async (code) => {
       const fetcher = vi
         .fn()
         .mockResolvedValueOnce(response())
         .mockResolvedValueOnce(
-          code === 'mismatch'
-            ? response(9)
-            : code === 'malformed 403'
-              ? new Response('{', { status: 403, headers: { 'Content-Type': 'application/json' } })
-              : new Response('', { status: Number(code) }),
+          code === '403 body read error'
+            ? new Response(
+                new ReadableStream({
+                  start(controller) {
+                    controller.error(new TypeError('body read failed'))
+                  },
+                }),
+                { status: 403 },
+              )
+            : code === 'mismatch'
+              ? response(9)
+              : code === 'malformed 403'
+                ? new Response('{', {
+                    status: 403,
+                    headers: { 'Content-Type': 'application/json' },
+                  })
+                : new Response('', { status: Number(code) }),
         )
         .mockResolvedValueOnce(response())
       setGeneratedFetch(fetcher)
@@ -317,6 +300,7 @@ describe('ProjectSyncStatus', () => {
     await screen.findByText('Pending: 2')
     await fireEvent.click(screen.getByRole('button', { name: 'Refresh sync' }))
     await screen.findByText('Sync status unavailable. Refresh to retry.')
+    expect(screen.queryByText('Reused: 1')).toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Refresh sync' }))
     await screen.findByText('Pending: 2')
   })

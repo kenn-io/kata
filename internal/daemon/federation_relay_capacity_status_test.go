@@ -148,8 +148,6 @@ func TestFederationStatusMeasuresOnlyRootedRelayProjects(t *testing.T) {
 	require.EqualValues(t, db.RelayCheckpointCapacityBytes, full.RelayCheckpointCapacity)
 	compact := readProject("?compact=true")
 	require.Equal(t, 2, wrapped.count(relayed.ID), "compact status must skip checkpoint measurement")
-	require.Zero(t, compact.RelayCheckpointBytes)
-	require.Zero(t, compact.RelayCheckpointCapacity)
 	full.RelayCheckpointBytes = 0
 	full.RelayCheckpointCapacity = 0
 	require.Equal(t, full, compact)
