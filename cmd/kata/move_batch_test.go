@@ -104,6 +104,96 @@ func TestParseRefsFrom(t *testing.T) {
 	require.Equal(t, moveBatchItem{Ref: "abc4", TargetProject: "dst"}, items[1])
 }
 
+func TestMoveBatchCLI_RefusedRowsDoNotConsumeInputBudget(t *testing.T) {
+	env, dir, _, dst, issue := setupMoveCLIProjects(t)
+	bad := strings.Repeat("x", 600000) + "\tbad\textra\n"
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, bad+bad+issue.UID+"\n", "--workspace", dir, "move", dst.Name, "--refs-from", "-", "--json")
+	require.Error(t, err)
+	var reply struct {
+		Results []api.MoveIssuesResult `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &reply))
+	require.Len(t, reply.Results, 3)
+	require.Equal(t, "refused", reply.Results[0].Result)
+	require.Equal(t, "refused", reply.Results[1].Result)
+	require.Equal(t, "moved", reply.Results[2].Result)
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, dst.ID, got.ProjectID)
+}
+
+func TestMoveBatchCLI_PreflightFailureReportsAll(t *testing.T) {
+	env, dir, _, dst, issue := setupMoveCLIProjects(t)
+	origin, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(origin)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects" {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	input := "\tbad\n" + issue.UID + "\n" + issue.UID + "\n"
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, "--workspace", dir, "move", dst.Name, "--refs-from", "-", "--json")
+	require.Error(t, err)
+	require.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
+	var reply struct {
+		Results []api.MoveIssuesResult `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &reply))
+	require.Len(t, reply.Results, 3)
+	require.Equal(t, "refused", reply.Results[0].Result)
+	require.Equal(t, "unattempted", reply.Results[1].Result)
+	require.Equal(t, "unattempted", reply.Results[2].Result)
+	require.Equal(t, issue.UID, reply.Results[2].Ref)
+}
+
+func TestMoveBatchCLI_RejectedPageIsUnattempted(t *testing.T) {
+	env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("synthetic-rejected-page-token"))
+	src, err := env.DB.CreateProject(t.Context(), "source")
+	require.NoError(t, err)
+	dst, err := env.DB.CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "issue", Author: "tester"})
+	require.NoError(t, err)
+	origin, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(origin)
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/issues/actions/move" {
+			calls++
+			if calls == 2 {
+				http.Error(w, "rejected", http.StatusBadRequest)
+				return
+			}
+		}
+		r.Host = origin.Host
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, strings.Repeat(issue.UID+"\n", 51), "--workspace", dir, "move", dst.Name, "--refs-from", "-", "--json")
+	require.Error(t, err)
+	var reply struct {
+		Results []api.MoveIssuesResult `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &reply))
+	require.Len(t, reply.Results, 51)
+	require.Equal(t, "moved", reply.Results[0].Result)
+	require.Equal(t, "unattempted", reply.Results[50].Result)
+}
+
+func TestMoveBatchCLI_Quiet(t *testing.T) {
+	env, dir, src, dst, issue := setupMoveCLIProjects(t)
+	other, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "other", Author: "tester"})
+	require.NoError(t, err)
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, "", "--workspace", dir, "--quiet", "move", issue.UID, other.UID, dst.Name)
+	require.NoError(t, err)
+	require.Empty(t, out)
+}
+
 func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 	for _, mode := range []outputMode{outputHuman, outputJSON, outputAgent} {
 		for _, allInvalid := range []bool{false, true} {

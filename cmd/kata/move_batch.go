@@ -43,7 +43,7 @@ func moveBatchUsage(message string) error {
 func parseRefsFrom(r io.Reader, defaultTarget string, maxItems int) ([]moveBatchItem, error) {
 	reader := bufio.NewReader(r)
 	var items []moveBatchItem
-	retained := 0
+	retained, invalidRetained := 0, 0
 	for line := 1; ; line++ {
 		value, oversized, err := readMoveBatchLine(reader)
 		if err != nil && err != io.EOF {
@@ -60,10 +60,6 @@ func parseRefsFrom(r io.Reader, defaultTarget string, maxItems int) ([]moveBatch
 			}
 			trimmed := strings.TrimSpace(value)
 			if (trimmed != "" || strings.Contains(value, "\t")) && trimmed != "#" && !strings.HasPrefix(trimmed, "# ") {
-				retained += len(value)
-				if retained > 1<<20 {
-					return nil, moveBatchUsage("refs-file input exceeds 1 MiB; split the input into separate runs")
-				}
 				fields := strings.Split(value, "\t")
 				item := moveBatchItem{Ref: strings.TrimSpace(fields[0]), TargetProject: defaultTarget}
 				if len(fields) >= 2 {
@@ -71,6 +67,18 @@ func parseRefsFrom(r io.Reader, defaultTarget string, maxItems int) ([]moveBatch
 				}
 				if len(fields) > 2 || item.Ref == "" || item.TargetProject == "" {
 					item.ParseError = fmt.Sprintf("line %d: expected ref and target project", line)
+					invalidRetained += len(item.Ref)
+					if invalidRetained > 1<<20 {
+						item.Ref = ""
+					} else {
+						item.Ref = strings.Clone(item.Ref)
+					}
+					item.TargetProject = ""
+				} else {
+					retained += len(value)
+					if retained > 1<<20 {
+						return nil, moveBatchUsage("refs-file input exceeds 1 MiB; split the input into separate runs")
+					}
 				}
 				items = append(items, item)
 			}
@@ -368,7 +376,25 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 	return out, nil
 }
 
-func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptions) error {
+func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptions) (resultErr error) {
+	results := make([]api.MoveIssuesResult, len(items))
+	for i, item := range items {
+		results[i] = api.MoveIssuesResult{Index: i, Ref: item.Ref}
+		if item.ParseError != "" {
+			results[i].Result, results[i].Code, results[i].Message = "refused", "validation", item.ParseError
+		}
+	}
+	preflight := true
+	defer func() {
+		if preflight && resultErr != nil {
+			for i := range results {
+				if results[i].Result == "" {
+					results[i].Result = "unattempted"
+				}
+			}
+			resultErr = errors.Join(resultErr, printMoveBatch(cmd, results, len(items)))
+		}
+	}()
 	a, err := dialDaemon(cmd.Context())
 	if err != nil {
 		return err
@@ -407,9 +433,10 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	}
 	targets := map[string]string{}
 	indexes := make([]int, 0, len(items))
-	results := make([]api.MoveIssuesResult, len(items))
 	for i, item := range items {
-		results[i] = api.MoveIssuesResult{Index: i, Ref: item.Ref}
+		if results[i].Result != "" {
+			continue
+		}
 		uid, err := moveBatchTarget(a, item, targets)
 		if err != nil {
 			results[i], err = moveBatchTargetError(i, item.Ref, err)
@@ -422,11 +449,12 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{Ref: item.Ref, ToProjectUID: uid, ExpectedRevision: item.ExpectedRevision})
 	}
 	if len(request.Body.Items) == 0 {
+		preflight = false
 		if err := printMoveBatch(cmd, results, len(items)); err != nil {
 			return err
 		}
 		if len(results) > 0 {
-			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: true}
+			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: !flags.Quiet}
 		}
 		return nil
 	}
@@ -455,6 +483,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	printResults := func() error {
 		return printMoveBatch(cmd, results, len(items))
 	}
+	preflight = false
 	for pageIndex, body := range pages {
 		start := pageIndex * api.MoveBatchMaxItems
 		classify := func() {
@@ -496,6 +525,13 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 				}
 			}
 			classify()
+			if response.StatusCode >= 400 && response.StatusCode < 500 {
+				for _, i := range indexes[start : start+len(body.Items)] {
+					if results[i].Result == "unknown" {
+						results[i].Result = "unattempted"
+					}
+				}
+			}
 			if printErr := printResults(); printErr != nil {
 				return printErr
 			}
@@ -537,13 +573,16 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	}
 	for _, r := range results {
 		if r.Result == "refused" {
-			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: true}
+			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: !flags.Quiet}
 		}
 	}
 	return nil
 }
 
 func printMoveBatch(cmd *cobra.Command, results []api.MoveIssuesResult, requested int) error {
+	if flags.Quiet && currentOutputMode() == outputHuman {
+		return nil
+	}
 	type summaryCounts struct {
 		Moved       int `json:"moved"`
 		Unchanged   int `json:"unchanged"`
