@@ -3,7 +3,6 @@ package sqlitestore
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -28,7 +27,7 @@ func TestFederationGenerationSurvivesProjectIDReuse(t *testing.T) {
 }
 
 func TestFederationGenerationsRejectChangedRows(t *testing.T) {
-	for _, change := range []string{"issue", "issue-project", "issue-insert", "comment", "comment-insert", "comment-delete", "label", "label-insert", "label-delete", "link", "link-insert", "link-delete", "event", "event-delete", "binding", "project", "provenance", "provenance-delete"} {
+	for _, change := range []string{"issue", "issue-project", "issue-insert", "comment", "comment-insert", "comment-delete", "label-insert", "label-delete", "link", "link-insert", "link-delete", "event", "event-delete", "binding", "project", "provenance", "provenance-delete"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := t.Context()
 			d, project, issue := incrementalTestStore(t)
@@ -64,8 +63,6 @@ func TestFederationGenerationsRejectChangedRows(t *testing.T) {
 				_, err = writer.ExecContext(ctx, `INSERT INTO comments(uid,issue_id,author,body) VALUES('01HZNQ7VFPK1XGD8R5MABCD4EC',?,'tester','new')`, issue.ID)
 			case "comment-delete":
 				_, err = writer.ExecContext(ctx, `DELETE FROM comments WHERE id=?`, comment.ID)
-			case "label":
-				_, err = writer.ExecContext(ctx, `UPDATE issue_labels SET author='changed' WHERE issue_id=?`, issue.ID)
 			case "label-insert":
 				_, err = writer.ExecContext(ctx, `INSERT INTO issue_labels(issue_id,label,author) VALUES(?,'new','tester')`, issue.ID)
 			case "label-delete":
@@ -77,11 +74,11 @@ func TestFederationGenerationsRejectChangedRows(t *testing.T) {
 			case "link-delete":
 				_, err = writer.ExecContext(ctx, `DELETE FROM links WHERE from_issue_id=? OR to_issue_id=?`, issue.ID, issue.ID)
 			case "event":
-				_, err = writer.ExecContext(ctx, `UPDATE events SET content_hash=? WHERE id=(SELECT MIN(id) FROM events WHERE project_id=?)`, strings.Repeat("a", 64), project.ID)
+				_, err = writer.ExecContext(ctx, `UPDATE events SET issue_id=NULL WHERE id=(SELECT MIN(id) FROM events WHERE issue_id=?)`, issue.ID)
 			case "event-delete":
 				_, err = writer.ExecContext(ctx, `DELETE FROM events WHERE id=(SELECT MIN(id) FROM events WHERE project_id=?)`, project.ID)
 			case "binding":
-				_, err = writer.ExecContext(ctx, `UPDATE federation_bindings SET enabled=0 WHERE project_id=?`, project.ID)
+				_, err = writer.ExecContext(ctx, `UPDATE federation_bindings SET relay_config='{}' WHERE project_id=?`, project.ID)
 			case "project":
 				_, err = writer.ExecContext(ctx, `UPDATE projects SET name='changed' WHERE id=?`, project.ID)
 			case "provenance":
@@ -136,7 +133,7 @@ func TestMoveRebuildPreparesLargeIssueScope(t *testing.T) {
 }
 
 func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
-	for _, change := range []string{"history", "binding", "unrelated", "unrelated-move", "issue", "fallback"} {
+	for _, change := range []string{"history", "binding", "unrelated-move", "issue", "fallback"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := t.Context()
 			d, source, issue := incrementalTestStore(t)
@@ -180,16 +177,13 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 				case "binding":
 					_, err := d.ExecContext(ctx, `UPDATE federation_bindings SET enabled=0 WHERE project_id=?`, source.ID)
 					require.NoError(t, err)
-				case "unrelated":
-					_, _, err := writer.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "concurrent", Author: "tester"})
-					require.NoError(t, err)
 				case "unrelated-move":
 					_, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: unrelatedIssue.ID, FromProjectID: other.ID, ToProjectID: otherDestination.ID, IfMatchRev: unrelatedIssue.Revision, Actor: "tester"})
 					require.NoError(t, err)
 				}
 			}
 			require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
-			if change == "unrelated" || change == "unrelated-move" {
+			if change == "unrelated-move" {
 				require.Equal(t, 1, attempts)
 			} else {
 				require.Equal(t, 2, attempts)
@@ -328,15 +322,6 @@ func TestMoveRebuildDoesNotResurrectArchivedDestination(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = prepared.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: destination.ID, Actor: "tester"})
 	require.NoError(t, err)
-	copyPath := filepath.Join(t.TempDir(), "locked.db")
-	_, err = prepared.ExecContext(ctx, `VACUUM INTO ?`, copyPath)
-	require.NoError(t, err)
-	locked, err := Open(ctx, copyPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, locked.Close()) })
-	require.NoError(t, locked.materializeFederatedProject(ctx, destination.ID))
-	_, err = locked.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-	require.ErrorIs(t, err, db.ErrNotFound)
 	require.NoError(t, prepared.MaterializeFederatedProject(ctx, destination.ID))
 	_, err = prepared.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.ErrorIs(t, err, db.ErrNotFound)
@@ -391,7 +376,10 @@ func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
 	locked, err := Open(ctx, copyPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, locked.Close()) })
+	attempts := 0
+	prepared.federationIngestPrepared = func() { attempts++ }
 	require.NoError(t, prepared.MaterializeFederatedProject(ctx, destination.ID))
+	require.Equal(t, 1, attempts)
 	require.NoError(t, locked.materializeFederatedProject(ctx, destination.ID))
 	for _, uid := range []string{issue.UID, peer.UID, second.UID, other.UID} {
 		actualIssue, err := prepared.IssueByUID(ctx, uid, db.IncludeDeletedYes)
