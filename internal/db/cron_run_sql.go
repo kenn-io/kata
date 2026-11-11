@@ -264,6 +264,13 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 				if _, err := cron.DecodeWorkflow([]byte(document)); err != nil {
 					return fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
 				}
+				support, err := workflowRevisionSupport(ctx, tx, a.Postgres, project.ID, map[string]string{*ref.event: *ref.id})
+				if err != nil {
+					return err
+				}
+				if err := support[*ref.event]; err != nil {
+					return err
+				}
 			}
 		}
 	}
