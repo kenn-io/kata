@@ -244,7 +244,9 @@ func (d *Store) ingestFederationEventsOnce(
 				if missing, ok := errors.AsType[*db.FederationProjectNotEnrolledError](err); ok {
 					missing.IssueUID = *ev.IssueUID
 					if p.AllowEventRejections {
-						result.RejectedEvents = append(result.RejectedEvents, missing.Rejection(in.SourceEventID, ev.EventUID))
+						rejection := missing.Rejection(in.SourceEventID, ev.EventUID)
+						result.RejectedEvents = append(result.RejectedEvents, rejection)
+						rejectedCreations.Remember(ev, rejection)
 						continue
 					}
 				}
@@ -342,8 +344,10 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, err
 		}
 	}
-	if err := d.authorizeFederationCurrentIssuesTx(ctx, tx, p, prepared, moveSnapshots); err != nil {
-		return db.FederationIngestResult{}, db.FinishTransactionRollback(ctx, err, tx.Rollback())
+	if !p.AllowEventRejections {
+		if err := d.authorizeFederationCurrentIssuesTx(ctx, tx, p, prepared, moveSnapshots); err != nil {
+			return db.FederationIngestResult{}, db.FinishTransactionRollback(ctx, err, tx.Rollback())
+		}
 	}
 	for _, in := range prepared {
 		if in.Duplicate {

@@ -44,10 +44,10 @@ func (e *FederationProjectNotEnrolledError) Rejection(sourceID int64, eventUID s
 	return FederationEventRejection{SourceEventID: sourceID, EventUID: eventUID, IssueUID: e.IssueUID, CurrentProjectUID: e.ProjectUID, CurrentProjectName: e.ProjectName, Code: FederationProjectNotEnrolledCode, Message: e.Error()}
 }
 
-// FederationRejectedCreations tracks unavailable issues during ingestion or a push drain.
+// FederationRejectedCreations tracks unavailable issues after a rejected creation or move.
 type FederationRejectedCreations map[string]FederationEventRejection
 
-// ValidationUIDs lets validation recognize retained creations without treating
+// ValidationUIDs lets validation recognize retained creations and moves without treating
 // them as accepted by subsequent events.
 func (r FederationRejectedCreations) ValidationUIDs(known map[string]struct{}) map[string]struct{} {
 	if len(r) == 0 {
@@ -63,7 +63,7 @@ func (r FederationRejectedCreations) ValidationUIDs(known map[string]struct{}) m
 	return all
 }
 
-// Dependent returns the original rejection for an event needing a retained creation.
+// Dependent returns the original rejection for an event needing a retained creation or move.
 func (r FederationRejectedCreations) Dependent(event RemoteEvent) (FederationEventRejection, bool, error) {
 	if len(r) == 0 {
 		return FederationEventRejection{}, false, nil
@@ -102,9 +102,9 @@ func federationEventIssueReferences(event, referenceEvent RemoteEvent) (string, 
 	return "", nil, nil
 }
 
-// Remember records a rejected creation so dependent events remain pending too.
+// Remember records a rejected creation or move so dependent events remain pending too.
 func (r FederationRejectedCreations) Remember(event RemoteEvent, rejection FederationEventRejection) {
-	if event.Type != "issue.created" && event.Type != "issue.snapshot" {
+	if event.Type != "issue.created" && event.Type != "issue.snapshot" && event.Type != "issue.moved" {
 		return
 	}
 	if uid, err := FederationPayloadIssueUID(event, PayloadMap(event.Payload)); err == nil && uid != "" {

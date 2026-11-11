@@ -216,7 +216,9 @@ func (s *Store) IngestFederationEvents(
 					if missing, ok := errors.AsType[*db.FederationProjectNotEnrolledError](err); ok {
 						missing.IssueUID = *event.IssueUID
 						if params.AllowEventRejections {
-							result.RejectedEvents = append(result.RejectedEvents, missing.Rejection(input.SourceEventID, event.EventUID))
+							rejection := missing.Rejection(input.SourceEventID, event.EventUID)
+							result.RejectedEvents = append(result.RejectedEvents, rejection)
+							rejectedCreations.Remember(event, rejection)
 							continue
 						}
 					}

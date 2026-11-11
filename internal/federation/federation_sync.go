@@ -403,15 +403,27 @@ func validateFederationPushAcknowledgment(batch []db.Event, ack api.FederationIn
 	if ack.PushCursorEventID > batch[len(batch)-1].ID {
 		return nil, errors.New("federation push cursor advanced beyond submitted batch")
 	}
+	if len(ack.RejectedEvents) == 0 {
+		return nil, nil
+	}
 	byUID := make(map[string]db.FederationEventRejection, len(ack.RejectedEvents))
 	for _, rejection := range ack.RejectedEvents {
+		if _, duplicate := byUID[rejection.EventUID]; duplicate {
+			return nil, errors.New("invalid federation push acknowledgment: duplicate rejection")
+		}
 		byUID[rejection.EventUID] = rejection
 	}
 	var rejected []rejectedFederationEvent
 	for _, event := range batch {
 		if rejection, ok := byUID[event.UID]; ok {
+			if rejection.SourceEventID != event.ID {
+				return nil, errors.New("invalid federation push acknowledgment: rejected source ID does not match its event")
+			}
 			rejected = append(rejected, rejectedFederationEvent{event: event, rejection: rejection})
 		}
+	}
+	if len(rejected) != len(ack.RejectedEvents) {
+		return nil, errors.New("invalid federation push acknowledgment: rejection names an unsubmitted event")
 	}
 	return rejected, nil
 }
