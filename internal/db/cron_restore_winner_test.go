@@ -76,3 +76,55 @@ func TestOwnerRestoreRepairsSameRevisionHeldOriginal(t *testing.T) {
 	again := ReconcileOwnerCronWorkflowReplay(result)
 	require.Same(t, repaired, again[1], "already retained original must not be rewritten")
 }
+
+// Equal evidence for one revision must not depend on import order: the
+// unsupported original wins over its normalized snapshot, keeps the canonical
+// author, and still yields to genuinely newer projections.
+func TestOwnerRestoreTiedSnapshotFavorsUnsupportedOriginal(t *testing.T) {
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	projectUID, workflowUID, origin, eventUID := newUID(t), newUID(t), newUID(t), newUID(t)
+	held := `{"version":1,"steps":null}`
+	clock := CronDefinitionHLC{Version: 1, PhysicalMS: 2, OriginInstanceUID: origin}
+	newBody := func(author, document string) CronDefinitionEvent {
+		return CronDefinitionEvent{UID: workflowUID, ProjectUID: projectUID, Name: "Review", Author: author, CreatedAt: now, UpdatedAt: now, Definition: jsontext.Value(document)}
+	}
+	marshal := func(body CronDefinitionEvent) []byte {
+		payload, err := json.Marshal(body)
+		require.NoError(t, err)
+		return payload
+	}
+	original := &EventExport{UID: eventUID, ProjectID: 1, OriginInstanceUID: origin, Type: "cron.workflow.updated", HLCPhysicalMS: 2, Payload: marshal(newBody("editor", held))}
+	snapshotBody := newBody("worker", `{"version":1,"steps":[]}`)
+	snapshotBody.DefinitionEventUID, snapshotBody.DefinitionHLC = eventUID, &clock
+	snapshot := &EventExport{UID: newUID(t), ProjectID: 1, OriginInstanceUID: origin, Type: "cron.workflow.snapshot", HLCPhysicalMS: 5, Payload: marshal(snapshotBody)}
+	project := &ProjectExport{ID: 1, UID: projectUID}
+	for _, tc := range []struct {
+		name   string
+		order  []*EventExport
+		rowMS  int64
+		newest bool
+	}{
+		{"original first", []*EventExport{original, snapshot}, 2, false},
+		{"snapshot first", []*EventExport{snapshot, original}, 2, false},
+		{"newer projection", []*EventExport{snapshot, original}, 9, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var rowValue CronWorkflowExport
+			rowValue.CronDefinition = CronDefinition{ID: 1, ProjectID: 1, UID: workflowUID, Name: "Review", Author: "worker", Revision: 3, CreatedAt: now, UpdatedAt: now, DefinitionEventUID: eventUID, DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: tc.rowMS, OriginInstanceUID: origin}}
+			rowValue.Definition.Version = 1
+			row := &rowValue
+			result := ReconcileOwnerCronWorkflowReplay([]ImportRecord{project, row, tc.order[0], tc.order[1]})
+			require.Same(t, tc.order[0], result[2], "retained events must remain intact")
+			require.Same(t, tc.order[1], result[3], "retained events must remain intact")
+			if tc.newest {
+				require.Same(t, row, result[1])
+				return
+			}
+			got := result[1].(*CronWorkflowExport)
+			require.JSONEq(t, held, string(got.RawDefinition))
+			require.Equal(t, eventUID, got.DefinitionEventUID)
+			require.Equal(t, "worker", got.Author)
+			require.Equal(t, int64(3), got.Revision)
+		})
+	}
+}
