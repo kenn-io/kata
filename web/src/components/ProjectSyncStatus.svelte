@@ -28,7 +28,6 @@
   $effect(() => {
     void identity
     const [id, uid] = untrack(() => [projectID, projectUID] as const)
-    let last: AbortController | undefined
     let current: AbortController | undefined
     let stopped = false
     let disposed = false
@@ -54,7 +53,6 @@
       pendingReturn = false
       const abort = new AbortController()
       current = abort
-      last = abort
       const finish = () => {
         clearTimeout(timeout)
         if (current !== abort) return
@@ -114,7 +112,7 @@
     void read(false)
     return () => {
       disposed = true
-      last?.abort()
+      current?.abort()
       refresh = undefined
     }
   })
@@ -171,7 +169,8 @@
       >
     {/if}
   {/if}
-  {#if error && hasResult}<span role="status">Sync status may be out of date.</span>{/if}
+  {#if error && hasResult}<span class="stale" role="status">Sync status may be out of date.</span
+    >{/if}
   <button type="button" onclick={() => refresh?.(true)}>Refresh sync</button>
 </section>
 
@@ -190,6 +189,13 @@
   }
   .project-sync span {
     min-width: 0;
+  }
+  .stale {
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--accent-amber) 14%, transparent);
+    color: var(--accent-amber);
+    padding: var(--space-1) var(--space-2);
+    font-weight: var(--font-weight-semibold);
   }
   button {
     color: var(--text-primary);
