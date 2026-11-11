@@ -262,6 +262,9 @@ Embeddings are local derived state and **do not federate**: each daemon embeds
 only what it stores, and no vectors are sent to or pulled from federated hubs.
 SQLite keeps them in a sidecar database; PostgreSQL keeps them in pgvector
 tables in its selected Kata schema when that optional extension is installed.
+Automatic PostgreSQL indexing releases its lease between cycles, so a daemon
+with a configured provider can take over and build its index before switching
+away from the active one.
 They are not included in JSONL
 [backup/export](../operations/backup-restore.md); a restore or a storage-format
 upgrade re-embeds from scratch rather than carrying vectors forward. Archives

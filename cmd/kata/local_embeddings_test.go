@@ -36,6 +36,19 @@ func TestApplySharedEmbeddingChoice(t *testing.T) {
 	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
 }
 
+func TestDaemonPreflightValidatesSharedChoice(t *testing.T) {
+	home := setupKataEnv(t)
+	clearLocalEmbeddingsEnv(t)
+	resetFlags(t)
+	t.Setenv("PORT", "")
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nmodel_context_tokens=32000\nmax_batch_tokens=31999\n"), 0600))
+	require.NoError(t, embedlocal.RecordChoice())
+	_, err := preflightDaemonStartup(t.Context(), "", false, true)
+	require.ErrorContains(t, err, "embedding batching")
+}
+
 func TestSharedChoiceStartsPostgresCompatibleIndex(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires pgvector testcontainer")

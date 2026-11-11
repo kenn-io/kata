@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-const reconcilerLeasePollInterval = 100 * time.Millisecond
-
 // AcquireReconcilerLease elects one semantic-search reconciler for a
 // PostgreSQL database/schema pair. SQLite indexes are process-local and need
 // no lease. A PostgreSQL lease is held on a dedicated connection until the
@@ -21,23 +19,9 @@ func (ix *Index) AcquireReconcilerLease(ctx context.Context) (func() error, erro
 	if err != nil {
 		return nil, fmt.Errorf("vector: reserve reconciler lease connection: %w", err)
 	}
-	for {
-		var acquired bool
-		if err := conn.QueryRowContext(ctx, reconcilerLockSQL).Scan(&acquired); err != nil {
-			_ = conn.Close()
-			return nil, fmt.Errorf("vector: acquire postgres reconciler lease: %w", err)
-		}
-		if acquired {
-			break
-		}
-		timer := time.NewTimer(reconcilerLeasePollInterval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			_ = conn.Close()
-			return nil, ctx.Err()
-		case <-timer.C:
-		}
+	if _, err := conn.ExecContext(ctx, reconcilerLockSQL); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("vector: acquire postgres reconciler lease: %w", err)
 	}
 	if err := ix.pg.adoptLease(conn); err != nil {
 		_ = conn.Close()
