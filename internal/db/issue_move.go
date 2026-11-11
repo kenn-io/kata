@@ -135,28 +135,22 @@ func FenceIssueMove(in *MoveIssueProjectIn, out MoveIssueProjectOut) {
 }
 
 func validateIssueMoveMembership(in MoveIssueProjectIn, inputs []IssueMoveTreeItem) error {
-	if !matchesIssueMoveMembership(in.ExpectedIssueIDs, inputs) {
-		return ErrIssueMoveTreeChanged
+	if in.ExpectedIssueIDs == nil {
+		return nil
 	}
-	return nil
-}
-
-func matchesIssueMoveMembership(expected []IssueMoveMember, inputs []IssueMoveTreeItem) bool {
-	if expected == nil {
-		return true
-	}
-	want := make(map[IssueMoveMember]struct{}, len(expected))
-	for _, member := range expected {
+	want := make(map[IssueMoveMember]struct{}, len(in.ExpectedIssueIDs))
+	for _, member := range in.ExpectedIssueIDs {
 		want[member] = struct{}{}
 	}
-	for _, item := range inputs {
-		member := IssueMoveMember{IssueID: item.In.IssueID, ProjectID: item.In.FromProjectID}
-		if _, ok := want[member]; !ok {
-			return false
-		}
-		delete(want, member)
+	if len(want) != len(inputs) {
+		return ErrIssueMoveTreeChanged
 	}
-	return len(want) == 0
+	for _, item := range inputs {
+		if _, ok := want[IssueMoveMember{IssueID: item.In.IssueID, ProjectID: item.In.FromProjectID}]; !ok {
+			return ErrIssueMoveTreeChanged
+		}
+	}
+	return nil
 }
 
 // Validate the complete proposed mapping set before previews or writes. Checking
