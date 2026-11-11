@@ -2,7 +2,10 @@ package daemon_test
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
@@ -128,5 +131,68 @@ func TestRefusedAdoptionUndoPreservesCredentialState(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// An owner backup may retain a future workflow event without a projection that
+// this version can represent. Adoption must undo the credential move if the
+// strict retained-history check refuses that event.
+func TestAdoptionRefusalRestoresCredentialsForFutureWorkflowHistory(t *testing.T) {
+	ctx := t.Context()
+	store := openReplicaServiceStore(t)
+	const created = "2026-07-15T12:00:00.000Z"
+	projectRecord := &db.ProjectExport{ID: 5, UID: replicaLocalProjectUID, Name: "spoke-project", CreatedAt: created, Metadata: jsontext.Value(`{}`), Revision: 1}
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	payload, err := json.Marshal(db.CronDefinitionEvent{
+		UID: "01HZNQ7VFPK1XGD8R5MABCD4EB", ProjectUID: projectRecord.UID,
+		Name: "future", Author: "worker", CreatedAt: now, UpdatedAt: now,
+		Definition: jsontext.Value(`{"version":2,"steps":[]}`),
+	})
+	require.NoError(t, err)
+	event := &db.EventExport{
+		ID: 10, UID: "01HZNQ7VFPK1XGD8R5MABCD4EC", OriginInstanceUID: store.InstanceUID(),
+		ProjectID: projectRecord.ID, ProjectUID: projectRecord.UID, ProjectName: projectRecord.Name,
+		Type: "cron.workflow.created", Actor: "worker", Payload: payload,
+		HLCPhysicalMS: 1784102400000, CreatedAt: created,
+	}
+	event.ContentHash, err = db.EventContentHash(db.EventHashInput{
+		UID: event.UID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: event.ProjectUID,
+		ProjectName: event.ProjectName, Type: event.Type, Actor: event.Actor,
+		HLCPhysicalMS: event.HLCPhysicalMS, CreatedAt: event.CreatedAt, Payload: event.Payload,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.ImportReplay(ctx, []db.ImportRecord{projectRecord, event}, db.ImportOptions{}))
+	project, err := store.ProjectByUID(ctx, projectRecord.UID)
+	require.NoError(t, err)
+	before, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, before, 1)
+	require.Equal(t, event.ContentHash, before[0].ContentHash)
+	_, err = store.FederationBindingByProject(ctx, project.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
+
+	credentials := newReplicaCredentialStore()
+	params := replicaServiceParams()
+	params.ProjectName, params.AdoptExisting = project.Name, true
+	params.Credential.Capabilities = "pull,push"
+	credentials.put(project.UID, params.Credential)
+	credentials.put(replicaHubProjectUID, params.Credential)
+	_, err = daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
+	require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+	require.Equal(t, 1, credentials.rekeyCalls)
+
+	current, err := store.ProjectByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, project, current)
+	after, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 10})
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	_, err = store.FederationBindingByProject(ctx, project.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	for _, uid := range []string{project.UID, replicaHubProjectUID} {
+		got, found, err := credentials.FederationCredential(ctx, uid)
+		require.NoError(t, err)
+		require.True(t, found, "credential for %s", uid)
+		require.Equal(t, params.Credential, got)
 	}
 }
