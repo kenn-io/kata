@@ -524,7 +524,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 		}
 	}
 	filterReadySchedules := false
-	filterCalendarSchedules := query.View == "today" || query.View == "upcoming" || query.View == "deadlines"
+	filterCalendarSchedules := query.View == "today" || query.View == "upcoming"
 	filterDelegated := query.View == "delegated"
 	readyRequested := false
 	if len(statuses) > 0 && !slices.Contains(statuses, "all") {
@@ -655,6 +655,9 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 		uiIssue.DeadlineOnDate = deadlineOnDate
 		uiIssue.ScheduledOnToday, uiIssue.DeadlineOnToday = scheduledToday, deadlineToday
 		issues = append(issues, uiIssue)
+		if limit > 0 && len(issues) == limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()

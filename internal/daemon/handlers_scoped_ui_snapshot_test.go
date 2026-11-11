@@ -47,7 +47,7 @@ func (s *projectionCountingUIStore) IssueScopedMembers(
 // before any projection read; a moved cursor invalidates it.
 func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 	instrumented := &projectionCountingUIStore{}
-	now := time.Date(2026, 1, 1, 4, 59, 59, 0, time.UTC)
+	now := time.Date(2026, 1, 1, 4, 59, 50, 0, time.UTC)
 	env := testenv.New(t,
 		testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity(),
 		testenv.Option(func(cfg *daemon.ServerConfig) {
@@ -83,7 +83,8 @@ func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 	etag := resp.Header.Get("ETag")
 	require.NotEmpty(t, etag)
 
-	// A matching If-None-Match returns 304 without building the projection.
+	// A matching validator remains usable after the response cache expires.
+	now = now.Add(7 * time.Second)
 	instrumented.snapshotReads.Store(0)
 	instrumented.subtreeReads.Store(0)
 	resp, body = envDoRaw(t, env, http.MethodGet, query, nil,
@@ -103,7 +104,7 @@ func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 	require.NotEqual(t, etag, wideResp.Header.Get("ETag"))
 
 	// A saved zone's midnight changes the projection even without an event.
-	now = now.Add(time.Second)
+	now = now.Add(3 * time.Second)
 	resp, body = envDoRaw(t, env, http.MethodGet, query, nil,
 		map[string]string{"Authorization": "Bearer worker-token", "If-None-Match": etag})
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
@@ -129,4 +130,23 @@ func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(body, &snapshot))
 	require.NotEqual(t, child.Revision, snapshot.Cursor, "sanity: cursor is an event id")
+}
+
+func TestEmptyTodaySnapshotExpiresWhenSavedZoneDayChanges(t *testing.T) {
+	now := time.Date(2026, 1, 1, 4, 59, 59, 0, time.UTC)
+	env := testenv.New(t, testenv.Option(func(cfg *daemon.ServerConfig) { cfg.UIClock = func() time.Time { return now } }))
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	saved, err := metadata.NewScheduleValue("2026-01-01", "America/New_York")
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Tomorrow", Author: "user-a", Metadata: map[string]jsontext.Value{"scheduled_on": saved}})
+	require.NoError(t, err)
+	query := "/api/v1/ui/snapshot?view=today&time_zone=UTC&local_date=2026-01-01"
+	first, body := envDoRaw(t, env, http.MethodGet, query, nil, nil)
+	require.Equal(t, http.StatusOK, first.StatusCode, string(body))
+	require.NotContains(t, string(body), issue.UID)
+	now = now.Add(time.Second)
+	second, body := envDoRaw(t, env, http.MethodGet, query, nil, map[string]string{"If-None-Match": first.Header.Get("ETag")})
+	require.Equal(t, http.StatusOK, second.StatusCode, string(body))
+	require.Contains(t, string(body), issue.UID)
 }

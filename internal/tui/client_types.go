@@ -92,6 +92,8 @@ func (i Issue) datesState() datesFormState {
 		deadline = metadata.ScheduleClockText(i.Metadata.DeadlineOn)
 	}
 	d := datesFormState{revision: i.Revision, scheduled: scheduled, deadline: deadline, scheduledToday: i.ScheduledOnToday, deadlineToday: i.DeadlineOnToday}
+	d.scheduledZone = savedDateLocation(i.Metadata.ScheduledOn)
+	d.deadlineZone = savedDateLocation(i.Metadata.DeadlineOn)
 	if err := errors.Join(serr, derr); err != nil {
 		d.unreadable = err.Error()
 	}
@@ -99,6 +101,23 @@ func (i Issue) datesState() datesFormState {
 }
 
 func (i Issue) timezone() string { return rawString(i.Metadata.Timezone) }
+
+func (i *Issue) refreshSavedDays(now time.Time) bool {
+	changed := false
+	for _, field := range []struct {
+		raw jsontext.Value
+		day *string
+	}{{i.Metadata.ScheduledOn, &i.ScheduledOnToday}, {i.Metadata.DeadlineOn, &i.DeadlineOnToday}} {
+		if loc := savedDateLocation(field.raw); loc != nil {
+			day := now.In(loc).Format(time.DateOnly)
+			if *field.day != day {
+				*field.day = day
+				changed = true
+			}
+		}
+	}
+	return changed
+}
 
 // scheduledText and deadlineText are the dates the detail strip shows: the
 // saved text when it carries the daemon's resolved date (keeping a saved clock

@@ -1217,3 +1217,30 @@ func RunUISnapshotLimitIgnoresUnseenFutureSchedule(t *testing.T, open func(*test
 	_, err = store.(db.UIStore).ReadUISnapshot(t.Context(), db.UISnapshotQuery{View: "all-open", Limit: 2, CalendarAt: "2026-01-01T00:00:00Z"})
 	require.ErrorContains(t, err, "unsupported schedule tzdata version")
 }
+
+// RunUISnapshotBoundedCalendar checks that lower-ranked dates cannot expire a full result.
+func RunUISnapshotBoundedCalendar(t *testing.T, open func(*testing.T) db.Storage) {
+	store := open(t)
+	ctx := t.Context()
+	project := createCursorProject(ctx, t, store)
+	create := func(title, date, zone string) db.Issue {
+		raw, err := metadata.NewScheduleValue(date, zone)
+		require.NoError(t, err)
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: title, Author: "user-a", Metadata: map[string]jsontext.Value{"scheduled_on": raw}})
+		require.NoError(t, err)
+		return issue
+	}
+	create("older excluded", "2026-01-03", "America/New_York")
+	visible := create("visible", "2026-01-01", "UTC")
+	create("newer excluded", "2026-01-03", "Asia/Tokyo")
+	query := db.UISnapshotQuery{ProjectUID: project.UID, View: "today", TimeZone: "UTC", LocalDate: "2026-01-01", CalendarAt: "2026-01-01T04:00:00Z", Limit: 1}
+	bounded, err := store.(db.UIStore).ReadUISnapshot(ctx, query)
+	require.NoError(t, err)
+	require.Equal(t, []string{visible.UID}, uiIssueUIDs(bounded.Issues))
+	require.Equal(t, "2026-01-01T15:00:00Z", bounded.CalendarBoundary.UTC().Format(time.RFC3339))
+	query.Limit = 0
+	unlimited, err := store.(db.UIStore).ReadUISnapshot(ctx, query)
+	require.NoError(t, err)
+	require.Equal(t, uiIssueUIDs(unlimited.Issues), uiIssueUIDs(bounded.Issues))
+	require.Equal(t, "2026-01-01T05:00:00Z", unlimited.CalendarBoundary.UTC().Format(time.RFC3339))
+}

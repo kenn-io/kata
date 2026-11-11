@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
@@ -43,6 +44,27 @@ func TestDateToggleUsesScheduleDay(t *testing.T) {
 	issue.ScheduledOnToday = "2026-01-01"
 	require.True(t, matchesDate(issue, ListFilter{Date: dateToday, Day: "2025-12-31"}))
 	require.False(t, matchesDate(issue, ListFilter{Date: dateScheduled, Day: "2025-12-31"}))
+}
+
+func TestDateToggleSavedZoneMidnightKeepsSelection(t *testing.T) {
+	now := time.Date(2026, 11, 10, 4, 59, 0, 0, time.UTC)
+	withClock(t, func() time.Time { return now })
+	saved, err := metadata.NewScheduleValue("2026-11-10", "America/New_York")
+	require.NoError(t, err)
+	newIssue := dated("new", "2026-11-10", "")
+	newIssue.Metadata.ScheduledOn = saved
+	newIssue.ScheduledOnToday = "2026-11-09"
+	keep := dated("keep", "2026-11-09", "")
+	m := filterFormFixture()
+	m.list.filter = ListFilter{Date: dateToday}.stampDay()
+	m.list = m.list.applyFetched(initialFetchMsg{issues: []Issue{newIssue, keep}})
+	assertQueueShortIDs(t, m.list.visibleRows(), []string{"keep"})
+	now = now.Add(2 * time.Minute)
+	m, _ = stepModel(m, dayTickMsg{})
+	assertQueueShortIDs(t, m.list.visibleRows(), []string{"new", "keep"})
+	selected, ok := m.list.targetRow()
+	require.True(t, ok)
+	assert.Equal(t, "keep", selected.ShortID)
 }
 
 func TestDateToggle_TodayAndScheduledSplitOnLocalDay(t *testing.T) {

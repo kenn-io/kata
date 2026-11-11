@@ -21,6 +21,7 @@ type uiSnapshotAuthorityCacheEntry struct {
 	// event payload references included. A cache hit registers them again
 	// instead of rediscovering them from the response fields.
 	dependencies []int64
+	createdAt    time.Time
 	expiresAt    time.Time
 	sequence     uint64
 }
@@ -56,7 +57,8 @@ func (c *uiSnapshotCache) get(key string) (db.UISnapshotData, []int64, bool) {
 	if !ok {
 		return db.UISnapshotData{}, nil, false
 	}
-	if !c.clock().Before(entry.expiresAt) {
+	now := c.clock()
+	if now.Before(entry.createdAt) || !now.Before(entry.expiresAt) {
 		delete(c.entries, key)
 		return db.UISnapshotData{}, nil, false
 	}
@@ -91,6 +93,7 @@ func (c *uiSnapshotCache) put(key string, data db.UISnapshotData, dependencies [
 	c.entries[key] = uiSnapshotAuthorityCacheEntry{
 		data:         c.clone(data),
 		dependencies: slices.Clone(dependencies),
+		createdAt:    now,
 		expiresAt:    expiresAt,
 		sequence:     c.sequence,
 	}

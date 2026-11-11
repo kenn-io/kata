@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -152,6 +153,12 @@ func TestUISnapshotCalendarMidnightInvalidatesCacheWithoutEvent(t *testing.T) {
 	require.Equal(t, http.StatusOK, third.StatusCode, string(body))
 	require.NotEqual(t, first.Header.Get("ETag"), third.Header.Get("ETag"))
 	require.Equal(t, 2, store.snapshotReads)
+	now = now.Add(-time.Second)
+	store.snapshot.Issues[0].ScheduledOnToday = "2025-12-31"
+	store.snapshot.CalendarBoundary = now.Add(time.Second)
+	rolledBack, body := getUISnapshot(t, ts, query, third.Header.Get("ETag"))
+	require.Equal(t, http.StatusOK, rolledBack.StatusCode, string(body))
+	require.Equal(t, 3, store.snapshotReads)
 }
 
 func getUISnapshot(t *testing.T, ts *httptest.Server, query url.Values, etag string) (*http.Response, []byte) {
@@ -189,6 +196,34 @@ func TestUISnapshotETagFastPath(t *testing.T) {
 	require.Empty(t, body)
 	require.Equal(t, 1, store.cursorReads)
 	require.Zero(t, store.snapshotReads, "matching ETag must not build the projection")
+	listed, body := getUISnapshot(t, ts, query, `W/"other", `+etag)
+	require.Equal(t, http.StatusNotModified, listed.StatusCode, string(body))
+	weak, body := getUISnapshot(t, ts, query, "W/"+etag)
+	require.Equal(t, http.StatusOK, weak.StatusCode, string(body))
+}
+
+func TestUISnapshotValidatorSurvivesCacheEvictionAndRestart(t *testing.T) {
+	store := &countingUIStore{cursor: 41, snapshotCursor: 41}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	ts := newUISnapshotServerWithClock(t, store, true, clock)
+	query := url.Values{"view": {"all-open"}}
+	first, _ := getUISnapshot(t, ts, query, "")
+	require.Equal(t, http.StatusOK, first.StatusCode)
+	etag := first.Header.Get("ETag")
+	for i := range 130 {
+		response, body := getUISnapshot(t, ts, url.Values{"view": {"all-open"}, "text": {strconv.Itoa(i)}}, "")
+		require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+	}
+	now = now.Add(15 * time.Second)
+	store.snapshotReads = 0
+	second, body := getUISnapshot(t, ts, query, etag)
+	require.Equal(t, http.StatusNotModified, second.StatusCode, string(body))
+	require.Zero(t, store.snapshotReads)
+	restarted := newUISnapshotServerWithClock(t, store, true, clock)
+	third, body := getUISnapshot(t, restarted, query, etag)
+	require.Equal(t, http.StatusNotModified, third.StatusCode, string(body))
+	require.Zero(t, store.snapshotReads)
 }
 
 func TestUISnapshotWithoutLimitRequestsCompleteAuthority(t *testing.T) {
@@ -328,6 +363,8 @@ func TestUISnapshotCapabilities(t *testing.T) {
 	writableResponse, writableBody := getUISnapshot(t, writable, query, "")
 	readonlyResponse, readonlyBody := getUISnapshot(t, readonly, query, "")
 	require.NotEqual(t, writableResponse.Header.Get("ETag"), readonlyResponse.Header.Get("ETag"))
+	policyChanged, body := getUISnapshot(t, readonly, query, writableResponse.Header.Get("ETag"))
+	require.Equal(t, http.StatusOK, policyChanged.StatusCode, string(body))
 	var first, second struct {
 		Origin       string `json:"origin"`
 		OriginStable bool   `json:"origin_stable"`

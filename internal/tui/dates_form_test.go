@@ -554,6 +554,24 @@ func TestDatesFormShowsSavedInstantInItsZoneAndKeepsUndo(t *testing.T) {
 	require.JSONEq(t, string(saved), string(fields["scheduled_on"]))
 }
 
+func TestDatesFormTodayAdvancesInSavedZone(t *testing.T) {
+	h := newDatesHarness(t, nil, viewDetail)
+	saved, err := metadata.NewScheduleValue("2026-11-08", "America/New_York")
+	require.NoError(t, err)
+	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "bob", Patch: map[string]jsontext.Value{"scheduled_on": saved}})
+	require.NoError(t, err)
+	h.reload()
+	now := time.Date(2026, 11, 10, 4, 59, 0, 0, time.UTC)
+	h.m.toastNow = func() time.Time { return now }
+	h.openForm()
+	h.fill("today", "")
+	assert.Contains(t, stripANSI(renderDatesForm(h.m.input, 80, now)), "2026-11-09 Mon")
+	now = now.Add(2 * time.Minute)
+	assert.Contains(t, stripANSI(renderDatesForm(h.m.input, 80, now)), "2026-11-10 Tue")
+	h.save()
+	assert.Equal(t, "2026-11-10", h.stored()["scheduled_on"])
+}
+
 func TestDetailStripShowsSavedSchedule(t *testing.T) {
 	for _, tc := range []struct {
 		name, value, resolved, want string

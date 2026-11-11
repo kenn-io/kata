@@ -12,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // DatesInput is one dates save: the keys to write and the revision the form
@@ -36,6 +37,8 @@ type datesFormState struct {
 	deadline       string
 	scheduledToday string
 	deadlineToday  string
+	scheduledZone  *time.Location
+	deadlineZone   *time.Location
 	// unreadable is why a stored date cannot be edited; a save is refused.
 	unreadable string
 }
@@ -96,16 +99,19 @@ func datesInputFromForm(s inputState, now time.Time, actor string) (DatesInput, 
 		key    string
 		opened string
 		today  string
+		zone   *time.Location
 	}{
-		{fieldScheduled, "Scheduled", api.MetadataKeyScheduledOn, s.dates.scheduled, s.dates.scheduledToday},
-		{fieldDeadline, "Deadline", api.MetadataKeyDeadlineOn, s.dates.deadline, s.dates.deadlineToday},
+		{fieldScheduled, "Scheduled", api.MetadataKeyScheduledOn, s.dates.scheduled, s.dates.scheduledToday, s.dates.scheduledZone},
+		{fieldDeadline, "Deadline", api.MetadataKeyDeadlineOn, s.dates.deadline, s.dates.deadlineToday, s.dates.deadlineZone},
 	} {
 		text := s.fieldValue(f.id)
 		if text == f.opened {
 			continue
 		}
 		fieldNow := now
-		if day, err := time.Parse(time.DateOnly, f.today); err == nil {
+		if f.zone != nil {
+			fieldNow = now.In(f.zone)
+		} else if day, err := time.Parse(time.DateOnly, f.today); err == nil {
 			fieldNow = day
 		}
 		value, err := resolveDateInput(text, fieldNow)
@@ -239,10 +245,14 @@ func renderDatesForm(s inputState, innerW int, now time.Time) string {
 		parts = append(parts, renderNewIssueField(s, idx, innerW))
 		fieldNow := now
 		today := s.dates.scheduledToday
+		zone := s.dates.scheduledZone
 		if s.fields[idx].id == fieldDeadline {
 			today = s.dates.deadlineToday
+			zone = s.dates.deadlineZone
 		}
-		if day, err := time.Parse(time.DateOnly, today); err == nil {
+		if zone != nil {
+			fieldNow = now.In(zone)
+		} else if day, err := time.Parse(time.DateOnly, today); err == nil {
 			fieldNow = day
 		}
 		parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), fieldNow))))
@@ -252,6 +262,15 @@ func renderDatesForm(s inputState, innerW int, now time.Time) string {
 	}
 	parts = append(parts, renderDatesFooter(s, innerW))
 	return modalBoxStyle.Width(innerW+2).Padding(0, 1).Render(strings.Join(parts, "\n"))
+}
+
+func savedDateLocation(raw jsontext.Value) *time.Location {
+	obj, err := metadata.DecodeSavedSchedule(raw)
+	if err != nil || obj == nil {
+		return nil
+	}
+	loc, _ := metadata.ScheduleLocation(obj.Timezone, obj.TZDataVersion)
+	return loc
 }
 
 func renderDatesFooter(s inputState, innerW int) string {

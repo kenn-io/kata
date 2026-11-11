@@ -2653,8 +2653,25 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return next, cmd, true
 	case dayTickMsg:
 		var cmd tea.Cmd
-		if m.list.filter.Date != "" && m.list.filter.Day != renderNow().Format(time.DateOnly) {
-			m, cmd = m.refreshListDay(nil)
+		now := renderNow()
+		changed := false
+		for _, issue := range m.list.issues {
+			changed = issue.refreshSavedDays(now) || changed
+		}
+		if m.detail.issue != nil {
+			m.detail.issue.refreshSavedDays(now)
+		}
+		if m.list.filter.Date != "" && (changed || m.list.filter.Day != now.Format(time.DateOnly)) {
+			m, cmd = m.refreshListDay(func(lm listModel) listModel {
+				for i := range lm.issues {
+					lm.issues[i].refreshSavedDays(now)
+				}
+				return lm
+			})
+		} else if changed {
+			for i := range m.list.issues {
+				m.list.issues[i].refreshSavedDays(now)
+			}
 		}
 		return m, combineCmds(cmd, dayTick()), true
 	case toastExpiredMsg:

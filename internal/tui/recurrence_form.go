@@ -20,6 +20,7 @@ import (
 type recurrenceFormState struct {
 	issueRevision int64
 	rec           *recurrenceclient.View
+	issueZone     string
 	unreadable    string
 }
 
@@ -44,7 +45,7 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.Vie
 		input.Blur()
 		s.fields = append(s.fields, inputField{id: f.id, kind: fieldSingleLine, input: input, label: f.label})
 	}
-	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec, unreadable: issue.datesState().unreadable}
+	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec, issueZone: issue.timezone(), unreadable: issue.datesState().unreadable}
 	rule, start, zone, errText := recurrenceFormSeed(issue, rec, state.unreadable)
 	s.err = errText
 	s.recurrence, s.target.projectID = state, issue.ProjectID
@@ -139,7 +140,7 @@ func (m Model) commitRecurrenceForm() (Model, tea.Cmd) {
 
 // recurrenceStart is the Start field as a date, or the error text for it.
 func (m Model) recurrenceStart() (string, string) {
-	start, err := resolveDateInput(m.input.fieldValue(fieldStart), m.toastNow())
+	start, err := resolveDateInput(m.input.fieldValue(fieldStart), recurrenceFormNow(m.input, m.toastNow()))
 	if err == nil && start == "" {
 		return "", "Start is required."
 	}
@@ -147,6 +148,16 @@ func (m Model) recurrenceStart() (string, string) {
 		return "", "Start must be YYYY-MM-DD, today, tomorrow, +Nd or +Nw."
 	}
 	return start, ""
+}
+
+func recurrenceFormNow(s inputState, now time.Time) time.Time {
+	zone, err := recurrenceclient.ResolveZone(s.fieldValue(fieldZone), s.recurrence.rec.Zone(), s.recurrence.issueZone, localZone)
+	if err == nil {
+		if loc, err := time.LoadLocation(zone); err == nil {
+			return now.In(loc)
+		}
+	}
+	return now
 }
 
 func (m Model) saveRecurrence(in RecurrenceInput) (Model, tea.Cmd) {
@@ -197,7 +208,7 @@ func renderRecurrenceForm(s inputState, innerW, height int, now time.Time) strin
 			parts = append(parts, subtleStyle.Render("blank rule stops repeating"))
 		}
 		if s.fields[idx].id == fieldStart {
-			parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), now))))
+			parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), recurrenceFormNow(s, now)))))
 		}
 	}
 	footer := renderRecurrenceFooter(s, innerW)

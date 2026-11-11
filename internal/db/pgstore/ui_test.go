@@ -462,6 +462,10 @@ func TestUISnapshotLimitIgnoresUnseenFutureSchedule(t *testing.T) {
 	dbtest.RunUISnapshotLimitIgnoresUnseenFutureSchedule(t, func(t *testing.T) db.Storage { return openUIStore(t) })
 }
 
+func TestUISnapshotBoundedCalendar(t *testing.T) {
+	dbtest.RunUISnapshotBoundedCalendar(t, func(t *testing.T) db.Storage { return openUIStore(t) })
+}
+
 func TestRecurrenceAttachmentKeepsDeadlineZone(t *testing.T) {
 	dbtest.RunRecurrenceAttachmentKeepsDeadlineZone(t, func(t *testing.T) db.Storage { return openUIStore(t) })
 }

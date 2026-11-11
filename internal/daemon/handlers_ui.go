@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -170,14 +171,8 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 					return nil, internalAPIError(err)
 				}
 				observedCursor = &cursor
-				if issueScopeFromContext(ctx) != nil {
-					key, err := scopedSnapshotValidatorKey(intent, cursor, policy, in.IfNoneMatch)
-					if err != nil {
-						return nil, internalAPIError(err)
-					}
-					if _, _, ok := authorityCache.get(key); ok {
-						return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: in.IfNoneMatch}, nil
-					}
+				if tag := matchingSnapshotETag(in.IfNoneMatch, intent, cursor, policy, now); tag != "" {
+					return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: tag}, nil
 				}
 			}
 			_, scopedIssueIDs, err := applyIssueScopeToUISnapshot(ctx, cfg.DB, &intent)
@@ -292,13 +287,6 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
-			if scopedIssueIDs != nil {
-				key, err := scopedSnapshotValidatorKey(intent, data.Cursor, policy, validator)
-				if err != nil {
-					return nil, internalAPIError(err)
-				}
-				authorityCache.put(key, db.UISnapshotData{Cursor: data.Cursor, CalendarBoundary: data.CalendarBoundary}, nil)
-			}
 			recordUISnapshotDependencies(ctx, dependencies)
 			if matchesStrongETag(in.IfNoneMatch, validator) {
 				return &api.UISnapshotResponse{Status: http.StatusNotModified, ETag: validator}, nil
@@ -402,13 +390,6 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return referencesResponse(data, policy, validator), nil
 		})
-}
-
-// scopedSnapshotValidatorKey caches only a scoped validator, never its projection.
-func scopedSnapshotValidatorKey(intent normalizedUISnapshotIntent, cursor int64, policy uiPolicy, validator string) (string, error) {
-	intent.CalendarAt = ""
-	key, err := makeUIETag(intent, cursor, policy)
-	return "scoped-validator:" + key + ":" + validator, err
 }
 
 func applyIssueScopeToUISnapshot(
@@ -792,20 +773,55 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 }
 
 func makeUISnapshotETag(intent normalizedUISnapshotIntent, data db.UISnapshotData, policy uiPolicy) (string, error) {
+	start, err := time.Parse(time.RFC3339Nano, intent.CalendarAt)
+	if err != nil {
+		return "", err
+	}
+	end := int64(0)
+	if !data.CalendarBoundary.IsZero() {
+		end = data.CalendarBoundary.UnixNano()
+	}
+	return snapshotIntervalETag(intent, data.Cursor, policy, start.UnixNano(), end)
+}
+
+// The interval and its hash let a later request validate the projection
+// without rebuilding it. A zero end means there is no known day boundary.
+func snapshotIntervalETag(intent normalizedUISnapshotIntent, cursor int64, policy uiPolicy, start, end int64) (string, error) {
 	intent.CalendarAt = ""
-	type calendarRow struct{ UID, ScheduledToday, DeadlineToday string }
-	rows := make([]calendarRow, 0, len(data.Issues)+1)
-	for _, issue := range data.Issues {
-		rows = append(rows, calendarRow{issue.UID, issue.ScheduledOnToday, issue.DeadlineOnToday})
+	digest, err := makeUIETag(struct {
+		Intent     normalizedUISnapshotIntent
+		Start, End int64
+	}{intent, start, end}, cursor, policy)
+	if err != nil {
+		return "", err
 	}
-	if data.SelectedIssue != nil {
-		issue := data.SelectedIssue
-		rows = append(rows, calendarRow{issue.UID, issue.ScheduledOnToday, issue.DeadlineOnToday})
+	return `"` + strconv.FormatInt(start, 10) + "." + strconv.FormatInt(end, 10) + "." + strings.Trim(digest, `"`) + `"`, nil
+}
+
+func matchingSnapshotETag(header string, intent normalizedUISnapshotIntent, cursor int64, policy uiPolicy, now time.Time) string {
+	for value := range strings.SplitSeq(header, ",") {
+		candidate := strings.TrimSpace(value)
+		if len(candidate) < 2 || candidate[0] != '"' || candidate[len(candidate)-1] != '"' {
+			continue
+		}
+		parts := strings.Split(candidate[1:len(candidate)-1], ".")
+		if len(parts) != 3 {
+			continue
+		}
+		start, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			continue
+		}
+		end, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || now.UnixNano() < start || (end != 0 && now.UnixNano() >= end) {
+			continue
+		}
+		current, err := snapshotIntervalETag(intent, cursor, policy, start, end)
+		if err == nil && candidate == current {
+			return candidate
+		}
 	}
-	return makeUIETag(struct {
-		Intent   normalizedUISnapshotIntent
-		Calendar []calendarRow
-	}{intent, rows}, data.Cursor, policy)
+	return ""
 }
 
 func makeUIETag(intent any, cursor int64, policy uiPolicy) (string, error) {
