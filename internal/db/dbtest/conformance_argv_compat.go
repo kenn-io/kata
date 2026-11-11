@@ -299,28 +299,33 @@ func uidForGuard(t *testing.T) string {
 	return id
 }
 
-// Adoption may replace valid argv history only after the target advertises it.
-func checkArgvAdoptionNegotiation(t *testing.T, store db.Storage) error {
+// Adoption must retain both live and deleted argv workflows when refused.
+func checkArgvAdoptionRefused(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
-	for _, features := range []string{"", db.CronWorkflowArgvEventFeature} {
+	for _, deleted := range []bool{false, true} {
 		project, err := store.CreateProject(ctx, "adopt-argv-"+uidForGuard(t))
 		require.NoError(t, err)
 		workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "argv", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "argv", Argv: []string{"echo", "", "a b"}}}}})
 		require.NoError(t, err)
-		target := uidForGuard(t)
-		result, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: target, Actor: "worker", TargetEventFeatures: features})
-		if features == "" {
-			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-			current, lookupErr := store.ProjectByID(ctx, project.ID)
-			require.NoError(t, lookupErr)
-			require.Equal(t, project.UID, current.UID)
-			continue
+		if deleted {
+			q := store.(interface {
+				ExecContext(context.Context, string, ...any) (sql.Result, error)
+			})
+			_, err = q.ExecContext(ctx, `UPDATE cron_workflows SET deleted_at=$1 WHERE uid=$2`, "2026-11-08T12:00:00Z", workflow.UID)
+			require.NoError(t, err)
 		}
+		_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: uidForGuard(t), Actor: "worker"})
+		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		current, err := store.ProjectByID(ctx, project.ID)
 		require.NoError(t, err)
-		require.Equal(t, target, result.Project.UID)
-		retained, err := store.CronWorkflow(ctx, project.ID, workflow.UID)
+		require.Equal(t, project.UID, current.UID)
+		workflows, err := store.ListCronWorkflows(ctx, db.CronList{ProjectID: project.ID, IncludeDeleted: true})
 		require.NoError(t, err)
-		require.Equal(t, []string{"echo", "", "a b"}, retained.Definition.Steps[0].Argv)
+		require.Len(t, workflows, 1)
+		require.Equal(t, []string{"echo", "", "a b"}, workflows[0].Definition.Steps[0].Argv)
+		require.Equal(t, deleted, workflows[0].DeletedAt != nil)
+		_, err = store.FederationBindingByProject(ctx, project.ID)
+		require.ErrorIs(t, err, db.ErrNotFound)
 	}
 	return nil
 }
