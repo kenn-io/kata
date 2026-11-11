@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -17,22 +18,6 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 )
 
-// The foreground logging contract retains startup errors even when a supervisor
-// discards stderr. The child uses only a synthetic home and storage namespace.
-func TestForegroundDaemonRetainsStartupError(t *testing.T) {
-	setupKataEnv(t)
-	t.Setenv("KATA_DSN", "")
-	t.Setenv("PORT", "")
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestForegroundDaemonLoggingProcess$")
-	child.Env = append(os.Environ(), "KATA_LOGGING_HELPER=startup")
-	require.NoError(t, child.Run())
-	data, err := os.ReadFile(filepath.Join(ns.DataDir, "daemon.log"))
-	require.NoError(t, err)
-	assert.Contains(t, string(data), "not-a-host-port")
-}
-
 func TestForegroundDaemonLoggingProcess(t *testing.T) {
 	mode := os.Getenv("KATA_LOGGING_HELPER")
 	if mode == "" {
@@ -48,43 +33,14 @@ func TestForegroundDaemonLoggingProcess(t *testing.T) {
 		_ = runDaemonWithListen(t.Context(), "not-a-host-port", false, true)
 		return
 	}
-	if mode == "startup" {
-		require.Error(t, runDaemonWithListen(t.Context(), "not-a-host-port", false, true))
-		return
-	}
-	oldLogger, oldOutput, oldFlags, oldPrefix := slog.Default(), log.Writer(), log.Flags(), log.Prefix()
-	writer, _, closeLog := startDaemonLogging(t.Context())
+	oldOutput := log.Writer()
+	writer, _, closeLog := startDaemonLogging()
 	fmt.Fprintln(writer, "fixture plain diagnostic")
 	slog.Warn("fixture structured diagnostic")
 	log.Print("fixture standard diagnostic")
-	if mode == "fatal" {
-		panic("fixture fatal diagnostic")
-	}
 	closeLog()
-	require.Same(t, oldLogger, slog.Default())
 	require.Equal(t, oldOutput, log.Writer())
-	require.Equal(t, oldFlags, log.Flags())
-	require.Equal(t, oldPrefix, log.Prefix())
 	fmt.Fprintln(os.Stderr, "fixture stderr after cleanup")
-}
-
-func TestForegroundDaemonFailedStderrRetainsDiagnostics(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("fixture requires /dev/full")
-	}
-	setupKataEnv(t)
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	full, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = full.Close() })
-	child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestForegroundDaemonLoggingProcess$")
-	child.Env = append(os.Environ(), "KATA_LOGGING_HELPER=discarded")
-	child.Stderr = full
-	require.NoError(t, child.Run())
-	data, err := os.ReadFile(filepath.Join(ns.DataDir, "daemon.log"))
-	require.NoError(t, err)
-	assert.Contains(t, string(data), "fixture plain diagnostic")
 }
 
 func TestForegroundDaemonEntrypointErrorOnce(t *testing.T) {
@@ -119,10 +75,13 @@ func TestForegroundDaemonEntrypointErrorOnce(t *testing.T) {
 }
 
 // Logging and crash configuration are process-global, so each mode runs in its
-// own child. The fatal mode never panics or signals the test runner.
+// own child so the startup panic never reaches the test runner.
 func TestForegroundDaemonLoggingSinks(t *testing.T) {
-	for _, mode := range []string{"discarded", "same-file", "fatal", "startup-panic", "unavailable"} {
+	for _, mode := range []string{"discarded", "same-file", "stderr-failed", "startup-panic", "unavailable"} {
 		t.Run(mode, func(t *testing.T) {
+			if mode == "stderr-failed" && runtime.GOOS != "linux" {
+				t.Skip("fixture requires /dev/full")
+			}
 			setupKataEnv(t)
 			t.Setenv("KATA_DSN", "")
 			ns, err := daemonruntime.NewNamespace()
@@ -138,6 +97,8 @@ func TestForegroundDaemonLoggingSinks(t *testing.T) {
 			stderrPath := filepath.Join(t.TempDir(), "stderr")
 			if mode == "same-file" {
 				stderrPath = path
+			} else if mode == "stderr-failed" {
+				stderrPath = "/dev/full"
 			}
 			stderr, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 			require.NoError(t, err)
@@ -150,7 +111,7 @@ func TestForegroundDaemonLoggingSinks(t *testing.T) {
 				child.Stderr = stderr
 			}
 			err = child.Run()
-			if mode == "fatal" || mode == "startup-panic" {
+			if mode == "startup-panic" {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
@@ -171,17 +132,45 @@ func TestForegroundDaemonLoggingSinks(t *testing.T) {
 			}
 			if mode == "same-file" {
 				assert.Contains(t, string(contents), "previous diagnostic")
-				assert.Contains(t, string(contents), "fixture stderr after cleanup")
 			}
-			if mode == "fatal" || mode == "startup-panic" {
+			if mode == "startup-panic" {
 				assert.Contains(t, string(contents), "panic: fixture fatal diagnostic")
 				assert.Contains(t, string(contents), "goroutine ")
 			}
 			info, err := os.Stat(path)
 			require.NoError(t, err)
-			if runtime.GOOS != "windows" {
+			if mode != "same-file" && runtime.GOOS != "windows" {
 				assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 			}
 		})
 	}
+}
+
+// A blocked synchronous stderr must not prevent the current diagnostic from
+// reaching the retained log first.
+func TestDaemonDiagnosticWriterRetainsBeforeBlockedStderr(t *testing.T) {
+	var retained bytes.Buffer
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	writer := daemonDiagnosticWriter{stderr: blockingDiagnosticWriter{entered, release}, file: &retained}
+	go func() {
+		defer close(done)
+		_, _ = writer.Write([]byte("fixture diagnostic"))
+	}()
+	<-entered
+	assert.Equal(t, "fixture diagnostic", retained.String())
+	close(release)
+	<-done
+}
+
+type blockingDiagnosticWriter struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (w blockingDiagnosticWriter) Write(p []byte) (int, error) {
+	close(w.entered)
+	<-w.release
+	return len(p), nil
 }

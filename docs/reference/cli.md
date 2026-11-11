@@ -1828,13 +1828,14 @@ after login. Kata never puts a remote token or another credential in the URL.
 
 ## Daemon and diagnostics
 
-Foreground daemons, including supervised launches, append diagnostics to
-`<KATA_HOME>/runtime/<storage-hash>/daemon.log` as well as stderr. The log also
-retains fatal Go runtime diagnostics and goroutine dumps. Detached launches use
-the same file without duplicating entries. New log files are owner-only; Kata
-does not rotate them. If the log cannot be opened, the daemon warns on stderr
-and continues with stderr diagnostics. A failed foreground start also appends
-its diagnostics to this file, including when another daemon is already running.
+Foreground daemons, including supervised launches, append daemon logger output
+to `<KATA_HOME>/runtime/<storage-hash>/daemon.log` as well as stderr. The log
+also retains startup errors after the log path is resolved and opened, plus fatal
+Go runtime diagnostics and goroutine dumps. Direct writes to stderr are not necessarily
+retained. Detached launches use the same file without duplicating entries. New
+log files are owner-only; Kata does not rotate them. If the log path cannot be
+resolved or opened, the daemon warns on stderr and continues with stderr
+diagnostics.
 
 `kata daemon stop`, `restart`, `reload`, and `kata update` skip daemon records from another PID namespace or with unverifiable identity. Each skipped record is printed on stderr with its PID and reason, for example `skipping daemon pid=54 (another PID namespace)`.
 

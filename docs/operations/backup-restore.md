@@ -89,8 +89,9 @@ If an interrupted import left `<database>.import.tmp.jsonl`,
 `<database>.import.tmp.db`, or the temporary database's WAL/SHM sidecars,
 the next cutover checks the original old-schema source, moves the partial files
 into a private `<database>.import.recovery-*` directory, and retries from that
-source. It prints the recovery directory in `kata daemon logs`. No hand deletion
-is needed. Preserve that directory until you have checked the upgraded data.
+source. It prints the recovery directory on stderr; detached daemon launches
+write stderr to `kata daemon logs`. No hand deletion is needed. Preserve that
+directory until you have checked the upgraded data.
 
 If the original source database is missing, startup refuses to create an empty
 database over an interrupted swap. Preserve the import temp files and all
