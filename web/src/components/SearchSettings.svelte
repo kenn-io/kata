@@ -188,6 +188,10 @@
         requestError = originStable ? `Couldn't reconnect. ${recoveryGuidance}` : recoveryGuidance
       }
     }
+    if (posting && !restartPending) {
+      posting = false
+      posts++
+    }
     loading = false
     poll()
   }
@@ -211,7 +215,7 @@
     posting = true
     restartDeadline = Date.now() + restartWaitMs
     requestError = undefined
-    posts++
+    const post = ++posts
     poll()
     try {
       const postSignal = AbortSignal.any([signal, AbortSignal.timeout(restartWaitMs)])
@@ -219,16 +223,18 @@
         method: 'POST',
         signal: postSignal,
       })
-      if (!response.ok) {
+      if (post === posts && !response.ok) {
         restartDeadline = 0
         requestError = "Couldn't restart the daemon. Try again or run kata daemon restart."
       }
     } catch {
-      if (!signal.aborted && !originStable && restartPending)
+      if (post === posts && !signal.aborted && !originStable && restartPending)
         requestError = `Couldn't confirm restart. ${recoveryGuidance}`
     } finally {
-      posting = false
-      if (!signal.aborted) poll()
+      if (post === posts) {
+        posting = false
+        if (!signal.aborted) poll()
+      }
     }
   }
 

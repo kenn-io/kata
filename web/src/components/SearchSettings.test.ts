@@ -112,6 +112,79 @@ describe('SearchSettings', () => {
     expect(screen.getByText('On', { exact: true })).not.toBeNull()
   })
 
+  test('allows retry when a status read reports failure while the restart response hangs', async () => {
+    vi.useFakeTimers()
+    const pending = status({
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+    })
+    const failed = status({
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1, error: 'Restart failed' },
+    })
+    setGeneratedFetch(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(pending))
+        .mockImplementation(async () => Response.json(failed)),
+    )
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    const postFetch = vi
+      .fn<typeof fetch>()
+      .mockImplementationOnce(
+        (_input, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new TypeError('disconnected')))
+          }),
+      )
+      .mockResolvedValue(new Response(null, { status: 202 }))
+    renderSettings({ postFetch, originStable: true })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(screen.getByRole('alert').textContent).toContain('Restart failed')
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    expect(postFetch).toHaveBeenCalledTimes(2)
+  })
+
+  test('ignores a late restart response after status confirms success', async () => {
+    vi.useFakeTimers()
+    const pending = status({
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+    })
+    setGeneratedFetch(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(pending))
+        .mockImplementation(async () =>
+          Response.json(status({ provider: 'built_in', can_change: false })),
+        ),
+    )
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    let resolvePost!: (response: Response) => void
+    const postFetch = vi.fn<typeof fetch>(
+      () =>
+        new Promise((resolve) => {
+          resolvePost = resolve
+        }),
+    )
+    renderSettings({ postFetch, originStable: true })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(screen.getByText('On', { exact: true })).not.toBeNull()
+    resolvePost(new Response(null, { status: 500 }))
+    await settle()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   test('reconnects when a stable daemon returns after a long outage', async () => {
     vi.useFakeTimers()
     let available = false
