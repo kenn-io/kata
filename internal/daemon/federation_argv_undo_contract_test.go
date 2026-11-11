@@ -30,6 +30,20 @@ func (s contextCredentialStore) RekeyFederationCredential(ctx context.Context, p
 	return s.replicaCredentialStore.RekeyFederationCredential(ctx, p)
 }
 
+func (s contextCredentialStore) RekeyFederationCredentialWithUndo(ctx context.Context, p config.FederationCredentialRekey) (*config.FederationCredentialRekeyUndo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.replicaCredentialStore.RekeyFederationCredentialWithUndo(ctx, p)
+}
+
+func (s contextCredentialStore) UndoFederationCredentialRekey(ctx context.Context, undo config.FederationCredentialRekeyUndo) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.replicaCredentialStore.UndoFederationCredentialRekey(ctx, undo)
+}
+
 func TestAttachEmptyWorkflowRefusalPreservesEqualTargetCredential(t *testing.T) {
 	ctx := t.Context()
 	store := openReplicaServiceStore(t)

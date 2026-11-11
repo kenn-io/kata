@@ -1675,7 +1675,7 @@ func ensureFederationReplicaCredentialRekey(
 	store db.Storage,
 	credentials config.FederationCredentialStore,
 	p EnsureFederationReplicaParams,
-) (*config.FederationCredentialRekey, error) {
+) (*config.FederationCredentialRekeyUndo, error) {
 	source := p.CredentialRekey
 	if source == nil && (p.AdoptExisting || p.AttachEmpty) {
 		project, err := store.ProjectByNameIncludingArchived(ctx, p.ProjectName)
@@ -1729,17 +1729,32 @@ func ensureFederationReplicaCredentialRekey(
 	if err := refuseArgvAdoptionBeforeRekey(ctx, store, p); err != nil {
 		return nil, err
 	}
-	managed, err := managedCredentialStore(credentials)
-	if err != nil {
-		return nil, err
-	}
 	rekey := config.FederationCredentialRekey{
 		FromProjectUID: source.ProjectUID,
 		ToProjectUID:   p.HubProjectUID,
 		Expected:       source.Expected,
 		Replacement:    p.Credential,
 	}
-	if err := managed.RekeyFederationCredential(ctx, rekey); err != nil {
+	managed, ok := credentials.(config.FederationCredentialRekeyUndoer)
+	if !ok {
+		// Non-adoption callers need no rollback and retain the original interface.
+		if !p.AdoptExisting && !p.AttachEmpty {
+			legacy, err := managedCredentialStore(credentials)
+			if err != nil {
+				return nil, err
+			}
+			if err := legacy.RekeyFederationCredential(ctx, rekey); err != nil {
+				if errors.Is(err, config.ErrFederationCredentialConflict) {
+					return nil, federationReplicaError(ErrFederationReplicaCredentialConflict, "federation credential rekey lost a concurrent update", "")
+				}
+				return nil, credentialIOError("rekey federation replica credential")
+			}
+			return nil, nil
+		}
+		return nil, credentialIOError("atomic federation credential rekey unavailable")
+	}
+	undo, err := managed.RekeyFederationCredentialWithUndo(ctx, rekey)
+	if err != nil {
 		if errors.Is(err, config.ErrFederationCredentialConflict) {
 			return nil, federationReplicaError(
 				ErrFederationReplicaCredentialConflict,
@@ -1749,14 +1764,14 @@ func ensureFederationReplicaCredentialRekey(
 		}
 		return nil, credentialIOError("rekey federation replica credential")
 	}
-	return &rekey, nil
+	return undo, nil
 }
 
 // refuseArgvAdoptionBeforeRekey fails closed before any credential moves.
 // The adoption transaction repeats this check and remains authoritative; a
 // store without the reader relies on that check and the restore after it.
 func refuseArgvAdoptionBeforeRekey(ctx context.Context, store db.Storage, p EnsureFederationReplicaParams) error {
-	if !p.AdoptExisting || p.AttachEmpty {
+	if !p.AdoptExisting && !p.AttachEmpty {
 		return nil
 	}
 	project, err := store.ProjectByNameIncludingArchived(ctx, p.ProjectName)
@@ -1783,24 +1798,18 @@ func refuseArgvAdoptionBeforeRekey(ctx context.Context, store db.Storage, p Ensu
 // restoreFederationReplicaCredentialRekey reverses an applied rekey with the
 // same exact compare-and-swap. Any concurrent change is left untouched.
 func restoreFederationReplicaCredentialRekey(
-	ctx context.Context, credentials config.FederationCredentialStore, applied config.FederationCredentialRekey,
+	ctx context.Context, credentials config.FederationCredentialStore, applied config.FederationCredentialRekeyUndo,
 ) error {
-	managed, err := managedCredentialStore(credentials)
-	if err != nil {
-		return err
+	managed, ok := credentials.(config.FederationCredentialRekeyUndoer)
+	if !ok {
+		return credentialIOError("atomic federation credential undo unavailable")
 	}
-	if err := managed.RekeyFederationCredential(ctx, config.FederationCredentialRekey{
-		FromProjectUID: applied.ToProjectUID,
-		ToProjectUID:   applied.FromProjectUID,
-		Expected:       applied.Replacement,
-		Replacement:    applied.Expected,
-	}); err != nil {
+	// Cleanup must finish even if the adoption caller was canceled.
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := managed.UndoFederationCredentialRekey(cleanupCtx, applied); err != nil {
 		if errors.Is(err, config.ErrFederationCredentialConflict) {
-			return federationReplicaError(
-				ErrFederationReplicaCredentialConflict,
-				"refused adoption could not restore a concurrently changed credential",
-				"",
-			)
+			return federationReplicaError(ErrFederationReplicaCredentialConflict, "refused adoption could not restore a concurrently changed credential", "")
 		}
 		return credentialIOError("restore federation credential after refused adoption")
 	}

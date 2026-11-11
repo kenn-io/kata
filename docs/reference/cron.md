@@ -606,7 +606,13 @@ daemon. `kata.load_recurrence` is a separate RRULE issue-template interface.
 body lists cron features: `cron_v1` and, when enabled,
 `cron_workflow_argv_v1`. Clients must advertise
 `cron_workflow_argv_v1` in the request header to read argv workflows or start
-new runs that reference them. Missing, unknown, or failed advertisements remain
+new runs that reference them. A show request for an argv workflow, or a list
+containing one, returns HTTP 409 `unsupported_event_features` without the exact
+token; the list is refused as a whole. Creating or replacing a complete workflow
+does not require the token. On a stale workflow write, HTTP 409 `cron_conflict`
+includes `current` only when the caller can read the reread definition. Advertise
+the token to receive argv conflict data. Archive and restore also require it
+when the existing definition contains argv. Missing, unknown, or failed advertisements remain
 distinct outcomes. This is an ordinary project
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.

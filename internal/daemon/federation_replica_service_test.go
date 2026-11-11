@@ -156,6 +156,22 @@ func (s *replicaCredentialStore) RekeyFederationCredential(
 	return nil
 }
 
+func (s *replicaCredentialStore) RekeyFederationCredentialWithUndo(_ context.Context, rekey config.FederationCredentialRekey) (*config.FederationCredentialRekeyUndo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rekeyCalls++
+	if s.rekeyErr != nil {
+		return nil, s.rekeyErr
+	}
+	return config.ApplyFederationCredentialRekey(s.credentials, rekey)
+}
+
+func (s *replicaCredentialStore) UndoFederationCredentialRekey(_ context.Context, undo config.FederationCredentialRekeyUndo) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return config.UndoFederationCredentialRekey(s.credentials, undo)
+}
+
 func (s *replicaCredentialStore) ReserveManagedFederationCredential(
 	_ context.Context, reservation config.FederationManagedCredentialReservation,
 ) error {

@@ -19,7 +19,7 @@ func registerCronDefinitionHandlers(h huma.API, cfg ServerConfig) {
 	registerCronWorkflowHandlers(h, cfg)
 }
 
-func cronAPIError(ctx context.Context, cfg ServerConfig, err error, projectID int64, uid string, job bool) error {
+func cronAPIError(ctx context.Context, cfg ServerConfig, err error, projectID int64, uid string, job bool, features ...string) error {
 	if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 		return apiErr
 	}
@@ -38,7 +38,7 @@ func cronAPIError(ctx context.Context, cfg ServerConfig, err error, projectID in
 					data["current"] = api.CronJobFrom(current)
 				}
 			} else {
-				if current, readErr := cfg.DB.CronWorkflow(ctx, projectID, uid); readErr == nil {
+				if current, readErr := cfg.DB.CronWorkflow(ctx, projectID, uid); readErr == nil && len(features) > 0 && requireWorkflowReadFeatures(features[0], current.Definition) == nil {
 					data["current"] = api.CronWorkflowFrom(current)
 				}
 			}
@@ -242,7 +242,7 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 
 func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 	path := "/api/v1/projects/{project_id}/cron/workflows"
-	put := func(ctx context.Context, projectID int64, id string, body api.PutCronWorkflowBody, deleted bool) (*api.CronWorkflowResponse, error) {
+	put := func(ctx context.Context, projectID int64, id string, body api.PutCronWorkflowBody, deleted bool, features string) (*api.CronWorkflowResponse, error) {
 		ctx, actor, err := cronWriteContext(ctx, body.Actor)
 		if err != nil {
 			return nil, err
@@ -252,7 +252,7 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 		}
 		value, event, err := cfg.DB.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: projectID, UID: id, ExpectedEventUID: body.ExpectedEventUID, Name: body.Name, Definition: body.Definition.Native(), Actor: actor, Deleted: deleted})
 		if err != nil {
-			return nil, cronAPIError(ctx, cfg, err, projectID, id, false)
+			return nil, cronAPIError(ctx, cfg, err, projectID, id, false, features)
 		}
 		events := []db.Event{event}
 		cfg.Publish().Events(projectID, events)
@@ -261,17 +261,26 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 		out.Body.Events = events
 		return out, nil
 	}
-	huma.Register(h, huma.Operation{OperationID: "createCronWorkflow", Method: http.MethodPost, Path: path, DefaultStatus: 201}, func(ctx context.Context, in *api.CreateCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
+	attributedWrite := func(ctx huma.Context, next func(huma.Context)) {
+		if err := ensureAttributedWriteAllowed(ctx.Context()); err != nil {
+			if apiErr, ok := errors.AsType[*api.APIError](err); ok {
+				writeHostAccessError(ctx, apiErr.Status, apiErr.Code, apiErr.Message)
+				return
+			}
+		}
+		next(ctx)
+	}
+	huma.Register(h, huma.Operation{OperationID: "createCronWorkflow", Method: http.MethodPost, Path: path, DefaultStatus: 201, Middlewares: huma.Middlewares{attributedWrite}}, func(ctx context.Context, in *api.CreateCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
 		if err := decodeCronWorkflowBody(in.RawBody, &in.Body); err != nil {
 			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", false)
 		}
-		return put(ctx, in.ProjectID, "", in.Body, false)
+		return put(ctx, in.ProjectID, "", in.Body, false, in.EventFeatures)
 	})
-	huma.Register(h, huma.Operation{OperationID: "replaceCronWorkflow", Method: http.MethodPut, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.ReplaceCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
+	huma.Register(h, huma.Operation{OperationID: "replaceCronWorkflow", Method: http.MethodPut, Path: path + "/{cron_uid}", Middlewares: huma.Middlewares{attributedWrite}}, func(ctx context.Context, in *api.ReplaceCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
 		if err := decodeCronWorkflowBody(in.RawBody, &in.Body); err != nil {
-			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, false)
+			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, false, in.EventFeatures)
 		}
-		return put(ctx, in.ProjectID, in.UID, in.Body, false)
+		return put(ctx, in.ProjectID, in.UID, in.Body, false, in.EventFeatures)
 	})
 	huma.Register(h, huma.Operation{OperationID: "showCronWorkflow", Method: http.MethodGet, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.CronWorkflowReadRequest) (*api.CronWorkflowResponse, error) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
@@ -279,7 +288,7 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 		}
 		value, err := cfg.DB.CronWorkflow(ctx, in.ProjectID, in.UID)
 		if err != nil {
-			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, false)
+			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, false, in.EventFeatures)
 		}
 		if err := requireWorkflowReadFeatures(in.EventFeatures, value.Definition); err != nil {
 			return nil, err
@@ -310,7 +319,7 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 		name, method, suffix string
 		deleted              bool
 	}{{"archive", http.MethodDelete, "", true}, {"restore", http.MethodPost, "/restore", false}} {
-		huma.Register(h, huma.Operation{OperationID: action.name + "CronWorkflow", Method: action.method, Path: path + "/{cron_uid}" + action.suffix}, func(ctx context.Context, in *api.CronDefinitionActionRequest) (*api.CronWorkflowResponse, error) {
+		huma.Register(h, huma.Operation{OperationID: action.name + "CronWorkflow", Method: action.method, Path: path + "/{cron_uid}" + action.suffix}, func(ctx context.Context, in *api.CronWorkflowActionRequest) (*api.CronWorkflowResponse, error) {
 			if _, err := attributedActor(ctx, in.Body.Actor); err != nil {
 				return nil, err
 			}
@@ -319,12 +328,15 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 			}
 			value, err := cfg.DB.CronWorkflow(ctx, in.ProjectID, in.UID)
 			if err != nil {
-				return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, false)
+				return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, false, in.EventFeatures)
 			}
 			if err := checkCronLifecycleState(value.CronDefinition, in.Body.ExpectedEventUID, action.deleted); err != nil {
-				return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, false)
+				return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, false, in.EventFeatures)
 			}
-			return put(ctx, in.ProjectID, in.UID, api.PutCronWorkflowBody{Actor: in.Body.Actor, Name: value.Name, Definition: api.CronWorkflowDefinitionFrom(value.Definition), ExpectedEventUID: in.Body.ExpectedEventUID}, action.deleted)
+			if err := requireWorkflowReadFeatures(in.EventFeatures, value.Definition); err != nil {
+				return nil, err
+			}
+			return put(ctx, in.ProjectID, in.UID, api.PutCronWorkflowBody{Actor: in.Body.Actor, Name: value.Name, Definition: api.CronWorkflowDefinitionFrom(value.Definition), ExpectedEventUID: in.Body.ExpectedEventUID}, action.deleted, in.EventFeatures)
 		})
 	}
 }

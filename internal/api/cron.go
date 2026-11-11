@@ -131,6 +131,12 @@ type CronDefinitionActionRequest struct {
 	Body CronDefinitionActionBody
 }
 
+// CronWorkflowActionRequest declares the formats readable by a lifecycle caller.
+type CronWorkflowActionRequest struct {
+	CronDefinitionActionRequest
+	EventFeatures string `header:"X-Kata-Event-Features"`
+}
+
 // CronJobActionRequest addresses a job lifecycle change, which a push
 // enrollment may authorize.
 type CronJobActionRequest struct {
@@ -169,9 +175,10 @@ type ReplaceCronJobRequest struct {
 
 // CreateCronWorkflowRequest creates a workflow in the selected project.
 type CreateCronWorkflowRequest struct {
-	ProjectID int64 `path:"project_id"`
-	RawBody   []byte
-	Body      PutCronWorkflowBody
+	EventFeatures string `header:"X-Kata-Event-Features"`
+	ProjectID     int64  `path:"project_id"`
+	RawBody       []byte
+	Body          PutCronWorkflowBody
 }
 
 // ReplaceCronWorkflowRequest replaces one workflow at its expected definition event.
