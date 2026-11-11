@@ -137,9 +137,7 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 	})
 	if err != nil || !found {
 		if resolved.LocalProfile != nil {
-			var firstFailure *client.LocalDaemonUnreachableError
-			errors.As(err, &firstFailure)
-			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "", firstFailure)
+			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
 			if diagnoseErr != nil {
 				return resolved, diagnoseErr
 			}

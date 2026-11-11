@@ -42,14 +42,15 @@ func TestDaemonRecoveryAdvice(t *testing.T) {
 	require.Contains(t, unix, "retained")
 	require.Contains(t, unix, "discarded")
 	require.NotContains(t, unix, ";")
-	for _, text := range []string{fmt.Sprintf("inspect the log file %q, if present, or retained foreground/supervisor stderr", filepath.Join(e.DataDir, "daemon.log")), "Immediately before using a terminating fallback, verify that PID 42 still identifies this daemon and that the selected endpoint remains unresponsive", "If responsive", e.WebOrigin + "/debug/pprof/goroutine?debug=2", "daemon-owner access", "configured authentication requires the owner's credential", "kill -QUIT 42", "terminates the daemon", "After the process exits", "original foreground launch command", "auto-started", "original KATA_HOME and storage environment"} {
+	require.NotContains(t, unix, "only if")
+	for _, text := range []string{fmt.Sprintf("read %q, if present, or the daemon's retained stderr", filepath.Join(e.DataDir, "daemon.log")), "If " + e.WebOrigin + " responds, capture " + e.WebOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner access, using the owner's credential when authentication is configured", "If you choose to stop it, immediately recheck that PID 42 is still this daemon and the selected endpoint still fails", "Then kill -QUIT 42 stops it and writes goroutine stacks to its stderr, which are lost if stderr is discarded", "After it exits, restart a supervised or foreground daemon through its supervisor or original command", "auto-started", "original KATA_HOME and storage environment"} {
 		require.Contains(t, unix, text)
 	}
 	windows := daemonRecoveryAdvice(e, "", "windows")
-	require.Contains(t, windows, "If both hold and you choose to stop it, taskkill /PID 42 /F stops the recorded process")
+	require.Contains(t, windows, "Then taskkill /PID 42 /F stops it")
 	require.NotContains(t, windows, "kill -QUIT")
 	e.VerifiedProcess = false
-	require.Contains(t, daemonRecoveryAdvice(e, "", "linux"), "verify that PID 42 still identifies this daemon and that the selected endpoint remains unresponsive")
+	require.Contains(t, daemonRecoveryAdvice(e, "", "linux"), "If you choose to stop it, immediately recheck that PID 42 is still this daemon and the selected endpoint still fails")
 	require.NotContains(t, daemonRecoveryAdvice(e, "", "linux"), "kill -QUIT")
 	require.NotContains(t, daemonRecoveryAdvice(e, "", "windows"), "taskkill")
 	e.WebOrigin = ""

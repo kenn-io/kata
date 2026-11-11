@@ -10,9 +10,9 @@ import (
 
 // daemonCaptureAdvice lists the evidence to read without stopping the daemon.
 func daemonCaptureAdvice(e *client.LocalDaemonUnreachableError) string {
-	advice := fmt.Sprintf("inspect the log file %q, if present, or retained foreground/supervisor stderr", filepath.Join(e.DataDir, "daemon.log"))
+	advice := fmt.Sprintf("read %q, if present, or the daemon's retained stderr", filepath.Join(e.DataDir, "daemon.log"))
 	if e.WebOrigin != "" {
-		advice += ". If responsive, capture " + e.WebOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner access, and configured authentication requires the owner's credential"
+		advice += fmt.Sprintf(". If %[1]s responds, capture %[1]s/debug/pprof/goroutine?debug=2 with daemon-owner access, using the owner's credential when authentication is configured", e.WebOrigin)
 	}
 	return advice
 }
@@ -21,15 +21,15 @@ func daemonCaptureAdvice(e *client.LocalDaemonUnreachableError) string {
 // recovery commands that fit the launch mode.
 func daemonRecoveryAdvice(e *client.LocalDaemonUnreachableError, profile, goos string) string {
 	advice := "This probe failed, so " + daemonCaptureAdvice(e)
-	advice += fmt.Sprintf(". Immediately before using a terminating fallback, verify that PID %d still identifies this daemon and that the selected endpoint remains unresponsive", e.PID)
+	advice += fmt.Sprintf(". If you choose to stop it, immediately recheck that PID %d is still this daemon and the selected endpoint still fails", e.PID)
 	if e.VerifiedProcess && goos == "windows" {
-		advice += fmt.Sprintf(". If both hold and you choose to stop it, taskkill /PID %d /F stops the recorded process", e.PID)
+		advice += fmt.Sprintf(". Then taskkill /PID %d /F stops it", e.PID)
 	} else if e.VerifiedProcess {
-		advice += fmt.Sprintf(". If both hold, you choose to stop it, and the daemon's stderr is retained, kill -QUIT %d writes goroutine stacks there and terminates the daemon. If stderr is discarded, the dump is lost", e.PID)
+		advice += fmt.Sprintf(". Then kill -QUIT %d stops it and writes goroutine stacks to its stderr, which are lost if stderr is discarded", e.PID)
 	}
-	advice += ". After the process exits, relaunch a supervised or foreground daemon through its supervisor or original foreground launch command. "
+	advice += ". After it exits, restart a supervised or foreground daemon through its supervisor or original command. "
 	if profile != "" {
-		return advice + "For a named profile normally started with Kata, run " + profileRecoveryCommand(profile, goos) + "."
+		return advice + "For a named profile Kata normally starts, run " + profileRecoveryCommand(profile, goos) + "."
 	}
 	return advice + "For an auto-started current home, run kata daemon restart with the original KATA_HOME and storage environment."
 }
