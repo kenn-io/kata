@@ -9,6 +9,8 @@ import (
 	"syscall"
 )
 
+var startedForRestartHelper = takeEnv(daemonRestartHelperEnv)
+
 func reapRestartHelper() {
 	pid, err := strconv.Atoi(startedForRestartHelper)
 	if err != nil || pid <= 0 {

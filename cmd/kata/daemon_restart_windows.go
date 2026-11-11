@@ -10,6 +10,8 @@ import (
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
+var _ = takeEnv(daemonRestartHelperEnv)
+
 func reapRestartHelper() {}
 
 // reexecDaemon starts a detached replacement with this process's arguments,

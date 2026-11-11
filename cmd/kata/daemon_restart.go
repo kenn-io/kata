@@ -56,9 +56,8 @@ const (
 
 // The restart variables are unset at process start so children never inherit them.
 var (
-	startedForRestartReply  = takeEnv(daemonRestartReplyEnv)
-	startedForRestartFrom   = takeEnv(daemonRestartFromEnv)
-	startedForRestartHelper = takeEnv(daemonRestartHelperEnv)
+	startedForRestartReply = takeEnv(daemonRestartReplyEnv)
+	startedForRestartFrom  = takeEnv(daemonRestartFromEnv)
 )
 
 func takeEnv(key string) string {
