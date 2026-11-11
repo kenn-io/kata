@@ -17,8 +17,7 @@ import (
 // Using the original clocks avoids treating the move snapshot as a content edit.
 func backfillFederationMoveHistory(ctx context.Context, client *Client, projectID int64, page api.PollEventsBody) ([]api.EventEnvelope, error) {
 	movedSubjects := map[string]bool{}
-	moves := map[string]api.EventEnvelope{}
-	var subjects []string
+	var subjects []api.EventEnvelope
 	seen := map[string]bool{}
 	for _, event := range page.Events {
 		seen[event.EventUID] = true
@@ -26,18 +25,18 @@ func backfillFederationMoveHistory(ctx context.Context, client *Client, projectI
 			continue
 		}
 		if !movedSubjects[*event.IssueUID] {
-			subjects = append(subjects, *event.IssueUID)
-			moves[*event.IssueUID] = event
+			subjects = append(subjects, event)
 			movedSubjects[*event.IssueUID] = true
 		}
 	}
 	events := slices.Clone(page.Events)
-	for _, uid := range subjects {
+	for _, move := range subjects {
+		uid := *move.IssueUID
 		// Arrival order does not determine ownership for concurrent moves.
 		// The hub checks current ownership before returning this history.
 		history, err := client.issueHistoryThrough(ctx, projectID, uid, page.NextAfterID)
 		if err != nil {
-			return nil, fmt.Errorf("read history for project %s move %s: %w", moves[uid].ProjectUID, moves[uid].EventUID, err)
+			return nil, fmt.Errorf("read history for project %s move %s: %w", move.ProjectUID, move.EventUID, err)
 		}
 		for _, event := range history {
 			if !seen[event.EventUID] {
