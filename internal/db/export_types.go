@@ -506,6 +506,8 @@ type EventExport struct {
 	CreatedAt         string         `json:"created_at"`
 	// AcceptedProjectIDs records bindings that acknowledged this event.
 	AcceptedProjectIDs []int64 `json:"accepted_project_ids,omitempty"`
+	// FederationReplayDue is nil for ordinary events and scoped exports.
+	FederationReplayDue *bool `json:"federation_replay_due,omitempty"`
 }
 
 // ImportKind reports the NDJSON kind this payload replays as.

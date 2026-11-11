@@ -342,6 +342,11 @@ CREATE TABLE events (
   CHECK (hlc_counter >= 0),
   CHECK (length(content_hash) = 64)
 );
+CREATE TABLE federation_local_replays (
+  event_uid    TEXT PRIMARY KEY REFERENCES events(uid) ON DELETE CASCADE,
+  delivery_due INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE INDEX idx_events_project ON events(project_id, id);
 CREATE INDEX idx_events_issue   ON events(issue_id, id) WHERE issue_id IS NOT NULL;
 CREATE INDEX idx_events_related ON events(related_issue_id, id) WHERE related_issue_id IS NOT NULL;

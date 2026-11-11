@@ -8,8 +8,23 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// inPlaceUpgrades add canonical tables, then canonical indexes. A table is
-// added only when it starts empty, so no existing row needs converting.
+// federationLocalReplaysBackfill records local-origin events that an
+// interrupted reset restored: a reset recorded after the event was created
+// with no pull completed since. Pull cursor equality marks the unadvanced turn.
+// Events the hub acknowledged are not due, unless their issue is unprojected.
+const federationLocalReplaysBackfill = `
+INSERT INTO federation_local_replays(event_uid, delivery_due)
+SELECT e.uid, CASE WHEN e.id > b.push_cursor_event_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL) THEN 1 ELSE 0 END
+  FROM events e
+  JOIN federation_bindings b ON b.project_id = e.project_id
+  JOIN federation_sync_status s ON s.project_id = e.project_id
+ WHERE e.origin_instance_uid = (SELECT value FROM meta WHERE key='instance_uid')
+   AND b.pull_cursor_event_id = b.replay_horizon_event_id - 1
+   AND s.last_reset_at IS NOT NULL
+   AND e.created_at < s.last_reset_at
+   AND (s.last_pull_success_at IS NULL OR s.last_pull_success_at < s.last_reset_at)`
+
+// inPlaceUpgrades add canonical tables, then canonical indexes.
 var inPlaceUpgrades = []struct {
 	From, To int
 	Tables   []string
@@ -24,7 +39,7 @@ var inPlaceUpgrades = []struct {
 	{47, 48, nil, []string{"idx_events_moved_from_id"}},
 	{48, 49, nil, []string{"idx_events_cron_run_uid"}},
 	{49, 50, []string{"mcp_event_subscriptions"}, []string{"idx_mcp_event_subscriptions_due", "idx_mcp_event_subscriptions_principal_callback", "idx_mcp_event_subscriptions_ended"}},
-	{50, 51, []string{"federation_push_accepted"}, nil},
+	{50, 51, []string{"federation_push_accepted", "federation_local_replays"}, nil},
 }
 
 // UpgradesInPlace reports whether in-place steps reach the current schema.
@@ -85,6 +100,11 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 				}
 				if _, err := tx.ExecContext(ctx, ddl); err != nil {
 					return fmt.Errorf("add table %s: %w", name, err)
+				}
+			}
+			if step.From == 50 {
+				if _, err := tx.ExecContext(ctx, federationLocalReplaysBackfill); err != nil {
+					return fmt.Errorf("recover local federation replays: %w", err)
 				}
 			}
 			for _, name := range step.Indexes {

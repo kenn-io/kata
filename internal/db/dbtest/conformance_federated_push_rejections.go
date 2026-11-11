@@ -7,19 +7,32 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/uid"
 )
 
 func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage) error {
-	for _, kind := range []string{"mixed", "revoked-race", "all-rejected", "payload-only", "moved-peer", "dependent-on-rejected-create", "rejected-move", "rejected-move-new-route", "duplicate-rejected-uid", "malformed-comment", "known-create", "known-snapshot"} {
+	for _, kind := range []string{"mixed", "revoked-race", "all-rejected", "payload-only", "moved-peer", "dependent-on-rejected-create", "rejected-move", "rejected-move-new-route", "rejected-move-before-source-creation", "duplicate-rejected-uid", "malformed-comment", "known-create", "known-snapshot"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
+			moveBeforeSourceCreation := kind == "rejected-move-before-source-creation"
+			rejectedMove := kind == "rejected-move" || kind == "rejected-move-new-route" || moveBeforeSourceCreation
+			hasDependent := rejectedMove || kind == "dependent-on-rejected-create"
 			source, target, moved, _ := federatedRehomeFixture(t, store, "partial-"+kind)
 			_, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: moved.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: moved.Revision, Actor: "worker"})
 			require.NoError(t, err)
 			if kind == "rejected-move-new-route" {
 				moved, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "Never in source", Author: "worker"})
 				require.NoError(t, err)
+			}
+			if moveBeforeSourceCreation {
+				// The destination can push a locally authored move before the source
+				// creation has reached the hub.
+				movedUID, err := uid.New()
+				require.NoError(t, err)
+				movedShortID, err := shortid.Derive(movedUID, shortid.MinLength)
+				require.NoError(t, err)
+				moved = db.Issue{UID: movedUID, ShortID: movedShortID, Title: "Undelivered source issue"}
 			}
 			good, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Independent", Author: "worker"})
 			require.NoError(t, err)
@@ -58,7 +71,7 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				require.NoError(t, err)
 				bad = newRemoteEvent(t, source, &freshUID, "issue.created", "worker", origin, at, payload)
 			}
-			if kind == "rejected-move" || kind == "rejected-move-new-route" {
+			if rejectedMove {
 				// A spoke can retain a move authored while target enrollment was valid,
 				// then lose that enrollment before delivering it through the source.
 				payload, err := json.Marshal(map[string]any{"issue_uid": moved.UID, "from_project_uid": target.UID, "from_short_id": moved.ShortID, "to_project_uid": source.UID, "to_short_id": moved.ShortID, "snapshot": map[string]string{"uid": moved.UID, "title": moved.Title, "author": "worker", "short_id": moved.ShortID, "status": "open"}})
@@ -76,9 +89,9 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				dependent := newRemoteEvent(t, source, &freshUID, "issue.updated", "worker", origin, at, []byte(`{"uid":"`+freshUID+`","title":"Must not be known"}`))
 				params.Events = []db.FederationIngestEvent{{SourceEventID: 1, Event: bad}, {SourceEventID: 2, Event: dependent}, {SourceEventID: 3, Event: valid}}
 			}
-			if kind == "rejected-move" || kind == "rejected-move-new-route" {
+			if rejectedMove {
 				afterMove := newRemoteEvent(t, source, &moved.UID, "issue.updated", "worker", origin, at, []byte(`{"uid":"`+moved.UID+`","title":"Must not acquire route authority"}`))
-				params.Events = append(params.Events, db.FederationIngestEvent{SourceEventID: 3, Event: afterMove})
+				params.Events = []db.FederationIngestEvent{{SourceEventID: 1, Event: bad}, {SourceEventID: 2, Event: afterMove}, {SourceEventID: 3, Event: valid}}
 			}
 			if kind == "duplicate-rejected-uid" {
 				valid.EventUID = bad.EventUID
@@ -110,8 +123,9 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				return
 			}
 			require.NoError(t, err, "only missing current-project enrollment is an event rejection")
-			if kind == "rejected-move" || kind == "rejected-move-new-route" || kind == "dependent-on-rejected-create" {
+			if hasDependent {
 				require.Len(t, result.RejectedEvents, 2)
+				require.Equal(t, params.Events[1].Event.EventUID, result.RejectedEvents[1].EventUID)
 			} else {
 				require.Len(t, result.RejectedEvents, 1)
 			}
@@ -129,7 +143,7 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 			} else {
 				require.Equal(t, 1, result.Accepted)
 				require.Equal(t, []string{valid.EventUID}, result.InsertedEventUIDs)
-				if kind == "rejected-move" || kind == "rejected-move-new-route" || kind == "dependent-on-rejected-create" {
+				if hasDependent {
 					require.Equal(t, int64(3), result.PushCursorEventID)
 				} else {
 					require.Equal(t, int64(2), result.PushCursorEventID)
@@ -147,7 +161,6 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				require.Empty(t, retry.RejectedEvents)
 			}
 			if kind == "dependent-on-rejected-create" {
-				require.Equal(t, params.Events[1].Event.EventUID, result.RejectedEvents[1].EventUID)
 				_, err := store.IssueByUID(ctx, freshUID, db.IncludeDeletedNo)
 				require.ErrorIs(t, err, db.ErrNotFound)
 				current, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &target.ID, Capabilities: "push,pull", Actor: "worker"})
@@ -162,7 +175,11 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				require.NoError(t, err)
 				require.Equal(t, "Must not be known", created.Title)
 			}
-			if kind != "mixed" && kind != "revoked-race" && kind != "moved-peer" && kind != "rejected-move" && kind != "rejected-move-new-route" {
+			if moveBeforeSourceCreation {
+				_, err := store.IssueByUID(ctx, moved.UID, db.IncludeDeletedNo)
+				require.ErrorIs(t, err, db.ErrNotFound)
+			}
+			if kind != "mixed" && kind != "revoked-race" && kind != "moved-peer" && !rejectedMove {
 				got, err = store.IssueByID(ctx, moved.ID)
 				require.NoError(t, err)
 				require.Equal(t, moved.Title, got.Title)

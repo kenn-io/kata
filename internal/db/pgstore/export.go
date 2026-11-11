@@ -834,18 +834,25 @@ OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
 		acceptedProjects = `(SELECT json_agg(project_id) FROM federation_push_accepted WHERE project_id=events.project_id AND event_id=events.id)`
 		acceptedJoin = ``
 	}
+	replayDue, replayJoin := "NULL", ""
+	if filter.ProjectID == nil {
+		replayDue = "replay.delivery_due"
+		replayJoin = " LEFT JOIN federation_local_replays replay ON replay.event_uid = events.uid"
+	}
 	query := `SELECT events.id, events.uid, events.origin_instance_uid, events.project_id,
        export_project.uid, events.project_name, ` + issueIDExpression + `, events.issue_uid,
        ` + relatedIDExpression + `, ` + relatedUIDExpression + `,
        events.type, events.actor, events.payload, events.hlc_physical_ms,
-       events.hlc_counter, events.content_hash, events.created_at, ` + acceptedProjects + `
+       events.hlc_counter, events.content_hash, events.created_at, ` + acceptedProjects + `, ` + replayDue + `
+
   FROM events
   JOIN projects export_project ON export_project.id = events.project_id
   LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
     OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid)
   LEFT JOIN issues peer ON peer.id = events.related_issue_id
     OR (events.related_issue_id IS NULL AND events.related_issue_uid IS NOT NULL AND peer.uid = events.related_issue_uid)
-  ` + acceptedJoin
+  ` + acceptedJoin + replayJoin
+
 	clauses := []string{subjectLive}
 	if filter.ProjectID != nil {
 		clauses = append(clauses, `events.project_id = $1`)
@@ -871,7 +878,8 @@ AND (events.related_issue_uid IS NULL OR NOT EXISTS (
 				&record.ProjectID, &record.ProjectUID, &record.ProjectName, &record.IssueID,
 				&record.IssueUID, &record.RelatedIssueID, &record.RelatedIssueUID,
 				&record.Type, &record.Actor, &payload, &record.HLCPhysicalMS,
-				&record.HLCCounter, &record.ContentHash, &record.CreatedAt, &acceptedProjects); err != nil {
+				&record.HLCCounter, &record.ContentHash, &record.CreatedAt, &acceptedProjects, &record.FederationReplayDue); err != nil {
+
 				return db.EventExport{}, pgExportScanError("event", err)
 			}
 			if acceptedProjects != nil {

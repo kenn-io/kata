@@ -164,6 +164,11 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 				return err
 			}
 		}
+		if opts.RecoverLegacyFederationReplays && !opts.NewInstance {
+			if _, err := tx.ExecContext(ctx, federationLocalReplaysBackfill); err != nil {
+				return fmt.Errorf("recover legacy federation local replays: %w", err)
+			}
+		}
 		if err := replayAPITokenProjection(ctx, tx); err != nil {
 			return err
 		}
@@ -1292,7 +1297,12 @@ func importEvent(ctx context.Context, tx *sql.Tx, e *db.EventExport, opts db.Imp
 			return wrapImportErr(db.ImportKindEvent, err)
 		}
 	}
-	return nil
+	if e.FederationReplayDue != nil {
+		_, err = tx.ExecContext(ctx, `INSERT INTO federation_local_replays(event_uid, delivery_due) VALUES($1,$2)`,
+			e.UID, boolInt(*e.FederationReplayDue))
+	}
+	return wrapImportErr(db.ImportKindEvent, err)
+
 }
 
 func importPurgeLog(ctx context.Context, tx *sql.Tx, pl *db.PurgeLogExport) error {

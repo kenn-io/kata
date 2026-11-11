@@ -233,6 +233,67 @@ func TestPushDefersDependentEventsAcrossPages(t *testing.T) {
 	}
 }
 
+func TestPushDefersRejectedMoveDependentsAcrossPages(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects)
+	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: projects[0].ID, Title: "Ready to move", Author: "worker",
+	})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	local, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	moved := spoke.move(t, local, 0, 1)
+	const commentBody = "Work after moving"
+	_, comment, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: moved.ID, Author: "worker", Body: commentBody})
+	require.NoError(t, err)
+	independent, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "Independent", Author: "worker"})
+	require.NoError(t, err)
+
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[1].ID)
+	require.NoError(t, err)
+	client, err := NewClient(ctx, hub.URL, spoke.credentials[projects[1].UID].Token, clientpkg.Opts{})
+	require.NoError(t, err)
+	pushStore := &boundedPushPageStore{Storage: spoke.env.DB}
+	pending, err := pushStore.PendingFederationPushEvents(ctx, binding.ProjectID, pushStore.InstanceUID(), binding.PushCursorEventID, federationPollLimit)
+	require.NoError(t, err)
+	require.Len(t, pending, 1, "the move and its comment must land on separate pages")
+	move := pending[0]
+	require.Equal(t, "issue.moved", move.Type)
+
+	// The local source binding exists. Without its credential, the hub
+	// receives the move but cannot authorize the source project.
+	sourceProof := spoke.credentials[projects[0].UID]
+	delete(spoke.credentials, projects[0].UID)
+	push := func() error {
+		return pushDirectSpoke(ctx, pushStore, &binding, projects[1].ID, client, nil, spoke.credentials, clientpkg.Opts{})
+	}
+	require.ErrorContains(t, push(), "pending federation events remain")
+	require.Less(t, binding.PushCursorEventID, move.ID)
+	got, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, projects[0].ID, got.ProjectID)
+	comments, err := hub.DB.CommentsByIssue(ctx, got.ID)
+	require.NoError(t, err)
+	require.Empty(t, comments)
+	_, err = hub.DB.IssueByUID(ctx, independent.UID, db.IncludeDeletedNo)
+	require.NoError(t, err, "unrelated work can pass the retained move and comment")
+	_, err = spoke.env.DB.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush)
+	require.ErrorIs(t, err, db.ErrNotFound)
+
+	spoke.credentials[projects[0].UID] = sourceProof
+	require.NoError(t, push())
+	require.GreaterOrEqual(t, binding.PushCursorEventID, comment.ID)
+	got, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, projects[1].ID, got.ProjectID)
+	comments, err = hub.DB.CommentsByIssue(ctx, got.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, commentBody, comments[0].Body)
+}
+
 func TestSyncFederationPartialPushAndPull(t *testing.T) {
 	hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
 	bound := projects[:1]

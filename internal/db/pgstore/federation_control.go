@@ -181,7 +181,25 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 
 // AdvanceFederationPullCursor records the highest consumed hub event id.
 func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error {
-	return s.updateFederationCursor(ctx, projectID, nextCursor)
+	return updateFederationPullCursor(ctx, s, projectID, nextCursor)
+}
+
+// CompleteFederationPullPage advances the cursor and claims local replay
+// delivery in the same transaction.
+func (s *Store) CompleteFederationPullPage(ctx context.Context, projectID, nextCursor int64, replayUIDs []string) ([]string, error) {
+	var claimed []string
+	err := s.withTx(ctx, sql.LevelDefault, func(tx *sql.Tx) error {
+		if err := updateFederationPullCursor(ctx, tx, projectID, nextCursor); err != nil {
+			return err
+		}
+		var err error
+		claimed, err = db.ClaimFederationLocalReplays(ctx, tx, replayUIDs)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return claimed, nil
 }
 
 // AdvanceFederationPushCursor advances the acknowledged local event id monotonically.
@@ -238,12 +256,12 @@ func (s *Store) FederationPushAccepted(ctx context.Context, projectID, eventID i
 	return found, mapSQLError(err, nil)
 }
 
-func (s *Store) updateFederationCursor(ctx context.Context, projectID, nextCursor int64) error {
+func updateFederationPullCursor(ctx context.Context, execer contextExecer, projectID, nextCursor int64) error {
 	query := `UPDATE federation_bindings SET pull_cursor_event_id=GREATEST(pull_cursor_event_id,$1),
 last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 WHERE project_id=$2`
-	result, err := s.ExecContext(ctx, query, nextCursor, projectID)
+	result, err := execer.ExecContext(ctx, query, nextCursor, projectID)
 	if err != nil {
 		return mapSQLError(err, nil)
 	}

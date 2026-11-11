@@ -827,17 +827,23 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 		acceptedProjects = `(SELECT json_group_array(project_id) FROM federation_push_accepted WHERE project_id=events.project_id AND event_id=events.id)`
 		acceptedJoin = ``
 	}
+	replayDue, replayJoin := "NULL", ""
+	if f.ProjectID == nil {
+		replayDue = "replay.delivery_due"
+		replayJoin = " LEFT JOIN federation_local_replays replay ON replay.event_uid = events.uid"
+	}
 	query := `SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, events.project_name, ` + issueIDExpr + `, events.issue_uid,
 	                 ` + relatedIDExpr + `, ` + relatedUIDExpr + `,
 	                 events.type, events.actor, events.payload, events.hlc_physical_ms, events.hlc_counter, events.content_hash,
-	                 CAST(events.created_at AS TEXT), ` + acceptedProjects + `
+	                 CAST(events.created_at AS TEXT), ` + acceptedProjects + `, ` + replayDue + `
+
 	          FROM events
 	          JOIN projects export_project ON export_project.id = events.project_id
 	          LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
 	               OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid)
 	          LEFT JOIN issues peer ON peer.id = events.related_issue_id
 	               OR (events.related_issue_id IS NULL AND events.related_issue_uid IS NOT NULL AND peer.uid = events.related_issue_uid)
-	          ` + acceptedJoin
+	          ` + acceptedJoin + replayJoin
 
 	clauses := []string{subjectLiveClause}
 	// SELECT-list args bind in column order — the subject scrub (issue_id
@@ -870,7 +876,8 @@ func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 			var acceptedProjects *string
 			if err := rows.Scan(&rec.ID, &rec.UID, &rec.OriginInstanceUID, &rec.ProjectID, &rec.ProjectUID, &rec.ProjectName, &rec.IssueID,
 				&rec.IssueUID, &rec.RelatedIssueID, &rec.RelatedIssueUID,
-				&rec.Type, &rec.Actor, &payload, &rec.HLCPhysicalMS, &rec.HLCCounter, &rec.ContentHash, &rec.CreatedAt, &acceptedProjects); err != nil {
+				&rec.Type, &rec.Actor, &payload, &rec.HLCPhysicalMS, &rec.HLCCounter, &rec.ContentHash, &rec.CreatedAt, &acceptedProjects, &rec.FederationReplayDue); err != nil {
+
 				return db.EventExport{}, scanError("event", err)
 			}
 			if acceptedProjects != nil {

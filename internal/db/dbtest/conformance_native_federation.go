@@ -387,3 +387,71 @@ func checkNativeCronValidation(t *testing.T, store db.Storage, backend Backend) 
 	}
 	return nil
 }
+
+// checkFederationLocalReplayStorage carries the replay lifecycle across backends.
+func checkFederationLocalReplayStorage(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	sqlStore := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	insertReplay := func(title string, due bool) string {
+		t.Helper()
+		_, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: title, Author: "tester"})
+		require.NoError(t, err)
+		_, err = sqlStore.ExecContext(ctx, `DELETE FROM events WHERE uid=$1`, event.UID)
+		require.NoError(t, err)
+		inserted, err := store.InsertRemoteEvent(db.WithFederationLocalReplayDelivery(ctx, due), project.ID, portableNativeEvent(event))
+		require.NoError(t, err)
+		require.True(t, inserted)
+		return event.UID
+	}
+
+	owed := insertReplay("Owed replay", true)
+	quiet := insertReplay("Quiet replay", false)
+	legacy := insertReplay("Legacy replay", true)
+	_, err = sqlStore.ExecContext(ctx, `DELETE FROM federation_local_replays WHERE event_uid=$1`, legacy)
+	require.NoError(t, err)
+	check := func(uid string, due, recorded bool) {
+		t.Helper()
+		gotDue, gotRecorded, err := store.FederationLocalReplayStatus(ctx, uid)
+		require.NoError(t, err)
+		require.Equal(t, due, gotDue)
+		require.Equal(t, recorded, gotRecorded)
+	}
+	check(owed, true, true)
+	check(quiet, false, true)
+	check(legacy, false, false)
+	require.NoError(t, store.RecordFederationLocalReplayDue(ctx, legacy))
+	require.NoError(t, store.RecordFederationLocalReplayDue(ctx, quiet))
+	check(quiet, false, true)
+	check(legacy, true, true)
+
+	binding, err := store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke, HubProjectUID: project.UID,
+		HubURL: "http://127.0.0.1:1", HubProjectID: 42, Enabled: true, Actor: "tester",
+	})
+	require.NoError(t, err)
+
+	_, err = store.CompleteFederationPullPage(ctx, -1, 100, []string{owed})
+	require.ErrorIs(t, err, db.ErrNotFound)
+	check(owed, true, true)
+
+	candidates := []string{owed, quiet, legacy}
+	claimed, err := store.CompleteFederationPullPage(ctx, binding.ProjectID, 100, candidates)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{owed, legacy}, claimed)
+	for _, uid := range candidates {
+		check(uid, false, true)
+	}
+	require.NoError(t, store.RecordFederationLocalReplayDue(ctx, legacy))
+	check(legacy, false, true)
+	claimed, err = store.CompleteFederationPullPage(ctx, binding.ProjectID, 101, candidates)
+	require.NoError(t, err)
+	require.Empty(t, claimed)
+	binding, err = store.FederationBindingByProject(ctx, binding.ProjectID)
+	require.NoError(t, err)
+	require.EqualValues(t, 101, binding.PullCursorEventID)
+	return nil
+}

@@ -17,7 +17,10 @@ import (
 // Event replay fields became durable wire data in schema v12. Later schema
 // changes must preserve and validate them instead of silently minting a new
 // content identity during cutover.
-const eventReplayFieldsSchemaVersion = 12
+const (
+	eventReplayFieldsSchemaVersion     = 12
+	federationLocalReplaySchemaVersion = 51
+)
 
 // ImportOptions controls optional import behaviors.
 type ImportOptions struct {
@@ -101,6 +104,18 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		return err
 	}
 
+	// Only full exports carry the hidden system project. Check the source
+	// before import creates a system project for a scoped snapshot.
+	recoverLegacyFederationReplays := false
+	if exportVersion < federationLocalReplaySchemaVersion && !opts.NewInstance && !opts.MergeProject {
+		for _, uid := range projectUIDByID {
+			if uid == db.SystemProjectUID {
+				recoverLegacyFederationReplays = true
+				break
+			}
+		}
+	}
+
 	recs := make([]db.ImportRecord, 0, len(envs))
 	for _, env := range envs {
 		rec, err := toImportRecord(env, exportVersion, localInstanceUID, projectUIDByID)
@@ -142,6 +157,7 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		NewInstance:                         opts.NewInstance,
 		DedupeLegacyActivePendingClaims:     exportVersion < 12,
 		RecomputeEventContentHash:           exportVersion < eventReplayFieldsSchemaVersion,
+		RecoverLegacyFederationReplays:      recoverLegacyFederationReplays,
 		PreserveIssueSyncBindingEnabled:     opts.PreserveIssueSyncBindingEnabled,
 		PreserveExternalRootBindingsEnabled: opts.PreserveExternalRootBindingsEnabled,
 		MergeProject:                        opts.MergeProject,
@@ -535,6 +551,9 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		}
 		if rec.ProjectName == "" && rec.LegacyProjectName != "" {
 			rec.ProjectName = rec.LegacyProjectName
+		}
+		if exportVersion < federationLocalReplaySchemaVersion {
+			rec.FederationReplayDue = nil
 		}
 		// Normalize the wire timestamp BEFORE content-hash computation so a
 		// Go-stringified timestamp at any export version flows through the

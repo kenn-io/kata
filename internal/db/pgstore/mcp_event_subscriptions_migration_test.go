@@ -16,7 +16,7 @@ import (
 
 func dropMCPEventSubscriptionsSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
-	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP TABLE IF EXISTS %s.mcp_event_subscriptions; DROP TABLE IF EXISTS %s.federation_push_accepted`, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP TABLE IF EXISTS %s.mcp_event_subscriptions; DROP TABLE IF EXISTS %s.federation_push_accepted; DROP TABLE IF EXISTS %s.federation_local_replays`, schema, schema, schema)) // #nosec G201 -- schema is a fixed test identifier.
 	require.NoError(t, err)
 }
 

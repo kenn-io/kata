@@ -2266,11 +2266,10 @@ batch. Quarantine blocks further push and can block reset.
 A direct spoke continues independent pushes when an
 issue has moved into a project it has not joined. Both peers must support
 per-event rejections. Upgrade the hub first so it understands partial acknowledgments.
-An older hub can report `auth_invalid` for missing project proof, so check the
-project enrollment and push access as well as the credential before retrying.
+A schema 51 spoke needs a schema 51 hub: a schema 50 hub rejects the newer schema before ingest.
 The status error names the issue and its current project and asks for matching
 push access and actor. Independent events reach the hub across later pages,
-while events that depend on a rejected creation wait for enrollment. Push rejection
+while events that depend on a rejected creation or move wait for enrollment. Push rejection
 does not stop the pull phase, but a source-only spoke's pull remains blocked
 when it receives the move until the destination is available.
 
@@ -2283,8 +2282,7 @@ join to restore pull.
 The event keeps its original UID and content hash. Until recovery, the durable
 push cursor stays before the earliest rejected event. The spoke records later
 accepted events and excludes them from pending push and future retries. The
-status diagnostic counts the other events the hub acknowledged. Full backups
-preserve these acknowledgments.
+status diagnostic counts the other events the hub acknowledged. Full backups preserve these acknowledgments and pending replay notifications independently.
 
 Missing enrollment alone does not create a quarantine or offer a skip action. A later poisoned
 batch retains both the rejected events and the poison batch in blocking

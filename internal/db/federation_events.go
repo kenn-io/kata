@@ -1,9 +1,13 @@
 package db
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/teammate"
@@ -11,6 +15,86 @@ import (
 
 // EventTimestampFormat is the millisecond UTC representation covered by portable event hashes.
 const EventTimestampFormat = "2006-01-02T15:04:05.000Z"
+
+type federationLocalReplayDeliveryKey struct{}
+
+// WithFederationLocalReplayDelivery records delivery debt for new local-origin
+// replays inserted for a pull page that has not advanced its cursor.
+func WithFederationLocalReplayDelivery(ctx context.Context, due bool) context.Context {
+	return context.WithValue(ctx, federationLocalReplayDeliveryKey{}, due)
+}
+
+// FederationLocalReplayDeliveryDue reports whether the current pull insert
+// must commit replay delivery debt along with the event.
+func FederationLocalReplayDeliveryDue(ctx context.Context) bool {
+	due, _ := ctx.Value(federationLocalReplayDeliveryKey{}).(bool)
+	return due
+}
+
+// ReadFederationLocalReplayStatus distinguishes a quiet replay from an older
+// event that has no replay marker.
+func ReadFederationLocalReplayStatus(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, eventUID string) (due, recorded bool, err error) {
+	var value int
+	err = q.QueryRowContext(ctx, `SELECT delivery_due FROM federation_local_replays WHERE event_uid=$1`, eventUID).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	return value == 1, err == nil, err
+}
+
+// RecordFederationLocalReplayDue preserves proven legacy delivery debt before
+// projection. A recorded quiet replay stays quiet.
+func RecordFederationLocalReplayDue(ctx context.Context, execer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, eventUID string) error {
+	_, err := execer.ExecContext(ctx, `
+		INSERT INTO federation_local_replays(event_uid, delivery_due) VALUES($1, 1)
+		ON CONFLICT(event_uid) DO NOTHING`, eventUID)
+	return err
+}
+
+// ClaimFederationLocalReplays closes delivery debt in the pull cursor
+// transaction. The caller has already verified missing projection for any
+// candidate that lacks a replay marker.
+func ClaimFederationLocalReplays(ctx context.Context, tx *sql.Tx, eventUIDs []string) ([]string, error) {
+	ordered := slices.Clone(eventUIDs)
+	slices.Sort(ordered)
+	claimed := make([]string, 0, len(ordered))
+	for chunk := range slices.Chunk(ordered, 500) {
+		args := make([]any, len(chunk))
+		placeholders := make([]string, len(chunk))
+		for i, uid := range chunk {
+			args[i] = uid
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+		//nolint:gosec // The query only joins generated placeholders.
+		rows, err := tx.QueryContext(ctx, `
+			INSERT INTO federation_local_replays(event_uid, delivery_due)
+			SELECT uid, 0 FROM events WHERE uid IN (`+strings.Join(placeholders, ",")+`) ORDER BY uid
+			ON CONFLICT(event_uid) DO UPDATE SET delivery_due=0
+			WHERE federation_local_replays.delivery_due=1
+			RETURNING event_uid`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var uid string
+			if err := rows.Scan(&uid); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			claimed = append(claimed, uid)
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return claimed, nil
+}
 
 // ProjectMetadataAdoptionPayload encodes existing project metadata as a
 // synthetic from-empty diff for a federation adoption baseline.

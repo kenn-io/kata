@@ -245,6 +245,11 @@ func (s *Store) insertRemoteEventTx(
 	if err != nil {
 		return false, err
 	}
+	if remote.OriginInstanceUID == s.instanceUID {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO federation_local_replays(event_uid, delivery_due) VALUES($1,$2)`, remote.EventUID, boolInt(db.FederationLocalReplayDeliveryDue(ctx))); err != nil {
+			return false, fmt.Errorf("record local federation replay: %w", err)
+		}
+	}
 	return true, nil
 }
 
@@ -285,4 +290,14 @@ func (s *Store) ReconcileLocalFederationEcho(
 		return mapSQLError(err, nil)
 	})
 	return found, err
+}
+
+// RecordFederationLocalReplayDue remembers debt for an unprojected legacy replay.
+func (s *Store) RecordFederationLocalReplayDue(ctx context.Context, eventUID string) error {
+	return mapSQLError(db.RecordFederationLocalReplayDue(ctx, s, eventUID), nil)
+}
+
+// FederationLocalReplayStatus reads the recorded notification state.
+func (s *Store) FederationLocalReplayStatus(ctx context.Context, eventUID string) (due, recorded bool, err error) {
+	return db.ReadFederationLocalReplayStatus(ctx, s, eventUID)
 }
