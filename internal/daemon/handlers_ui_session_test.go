@@ -131,6 +131,67 @@ func TestUIAttachmentCapabilityWithoutLocalVault(t *testing.T) {
 	require.False(t, effectiveUIPolicy(t.Context(), cfg, "").Capabilities.Attachments)
 }
 
+type countingBindingStore struct {
+	db.Storage
+	reads int
+}
+
+func (s *countingBindingStore) ListFederationBindings(ctx context.Context) ([]db.FederationBinding, error) {
+	s.reads++
+	return s.Storage.ListFederationBindings(ctx)
+}
+
+func TestUISnapshot304AvoidsBindingProjection(t *testing.T) {
+	store := openAuthTestDB(t)
+	project, err := store.CreateProject(t.Context(), "project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "issue", Author: "operator"})
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
+	require.NoError(t, err)
+	counting := &countingBindingStore{Storage: store}
+	server := NewServer(ServerConfig{DB: counting, UIStore: store})
+	t.Cleanup(func() { _ = server.Close() })
+	url := "/api/v1/ui/snapshot?view=all-open&selected_issue_uid=" + issue.UID
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var snapshot struct {
+		Capabilities struct {
+			Attachments bool `json:"attachments"`
+		} `json:"capabilities"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &snapshot))
+	require.True(t, snapshot.Capabilities.Attachments)
+	etag := response.Header().Get("ETag")
+	require.NotEmpty(t, etag)
+	counting.reads = 0
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	request.Header.Set("If-None-Match", etag)
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	require.Equal(t, http.StatusNotModified, response.Code, response.Body.String())
+	assert.Zero(t, counting.reads)
+
+	cursor, err := store.UIEventCursor(t.Context())
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
+	require.NoError(t, err)
+	updatedCursor, err := store.UIEventCursor(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, cursor, updatedCursor)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	request.Header.Set("If-None-Match", etag)
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.NotEqual(t, etag, response.Header().Get("ETag"))
+	snapshot.Capabilities.Attachments = false
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &snapshot))
+	require.False(t, snapshot.Capabilities.Attachments)
+}
+
 func TestUISnapshotAttachmentCapabilityFollowsSelectedIssueProject(t *testing.T) {
 	store := openAuthTestDB(t)
 	standalone, err := store.CreateProject(t.Context(), "standalone")
