@@ -56,6 +56,9 @@ type WebUIOpener func(context.Context, WebUILaunch) error
 func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI, error) {
 	resolved, err := resolveWebUIHostTarget(ctx, opts)
 	if err != nil {
+		if resolved.LocalProfile != nil {
+			return PreparedWebUI{DaemonName: resolved.Name}, err
+		}
 		return PreparedWebUI{}, err
 	}
 	baseURL := resolved.BaseURL

@@ -10,11 +10,13 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/client"
 )
 
 // globalFlags carries the universal flags applied on every command. Sel is the
@@ -359,6 +361,9 @@ func cliErrorForErr(err error, runEReached bool) *cliError {
 			Message:  err.Error(),
 			Kind:     kindForExit(exit),
 			ExitCode: exit,
+		}
+		if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
+			cli.Hint = daemonRecoveryAdvice(unreachable, "", runtime.GOOS)
 		}
 	}
 	return cli

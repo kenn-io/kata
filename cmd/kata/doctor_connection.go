@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"runtime"
 
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
@@ -49,7 +50,7 @@ func (s *doctorState) resolveDoctorDaemon(ctx context.Context) (client.ResolvedD
 // states that the next ordinary command resolves, so neither is a failure. A
 // local profile directory with loose permissions is a failure because ordinary
 // commands reject it without repair.
-func doctorDiscoveryCheck(err error) diagnostics.Check {
+func doctorDiscoveryCheck(err error, profile string) diagnostics.Check {
 	if errors.Is(err, errDoctorWorkspaceUnavailable) {
 		return skippedDoctorCheck("Workspace resolution failed")
 	}
@@ -62,6 +63,15 @@ func doctorDiscoveryCheck(err error) diagnostics.Check {
 	if _, ok := errors.AsType[*client.PrivateDirError](err); ok {
 		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Local runtime directory is not private; doctor did not inspect it", Fix: "Run any kata command, such as kata list, to restore owner-only permissions. If the warning remains, check the ownership of <KATA_HOME>/runtime and that it is not a symlink."}
 	}
+	return doctorUnavailableCheck(err, profile)
+}
+
+// doctorUnavailableCheck reports a failed discovery. A live local daemon whose
+// ping failed keeps the evidence and the recovery commands of its selection.
+func doctorUnavailableCheck(err error, profile string) diagnostics.Check {
+	if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
+		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: err.Error(), Fix: daemonRecoveryAdvice(unreachable, profile, runtime.GOOS)}
+	}
 	return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Selected daemon is unavailable or its target configuration is invalid", Fix: "Check --daemon, KATA_SERVER, .kata.local.toml and active_daemon; for an unreachable local daemon, inspect kata daemon status and its logs."}
 }
 
@@ -73,7 +83,7 @@ func (s *doctorState) connectDoctorDaemon(ctx context.Context) (*kataapi.Client,
 		err = errors.New("resolved daemon has no base URL")
 	}
 	if err != nil {
-		return nil, false, doctorDiscoveryCheck(err)
+		return nil, false, doctorDiscoveryCheck(err, resolvedProfileName(resolved))
 	}
 	hc, err := client.NewHTTPClientForResolved(probe, resolved, client.Opts{Timeout: doctorRequestTimeout})
 	if err != nil {

@@ -69,22 +69,26 @@ type PingInfo struct {
 // recorded endpoint could not be reached.
 var ErrLocalDaemonUnreachable = errors.New("local daemon is unreachable")
 
-type localDaemonUnreachableError struct {
-	pid     int
-	address string
-	cause   error
+// LocalDaemonUnreachableError retains the failed process and its evidence paths.
+type LocalDaemonUnreachableError struct {
+	PID             int
+	Address         string
+	DataDir         string
+	WebOrigin       string
+	VerifiedProcess bool
+	cause           error
 }
 
-func (e *localDaemonUnreachableError) Error() string {
-	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %v",
-		e.pid, e.address, e.cause)
+func (e *LocalDaemonUnreachableError) Error() string {
+	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %v", e.PID, e.Address, e.cause)
 }
 
-func (e *localDaemonUnreachableError) Unwrap() error {
+func (e *LocalDaemonUnreachableError) Unwrap() error {
 	return e.cause
 }
 
-func (e *localDaemonUnreachableError) Is(target error) bool {
+// Is reports whether target is the local daemon unreachable sentinel.
+func (e *LocalDaemonUnreachableError) Is(target error) bool {
 	return target == ErrLocalDaemonUnreachable
 }
 
@@ -140,11 +144,7 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 					yield(liveDaemon{}, err)
 					return
 				}
-				if !yield(liveDaemon{}, &localDaemonUnreachableError{
-					pid:     r.PID,
-					address: address,
-					cause:   probeErr,
-				}) {
+				if !yield(liveDaemon{}, unreachableRuntime(r, dataDir, probeErr)) {
 					return
 				}
 				continue
@@ -166,6 +166,19 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 				return
 			}
 		}
+	}
+}
+
+func unreachableRuntime(r kitdaemon.RuntimeRecord, dataDir string, cause error) *LocalDaemonUnreachableError {
+	origin := ""
+	if web, err := DiscoverWebRuntime(r); err == nil {
+		origin = web.Origin
+	}
+	return &LocalDaemonUnreachableError{
+		PID: r.PID, Address: r.Endpoint().ConfigAddress(), DataDir: dataDir,
+		WebOrigin:       origin,
+		VerifiedProcess: daemonruntime.RuntimeProcessAlive(r),
+		cause:           cause,
 	}
 }
 

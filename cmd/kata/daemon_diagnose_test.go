@@ -799,3 +799,47 @@ func TestDaemonRunningProfileDoesNotRequireProject(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing_project")
 }
+
+func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
+	home, _, uid, _ := stoppedProfileCLI(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "fixture unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
+	logPath := filepath.Join(ns.DataDir, "daemon.log")
+
+	t.Run("ordinary", func(t *testing.T) {
+		for _, args := range [][]string{{"--daemon", "work", "list"}, {"list"}} {
+			_, _, err := executeRootCapture(t, t.Context(), args...)
+			var cliErr *cliError
+			require.ErrorAs(t, err, &cliErr)
+			require.Contains(t, cliErr.Message, "503")
+			require.Contains(t, cliErr.Hint, fmt.Sprintf("%q", logPath))
+			require.Contains(t, cliErr.Hint, "--daemon=work")
+			require.Contains(t, cliErr.Hint, "recover")
+		}
+	})
+	t.Run("health keeps the failure in the error text", func(t *testing.T) {
+		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", "work", "health")
+		cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+		require.Equal(t, "local_unreachable", cliErr.Code)
+		require.Equal(t, kindDaemonUnavail, cliErr.Kind)
+		var result daemonDiagnosis
+		require.NoError(t, json.Unmarshal(cliErr.Data, &result))
+		require.Equal(t, "local_unreachable", result.State)
+		require.Contains(t, result.Message, "503")
+		require.Contains(t, cliErr.Message, "503")
+		healthNextAction := result.NextAction
+		require.Contains(t, healthNextAction, "--daemon=work")
+		require.Contains(t, healthNextAction, "recover")
+		require.Contains(t, cliErr.Message, healthNextAction)
+		require.Contains(t, stderr, healthNextAction)
+	})
+}

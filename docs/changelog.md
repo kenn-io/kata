@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Diagnose a live but unreachable local daemon with its log path, available profiling endpoint, and recovery steps for the selected home or profile.
+
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index
   build finishes, and an opener waiting for another opener's migration keeps

@@ -1,7 +1,7 @@
 ---
 title: Remote daemon
 description: Serve Kata to trusted private-network clients with explicit authentication and transport settings.
-last_edited: 2026-10-22
+last_edited: 2026-11-11
 ---
 
 # Remote daemon
@@ -60,6 +60,34 @@ go tool pprof kata.heap.pprof
 The index also links the goroutine, allocation, mutex-contention, blocking,
 thread-creation, command-line, symbol, and execution-trace endpoints. Capture
 `/debug/pprof/trace?seconds=5` and open it with `go tool trace`.
+
+## Recover an unresponsive local daemon
+
+If a local process is alive but this CLI probe failed, errors report its PID,
+endpoint, log path, and recovery steps. After independently confirming the
+advertised web origin is this daemon's browser origin, capture
+`/debug/pprof/goroutine?debug=2` there with daemon-owner access before stopping
+the process. These handlers require daemon-owner authority. When authentication
+is configured, use the owner's bearer credential from the daemon's authentication
+configuration (for example, `[auth].token` or `KATA_AUTH_TOKEN`).
+The profiling listener may be the same listener that failed, so capture can also
+time out.
+
+Check the reported `daemon.log`, if present, or the daemon's retained stderr.
+Stopping the process is optional. If you choose to stop it, immediately recheck
+that the PID still identifies this daemon and the selected endpoint still fails.
+Then on Unix, `kill -QUIT <pid>` stops it and writes goroutine stacks to its
+stderr, which are lost if stderr is discarded. On Windows, `taskkill /PID <pid> /F`
+stops the recorded process.
+
+After the process exits, choose the recovery command for its launch mode:
+
+- Relaunch foreground and supervised daemons using the original command or supervisor.
+- For an auto-started current home, run `kata daemon restart` with the original
+  `KATA_HOME` and storage environment.
+- For a named profile you normally start with Kata, run
+  `kata --daemon <name> daemon recover`. This preserves its pinned storage and
+  instance identity. On Windows, the command is printed in PowerShell syntax.
 
 ## Client setup
 

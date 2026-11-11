@@ -13,6 +13,7 @@ import (
 	"net/http/httptrace"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,14 +64,14 @@ func ensureDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) {
 	if flags.Daemon != "" {
 		resolved, err := client.PrepareResolvedNamed(ctx, flags.Daemon)
 		if err != nil {
-			return client.ResolvedDaemon{}, cliDaemonTargetError(err)
+			return client.ResolvedDaemon{}, cliDaemonTargetError(err, resolvedProfileName(resolved))
 		}
 		return resolved, nil
 	}
 	workspaceStart := workspaceStartForRemote()
 	resolved, err := client.PrepareResolvedInWorkspace(ctx, workspaceStart)
 	if err != nil {
-		return client.ResolvedDaemon{}, cliDaemonTargetError(err)
+		return client.ResolvedDaemon{}, cliDaemonTargetError(err, resolvedProfileName(resolved))
 	}
 	return resolved, nil
 }
@@ -143,7 +144,7 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 			return resolved, diagnosisError(diagnosis)
 		}
 		if err != nil {
-			return resolved, cliDaemonTargetError(err)
+			return resolved, cliDaemonTargetError(err, "")
 		}
 		return resolved, noDaemonRunningError()
 	}
@@ -165,7 +166,17 @@ func noDaemonRunningError() error {
 	}
 }
 
-func cliDaemonTargetError(err error) error {
+func resolvedProfileName(resolved client.ResolvedDaemon) string {
+	if resolved.LocalProfile != nil {
+		return resolved.Name
+	}
+	return ""
+}
+
+func cliDaemonTargetError(err error, profile string) error {
+	if unreachable, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
+		return &cliError{Message: err.Error(), Hint: daemonRecoveryAdvice(unreachable, profile, runtime.GOOS), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+	}
 	code := ""
 	switch {
 	case errors.Is(err, client.ErrProfileStorageUnavailable):

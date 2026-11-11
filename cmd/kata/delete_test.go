@@ -36,7 +36,7 @@ func TestDelete_AgentOutput(t *testing.T) {
 	assert.Regexp(t, `(?m)^OK delete \S+`, out)
 	assert.Contains(t, out, "Status: deleted")
 	assert.NotContains(t, out, "Status: open")
-	assert.Contains(t, out, "Undo: kata restore kata#"+short+" --agent")
+	assert.Contains(t, out, "Undo: kata restore 'kata#"+short+"' --agent")
 }
 
 func TestDelete_AgentUndoUsesQualifiedRef(t *testing.T) {
@@ -50,7 +50,7 @@ func TestDelete_AgentUndoUsesQualifiedRef(t *testing.T) {
 	require.NoError(t, printDestructive(cmd, "other#abc4", "other", "delete", body))
 
 	out := buf.String()
-	assert.Contains(t, out, "Undo: kata restore other#abc4 --agent")
+	assert.Contains(t, out, "Undo: kata restore 'other#abc4' --agent")
 	assert.NotContains(t, out, "Undo: kata restore abc4 --agent")
 }
 

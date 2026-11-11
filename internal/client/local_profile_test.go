@@ -749,3 +749,29 @@ func TestLocalProfileReplacesCapableDaemonInPlace(t *testing.T) {
 	assert.Zero(t, state.stopCalls)
 	assert.Equal(t, live.URL, resolved.BaseURL)
 }
+
+func TestPrepareWebUIKeepsProfileNameOnUnreachable(t *testing.T) {
+	profile, root := localProfileFixture(t)
+	server := newHungServer(t)
+	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
+	for name, call := range map[string]func() (string, error){
+		"web workspace": func() (string, error) {
+			prepared, err := PrepareWebUI(t.Context(), PrepareWebUIOptions{WorkspaceStart: root})
+			return prepared.DaemonName, err
+		},
+		"web": func() (string, error) {
+			prepared, err := PrepareWebUI(t.Context(), PrepareWebUIOptions{DaemonName: "work"})
+			return prepared.DaemonName, err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			selected, err := call()
+			require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+			require.Equal(t, "work", selected)
+		})
+	}
+}

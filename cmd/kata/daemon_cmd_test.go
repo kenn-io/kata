@@ -483,7 +483,7 @@ func TestDaemonStatus_ListsUnverifiableRecord(t *testing.T) {
 	assert.Equal(t, child.Process.Pid, got.Daemons[0].PID)
 }
 
-func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
+func TestDaemonStatusReportsWebURLAndRecoveryAdvice(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
@@ -499,6 +499,12 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
 	assert.True(t, strings.HasPrefix(string(out), "OK daemon status=running web_url=http://127.0.0.1:28888 selected_state=local_unreachable selected_profile=\"\" message="))
 	assert.Contains(t, string(out), "unreachable")
+	assert.Contains(t, string(out), "next_action=")
+	assert.Contains(t, string(out), "daemon.log")
+	resetFlags(t)
+	human := executeRoot(t, newRootCmd(), "daemon", "status")
+	assert.Contains(t, string(human), "  next:")
+	assert.Contains(t, string(human), "daemon.log")
 }
 
 func TestDaemonStatusReportsMCPState(t *testing.T) {
