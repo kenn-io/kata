@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -51,11 +52,38 @@ func TestUnixConsumerHealthAndDiagnosisPreserveEndpoint(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("endpoint-test-token"))
 	path, _ := unixConsumerEndpoint(t, env.URL)
 	t.Setenv("KATA_SERVER", "unix://"+path)
-	for _, args := range [][]string{{"health", "--json"}, {"daemon", "diagnose", "--json"}, {"daemon", "locate", "--json"}} {
-		out, _, err := executeRootCapture(t, t.Context(), args...)
-		require.NoError(t, err)
-		assert.Contains(t, out, "unix://"+path)
-		assert.NotContains(t, out, "kata.invalid")
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"health", []string{"health", "--json"}},
+		{"diagnose", []string{"daemon", "diagnose", "--json"}},
+		{"locate", []string{"daemon", "locate", "--json"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, _, err := executeRootCapture(t, t.Context(), tc.args...)
+			require.NoError(t, err)
+			var response struct {
+				Selected struct {
+					Endpoint string `json:"endpoint"`
+				} `json:"selected"`
+				Endpoint       string          `json:"endpoint"`
+				Address        string          `json:"address"`
+				RequestBaseURL json.RawMessage `json:"request_base_url"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &response))
+			endpoint := response.Endpoint
+			switch tc.name {
+			case "health":
+				endpoint = response.Selected.Endpoint
+			case "locate":
+				endpoint = response.Address
+				assert.Nil(t, response.RequestBaseURL, "locate must omit the synthetic HTTP request base")
+			}
+			assert.Equal(t, "unix://"+path, endpoint)
+			assert.NotContains(t, out, "kata.invalid")
+			t.Logf("selected socket endpoint: %q", endpoint)
+		})
 	}
 }
 
