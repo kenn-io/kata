@@ -112,23 +112,21 @@ func TestManagedExternallyProfileDoesNotAutostart(t *testing.T) {
 }
 
 func TestManagedExternallyDoesNotWaitForStartLock(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		home := setupKataEnv(t)
-		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
-		server, pings := restartGapDaemon(t, "", "")
-		require.NoError(t, writeRuntimeRecord(t, home, strings.TrimPrefix(server.URL, "http://")))
-		ns, err := daemonruntime.NewNamespace()
-		require.NoError(t, err)
-		release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
-		require.NoError(t, err)
-		defer release()
-		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-		defer cancel()
-		running, err := ensureLocalRunningTarget(ctx)
-		require.NoError(t, err)
-		require.Equal(t, server.URL, running.BaseURL)
-		require.GreaterOrEqual(t, pings.Load(), int32(2))
-	})
+	home := setupKataEnv(t)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+	server, pings := restartGapDaemon(t, "", "")
+	require.NoError(t, writeRuntimeRecord(t, home, strings.TrimPrefix(server.URL, "http://")))
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
+	require.NoError(t, err)
+	defer release()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	running, err := ensureLocalRunningTarget(ctx)
+	require.NoError(t, err)
+	require.Equal(t, server.URL, running.BaseURL)
+	require.GreaterOrEqual(t, pings.Load(), int32(2))
 }
 
 // A current home's runtime directory that has lost owner-only permissions is
