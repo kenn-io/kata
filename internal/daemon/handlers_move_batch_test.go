@@ -304,3 +304,47 @@ func TestMoveIssuesBatch_ThreePageDuplicateKeepsOriginalRevision(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
 }
+
+func TestMoveIssuesBatch_ThreePageDuplicateAfterEdit(t *testing.T) {
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.MoveBatchBudget = time.Nanosecond }) //nolint:kennlint // deadlinetest: Yield after each chunk.
+	_, target, issue := seedMovePair(t, env)
+	request := api.MoveIssuesRequest{}
+	request.Body.Actor, request.Body.ToProjectUID = "tester", target.UID
+	for page := range 3 {
+		if page > 0 {
+			for range 49 {
+				request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{})
+			}
+		}
+		request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{Ref: issue.UID})
+	}
+	request.Body.Items[0].ExpectedRevision = issue.Revision
+	for page := range 3 {
+		raw, err := json.Marshal(request.Body)
+		require.NoError(t, err)
+		resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", string(raw), "")
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		var out api.MoveIssuesResponse
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&out.Body))
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, min((page+1)*50, len(request.Body.Items)), out.Body.NextIndex)
+		result := out.Body.Results[0]
+		switch page {
+		case 0:
+			require.Equal(t, "moved", result.Result)
+			request.Body.Items[100].ExpectedRevision = result.Revision
+			owner := "changed"
+			updated, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Owner: &owner, Actor: "tester"})
+			require.NoError(t, err)
+			require.Greater(t, updated.Revision, result.Revision)
+		case 1:
+			require.Equal(t, "already_in_target", result.Code)
+		case 2:
+			require.Equal(t, "revision_conflict", result.Code)
+		}
+		request.Body.StartIndex = out.Body.NextIndex
+		for _, completed := range out.Body.Results {
+			request.Body.Completed = append(request.Body.Completed, api.MoveIssuesCompleted{Result: completed.Result, Code: completed.Code, UID: completed.UID, Revision: completed.Revision})
+		}
+	}
+}
