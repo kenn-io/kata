@@ -385,7 +385,8 @@ func extendCollidingSourceShortIDs(
                           AND EXISTS(SELECT 1 FROM issues referenced WHERE referenced.uid=e.issue_uid)
                           AND EXISTS(SELECT 1 FROM events retained_move
                             WHERE retained_move.uid=json_extract(e.payload, '$.move_event_uid')
-                              AND retained_move.type='issue.moved' AND retained_move.issue_uid=e.issue_uid)))
+                              AND ((retained_move.type='issue.moved' AND retained_move.issue_uid=e.issue_uid)
+                                OR (retained_move.type='issue.snapshot' AND COALESCE(NULLIF(retained_move.issue_uid,''),json_extract(retained_move.payload,'$.issue_uid'),json_extract(retained_move.payload,'$.uid'))=e.issue_uid)))))
                          AND json_extract(e.payload, '$.from_short_id')=s.short_id
                          AND e.issue_uid<>s.uid)
 		  )

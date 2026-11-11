@@ -565,7 +565,7 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 		fromProject, _ := StringValue(payload["from_project_uid"])
 		fromShort, _ := StringValue(payload["from_short_id"])
 		var reference *FederationMovedReference
-		if winner.Type == "issue.moved" && (sourceProject.UID != fromProject || sourceShort != fromShort) {
+		if winner.Type == "issue.snapshot" || sourceProject.UID != fromProject || sourceShort != fromShort {
 			reference = &FederationMovedReference{IssueUID: issue.UID, FromProjectUID: sourceProject.UID, FromShortID: sourceShort, MoveEventUID: winner.UID}
 		}
 		if err := recordFederationMoveDisplacement(ctx, tx, sourceProject, issue.ProjectUID, winner, acceptedEventUIDs, reference, insertResetControl); err != nil {

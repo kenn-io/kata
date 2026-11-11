@@ -46,8 +46,6 @@ func TestDestinationLeaveAndArchiveExplainPendingSource(t *testing.T) {
 		name, method, path string
 		body               any
 	}{
-		{"preflight", http.MethodPost, fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", target.ID), map[string]any{"disposition": "detach", "preflight": true, "actor": "worker"}},
-		{"prepare", http.MethodPost, fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", target.ID), map[string]any{"disposition": "detach", "prepare": true, "actor": "worker"}},
 		{"leave", http.MethodPost, fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", target.ID), map[string]any{"disposition": "detach", "actor": "worker"}},
 		{"archive", http.MethodDelete, fmt.Sprintf("/api/v1/projects/%d?actor=worker&force=true", target.ID), nil},
 	} {

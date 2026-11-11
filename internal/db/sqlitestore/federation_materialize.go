@@ -149,11 +149,6 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		}
 	}
 	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
-	for _, issue := range m.projection.Issues {
-		if issue.ProjectUID != binding.HubProjectUID {
-			return federationMaterialization{fullReplay: true}, nil
-		}
-	}
 	var projectedUIDs []string
 	for uid := range m.projection.Issues {
 		projectedUIDs = append(projectedUIDs, uid)

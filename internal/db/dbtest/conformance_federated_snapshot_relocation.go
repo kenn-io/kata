@@ -2,7 +2,6 @@ package dbtest
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"testing"
@@ -18,7 +17,7 @@ import (
 // even when the spoke never received the intervening issue.moved event.
 func checkFederatedSnapshotRelocatesHeldIssue(t *testing.T, _ db.Storage, backend Backend) error {
 	for _, lifecycle := range []string{
-		"active replicas", "pausing the source retains discussion", "source paused before destination joins",
+		"active replicas", "payload-only snapshot reference", "pausing the source retains discussion", "source paused before destination joins",
 		"source leave retains discussion", "destination leave preserves standalone issue",
 		"destination leave waits for pending initial link", "destination leave waits for pending cron observation",
 		"destination leave waits for archived source",
@@ -66,11 +65,28 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		var events []db.RemoteEvent
 		for _, event := range page.Events {
 			require.NotEqual(t, "issue.moved", event.Type, "the reporter's baseline has no retained move history")
-			events = append(events, remoteMoveEvent(event))
+			remote := remoteMoveEvent(event)
+			if lifecycle == "payload-only snapshot reference" && project.ID == target.ID && remote.Type == "issue.snapshot" && remote.IssueUID != nil && *remote.IssueUID == issue.UID {
+				remote.IssueUID = nil
+				remote.ContentHash = remoteEventHash(t, remote)
+			}
+			events = append(events, remote)
 		}
 		require.NotEmpty(t, events)
 		_, err = spoke.InsertRemoteEvents(ctx, local.ID, events)
 		require.NoError(t, err)
+		if lifecycle == "destination leave preserves standalone issue" && after != 0 {
+			if scoped, ok := spoke.(interface {
+				MaterializeFederatedEvents(context.Context, int64, []string) error
+			}); ok {
+				var uids []string
+				for _, event := range events {
+					uids = append(uids, event.EventUID)
+				}
+				require.NoError(t, scoped.MaterializeFederatedEvents(ctx, local.ID, uids))
+				return
+			}
+		}
 		require.NoError(t, spoke.MaterializeFederatedProject(ctx, local.ID), "a destination snapshot must reuse the issue held in the source")
 	}
 	localSource := join(source)
@@ -219,6 +235,39 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	after, err := spoke.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, cursor, after, "repeated pulls must not create synthetic moves or reset controls")
+	if lifecycle == "active replicas" || lifecycle == "payload-only snapshot reference" {
+		t.Run("source reference", func(t *testing.T) {
+			resolved, err := spoke.IssueByShortID(ctx, localSource.ID, before.ShortID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, issue.UID, resolved.UID)
+		})
+		t.Run("source reference reservation", func(t *testing.T) {
+			other, _, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: localSource.ID, UID: "01HZNQ7VFPK1XGD8R5MAYXD4EX", Title: "source reference collision", Author: "worker"})
+			require.NoError(t, err)
+			require.NotEqual(t, before.ShortID, other.ShortID)
+		})
+		t.Run("merge preserves source reference", func(t *testing.T) {
+			acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
+			acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
+			_, err := spoke.LeaveFederationReplica(ctx, localSource.ID)
+			require.NoError(t, err)
+			_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
+			require.NoError(t, err)
+			incoming, err := spoke.CreateProject(ctx, "reference-merge")
+			require.NoError(t, err)
+			collision, _, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: incoming.ID, UID: "01HZNQ7VFPK1XGD8R5MAZZD4EX", Title: "merge reference collision", Author: "worker"})
+			require.NoError(t, err)
+			require.Equal(t, before.ShortID, collision.ShortID)
+			_, err = spoke.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: incoming.ID, TargetProjectID: localSource.ID, Actor: "worker"})
+			require.NoError(t, err)
+			merged, err := spoke.IssueByUID(ctx, collision.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.NotEqual(t, before.ShortID, merged.ShortID)
+			resolved, err := spoke.IssueByShortID(ctx, localSource.ID, before.ShortID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, issue.UID, resolved.UID)
+		})
+	}
 	switch lifecycle {
 	case "pausing the source retains discussion":
 		binding, err := spoke.FederationBindingByProject(ctx, localSource.ID)
@@ -300,9 +349,9 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 			if kind == "recurrence" {
 				r, _, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{ProjectID: source.ID, Actor: "worker", Rule: "FREQ=WEEKLY", DTStart: "2026-10-12", Timezone: "UTC", Template: db.RecurrenceTemplate{Title: "pinned"}})
 				require.NoError(t, err)
-				_, err = store.(interface {
-					ExecContext(context.Context, string, ...any) (sql.Result, error)
-				}).ExecContext(ctx, `UPDATE issues SET recurrence_id=$1 WHERE id=$2`, r.ID, issue.ID)
+				next, err := store.MaterializeNext(ctx, r.ID, "2026-10-12", "worker")
+				require.NoError(t, err)
+				issue, err = store.IssueByID(ctx, next.NewIssueID)
 				require.NoError(t, err)
 			}
 			prepareRehomePull(t, store, source, target, "pull")
@@ -322,6 +371,11 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 			}
 			var payload map[string]jsontext.Value
 			require.NoError(t, json.Unmarshal(move.Payload, &payload))
+			if kind == "recurrence" {
+				snapshotPayload, err := json.Marshal(map[string]string{"uid": issue.UID, "short_id": issue.ShortID, "title": issue.Title, "author": issue.Author, "status": issue.Status})
+				require.NoError(t, err)
+				payload["snapshot"] = snapshotPayload
+			}
 			snapshot := newRemoteEvent(t, target, &issue.UID, "issue.snapshot", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+1, payload["snapshot"])
 			_, err := store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{snapshot})
 			require.NoError(t, err)
