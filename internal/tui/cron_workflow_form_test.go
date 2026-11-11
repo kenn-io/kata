@@ -186,10 +186,14 @@ func TestWorkflowFormRoundTripsThroughDaemon(t *testing.T) {
 	m.cron.form, err = workflowFormFor(rec)
 	require.NoError(t, err)
 	m.cron.form.val[cfName] = "Renamed"
+	m.cron.form.val[cfDefinition] = `{"version":1,"steps":[{"key":"ship","kind":"argv","argv":["printf",""," ","雪","quote\";$","line\nnext"]}]}`
 	m, cmd = press(m, ctrlKey('o'))
 	m = settle(t, m, cmd)
 	require.Nil(t, m.cron.form)
 	require.Equal(t, "Saved Renamed", m.toast.text)
+	reloaded, err := c.ShowCronWorkflow(t.Context(), project.ID, uid)
+	require.NoError(t, err)
+	require.Equal(t, []string{"printf", "", " ", "雪", "quote\";$", "line\nnext"}, reloaded.Definition.Steps[0].Argv)
 }
 
 func TestWorkflowEditorRefusesReservedArgvWithoutMutation(t *testing.T) {
