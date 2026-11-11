@@ -138,7 +138,7 @@ func finalizeDiagnosis(result daemonDiagnosis, err error, firstFailure *client.L
 	if firstFailure != nil && result.State != "local_unreachable" {
 		result.PID = firstFailure.PID
 		result.Endpoint = firstFailure.Address
-		result.NextAction += ". This probe failed: " + firstFailure.Error() + ". To investigate, " + daemonCaptureAdvice(firstFailure) + "."
+		result.NextAction += ". The failed probe reported " + firstFailure.Error() + ". To investigate, " + daemonCaptureAdvice(firstFailure) + "."
 	}
 	return result
 }
