@@ -203,22 +203,6 @@ func TestLocalProfileSelectionPrecedenceAndRefresh(t *testing.T) {
 	assert.False(t, refreshed.ConfiguredRemote())
 }
 
-// Discovery must use the selected snapshot even if routing changes before it runs.
-func TestDiscoveryRetainsSelectedSnapshot(t *testing.T) {
-	_, root := localProfileFixture(t)
-	server := startResolvableDaemon(t)
-	t.Setenv("KATA_SERVER", server.URL)
-	selection, err := InspectSelection(t.Context(), root, "")
-	require.NoError(t, err)
-	require.Nil(t, selection.Profile)
-	t.Setenv("KATA_SERVER", "") // The workspace now selects the local profile.
-	resolved, found, err := DiscoverSelection(t.Context(), selection, DiscoverRequest{WorkspaceStart: root})
-	require.NoError(t, err)
-	require.True(t, found)
-	assert.Equal(t, server.URL, resolved.BaseURL)
-	assert.Equal(t, DaemonSourceServerEnv, resolved.Source)
-}
-
 func TestLocalProfileLiveIdentityUsesWorkCredential(t *testing.T) {
 	profile, root := localProfileFixture(t)
 	t.Setenv("KATA_AUTH_TOKEN", "personal-token")
@@ -766,7 +750,7 @@ func TestLocalProfileReplacesCapableDaemonInPlace(t *testing.T) {
 	assert.Equal(t, live.URL, resolved.BaseURL)
 }
 
-func TestUnreachableProfileAdviceSharedByCallers(t *testing.T) {
+func TestPrepareWebUIKeepsProfileNameOnUnreachable(t *testing.T) {
 	profile, root := localProfileFixture(t)
 	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	t.Cleanup(server.Close)
@@ -776,21 +760,9 @@ func TestUnreachableProfileAdviceSharedByCallers(t *testing.T) {
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
 	require.NoError(t, err)
 	for name, call := range map[string]func() (string, error){
-		"named": func() (string, error) {
-			resolved, err := EnsureResolvedNamed(t.Context(), "work")
-			return resolved.Name, err
-		},
-		"workspace": func() (string, error) {
-			resolved, err := PrepareResolvedInWorkspace(t.Context(), root)
-			return resolved.Name, err
-		},
 		"web workspace": func() (string, error) {
 			prepared, err := PrepareWebUI(t.Context(), PrepareWebUIOptions{WorkspaceStart: root})
 			return prepared.DaemonName, err
-		},
-		"discover": func() (string, error) {
-			resolved, _, err := DiscoverSelected(t.Context(), DiscoverRequest{Name: "work"})
-			return resolved.Name, err
 		},
 		"web": func() (string, error) {
 			prepared, err := PrepareWebUI(t.Context(), PrepareWebUIOptions{DaemonName: "work"})

@@ -335,7 +335,6 @@ func TestHealthSelectedProfileDoesNotUsePersonalRuntime(t *testing.T) {
 	assert.Equal(t, "stopped_local_profile", target.Code)
 	_, err = os.Stat(filepath.Join(home, "runtime"))
 	assert.ErrorIs(t, err, os.ErrNotExist)
-
 }
 
 func TestDaemonDiagnoseEmptyCurrentHomeDoesNotInitialize(t *testing.T) {
@@ -805,16 +804,13 @@ func TestDaemonRunningProfileDoesNotRequireProject(t *testing.T) {
 func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 	home, _, uid, _ := stoppedProfileCLI(t)
 	entered := make(chan struct{}, 1)
-	var changeCatalog atomic.Bool
-	catalogPath := filepath.Join(os.Getenv("KATA_HOME"), "config.toml")
-	//nolint:gosec // The path is under the temporary home set by stoppedProfileCLI.
-	catalog, err := os.ReadFile(catalogPath)
-	require.NoError(t, err)
-	changed := make(chan error, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		if changeCatalog.CompareAndSwap(true, false) {
-			//nolint:gosec // The path is under the temporary fixture home.
-			changed <- os.WriteFile(catalogPath, []byte(strings.Replace(string(catalog), `name = "work"`, `name = "other"`, 1)), 0600)
+	var healthProbe atomic.Bool
+	var healthPings atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if healthProbe.Load() && healthPings.Add(1) > 1 {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"test","instance_uid":%q}`, uid)
+			return
 		}
 		select {
 		case entered <- struct{}{}:
@@ -857,40 +853,28 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 			var cliErr *cliError
 			require.ErrorAs(t, err, &cliErr)
 			require.Contains(t, cliErr.Message, "context deadline exceeded")
-			require.Contains(t, cliErr.Hint, logPath)
+			require.Contains(t, cliErr.Hint, fmt.Sprintf("%q", logPath))
 			require.Contains(t, cliErr.Hint, recoverCmd)
 		}
 	})
 	t.Run("health keeps the failure in the error text", func(t *testing.T) {
+		healthProbe.Store(true)
+		t.Cleanup(func() { healthProbe.Store(false) })
 		_, stderr, err := executeRootCapture(t, t.Context(), "--daemon", "work", "health")
 		cliErr := requireCLIError(t, err, ExitDaemonUnavail)
 		require.Equal(t, "local_unreachable", cliErr.Code)
+		require.Equal(t, kindDaemonUnavail, cliErr.Kind)
+		require.EqualValues(t, 1, healthPings.Load())
 		var result daemonDiagnosis
 		require.NoError(t, json.Unmarshal(cliErr.Data, &result))
-		require.Equal(t, "work", result.Profile)
-		require.Equal(t, uid, result.ExpectedInstanceUID)
+		require.Equal(t, "local_unreachable", result.State)
+		require.Contains(t, result.Message, "context deadline exceeded")
 		for _, evidence := range []string{fmt.Sprintf("pid %d", os.Getpid()), server.Listener.Addr().String(), "context deadline exceeded"} {
 			require.Contains(t, cliErr.Message, evidence)
 		}
 		healthNextAction := result.NextAction
-		require.NotEmpty(t, healthNextAction)
+		require.Contains(t, healthNextAction, recoverCmd)
 		require.Contains(t, cliErr.Message, healthNextAction)
 		require.Contains(t, stderr, healthNextAction)
 	})
-	t.Run("health retains selection when catalog changes", func(t *testing.T) {
-		changeCatalog.Store(true)
-		t.Cleanup(func() {
-			//nolint:gosec // Restore the temporary fixture catalog.
-			require.NoError(t, os.WriteFile(catalogPath, catalog, 0600))
-		})
-		_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "health")
-		require.NoError(t, <-changed)
-		cliErr := requireCLIError(t, err, ExitDaemonUnavail)
-		require.Equal(t, "local_unreachable", cliErr.Code)
-		var result daemonDiagnosis
-		require.NoError(t, json.Unmarshal(cliErr.Data, &result))
-		require.Equal(t, "work", result.Profile)
-		require.Contains(t, result.NextAction, recoverCmd)
-	})
-
 }

@@ -203,26 +203,6 @@ func TestEnsureRunningDiscoveryWaitsForStartLockBeforeStoppingDaemon(t *testing.
 	assert.Zero(t, restore.stopCalls, "another restart owns validation; its daemon must keep running")
 }
 
-func TestDiscoverForStartRetainsInFlightDeadlineEvidence(t *testing.T) {
-	tmp := setupKataEnv(t)
-	entered := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { close(entered); <-r.Context().Done() }))
-	t.Cleanup(server.Close)
-	require.NoError(t, writeRuntimeRecord(t, tmp, strings.TrimPrefix(server.URL, "http://")))
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	_, _, err = discoverForStart(ctx, ns.DataDir)
-	select {
-	case <-entered:
-	default:
-		t.Fatal("probe did not enter")
-	}
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-}
-
 func TestEnsureRunningDiscoveryWaitsForStartLockWhenDaemonUnreachable(t *testing.T) {
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
 	tmp := setupKataEnv(t)

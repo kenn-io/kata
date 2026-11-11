@@ -46,12 +46,6 @@ func DiscoverSelected(ctx context.Context, req DiscoverRequest) (ResolvedDaemon,
 	if err != nil {
 		return ResolvedDaemon{}, false, err
 	}
-	return DiscoverSelection(ctx, selection, req)
-}
-
-// DiscoverSelection discovers the daemon from an existing selection snapshot.
-// Request options retain the same meaning as in DiscoverSelected.
-func DiscoverSelection(ctx context.Context, selection DaemonSelection, req DiscoverRequest) (ResolvedDaemon, bool, error) {
 	var up daemonBringUp = liveDiscovery{scan: liveDaemons, verify: verifyLocalProfileInstance}
 	if req.ReadOnly {
 		up = liveDiscovery{scan: liveDaemonsReadOnly}

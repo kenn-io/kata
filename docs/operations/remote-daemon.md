@@ -63,7 +63,7 @@ thread-creation, command-line, symbol, and execution-trace endpoints. Capture
 
 ## Recover an unresponsive local daemon
 
-If a local process is alive but cannot answer ping, CLI errors report its PID,
+If a local process is alive but did not answer this CLI probe, errors report its PID,
 endpoint, log path, and recovery steps. If the advertised web origin responds,
 capture `/debug/pprof/goroutine?debug=2` there before stopping the process. These
 handlers require daemon-owner authority. When authentication is configured, use
@@ -72,11 +72,12 @@ the owner's bearer credential from the daemon's authentication configuration
 The profiling listener may be the same listener that failed, so capture can also
 time out.
 
-Check the reported `daemon.log` or the supervisor's stderr log. Foreground and
-supervised launches may only retain supervisor stderr. After confirming the PID
-identifies the daemon, Unix operators can use `kill -QUIT <pid>` as a fallback.
-It writes goroutine stacks to stderr **and terminates the daemon**. On Windows,
-stop the confirmed process with `taskkill /PID <pid> /F`.
+Check the reported `daemon.log`, if present, or retained foreground or supervisor
+stderr. Immediately before using a terminating fallback, verify that the PID
+still identifies this daemon and that the selected endpoint remains unresponsive.
+If both hold and you choose to stop it, Unix operators can use `kill -QUIT <pid>`
+to write goroutine stacks to stderr and terminate the daemon. On Windows,
+`taskkill /PID <pid> /F` stops the recorded process.
 
 After the process exits, choose the recovery command for its launch mode:
 
