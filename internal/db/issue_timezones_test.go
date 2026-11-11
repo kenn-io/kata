@@ -16,6 +16,9 @@ func TestPrepareIssueSchedules(t *testing.T) {
 		name, current, patch, fallback, recurrence, wantZone string
 		wantError                                            bool
 	}{
+		{"replace opaque stored date", `{"$field":{"legacy":"opaque"}}`, `{"$field":"2026-11-13"}`, "America/New_York", "", "America/New_York", false},
+		{"refuse stored future rules", `{"$field":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}}`, `{"$field":"2026-11-13"}`, "UTC", "", "", true},
+		{"refuse stored future members", `{"$field":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}}`, `{"$field":"2026-11-13"}`, "UTC", "", "", true},
 		{"UTC", "{}", `{"timezone":"UTC"}`, "Local", "", "", false},
 		{"Etc UTC", "{}", `{"timezone":"Etc/UTC"}`, "Local", "", "", false},
 		{"New York", "{}", `{"timezone":"America/New_York"}`, "Local", "", "", false},

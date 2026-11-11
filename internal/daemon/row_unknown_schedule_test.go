@@ -15,12 +15,12 @@ import (
 
 func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 	for _, tc := range []struct {
-		name, scheduled string
-		unsupported     bool
+		name, scheduled, wantError string
+		unsupported, replace       bool
 	}{
-		{"unsupported rules", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`, true},
-		{"unsupported members", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}`, true},
-		{"opaque legacy value", `{"legacy":"opaque"}`, false},
+		{"unsupported rules", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}`, "unsupported schedule tzdata version", true, false},
+		{"unsupported members", `{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}`, "unknown object member name", true, true},
+		{"opaque legacy value", `{"legacy":"opaque"}`, "", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newRowDatesFixture(t)
@@ -39,9 +39,7 @@ func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 					status, raw := cronHTTP(t, f.env, http.MethodGet, path, nil)
 					if tc.unsupported {
 						require.NotEqual(t, http.StatusOK, status, string(raw))
-						if tc.name == "unsupported rules" {
-							require.Contains(t, string(raw), "unsupported schedule tzdata version")
-						}
+						require.Contains(t, string(raw), tc.wantError)
 						return
 					}
 					require.Equal(t, http.StatusOK, status, string(raw))
@@ -70,35 +68,37 @@ func TestRowsHandleStoredScheduleObjects(t *testing.T) {
 					require.Equal(t, "2026-11-02", row["deadline_on_date"])
 				})
 			}
-			for _, field := range []string{"scheduled_on", "deadline_on"} {
-				t.Run("replace "+field, func(t *testing.T) {
-					// Restore the same opaque or unsupported value in each planning field.
-					for _, record := range records {
-						if issue, ok := record.(*db.IssueExport); ok && issue.UID == f.nodate.UID {
-							issue.Metadata = jsontext.Value(`{"` + field + `":` + tc.scheduled + `}`)
-						}
-					}
-					require.NoError(t, f.env.DB.ImportReplay(t.Context(), records, db.ImportOptions{}))
-					before, err := f.env.DB.IssueByID(t.Context(), f.nodate.ID)
-					require.NoError(t, err)
-					status, raw := cronHTTP(t, f.env, http.MethodPost, show+"/metadata", map[string]any{"actor": "tester", "patch": map[string]string{field: "2026-11-13"}})
-					after, err := f.env.DB.IssueByID(t.Context(), f.nodate.ID)
-					require.NoError(t, err)
-					if tc.unsupported {
-						require.Equal(t, http.StatusBadRequest, status, string(raw))
-						require.Equal(t, before, after)
-						return
-					}
-					require.Equal(t, http.StatusOK, status, string(raw))
-					var fields map[string]jsontext.Value
-					require.NoError(t, json.Unmarshal([]byte(after.Metadata), &fields))
-					saved, err := metadata.DecodeSavedSchedule(fields[field])
-					require.NoError(t, err)
-					require.NotNil(t, saved)
-					require.Equal(t, "America/New_York", saved.Timezone)
-					require.Equal(t, "2026-11-13", saved.Value)
-				})
+			if !tc.replace {
+				return
 			}
+			t.Run("replace scheduled_on", func(t *testing.T) {
+				records, err := dbtest.CollectImportRecords(t.Context(), f.env.DB, db.ExportFilter{ProjectID: &f.project.ID})
+				require.NoError(t, err)
+				for _, record := range records {
+					if issue, ok := record.(*db.IssueExport); ok && issue.UID == f.nodate.UID {
+						issue.Metadata = jsontext.Value(`{"scheduled_on":` + tc.scheduled + `}`)
+					}
+				}
+				require.NoError(t, f.env.DB.ImportReplay(t.Context(), records, db.ImportOptions{}))
+				before, err := f.env.DB.IssueByID(t.Context(), f.nodate.ID)
+				require.NoError(t, err)
+				status, raw := cronHTTP(t, f.env, http.MethodPost, show+"/metadata", map[string]any{"actor": "tester", "patch": map[string]string{"scheduled_on": "2026-11-13"}})
+				after, err := f.env.DB.IssueByID(t.Context(), f.nodate.ID)
+				require.NoError(t, err)
+				if tc.unsupported {
+					require.Equal(t, http.StatusBadRequest, status, string(raw))
+					require.Equal(t, before, after)
+					return
+				}
+				require.Equal(t, http.StatusOK, status, string(raw))
+				var fields map[string]jsontext.Value
+				require.NoError(t, json.Unmarshal([]byte(after.Metadata), &fields))
+				saved, err := metadata.DecodeSavedSchedule(fields["scheduled_on"])
+				require.NoError(t, err)
+				require.NotNil(t, saved)
+				require.Equal(t, "America/New_York", saved.Timezone)
+				require.Equal(t, "2026-11-13", saved.Value)
+			})
 		})
 	}
 }

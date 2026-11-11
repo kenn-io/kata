@@ -275,7 +275,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 | Version | Change |
 | --- | --- |
 | `0.44.0` | Attachment routes return `503 docbank_key_unavailable` instead of `502 docbank_unauthorized` when the daemon cannot resolve its own Docbank key. Health diagnostics add a `docbank` block. |
-| `0.45.0` | Schedule and deadline metadata may contain saved values with their timezone and timezone-data version. |
+| `0.45.0` | Schedule and deadline metadata may contain saved values with their timezone and timezone-data version. Issue rows add `scheduled_on_date`, `deadline_on_date`, `scheduled_on_today`, and `deadline_on_today`; issue detail and browser snapshot rows also add `scheduled_on_display` and `deadline_on_display` for saved instants. |
 | `0.43.0` | Adds the daemon-owned MCP Events routes `POST /api/v1/mcp-events/list`, `POST /api/v1/mcp-events/subscribe`, `POST /api/v1/mcp-events/unsubscribe`, and `GET /api/v1/mcp-events/subscriptions` (status). Subscribe and unsubscribe arguments name either a non-empty `project_uids` list or `all_projects: true`. Failures return an `mcp_events` error whose `data` carries `mcp_code` and `mcp_data`. Older daemons do not serve these routes. Both issue list routes accept `compact=true`. |
 | `0.42.0` | Adds daemon-wide local embeddings setup and status at `GET` and `POST /embeddings/local`, and the `X-Kata-Embeddings-Configured` search response header. |
 | `0.41.0` | Adds `sort=priority` to both ready routes. `kata next` and MCP `kata.next` request one priority-ordered row; older daemons retain the full-queue fetch and client-side selection. |
@@ -776,8 +776,8 @@ whose snapshot reports `contract_version` `2`. The daemon-switcher proxy
 (`/api/v1/ui/proxy`) does not forward `GET /api/v1/issues` or project issue
 lists, so `collection_links` is how to get child counts through it.
 
-A matching snapshot `If-None-Match` returns `304` without rebuilding the
-projection. The response cursor is captured in the same consistent storage
+An exact matching snapshot `If-None-Match` returns `304` without rebuilding the
+projection while the validator's calendar interval remains valid. The response cursor is captured in the same consistent storage
 read as a newly built projection. Browser events are invalidations; the SPA
 refreshes the snapshot instead of constructing a second authority from event
 payloads.

@@ -94,7 +94,7 @@ func (i Issue) datesState() datesFormState {
 	d := datesFormState{revision: i.Revision, scheduled: scheduled, deadline: deadline, scheduledToday: i.ScheduledOnToday, deadlineToday: i.DeadlineOnToday}
 	d.scheduledZone = savedDateLocation(i.Metadata.ScheduledOn)
 	d.deadlineZone = savedDateLocation(i.Metadata.DeadlineOn)
-	if err := errors.Join(serr, derr); err != nil {
+	if err := errors.Join(serr, derr); metadata.IsUnsupportedSchedule(err) {
 		d.unreadable = err.Error()
 	}
 	return d
