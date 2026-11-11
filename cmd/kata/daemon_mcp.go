@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -55,21 +56,35 @@ func newDaemonMCPHandler(ctx context.Context, store db.Storage, cfg config.MCPCo
 	if err != nil {
 		return nil, err
 	}
-	observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
+	observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved, false)
 	// Token administration remains an explicit sidecar-only capability.
-	server, err := mcpserver.New(mcpserver.Options{
-		Client: apiClient, LongRunningClient: longRunningClient,
-		Scope: scope, Actor: cfg.Actor, Version: version.Version,
-		StartupSections: cfg.StartupSections,
-		ObserveToolCall: observe,
-	})
+	admission := mcpserver.NewToolAdmission()
+	newServer := func(events bool) (*sdkmcp.Server, error) {
+		return mcpserver.New(mcpserver.Options{
+			Client: apiClient, LongRunningClient: longRunningClient,
+			Scope: scope, Actor: cfg.Actor, Version: version.Version,
+			StartupSections: cfg.StartupSections, ObserveToolCall: observe,
+			Events: events, Admission: admission,
+		})
+	}
+	legacy, err := newServer(false)
+	if err != nil {
+		stopReporting()
+		return nil, err
+	}
+	current, err := newServer(true)
 	if err != nil {
 		stopReporting()
 		return nil, err
 	}
 	context.AfterFunc(ctx, stopReporting)
 	// ApplyListenerPolicy owns the daemon mount's Host validation.
-	return newMCPHTTPHandler(server, token, true), nil
+	handler := mcpserver.NewHTTPHandler(
+		func(*http.Request) *sdkmcp.Server { return legacy },
+		func(*http.Request) *sdkmcp.Server { return current },
+		mcpserver.HTTPOptions{DisableLocalhostProtection: true},
+	)
+	return requireMCPHTTPBearer(token, http.NewCrossOriginProtection().Handler(handler)), nil
 }
 
 func daemonMCPScope(ctx context.Context, store db.Storage, cfg config.MCPConfig) (*mcpserver.Scope, error) {
