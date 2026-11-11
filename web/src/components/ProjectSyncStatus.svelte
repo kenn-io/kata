@@ -71,6 +71,7 @@
       try {
         const response = await getProjectFederationStatus(
           { projectId: id },
+          { compact: true },
           { signal: abort.signal },
         )
         if (abort.signal.aborted || disposed) return

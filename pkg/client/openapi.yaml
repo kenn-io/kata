@@ -9805,6 +9805,13 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: Omit relay checkpoint capacity measurement.
+          explode: false
+          in: query
+          name: compact
+          schema:
+            description: Omit relay checkpoint capacity measurement.
+            type: boolean
       responses:
         "200":
           content:

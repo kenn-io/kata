@@ -5,6 +5,8 @@ import (
 	"crypto/ed25519"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -111,4 +113,44 @@ func TestFederationStatusMeasuresOnlyRootedRelayProjects(t *testing.T) {
 	require.Zero(t, statuses[broken.ID].RelayCheckpointBytes, "a failed measurement reports no size")
 	require.Zero(t, statuses[broken.ID].RelayCheckpointCapacity)
 	require.Contains(t, statuses[broken.ID].RelayCheckpointError, "retained artifact manifest is malformed")
+
+	readProject := func(query string) api.FederationProjectStatus {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/federation/status%s", httpServer.URL, relayed.ID, query), nil)
+		require.NoError(t, err)
+		request.Header.Set("Authorization", "Bearer bootstrap-test-token")
+		response, err := httpServer.Client().Do(request)
+		require.NoError(t, err)
+		defer response.Body.Close()
+		require.Equal(t, http.StatusOK, response.StatusCode)
+		data, err := io.ReadAll(response.Body)
+		require.NoError(t, err)
+		var raw struct {
+			Statuses []map[string]any `json:"statuses"`
+		}
+		require.NoError(t, json.Unmarshal(data, &raw))
+		require.Len(t, raw.Statuses, 1)
+		if query == "" {
+			require.Contains(t, raw.Statuses[0], "relay_checkpoint_bytes")
+			require.Contains(t, raw.Statuses[0], "relay_checkpoint_capacity_bytes")
+		} else {
+			require.NotContains(t, raw.Statuses[0], "relay_checkpoint_bytes")
+			require.NotContains(t, raw.Statuses[0], "relay_checkpoint_capacity_bytes")
+			require.NotContains(t, raw.Statuses[0], "relay_checkpoint_error")
+		}
+		var body api.FederationStatusBody
+		require.NoError(t, json.Unmarshal(data, &body))
+		require.Len(t, body.Statuses, 1)
+		return body.Statuses[0]
+	}
+	full := readProject("")
+	require.Equal(t, 2, wrapped.count(relayed.ID))
+	require.Positive(t, full.RelayCheckpointBytes)
+	require.EqualValues(t, db.RelayCheckpointCapacityBytes, full.RelayCheckpointCapacity)
+	compact := readProject("?compact=true")
+	require.Equal(t, 2, wrapped.count(relayed.ID), "compact status must skip checkpoint measurement")
+	require.Zero(t, compact.RelayCheckpointBytes)
+	require.Zero(t, compact.RelayCheckpointCapacity)
+	full.RelayCheckpointBytes = 0
+	full.RelayCheckpointCapacity = 0
+	require.Equal(t, full, compact)
 }
