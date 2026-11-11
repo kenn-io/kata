@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"fmt"
 	"slices"
@@ -1193,4 +1194,25 @@ func RunUISnapshotSavedCalendarContract(t *testing.T, open func(*testing.T) db.S
 	all, err := uiStore.ReadUISnapshot(ctx, query)
 	require.NoError(t, err)
 	require.Equal(t, "2026-01-01", all.Issues[0].ScheduledOnToday)
+}
+
+func RunUISnapshotLimitIgnoresUnseenFutureSchedule(t *testing.T, open func(*testing.T) db.Storage) {
+	t.Helper()
+	store := open(t)
+	project := createCursorProject(t.Context(), t, store)
+	unseen := createCursorIssue(t.Context(), t, store, project.ID, "Unseen")
+	queryer := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	_, err := queryer.ExecContext(t.Context(), `UPDATE issues SET metadata=$1 WHERE id=$2`, `{"scheduled_on":{"value":"2026-01-01","timezone":"UTC","tzdata_version":"future"}}`, unseen.ID)
+	require.NoError(t, err)
+	visible := createCursorIssue(t.Context(), t, store, project.ID, "Visible")
+	snapshot, err := store.(db.UIStore).ReadUISnapshot(t.Context(), db.UISnapshotQuery{View: "all-open", Limit: 1, CalendarAt: "2026-01-01T00:00:00Z"})
+	require.NoError(t, err)
+	require.Equal(t, []string{visible.UID}, uiIssueUIDs(snapshot.Issues))
+	ready, err := store.(db.UIStore).ReadUISnapshot(t.Context(), db.UISnapshotQuery{View: "all-open", Statuses: []string{"ready"}, Limit: 1, ReadyAt: "2026-01-01T00:00:00Z", CalendarAt: "2026-01-01T00:00:00Z"})
+	require.NoError(t, err)
+	require.Equal(t, []string{visible.UID}, uiIssueUIDs(ready.Issues))
+	_, err = store.(db.UIStore).ReadUISnapshot(t.Context(), db.UISnapshotQuery{View: "all-open", Limit: 2, CalendarAt: "2026-01-01T00:00:00Z"})
+	require.ErrorContains(t, err, "unsupported schedule tzdata version")
 }

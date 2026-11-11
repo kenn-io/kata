@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json/v2"
 	"time"
 
 	"go.kenn.io/kata/internal/metadata"
@@ -68,5 +69,39 @@ func RowPlanningDates(raw, scheduledDefaultTimezone, deadlineDefaultTimezone str
 // RowPlanningProjection resolves each field and the current day in its zone.
 func RowPlanningProjection(raw, scheduledDefaultTimezone, deadlineDefaultTimezone string, now time.Time) (scheduledOn, deadlineOn, scheduledToday, deadlineToday, scheduledDisplay, deadlineDisplay string, err error) {
 	dates := resolvePlanningCalendarDates(raw, nil, scheduledDefaultTimezone, deadlineDefaultTimezone, now, nil)
-	return dates.scheduledOn, dates.deadlineOn, dates.scheduledToday, dates.deadlineToday, dates.scheduledDisplay, dates.deadlineDisplay, dates.unsupported()
+	return planningProjectionForEdit(dates, raw, scheduledDefaultTimezone, deadlineDefaultTimezone, now)
+}
+
+func planningProjectionForEdit(d planningCalendarDates, raw, scheduledDefault, deadlineDefault string, now time.Time) (string, string, string, string, string, string, error) {
+	if !d.hasScheduledOn && d.scheduledErr == nil {
+		d.scheduledToday = emptyScheduleToday(raw, scheduledDefault, now)
+	}
+	if !d.hasDeadlineOn && d.deadlineErr == nil {
+		d.deadlineToday = emptyScheduleToday(raw, deadlineDefault, now)
+	}
+	return d.scheduledOn, d.deadlineOn, d.scheduledToday, d.deadlineToday, d.scheduledDisplay, d.deadlineDisplay, d.unsupported()
+}
+
+func emptyScheduleToday(raw, defaultZone string, now time.Time) string {
+	if now.IsZero() {
+		return ""
+	}
+	var values struct {
+		Timezone string `json:"timezone"`
+	}
+	if raw != "" && json.Unmarshal([]byte(raw), &values) != nil {
+		return ""
+	}
+	zone := values.Timezone
+	if zone == "" {
+		zone = defaultZone
+	}
+	if zone == "" {
+		zone = "UTC"
+	}
+	loc, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion)
+	if err != nil {
+		return ""
+	}
+	return now.In(loc).Format(time.DateOnly)
 }

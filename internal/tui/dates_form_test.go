@@ -146,6 +146,11 @@ func TestDatesFormWritesRelativeAndLocalTimeForms(t *testing.T) {
 			h := newDatesHarness(t, nil, viewDetail)
 			before := h.revision()
 			h.openForm()
+			if tt.name == "weeks" {
+				day, err := time.Parse(time.DateOnly, h.m.input.dates.scheduledToday)
+				require.NoError(t, err)
+				tt.want = day.AddDate(0, 0, 14).Format(time.DateOnly)
+			}
 			h.fill(tt.typed, "")
 			h.save()
 
@@ -169,10 +174,13 @@ func TestDatesFormWritesOnlyChangedKeysInOneRequest(t *testing.T) {
 	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-09-01T09:00", "deadline_on": "2026-11-20"}, viewList)
 	before := h.revision()
 	h.openForm()
+	day, err := time.Parse(time.DateOnly, h.m.input.dates.deadlineToday)
+	require.NoError(t, err)
+	deadline := day.AddDate(0, 0, 7).Format(time.DateOnly)
 	h.fill("2026-09-01T09:00", "+1w")
 	h.save()
 
-	assert.Equal(t, map[string]string{"scheduled_on": "2026-09-01T09:00", "deadline_on": "2026-11-09"}, h.stored(),
+	assert.Equal(t, map[string]string{"scheduled_on": "2026-09-01T09:00", "deadline_on": deadline}, h.stored(),
 		"the untouched Scheduled keeps its time")
 	assert.Equal(t, before+1, h.revision(), "both keys travel in one patch")
 }
@@ -377,9 +385,11 @@ func TestDatesFormConflictRemovesRemotelyClosedIssueFromToday(t *testing.T) {
 func TestDatesUndoWritesThePreviousDatesBack(t *testing.T) {
 	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-20"}, viewDetail)
 	h.openForm()
+	day, err := time.Parse(time.DateOnly, h.m.input.dates.scheduledToday)
+	require.NoError(t, err)
 	h.fill("tomorrow", "")
 	h.save()
-	require.Equal(t, map[string]string{"scheduled_on": "2026-11-03"}, h.stored())
+	require.Equal(t, map[string]string{"scheduled_on": day.AddDate(0, 0, 1).Format(time.DateOnly)}, h.stored())
 	changed := h.revision()
 
 	h.undo()

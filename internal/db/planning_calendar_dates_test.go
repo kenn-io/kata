@@ -180,3 +180,11 @@ func TestCalendarProjectionOmitsOpaqueField(t *testing.T) {
 	assert.Equal(t, "2026-01-01", deadline)
 	assert.True(t, included)
 }
+
+func TestEmptyScheduleProjectionUsesIssueZoneForRelativeEdits(t *testing.T) {
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	_, _, scheduledToday, deadlineToday, _, _, err := RowPlanningProjection(`{"timezone":"Pacific/Kiritimati"}`, "UTC", "UTC", now)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-11-03", scheduledToday)
+	assert.Equal(t, "2026-11-03", deadlineToday)
+}

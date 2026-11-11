@@ -685,7 +685,7 @@ func readUIIssues(
 				string(issue.Metadata), readyAt,
 				scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
 			)
-			if err != nil {
+			if err != nil && (limit == 0 || len(issues) < limit) {
 				return nil, fmt.Errorf("read UI issue %s schedule: %w", issue.UID, err)
 			}
 			if !due {
@@ -701,7 +701,7 @@ func readUIIssues(
 			string(issue.Metadata), query,
 			scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
 		)
-		if err != nil {
+		if err != nil && (limit == 0 || len(issues) < limit) {
 			return nil, fmt.Errorf("read UI issue %s calendar schedule: %w", issue.UID, err)
 		}
 		if !matches || (limit > 0 && len(issues) >= limit) {
