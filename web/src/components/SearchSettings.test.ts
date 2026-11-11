@@ -129,6 +129,40 @@ describe('SearchSettings', () => {
     expect(read).toHaveBeenCalledTimes(3)
   })
 
+  test('reconnects when a stable daemon returns after a long outage', async () => {
+    vi.useFakeTimers()
+    let available = false
+    const pending = status({
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+    })
+    setGeneratedFetch(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(pending))
+        .mockImplementation(async () => {
+          if (!available) throw new TypeError('disconnected')
+          return Response.json(status({ provider: 'built_in', can_change: false }))
+        }),
+    )
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    renderSettings({
+      postFetch: vi.fn(async () => new Response(null, { status: 202 })),
+      originStable: true,
+    })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(screen.getByRole('alert').textContent).toContain('kata daemon status')
+    available = true
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(screen.getByText('On', { exact: true })).not.toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   test.each([
     [true, "Couldn't reconnect. Run kata daemon status, then reopen kata ui."],
     [false, 'Run kata daemon status, then reopen kata ui.'],

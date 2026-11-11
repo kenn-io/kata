@@ -34,6 +34,10 @@
   }: Props = $props()
 
   const pollMs = 2000
+  const restartWaitMs = 120_000
+  const reopenGuidance =
+    'After restart, run kata ui to reopen. If this daemon uses a custom home, set KATA_HOME to it first.'
+  const recoveryGuidance = 'Run kata daemon status, then reopen kata ui.'
   // Ollama shows its status only; switching to the built-in server comes later.
   const labels = { keepsIndex: '' }
   // Count-free indexing and a saved setting waiting on a restart use the
@@ -70,7 +74,7 @@
       (status?.can_restart || job?.state === 'restarting') && canAdministerDaemon
         ? originStable
           ? ''
-          : 'After restart, run kata ui to reopen. If this daemon uses a custom home, set KATA_HOME to it first.'
+          : reopenGuidance
         : remoteHost
           ? `Restart the daemon on ${remoteHost} to finish.`
           : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
@@ -148,7 +152,10 @@
     let next: LocalEmbeddingsStatus | undefined
     try {
       const readSignal = restartPending
-        ? AbortSignal.any([signal, AbortSignal.timeout(Math.max(0, restartDeadline - Date.now()))])
+        ? AbortSignal.any([
+            signal,
+            AbortSignal.timeout(Math.max(pollMs * 5, restartDeadline - Date.now())),
+          ])
         : signal
       const response = await getLocalEmbeddings({ signal: readSignal })
       if (response.status === 200) next = response.data
@@ -158,7 +165,7 @@
     if (signal.aborted || post !== posts) return
     if (next) {
       if (next.job?.state === 'restarting' && !restartPending)
-        restartDeadline = Date.now() + 120_000
+        restartDeadline = Date.now() + restartWaitMs
       if (
         next.job?.error ||
         next.job?.state !== status?.job?.state ||
@@ -174,12 +181,7 @@
         restartDeadline = 0
     }
     if (restartPending && Date.now() >= restartDeadline) {
-      restartDeadline = 0
-      requestError = originStable
-        ? "Couldn't reconnect. Run kata daemon status, then reopen kata ui."
-        : 'Run kata daemon status, then reopen kata ui.'
-      loading = false
-      return
+      requestError = originStable ? `Couldn't reconnect. ${recoveryGuidance}` : recoveryGuidance
     }
     loading = false
     poll()
@@ -193,9 +195,7 @@
 
   async function restartDaemon(): Promise<void> {
     if (posting || restartPending || !page) return
-    const reopen = originStable
-      ? ''
-      : '\n\nAfter restart, run kata ui to reopen. If this daemon uses a custom home, set KATA_HOME to it first.'
+    const reopen = originStable ? '' : `\n\n${reopenGuidance}`
     if (
       !confirm(
         `Restart this daemon? All projects and clients on it will disconnect briefly.${reopen}`,
@@ -204,12 +204,12 @@
       return
     const signal = page.signal
     posting = true
-    restartDeadline = Date.now() + 120_000
+    restartDeadline = Date.now() + restartWaitMs
     requestError = undefined
     posts++
     clearTimeout(timer)
     try {
-      const postSignal = AbortSignal.any([signal, AbortSignal.timeout(120_000)])
+      const postSignal = AbortSignal.any([signal, AbortSignal.timeout(restartWaitMs)])
       const response = await postFetch(getRestartLocalEmbeddingsUrl(), {
         method: 'POST',
         signal: postSignal,
@@ -220,7 +220,7 @@
       }
     } catch {
       if (!signal.aborted && !originStable)
-        requestError = "Couldn't confirm restart. Run kata daemon status, then reopen kata ui."
+        requestError = `Couldn't confirm restart. ${recoveryGuidance}`
     } finally {
       posting = false
       if (!signal.aborted) poll()
