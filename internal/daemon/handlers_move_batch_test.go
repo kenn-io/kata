@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -208,6 +209,24 @@ func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 			}
 			require.Equal(t, want, out.Results[stale].Code)
 			require.Equal(t, "moved", out.Results[valid].Result)
+			got, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, target.ID, got.ProjectID)
+		})
+	}
+}
+
+func TestMoveIssuesBatch_InvalidJSONItemDoesNotBlockNeighbor(t *testing.T) {
+	for _, invalid := range []string{`{"ref":42}`, `{"ref":true}`, `{"ref":"abc4","to_project_uid":42}`, `{"ref":"abc4","expected_revision":"1"}`, `{"ref":"$issue","expected_revision":null}`, `42`} {
+		t.Run(invalid, func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("tok"))
+			_, target, issue := seedMovePair(t, env)
+			body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q,"items":[%s,{"ref":%q}]}`, target.UID, strings.ReplaceAll(invalid, "$issue", issue.UID), issue.UID)
+			out := postMoveBatch(t, env, body)
+			require.Len(t, out.Results, 2)
+			require.Equal(t, "refused", out.Results[0].Result)
+			require.Equal(t, "validation", out.Results[0].Code)
+			require.Equal(t, "moved", out.Results[1].Result)
 			got, err := env.DB.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
 			require.Equal(t, target.ID, got.ProjectID)

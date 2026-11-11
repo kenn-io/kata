@@ -50,6 +50,9 @@ func checkMoveBatchClaims(cfg ServerConfig, items []moveBatchItem, results []api
 
 func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRequest) (*api.MoveIssuesResponse, error) {
 	return func(ctx context.Context, in *api.MoveIssuesRequest) (out *api.MoveIssuesResponse, resultErr error) {
+		if len(in.Body.Items) == 0 || len(in.Body.Items) > api.MoveBatchMaxItems {
+			return nil, api.NewError(400, "validation", "items must contain between 1 and 50 entries", "", nil)
+		}
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err
@@ -73,7 +76,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 			r := &results[j]
 			r.Index = j
 			r.Ref = input.Ref
-			if input.Ref == "" || input.ExpectedRevision < 0 {
+			if input.Invalid || input.Ref == "" || input.ExpectedRevision < 0 {
 				moveBatchRefusal(r, api.NewError(400, "validation", "ref must be nonempty and expected_revision must be nonnegative", "", nil))
 				continue
 			}
