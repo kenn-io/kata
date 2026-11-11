@@ -19,25 +19,26 @@ import (
 	"go.kenn.io/kit/embedlocal"
 )
 
-func TestApplySharedEmbeddingChoiceKeepsConfiguredProvider(t *testing.T) {
+func TestApplySharedEmbeddingChoice(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	require.NoError(t, embedlocal.RecordChoice())
 	configured := config.EmbeddingsConfig{BaseURL: "https://embeddings.example/v1", Model: "example-model", Dims: 1024}
-	got, err := applySharedEmbeddingChoice(t.Context(), configured)
-	require.NoError(t, err)
-	require.Equal(t, configured, got)
-}
-
-func TestApplySharedEmbeddingChoiceResetsIncompatibleRecipe(t *testing.T) {
-	clearLocalEmbeddingsEnv(t)
-	require.NoError(t, embedlocal.RecordChoice())
-	current := config.EmbeddingsConfig{
-		Dims: 1024, DocumentPrefix: "document prefix", DocumentSuffix: "document suffix",
-		QueryPrefix: "query prefix", QuerySuffix: "query suffix", FingerprintSalt: "salt", RequestDimensions: true,
+	for _, tc := range []struct {
+		name          string
+		current, want config.EmbeddingsConfig
+	}{
+		{name: "configured provider", current: configured, want: configured},
+		{name: "incompatible recipe", current: config.EmbeddingsConfig{
+			Dims: 1024, DocumentPrefix: "document prefix", DocumentSuffix: "document suffix",
+			QueryPrefix: "query prefix", QuerySuffix: "query suffix", FingerprintSalt: "salt", RequestDimensions: true,
+		}, want: config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := applySharedEmbeddingChoice(t.Context(), tc.current)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
 	}
-	got, err := applySharedEmbeddingChoice(t.Context(), current)
-	require.NoError(t, err)
-	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
 }
 
 func TestLocalEmbeddingsSetup(t *testing.T) {

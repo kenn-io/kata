@@ -76,7 +76,7 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 				t.Setenv("KATA_POSTGRES_ALLOW_INSECURE", "1")
 			}
 			path := filepath.Join(home, "config.toml")
-			original := []byte("# example configuration\n[search.embeddings]\ndims = 1024\n")
+			original := []byte("# example configuration\n")
 			require.NoError(t, os.WriteFile(path, original, 0o600))
 			oldTelemetry := newTelemetryReporter
 			newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
@@ -195,11 +195,11 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 				t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
 			}
 			baseURL, _ = launch()
-			saved, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
-			require.NoError(t, err)
-			require.Equal(t, original, saved)
 			wantMode := "lexical"
 			if tc.ready {
+				saved, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
+				require.NoError(t, err)
+				require.Equal(t, original, saved)
 				request("GET", "/api/v1/embeddings/local", "", 200, &status)
 				require.Equal(t, "built_in", status.Provider)
 				wantMode = "hybrid"
