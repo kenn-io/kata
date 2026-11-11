@@ -64,6 +64,34 @@ describe('ProjectSyncStatus', () => {
     },
   )
 
+  it('refreshes after returning to a project while an older read is in flight', async () => {
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    let finish!: (result: Response) => void
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            finish = resolve
+          }),
+      )
+      .mockResolvedValueOnce(response(7, projectUID, 0))
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Pending: 2')
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    hidden.mockReturnValue(true)
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    hidden.mockReturnValue(false)
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    finish(response())
+    await screen.findByText('Pending: 0')
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
   it('skips a cycle while a read is in progress', async () => {
     let finish!: (result: Response) => void
     const fetcher = vi.fn().mockImplementationOnce(

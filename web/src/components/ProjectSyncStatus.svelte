@@ -35,15 +35,24 @@
     const [id, uid] = untrack(() => [projectID, projectUID] as const)
     let current: AbortController | undefined
     let disposed = false
+    // A cycle that arrives during a background read, such as the one sent when
+    // the tab becomes visible again, can be newer than that read. Run it once
+    // the read settles instead of waiting for the next cycle. A read that shows
+    // the loading state has nothing older on screen, so it skips the cycle.
+    let pending = false
     resetView()
 
     async function read(manual = false): Promise<void> {
       if (document.hidden) return
       if (current) {
-        if (!manual) return
+        if (!manual) {
+          pending ||= !loading
+          return
+        }
         current.abort()
         current = undefined
       }
+      pending = false
       loading = manual || (loading && !error)
       reading = true
       const abort = new AbortController()
@@ -55,8 +64,13 @@
         if (disposed) return
         loading = false
         reading = false
+        if (pending) {
+          pending = false
+          void read()
+        }
       }
       const timeout = setTimeout(() => {
+        pending = false
         status = undefined
         error = true
         abort.abort()
