@@ -56,6 +56,18 @@ func TestAdapterPreflightsAllSteps(t *testing.T) {
 	require.Zero(t, adapter.launches)
 }
 
+func TestAdapterRejectsUnknownWorkflowVersion(t *testing.T) {
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	workflow := adapterWorkflow(t, api.CronWorkflowStep{Key: "literal", Kind: "argv", Argv: []string{executable, "-test.run=^TestAdapterArgvChild$", "--"}})
+	workflow.Version = 2
+	adapter := exampleAdapter{supportsArgv: true, dir: t.TempDir()}
+	outcome := adapter.run(t.Context(), workflow)
+	require.Equal(t, "failed", outcome.status)
+	require.Zero(t, adapter.admissions)
+	require.Zero(t, adapter.launches)
+}
+
 func TestAdapterMissingProgramDoesNotRetry(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "missing-program")
