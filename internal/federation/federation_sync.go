@@ -542,6 +542,10 @@ func syncDirectSpoke(
 	}
 	defer func() {
 		if pushErr != nil {
+			if resultErr == nil {
+				resultErr = pushErr
+				return
+			}
 			resultErr = errors.Join(pushErr, resultErr)
 			resultErr = errors.Join(resultErr, store.RecordFederationSyncError(ctx, binding.ProjectID, resultErr, time.Now().UTC()))
 		}
