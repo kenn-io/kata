@@ -153,8 +153,7 @@ health check. Inspect sync timestamps and pending work before treating the
 replicas as caught up. Use `--agent` for concise agent output, or `--json` when
 a script needs the full diagnostics. The web project's sync summary refreshes
 its recorded state every 30 seconds while the tab is visible and when you return.
-A temporary failure leaves the last summary with a stale warning. Use **Refresh
-sync** to read it now or retry after a permanent error.
+Use **Refresh sync** to read it now.
 
 To bind a workspace to the replica after connection, run
 `kata init --project shared-replica` in that workspace. In identity mode, use an

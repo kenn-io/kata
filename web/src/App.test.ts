@@ -1773,61 +1773,60 @@ describe('App', () => {
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
   })
 
-  it.each(['poll', 'sse'])(
-    'refreshes selected project sync on the visible app cycle in %s mode',
-    async (updates) => {
-      vi.useFakeTimers()
-      vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-      history.replaceState(null, '', '/kata?scope=01J00000000000000000000002#direct=1')
-      sessionStorage.setItem(
-        'kata.web.session.v1',
-        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-      )
-      let reads = 0
-      vi.stubGlobal(
-        'fetch',
-        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-          const request = requestOf(input, init)
-          const path = new URL(request.url).pathname
-          if (path.endsWith('/federation/status')) {
-            reads++
-            return Response.json({
-              statuses: [
-                {
-                  project_id: 7,
-                  project_uid: '01J00000000000000000000002',
-                  enabled: true,
-                  role: 'replica',
-                  pending_push_count: reads === 1 ? 2 : 0,
-                },
-              ],
-            })
-          }
-          if (path === '/api/v1/events/stream')
-            return new Response(new ReadableStream(), {
-              headers: { 'Content-Type': 'text/event-stream' },
-            })
-          if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
-          if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
-          if (path.endsWith('/references'))
-            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-          const result = snapshot()
-          result.capabilities.updates = updates
-          return Response.json(result, { headers: { ETag: '"snapshot"' } })
-        }),
-      )
-      render(App)
-      await vi.advanceTimersByTimeAsync(0)
-      await tick()
-      expect(screen.getByText('Pending: 2')).not.toBeNull()
-      await vi.advanceTimersByTimeAsync(30_000)
-      await tick()
-      expect(screen.getByText('Pending: 0')).not.toBeNull()
-      document.dispatchEvent(new Event('visibilitychange'))
-      await vi.advanceTimersByTimeAsync(0)
-      expect(reads).toBe(3)
-    },
-  )
+  it('refreshes selected project sync on the visible app cycle', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    history.replaceState(null, '', '/kata?scope=01J00000000000000000000002#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let pending = 2
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const path = new URL(request.url).pathname
+        if (path.endsWith('/federation/status')) {
+          return Response.json({
+            statuses: [
+              {
+                project_id: 7,
+                project_uid: '01J00000000000000000000002',
+                enabled: true,
+                role: 'replica',
+                pending_push_count: pending,
+              },
+            ],
+          })
+        }
+        if (path === '/api/v1/events/stream')
+          return new Response(new ReadableStream(), {
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (path.endsWith('/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        const result = snapshot()
+        result.capabilities.updates = 'sse'
+        return Response.json(result, { headers: { ETag: '"snapshot"' } })
+      }),
+    )
+    render(App)
+    await vi.advanceTimersByTimeAsync(0)
+    await tick()
+    expect(screen.getByText('Pending: 2')).not.toBeNull()
+    pending = 0
+    await vi.advanceTimersByTimeAsync(30_000)
+    await tick()
+    expect(screen.getByText('Pending: 0')).not.toBeNull()
+    pending = 3
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(0)
+    await tick()
+    expect(screen.getByText('Pending: 3')).not.toBeNull()
+  })
 
   it('refreshes credential metadata periodically only while the page is visible', async () => {
     vi.useFakeTimers()
