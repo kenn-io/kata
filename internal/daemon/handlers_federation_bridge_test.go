@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -249,6 +250,19 @@ func TestRelayHTTPTransportPrefixAndRevocation(t *testing.T) {
 		envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{Version: 1, BindingUID: grant.Enrollment.RelayBindingUID, ProjectUID: f.private.UID, AuthorityUID: store.InstanceUID(), SenderInstanceUID: grant.Enrollment.SpokeInstanceUID, ReceiverInstanceUID: store.InstanceUID(), Epoch: 1, Sequence: 15, Stream: db.RelayStreamEvent, Path: []string{event.OriginInstanceUID, grant.Enrollment.SpokeInstanceUID}, SourceUID: event.EventUID, SourceHash: event.ContentHash, Body: body})
 		require.NoError(t, err)
 		batch := db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}}
+		held := event
+		held.Type = "cron.workflow.created"
+		held.Payload = jsontext.Value(`{"definition":null}`)
+		held.ContentHash, err = db.RemoteEventContentHash(held)
+		require.NoError(t, err)
+		heldBody, err := db.EncodeRelaySourceEvent(held)
+		require.NoError(t, err)
+		heldEnvelope := envelope
+		heldEnvelope.Body, heldEnvelope.SourceHash = heldBody, held.ContentHash
+		heldEnvelope, err = db.SealRelayEnvelope(heldEnvelope)
+		require.NoError(t, err)
+		status, _, raw = f.request(t, http.MethodPost, base+":accept", "", db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{heldEnvelope}}, headers)
+		require.Equal(t, http.StatusConflict, status, string(raw))
 		status, _, raw = f.request(t, http.MethodPost, base+":accept", "", batch, headers)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var accepted db.RelayAcceptance

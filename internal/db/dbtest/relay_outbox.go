@@ -1,7 +1,9 @@
 package dbtest
 
 import (
+	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -32,6 +34,33 @@ func RunRelayOutboxAtomicity(t *testing.T, store db.Storage) {
 	comment, commentEvent, err := store.CreateComment(writeCtx, db.CreateCommentParams{IssueID: issue.ID, Author: "comment-assistant", Body: "Queued comment", Teammate: "reviewer"})
 	require.NoError(t, err)
 	_ = comment
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+		QueryRowContext(context.Context, string, ...any) *sql.Row
+	})
+	featureEvent := argvCompatRemoteWorkflow(t, project, store.InstanceUID(), `{"steps":[{"kind":"argv","argv":["true"]}]}`)
+	insertFeature := func() {
+		_, err := q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, featureEvent.EventUID, store.InstanceUID(), project.ID, project.Name, featureEvent.Type, "worker", string(featureEvent.Payload), featureEvent.HLCPhysicalMS, 0, featureEvent.ContentHash)
+		require.NoError(t, err)
+	}
+	removeFeature := func() {
+		_, err := q.ExecContext(ctx, `DELETE FROM events WHERE uid=$1`, featureEvent.EventUID)
+		require.NoError(t, err)
+	}
+	peerCtx := db.WithRelayPeerFeatures(ctx, grant.Enrollment.RelayBindingUID, "")
+	insertFeature()
+	_, err = store.PendingRelayDeliveries(peerCtx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 1)
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	_, err = store.AcceptRelayDeliveries(peerCtx, grant.Enrollment.RelayBindingUID, db.RelayBatch{Stream: db.RelayStreamEvent})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	var emittedCursor, acceptedCursor int64
+	require.NoError(t, q.QueryRowContext(ctx, `SELECT COALESCE(MAX(emitted_through),0),COALESCE(MAX(accepted_through),0) FROM federation_relay_cursors WHERE binding_uid=$1 AND stream=$2`, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent).Scan(&emittedCursor, &acceptedCursor))
+	require.Zero(t, emittedCursor)
+	require.Zero(t, acceptedCursor)
+	var emitted int
+	require.NoError(t, q.QueryRowContext(ctx, `SELECT COUNT(*) FROM federation_relay_outbox WHERE binding_uid=$1 AND emitted=1`, grant.Enrollment.RelayBindingUID).Scan(&emitted))
+	require.Zero(t, emitted)
+	removeFeature()
 	first, err := store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 1)
 	require.NoError(t, err)
 	require.Len(t, first, 1)
@@ -45,6 +74,15 @@ func RunRelayOutboxAtomicity(t *testing.T, store db.Storage) {
 	require.Equal(t, first, retry)
 	require.Error(t, store.AckRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, 1, db.RelayStreamEvent, first[0].Sequence+100, "arbitrary"), "cannot acknowledge an unoffered maximum")
 	require.Error(t, store.AckRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, 2, db.RelayStreamEvent, first[0].Sequence, first[0].Digest), "stale/wrong epoch cannot advance")
+	insertFeature()
+	require.ErrorIs(t, store.AckRelayDeliveries(peerCtx, grant.Enrollment.RelayBindingUID, 1, db.RelayStreamEvent, first[0].Sequence, first[0].Digest), db.ErrUnsupportedEventFeatures)
+	var acknowledged int
+	require.NoError(t, q.QueryRowContext(ctx, `SELECT COUNT(*) FROM federation_relay_outbox WHERE binding_uid=$1 AND acknowledged=1`, grant.Enrollment.RelayBindingUID).Scan(&acknowledged))
+	require.Zero(t, acknowledged)
+	var acknowledgedCursor int64
+	require.NoError(t, q.QueryRowContext(ctx, `SELECT COALESCE(MAX(acknowledged_through),0) FROM federation_relay_cursors WHERE binding_uid=$1 AND stream=$2`, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent).Scan(&acknowledgedCursor))
+	require.Zero(t, acknowledgedCursor)
+	removeFeature()
 	require.NoError(t, store.AckRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, 1, db.RelayStreamEvent, first[0].Sequence, first[0].Digest))
 	require.NoError(t, store.AckRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, 1, db.RelayStreamEvent, first[0].Sequence, first[0].Digest), "lost ack reply is idempotent")
 	second, err := store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 1)

@@ -61,17 +61,6 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 		if err != nil {
 			return err
 		}
-		for _, envelope := range batch.Envelopes {
-			if err := db.ValidateRelayEnvelope(authority, envelope); err != nil {
-				return err
-			}
-			if err := checkPushPath(envelope.Path); err != nil {
-				return err
-			}
-			if err := db.CheckRelayBatchFeatures(db.RelayBatch{Stream: batch.Stream, Envelopes: []db.RelayEnvelope{envelope}}, db.SupportedEventFeatures); err != nil {
-				return err
-			}
-		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO federation_relay_cursors(project_uid,binding_uid,stream,reset_epoch) VALUES(?,?,?,?) ON CONFLICT(binding_uid,stream,reset_epoch) DO NOTHING`, projectUID, bindingUID, batch.Stream, grant.RelayResetEpoch); err != nil {
 			return err
 		}
@@ -112,6 +101,9 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 				return err
 			}
 			if err := checkPushPath(envelope.Path); err != nil {
+				return err
+			}
+			if err := db.CheckRelayBatchFeatures(db.RelayBatch{Stream: batch.Stream, Envelopes: []db.RelayEnvelope{envelope}}, db.SupportedEventFeatures); err != nil {
 				return err
 			}
 			var retained string

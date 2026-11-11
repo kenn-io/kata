@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
 )
 
 // CheckRelayProjectFeatures gates a specific authenticated hop before relay state changes.
@@ -36,11 +37,14 @@ func CheckRelayBatchFeatures(batch RelayBatch, supported string) error {
 		if err != nil {
 			return err
 		}
-		required, err := PayloadRequiredFeatures(source.Type, string(source.Payload))
-		if err != nil {
-			return err
+		if !workflowDefinitionEvent(source.Type) {
+			continue
 		}
-		if RequireEventFeatures(required, CronWorkflowArgvEventFeature) == nil {
+		argv, held := retainedWorkflowEvidence(source.Type, string(source.Payload))
+		if held {
+			return fmt.Errorf("%w: held workflow definition", ErrUnsupportedEventFeatures)
+		}
+		if argv {
 			if err := RequireEventFeatures(supported, CronWorkflowArgvEventFeature); err != nil {
 				return err
 			}
