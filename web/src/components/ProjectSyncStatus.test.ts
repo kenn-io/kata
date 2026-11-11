@@ -36,6 +36,49 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 describe('ProjectSyncStatus', () => {
+  it('keeps the current summary visible while a background read is in flight', async () => {
+    let resolveRead!: (value: Response) => void
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveRead = resolve
+          }),
+      )
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Pending: 2')
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    expect(screen.getByText('Pending: 2')).not.toBeNull()
+    expect(screen.queryByText('Reading sync status…')).toBeNull()
+    resolveRead(response())
+  })
+
+  it('shows loading for a manual refresh', async () => {
+    let resolveRead!: (value: Response) => void
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveRead = resolve
+          }),
+      )
+    setGeneratedFetch(fetcher)
+    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
+    await screen.findByText('Pending: 2')
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh sync' }))
+    expect(screen.getByText('Reading sync status…')).not.toBeNull()
+    expect(screen.queryByText('Pending: 2')).toBeNull()
+    resolveRead(response())
+    await screen.findByText('Pending: 2')
+  })
+
   it('refreshes after returning while an older read is in flight', async () => {
     let resolveSlow!: (value: Response) => void
     const fetcher = vi

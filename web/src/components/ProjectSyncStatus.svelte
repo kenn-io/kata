@@ -11,10 +11,12 @@
   let { projectID, projectUID, refreshGeneration = 0 }: Props = $props()
   let status = $state<FederationProjectStatus>()
   let loading = $state(true)
+  let reading = $state(false)
   let error = $state(false)
   let stale = $state(false)
+  let hasResult = false
   let queued = false
-  let refresh: (() => void) | undefined
+  let refresh: ((manual?: boolean) => void) | undefined
   let identity = $derived(`${projectID}:${projectUID}`)
   let counts = $derived.by(() => {
     const result: Record<string, number> = {}
@@ -30,6 +32,8 @@
     loading = true
     error = false
     stale = false
+    reading = false
+    hasResult = false
     queued = false
   }
 
@@ -46,15 +50,15 @@
     let disposed = false
     resetView()
 
-    async function read(): Promise<void> {
+    async function read(manual = false): Promise<void> {
       if (document.hidden) return
       if (current) {
         queued = true
         return
       }
       error = false
-      stale = false
-      loading = true
+      loading = manual || !hasResult
+      reading = true
       const abort = new AbortController()
       current = abort
       const finish = () => {
@@ -63,10 +67,12 @@
         current = undefined
         if (disposed) return
         loading = false
+        reading = false
         runQueued()
       }
       const timeout = setTimeout(() => {
         status = undefined
+        hasResult = false
         error = true
         abort.abort()
         finish()
@@ -74,20 +80,26 @@
       abort.signal.addEventListener('abort', () => clearTimeout(timeout), { once: true })
       try {
         const result = await readProjectSync(id, uid, abort.signal, status, () => {
-          if (!abort.signal.aborted && !disposed) status = undefined
+          if (!abort.signal.aborted && !disposed) {
+            status = undefined
+            hasResult = false
+            loading = true
+          }
         })
         if (abort.signal.aborted || disposed) return
         ;({ status, stale } = result)
+        hasResult = true
       } catch {
         if (!abort.signal.aborted && !disposed) {
           status = undefined
+          hasResult = false
           error = true
         }
       } finally {
         finish()
       }
     }
-    refresh = () => void read()
+    refresh = (manual) => void read(manual)
     return () => {
       disposed = true
       current?.abort()
@@ -103,7 +115,7 @@
   })
 </script>
 
-<section class="project-sync" aria-label="Project sync" aria-busy={loading}>
+<section class="project-sync" aria-label="Project sync" aria-busy={reading}>
   <strong>Project sync</strong>
   {#if loading}
     <span role="status">Reading sync status…</span>
@@ -113,7 +125,7 @@
     <span>Local project</span>
   {:else}
     <span>{status.enabled ? status.role : 'Sync disabled'}</span>
-    {#if stale}<span role="status">Sync status may be out of date.</span>{/if}
+    {#if stale}<span class="stale" role="status">Sync status may be out of date.</span>{/if}
     <span>Pending: {status.pending_push_count}</span>
     {#if status.last_successful_sync_at}
       <span
@@ -143,7 +155,9 @@
       >
     {/if}
   {/if}
-  <button type="button" disabled={loading} onclick={() => refresh?.()}>Refresh sync</button>
+  <button type="button" disabled={loading || reading} onclick={() => refresh?.(true)}
+    >Refresh sync</button
+  >
 </section>
 
 <style>
@@ -161,6 +175,13 @@
   }
   .project-sync span {
     min-width: 0;
+  }
+  .stale {
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--accent-amber) 14%, transparent);
+    color: var(--accent-amber);
+    padding: var(--space-1) var(--space-2);
+    font-weight: var(--font-weight-semibold);
   }
   button {
     color: var(--text-primary);
