@@ -187,7 +187,7 @@ func (w *WebhookClient) destinationAddresses(ctx context.Context, u *url.URL) ([
 
 func privateWebhookHostname(host string) bool {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	for _, suffix := range []string{"internal", "home.arpa"} {
+	for _, suffix := range []string{"internal", "home.arpa", "local"} {
 		if host == suffix || strings.HasSuffix(host, "."+suffix) {
 			return true
 		}
@@ -204,7 +204,7 @@ func validWebhookHostname(host string) bool {
 	if len(labels) < 2 {
 		return false
 	}
-	for _, suffix := range []string{"localhost", "local"} {
+	for _, suffix := range []string{"localhost"} {
 		if host == suffix || strings.HasSuffix(host, "."+suffix) {
 			return false
 		}

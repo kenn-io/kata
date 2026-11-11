@@ -1083,8 +1083,8 @@ CIDRs, zones or hostnames in `addresses`.
 An origin includes the scheme, hostname and optional port. The default
 HTTPS port `:443` equals an omitted port. Hostname case is ignored.
 Origins cannot contain credentials, wildcards, non-root paths, queries or
-fragments. Exact pinned `.internal` and `home.arpa` names are permitted; `localhost`
-and `.local` remain forbidden.
+fragments. Exact pinned `.internal`, `home.arpa`, and `.local` names are permitted;
+`localhost` remains forbidden.
 Duplicate origins or addresses within an entry disable Events. A private
 literal-IP origin must pin only that same IP.
 

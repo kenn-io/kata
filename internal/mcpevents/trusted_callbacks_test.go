@@ -43,7 +43,7 @@ func TestTrustedCallbackPolicyConfiguration(t *testing.T) {
 			t.Errorf("valid pin %s: %v", pin, err)
 		}
 	}
-	for _, origin := range []string{"https://events.corp.internal", "https://events.home.arpa"} {
+	for _, origin := range []string{"https://events.corp.internal", "https://events.home.arpa", "https://receiver.local"} {
 		policy, err := CompileTrustedCallbacks([]config.MCPEventsTrustedCallback{{Origin: origin, Addresses: []string{"10.0.0.1"}}})
 		if err != nil {
 			t.Fatalf("valid origin %s: %v", origin, err)

@@ -245,7 +245,7 @@ func TestWebhookValidationBeforeNetwork(t *testing.T) {
 		return nil, errors.New("secret callback details")
 	}})
 	key := fixtureSecret(1, 32)
-	for _, callback := range []string{"http://receiver.example/events", "https://user:pass@receiver.example/events", fixtureCallback + "#", fixtureCallback + "#fragment", "https://127.0.0.1/", "https://[::1]/", "https://events.corp.internal/x", "https://events.home.arpa/x", "https://localhost/", "https://2130706433/", "https://receiver.example:0/", "https://receiver.example:65536/"} {
+	for _, callback := range []string{"http://receiver.example/events", "https://user:pass@receiver.example/events", fixtureCallback + "#", fixtureCallback + "#fragment", "https://127.0.0.1/", "https://[::1]/", "https://events.corp.internal/x", "https://events.home.arpa/x", "https://receiver.local/x", "https://localhost/", "https://2130706433/", "https://receiver.example:0/", "https://receiver.example:65536/"} {
 		if _, err := w.Send(t.Context(), callback, "evt", "sub", []byte(`{}`), []string{key}); err == nil {
 			t.Errorf("accepted callback %q", callback)
 		}
