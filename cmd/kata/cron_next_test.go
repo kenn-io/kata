@@ -149,7 +149,6 @@ func TestCronNextParentReadErrors(t *testing.T) {
 			require.ErrorAs(t, err, &got)
 			if code == "issue_not_found" {
 				require.Equal(t, "cron_preview_unavailable", got.Code)
-				require.Contains(t, string(got.Data), `"status":"unavailable"`)
 				require.Contains(t, got.Message, "native parent or stored progress is unavailable")
 			} else {
 				require.Equal(t, code, got.Code)
@@ -178,7 +177,7 @@ func TestCronNextModes(t *testing.T) {
 	require.NoError(t, err)
 	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--project", project.Name, "cron", "job", "next", jobID, "--from", "2091-01-01T00:00:00Z")
 	require.NoError(t, err)
-	require.Equal(t, "Adapter trigger times (UTC, exhausted)\nadapter trigger times do not promise execution\n", out)
+	require.Equal(t, "Adapter trigger times (UTC, exhausted)\n", out)
 	for _, tc := range []struct {
 		name  string
 		flags []string
@@ -197,6 +196,10 @@ func TestCronNextModes(t *testing.T) {
 				require.Empty(t, out)
 			} else {
 				require.Contains(t, out, tc.want)
+			}
+			if tc.name == "json" || tc.name == "agent" {
+				require.Contains(t, out, `"basis":"adapter_trigger"`)
+				require.Contains(t, out, `"definition_event_uid":`)
 			}
 		})
 	}

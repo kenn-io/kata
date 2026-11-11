@@ -29,14 +29,11 @@ type cronNextOccurrence struct {
 type cronNextResult struct {
 	JobUID             string               `json:"job_uid"`
 	DefinitionEventUID string               `json:"definition_event_uid"`
-	ParentRevision     int64                `json:"parent_revision,omitzero"`
 	AsOf               time.Time            `json:"as_of"`
 	Basis              string               `json:"basis"`
 	Timezone           string               `json:"timezone"`
-	Delivery           string               `json:"delivery"`
 	Status             string               `json:"status"`
 	Occurrences        []cronNextOccurrence `json:"occurrences"`
-	Warnings           []string             `json:"warnings"`
 }
 
 func newCronNextCmd() *cobra.Command {
@@ -123,21 +120,19 @@ func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string,
 	}
 	job := envelope.Job
 	def, err := cron.DecodeJob(job.Definition)
-	if err == nil {
-		err = def.ValidateVersion()
-	}
 	if err != nil {
 		return cronNextResult{}, fmt.Errorf("cannot preview saved job with this kata: %w", err)
 	}
 	zone := cron.TriggerLocation(def.Trigger)
-	result := cronNextResult{JobUID: job.UID, DefinitionEventUID: job.DefinitionEventUID, AsOf: from.UTC(), Delivery: "adapter", Basis: "adapter_trigger", Timezone: zone.String(), Status: "ready", Occurrences: []cronNextOccurrence{}, Warnings: []string{}}
+	result := cronNextResult{JobUID: job.UID, DefinitionEventUID: job.DefinitionEventUID, AsOf: from.UTC(), Basis: "adapter_trigger", Timezone: zone.String(), Status: "ready", Occurrences: []cronNextOccurrence{}}
 	native := cron.IsRecurringIssueJob(def)
 	if native {
-		result.Delivery, result.Basis = "daemon", "stored_progress"
-	} else {
-		result.Warnings = append(result.Warnings, "adapter trigger times do not promise execution")
+		result.Basis = "stored_progress"
 	}
 	if job.DeletedAt != nil {
+		if err := def.ValidateVersion(); err != nil {
+			return cronNextResult{}, fmt.Errorf("cannot preview saved job with this kata: %w", err)
+		}
 		result.Status = "deleted"
 		return result, nil
 	}
@@ -151,7 +146,6 @@ func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string,
 				return result, mapped
 			}
 		} else {
-			result.ParentRevision = p.Revision
 			parent = &cron.PreviewParent{Open: p.Status == "open" && p.DeletedAt == nil}
 			if progress, err := cron.DecodeRecurringProgress(p.Metadata[recurrenceclient.CronProgressPrefix+job.UID]); err == nil {
 				parent.Progress = &progress
@@ -166,16 +160,9 @@ func readCronNext(a daemonAPI, c *kataclient.Client, projectID int64, id string,
 	if preview.Status == "unavailable" || preview.Status == "unsupported" {
 		reason := "native parent or stored progress is unavailable"
 		if preview.Status == "unsupported" {
-			result.Basis = "adapter_defined"
 			reason = "this adapter trigger cannot be previewed"
 		}
-		result.Status = "unavailable"
-		result.Warnings = append(result.Warnings, reason)
-		raw, err := json.Marshal(result)
-		if err != nil {
-			return cronNextResult{}, err
-		}
-		return result, &cliError{Kind: kindValidation, Code: "cron_preview_unavailable", ExitCode: ExitValidation, Message: "cron preview unavailable: " + reason, Data: raw}
+		return result, &cliError{Kind: kindValidation, Code: "cron_preview_unavailable", ExitCode: ExitValidation, Message: "cron preview unavailable: " + reason}
 	}
 	for _, at := range preview.Times {
 		result.Occurrences = append(result.Occurrences, cronNextOccurrence{At: at.UTC(), Local: at.In(zone).Format(time.RFC3339Nano)})
@@ -191,7 +178,7 @@ func emitCronNext(cmd *cobra.Command, result cronNextResult) error {
 		return nil
 	}
 	label := "Next native occurrences"
-	if result.Delivery == "adapter" {
+	if result.Basis == "adapter_trigger" {
 		label = "Adapter trigger times"
 	}
 	lines := []string{fmt.Sprintf("%s (%s, %s)", label, result.Timezone, result.Status)}
@@ -201,7 +188,6 @@ func emitCronNext(cmd *cobra.Command, result cronNextResult) error {
 	for _, occurrence := range result.Occurrences {
 		lines = append(lines, "  "+occurrence.Local)
 	}
-	lines = append(lines, result.Warnings...)
 	_, err := fmt.Fprintln(cmd.OutOrStdout(), strings.Join(lines, "\n"))
 	return err
 }
