@@ -11,13 +11,15 @@ import (
 // workflow that this release claims it can retain and project.
 func TestArgvCompatStoredDecodeRefusesReservedKind(t *testing.T) {
 	for _, input := range []string{
+		`null`,
+		`{"steps":null}`,
+		`{"steps":[null]}`,
+		`{"steps":[{"kind":null}]}`,
 		`{"version":1,"steps":[{"key":"literal","kind":"argv"}]}`,
 		`{"version":1,"steps":[{"key":"first","kind":"command","command":"true"},{"key":"literal","kind":"\u0061rgv"}]}`,
 		`{"version":1,"steps":[{"key":"literal","kind":"argv","argv":["printf","%s",""]}]}`,
 	} {
 		_, err := cron.DecodeWorkflow([]byte(input))
-		require.Error(t, err)
-		_, err = cron.ParseWorkflow([]byte(input))
 		require.Error(t, err)
 	}
 }

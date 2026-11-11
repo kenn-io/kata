@@ -43,10 +43,10 @@ func TestCronReferenceOperationalErrorChains(t *testing.T) {
 			}
 			for _, scan := range []bool{false, true} {
 				script := &faultsql.Script{Query: func(int64) (driver.Rows, error) {
-					rows := &faultsql.Rows{Names: []string{"project", "event"}, Err: context.Canceled}
+					rows := &faultsql.Rows{Names: []string{"project", "event", "definition"}, Err: context.Canceled}
 					if scan {
 						rows.Err = nil
-						rows.Values = [][]driver.Value{{"invalid integer", version}}
+						rows.Values = [][]driver.Value{{"invalid integer", version, "{}"}}
 					}
 					return rows, nil
 				}}
