@@ -20,7 +20,7 @@ func CronDefinitionSnapshots(ctx context.Context, tx *sql.Tx, project Project) (
 	if err != nil {
 		return nil, err
 	}
-	workflows, err := query.Workflows(ctx, CronList{ProjectID: project.ID, IncludeDeleted: true})
+	workflows, err := query.workflows(ctx, CronList{ProjectID: project.ID, IncludeDeleted: true}, true)
 	if err != nil {
 		return nil, err
 	}
