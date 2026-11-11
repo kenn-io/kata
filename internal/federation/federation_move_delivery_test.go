@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
@@ -115,6 +116,73 @@ func TestSyncFederationMoveBackKeepsCompletedLocalReplaySilent(t *testing.T) {
 	local, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, spoke.projects[0].ID, local.ProjectID)
+}
+
+func TestSyncFederationMoveResetDeliversLocalReplayOnceAcrossBindings(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects)
+	issue, created, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: spoke.projects[0].ID, Title: "Local issue", Author: "worker",
+	})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	hubEvents, err := hub.DB.EventsByUIDs(ctx, projects[0].ID, []string{created.UID})
+	require.NoError(t, err)
+	require.Len(t, hubEvents, 1)
+	originalHubID := hubEvents[0].ID
+	source, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, source.PullCursorEventID, originalHubID)
+
+	current, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	moved, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: current.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: current.Revision, Actor: "worker",
+	})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 1))
+	destination, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[1].ID)
+	require.NoError(t, err)
+	require.NoError(t, spoke.env.DB.ResetFederatedProject(ctx, destination.ProjectID, destination.ReplayHorizonEventID, moved.EventID-1))
+
+	pull := func(project int) (int, error) {
+		t.Helper()
+		binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[project].ID)
+		require.NoError(t, err)
+		delivered := 0
+		err = SyncFederationPullOnlyOnceWithPulledEvents(ctx, spoke.env.DB, binding, spoke.credentials[projects[project].UID], clientpkg.Opts{}, func(_ int64, events []db.Event) {
+			for _, event := range events {
+				if event.UID == created.UID {
+					delivered++
+				}
+			}
+		}, spoke.credentials)
+		return delivered, err
+	}
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "during_spoke_pull_apply_before_materialize=unexpected")
+	delivered, err := pull(1)
+	require.ErrorContains(t, err, "during_spoke_pull_apply_before_materialize")
+	require.Zero(t, delivered)
+	_, err = spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	retained, err := spoke.env.DB.EventsByUIDs(ctx, source.ProjectID, []string{created.UID})
+	require.NoError(t, err)
+	require.Len(t, retained, 1, "the destination replay restored the original envelope before failing")
+	require.Greater(t, retained[0].ID, source.PushCursorEventID)
+
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
+	delivered, err = pull(1)
+	require.NoError(t, err)
+	assert.Equal(t, 1, delivered, "the interrupted destination replay owes delivery despite the source cursor")
+	local, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, destination.ProjectID, local.ProjectID)
+
+	require.NoError(t, spoke.env.DB.ResetFederatedProject(ctx, source.ProjectID, originalHubID, originalHubID-1))
+	delivered, err = pull(0)
+	require.NoError(t, err)
+	assert.Zero(t, delivered, "source catch-up must not deliver the destination replay again")
 }
 
 func TestSyncFederationUnsyncedCreateRoundTrip(t *testing.T) {

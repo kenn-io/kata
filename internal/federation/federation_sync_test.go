@@ -1810,12 +1810,14 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 	require.NoError(t, err)
 	legacy := recovery == "upgrade" || recovery == "legacy-backup"
 	var earlier api.EventEnvelope
+	var earlierIssue db.Issue
 	if legacy {
-		_, event, err := spoke.CreateIssue(ctx, db.CreateIssueParams{
+		createdIssue, event, err := spoke.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Completed reset page", Author: "tester",
 		})
 		require.NoError(t, err)
 		earlier = eventEnvelopeForSyncTest(event, 100)
+		earlierIssue = createdIssue
 	}
 	issue, localEvent, err := spoke.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID,
@@ -1826,14 +1828,24 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 	lastID := int64(100)
 	acknowledged := localEvent.ID
 	var laterPage []api.EventEnvelope
+	var earlierIssueCommentUID string
 	if legacy {
 		_, comment, err := spoke.CreateComment(ctx, db.CreateCommentParams{
 			IssueID: issue.ID, Body: "Comment before reset", Author: "tester",
 		})
 		require.NoError(t, err)
-		acknowledged = comment.ID
-		lastID = 102
-		laterPage = []api.EventEnvelope{eventEnvelopeForSyncTest(localEvent, 101), eventEnvelopeForSyncTest(comment, lastID)}
+		commentOnEarlierIssue, earlierIssueComment, err := spoke.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: earlierIssue.ID, Body: "Comment on the earlier page's issue", Author: "tester",
+		})
+		require.NoError(t, err)
+		earlierIssueCommentUID = commentOnEarlierIssue.UID
+		acknowledged = earlierIssueComment.ID
+		lastID = 103
+		laterPage = []api.EventEnvelope{
+			eventEnvelopeForSyncTest(localEvent, 101),
+			eventEnvelopeForSyncTest(comment, 102),
+			eventEnvelopeForSyncTest(earlierIssueComment, lastID),
+		}
 	}
 	envelope := eventEnvelopeForSyncTest(localEvent, 100)
 	binding, err := spoke.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -1936,6 +1948,11 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		require.ErrorIs(t, err, db.ErrNotFound, "reopening preserves the interrupted projection")
 	}
 	if legacy {
+		_, err := spoke.IssueByUID(ctx, earlierIssue.UID, db.IncludeDeletedYes)
+		require.NoError(t, err, "the earlier page's issue is already projected")
+		commentIssueIDs, err := spoke.CommentIssueIDsByUIDs(ctx, []string{earlierIssueCommentUID})
+		require.NoError(t, err)
+		require.Empty(t, commentIssueIDs, "the later page's comment has not been projected")
 		status, err := spoke.FederationSyncStatusByProject(ctx, project.ID)
 		require.NoError(t, err)
 		require.NotNil(t, status.LastPullStartedAt)
@@ -1964,7 +1981,12 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		for _, event := range delivered {
 			deliveredUIDs = append(deliveredUIDs, event.UID)
 		}
-		require.ElementsMatch(t, []string{laterPage[0].EventUID, laterPage[1].EventUID}, deliveredUIDs)
+		earlier, err := spoke.IssueByUID(ctx, earlierIssue.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		commentIssueIDs, err := spoke.CommentIssueIDsByUIDs(ctx, []string{earlierIssueCommentUID})
+		require.NoError(t, err)
+		assert.Equal(t, earlier.ID, commentIssueIDs[earlierIssueCommentUID], "retry projects the later comment on the existing issue")
+		assert.ElementsMatch(t, []string{laterPage[0].EventUID, laterPage[1].EventUID, laterPage[2].EventUID}, deliveredUIDs)
 		return
 	}
 	require.NotEmpty(t, delivered)
