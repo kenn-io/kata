@@ -43,8 +43,8 @@ func docbankServiceIssue(ctx context.Context, cfg ServerConfig, project db.Proje
 }
 
 func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
-	huma.Register(h, huma.Operation{OperationID: "federatedDocbankCapabilities", Method: http.MethodGet, Path: federatedDocbankPath + "/capabilities"}, func(ctx context.Context, in *api.DocbankServiceRequest) (*api.DocbankServiceCapabilitiesResponse, error) {
-		ctx, project, _, err := authorizeDocbankService(ctx, cfg, *in, "pull,push", "federatedDocbankCapabilities")
+	huma.Register(h, huma.Operation{OperationID: "federatedDocbankCapabilities", Method: http.MethodGet, Path: federatedDocbankPath + "/capabilities"}, func(ctx context.Context, in *api.DocbankCapabilitiesRequest) (*api.DocbankServiceCapabilitiesResponse, error) {
+		ctx, project, _, err := authorizeDocbankService(ctx, cfg, in.DocbankServiceRequest, "pull,push", "federatedDocbankCapabilities")
 		if err != nil {
 			return nil, err
 		}
@@ -52,7 +52,7 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		caps, err := docbankOriginCapabilities(ctx, cfg, project, binding)
+		caps, err := docbankOriginCapabilities(ctx, cfg, project, binding, in.Origin)
 		if err != nil {
 			return nil, err
 		}
@@ -85,7 +85,7 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if err := checkDocbankOrigin(cfg, binding, in.Origin); err != nil {
+		if err := checkDocbankOrigin(ctx, cfg, binding, in.Origin); err != nil {
 			return nil, err
 		}
 		var descriptor metadata.Attachment
@@ -117,7 +117,7 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if err := checkDocbankOrigin(cfg, binding, in.Origin); err != nil {
+		if err := checkDocbankOrigin(ctx, cfg, binding, in.Origin); err != nil {
 			return nil, err
 		}
 		var descriptor metadata.Attachment
@@ -167,7 +167,11 @@ func registerFederatedDocbankHandlers(h huma.API, cfg ServerConfig) {
 func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Project, binding *db.FederationBinding, attachment metadata.Attachment) (*http.Response, error) {
 	if binding == nil || binding.Role != db.FederationRoleSpoke {
 		// Only projects without an upstream may use this daemon's Docbank origin.
-		if attachment.Origin != cfg.DB.InstanceUID() {
+		local, err := localAttachmentOrigin(ctx, cfg, attachment.Origin)
+		if err != nil {
+			return nil, err
+		}
+		if !local {
 			return nil, attachmentError(410, "attachment_origin_unavailable")
 		}
 		if cfg.Docbank == nil {
@@ -190,15 +194,19 @@ func originDocbankContent(ctx context.Context, cfg ServerConfig, project db.Proj
 		}
 		return resp, nil
 	}
-	if err := checkDocbankOrigin(cfg, binding, attachment.Origin); err != nil {
+	if err := checkDocbankOrigin(ctx, cfg, binding, attachment.Origin); err != nil {
 		return nil, err
 	}
 	return docbankForwardRequest(ctx, cfg, *binding, http.MethodGet, "versions/"+attachment.DocbankVersion.String()+"/content", url.Values{"project_uid": {project.UID}, "origin": {attachment.Origin}}, nil)
 }
 
-func checkDocbankOrigin(cfg ServerConfig, binding *db.FederationBinding, origin string) error {
+func checkDocbankOrigin(ctx context.Context, cfg ServerConfig, binding *db.FederationBinding, origin string) error {
 	if binding == nil || binding.Role != db.FederationRoleSpoke {
-		if origin != cfg.DB.InstanceUID() {
+		local, err := localAttachmentOrigin(ctx, cfg, origin)
+		if err != nil {
+			return err
+		}
+		if !local {
 			return attachmentError(409, "attachment_origin_mismatch")
 		}
 	} else if binding.RelayConfig != nil && origin != binding.RelayConfig.AuthorityUID {

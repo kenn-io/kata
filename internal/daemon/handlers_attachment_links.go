@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"path"
+	"slices"
 	"strings"
 	"uuid"
 
@@ -64,7 +65,7 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 	return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, attachment, nil)
 }
 
-func attachmentForVersion(iss db.Issue, version docbank.Version, origin, localOrigin string) (string, metadata.Attachment, error) {
+func attachmentForVersion(iss db.Issue, version docbank.Version, origin string, localOrigins []string) (string, metadata.Attachment, error) {
 	var values map[string]jsontext.Value
 	if err := json.Unmarshal([]byte(iss.Metadata), &values); err != nil {
 		return "", metadata.Attachment{}, err
@@ -80,7 +81,7 @@ func attachmentForVersion(iss db.Issue, version docbank.Version, origin, localOr
 		if !valid || attachment.DocbankVersion != version.ID {
 			continue
 		}
-		sameOrigin := attachment.Origin == origin || (origin == "" && attachment.Origin == localOrigin)
+		sameOrigin := attachment.Origin == origin || ((origin == "" || slices.Contains(localOrigins, origin)) && slices.Contains(localOrigins, attachment.Origin))
 		if !sameOrigin {
 			continue
 		}

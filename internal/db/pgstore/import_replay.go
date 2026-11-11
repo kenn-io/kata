@@ -231,7 +231,7 @@ func (s *Store) importReplayRecord(
 		}
 		return replayLinkInserted, pgReplayError(db.ImportKindMCPEventSubscription, db.ReplayMCPEventSubscription(ctx, tx, rec))
 	case *db.MetaKV:
-		return replayLinkInserted, pgReplayMeta(ctx, tx, rec, opts)
+		return replayLinkInserted, pgReplayMeta(ctx, tx, rec, opts, s.instanceUID)
 	case *db.EmbeddingArtifactExport:
 		return replayLinkInserted, importEmbeddingArtifact(ctx, tx, rec)
 	case *db.RootKeyPin:

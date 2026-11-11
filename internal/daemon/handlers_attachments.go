@@ -182,7 +182,11 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 			return nil, attachmentError(400, "attachment_invalid")
 		}
 		var resp *http.Response
-		if e.Origin == "" || e.Origin == cfg.DB.InstanceUID() {
+		local, err := localAttachmentOrigin(ctx, cfg, e.Origin)
+		if err != nil {
+			return nil, err
+		}
+		if e.Origin == "" || local {
 			if cfg.Docbank == nil {
 				return nil, attachmentError(503, "docbank_not_configured")
 			}
@@ -200,7 +204,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 			if binding != nil && binding.Role == db.FederationRoleSpoke {
-				caps, err := docbankOriginCapabilities(ctx, cfg, project, binding)
+				caps, err := docbankOriginCapabilities(ctx, cfg, project, binding, e.Origin)
 				if err != nil {
 					return nil, err
 				}
@@ -245,11 +249,17 @@ func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss 
 		return nil, err
 	}
 	patch := map[string]jsontext.Value{metadata.AttachmentPrefix + id: raw}
+	var localOrigins []string
 	if reuseVersion != nil {
+		localOrigins, err = cfg.DB.FormerInstanceUIDs(ctx)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		localOrigins = append(localOrigins, cfg.DB.InstanceUID())
 		// Recheck under the metadata write transaction so concurrent retries
 		// cannot each observe an absent reference and create a second one.
 		ctx = db.WithMetadataPatchHook(ctx, func(_ context.Context, _ *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
-			existingID, _, err := attachmentForVersion(current, docbank.Version{ID: *reuseVersion}, e.Origin, cfg.DB.InstanceUID())
+			existingID, _, err := attachmentForVersion(current, docbank.Version{ID: *reuseVersion}, e.Origin, localOrigins)
 			if err != nil {
 				return nil, err
 			}
@@ -270,7 +280,7 @@ func saveAttachment(ctx context.Context, cfg ServerConfig, projectID int64, iss 
 		cfg.Publish().Event(res.Event.ProjectID, res.Event)
 	}
 	if reuseVersion != nil {
-		id, e, err = attachmentForVersion(res.Issue, docbank.Version{ID: *reuseVersion}, e.Origin, cfg.DB.InstanceUID())
+		id, e, err = attachmentForVersion(res.Issue, docbank.Version{ID: *reuseVersion}, e.Origin, localOrigins)
 		if err != nil {
 			return nil, internalAPIError(err)
 		}

@@ -35,7 +35,7 @@ func TestDocbankForwardRejectsFormerRouteAfterRebind(t *testing.T) {
 	_, err := store.UpsertFederationBinding(t.Context(), old)
 	require.NoError(t, err)
 	cfg := ServerConfig{DB: store, FederationCredentials: uiCapabilityCredentials{credential: config.FederationCredential{HubURL: former.URL, HubProjectID: 1, Token: "old-token", AllowInsecure: true}}}
-	_, err = docbankOriginCapabilities(t.Context(), cfg, project, &old)
+	_, err = docbankOriginCapabilities(t.Context(), cfg, project, &old, "")
 	require.NoError(t, err)
 	require.Equal(t, []string{"Bearer old-token"}, received)
 

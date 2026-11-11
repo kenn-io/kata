@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,17 @@ import (
 )
 
 const federatedDocbankPath = "/api/v1/projects/{project_id}/federation/docbank"
+
+func localAttachmentOrigin(ctx context.Context, cfg ServerConfig, origin string) (bool, error) {
+	if origin == cfg.DB.InstanceUID() {
+		return true, nil
+	}
+	former, err := cfg.DB.FormerInstanceUIDs(ctx)
+	if err != nil {
+		return false, internalAPIError(err)
+	}
+	return slices.Contains(former, origin), nil
+}
 
 // A disabled replica is still a replica. Never reinterpret it as a new local
 // Docbank origin when an operator suspends its upstream transport.
@@ -39,14 +51,29 @@ func docbankUpstream(ctx context.Context, cfg ServerConfig, projectID int64) (*d
 	return &binding, nil
 }
 
-func docbankOriginCapabilities(ctx context.Context, cfg ServerConfig, project db.Project, binding *db.FederationBinding) (api.DocbankServiceCapabilities, error) {
+func docbankOriginCapabilities(ctx context.Context, cfg ServerConfig, project db.Project, binding *db.FederationBinding, origin string) (api.DocbankServiceCapabilities, error) {
 	if binding == nil || binding.Role != db.FederationRoleSpoke {
 		if cfg.Docbank == nil {
 			return api.DocbankServiceCapabilities{}, attachmentError(503, "docbank_not_configured")
 		}
-		return api.DocbankServiceCapabilities{Version: 1, ProjectUID: project.UID, Origin: cfg.DB.InstanceUID()}, nil
+		if origin == "" {
+			origin = cfg.DB.InstanceUID()
+		} else {
+			local, err := localAttachmentOrigin(ctx, cfg, origin)
+			if err != nil {
+				return api.DocbankServiceCapabilities{}, err
+			}
+			if !local {
+				return api.DocbankServiceCapabilities{}, attachmentError(409, "attachment_origin_mismatch")
+			}
+		}
+		return api.DocbankServiceCapabilities{Version: 1, ProjectUID: project.UID, Origin: origin}, nil
 	}
-	resp, err := docbankForwardRequest(ctx, cfg, *binding, http.MethodGet, "capabilities", url.Values{"project_uid": {project.UID}}, nil)
+	query := url.Values{"project_uid": {project.UID}}
+	if origin != "" {
+		query.Set("origin", origin)
+	}
+	resp, err := docbankForwardRequest(ctx, cfg, *binding, http.MethodGet, "capabilities", query, nil)
 	if err != nil {
 		return api.DocbankServiceCapabilities{}, err
 	}
@@ -228,7 +255,7 @@ func ensureDocbankIssueUpstream(ctx context.Context, cfg ServerConfig, project d
 func forwardDocbankDescriptor(ctx context.Context, cfg ServerConfig, project db.Project, binding *db.FederationBinding, issue db.Issue, result *claimRefreshResult, expectedOrigin, name string, input *api.LinkAttachmentInput, body io.Reader) (metadata.Attachment, error) {
 	origin := expectedOrigin
 	if origin == "" {
-		caps, err := docbankOriginCapabilities(ctx, cfg, project, binding)
+		caps, err := docbankOriginCapabilities(ctx, cfg, project, binding, "")
 		if err != nil {
 			return metadata.Attachment{}, err
 		}

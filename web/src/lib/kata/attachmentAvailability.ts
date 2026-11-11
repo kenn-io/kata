@@ -17,7 +17,7 @@ export function attachmentAvailable(
   route: ReadUIAttachmentRoute200Route | undefined,
   attachment: KataAttachment,
 ): boolean {
-  if (!attachment.origin || attachment.origin === capabilities.attachment_instance_uid) {
+  if (!attachment.origin || capabilities.attachment_local_origins?.includes(attachment.origin)) {
     return Boolean(capabilities.attachments)
   }
   return Boolean(

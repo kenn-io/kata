@@ -14,19 +14,19 @@ const UISnapshotContractVersion = "2"
 
 // UICapabilities describes the browser behavior authorized for this request.
 type UICapabilities struct {
-	Attachments           bool           `json:"attachments,omitempty,omitzero"`
-	AttachmentInstanceUID string         `json:"attachment_instance_uid,omitempty"`
-	AccessAdmin           bool           `json:"access_admin,omitempty,omitzero"`
-	Writable              bool           `json:"writable"`
-	Updates               string         `json:"updates" enum:"sse,poll"`
-	ActorPolicy           string         `json:"actor_policy"`
-	Account               string         `json:"account,omitempty"`
-	AuthKind              string         `json:"auth_kind,omitempty" doc:"How this request authenticated; matches the instance auth kind. Never contains credentials."`
-	Scope                 *TokenScopeOut `json:"scope,omitempty"`
-	ExpiresAt             *time.Time     `json:"expires_at,omitempty"`
-	AllowedActions        []string       `json:"allowed_actions,omitempty"`
-	CloseRequiresEvidence bool           `json:"close_requires_evidence,omitempty,omitzero"`
-	TokenAuditRead        bool           `json:"token_audit_read,omitempty,omitzero"`
+	Attachments            bool           `json:"attachments,omitempty,omitzero"`
+	AttachmentLocalOrigins []string       `json:"attachment_local_origins,omitempty"`
+	AccessAdmin            bool           `json:"access_admin,omitempty,omitzero"`
+	Writable               bool           `json:"writable"`
+	Updates                string         `json:"updates" enum:"sse,poll"`
+	ActorPolicy            string         `json:"actor_policy"`
+	Account                string         `json:"account,omitempty"`
+	AuthKind               string         `json:"auth_kind,omitempty" doc:"How this request authenticated; matches the instance auth kind. Never contains credentials."`
+	Scope                  *TokenScopeOut `json:"scope,omitempty"`
+	ExpiresAt              *time.Time     `json:"expires_at,omitempty"`
+	AllowedActions         []string       `json:"allowed_actions,omitempty"`
+	CloseRequiresEvidence  bool           `json:"close_requires_evidence,omitempty,omitzero"`
+	TokenAuditRead         bool           `json:"token_audit_read,omitempty,omitzero"`
 }
 
 // UIAttachmentRoute describes a project's upstream attachment route.

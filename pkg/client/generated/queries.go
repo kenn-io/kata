@@ -197,7 +197,8 @@ func (g GetProjectFederationQuery) Validate() error {
 }
 
 type FederatedDocbankCapabilitiesQuery struct {
-	ProjectUID string `json:"project_uid" validate:"required"`
+	ProjectUID string  `json:"project_uid" validate:"required"`
+	Origin     *string `json:"origin,omitempty"`
 }
 
 func (f FederatedDocbankCapabilitiesQuery) Validate() error {

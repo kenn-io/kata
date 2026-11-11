@@ -14,6 +14,11 @@ type DocbankServiceRequest struct {
 	Authorization string `header:"Authorization"`
 }
 
+type DocbankCapabilitiesRequest struct {
+	DocbankServiceRequest
+	Origin string `query:"origin"`
+}
+
 // DocbankServiceCapabilities is computed through the complete upstream path.
 type DocbankServiceCapabilities struct {
 	Version    int    `json:"version"`

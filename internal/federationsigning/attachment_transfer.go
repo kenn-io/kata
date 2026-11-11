@@ -3,7 +3,6 @@ package federationsigning
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"io"
 	"net/http"
@@ -142,5 +141,5 @@ func spoolBody(ctx context.Context, body io.ReadCloser, length, limit int64) (_ 
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil, "", err
 	}
-	return s, "sha-256=:" + base64.StdEncoding.EncodeToString(h.Sum(nil)) + ":", nil
+	return s, sha256ContentDigest(h.Sum(nil)), nil
 }

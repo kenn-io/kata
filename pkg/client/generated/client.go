@@ -4903,6 +4903,7 @@ func (c *Client) FederatedDocbankCapabilities(ctx context.Context, options *Fede
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
+		"origin":      {Style: "form", Explode: &[]bool{false}[0]},
 		"project_uid": {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{

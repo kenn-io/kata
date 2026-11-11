@@ -96,6 +96,7 @@ upload or link when its upstream has not seen the issue yet.
 Shared-project references carry the root Kata instance UID in `origin`. Every
 replica stores the same value. Standalone references have no origin marker and
 continue to use the serving daemon's local Docbank after sharing or adoption.
+Restored copies and their existing relays resolve references from former identities in the restored root’s configured Docbank.
 To make those files available on other replicas, copy or link them into the
 root's vault and add new shared references. On a hub, `reuse_existing` creates
 an origin-marked reference when the only match is an unmarked reference, so

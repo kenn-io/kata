@@ -2242,7 +2242,7 @@ describe('AppShell task selection', () => {
   test('keeps upload controls when switching to a pre-origin daemon', async () => {
     const current = twoTaskSnapshot()
     current.capabilities.attachments = false
-    current.capabilities.attachment_instance_uid = '01ARZ3NDEKTSV4RRFFQ69G5FAV'
+    current.capabilities.attachment_local_origins = ['01ARZ3NDEKTSV4RRFFQ69G5FAV']
     const props = {
       route: { ...listRoute, issueUID: firstUID },
       snapshot: current,
@@ -2256,7 +2256,7 @@ describe('AppShell task selection', () => {
     expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
     const older = structuredClone(current)
     older.capabilities.attachments = true
-    delete older.capabilities.attachment_instance_uid
+    delete older.capabilities.attachment_local_origins
     await rerender({
       ...props,
       snapshot: older,
@@ -2269,7 +2269,7 @@ describe('AppShell task selection', () => {
   test('keeps content controls when switching to a pre-origin daemon', async () => {
     const current = twoTaskSnapshot()
     current.capabilities.attachments = false
-    current.capabilities.attachment_instance_uid = '01ARZ3NDEKTSV4RRFFQ69G5FAV'
+    current.capabilities.attachment_local_origins = ['01ARZ3NDEKTSV4RRFFQ69G5FAV']
     current.selected!.issue!.metadata = {
       'attachment.file': {
         name: 'screen.png',
@@ -2290,7 +2290,7 @@ describe('AppShell task selection', () => {
     expect(screen.queryByRole('button', { name: 'Preview screen.png' })).toBeNull()
     const older = structuredClone(current)
     older.capabilities.attachments = true
-    delete older.capabilities.attachment_instance_uid
+    delete older.capabilities.attachment_local_origins
     await rerender({ ...props, snapshot: older })
     expect(screen.getByRole('button', { name: 'Preview screen.png' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Download screen.png' })).not.toBeNull()
@@ -2312,7 +2312,7 @@ describe('AppShell task selection', () => {
         name: 'local-project',
       },
     })
-    current.capabilities.attachment_instance_uid = '01ARZ3NDEKTSV4RRFFQ69G5FAV'
+    current.capabilities.attachment_local_origins = ['01ARZ3NDEKTSV4RRFFQ69G5FAV']
     current.capabilities.attachments = false
     const attachmentRoute = {
       project_uid: spoke.project_uid!,

@@ -105,6 +105,9 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,?)=?`, len(db.FederationSpokeNamePrefix), db.FederationSpokeNamePrefix); err != nil {
 			return fmt.Errorf("clear target spoke names: %w", err)
 		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,?)=?`, len(db.FormerInstanceUIDMetaPrefix), db.FormerInstanceUIDMetaPrefix); err != nil {
+			return fmt.Errorf("clear target former instance UIDs: %w", err)
+		}
 		// The key check travels with the subscription rows. A full restore
 		// replaces both, so the target's value must not outlive its rows. The
 		// scan position never travels: without it the restored daemon pings
@@ -565,7 +568,8 @@ func importMeta(ctx context.Context, tx *sql.Tx, m *db.MetaKV, opts db.ImportOpt
 	}
 	// --new-instance keeps the target's instance_uid (the value db.Open wrote).
 	if m.Key == "instance_uid" && opts.NewInstance {
-		return nil
+		_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT ?,'' WHERE EXISTS (SELECT 1 FROM meta WHERE key='instance_uid' AND value<>?) ON CONFLICT(key) DO NOTHING`, db.FormerInstanceUIDMetaPrefix+m.Value, m.Value)
+		return wrapImportErr(db.ImportKindMeta, err)
 	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO meta(key, value) VALUES(?, ?)

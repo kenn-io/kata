@@ -7156,8 +7156,10 @@ components:
           items:
             type: string
           type: array
-        attachment_instance_uid:
-          type: string
+        attachment_local_origins:
+          items:
+            type: string
+          type: array
         attachments:
           type: boolean
         auth_kind:
@@ -9619,6 +9621,11 @@ paths:
             type: string
         - in: header
           name: Authorization
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: origin
           schema:
             type: string
       responses:

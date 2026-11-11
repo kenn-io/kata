@@ -5,7 +5,7 @@ const capabilities = {
   actor_policy: 'request',
   updates: 'poll' as const,
   writable: true,
-  attachment_instance_uid: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+  attachment_local_origins: ['01ARZ3NDEKTSV4RRFFQ69G5FAV', '01ARZ3NDEKTSV4RRFFQ69G5FAU'],
   attachments: true,
 }
 const project = '01ARZ3NDEKTSV4RRFFQ69G5FAX'
@@ -26,6 +26,9 @@ describe('attachment availability', () => {
   it('gates shared controls while a project route is pending', () => {
     expect(attachmentWritable(capabilities, project, undefined)).toBe(false)
     expect(attachmentAvailable(capabilities, project, undefined, file)).toBe(true)
+    expect(
+      attachmentAvailable(capabilities, project, undefined, { ...file, origin: '01ARZ3NDEKTSV4RRFFQ69G5FAU' }),
+    ).toBe(true)
     expect(
       attachmentAvailable(capabilities, project, undefined, { ...file, origin: route.origin }),
     ).toBe(false)

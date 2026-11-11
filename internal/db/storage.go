@@ -134,6 +134,7 @@ type Storage interface {
 	ClaimScreenView(ctx context.Context, screen, day string) (bool, error)
 	ReleaseScreenView(ctx context.Context, screen, day string) error
 	InstanceUID() string
+	FormerInstanceUIDs(context.Context) ([]string, error)
 	RefreshInstanceUID(ctx context.Context) error
 	// InstanceCreatedAt reports when InstanceUID was generated, or zero when
 	// the instance predates recording it.

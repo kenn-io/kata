@@ -1,6 +1,7 @@
 package federation_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/json/jsontext"
@@ -23,8 +24,63 @@ import (
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/federation"
+	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/metadata"
 )
+
+func TestRelayDocbankReadAfterRootNewInstanceRestore(t *testing.T) {
+	for _, direct := range []bool{true, false} {
+		t.Run(fmt.Sprintf("direct=%t", direct), func(t *testing.T) {
+			root, relay, leaf, issue := newRelayClaimChain(t)
+			vault := docbanktest.New(t)
+			serveRelayDocbank(t, root, vault)
+			serveRelayDocbank(t, relay, nil)
+			serveRelayDocbank(t, leaf, nil)
+			node := leaf
+			if direct {
+				node = relay
+			}
+			code, acquired := relayClaimAction(t, node, issue.UID, "acquire", "")
+			require.Equal(t, http.StatusOK, code)
+			require.True(t, acquired.Granted)
+			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", node.project.ID, issue.UID)
+			status, raw := relayDocbankRequest(t, node, http.MethodPost, endpoint+"?name=report.pdf", "root document", "application/octet-stream")
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var out api.AddAttachmentResponseBody
+			require.NoError(t, json.Unmarshal(raw, &out))
+			foreign := out.Attachment
+			foreign.Origin = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+			foreignRaw, err := json.Marshal(foreign)
+			require.NoError(t, err)
+			localIssue, err := node.store.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			_, err = node.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: localIssue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.foreign": foreignRaw}})
+			require.NoError(t, err)
+			var backup bytes.Buffer
+			require.NoError(t, jsonl.Export(t.Context(), root.store, &backup, jsonl.ExportOptions{IncludeDeleted: true}))
+			restored := openRelayMatrixStore(t, "sqlite", false)
+			require.NoError(t, jsonl.ImportWithOptions(t.Context(), bytes.NewReader(backup.Bytes()), restored, jsonl.ImportOptions{NewInstance: true}))
+			root.store = restored
+			root.signer.AuthorityUID = restored.InstanceUID()
+			serveRelayDocbank(t, root, vault)
+			status, raw = relayDocbankRequest(t, node, http.MethodGet, "/api/v1/ui/attachment-route?project_uid="+node.project.UID, "", "")
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var uiRoute struct {
+				Route *api.UIAttachmentRoute `json:"route"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &uiRoute))
+			require.NotNil(t, uiRoute.Route)
+			require.True(t, uiRoute.Route.Read)
+			require.False(t, uiRoute.Route.Write)
+			require.Equal(t, out.Attachment.Origin, uiRoute.Route.Origin)
+			status, raw = relayDocbankRequest(t, node, http.MethodGet, endpoint+"/"+out.ID+"/content", "", "")
+			require.Equal(t, http.StatusOK, status, string(raw))
+			require.Equal(t, "root document", string(raw))
+			status, raw = relayDocbankRequest(t, node, http.MethodGet, endpoint+"/foreign/content", "", "")
+			require.Equal(t, http.StatusConflict, status, string(raw))
+		})
+	}
+}
 
 func serveRelayDocbank(t *testing.T, node *relayMatrixNode, f *docbanktest.Fake, syncOverride ...func(context.Context, db.FederationBinding, config.FederationCredential) error) {
 	t.Helper()

@@ -50,6 +50,10 @@ var (
 	components     = []string{"@method", "@target-uri", "content-digest", "content-type", "authorization"}
 )
 
+func sha256ContentDigest(digest []byte) string {
+	return "sha-256=:" + base64.StdEncoding.EncodeToString(digest) + ":"
+}
+
 // Verifier owns one bounded admission cache and its durable restart barrier.
 type Verifier struct {
 	statePath      string
@@ -233,7 +237,7 @@ func (v *Verifier) Verify(r *http.Request, enrollmentID int64) error {
 		digestHeader := r.Header.Get("Content-Digest")
 		encoded := strings.TrimSuffix(strings.TrimPrefix(digestHeader, "sha-256=:"), ":")
 		digestBytes, err := base64.StdEncoding.DecodeString(encoded)
-		if err != nil || len(digestBytes) != sha256.Size || digestHeader != "sha-256=:"+base64.StdEncoding.EncodeToString(digestBytes)+":" {
+		if err != nil || len(digestBytes) != sha256.Size || digestHeader != sha256ContentDigest(digestBytes) {
 			return signingpolicy.ErrInvalid
 		}
 		if err := v.admit(r, k, secret, d); err != nil {
@@ -276,7 +280,7 @@ func (v *Verifier) Verify(r *http.Request, enrollmentID int64) error {
 		}
 	}
 	digest := sha256.Sum256(body)
-	expected := "sha-256=:" + base64.StdEncoding.EncodeToString(digest[:]) + ":"
+	expected := sha256ContentDigest(digest[:])
 	if subtle.ConstantTimeCompare([]byte(expected), []byte(r.Header.Get("Content-Digest"))) != 1 {
 		return signingpolicy.ErrInvalid
 	}

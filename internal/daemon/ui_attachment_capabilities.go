@@ -57,7 +57,7 @@ func (c *uiAttachmentCapabilityCache) available(ctx, parent context.Context, cfg
 	c.mu.Unlock()
 	project, err := cfg.DB.ProjectByID(ctx, binding.ProjectID)
 	if err == nil {
-		_, err = docbankOriginCapabilities(ctx, cfg, project, &binding)
+		_, err = docbankOriginCapabilities(ctx, cfg, project, &binding, "")
 	}
 	var apiErr *api.APIError
 	unavailable := errors.As(err, &apiErr) && apiErr != nil && (apiErr.Code == "docbank_not_configured" || apiErr.Code == "docbank_forward_unsupported")

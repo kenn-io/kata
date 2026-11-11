@@ -755,7 +755,10 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 	}}
 	policy.Capabilities.Attachments = cfg.Docbank != nil
 	if cfg.DB != nil {
-		policy.Capabilities.AttachmentInstanceUID = cfg.DB.InstanceUID()
+		policy.Capabilities.AttachmentLocalOrigins = []string{cfg.DB.InstanceUID()}
+		if former, err := cfg.DB.FormerInstanceUIDs(ctx); err == nil {
+			policy.Capabilities.AttachmentLocalOrigins = append(policy.Capabilities.AttachmentLocalOrigins, former...)
+		}
 	}
 	if cfg.WebSessions != nil {
 		principal, _ := PrincipalFromContext(ctx)

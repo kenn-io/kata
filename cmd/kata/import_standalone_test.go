@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/storeopen"
-	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -34,10 +32,12 @@ func TestImportAsStandaloneDetachesCopyOnSQLiteAndPostgres(t *testing.T) {
 		ProjectID: &project.ID, Capabilities: "pull,push", Actor: "user-b",
 	})
 	require.NoError(t, err)
-	var exported bytes.Buffer
-	require.NoError(t, jsonl.Export(ctx, source, &exported, jsonl.ExportOptions{IncludeDeleted: true}))
 	input := filepath.Join(home, "source.jsonl")
-	require.NoError(t, os.WriteFile(input, exported.Bytes(), 0o600))
+	t.Setenv("KATA_DB", filepath.Join(home, "source.db"))
+	_, err = runCmdOutput(t, nil, "export", "--output", input)
+	require.NoError(t, err)
+	exported, err := os.ReadFile(input) //nolint:gosec // test-owned export under TempDir
+	require.NoError(t, err)
 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -58,6 +58,9 @@ func TestImportAsStandaloneDetachesCopyOnSQLiteAndPostgres(t *testing.T) {
 					require.NoError(t, err)
 					t.Cleanup(func() { require.NoError(t, copied.Close()) })
 					assert.NotEqual(t, source.InstanceUID(), copied.InstanceUID())
+					former, err := copied.FormerInstanceUIDs(ctx)
+					require.NoError(t, err)
+					assert.Contains(t, former, source.InstanceUID())
 					got, err := copied.ProjectByName(ctx, project.Name)
 					require.NoError(t, err)
 					assert.Equal(t, project.UID, got.UID)
@@ -85,7 +88,7 @@ func TestImportAsStandaloneDetachesCopyOnSQLiteAndPostgres(t *testing.T) {
 
 	got, err := os.ReadFile(input) //nolint:gosec // test-owned export under TempDir
 	require.NoError(t, err)
-	assert.Equal(t, exported.Bytes(), got, "the source export is read-only")
+	assert.Equal(t, exported, got, "the source export is read-only")
 	_, err = source.ResolveAPIToken(ctx, apiToken)
 	require.NoError(t, err, "copying must not revoke source authority")
 	_, err = source.AuthorizeFederationToken(ctx, federationToken, project.ID, "pull")

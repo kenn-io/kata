@@ -4,4 +4,5 @@
 
 export type FederatedDocbankCapabilitiesParams = {
   project_uid: string
+  origin?: string
 }
