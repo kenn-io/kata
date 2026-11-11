@@ -11,7 +11,7 @@ export async function readProjectSync(
   projectId: number,
   uid: string,
   signal: AbortSignal,
-  previous: FederationProjectStatus | undefined,
+  previous: ProjectSyncRead | undefined,
   clearPrevious: () => void,
 ): Promise<ProjectSyncRead> {
   let response: Awaited<ReturnType<typeof getProjectFederationStatus>>
@@ -40,11 +40,11 @@ export async function readProjectSync(
         responseStatus === 408 ||
         responseStatus === 429)
     )
-      return { status: previous, stale: true }
+      return { status: previous.status, stale: true }
     throw error
   }
   if (previous && (response.status >= 500 || response.status === 408 || response.status === 429))
-    return { status: previous, stale: true }
+    return { status: previous.status, stale: true }
   if (response.status !== 200) throw new Error()
   const found = response.data.statuses.find(
     (entry) => entry.project_id === projectId && entry.project_uid === uid,

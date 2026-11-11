@@ -156,6 +156,69 @@ describe('ProjectSyncStatus', () => {
     expect(screen.getByText('Pending: 2')).not.toBeNull()
   })
 
+  it('retains a stale local result after a transient failure until recovery', async () => {
+    setGeneratedFetch(
+      vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ statuses: [] }))
+        .mockResolvedValueOnce(new Response('', { status: 503 }))
+        .mockResolvedValueOnce(Response.json({ statuses: [] })),
+    )
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Local project')
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await screen.findByText('Sync status may be out of date.')
+    expect(screen.getByText('Local project')).not.toBeNull()
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    await waitFor(() => expect(screen.queryByText('Sync status may be out of date.')).toBeNull())
+    expect(screen.getByText('Local project')).not.toBeNull()
+  })
+
+  it('replaces a stalled background read on manual refresh and ignores its late result', async () => {
+    let resolveOld!: (value: Response) => void
+    let oldSignal: AbortSignal | undefined
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockImplementationOnce((_url, init) => {
+        oldSignal = init.signal
+        return new Promise<Response>((resolve) => {
+          resolveOld = resolve
+        })
+      })
+      .mockResolvedValueOnce(
+        Response.json({
+          statuses: [
+            {
+              project_id: 7,
+              project_uid: projectUID,
+              role: 'replica',
+              enabled: true,
+              pending_push_count: 0,
+            },
+          ],
+        }),
+      )
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Pending: 2')
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    const button = screen.getByRole('button', { name: 'Refresh sync' }) as HTMLButtonElement
+    expect(button.disabled).toBe(false)
+    await fireEvent.click(button)
+    await screen.findByText('Pending: 0')
+    expect(oldSignal?.aborted).toBe(true)
+    resolveOld(response())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.getByText('Pending: 0')).not.toBeNull()
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
   it('keeps the last summary when a background read times out', async () => {
     setGeneratedFetch(
       vi
@@ -199,11 +262,12 @@ describe('ProjectSyncStatus', () => {
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
     await vi.advanceTimersByTimeAsync(120_000)
-    expect(screen.getByText('Sync status unavailable. Refresh to retry.')).not.toBeNull()
-    expect(screen.queryByText('Local project')).toBeNull()
+    expect(screen.getByText('Sync status may be out of date.')).not.toBeNull()
+    expect(screen.getByText('Local project')).not.toBeNull()
     resolveRetry(Response.json({ statuses: [] }))
     await vi.advanceTimersByTimeAsync(0)
     expect(screen.getByText('Local project')).not.toBeNull()
+    expect(screen.queryByText('Sync status may be out of date.')).toBeNull()
   })
 
   it('disables refresh while a denied response body is stalled, then retries', async () => {
@@ -332,7 +396,7 @@ describe('ProjectSyncStatus', () => {
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
     expect(
       (screen.getByRole('button', { name: 'Refresh sync' }) as HTMLButtonElement).disabled,
-    ).toBe(true)
+    ).toBe(false)
     expect(signal?.aborted).toBe(false)
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
     hidden.mockReturnValue(true)

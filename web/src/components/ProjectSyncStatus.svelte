@@ -53,8 +53,13 @@
     async function read(manual = false): Promise<void> {
       if (document.hidden) return
       if (current) {
-        queued = true
-        return
+        if (!manual) {
+          queued = true
+          return
+        }
+        current.abort()
+        current = undefined
+        queued = false
       }
       loading = manual || !hasResult
       reading = true
@@ -70,20 +75,26 @@
         runQueued()
       }
       const timeout = setTimeout(() => {
-        if (status) stale = true
+        if (hasResult) stale = true
         else error = true
         abort.abort()
         finish()
       }, 120_000)
       abort.signal.addEventListener('abort', () => clearTimeout(timeout), { once: true })
       try {
-        const result = await readProjectSync(id, uid, abort.signal, status, () => {
-          if (!abort.signal.aborted && !disposed) {
-            status = undefined
-            hasResult = false
-            loading = true
-          }
-        })
+        const result = await readProjectSync(
+          id,
+          uid,
+          abort.signal,
+          hasResult ? { status, stale } : undefined,
+          () => {
+            if (!abort.signal.aborted && !disposed) {
+              status = undefined
+              hasResult = false
+              loading = true
+            }
+          },
+        )
         if (abort.signal.aborted || disposed) return
         ;({ status, stale } = result)
         error = false
@@ -124,7 +135,6 @@
     <span>Local project</span>
   {:else}
     <span>{status.enabled ? status.role : 'Sync disabled'}</span>
-    {#if stale}<span class="stale" role="status">Sync status may be out of date.</span>{/if}
     <span>Pending: {status.pending_push_count}</span>
     {#if status.last_successful_sync_at}
       <span
@@ -154,9 +164,10 @@
       >
     {/if}
   {/if}
-  <button type="button" disabled={loading || reading} onclick={() => refresh?.(true)}
-    >Refresh sync</button
-  >
+  {#if stale && !loading && !error}<span class="stale" role="status"
+      >Sync status may be out of date.</span
+    >{/if}
+  <button type="button" disabled={loading} onclick={() => refresh?.(true)}>Refresh sync</button>
 </section>
 
 <style>
