@@ -1183,9 +1183,9 @@ func ensureFederationReplicaState(
 	}
 
 	result, err := ensureReplicaBindingOrAdopt(ctx, store, p)
-	if err != nil && rekey != nil && errors.Is(err, db.ErrUnsupportedEventFeatures) {
-		// Argv history appeared after the preflight; the refused transaction left
-		// the project unchanged, so return the credential to its source key.
+	if err != nil && rekey != nil && (errors.Is(err, db.ErrUnsupportedEventFeatures) ||
+		errors.Is(err, db.ErrFederationIngestValidation)) {
+		// Workflow feature or validation refusal left the project unchanged.
 		if restoreErr := restoreFederationReplicaCredentialRekey(ctx, credentials, *rekey); restoreErr != nil {
 			return result, errors.Join(err, restoreErr)
 		}
