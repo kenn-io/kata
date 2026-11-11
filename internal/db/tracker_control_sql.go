@@ -189,7 +189,7 @@ func loadTrackerControlCapacity(ctx context.Context, tx *sql.Tx) (trackerControl
 		return c, nil
 	}
 	prefix := TrackerMetadataPrefix + "control."
-	rows, err := tx.QueryContext(ctx, `SELECT key,value FROM meta WHERE key >= $1 AND key < $2`, prefix, TrackerMetadataPrefix+"control/")
+	rows, err := tx.QueryContext(ctx, `SELECT key,value FROM meta WHERE substr(key,1,$1)=$2`, len(prefix), prefix)
 	if err != nil {
 		return c, err
 	}

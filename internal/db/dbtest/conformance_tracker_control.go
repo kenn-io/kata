@@ -128,7 +128,7 @@ func checkTrackerControlCapacity(t *testing.T, store db.Storage) error {
 	return nil
 }
 
-// A restore retires pending effects and invalidates their local capacity counts.
+// A restore retires pending effects and resets their local capacity counts.
 func checkTrackerControlRestoreCapacity(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "tracker-restore-project")
@@ -147,6 +147,9 @@ func checkTrackerControlRestoreCapacity(t *testing.T, store db.Storage) error {
 	retained, err := db.RetainTrackerMetadataSQL(ctx, tx)
 	require.NoError(t, err)
 	require.NoError(t, db.RestoreRetainedTrackerMetadataSQL(ctx, tx, retained))
+	var counter string
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, db.TrackerControlCapacityKey).Scan(&counter))
+	require.JSONEq(t, `{"pending":0,"projects":{},"connections":{}}`, counter)
 	require.NoError(t, tx.Commit())
 	for range 64 {
 		p := base

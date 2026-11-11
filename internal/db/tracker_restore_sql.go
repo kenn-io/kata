@@ -33,18 +33,16 @@ func RetainTrackerMetadataSQL(ctx context.Context, tx *sql.Tx) ([]MetaKV, error)
 	return retained, rows.Err()
 }
 
-// RestoreRetainedTrackerMetadataSQL preserves target evidence during replacement.
+// RestoreRetainedTrackerMetadataSQL preserves target evidence during full replacement.
 func RestoreRetainedTrackerMetadataSQL(ctx context.Context, tx *sql.Tx, records []MetaKV) error {
-	// Imported and retained pending receipts are made inactive; rebuild local counts.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, TrackerControlCapacityKey); err != nil {
-		return err
-	}
 	for _, rec := range records {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, rec.Key, rec.Value); err != nil {
 			return err
 		}
 	}
-	return nil
+	// Full replacement normalizes imported and retained pending receipts to inactive.
+	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, TrackerControlCapacityKey, `{"pending":0,"projects":{},"connections":{}}`)
+	return err
 }
 
 // CheckTrackerMetadataRestoreConflict refuses to destroy retained newer or
