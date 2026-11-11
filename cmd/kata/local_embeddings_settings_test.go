@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -19,8 +20,10 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/vector"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/embedlocal"
 )
@@ -247,7 +250,7 @@ func TestSharedChoiceEnablesStartup(t *testing.T) {
 	require.NoError(t, embedlocal.RecordChoice())
 	cfg, err := config.ReadSearchConfig()
 	require.NoError(t, err)
-	next, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, nil)
+	next, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, nil, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
 	require.True(t, next.UsesLocal())
 	data, err := os.ReadFile(filepath.Join(home, "config.toml")) // #nosec G304 -- isolated test configuration
@@ -281,7 +284,7 @@ func TestSharedChoicePreservesStartupProviders(t *testing.T) {
 			}
 			cfg, err := config.ReadSearchConfig()
 			require.NoError(t, err)
-			next, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, func(context.Context) error { return fmt.Errorf("pgvector unavailable") })
+			next, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, func(context.Context) error { return fmt.Errorf("pgvector unavailable") }, filepath.Join(home, "kata.db"))
 			if tc.name == "pgvector unavailable" {
 				require.ErrorContains(t, err, "pgvector")
 			} else {
@@ -297,11 +300,11 @@ func TestSharedChoicePreservesStartupProviders(t *testing.T) {
 
 func TestSavedLocalRecordsSharedChoice(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
-	setupKataEnv(t)
+	home := setupKataEnv(t)
 	t.Setenv("HOME", t.TempDir())
 	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nlocal = true\n"))
 	require.NoError(t, err)
-	_, err = applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, nil)
+	_, err = applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, nil, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
 	chosen, err := embedlocal.ChoiceRecorded()
 	require.NoError(t, err)
@@ -318,9 +321,130 @@ func TestSharedChoicePreservesProviderSavedAfterPreflight(t *testing.T) {
 	original := "[search.embeddings]\nbase_url = 'https://embeddings.example/v1'\nmodel = 'example'\ndims = 768\n"
 	path := filepath.Join(home, "config.toml")
 	require.NoError(t, os.WriteFile(path, []byte(original), 0o600))
-	_, err = applySharedEmbeddingChoice(t.Context(), current.Embeddings, nil)
+	_, err = applySharedEmbeddingChoice(t.Context(), current.Embeddings, nil, filepath.Join(home, "kata.db"))
 	require.ErrorContains(t, err, "changed")
 	data, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
 	require.NoError(t, err)
 	require.Equal(t, original, string(data))
+}
+
+func TestSharedChoiceRejectsInvalidBatchBeforeSaving(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	home := setupKataEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, embedlocal.RecordChoice())
+	original := "[search.embeddings]\nmodel_context_tokens = 32000\nmax_batch_tokens = 31999\n"
+	path := filepath.Join(home, "config.toml")
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o600))
+	cfg, err := config.ReadSearchConfig()
+	require.NoError(t, err)
+	_, err = applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, nil, filepath.Join(home, "kata.db"))
+	require.ErrorContains(t, err, "embedding batching")
+	data, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
+	require.NoError(t, err)
+	require.Equal(t, original, string(data))
+}
+
+func TestSavedLocalKeepsExistingChoiceFile(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	home := setupKataEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, embedlocal.RecordChoice())
+	dir, err := embedlocal.DefaultDir()
+	require.NoError(t, err)
+	path := filepath.Join(dir, "search-by-meaning")
+	old := time.Unix(1000000000, 0)
+	require.NoError(t, os.Chtimes(path, old, old))
+	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nlocal = true\n"))
+	require.NoError(t, err)
+	_, err = applySharedEmbeddingChoice(t.Context(), cfg.Embeddings, nil, filepath.Join(home, "kata.db"))
+	require.NoError(t, err)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, old, info.ModTime())
+}
+
+func TestSavedLocalStartsWhenChoiceCannotBeWritten(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	resetFlags(t)
+	home := setupKataEnv(t)
+	sharedHome := t.TempDir()
+	t.Setenv("HOME", sharedHome)
+	t.Setenv("PORT", "")
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	require.NoError(t, os.WriteFile(filepath.Join(sharedHome, ".kenn"), []byte("blocks marker directory"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nlocal = true\n"), 0o600))
+	oldOpen := openEmbeddingVectorIndex
+	openEmbeddingVectorIndex = func(context.Context, db.Storage, string) (*vector.Index, error) {
+		return nil, errors.New("embedding index reached")
+	}
+	t.Cleanup(func() { openEmbeddingVectorIndex = oldOpen })
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	err := runDaemonWithListen(ctx, "127.0.0.1:0", false, false)
+	require.ErrorContains(t, err, "embedding index reached")
+}
+
+func TestTurnOnRetainsSavedLocalWhenChoiceCannotBeWritten(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	home := setupKataEnv(t)
+	sharedHome := t.TempDir()
+	t.Setenv("HOME", sharedHome)
+	require.NoError(t, os.WriteFile(filepath.Join(sharedHome, ".kenn"), []byte("blocks marker directory"), 0o600))
+	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
+	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
+	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+		if opts.Executable == "" {
+			return "", embedlocal.ErrNotFound
+		}
+		return "http://127.0.0.1:12345/v1", nil
+	}
+	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
+		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
+	}
+	_, err := enableLocalEmbeddings(t.Context(), localEmbeddingsRun{
+		confirm: func(context.Context, int64) (bool, error) { return true, nil },
+		notice:  func(string) error { return nil },
+		restart: func(_ context.Context, apply func() error) error { return apply() },
+	})
+	require.ErrorContains(t, err, "record built-in embeddings choice")
+	data, err := os.ReadFile(filepath.Join(home, "config.toml")) // #nosec G304 -- isolated test configuration
+	require.NoError(t, err)
+	cfg, err := config.ParseSearchConfig(data)
+	require.NoError(t, err)
+	require.True(t, cfg.Embeddings.UsesLocal())
+}
+
+func TestTurnOnKeepsExistingChoiceFile(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	setupKataEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, embedlocal.RecordChoice())
+	dir, err := embedlocal.DefaultDir()
+	require.NoError(t, err)
+	path := filepath.Join(dir, "search-by-meaning")
+	old := time.Unix(1000000000, 0)
+	require.NoError(t, os.Chtimes(path, old, old))
+	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
+	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
+	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+		if opts.Executable == "" {
+			return "", embedlocal.ErrNotFound
+		}
+		return "http://127.0.0.1:12345/v1", nil
+	}
+	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
+		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
+	}
+	_, err = enableLocalEmbeddings(t.Context(), localEmbeddingsRun{
+		confirm: func(context.Context, int64) (bool, error) { return true, nil },
+		notice:  func(string) error { return nil },
+		restart: func(_ context.Context, apply func() error) error { return apply() },
+	})
+	require.NoError(t, err)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, old, info.ModTime())
 }

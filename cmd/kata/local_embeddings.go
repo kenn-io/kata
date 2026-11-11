@@ -221,17 +221,25 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 		return "", err
 	}
 	if next.Embeddings.UsesLocal() {
-		if err := embedlocal.RecordChoice(); err != nil {
+		if err := recordLocalEmbeddingChoice(); err != nil {
 			return "", fmt.Errorf("record built-in embeddings choice: %w", err)
 		}
 	}
 	return index, nil
 }
 
+func recordLocalEmbeddingChoice() error {
+	chosen, err := embedlocal.ChoiceRecorded()
+	if err != nil || chosen {
+		return err
+	}
+	return embedlocal.RecordChoice()
+}
+
 // applySharedEmbeddingChoice persists the shared built-in choice before startup.
-func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsConfig, vectorReady func(context.Context) error) (config.EmbeddingsConfig, error) {
+func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsConfig, vectorReady func(context.Context) error, dbPath string) (config.EmbeddingsConfig, error) {
 	if current.UsesLocal() {
-		return current, embedlocal.RecordChoice()
+		return current, recordLocalEmbeddingChoice()
 	}
 	if current.Enabled() {
 		return current, nil
@@ -266,6 +274,9 @@ func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsCo
 	}
 	next, err := config.ParseSearchConfig(proposed)
 	if err != nil {
+		return current, err
+	}
+	if _, _, err := preflightEmbeddingStartup(next.Embeddings, dbPath); err != nil {
 		return current, err
 	}
 	latest, latestExists, err := readLocalEmbeddingsConfig(path)

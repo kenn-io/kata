@@ -1474,7 +1474,7 @@ func runDaemonProcess(
 			return idx.Close()
 		}
 	}
-	chosen, choiceErr := applySharedEmbeddingChoice(ctx, dcfg.Search.Embeddings, vectorReady)
+	chosen, choiceErr := applySharedEmbeddingChoice(ctx, dcfg.Search.Embeddings, vectorReady, dbPath)
 	if choiceErr == nil && chosen != dcfg.Search.Embeddings {
 		startup.Embedder, startup.VectorsPath, choiceErr = preflightEmbeddingStartup(chosen, dbPath)
 		if choiceErr == nil {
@@ -1483,9 +1483,6 @@ func runDaemonProcess(
 	}
 	if choiceErr != nil {
 		daemonLog.Printf("shared embeddings choice: %v", choiceErr)
-		if dcfg.Search.Embeddings.UsesLocal() {
-			startup.Embedder = nil
-		}
 	}
 
 	broadcaster := daemon.NewEventBroadcaster()
