@@ -53,7 +53,7 @@ func TestPrepareIssueSchedules(t *testing.T) {
 		{"remove empty zone", `{"timezone":"","scheduled_on":"2026-11-12"}`, `{"timezone":null}`, "Local", "", "", false},
 		{"issue zone for instant", `{"timezone":"America/New_York"}`, `{"$field":"2026-01-01T02:00:00Z"}`, "UTC", "", "America/New_York", false},
 		{"recurrence zone for instant", "{}", `{"$field":"2026-01-01T02:00:00Z"}`, "UTC", "US/Eastern", "US/Eastern", false},
-		{"unusable recurrence zone for instant", "{}", `{"$field":"2026-01-01T02:00:00Z"}`, "UTC", "Local", "UTC", false},
+		{"unusable recurrence zone for instant", "{}", `{"$field":"2026-01-01T02:00:00Z"}`, "UTC", "Mars/Olympus_Mons", "UTC", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fields := []string{"scheduled_on"}

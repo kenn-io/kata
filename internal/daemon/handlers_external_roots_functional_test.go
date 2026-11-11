@@ -445,12 +445,12 @@ func TestExternalRootHandlersClassifyFieldAndPublishingErrors(t *testing.T) {
 		ID: "example-connector", Command: testExternalRootCommand(t),
 	}}, func(config.ConnectorConfig) connectorclient.Client { return client })
 	require.NoError(t, err)
-	reconciler := rootbridge.NewReconciler(database.db, registry, rootbridge.ReconcilerConfig{Now: func() time.Time { return now }})
-	service := rootbridge.NewService(database.db, registry,
+	reconciler := rootbridge.NewReconciler(database.db, registry, rootbridge.ReconcilerConfig{Now: func() time.Time { return now }, DefaultTimezone: "Local"})
+	service := rootbridge.NewServiceWithEventSinkAndDefaultTimezone(database.db, registry,
 		func(ctx context.Context, bindingID int64, claimToken string) ([]db.Event, error) {
 			result, err := reconciler.Run(ctx, bindingID, rootbridge.RunOptions{ClaimToken: claimToken})
 			return result.Events, err
-		})
+		}, nil, "Local")
 	ts := startTestServer(t, daemon.ServerConfig{
 		DB: database.db, StartedAt: now, ExternalRootRegistry: registry,
 		ExternalRootService: service, ExternalRootReconciler: reconciler,
@@ -495,23 +495,10 @@ func TestExternalRootHandlersClassifyFieldAndPublishingErrors(t *testing.T) {
 		"connector": "example-connector", "external": "opaque-locator", "actor": "operator", "publish_comments": true,
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
-	t.Run("unportable inherited zone keeps a rejected field conflict", func(t *testing.T) {
+	t.Run("daemon Local default keeps a rejected field conflict", func(t *testing.T) {
 		status, body := requestExternalRootJSON(t, ts.URL, http.MethodPut,
 			"/api/v1/connectors/example-connector/fields/scheduled_on", map[string]any{"external_field": "start-date"})
 		require.Equal(t, http.StatusOK, status, string(body))
-		created, err := database.db.CreateRecurrenceForIssue(t.Context(), db.CreateRecurrenceForIssueIn{
-			IssueID: issue.ID,
-			Recurrence: db.CreateRecurrenceIn{
-				ProjectID: project.ID, Actor: "operator", Rule: "FREQ=DAILY",
-				DTStart: "2026-08-20", Timezone: "UTC", Template: db.RecurrenceTemplate{Title: issue.Title},
-			},
-		})
-		require.NoError(t, err)
-		_, err = database.db.PatchRecurrence(t.Context(), db.PatchRecurrenceIn{
-			RecurrenceID: created.Recurrence.ID, IfMatchRev: created.Recurrence.Revision,
-			Actor: "operator", Update: db.RecurrenceUpdate{Timezone: new("Local")},
-		})
-		require.NoError(t, err)
 		cleared, err := database.db.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
 			IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{
 				"scheduled_on": jsontext.Value("null"), "timezone": jsontext.Value("null"),
