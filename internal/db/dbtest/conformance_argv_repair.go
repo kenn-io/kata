@@ -293,14 +293,91 @@ func checkArgvJobWorkflowAdmission(t *testing.T, source db.Storage, backend Back
 	return nil
 }
 
-// A snapshot can be the only retained evidence for a normalized workflow revision.
-func checkArgvSnapshotHeldRevision(t *testing.T, store db.Storage, _ Backend) error {
+// Held snapshots fence their exact workflow revision, with or without the original event.
+func checkArgvSnapshotHeldRevision(t *testing.T, store db.Storage, backend Backend) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	job, workflow := nativeFederationDefinitions(t, store, project)
+	historicalWorkflowEvent := workflow.DefinitionEventUID
+	historicalClock := workflow.DefinitionHLC
+	workflow, _, err = store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, UID: workflow.UID, ExpectedEventUID: historicalWorkflowEvent, Name: "Edited workflow", Actor: "worker", Definition: workflow.Definition})
+	require.NoError(t, err)
 	sibling, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Sibling", Actor: "worker", Definition: workflow.Definition})
 	require.NoError(t, err)
+
+	t.Run("original and held snapshot owner replay", func(t *testing.T) {
+		ctx := t.Context()
+		records, err := CollectImportRecords(ctx, store, db.ExportFilter{IncludeDeleted: true})
+		require.NoError(t, err)
+		var original *db.EventExport
+		var maxID int64
+		for _, record := range records {
+			if event, ok := record.(*db.EventExport); ok {
+				if event.ID > maxID {
+					maxID = event.ID
+				}
+				if event.UID == historicalWorkflowEvent {
+					original = event
+				}
+			}
+		}
+		require.NotNil(t, original)
+		// Keep the exported original and newer winner; the snapshot has its own
+		// envelope and hash but cites the original definition identity and clock.
+		snapshot := *original
+		snapshot.ID = maxID + 1
+		snapshot.UID, err = uid.New()
+		require.NoError(t, err)
+		snapshot.Type = "cron.workflow.snapshot"
+		snapshot.HLCPhysicalMS = workflow.DefinitionHLC.PhysicalMS + 1
+		snapshot.HLCCounter = 0
+		var body db.CronDefinitionEvent
+		require.NoError(t, json.Unmarshal(original.Payload, &body))
+		body.DefinitionEventUID = historicalWorkflowEvent
+		body.DefinitionHLC = &historicalClock
+		body.Definition = []byte(`{"version":1,"steps":null}`)
+		snapshot.Payload, err = json.Marshal(body)
+		require.NoError(t, err)
+		snapshot.ContentHash, err = db.EventContentHash(db.EventHashInput{UID: snapshot.UID, OriginInstanceUID: snapshot.OriginInstanceUID, ProjectUID: project.UID, ProjectName: snapshot.ProjectName, IssueUID: snapshot.IssueUID, RelatedIssueUID: snapshot.RelatedIssueUID, Type: snapshot.Type, Actor: snapshot.Actor, HLCPhysicalMS: snapshot.HLCPhysicalMS, HLCCounter: snapshot.HLCCounter, CreatedAt: snapshot.CreatedAt, Payload: snapshot.Payload})
+		require.NoError(t, err)
+		records = append(records, &snapshot)
+		target := backend.Open(t)
+		t.Cleanup(func() { require.NoError(t, target.Close()) })
+		require.NoError(t, target.ImportReplay(ctx, records, db.ImportOptions{}))
+		p, err := target.ProjectByUID(ctx, project.UID)
+		require.NoError(t, err)
+		current, err := target.CronWorkflow(ctx, p.ID, workflow.UID)
+		require.NoError(t, err)
+		assert.Equal(t, workflow.DefinitionEventUID, current.DefinitionEventUID, "newer supported revision remains current")
+		_, _, err = target.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "New job", Actor: "worker", Definition: job.Definition})
+		require.NoError(t, err, "new jobs use the supported current revision")
+		q := target.(interface {
+			QueryRowContext(context.Context, string, ...any) *sql.Row
+		})
+		for _, withJob := range []bool{false, true} {
+			name := "direct workflow"
+			if withJob {
+				name = "job with same workflow"
+			}
+			t.Run(name, func(t *testing.T) {
+				var before, after int
+				require.NoError(t, q.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE project_id=$1`, p.ID).Scan(&before))
+				runUID, err := uid.New()
+				require.NoError(t, err)
+				run := db.ObserveCronRun{ProjectID: p.ID, UID: runUID, WorkflowUID: &workflow.UID, WorkflowDefinitionEventUID: &historicalWorkflowEvent, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1}}
+				if withJob {
+					run.JobUID, run.DefinitionEventUID = &job.UID, &job.DefinitionEventUID
+				}
+				_, err = target.ObserveCronRun(ctx, run)
+				assert.ErrorIs(t, err, cron.ErrInvalid, "held snapshot fences its exact original revision")
+				_, err = target.CronRun(ctx, p.ID, runUID)
+				assert.ErrorIs(t, err, db.ErrNotFound, "rejected observation must not persist a run")
+				require.NoError(t, q.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE project_id=$1`, p.ID).Scan(&after))
+				assert.Equal(t, before, after, "rejected observation must not persist an event")
+			})
+		}
+	})
 
 	runUID, err := uid.New()
 	require.NoError(t, err)
@@ -344,6 +421,11 @@ func checkArgvSnapshotHeldRevision(t *testing.T, store db.Storage, _ Backend) er
 	fresh.WorkflowUID, fresh.WorkflowDefinitionEventUID = nil, nil
 	_, err = store.ObserveCronRun(ctx, fresh)
 	require.ErrorIs(t, err, cron.ErrInvalid, "job-only running must reject held snapshot")
+	fresh.UID, err = uid.New()
+	require.NoError(t, err)
+	fresh.WorkflowUID, fresh.WorkflowDefinitionEventUID = &workflow.UID, &historicalWorkflowEvent
+	_, err = store.ObserveCronRun(ctx, fresh)
+	assert.NoError(t, err, "a supported historical revision of the job's workflow remains admissible")
 	var eventsBefore, eventsAfter int
 	require.NoError(t, q.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE project_id=$1`, project.ID).Scan(&eventsBefore))
 	fresh.UID, err = uid.New()

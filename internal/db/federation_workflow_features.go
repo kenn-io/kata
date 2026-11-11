@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"strings"
+
+	"go.kenn.io/kata/internal/cron"
 )
 
 // CronWorkflowArgvEventFeature is reserved for literal argument workflow steps.
@@ -177,5 +180,14 @@ func RequireLocalProjectWorkflows(ctx context.Context, tx *sql.Tx, projectUID st
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1`, projectUID).Scan(&project.ID); err != nil {
 		return err
 	}
-	return checkRetainedWorkflowSnapshots(ctx, tx, project)
+	if err := checkRetainedWorkflowSnapshots(ctx, tx, project); err != nil {
+		return err
+	}
+	// Restored owner backups can carry a projection whose original events were
+	// compacted away; the strict snapshot read rejects what the event scan cannot see.
+	_, err = CronSQL{Query: tx}.workflows(ctx, CronList{ProjectID: project.ID, IncludeDeleted: true}, true)
+	if errors.Is(err, cron.ErrInvalid) {
+		return fmt.Errorf("%w: retained workflow projection: %w", ErrFederationIngestValidation, err)
+	}
+	return err
 }
