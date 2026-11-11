@@ -329,6 +329,7 @@ func checkArgvSnapshotHeldRevision(t *testing.T, store db.Storage, _ Backend) er
 	resignNativeEvent(t, &snapshot)
 	q := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
+		QueryRowContext(context.Context, string, ...any) *sql.Row
 	})
 	_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, snapshot.EventUID, snapshot.OriginInstanceUID, project.ID, snapshot.ProjectName, snapshot.Type, snapshot.Actor, string(snapshot.Payload), snapshot.HLCPhysicalMS, snapshot.HLCCounter, snapshot.ContentHash, snapshot.CreatedAt.UTC().Format(db.EventTimestampFormat))
 	require.NoError(t, err)
@@ -343,8 +344,20 @@ func checkArgvSnapshotHeldRevision(t *testing.T, store db.Storage, _ Backend) er
 	fresh.WorkflowUID, fresh.WorkflowDefinitionEventUID = nil, nil
 	_, err = store.ObserveCronRun(ctx, fresh)
 	require.ErrorIs(t, err, cron.ErrInvalid, "job-only running must reject held snapshot")
+	var eventsBefore, eventsAfter int
+	require.NoError(t, q.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE project_id=$1`, project.ID).Scan(&eventsBefore))
 	fresh.UID, err = uid.New()
 	require.NoError(t, err)
+	fresh.WorkflowUID, fresh.WorkflowDefinitionEventUID = &sibling.UID, &sibling.DefinitionEventUID
+	_, err = store.ObserveCronRun(ctx, fresh)
+	assert.ErrorIs(t, err, cron.ErrInvalid, "a healthy direct workflow must not bypass the job's held workflow")
+	_, err = store.CronRun(ctx, project.ID, fresh.UID)
+	assert.ErrorIs(t, err, db.ErrNotFound, "rejected running evidence must not persist a run")
+	require.NoError(t, q.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE project_id=$1`, project.ID).Scan(&eventsAfter))
+	assert.Equal(t, eventsBefore, eventsAfter, "rejected running evidence must not persist an event")
+	fresh.UID, err = uid.New()
+	require.NoError(t, err)
+	fresh.WorkflowUID, fresh.WorkflowDefinitionEventUID = nil, nil
 	fresh.Status = "succeeded"
 	_, err = store.ObserveCronRun(ctx, fresh)
 	assert.NoError(t, err, "terminal job-only evidence remains valid")
