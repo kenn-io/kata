@@ -7031,6 +7031,8 @@ components:
           type: string
         deadline_on_date:
           type: string
+        deadline_on_display:
+          type: string
         deleted_at:
           format: date-time
           type: string
@@ -7067,6 +7069,8 @@ components:
           format: int64
           type: integer
         scheduled_on_date:
+          type: string
+        scheduled_on_display:
           type: string
         short_id:
           type: string

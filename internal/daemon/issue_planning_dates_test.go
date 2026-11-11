@@ -188,12 +188,18 @@ func TestSavedInstantDatesUseSelectedZoneAcrossViews(t *testing.T) {
 	require.Equal(t, 200, status, string(raw))
 	var snapshot struct {
 		Selected struct {
-			Issue rowDates `json:"issue"`
+			Issue struct {
+				rowDates
+				ScheduledOnDisplay string `json:"scheduled_on_display"`
+				DeadlineOnDisplay  string `json:"deadline_on_display"`
+			} `json:"issue"`
 		} `json:"selected"`
 		Collection []rowDates `json:"collection"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &snapshot))
-	check(snapshot.Selected.Issue)
+	check(snapshot.Selected.Issue.rowDates)
+	require.Equal(t, "2025-12-31T21:00:00", snapshot.Selected.Issue.ScheduledOnDisplay)
+	require.Equal(t, "2025-12-31T21:00:00", snapshot.Selected.Issue.DeadlineOnDisplay)
 	require.Len(t, snapshot.Collection, 1)
 	check(snapshot.Collection[0])
 }

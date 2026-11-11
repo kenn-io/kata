@@ -7402,6 +7402,7 @@ type UIIssue struct {
 	ClosedReason        *string              `json:"closed_reason,omitempty"`
 	CreatedAt           time.Time            `json:"created_at" validate:"required"`
 	DeadlineOnDate      *string              `json:"deadline_on_date,omitempty"`
+	DeadlineOnDisplay   *string              `json:"deadline_on_display,omitempty"`
 	DeletedAt           *time.Time           `json:"deleted_at,omitempty"`
 	ID                  int64                `json:"id"`
 	Labels              []string             `json:"labels" validate:"required"`
@@ -7416,6 +7417,7 @@ type UIIssue struct {
 	RecurrenceID        *int64               `json:"recurrence_id,omitempty"`
 	Revision            int64                `json:"revision"`
 	ScheduledOnDate     *string              `json:"scheduled_on_date,omitempty"`
+	ScheduledOnDisplay  *string              `json:"scheduled_on_display,omitempty"`
 	ShortID             string               `json:"short_id" validate:"required"`
 	SourceActor         *string              `json:"source_actor,omitempty"`
 	Status              string               `json:"status" validate:"required"`

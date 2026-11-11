@@ -91,8 +91,8 @@ func DecodeSavedSchedule(raw jsontext.Value) (*SavedSchedule, error) {
 	return obj, err
 }
 
-// SavedScheduleWallTime projects saved instants using their saved rules.
-func SavedScheduleWallTime(raw jsontext.Value) (string, error) {
+// savedScheduleWallTime projects saved instants using their saved rules.
+func savedScheduleWallTime(raw jsontext.Value) (string, error) {
 	obj, loc, err := decodeSavedSchedule(raw)
 	if err != nil || obj == nil {
 		return "", err
@@ -102,6 +102,17 @@ func SavedScheduleWallTime(raw jsontext.Value) (string, error) {
 		return "", err
 	}
 	return instant.In(loc).Format("2006-01-02T15:04:05.999999999"), nil
+}
+
+// SavedScheduleWallTimes projects saved instants for issue detail views.
+func SavedScheduleWallTimes(raw string) (scheduled, deadline string) {
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return "", ""
+	}
+	scheduled, _ = savedScheduleWallTime(fields["scheduled_on"])
+	deadline, _ = savedScheduleWallTime(fields["deadline_on"])
+	return scheduled, deadline
 }
 
 // IsUnsupportedSchedule reports a saved schedule written by a newer build:

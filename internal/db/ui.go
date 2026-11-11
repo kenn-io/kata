@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // UIStore is the narrow coherent-read contract used by the browser API.
@@ -55,11 +57,13 @@ type UIProject struct {
 // UIIssue is an issue plus the display identity and labels needed by the SPA.
 type UIIssue struct {
 	Issue
-	ProjectName     string   `json:"project_name"`
-	QualifiedID     string   `json:"qualified_id"`
-	Labels          []string `json:"labels"`
-	ScheduledOnDate string   `json:"scheduled_on_date,omitempty"`
-	DeadlineOnDate  string   `json:"deadline_on_date,omitempty"`
+	ProjectName        string   `json:"project_name"`
+	QualifiedID        string   `json:"qualified_id"`
+	Labels             []string `json:"labels"`
+	ScheduledOnDate    string   `json:"scheduled_on_date,omitempty"`
+	DeadlineOnDate     string   `json:"deadline_on_date,omitempty"`
+	ScheduledOnDisplay string   `json:"scheduled_on_display,omitempty"`
+	DeadlineOnDisplay  string   `json:"deadline_on_display,omitempty"`
 }
 
 // MatchUICalendarView evaluates date-sensitive browser collection predicates
@@ -111,6 +115,7 @@ func ProjectUIPlanningDates(ctx context.Context, tx *sql.Tx, issue *UIIssue, que
 	}
 	issue.ScheduledOnDate = dates.scheduledOn
 	issue.DeadlineOnDate = dates.deadlineOn
+	issue.ScheduledOnDisplay, issue.DeadlineOnDisplay = metadata.SavedScheduleWallTimes(string(issue.Metadata))
 	return nil
 }
 
