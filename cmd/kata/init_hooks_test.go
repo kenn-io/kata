@@ -52,7 +52,7 @@ func TestApplyClaudeHooks_MigratesExactLegacyHandlers(t *testing.T) {
 		assert.Equal(t, "startup|resume|clear", group["matcher"])
 		starts = append(starts, group["hooks"].([]any)...)
 	}
-	assert.ElementsMatch(t, []any{expectedHookHandler("start"), map[string]any{"type": "command", "command": "notify-session"}}, starts)
+	assert.Equal(t, []any{expectedHookHandler("start"), map[string]any{"type": "command", "command": "notify-session"}}, starts)
 	assert.Equal(t, []any{map[string]any{
 		"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other",
 		"hooks":   []any{expectedHookHandler("end")},
