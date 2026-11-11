@@ -69,7 +69,7 @@ option objects retain exact JSON numbers.
 ### Create with typed flags
 
 For common per-run jobs, `kata cron job create` accepts typed flags instead of
-`--file`. This interface is available on main after 0.18.0. Choose the job's
+`--file`. Typed creation is available on main and will ship in a future release. Choose the job's
 enabled state and policies explicitly. This example stores a disabled native
 job; enabling it activates delivery by the owning daemon:
 

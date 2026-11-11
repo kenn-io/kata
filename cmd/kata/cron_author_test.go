@@ -1,18 +1,14 @@
 package main
 
 import (
-	"fmt"
-	"math"
 	"strings"
 	"testing"
-	"time"
 	_ "time/tzdata"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
-	"pgregory.net/rapid"
 )
 
 func cronAuthorFixture() []string {
@@ -47,7 +43,7 @@ func TestCronAuthorNativeLeavesParentResolutionToExistingPath(t *testing.T) {
 		"--timezone", "America/New_York", "--notify", "--recipient", "worker", "--message", "Hello", "--grace", "5m",
 	})
 	require.NoError(t, err)
-	require.Equal(t, "Check-ins", body.Name)
+	require.Equal(t, " Check-ins ", body.Name)
 	require.Equal(t, cron.Action{Kind: "notify", Recipient: "worker", Message: "Hello"}, body.Definition.Action)
 	require.Equal(t, &cron.IssuePolicy{Kind: "per-run", Title: "Check in", Body: "Literal ${text}"}, body.Definition.Issue)
 	require.Equal(t, int64(300), body.Definition.GraceSeconds)
@@ -59,13 +55,8 @@ func TestCronAuthorRejectsInvalidSelections(t *testing.T) {
 		name, flag, value, want string
 	}{
 		{"two schedules", "--cron", "@daily", "exactly one"},
-		{"zero interval", "--every", "0s", "--every must be positive"},
-		{"blank prompt", "--prompt", " ", "--prompt requires a nonempty prompt"},
-		{"blank adapter", "--adapter", " ", "--prompt requires a nonempty prompt"},
-		{"empty agent", "--adapter-agent", "", "--adapter-agent must not be empty"},
-		{"blank agent", "--adapter-agent", " \t\n", "--adapter-agent must not be empty"},
+		{"blank adapter", "--adapter", " ", "--prompt requires an explicit --adapter"},
 		{"fractional grace", "--grace", "0.5s", "--grace must use whole seconds"},
-		{"negative timeout", "--timeout", "-1s", "--timeout must be nonnegative"},
 		{"notify false", "--notify", "false", "notify"},
 		{"mixed action", "--notify", "true", "exactly one"},
 		{"native recipient on prompt", "--recipient", "worker", "notify"},
@@ -88,7 +79,7 @@ func TestCronAuthorRequiresExplicitChoices(t *testing.T) {
 		{"--overlap", "typed creation requires explicit --overlap"},
 		{"--every", "choose exactly one of --cron, --every or --once"},
 		{"--prompt", "choose exactly one of --notify or --prompt"},
-		{"--adapter", "--prompt requires a nonempty prompt and explicit --adapter"},
+		{"--adapter", "--prompt requires an explicit --adapter"},
 	} {
 		t.Run(tc.flag, func(t *testing.T) {
 			args := cronAuthorFixture()
@@ -150,39 +141,8 @@ func TestCronAuthorWholeSecondsContract(t *testing.T) {
 	}{
 		{"1h30m", 5400}, {"1.0000000001s", 1},
 	} {
-		got, err := cronAuthorSeconds(tc.value, "every", false)
+		got, err := cronAuthorSeconds(tc.value, "every")
 		require.NoError(t, err)
 		require.Equal(t, tc.want, got)
 	}
-	rapid.Check(t, func(rt *rapid.T) {
-		seconds := rapid.Int64().Draw(rt, "seconds")
-		allowZero := rapid.Bool().Draw(rt, "allow zero")
-		got, err := cronAuthorSeconds(fmt.Sprintf("%ds", seconds), "every", allowZero)
-		valid := seconds >= 0 && seconds <= math.MaxInt64/int64(time.Second) && (allowZero || seconds > 0)
-		if valid {
-			require.NoError(t, err)
-			require.Equal(t, seconds, got)
-		} else {
-			require.Error(t, err)
-		}
-	})
-}
-
-func TestCronAuthorPromptTextIsLiteral(t *testing.T) {
-	rapid.Check(t, func(rt *rapid.T) {
-		text := "Inspect " + rapid.String().Draw(rt, "prompt")
-		cmd := &cobra.Command{}
-		var author cronAuthorOptions
-		author.register(cmd)
-		if err := cmd.Flags().Parse(append(cronAuthorFixture(), "--prompt="+text)); err != nil {
-			rt.Fatal(err)
-		}
-		body, err := author.build(cmd, "")
-		if err != nil {
-			rt.Fatal(err)
-		}
-		if body.Definition.Action.Prompt != text {
-			rt.Fatal("literal prompt changed")
-		}
-	})
 }

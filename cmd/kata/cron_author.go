@@ -64,17 +64,10 @@ func (o *cronAuthorOptions) used(cmd *cobra.Command) bool {
 }
 
 // cronAuthorSeconds converts durations to whole seconds.
-func cronAuthorSeconds(value, flag string, allowZero bool) (int64, error) {
+func cronAuthorSeconds(value, flag string) (int64, error) {
 	d, err := time.ParseDuration(value)
 	if err != nil {
 		return 0, cronCLIValidation(fmt.Sprintf("--%s requires a supported duration: %v", flag, err))
-	}
-	if d < 0 || !allowZero && d == 0 {
-		rule := "positive"
-		if allowZero {
-			rule = "nonnegative"
-		}
-		return 0, cronCLIValidation("--" + flag + " must be " + rule)
 	}
 	if d%time.Second != 0 {
 		return 0, cronCLIValidation("--" + flag + " must use whole seconds")
@@ -89,7 +82,7 @@ func (o *cronAuthorOptions) build(cmd *cobra.Command, parent string) (api.PutCro
 			return out, cronCLIValidation("typed creation requires explicit --" + flag)
 		}
 	}
-	out.Name = strings.TrimSpace(o.name)
+	out.Name = o.name
 	if cmd.Flags().Changed("notify") && !o.notify {
 		return out, cronCLIValidation("--notify must be true when supplied")
 	}
@@ -110,16 +103,13 @@ func (o *cronAuthorOptions) build(cmd *cobra.Command, parent string) (api.PutCro
 		target      *int64
 	}{{"grace", o.grace, &out.Definition.GraceSeconds}, {"timeout", o.timeout, &out.Definition.TimeoutSeconds}} {
 		if cmd.Flags().Changed(setting.flag) {
-			*setting.target, err = cronAuthorSeconds(setting.value, setting.flag, true)
+			*setting.target, err = cronAuthorSeconds(setting.value, setting.flag)
 			if err != nil {
 				return out, err
 			}
 		}
 	}
 	if o.notify {
-		if strings.TrimSpace(parent) == "" || strings.TrimSpace(o.recipient) == "" {
-			return out, cronCLIValidation("--notify requires --parent and --recipient")
-		}
 		for _, flag := range []string{"adapter", "adapter-agent", "checkout-key"} {
 			if cmd.Flags().Changed(flag) {
 				return out, cronCLIValidation("--" + flag + " requires --prompt")
@@ -132,16 +122,13 @@ func (o *cronAuthorOptions) build(cmd *cobra.Command, parent string) (api.PutCro
 	if parent != "" || cmd.Flags().Changed("recipient") || cmd.Flags().Changed("message") {
 		return out, cronCLIValidation("--parent, --recipient and --message require --notify")
 	}
-	if strings.TrimSpace(o.prompt) == "" || strings.TrimSpace(o.adapter) == "" {
-		return out, cronCLIValidation("--prompt requires a nonempty prompt and explicit --adapter")
+	if strings.TrimSpace(o.adapter) == "" {
+		return out, cronCLIValidation("--prompt requires an explicit --adapter")
 	}
 	out.Definition.Action = cron.Action{Kind: "execute", Prompt: o.prompt}
 	out.Definition.CheckoutKey = o.checkoutKey
 	options := map[string]string{"adapter": o.adapter}
 	if cmd.Flags().Changed("adapter-agent") {
-		if strings.TrimSpace(o.agent) == "" {
-			return out, cronCLIValidation("--adapter-agent must not be empty")
-		}
 		options["agent"] = o.agent
 	}
 	out.Definition.Options, err = json.Marshal(options)
@@ -180,7 +167,7 @@ func (o *cronAuthorOptions) trigger(cmd *cobra.Command) (cron.Trigger, error) {
 		trigger.Kind, trigger.Cron = "cron", o.expression
 	case cmd.Flags().Changed("every"):
 		trigger.Kind = "interval"
-		seconds, err := cronAuthorSeconds(o.every, "every", false)
+		seconds, err := cronAuthorSeconds(o.every, "every")
 		if err != nil {
 			return trigger, err
 		}

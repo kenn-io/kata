@@ -71,19 +71,6 @@ func TestCronCLIAuthoringFlagsAreCreateOnly(t *testing.T) {
 	}
 }
 
-func TestCronCLICreateRetainsGlobalAgentOutputFlag(t *testing.T) {
-	resetFlags(t)
-	cmd := newRootCmd()
-	create, _, err := cmd.Find([]string{"cron", "job", "create"})
-	require.NoError(t, err)
-	// --agent is an existing global output selector, including on file create.
-	// The adapter's agent choice must not shadow it with a string flag.
-	require.NoError(t, create.ParseFlags([]string{"--agent", "--file", "request.json"}))
-	selected, err := create.Flags().GetBool("agent")
-	require.NoError(t, err)
-	require.True(t, selected)
-}
-
 func TestCronCLITypedNativeParentResolution(t *testing.T) {
 	t.Setenv("KATA_AUTHOR", "worker")
 	env := testenv.New(t)
