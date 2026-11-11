@@ -189,7 +189,7 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 		return RunningDaemon{}, err
 	}
 	if !enabled {
-		return waitForSupervisedDaemon(ctx, ns.DataDir, configPath, true)
+		return waitForSupervisedDaemon(ctx, ns.DataDir, configPath, true, discoverDaemonForSupervised)
 	}
 	found, release, err := discoverForStart(ctx, ns.DataDir)
 	if err != nil {
@@ -214,32 +214,23 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 }
 
 func externallyManagedVersionError(info PingInfo) error {
+	if err := refuseDaemonDowngrade(info); err != nil {
+		return err
+	}
 	return fmt.Errorf("%w: running kata daemon %s differs from this kata binary %s; restart it with your service manager (autostart = false)", ErrDaemonNotReplaceable, daemonVersionLabel(info), currentVersionForEnsure())
 }
 
-func waitForSupervisedDaemon(ctx context.Context, dataDir, configPath string, migrationAllowed bool) (RunningDaemon, error) {
-	return waitForSupervisedDaemonUsing(ctx, dataDir, configPath, migrationAllowed, discoverDaemonForAutoStart, nil)
-}
-
-func waitForSupervisedDaemonUsing(ctx context.Context, dataDir, configPath string, migrationAllowed bool, scan func(context.Context, string) (ensureDiscovery, error), verify func(context.Context, liveDaemon) error) (RunningDaemon, error) {
+func waitForSupervisedDaemon(ctx context.Context, dataDir, configPath string, migrationAllowed bool, scan func(context.Context, string) (ensureDiscovery, error)) (RunningDaemon, error) {
 	ctx, cancel := context.WithTimeout(ctx, daemonStartupWait)
 	defer cancel()
 	var running RunningDaemon
 	var unreachable error
 	err := waitForDaemonStartup(ctx, nil, daemonStartupWait, nil, func(ctx context.Context) (bool, error) {
-		if ctx.Err() != nil {
-			return false, ctx.Err()
-		}
 		found, err := scan(ctx, dataDir)
 		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
 			return false, err
 		}
 		unreachable = err
-		if found.Outcome != daemonScanNone && verify != nil {
-			if err := verify(ctx, found.Daemon); err != nil {
-				return false, err
-			}
-		}
 		switch found.Outcome {
 		case daemonScanCompatible:
 			running = runningDaemonForLive(found.Daemon)
@@ -260,7 +251,7 @@ func waitForSupervisedDaemonUsing(ctx context.Context, dataDir, configPath strin
 	if migrationAllowed && sqliteCutoverLocked(ctx) {
 		return RunningDaemon{}, fmt.Errorf("%w: storage migration is in progress; retry after the service manager's daemon becomes ready (%s)", ErrLocalDaemonUnreachable, configPath)
 	}
-	message := fmt.Errorf("%w; readiness budget %s; start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
+	message := fmt.Errorf("%w; wait up to %s or the caller's deadline; start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
 	if unreachable != nil {
 		message = fmt.Errorf("%w: %w", message, unreachable)
 	}
@@ -399,6 +390,10 @@ const (
 type ensureDiscovery struct {
 	Outcome daemonScanOutcome
 	Daemon  liveDaemon
+}
+
+var discoverDaemonForSupervised = func(ctx context.Context, dir string) (ensureDiscovery, error) {
+	return discoverForEnsureUsing(ctx, dir, liveDaemonsReadOnly)
 }
 
 func discoverForEnsure(ctx context.Context, dataDir string) (ensureDiscovery, error) {

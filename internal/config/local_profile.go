@@ -54,13 +54,23 @@ type LocalProfileConfig struct {
 
 // ResolveLocalProfile reads only the selected home and derives its storage identity.
 func ResolveLocalProfile(entry CatalogDaemonConfig) (LocalProfileConfig, error) {
+	return resolveLocalProfile(entry, false)
+}
+
+// ResolveLocalProfileForClient uses the selected client credential for a
+// supervisor-owned profile without resolving the daemon's private token.
+func ResolveLocalProfileForClient(entry CatalogDaemonConfig, clientToken string) (LocalProfileConfig, error) {
+	return resolveLocalProfile(entry, clientToken != "")
+}
+
+func resolveLocalProfile(entry CatalogDaemonConfig, hasClientToken bool) (LocalProfileConfig, error) {
 	if err := normalizeLocalProfileEntry(&entry); err != nil {
 		return LocalProfileConfig{}, err
 	}
 	if !entry.Local || entry.Home == "" {
 		return LocalProfileConfig{}, fmt.Errorf("daemon %q is not an explicit local profile", entry.Name)
 	}
-	cfg, err := ReadDaemonConfigForHome(entry.Home)
+	cfg, err := readDaemonConfig(filepath.Join(entry.Home, "config.toml"), false, hasClientToken)
 	if err != nil {
 		return LocalProfileConfig{}, err
 	}

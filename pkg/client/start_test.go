@@ -171,8 +171,7 @@ func TestDiscoverStartWithRespectsDisabledAutostart(t *testing.T) {
 		_, err = client.Discover(ctx, client.DiscoverOptions{StartWith: kata})
 
 		require.ErrorIs(t, err, client.ErrDaemonUnavailable)
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-		require.ErrorContains(t, err, "service manager")
+		require.ErrorContains(t, err, "managed externally")
 		assert.Nil(t, ranWith())
 	})
 }

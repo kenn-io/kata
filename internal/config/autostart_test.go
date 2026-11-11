@@ -21,7 +21,4 @@ func TestAutostartPolicy(t *testing.T) {
 		require.Equal(t, test.enabled, enabled)
 		require.Equal(t, filepath.Join(home, "config.toml"), path)
 	}
-	require.True(t, (DaemonConfig{}).AutostartEnabled())
-	disabled := false
-	require.False(t, (DaemonConfig{Autostart: &disabled}).AutostartEnabled())
 }

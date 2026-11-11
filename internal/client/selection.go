@@ -127,7 +127,7 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 			// The profile's identity check sends this credential.
 			return DaemonSelection{}, credentialErr
 		}
-		profile, err := config.ResolveLocalProfile(entry)
+		profile, err := config.ResolveLocalProfileForClient(entry, token)
 		if err != nil {
 			return DaemonSelection{}, err
 		}

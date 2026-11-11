@@ -411,13 +411,13 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	return readDaemonConfig(path, true)
+	return readDaemonConfig(path, true, false)
 }
 
 // ReadDaemonConfigForHome reads a selected home's configuration without
 // applying the calling client's daemon environment overrides.
 func ReadDaemonConfigForHome(home string) (*DaemonConfig, error) {
-	return readDaemonConfig(filepath.Join(home, "config.toml"), false)
+	return readDaemonConfig(filepath.Join(home, "config.toml"), false, false)
 }
 
 // ReadDaemonCatalogAndAuthPolicy reads the selected daemon, catalog, and
@@ -467,7 +467,7 @@ func ReadDaemonCatalogAndAuthPolicy() (*DaemonConfig, error) {
 	return cfg, nil
 }
 
-func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
+func readDaemonConfig(path string, mergeEnv, skipSupervisedAuth bool) (*DaemonConfig, error) {
 	var cfg DaemonConfig
 	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
 	switch {
@@ -516,8 +516,10 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 			return nil, err
 		}
 	}
-	if err := resolveAuthCredential(&cfg.Auth); err != nil {
-		return nil, err
+	if !skipSupervisedAuth || cfg.AutostartEnabled() {
+		if err := resolveAuthCredential(&cfg.Auth); err != nil {
+			return nil, err
+		}
 	}
 	if cfg.Sources["auth"] != "KATA_AUTH_TOKEN" {
 		cfg.Sources["auth"], _, _ = strings.Cut(cfg.Auth.Source, ":")

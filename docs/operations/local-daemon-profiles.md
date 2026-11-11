@@ -71,8 +71,10 @@ Registration is opt-in. Kata does not convert loopback URLs into profiles,
 remove overrides, enroll a project, or merge same-named projects.
 
 A profile obeys top-level `autostart = false` in its selected home's
-`config.toml`: ordinary commands and `kata daemon recover` wait up to 30 seconds
-for its service manager instead of starting a daemon.
+`config.toml`: ordinary commands wait up to 30 seconds, or the caller's shorter
+deadline, for its service manager instead of starting a daemon. `kata daemon
+recover` first checks the existing storage, schema, and requested project; if
+those checks pass, it waits in the same way.
 
 ## Diagnose and recover
 
@@ -122,7 +124,7 @@ them.
 | State | Action |
 | --- | --- |
 | `ready` | Continue using the selected daemon. |
-| `stopped_local_profile` | Run `daemon recover` to start that existing profile. |
+| `stopped_local_profile` | Run `daemon recover` to check and reach that existing profile. If autostart is disabled, start it through its service manager. |
 | `local_stopped` | Start the current home explicitly. It is not a pinned profile. |
 | `local_unreachable` | Inspect the selected process, transport, and credentials. |
 | `selection_error` | Repair routing with `daemon diagnose`; status retains the current-home process list. |

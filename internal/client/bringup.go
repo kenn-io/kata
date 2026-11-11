@@ -147,8 +147,7 @@ type executableStart struct {
 
 func (s executableStart) profile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
 	if !s.request.ReadOnly && !selection.Profile.Config.AutostartEnabled() {
-		resolved, err := waitForSupervisedProfile(ctx, selection.Resolved, *selection.Profile)
-		return resolved, err == nil, err
+		return inProcessStart{}.profile(ctx, selection)
 	}
 	args := []string{"daemon", "recover"}
 	switch {
@@ -162,23 +161,10 @@ func (s executableStart) profile(ctx context.Context, selection DaemonSelection)
 
 func (s executableStart) local(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
 	if !s.request.ReadOnly {
-		enabled, configPath, err := config.ReadAutostartEnabled()
-		if err != nil {
+		if enabled, _, err := config.ReadAutostartEnabled(); err != nil {
 			return ResolvedDaemon{}, false, err
-		}
-		if !enabled {
-			ns, err := daemonruntime.NewNamespace()
-			if err != nil {
-				return ResolvedDaemon{}, false, err
-			}
-			running, err := waitForSupervisedDaemon(ctx, ns.DataDir, configPath, true)
-			if err != nil {
-				return selection.Resolved, false, err
-			}
-			if selectsCurrentHomeDefault(selection) {
-				return resolvedForRunning(DaemonSourceLocalRuntime, "", running).withGlobalAuth(), true, nil
-			}
-			return selection.Resolved.WithRunning(running), true, nil
+		} else if !enabled {
+			return inProcessStart{}.local(ctx, selection)
 		}
 	}
 	return s.startIfStopped(ctx, selection, s.discover.local, []string{"daemon", "start"})

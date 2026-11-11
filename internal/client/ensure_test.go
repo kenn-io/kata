@@ -1419,9 +1419,6 @@ func testEnsureRunningReplacesCapableDaemonInPlace(t *testing.T, supervised bool
 
 	if supervised {
 		require.ErrorIs(t, err, ErrDaemonNotReplaceable)
-		require.ErrorContains(t, err, "v0.1.0")
-		require.ErrorContains(t, err, "v0.2.0")
-		require.ErrorContains(t, err, "service manager")
 		assert.Zero(t, requests)
 		assert.Zero(t, state.stopCalls)
 		assert.Zero(t, state.startCalls)

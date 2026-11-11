@@ -150,8 +150,7 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 
 func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, error) {
 	profile := *selection.Profile
-	enabled := profile.Config.AutostartEnabled()
-	if !enabled {
+	if !profile.Config.AutostartEnabled() {
 		return waitForSupervisedProfile(ctx, selection.Resolved, profile)
 	}
 	inspector, err := installedStorageInspector()
@@ -260,20 +259,18 @@ func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, prof
 		if err := safefileio.ValidatePrivateDir(dir); err != nil {
 			return ensureDiscovery{}, &LocalProfileDirError{Err: err}
 		}
-		return discoverSupervisedProfile(ctx, dir)
-	}
-	verify := func(ctx context.Context, candidate liveDaemon) error {
-		selected := resolved.WithRunning(runningDaemonForLive(candidate))
-		selected.UnixSocket = candidate.UnixSocket
+		found, err := discoverSupervisedProfile(ctx, dir)
+		if err != nil || found.Outcome == daemonScanNone {
+			return found, err
+		}
+		selected := resolved.WithRunning(runningDaemonForLive(found.Daemon))
+		selected.UnixSocket = found.Daemon.UnixSocket
 		if err := verifyLocalProfileInstance(ctx, selected); err != nil {
-			return err
+			return ensureDiscovery{}, err
 		}
 		resolved = selected
-		return nil
+		return found, nil
 	}
-	_, err := waitForSupervisedDaemonUsing(ctx, resolved.LocalProfile.DataDir, filepath.Join(profile.Home, "config.toml"), false, scan, verify)
-	if err != nil {
-		return resolved, err
-	}
-	return resolved, nil
+	_, err := waitForSupervisedDaemon(ctx, resolved.LocalProfile.DataDir, filepath.Join(profile.Home, "config.toml"), false, scan)
+	return resolved, err
 }

@@ -479,7 +479,7 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	case "unhealthy":
 		result.NextAction = "inspect the selected daemon's health report and logs"
 	case "stopped_local_profile":
-		result.NextAction = "run kata daemon recover to start this existing profile"
+		result.NextAction = "run kata daemon recover to check and reach this existing profile; if autostart is disabled, start it through its service manager"
 	case "local_stopped":
 		result.NextAction = "start the current home with kata daemon start"
 	case "unknown_loopback_endpoint":
