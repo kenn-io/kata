@@ -349,8 +349,8 @@ func TestCronDefinitionWritePolicy(t *testing.T) {
 func TestCronWorkflowGeneratedClientEmptyArgvIsRefused(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	project := seedProject(t, env, "workflow-example")
-	command := "true"
-	body := generated.CreateCronWorkflowBody{Name: "Rejected", Definition: generated.CronWorkflowDefinition{Version: 1, Steps: []generated.CronWorkflowStep{{Key: "inspect", Kind: "command", Command: &command, Argv: []string{}}}}}
+	command, actor := "true", "worker"
+	body := generated.CreateCronWorkflowBody{Actor: &actor, Name: "Rejected", Definition: generated.CronWorkflowDefinition{Version: 1, Steps: []generated.CronWorkflowStep{{Key: "inspect", Kind: "command", Command: &command, Argv: []string{}}}}}
 	raw, err := stdjson.Marshal(body)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"argv":[]`)
