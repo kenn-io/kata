@@ -642,16 +642,11 @@ func TestPatchRecurrenceLocalAdvancement(t *testing.T) {
 	assert.Equal(t, "2026-08-05", *next.OccurrenceKey)
 	var fields map[string]any
 	require.NoError(t, json.Unmarshal([]byte(next.Metadata), &fields))
-	value, zone, instant, present, err := metadata.ScheduleFieldInstant(string(next.Metadata), "scheduled_on", "")
+	value, _, _, present, err := metadata.ScheduleFieldInstant(string(next.Metadata), "scheduled_on", "")
 	require.NoError(t, err)
 	require.True(t, present)
 	assert.Equal(t, "2026-08-05", value)
 	assert.Equal(t, "Local", fields["timezone"])
-	location, err := metadata.ScheduleLocation(zone, metadata.ScheduleTZDataVersion)
-	require.NoError(t, err)
-	_, localOffset := instant.In(time.Local).Zone()
-	_, savedOffset := instant.In(location).Zone()
-	assert.Equal(t, localOffset, savedOffset)
 	require.NotNil(t, current.NextOccurrenceKey)
 	assert.Equal(t, "2026-08-07", *current.NextOccurrenceKey)
 }

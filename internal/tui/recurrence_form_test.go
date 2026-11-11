@@ -130,7 +130,7 @@ func TestRecurrenceFormRejectsUnknownScheduleRules(t *testing.T) {
 	t.Setenv("TZ", "Asia/Tokyo")
 	issue := Issue{Metadata: issueMetadata{ScheduledOn: jsontext.Value(`{"value":"2026-01-01","timezone":"America/New_York","tzdata_version":"unknown"}`)}}
 	form := newRecurrenceForm(formTarget{}, issue, nil)
-	assert.Contains(t, form.err, "unknown")
+	assert.Contains(t, form.err, "unsupported schedule tzdata version")
 	assert.Empty(t, form.fieldValue(fieldZone))
 }
 

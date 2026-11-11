@@ -19,16 +19,11 @@ function acceptCanonicalWire(wire: ShowIssueResponseBody): KataIssueDetailWire {
 
 describe('projectIssueDetail', () => {
   it.each([
-    ['legacy', '2026-11-12T09:30'],
-    [
-      'saved',
-      {
-        value: '2026-11-12T09:30',
-        timezone: 'America/New_York',
-        tzdata_version: tzdataVersion,
-      },
-    ],
-  ])('retains the time in %s schedules', (_name, value) => {
+    ['legacy', '2026-11-12T09:30', '2026-11-12T09:30'],
+    ['saved', { value: '2026-11-12T09:30', timezone: 'America/New_York', tzdata_version: tzdataVersion }, '2026-11-12T09:30'],
+    ['legacy instant', '2026-01-01T02:00:00Z', '2026-01-01T02:00:00Z'],
+    ['saved instant', { value: '2026-01-01T02:00:00Z', timezone: 'America/New_York', tzdata_version: tzdataVersion }, '2026-01-01T02:00:00Z'],
+  ])('retains the time in %s schedules', (_name, value, expected) => {
     const detail = projectIssueDetail({
       issue: {
         uid: '01TASK',
@@ -39,38 +34,22 @@ describe('projectIssueDetail', () => {
         metadata: { scheduled_on: value, deadline_on: value },
       },
     })
-    expect(detail.issue.scheduledOn).toBe('2026-11-12T09:30')
-    expect(detail.issue.deadlineOn).toBe('2026-11-12T09:30')
+    expect(detail.issue.scheduledOn).toBe(expected)
+    expect(detail.issue.deadlineOn).toBe(expected)
   })
-  it('retains the time and UTC zone of a legacy instant', () => {
+  it('prefers projected dates for schedule formats it cannot interpret', () => {
     const detail = projectIssueDetail({
       issue: {
         uid: '01TASK',
         title: 'Scheduled',
         status: 'open',
-        scheduled_on_date: '2025-12-31',
-        metadata: { scheduled_on: '2026-01-01T02:00:00Z' },
+        scheduled_on_date: '2026-11-12',
+        deadline_on_date: '2026-11-13',
+        metadata: { scheduled_on: 'future-format', deadline_on: { value: 'future-format' } },
       },
     })
-    expect(detail.issue.scheduledOn).toBe('2026-01-01T02:00:00Z')
-  })
-  it('retains a saved instant when an older daemon lacks the display projection', () => {
-    const detail = projectIssueDetail({
-      issue: {
-        uid: '01TASK',
-        title: 'Scheduled',
-        status: 'open',
-        scheduled_on_date: '2025-12-31',
-        metadata: {
-          scheduled_on: {
-            value: '2026-01-01T02:00:00Z',
-            timezone: 'America/New_York',
-            tzdata_version: tzdataVersion,
-          },
-        },
-      },
-    })
-    expect(detail.issue.scheduledOn).toBe('2026-01-01T02:00:00Z')
+    expect(detail.issue.scheduledOn).toBe('2026-11-12')
+    expect(detail.issue.deadlineOn).toBe('2026-11-13')
   })
   it('shows saved schedules on their resolved calendar dates', () => {
     const saved = {

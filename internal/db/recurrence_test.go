@@ -85,29 +85,22 @@ func TestRecurrenceLocalRejectsDifferentRules(t *testing.T) {
 	require.ErrorContains(t, err, "Local timezone rules differ")
 }
 
-func TestAttachRecurrencePreservesExistingDeadlineZone(t *testing.T) {
-	raw := jsontext.Value(`{"timezone":"America/New_York","deadline_on":"2026-05-19T09:00"}`)
-	before, _, at, _, err := metadata.ScheduleFieldInstant(string(raw), "deadline_on", "")
-	require.NoError(t, err)
-	got, err := ComposeExistingRecurrenceIssueMetadata(raw, "2026-05-18", "Europe/London", "UTC")
-	require.NoError(t, err)
-	after, zone, gotAt, _, err := metadata.ScheduleFieldInstant(string(got), "deadline_on", "")
-	require.NoError(t, err)
-	assert.Equal(t, before, after)
-	assert.Equal(t, "America/New_York", zone)
-	assert.Equal(t, at, gotAt)
-}
-
-func TestAttachRecurrencePreservesDeadlineInDaemonDefaultZone(t *testing.T) {
-	raw := jsontext.Value(`{"deadline_on":"2026-05-19T09:00"}`)
-	_, _, before, _, err := metadata.ScheduleFieldInstant(string(raw), "deadline_on", "America/New_York")
-	require.NoError(t, err)
-	got, err := ComposeExistingRecurrenceIssueMetadata(raw, "2026-05-18", "Europe/London", "America/New_York")
-	require.NoError(t, err)
-	_, zone, after, _, err := metadata.ScheduleFieldInstant(string(got), "deadline_on", "")
-	require.NoError(t, err)
-	assert.Equal(t, "America/New_York", zone)
-	assert.Equal(t, before, after)
+func TestAttachRecurrencePreservesDeadlineZone(t *testing.T) {
+	for _, tc := range []struct{ name, raw, defaultZone string }{
+		{"issue zone", `{"timezone":"America/New_York","deadline_on":"2026-05-19T09:00"}`, "UTC"},
+		{"daemon zone", `{"deadline_on":"2026-05-19T09:00"}`, "America/New_York"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, before, _, err := metadata.ScheduleFieldInstant(tc.raw, "deadline_on", tc.defaultZone)
+			require.NoError(t, err)
+			got, err := ComposeExistingRecurrenceIssueMetadata(jsontext.Value(tc.raw), "2026-05-18", "Europe/London", tc.defaultZone)
+			require.NoError(t, err)
+			_, zone, after, _, err := metadata.ScheduleFieldInstant(string(got), "deadline_on", "")
+			require.NoError(t, err)
+			assert.Equal(t, "America/New_York", zone)
+			assert.Equal(t, before, after)
+		})
+	}
 }
 
 func TestRecurrenceLocalRejectsChangedDeadlineCalendarDate(t *testing.T) {

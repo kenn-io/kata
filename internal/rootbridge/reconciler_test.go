@@ -1094,7 +1094,7 @@ func TestFieldReconcileLegacyDateWithAliasTimezone(t *testing.T) {
 		name, issueTimezone, daemonTimezone string
 	}{
 		{"issue timezone", `"US/Eastern"`, "UTC"},
-		{"daemon timezone", `null`, "US/Eastern"},
+		{"daemon timezone", ``, "US/Eastern"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newReconcileHarness(t)
@@ -1103,7 +1103,11 @@ func TestFieldReconcileLegacyDateWithAliasTimezone(t *testing.T) {
 			h.seedBaseline(t, "scheduled_on", date("2026-08-20"))
 			sibling, err := metadata.NewScheduleValue("2026-08-22T09:00", "Europe/Paris")
 			require.NoError(t, err)
-			_, err = h.store.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, `{"timezone":`+tc.issueTimezone+`,"scheduled_on":"2026-08-20","deadline_on":`+string(sibling)+`}`, h.issue.ID)
+			zone := ""
+			if tc.issueTimezone != "" {
+				zone = `"timezone":` + tc.issueTimezone + `,`
+			}
+			_, err = h.store.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, `{`+zone+`"scheduled_on":"2026-08-20","deadline_on":`+string(sibling)+`}`, h.issue.ID)
 			require.NoError(t, err)
 			h.client.fieldValues["start-date"] = date("2026-08-21")
 
@@ -1151,6 +1155,14 @@ func TestFieldReconcilePreservesIndependentScheduleZones(t *testing.T) {
 			values, err := metadataObject(issue.Metadata)
 			require.NoError(t, err)
 			assert.JSONEq(t, `"America/New_York"`, string(values["timezone"]))
+			if value.Kind == fieldKindNull {
+				require.NotContains(t, values, "scheduled_on")
+				continue
+			}
+			saved, err := metadata.DecodeSavedSchedule(values["scheduled_on"])
+			require.NoError(t, err)
+			require.NotNil(t, saved)
+			assert.Equal(t, "America/New_York", saved.Timezone)
 		}
 	})
 
@@ -1211,7 +1223,7 @@ func TestFieldReconcilePreservesIndependentScheduleZones(t *testing.T) {
 		}
 	})
 
-	t.Run("two mapped local fields move to one new timezone together", func(t *testing.T) {
+	t.Run("two existing schedules update in one reconciliation", func(t *testing.T) {
 		h := newReconcileHarness(t)
 		h.mapField(t, "scheduled_on", "start-date")
 		h.mapField(t, "deadline_on", "due-date")

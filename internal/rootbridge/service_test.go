@@ -877,7 +877,7 @@ func TestResolveFieldConflictResumesAfterSelectedSideWasAlreadyApplied(t *testin
 	}
 }
 
-func TestResolveFieldConflictAllowsCoordinatedLocalTimezoneTransition(t *testing.T) {
+func TestResolveFieldConflictsPreserveScheduleZones(t *testing.T) {
 	h := newReconcileHarness(t)
 	startMapping := h.mapField(t, "scheduled_on", "start-date")
 	dueMapping := h.mapField(t, "deadline_on", "due-date")
