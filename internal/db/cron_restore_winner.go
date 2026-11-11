@@ -45,7 +45,8 @@ func ReconcileOwnerCronWorkflowReplay(records []ImportRecord) []ImportRecord {
 			continue
 		}
 		latest, exists := winners[key{projects[row.ProjectID], row.UID}]
-		if !exists || compareClock(cronDefinitionClock(latest.value), cronDefinitionClock(row.CronDefinition)) <= 0 {
+		order := compareClock(cronDefinitionClock(latest.value), cronDefinitionClock(row.CronDefinition))
+		if !exists || order < 0 || (order == 0 && (latest.value.DefinitionEventUID != row.DefinitionEventUID || latest.value.Author != row.Author)) {
 			result = append(result, record)
 			continue
 		}
@@ -56,6 +57,14 @@ func ReconcileOwnerCronWorkflowReplay(records []ImportRecord) []ImportRecord {
 		if _, err := cron.DecodeWorkflow(latest.document); err == nil {
 			result = append(result, record)
 			continue
+		}
+		if order == 0 && len(row.RawDefinition) != 0 {
+			current := append(jsontext.Value(nil), row.RawDefinition...)
+			original := append(jsontext.Value(nil), latest.document...)
+			if current.Canonicalize() == nil && original.Canonicalize() == nil && string(current) == string(original) {
+				result = append(result, record)
+				continue
+			}
 		}
 		replacement := *row
 		replacement.CronDefinition = latest.value
