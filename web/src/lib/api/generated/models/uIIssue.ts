@@ -29,8 +29,6 @@ export interface UIIssue {
   qualified_id: string
   recurrence_id?: number
   revision: number
-  /** Why this issue's saved scheduled_on or deadline_on cannot be read, when a newer build wrote rules or members this build does not know; the issue stays listed without that date. */
-  schedule_error?: string
   scheduled_on_date?: string
   scheduled_on_display?: string
   scheduled_on_today?: string

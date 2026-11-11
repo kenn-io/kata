@@ -90,21 +90,6 @@ describe('IssueCollection', () => {
     vi.useRealTimers()
   })
 
-  it('shows an unreadable schedule on an issue row', () => {
-    const issue = { ...baseIssues[0]!, schedule_error: 'unsupported schedule tzdata version' }
-    render(IssueCollection, {
-      props: {
-        currentView: viewWithIssues([issue]),
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
-    expect(screen.getByRole('button', { name: /Review example project/ }).textContent).toContain(
-      'unsupported schedule',
-    )
-  })
-
   describe('capped render', () => {
     function manyTasks(count: number): KataTaskSummary[] {
       return Array.from({ length: count }, (_, index) =>

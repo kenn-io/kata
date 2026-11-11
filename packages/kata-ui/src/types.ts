@@ -214,8 +214,6 @@ export interface KataIssueDetailProps {
     source?: { issueUID: string; commentUID: string },
   ) => void
   returnComment?: { issueUID: string; commentUID: string } | undefined
-  /** Why the host could not read this issue's schedule; shown as a warning. */
-  scheduleError?: string | undefined
   onReplyComment?: (commentUID: string, kind: KataReplyKind) => void
   commentActionsDisabled?: boolean
   selectedCommentUID?: string | undefined

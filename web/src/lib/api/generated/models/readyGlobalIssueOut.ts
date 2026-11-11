@@ -19,7 +19,7 @@ export interface ReadyGlobalIssueOut {
   closed_at?: string
   closed_reason?: string
   created_at: string
-  /** deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed or unsupported (see schedule_error). */
+  /** deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request. */
   deadline_on_date?: string
   /** Today's date in the deadline field's timezone. */
   deadline_on_today?: string
@@ -40,9 +40,7 @@ export interface ReadyGlobalIssueOut {
   recurrence_id?: number
   related?: LinkPeer[]
   revision: number
-  /** Why this row's saved scheduled_on or deadline_on cannot be read, when a newer build wrote rules or members this build does not know; the row's other fields stay valid. */
-  schedule_error?: string
-  /** scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed or unsupported (see schedule_error). */
+  /** scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request. */
   scheduled_on_date?: string
   /** Today's date in the scheduled field's timezone. */
   scheduled_on_today?: string

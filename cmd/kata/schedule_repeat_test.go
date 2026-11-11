@@ -168,8 +168,7 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			previous := localTimeZoneName
-			t.Cleanup(func() { localTimeZoneName = previous })
+			isolateCallerZone(t)
 			localTimeZoneName = func() string { return "Asia/Tokyo" }
 			env, dir, pid := setupCLIWorkspace(t)
 			ref := createIssue(t, env, pid, "zone source")

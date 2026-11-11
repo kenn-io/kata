@@ -82,10 +82,6 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		if !patched && !changedZone {
 			continue
 		}
-		saved, err := metadata.DecodeSavedSchedule(before[field])
-		if metadata.IsUnsupportedSchedule(err) {
-			return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
-		}
 		if supplied := patch[field]; len(supplied) > 0 && supplied[0] == '{' {
 			saved, err := metadata.DecodeSavedSchedule(supplied)
 			if err != nil || saved == nil {
@@ -100,19 +96,25 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 		}
 		if patched && !changedZone && len(before[field]) > 0 {
 			previous, err := metadata.ScheduleValueText(before[field])
-			if err == nil && (previous == value || before[field][0] == '{' && metadata.ScheduleClockText(before[field]) == value) {
+			if err == nil && previous == value {
 				if before[field][0] != '"' || !legacyScheduleZoneKnown(before["timezone"], field, defaultZone, recurrenceZone) {
 					result[field] = before[field]
 					continue
 				}
 			}
 		}
-		if saved != nil && !changedZone {
-			result[field], err = metadata.NewScheduleValueWithVersion(value, saved.Timezone, saved.TZDataVersion)
-			if err != nil {
+		if len(before[field]) > 0 {
+			saved, err := metadata.DecodeSavedSchedule(before[field])
+			if metadata.IsUnsupportedSchedule(err) {
 				return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
 			}
-			continue
+			if saved != nil && !changedZone {
+				result[field], err = metadata.NewScheduleValueWithVersion(value, saved.Timezone, saved.TZDataVersion)
+				if err != nil {
+					return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
+				}
+				continue
+			}
 		}
 		var zone string
 		_, instantErr := time.Parse(time.RFC3339, value)

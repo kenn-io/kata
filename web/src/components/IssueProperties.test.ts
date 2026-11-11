@@ -256,21 +256,6 @@ describe('IssueProperties', () => {
     },
   )
 
-  it('converts a timed schedule to a date when its day is selected', async () => {
-    const onPatchMetadata = vi.fn(async () => true)
-    renderProperties({
-      issue: makeIssue({
-        scheduled_on_date: '2026-06-01',
-        metadata: { scheduled_on: '2026-06-01T09:00:00' },
-      }),
-      onPatchMetadata,
-    })
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
-    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
-    await fireEvent.click(screen.getByRole('button', { name: /Jun 1, 2026/ }))
-    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { scheduled_on: '2026-06-01' })
-  })
-
   it('patches scheduled and due dates and closes editors on accepted replacement', async () => {
     const onPatchMetadata = vi.fn(async () => true)
     const view = renderProperties({ onPatchMetadata, draftResetGeneration: 0 })

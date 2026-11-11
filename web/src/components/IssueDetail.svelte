@@ -83,9 +83,6 @@
   <div class="editor-toolbar">
     <Button size="sm" label="Done editing" onclick={() => (editing = false)} />
   </div>
-  {#if props.issue.issue.schedule_error}
-    <p class="schedule-error" title={props.issue.issue.schedule_error}>Unsupported schedule</p>
-  {/if}
   <IssueEditor {...props} navigationActive={editing} />
 </section>
 <!-- An unsent reply survives edit mode, so its composer stays mounted while hidden. -->
@@ -110,7 +107,6 @@
       }}
       commentActionsDisabled={Boolean(props.actionsDisabled || props.authorityBlocked)}
       selectedCommentUID={props.selectedCommentUID}
-      scheduleError={props.issue.issue.schedule_error}
       pending={props.pending}
     />
   {/if}
@@ -158,13 +154,6 @@
   .editor-mode[hidden],
   .shared-detail[hidden] {
     display: none;
-  }
-
-  .schedule-error {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-semibold);
   }
 
   .shared-detail {

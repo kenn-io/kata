@@ -18,6 +18,13 @@ type planningCalendarDates struct {
 	scheduledErr, deadlineErr         error
 }
 
+func (d planningCalendarDates) err() error {
+	if d.scheduledErr != nil {
+		return d.scheduledErr
+	}
+	return d.deadlineErr
+}
+
 // unsupported returns the error of a field saved by a newer build (tzdata rules
 // or members this build cannot read), which a row must surface, not omit.
 func (d planningCalendarDates) unsupported() error {

@@ -199,6 +199,7 @@ func TestRecurrenceTodayUsesBundledRules(t *testing.T) {
 }
 
 func TestRecurrenceFormRejectsUnknownScheduleRules(t *testing.T) {
+	t.Setenv("TZ", "Asia/Tokyo")
 	issue := Issue{Metadata: issueMetadata{ScheduledOn: jsontext.Value(`{"value":"2026-01-01","timezone":"America/New_York","tzdata_version":"unknown"}`)}}
 	form := newRecurrenceForm(formTarget{}, issue, nil)
 	assert.Contains(t, form.err, "unsupported schedule tzdata version")
@@ -623,17 +624,14 @@ func TestSaveRecurrenceRequiresGuardedStartAPI(t *testing.T) {
 func TestSaveRecurrenceRejectsUnknownRulesOnReadback(t *testing.T) {
 	const saved = `{"value":"2026-01-01","timezone":"America/New_York","tzdata_version":"unknown"}`
 	const refusal = "unsupported schedule tzdata version"
-	for _, test := range []struct {
-		name, field string
-		change      bool
-	}{
-		{"start scheduled", "scheduled_on", false}, {"change scheduled", "scheduled_on", true},
-		{"start deadline", "deadline_on", false}, {"change deadline", "deadline_on", true},
+	for _, test := range []struct{ name, field string }{
+		{"start scheduled", "scheduled_on"}, {"change scheduled", "scheduled_on"},
+		{"start deadline", "deadline_on"}, {"change deadline", "deadline_on"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newRecurrenceHarness(t, viewDetail)
 			var current *recurrenceclient.View
-			if test.change {
+			if strings.HasPrefix(test.name, "change") {
 				rec := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
 				current = &rec
 			}

@@ -3590,7 +3590,7 @@ components:
           format: date-time
           type: string
         deadline_on_date:
-          description: deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed or unsupported (see schedule_error).
+          description: deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
           type: string
         deadline_on_today:
           description: Today's date in the deadline field's timezone.
@@ -3637,11 +3637,8 @@ components:
         revision:
           format: int64
           type: integer
-        schedule_error:
-          description: Why this row's saved scheduled_on or deadline_on cannot be read, when a newer build wrote rules or members this build does not know; the row's other fields stay valid.
-          type: string
         scheduled_on_date:
-          description: scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed or unsupported (see schedule_error).
+          description: scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
           type: string
         scheduled_on_today:
           description: Today's date in the scheduled field's timezone.
@@ -4238,7 +4235,7 @@ components:
           format: date-time
           type: string
         deadline_on_date:
-          description: deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed or unsupported (see schedule_error).
+          description: deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
           type: string
         deadline_on_today:
           description: Today's date in the deadline field's timezone.
@@ -4287,11 +4284,8 @@ components:
         revision:
           format: int64
           type: integer
-        schedule_error:
-          description: Why this row's saved scheduled_on or deadline_on cannot be read, when a newer build wrote rules or members this build does not know; the row's other fields stay valid.
-          type: string
         scheduled_on_date:
-          description: scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed or unsupported (see schedule_error).
+          description: scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
           type: string
         scheduled_on_today:
           description: Today's date in the scheduled field's timezone.
@@ -5708,7 +5702,7 @@ components:
           format: date-time
           type: string
         deadline_on_date:
-          description: deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed or unsupported (see schedule_error).
+          description: deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
           type: string
         deadline_on_today:
           description: Today's date in the deadline field's timezone.
@@ -5757,11 +5751,8 @@ components:
         revision:
           format: int64
           type: integer
-        schedule_error:
-          description: Why this row's saved scheduled_on or deadline_on cannot be read, when a newer build wrote rules or members this build does not know; the row's other fields stay valid.
-          type: string
         scheduled_on_date:
-          description: scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed or unsupported (see schedule_error).
+          description: scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
           type: string
         scheduled_on_today:
           description: Today's date in the scheduled field's timezone.
@@ -7315,9 +7306,6 @@ components:
         revision:
           format: int64
           type: integer
-        schedule_error:
-          description: Why this issue's saved scheduled_on or deadline_on cannot be read, when a newer build wrote rules or members this build does not know; the issue stays listed without that date.
-          type: string
         scheduled_on_date:
           type: string
         scheduled_on_display:

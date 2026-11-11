@@ -17,24 +17,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/testenv"
 )
-
-func TestListReportsUnknownScheduleRules(t *testing.T) {
-	env, dir, pid := setupCLIWorkspace(t)
-	createIssue(t, env, pid, "Unreadable date")
-	records, err := dbtest.CollectImportRecords(t.Context(), env.DB, db.ExportFilter{ProjectID: &pid})
-	require.NoError(t, err)
-	for _, record := range records {
-		if issue, ok := record.(*db.IssueExport); ok && issue.Title == "Unreadable date" {
-			issue.Metadata = []byte(`{"scheduled_on":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}}`)
-		}
-	}
-	require.NoError(t, env.DB.ImportReplay(t.Context(), records, db.ImportOptions{}))
-	out := runCLI(t, env, dir, "list")
-	assert.Contains(t, out, "unsupported schedule")
-}
 
 // TestList_OutputsShortIDNotNumber pins the JSON wire shape: each issue
 // row carries short_id and qualified_id; the legacy `number` field is gone.

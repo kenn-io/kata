@@ -920,41 +920,18 @@ func titleForRow(iss Issue, chrome viewChrome, titleW int) string {
 	if chrome.scope.allProjects {
 		clean = projectPrefix(iss.ProjectID, chrome.projectsByID) + clean
 	}
-	return fitRowDates(clean, rowDatesText(iss), iss.ScheduleError != "", titleW)
+	dates := rowDatesText(iss)
+	// Keep at least rowDatesMinTitle cells of title; on a cell too narrow
+	// for that the dates stay out of the way.
+	if dates == "" || titleW-1 < len(dates)+1+rowDatesMinTitle {
+		return truncate(clean, titleW)
+	}
+	return padToWidth(truncate(clean, titleW-1-len(dates)-1), titleW-1-len(dates)) + dates
 }
-
-// fitRowDates appends dates to a title. It keeps at least rowDatesMinTitle
-// cells of title; on a cell too narrow for that the dates stay out of the
-// way, except an unreadable-schedule marker, which shrinks the title instead.
-func fitRowDates(title, dates string, unreadable bool, titleW int) string {
-	if dates != "" && titleW-1 >= len(dates)+1+rowDatesMinTitle {
-		return padToWidth(truncate(title, titleW-1-len(dates)-1), titleW-1-len(dates)) + dates
-	}
-	if !unreadable {
-		return truncate(title, titleW)
-	}
-	room := titleW - 1 - len(unreadableNarrow)
-	if room < 1 {
-		return truncate(unreadableNarrow, titleW)
-	}
-	return padToWidth(truncate(title, room), room+1) + unreadableNarrow
-}
-
-// unreadableNarrow marks an unreadable schedule on a row too narrow for dates.
-const unreadableNarrow = "unsupported"
 
 // rowDatesMinTitle is the title width a row keeps before its dates
 // are dropped for lack of room.
 const rowDatesMinTitle = 15
-
-// unreadableDateParts leads a row's dates with a marker when its saved schedule
-// was written by a newer build, so the gap reads as unreadable, not as no date.
-func unreadableDateParts(iss Issue) []string {
-	if iss.ScheduleError == "" {
-		return nil
-	}
-	return []string{"unsupported schedule"}
-}
 
 // rowDatesText renders an issue's resolved dates as "s:MM-DD d:MM-DD",
 // dropping the year for dates in the current year. A missing date is
@@ -962,7 +939,7 @@ func unreadableDateParts(iss Issue) []string {
 func rowDatesText(iss Issue) string {
 	year := renderNow().Format("2006") + "-"
 	short := func(d string) string { return strings.TrimPrefix(d, year) }
-	parts := unreadableDateParts(iss)
+	var parts []string
 	if iss.ScheduledOnDate != "" {
 		parts = append(parts, "s:"+short(iss.ScheduledOnDate))
 	}

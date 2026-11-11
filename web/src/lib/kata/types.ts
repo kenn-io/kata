@@ -66,7 +66,6 @@ export interface KataTaskSummary extends KataCreationAttributionWire {
   project_name: string
   scheduled_on_date?: string | undefined
   deadline_on_date?: string | undefined
-  schedule_error?: string | undefined
   scheduled_on_today?: string | undefined
   deadline_on_today?: string | undefined
   scheduled_on_display?: string | undefined

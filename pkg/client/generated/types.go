@@ -3598,7 +3598,7 @@ type IssueOut struct {
 	ClosedReason        *string      `json:"closed_reason,omitempty"`
 	CreatedAt           time.Time    `json:"created_at" validate:"required"`
 
-	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed or unsupported (see schedule_error).
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
 	DeadlineOnDate *string `json:"deadline_on_date,omitempty"`
 
 	// DeadlineOnToday Today's date in the deadline field's timezone.
@@ -3621,10 +3621,7 @@ type IssueOut struct {
 	Related      []LinkPeer `json:"related,omitempty"`
 	Revision     int64      `json:"revision"`
 
-	// ScheduleError Why this row's saved scheduled_on or deadline_on cannot be read, when a newer build wrote rules or members this build does not know; the row's other fields stay valid.
-	ScheduleError *string `json:"schedule_error,omitempty"`
-
-	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed or unsupported (see schedule_error).
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
 	ScheduledOnDate *string `json:"scheduled_on_date,omitempty"`
 
 	// ScheduledOnToday Today's date in the scheduled field's timezone.
@@ -4266,7 +4263,7 @@ type ListGlobalIssueOut struct {
 	ClosedReason        *string      `json:"closed_reason,omitempty"`
 	CreatedAt           time.Time    `json:"created_at" validate:"required"`
 
-	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed or unsupported (see schedule_error).
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
 	DeadlineOnDate *string `json:"deadline_on_date,omitempty"`
 
 	// DeadlineOnToday Today's date in the deadline field's timezone.
@@ -4290,10 +4287,7 @@ type ListGlobalIssueOut struct {
 	Related      []LinkPeer `json:"related,omitempty"`
 	Revision     int64      `json:"revision"`
 
-	// ScheduleError Why this row's saved scheduled_on or deadline_on cannot be read, when a newer build wrote rules or members this build does not know; the row's other fields stay valid.
-	ScheduleError *string `json:"schedule_error,omitempty"`
-
-	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed or unsupported (see schedule_error).
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
 	ScheduledOnDate *string `json:"scheduled_on_date,omitempty"`
 
 	// ScheduledOnToday Today's date in the scheduled field's timezone.
@@ -5805,7 +5799,7 @@ type ReadyGlobalIssueOut struct {
 	ClosedReason        *string      `json:"closed_reason,omitempty"`
 	CreatedAt           time.Time    `json:"created_at" validate:"required"`
 
-	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed or unsupported (see schedule_error).
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request.
 	DeadlineOnDate *string `json:"deadline_on_date,omitempty"`
 
 	// DeadlineOnToday Today's date in the deadline field's timezone.
@@ -5829,10 +5823,7 @@ type ReadyGlobalIssueOut struct {
 	Related      []LinkPeer `json:"related,omitempty"`
 	Revision     int64      `json:"revision"`
 
-	// ScheduleError Why this row's saved scheduled_on or deadline_on cannot be read, when a newer build wrote rules or members this build does not know; the row's other fields stay valid.
-	ScheduleError *string `json:"schedule_error,omitempty"`
-
-	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed or unsupported (see schedule_error).
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request.
 	ScheduledOnDate *string `json:"scheduled_on_date,omitempty"`
 
 	// ScheduledOnToday Today's date in the scheduled field's timezone.
@@ -7426,44 +7417,41 @@ func (u UIGraphUnresolvedRef) Validate() error {
 }
 
 type UIIssue struct {
-	AccountableActor    *string        `json:"accountable_actor,omitempty"`
-	AssignmentExpiresOn *time.Time     `json:"assignment_expires_on,omitempty"`
-	Author              string         `json:"author" validate:"required"`
-	AuthorityUID        *string        `json:"authority_uid,omitempty"`
-	Body                string         `json:"body" validate:"required"`
-	ClosedAt            *time.Time     `json:"closed_at,omitempty"`
-	ClosedReason        *string        `json:"closed_reason,omitempty"`
-	CreatedAt           time.Time      `json:"created_at" validate:"required"`
-	DeadlineOnDate      *string        `json:"deadline_on_date,omitempty"`
-	DeadlineOnDisplay   *string        `json:"deadline_on_display,omitempty"`
-	DeadlineOnToday     *string        `json:"deadline_on_today,omitempty"`
-	DeletedAt           *time.Time     `json:"deleted_at,omitempty"`
-	ID                  int64          `json:"id"`
-	Labels              []string       `json:"labels" validate:"required"`
-	Metadata            map[string]any `json:"metadata"`
-	OccurrenceKey       *string        `json:"occurrence_key,omitempty"`
-	Owner               *string        `json:"owner,omitempty"`
-	Priority            *int64         `json:"priority,omitempty"`
-	ProjectID           int64          `json:"project_id"`
-	ProjectName         string         `json:"project_name" validate:"required"`
-	ProjectUID          *string        `json:"project_uid,omitempty"`
-	QualifiedID         string         `json:"qualified_id" validate:"required"`
-	RecurrenceID        *int64         `json:"recurrence_id,omitempty"`
-	Revision            int64          `json:"revision"`
-
-	// ScheduleError Why this issue's saved scheduled_on or deadline_on cannot be read, when a newer build wrote rules or members this build does not know; the issue stays listed without that date.
-	ScheduleError      *string              `json:"schedule_error,omitempty"`
-	ScheduledOnDate    *string              `json:"scheduled_on_date,omitempty"`
-	ScheduledOnDisplay *string              `json:"scheduled_on_display,omitempty"`
-	ScheduledOnToday   *string              `json:"scheduled_on_today,omitempty"`
-	ShortID            string               `json:"short_id" validate:"required"`
-	SourceActor        *string              `json:"source_actor,omitempty"`
-	Status             string               `json:"status" validate:"required"`
-	Teammate           *string              `json:"teammate,omitempty"`
-	Title              string               `json:"title" validate:"required"`
-	UID                string               `json:"uid" validate:"required"`
-	UpdatedAt          time.Time            `json:"updated_at" validate:"required"`
-	Verification       *UIIssueVerification `json:"verification,omitempty"`
+	AccountableActor    *string              `json:"accountable_actor,omitempty"`
+	AssignmentExpiresOn *time.Time           `json:"assignment_expires_on,omitempty"`
+	Author              string               `json:"author" validate:"required"`
+	AuthorityUID        *string              `json:"authority_uid,omitempty"`
+	Body                string               `json:"body" validate:"required"`
+	ClosedAt            *time.Time           `json:"closed_at,omitempty"`
+	ClosedReason        *string              `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time            `json:"created_at" validate:"required"`
+	DeadlineOnDate      *string              `json:"deadline_on_date,omitempty"`
+	DeadlineOnDisplay   *string              `json:"deadline_on_display,omitempty"`
+	DeadlineOnToday     *string              `json:"deadline_on_today,omitempty"`
+	DeletedAt           *time.Time           `json:"deleted_at,omitempty"`
+	ID                  int64                `json:"id"`
+	Labels              []string             `json:"labels" validate:"required"`
+	Metadata            map[string]any       `json:"metadata"`
+	OccurrenceKey       *string              `json:"occurrence_key,omitempty"`
+	Owner               *string              `json:"owner,omitempty"`
+	Priority            *int64               `json:"priority,omitempty"`
+	ProjectID           int64                `json:"project_id"`
+	ProjectName         string               `json:"project_name" validate:"required"`
+	ProjectUID          *string              `json:"project_uid,omitempty"`
+	QualifiedID         string               `json:"qualified_id" validate:"required"`
+	RecurrenceID        *int64               `json:"recurrence_id,omitempty"`
+	Revision            int64                `json:"revision"`
+	ScheduledOnDate     *string              `json:"scheduled_on_date,omitempty"`
+	ScheduledOnDisplay  *string              `json:"scheduled_on_display,omitempty"`
+	ScheduledOnToday    *string              `json:"scheduled_on_today,omitempty"`
+	ShortID             string               `json:"short_id" validate:"required"`
+	SourceActor         *string              `json:"source_actor,omitempty"`
+	Status              string               `json:"status" validate:"required"`
+	Teammate            *string              `json:"teammate,omitempty"`
+	Title               string               `json:"title" validate:"required"`
+	UID                 string               `json:"uid" validate:"required"`
+	UpdatedAt           time.Time            `json:"updated_at" validate:"required"`
+	Verification        *UIIssueVerification `json:"verification,omitempty"`
 }
 
 func (u UIIssue) Validate() error {

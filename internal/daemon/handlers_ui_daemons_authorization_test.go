@@ -702,7 +702,7 @@ func TestWebDaemonGatewayRejectsIncompatibleUIContracts(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w,
-			`{"contract_version":"legacy","capabilities":{"writable":true,"updates":"sse","actor_policy":"request"}}`)
+			`{"contract_version":"2","capabilities":{"writable":true,"updates":"sse","actor_policy":"request"}}`)
 	}))
 	t.Cleanup(upstream.Close)
 

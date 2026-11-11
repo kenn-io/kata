@@ -19,8 +19,6 @@ func TestPrepareIssueSchedules(t *testing.T) {
 	}{
 		{"replace opaque stored date", `{"$field":{"legacy":"opaque"}}`, `{"$field":"2026-11-13"}`, "America/New_York", "", "America/New_York", false, false},
 		{"refuse stored future rules", `{"$field":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}}`, `{"$field":"2026-11-13"}`, "UTC", "", "", true, false},
-		{"refuse future rules on object replacement", `{"$field":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"unknown"}}`, `{"$field":{"value":"2026-11-13","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}`, "UTC", "", "", true, false},
-		{"refuse future rules with new value syntax", `{"$field":{"value":"future-date-format","timezone":"UTC","tzdata_version":"unknown"}}`, `{"$field":"2026-11-13"}`, "UTC", "", "", true, false},
 		{"refuse stored future members", `{"$field":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":true}}`, `{"$field":"2026-11-13"}`, "UTC", "", "", true, false},
 		{"UTC", "{}", `{"timezone":"UTC"}`, "Local", "", "UTC", false, false},
 		{"Etc UTC", "{}", `{"timezone":"Etc/UTC"}`, "Local", "", "Etc/UTC", false, false},

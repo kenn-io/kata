@@ -782,9 +782,6 @@ cursor is captured in the same consistent storage read as a newly built
 projection. Browser events are invalidations; the SPA refreshes the snapshot
 instead of constructing a second authority from event payloads.
 
-In browser snapshots, saved schedule metadata is clock text in its saved zone.
-Storage and the issue API retain the complete schedule and its timezone rules.
-
 The browser-session routes are deliberately outside the generated client
 contract. A fresh tab on a direct-loopback origin uses
 `POST /api/v1/ui/session/local`. Exact Host, peer address, forwarding-header,

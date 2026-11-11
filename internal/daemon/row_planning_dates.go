@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
-	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
 )
@@ -26,8 +24,8 @@ func newPlanningDateResolver(store db.Storage, defaultTimezone string) *planning
 	return &planningDateResolver{store: store, defaultTimezone: defaultTimezone, recurrenceTimezone: map[int64]string{}, now: time.Now()}
 }
 
-// resolve omits a field whose stored value is malformed; it fails when the
-// recurrence timezone lookup fails or a saved schedule's tzdata is unsupported.
+// resolve omits a field whose stored value cannot be read; it fails when the
+// recurrence timezone lookup fails.
 func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (scheduledOn, deadlineOn, scheduledToday, deadlineToday, scheduledDisplay, deadlineDisplay string, err error) {
 	raw := string(issue.Metadata)
 	if raw == "" {
@@ -48,29 +46,9 @@ func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (sch
 			scheduledDefault = zone
 		}
 	}
-	return db.RowPlanningProjection(raw, scheduledDefault, r.defaultTimezone, r.now)
-}
-
-// scheduleReadError reports a saved schedule this build cannot read as a client
-// error naming the cause, since only a newer build or a rewrite can resolve it.
-func scheduleReadError(err error) error {
-	if !metadata.IsUnsupportedSchedule(err) {
-		return internalAPIError(err)
+	scheduledOn, deadlineOn, scheduledToday, deadlineToday, scheduledDisplay, deadlineDisplay, err = db.RowPlanningProjection(raw, scheduledDefault, r.defaultTimezone, r.now)
+	if metadata.IsUnsupportedSchedule(err) {
+		err = nil
 	}
-	return api.NewError(http.StatusBadRequest, "unsupported_schedule", err.Error(), "update kata, or clear the unreadable date", nil)
-}
-
-// applyRow sets a list row's planning dates. A saved schedule this build cannot
-// read is reported on that row's schedule_error, so it never hides other rows.
-func (r *planningDateResolver) applyRow(ctx context.Context, issue db.Issue, row *api.IssueOut) error {
-	scheduledOn, deadlineOn, scheduledToday, deadlineToday, _, _, err := r.resolve(ctx, issue)
-	if err != nil {
-		if !metadata.IsUnsupportedSchedule(err) {
-			return err
-		}
-		row.ScheduleError = err.Error()
-	}
-	row.ScheduledOnDate, row.DeadlineOnDate = scheduledOn, deadlineOn
-	row.ScheduledOnToday, row.DeadlineOnToday = scheduledToday, deadlineToday
-	return nil
+	return
 }
