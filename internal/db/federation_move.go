@@ -152,7 +152,7 @@ func checkFederationMoveDestinationLifecycle(
 			return err
 		}
 		if pending {
-			return fmt.Errorf("%w: restore any archived former project and sync pending updates for moved issues, then retry destination leave or archive", ErrFederationResetBlockedByPendingPush)
+			return fmt.Errorf("%w: %w: restore any archived former project and sync pending updates for moved issues, then retry destination leave or archive", ErrFederationResetBlockedByPendingPush, ErrFederationMovedIssuePendingPush)
 		}
 	}
 	return nil
