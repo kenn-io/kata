@@ -245,10 +245,6 @@ func EnsureSameLocalProfile(ctx context.Context, resolved ResolvedDaemon) (Resol
 	return EnsureLocalProfileSelection(ctx, DaemonSelection{Resolved: resolved, Profile: resolved.profileConfig})
 }
 
-var discoverSupervisedProfile = func(ctx context.Context, dir string) (ensureDiscovery, error) {
-	return discoverForEnsureUsing(ctx, dir, liveDaemonsReadOnly)
-}
-
 func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, profile config.LocalProfileConfig) (ResolvedDaemon, error) {
 	scan := func(ctx context.Context, dir string) (ensureDiscovery, error) {
 		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
@@ -259,7 +255,7 @@ func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, prof
 		if err := safefileio.ValidatePrivateDir(dir); err != nil {
 			return ensureDiscovery{}, &LocalProfileDirError{Err: err}
 		}
-		found, err := discoverSupervisedProfile(ctx, dir)
+		found, err := discoverDaemonForSupervised(ctx, dir)
 		if err != nil || found.Outcome == daemonScanNone {
 			return found, err
 		}

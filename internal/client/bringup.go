@@ -147,7 +147,8 @@ type executableStart struct {
 
 func (s executableStart) profile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
 	if !s.request.ReadOnly && !selection.Profile.Config.AutostartEnabled() {
-		return inProcessStart{}.profile(ctx, selection)
+		live := liveDiscovery{scan: liveDaemonsReadOnly, verify: verifyLocalProfileInstance}
+		return supervisedExecutableDiscovery(ctx, selection, live.profile, inProcessStart{}.profile)
 	}
 	args := []string{"daemon", "recover"}
 	switch {
@@ -164,10 +165,26 @@ func (s executableStart) local(ctx context.Context, selection DaemonSelection) (
 		if enabled, _, err := config.ReadAutostartEnabled(); err != nil {
 			return ResolvedDaemon{}, false, err
 		} else if !enabled {
-			return inProcessStart{}.local(ctx, selection)
+			live := liveDiscovery{scan: liveDaemonsReadOnly, verify: verifyLocalProfileInstance}
+			return supervisedExecutableDiscovery(ctx, selection, live.local, inProcessStart{}.local)
 		}
 	}
 	return s.startIfStopped(ctx, selection, s.discover.local, []string{"daemon", "start"})
+}
+
+// An SDK's build version need not match an already-running daemon. Discover it
+// first, then use the normal supervised wait only during a restart gap.
+func supervisedExecutableDiscovery(
+	ctx context.Context, selection DaemonSelection,
+	discover, wait func(context.Context, DaemonSelection) (ResolvedDaemon, bool, error),
+) (ResolvedDaemon, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, daemonStartupWait)
+	defer cancel()
+	resolved, ok, err := discover(ctx, selection)
+	if ok || err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) && ctx.Err() == nil {
+		return resolved, ok, err
+	}
+	return wait(ctx, selection)
 }
 
 func (s executableStart) startIfStopped(

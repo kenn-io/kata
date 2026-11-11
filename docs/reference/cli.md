@@ -1933,7 +1933,8 @@ returns an error identifying the installed version and directs you to
 startup options. Run the start command in its original host shell or service
 environment. Remote daemons must be updated on their own hosts.
 
-Local commands auto-start the daemon when appropriate. When the running local
+Local commands auto-start the daemon when appropriate unless the selected
+home sets [`autostart = false`](configuration.md#daemon-config). When the running local
 daemon reports a different version and supports executable replacement, a local
 command asks it to restart in place using the current binary. Older daemons
 use stop-and-start replacement. It leaves the daemon running and fails in these

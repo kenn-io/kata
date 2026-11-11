@@ -74,7 +74,7 @@ func daemonDiagnoseCmd() *cobra.Command {
 
 func daemonRecoverCmd() *cobra.Command {
 	var expected string
-	cmd := &cobra.Command{Use: "recover", Short: "start the selected existing local profile and verify its identity", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "recover", Short: "reach the selected existing local profile and verify its identity", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := validateExpectedProjectUID(expected); err != nil {
 			return err
 		}

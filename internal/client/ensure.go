@@ -251,7 +251,7 @@ func waitForSupervisedDaemon(ctx context.Context, dataDir, configPath string, mi
 	if migrationAllowed && sqliteCutoverLocked(ctx) {
 		return RunningDaemon{}, fmt.Errorf("%w: storage migration is in progress; retry after the service manager's daemon becomes ready (%s)", ErrLocalDaemonUnreachable, configPath)
 	}
-	message := fmt.Errorf("%w; wait up to %s or the caller's deadline; start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
+	message := fmt.Errorf("%w; did not become ready (limit %s or the caller's deadline); start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
 	if unreachable != nil {
 		message = fmt.Errorf("%w: %w", message, unreachable)
 	}

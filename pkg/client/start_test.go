@@ -3,6 +3,8 @@ package client_test
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +16,9 @@ import (
 	"github.com/stretchr/testify/require"
 	kitdaemon "go.kenn.io/kit/daemon"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/version"
 	"go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/katatest"
 )
@@ -174,4 +178,44 @@ func TestDiscoverStartWithRespectsDisabledAutostart(t *testing.T) {
 		require.ErrorContains(t, err, "managed externally")
 		assert.Nil(t, ranWith())
 	})
+}
+
+// StartWith only affects a stopped daemon; an existing daemon remains usable
+// even when the embedding application's version differs from its version.
+func TestDiscoverStartWithUsesExistingSupervisedDaemon(t *testing.T) {
+	for _, profile := range []bool{false, true} {
+		t.Run(fmt.Sprintf("profile=%t", profile), func(t *testing.T) {
+			home := isolateKataHome(t)
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+			uid := "01HZZZZZZZZZZZZZZZZZZZZZ01"
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/instance" {
+					_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+					return
+				}
+				_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version+"-other", os.Getpid())
+			}))
+			defer srv.Close()
+			var options client.DiscoverOptions
+			if profile {
+				profileHome := t.TempDir()
+				require.NoError(t, os.WriteFile(filepath.Join(profileHome, "config.toml"), []byte("autostart = false\n"), 0600))
+				writeDaemonCatalog(t, home, fmt.Sprintf("[[daemon]]\nname = 'work'\nlocal = true\nhome = %q\ninstance_uid = %q\n", profileHome, uid))
+				selected, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: profileHome, InstanceUID: uid})
+				require.NoError(t, err)
+				ns, err := daemonruntime.NewNamespaceForHome(selected.Home, selected.StorageID)
+				require.NoError(t, err)
+				publishRuntime(t, ns, srv.Listener.Addr().String(), nil)
+				options.Daemon = "work"
+			} else {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+				publishLocalRuntime(t, home, srv.Listener.Addr().String())
+			}
+			_, err := client.Discover(t.Context(), options)
+			require.NoError(t, err)
+			options.StartWith = "unused"
+			_, err = client.Discover(t.Context(), options)
+			require.NoError(t, err)
+		})
+	}
 }
