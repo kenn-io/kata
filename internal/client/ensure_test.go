@@ -478,6 +478,11 @@ func TestAutoStartUsesKitDetachedStarter(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(logData), "daemon stdout")
 	assert.Contains(t, string(logData), "daemon stderr")
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(filepath.Join(ns.DataDir, "daemon.log"))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 }
 
 func TestAutoStartReportsRestrictedStateDirectoryBeforeSpawn(t *testing.T) {

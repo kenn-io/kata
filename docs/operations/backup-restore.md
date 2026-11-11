@@ -70,7 +70,8 @@ migration is pending and report that progress on stderr. Cancelling detached
 startup stops waiting; the detached daemon keeps running. After a running-daemon restart
 starts, one Ctrl-C keeps the CLI waiting and holding the start lock until the
 restart completes or its readiness budget expires. That budget extends while an
-SQLite migration runs. Use `kata daemon logs` to inspect progress. A daemon
+SQLite migration runs. Inspect `daemon.log` for daemon diagnostics as described
+in [Daemon and diagnostics](../reference/cli.md#daemon-and-diagnostics). A daemon
 that exits before readiness reports its startup
 error rather than a readiness timeout.
 
@@ -89,9 +90,10 @@ If an interrupted import left `<database>.import.tmp.jsonl`,
 `<database>.import.tmp.db`, or the temporary database's WAL/SHM sidecars,
 the next cutover checks the original old-schema source, moves the partial files
 into a private `<database>.import.recovery-*` directory, and retries from that
-source. It prints the recovery directory on stderr; detached daemon launches
-write stderr to `kata daemon logs`. No hand deletion is needed. Preserve that
-directory until you have checked the upgraded data.
+source. It prints the recovery directory on stderr. Detached launches and
+Linux or macOS launches with null stderr retain it in `daemon.log`. No hand
+deletion is needed. Preserve that directory until you have checked the upgraded
+data.
 
 If the original source database is missing, startup refuses to create an empty
 database over an interrupted swap. Preserve the import temp files and all

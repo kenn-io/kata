@@ -56,45 +56,6 @@ func TestForegroundDaemonLoggingProcess(t *testing.T) {
 	fmt.Fprintln(os.Stderr, "fixture stderr after cleanup")
 }
 
-func TestForegroundDaemonEntrypointErrorOnce(t *testing.T) {
-	for _, mode := range []string{"separate", "same-file", "discarded"} {
-		t.Run(mode, func(t *testing.T) {
-			setupKataEnv(t)
-			t.Setenv("KATA_DSN", "")
-			t.Setenv("PORT", "")
-			ns, err := daemonruntime.NewNamespace()
-			require.NoError(t, err)
-			require.NoError(t, os.MkdirAll(ns.DataDir, 0o700))
-			logPath := filepath.Join(ns.DataDir, "daemon.log")
-			stderrPath := filepath.Join(t.TempDir(), "stderr")
-			if mode == "same-file" {
-				stderrPath = logPath
-			}
-			stderr, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = stderr.Close() })
-			child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestForegroundDaemonLoggingProcess$")
-			child.Env = append(os.Environ(), "KATA_LOGGING_HELPER=entrypoint")
-			if mode != "discarded" {
-				child.Stderr = stderr
-			} else if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-				t.Skip("null stderr redirection is supported on Linux and macOS")
-			}
-			require.Error(t, child.Run())
-			paths := []string{stderrPath, logPath}
-			if mode == "discarded" {
-				paths = []string{logPath}
-			}
-			for _, path := range paths {
-				data, err := os.ReadFile(path)
-				require.NoError(t, err)
-				assert.Equal(t, 1, strings.Count(string(data), "invalid --listen value"), "%s: %s", path, data)
-				assert.NotContains(t, string(data), "kata daemon: kata daemon:")
-			}
-		})
-	}
-}
-
 // Logging and crash configuration are process-global, so each mode runs in its
 // own child so the startup panic never reaches the test runner.
 func TestForegroundDaemonLoggingSinks(t *testing.T) {
@@ -108,6 +69,7 @@ func TestForegroundDaemonLoggingSinks(t *testing.T) {
 			}
 			setupKataEnv(t)
 			t.Setenv("KATA_DSN", "")
+			t.Setenv("PORT", "")
 			ns, err := daemonruntime.NewNamespace()
 			require.NoError(t, err)
 			require.NoError(t, os.MkdirAll(ns.DataDir, 0o700))
@@ -177,10 +139,23 @@ func TestForegroundDaemonLoggingSinks(t *testing.T) {
 				assert.Contains(t, string(contents), "panic: fixture fatal diagnostic")
 				assert.Contains(t, string(contents), "goroutine ")
 			}
-			info, err := os.Stat(path)
-			require.NoError(t, err)
-			if mode != "same-file" && runtime.GOOS != "windows" {
-				assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+			if mode == "separate" || mode == "same-file" || (mode == "discarded" && (runtime.GOOS == "linux" || runtime.GOOS == "darwin")) {
+				entrypoint := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestForegroundDaemonLoggingProcess$")
+				entrypoint.Env = append(os.Environ(), "KATA_LOGGING_HELPER=entrypoint")
+				if mode != "discarded" {
+					entrypoint.Stderr = stderr
+				}
+				require.Error(t, entrypoint.Run())
+				paths := []string{path}
+				if mode == "separate" {
+					paths = append(paths, stderrPath)
+				}
+				for _, outputPath := range paths {
+					data, err := os.ReadFile(outputPath)
+					require.NoError(t, err)
+					assert.Equal(t, 1, strings.Count(string(data), "invalid --listen value"), "%s: %s", outputPath, data)
+					assert.NotContains(t, string(data), "kata daemon: kata daemon:")
+				}
 			}
 		})
 	}
