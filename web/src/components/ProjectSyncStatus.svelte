@@ -7,13 +7,15 @@
     projectID: number
     projectUID: string
     refreshGeneration?: number
+    visibilityGeneration?: number
   }
-  let { projectID, projectUID, refreshGeneration = 0 }: Props = $props()
+  let { projectID, projectUID, refreshGeneration = 0, visibilityGeneration = 0 }: Props = $props()
   let status = $state<FederationProjectStatus>()
   let loading = $state(true)
   let error = $state(false)
   let hasResult = $state(false)
-  let refresh: ((manual: boolean) => void) | undefined
+  let refresh: ((manual: boolean, returning?: boolean) => void) | undefined
+  let seenVisibility = untrack(() => visibilityGeneration)
   let identity = $derived(`${projectID}:${projectUID}`)
   let statusCommand = $derived(
     `kata federation status --project '${status?.project_name.replaceAll("'", "'\\''")}'`,
@@ -34,20 +36,44 @@
     let current: AbortController | undefined
     let stopped = false
     let disposed = false
+    let pendingReturn = false
     status = undefined
     hasResult = false
     loading = true
     error = false
 
-    async function read(manual: boolean): Promise<void> {
+    async function read(manual: boolean, returning = false): Promise<void> {
       if (manual) {
         current?.abort()
         stopped = false
+        pendingReturn = false
         loading = true
-      } else if (document.hidden || current || stopped) return
+      } else {
+        if (document.hidden || stopped) return
+        if (current) {
+          if (returning) pendingReturn = true
+          return
+        }
+      }
+      pendingReturn = false
       const abort = new AbortController()
       current = abort
       last = abort
+      const finish = () => {
+        clearTimeout(timeout)
+        if (current !== abort) return
+        current = undefined
+        if (disposed) return
+        loading = false
+        if (pendingReturn && !document.hidden && !stopped) void read(false)
+      }
+      const timeout = setTimeout(() => {
+        if (current !== abort || disposed) return
+        error = true
+        abort.abort()
+        finish()
+      }, 120_000)
+      abort.signal.addEventListener('abort', () => clearTimeout(timeout), { once: true })
       try {
         const response = await getProjectFederationStatus(
           { projectId: id },
@@ -83,14 +109,11 @@
       } catch {
         if (!abort.signal.aborted && !disposed) error = true
       } finally {
-        if (current === abort) {
-          current = undefined
-          if (!disposed) loading = false
-        }
+        finish()
       }
     }
-    refresh = (manual) => {
-      void read(manual)
+    refresh = (manual, returning) => {
+      void read(manual, returning)
     }
     void read(false)
     return () => {
@@ -103,6 +126,13 @@
   $effect(() => {
     void refreshGeneration
     untrack(() => refresh?.(false))
+  })
+
+  $effect(() => {
+    const generation = visibilityGeneration
+    if (generation === seenVisibility) return
+    seenVisibility = generation
+    untrack(() => refresh?.(false, true))
   })
 </script>
 

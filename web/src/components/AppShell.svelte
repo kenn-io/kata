@@ -66,6 +66,7 @@
 
   interface Props {
     syncRefreshGeneration?: number
+    syncVisibilityGeneration?: number
     route: AppRoute
     requestedRoute?: AppRoute | undefined
     snapshot: UISnapshot
@@ -139,6 +140,7 @@
 
   let {
     syncRefreshGeneration = 0,
+    syncVisibilityGeneration = 0,
     route: acceptedRoute,
     requestedRoute = undefined,
     snapshot,
@@ -795,6 +797,7 @@
         projectID={selectedProject.id}
         projectUID={selectedProject.uid}
         refreshGeneration={syncRefreshGeneration}
+        visibilityGeneration={syncVisibilityGeneration}
       />
     {/key}
   {/if}
