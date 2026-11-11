@@ -64,17 +64,19 @@ thread-creation, command-line, symbol, and execution-trace endpoints. Capture
 If a local process is alive but cannot answer ping, CLI errors report its PID,
 endpoint, log path, and recovery steps. If the advertised web origin responds,
 capture `/debug/pprof/goroutine?debug=2` there before stopping the process. These
-handlers require daemon-owner authority; an ordinary owner-local browser session
-cannot access them. Configured deployments need the owner's bearer credential from the daemon's authentication configuration (for example, `[auth].token` or `KATA_AUTH_TOKEN`).
+handlers require daemon-owner authority. When authentication is configured, use
+the owner's bearer credential from the daemon's authentication configuration
+(for example, `[auth].token` or `KATA_AUTH_TOKEN`).
 The profiling listener may be the same listener that failed, so capture can also
 time out.
 
 After confirming the PID identifies the daemon, on Unix `kill -QUIT <pid>` is a fallback that writes goroutine stacks to stderr
 **and terminates the daemon**. Check the reported `daemon.log` or the supervisor's
 stderr log. Foreground and supervised launches may only retain supervisor stderr.
-For the current home, run `kata daemon restart` with the original `KATA_HOME` and
-storage environment. For a named local profile, stop the reported PID (on Windows,
-use `taskkill /PID <pid> /F`), wait for it to exit, then run
+After it exits, relaunch foreground and supervised daemons using their original
+command or supervisor. For an auto-started current home, run `kata daemon restart`
+with the original `KATA_HOME` and storage environment. For a named local profile,
+stop the reported PID (on Windows, use `taskkill /PID <pid> /F`), wait for it to exit, then run
 `kata --daemon <name> daemon recover`. This keeps the profile's pinned storage and
 instance identity; setting `KATA_HOME` alone does not preserve those checks. On
 Windows, quote profile names as PowerShell literal strings when needed.

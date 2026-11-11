@@ -136,7 +136,8 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			require.Contains(t, message, "original KATA_HOME and storage environment")
 			if origin != "" {
 				require.Contains(t, message, origin+"/debug/pprof/goroutine?debug=2")
-				require.Contains(t, message, "signed-in browser")
+				require.Contains(t, message, "daemon-owner access")
+				require.Contains(t, message, "configured authentication requires the owner's credential")
 				require.Contains(t, message, "if responsive")
 			} else {
 				require.NotContains(t, message, "/debug/pprof/")
