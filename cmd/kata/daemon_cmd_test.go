@@ -364,6 +364,55 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 	assert.Regexp(t, `(?m)^  uptime:  52m3[3-4]s$`, out)
 }
 
+func TestDaemonStatusAutoStarted(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	_, err = store.Write(kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777",
+		Metadata: map[string]string{"autostart": "1"},
+	})
+	require.NoError(t, err)
+
+	human, _, _ := executeRootCapture(t, t.Context(), "daemon", "status")
+	assert.Contains(t, human, "  started: automatically by a kata command\n")
+	agent, _, _ := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
+	assert.Contains(t, agent, " auto_started=true")
+
+	child := startSleepProcess(t)
+	_, err = store.Write(kitdaemon.RuntimeRecord{
+		PID: child.Process.Pid, Network: "tcp", Address: "127.0.0.1:7778",
+	})
+	require.NoError(t, err)
+	stdout, _, _ := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	var got struct {
+		Daemons []struct {
+			PID         int   `json:"pid"`
+			AutoStarted *bool `json:"auto_started"`
+		} `json:"daemons"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	require.Len(t, got.Daemons, 2)
+	for _, d := range got.Daemons {
+		if d.PID == os.Getpid() {
+			require.NotNil(t, d.AutoStarted)
+			assert.True(t, *d.AutoStarted)
+		} else {
+			assert.Equal(t, child.Process.Pid, d.PID)
+			assert.Nil(t, d.AutoStarted)
+		}
+	}
+	human, _, _ = executeRootCapture(t, t.Context(), "daemon", "status")
+	assert.Contains(t, human, "  pid:     "+strconv.Itoa(os.Getpid())+"\n  started: automatically by a kata command\n")
+	assert.NotContains(t, human, "  pid:     "+strconv.Itoa(child.Process.Pid)+"\n  started:")
+	assert.Equal(t, 1, strings.Count(human, "  started: automatically by a kata command\n"))
+	agent, _, _ = executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
+	assert.NotContains(t, agent, "auto_started=")
+}
+
 func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) {
 	resetFlags(t)
 	tmp := setupKataEnv(t)
@@ -2620,6 +2669,7 @@ func TestDaemonRuntimeWebMetadata(t *testing.T) {
 	}, 3*time.Second, 10*time.Millisecond)
 
 	assert.NotEmpty(t, record.Metadata["web_origin"])
+	assert.Equal(t, "1", record.Metadata["autostart"])
 	assert.Equal(t, "true", record.Metadata["web_origin_stable"])
 	assert.Equal(t, "loopback,sse", record.Metadata["web_capabilities"])
 	if runtime.GOOS != "windows" {

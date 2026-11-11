@@ -676,6 +676,7 @@ func daemonStatusCmd() *cobra.Command {
 				if daemonruntime.RuntimeRecordWorthProbing(r) {
 					out.Daemons = append(out.Daemons, daemonStatusEntry{
 						PID:           r.PID,
+						AutoStarted:   r.Metadata["autostart"] == "1",
 						Version:       daemonRuntimeVersion(r),
 						Address:       r.Endpoint().ConfigAddress(),
 						WebURL:        r.Metadata["web_origin"],
@@ -698,6 +699,9 @@ func daemonStatusCmd() *cobra.Command {
 				}
 				if len(out.Daemons) == 1 && out.Daemons[0].MCP != "" {
 					daemonFields += " mcp=" + out.Daemons[0].MCP
+				}
+				if len(out.Daemons) == 1 && out.Daemons[0].AutoStarted {
+					daemonFields += " auto_started=true"
 				}
 				message := ""
 				if selected.Message != "" {
@@ -746,6 +750,9 @@ func daemonStatusCmd() *cobra.Command {
 					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  MCP:     %s\n", d.MCP)
 				}
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  pid:     %d\n", d.PID)
+				if d.AutoStarted {
+					_, _ = fmt.Fprintln(cmd.OutOrStdout(), "  started: automatically by a kata command")
+				}
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  version: %s\n", d.Version)
 				if !d.StartedAt.IsZero() {
 					uptime := time.Since(d.StartedAt).Round(time.Second)
@@ -770,6 +777,7 @@ type daemonStatusOutput struct {
 }
 
 type daemonStatusEntry struct {
+	AutoStarted   bool              `json:"auto_started,omitempty"`
 	PID           int               `json:"pid"`
 	Version       string            `json:"version"`
 	Address       string            `json:"address"`
@@ -1470,6 +1478,9 @@ func runDaemonProcess(
 	rec := kitdaemon.NewRuntimeRecord("kata", version.Version, runtimeEndpoint)
 	rec.Address = runtimeEndpoint.ConfigAddress()
 	rec.Metadata = map[string]string{"db_path": redactRuntimeDSN(dbPath)}
+	if os.Getenv(daemonruntime.AutoStartMarkerEnv) == "1" {
+		rec.Metadata["autostart"] = "1"
+	}
 	for key, source := range dcfg.Sources {
 		rec.Metadata["config_"+key+"_source"] = source
 	}

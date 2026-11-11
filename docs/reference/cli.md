@@ -2002,8 +2002,9 @@ resolved web UI URL on its own line after the daemon transport address.
 `daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
 `KATA_HOME` and reject `--daemon`. Set the home explicitly for those operations.
 `daemon status` reports current-home processes and a separate selected-daemon
-diagnosis. It exits 0 only when the selected daemon is ready; stopped or
-unavailable selections exit 7 after printing diagnostics in every output mode.
+diagnosis. It identifies processes automatically started by a Kata command when
+that provenance is available. It exits 0 only when the selected daemon is ready;
+stopped or unavailable selections exit 7 after printing diagnostics in every output mode.
 A ready selected remote or local profile succeeds even when the current home
 has no running daemon. `daemon diagnose` inspects selection, home, database/project identity,
 schema, process, and federation origin without starting or changing anything.
