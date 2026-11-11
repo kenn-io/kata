@@ -51,20 +51,15 @@ func TestDocbankRootBindingLookupFailsClosed(t *testing.T) {
 			require.NoError(t, err)
 			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", project.ID, issue.UID)
 			fault.reads.Store(0)
+			fault.failAt.Store(2)
 			var status int
 			var body []byte
 			if operation == "upload" {
-				vault.BeforeResponse = func(method, path string) {
-					if method == http.MethodPost && path == "/api/v1/uploads" {
-						fault.failAt.Store(fault.reads.Load() + 1)
-					}
-				}
 				status, body = attachmentUpload(t, env, endpoint, "file.pdf", strings.NewReader("fixture"))
 			} else {
 				version := uuid.MustParse(linkVersion)
 				vault.Seed("/private/file.pdf", docbank.Node{ID: 42, Name: "file.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("fixture")})
 				// The claim gate succeeds; the route lookup fails.
-				fault.failAt.Store(2)
 				status, body, err = postAttachmentLink(t, env, endpoint+"/links", `{"path":"/private/file.pdf","actor":"operator"}`)
 				require.NoError(t, err)
 			}

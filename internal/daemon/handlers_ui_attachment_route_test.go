@@ -63,6 +63,16 @@ func TestUIAttachmentRouteOriginAvailability(t *testing.T) {
 			require.Equal(t, tc.write, response.Route.Write)
 		})
 	}
+	local, err := store.CreateProject(t.Context(), "local-project")
+	require.NoError(t, err)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/ui/attachment-route?project_uid="+local.UID, nil)
+	r.RemoteAddr = "127.0.0.1:1234"
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, r)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var response api.UIAttachmentRouteResponseBody
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Nil(t, response.Route)
 }
 
 func (c uiCapabilityCredentials) FederationCredential(context.Context, string) (config.FederationCredential, bool, error) {

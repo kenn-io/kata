@@ -118,20 +118,22 @@ func TestRebindFederationReplicaWaitsForClaimAcrossPostgresDaemons(t *testing.T)
 		AllowInsecure: true, Enabled: true,
 	})
 	require.NoError(t, err)
-	credentials := newReplicaCredentialStore()
+	claimCredentials := newReplicaCredentialStore()
+	rebindCredentials := newReplicaCredentialStore()
 	credential := rebindCredential(oldHub.URL, false, false)
 	credential.Capabilities = "claim"
-	credentials.put(project.UID, credential)
+	claimCredentials.put(project.UID, credential)
+	rebindCredentials.put(project.UID, credential)
 
 	claimDaemon := daemon.NewServer(daemon.ServerConfig{
-		DB: claimStore, StartedAt: now, FederationCredentials: credentials,
+		DB: claimStore, StartedAt: now, FederationCredentials: claimCredentials,
 	})
 	t.Cleanup(func() { require.NoError(t, claimDaemon.Close()) })
 	claimServer := httptest.NewServer(claimDaemon.Handler())
 	t.Cleanup(claimServer.Close)
 
 	rebindDaemon := daemon.NewServer(daemon.ServerConfig{
-		DB: rebindStore, StartedAt: now, FederationCredentials: credentials,
+		DB: rebindStore, StartedAt: now, FederationCredentials: rebindCredentials,
 		FederationCatalog: []config.CatalogDaemonConfig{{
 			Name: "primary-hub", URL: targetHub.URL,
 		}},
@@ -176,10 +178,10 @@ func TestRebindFederationReplicaWaitsForClaimAcrossPostgresDaemons(t *testing.T)
 	claimStatus, err := claimStore.ClaimStatus(ctx, project.ID, issue.UID, time.Now().UTC())
 	require.NoError(t, err)
 	assert.Equal(t, "spoke-cli", claimStatus.Holder.Holder)
-	reboundCredential, found, err := credentials.FederationCredential(ctx, project.UID)
+	staleCredential, found, err := claimCredentials.FederationCredential(ctx, project.UID)
 	require.NoError(t, err)
 	require.True(t, found)
-	assert.Equal(t, targetHub.URL, reboundCredential.HubURL)
+	assert.Equal(t, oldHub.URL, staleCredential.HubURL)
 
 	require.NoError(t, getFederationClaimStatus(
 		ctx,

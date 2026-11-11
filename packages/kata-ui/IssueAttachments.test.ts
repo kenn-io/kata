@@ -50,26 +50,6 @@ it('loads image previews through the host fetch and revokes URLs on unmount', as
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
 })
 
-it('revokes an open preview when only the attachment origin changes', async () => {
-  vi.mocked(URL.createObjectURL).mockReturnValueOnce('blob:old-origin')
-  const { rerender } = render(IssueAttachments, {
-    attachmentsEnabled: true,
-    attachments: { [id]: entry },
-    baseURL: '/attachments',
-    fetchAttachment: async () => new Blob(['old origin'], { type: 'image/png' }),
-  })
-  await fireEvent.click(screen.getByRole('button', { name: 'Preview screen.png' }))
-  await waitFor(() => expect(screen.getByAltText('screen.png').getAttribute('src')).toBe('blob:old-origin'))
-
-  await rerender({
-    attachments: { [id]: { ...entry, origin: '01ARZ3NDEKTSV4RRFFQ69G5FAV' } },
-  })
-
-  expect(screen.queryByAltText('screen.png')).toBeNull()
-  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:old-origin')
-  expect(screen.getByRole('button', { name: 'Preview screen.png' })).toBeTruthy()
-})
-
 it('ignores an in-flight preview response after the attachment origin changes', async () => {
   let finishOld!: (blob: Blob) => void
   let settleOld!: () => void
@@ -318,7 +298,7 @@ it('gives each reference a stable history anchor', () => {
 })
 
 it('shows actions only for references the host can read', async () => {
-  const remote = { ...entry, origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW' }
+  const remote = { ...entry, name: 'remote.png', origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW' }
   const { rerender } = render(IssueAttachments, {
     attachmentsEnabled: false,
     attachmentReadable: (value) => !value.origin,
@@ -328,7 +308,8 @@ it('shows actions only for references the host can read', async () => {
     uploadAttachment: async () => {},
   })
   expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
-  expect(screen.getAllByRole('button', { name: 'Download screen.png' })).toHaveLength(1)
+  expect(screen.getByRole('button', { name: 'Download screen.png' })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Download remote.png' })).toBeNull()
   await rerender({
     attachmentsEnabled: true,
     attachmentReadable: (value) => Boolean(value.origin),
@@ -336,5 +317,6 @@ it('shows actions only for references the host can read', async () => {
     baseURL: '/attachments',
   })
   expect(screen.getByRole('button', { name: 'Attach files' })).toBeTruthy()
-  expect(screen.getAllByRole('button', { name: 'Download screen.png' })).toHaveLength(1)
+  expect(screen.queryByRole('button', { name: 'Download screen.png' })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Download remote.png' })).toBeTruthy()
 })

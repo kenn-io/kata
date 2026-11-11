@@ -49,5 +49,16 @@ describe('attachment availability', () => {
     ).toBe(false)
     expect(attachmentWritable(capabilities, project, { ...route, write: false })).toBe(false)
     expect(attachmentAvailable(capabilities, project, { ...route, read: false }, file)).toBe(true)
+    expect(
+      attachmentAvailable(
+        capabilities,
+        project,
+        { ...route, read: false },
+        { ...file, origin: route.origin },
+      ),
+    ).toBe(false)
+    const { attachment_local_origins: _, ...older } = capabilities
+    expect(attachmentWritable(older, project, null)).toBe(true)
+    expect(attachmentAvailable(older, project, null, file)).toBe(true)
   })
 })

@@ -392,28 +392,6 @@ func TestAttachmentUploadStatusErrors(t *testing.T) {
 	}
 }
 
-func TestUIAttachmentRoutesAreProjectSpecific(t *testing.T) {
-	env := testenv.New(t)
-	spoke, _ := seedProjectAndIssue(t, env)
-	_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: spoke.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: spoke.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
-	require.NoError(t, err)
-	local := seedProject(t, env, "local-project")
-	code, raw := env.Get(t, "/api/v1/ui/attachment-route?project_uid="+spoke.UID)
-	require.Equal(t, http.StatusOK, code, string(raw))
-	var result struct {
-		Route *api.UIAttachmentRoute `json:"route"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &result))
-	require.NotNil(t, result.Route)
-	require.Equal(t, spoke.UID, result.Route.ProjectUID)
-	require.True(t, result.Route.Read)
-	require.True(t, result.Route.Write)
-	code, raw = env.Get(t, "/api/v1/ui/attachment-route?project_uid="+local.UID)
-	require.Equal(t, http.StatusOK, code, string(raw))
-	require.NoError(t, json.Unmarshal(raw, &result))
-	require.Nil(t, result.Route)
-}
-
 func TestUIAttachmentRouteAuthorizationBeforeProbe(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

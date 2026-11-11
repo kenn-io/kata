@@ -37,7 +37,7 @@ func TestDocbankOriginClientPreflight(t *testing.T) {
 				t.Cleanup(server.Close)
 				client, err := NewClient(t.Context(), server.URL, "fixture-token", clientpkg.Opts{})
 				require.NoError(t, err)
-				payload := jsontext.Value(`{"metadata":{"attachment.id":{"origin":"01ARZ3NDEKTSV4RRFFQ69G5FAV"}}}`)
+				payload := jsontext.Value(`{"metadata":{"attachment.id":{"origin":"01ARZ3NDEKTSV4RRFFQ69G5FAV","docbank_version":"6f1c2e8a-2222-4222-8222-222222222222","name":"file.pdf","size":12,"media_type":"application/pdf"}}}`)
 				if relay {
 					event := db.RemoteEvent{EventUID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", OriginInstanceUID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", ProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAX", Type: "issue.created", Actor: "member", HLCPhysicalMS: 1, CreatedAt: time.Unix(1, 0).UTC(), Payload: payload}
 					event.ContentHash, err = db.EventContentHash(db.EventHashInput{UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: event.ProjectUID, Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS, CreatedAt: event.CreatedAt.Format(db.EventTimestampFormat), Payload: event.Payload})

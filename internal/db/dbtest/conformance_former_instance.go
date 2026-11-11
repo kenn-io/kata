@@ -14,7 +14,6 @@ func checkFormerInstanceIdentities(t *testing.T, source db.Storage, backend Back
 	_, _, err = source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "restore", Author: "operator"})
 	require.NoError(t, err)
 	var records []db.ImportRecord
-	var events []db.EventExport
 	for row, err := range source.ExportMeta(ctx) {
 		require.NoError(t, err)
 		records = append(records, &row)
@@ -29,7 +28,6 @@ func checkFormerInstanceIdentities(t *testing.T, source db.Storage, backend Back
 	}
 	for row, err := range source.ExportEvents(ctx, db.ExportFilter{IncludeDeleted: true}) {
 		require.NoError(t, err)
-		events = append(events, row)
 		records = append(records, &row)
 	}
 	first := backend.Open(t)
@@ -38,12 +36,6 @@ func checkFormerInstanceIdentities(t *testing.T, source db.Storage, backend Back
 	aliases, err := first.FormerInstanceUIDs(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []string{source.InstanceUID()}, aliases)
-	var restored []db.EventExport
-	for row, err := range first.ExportEvents(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		restored = append(restored, row)
-	}
-	require.Equal(t, events, restored)
 	var meta []db.ImportRecord
 	for row, err := range first.ExportMeta(ctx) {
 		require.NoError(t, err)

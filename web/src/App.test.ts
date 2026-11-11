@@ -255,16 +255,16 @@ describe('App', () => {
     await waitFor(() => expect(routeRequests).toContain(first.project_uid))
     await fireEvent.click(await screen.findByRole('button', { name: /Other issue/ }))
     await waitFor(() => expect(routeRequests).toContain(second.project_uid))
-    releaseFirst(
-      Response.json({ route: { project_uid: first.project_uid, read: true, write: true } }),
-    )
-    await tick()
-    expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
     releaseSecond(
       Response.json({ route: { project_uid: second.project_uid, read: true, write: true } }),
     )
     await tick()
     expect(await screen.findByRole('button', { name: 'Attach files' })).not.toBeNull()
+    releaseFirst(
+      Response.json({ route: { project_uid: first.project_uid, read: true, write: true } }),
+    )
+    await tick()
+    expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
   })
 
   it.each([

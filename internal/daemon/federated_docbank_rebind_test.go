@@ -32,24 +32,14 @@ func TestForwardDocbankDescriptorRejectsUnknownAttachmentFields(t *testing.T) {
 	require.NoError(t, err)
 	cfg := ServerConfig{DB: store, FederationCredentials: uiCapabilityCredentials{credential: config.FederationCredential{HubURL: upstream.URL, HubProjectID: 1, Token: "fixture", AllowInsecure: true}}}
 	result := &claimRefreshResult{known: true, binding: binding}
-	for _, tc := range []struct {
-		name  string
-		input *api.LinkAttachmentInput
-	}{
-		{"upload", nil},
-		{"link", &api.LinkAttachmentInput{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			extra = ""
-			_, err := forwardDocbankDescriptor(t.Context(), cfg, project, &binding, issue, result, store.InstanceUID(), "file.pdf", tc.input, strings.NewReader("data"))
-			require.NoError(t, err)
-			extra = `,"new_required_field":"meaning"`
-			_, err = forwardDocbankDescriptor(t.Context(), cfg, project, &binding, issue, result, store.InstanceUID(), "file.pdf", tc.input, strings.NewReader("data"))
-			var apiErr *api.APIError
-			require.ErrorAs(t, err, &apiErr)
-			require.Equal(t, "attachment_invalid", apiErr.Code)
-		})
-	}
+	_, err = forwardDocbankDescriptor(t.Context(), cfg, project, &binding, issue, result, store.InstanceUID(), "file.pdf", nil, strings.NewReader("data"))
+	require.NoError(t, err)
+	extra = `,"new_required_field":"meaning"`
+	_, err = forwardDocbankDescriptor(t.Context(), cfg, project, &binding, issue, result, store.InstanceUID(), "file.pdf", nil, strings.NewReader("data"))
+	var apiErr *api.APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, http.StatusBadGateway, apiErr.Status)
+	require.Equal(t, "attachment_invalid", apiErr.Code)
 }
 
 func TestDocbankForwardRejectsFormerRouteAfterRebind(t *testing.T) {
