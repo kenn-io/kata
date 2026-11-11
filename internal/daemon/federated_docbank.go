@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/metadata"
@@ -63,6 +64,11 @@ func docbankOriginCapabilities(ctx context.Context, cfg ServerConfig, project db
 // docbankForwardRequest uses the same daemon-owned, origin-pinned credential
 // route as synchronous leases. It never copies an incoming Authorization.
 func docbankForwardRequest(ctx context.Context, cfg ServerConfig, binding db.FederationBinding, method, suffix string, query url.Values, body io.Reader) (*http.Response, error) {
+	finish, err := beginDocbankForward(ctx, cfg, binding)
+	if err != nil {
+		return nil, err
+	}
+	defer finish()
 	project, err := cfg.DB.ProjectByID(ctx, binding.ProjectID)
 	if err != nil {
 		return nil, internalAPIError(err)
@@ -139,6 +145,21 @@ func docbankForwardRequest(ctx context.Context, cfg ServerConfig, binding db.Fed
 	return nil, attachmentError(resp.StatusCode, code)
 }
 
+// beginDocbankForward pairs the current route and credential under the same
+// gate used by rebinds, before any request can carry the credential.
+func beginDocbankForward(ctx context.Context, cfg ServerConfig, binding db.FederationBinding) (func(), error) {
+	finish, err := beginClaimFederationTransport(ctx, cfg, binding.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	current, err := cfg.DB.FederationBindingByProject(ctx, binding.ProjectID)
+	if err != nil || !sameClaimRefreshRoute(current, binding) {
+		finish()
+		return nil, attachmentError(http.StatusServiceUnavailable, "federation_offline")
+	}
+	return finish, nil
+}
+
 func sameClaimRefreshRoute(a, b db.FederationBinding) bool {
 	if a.Role != b.Role || a.Enabled != b.Enabled || a.PushEnabled != b.PushEnabled || a.HubURL != b.HubURL || a.HubProjectID != b.HubProjectID || a.HubProjectUID != b.HubProjectUID || a.AllowInsecure != b.AllowInsecure {
 		return false
@@ -158,20 +179,29 @@ func ensureDocbankIssueUpstream(ctx context.Context, cfg ServerConfig, project d
 	if result != nil && result.known && !result.missing {
 		return nil
 	}
-	remote, credential, err := claimForwardClient(ctx, cfg, binding)
-	if err != nil {
-		return err
-	}
-	if result == nil || !result.known {
+	credential, missing, err := func() (config.FederationCredential, bool, error) {
+		finish, err := beginDocbankForward(ctx, cfg, binding)
+		if err != nil {
+			return config.FederationCredential{}, false, err
+		}
+		defer finish()
+		remote, credential, err := claimForwardClient(ctx, cfg, binding)
+		if err != nil {
+			return credential, false, err
+		}
+		if result != nil && result.known {
+			return credential, true, nil
+		}
 		_, err = remote.ClaimStatus(ctx, credential.HubProjectID, issue.UID)
 		var status *claimHubStatusError
-		if err == nil || !errors.As(err, &status) || status == nil || status.StatusCode != http.StatusNotFound {
-			return nil
+		if !errors.As(err, &status) || status == nil || status.StatusCode != http.StatusNotFound {
+			return credential, false, nil
 		}
 		code := hubStatusErrorCode(status)
-		if code != "issue_not_found" && (binding.RelayConfig == nil || code != "hub_claim_failed") {
-			return nil
-		}
+		return credential, code == "issue_not_found" || (binding.RelayConfig != nil && code == "hub_claim_failed"), nil
+	}()
+	if err != nil || !missing {
+		return err
 	}
 	if cfg.FederationSyncOnce == nil {
 		return attachmentError(http.StatusServiceUnavailable, "federation_offline")
