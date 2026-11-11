@@ -139,7 +139,7 @@ func (o *cronAuthorOptions) build(cmd *cobra.Command, parent string) (api.PutCro
 }
 
 func (o *cronAuthorOptions) trigger(cmd *cobra.Command) (cron.Trigger, error) {
-	var trigger cron.Trigger
+	trigger := cron.Trigger{Timezone: o.timezone}
 	count := 0
 	for _, flag := range []string{"cron", "every", "once"} {
 		if cmd.Flags().Changed(flag) {
@@ -149,13 +149,12 @@ func (o *cronAuthorOptions) trigger(cmd *cobra.Command) (cron.Trigger, error) {
 	if count != 1 {
 		return trigger, cronCLIValidation("choose exactly one of --cron, --every or --once")
 	}
-	if cmd.Flags().Changed("timezone") || cmd.Flags().Changed("cron") {
-		if o.timezone == "" || o.timezone == "Local" {
-			return trigger, cronCLIValidation("--timezone requires an explicit IANA timezone; Local is not portable")
-		}
+	if (cmd.Flags().Changed("timezone") || cmd.Flags().Changed("cron")) && (o.timezone == "" || o.timezone == "Local") {
+		return trigger, cronCLIValidation("--timezone requires an explicit IANA timezone; Local is not portable")
 	}
-	trigger.Timezone = o.timezone
 	switch {
+	case cmd.Flags().Changed("once") && o.notify:
+		return trigger, cronCLIValidation("--once is only supported for adapter jobs")
 	case cmd.Flags().Changed("cron"):
 		expression := strings.TrimSpace(o.expression)
 		if strings.HasPrefix(expression, "TZ=") || strings.HasPrefix(expression, "CRON_TZ=") {

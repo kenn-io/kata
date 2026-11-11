@@ -24,6 +24,8 @@ func TestCronCLIAuthoredInputErrorsPerformNoNetworkRequests(t *testing.T) {
 	_, _, err := executeCronCLI(t, server.URL, nil, args...)
 	require.ErrorContains(t, err, "--every must use whole seconds")
 	require.Zero(t, requests.Load())
+	_, _, err = executeCronCLI(t, server.URL, nil, "job", "create", "--name=Review", "--title=Check in", "--enabled=false", "--catchup=latest", "--overlap=allow", "--once=2026-12-01T09:00:00Z", "--notify")
+	require.ErrorContains(t, err, "--once is only supported for adapter jobs")
 }
 
 func TestCronCLIFileRejectsEveryAuthoredFlag(t *testing.T) {
