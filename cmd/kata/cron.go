@@ -253,14 +253,9 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 		if err != nil {
 			return err
 		}
-		if o.definition() && o.action == "create" {
-			if o.identity == "" {
-				o.identity, err = uid.New()
-				if err != nil {
-					return err
-				}
-			}
-			if _, err = fmt.Fprintf(cmd.ErrOrStderr(), "Definition UID: %s (reuse --uid on retry)\n", o.identity); err != nil {
+		if o.definition() && o.action == "create" && o.identity == "" {
+			o.identity, err = uid.New()
+			if err != nil {
 				return err
 			}
 		}
@@ -307,6 +302,11 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	}
 	if o.action == "edit" {
 		return o.edit(cmd.Context(), cmd, daemon, client, project.ID)
+	}
+	if o.definition() && o.action == "create" {
+		if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "Definition UID: %s (reuse --uid on retry)\n", o.identity); err != nil {
+			return err
+		}
 	}
 	raw, err := o.call(daemon, client, project.ID, body)
 	if err != nil {

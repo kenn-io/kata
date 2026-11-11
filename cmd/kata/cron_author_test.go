@@ -25,6 +25,8 @@ func cronAuthorBuild(t *testing.T, parent string, args []string) (api.PutCronJob
 }
 
 func TestCronAuthorPromptMatchesFileDefinition(t *testing.T) {
+	_, err := cronAuthorBuild(t, "", append(cronAuthorFixture(), "--adapter-agent= "))
+	require.ErrorContains(t, err, "--adapter-agent must not be empty")
 	body, err := cronAuthorBuild(t, "", append(cronAuthorFixture(), "--adapter-agent=example-agent", "--checkout-key=example-checkout"))
 	require.NoError(t, err)
 	require.Equal(t, api.PutCronJobBody{Name: "Inspection", Definition: api.CronJobDefinition{

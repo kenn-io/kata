@@ -44,7 +44,7 @@ func TestCronCLITypedCreationHasNoNameUpsert(t *testing.T) {
 	require.NoError(t, err)
 	identity := cronCLIUID(t)
 	args := append([]string{"job", "create", "--uid", identity}, cronAuthorFixture()...)
-	args = append(args, "--adapter-agent=example-agent")
+	args = append(args, "--adapter= example-adapter ", "--adapter-agent= example-agent ")
 	_, diagnostic, err := executeCronCLI(t, env.URL, nil, args...)
 	require.NoError(t, err)
 	require.Contains(t, diagnostic, "reuse --uid on retry")
@@ -104,7 +104,8 @@ func TestCronCLITypedNativeParentResolution(t *testing.T) {
 	require.False(t, stored.Definition.Enabled)
 	puts.Store(0)
 	invalid := append(append([]string{}, args...), "--every=30s", "--uid="+cronCLIUID(t))
-	_, _, err = executeCronCLI(t, server.URL, nil, invalid...)
+	_, diagnostic, err := executeCronCLI(t, server.URL, nil, invalid...)
 	require.ErrorContains(t, err, "at least 60")
+	require.NotContains(t, diagnostic, "reuse --uid on retry")
 	require.Zero(t, puts.Load(), "invalid definition must not reach the write")
 }

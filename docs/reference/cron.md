@@ -107,7 +107,7 @@ job. Typed `--cron` uses `--timezone` as its single timezone source; `TZ=` and
 interval rather than the `@every` descriptor. An interval measures elapsed time;
 an omitted interval timezone does not
 choose the machine's local zone. Once requires an explicit offset or `Z`.
-Durations use nanosecond precision. Fractional seconds at that precision, overflow, and negative durations are rejected.
+Durations use nanosecond precision; smaller fractions are truncated. Fractional seconds at nanosecond precision, overflow, and negative durations are rejected.
 
 Prompt, body and message text stay literal. Kata neither parses shell words nor
 launches a process. `options.adapter` selects an adapter by convention; it does

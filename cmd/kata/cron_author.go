@@ -127,14 +127,14 @@ func (o *cronAuthorOptions) build(cmd *cobra.Command, parent string) (api.PutCro
 	}
 	out.Definition.Action = cron.Action{Kind: "execute", Prompt: o.prompt}
 	out.Definition.CheckoutKey = o.checkoutKey
-	options := map[string]string{"adapter": o.adapter}
+	options := map[string]string{"adapter": strings.TrimSpace(o.adapter)}
 	if cmd.Flags().Changed("adapter-agent") {
-		options["agent"] = o.agent
+		if strings.TrimSpace(o.agent) == "" {
+			return out, cronCLIValidation("--adapter-agent must not be empty")
+		}
+		options["agent"] = strings.TrimSpace(o.agent)
 	}
-	out.Definition.Options, err = json.Marshal(options)
-	if err != nil {
-		return out, cronCLIValidation(err.Error())
-	}
+	out.Definition.Options, _ = json.Marshal(options)
 	return out, nil
 }
 
