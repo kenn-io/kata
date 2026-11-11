@@ -1,48 +1,13 @@
 package sqlitestore
 
 import (
-	"context"
-	"database/sql"
-	"database/sql/driver"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"modernc.org/sqlite"
 )
-
-type moveQueryCounter struct {
-	path   string
-	counts map[string]int
-}
-
-func (c *moveQueryCounter) Driver() driver.Driver { return &sqlite.Driver{} }
-func (c *moveQueryCounter) Connect(context.Context) (driver.Conn, error) {
-	conn, err := c.Driver().Open(c.path)
-	if err != nil {
-		return nil, err
-	}
-	return &moveQueryConn{Conn: conn, counter: c}, nil
-}
-
-type moveQueryConn struct {
-	driver.Conn
-	counter *moveQueryCounter
-}
-
-func (c *moveQueryConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
-	return c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
-}
-
-func (c *moveQueryConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	if strings.Contains(query, "SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues") {
-		c.counter.counts[args[0].Value.(string)]++
-	}
-	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
-}
 
 func unapplyMove(t *testing.T, d *Store, issue db.Issue, source, destination db.Project) {
 	t.Helper()
@@ -53,28 +18,8 @@ func unapplyMove(t *testing.T, d *Store, issue db.Issue, source, destination db.
 	require.NoError(t, err)
 }
 
-func TestFederationGenerationSurvivesProjectIDReuse(t *testing.T) {
-	ctx := t.Context()
-	d, _, _ := incrementalTestStore(t)
-	project, err := d.CreateProject(ctx, "temporary")
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `DELETE FROM events WHERE project_id=?`, project.ID)
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `INSERT INTO federation_project_generations(project_id,generation) VALUES(?,42) ON CONFLICT(project_id) DO UPDATE SET generation=42`, project.ID)
-	require.NoError(t, err)
-	var afterDelete, after int64
-	_, err = d.ExecContext(ctx, `DELETE FROM projects WHERE id=?`, project.ID)
-	require.NoError(t, err)
-	require.NoError(t, d.QueryRowContext(ctx, `SELECT generation FROM federation_project_generations WHERE project_id=?`, project.ID).Scan(&afterDelete))
-	require.Greater(t, afterDelete, int64(42))
-	_, err = d.ExecContext(ctx, `INSERT INTO projects(id,uid,name) VALUES(?,'01HZNQ7VFPK1XGD8R5MABCD4EC','replacement')`, project.ID)
-	require.NoError(t, err)
-	require.NoError(t, d.QueryRowContext(ctx, `SELECT generation FROM federation_project_generations WHERE project_id=?`, project.ID).Scan(&after))
-	require.Greater(t, after, afterDelete)
-}
-
-func TestFederationGenerationsRejectChangedRows(t *testing.T) {
-	for _, change := range []string{"issue", "issue-project", "issue-insert", "comment", "comment-insert", "comment-delete", "label-insert", "label-delete", "link", "link-insert", "link-delete", "event", "event-delete", "binding", "project", "provenance", "provenance-delete"} {
+func TestMoveRebuildRetriesChangedRows(t *testing.T) {
+	for _, change := range []string{"issue", "comment", "label", "link"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := t.Context()
 			d, project, issue := incrementalTestStore(t)
@@ -86,55 +31,81 @@ func TestFederationGenerationsRejectChangedRows(t *testing.T) {
 			require.NoError(t, err)
 			_, _, err = d.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "related", Author: "tester"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, FromShortID: issue.ShortID, FromUID: issue.UID, ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "tester"})
 			require.NoError(t, err)
-			_, err = d.ExecContext(ctx, `INSERT INTO federation_root_keys(project_uid,authority_uid,key_id,public_key) VALUES(?,'authority','key','public')`, project.UID)
-			require.NoError(t, err)
-			_, err = d.ExecContext(ctx, `INSERT INTO federation_event_provenance(project_uid,event_uid,content_hash,reset_epoch,sequence,key_id,receipt) SELECT ?,uid,content_hash,1,1,'key','{"ingress_instance_uid":"other"}' FROM events WHERE project_id=? ORDER BY id LIMIT 1`, project.UID, project.ID)
-			require.NoError(t, err)
-			prepared, err := d.prepareFederationRebuild(ctx, project.ID)
-			require.NoError(t, err)
 			writer, err := Open(ctx, d.Path())
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, writer.Close()) })
-			switch change {
-			case "issue":
-				_, err = writer.ExecContext(ctx, `UPDATE issues SET title='changed' WHERE id=?`, issue.ID)
-			case "issue-project":
-				other, createErr := writer.CreateProject(ctx, "other")
-				require.NoError(t, createErr)
-				_, err = writer.ExecContext(ctx, `UPDATE issues SET project_id=? WHERE id=?`, other.ID, issue.ID)
-			case "issue-insert":
-				_, err = writer.ExecContext(ctx, `INSERT INTO issues(uid,project_id,short_id,title,author) VALUES('01HZNQ7VFPK1XGD8R5MABCD4EC',?,'d4ec','new','tester')`, project.ID)
-			case "comment":
-				_, err = writer.ExecContext(ctx, `UPDATE comments SET body='changed' WHERE id=?`, comment.ID)
-			case "comment-insert":
-				_, err = writer.ExecContext(ctx, `INSERT INTO comments(uid,issue_id,author,body) VALUES('01HZNQ7VFPK1XGD8R5MABCD4EC',?,'tester','new')`, issue.ID)
-			case "comment-delete":
-				_, err = writer.ExecContext(ctx, `DELETE FROM comments WHERE id=?`, comment.ID)
-			case "label-insert":
-				_, err = writer.ExecContext(ctx, `INSERT INTO issue_labels(issue_id,label,author) VALUES(?,'new','tester')`, issue.ID)
-			case "label-delete":
-				_, err = writer.ExecContext(ctx, `DELETE FROM issue_labels WHERE issue_id=?`, issue.ID)
-			case "link":
-				_, err = writer.ExecContext(ctx, `UPDATE links SET author='changed' WHERE from_issue_id=? OR to_issue_id=?`, issue.ID, issue.ID)
-			case "link-insert":
-				_, err = writer.ExecContext(ctx, `INSERT INTO links(from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author) VALUES(?,?,?,?,'blocks','tester')`, issue.ID, peer.ID, issue.UID, peer.UID)
-			case "link-delete":
-				_, err = writer.ExecContext(ctx, `DELETE FROM links WHERE from_issue_id=? OR to_issue_id=?`, issue.ID, issue.ID)
-			case "event":
-				_, err = writer.ExecContext(ctx, `UPDATE events SET issue_id=NULL WHERE id=(SELECT MIN(id) FROM events WHERE issue_id=?)`, issue.ID)
-			case "event-delete":
-				_, err = writer.ExecContext(ctx, `DELETE FROM events WHERE id=(SELECT MIN(id) FROM events WHERE project_id=?)`, project.ID)
-			case "binding":
-				_, err = writer.ExecContext(ctx, `UPDATE federation_bindings SET relay_config='{}' WHERE project_id=?`, project.ID)
-			case "project":
-				_, err = writer.ExecContext(ctx, `UPDATE projects SET name='changed' WHERE id=?`, project.ID)
-			case "provenance":
-				_, err = writer.ExecContext(ctx, `UPDATE federation_event_provenance SET receipt='{"ingress_instance_uid":"changed"}' WHERE project_uid=?`, project.UID)
-			case "provenance-delete":
-				_, err = writer.ExecContext(ctx, `DELETE FROM federation_event_provenance WHERE project_uid=?`, project.UID)
+			attempts := 0
+			var locked *Store
+			d.federationIngestPrepared = func() {
+				attempts++
+				if attempts != 1 {
+					return
+				}
+				switch change {
+				case "issue":
+					_, err = writer.ExecContext(ctx, `UPDATE issues SET title='changed', priority=1.5 WHERE id=?`, issue.ID)
+				case "comment":
+					_, err = writer.ExecContext(ctx, `UPDATE comments SET body='changed' WHERE id=?`, comment.ID)
+				case "label":
+					_, err = writer.ExecContext(ctx, `UPDATE issue_labels SET label='changed' WHERE issue_id=?`, issue.ID)
+				case "link":
+					_, err = writer.ExecContext(ctx, `UPDATE links SET author='changed' WHERE from_issue_id=?`, issue.ID)
+				}
+				require.NoError(t, err)
+				locked = cloneIncrementalStore(t, d)
+				require.NoError(t, locked.materializeFederatedProject(ctx, project.ID))
 			}
+			require.NoError(t, d.MaterializeFederatedProject(ctx, project.ID))
+			require.Equal(t, 2, attempts)
+			require.Equal(t, federationProjectionRows(t, locked, project.ID), federationProjectionRows(t, d, project.ID))
+		})
+	}
+}
+
+func TestMoveRebuildRetriesChangedMoveDecisions(t *testing.T) {
+	for _, change := range []string{"target-deleted", "target-binding", "issue-moved"} {
+		t.Run(change, func(t *testing.T) {
+			ctx := t.Context()
+			d, source, issue := incrementalTestStore(t)
+			destination, err := d.CreateProject(ctx, "destination")
 			require.NoError(t, err)
-			require.ErrorIs(t, d.applyFederationRebuild(ctx, prepared), errStaleFederationPreparation)
+			_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
+			require.NoError(t, err)
+			other, err := d.CreateProject(ctx, "other")
+			require.NoError(t, err)
+			_, err = d.EnableProjectFederation(ctx, other.ID, "tester")
+			require.NoError(t, err)
+			unapplyMove(t, d, issue, source, destination)
+			writer, err := Open(ctx, d.Path())
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, writer.Close()) })
+			attempts := 0
+			d.federationIngestPrepared = func() {
+				attempts++
+				if attempts != 1 {
+					return
+				}
+				switch change {
+				case "target-deleted":
+					_, err = writer.ExecContext(ctx, `UPDATE projects SET deleted_at=CURRENT_TIMESTAMP WHERE id=?`, destination.ID)
+				case "target-binding":
+					_, err = writer.ExecContext(ctx, `DELETE FROM federation_bindings WHERE project_id=?`, destination.ID)
+				case "issue-moved":
+					var current db.Issue
+					current, err = writer.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+					if err == nil {
+						_, err = writer.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: other.ID, IfMatchRev: current.Revision, Actor: "tester"})
+					}
+				}
+				require.NoError(t, err)
+			}
+			err = d.MaterializeFederatedProject(ctx, source.ID)
+			if change == "target-deleted" {
+				require.ErrorIs(t, err, db.ErrNotFound)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, 2, attempts)
 		})
 	}
 }
@@ -205,12 +176,9 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 			t.Cleanup(func() { require.NoError(t, writer.Close()) })
 			unapplyMove(t, d, issue, source, destination)
 			if change == "history" {
-				_, err = d.ExecContext(ctx, `UPDATE federation_bindings SET role='spoke',hub_url='https://example.com',hub_project_id=? WHERE project_id=?`, destination.ID, destination.ID)
-				require.NoError(t, err)
-				prepared, err := d.prepareFederationRebuild(ctx, destination.ID)
-				require.NoError(t, err)
-				for _, project := range prepared.projects {
-					require.NotContains(t, project.materialization.projectStamps, other.ID)
+				for _, project := range []db.Project{source, destination} {
+					_, err = d.ExecContext(ctx, `UPDATE federation_bindings SET role='spoke',hub_url='https://example.com',hub_project_id=? WHERE project_id=?`, project.ID, project.ID)
+					require.NoError(t, err)
 				}
 			}
 			attempts := 0
@@ -434,20 +402,13 @@ func TestMoveRebuildRefreshesChangedDecisions(t *testing.T) {
 	require.NoError(t, locked.materializeFederatedProject(ctx, source.ID))
 	prepared, err := d.prepareFederationRebuild(ctx, source.ID)
 	require.NoError(t, err)
-	count := &moveQueryCounter{path: "file:" + d.Path() + "?_pragma=foreign_keys(1)", counts: map[string]int{}}
-	raw := sql.OpenDB(count)
-	t.Cleanup(func() { require.NoError(t, raw.Close()) })
-	store := *d
-	store.DB = raw
-	require.NoError(t, store.applyFederationRebuild(ctx, prepared))
+	require.NoError(t, d.applyFederationRebuild(ctx, prepared))
 	got, err := d.IssueByUID(ctx, moving.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	want, err := locked.IssueByUID(ctx, moving.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	require.Equal(t, destination.ID, got.ProjectID)
 	require.Equal(t, want, got)
-	require.Equal(t, 3, count.counts[moving.UID], "the moved row needs one fresh decision after both validations")
-	require.Equal(t, 2, count.counts[settled.UID], "an unchanged row needs only the two validations")
 }
 
 func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
@@ -605,7 +566,11 @@ func TestMoveRebuildPreservesLinks(t *testing.T) {
 			attempts := 0
 			d.federationIngestPrepared = func() { attempts++ }
 			require.NoError(t, d.MaterializeFederatedProject(ctx, projectID))
-			require.Equal(t, 1, attempts)
+			if scenario == "former-source" {
+				require.Zero(t, attempts)
+			} else {
+				require.Equal(t, 1, attempts)
+			}
 			if scenario == "archived" {
 				_, _, _, err = locked.RestoreProject(ctx, destination.ID, "tester")
 				require.NoError(t, err)

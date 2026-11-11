@@ -518,7 +518,6 @@ func seedV1DBWithOrphanRelatedEvent(t *testing.T, path string) {
 // first.
 func dropV10Additions(t *testing.T, raw *sql.DB) {
 	t.Helper()
-	jsonl.DropGenerationSchema(t, raw)
 	stmts := []string{
 		`DROP TABLE IF EXISTS federation_bindings`,
 		`DROP TABLE comments`,

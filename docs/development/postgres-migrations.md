@@ -463,7 +463,3 @@ place, with an atomic schema-version update.
 Start the matching schema 50 binary after migration. Older binaries cannot open
 schema 50. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
-
-## Schema 51: Federation rebuild generations
-
-The PostgreSQL 50→51 migration advances the shared schema version without changing PostgreSQL objects. Stop daemons and imports, back up the database, and run `kata storage postgres migrate` with schema-owner credentials. Existing runtime grants remain sufficient. SQLite installs project generation state and triggers in place. Older binaries cannot open schema 51; rollback requires the pre-upgrade backup and matching older binary.

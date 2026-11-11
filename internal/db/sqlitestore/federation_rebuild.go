@@ -10,14 +10,13 @@ import (
 )
 
 type preparedFederationRebuildProject struct {
-	id               int64
-	events           []db.FoldEvent
-	projection       db.FoldProjection
-	moveProjection   db.FoldProjection
-	moved            db.FoldProjection
-	decisions        []db.FederatedMoveDecision
-	materialization  federationMaterialization
-	linksUnderWriter bool
+	id              int64
+	events          []db.FoldEvent
+	projection      db.FoldProjection
+	moveProjection  db.FoldProjection
+	moved           db.FoldProjection
+	decisions       []db.FederatedMoveDecision
+	materialization federationMaterialization
 }
 
 type preparedFederationRebuild struct {
@@ -82,13 +81,13 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			return preparedFederationRebuild{}, err
 		}
 		m := federationMaterialization{binding: binding}
-		if err := m.prepareFullHistory(ctx, tx, p.events, true); err != nil {
+		if err := m.prepareFullHistory(ctx, tx, p.id, p.events, true); err != nil {
 			return preparedFederationRebuild{}, err
 		}
 		if err := m.foldLinks(ctx, tx, nil, true); err != nil {
 			return preparedFederationRebuild{}, err
 		}
-		if err := m.stampFullHistoryRows(ctx, tx, p.id); err != nil {
+		if err := m.stampFullHistoryLinks(ctx, tx, p.id); err != nil {
 			return preparedFederationRebuild{}, err
 		}
 		projectUID, err := projectUIDTx(ctx, tx, p.id)
@@ -144,12 +143,8 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		// A former source outside this group can hold links until rehome.
 		for _, decision := range result.moved {
 			if isFederationRehome(decision) && slices.Contains(p.materialization.linkProjects, decision.TargetID) && !slices.Contains(p.materialization.linkProjects, decision.SourceID) {
-				p.linksUnderWriter = true
-				break
+				return preparedFederationRebuild{}, errStaleFederationPreparation
 			}
-		}
-		if p.linksUnderWriter {
-			continue
 		}
 		included := map[string]int64{}
 		excluded := map[string]bool{}
@@ -170,6 +165,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		if err := p.materialization.prepareLinks(ctx, tx, p.id, nil, included, excluded); err != nil {
 			return preparedFederationRebuild{}, err
 		}
+		p.materialization.rowStamp = p.materialization.rowHasher.sum()
 	}
 	return result, nil
 }
@@ -190,37 +186,20 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 			if err := checkFullPullPreparation(ctx, tx, p.id, p.materialization); err != nil {
 				return err
 			}
+		}
+		// Earlier rehomes can change the source of a later decision.
+		changed := map[string]bool{}
+		for _, p := range prepared.projects {
 			decisions, _, err := db.PlanFederatedMovedIssues(ctx, tx, p.events, p.moveProjection)
 			if err != nil {
 				return err
 			}
-			if !slices.Equal(decisions, p.decisions) {
+			if len(decisions) != len(p.decisions) {
 				return errStaleFederationPreparation
 			}
-		}
-		// The existing move routine keeps its live claim, recurrence, and import guards.
-		// Refresh only issues changed by earlier rehomes.
-		changed := map[string]bool{}
-		for _, p := range prepared.projects {
-			decisions := p.decisions
-			affected := db.FoldProjection{Issues: map[string]db.FoldIssue{}}
-			for _, decision := range decisions {
-				if changed[decision.IssueUID] {
-					affected.Issues[decision.IssueUID] = p.moveProjection.Issues[decision.IssueUID]
-				}
-			}
-			if len(affected.Issues) > 0 {
-				refreshed, _, err := db.PlanFederatedMovedIssues(ctx, tx, p.events, affected)
-				if err != nil {
-					return err
-				}
-				decisions = slices.Clone(decisions)
-				j := 0
-				for i := range decisions {
-					if changed[decisions[i].IssueUID] {
-						decisions[i] = refreshed[j]
-						j++
-					}
+			for i, decision := range decisions {
+				if !changed[decision.IssueUID] && decision != p.decisions[i] {
+					return errStaleFederationPreparation
 				}
 			}
 			if err := d.rehomeFederatedMovedIssues(ctx, tx, p.events, p.moveProjection, decisions, nil); err != nil {
@@ -232,6 +211,7 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 				}
 			}
 		}
+
 		validator := db.NewCronReplayValidator(tx, false)
 		for _, p := range prepared.projects {
 			m := p.materialization
@@ -262,26 +242,10 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 				continue
 			}
 			groups = append(groups, m.linkProjects)
-			if p.linksUnderWriter {
-				included := map[string]int64{}
-				excluded := map[string]bool{}
-				for _, other := range prepared.projects {
-					if slices.Contains(m.linkProjects, other.id) {
-						maps.Copy(included, other.materialization.issueIDs)
-						for uid := range other.materialization.staleIssues {
-							excluded[uid] = true
-						}
-					}
-				}
-				if err := m.prepareLinks(ctx, tx, p.id, nil, included, excluded); err != nil {
-					return err
-				}
-			} else {
-				for _, other := range prepared.projects {
-					for uid, id := range other.materialization.linkIDs {
-						if _, ok := m.linkIDs[uid]; ok && id != 0 {
-							m.linkIDs[uid] = id
-						}
+			for _, other := range prepared.projects {
+				for uid, id := range other.materialization.linkIDs {
+					if _, ok := m.linkIDs[uid]; ok && id != 0 {
+						m.linkIDs[uid] = id
 					}
 				}
 			}

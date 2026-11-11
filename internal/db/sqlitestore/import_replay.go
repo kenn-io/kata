@@ -425,7 +425,7 @@ func validateFreshReplayTarget(
 		return fmt.Errorf("import requires a fresh target: project state exists")
 	}
 	for _, table := range tables {
-		if table == "projects" || table == "federation_project_generations" {
+		if table == "projects" {
 			continue
 		}
 		quoted := `"` + strings.ReplaceAll(table, `"`, `""`) + `"`

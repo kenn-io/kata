@@ -1985,7 +1985,7 @@ func clearFederatedProjection(ctx context.Context, tx *sql.Tx, projectID int64) 
 func reconcileFederatedIssues(
 	ctx context.Context, tx *sql.Tx, projectID int64, projection db.FoldProjection,
 ) (map[string]int64, error) {
-	existing, err := federatedIssueRowsByUID(ctx, tx, projectID)
+	existing, err := federatedIssueRowsByUID(ctx, tx, projectID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -2159,12 +2159,13 @@ func federatedIssueValues(issue db.FoldIssue, shortID string, metadata jsontext.
 	return values, nil
 }
 
-func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, issueScope ...string) (map[string]federatedIssueRow, error) {
+func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, stamp *federationRowHasher, issueScope ...string) (map[string]federatedIssueRow, error) {
 	query := `SELECT uid, id, short_id, title, body, status, closed_reason, owner,
  CAST(assignment_expires_on AS TEXT), priority, author, CAST(created_at AS TEXT),
  CAST(updated_at AS TEXT), CAST(closed_at AS TEXT), CAST(deleted_at AS TEXT), metadata
  FROM issues WHERE project_id = ?`
 	query, args := scopedFederationRows(query, projectID, "uid", issueScope)
+	query += " ORDER BY id"
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated issue rows: %w", err)
@@ -2183,7 +2184,12 @@ func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, i
 		row.deleted = deletedAt != nil
 		row.values = []any{row.shortID, row.title, row.body, status, closedReason, owner, assignmentExpiresOn,
 			priority, author, createdAt, updatedAt, closedAt, deletedAt, metadata}
-		out[uid] = row
+		if stamp != nil {
+			stamp.write(1, append([]any{uid, row.id}, row.values...)...)
+		}
+		if stamp == nil || !stamp.only {
+			out[uid] = row
+		}
 	}
 	return out, rows.Err()
 }
@@ -2191,7 +2197,7 @@ func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, i
 func reconcileFederatedComments(
 	ctx context.Context, tx *sql.Tx, projectID int64, issueIDs map[string]int64, projection db.FoldProjection,
 ) error {
-	existing, err := federatedCommentRowsByUID(ctx, tx, projectID)
+	existing, err := federatedCommentRowsByUID(ctx, tx, projectID, nil)
 	if err != nil {
 		return err
 	}
@@ -2283,13 +2289,14 @@ func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID 
 	return owners > 0, nil
 }
 
-func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, issueScope ...string) (map[string]federatedCommentRow, error) {
+func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, stamp *federationRowHasher, issueScope ...string) (map[string]federatedCommentRow, error) {
 	query := `
 		SELECT c.uid, c.id, c.issue_id, c.author, CAST(c.created_at AS TEXT), c.body, c.teammate
 		  FROM comments c
 		  JOIN issues i ON i.id = c.issue_id
 		 WHERE i.project_id = ?`
 	query, args := scopedFederationRows(query, projectID, "i.uid", issueScope)
+	query += " ORDER BY c.id"
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated comments: %w", err)
@@ -2304,7 +2311,12 @@ func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64,
 			return nil, fmt.Errorf("scan federated comment: %w", err)
 		}
 		row.teammate = teammate.String
-		out[uid] = row
+		if stamp != nil {
+			stamp.write(2, uid, row.id, row.issueID, row.author, row.createdAt, row.body, teammate)
+		}
+		if stamp == nil || !stamp.only {
+			out[uid] = row
+		}
 	}
 	return out, rows.Err()
 }
@@ -2317,7 +2329,7 @@ type federatedLabelKey struct {
 func reconcileFederatedLabels(
 	ctx context.Context, tx *sql.Tx, projectID int64, issueIDs map[string]int64, projection db.FoldProjection,
 ) error {
-	existing, err := federatedLabelKeys(ctx, tx, projectID)
+	existing, err := federatedLabelKeys(ctx, tx, projectID, nil)
 	if err != nil {
 		return err
 	}
@@ -2355,13 +2367,14 @@ func reconcileFederatedLabelsFromRows(ctx context.Context, tx *sql.Tx, issueIDs 
 	return nil
 }
 
-func federatedLabelKeys(ctx context.Context, tx *sql.Tx, projectID int64, issueScope ...string) (map[federatedLabelKey]struct{}, error) {
+func federatedLabelKeys(ctx context.Context, tx *sql.Tx, projectID int64, stamp *federationRowHasher, issueScope ...string) (map[federatedLabelKey]struct{}, error) {
 	query := `
 		SELECT il.issue_id, il.label
 		  FROM issue_labels il
 		  JOIN issues i ON i.id = il.issue_id
 		 WHERE i.project_id = ?`
 	query, args := scopedFederationRows(query, projectID, "i.uid", issueScope)
+	query += " ORDER BY il.issue_id,il.label"
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated labels: %w", err)
@@ -2373,7 +2386,12 @@ func federatedLabelKeys(ctx context.Context, tx *sql.Tx, projectID int64, issueS
 		if err := rows.Scan(&key.issueID, &key.label); err != nil {
 			return nil, fmt.Errorf("scan federated label: %w", err)
 		}
-		out[key] = struct{}{}
+		if stamp != nil {
+			stamp.write(3, key.issueID, key.label)
+		}
+		if stamp == nil || !stamp.only {
+			out[key] = struct{}{}
+		}
 	}
 	return out, rows.Err()
 }
@@ -2426,11 +2444,11 @@ func reconcileFederatedLinkProjection(
 	ctx context.Context, tx *sql.Tx, projection db.FoldProjection,
 	desiredProjectIDs, ownedProjectIDs []int64, currentProjectID int64, currentIssueIDs map[string]int64,
 ) error {
-	issueIDs, err := federationGroupIssueIDs(ctx, tx, desiredProjectIDs, currentProjectID, currentIssueIDs, nil)
+	issueIDs, err := federationGroupIssueIDs(ctx, tx, desiredProjectIDs, currentProjectID, currentIssueIDs, nil, nil)
 	if err != nil {
 		return err
 	}
-	existing, err := federatedLinkRows(ctx, tx, ownedProjectIDs)
+	existing, err := federatedLinkRows(ctx, tx, ownedProjectIDs, nil)
 	if err != nil {
 		return err
 	}
@@ -2781,6 +2799,7 @@ func federationGroupIssueIDs(
 	currentProjectID int64,
 	currentIssueIDs map[string]int64,
 	currentIssueScope []string,
+	stamp *federationRowHasher,
 ) (map[string]int64, error) {
 	if len(projectIDs) == 0 {
 		return map[string]int64{}, nil
@@ -2806,6 +2825,12 @@ func federationGroupIssueIDs(
 		if err := rows.Scan(&uid, &issueID, &projectID); err != nil {
 			return nil, fmt.Errorf("scan federation group issue: %w", err)
 		}
+		if stamp != nil {
+			stamp.write(4, uid, issueID, projectID)
+		}
+		if stamp != nil && stamp.only {
+			continue
+		}
 		// A scoped fold only replaces endpoint resolution inside its scope.
 		// Untouched issues in this same project still resolve from persisted rows.
 		if projectID == currentProjectID && (len(currentIssueScope) == 0 || slices.Contains(currentIssueScope, uid)) {
@@ -2827,7 +2852,7 @@ func federationGroupIssueIDs(
 // group. A group cannot delete a link owned by an event stream that has not
 // joined it; binding transitions remove only the departing project's former
 // group boundaries through removeFederatedBoundaryLinksBetweenProjectAndGroup.
-func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map[db.FoldLinkKey]federatedLinkRow, error) {
+func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64, stamp *federationRowHasher) (map[db.FoldLinkKey]federatedLinkRow, error) {
 	if len(projectIDs) == 0 {
 		return map[db.FoldLinkKey]federatedLinkRow{}, nil
 	}
@@ -2842,7 +2867,7 @@ func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map
 		  JOIN issues f ON f.id = l.from_issue_id
 		  JOIN issues t ON t.id = l.to_issue_id
 		 WHERE f.project_id IN (`+placeholders+`)
-		   AND t.project_id IN (`+placeholders+`)`, queryArgs...)
+		   AND t.project_id IN (`+placeholders+`) ORDER BY l.id`, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated links: %w", err)
 	}
@@ -2853,7 +2878,12 @@ func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map
 		if err := rows.Scan(&row.id, &row.fromID, &row.toID, &row.fromUID, &row.toUID, &row.typ, &row.author, &row.createdAt); err != nil {
 			return nil, fmt.Errorf("scan federated link: %w", err)
 		}
-		out[row.key()] = row
+		if stamp != nil {
+			stamp.write(5, row.id, row.fromID, row.toID, row.fromUID, row.toUID, row.typ, row.author, row.createdAt)
+		}
+		if stamp == nil || !stamp.only {
+			out[row.key()] = row
+		}
 	}
 	return out, rows.Err()
 }

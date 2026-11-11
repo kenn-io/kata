@@ -7,7 +7,9 @@ import (
 	"encoding/binary"
 	"encoding/json/v2"
 	"fmt"
+	"hash"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 
@@ -21,9 +23,11 @@ type federationMaterialization struct {
 	fullReplay       bool
 	fullHistory      bool
 	linksAffected    bool
-	projectStamps    map[int64]federationProjectStamp
-	historyProjects  map[string]struct{}
-	instanceUID      string
+	eventStamp       [32]byte
+	rowStamp         [32]byte
+	rowHasher        *federationRowHasher
+	linkStamps       map[int64][32]byte
+	relayOrigins     relayOriginClassifier
 	shortIDChecks    []federatedShortIDCheck
 	linkReadProjects []int64
 	maxEventID       int64
@@ -151,7 +155,7 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 	}
 	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
 	if deferRows && len(issueScope) == 0 {
-		if err := m.prepareFullHistory(ctx, tx, events, linksAffected); err != nil {
+		if err := m.prepareFullHistory(ctx, tx, projectID, events, linksAffected); err != nil {
 			return federationMaterialization{}, err
 		}
 	}
@@ -174,7 +178,7 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		}
 	}
 	if m.fullHistory {
-		if err := m.stampFullHistoryRows(ctx, tx, projectID); err != nil {
+		if err := m.stampFullHistoryLinks(ctx, tx, projectID); err != nil {
 			return federationMaterialization{}, err
 		}
 	}
@@ -190,6 +194,9 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		if err := m.prepareLinks(ctx, tx, projectID, issueScope, nil, nil); err != nil {
 			return federationMaterialization{}, err
 		}
+	}
+	if m.rowHasher != nil {
+		m.rowStamp = m.rowHasher.sum()
 	}
 	return m, nil
 }
@@ -234,7 +241,7 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 			}
 		}
 	}
-	events, _, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, events)
+	events, m.relayOrigins, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, events)
 	if err != nil {
 		return err
 	}
@@ -254,50 +261,114 @@ func (m *federationMaterialization) recordMoveIssueUIDs(events []db.FoldEvent) {
 	}
 }
 
-type federationProjectStamp struct{ generation, maxEventID int64 }
-
-func federationProjectStampTx(ctx context.Context, tx *sql.Tx, projectID int64) (federationProjectStamp, error) {
-	var stamp federationProjectStamp
-	err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT generation FROM federation_project_generations WHERE project_id=?),0), COALESCE((SELECT MAX(id) FROM events WHERE project_id=?),0)`, projectID, projectID).Scan(&stamp.generation, &stamp.maxEventID)
-	return stamp, err
+type federationRowHasher struct {
+	h    hash.Hash
+	only bool
 }
 
-func (m *federationMaterialization) prepareFullHistory(ctx context.Context, tx *sql.Tx, events []db.FoldEvent, linksAffected bool) error {
+func newFederationRowHasher(only bool) *federationRowHasher {
+	return &federationRowHasher{h: sha256.New(), only: only}
+}
+
+func (s *federationRowHasher) write(kind byte, values ...any) {
+	if s == nil {
+		return
+	}
+	_, _ = s.h.Write([]byte{kind})
+	for _, value := range values {
+		var data []byte
+		tag := byte(2)
+		switch v := value.(type) {
+		case nil:
+			_, _ = s.h.Write([]byte{0})
+			continue
+		case string:
+			data = []byte(v)
+		case []byte:
+			data = v
+			tag = 4
+		case int64:
+			var n [8]byte
+			binary.BigEndian.PutUint64(n[:], uint64(v))
+			_, _ = s.h.Write([]byte{1})
+			_, _ = s.h.Write(n[:])
+			continue
+		case float64:
+			var n [8]byte
+			binary.BigEndian.PutUint64(n[:], math.Float64bits(v))
+			_, _ = s.h.Write([]byte{3})
+			_, _ = s.h.Write(n[:])
+			continue
+		case sql.NullString:
+			if !v.Valid {
+				_, _ = s.h.Write([]byte{0})
+				continue
+			}
+			data = []byte(v.String)
+		default:
+			panic(fmt.Sprintf("unsupported federation stamp value %T", value))
+		}
+		_, _ = s.h.Write([]byte{tag})
+		var n [8]byte
+		binary.BigEndian.PutUint64(n[:], uint64(len(data)))
+		_, _ = s.h.Write(n[:])
+		_, _ = s.h.Write(data)
+	}
+}
+
+func (s *federationRowHasher) sum() [32]byte { return [32]byte(s.h.Sum(nil)) }
+
+func federationRowStamp(ctx context.Context, tx *sql.Tx, projectID int64, group []int64) ([32]byte, error) {
+	s := newFederationRowHasher(true)
+	if _, err := federatedIssueRowsByUID(ctx, tx, projectID, s); err != nil {
+		return [32]byte{}, err
+	}
+	if _, err := federatedCommentRowsByUID(ctx, tx, projectID, s); err != nil {
+		return [32]byte{}, err
+	}
+	if _, err := federatedLabelKeys(ctx, tx, projectID, s); err != nil {
+		return [32]byte{}, err
+	}
+	if len(group) > 0 {
+		if _, err := federationGroupIssueIDs(ctx, tx, group, 0, nil, nil, s); err != nil {
+			return [32]byte{}, err
+		}
+		if _, err := federatedLinkRows(ctx, tx, group, s); err != nil {
+			return [32]byte{}, err
+		}
+	}
+	return s.sum(), nil
+}
+
+func (m *federationMaterialization) prepareFullHistory(ctx context.Context, tx *sql.Tx, projectID int64, events []db.FoldEvent, linksAffected bool) error {
 	m.fullHistory = true
 	m.moveIssueUIDs = map[string]struct{}{}
-	m.historyProjects = map[string]struct{}{}
-	for _, event := range events {
-		m.historyProjects[event.ProjectUID] = struct{}{}
-	}
 	m.recordMoveIssueUIDs(events)
 	m.linksAffected = linksAffected
-	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&m.instanceUID); err != nil {
+	m.rowHasher = newFederationRowHasher(false)
+	var err error
+	m.eventStamp, err = federationEventStamp(ctx, tx, projectID, nil, nil)
+	if err != nil {
 		return err
 	}
 	return tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events`).Scan(&m.maxEventID)
 }
 
-func (m *federationMaterialization) stampFullHistoryRows(ctx context.Context, tx *sql.Tx, projectID int64) error {
-	ids := map[int64]struct{}{projectID: {}}
+func (m *federationMaterialization) stampFullHistoryLinks(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if !m.linksAffected {
+		return nil
+	}
+	m.linkStamps = make(map[int64][32]byte)
 	for _, id := range m.linkReadProjects {
-		ids[id] = struct{}{}
-	}
-	for uid := range m.historyProjects {
-		var id int64
-		if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=?`, uid).Scan(&id); err != nil {
-			return err
+		if id == projectID {
+			continue
 		}
-		ids[id] = struct{}{}
-	}
-	m.projectStamps = make(map[int64]federationProjectStamp, len(ids))
-	for id := range ids {
-		stamp, err := federationProjectStampTx(ctx, tx, id)
+		stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes(), nil)
 		if err != nil {
 			return err
 		}
-		m.projectStamps[id] = stamp
+		m.linkStamps[id] = stamp
 	}
-	m.historyProjects = nil
 	return nil
 }
 
@@ -403,7 +474,7 @@ func loadFederatedScope[K comparable, V any](scope []string, load func([]string)
 // local writes and imports can leave values that a full rebuild would repair.
 func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string) error {
 	existing, err := loadFederatedScope(issueScope, func(scope []string) (map[string]federatedIssueRow, error) {
-		return federatedIssueRowsByUID(ctx, tx, projectID, scope...)
+		return federatedIssueRowsByUID(ctx, tx, projectID, m.rowHasher, scope...)
 	})
 	if err != nil {
 		return err
@@ -439,7 +510,7 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 		}
 	}
 	comments, err := loadFederatedScope(issueScope, func(scope []string) (map[string]federatedCommentRow, error) {
-		return federatedCommentRowsByUID(ctx, tx, projectID, scope...)
+		return federatedCommentRowsByUID(ctx, tx, projectID, m.rowHasher, scope...)
 	})
 	if err != nil {
 		return err
@@ -458,7 +529,7 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 		}
 	}
 	labels, err := loadFederatedScope(issueScope, func(scope []string) (map[federatedLabelKey]struct{}, error) {
-		return federatedLabelKeys(ctx, tx, projectID, scope...)
+		return federatedLabelKeys(ctx, tx, projectID, m.rowHasher, scope...)
 	})
 	if err != nil {
 		return err
@@ -490,7 +561,7 @@ func canonicalFederatedLinkKey(key db.FoldLinkKey) db.FoldLinkKey {
 }
 
 func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string, included map[string]int64, excluded map[string]bool) error {
-	ids, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, projectID, m.issueIDs, issueScope)
+	ids, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, projectID, m.issueIDs, issueScope, m.rowHasher)
 	if err != nil {
 		return err
 	}
@@ -506,7 +577,7 @@ func (m *federationMaterialization) prepareLinks(ctx context.Context, tx *sql.Tx
 		}
 	}
 	m.linkIDs = ids
-	existing, err := federatedLinkRows(ctx, tx, m.linkProjects)
+	existing, err := federatedLinkRows(ctx, tx, m.linkProjects, m.rowHasher)
 	if err != nil {
 		return err
 	}

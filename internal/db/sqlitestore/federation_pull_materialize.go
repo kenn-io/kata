@@ -6,6 +6,7 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -155,21 +156,14 @@ func checkFullPullPreparation(ctx context.Context, tx *sql.Tx, projectID int64, 
 	if err != nil {
 		return err
 	}
-	var instanceUID string
-	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&instanceUID); err != nil {
+	stamp, err := federationEventStamp(ctx, tx, projectID, nil, nil)
+	if err != nil {
 		return err
 	}
-	if instanceUID != m.instanceUID {
+	if stamp != m.eventStamp || binding.ProjectID != m.binding.ProjectID || binding.Role != m.binding.Role ||
+		binding.HubURL != m.binding.HubURL || binding.HubProjectUID != m.binding.HubProjectUID ||
+		binding.Enabled != m.binding.Enabled || !reflect.DeepEqual(binding.RelayConfig, m.binding.RelayConfig) {
 		return errStaleFederationPreparation
-	}
-	for id, expected := range m.projectStamps {
-		stamp, err := federationProjectStampTx(ctx, tx, id)
-		if err != nil {
-			return err
-		}
-		if stamp != expected {
-			return errStaleFederationPreparation
-		}
 	}
 	// A move can add history for an issue included in the prepared fold.
 	//nolint:gosec // The UID expression is fixed SQL; the event ID is bound.
@@ -203,6 +197,31 @@ func checkFullPullPreparation(ctx context.Context, tx *sql.Tx, projectID int64, 
 		if !slices.Equal(projects, m.linkProjects) {
 			return errStaleFederationPreparation
 		}
+		if len(projects) > 0 {
+			origins, err := loadRelayOriginClassifier(ctx, tx, projects)
+			if err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(origins, m.relayOrigins) {
+				return errStaleFederationPreparation
+			}
+		}
+		for id, expected := range m.linkStamps {
+			stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes(), nil)
+			if err != nil {
+				return err
+			}
+			if stamp != expected {
+				return errStaleFederationPreparation
+			}
+		}
+	}
+	rowStamp, err := federationRowStamp(ctx, tx, projectID, m.linkProjects)
+	if err != nil {
+		return err
+	}
+	if rowStamp != m.rowStamp {
+		return errStaleFederationPreparation
 	}
 	for _, check := range m.shortIDChecks {
 		shortID, err := resolveFederatedIssueShortID(ctx, tx, projectID, check.uid, check.preferred, &check.row)

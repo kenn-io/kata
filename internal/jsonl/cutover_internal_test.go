@@ -83,7 +83,6 @@ func TestAutoCutoverRefusesSourceChangedAfterExport(t *testing.T) {
 		ProjectID: project.ID, Title: "exported title", Author: "example-actor",
 	})
 	require.NoError(t, err)
-	dropGenerationSchema(t, source.DB)
 	_, err = source.ExecContext(ctx, `UPDATE meta SET value='28' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	require.NoError(t, source.Checkpoint(ctx))
@@ -125,7 +124,6 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kata.db")
 	source, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
-	dropGenerationSchema(t, source.DB)
 	_, err = source.ExecContext(ctx, `UPDATE meta SET value='28' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	require.NoError(t, source.Checkpoint(ctx))
@@ -233,7 +231,6 @@ func indexOnlySource(t *testing.T, version int) string {
 	source, err := sqlitestore.Open(t.Context(), path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = source.DB.Close() })
-	dropGenerationSchema(t, source.DB)
 	for _, step := range []struct {
 		to      int
 		indexes []string
@@ -264,25 +261,4 @@ func indexOnlySource(t *testing.T, version int) string {
 	require.NoError(t, err)
 	require.NoError(t, source.Close())
 	return path
-}
-
-func dropGenerationSchema(t *testing.T, d *sql.DB) {
-	t.Helper()
-	ctx := t.Context()
-	rows, err := d.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'federation_generation_*'`)
-	require.NoError(t, err)
-	var names []string
-	for rows.Next() {
-		var name string
-		require.NoError(t, rows.Scan(&name))
-		names = append(names, name)
-	}
-	require.NoError(t, rows.Err())
-	require.NoError(t, rows.Close())
-	for _, name := range names {
-		_, err = d.ExecContext(ctx, `DROP TRIGGER "`+name+`"`)
-		require.NoError(t, err)
-	}
-	_, err = d.ExecContext(ctx, `DROP TABLE federation_project_generations`)
-	require.NoError(t, err)
 }

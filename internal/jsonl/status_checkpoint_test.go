@@ -42,7 +42,6 @@ func TestStatusCheckpointExportAndRestore(t *testing.T) {
 				_, err = source.ExecContext(ctx, `UPDATE import_mappings SET observed_status='closed',observed_status_at=? WHERE id=?`, stamp, mappings[2].ID)
 			}
 			require.NoError(t, err)
-			dropGenerationSchema(t, source.DB)
 			_, err = source.ExecContext(ctx, `UPDATE meta SET value=? WHERE key='schema_version'`, version)
 			require.NoError(t, err)
 			for _, legacyExporter := range []bool{false, true} {
