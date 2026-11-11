@@ -6,6 +6,7 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -1196,7 +1197,7 @@ func RunUISnapshotSavedCalendarContract(t *testing.T, open func(*testing.T) db.S
 	require.Equal(t, "2026-01-01", all.Issues[0].ScheduledOnToday)
 }
 
-// RunUISnapshotLimitIgnoresUnseenFutureSchedule checks that unreadable schedules outside the limit do not fail a snapshot.
+// RunUISnapshotLimitIgnoresUnseenFutureSchedule checks that unreadable schedules outside the limit do not fail a snapshot, and that a listed one is flagged on its row.
 func RunUISnapshotLimitIgnoresUnseenFutureSchedule(t *testing.T, open func(*testing.T) db.Storage) {
 	t.Helper()
 	store := open(t)
@@ -1214,8 +1215,12 @@ func RunUISnapshotLimitIgnoresUnseenFutureSchedule(t *testing.T, open func(*test
 	ready, err := store.(db.UIStore).ReadUISnapshot(t.Context(), db.UISnapshotQuery{View: "all-open", Statuses: []string{"ready"}, Limit: 1, ReadyAt: "2026-01-01T00:00:00Z", CalendarAt: "2026-01-01T00:00:00Z"})
 	require.NoError(t, err)
 	require.Equal(t, []string{visible.UID}, uiIssueUIDs(ready.Issues))
-	_, err = store.(db.UIStore).ReadUISnapshot(t.Context(), db.UISnapshotQuery{View: "all-open", Limit: 2, CalendarAt: "2026-01-01T00:00:00Z"})
-	require.ErrorContains(t, err, "unsupported schedule tzdata version")
+	both, err := store.(db.UIStore).ReadUISnapshot(t.Context(), db.UISnapshotQuery{View: "all-open", Limit: 2, CalendarAt: "2026-01-01T00:00:00Z"})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{visible.UID, unseen.UID}, uiIssueUIDs(both.Issues))
+	for _, issue := range both.Issues {
+		require.Equal(t, issue.UID == unseen.UID, strings.Contains(issue.ScheduleError, "unsupported schedule tzdata version"), issue.UID)
+	}
 }
 
 // RunUISnapshotBoundedCalendar checks that lower-ranked dates cannot expire a full result.

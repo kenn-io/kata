@@ -210,6 +210,12 @@
     return issue.issue.scheduled_on_date ?? scheduleText(issue.issue.metadata.scheduled_on) ?? ''
   }
 
+  // A saved descriptor keeps its zone and version; a timed legacy string converts to the date.
+  function reselectsSavedDate(value: string): boolean {
+    const raw = issue.issue.metadata.scheduled_on
+    return value !== '' && value === scheduledDate() && (typeof raw !== 'string' || raw === value)
+  }
+
   function dueLabel(): string {
     const value = deadlineDate()
     return value ? formatDate(value) : 'No due date'
@@ -246,7 +252,7 @@
     if (actionsDisabled) return
     const property = 'scheduled'
     scheduledDraft = value
-    if (value !== '' && value === scheduledDate()) {
+    if (reselectsSavedDate(value)) {
       resetDraft(property)
       return
     }

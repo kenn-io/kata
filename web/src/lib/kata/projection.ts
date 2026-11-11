@@ -464,8 +464,7 @@ function normalizeIssue(
     project_uid: issue.project_uid ?? project?.uid ?? '',
     project_name:
       issue.project_name || project?.name || projectNameFromQualifiedID(issue.qualified_id),
-    scheduled_on_date: issue.scheduled_on_date,
-    deadline_on_date: issue.deadline_on_date,
+    ...scheduleDateFields(issue),
     scheduled_on_today: issue.scheduled_on_today,
     deadline_on_today: issue.deadline_on_today,
     scheduled_on_display: issue.scheduled_on_display,
@@ -489,6 +488,16 @@ function normalizeIssue(
     closed_reason: normalizeClosedReason(issue.closed_reason),
     closed_at: issue.closed_at,
     deleted_at: issue.deleted_at,
+  }
+}
+
+function scheduleDateFields(
+  issue: UIIssue,
+): Pick<KataTaskSummary, 'scheduled_on_date' | 'deadline_on_date' | 'schedule_error'> {
+  return {
+    scheduled_on_date: issue.scheduled_on_date,
+    deadline_on_date: issue.deadline_on_date,
+    schedule_error: issue.schedule_error,
   }
 }
 

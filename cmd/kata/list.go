@@ -222,6 +222,7 @@ For what to work on next, use kata ready or kata next instead.`,
 					Revision    int64    `json:"revision"`
 					Labels      []string `json:"labels"`
 					Blocked     bool     `json:"blocked"`
+					SchedErr    string   `json:"schedule_error"`
 					Parent      *struct {
 						QualifiedID string `json:"qualified_id"`
 					} `json:"parent"`
@@ -282,12 +283,11 @@ For what to work on next, use kata ready or kata next instead.`,
 				}
 				rows[idx] = issueRow{
 					ID:       i.ShortID,
-					Title:    i.Title,
+					Title:    scheduleErrorTitle(i.Title, i.SchedErr),
 					Owner:    owner,
 					Priority: i.Priority,
-					Status:   i.Status,
-					Blocked:  i.Blocked,
-					Labels:   i.Labels,
+					Status:   i.Status, Blocked: i.Blocked,
+					Labels: i.Labels,
 				}
 				if all {
 					rows[idx].ID = i.QualifiedID
@@ -410,4 +410,13 @@ func writeAgentFieldLine(w io.Writer, lead string, fields ...agentField) error {
 	}
 	_, err := fmt.Fprintln(w)
 	return err
+}
+
+// scheduleErrorTitle marks a row whose saved dates this build cannot read, so
+// the gap is not mistaken for an issue with no dates.
+func scheduleErrorTitle(title, scheduleErr string) string {
+	if scheduleErr == "" {
+		return title
+	}
+	return title + " [unsupported schedule]"
 }

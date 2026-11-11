@@ -22,6 +22,7 @@
     commentActionsDisabled = false,
     selectedCommentUID,
     returnComment,
+    scheduleError,
     pending = false,
   }: KataIssueDetailProps = $props()
 
@@ -54,6 +55,10 @@
       </div>
     {/if}
   </div>
+
+  {#if scheduleError}
+    <p class="schedule-error" title={scheduleError}>Unsupported schedule</p>
+  {/if}
 
   <section class="body-section" aria-label="Description">
     {#if detail.issue.body}
@@ -169,6 +174,13 @@
 
   .empty {
     margin: 0;
+  }
+
+  .schedule-error {
+    margin: 0;
+    color: var(--text-secondary, #555b6e);
+    font-size: var(--font-size-sm, 0.875rem);
+    font-weight: var(--font-weight-semibold, 600);
   }
 
   /* Stack on the pane's width, not the viewport: the detail pane can be

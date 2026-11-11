@@ -697,20 +697,14 @@ func readUIIssues(
 				continue
 			}
 		}
-		scheduledOnDate, deadlineOnDate, scheduledToday, deadlineToday, matches, err := db.MatchUICalendarView(
-			string(issue.Metadata), query,
-			scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
-		)
+		uiIssue := makeUIIssue(issue, projectNames[issue.ProjectID], nil)
+		matches, err := db.ApplyUICalendarView(&uiIssue, query, scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone))
 		if err != nil {
 			return nil, fmt.Errorf("read UI issue %s calendar schedule: %w", issue.UID, err)
 		}
 		if !matches {
 			continue
 		}
-		uiIssue := makeUIIssue(issue, projectNames[issue.ProjectID], nil)
-		uiIssue.ScheduledOnDate = scheduledOnDate
-		uiIssue.DeadlineOnDate = deadlineOnDate
-		uiIssue.ScheduledOnToday, uiIssue.DeadlineOnToday = scheduledToday, deadlineToday
 		issues = append(issues, uiIssue)
 		if limit > 0 && len(issues) == limit {
 			break

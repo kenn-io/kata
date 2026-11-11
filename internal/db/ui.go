@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"time"
+
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // UIStore is the narrow coherent-read contract used by the browser API.
@@ -66,6 +68,7 @@ type UIIssue struct {
 	DeadlineOnDisplay  string   `json:"deadline_on_display,omitempty"`
 	ScheduledOnToday   string   `json:"scheduled_on_today,omitempty"`
 	DeadlineOnToday    string   `json:"deadline_on_today,omitempty"`
+	ScheduleError      string   `json:"schedule_error,omitempty" doc:"Why this issue's saved scheduled_on or deadline_on cannot be read, when a newer build wrote rules or members this build does not know; the issue stays listed without that date."`
 }
 
 // MatchUICalendarView evaluates date-sensitive browser collection predicates
@@ -106,6 +109,20 @@ func MatchUICalendarView(
 	}
 }
 
+// ApplyUICalendarView sets a collection row's planning dates and reports whether
+// the row belongs in the view. A saved schedule this build cannot read keeps the
+// row listed, with the reason on ScheduleError, so it never hides other rows.
+func ApplyUICalendarView(issue *UIIssue, query UISnapshotQuery, scheduledDefaultTimezone string) (bool, error) {
+	scheduled, deadline, scheduledToday, deadlineToday, matches, err := MatchUICalendarView(string(issue.Metadata), query, scheduledDefaultTimezone)
+	if metadata.IsUnsupportedSchedule(err) {
+		issue.ScheduleError = err.Error()
+		return true, nil
+	}
+	issue.ScheduledOnDate, issue.DeadlineOnDate = scheduled, deadline
+	issue.ScheduledOnToday, issue.DeadlineOnToday = scheduledToday, deadlineToday
+	return matches, err
+}
+
 // ProjectUIPlanningDates gives a selected issue the same dates as collection rows.
 func ProjectUIPlanningDates(ctx context.Context, tx *sql.Tx, issue *UIIssue, query UISnapshotQuery) error {
 	scheduledDefault := query.DefaultTimezone
@@ -121,7 +138,7 @@ func ProjectUIPlanningDates(ctx context.Context, tx *sql.Tx, issue *UIIssue, que
 	now, _ := time.Parse(time.RFC3339Nano, query.CalendarAt)
 	dates := resolvePlanningCalendarDates(string(issue.Metadata), &query.TimeZone, scheduledDefault, query.DefaultTimezone, now, query.CalendarBoundary)
 	if err := dates.unsupported(); err != nil {
-		return err
+		issue.ScheduleError = err.Error()
 	}
 	issue.ScheduledOnDate = dates.scheduledOn
 	issue.DeadlineOnDate = dates.deadlineOn

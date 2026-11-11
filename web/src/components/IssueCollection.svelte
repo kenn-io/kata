@@ -1117,6 +1117,9 @@
           <span class="chevron chevron--placeholder" aria-hidden="true"></span>
         {/if}
         <span class="title-text" id={titleId}>{issue.title}</span>
+        {#if issue.schedule_error}
+          <span class="schedule-error" title={issue.schedule_error}>unsupported schedule</span>
+        {/if}
       </span>
       {#if columnVisibility.updated}
         <span class="cell cell-updated" title={issue.updated_at}>
@@ -1476,6 +1479,13 @@
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  .schedule-error {
+    flex-shrink: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
   }
 
   .chevron {

@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -61,6 +62,21 @@ func TestDatesFormRejectsUnknownScheduleRules(t *testing.T) {
 				require.JSONEq(t, tc.raw, string(fields["scheduled_on"]))
 				require.Equal(t, "2026-12-02", metadata.ScheduleClockText(fields["deadline_on"]))
 			}
+		})
+	}
+}
+
+func TestListRowReportsUnknownScheduleRules(t *testing.T) {
+	var issue Issue
+	require.NoError(t, json.Unmarshal([]byte(`{"schedule_error":"unsupported schedule tzdata version"}`), &issue))
+	require.Contains(t, rowDatesText(issue), "unsupported schedule")
+}
+
+func TestNarrowListRowReportsUnknownScheduleRules(t *testing.T) {
+	issue := Issue{Title: "Example task", ScheduleError: "unsupported schedule tzdata version"}
+	for _, width := range []int{20, 40} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			require.Contains(t, titleForRow(issue, viewChrome{}, width), "unsupported")
 		})
 	}
 }

@@ -59,6 +59,8 @@ type Issue struct {
 	DeadlineOnDate   string `json:"deadline_on_date,omitempty"`
 	ScheduledOnToday string `json:"scheduled_on_today,omitempty"`
 	DeadlineOnToday  string `json:"deadline_on_today,omitempty"`
+	// ScheduleError is set when the saved dates were written by a newer build.
+	ScheduleError string `json:"schedule_error,omitempty"`
 }
 
 // issueMetadata keeps the two planning-date keys and the timezone of an

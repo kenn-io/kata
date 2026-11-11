@@ -112,11 +112,11 @@ func decodeSavedSchedule(raw jsontext.Value) (*SavedSchedule, *time.Location, er
 	if err := json.Unmarshal(raw, &obj, json.RejectUnknownMembers(true)); err != nil {
 		return nil, nil, err
 	}
-	if _, _, _, err := classifyScheduledOn(obj.Value); err != nil {
-		return nil, nil, err
-	}
 	loc, err := ScheduleLocation(obj.Timezone, obj.TZDataVersion)
 	if err != nil {
+		return nil, nil, err
+	}
+	if _, _, _, err := classifyScheduledOn(obj.Value); err != nil {
 		return nil, nil, err
 	}
 	return &obj, loc, nil

@@ -628,10 +628,11 @@ type IssueOut struct {
 	Blocked bool `json:"blocked,omitempty,omitzero"`
 	// ScheduledOnDate and DeadlineOnDate are the issue's planning dates as
 	// calendar dates, resolved by the same rule as the browser snapshot.
-	ScheduledOnDate  string `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed; unsupported saved rules fail the request."`
-	DeadlineOnDate   string `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed; unsupported saved rules fail the request."`
+	ScheduledOnDate  string `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or malformed or unsupported (see schedule_error)."`
+	DeadlineOnDate   string `json:"deadline_on_date,omitempty" doc:"deadline_on as a YYYY-MM-DD calendar date in its saved timezone, or for legacy strings the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or malformed or unsupported (see schedule_error)."`
 	ScheduledOnToday string `json:"scheduled_on_today,omitempty" doc:"Today's date in the scheduled field's timezone."`
 	DeadlineOnToday  string `json:"deadline_on_today,omitempty" doc:"Today's date in the deadline field's timezone."`
+	ScheduleError    string `json:"schedule_error,omitempty" doc:"Why this row's saved scheduled_on or deadline_on cannot be read, when a newer build wrote rules or members this build does not know; the row's other fields stay valid."`
 	// Oversized marks a compact row too large to send whole. It then carries
 	// only the issue's identity and status.
 	Oversized bool `json:"oversized,omitempty,omitzero" doc:"Set on a compact row too large to send whole; the row then carries only the issue's identity and status."`

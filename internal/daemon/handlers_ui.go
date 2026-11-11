@@ -936,18 +936,11 @@ func projectBrowserIssueDates(issue *db.UIIssue) error {
 	}
 	changed := false
 	for _, field := range []string{"scheduled_on", "deadline_on"} {
-		saved, err := metadata.DecodeSavedSchedule(fields[field])
-		if metadata.IsUnsupportedSchedule(err) {
-			return err
-		}
-		if saved == nil || err != nil {
-			continue
-		}
-		fields[field], err = json.Marshal(metadata.ScheduleClockText(fields[field]))
+		fieldChanged, err := projectBrowserScheduleField(issue, fields, field)
 		if err != nil {
 			return err
 		}
-		changed = true
+		changed = changed || fieldChanged
 	}
 	if changed {
 		raw, err := json.Marshal(fields)
@@ -957,6 +950,23 @@ func projectBrowserIssueDates(issue *db.UIIssue) error {
 		issue.Metadata = db.JSONBlob(raw)
 	}
 	return nil
+}
+
+// projectBrowserScheduleField rewrites one saved schedule as the clock text old
+// browsers read. A schedule this build cannot read is dropped from the row's
+// metadata and named on ScheduleError, so no browser has to interpret its rules.
+func projectBrowserScheduleField(issue *db.UIIssue, fields map[string]jsontext.Value, field string) (bool, error) {
+	saved, err := metadata.DecodeSavedSchedule(fields[field])
+	if metadata.IsUnsupportedSchedule(err) {
+		issue.ScheduleError = err.Error()
+		delete(fields, field)
+		return true, nil
+	}
+	if saved == nil || err != nil {
+		return false, nil
+	}
+	fields[field], err = json.Marshal(metadata.ScheduleClockText(fields[field]))
+	return err == nil, err
 }
 
 func referencesResponse(data db.UIReferencesData, policy uiPolicy, validator string) *api.UIReferencesResponse {

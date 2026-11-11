@@ -1083,7 +1083,7 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	out := &api.ShowIssueResponse{}
 	scheduledOnDate, deadlineOnDate, scheduledToday, deadlineToday, scheduledOnDisplay, deadlineOnDisplay, err := newPlanningDateResolver(cfg.DB, cfg.DefaultTimezone).resolve(ctx, issue)
 	if err != nil {
-		return nil, internalAPIError(err)
+		return nil, scheduleReadError(err)
 	}
 	out.Body.Issue = api.ShowIssueOut{
 		Issue: issue, Labels: labelNames,
@@ -1408,10 +1408,6 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, defaultTimezone str
 	out := make([]api.IssueOut, len(issues))
 	for i, iss := range issues {
 		rel := relationships[iss.ID]
-		scheduledOnDate, deadlineOnDate, scheduledToday, deadlineToday, _, _, err := dates.resolve(ctx, iss)
-		if err != nil {
-			return nil, err
-		}
 		row := api.IssueOut{
 			Issue:       iss,
 			QualifiedID: qualifiedID(project.Name, iss.ShortID),
@@ -1421,11 +1417,10 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, defaultTimezone str
 			Related:     peerSlice(peerCache, rel.Related),
 			// Blocked is server-computed display state (ready predicate),
 			// kept separate from the full blocked_by hydration above.
-			Blocked:          rel.ActivelyBlocked,
-			ScheduledOnDate:  scheduledOnDate,
-			DeadlineOnDate:   deadlineOnDate,
-			ScheduledOnToday: scheduledToday,
-			DeadlineOnToday:  deadlineToday,
+			Blocked: rel.ActivelyBlocked,
+		}
+		if err := dates.applyRow(ctx, iss, &row); err != nil {
+			return nil, err
 		}
 		if rel.ParentIssueID != nil {
 			if peer, ok := peerCache[*rel.ParentIssueID]; ok {

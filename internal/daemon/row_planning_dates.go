@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // planningDateResolver projects issue metadata into the scheduled_on_date and
@@ -46,4 +49,28 @@ func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (sch
 		}
 	}
 	return db.RowPlanningProjection(raw, scheduledDefault, r.defaultTimezone, r.now)
+}
+
+// scheduleReadError reports a saved schedule this build cannot read as a client
+// error naming the cause, since only a newer build or a rewrite can resolve it.
+func scheduleReadError(err error) error {
+	if !metadata.IsUnsupportedSchedule(err) {
+		return internalAPIError(err)
+	}
+	return api.NewError(http.StatusBadRequest, "unsupported_schedule", err.Error(), "update kata, or clear the unreadable date", nil)
+}
+
+// applyRow sets a list row's planning dates. A saved schedule this build cannot
+// read is reported on that row's schedule_error, so it never hides other rows.
+func (r *planningDateResolver) applyRow(ctx context.Context, issue db.Issue, row *api.IssueOut) error {
+	scheduledOn, deadlineOn, scheduledToday, deadlineToday, _, _, err := r.resolve(ctx, issue)
+	if err != nil {
+		if !metadata.IsUnsupportedSchedule(err) {
+			return err
+		}
+		row.ScheduleError = err.Error()
+	}
+	row.ScheduledOnDate, row.DeadlineOnDate = scheduledOn, deadlineOn
+	row.ScheduledOnToday, row.DeadlineOnToday = scheduledToday, deadlineToday
+	return nil
 }

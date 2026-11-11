@@ -105,6 +105,25 @@ describe('IssueDetail', () => {
     expect(within(readView).getByText(/Jun 1.*1:00/)).toBeTruthy()
   })
 
+  it('shows an unreadable schedule in the read view', () => {
+    renderDetail({ issue: makeIssue({ schedule_error: 'unsupported schedule tzdata version' }) })
+    expect(
+      within(screen.getByRole('region', { name: 'Kata issue detail' })).getByText(
+        /unsupported schedule/i,
+      ),
+    ).toBeTruthy()
+  })
+
+  it('shows an unreadable schedule in the editor', async () => {
+    renderDetail({ issue: makeIssue({ schedule_error: 'unsupported schedule tzdata version' }) })
+    await openEditor()
+    expect(
+      within(screen.getByRole('region', { name: 'Kata issue editor' })).getByText(
+        /unsupported schedule/i,
+      ),
+    ).toBeTruthy()
+  })
+
   it('shows recurrence and history to read-only users without mutation controls', () => {
     const view = renderDetail({
       actionsDisabled: true,
