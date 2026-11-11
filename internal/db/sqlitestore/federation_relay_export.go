@@ -18,7 +18,6 @@ func (d *Store) ExportRelayState(ctx context.Context) iter.Seq2[db.ImportRecord,
 				yield(nil, err)
 				return
 			}
-			keep := true
 			for rows.Next() {
 				var r db.RelayOutboxExport
 				var emitted, acknowledged int
@@ -32,8 +31,8 @@ func (d *Store) ExportRelayState(ctx context.Context) iter.Seq2[db.ImportRecord,
 					break
 				}
 				if !yield(&r, nil) {
-					keep = false
-					break
+					_ = rows.Close()
+					return
 				}
 			}
 			if err == nil {
@@ -44,9 +43,6 @@ func (d *Store) ExportRelayState(ctx context.Context) iter.Seq2[db.ImportRecord,
 				yield(nil, fmt.Errorf("export federation_relay_outbox: %w", err))
 				return
 			}
-			if !keep {
-				return
-			}
 		}
 		{
 			rows, err := d.readQ.QueryContext(ctx, `SELECT project_uid,binding_uid,stream,reset_epoch,sequence,source_uid,source_hash,envelope_digest,envelope,accepted FROM federation_relay_inbox ORDER BY binding_uid,stream,reset_epoch,sequence`)
@@ -54,7 +50,6 @@ func (d *Store) ExportRelayState(ctx context.Context) iter.Seq2[db.ImportRecord,
 				yield(nil, err)
 				return
 			}
-			keep := true
 			for rows.Next() {
 				var r db.RelayInboxExport
 				var accepted int
@@ -67,8 +62,8 @@ func (d *Store) ExportRelayState(ctx context.Context) iter.Seq2[db.ImportRecord,
 					break
 				}
 				if !yield(&r, nil) {
-					keep = false
-					break
+					_ = rows.Close()
+					return
 				}
 			}
 			if err == nil {
@@ -79,9 +74,6 @@ func (d *Store) ExportRelayState(ctx context.Context) iter.Seq2[db.ImportRecord,
 				yield(nil, fmt.Errorf("export federation_relay_inbox: %w", err))
 				return
 			}
-			if !keep {
-				return
-			}
 		}
 		{
 			rows, err := d.readQ.QueryContext(ctx, `SELECT project_uid,binding_uid,stream,reset_epoch,offered_through,accepted_through,emitted_through,acknowledged_through FROM federation_relay_cursors ORDER BY binding_uid,stream,reset_epoch`)
@@ -89,7 +81,6 @@ func (d *Store) ExportRelayState(ctx context.Context) iter.Seq2[db.ImportRecord,
 				yield(nil, err)
 				return
 			}
-			keep := true
 			for rows.Next() {
 				var r db.RelayCursorExport
 				err = rows.Scan(&r.ProjectUID, &r.BindingUID, &r.Stream, &r.ResetEpoch, &r.OfferedThrough, &r.AcceptedThrough, &r.EmittedThrough, &r.AcknowledgedThrough)
@@ -100,8 +91,8 @@ func (d *Store) ExportRelayState(ctx context.Context) iter.Seq2[db.ImportRecord,
 					break
 				}
 				if !yield(&r, nil) {
-					keep = false
-					break
+					_ = rows.Close()
+					return
 				}
 			}
 			if err == nil {
@@ -110,9 +101,6 @@ func (d *Store) ExportRelayState(ctx context.Context) iter.Seq2[db.ImportRecord,
 			_ = rows.Close()
 			if err != nil {
 				yield(nil, fmt.Errorf("export federation_relay_cursors: %w", err))
-				return
-			}
-			if !keep {
 				return
 			}
 		}
