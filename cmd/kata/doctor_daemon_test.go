@@ -450,8 +450,11 @@ func TestDoctorFailsWhenLiveLocalRuntimeIsUnreachable(t *testing.T) {
 	require.NoError(t, err)
 	flags = globalFlags{Workspace: workspace}
 
-	require.EqualValues(t, "fail", doctorFinding(t, collectDoctor(t.Context()), "daemon.connection").Status,
+	check := doctorFinding(t, collectDoctor(t.Context()), "daemon.connection")
+	require.EqualValues(t, "fail", check.Status,
 		"a live runtime record whose endpoint does not answer is a real failure, not a stopped daemon")
+	require.Equal(t, "Selected local daemon is unreachable", check.Summary)
+	require.Contains(t, check.Fix, filepath.Join(ns.DataDir, "daemon.log"))
 }
 
 func TestDoctorDiscoveryRejectsRedirects(t *testing.T) {
@@ -562,17 +565,4 @@ func TestDoctorHookNamesPATHMismatch(t *testing.T) {
 	check := doctorFinding(t, collectDoctor(ctx), "daemon.hooks")
 	require.EqualValues(t, "fail", check.Status)
 	require.Contains(t, fmt.Sprint(check.Details), "PATH")
-}
-
-func TestDoctorReportsUnreachableRecoveryAdvice(t *testing.T) {
-	dir := t.TempDir()
-	_, err := (kitdaemon.RuntimeStore{Dir: dir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"})
-	require.NoError(t, err)
-	_, found, err := client.DiscoverResolvedReadOnly(t.Context(), dir)
-	require.False(t, found)
-	require.ErrorIs(t, err, client.ErrLocalDaemonUnreachable)
-	check := doctorDiscoveryCheck(err)
-	require.EqualValues(t, "fail", check.Status)
-	require.Equal(t, "Selected local daemon is unreachable", check.Summary)
-	require.Contains(t, check.Fix, filepath.Join(dir, "daemon.log"))
 }

@@ -17,7 +17,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
@@ -349,6 +348,14 @@ func TestHealthSelectedProfileNonPrivateRuntimeIsStructured(t *testing.T) {
 	_, _, err = executeRootCapture(t, t.Context(), "health", "--json")
 	target := requireCLIError(t, err, ExitDaemonUnavail)
 	assert.Equal(t, "local_unreachable", target.Code)
+	var result daemonDiagnosis
+	require.NoError(t, json.Unmarshal(target.Data, &result))
+	assert.Equal(t, "local_unreachable", result.State)
+	assert.Equal(t, "work", result.Profile)
+	assert.Equal(t, home, result.Home)
+	assert.Equal(t, uid, result.ExpectedInstanceUID)
+	assert.NotEmpty(t, result.Message)
+	assert.NotEmpty(t, result.NextAction)
 	assertUnchanged()
 }
 
@@ -482,11 +489,6 @@ func TestDaemonDiagnoseProjectReadFailureIsUnreadableStorage(t *testing.T) {
 	out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 	require.NoError(t, err)
 	assertDiagnosticState(t, out, "unreadable_storage")
-	selection, err := client.InspectSelection(t.Context(), workspaceStartForRemote(), "work")
-	require.NoError(t, err)
-	result, _, err := diagnoseDaemonSelectionObserved(t.Context(), "", selection, &client.LocalDaemonUnreachableError{})
-	require.NoError(t, err)
-	assert.Equal(t, "unreadable_storage", result.State)
 }
 
 func TestDaemonDiagnoseUnsupportedSchemaCannotRecover(t *testing.T) {
@@ -851,7 +853,6 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("diagnose", func(t *testing.T) {
-		calls.Store(0)
 		out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
 		require.NoError(t, err)
 		var result daemonDiagnosis
@@ -860,15 +861,6 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		require.Equal(t, os.Getpid(), result.PID)
 		require.Contains(t, result.Endpoint, server.Listener.Addr().String())
 		require.Contains(t, result.NextAction, "kata --daemon work daemon recover")
-	})
-	t.Run("list", func(t *testing.T) {
-		calls.Store(0)
-		_, _, err := executeRootCapture(t, t.Context(), "list")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "kata --daemon work daemon recover")
-		var cliErr *cliError
-		require.ErrorAs(t, err, &cliErr)
-		require.Equal(t, ExitDaemonUnavail, cliErr.ExitCode)
 	})
 	t.Run("transient health failure is not reprobed", func(t *testing.T) {
 		calls.Store(0)

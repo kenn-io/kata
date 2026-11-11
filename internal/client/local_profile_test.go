@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -775,10 +776,22 @@ func TestUnreachableProfileAdviceSharedByCallers(t *testing.T) {
 }
 
 func TestScopeProfileUnreachablePreservesInstanceFailure(t *testing.T) {
-	t.Setenv("KATA_HTTP_TIMEOUT", "50ms")
-	err := verifyLocalProfileInstance(t.Context(), ResolvedDaemon{BaseURL: "http://127.0.0.1:1"})
+	profile, root := localProfileFixture(t)
+	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	selection, err := InspectSelection(t.Context(), root, "work")
+	require.NoError(t, err)
+	instanceErr := fmt.Errorf("local profile instance is unavailable: %w", ErrLocalDaemonUnreachable)
+	scan := func(context.Context, string) iter.Seq2[liveDaemon, error] {
+		return func(yield func(liveDaemon, error) bool) { yield(liveDaemon{}, nil) }
+	}
+	_, found, err := discoverLocalProfileWithVerifier(t.Context(), selection, scan, func(context.Context, ResolvedDaemon) error {
+		return instanceErr
+	})
+	require.False(t, found)
 	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-	require.Same(t, err, scopeProfileUnreachable(err, "work"))
+	require.Same(t, instanceErr, err)
 	require.Contains(t, err.Error(), "local profile instance is unavailable")
 }
 
