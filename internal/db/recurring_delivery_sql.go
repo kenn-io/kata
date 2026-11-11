@@ -47,6 +47,8 @@ type RecurringChild struct {
 	ScheduledAt time.Time `json:"scheduled_at"`
 }
 
+var ErrRecurringOccurrenceVersion = errors.New("unsupported recurring occurrence version")
+
 // LastRecurringChild consumes authorized child rows, retaining only the newest
 // supported occurrence. Only the returned evidence participates in response release.
 func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, error) {
@@ -59,9 +61,20 @@ func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, e
 		if err := rows.Scan(&id, &uid, &occurrence); err != nil {
 			return nil, err
 		}
+		var header struct {
+			Version int `json:"version"`
+		}
+		if err := json.Unmarshal([]byte(occurrence), &header); err != nil {
+			continue
+		}
+		if header.Version > 1 {
+			return nil, ErrRecurringOccurrenceVersion
+		}
 		var value recurringOccurrence
-		// Unknown versions and corrupt provenance are not delivery evidence.
-		if err := json.Unmarshal([]byte(occurrence), &value); err != nil || value.Version != 1 || value.ScheduledAt.IsZero() {
+		if err := json.Unmarshal([]byte(occurrence), &value); err != nil {
+			continue
+		}
+		if value.Version != 1 || value.ScheduledAt.IsZero() {
 			continue
 		}
 		child := RecurringChild{UID: uid, ScheduledAt: value.ScheduledAt.UTC()}
@@ -89,9 +102,37 @@ func recurringRecipient(j cron.JobDefinition, parent Issue) (string, error) {
 	return notification.NormalizeRecipient(recipient)
 }
 
-// RecurringDelivery returns one status per input; adapter entries remain nil.
-func (a CronSQL) RecurringDelivery(ctx context.Context, projectID int64, jobs []CronJob, now time.Time) ([]*RecurringDelivery, error) {
-	out := make([]*RecurringDelivery, len(jobs))
+type CronDeliveryQuery struct {
+	CronList
+	JobUID string
+}
+
+type CronDeliveryJob struct {
+	Job      CronJob
+	Delivery *RecurringDelivery
+}
+
+// RecurringDelivery selects jobs and evaluates their delivery in the same read.
+func (a CronSQL) RecurringDelivery(ctx context.Context, query CronDeliveryQuery, now time.Time) ([]CronDeliveryJob, error) {
+	var jobs []CronJob
+	if query.JobUID != "" {
+		job, err := a.Job(ctx, query.ProjectID, query.JobUID)
+		if err != nil {
+			return nil, err
+		}
+		jobs = []CronJob{job}
+	} else {
+		var err error
+		jobs, err = a.Jobs(ctx, query.CronList)
+		if err != nil {
+			return nil, err
+		}
+	}
+	projectID := query.ProjectID
+	out := make([]CronDeliveryJob, len(jobs))
+	for i, job := range jobs {
+		out[i].Job = job
+	}
 	native := false
 	for _, j := range jobs {
 		native = native || cron.IsRecurringIssueJob(j.Definition)
@@ -119,7 +160,7 @@ func (a CronSQL) RecurringDelivery(ctx context.Context, projectID int64, jobs []
 			continue
 		}
 		d := &RecurringDelivery{State: "active", Authority: authority, DeliversHere: delivers, EvaluatedAt: now}
-		out[i] = d
+		out[i].Delivery = d
 		// Unlike dispatch this projection must not lock the parent.
 		parent, deleted, err := a.recurringParent(ctx, a.Query, projectID, j.Definition.Issue.ParentUID, false)
 		missing := errors.Is(err, ErrNotFound)
@@ -170,7 +211,9 @@ func (a CronSQL) RecurringDelivery(ctx context.Context, projectID int64, jobs []
 				d.Error = evalErr.Error()
 			}
 			d.LastChild, err = a.RecurringChild(ctx, parent.ID, j.UID)
-			if err != nil {
+			if errors.Is(err, ErrRecurringOccurrenceVersion) {
+				d.Error = err.Error()
+			} else if err != nil {
 				return nil, err
 			}
 		}

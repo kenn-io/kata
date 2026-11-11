@@ -42,11 +42,11 @@ func deliveryStamp(t *testing.T, s db.Storage, child db.Issue, stamp time.Time) 
 
 func deliveryRead(t *testing.T, s db.Storage, p db.Project, j db.CronJob, now time.Time) *db.RecurringDelivery {
 	t.Helper()
-	out, err := s.RecurringCronDelivery(t.Context(), p.ID, []db.CronJob{j}, now)
+	out, err := s.RecurringCronDelivery(t.Context(), db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}, JobUID: j.UID}, now)
 	require.NoError(t, err)
 	require.Len(t, out, 1)
-	require.NotNil(t, out[0])
-	return out[0]
+	require.NotNil(t, out[0].Delivery)
+	return out[0].Delivery
 }
 
 func checkRecurringDeliveryStatus(t *testing.T, s db.Storage) error {
@@ -101,16 +101,24 @@ func checkRecurringDeliveryStatus(t *testing.T, s db.Storage) error {
 	_, _, _, err = s.ReopenIssue(ctx, parent.ID, "operator")
 	require.NoError(t, err)
 	j.Definition.Enabled = false
+	rawDef, err := json.Marshal(j.Definition)
+	require.NoError(t, err)
+	deliveryExec(t, s, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, string(rawDef), j.UID)
 	require.Equal(t, "disabled", deliveryRead(t, s, p, j, now).Reason)
 	j.DeletedAt = &now
+	deliveryExec(t, s, `UPDATE cron_jobs SET deleted_at=$1 WHERE uid=$2`, now.Format(time.RFC3339Nano), j.UID)
 	require.Equal(t, "job_deleted", deliveryRead(t, s, p, j, now).Reason)
 	j.DeletedAt = nil
+	deliveryExec(t, s, `UPDATE cron_jobs SET deleted_at=NULL WHERE uid=$1`, j.UID)
 	deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, `{"cron.progress.`+j.UID+`":{"version":2}}`, parent.ID)
 	d = deliveryRead(t, s, p, j, now)
 	require.Equal(t, "paused", d.State)
 	require.Equal(t, "disabled", d.Reason)
 	require.Contains(t, d.Error, "invalid recurring progress")
 	j.Definition.Enabled = true
+	rawDef, err = json.Marshal(j.Definition)
+	require.NoError(t, err)
+	deliveryExec(t, s, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, string(rawDef), j.UID)
 	d = deliveryRead(t, s, p, j, now)
 	require.Equal(t, "error", d.State)
 	require.Contains(t, d.Error, "invalid recurring progress")
@@ -120,12 +128,15 @@ func checkRecurringDeliveryStatus(t *testing.T, s db.Storage) error {
 	require.NoError(t, err)
 	def := j.Definition
 	def.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: second.UID, Title: "Other work"}
-	good, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Other schedule", Actor: "operator", Definition: def})
+	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Other schedule", Actor: "operator", Definition: def})
 	require.NoError(t, err)
-	out, err := s.RecurringCronDelivery(ctx, p.ID, []db.CronJob{j, good}, now)
+	out, err := s.RecurringCronDelivery(ctx, db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}}, now)
 	require.NoError(t, err)
-	require.NotEmpty(t, out[0].Error)
-	require.Empty(t, out[1].Error)
+	if out[0].Job.UID != j.UID {
+		out[0], out[1] = out[1], out[0]
+	}
+	require.NotEmpty(t, out[0].Delivery.Error)
+	require.Empty(t, out[1].Delivery.Error)
 	// Restore valid progress, then evaluate otherwise unwritable stored definitions.
 	raw, err := json.Marshal(map[string]any{"cron.progress." + j.UID: progress})
 	require.NoError(t, err)
@@ -138,12 +149,15 @@ func checkRecurringDeliveryStatus(t *testing.T, s db.Storage) error {
 		deliveryExec(t, s, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, string(raw), j.UID)
 		j, err = s.CronJob(ctx, p.ID, j.UID)
 		require.NoError(t, err)
-		out, err = s.RecurringCronDelivery(ctx, p.ID, []db.CronJob{j, good}, now)
+		out, err = s.RecurringCronDelivery(ctx, db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}}, now)
 		require.NoError(t, err)
-		require.Equal(t, "error", out[0].State)
-		require.NotEmpty(t, out[0].Error)
-		require.Nil(t, out[0].NextDueAt)
-		require.Empty(t, out[1].Error)
+		if out[0].Job.UID != j.UID {
+			out[0], out[1] = out[1], out[0]
+		}
+		require.Equal(t, "error", out[0].Delivery.State)
+		require.NotEmpty(t, out[0].Delivery.Error)
+		require.Nil(t, out[0].Delivery.NextDueAt)
+		require.Empty(t, out[1].Delivery.Error)
 	}
 	j.Definition = original
 	raw, err = json.Marshal(original)
@@ -165,11 +179,15 @@ func checkRecurringDeliveryStatus(t *testing.T, s db.Storage) error {
 	adapterDefinition := original
 	adapterDefinition.Action = cron.Action{Kind: "execute", Prompt: "Inspect"}
 	adapterDefinition.Issue = &cron.IssuePolicy{Kind: "per-run", Title: "Adapter work"}
-	adapter, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Adapter", Actor: "operator", Definition: adapterDefinition})
+	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Adapter", Actor: "operator", Definition: adapterDefinition})
 	require.NoError(t, err)
-	out, err = s.RecurringCronDelivery(ctx, p.ID, []db.CronJob{j, adapter}, now)
+	out, err = s.RecurringCronDelivery(ctx, db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}}, now)
 	require.NoError(t, err)
-	require.Nil(t, out[1])
+	for _, row := range out {
+		if row.Job.Definition.Action.Kind == "execute" {
+			require.Nil(t, row.Delivery)
+		}
+	}
 	return nil
 }
 
@@ -230,7 +248,7 @@ func checkRecurringDeliveryLastChild(t *testing.T, s db.Storage) error {
 	}
 	require.Equal(t, children[0].UID, deliveryRead(t, s, p, j, now).LastChild.UID)
 	readCtx := db.WithExposedIssues(db.WithAuthorizedProjects(ctx, []string{p.UID}))
-	_, err = s.RecurringCronDelivery(readCtx, p.ID, []db.CronJob{j}, now)
+	_, err = s.RecurringCronDelivery(readCtx, db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}, JobUID: j.UID}, now)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []int64{parent.ID, children[0].ID}, db.ExposedIssues(readCtx))
 	tied, err := time.Parse(time.RFC3339Nano, stamps[0])
@@ -246,9 +264,9 @@ func checkRecurringDeliveryLastChild(t *testing.T, s db.Storage) error {
 	_, err = s.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: children[0].ID, FromProjectID: p.ID, ToProjectID: hidden.ID, IfMatchRev: children[0].Revision, Actor: "operator"})
 	require.NoError(t, err)
 	scoped := db.WithExposedIssues(db.WithAuthorizedProjects(ctx, []string{p.UID}))
-	out, err := s.RecurringCronDelivery(scoped, p.ID, []db.CronJob{j}, now)
+	out, err := s.RecurringCronDelivery(scoped, db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}, JobUID: j.UID}, now)
 	require.NoError(t, err)
-	require.Equal(t, children[1].UID, out[0].LastChild.UID)
+	require.Equal(t, children[1].UID, out[0].Delivery.LastChild.UID)
 	require.ElementsMatch(t, []int64{parent.ID, children[1].ID}, db.ExposedIssues(scoped))
 	_, _, err = s.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: hidden.ID, Actor: "operator", Force: true})
 	require.NoError(t, err)
@@ -345,6 +363,12 @@ func checkRecurringDeliveryOccurrenceVersions(t *testing.T, s db.Storage, b Back
 	children, err := s.ChildrenOfIssue(ctx, parent.ID)
 	require.NoError(t, err)
 	require.Len(t, children, 2)
+	second, _, err := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Healthy parent", Author: "operator"})
+	require.NoError(t, err)
+	definition := j.Definition
+	definition.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: second.UID, Title: "Healthy work"}
+	healthy, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Healthy schedule", Actor: "operator", Definition: definition})
+	require.NoError(t, err)
 	newest := deliveryRead(t, s, p, j, now).LastChild.UID
 	var latest, older db.Issue
 	for _, child := range children {
@@ -374,8 +398,20 @@ func checkRecurringDeliveryOccurrenceVersions(t *testing.T, s db.Storage, b Back
 			raw, err := json.Marshal(metadata)
 			require.NoError(t, err)
 			deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, string(raw), latest.ID)
-			require.Equal(t, older.UID, deliveryRead(t, s, p, j, now).LastChild.UID)
 			if tc.name == "future version" {
+				d := deliveryRead(t, s, p, j, now)
+				require.Equal(t, "error", d.State)
+				require.Nil(t, d.LastChild)
+				rows, err := s.RecurringCronDelivery(ctx, db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}}, now)
+				require.NoError(t, err)
+				found := false
+				for _, row := range rows {
+					if row.Job.UID == healthy.UID {
+						found = true
+						require.Empty(t, row.Delivery.Error)
+					}
+				}
+				require.True(t, found)
 				records, err := CollectImportRecords(ctx, s, db.ExportFilter{IncludeDeleted: true})
 				require.NoError(t, err)
 				restored := b.Open(t)
@@ -383,9 +419,43 @@ func checkRecurringDeliveryOccurrenceVersions(t *testing.T, s db.Storage, b Back
 				require.NoError(t, restored.ImportReplay(t.Context(), records, db.ImportOptions{}))
 				rp, err := restored.ProjectByUID(t.Context(), p.UID)
 				require.NoError(t, err)
-				require.Equal(t, older.UID, deliveryRead(t, restored, rp, j, now).LastChild.UID)
+				require.Equal(t, "error", deliveryRead(t, restored, rp, j, now).State)
+			} else {
+				require.Equal(t, older.UID, deliveryRead(t, s, p, j, now).LastChild.UID)
 			}
 		})
 	}
 	return nil
+}
+
+// CheckCronDeliveryConsistent commits delivery and a definition change after the parent read.
+func CheckCronDeliveryConsistent(t *testing.T, s db.Storage, setStage func(func(context.Context) error)) {
+	p, _, j, progress := recurringFixture(t, s, "all")
+	now := progress.Anchor.Add(5 * time.Hour)
+	setStage(func(ctx context.Context) error {
+		setStage(nil)
+		if _, err := s.DispatchRecurringCron(ctx, db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: j.UID, ExpectedEventUID: j.DefinitionEventUID, Now: now}); err != nil {
+			return err
+		}
+		changed := j.Definition
+		changed.Enabled = false
+		raw, err := json.Marshal(changed)
+		if err != nil {
+			return err
+		}
+		_, err = s.(interface {
+			ExecContext(context.Context, string, ...any) (sql.Result, error)
+		}).ExecContext(ctx, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, string(raw), j.UID)
+		return err
+	})
+	rows, err := s.RecurringCronDelivery(t.Context(), db.CronDeliveryQuery{CronList: db.CronList{ProjectID: p.ID}, JobUID: j.UID}, now)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.True(t, rows[0].Job.Definition.Enabled)
+	require.Equal(t, progress.Through, *rows[0].Delivery.Through)
+	require.Nil(t, rows[0].Delivery.LastChild)
+	after := deliveryRead(t, s, p, j, now)
+	require.Equal(t, "disabled", after.Reason)
+	require.Equal(t, now, *after.Through)
+	require.NotNil(t, after.LastChild)
 }

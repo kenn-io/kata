@@ -76,14 +76,42 @@ func (d *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurri
 }
 
 // RecurringCronDelivery reads status without changing delivery evidence.
-func (d *Store) RecurringCronDelivery(ctx context.Context, projectID int64, jobs []db.CronJob, now time.Time) ([]*db.RecurringDelivery, error) {
-	return d.cronSQL().RecurringDelivery(ctx, projectID, jobs, now)
+func (d *Store) RecurringCronDelivery(ctx context.Context, query db.CronDeliveryQuery, now time.Time) ([]db.CronDeliveryJob, error) {
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	a := d.cronSQL()
+	a.Query = tx
+	a.RecurringChild = func(ctx context.Context, parentID int64, jobUID string) (*db.RecurringChild, error) {
+		if d.cronDeliveryReadStage != nil {
+			if err := d.cronDeliveryReadStage(ctx); err != nil {
+				return nil, err
+			}
+		}
+		return d.recurringChildTx(ctx, tx, parentID, jobUID)
+	}
+	out, err := a.RecurringDelivery(ctx, query, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (d *Store) recurringChild(ctx context.Context, parentID int64, jobUID string) (*db.RecurringChild, error) {
+	return d.recurringChildTx(ctx, d, parentID, jobUID)
+}
+
+func (d *Store) recurringChildTx(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, parentID int64, jobUID string) (*db.RecurringChild, error) {
 	args := []any{parentID, jobUID}
 	query := `SELECT i.id, i.uid, json_extract(i.metadata,'$."cron.occurrence"') FROM issues i JOIN projects p ON p.id=i.project_id JOIN links l ON l.from_issue_id=i.id WHERE l.type='parent' AND l.to_issue_id=? AND json_extract(i.metadata,'$."cron.occurrence".job_uid')=? AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND ` + authorizedLinkPredicate(ctx, "l.", &args)
-	rows, err := d.QueryContext(ctx, query, args...)
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

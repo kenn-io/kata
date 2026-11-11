@@ -624,6 +624,11 @@ func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64,
 
 func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID int64) ([]byte, error) {
 	include := "delivery"
+	if o.resource == "job" && (o.action == "list" || o.action == "show") {
+		if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, apiVersionCronDelivery, "cron job delivery"); err != nil {
+			return nil, err
+		}
+	}
 	switch {
 	case o.resource == "job" && o.action == "list":
 		response, err := c.ListCronJobsWithResponse(a.ctx, &generated.ListCronJobsRequestOptions{PathParams: &generated.ListCronJobsPath{ProjectID: projectID}, Query: &generated.ListCronJobsQuery{IncludeDeleted: &o.includeDeleted, Include: &include}})

@@ -93,3 +93,12 @@ func TestDescribeRecurringIntervalPhaseProperty(t *testing.T) {
 		require.Equal(t, string(beforeJob), string(afterJob))
 	})
 }
+
+func TestDescribeRecurringPreviewExhausted(t *testing.T) {
+	j := nativeJob(t)
+	last := time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC)
+	progress := RecurringProgress{Version: 1, Anchor: last, Through: last}
+	_, err := DescribeRecurring(j, definitionUID, progress, last)
+	require.ErrorIs(t, err, ErrInvalid)
+	require.ErrorContains(t, err, "schedule has no supported next occurrence")
+}

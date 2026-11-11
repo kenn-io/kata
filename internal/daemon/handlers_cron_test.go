@@ -368,8 +368,8 @@ type deliveryAfterReadStore struct {
 	afterRead func() error
 }
 
-func (s *deliveryAfterReadStore) RecurringCronDelivery(ctx context.Context, projectID int64, jobs []db.CronJob, now time.Time) ([]*db.RecurringDelivery, error) {
-	out, err := s.Storage.RecurringCronDelivery(ctx, projectID, jobs, now)
+func (s *deliveryAfterReadStore) RecurringCronDelivery(ctx context.Context, query db.CronDeliveryQuery, now time.Time) ([]db.CronDeliveryJob, error) {
+	out, err := s.Storage.RecurringCronDelivery(ctx, query, now)
 	if err == nil && s.afterRead != nil {
 		after := s.afterRead
 		s.afterRead = nil
@@ -401,9 +401,9 @@ func TestCronDeliveryResponseRelease(t *testing.T) {
 				children, err := store.ChildrenOfIssue(t.Context(), f.issue.ID)
 				require.NoError(t, err)
 				require.Len(t, children, tc.children)
-				delivery, err := store.RecurringCronDelivery(t.Context(), f.private.ID, []db.CronJob{j}, now)
+				delivery, err := store.RecurringCronDelivery(t.Context(), db.CronDeliveryQuery{CronList: db.CronList{ProjectID: f.private.ID}, JobUID: j.UID}, now)
 				require.NoError(t, err)
-				selected := delivery[0].LastChild.UID
+				selected := delivery[0].Delivery.LastChild.UID
 				var child db.Issue
 				for _, candidate := range children {
 					if (candidate.UID == selected) == tc.returned {

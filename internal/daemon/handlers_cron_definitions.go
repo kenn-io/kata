@@ -183,43 +183,50 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		value, err := cfg.DB.CronJob(ctx, in.ProjectID, in.UID)
+		var value db.CronJob
+		var delivery *db.RecurringDelivery
+		var err error
+		if includeContains(in.Include, "delivery") {
+			var rows []db.CronDeliveryJob
+			rows, err = cfg.DB.RecurringCronDelivery(ctx, db.CronDeliveryQuery{CronList: db.CronList{ProjectID: in.ProjectID}, JobUID: in.UID}, tokenObservationTime(cfg))
+			if err == nil {
+				value, delivery = rows[0].Job, rows[0].Delivery
+			}
+		} else {
+			value, err = cfg.DB.CronJob(ctx, in.ProjectID, in.UID)
+		}
 		if err != nil {
 			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, true)
 		}
 		out := &api.CronJobResponse{}
 		out.Body.Job = api.CronJobFrom(value)
-		if includeContains(in.Include, "delivery") {
-			delivery, err := cfg.DB.RecurringCronDelivery(ctx, in.ProjectID, []db.CronJob{value}, tokenObservationTime(cfg))
-			if err != nil {
-				return nil, internalAPIError(err)
-			}
-			out.Body.Job.Delivery = (*api.CronJobDelivery)(delivery[0])
-		}
+		out.Body.Job.Delivery = (*api.CronJobDelivery)(delivery)
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "listCronJobs", Method: http.MethodGet, Path: path}, func(ctx context.Context, in *api.ListCronJobsRequest) (*api.ListCronJobsResponse, error) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		values, err := cfg.DB.ListCronJobs(ctx, db.CronList{ProjectID: in.ProjectID, IncludeDeleted: in.IncludeDeleted})
+		query := db.CronList{ProjectID: in.ProjectID, IncludeDeleted: in.IncludeDeleted}
+		var rows []db.CronDeliveryJob
+		var err error
+		if includeContains(in.Include, "delivery") {
+			rows, err = cfg.DB.RecurringCronDelivery(ctx, db.CronDeliveryQuery{CronList: query}, tokenObservationTime(cfg))
+		} else {
+			var values []db.CronJob
+			values, err = cfg.DB.ListCronJobs(ctx, query)
+			for _, value := range values {
+				rows = append(rows, db.CronDeliveryJob{Job: value})
+			}
+		}
 		if err != nil {
 			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", true)
 		}
 		out := &api.ListCronJobsResponse{}
 		out.Body.Jobs = []api.CronJob{}
-		var delivery []*db.RecurringDelivery
-		if includeContains(in.Include, "delivery") {
-			delivery, err = cfg.DB.RecurringCronDelivery(ctx, in.ProjectID, values, tokenObservationTime(cfg))
-			if err != nil {
-				return nil, internalAPIError(err)
-			}
-		}
-		for i, value := range values {
-			job := api.CronJobFrom(value)
-			if delivery != nil {
-				job.Delivery = (*api.CronJobDelivery)(delivery[i])
-			}
+		for _, row := range rows {
+			job := api.CronJobFrom(row.Job)
+			job.Delivery = (*api.CronJobDelivery)(row.Delivery)
 			out.Body.Jobs = append(out.Body.Jobs, job)
 		}
 		return out, nil

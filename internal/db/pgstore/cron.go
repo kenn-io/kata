@@ -59,14 +59,42 @@ func (s *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurri
 }
 
 // RecurringCronDelivery reads status without changing delivery evidence.
-func (s *Store) RecurringCronDelivery(ctx context.Context, projectID int64, jobs []db.CronJob, now time.Time) ([]*db.RecurringDelivery, error) {
-	return s.cronSQL().RecurringDelivery(ctx, projectID, jobs, now)
+func (s *Store) RecurringCronDelivery(ctx context.Context, query db.CronDeliveryQuery, now time.Time) ([]db.CronDeliveryJob, error) {
+	tx, err := s.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	a := s.cronSQL()
+	a.Query = tx
+	a.RecurringChild = func(ctx context.Context, parentID int64, jobUID string) (*db.RecurringChild, error) {
+		if s.cronDeliveryReadStage != nil {
+			if err := s.cronDeliveryReadStage(ctx); err != nil {
+				return nil, err
+			}
+		}
+		return s.recurringChildTx(ctx, tx, parentID, jobUID)
+	}
+	out, err := a.RecurringDelivery(ctx, query, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Store) recurringChild(ctx context.Context, parentID int64, jobUID string) (*db.RecurringChild, error) {
+	return s.recurringChildTx(ctx, s, parentID, jobUID)
+}
+
+func (s *Store) recurringChildTx(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, parentID int64, jobUID string) (*db.RecurringChild, error) {
 	args := []any{parentID, jobUID}
 	query := `SELECT i.id, i.uid, i.metadata::jsonb -> 'cron.occurrence' FROM issues i JOIN projects p ON p.id=i.project_id JOIN links l ON l.from_issue_id=i.id WHERE l.type='parent' AND l.to_issue_id=$1 AND i.metadata::jsonb -> 'cron.occurrence' ->> 'job_uid'=$2 AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND ` + authorizedLinkPredicate(ctx, "l.", &args)
-	rows, err := s.QueryContext(ctx, query, args...)
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

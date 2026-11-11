@@ -18,13 +18,12 @@ func DescribeRecurring(j JobDefinition, definitionEventUID string, p RecurringPr
 	if err != nil {
 		return RecurringDescription{}, err
 	}
-	next, err := recurringNext(j.Trigger, p.Anchor)
+	occurrences, err := RecurringOccurrences(j, p, p.Through, 1)
 	if err != nil {
 		return RecurringDescription{}, err
 	}
-	due := next(p.Through)
-	if due.IsZero() || !due.After(p.Through) || due.Year() > 9999 {
+	if len(occurrences) == 0 {
 		return RecurringDescription{}, invalid("schedule has no supported next occurrence")
 	}
-	return RecurringDescription{NextDueAt: due.UTC(), Batch: batch}, nil
+	return RecurringDescription{NextDueAt: occurrences[0], Batch: batch}, nil
 }

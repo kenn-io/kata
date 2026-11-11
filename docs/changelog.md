@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- See native recurring job delivery progress and child evidence together in job show and list. The CLI requires daemon API 0.45.0 or newer; upgrade an older daemon.
+
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and
   stop on a failed selected source without fallback. See

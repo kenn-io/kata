@@ -386,14 +386,14 @@ shows how far delivery has reached and whether it has caught up. API clients
 opt in with `?include=delivery` on job show/list. Adapter jobs omit the object
 and keep using their run evidence. MCP and TUI clients remain unchanged and do
 not request or display delivery status. Reads change no progress, revisions or
-events.
+events. Job definitions, progress, and children come from one consistent database read. The CLI requires daemon API 0.45.0 or newer; upgrade the daemon if it reports an older API.
 
 | State | Meaning |
 | --- | --- |
 | `active` | The next undelivered occurrence is less than two minutes overdue, or is still in the future. |
 | `behind` | The next undelivered occurrence is at least two minutes overdue. Delivery has not caught up. |
 | `paused` | Delivery is paused for the first applicable reason below. |
-| `error` | Progress, schedule evaluation or the resolved notification recipient is invalid; `error` gives the evaluation failure. |
+| `error` | Progress, an occurrence version, schedule evaluation or the resolved notification recipient is invalid; `error` gives the evaluation failure. |
 
 Paused reasons, in precedence order: `not_owning_hub` (a disabled hub binding),
 `job_deleted`, `disabled`, `parent_missing`, `parent_deleted`,
@@ -423,7 +423,7 @@ first require fixing a definition rejected by current write rules.
 linked to this parent with this job's provenance. It considers only readable,
 non-archived child projects. It orders by occurrence time, then UID for ties,
 so moved children, restore and replication do not change the ordering.
-Finding `last_child` scans matching authorized child history, so the cost of a
+An unsupported occurrence version reports an error for that job and omits `last_child`; upgrade the daemon to read the newer evidence. Finding `last_child` scans matching authorized child history, so the cost of a
 delivery read grows with that history.
 
 `authority` is `local`, `hub`, `hub_disabled` or `spoke`; `delivers_here` is true

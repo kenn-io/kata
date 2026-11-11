@@ -2424,7 +2424,7 @@ kata cron run show <run-uid> --json
 kata show <issue-ref> --planning-dates --json
 ```
 
-Native job list/show include [delivery status](cron.md#delivery-status), with the
+Native job list/show require daemon API 0.45.0 or newer; upgrade older daemons. They include [delivery status](cron.md#delivery-status), with the
 next due time and latest visible child.
 
 Recurring job create/update also accept `--parent <issue-ref>`; see
