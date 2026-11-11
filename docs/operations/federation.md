@@ -1856,6 +1856,11 @@ contacting the hub. The enrollment token then **remains valid** until you run
 kata federation leave <project> --local-only
 ```
 
+Before leaving a destination that holds moved issues, sync any pending updates
+for those issues from their former projects on the same hub. The hub needs the
+destination's enrollment to accept those updates. If a former project's sync
+is paused, resume it and let it push before retrying the leave.
+
 Leaving is idempotent: running it on a project that is already standalone
 reports success and finishes any cleanup a failed earlier leave left behind
 (such as a stale hub credential in `credentials.toml`), and `leave --delete`

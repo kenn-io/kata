@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"go.kenn.io/kata/internal/httpurl"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -17,13 +18,13 @@ type moveQuery interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-// CheckFederationMoveSourceLifecycle keeps a native source joined while a
-// destination still owes a locally authored move that needs its credential.
+// CheckFederationMoveSourceLifecycle keeps the native replicas joined while
+// pending moves or updates in another stream still need their credentials.
 func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
-	var sourceUID string
-	err := tx.QueryRowContext(ctx, `SELECT p.uid FROM projects p
+	var sourceUID, hubURL, actor string
+	err := tx.QueryRowContext(ctx, `SELECT p.uid,b.hub_url,b.bound_actor FROM projects p
  JOIN federation_bindings b ON b.project_id=p.id
- WHERE p.id=$1 AND b.role='spoke' AND b.relay_config IS NULL`, projectID).Scan(&sourceUID)
+ WHERE p.id=$1 AND b.role='spoke' AND b.relay_config IS NULL`, projectID).Scan(&sourceUID, &hubURL, &actor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -65,7 +66,38 @@ func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, project
 	if pending {
 		return fmt.Errorf("%w: sync pending events for moved issues before source leave or archive", ErrFederationResetBlockedByPendingPush)
 	}
-	return nil
+	return checkFederationMoveDestinationLifecycle(ctx, tx, projectID, originInstanceUID, hubURL, actor)
+}
+
+// A source stream still needs the current owner's enrollment to push its
+// pending updates. Pausing sync does not acknowledge those updates.
+func checkFederationMoveDestinationLifecycle(ctx context.Context, tx *sql.Tx, projectID int64, instanceUID, hubURL, actor string) error {
+	origin, err := httpurl.CanonicalHTTPOrigin(hubURL)
+	if err != nil {
+		return nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT b.hub_url FROM events e
+ JOIN federation_bindings b ON b.project_id=e.project_id
+ JOIN projects p ON p.id=b.project_id AND p.deleted_at IS NULL
+ JOIN issues i ON i.uid=e.issue_uid AND i.project_id=$1
+ WHERE e.project_id<>$1 AND e.origin_instance_uid=$2 AND b.bound_actor=$3
+ AND b.role='spoke' AND b.relay_config IS NULL AND e.id>b.push_cursor_event_id
+ AND (e.type LIKE 'issue.%' OR e.type IN ('cron.run.observed','cron.run.snapshot'))
+ AND e.type IN (`+FederationPushEventTypesSQL()+`)`, projectID, instanceUID, actor)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var candidate string
+		if err := rows.Scan(&candidate); err != nil {
+			return err
+		}
+		if sourceOrigin, err := httpurl.CanonicalHTTPOrigin(candidate); err == nil && sourceOrigin == origin {
+			return fmt.Errorf("%w: sync pending updates for moved issues from their former projects, then retry destination leave or archive", ErrFederationResetBlockedByPendingPush)
+		}
+	}
+	return rows.Err()
 }
 
 // federationMoveSourceHasPendingEvents protects history that remains in a
