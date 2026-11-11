@@ -356,8 +356,8 @@ func authorizeFederationMoveSource(ctx context.Context, cfg ServerConfig, transa
 }
 
 // authenticateFederationMoveSources validates supplemental bearer possession.
-// Invalid supplied proofs remain present without a grant, so fresh storage
-// admission rejects them while accepted duplicates need no renewed authority.
+// Invalid proofs remain present without a grant so storage can reject affected
+// events, while accepted duplicates need no renewed authority.
 // Storage requires a live exact grant for fresh cross-project effects.
 // The mandatory route bearer is authenticated independently.
 func authenticateFederationMoveSources(ctx context.Context, cfg ServerConfig, principal federationPrincipal, tokens map[string]string) (map[string]int64, error) {

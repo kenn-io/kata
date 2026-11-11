@@ -366,3 +366,42 @@ func TestFederationSuppressesAcceptedLocalEcho(t *testing.T) {
 		})
 	}
 }
+
+func TestRevokedSupplementalEnrollmentRetainsOnlyDependentWork(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "source-project", "target-project")
+	sender := newMoveDeliverySpoke(t, hub, projects)
+	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved work", Author: "worker"})
+	require.NoError(t, err)
+	for i := range projects {
+		require.NoError(t, sender.sync(t, i))
+	}
+	local, err := sender.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, _, err = sender.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Retained comment"})
+	require.NoError(t, err)
+	independent, _, err := sender.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: sender.projects[0].ID, Title: "Independent work", Author: "worker"})
+	require.NoError(t, err)
+	_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	grant, err := hub.DB.AuthorizeFederationToken(ctx, sender.credentials[projects[1].UID].Token, projects[1].ID, "push")
+	require.NoError(t, err)
+	require.NoError(t, hub.DB.RevokeFederationEnrollment(ctx, grant.ID))
+	err = sender.sync(t, 0)
+	require.ErrorContains(t, err, "pending federation events remain")
+	_, err = hub.DB.IssueByUID(ctx, independent.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	comments, err := hub.DB.CommentsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Empty(t, comments)
+	replacement, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: sender.env.DB.InstanceUID(), ProjectID: &projects[1].ID, Capabilities: "push,pull", Actor: "worker"})
+	require.NoError(t, err)
+	credential := sender.credentials[projects[1].UID]
+	credential.Token = replacement.Token
+	sender.credentials[projects[1].UID] = credential
+	require.NoError(t, sender.sync(t, 0))
+	comments, err = hub.DB.CommentsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "Retained comment", comments[0].Body)
+}

@@ -11,7 +11,7 @@ import (
 )
 
 func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage) error {
-	for _, kind := range []string{"mixed", "all-rejected", "payload-only", "moved-peer", "dependent-on-rejected-create", "rejected-move", "rejected-move-new-route", "duplicate-rejected-uid", "malformed-comment", "known-create", "known-snapshot"} {
+	for _, kind := range []string{"mixed", "revoked-race", "all-rejected", "payload-only", "moved-peer", "dependent-on-rejected-create", "rejected-move", "rejected-move-new-route", "duplicate-rejected-uid", "malformed-comment", "known-create", "known-snapshot"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			source, target, moved, _ := federatedRehomeFixture(t, store, "partial-"+kind)
@@ -90,9 +90,12 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 			require.NoError(t, err)
 			if kind == "mixed" {
 				params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: 0}
-				_, err := store.IngestFederationEvents(ctx, params)
-				require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized, "supplied invalid proof remains an atomic credential failure")
-				params.MoveSourceEnrollmentIDs = nil
+			}
+			if kind == "revoked-race" {
+				current, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &target.ID, Capabilities: "push,pull", Actor: "worker"})
+				require.NoError(t, err)
+				require.NoError(t, store.RevokeFederationEnrollment(ctx, current.Enrollment.ID))
+				params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: current.Enrollment.ID}
 			}
 			result, err := store.IngestFederationEvents(ctx, params)
 			if kind == "duplicate-rejected-uid" {
@@ -133,6 +136,16 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				}
 				require.Equal(t, "Arrived", got.Title)
 			}
+			if kind == "mixed" || kind == "revoked-race" {
+				current, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &target.ID, Capabilities: "push,pull", Actor: "worker"})
+				require.NoError(t, err)
+				params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: current.Enrollment.ID}
+				retry, err := store.IngestFederationEvents(ctx, params)
+				require.NoError(t, err)
+				require.Equal(t, 1, retry.Accepted)
+				require.Equal(t, 1, retry.Duplicates)
+				require.Empty(t, retry.RejectedEvents)
+			}
 			if kind == "dependent-on-rejected-create" {
 				require.Equal(t, params.Events[1].Event.EventUID, result.RejectedEvents[1].EventUID)
 				_, err := store.IssueByUID(ctx, freshUID, db.IncludeDeletedNo)
@@ -149,7 +162,7 @@ func checkFederatedMissingEnrollmentPartialBatch(t *testing.T, store db.Storage)
 				require.NoError(t, err)
 				require.Equal(t, "Must not be known", created.Title)
 			}
-			if kind != "moved-peer" && kind != "rejected-move" && kind != "rejected-move-new-route" {
+			if kind != "mixed" && kind != "revoked-race" && kind != "moved-peer" && kind != "rejected-move" && kind != "rejected-move-new-route" {
 				got, err = store.IssueByID(ctx, moved.ID)
 				require.NoError(t, err)
 				require.Equal(t, moved.Title, got.Title)
@@ -177,6 +190,7 @@ func checkRejectedAdoptionBaseline(t *testing.T, store db.Storage) error {
 	snapshot := newRemoteEvent(t, source, &snapshotUID, "issue.snapshot", "worker", origin, time.Now().UnixMilli(), payload)
 	metadata := newRemoteEvent(t, source, nil, "project.metadata_updated", "worker", origin, time.Now().UnixMilli(), []byte(`{"project_uid":"`+source.UID+`","metadata":{"adopted":true}}`))
 	params := db.FederationIngestParams{AllowEventRejections: true, ProjectID: source.ID, FederationEnrollmentID: grant.Enrollment.ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, AllowSnapshotAuthorPreservation: true, AdoptionBaseline: db.FederationAdoptionBaselineComplete, AdoptionBaselineEndSourceEventID: 2, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: metadata}, {SourceEventID: 2, Event: snapshot}}}
+	params.MoveSourceEnrollmentIDs = map[string]int64{target.UID: 0}
 	_, err = store.IngestFederationEvents(ctx, params)
 	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized, "a baseline with missing enrollment stays atomic")
 	enrollment, err := federationEnrollmentByID(ctx, store, grant.Enrollment.ID)

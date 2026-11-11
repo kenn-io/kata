@@ -24,8 +24,8 @@ type FederationEventRejection struct {
 	Message            string `json:"message"`
 }
 
-// FederationProjectNotEnrolledError is narrower than an invalid credential:
-// the source credential is valid but no supplemental proof was submitted.
+// FederationProjectNotEnrolledError reports a missing or unusable supplemental
+// project grant after the route credential has been authenticated.
 type FederationProjectNotEnrolledError struct {
 	IssueUID    string
 	ProjectUID  string

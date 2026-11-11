@@ -1453,31 +1453,40 @@ func (d *Store) authorizeFederationCurrentIssueTx(ctx context.Context, tx *sql.T
 // A supplemental project uses the route grant only when that grant covers it;
 // otherwise its exact bearer proof must belong to the same native spoke/actor.
 func (d *Store) authorizeFederationAffectedProjectTx(ctx context.Context, tx *sql.Tx, p db.FederationIngestParams, projectID int64, projectUID string) error {
+	missingEnrollment := func() error {
+		project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, projectID))
+		if err != nil {
+			return err
+		}
+		return &db.FederationProjectNotEnrolledError{ProjectUID: project.UID, ProjectName: project.Name}
+	}
+
 	if p.FederationEnrollmentID == 0 {
 		if !db.ProjectAttributionVisible(ctx, projectUID) {
 			return db.ErrNotFound
 		}
 	} else {
+		supplemental := false
 		grantID := p.FederationEnrollmentID
 		grant, err := federationEnrollmentByIDTx(ctx, tx, grantID)
 		if err != nil {
 			return err
 		}
 		if grant.ProjectID != nil && *grant.ProjectID != projectID {
+			supplemental = true
 			var supplied bool
 			grantID, supplied = p.MoveSourceEnrollmentIDs[projectUID]
 			if grantID == 0 {
-				if supplied {
+				if supplied && !p.AllowEventRejections {
 					return db.ErrFederationMoveSourceUnauthorized
 				}
-				project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id=$1 AND deleted_at IS NULL`, projectID))
-				if err != nil {
-					return err
-				}
-				return &db.FederationProjectNotEnrolledError{ProjectUID: project.UID, ProjectName: project.Name}
+				return missingEnrollment()
 			}
 			grant, err = federationEnrollmentByIDTx(ctx, tx, grantID)
 			if errors.Is(err, db.ErrNotFound) {
+				if p.AllowEventRejections {
+					return missingEnrollment()
+				}
 				return db.ErrFederationMoveSourceUnauthorized
 			}
 			if err != nil {
@@ -1489,6 +1498,9 @@ func (d *Store) authorizeFederationAffectedProjectTx(ctx context.Context, tx *sq
 		}
 		if err := d.FederationEnrollmentTransactionFence(grant, projectID, "push")(ctx, tx); err != nil {
 			if errors.Is(err, db.ErrNotFound) {
+				if supplemental && p.AllowEventRejections {
+					return missingEnrollment()
+				}
 				return fmt.Errorf("%w: %w", db.ErrFederationMoveSourceUnauthorized, err)
 			}
 			return err
