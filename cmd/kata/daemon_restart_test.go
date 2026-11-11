@@ -41,6 +41,18 @@ func TestSelectRestartGeneration(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestRestartLockDeadline(t *testing.T) {
+	ordinary, cancel := restartLockContext(t.Context(), "")
+	defer cancel()
+	_, bounded := ordinary.Deadline()
+	require.False(t, bounded)
+	helper, cancel := restartLockContext(t.Context(), "123.456")
+	defer cancel()
+	deadline, bounded := helper.Deadline()
+	require.True(t, bounded)
+	require.WithinDuration(t, time.Now().Add(30*time.Second), deadline, time.Second)
+}
+
 func TestNewDaemonRestart_UnresolvableExecutableDisablesRestart(t *testing.T) {
 	stubDaemonExecutable(t, func() (string, error) { return "", errors.New("procfs unavailable") })
 	var stderr bytes.Buffer

@@ -56,6 +56,7 @@ export interface KataFixture {
   restart(): Promise<void>
   restartReadonly(): Promise<void>
   restartIdentity(enabled?: boolean): Promise<void>
+  prepareSearch(baseURL: string): Promise<void>
 }
 
 interface RunningFixture {
@@ -100,6 +101,8 @@ async function startProductionFixture(): Promise<RunningFixture> {
     }),
     KATA_AUTH_TOKEN: 'example-local-token',
     KATA_SERVER: '',
+    HOME: home,
+    USERPROFILE: home,
   }
   const remoteEnvironment = {
     ...createDevChildEnvironment(process.env, {
@@ -109,6 +112,8 @@ async function startProductionFixture(): Promise<RunningFixture> {
     }),
     KATA_AUTH_TOKEN: 'example-remote-token',
     KATA_SERVER: '',
+    HOME: remoteHome,
+    USERPROFILE: remoteHome,
   }
 
   const remote = await retryPortBind(freePort, async (remotePort) => {
@@ -176,6 +181,7 @@ listen = "127.0.0.1:${port}"
   })
   const { origin } = local
   let daemon = local.daemon
+  let preparedSearch = false
   run(binary, ['projects', 'create', 'example-project'], workspace, environment)
   run(binary, ['projects', 'create', 'example-inbox'], workspace, environment)
   await writeFile(
@@ -239,6 +245,16 @@ listen = "127.0.0.1:${port}"
       if (!response.ok()) throw new Error(`issue seed failed with status ${response.status()}`)
       return ((await response.json()) as { issue: SeededIssue }).issue
     },
+    async prepareSearch(baseURL) {
+      const configPath = join(home, 'config.toml')
+      const original = await readFile(configPath, 'utf8')
+      await writeFile(
+        configPath,
+        `${original}\n[search.embeddings]\nbase_url = ${JSON.stringify(baseURL)}\nmodel = "nomic-embed-text"\ndims = 768\n`,
+        { mode: 0o600 },
+      )
+      preparedSearch = true
+    },
     async restart() {
       await stopDaemon(daemon)
       daemon = startDaemon(binary, workspace, environment)
@@ -269,8 +285,12 @@ listen = "127.0.0.1:${port}"
   return {
     fixture,
     async stop() {
-      await Promise.all([stopDaemon(daemon), stopDaemon(remoteDaemon)])
-      await rm(root, { recursive: true, force: true })
+      try {
+        if (preparedSearch) run(binary, ['daemon', 'stop'], workspace, environment)
+      } finally {
+        await Promise.all([stopDaemon(daemon), stopDaemon(remoteDaemon)])
+        await rm(root, { recursive: true, force: true })
+      }
     },
   }
 }

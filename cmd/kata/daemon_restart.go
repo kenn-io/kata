@@ -297,6 +297,13 @@ func selectRestartGeneration(records []kitdaemon.RuntimeRecord, generation strin
 	return kitdaemon.RuntimeRecord{}, errors.New("daemon generation is no longer running")
 }
 
+func restartLockContext(ctx context.Context, generation string) (context.Context, context.CancelFunc) {
+	if generation != "" {
+		return context.WithTimeout(ctx, 30*time.Second)
+	}
+	return context.WithCancel(ctx)
+}
+
 func restartRequestPath(dir string, rec kitdaemon.RuntimeRecord) string {
 	return filepath.Join(dir, "restart."+restartGeneration(rec))
 }

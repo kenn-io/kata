@@ -914,7 +914,7 @@ func daemonRestartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			lockCtx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			lockCtx, cancel := restartLockContext(cmd.Context(), generation)
 			defer cancel()
 			running, release, err := lockLiveDaemons(lockCtx, ns, cmd.ErrOrStderr())
 			if err != nil {
@@ -1694,12 +1694,7 @@ func runDaemonProcess(
 					if err == nil {
 						return
 					}
-					localSetup.mu.Lock()
-					defer localSetup.mu.Unlock()
-					if localSetup.job != nil && localSetup.job.State == "restarting" {
-						localSetup.job.State = "restart"
-						localSetup.job.Error = fmt.Sprintf("restart failed: %v: %s", err, strings.TrimSpace(output.String()))
-					}
+					localSetup.restartExited(fmt.Errorf("restart failed: %w: %s", err, strings.TrimSpace(output.String())))
 				},
 			})
 		}

@@ -56,7 +56,12 @@ export async function prepareBrowserTestRuntime(
       environment,
     )
     runCommand(
-      ['go', ...developmentKataBuildArguments(binary)],
+      [
+        'go',
+        ...developmentKataBuildArguments(binary).slice(0, -1),
+        '-tags=kata_browser_fixture',
+        './cmd/kata',
+      ],
       options.repositoryRoot,
       environment,
     )

@@ -15,8 +15,9 @@ import (
 )
 
 type localEmbeddingsFixture struct {
-	calls int
-	busy  bool
+	calls      int
+	busy       bool
+	restartErr error
 }
 
 func (f *localEmbeddingsFixture) Status(context.Context) (api.LocalEmbeddingsStatus, error) {
@@ -30,7 +31,7 @@ func (f *localEmbeddingsFixture) TurnOn(context.Context) error {
 	return nil
 }
 
-func (f *localEmbeddingsFixture) Restart(context.Context) error { f.calls++; return nil }
+func (f *localEmbeddingsFixture) Restart(context.Context) error { f.calls++; return f.restartErr }
 
 func TestLocalEmbeddingsRestartAdministration(t *testing.T) {
 	for _, tc := range []struct {
@@ -53,6 +54,23 @@ func TestLocalEmbeddingsRestartAdministration(t *testing.T) {
 			} else {
 				require.Zero(t, fixture.calls)
 			}
+		})
+	}
+	for _, tc := range []struct {
+		name  string
+		setup LocalEmbeddings
+		want  int
+	}{
+		{"unavailable", nil, http.StatusNotFound},
+		{"not ready", &localEmbeddingsFixture{restartErr: ErrLocalEmbeddingsBusy}, http.StatusConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			registerLocalEmbeddingsHandlers(humago.New(mux, huma.DefaultConfig("test", "1")), ServerConfig{LocalEmbeddings: tc.setup})
+			req := httptest.NewRequestWithContext(WithPrincipal(t.Context(), Principal{Kind: PrincipalWebLocal}), http.MethodPost, "/api/v1/embeddings/local/restart", nil)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, req)
+			require.Equal(t, tc.want, response.Code)
 		})
 	}
 }

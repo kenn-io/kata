@@ -76,6 +76,18 @@ func TestLocalEmbeddingsRestartFailureCanRetry(t *testing.T) {
 	require.Contains(t, status.Job.Error, "helper could not start")
 }
 
+func TestLocalEmbeddingsRestartHelperExitCanRetry(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	setup := &localEmbeddingsSetup{job: &api.LocalEmbeddingsJob{State: "restarting"}, restart: func() error { return nil }}
+	setup.restartExited(errors.New("replacement refused"))
+	status, err := setup.Status(t.Context())
+	require.NoError(t, err)
+	require.True(t, status.CanRestart)
+	require.Equal(t, "restart", status.Job.State)
+	require.Contains(t, status.Job.Error, "replacement refused")
+}
+
 func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

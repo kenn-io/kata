@@ -142,13 +142,9 @@
     const post = posts
     let next: LocalEmbeddingsStatus | undefined
     try {
-      const readSignal =
-        restartPending && originStable
-          ? AbortSignal.any([
-              signal,
-              AbortSignal.timeout(Math.max(0, restartDeadline - Date.now())),
-            ])
-          : signal
+      const readSignal = restartPending
+        ? AbortSignal.any([signal, AbortSignal.timeout(Math.max(0, restartDeadline - Date.now()))])
+        : signal
       const response = await getLocalEmbeddings({ signal: readSignal })
       if (response.status === 200) next = response.data
     } catch {
@@ -164,10 +160,11 @@
       )
         restartPending = false
     }
-    if (!next && restartPending && !originStable) return
-    if (restartPending && originStable && Date.now() >= restartDeadline) {
+    if (restartPending && Date.now() >= restartDeadline) {
       restartPending = false
-      requestError = "Couldn't reconnect. Run kata daemon status, then reopen kata ui."
+      requestError = originStable
+        ? "Couldn't reconnect. Run kata daemon status, then reopen kata ui."
+        : 'Run kata daemon status, then reopen kata ui.'
       loading = false
       return
     }

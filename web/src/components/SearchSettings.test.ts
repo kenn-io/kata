@@ -148,6 +148,58 @@ describe('SearchSettings', () => {
     expect(screen.getByRole('alert').textContent).toContain('kata daemon status')
   })
 
+  test('shows a helper failure after an interrupted read on an ephemeral origin', async () => {
+    vi.useFakeTimers()
+    const pending = status({
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+    })
+    const failed = status({
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1, error: 'Restart failed' },
+    })
+    setGeneratedFetch(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(pending))
+        .mockRejectedValueOnce(new TypeError('disconnected'))
+        .mockResolvedValue(Response.json(failed)),
+    )
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    renderSettings({ postFetch: vi.fn(async () => new Response(null, { status: 202 })) })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(screen.getByRole('alert').textContent).toContain('Restart failed')
+    expect(screen.getByRole('button', { name: 'Restart daemon' })).not.toBeNull()
+  })
+
+  test('ends the wait with reopening instructions on an ephemeral origin', async () => {
+    vi.useFakeTimers()
+    const pending = status({
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+    })
+    setGeneratedFetch(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(pending))
+        .mockRejectedValue(new TypeError('disconnected')),
+    )
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    renderSettings({ postFetch: vi.fn(async () => new Response(null, { status: 202 })) })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(screen.getByRole('alert').textContent).toContain('reopen kata ui')
+  })
+
   test('shows a restart rejection and allows another attempt', async () => {
     vi.useFakeTimers()
     setGeneratedFetch(

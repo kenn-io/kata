@@ -29,6 +29,7 @@ import (
 
 var localEmbeddingsEndpoint = embedlocal.Endpoint
 var localEmbeddingsInstall = embedlocal.Install
+var localEmbeddingsInspect = embedlocal.Inspect
 
 func resolveLocalEmbeddings(ctx context.Context, confirm func(context.Context, int64) (bool, error)) (string, error) {
 	endpoint, err := localEmbeddingsEndpoint(ctx, embedlocal.Options{SkipOllama: true})
@@ -525,7 +526,7 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 	}
 	// Only an unconfigured daemon depends on the shared installation files.
 	if status.Provider == "none" {
-		inspected, err := embedlocal.Inspect(ctx, embedlocal.Options{})
+		inspected, err := localEmbeddingsInspect(ctx, embedlocal.Options{})
 		if err != nil {
 			return status, err
 		}
@@ -557,6 +558,17 @@ func (s *localEmbeddingsSetup) Restart(_ context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (s *localEmbeddingsSetup) restartExited(err error) {
+	if err == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.job != nil && s.job.State == "restarting" {
+		s.job.State, s.job.Error = "restart", err.Error()
+	}
 }
 
 func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
