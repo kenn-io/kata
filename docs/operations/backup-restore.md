@@ -55,7 +55,7 @@ damaged database.
 
 ## Slow or interrupted upgrade startup
 
-SQLite in-place upgrades from schemas 41 through 49 to 50 add the missing
+SQLite in-place upgrades from schemas 41 through 50 to 51 add the missing
 indexes, and the empty MCP Events subscriptions table, inside the existing
 database in one transaction. Allow free space for the new indexes, their WAL
 pages, and temporary sort files. These upgrades keep

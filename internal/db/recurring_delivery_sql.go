@@ -76,16 +76,12 @@ func LastRecurringChild(ctx context.Context, rows *sql.Rows) (*RecurringChild, e
 		return nil, rows.Err()
 	}
 	var id int64
-	var uid, occurrence string
-	if err := rows.Scan(&id, &uid, &occurrence); err != nil {
+	var uid, occurrence, key string
+	if err := rows.Scan(&id, &uid, &occurrence, &key); err != nil {
 		return nil, err
 	}
-	key := RecurringOccurrenceKey(occurrence)
 	if key == "~" {
 		return nil, errRecurringOccurrenceVersion
-	}
-	if key == "" {
-		return nil, nil
 	}
 	var value recurringOccurrence
 	if err := json.Unmarshal([]byte(occurrence), &value); err != nil {
