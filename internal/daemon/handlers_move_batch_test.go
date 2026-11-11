@@ -42,35 +42,37 @@ func postMoveBatch(t *testing.T, env *testenv.Env, body string) batchReply {
 	return out
 }
 
-func TestMoveIssuesBatch_HTTPRejectsMoreThan50(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	source, target, issue := seedMovePair(t, env)
-	items := make([]map[string]string, 51)
-	for i := range items {
-		items[i] = map[string]string{"ref": issue.UID}
-	}
-	body, err := json.Marshal(map[string]any{"actor": "tester", "to_project_uid": target.UID, "items": items})
-	require.NoError(t, err)
-	resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", string(body), "")
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	require.NoError(t, resp.Body.Close())
-	got, err := env.DB.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, source.ID, got.ProjectID)
-}
-
-func TestMoveIssuesBatch_RejectsSubtreeAndDryRun(t *testing.T) {
-	for _, field := range []string{"subtree", "dry_run"} {
-		t.Run(field, func(t *testing.T) {
+func TestMoveIssuesBatch_RejectsInvalidRequest(t *testing.T) {
+	for _, mode := range []string{"too many", "subtree", "dry_run", "blank comment", "invalid teammate"} {
+		t.Run(mode, func(t *testing.T) {
 			env := testenv.New(t, testenv.WithAuthToken("tok"))
 			source, target, issue := seedMovePair(t, env)
-			body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q,"%s":true,"items":[{"ref":%q}]}`, target.UID, field, issue.UID)
-			resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", body, "")
+			body := map[string]any{"actor": "tester", "to_project_uid": target.UID, "items": []map[string]string{{"ref": issue.UID}}}
+			switch mode {
+			case "too many":
+				items := make([]map[string]string, 51)
+				for i := range items {
+					items[i] = map[string]string{"ref": issue.UID}
+				}
+				body["items"] = items
+			case "subtree", "dry_run":
+				body[mode] = true
+			case "blank comment":
+				body["comment"] = "  \t "
+			case "invalid teammate":
+				body["comment"], body["teammate"] = "routed", "@invalid"
+			}
+			raw, err := json.Marshal(body)
+			require.NoError(t, err)
+			resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", string(raw), "")
 			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 			require.NoError(t, resp.Body.Close())
 			got, err := env.DB.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
 			require.Equal(t, source.ID, got.ProjectID)
+			comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Empty(t, comments)
 		})
 	}
 }
@@ -82,18 +84,24 @@ func TestMoveIssuesBatch_DuplicateDifferentTargets(t *testing.T) {
 			source, firstTarget, issue := seedMovePair(t, env)
 			secondTarget, err := env.DB.CreateProject(t.Context(), "other-target")
 			require.NoError(t, err)
+			independent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "independent", Author: "tester"})
+			require.NoError(t, err)
 			if reversed {
 				firstTarget, secondTarget = secondTarget, firstTarget
 			}
 			before, err := env.DB.MaxEventID(t.Context())
 			require.NoError(t, err)
-			body := fmt.Sprintf(`{"actor":"tester","comment":"routed","items":[{"ref":%q,"to_project_uid":%q},{"ref":%q,"to_project_uid":%q}]}`, issue.UID, firstTarget.UID, source.Name+"#"+issue.ShortID, secondTarget.UID)
+			body := fmt.Sprintf(`{"actor":"tester","comment":"routed","items":[{"ref":%q,"to_project_uid":%q},{"ref":%q,"to_project_uid":%q},{"ref":%q,"to_project_uid":%q}]}`, issue.UID, firstTarget.UID, source.Name+"#"+issue.ShortID, secondTarget.UID, independent.UID, firstTarget.UID)
 			out := postMoveBatch(t, env, body)
-			require.Len(t, out.Results, 2)
+			require.Len(t, out.Results, 3)
 			require.Equal(t, "moved", out.Results[0].Result)
 			require.Equal(t, "refused", out.Results[1].Result)
 			require.Equal(t, "duplicate_conflicting_target", out.Results[1].Code)
+			require.Equal(t, "moved", out.Results[2].Result)
 			got, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, firstTarget.ID, got.ProjectID)
+			got, err = env.DB.IssueByID(t.Context(), independent.ID)
 			require.NoError(t, err)
 			require.Equal(t, firstTarget.ID, got.ProjectID)
 			comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
@@ -103,7 +111,7 @@ func TestMoveIssuesBatch_DuplicateDifferentTargets(t *testing.T) {
 			require.NoError(t, err)
 			moves := 0
 			for _, event := range events {
-				if event.Type == "issue.moved" {
+				if event.Type == "issue.moved" && event.IssueID != nil && *event.IssueID == issue.ID {
 					moves++
 				}
 			}
@@ -235,25 +243,6 @@ func TestMoveIssuesBatch_InvalidJSONItemDoesNotBlockNeighbor(t *testing.T) {
 			got, err := env.DB.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
 			require.Equal(t, target.ID, got.ProjectID)
-		})
-	}
-}
-
-func TestMoveIssuesBatch_RejectsInvalidOptions(t *testing.T) {
-	for _, option := range []string{`"comment":"  \t "`, `"comment":"routed","teammate":"@invalid"`} {
-		t.Run(option, func(t *testing.T) {
-			env := testenv.New(t, testenv.WithAuthToken("tok"))
-			source, target, issue := seedMovePair(t, env)
-			body := fmt.Sprintf(`{"actor":"tester",%s,"items":[{"ref":%q,"to_project_uid":%q}]}`, option, issue.UID, target.UID)
-			resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", body, "")
-			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-			require.NoError(t, resp.Body.Close())
-			got, err := env.DB.IssueByID(t.Context(), issue.ID)
-			require.NoError(t, err)
-			require.Equal(t, source.ID, got.ProjectID)
-			comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
-			require.NoError(t, err)
-			require.Empty(t, comments)
 		})
 	}
 }

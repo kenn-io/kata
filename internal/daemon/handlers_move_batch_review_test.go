@@ -75,29 +75,6 @@ func TestMoveIssuesBatch_SelectedChildRevision(t *testing.T) {
 	}
 }
 
-func TestMoveIssuesBatch_ConflictingDuplicateLeavesValidMove(t *testing.T) {
-	store := openClaimGateHelperDB(t)
-	source, issue := createClaimGateHelperIssue(t, store)
-	local, err := store.CreateProject(t.Context(), "local-target")
-	require.NoError(t, err)
-	remote, err := store.CreateProject(t.Context(), "remote-target")
-	require.NoError(t, err)
-	independent, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "independent", Author: "agent"})
-	require.NoError(t, err)
-	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.Comment = "agent", "routed"
-	req.Body.Items = []api.MoveIssuesItem{{Ref: issue.UID, ToProjectUID: local.UID}, {Ref: issue.UID, ToProjectUID: remote.UID}, {Ref: independent.UID, ToProjectUID: local.UID}}
-	out, err := moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
-	require.NoError(t, err)
-	require.Equal(t, "moved", out.Body.Results[0].Result)
-	require.Equal(t, "refused", out.Body.Results[1].Result)
-	require.Equal(t, "duplicate_conflicting_target", out.Body.Results[1].Code)
-	require.Equal(t, "moved", out.Body.Results[2].Result)
-	got, err := store.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, local.ID, got.ProjectID)
-}
-
 func TestMoveBatchRefusal_FinalizationFailurePrecedesDenial(t *testing.T) {
 	var result api.MoveIssuesResult
 	moveBatchRefusal(&result, errors.Join(api.NewError(404, "not_found", "not found", "", nil), db.ErrTransactionFinalizationFailed))
