@@ -45,6 +45,7 @@ func TestCronNextSavedSchedules(t *testing.T) {
 		invalid, deleted               bool
 	}{
 		{"local once", `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"once","at":"2026-06-01T08:00:00Z","timezone":"Local"},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Inspection"},"overlap":"forbid","catchup":"all"}`, "", "2026-06-01T08:00:00Z", false, false},
+		{"adapter implicit zone", `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"cron","cron":"0 9 * * *"},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Inspection"},"overlap":"forbid","catchup":"all"}`, "", "cron_preview_unavailable", true, false},
 		{"native interval", native, parent, "2026-06-01T08:00:00Z", false, false},
 		{"native local cron", strings.Replace(native, `"kind":"interval","interval_seconds":7200`, `"kind":"cron","cron":"0 9 * * *"`, 1), parent, "2026-06-01T09:00:00Z", false, false},
 		{"archived parent", native, strings.Replace(parent, `"status":"open"`, `"status":"open","deleted_at":"2026-01-01T00:00:00Z"`, 1), `"status":"parent_closed"`, false, false},
@@ -61,6 +62,11 @@ func TestCronNextSavedSchedules(t *testing.T) {
 		{"deleted future definition", strings.Replace(native, `"version":1`, `"version":2`, 1), parent, "", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "adapter implicit zone" {
+				previous := time.Local
+				time.Local = time.FixedZone("adapter", -4*3600)
+				t.Cleanup(func() { time.Local = previous })
+			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.URL.Path == "/api/v1/projects":

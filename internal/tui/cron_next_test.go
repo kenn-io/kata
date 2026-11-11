@@ -182,6 +182,9 @@ func TestCronJobDetailAdapterCronUsesOwnGrammar(t *testing.T) {
 }
 
 func TestCronJobDetailLocalCron(t *testing.T) {
+	previous := time.Local
+	time.Local = time.FixedZone("adapter", -4*3600)
+	t.Cleanup(func() { time.Local = previous })
 	progress := cron.RecurringProgress{Version: 1, Anchor: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), Through: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)}
 	got := nextRunsDetail(t, "2026-06-01T05:00:00Z", nativeNotify(generated.TriggerResponse{Kind: "cron", Cron: new("0 9 * * *"), Timezone: new("Local")}), &progress)
 	require.Regexp(t, `Next:\s+2026-06-01 09:00 UTC`, got)
@@ -189,6 +192,10 @@ func TestCronJobDetailLocalCron(t *testing.T) {
 	require.Contains(t, got, "2026-06-03 09:00 UTC")
 	got = nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
 		d.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new("TZ=Local 0 9 * * *")}
+	}, nil)
+	require.Regexp(t, `Triggers:\s+unavailable`, got)
+	got = nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
+		d.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new("0 9 * * *")}
 	}, nil)
 	require.Regexp(t, `Triggers:\s+unavailable`, got)
 }

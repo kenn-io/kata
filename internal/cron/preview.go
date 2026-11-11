@@ -36,10 +36,9 @@ func PreviewJob(def JobDefinition, parent *PreviewParent, after time.Time, count
 		if def.Trigger.Kind != "cron" {
 			status = "unsupported"
 		} else if schedule, err := adapterCronSchedule(def.Trigger); err == nil {
-			_, _, hasZone, _ := splitCronDirective(def.Trigger.Cron)
 			if schedule == nil {
 				status = "unsupported"
-			} else if parsed, ok := schedule.(*cronparser.SpecSchedule); ok && parsed.Location == time.Local && (hasZone || def.Trigger.Timezone != "") {
+			} else if parsed, ok := schedule.(*cronparser.SpecSchedule); ok && parsed.Location == time.Local {
 				status = "unavailable"
 			}
 		}

@@ -38,7 +38,7 @@ issue. Recording a run changes neither ownership nor leases. See
 
 Run `kata cron job next <job-uid>` to preview the next three times. Use `--count` to choose 1–100 times, `--from` for an RFC3339 lower bound, and `--json` or `--agent` for machine output. The result includes the observed definition revision, UTC and local times, and a status. Its `as_of` field is the `--from` lower bound. Native jobs use retained delivery progress, so `--from` cannot rewind it. Paused or deleted jobs and closed or deleted parents have no times. An unreadable parent or progress makes the preview unavailable. Adapter cron and once times describe triggers, not guaranteed execution; other adapter triggers are unavailable. An unavailable preview exits with code 3 and error code `cron_preview_unavailable`. The daemon must advertise `cron_v1`. The command reads state without reserving or delivering work.
 
-Times for triggers whose effective zone is `Local` display in UTC. Native cron jobs use UTC for those schedules; adapter cron previews are unavailable because the adapter's execution timezone is unknown. An embedded timezone directive takes precedence.
+Times for triggers whose effective zone is `Local` display in UTC. Native cron jobs use UTC for those schedules. Adapter cron previews with `Local` or no timezone are unavailable because the adapter's execution timezone is unknown. An embedded timezone directive takes precedence.
 
 ## Definitions
 
