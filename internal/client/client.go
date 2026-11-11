@@ -138,18 +138,13 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			}
 			ep := r.Endpoint()
 			address := ep.ConfigAddress()
-			if err := ctx.Err(); err != nil {
-				yield(liveDaemon{}, err)
-				return
-			}
 			url, info, probeErr := probe(ctx, address)
 			if probeErr != nil {
-				if err := ctx.Err(); errors.Is(err, context.Canceled) {
+				if err := ctx.Err(); err != nil {
 					yield(liveDaemon{}, err)
 					return
 				}
-				// A deadline preserves this probe as evidence, but ends the scan.
-				if !yield(liveDaemon{}, unreachableRuntime(r, dataDir, probeErr)) || ctx.Err() != nil {
+				if !yield(liveDaemon{}, unreachableRuntime(r, dataDir, probeErr)) {
 					return
 				}
 				continue
@@ -462,7 +457,7 @@ func newHTTPClientWithoutAuth(ctx context.Context, baseURL string, opts Opts) (*
 	}
 	for candidate, err := range liveDaemons(ctx, ns.DataDir) {
 		if err != nil {
-			if errors.Is(err, ErrLocalDaemonUnreachable) && ctx.Err() == nil {
+			if errors.Is(err, ErrLocalDaemonUnreachable) {
 				continue
 			}
 			return nil, err

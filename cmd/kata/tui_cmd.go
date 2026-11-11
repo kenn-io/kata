@@ -60,24 +60,27 @@ Set [tui] confirm_quit = false in <KATA_HOME>/config.toml to make q quit immedia
 					return err
 				}
 			}
+			daemonName := flags.Daemon
+			profile := ""
+			if selection, inspectErr := client.InspectSelection(ctx, workspace, flags.Daemon); inspectErr == nil {
+				if name := resolvedProfileName(selection.Resolved); name != "" {
+					profile = name
+					daemonName = name
+				}
+			}
 			err = runTUI(ctx, tui.Options{
 				Stdout:           cmd.OutOrStdout(),
 				Stderr:           cmd.ErrOrStderr(),
 				DisplayUIDFormat: uidFormat,
-				DaemonName:       flags.Daemon,
+				DaemonName:       daemonName,
 				Mouse:            tuiConfig.Mouse,
 				SkipQuitConfirm:  tuiConfig.ConfirmQuit != nil && !*tuiConfig.ConfirmQuit,
 				InitialIssueRef:  initialIssueRef,
 				ProjectName:      strings.TrimSpace(flags.Project),
 				Workspace:        workspace,
 			})
-			if _, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok {
-				selection, inspectErr := client.InspectSelection(ctx, workspace, flags.Daemon)
-				if inspectErr == nil {
-					if profile := resolvedProfileName(selection.Resolved); profile != "" {
-						return cliDaemonTargetError(err, profile)
-					}
-				}
+			if _, ok := errors.AsType[*client.LocalDaemonUnreachableError](err); ok && profile != "" {
+				return cliDaemonTargetError(err, profile)
 			}
 			return err
 		},
