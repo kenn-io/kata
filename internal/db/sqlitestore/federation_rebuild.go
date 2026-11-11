@@ -186,14 +186,9 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 				return errStaleFederationPreparation
 			}
 		}
-		// Reuse the first validated plan; earlier rehomes can change later plans.
-		// The move routine keeps its live claim, recurrence, and import guards.
-		for i, p := range prepared.projects {
-			var planned *[]db.FederatedMoveDecision
-			if i == 0 {
-				planned = &p.decisions
-			}
-			if _, err := d.rehomeFederatedMovedIssues(ctx, tx, p.events, p.moveProjection, nil, planned); err != nil {
+		// The existing move routine keeps its live claim, recurrence, and import guards.
+		for _, p := range prepared.projects {
+			if _, err := d.rehomeFederatedMovedIssues(ctx, tx, p.events, p.moveProjection, nil); err != nil {
 				return err
 			}
 		}

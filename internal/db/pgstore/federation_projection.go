@@ -565,7 +565,7 @@ func (s *Store) materializeFederatedProjectTxScoped(
 		}
 		event, err := s.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, IssueUID: issueUID, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: payload, SkipRelay: true})
 		return event.ID, err
-	}, nil)
+	})
 	if err != nil {
 		return err
 	}

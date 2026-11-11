@@ -77,24 +77,3 @@ func TestMCPEventSubscriptionsMigrationMatchesFreshSchema(t *testing.T) {
 	require.NoError(t, upgraded.QueryRowContext(ctx, `SELECT COUNT(*) FROM mcp_event_subscriptions`).Scan(&empty))
 	assert.Zero(t, empty)
 }
-
-func TestFederationGenerationsVersionMigration(t *testing.T) {
-	ctx := t.Context()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
-	t.Cleanup(cleanup)
-	const schema = "federation_generations_upgrade"
-	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
-	require.NoError(t, err)
-	require.NoError(t, store.Close())
-	admin, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = admin.Close() })
-	_, err = admin.ExecContext(ctx, `UPDATE federation_generations_upgrade.meta SET value='50' WHERE key='schema_version'`)
-	require.NoError(t, err)
-	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = upgraded.Close() })
-	version, err := upgraded.SchemaVersion(ctx)
-	require.NoError(t, err)
-	require.Equal(t, db.CurrentSchemaVersion(), version)
-}

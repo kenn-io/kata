@@ -357,25 +357,10 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEven
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-// A supplied plan must have been validated under the same write transaction.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error), planned *[]FederatedMoveDecision) ([]int64, error) {
-	var decisions []FederatedMoveDecision
-	var destinations []int64
-	if planned == nil {
-		var err error
-		decisions, destinations, err = PlanFederatedMovedIssues(ctx, tx, events, p)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		decisions = *planned
-		projects := map[int64]bool{}
-		for _, decision := range decisions {
-			if decision.Joined && decision.Active {
-				projects[decision.TargetID] = true
-			}
-		}
-		destinations = slices.Sorted(maps.Keys(projects))
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) ([]int64, error) {
+	decisions, destinations, err := PlanFederatedMovedIssues(ctx, tx, events, p)
+	if err != nil {
+		return nil, err
 	}
 	moved := map[string]FoldEvent{}
 	for _, e := range events {

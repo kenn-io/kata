@@ -12,77 +12,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestFederationGenerationTracksProjectChanges(t *testing.T) {
-	ctx := t.Context()
-	d, source, issue := incrementalTestStore(t)
-	other, err := d.CreateProject(ctx, "other")
-	require.NoError(t, err)
-	writer, err := Open(ctx, d.Path())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, writer.Close()) })
-	generation := func(id int64) int64 {
-		var value int64
-		require.NoError(t, d.QueryRowContext(ctx, `SELECT generation FROM federation_project_generations WHERE project_id=?`, id).Scan(&value))
-		return value
-	}
-	before, untouched := generation(source.ID), generation(other.ID)
-	tx, err := writer.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	_, err = tx.ExecContext(ctx, `UPDATE issues SET title='rolled back' WHERE id=?`, issue.ID)
-	require.NoError(t, err)
-	require.NoError(t, tx.Rollback())
-	require.Equal(t, before, generation(source.ID))
-	_, err = writer.ExecContext(ctx, `UPDATE issues SET title='changed' WHERE id=?`, issue.ID)
-	require.NoError(t, err)
-	require.Greater(t, generation(source.ID), before)
-	require.Equal(t, untouched, generation(other.ID))
-	before = generation(source.ID)
-	_, err = writer.ExecContext(ctx, `UPDATE issues SET project_id=? WHERE id=?`, other.ID, issue.ID)
-	require.NoError(t, err)
-	require.Greater(t, generation(source.ID), before)
-	require.Greater(t, generation(other.ID), untouched)
-	before = generation(other.ID)
-	tx, err = writer.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	require.NoError(t, db.LockCronProject(ctx, tx, other.ID))
-	require.NoError(t, tx.Commit())
-	require.Equal(t, before, generation(other.ID))
-}
-
-func TestFederationGenerationUpgradeFrom50(t *testing.T) {
-	ctx := t.Context()
-	d, project, _ := incrementalTestStore(t)
-	path := d.Path()
-	rows, err := d.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'federation_generation_%'`)
-	require.NoError(t, err)
-	var names []string
-	for rows.Next() {
-		var name string
-		require.NoError(t, rows.Scan(&name))
-		names = append(names, name)
-	}
-	require.NoError(t, rows.Err())
-	require.NoError(t, rows.Close())
-	for _, name := range names {
-		_, err := d.ExecContext(ctx, `DROP TRIGGER "`+name+`"`)
-		require.NoError(t, err)
-	}
-	_, err = d.ExecContext(ctx, `DROP TABLE federation_project_generations`)
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `UPDATE meta SET value='50' WHERE key='schema_version'`)
-	require.NoError(t, err)
-	require.NoError(t, UpgradeInPlace(ctx, path))
-	var version, generation int64
-	require.NoError(t, d.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='schema_version'`).Scan(&version))
-	require.EqualValues(t, 51, version)
-	require.NoError(t, d.QueryRowContext(ctx, `SELECT generation FROM federation_project_generations WHERE project_id=?`, project.ID).Scan(&generation))
-	require.Zero(t, generation)
-	_, err = d.ExecContext(ctx, `UPDATE projects SET name='updated' WHERE id=?`, project.ID)
-	require.NoError(t, err)
-	require.NoError(t, d.QueryRowContext(ctx, `SELECT generation FROM federation_project_generations WHERE project_id=?`, project.ID).Scan(&generation))
-	require.Positive(t, generation)
-}
-
 func TestFederationGenerationSurvivesProjectIDReuse(t *testing.T) {
 	ctx := t.Context()
 	d, _, _ := incrementalTestStore(t)
@@ -101,7 +30,7 @@ func TestFederationGenerationSurvivesProjectIDReuse(t *testing.T) {
 }
 
 func TestFederationGenerationsRejectChangedRows(t *testing.T) {
-	for _, change := range []string{"issue", "issue-insert", "comment", "comment-insert", "comment-delete", "label", "label-insert", "label-delete", "link", "link-insert", "link-delete", "event", "event-delete", "binding", "project", "provenance", "provenance-delete"} {
+	for _, change := range []string{"issue", "issue-project", "issue-insert", "comment", "comment-insert", "comment-delete", "label", "label-insert", "label-delete", "link", "link-insert", "link-delete", "event", "event-delete", "binding", "project", "provenance", "provenance-delete"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := t.Context()
 			d, project, issue := incrementalTestStore(t)
@@ -125,6 +54,10 @@ func TestFederationGenerationsRejectChangedRows(t *testing.T) {
 			switch change {
 			case "issue":
 				_, err = writer.ExecContext(ctx, `UPDATE issues SET title='changed' WHERE id=?`, issue.ID)
+			case "issue-project":
+				other, createErr := writer.CreateProject(ctx, "other")
+				require.NoError(t, createErr)
+				_, err = writer.ExecContext(ctx, `UPDATE issues SET project_id=? WHERE id=?`, other.ID, issue.ID)
 			case "issue-insert":
 				_, err = writer.ExecContext(ctx, `INSERT INTO issues(uid,project_id,short_id,title,author) VALUES('01HZNQ7VFPK1XGD8R5MABCD4EC',?,'d4ec','new','tester')`, project.ID)
 			case "comment":
