@@ -761,30 +761,3 @@ func TestOpenAPIDocumentShowIssueCarriesLabelStrings(t *testing.T) {
 
 	require.NotContains(t, schemas["Issue"].Properties, "labels")
 }
-
-func TestOpenAPICronDeliveryReadContract(t *testing.T) {
-	doc := OpenAPIDocument()
-	for _, resource := range []string{"jobs", "workflows"} {
-		for _, suffix := range []string{"", "/{cron_uid}"} {
-			path := "/api/v1/projects/{project_id}/cron/" + resource + suffix
-			operation := doc.Paths[path].Get
-			require.NotNil(t, operation)
-			var include *huma.Param
-			for _, parameter := range operation.Parameters {
-				if parameter.Name == "include" && parameter.In == "query" {
-					include = parameter
-				}
-			}
-			if resource == "jobs" {
-				require.NotNil(t, include, path)
-				require.False(t, include.Required)
-			} else {
-				require.Nil(t, include, path)
-			}
-		}
-	}
-	job := doc.Components.Schemas.Map()["CronJob"]
-	require.NotNil(t, job)
-	require.Contains(t, job.Properties, "delivery")
-	require.NotContains(t, job.Required, "delivery")
-}

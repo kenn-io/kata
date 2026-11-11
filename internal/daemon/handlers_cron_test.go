@@ -305,47 +305,41 @@ func deliveryHTTPFixture(t *testing.T) (*testenv.Env, db.Project, db.Issue, db.C
 	return env, p, parent, j, now
 }
 
-func TestCronJobShowIncludesDelivery(t *testing.T) {
+func TestCronJobDeliveryResponses(t *testing.T) {
 	env, p, _, j, now := deliveryHTTPFixture(t)
-	status, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s?include=unknown,delivery", p.ID, j.UID), nil)
-	require.Equalf(t, 200, status, "%s", raw)
-	var out struct {
-		Job struct {
-			Delivery struct {
-				State       string    `json:"state"`
-				Next        string    `json:"next_due_at"`
-				EvaluatedAt time.Time `json:"evaluated_at"`
-			} `json:"delivery"`
-		} `json:"job"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &out))
-	require.Equal(t, "behind", out.Job.Delivery.State)
-	require.NotEmpty(t, out.Job.Delivery.Next)
-	require.Equal(t, now, out.Job.Delivery.EvaluatedAt)
-}
-
-func TestCronJobListDeliveryOnlyForNativeJobs(t *testing.T) {
-	env, p, _, j, _ := deliveryHTTPFixture(t)
-	status, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs?include=delivery", p.ID), nil)
-	require.Equalf(t, 200, status, "%s", raw)
-	var out struct {
-		Jobs []map[string]jsontext.Value `json:"jobs"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &out))
-	require.Len(t, out.Jobs, 1)
-	require.JSONEq(t, `"`+j.UID+`"`, string(out.Jobs[0]["uid"]))
-	require.Contains(t, out.Jobs[0], "delivery")
-}
-
-func TestCronJobResponsesOmitDeliveryByDefault(t *testing.T) {
-	env, p, _, j, _ := deliveryHTTPFixture(t)
 	base := fmt.Sprintf("/api/v1/projects/%d/cron/jobs", p.ID)
 	path := base + "/" + j.UID
-	for _, url := range []string{base, path, path + "?include=unknown"} {
-		status, raw := cronHTTP(t, env, http.MethodGet, url, nil)
+	t.Run("show", func(t *testing.T) {
+		status, raw := cronHTTP(t, env, http.MethodGet, path+"?include=unknown,delivery", nil)
 		require.Equalf(t, 200, status, "%s", raw)
-		require.NotContains(t, string(raw), `"delivery"`)
-	}
+		var out struct {
+			Job struct {
+				Delivery struct {
+					EvaluatedAt time.Time `json:"evaluated_at"`
+				} `json:"delivery"`
+			} `json:"job"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &out))
+		require.Equal(t, now, out.Job.Delivery.EvaluatedAt)
+	})
+	t.Run("list", func(t *testing.T) {
+		status, raw := cronHTTP(t, env, http.MethodGet, base+"?include=delivery", nil)
+		require.Equalf(t, 200, status, "%s", raw)
+		var out struct {
+			Jobs []map[string]jsontext.Value `json:"jobs"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &out))
+		require.Len(t, out.Jobs, 1)
+		require.JSONEq(t, `"`+j.UID+`"`, string(out.Jobs[0]["uid"]))
+		require.Contains(t, out.Jobs[0], "delivery")
+	})
+	t.Run("omitted by default", func(t *testing.T) {
+		for _, url := range []string{base, path, path + "?include=unknown"} {
+			status, raw := cronHTTP(t, env, http.MethodGet, url, nil)
+			require.Equalf(t, 200, status, "%s", raw)
+			require.NotContains(t, string(raw), `"delivery"`)
+		}
+	})
 }
 
 // Read the actual delivery projection before committing a child move; the

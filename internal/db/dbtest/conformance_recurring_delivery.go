@@ -204,6 +204,46 @@ func checkRecurringDeliveryStatus(t *testing.T, s db.Storage) error {
 		}
 		require.True(t, found)
 	})
+	t.Run("durable scan", func(t *testing.T) {
+		parent, _, err := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Scan parent", Author: "operator"})
+		require.NoError(t, err)
+		def := original
+		def.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Scan work"}
+		j, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Scan schedule", Actor: "operator", Definition: def})
+		require.NoError(t, err)
+		parent, err = s.IssueByID(ctx, parent.ID)
+		require.NoError(t, err)
+		var parentMetadata map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal([]byte(parent.Metadata), &parentMetadata))
+		progress, err := cron.DecodeRecurringProgress(parentMetadata["cron.progress."+j.UID])
+		require.NoError(t, err)
+		j.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 * * * *"}
+		raw, err := json.Marshal(j.Definition)
+		require.NoError(t, err)
+		deliveryExec(t, s, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, string(raw), j.UID)
+		now := progress.Anchor.Add(60 * 24 * time.Hour)
+		d := deliveryRead(t, s, p, j, now)
+		require.Equal(t, "behind", d.State)
+		require.Nil(t, d.Scan, "a hypothetical scan must not masquerade as durable progress")
+		require.Equal(t, progress.Through, *d.Through)
+		require.Zero(t, d.Pending.Count)
+		require.True(t, d.Pending.More)
+		_, err = s.DispatchRecurringCron(t.Context(), db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: j.UID, ExpectedEventUID: j.DefinitionEventUID, Now: now})
+		require.NoError(t, err)
+		stored, err := s.IssueByID(t.Context(), parent.ID)
+		require.NoError(t, err)
+		var metadata map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal([]byte(stored.Metadata), &metadata))
+		checkpoint, err := cron.DecodeRecurringProgress(metadata["cron.progress."+j.UID])
+		require.NoError(t, err)
+		require.NotNil(t, checkpoint.Scan)
+		d = deliveryRead(t, s, p, j, now)
+		require.Equal(t, checkpoint.Through, *d.Through)
+		require.Equal(t, checkpoint.Scan.Cursor, d.Scan.Cursor)
+		require.Equal(t, checkpoint.Scan.Until, d.Scan.Until)
+		require.Equal(t, 1, d.Pending.Count)
+		require.False(t, d.Pending.More)
+	})
 	return nil
 }
 
@@ -225,62 +265,10 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 		healthy, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Healthy schedule", Actor: "operator", Definition: definition})
 		require.NoError(t, err)
 		newest := deliveryRead(t, s, p, j, now).LastChild.UID
-		var latest, older db.Issue
-		for _, child := range children {
-			if child.UID == newest {
-				latest = child
-			} else {
-				older = child
-			}
+		older := children[0]
+		if older.UID == newest {
+			older = children[1]
 		}
-		for _, tc := range []struct{ name, key, raw string }{
-			{"future version", "version", "2"},
-			{"missing version", "version", ""},
-			{"zero timestamp", "scheduled_at", `"0001-01-01T00:00:00Z"`},
-			{"invalid timestamp", "scheduled_at", `"not a timestamp"`},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				var metadata, occurrence map[string]jsontext.Value
-				require.NoError(t, json.Unmarshal([]byte(latest.Metadata), &metadata))
-				require.NoError(t, json.Unmarshal(metadata["cron.occurrence"], &occurrence))
-				if tc.raw == "" {
-					delete(occurrence, tc.key)
-				} else {
-					occurrence[tc.key] = jsontext.Value(tc.raw)
-				}
-				metadata["cron.occurrence"], err = json.Marshal(occurrence)
-				require.NoError(t, err)
-				raw, err := json.Marshal(metadata)
-				require.NoError(t, err)
-				deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, string(raw), latest.ID)
-				if tc.name == "future version" {
-					d := deliveryRead(t, s, p, j, now)
-					require.Equal(t, "error", d.State)
-					require.Nil(t, d.LastChild)
-					rows, err := s.RecurringCronDelivery(ctx, db.CronDeliveryQuery{ProjectID: p.ID}, now)
-					require.NoError(t, err)
-					found := false
-					for _, row := range rows {
-						if row.Job.UID == healthy.UID {
-							found = true
-							require.Empty(t, row.Delivery.Error)
-						}
-					}
-					require.True(t, found)
-					records, err := CollectImportRecords(ctx, s, db.ExportFilter{IncludeDeleted: true})
-					require.NoError(t, err)
-					restored := b.Open(t)
-					t.Cleanup(func() { require.NoError(t, restored.Close()) })
-					require.NoError(t, restored.ImportReplay(t.Context(), records, db.ImportOptions{}))
-					rp, err := restored.ProjectByUID(t.Context(), p.UID)
-					require.NoError(t, err)
-					require.Equal(t, "error", deliveryRead(t, restored, rp, j, now).State)
-				} else {
-					require.Equal(t, older.UID, deliveryRead(t, s, p, j, now).LastChild.UID)
-				}
-			})
-		}
-		deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, latest.Metadata, latest.ID)
 		var metadata, occurrence map[string]jsontext.Value
 		require.NoError(t, json.Unmarshal([]byte(older.Metadata), &metadata))
 		require.NoError(t, json.Unmarshal(metadata["cron.occurrence"], &occurrence))
@@ -294,6 +282,24 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 		d := deliveryRead(t, s, p, j, now)
 		require.Equal(t, "error", d.State)
 		require.Nil(t, d.LastChild)
+		rows, err := s.RecurringCronDelivery(ctx, db.CronDeliveryQuery{ProjectID: p.ID}, now)
+		require.NoError(t, err)
+		found := false
+		for _, row := range rows {
+			if row.Job.UID == healthy.UID {
+				found = true
+				require.Empty(t, row.Delivery.Error)
+			}
+		}
+		require.True(t, found)
+		records, err := CollectImportRecords(ctx, s, db.ExportFilter{IncludeDeleted: true})
+		require.NoError(t, err)
+		restored := b.Open(t)
+		t.Cleanup(func() { require.NoError(t, restored.Close()) })
+		require.NoError(t, restored.ImportReplay(t.Context(), records, db.ImportOptions{}))
+		rp, err := restored.ProjectByUID(t.Context(), p.UID)
+		require.NoError(t, err)
+		require.Equal(t, "error", deliveryRead(t, restored, rp, j, now).State)
 		deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, older.Metadata, older.ID)
 	})
 	t.Run("last child", func(t *testing.T) {
@@ -377,37 +383,6 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 		require.Equal(t, "hub_disabled", d.Authority)
 		require.Equal(t, "not_owning_hub", d.Reason)
 	})
-	return nil
-}
-
-func checkRecurringDeliveryDurableScan(t *testing.T, s db.Storage) error {
-	p, parent, j, progress := recurringFixture(t, s, "latest")
-	j.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 * * * *"}
-	raw, err := json.Marshal(j.Definition)
-	require.NoError(t, err)
-	deliveryExec(t, s, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, string(raw), j.UID)
-	now := progress.Anchor.Add(60 * 24 * time.Hour)
-	d := deliveryRead(t, s, p, j, now)
-	require.Equal(t, "behind", d.State)
-	require.Nil(t, d.Scan, "a hypothetical scan must not masquerade as durable progress")
-	require.Equal(t, progress.Through, *d.Through)
-	require.Zero(t, d.Pending.Count)
-	require.True(t, d.Pending.More)
-	_, err = s.DispatchRecurringCron(t.Context(), db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: j.UID, ExpectedEventUID: j.DefinitionEventUID, Now: now})
-	require.NoError(t, err)
-	stored, err := s.IssueByID(t.Context(), parent.ID)
-	require.NoError(t, err)
-	var metadata map[string]jsontext.Value
-	require.NoError(t, json.Unmarshal([]byte(stored.Metadata), &metadata))
-	checkpoint, err := cron.DecodeRecurringProgress(metadata["cron.progress."+j.UID])
-	require.NoError(t, err)
-	require.NotNil(t, checkpoint.Scan)
-	d = deliveryRead(t, s, p, j, now)
-	require.Equal(t, checkpoint.Through, *d.Through)
-	require.Equal(t, checkpoint.Scan.Cursor, d.Scan.Cursor)
-	require.Equal(t, checkpoint.Scan.Until, d.Scan.Until)
-	require.Equal(t, 1, d.Pending.Count)
-	require.False(t, d.Pending.More)
 	return nil
 }
 

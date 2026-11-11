@@ -1,15 +1,13 @@
-package pgstore_test
+package pgstore
 
 import (
 	"encoding/json"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -17,7 +15,7 @@ func TestRecurringDeliveryHistoryCostPostgres(t *testing.T) {
 	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
-	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "delivery_cost", SchemaMode: pgstore.SchemaModeBootstrap})
+	store, err := OpenWithConfig(ctx, dsn, Config{Schema: "delivery_cost", SchemaMode: SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
 	p, err := store.CreateProject(ctx, "example-project")
@@ -42,17 +40,9 @@ func TestRecurringDeliveryHistoryCostPostgres(t *testing.T) {
 		require.NoError(t, err)
 		_, err = store.ExecContext(ctx, `ANALYZE issues; ANALYZE links`)
 		require.NoError(t, err)
-		for _, query := range []db.CronDeliveryQuery{{ProjectID: p.ID, JobUID: jobs[0].UID}, {ProjectID: p.ID}} {
-			startTime := time.Now()
-			for range 3 {
-				result, err := store.RecurringCronDelivery(ctx, query, time.Now())
-				require.NoError(t, err)
-				require.NotEmpty(t, result)
-			}
-			t.Logf("%d children per job, job=%t: three reads %s", n, query.JobUID != "", time.Since(startTime))
-		}
 		var raw []byte
-		err = store.QueryRowContext(ctx, `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT i.id, i.uid, i.metadata::jsonb -> 'cron.occurrence' FROM issues i WHERE (i.metadata::jsonb -> 'cron.occurrence' ->> 'job_uid') COLLATE "C"=$1 AND i.deleted_at IS NULL AND kata_occurrence_key(i.metadata::jsonb -> 'cron.occurrence') IS NOT NULL AND EXISTS (SELECT 1 FROM links l JOIN projects p ON p.id=i.project_id WHERE l.from_issue_id=i.id AND l.type='parent' AND l.to_issue_id=$2 AND p.deleted_at IS NULL) ORDER BY kata_occurrence_key(i.metadata::jsonb -> 'cron.occurrence') COLLATE "C" DESC, i.uid COLLATE "C" DESC LIMIT 1`, jobs[0].UID, parent.ID).Scan(&raw)
+		query, args := recurringChildQuery(ctx, parent.ID, jobs[0].UID)
+		err = store.QueryRowContext(ctx, `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) `+query, args...).Scan(&raw)
 		require.NoError(t, err)
 		var result []struct {
 			Plan map[string]any `json:"Plan"`
@@ -61,7 +51,11 @@ func TestRecurringDeliveryHistoryCostPostgres(t *testing.T) {
 		var findIndex func(map[string]any) (float64, bool)
 		findIndex = func(node map[string]any) (float64, bool) {
 			if node["Index Name"] == "idx_issues_recurring_delivery" {
-				return node["Actual Rows"].(float64), true
+				rows := node["Actual Rows"].(float64)
+				if removed, ok := node["Rows Removed by Filter"].(float64); ok {
+					rows += removed
+				}
+				return rows * node["Actual Loops"].(float64), true
 			}
 			if children, ok := node["Plans"].([]any); ok {
 				for _, child := range children {

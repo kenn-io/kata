@@ -17,13 +17,13 @@ func TestDescribeRecurring(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, anchor.Add(2*time.Hour), d.NextDueAt)
 	require.Len(t, d.Batch.Due, 2)
-}
 
-func TestDescribeRecurringPreviewExhausted(t *testing.T) {
-	j := nativeJob(t)
-	last := time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC)
-	progress := RecurringProgress{Version: 1, Anchor: last, Through: last}
-	_, err := DescribeRecurring(j, definitionUID, progress, last)
-	require.ErrorIs(t, err, ErrInvalid)
-	require.ErrorContains(t, err, "schedule has no supported next occurrence")
+	t.Run("preview exhausted", func(t *testing.T) {
+		j := nativeJob(t)
+		last := time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC)
+		progress := RecurringProgress{Version: 1, Anchor: last, Through: last}
+		_, err := DescribeRecurring(j, definitionUID, progress, last)
+		require.ErrorIs(t, err, ErrInvalid)
+		require.ErrorContains(t, err, "schedule has no supported next occurrence")
+	})
 }

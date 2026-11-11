@@ -43,6 +43,7 @@ func TestRecurringDeliveryHistoryCost(t *testing.T) {
 		require.NoError(t, conn.Close())
 		return pages
 	}
+	var smallShow, smallList int
 	for _, n := range []int{1000, 35040} {
 		start := 1
 		if n > 1000 {
@@ -58,8 +59,10 @@ func TestRecurringDeliveryHistoryCost(t *testing.T) {
 		list := count(db.CronDeliveryQuery{ProjectID: p.ID})
 		t.Logf("%d children per job: show=%d pages, list=%d pages", n, show, list)
 		if n == 1000 {
-			require.Less(t, show, 10000)
-			continue
+			smallShow, smallList = show, list
+		} else {
+			require.LessOrEqual(t, show, smallShow+100, "show cost should stay near the smaller history")
+			require.LessOrEqual(t, list, smallList+400, "list cost should stay near the smaller history")
 		}
 		require.Less(t, show, 10000, "job show should seek occurrence evidence")
 		require.Less(t, list, 40000, "job list should seek each job's evidence")

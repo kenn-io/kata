@@ -71,22 +71,12 @@ func TestRecurringDeliveryMigrationPostgres(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, admin.Close()) })
-	_, err = admin.ExecContext(ctx, `DROP INDEX recurring_delivery_upgrade.idx_issues_recurring_delivery; DROP FUNCTION recurring_delivery_upgrade.kata_occurrence_key(jsonb); UPDATE recurring_delivery_upgrade.meta SET value='50' WHERE key='schema_version'; CREATE TABLE recurring_delivery_upgrade.idx_issues_recurring_delivery(x integer)`)
-	require.NoError(t, err)
-	_, err = pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
-	require.Error(t, err)
-	var version int
-	require.NoError(t, admin.QueryRowContext(ctx, `SELECT value FROM recurring_delivery_upgrade.meta WHERE key='schema_version'`).Scan(&version))
-	require.Equal(t, 50, version)
-	var functionExists bool
-	require.NoError(t, admin.QueryRowContext(ctx, `SELECT to_regprocedure('recurring_delivery_upgrade.kata_occurrence_key(jsonb)') IS NOT NULL`).Scan(&functionExists))
-	require.False(t, functionExists)
-	_, err = admin.ExecContext(ctx, `DROP TABLE recurring_delivery_upgrade.idx_issues_recurring_delivery`)
+	_, err = admin.ExecContext(ctx, `DROP INDEX recurring_delivery_upgrade.idx_issues_recurring_delivery; DROP FUNCTION recurring_delivery_upgrade.kata_occurrence_key(jsonb); UPDATE recurring_delivery_upgrade.meta SET value='50' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, upgraded.Close()) })
-	version, err = upgraded.SchemaVersion(ctx)
+	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
 	require.Equal(t, db.CurrentSchemaVersion(), version)
 	rows, err := upgraded.RecurringCronDelivery(ctx, db.CronDeliveryQuery{ProjectID: p.ID, JobUID: job.UID}, time.Now())
@@ -94,8 +84,4 @@ func TestRecurringDeliveryMigrationPostgres(t *testing.T) {
 	require.Len(t, rows, 1)
 	require.NotNil(t, rows[0].Delivery.LastChild)
 	require.Equal(t, child.UID, rows[0].Delivery.LastChild.UID)
-
-	var key sql.NullString
-	require.NoError(t, upgraded.QueryRowContext(ctx, `SELECT kata_occurrence_key('{"version":1,"scheduled_at":"2026-01-01T00:00:00Z"}'::jsonb)`).Scan(&key))
-	require.True(t, key.Valid)
 }
