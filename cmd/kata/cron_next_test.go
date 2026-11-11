@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -44,7 +46,7 @@ func TestCronNextSavedSchedules(t *testing.T) {
 	}{
 		{"local once", `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"once","at":"2026-06-01T08:00:00Z","timezone":"Local"},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Inspection"},"overlap":"forbid","catchup":"all"}`, "", "2026-06-01T08:00:00Z", false, false},
 		{"native interval", native, parent, "2026-06-01T08:00:00Z", false, false},
-		{"native local cron", strings.Replace(native, `"kind":"interval","interval_seconds":7200`, `"kind":"cron","cron":"0 9 * * *"`, 1), parent, "cron_preview_unavailable", true, false},
+		{"native local cron", strings.Replace(native, `"kind":"interval","interval_seconds":7200`, `"kind":"cron","cron":"0 9 * * *"`, 1), parent, "2026-06-01T09:00:00Z", false, false},
 		{"archived parent", native, strings.Replace(parent, `"status":"open"`, `"status":"open","deleted_at":"2026-01-01T00:00:00Z"`, 1), `"status":"parent_closed"`, false, false},
 		{"closed parent without progress", native, strings.Replace(parent, `"status":"open","revision":7,"metadata":{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{"version":1,"anchor":"2026-06-01T00:00:00Z","through":"2026-06-01T06:00:00Z"}}`, `"status":"closed","metadata":{}`, 1), "cron_preview_unavailable", true, false},
 		{"missing parent", native, "error:issue_not_found", "cron_preview_unavailable", true, false},
@@ -115,7 +117,7 @@ func TestCronNextSavedSchedules(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Contains(t, out, tc.want)
-			if tc.name == "local once" || tc.name == "native interval" {
+			if tc.name == "local once" || tc.name == "native interval" || tc.name == "native local cron" {
 				previous := time.Local
 				t.Cleanup(func() { time.Local = previous })
 				for _, offset := range []int{-5 * 3600, 2 * 3600} {
@@ -123,7 +125,7 @@ func TestCronNextSavedSchedules(t *testing.T) {
 					out, _, err := executeCronCLI(t, server.URL, nil, "job", "next", id, "--count", "1", "--from", "2026-06-01T01:00:00Z")
 					require.NoError(t, err)
 					require.Contains(t, out, `"timezone":"UTC"`)
-					require.Contains(t, out, `"local":"2026-06-01T08:00:00Z"`)
+					require.Contains(t, out, `"local":"`+tc.want+`"`)
 				}
 			}
 		})
@@ -145,6 +147,39 @@ func TestCronNextLeavesProgressUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, out, `"status":"ready"`)
 	after, err := env.DB.IssueByUID(t.Context(), parent.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, before.Metadata, after.Metadata)
+
+	def.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 * * *", Timezone: "Local"}
+	job, _, err = env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Local cron", Actor: "tester", Definition: def})
+	require.NoError(t, err)
+	before, err = env.DB.IssueByUID(t.Context(), parent.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	var metadata map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(before.Metadata), &metadata))
+	progress, err := cron.DecodeRecurringProgress(metadata["cron.progress."+job.UID])
+	require.NoError(t, err)
+	start := progress.Through.UTC()
+	first := time.Date(start.Year(), start.Month(), start.Day(), 9, 0, 0, 0, time.UTC)
+	if !first.After(start) {
+		first = first.AddDate(0, 0, 1)
+	}
+	want := []time.Time{first, first.AddDate(0, 0, 1), first.AddDate(0, 0, 2)}
+	previous := time.Local
+	t.Cleanup(func() { time.Local = previous })
+	for _, offset := range []int{-5 * 3600, 2 * 3600} {
+		time.Local = time.FixedZone("client", offset)
+		batch, err := cron.PlanRecurring(def, job.DefinitionEventUID, progress, want[2])
+		require.NoError(t, err)
+		require.Equal(t, want, batch.Due)
+		out, _, err := executeCronCLI(t, env.URL, nil, "job", "next", job.UID, "--from", start.Format(time.RFC3339Nano))
+		require.NoError(t, err)
+		require.Contains(t, out, `"timezone":"UTC"`)
+		for _, instant := range want {
+			require.Contains(t, out, `"local":"`+instant.Format(time.RFC3339)+`"`)
+		}
+	}
+	after, err = env.DB.IssueByUID(t.Context(), parent.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, before.Metadata, after.Metadata)
 }

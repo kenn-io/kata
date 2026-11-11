@@ -20,43 +20,41 @@ type JobPreview struct {
 
 // PreviewJob applies the same availability rules to every saved-job preview.
 func PreviewJob(def JobDefinition, parent *PreviewParent, after time.Time, count int) (JobPreview, error) {
-	if err := def.ValidateVersion(); err != nil {
-		return JobPreview{}, err
-	}
-	if !def.Enabled {
-		return JobPreview{Status: "paused"}, nil
-	}
-	var schedule cronparser.Schedule
-	var scheduleErr error
-	if def.Trigger.Kind == "cron" {
-		schedule, scheduleErr = adapterCronSchedule(def.Trigger)
-		_, _, hasZone, _ := splitCronDirective(def.Trigger.Cron)
-		if parsed, ok := schedule.(*cronparser.SpecSchedule); scheduleErr == nil && ok && parsed.Location == time.Local && (hasZone || def.Trigger.Timezone != "") {
-			return JobPreview{Status: "unavailable"}, nil
-		}
-	}
+	status := ""
 	var progress RecurringProgress
-	if IsRecurringIssueJob(def) {
+	if !def.Enabled {
+		status = "paused"
+	} else if IsRecurringIssueJob(def) {
 		if parent == nil || parent.Progress == nil {
-			return JobPreview{Status: "unavailable"}, nil
+			status = "unavailable"
+		} else if !parent.Open {
+			status = "parent_closed"
+		} else {
+			progress = *parent.Progress
 		}
-		if !parent.Open {
-			return JobPreview{Status: "parent_closed"}, nil
-		}
-		progress = *parent.Progress
 	} else if def.Trigger.Kind != "once" {
 		if def.Trigger.Kind != "cron" {
-			return JobPreview{Status: "unsupported"}, nil
+			status = "unsupported"
+		} else if schedule, err := adapterCronSchedule(def.Trigger); err == nil {
+			_, _, hasZone, _ := splitCronDirective(def.Trigger.Cron)
+			if schedule == nil {
+				status = "unsupported"
+			} else if parsed, ok := schedule.(*cronparser.SpecSchedule); ok && parsed.Location == time.Local && (hasZone || def.Trigger.Timezone != "") {
+				status = "unavailable"
+			}
 		}
-		if scheduleErr == nil && schedule == nil {
-			return JobPreview{Status: "unsupported"}, nil
+	}
+	if status != "" {
+		if err := def.ValidateVersion(); err != nil {
+			return JobPreview{}, err
 		}
+		return JobPreview{Status: status}, nil
 	}
 	occurrences, err := RecurringOccurrences(def, progress, after, count)
 	if err != nil {
 		return JobPreview{}, err
 	}
-	status := "ready"
+	status = "ready"
 	if len(occurrences) == 0 {
 		status = "exhausted"
 	}
