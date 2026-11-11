@@ -194,7 +194,6 @@ export interface KataIssueDetailProps {
   fetchAttachment?: ((url: string) => Promise<Blob>) | undefined
   uploadAttachment?: ((file: File) => Promise<void>) | undefined
   attachmentsEnabled?: boolean | undefined
-  attachmentReadable?: ((attachment: KataAttachment) => boolean) | undefined
   actionsDisabled?: boolean | undefined
   detail: KataIssueDetailModel
   actions?: readonly KataIssueHostAction[]

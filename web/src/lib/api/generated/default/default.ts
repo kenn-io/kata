@@ -231,8 +231,6 @@ import type {
   ReachableGraphResponseBody,
   ReachableIssueGraphParams,
   ReachableIssueGraphPathParameters,
-  ReadUIAttachmentRoute200,
-  ReadUIAttachmentRouteParams,
   ReadUILaunchTargetParams,
   ReadUIReferencesParams,
   ReadUISnapshotParams,
@@ -7194,53 +7192,6 @@ export const revokeToken = async (
   return orvalFetch<revokeTokenResponse>(getRevokeTokenUrl({ id }), {
     ...options,
     method: 'POST',
-  })
-}
-
-export type readUIAttachmentRouteResponse200 = {
-  data: ReadUIAttachmentRoute200
-  status: 200
-}
-
-export type readUIAttachmentRouteResponseDefault = {
-  data: ErrorEnvelope
-  status: Exclude<HTTPStatusCodes, 200>
-}
-
-export type readUIAttachmentRouteResponseSuccess = readUIAttachmentRouteResponse200 & {
-  headers: Headers
-}
-export type readUIAttachmentRouteResponseError = readUIAttachmentRouteResponseDefault & {
-  headers: Headers
-}
-
-export type readUIAttachmentRouteResponse =
-  | readUIAttachmentRouteResponseSuccess
-  | readUIAttachmentRouteResponseError
-
-export const getReadUIAttachmentRouteUrl = (params: ReadUIAttachmentRouteParams) => {
-  const normalizedParams = new URLSearchParams()
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  })
-
-  const stringifiedParams = normalizedParams.toString()
-
-  return stringifiedParams.length > 0
-    ? `/api/v1/ui/attachment-route?${stringifiedParams}`
-    : `/api/v1/ui/attachment-route`
-}
-
-export const readUIAttachmentRoute = async (
-  params: ReadUIAttachmentRouteParams,
-  options?: Parameters<typeof orvalFetch>[1],
-): Promise<readUIAttachmentRouteResponse> => {
-  return orvalFetch<readUIAttachmentRouteResponse>(getReadUIAttachmentRouteUrl(params), {
-    ...options,
-    method: 'GET',
   })
 }
 

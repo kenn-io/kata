@@ -20,8 +20,6 @@
   import SettingsIcon from '@lucide/svelte/icons/settings'
   import SunIcon from '@lucide/svelte/icons/sun'
 
-  import type { KataAttachment } from '@kenn-io/kata-ui'
-  import { attachmentAvailable, attachmentWritable } from '../lib/kata/attachmentAvailability'
   import type { TokenOut, UIIssueReference } from '../lib/api/generated'
   import type { WebDaemonInfo } from '../lib/daemons/client'
   import type { KataRoute, ShareableFilters, SystemView } from '../lib/router'
@@ -70,8 +68,6 @@
     route: AppRoute
     requestedRoute?: AppRoute | undefined
     snapshot: UISnapshot
-    attachmentRoute?: import('../lib/api/generated').ReadUIAttachmentRoute200Route | undefined
-    attachmentRouteProject?: string | undefined
     loading: boolean
     canMutate: boolean
     mutationPending: boolean
@@ -144,8 +140,6 @@
     route: acceptedRoute,
     requestedRoute = undefined,
     snapshot,
-    attachmentRoute = undefined,
-    attachmentRouteProject = undefined,
     loading,
     canMutate,
     mutationPending,
@@ -938,22 +932,7 @@
         actionsDisabled={!canMutate || mutationPending || projection.selected_pending === true}
         authorityBlocked={!canMutate || projection.selected_pending === true}
         pending={projection.selected_pending === true}
-        attachmentsEnabled={attachmentWritable(
-          snapshot.capabilities,
-          projection.selected_detail.issue.project_uid,
-          attachmentRouteProject === projection.selected_detail.issue.project_uid
-            ? attachmentRoute
-            : undefined,
-        )}
-        attachmentReadable={(attachment: KataAttachment) =>
-          attachmentAvailable(
-            snapshot.capabilities,
-            projection.selected_detail!.issue.project_uid,
-            attachmentRouteProject === projection.selected_detail!.issue.project_uid
-              ? attachmentRoute
-              : undefined,
-            attachment,
-          )}
+        attachmentsEnabled={Boolean(snapshot.capabilities.attachments)}
         {onUploadAttachment}
         administrativeActionsAllowed={!scopedAuthority}
         {draftResetGeneration}

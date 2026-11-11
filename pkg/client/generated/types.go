@@ -7302,12 +7302,11 @@ func (t TriggerResponse) Validate() error {
 }
 
 type UICapabilities struct {
-	AccessAdmin            *bool    `json:"access_admin,omitempty"`
-	Account                *string  `json:"account,omitempty"`
-	ActorPolicy            string   `json:"actor_policy" validate:"required"`
-	AllowedActions         []string `json:"allowed_actions,omitempty"`
-	AttachmentLocalOrigins []string `json:"attachment_local_origins,omitempty"`
-	Attachments            *bool    `json:"attachments,omitempty"`
+	AccessAdmin    *bool    `json:"access_admin,omitempty"`
+	Account        *string  `json:"account,omitempty"`
+	ActorPolicy    string   `json:"actor_policy" validate:"required"`
+	AllowedActions []string `json:"allowed_actions,omitempty"`
+	Attachments    *bool    `json:"attachments,omitempty"`
 
 	// AuthKind How this request authenticated; matches the instance auth kind. Never contains credentials.
 	AuthKind              *string               `json:"auth_kind,omitempty"`
@@ -7817,15 +7816,4 @@ func (u UISnapshotResponseBody) Validate() error {
 type UnassignRequestBody struct {
 	Actor         *string `json:"actor,omitempty"`
 	ExpectedOwner *string `json:"expected_owner,omitempty"`
-}
-
-type ReadUIAttachmentRoute_Response_Route struct {
-	Origin     *string `json:"origin,omitempty"`
-	ProjectUID string  `json:"project_uid" validate:"required"`
-	Read       bool    `json:"read"`
-	Write      bool    `json:"write"`
-}
-
-func (r ReadUIAttachmentRoute_Response_Route) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }

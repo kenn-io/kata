@@ -152,6 +152,9 @@ func docbankForwardRequest(ctx context.Context, cfg ServerConfig, binding db.Fed
 	}
 	var envelope api.ErrorEnvelope
 	if json.UnmarshalRead(io.LimitReader(resp.Body, 4096), &envelope) != nil || envelope.Error.Code == "" {
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return nil, federationBridgeHubRejection(resp.StatusCode)
+		}
 		if resp.StatusCode == http.StatusNotFound {
 			return nil, attachmentError(503, "docbank_forward_unsupported")
 		}
@@ -169,6 +172,9 @@ func docbankForwardRequest(ctx context.Context, cfg ServerConfig, binding db.Fed
 		return nil, api.NewError(resp.StatusCode, code, "issue is not available at the upstream yet", "sync the project and retry", nil)
 	case "claim_denied":
 		return nil, api.NewError(resp.StatusCode, code, "lease denied for federated issue mutation", "run kata federation lease acquire <ref>", nil)
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, federationBridgeHubRejection(resp.StatusCode)
 	}
 	return nil, attachmentError(resp.StatusCode, code)
 }

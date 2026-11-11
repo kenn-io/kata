@@ -9,7 +9,6 @@ export interface UICapabilities {
   account?: string
   actor_policy: string
   allowed_actions?: string[]
-  attachment_local_origins?: string[]
   attachments?: boolean
   /** How this request authenticated; matches the instance auth kind. Never contains credentials. */
   auth_kind?: string

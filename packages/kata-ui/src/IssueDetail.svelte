@@ -14,7 +14,6 @@
     fetchAttachment,
     uploadAttachment,
     attachmentsEnabled = false,
-    attachmentReadable,
     actionsDisabled = false,
     actions = [],
     onOpenIssue,
@@ -71,7 +70,6 @@
     {fetchAttachment}
     {uploadAttachment}
     {attachmentsEnabled}
-    {attachmentReadable}
     {actionsDisabled}
   />
   <IssueLinks

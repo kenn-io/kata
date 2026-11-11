@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json/v2"
-	"errors"
 	"net/http"
 	"slices"
 	"sort"
@@ -99,33 +98,6 @@ type uiETagBasis struct {
 func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 	authorityCache := newUISnapshotAuthorityCache()
 	enrichmentCache := newUISnapshotEnrichmentCache()
-	huma.Register(humaAPI, huma.Operation{OperationID: "readUIAttachmentRoute", Method: http.MethodGet, Path: "/api/v1/ui/attachment-route"}, func(ctx context.Context, in *api.UIAttachmentRouteRequest) (*api.UIAttachmentRouteResponse, error) {
-		ctx, err := authorizeHostProjectScope(ctx, nil, []string{in.ProjectUID}, false)
-		if err != nil {
-			return nil, err
-		}
-		project, err := activeProjectByUID(ctx, cfg.DB, in.ProjectUID)
-		if err != nil {
-			return nil, err
-		}
-		if err := authorizeIssueScopedProject(ctx, project); err != nil {
-			return nil, err
-		}
-		binding, err := cfg.DB.FederationBindingByProject(ctx, project.ID)
-		out := &api.UIAttachmentRouteResponse{}
-		if errors.Is(err, db.ErrNotFound) {
-			return out, nil
-		}
-		if err != nil {
-			return nil, internalAPIError(err)
-		}
-		if binding.Role != db.FederationRoleSpoke {
-			return out, nil
-		}
-		out.Body.Route = uiAttachmentRoute(ctx, cfg, binding)
-		out.Body.Route.Write = out.Body.Route.Write && effectiveUIPolicy(ctx, cfg).Capabilities.Writable
-		return out, nil
-	})
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "resolveUIIssueReference",
 		Method:      http.MethodGet,
@@ -753,10 +725,14 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 		Writable: !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
 	}}
 	policy.Capabilities.Attachments = cfg.Docbank != nil
-	if cfg.DB != nil {
-		policy.Capabilities.AttachmentLocalOrigins = []string{cfg.DB.InstanceUID()}
-		if former, err := cfg.DB.FormerInstanceUIDs(ctx); err == nil {
-			policy.Capabilities.AttachmentLocalOrigins = append(policy.Capabilities.AttachmentLocalOrigins, former...)
+	if cfg.DB != nil && !policy.Capabilities.Attachments {
+		if bindings, err := cfg.DB.ListFederationBindings(ctx); err == nil {
+			for _, binding := range bindings {
+				if binding.Role == db.FederationRoleSpoke {
+					policy.Capabilities.Attachments = true
+					break
+				}
+			}
 		}
 	}
 	if cfg.WebSessions != nil {
@@ -790,26 +766,6 @@ func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
 		}
 	}
 	return policy
-}
-
-func uiAttachmentRoute(ctx context.Context, cfg ServerConfig, binding db.FederationBinding) *api.UIAttachmentRoute {
-	route := &api.UIAttachmentRoute{ProjectUID: binding.HubProjectUID, Read: binding.Enabled}
-	if binding.RelayConfig != nil {
-		route.Origin = binding.RelayConfig.AuthorityUID
-	}
-	if binding.Enabled {
-		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-		project, err := cfg.DB.ProjectByID(probeCtx, binding.ProjectID)
-		if err == nil {
-			_, err = docbankOriginCapabilities(probeCtx, cfg, project, &binding, "")
-		}
-		var apiErr *api.APIError
-		unavailable := errors.As(err, &apiErr) && apiErr != nil && (apiErr.Code == "docbank_not_configured" || apiErr.Code == "docbank_forward_unsupported")
-		route.Read = !unavailable
-		route.Write = binding.PushEnabled && !unavailable && (apiErr == nil || apiErr.Code != "attachment_origin_mismatch")
-	}
-	return route
 }
 
 func makeUIETag(intent any, cursor int64, policy uiPolicy) (string, error) {

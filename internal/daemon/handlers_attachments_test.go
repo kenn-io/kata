@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -390,55 +389,4 @@ func TestAttachmentUploadStatusErrors(t *testing.T) {
 			require.JSONEq(t, `{}`, string(stored.Metadata))
 		})
 	}
-}
-
-func TestUIAttachmentRouteAuthorizationBeforeProbe(t *testing.T) {
-	var calls atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		_ = json.NewEncoder(w).Encode(map[string]any{"version": 1, "project_uid": r.URL.Query().Get("project_uid"), "origin": "01ARZ3NDEKTSV4RRFFQ69G5FAW"})
-	}))
-	t.Cleanup(upstream.Close)
-	credentials := newReplicaCredentialStore()
-	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity(), func(cfg *daemon.ServerConfig) {
-		cfg.FederationCredentials = credentials
-		manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{Origin: "http://127.0.0.1:27123", InstanceID: "fixture", Writable: true, Auth: cfg.Auth, DB: cfg.DB})
-		require.NoError(t, err)
-		cfg.WebSessions = manager
-	})
-	private, _ := seedProjectAndIssue(t, env)
-	public, err := env.DB.CreateProject(t.Context(), "public")
-	require.NoError(t, err)
-	local, err := env.DB.CreateProject(t.Context(), "local")
-	require.NoError(t, err)
-	root, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: local.ID, Title: "root", Author: "operator"})
-	require.NoError(t, err)
-	_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: private.UID, Visibility: "teams"}, db.BootstrapActor)
-	require.NoError(t, err)
-	for _, project := range []db.Project{private, public} {
-		_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: upstream.URL, HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator", AllowInsecure: true})
-		require.NoError(t, err)
-		require.NoError(t, credentials.StoreFederationCredential(t.Context(), project.UID, config.FederationCredential{HubURL: upstream.URL, HubProjectID: 1, Token: "fixture", AllowInsecure: true}))
-	}
-	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "operator-token", Actor: "operator", AdminActor: db.BootstrapActor})
-	require.NoError(t, err)
-	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "scoped-token", Actor: "operator", AdminActor: db.BootstrapActor, Scope: &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: local.UID, RootIssueUID: root.UID}, ExpiresAt: new(time.Now().UTC().Add(time.Hour))})
-	require.NoError(t, err)
-	headers := func(token string) map[string]string {
-		resp, body := envDoRaw(t, env, http.MethodPost, "/api/v1/ui/session/login", map[string]string{"token": token, "return_path": "/kata"}, nil)
-		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-		var session api.UISessionResponse
-		require.NoError(t, json.Unmarshal(body, &session))
-		return map[string]string{"X-Kata-Web-Session": session.Session, "Cookie": resp.Cookies()[0].String(), "Authorization": "Bearer " + token}
-	}
-	scopedHeaders := headers("scoped-token")
-	operatorHeaders := headers("operator-token")
-	for _, h := range []map[string]string{operatorHeaders, scopedHeaders} {
-		resp, body := envDoRaw(t, env, http.MethodGet, "/api/v1/ui/attachment-route?project_uid="+private.UID, nil, h)
-		require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
-	}
-	require.Zero(t, calls.Load())
-	resp, body := envDoRaw(t, env, http.MethodGet, "/api/v1/ui/attachment-route?project_uid="+public.UID, nil, operatorHeaders)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	require.EqualValues(t, 1, calls.Load())
 }

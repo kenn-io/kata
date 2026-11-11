@@ -4,18 +4,78 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
 )
+
+func TestBrowserSessionSurvivesRemoteAttachmentAuthenticationFailure(t *testing.T) {
+	store := openAuthTestDB(t)
+	project, err := store.CreateProject(t.Context(), "attachments")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "example", Author: "operator"})
+	require.NoError(t, err)
+	const origin = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	_, err = store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.file": []byte(`{"name":"file.pdf","media_type":"application/pdf","size":7,"docbank_version":"6f1c2e8a-2222-4222-8222-222222222222","origin":"` + origin + `"}`)}})
+	require.NoError(t, err)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/capabilities") {
+			_, _ = fmt.Fprintf(w, `{"version":1,"project_uid":%q,"origin":%q}`, project.UID, origin)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"code":"signature_invalid","message":"private remote detail"}}`))
+	}))
+	t.Cleanup(upstream.Close)
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: upstream.URL, HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator", AllowInsecure: true})
+	require.NoError(t, err)
+	manager := newDeterministicSessionManager(t, "http://127.0.0.1:27123", "instance_a")
+	server := NewServer(ServerConfig{DB: store, WebSessions: manager, FederationCredentials: uiCapabilityCredentials{credential: config.FederationCredential{HubURL: upstream.URL, HubProjectID: 1, Token: "fixture", AllowInsecure: true}}})
+	t.Cleanup(func() { _ = server.Close() })
+	handler, err := server.HandlerFor(ListenerPolicy{Kind: ListenerBrowser, Origin: "http://127.0.0.1:27123", RequireBrowserSession: true, AllowLocalSession: true})
+	require.NoError(t, err)
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("http://127.0.0.1:27123/api/v1/projects/%d/issues/%s/attachments/file/content", project.ID, issue.UID), nil)
+	request.AddCookie(manager.Cookie(issued.Cookie))
+	request.Header.Set(webSessionHeader, issued.Session)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	require.Equal(t, http.StatusBadGateway, response.Code, response.Body.String())
+	require.NotContains(t, response.Body.String(), "private remote detail")
+	snapshot := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:27123/api/v1/ui/snapshot?view=inbox", nil)
+	snapshot.AddCookie(manager.Cookie(issued.Cookie))
+	snapshot.Header.Set(webSessionHeader, issued.Session)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, snapshot)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+}
+
+func TestUIAttachmentCapabilityWithoutLocalVault(t *testing.T) {
+	store := openAuthTestDB(t)
+	project, err := store.CreateProject(t.Context(), "project")
+	require.NoError(t, err)
+	cfg := ServerConfig{DB: store}
+	require.False(t, effectiveUIPolicy(t.Context(), cfg).Capabilities.Attachments)
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
+	require.NoError(t, err)
+	require.False(t, effectiveUIPolicy(t.Context(), cfg).Capabilities.Attachments)
+	_, err = store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator"})
+	require.NoError(t, err)
+	require.True(t, effectiveUIPolicy(t.Context(), cfg).Capabilities.Attachments)
+}
 
 func TestIssueLocalUISession(t *testing.T) {
 	store := openAuthTestDB(t)
@@ -47,50 +107,6 @@ func TestIssueLocalUISession(t *testing.T) {
 	assert.Equal(t, "/kata?view=today", session.ReturnPath)
 	assert.True(t, session.Writable)
 	assert.False(t, session.TokenAuditRead)
-}
-
-func TestWebLocalAttachmentRouteDirectAndGateway(t *testing.T) {
-	store := openAuthTestDB(t)
-	project, err := store.CreateProject(t.Context(), "attachments")
-	require.NoError(t, err)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/api/v1/instance" {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"web_ui_contract_version": api.UISnapshotContractVersion,
-				"web_ui_capabilities":     api.UICapabilities{Writable: true, Updates: "poll", ActorPolicy: "request"},
-			})
-			return
-		}
-		_, _ = w.Write([]byte(`{"route":null}`))
-	}))
-	t.Cleanup(upstream.Close)
-	manager := newDeterministicSessionManager(t, "http://127.0.0.1:27123", "instance_a")
-	server := NewServer(ServerConfig{DB: store, WebSessions: manager, WebDaemons: []config.CatalogDaemonConfig{{Name: "example-remote", URL: upstream.URL, AllowInsecure: true}}})
-	t.Cleanup(func() { _ = server.Close() })
-	handler, err := server.HandlerFor(ListenerPolicy{Kind: ListenerBrowser, Origin: "http://127.0.0.1:27123", RequireBrowserSession: true, AllowLocalSession: true})
-	require.NoError(t, err)
-	for _, tc := range []struct {
-		name      string
-		path      string
-		principal PrincipalKind
-	}{
-		{"local", "/api/v1/ui/attachment-route", PrincipalWebLocal},
-		{"gateway local session", "/api/v1/ui/proxy/api/v1/ui/attachment-route", PrincipalWebLocal},
-		{"gateway token session", "/api/v1/ui/proxy/api/v1/ui/attachment-route", PrincipalStaticToken},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			issued, err := manager.IssueSession(Principal{Kind: tc.principal}, "/kata")
-			require.NoError(t, err)
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:27123"+tc.path+"?project_uid="+project.UID, nil)
-			request.AddCookie(manager.Cookie(issued.Cookie))
-			request.Header.Set(webSessionHeader, issued.Session)
-			request.Header.Set(webDaemonHeaderName, "example-remote")
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, request)
-			assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		})
-	}
 }
 
 func TestBootstrapUISessionAdvertisesCredentialAuditWithoutIssueWrites(t *testing.T) {
@@ -183,4 +199,13 @@ func TestWebLocalSessionRejectsPathBasedProjectInit(t *testing.T) {
 			assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 		})
 	}
+}
+
+type uiCapabilityCredentials struct {
+	config.FederationCredentialStore
+	credential config.FederationCredential
+}
+
+func (c uiCapabilityCredentials) FederationCredential(context.Context, string) (config.FederationCredential, bool, error) {
+	return c.credential, true, nil
 }

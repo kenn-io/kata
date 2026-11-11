@@ -2239,10 +2239,9 @@ describe('AppShell task selection', () => {
     return current
   }
 
-  test('keeps attachment controls when switching to a pre-origin daemon', async () => {
+  test('shows attachment controls when the instance supports attachments', async () => {
     const current = twoTaskSnapshot()
     current.capabilities.attachments = false
-    current.capabilities.attachment_local_origins = ['01ARZ3NDEKTSV4RRFFQ69G5FAV']
     current.selected!.issue!.metadata = {
       'attachment.file': {
         name: 'screen.png',
@@ -2265,43 +2264,13 @@ describe('AppShell task selection', () => {
     expect(screen.queryByRole('button', { name: 'Preview screen.png' })).toBeNull()
     const older = structuredClone(current)
     older.capabilities.attachments = true
-    delete older.capabilities.attachment_local_origins
     await rerender({
       ...props,
       snapshot: older,
-      attachmentRoute: null,
-      attachmentRouteProject: older.selected!.issue!.project_uid,
     })
     expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Preview screen.png' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Download screen.png' })).not.toBeNull()
-  })
-
-  test('uses the selected project attachment route', async () => {
-    const current = twoTaskSnapshot()
-    const spoke = current.collection![0]!
-    current.capabilities.attachment_local_origins = ['01ARZ3NDEKTSV4RRFFQ69G5FAV']
-    current.capabilities.attachments = false
-    const attachmentRoute = {
-      project_uid: spoke.project_uid!,
-      read: true,
-      write: true,
-      origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
-    }
-    const onNavigate = vi.fn()
-    const props = {
-      route: { ...listRoute, issueUID: firstUID },
-      snapshot: current,
-      attachmentRoute,
-      attachmentRouteProject: spoke.project_uid!,
-      loading: false,
-      ...mutationProps(),
-      onNavigate,
-      onCreateProject: vi.fn(async () => ({ changed: true })),
-      onUploadAttachment: vi.fn(async () => {}),
-    }
-    render(AppShell, { props })
-    expect(screen.getByRole('button', { name: 'Attach files' })).not.toBeNull()
   })
 
   test('shows a clicked task in the same frame, before its snapshot arrives', async () => {

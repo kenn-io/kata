@@ -10,7 +10,6 @@
     fetchAttachment?: ((url: string) => Promise<Blob>) | undefined
     uploadAttachment?: ((file: File) => Promise<void>) | undefined
     attachmentsEnabled?: boolean | undefined
-    attachmentReadable?: ((attachment: KataAttachment) => boolean) | undefined
     actionsDisabled?: boolean | undefined
   }
   let {
@@ -19,7 +18,6 @@
     fetchAttachment,
     uploadAttachment,
     attachmentsEnabled = false,
-    attachmentReadable,
     actionsDisabled = false,
   }: Props = $props()
   const previews = new SvelteMap<string, string>()
@@ -34,7 +32,7 @@
   const uploadDisabled = $derived(uploading || actionsDisabled)
   const entries = $derived(
     Object.entries(attachments).map(([id, e]) => {
-      const readable = attachmentReadable ? attachmentReadable(e) : attachmentsEnabled
+      const readable = attachmentsEnabled
       return {
         ...e,
         id,

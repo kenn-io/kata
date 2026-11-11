@@ -63,16 +63,6 @@ func TestRelayDocbankReadAfterRootNewInstanceRestore(t *testing.T) {
 			root.store = restored
 			root.signer.AuthorityUID = restored.InstanceUID()
 			serveRelayDocbank(t, root, vault)
-			status, raw = relayDocbankRequest(t, node, http.MethodGet, "/api/v1/ui/attachment-route?project_uid="+node.project.UID, "", "")
-			require.Equal(t, http.StatusOK, status, string(raw))
-			var uiRoute struct {
-				Route *api.UIAttachmentRoute `json:"route"`
-			}
-			require.NoError(t, json.Unmarshal(raw, &uiRoute))
-			require.NotNil(t, uiRoute.Route)
-			require.True(t, uiRoute.Route.Read)
-			require.False(t, uiRoute.Route.Write)
-			require.Equal(t, out.Attachment.Origin, uiRoute.Route.Origin)
 			status, raw = relayDocbankRequest(t, node, http.MethodGet, endpoint+"/"+out.ID+"/content", "", "")
 			require.Equal(t, http.StatusOK, status, string(raw))
 			require.Equal(t, "root document", string(raw))
@@ -114,33 +104,6 @@ func relayDocbankRequest(t *testing.T, node *relayMatrixNode, method, endpoint, 
 	raw, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	return resp.StatusCode, raw
-}
-
-func TestRelayDocbankUIOriginAvailability(t *testing.T) {
-	for _, configured := range []bool{false, true} {
-		t.Run(fmt.Sprintf("configured=%t", configured), func(t *testing.T) {
-			root, relay, leaf, _ := newRelayClaimChain(t)
-			var vault *docbanktest.Fake
-			if configured {
-				vault = docbanktest.New(t)
-			}
-			serveRelayDocbank(t, root, vault)
-			serveRelayDocbank(t, relay, nil)
-			serveRelayDocbank(t, leaf, nil)
-			status, raw := relayDocbankRequest(t, leaf, http.MethodGet, "/api/v1/ui/attachment-route?project_uid="+leaf.project.UID, "", "")
-			require.Equal(t, http.StatusOK, status, string(raw))
-			var result struct {
-				Route *api.UIAttachmentRoute `json:"route"`
-			}
-			require.NoError(t, json.Unmarshal(raw, &result))
-			require.NotNil(t, result.Route)
-			route := *result.Route
-			require.Equal(t, leaf.project.UID, route.ProjectUID)
-			require.Equal(t, configured, route.Read)
-			require.Equal(t, configured, route.Write)
-			require.Equal(t, root.store.InstanceUID(), route.Origin)
-		})
-	}
 }
 
 func TestRelayDocbankUploadAndImmediateContent(t *testing.T) {

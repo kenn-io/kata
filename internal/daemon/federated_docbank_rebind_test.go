@@ -19,6 +19,50 @@ import (
 	"go.kenn.io/kata/internal/federationcoord"
 )
 
+func TestDocbankForwardMapsHubCredentialRejection(t *testing.T) {
+	store := openClaimGateHelperDB(t)
+	project, _ := createClaimGateHelperIssue(t, store)
+	var status int
+	var code string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = fmt.Fprintf(w, `{"error":{"code":%q,"message":"private remote detail"}}`, code)
+	}))
+	t.Cleanup(upstream.Close)
+	binding := db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: upstream.URL, HubProjectID: 1, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "operator", AllowInsecure: true}
+	_, err := store.UpsertFederationBinding(t.Context(), binding)
+	require.NoError(t, err)
+	cfg := ServerConfig{DB: store, FederationCredentials: uiCapabilityCredentials{credential: config.FederationCredential{HubURL: upstream.URL, HubProjectID: 1, Token: "fixture", AllowInsecure: true}}}
+	for _, suffix := range []string{"issues/a/uploads", "issues/a/links", "versions/a/content"} {
+		for _, tc := range []struct {
+			status     int
+			code       string
+			wantStatus int
+			wantCode   string
+		}{
+			{http.StatusUnauthorized, "signature_invalid", http.StatusBadGateway, "hub_credential_rejected"},
+			{http.StatusForbidden, "auth_invalid", http.StatusBadGateway, "hub_credential_rejected"},
+			{http.StatusForbidden, "claim_denied", http.StatusForbidden, "claim_denied"},
+			{http.StatusForbidden, "docbank_outside_scope", http.StatusForbidden, "docbank_outside_scope"},
+		} {
+			t.Run(fmt.Sprintf("%s/%s", suffix, tc.code), func(t *testing.T) {
+				status, code = tc.status, tc.code
+				method := http.MethodPost
+				if strings.HasSuffix(suffix, "/content") {
+					method = http.MethodGet
+				}
+				_, err := docbankForwardRequest(t.Context(), cfg, binding, method, suffix, nil, nil)
+				var apiErr *api.APIError
+				require.ErrorAs(t, err, &apiErr)
+				require.Equal(t, tc.wantStatus, apiErr.Status)
+				require.Equal(t, tc.wantCode, apiErr.Code)
+				require.NotContains(t, apiErr.Error(), "private remote detail")
+			})
+		}
+	}
+}
+
 func TestForwardDocbankDescriptorRejectsUnknownAttachmentFields(t *testing.T) {
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)

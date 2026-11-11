@@ -1,7 +1,6 @@
 package api //nolint:revive // package name "api" is the public wire namespace.
 
 import (
-	"reflect"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -14,50 +13,18 @@ const UISnapshotContractVersion = "2"
 
 // UICapabilities describes the browser behavior authorized for this request.
 type UICapabilities struct {
-	Attachments            bool           `json:"attachments,omitempty,omitzero"`
-	AttachmentLocalOrigins []string       `json:"attachment_local_origins,omitempty"`
-	AccessAdmin            bool           `json:"access_admin,omitempty,omitzero"`
-	Writable               bool           `json:"writable"`
-	Updates                string         `json:"updates" enum:"sse,poll"`
-	ActorPolicy            string         `json:"actor_policy"`
-	Account                string         `json:"account,omitempty"`
-	AuthKind               string         `json:"auth_kind,omitempty" doc:"How this request authenticated; matches the instance auth kind. Never contains credentials."`
-	Scope                  *TokenScopeOut `json:"scope,omitempty"`
-	ExpiresAt              *time.Time     `json:"expires_at,omitempty"`
-	AllowedActions         []string       `json:"allowed_actions,omitempty"`
-	CloseRequiresEvidence  bool           `json:"close_requires_evidence,omitempty,omitzero"`
-	TokenAuditRead         bool           `json:"token_audit_read,omitempty,omitzero"`
-}
-
-// UIAttachmentRoute describes a project's upstream attachment route.
-type UIAttachmentRoute struct {
-	ProjectUID string `json:"project_uid"`
-	Read       bool   `json:"read"`
-	Write      bool   `json:"write"`
-	Origin     string `json:"origin,omitempty"`
-}
-
-// UIAttachmentRouteRequest selects a project for its attachment route.
-type UIAttachmentRouteRequest struct {
-	ProjectUID string `query:"project_uid" required:"true"`
-}
-
-// UIAttachmentRouteResponse contains the selected project's route.
-type UIAttachmentRouteResponse struct {
-	Body UIAttachmentRouteResponseBody
-}
-
-// UIAttachmentRouteResponseBody permits a null route for local projects.
-type UIAttachmentRouteResponseBody struct {
-	Route *UIAttachmentRoute `json:"route"`
-}
-
-// Schema describes the nullable route in the generated API.
-func (UIAttachmentRouteResponseBody) Schema(r huma.Registry) *huma.Schema {
-	route := r.Schema(reflect.TypeFor[UIAttachmentRoute](), false, "")
-	schema := *route
-	schema.Nullable = true
-	return &huma.Schema{Type: huma.TypeObject, Properties: map[string]*huma.Schema{"route": &schema}, Required: []string{"route"}}
+	Attachments           bool           `json:"attachments,omitempty,omitzero"`
+	AccessAdmin           bool           `json:"access_admin,omitempty,omitzero"`
+	Writable              bool           `json:"writable"`
+	Updates               string         `json:"updates" enum:"sse,poll"`
+	ActorPolicy           string         `json:"actor_policy"`
+	Account               string         `json:"account,omitempty"`
+	AuthKind              string         `json:"auth_kind,omitempty" doc:"How this request authenticated; matches the instance auth kind. Never contains credentials."`
+	Scope                 *TokenScopeOut `json:"scope,omitempty"`
+	ExpiresAt             *time.Time     `json:"expires_at,omitempty"`
+	AllowedActions        []string       `json:"allowed_actions,omitempty"`
+	CloseRequiresEvidence bool           `json:"close_requires_evidence,omitempty,omitzero"`
+	TokenAuditRead        bool           `json:"token_audit_read,omitempty,omitzero"`
 }
 
 // UISnapshotRequest is the normalized route and projection intent accepted by

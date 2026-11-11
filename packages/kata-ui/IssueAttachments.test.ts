@@ -296,27 +296,3 @@ it('gives each reference a stable history anchor', () => {
   const { container } = render(IssueAttachments, { attachments: { [id]: entry }, baseURL: '/attachments' })
   expect(container.querySelector(`[id="kata-attachment-${id}"]`)?.textContent).toContain('screen.png')
 })
-
-it('shows actions only for references the host can read', async () => {
-  const remote = { ...entry, name: 'remote.png', origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW' }
-  const { rerender } = render(IssueAttachments, {
-    attachmentsEnabled: false,
-    attachmentReadable: (value) => !value.origin,
-    attachments: { local: entry, remote },
-    baseURL: '/attachments',
-    fetchAttachment: async () => new Blob(['data']),
-    uploadAttachment: async () => {},
-  })
-  expect(screen.queryByRole('button', { name: 'Attach files' })).toBeNull()
-  expect(screen.getByRole('button', { name: 'Download screen.png' })).toBeTruthy()
-  expect(screen.queryByRole('button', { name: 'Download remote.png' })).toBeNull()
-  await rerender({
-    attachmentsEnabled: true,
-    attachmentReadable: (value) => Boolean(value.origin),
-    attachments: { local: entry, remote },
-    baseURL: '/attachments',
-  })
-  expect(screen.getByRole('button', { name: 'Attach files' })).toBeTruthy()
-  expect(screen.queryByRole('button', { name: 'Download screen.png' })).toBeNull()
-  expect(screen.getByRole('button', { name: 'Download remote.png' })).toBeTruthy()
-})
