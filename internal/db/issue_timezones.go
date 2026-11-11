@@ -109,12 +109,12 @@ func PrepareIssueSchedules(current jsontext.Value, patch map[string]jsontext.Val
 				}
 			}
 		}
-		if !changedZone && len(before[field]) > 0 {
+		if len(before[field]) > 0 {
 			saved, err := metadata.DecodeSavedSchedule(before[field])
 			if metadata.IsUnsupportedSchedule(err) {
 				return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
 			}
-			if saved != nil {
+			if saved != nil && !changedZone {
 				result[field], err = metadata.NewScheduleValueWithVersion(value, saved.Timezone, saved.TZDataVersion)
 				if err != nil {
 					return nil, fmt.Errorf("%w: %s: %v", metadata.ErrInvalidValue, field, err)
