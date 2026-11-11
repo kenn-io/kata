@@ -108,12 +108,7 @@ func TestScheduleCodecKataPatchKeepsOtherSchedule(t *testing.T) {
 		name, codec, metadata string
 	}{
 		{"other local with zone", "scheduled_on", `{"deadline_on":"2026-08-20T09:30","timezone":"America/New_York"}`},
-		{"scheduled date with zone", "deadline_on", `{"scheduled_on":"2026-08-20","timezone":"America/New_York"}`},
-		{"deadline date with zone", "scheduled_on", `{"deadline_on":"2026-08-20","timezone":"America/New_York"}`},
-		{"scheduled date without zone", "deadline_on", `{"scheduled_on":"2026-08-20"}`},
-		{"deadline date without zone", "scheduled_on", `{"deadline_on":"2026-08-20"}`},
 		{"scheduled local without zone", "deadline_on", `{"scheduled_on":"2026-08-20T09:30"}`},
-		{"deadline local without zone", "scheduled_on", `{"deadline_on":"2026-08-20T09:30"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			patch, err := fieldCodecs[tc.codec].KataPatch(

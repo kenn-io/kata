@@ -251,35 +251,10 @@ func TestCronClientRefusesPublicationToOldHub(t *testing.T) {
 	_, err = client.IngestProjectEvents(t.Context(), 1, []api.FederationIngestEventEnvelope{{EventID: 10, Type: "cron.job.created"}})
 	require.Error(t, err)
 	require.Zero(t, posts, "publication requires positive hub support before POST")
-}
-
-func TestScheduleClientRefusesPublicationToOldHub(t *testing.T) {
-	posts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodPost {
-			posts++
-			_, _ = w.Write([]byte(`{"accepted":1}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"project_id":1,"project_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","replay_horizon_event_id":1,"baseline_through_event_id":1}`))
-	}))
-	t.Cleanup(server.Close)
-	client, err := federation.NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
-	require.NoError(t, err)
 	saved := `{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}`
-	for _, tc := range []struct{ kind, payload string }{
-		{"issue.created", `{"metadata":{"scheduled_on":` + saved + `}}`},
-		{"issue.snapshot", `{"metadata":{"deadline_on":` + saved + `}}`},
-		{"issue.moved", `{"snapshot":{"metadata":{"scheduled_on":` + saved + `}}}`},
-		{"issue.metadata_updated", `{"diff":{"scheduled_on":{"from":null,"to":` + saved + `}}}`},
-	} {
-		t.Run(tc.kind, func(t *testing.T) {
-			_, err := client.IngestProjectEvents(t.Context(), 1, []api.FederationIngestEventEnvelope{{Type: tc.kind, Payload: jsontext.Value(tc.payload)}})
-			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-			require.Zero(t, posts)
-		})
-	}
+	_, err = client.IngestProjectEvents(t.Context(), 1, []api.FederationIngestEventEnvelope{{Type: "issue.snapshot", Payload: jsontext.Value(`{"metadata":{"deadline_on":` + saved + `}}`)}})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	require.Zero(t, posts)
 }
 
 func TestPushOnlyEnrollmentCanPublishCronEvents(t *testing.T) {

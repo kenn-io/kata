@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -443,8 +444,8 @@ func checkDueNotificationCandidates(t *testing.T, store db.Storage) error {
 		name, raw       string
 		listed, settled bool
 	}{
-		{"saved due", `{"scheduled_on":{"value":"2026-09-15","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}}`, true, false},
-		{"saved future", `{"deadline_on":{"value":"2099-01-01","timezone":"UTC","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}}`, false, false},
+		{"saved due", `{"scheduled_on":{"value":"2026-09-15","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}`, true, false},
+		{"saved future", `{"deadline_on":{"value":"2099-01-01","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}`, false, false},
 		{"future date", `{"scheduled_on":"2099-01-01"}`, false, false},
 		{"future local time", `{"scheduled_on":"2099-01-01T09:00"}`, false, false},
 		{"future instant", `{"scheduled_on":"2099-01-01T09:00:00Z"}`, false, false},

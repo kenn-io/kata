@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // RunUISnapshotGraphReachContract checks that graph traversal stays within visible issues.
@@ -811,8 +812,8 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 			metadata map[string]jsontext.Value
 		}{
 			{name: "saved rules", want: "2026-09-01", metadata: map[string]jsontext.Value{
-				"scheduled_on": jsontext.Value(`{"value":"2026-09-01T09:00","timezone":"Asia/Tokyo","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}`),
-				"deadline_on":  jsontext.Value(`{"value":"2026-09-01T09:00","timezone":"Asia/Tokyo","tzdata_version":"sha256:b2d18a7c8fa8142097a48c99609fb3c92db5ee98bc740294e57eab8ae9f94779"}`),
+				"scheduled_on": jsontext.Value(`{"value":"2026-09-01T09:00","timezone":"Asia/Tokyo","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}`),
+				"deadline_on":  jsontext.Value(`{"value":"2026-09-01T09:00","timezone":"Asia/Tokyo","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}`),
 			}},
 			{name: "UTC instant", want: "2026-08-31", metadata: map[string]jsontext.Value{
 				"scheduled_on": jsontext.Value(`"2026-09-01T00:30:00Z"`),

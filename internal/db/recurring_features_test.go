@@ -158,6 +158,7 @@ func TestSchedulePayloadFeatures(t *testing.T) {
 		wantFeature, wantError bool
 	}{
 		{"created", "issue.created", `{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}`, true, false},
+		{"snapshot", "issue.snapshot", `{"metadata":{"deadline_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}`, true, false},
 		{"updated", "issue.metadata_updated", `{"diff":{"deadline_on":{"from":null,"to":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}}`, true, false},
 		{"projection", "projection.issue", `{"metadata":{"deadline_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}`, true, false},
 		{"moved", "issue.moved", `{"snapshot":{"metadata":{"scheduled_on":{"value":"2026-05-18","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `"}}}}`, true, false},

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -144,5 +145,5 @@ func TestRowPlanningDatesFailsOnUnsupportedTZDataVersion(t *testing.T) {
 func TestRowPlanningDatesReportsUnknownScheduleMember(t *testing.T) {
 	raw := `{"scheduled_on":{"value":"2026-11-12","timezone":"UTC","tzdata_version":"` + metadata.ScheduleTZDataVersion + `","future":1},"deadline_on":"2026-11-02"}`
 	_, _, err := RowPlanningDates(raw, "", "")
-	require.Error(t, err)
+	require.ErrorIs(t, err, json.ErrUnknownName)
 }

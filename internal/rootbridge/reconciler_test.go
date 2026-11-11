@@ -1089,6 +1089,42 @@ func TestFieldReconcilePreservesConnectorErrorsWithoutAdvancingBaseline(t *testi
 	})
 }
 
+func TestFieldReconcileLegacyDateWithAliasTimezone(t *testing.T) {
+	for _, tc := range []struct {
+		name, issueTimezone, daemonTimezone string
+	}{
+		{"issue timezone", `"US/Eastern"`, "UTC"},
+		{"daemon timezone", `null`, "US/Eastern"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newReconcileHarness(t)
+			h.reconciler = NewReconciler(h.store, h.registry, ReconcilerConfig{DefaultTimezone: tc.daemonTimezone, Now: func() time.Time { return h.now }})
+			h.mapField(t, "scheduled_on", "start-date")
+			h.seedBaseline(t, "scheduled_on", date("2026-08-20"))
+			sibling, err := metadata.NewScheduleValue("2026-08-22T09:00", "Europe/Paris")
+			require.NoError(t, err)
+			_, err = h.store.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, `{"timezone":`+tc.issueTimezone+`,"scheduled_on":"2026-08-20","deadline_on":`+string(sibling)+`}`, h.issue.ID)
+			require.NoError(t, err)
+			h.client.fieldValues["start-date"] = date("2026-08-21")
+
+			result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
+			require.NoError(t, err)
+			require.Zero(t, result.FieldConflicts)
+			issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
+			require.NoError(t, err)
+			values, err := metadataObject(issue.Metadata)
+			require.NoError(t, err)
+			saved, err := metadata.DecodeSavedSchedule(values["scheduled_on"])
+			require.NoError(t, err)
+			require.NotNil(t, saved)
+			require.Equal(t, "2026-08-21", saved.Value)
+			require.Equal(t, "US/Eastern", saved.Timezone)
+			require.Equal(t, metadata.ScheduleTZDataVersion, saved.TZDataVersion)
+			require.JSONEq(t, string(sibling), string(values["deadline_on"]))
+		})
+	}
+}
+
 func TestFieldReconcilePreservesIndependentScheduleZones(t *testing.T) {
 	t.Run("date instant and clear preserve issue timezone", func(t *testing.T) {
 		for _, value := range []connector.FieldValue{

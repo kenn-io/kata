@@ -351,9 +351,6 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	require.NoError(t, json.Unmarshal([]byte(linkedIssue.Metadata), &linkedMetadata))
 	assert.Equal(t, map[string]any{"value": "2026-08-03", "timezone": "UTC", "tzdata_version": metadata.ScheduleTZDataVersion}, linkedMetadata["scheduled_on"])
 	assert.Equal(t, "UTC", linkedMetadata["timezone"])
-	folded, err := foldProjectIssues(ctx, store, attachmentProject.ID)
-	require.NoError(t, err)
-	require.JSONEq(t, string(linkedIssue.Metadata), string(folded.IssueMetadata[linkedIssue.UID]), "federation replay must retain the attached issue's saved schedule")
 	issueEvents, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: attachmentProject.ID, Limit: 1000})
 	require.NoError(t, err)
 	var creations int

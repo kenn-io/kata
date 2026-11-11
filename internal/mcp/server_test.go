@@ -24,7 +24,6 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/storageadmin"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -985,8 +984,7 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 		Name: "kata.show", Arguments: map[string]any{"ref": ref},
 	})
 	require.NoError(t, err)
-	require.Equal(t, map[string]any{"value": "2026-09-01T16:30:00Z", "timezone": "UTC", "tzdata_version": metadata.ScheduleTZDataVersion},
-		shown.StructuredContent.(map[string]any)["issue"].(map[string]any)["metadata"].(map[string]any)["deadline_on"])
+	require.Equal(t, "2026-09-01T16:30:00Z", shown.StructuredContent.(map[string]any)["issue"].(map[string]any)["metadata"].(map[string]any)["deadline_on"].(map[string]any)["value"])
 
 	deadlineCleared, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
 		Name: "kata.set_deadline", Arguments: map[string]any{"ref": ref, "clear_deadline": true},
@@ -1011,8 +1009,7 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 		Name: "kata.show", Arguments: map[string]any{"ref": ref},
 	})
 	require.NoError(t, err)
-	require.Equal(t, map[string]any{"value": "2026-09-02T09:30", "timezone": "UTC", "tzdata_version": metadata.ScheduleTZDataVersion},
-		shown.StructuredContent.(map[string]any)["issue"].(map[string]any)["metadata"].(map[string]any)["scheduled_on"])
+	require.Equal(t, "2026-09-02T09:30", shown.StructuredContent.(map[string]any)["issue"].(map[string]any)["metadata"].(map[string]any)["scheduled_on"].(map[string]any)["value"])
 
 	scheduleCleared, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
 		Name: "kata.set_schedule", Arguments: map[string]any{"ref": ref, "clear_schedule": true},

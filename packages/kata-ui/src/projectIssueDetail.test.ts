@@ -1,6 +1,3 @@
-import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { ShowIssueResponseBody } from '../../../web/src/lib/api/generated/models/showIssueResponseBody.ts'
@@ -8,9 +5,7 @@ import { projectIssueDetail } from './projectIssueDetail.js'
 import type { KataIssueDetailWire } from './types.js'
 
 const versionID = '6f1c2e8a-2222-4222-8222-222222222222'
-const tzdataVersion = `sha256:${createHash('sha256')
-  .update(readFileSync(resolve(process.cwd(), '../../internal/metadata/tzdata/zoneinfo-2026c.zip')))
-  .digest('hex')}`
+const tzdataVersion = 'sha256:fixture'
 const attachment = {
   name: 'shot.png',
   media_type: 'image/png',

@@ -89,6 +89,7 @@ func TestIssuePortableTimezoneAdmission(t *testing.T) {
 		want     int
 	}{
 		{"reject", map[string]any{"timezone": "Local", "scheduled_on": "2026-11-12"}, http.StatusBadRequest},
+		{"reject alias", map[string]any{"timezone": "US/Eastern", "scheduled_on": "2026-11-12"}, http.StatusBadRequest},
 		{"accept", map[string]any{"timezone": "UTC", "scheduled_on": "2026-11-12"}, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -199,7 +200,6 @@ func TestIssuePortableTimezoneCopiedRecurrence(t *testing.T) {
 		}{
 			{`{"scheduled_on":"2026-11-13"}`, 200},
 			{`{"deadline_on":"2026-11-14"}`, 400},
-			{`{"timezone":"Local"}`, 400},
 			{`{"timezone":null,"scheduled_on":"2026-11-15"}`, 200},
 		} {
 			resp := doPost(t, env, env.URL+path, `{"actor":"tester","patch":`+tc.patch+`}`)

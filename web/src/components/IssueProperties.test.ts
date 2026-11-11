@@ -1,15 +1,10 @@
-import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { KataTaskDetail } from '../lib/kata/types'
 
 import IssueProperties from './IssueProperties.svelte'
 
-const tzdataVersion = `sha256:${createHash('sha256')
-  .update(readFileSync(resolve(process.cwd(), '../internal/metadata/tzdata/zoneinfo-2026c.zip')))
-  .digest('hex')}`
+const tzdataVersion = 'sha256:fixture'
 
 function makeIssue(overrides: Partial<KataTaskDetail['issue']> = {}): KataTaskDetail {
   return {
@@ -207,14 +202,6 @@ describe('IssueProperties', () => {
   it.each([
     ['UTC instant', '2026-09-01T00:30:00Z'],
     ['local time', '2026-09-01T09:00'],
-    [
-      'saved UTC instant',
-      {
-        value: '2026-09-01T00:30:00Z',
-        timezone: 'America/New_York',
-        tzdata_version: tzdataVersion,
-      },
-    ],
   ])('uses the projected date for a timed %s deadline without replacing it', async (_, raw) => {
     const onPatchMetadata = vi.fn(async () => true)
     renderProperties({

@@ -80,24 +80,39 @@ func (c scheduleCodec) kataPatch(
 		return nil, err
 	}
 	patch := map[string]jsontext.Value{c.key: mustJSON(canonicalScheduleValue(canonical))}
-	if canonical.Kind != fieldKindLocalDateTime {
-		return db.PrepareIssueSchedules(jsontext.Value(issue.Metadata), patch, c.defaultTimezone, "")
-	}
-	values, err := metadataObject(issue.Metadata)
-	if err != nil {
-		return nil, err
-	}
-	version := metadata.ScheduleTZDataVersion
-	if saved, err := metadata.DecodeSavedSchedule(values[c.key]); err != nil {
-		return nil, err
-	} else if saved != nil && saved.Timezone == canonical.Timezone {
-		version = saved.TZDataVersion
-	}
-	patch[c.key], err = metadata.NewScheduleValueWithVersion(canonical.Value, canonical.Timezone, version)
-	if err != nil {
+	if err := c.pinZone(issue, canonical, patch); err != nil {
 		return nil, err
 	}
 	return db.PrepareIssueSchedules(jsontext.Value(issue.Metadata), patch, c.defaultTimezone, "")
+}
+
+// pinZone saves the zone a local date-time or first-saved date resolves to, so
+// an alias zone already on the issue or daemon survives without public
+// admission accepting it.
+func (c scheduleCodec) pinZone(issue db.Issue, canonical connector.FieldValue, patch map[string]jsontext.Value) error {
+	values, err := metadataObject(issue.Metadata)
+	if err != nil {
+		return err
+	}
+	saved, err := metadata.DecodeSavedSchedule(values[c.key])
+	if err != nil {
+		return err
+	}
+	zone := canonical.Timezone
+	if canonical.Kind == fieldKindDate && saved == nil {
+		if zone, err = metadataTimezone(values, c.defaultTimezone); err != nil {
+			return err
+		}
+	}
+	if zone == "" {
+		return nil
+	}
+	version := metadata.ScheduleTZDataVersion
+	if saved != nil && saved.Timezone == zone {
+		version = saved.TZDataVersion
+	}
+	patch[c.key], err = metadata.NewScheduleValueWithVersion(canonical.Value, zone, version)
+	return err
 }
 
 func kataPatchWithCoordinatedTimezone(
