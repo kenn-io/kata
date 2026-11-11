@@ -1,6 +1,7 @@
 package federation_test
 
 import (
+	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -251,4 +252,46 @@ func TestRelayDocbankUnsupportedPreflightLeavesUploadUnread(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
 	require.Contains(t, response.Body.String(), "docbank_forward_unsupported")
 	require.Zero(t, body.reads)
+}
+
+func TestRelayDocbankReferencesCreatedBeforeSharing(t *testing.T) {
+	root := newRelayMatrixNode(t, "sqlite", "root-member")
+	relay := newRelayMatrixNode(t, "sqlite", "relay-member")
+	leaf := newRelayMatrixNode(t, "sqlite", "leaf-member")
+	project, err := root.store.CreateProject(t.Context(), "shared-project")
+	require.NoError(t, err)
+	root.project = project
+	issue, _, err := root.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Author: root.account, Title: "Attachments before sharing"})
+	require.NoError(t, err)
+	vault := docbanktest.New(t)
+	version := uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222")
+	vault.Seed("/kata/existing.pdf", docbank.Node{ID: 42, Name: "existing.pdf", Kind: "file", CurrentVersionID: version}, map[uuid.UUID][]byte{version: []byte("linked bytes")})
+	serveRelayDocbank(t, root, vault)
+	serveRelayDocbank(t, relay, nil)
+	serveRelayDocbank(t, leaf, nil)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", project.ID, issue.UID)
+	status, raw := relayDocbankRequest(t, root, http.MethodPost, endpoint+"?name=uploaded.pdf", "uploaded bytes", "application/octet-stream")
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var uploaded api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &uploaded))
+	status, raw = relayDocbankRequest(t, root, http.MethodPost, endpoint+"/links", `{"path":"/kata/existing.pdf"}`, "application/json")
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var linked api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &linked))
+	require.Equal(t, root.store.InstanceUID(), uploaded.Attachment.Origin)
+	require.Equal(t, root.store.InstanceUID(), linked.Attachment.Origin)
+	_, err = root.store.EnableProjectFederation(t.Context(), project.ID, root.account)
+	require.NoError(t, err)
+	public := root.signer.PrivateKey.Public().(ed25519.PublicKey)
+	require.NoError(t, root.store.PinRootAuthority(t.Context(), db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: root.store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
+	enrollRelayMatrixReplica(t, root, relay, "relay-project", true)
+	syncRelayMatrixNode(t, relay)
+	enrollRelayMatrixReplica(t, relay, leaf, "leaf-project", false)
+	syncRelayMatrixNode(t, leaf)
+	leafEndpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", leaf.project.ID, issue.UID)
+	for _, tc := range []struct{ id, content string }{{uploaded.ID, "uploaded bytes"}, {linked.ID, "linked bytes"}} {
+		status, raw = relayDocbankRequest(t, leaf, http.MethodGet, leafEndpoint+"/"+tc.id+"/content", "", "")
+		require.Equal(t, http.StatusOK, status, string(raw))
+		require.Equal(t, tc.content, string(raw))
+	}
 }
