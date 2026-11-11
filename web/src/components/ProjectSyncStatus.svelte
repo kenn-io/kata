@@ -140,7 +140,8 @@
       {@const powershellCommand = `kata federation status --project '${status.project_name.replaceAll("'", "''")}'`}
       <div class="sync-attention">
         <span class="attention">Sync needs attention</span>
-        <span>Use a CLI configured for {window.location.origin}.</span>
+        <span>Run in a CLI connected to this daemon.</span>
+        <span>Browser: {window.location.origin}</span>
         <div class="command">
           <span class="shell">Bash/Zsh</span>
           <code>{bashCommand}</code>

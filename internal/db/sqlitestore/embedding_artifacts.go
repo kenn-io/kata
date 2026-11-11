@@ -207,7 +207,12 @@ func (d *Store) EmbeddingArtifactManifests(ctx context.Context, projectUID strin
 		return nil, db.ErrFederationIngestValidation
 	}
 	manifests := []embedding.ArtifactManifest{}
-	err := d.relayTx(ctx, func(tx *sql.Tx) error {
+	err := d.RetryTransient(ctx, func() error {
+		tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
 		manifests = []embedding.ArtifactManifest{}
 		rows, err := tx.QueryContext(ctx, `SELECT a.manifest FROM federation_embedding_artifacts a
 			JOIN projects p ON p.uid=a.project_uid

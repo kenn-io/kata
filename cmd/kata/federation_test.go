@@ -130,11 +130,18 @@ func TestFederationStatusProjectMember(t *testing.T) {
 	require.NoError(t, err)
 	_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "owner")
 	require.NoError(t, err)
+	require.NoError(t, env.DB.RecordFederationSyncError(t.Context(), project.ID, errors.New("hub offline"), time.Now()))
+	other, err := env.DB.CreateProject(t.Context(), "private-project")
+	require.NoError(t, err)
 	team, _, err := env.DB.CreateTeam(t.Context(), "project-team", "owner")
 	require.NoError(t, err)
 	_, err = env.DB.SetTeamMembership(t.Context(), team.UID, "member", true, "owner")
 	require.NoError(t, err)
 	_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{team.UID}}, "owner")
+	require.NoError(t, err)
+	otherTeam, _, err := env.DB.CreateTeam(t.Context(), "other-team", "owner")
+	require.NoError(t, err)
+	_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: other.UID, Visibility: "teams", TeamUIDs: []string{otherTeam.UID}}, "owner")
 	require.NoError(t, err)
 	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "member-token", Actor: "member", AdminActor: db.BootstrapActor})
 	require.NoError(t, err)
@@ -143,6 +150,31 @@ func TestFederationStatusProjectMember(t *testing.T) {
 	require.Error(t, err)
 	out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name, "--format", "json")
 	assert.Contains(t, out, project.Name)
+	assert.Contains(t, out, "hub offline")
+	_, err = runCmdOutput(t, env, "federation", "status", "--project", other.Name)
+	require.Error(t, err)
+}
+
+func TestFederationStatusProjectAnonymousReadonly(t *testing.T) {
+	env := testenv.New(t, testenv.WithInsecureReadonly())
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "owner")
+	require.NoError(t, err)
+	require.NoError(t, env.DB.RecordFederationSyncError(t.Context(), project.ID, errors.New("hub offline"), time.Now()))
+	for _, path := range []string{"/api/v1/projects/resolve?name=spoke-project", fmt.Sprintf("/api/v1/projects/%d", project.ID), fmt.Sprintf("/api/v1/projects/%d/federation/status?compact=true", project.ID), fmt.Sprintf("/api/v1/projects/%d/federation/status", project.ID)} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, env.URL+path, nil)
+		require.NoError(t, err)
+		resp, err := env.HTTP.Do(req)
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, http.StatusOK, resp.StatusCode, "%s: %s", path, body)
+	}
+	out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name)
+	assert.Contains(t, out, project.Name)
+	assert.Contains(t, out, "hub offline")
 }
 
 func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {

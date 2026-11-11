@@ -1481,7 +1481,7 @@ func resolveFederationProjectByName(a daemonAPI, name string) (projectRef, error
 	if err != nil {
 		return projectRef{}, err
 	}
-	callResp, callErr := apiClient.ResolveProjectWithResponse(a.ctx, &generated.ResolveProjectRequestOptions{Body: &generated.ResolveProjectBody{Name: &name}})
+	callResp, callErr := apiClient.ReadProjectByNameWithResponse(a.ctx, &generated.ReadProjectByNameRequestOptions{Query: &generated.ReadProjectByNameQuery{Name: name}})
 	if callResp == nil {
 		return projectRef{}, externalCLITransportError(callResp, callErr)
 	}

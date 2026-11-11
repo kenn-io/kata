@@ -131,6 +131,15 @@ type ListProjectsQuery struct {
 	Include *string `json:"include,omitempty"`
 }
 
+type ReadProjectByNameQuery struct {
+	// Name project name
+	Name string `json:"name" validate:"required"`
+}
+
+func (r ReadProjectByNameQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type RemoveProjectQuery struct {
 	Actor string `json:"actor" validate:"required"`
 	Force *bool  `json:"force,omitempty"`

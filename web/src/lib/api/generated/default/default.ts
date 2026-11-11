@@ -224,6 +224,7 @@ import type {
   ReachableGraphResponseBody,
   ReachableIssueGraphParams,
   ReachableIssueGraphPathParameters,
+  ReadProjectByNameParams,
   ReadUILaunchTargetParams,
   ReadUIReferencesParams,
   ReadUISnapshotParams,
@@ -2027,6 +2028,53 @@ export const initProject = async (
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(initProjectRequestBody),
+  })
+}
+
+export type readProjectByNameResponse200 = {
+  data: ProjectResolveBody
+  status: 200
+}
+
+export type readProjectByNameResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type readProjectByNameResponseSuccess = readProjectByNameResponse200 & {
+  headers: Headers
+}
+export type readProjectByNameResponseError = readProjectByNameResponseDefault & {
+  headers: Headers
+}
+
+export type readProjectByNameResponse =
+  | readProjectByNameResponseSuccess
+  | readProjectByNameResponseError
+
+export const getReadProjectByNameUrl = (params: ReadProjectByNameParams) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/resolve?${stringifiedParams}`
+    : `/api/v1/projects/resolve`
+}
+
+export const readProjectByName = async (
+  params: ReadProjectByNameParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<readProjectByNameResponse> => {
+  return orvalFetch<readProjectByNameResponse>(getReadProjectByNameUrl(params), {
+    ...options,
+    method: 'GET',
   })
 }
 

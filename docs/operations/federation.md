@@ -774,8 +774,10 @@ credentials. Retained-window counts describe stored artifacts, not provider
 requests or billing.
 
 When sync needs attention, copy the diagnostic command for Bash/Zsh or
-PowerShell. Configure the CLI to use the source daemon shown in the summary.
-Select a catalog entry with `--daemon`, or set `KATA_SERVER` for a remote daemon.
+PowerShell. Connect the CLI to the same daemon with your own credential. A local
+install uses its existing home or registered daemon profile. For a remote daemon,
+select its configured API connection with `--daemon` or `KATA_SERVER`. The
+browser address shown in the summary can differ from the CLI connection.
 
 ### Embedding transfer and reuse
 

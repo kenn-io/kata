@@ -8439,6 +8439,30 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
   /api/v1/projects/resolve:
+    get:
+      operationId: readProjectByName
+      parameters:
+        - description: project name
+          explode: false
+          in: query
+          name: name
+          required: true
+          schema:
+            description: project name
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectResolveBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
     post:
       operationId: resolveProject
       requestBody:

@@ -1,9 +1,10 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { DatabaseSync } from 'node:sqlite'
 
 import { expect, test as base, type APIResponse, type Page } from '@playwright/test'
 
@@ -56,6 +57,9 @@ interface KataFixture {
   restart(): Promise<void>
   restartReadonly(): Promise<void>
   restartIdentity(enabled?: boolean): Promise<void>
+  prepareSyncDiagnostic(): Promise<void>
+  recordSyncDiagnosticError(): void
+  runSyncDiagnostic(shell: 'bash' | 'pwsh', command: string, remote: boolean): string
 }
 
 interface RunningFixture {
@@ -189,6 +193,47 @@ listen = "127.0.0.1:${port}"
     origin,
     projectID: project.id,
     projectUID: project.uid,
+    async prepareSyncDiagnostic() {
+      const name = "spoke project's"
+      run(binary, ['projects', 'rename', 'example-project', name], workspace, environment)
+      run(binary, ['projects', 'create', name], remoteWorkspace, remoteEnvironment)
+      run(binary, ['federation', 'enable', name], remoteWorkspace, remoteEnvironment)
+      await symlink(binary, join(root, 'kata'))
+    },
+    recordSyncDiagnosticError() {
+      for (const path of [join(home, 'kata.db'), join(remoteHome, 'kata.db')]) {
+        const database = new DatabaseSync(path)
+        try {
+          database
+            .prepare(
+              `INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
+            SELECT id, '2026-10-01T12:00:00Z', 'example sync failure' FROM projects WHERE name = ?
+            ON CONFLICT(project_id) DO UPDATE SET last_error_at=excluded.last_error_at, last_error=excluded.last_error`,
+            )
+            .run("spoke project's")
+        } finally {
+          database.close()
+        }
+      }
+    },
+    runSyncDiagnostic(shell, command, remote) {
+      const env = remote ? remoteEnvironment : environment
+      const result = spawnSync(
+        shell,
+        shell === 'bash' ? ['-c', command] : ['-NoProfile', '-NonInteractive', '-Command', command],
+        {
+          cwd: remote ? remoteWorkspace : workspace,
+          env: {
+            ...env,
+            KATA_SERVER: remote ? remoteOrigin : '',
+            PATH: `${root}${delimiter}${env.PATH}`,
+          },
+          encoding: 'utf8',
+        },
+      )
+      if (result.status !== 0) throw new Error(`${shell} diagnostic failed: ${result.stderr}`)
+      return result.stdout
+    },
     async launch(page, route = '/kata?view=all-open') {
       await page.goto(`${origin}${route}`)
       await expect(page.getByRole('button', { name: 'New task' })).toBeVisible()

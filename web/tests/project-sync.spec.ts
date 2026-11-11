@@ -4,6 +4,7 @@ test('local project readers see native sync status with bounded embedding summar
   page,
   kata,
 }, testInfo) => {
+  await kata.prepareSyncDiagnostic()
   const local = await kata.launch(page, `/kata?scope=${kata.projectUID}`)
   const region = page.getByRole('region', { name: 'Project sync' })
   await expect(region.getByText('Local project')).toBeVisible()
@@ -35,6 +36,7 @@ test('local project readers see native sync status with bounded embedding summar
     { actor: 'example-owner' },
   )
   expect(enabled.ok()).toBe(true)
+  kata.recordSyncDiagnosticError()
   await region.getByRole('button', { name: 'Refresh sync' }).click()
   // This hub/unconfigured state comes from the native production SQLite daemon.
   await expect(region.getByText('hub', { exact: true })).toBeVisible()
@@ -45,8 +47,6 @@ test('local project readers see native sync status with bounded embedding summar
   await page.route(`**${statusPath}*`, async (route) => {
     const response = await route.fetch()
     const data = await response.json()
-    data.statuses[0].project_name = "spoke project's"
-    data.statuses[0].last_error = 'example sync failure'
     data.statuses[0].embedding = {
       state: 'reused',
       artifact_limit: 32,
@@ -67,7 +67,8 @@ test('local project readers see native sync status with bounded embedding summar
   await expect(
     region.getByRole('button', { name: 'Copy PowerShell sync status command' }),
   ).toBeVisible()
-  await expect(region.getByText(`Use a CLI configured for ${kata.origin}.`)).toBeVisible()
+  await expect(region.getByText('Run in a CLI connected to this daemon.')).toBeVisible()
+  await expect(region.getByText(`Browser: ${kata.origin}`)).toBeVisible()
   await expect(
     region.getByText("kata federation status --project 'spoke project'\\''s'"),
   ).toBeVisible()
@@ -75,6 +76,18 @@ test('local project readers see native sync status with bounded embedding summar
     region.getByText("kata federation status --project 'spoke project''s'"),
   ).toBeVisible()
   await expect(region.getByText('example sync failure')).toHaveCount(0)
+  await page
+    .context()
+    .grantPermissions(['clipboard-read', 'clipboard-write'], { origin: kata.origin })
+  for (const [shell, label] of [
+    ['bash', 'Bash/Zsh'],
+    ['pwsh', 'PowerShell'],
+  ] as const) {
+    await region.getByRole('button', { name: `Copy ${label} sync status command` }).click()
+    const command = await page.evaluate(() => navigator.clipboard.readText())
+    expect(kata.runSyncDiagnostic(shell, command, false)).toContain('example sync failure')
+    expect(kata.runSyncDiagnostic(shell, command, true)).toContain('example sync failure')
+  }
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 1000 })
     await expect(region.getByText('Retained without index: 1')).toBeVisible()

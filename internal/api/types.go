@@ -338,6 +338,11 @@ type ResolveProjectRequest struct {
 	}
 }
 
+// ReadProjectByNameRequest selects an existing project by name.
+type ReadProjectByNameRequest struct {
+	Name string `query:"name" required:"true" doc:"project name"`
+}
+
 // ProjectResolveBody is the JSON body field of a successful resolve response.
 type ProjectResolveBody struct {
 	Project       ProjectOut      `json:"project"`

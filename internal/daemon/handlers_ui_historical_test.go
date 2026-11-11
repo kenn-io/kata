@@ -19,6 +19,40 @@ type historicalUIReferenceHostAccess struct {
 	deniedProjectID int64
 }
 
+func TestReadProjectByNameHostScope(t *testing.T) {
+	dbh := openTestDB(t)
+	allowed, err := dbh.db.CreateProject(t.Context(), "allowed-project")
+	require.NoError(t, err)
+	denied, err := dbh.db.CreateProject(t.Context(), "denied-project")
+	require.NoError(t, err)
+	server := daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now, HostAccess: historicalUIReferenceHostAccess{deniedProjectID: denied.ID}})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "worker"})
+		server.Handler().ServeHTTP(w, r.WithContext(ctx))
+	}))
+	t.Cleanup(ts.Close)
+	for _, tc := range []struct {
+		path   string
+		status int
+	}{
+		{"/api/v1/projects/resolve?name=allowed-project", http.StatusOK},
+		{"/api/v1/projects/resolve?name=denied-project", http.StatusNotFound},
+		{"/api/v1/projects", http.StatusNotFound},
+	} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+tc.path, nil)
+		require.NoError(t, err)
+		resp, err := ts.Client().Do(req)
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, tc.status, resp.StatusCode, string(body))
+		if tc.status == http.StatusOK {
+			require.Contains(t, string(body), allowed.Name)
+		}
+	}
+}
+
 func (a historicalUIReferenceHostAccess) Authorize(_ context.Context, request daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
 	if request.Operation.AllProjects || slices.Contains(request.Operation.ProjectIDs, a.deniedProjectID) {
 		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied

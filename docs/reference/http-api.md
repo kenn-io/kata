@@ -19,6 +19,12 @@ discovery. [Cron](cron.md) documents job and workflow resources.
 
 Search responses include `X-Kata-Embeddings-Configured: true` when the answering daemon has an embeddings provider, even while its index is empty or read-only mode forces lexical search. The value is `false` when no provider is configured. The response body is unchanged.
 
+## Project lookup by name
+
+`GET /api/v1/projects/resolve?name=...` resolves an accessible project by its
+exact name. It requires read access to that project and does not resolve aliases
+or filesystem paths.
+
 ## Local embeddings setup
 
 `GET /api/v1/embeddings/local` reports the configured provider, missing download bytes, Ollama availability, setup job, indexing progress, and `can_change`. `indexing.failed` reports an indexing error while the daemon keeps retrying. Aggregate indexing counts, time estimates, and detailed setup errors are visible only to daemon owners. Other viewers receive progress and failure state without those details. Issue-scoped credentials can read the status.
