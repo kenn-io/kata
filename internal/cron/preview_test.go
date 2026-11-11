@@ -16,6 +16,11 @@ func TestPreviewJobStates(t *testing.T) {
 	got, err = PreviewJob(j, nil, now, 1)
 	require.NoError(t, err)
 	require.Equal(t, "unavailable", got.Status)
+	invalid := p
+	invalid.Version = 2
+	got, err = PreviewJob(j, &PreviewParent{Open: true, Progress: &invalid}, now, 1)
+	require.NoError(t, err)
+	require.Equal(t, "unavailable", got.Status)
 	got, err = PreviewJob(j, &PreviewParent{Open: false}, now, 1)
 	require.NoError(t, err)
 	require.Equal(t, "parent_closed", got.Status)
