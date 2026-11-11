@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -211,7 +210,7 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 		if err := checkDaemonReplaceable(ctx, found.Daemon.Info); err != nil {
 			return RunningDaemon{}, err
 		}
-		if canRestartLocalDaemon(found.Daemon.Record) && (enabled || runtime.GOOS != "windows") {
+		if enabled && canRestartLocalDaemon(found.Daemon.Record) {
 			return restartLocalDaemon(ctx, ns, found.Daemon.Record)
 		}
 		if !enabled {
@@ -266,10 +265,10 @@ func waitForSupervisedDaemon(ctx context.Context, dataDir, configPath string, mi
 	if migrationAllowed && sqliteCutoverLocked(ctx) {
 		return RunningDaemon{}, fmt.Errorf("%w: storage migration is in progress; retry after the service manager's daemon becomes ready (%s)", ErrLocalDaemonUnreachable, configPath)
 	}
+	message := fmt.Errorf("%w; readiness budget %s; start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
 	if unreachable != nil {
-		return RunningDaemon{}, unreachable
+		message = fmt.Errorf("%w: %w", message, unreachable)
 	}
-	message := fmt.Errorf("%w; waited up to %s; start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
 	if ctx.Err() != nil {
 		return RunningDaemon{}, fmt.Errorf("%w: %w", message, ctx.Err())
 	}

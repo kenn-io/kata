@@ -37,9 +37,7 @@ Run the daemon under a process manager such as launchd, systemd, or a container
 runtime on the host that owns the SQLite database. Set top-level `autostart = false`
 in that home's `config.toml` so CLI commands wait up to 30 seconds during a
 restart instead of starting a competing daemon. Explicit `kata daemon start`
-remains available. During upgrades, Kata can replace a capable running daemon
-in place on Unix while preserving the service manager's process and environment;
-otherwise restart the daemon through its service manager.
+remains available. During upgrades, restart the daemon through its service manager.
 
 ## Runtime profiling
 

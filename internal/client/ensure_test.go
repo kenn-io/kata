@@ -1372,9 +1372,6 @@ func patchEnsureHooks(t *testing.T, version, startedURL string) *ensurePatchStat
 func TestEnsureRunningReplacesCapableDaemonInPlace(t *testing.T) {
 	for _, supervised := range []bool{false, true} {
 		t.Run(fmt.Sprintf("supervised=%t", supervised), func(t *testing.T) {
-			if supervised && runtime.GOOS == "windows" {
-				t.Skip("Windows cannot retain the supervisor process through replacement")
-			}
 			testEnsureRunningReplacesCapableDaemonInPlace(t, supervised)
 		})
 	}
@@ -1420,6 +1417,16 @@ func testEnsureRunningReplacesCapableDaemonInPlace(t *testing.T, supervised bool
 
 	url, err := EnsureRunning(t.Context())
 
+	if supervised {
+		require.ErrorIs(t, err, ErrDaemonNotReplaceable)
+		require.ErrorContains(t, err, "v0.1.0")
+		require.ErrorContains(t, err, "v0.2.0")
+		require.ErrorContains(t, err, "service manager")
+		assert.Zero(t, requests)
+		assert.Zero(t, state.stopCalls)
+		assert.Zero(t, state.startCalls)
+		return
+	}
 	require.NoError(t, err)
 	assert.Equal(t, 1, requests, "older capable daemon must receive an in-place request")
 	assert.Zero(t, state.stopCalls)

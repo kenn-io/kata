@@ -559,7 +559,7 @@ Local startup policy is configured at the top level of `<KATA_HOME>/config.toml`
 
 | Key | Default | Behavior |
 | --- | --- | --- |
-| `autostart` | `true` | `false` prevents implicit daemon starts, including `kata daemon recover`. Commands wait up to 30 seconds (or their shorter deadline) for the service manager's daemon, then fail. Explicit `kata daemon start` remains available. |
+| `autostart` | `true` | `false` prevents implicit daemon starts and replacement, including `kata daemon recover`. Commands wait up to 30 seconds (or their shorter deadline) for the service manager's daemon, then fail. Restart an incompatible daemon through its service manager. Explicit `kata daemon start` remains available. |
 
 Idle shutdown is intended for the default owner-local daemon rather than the
 shared-daemon configuration above. Its minimal configuration is:

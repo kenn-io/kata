@@ -697,7 +697,18 @@ func TestLocalProfileWithoutInstalledStorageDiscoversButCannotStart(t *testing.T
 }
 
 func TestLocalProfileReplacesCapableDaemonInPlace(t *testing.T) {
+	for _, supervised := range []bool{false, true} {
+		t.Run(fmt.Sprintf("supervised=%t", supervised), func(t *testing.T) {
+			testLocalProfileReplacesCapableDaemonInPlace(t, supervised)
+		})
+	}
+}
+
+func testLocalProfileReplacesCapableDaemonInPlace(t *testing.T, supervised bool) {
 	profile, root := localProfileFixture(t)
+	if supervised {
+		require.NoError(t, os.WriteFile(filepath.Join(profile.Home, "config.toml"), []byte("autostart = false\n"), 0600))
+	}
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
 	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/ping" {
@@ -744,6 +755,16 @@ func TestLocalProfileReplacesCapableDaemonInPlace(t *testing.T) {
 
 	resolved, err := EnsureResolvedInWorkspace(t.Context(), root)
 
+	if supervised {
+		require.ErrorIs(t, err, ErrDaemonNotReplaceable)
+		require.ErrorContains(t, err, "v0.1.0")
+		require.ErrorContains(t, err, "v0.2.0")
+		require.ErrorContains(t, err, "service manager")
+		assert.Zero(t, requests)
+		assert.Zero(t, state.stopCalls)
+		assert.Zero(t, state.startCalls)
+		return
+	}
 	require.NoError(t, err)
 	assert.Equal(t, 1, requests, "older profile daemon must receive an in-place request")
 	assert.Zero(t, state.stopCalls)

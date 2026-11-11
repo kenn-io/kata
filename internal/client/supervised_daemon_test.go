@@ -39,8 +39,6 @@ func TestManagedExternallyWaitReleasesStartLock(t *testing.T) {
 	home := setupKataEnv(t)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
 	state := patchEnsureHooks(t, "v0.2.0", "http://spawned")
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
 	orig := discoverDaemonForAutoStart
 	t.Cleanup(func() { discoverDaemonForAutoStart = orig })
 	calls := 0
@@ -63,7 +61,25 @@ func TestManagedExternallyWaitReleasesStartLock(t *testing.T) {
 	require.Equal(t, "http://supervised", got.BaseURL)
 	require.Equal(t, 2, calls)
 	require.Zero(t, state.startCalls)
-	require.NotEmpty(t, ns.DataDir)
+}
+
+func TestManagedExternallyUnreachableRetainsGuidance(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		setupKataEnv(t)
+		cause := fmt.Errorf("daemon endpoint unreachable: %w", ErrLocalDaemonUnreachable)
+		orig := discoverDaemonForAutoStart
+		t.Cleanup(func() { discoverDaemonForAutoStart = orig })
+		discoverDaemonForAutoStart = func(context.Context, string) (ensureDiscovery, error) {
+			return ensureDiscovery{}, cause
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+		defer cancel()
+		_, err := waitForSupervisedDaemon(ctx, t.TempDir(), "/example/config.toml", false)
+		require.ErrorIs(t, err, ErrDaemonManagedExternally)
+		require.ErrorIs(t, err, cause)
+		require.ErrorContains(t, err, "service manager")
+		require.ErrorContains(t, err, "autostart = false")
+	})
 }
 
 func TestManagedExternallyStaleWaitDoesNotReplace(t *testing.T) {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"sync"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
@@ -196,7 +195,7 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 		if err := refuseDaemonDowngrade(found.Daemon.Info); err != nil {
 			return resolved, err
 		}
-		if canRestartLocalDaemon(found.Daemon.Record) && (enabled || goruntime.GOOS != "windows") {
+		if enabled && canRestartLocalDaemon(found.Daemon.Record) {
 			ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
 			if err != nil {
 				return resolved, err
