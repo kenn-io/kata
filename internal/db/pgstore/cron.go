@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Store) cronSQL() db.CronSQL {
-	return db.CronSQL{RecurringChild: s.recurringChild, CreateIssueTx: s.createIssueTx, PatchIssueMetadataTx: func(ctx context.Context, tx *sql.Tx, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
+	return db.CronSQL{CreateIssueTx: s.createIssueTx, PatchIssueMetadataTx: func(ctx context.Context, tx *sql.Tx, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
 		return s.patchIssueMetadata(ctx, in, func(_ context.Context, run transactionFunc) error { return run(tx) })
 	}, Postgres: true, InstanceUID: s.InstanceUID(), Query: s, Transact: func(ctx context.Context, run func(*sql.Tx) error) error { return s.withSerializableTx(ctx, run) }, WriteGate: func(ctx context.Context, tx *sql.Tx, id int64) error { return ensureProjectWritableTx(ctx, tx, id) }, EffectiveActor: func(ctx context.Context, tx *sql.Tx, projectID int64, actor string) (string, error) {
 		return effectiveLocalMutationActorTx(ctx, tx, projectID, actor)
@@ -83,10 +83,6 @@ func (s *Store) RecurringCronDelivery(ctx context.Context, query db.CronDelivery
 		return nil, err
 	}
 	return out, nil
-}
-
-func (s *Store) recurringChild(ctx context.Context, parentID int64, jobUID string) (*db.RecurringChild, error) {
-	return s.recurringChildTx(ctx, s, parentID, jobUID)
 }
 
 func (s *Store) recurringChildTx(ctx context.Context, q interface {

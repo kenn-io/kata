@@ -9,7 +9,7 @@ import (
 )
 
 func (d *Store) cronSQL() db.CronSQL {
-	return db.CronSQL{RecurringChild: d.recurringChild, CreateIssueTx: func(ctx context.Context, tx *sql.Tx, p db.CreateIssueParams) (db.Issue, db.Event, error) {
+	return db.CronSQL{CreateIssueTx: func(ctx context.Context, tx *sql.Tx, p db.CreateIssueParams) (db.Issue, db.Event, error) {
 		id, event, err := d.createIssueTx(ctx, tx, p)
 		if err != nil {
 			return db.Issue{}, db.Event{}, err
@@ -100,10 +100,6 @@ func (d *Store) RecurringCronDelivery(ctx context.Context, query db.CronDelivery
 		return nil, err
 	}
 	return out, nil
-}
-
-func (d *Store) recurringChild(ctx context.Context, parentID int64, jobUID string) (*db.RecurringChild, error) {
-	return d.recurringChildTx(ctx, d, parentID, jobUID)
 }
 
 func (d *Store) recurringChildTx(ctx context.Context, q interface {
