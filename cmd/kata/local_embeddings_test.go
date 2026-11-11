@@ -97,7 +97,7 @@ func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {
 }
 
 func TestLocalEmbeddingsFreshOllama(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setLocalEmbeddingsTestHome(t, t.TempDir())
 	clearLocalEmbeddingsEnv(t)
 	setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "")
@@ -143,7 +143,7 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := setupKataEnv(t)
-			t.Setenv("HOME", t.TempDir())
+			setLocalEmbeddingsTestHome(t, t.TempDir())
 			t.Setenv("KATA_SERVER", "")
 			path := filepath.Join(home, "config.toml")
 			if tc.exists {
@@ -181,7 +181,7 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 }
 
 func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setLocalEmbeddingsTestHome(t, t.TempDir())
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
 	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
@@ -375,7 +375,7 @@ func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 }
 
 func TestLocalEmbeddingsDaemonApprovesRecordedChoice(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setLocalEmbeddingsTestHome(t, t.TempDir())
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
 	require.NoError(t, embedlocal.RecordChoice())

@@ -66,6 +66,7 @@ func TestFederationEmbeddingRecipeExport(t *testing.T) {
 }
 
 func TestFederationEmbeddingRecipeUnconfigured(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 	var output bytes.Buffer
 	cmd := newFederationCmd()
@@ -81,7 +82,7 @@ func TestFederationEmbeddingRecipeUnconfigured(t *testing.T) {
 func TestFederationEmbeddingRecipeUsesSharedChoice(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	setupKataEnv(t)
-	t.Setenv("HOME", t.TempDir())
+	setLocalEmbeddingsTestHome(t, t.TempDir())
 	require.NoError(t, embedlocal.RecordChoice())
 	var output bytes.Buffer
 	cmd := newFederationCmd()

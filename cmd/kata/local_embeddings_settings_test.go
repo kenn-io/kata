@@ -31,7 +31,7 @@ import (
 func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setLocalEmbeddingsTestHome(t, home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".kenn"), []byte("unrelated file"), 0o600))
 	for _, tc := range []struct{ provider, url string }{
 		{"ollama", "http://127.0.0.1:11434/v1"},
@@ -63,7 +63,7 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 			clearLocalEmbeddingsEnv(t)
 			resetFlags(t)
 			home := setupKataEnv(t)
-			t.Setenv("HOME", t.TempDir())
+			setLocalEmbeddingsTestHome(t, t.TempDir())
 			t.Setenv("PORT", "")
 			t.Setenv("KATA_SERVER", "")
 			t.Setenv("KATA_DSN", "")
@@ -235,7 +235,7 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
-	t.Setenv("HOME", t.TempDir())
+	setLocalEmbeddingsTestHome(t, t.TempDir())
 	original := []byte("[search.embeddings]\nbase_url = \"http://127.0.0.1:11434/v1\"\nmodel = \"nomic-embed-text\"\ndims = 768\n")
 	path := filepath.Join(home, "config.toml")
 	require.NoError(t, os.WriteFile(path, original, 0o600))
@@ -256,7 +256,7 @@ func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 func TestSharedChoiceEnablesStartup(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
-	t.Setenv("HOME", t.TempDir())
+	setLocalEmbeddingsTestHome(t, t.TempDir())
 	require.NoError(t, embedlocal.RecordChoice())
 	cfg, err := config.ReadSearchConfig()
 	require.NoError(t, err)
@@ -279,7 +279,7 @@ func TestSharedChoicePreservesStartupProviders(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			clearLocalEmbeddingsEnv(t)
 			home := setupKataEnv(t)
-			t.Setenv("HOME", t.TempDir())
+			setLocalEmbeddingsTestHome(t, t.TempDir())
 			if tc.env != "" {
 				t.Setenv("KATA_SEARCH_EMBEDDINGS_BASE_URL", tc.env)
 				t.Setenv("KATA_SEARCH_EMBEDDINGS_MODEL", "example")
@@ -305,7 +305,7 @@ func TestSharedChoicePreservesStartupProviders(t *testing.T) {
 func TestSavedLocalDoesNotRecordSharedChoice(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	setupKataEnv(t)
-	t.Setenv("HOME", t.TempDir())
+	setLocalEmbeddingsTestHome(t, t.TempDir())
 	cfg, err := config.ParseSearchConfig([]byte("[search.embeddings]\nlocal = true\n"))
 	require.NoError(t, err)
 	next, err := applySharedEmbeddingChoice(t.Context(), cfg.Embeddings)
@@ -319,7 +319,7 @@ func TestSavedLocalDoesNotRecordSharedChoice(t *testing.T) {
 func TestSharedChoiceRejectsInvalidBatchBeforeSaving(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
-	t.Setenv("HOME", t.TempDir())
+	setLocalEmbeddingsTestHome(t, t.TempDir())
 	require.NoError(t, embedlocal.RecordChoice())
 	original := "[search.embeddings]\nmodel_context_tokens = 32000\nmax_batch_tokens = 31999\n"
 	path := filepath.Join(home, "config.toml")
@@ -338,7 +338,7 @@ func TestSharedChoiceRejectsInvalidBatchBeforeSaving(t *testing.T) {
 func TestSavedLocalKeepsExistingChoiceFile(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	setupKataEnv(t)
-	t.Setenv("HOME", t.TempDir())
+	setLocalEmbeddingsTestHome(t, t.TempDir())
 	require.NoError(t, embedlocal.RecordChoice())
 	dir, err := embedlocal.DefaultDir()
 	require.NoError(t, err)
@@ -359,7 +359,7 @@ func TestSavedLocalStartsWhenChoiceCannotBeWritten(t *testing.T) {
 	resetFlags(t)
 	home := setupKataEnv(t)
 	sharedHome := t.TempDir()
-	t.Setenv("HOME", sharedHome)
+	setLocalEmbeddingsTestHome(t, sharedHome)
 	t.Setenv("PORT", "")
 	t.Setenv("KATA_SERVER", "")
 	t.Setenv("KATA_DSN", "")
@@ -381,7 +381,7 @@ func TestTurnOnDoesNotSaveLocalWhenChoiceCannotBeWritten(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
 	sharedHome := t.TempDir()
-	t.Setenv("HOME", sharedHome)
+	setLocalEmbeddingsTestHome(t, sharedHome)
 	require.NoError(t, os.WriteFile(filepath.Join(sharedHome, ".kenn"), []byte("blocks marker directory"), 0o600))
 	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
 	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
@@ -407,7 +407,7 @@ func TestTurnOnDoesNotSaveLocalWhenChoiceCannotBeWritten(t *testing.T) {
 func TestTurnOnKeepsExistingChoiceFile(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	setupKataEnv(t)
-	t.Setenv("HOME", t.TempDir())
+	setLocalEmbeddingsTestHome(t, t.TempDir())
 	require.NoError(t, embedlocal.RecordChoice())
 	dir, err := embedlocal.DefaultDir()
 	require.NoError(t, err)
@@ -439,7 +439,7 @@ func TestTurnOnKeepsExistingChoiceFile(t *testing.T) {
 func TestSavedLocalUsesInstalledServerWithoutRecordingChoice(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
-	t.Setenv("HOME", t.TempDir())
+	setLocalEmbeddingsTestHome(t, t.TempDir())
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		values := make([]float64, 768)
 		values[0] = 1

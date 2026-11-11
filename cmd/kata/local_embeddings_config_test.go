@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -19,9 +21,15 @@ func stubLocalEmbeddingsInstall(t *testing.T) {
 	}
 }
 
+func setLocalEmbeddingsTestHome(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+}
+
 func clearLocalEmbeddingsEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	setLocalEmbeddingsTestHome(t, t.TempDir())
 	for _, key := range []string{"KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX", "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS"} {
 		t.Setenv(key, "")
 	}
@@ -82,4 +90,17 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The shared embedding directory must stay inside each test's temporary home.
+func TestLocalEmbeddingsTestHomeIsIsolated(t *testing.T) {
+	original := t.TempDir()
+	t.Setenv("USERPROFILE", original)
+	clearLocalEmbeddingsEnv(t)
+	home := os.Getenv("HOME")
+	require.NotEqual(t, original, home)
+	require.Equal(t, home, os.Getenv("USERPROFILE"))
+	dir, err := embedlocal.DefaultDir()
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(home, ".kenn", "embeddings"), dir)
 }
