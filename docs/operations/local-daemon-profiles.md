@@ -171,7 +171,8 @@ The profile's own auth token is used for its API and identity checks. A catalog
 it does not change the daemon's configured auth. With `autostart = false`, Kata
 never launches the profile, so a catalog credential is used for the client's
 API and identity checks without resolving the daemon's own `auth.token_env`,
-which only the service manager reads and which may be a reserved name. Without a
+which may exist only in the supervised process environment and may use a
+reserved name. Without a
 catalog credential, the client resolves the profile's own token. For a profile
 Kata launches, use a neutral, non-reserved environment name for a referenced
 credential.
