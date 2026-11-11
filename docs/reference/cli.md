@@ -2002,9 +2002,11 @@ resolved web UI URL on its own line after the daemon transport address.
 `daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
 `KATA_HOME` and reject `--daemon`. Set the home explicitly for those operations.
 `daemon status` reports current-home processes and a separate selected-daemon
-diagnosis. It exits 0 only when the selected daemon is ready. Stopped,
-unavailable, or version-mismatched selections exit 7; an unknown named daemon
-exits 3. Diagnostics are printed in every output mode.
+diagnosis. It exits 0 only when the selected daemon is ready. Stopped or
+unavailable selections and the `version_mismatch` state exit 7; an unknown
+named daemon exits 3. A
+different default daemon runtime version alone is informational. Diagnostics
+are printed in every output mode.
 In agent mode, the `OK daemon` report on stdout indicates that the report was
 produced; a non-ready selection also emits an `ERR status` line on stderr.
 A ready selected remote or local profile succeeds even when the current home

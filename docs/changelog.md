@@ -10,8 +10,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Use `kata daemon status` in scripts to check the selected daemon's readiness.
-  A stopped, unavailable, or version-mismatched selection now exits 7; an
-  unknown named daemon exits 3. Both print diagnostics and previously exited 0.
+  Stopped or unavailable selections and the `version_mismatch` state now exit 7;
+  an unknown named daemon exits 3. Both print diagnostics and previously exited 0.
 
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index
