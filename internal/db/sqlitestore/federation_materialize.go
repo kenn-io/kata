@@ -289,7 +289,7 @@ func (s *federationRowHasher) write(kind byte, values ...any) {
 			tag = 4
 		case int64:
 			var n [8]byte
-			binary.BigEndian.PutUint64(n[:], uint64(v))
+			binary.BigEndian.PutUint64(n[:], uint64(v)) //nolint:gosec // Preserve the bits of signed SQLite integers.
 			_, _ = s.h.Write([]byte{1})
 			_, _ = s.h.Write(n[:])
 			continue
