@@ -590,35 +590,39 @@ func TestWebDaemonGatewayRejectsNestedProxyRoutesWithoutContactingTarget(t *test
 
 func TestResolveWebDaemonRequiresCanonicalRootOrigin(t *testing.T) {
 	t.Run("canonicalizes origin", func(t *testing.T) {
-		resolved := resolveWebDaemon(config.CatalogDaemonConfig{
+		resolved, err := resolveWebDaemon(config.CatalogDaemonConfig{
 			Name: "example-remote", URL: "https://DAEMON.EXAMPLE:443/",
 		})
+		require.NoError(t, err)
 		assert.Equal(t, "https://daemon.example", resolved.baseURL)
 	})
 
 	t.Run("rejects path prefix", func(t *testing.T) {
-		resolved := resolveWebDaemon(config.CatalogDaemonConfig{
+		resolved, err := resolveWebDaemon(config.CatalogDaemonConfig{
 			Name: "example-remote", URL: "https://daemon.example/gateway",
 		})
+		require.NoError(t, err)
 		assert.Empty(t, resolved.baseURL)
 	})
 }
 
 func TestWebDaemonBearerTransportRequiresExplicitPlaintextTrust(t *testing.T) {
-	resolved := resolveWebDaemon(config.CatalogDaemonConfig{
+	resolved, err := resolveWebDaemon(config.CatalogDaemonConfig{
 		Name: "example-remote", URL: "http://100.64.0.5:7777", Token: "target-token",
 	})
 
-	_, err := webDaemonBearerTransport(resolved, false)
+	require.NoError(t, err)
+	_, err = webDaemonBearerTransport(resolved, false)
 	require.Error(t, err)
 
 	_, err = webDaemonBearerTransport(resolved, true)
 	require.NoError(t, err)
 
-	resolved = resolveWebDaemon(config.CatalogDaemonConfig{
+	resolved, err = resolveWebDaemon(config.CatalogDaemonConfig{
 		Name: "example-remote", URL: "http://daemon.example", Token: "target-token",
 		AllowInsecure: true,
 	})
+	require.NoError(t, err)
 	_, err = webDaemonBearerTransport(resolved, false)
 	require.NoError(t, err)
 }

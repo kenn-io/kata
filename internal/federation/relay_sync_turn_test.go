@@ -3,6 +3,7 @@ package federation_test
 import (
 	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/activity"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federation"
@@ -360,4 +362,98 @@ func TestRunnerLeavesSpokesWithFailedClaimRetriesOnTheInterval(t *testing.T) {
 			require.Len(t, issues, 3, "the sync turn ran and stopped at its budget with work remaining")
 		})
 	}
+}
+
+// The real relay handshake reaches a refused reset; the runner gates the whole
+// binding until due while preserving its error and serving another project.
+func TestRunnerRelayRefusalBackoff(t *testing.T) {
+	ctx := t.Context()
+	root := newRecoveryRoot(t, "sqlite")
+	relay := newRelayMatrixNode(t, "sqlite", "relay-member")
+	_, _, err := root.store.CreateIssue(db.WithRootAttribution(ctx, root.signer, root.account), db.CreateIssueParams{ProjectID: root.project.ID, Title: "Retained before compaction", Author: root.account})
+	require.NoError(t, err)
+	// Use the existing compacted-history bootstrap fixture, rather than merely
+	// assuming that an enrolled relay will need a checkpoint.
+	_, err = root.store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	}).ExecContext(ctx, "DELETE FROM events WHERE project_id=?", root.project.ID)
+	require.NoError(t, err)
+	var resets, metadata, other atomic.Int32
+	var repaired atomic.Bool
+	handler := root.http.Config.Handler
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/federation/metadata") {
+			metadata.Add(1)
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/federation/relay/reset") {
+			resets.Add(1)
+			if !repaired.Load() {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"error":{"code":"relay_cross_project_links","message":"this daemon's copy of the project has cross-project issue links"}}`))
+				return
+			}
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(proxy.Close)
+	root.http = proxy
+	enrollRelayMatrixReplica(t, root, relay, "spoke-project", false)
+	independent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		other.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(independent.Close)
+	project, err := relay.store.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	_, err = relay.store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: independent.URL, HubProjectID: 42, HubProjectUID: project.UID, Enabled: true})
+	require.NoError(t, err)
+	require.NoError(t, relay.credentials.StoreFederationCredential(ctx, project.UID, config.FederationCredential{}))
+	wake := make(chan struct{}, 1)
+	outcomes := make(chan error, 128)
+	runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Second, Wake: wake, Debounce: time.Millisecond, OnError: func(err error) {
+		select {
+		case outcomes <- err:
+		default:
+		}
+	}}
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(runCtx) }()
+	defer func() { cancel(); require.ErrorIs(t, <-done, context.Canceled) }()
+
+	if !t.Run("reset refusal", func(t *testing.T) {
+		select {
+		case <-outcomes:
+		case <-time.After(10 * time.Second):
+			t.Fatal("runner did not complete a pass")
+		}
+		require.Equal(t, int32(1), resets.Load())
+		status, err := relay.store.FederationSyncStatusByProject(ctx, relay.project.ID)
+		require.NoError(t, err)
+		require.NotNil(t, status.LastError)
+		require.Contains(t, *status.LastError, "/federation/relay/reset")
+		require.Contains(t, *status.LastError, "the project on the hub has cross-project issue links")
+	}) {
+		return
+	}
+	if !t.Run("not due", func(t *testing.T) {
+		before := metadata.Load()
+		progress := other.Load()
+		wake <- struct{}{}
+		//nolint:kennlint // sleeptest: Observe an independent request after the wake without depending on result callback counts.
+		require.Eventually(t, func() bool { return other.Load() > progress }, 5*time.Second, 20*time.Millisecond)
+		require.Equal(t, before, metadata.Load(), "wake skips the whole refused turn")
+		require.Equal(t, int32(1), resets.Load())
+	}) {
+		return
+	}
+	t.Run("due retry and recovery", func(t *testing.T) {
+		repaired.Store(true)
+		//nolint:kennlint // sleeptest: Exercise the production one-minute refusal delay once; lifecycle tests own its full schedule.
+		require.Eventually(t, func() bool {
+			status, err := relay.store.FederationSyncStatusByProject(ctx, relay.project.ID)
+			return err == nil && status.LastError == nil
+		}, 70*time.Second, 20*time.Millisecond)
+		require.Equal(t, int32(2), resets.Load())
+	})
 }

@@ -155,8 +155,8 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 }
 
 // catalogClientToken is a catalog entry's credential as clients send it.
-// KATA_AUTH_TOKEN replaces a remote entry's credential, so its token_env is
-// not read then.
+// KATA_AUTH_TOKEN replaces a remote entry's credential, so its token_file or
+// token_env is not read then.
 func catalogClientToken(entry config.CatalogDaemonConfig) (string, error) {
 	if !entry.Local && globalAuthTokenOverrideSet() {
 		return entry.Token, nil

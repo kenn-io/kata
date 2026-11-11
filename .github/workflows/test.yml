@@ -51,6 +51,16 @@ jobs:
               - 'mise.toml'
             docs-javascript:
               - 'docs/javascripts/**'
+            release-commands:
+              - 'README.md'
+              - 'scripts/install.sh'
+              - 'scripts/install.ps1'
+              - '.github/workflows/**'
+
+  release-commands:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'release-commands')) }}
+    uses: ./.github/workflows/release-commands.yml
 
   web-static:
     needs: changes

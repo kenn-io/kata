@@ -117,7 +117,7 @@ func ValidateFederationAuthentication(mapping FederationProjectConfig, catalog C
 		return errors.New("actor must be supplied by the credential_provider")
 	}
 	if catalog.HasClientToken() {
-		return errors.New("credential_provider cannot use a catalog token or token_env")
+		return errors.New("credential_provider cannot use a catalog token, token_file or token_env")
 	}
 	if !strings.HasPrefix(catalog.URL, "https://") {
 		return errors.New("credential_provider requires an HTTPS hub URL")

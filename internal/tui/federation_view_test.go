@@ -2177,8 +2177,9 @@ func TestFetchProjectsCarriesUIDs(t *testing.T) {
 }
 func daemonTargetWithResolvedAuth(name, baseURL, token string, allowInsecure bool) daemonTarget {
 	return daemonTarget{
-		Name: name,
-		URL:  baseURL,
+		Name:  name,
+		Token: token,
+		URL:   baseURL,
 		resolved: clientpkg.ResolvedDaemon{
 			Source: clientpkg.DaemonSourceInjected, Name: name, BaseURL: baseURL,
 			Token: token, AllowInsecure: allowInsecure,

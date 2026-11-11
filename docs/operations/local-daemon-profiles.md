@@ -1,7 +1,7 @@
 ---
 title: Local daemon profiles
 description: Keep personal and work spokes separate and recover a stopped spoke without changing its database identity.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # Local daemon profiles
@@ -167,12 +167,12 @@ profile daemon with `[docbank] local = true` finds the same Docbank vault as the
 `docbank` CLI instead of falling back to `~/.docbank`.
 
 The profile's own auth token is used for its API and identity checks. A catalog
-`token` or `token_env` can select a client credential for identity-token mode;
-it does not change the daemon's configured auth. With `autostart = false`, Kata
-never launches the profile, so a catalog credential is used for the client's
-API and identity checks without resolving the daemon's own `auth.token_env`,
-which may exist only in the supervised process environment and may use a
-reserved name. Without a
+`token`, `token_file` or `token_env` can select a client credential for
+identity-token mode, in that order of precedence. It does not change the
+daemon's configured auth. With `autostart = false`, Kata never launches the
+profile, so a catalog credential is used for the client's API and identity
+checks without resolving the daemon's own `auth.token_env`, which may exist only
+in the supervised process environment and may use a reserved name. Without a
 catalog credential, the client resolves the profile's own token. For a profile
 Kata launches, use a neutral, non-reserved environment name for a referenced
 credential.

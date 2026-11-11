@@ -1,6 +1,6 @@
 module go.kenn.io/kata
 
-go 1.27.3
+go 1.27.4
 
 require (
 	charm.land/bubbles/v2 v2.1.1
@@ -48,6 +48,7 @@ require (
 	golang.org/x/text v0.43.0
 	golang.org/x/time v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
+	hegel.dev/go/hegel v0.9.29
 	modernc.org/sqlite v1.61.0
 	pgregory.net/rapid v1.3.0
 )
