@@ -140,7 +140,8 @@ func (a TrackerFenceSQL) BeginControl(ctx context.Context, p tracker.ControlRece
 	return result, fresh, admissionErr
 }
 
-const trackerControlCapacityKey = TrackerMetadataPrefix + "control_capacity.global"
+// TrackerControlCapacityKey is local, rebuildable admission bookkeeping.
+const TrackerControlCapacityKey = TrackerMetadataPrefix + "control_capacity.global"
 
 type trackerControlCounts struct {
 	Pending     int            `json:"pending"`
@@ -164,11 +165,12 @@ func (c trackerControlCounts) full(p tracker.ControlReceipt) bool {
 	return c.Pending >= 256 || c.Projects[p.ProjectUID] >= 64 || c.Connections[p.Selection.OwnerInstanceUID+"."+p.Selection.ConnectionUID] >= 64
 }
 
-// The row is a transaction-wide serialization point on both backends. A missing
-// row means an older database or a restore: rebuild once from retained receipts.
+// SQLite retries conflicting writes; PostgreSQL retries serializable transactions.
+// The counter and receipt changes commit together. A missing row can be an
+// upgrade from before counters existed, so rebuild from retained receipts.
 func loadTrackerControlCapacity(ctx context.Context, tx *sql.Tx) (trackerControlCounts, error) {
 	c := trackerControlCounts{Projects: map[string]int{}, Connections: map[string]int{}}
-	inserted, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2) ON CONFLICT(key) DO NOTHING`, trackerControlCapacityKey, "")
+	inserted, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2) ON CONFLICT(key) DO NOTHING`, TrackerControlCapacityKey, "")
 	if err != nil {
 		return c, err
 	}
@@ -177,12 +179,8 @@ func loadTrackerControlCapacity(ctx context.Context, tx *sql.Tx) (trackerControl
 		return c, err
 	}
 	if n == 0 {
-		// UPDATE obtains the row lock before reading, including on PostgreSQL.
-		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value=value WHERE key=$1`, trackerControlCapacityKey); err != nil {
-			return c, err
-		}
 		var raw string
-		if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, trackerControlCapacityKey).Scan(&raw); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, TrackerControlCapacityKey).Scan(&raw); err != nil {
 			return c, err
 		}
 		if json.Unmarshal([]byte(raw), &c, json.RejectUnknownMembers(true)) != nil || c.Projects == nil || c.Connections == nil || c.Pending < 0 {
@@ -191,7 +189,7 @@ func loadTrackerControlCapacity(ctx context.Context, tx *sql.Tx) (trackerControl
 		return c, nil
 	}
 	prefix := TrackerMetadataPrefix + "control."
-	rows, err := tx.QueryContext(ctx, `SELECT key,value FROM meta WHERE substr(key,1,$1)=$2`, len(prefix), prefix)
+	rows, err := tx.QueryContext(ctx, `SELECT key,value FROM meta WHERE key >= $1 AND key < $2`, prefix, TrackerMetadataPrefix+"control/")
 	if err != nil {
 		return c, err
 	}
@@ -225,7 +223,7 @@ func saveTrackerControlCapacity(ctx context.Context, tx *sql.Tx, c trackerContro
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE meta SET value=$1 WHERE key=$2`, string(raw), trackerControlCapacityKey)
+	_, err = tx.ExecContext(ctx, `UPDATE meta SET value=$1 WHERE key=$2`, string(raw), TrackerControlCapacityKey)
 	return err
 }
 

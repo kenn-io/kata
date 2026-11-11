@@ -54,7 +54,6 @@ var storageScenarios = []scenario{
 	{name: "tracker project import history scope", methods: []string{"CreateProject", "ImportReplay", "UpsertIssueSyncBinding"}, runWithBackend: checkTrackerProjectImportHistoryScope},
 	{name: "tracker restore without execution history", methods: []string{"CreateProject", "ImportReplay", "UpsertIssueSyncBinding"}, runWithBackend: checkTrackerRestoreWithoutJournal},
 	{name: "tracker restore control capacity", methods: []string{"CreateProject"}, run: checkTrackerControlRestoreCapacity},
-	{name: "tracker concurrent control capacity", methods: []string{"CreateProject"}, run: checkTrackerControlConcurrentCapacity},
 	{name: "tracker pending control capacity", methods: []string{"CreateProject"}, run: checkTrackerControlCapacity},
 	{name: "tracker control UID receipts", methods: []string{"CreateProject"}, run: checkTrackerControlReceipts},
 	{name: "tracker disabled binding receipt recovery", methods: []string{"CreateProject", "UpsertIssueSyncBinding", "ClaimIssueSyncBinding"}, run: checkTrackerRecoveryReceipt},

@@ -68,6 +68,10 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 		if err != nil {
 			return err
 		}
+		// Admission counts are local and are rebuilt after restore.
+		if record.Key == db.TrackerControlCapacityKey {
+			continue
+		}
 		if opts.ProjectID > 0 && (strings.HasPrefix(record.Key, db.FederationSpokeNamePrefix) || strings.HasPrefix(record.Key, db.AttributionUIResetMetadataPrefix) || strings.HasPrefix(record.Key, db.ProjectStreamResetMetadataPrefix) || strings.HasPrefix(record.Key, db.RelayResetMetadataPrefix) || strings.HasPrefix(record.Key, db.RelayResetSupersededMetadataPrefix) || strings.HasPrefix(record.Key, db.PendingCreationMetadataPrefix)) {
 			continue
 		}

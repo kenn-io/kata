@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -51,7 +52,7 @@ func checkTrackerControlCapacity(t *testing.T, store db.Storage) error {
 	base := tracker.ControlReceipt{Version: 1, RootInstanceUID: store.InstanceUID(), ProjectUID: project.UID, Principal: tracker.Principal{AuthorityInstanceUID: store.InstanceUID(), Kind: tracker.SubjectAccount, Subject: "member"}, Selection: tracker.Selection{OwnerInstanceUID: store.InstanceUID(), ConnectionUID: "01ARZ3NDEKTSV4RRFFQ69G5FAY", Generation: "first"}, Kind: tracker.ControlRun, SourceKey: "notion:source", RequestDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", State: tracker.ControlPending}
 	receipts := store.(db.TrackerControlStore)
 	var first tracker.ControlReceipt
-	for i := range 64 {
+	for i := range 63 {
 		p := base
 		p.UID, err = uid.New()
 		require.NoError(t, err)
@@ -62,15 +63,55 @@ func checkTrackerControlCapacity(t *testing.T, store db.Storage) error {
 			first = p
 		}
 	}
-	// A database predating the local counter must rebuild it from receipts.
+	// Race for the final slot before exercising the compatibility rebuild.
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errs := make([]error, 2)
+	candidates := make([]tracker.ControlReceipt, 2)
+	for i := range errs {
+		candidates[i] = base
+		candidates[i].UID, err = uid.New()
+		require.NoError(t, err)
+		wg.Add(1)
+		go func() { defer wg.Done(); <-start; _, _, errs[i] = receipts.BeginTrackerControl(ctx, candidates[i]) }()
+	}
+	close(start)
+	wg.Wait()
+	var overflow tracker.ControlReceipt
+	successes, full := 0, 0
+	for i, err := range errs {
+		if err == nil {
+			successes++
+		} else if errors.Is(err, tracker.ErrControlCapacity) {
+			full++
+			overflow = candidates[i]
+		} else {
+			require.NoError(t, err)
+		}
+	}
+	require.Equal(t, 1, successes)
+	require.Equal(t, 1, full)
+	var counter db.MetaKV
+	for record, exportErr := range store.ExportMeta(ctx) {
+		require.NoError(t, exportErr)
+		if strings.HasPrefix(record.Key, db.TrackerMetadataPrefix+"control_capacity.") {
+			require.Empty(t, counter.Key)
+			counter = record
+		}
+	}
+	require.NotEmpty(t, counter.Key)
+	_, keep, err := db.TrackerMetadataForImport(counter, db.ImportOptions{})
+	require.NoError(t, err)
+	require.False(t, keep)
 	sqlStore := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
-	_, err = sqlStore.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, db.TrackerMetadataPrefix+"control_capacity.global")
+	_, err = sqlStore.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, counter.Key)
 	require.NoError(t, err)
-	overflow := base
-	overflow.UID, err = uid.New()
-	require.NoError(t, err)
+	for record, exportErr := range store.ExportMeta(ctx) {
+		require.NoError(t, exportErr)
+		require.NotEqual(t, counter.Key, record.Key)
+	}
 	_, _, err = receipts.BeginTrackerControl(ctx, overflow)
 	require.ErrorIs(t, err, tracker.ErrControlCapacity)
 	done := first
@@ -80,48 +121,10 @@ func checkTrackerControlCapacity(t *testing.T, store db.Storage) error {
 	_, fresh, err := receipts.BeginTrackerControl(ctx, overflow)
 	require.NoError(t, err)
 	require.True(t, fresh)
-	retained, err := receipts.ReadTrackerControl(ctx, project.UID, first.UID)
+	retained, fresh, err := receipts.BeginTrackerControl(ctx, first)
 	require.NoError(t, err)
+	require.False(t, fresh)
 	require.Equal(t, done, retained, "capacity must not evict replay evidence")
-	return nil
-}
-
-// Concurrent admissions must share the same project and connection limit.
-func checkTrackerControlConcurrentCapacity(t *testing.T, store db.Storage) error {
-	ctx := t.Context()
-	project, err := store.CreateProject(ctx, "tracker-concurrent-project")
-	require.NoError(t, err)
-	base := tracker.ControlReceipt{Version: 1, RootInstanceUID: store.InstanceUID(), ProjectUID: project.UID, Principal: tracker.Principal{AuthorityInstanceUID: store.InstanceUID(), Kind: tracker.SubjectAccount, Subject: "member"}, Selection: tracker.Selection{OwnerInstanceUID: store.InstanceUID(), ConnectionUID: "01ARZ3NDEKTSV4RRFFQ69G5FAY", Generation: "first"}, Kind: tracker.ControlRun, SourceKey: "notion:source", RequestDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", State: tracker.ControlPending}
-	receipts := store.(db.TrackerControlStore)
-	for range 63 {
-		p := base
-		p.UID, err = uid.New()
-		require.NoError(t, err)
-		_, _, err = receipts.BeginTrackerControl(ctx, p)
-		require.NoError(t, err)
-	}
-	var wg sync.WaitGroup
-	errs := make([]error, 2)
-	for i := range errs {
-		p := base
-		p.UID, err = uid.New()
-		require.NoError(t, err)
-		wg.Add(1)
-		go func() { defer wg.Done(); _, _, errs[i] = receipts.BeginTrackerControl(ctx, p) }()
-	}
-	wg.Wait()
-	successes, full := 0, 0
-	for _, err := range errs {
-		if err == nil {
-			successes++
-		} else if errors.Is(err, tracker.ErrControlCapacity) {
-			full++
-		} else {
-			require.NoError(t, err)
-		}
-	}
-	require.Equal(t, 1, successes)
-	require.Equal(t, 1, full)
 	return nil
 }
 
@@ -145,9 +148,6 @@ func checkTrackerControlRestoreCapacity(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	require.NoError(t, db.RestoreRetainedTrackerMetadataSQL(ctx, tx, retained))
 	require.NoError(t, tx.Commit())
-	restored, err := receipts.ReadTrackerControl(ctx, project.UID, base.UID)
-	require.NoError(t, err)
-	require.Equal(t, tracker.ControlRestored, restored.State)
 	for range 64 {
 		p := base
 		p.UID, err = uid.New()

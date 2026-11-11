@@ -280,6 +280,10 @@ func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportO
 		if err := rows.Scan(&rec.Key, &rec.Value); err != nil {
 			return fmt.Errorf("scan meta: %w", err)
 		}
+		// Admission counts are local and are rebuilt after restore.
+		if rec.Key == db.TrackerControlCapacityKey {
+			continue
+		}
 		if opts.ProjectID != 0 && (strings.HasPrefix(rec.Key, db.FederationSpokeNamePrefix) || strings.HasPrefix(rec.Key, db.AttributionUIResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.ProjectStreamResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetSupersededMetadataPrefix) || strings.HasPrefix(rec.Key, db.PendingCreationMetadataPrefix)) {
 			continue
 		}

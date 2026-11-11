@@ -128,6 +128,9 @@ func (a TrackerFenceSQL) Load(ctx context.Context, rootUID, projectUID, role str
 	return f, found, err
 }
 
+// TrackerAttemptLookupSQL checks the bounded key range for prior attempts.
+const TrackerAttemptLookupSQL = `SELECT EXISTS(SELECT 1 FROM meta WHERE key >= $1 AND key < $2)`
+
 // Store conditionally advances an execution fence and retains settled evidence.
 func (a TrackerFenceSQL) Store(ctx context.Context, previous *TrackerExecutionFence, next TrackerExecutionFence, processEpoch string) error {
 	if next.Validate() != nil || !a.local(next) || !uid.Valid(processEpoch) {
@@ -187,7 +190,7 @@ func (a TrackerFenceSQL) Store(ctx context.Context, previous *TrackerExecutionFe
 			}
 			lower, upper := trackerAttemptKeyBounds(next)
 			var hasAttempt bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key >= $1 AND key < $2)`, lower, upper).Scan(&hasAttempt); err != nil {
+			if err := tx.QueryRowContext(ctx, TrackerAttemptLookupSQL, lower, upper).Scan(&hasAttempt); err != nil {
 				return err
 			}
 			if hasAttempt {

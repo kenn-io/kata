@@ -13,7 +13,7 @@ func TestTrackerAttemptLookupUsesMetaPrimaryKeyRange(t *testing.T) {
 	base, err := db.TrackerExecutionFenceKey("01ARZ3NDEKTSV4RRFFQ69G5FAV", "01ARZ3NDEKTSV4RRFFQ69G5FAW", "executor")
 	require.NoError(t, err)
 	prefix := base + ".attempt." + strings.Repeat("a", 64) + "."
-	rows, err := store.QueryContext(t.Context(), `EXPLAIN QUERY PLAN SELECT EXISTS(SELECT 1 FROM meta WHERE key >= ? AND key < ?)`, prefix+"00000000000000000001", prefix+"09223372036854775808")
+	rows, err := store.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+db.TrackerAttemptLookupSQL, prefix+"00000000000000000001", prefix+"09223372036854775808")
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	var plan []string

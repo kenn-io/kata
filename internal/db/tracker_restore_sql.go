@@ -36,7 +36,7 @@ func RetainTrackerMetadataSQL(ctx context.Context, tx *sql.Tx) ([]MetaKV, error)
 // RestoreRetainedTrackerMetadataSQL preserves target evidence during replacement.
 func RestoreRetainedTrackerMetadataSQL(ctx context.Context, tx *sql.Tx, records []MetaKV) error {
 	// Imported and retained pending receipts are made inactive; rebuild local counts.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, trackerControlCapacityKey); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, TrackerControlCapacityKey); err != nil {
 		return err
 	}
 	for _, rec := range records {
