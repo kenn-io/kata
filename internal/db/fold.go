@@ -515,7 +515,7 @@ func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, body
 			return
 		}
 		sameIdentity := existing.IssueUID == comment.IssueUID && existing.Author == comment.Author &&
-			existing.Teammate == comment.Teammate && existing.CreatedAt == comment.CreatedAt &&
+			existing.Teammate == comment.Teammate && sameCommentCreationTime(existing.CreatedAt, comment.CreatedAt) &&
 			existing.ReplyToUID == comment.ReplyToUID && existing.ReplyKind == comment.ReplyKind
 		if sameIdentity && comment.EditedAt != "" {
 			incoming, incomingErr := time.Parse(time.RFC3339Nano, comment.EditedAt)
@@ -531,6 +531,15 @@ func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, body
 		return
 	}
 	p.Comments[commentUID] = comment
+}
+
+func sameCommentCreationTime(first, second string) bool {
+	if first == second {
+		return true
+	}
+	created, createdErr := time.Parse(time.RFC3339Nano, first)
+	incoming, incomingErr := time.Parse(time.RFC3339Nano, second)
+	return createdErr == nil && incomingErr == nil && created.Equal(incoming)
 }
 
 func (p *FoldProjection) editCommentBody(commentUID, issueUID, body, editedAt string, clock FoldClock) {
