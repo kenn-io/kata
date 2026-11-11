@@ -68,6 +68,8 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.True(t, ok, "native atomic signed reset installation is required")
 	replica, err := downstream.CreateProjectWithUID(ctx, "spoke-project", project.UID)
 	require.NoError(t, err)
+	localWinner, _, err := downstream.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: replica.ID, Name: "Local winner", Actor: "worker", Definition: workflowDefinition})
+	require.NoError(t, err)
 	require.NoError(t, downstream.PinRootAuthority(ctx, pin))
 	_, err = downstream.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replica.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "company-member", Enabled: true, PushEnabled: true})
 	require.NoError(t, err)
@@ -94,11 +96,15 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	q := downstream.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
-	for _, definition := range []string{`{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`, `{"definition":null}`} {
+	for _, definition := range []string{`{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`, `null`} {
 		event := argvCompatRemoteWorkflow(t, replica, downstream.InstanceUID(), definition)
-		if definition == `{"definition":null}` {
-			event.Payload = jsontext.Value(definition)
-		}
+		var payload map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal(event.Payload, &payload))
+		payload["uid"], err = json.Marshal(localWinner.UID)
+		require.NoError(t, err)
+		event.Payload, err = json.Marshal(payload)
+		require.NoError(t, err)
+		event = newRemoteEvent(t, replica, nil, "cron.workflow.deleted", "worker", downstream.InstanceUID(), event.HLCPhysicalMS, event.Payload)
 		_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, downstream.InstanceUID(), replica.ID, replica.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, 0, event.ContentHash)
 		require.NoError(t, err)
 		err = installer.InstallRelayReset(ctx, bindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation)
@@ -106,6 +112,8 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 		binding, err := downstream.FederationBindingByProject(ctx, replica.ID)
 		require.NoError(t, err)
 		require.Equal(t, int64(1), binding.RelayConfig.ResetEpoch)
+		_, err = downstream.CronWorkflow(ctx, replica.ID, localWinner.UID)
+		require.NoError(t, err)
 		events, err := downstream.EventsByUIDs(ctx, replica.ID, []string{event.EventUID})
 		require.NoError(t, err)
 		require.Len(t, events, 1)

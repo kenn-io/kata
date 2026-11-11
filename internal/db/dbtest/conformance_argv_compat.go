@@ -243,11 +243,18 @@ func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
 	})
 	for _, operation := range []string{"adopt", "reset", "conditional reset"} {
 		for _, definition := range []string{`{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`, `{"version":1,"steps":null}`} {
-			project, err := store.CreateProject(ctx, "guard-"+operation+"-"+uidForGuard(t))
+			project, err := store.CreateProject(ctx, "guard-"+uidForGuard(t))
 			require.NoError(t, err)
 			workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Current", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "command", Command: "true"}}}})
 			require.NoError(t, err)
 			event := argvCompatRemoteWorkflow(t, project, store.InstanceUID(), definition)
+			var payload map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal(event.Payload, &payload))
+			payload["uid"], err = json.Marshal(workflow.UID)
+			require.NoError(t, err)
+			raw, err := json.Marshal(payload)
+			require.NoError(t, err)
+			event = newRemoteEvent(t, project, nil, "cron.workflow.deleted", "worker", store.InstanceUID(), event.HLCPhysicalMS, raw)
 			_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, 0, event.ContentHash)
 			require.NoError(t, err)
 			if operation == "adopt" {
