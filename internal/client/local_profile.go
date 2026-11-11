@@ -108,7 +108,7 @@ func discoverLocalProfileWithVerifier(
 		resolved.UnixSocket = candidate.UnixSocket
 		if verify != nil {
 			if err := verify(ctx, resolved); err != nil {
-				return resolved, false, withInstanceFailureEvidence(err, candidate, resolved.LocalProfile.DataDir)
+				return resolved, false, err
 			}
 		}
 		return resolved, true, nil
@@ -128,7 +128,7 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 	}
 	resp, err := apiClient.InstanceWithResponse(ctx)
 	if resp == nil {
-		return fmt.Errorf("local profile instance is unavailable: %w: %w", ErrLocalDaemonUnreachable, err)
+		return fmt.Errorf("local profile instance is unavailable: %w", ErrLocalDaemonUnreachable)
 	}
 	if resp.StatusCode != 200 {
 		if resp.StatusCode == 401 || resp.StatusCode == 403 {
@@ -146,13 +146,6 @@ func verifyLocalProfileInstance(ctx context.Context, resolved ResolvedDaemon) er
 		return &LocalProfileIdentityError{Expected: resolved.LocalProfile.InstanceUID, Observed: resp.JSON200.InstanceUID}
 	}
 	return nil
-}
-
-func withInstanceFailureEvidence(err error, candidate liveDaemon, dataDir string) error {
-	if errors.Is(err, ErrLocalDaemonUnreachable) {
-		return unreachableRuntime(candidate.Record, dataDir, err)
-	}
-	return err
 }
 
 func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (result ResolvedDaemon, resultErr error) {
@@ -184,7 +177,7 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (result 
 		resolved = resolved.WithRunning(runningDaemonForLive(found.Daemon))
 		resolved.UnixSocket = found.Daemon.UnixSocket
 		if err := verifyLocalProfileInstance(ctx, resolved); err != nil {
-			return resolved, withInstanceFailureEvidence(err, found.Daemon, resolved.LocalProfile.DataDir)
+			return resolved, err
 		}
 		if found.Outcome == daemonScanCompatible {
 			return resolved, nil

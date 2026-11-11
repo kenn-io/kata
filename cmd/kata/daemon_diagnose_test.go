@@ -843,6 +843,15 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 		require.Equal(t, "local_unreachable", result.State)
 		require.Contains(t, result.NextAction, recoverCmd)
 	})
+	t.Run("diagnose with short deadline", func(t *testing.T) {
+		t.Setenv("KATA_HTTP_TIMEOUT", "100ms")
+		out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", "--json")
+		require.NoError(t, err)
+		var result daemonDiagnosis
+		require.NoError(t, json.Unmarshal([]byte(out), &result))
+		require.Equal(t, "local_unreachable", result.State)
+		require.Contains(t, result.NextAction, recoverCmd)
+	})
 	t.Run("ordinary", func(t *testing.T) {
 		_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", "list")
 		var cliErr *cliError
