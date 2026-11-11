@@ -129,15 +129,15 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			require.Contains(t, message, filepath.Join(dir, "daemon.log"))
 			require.Contains(t, message, "supervisor stderr")
 			require.Contains(t, message, "kata daemon restart")
-			require.Contains(t, message, "after it exits")
+			require.Contains(t, message, "After it exits")
 			require.Contains(t, message, "original foreground launch command")
 			require.Contains(t, message, "auto-started")
 			require.Contains(t, message, "original KATA_HOME and storage environment")
 			if origin != "" {
 				require.Contains(t, message, origin+"/debug/pprof/goroutine?debug=2")
 				require.Contains(t, message, "daemon-owner access")
-				require.Contains(t, message, "configured authentication requires the owner's credential")
-				require.Contains(t, message, "if responsive")
+				require.Contains(t, message, "configured authentication use the owner's credential")
+				require.Contains(t, message, "If responsive")
 			} else {
 				require.NotContains(t, message, "/debug/pprof/")
 			}

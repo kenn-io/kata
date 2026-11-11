@@ -82,7 +82,7 @@ type LocalDaemonUnreachableError struct {
 }
 
 func (e *LocalDaemonUnreachableError) Error() string {
-	return e.Summary() + "; " + e.RecoveryAdvice()
+	return e.Summary() + ". " + e.RecoveryAdvice()
 }
 
 // Summary describes the probe failure without assuming a recovery target.
@@ -102,23 +102,23 @@ func (e *LocalDaemonUnreachableError) Is(target error) bool {
 func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 	advice := fmt.Sprintf("inspect %q or the supervisor stderr log", filepath.Join(e.dataDir, "daemon.log"))
 	if validWebOrigin(e.webOrigin) {
-		advice += "; if responsive, capture " + e.webOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner access; configured authentication requires the owner's credential"
+		advice += ". If responsive, capture " + e.webOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner access. With configured authentication use the owner's credential"
 	}
 	if e.verifiedProcess && goruntime.GOOS != "windows" {
-		advice += fmt.Sprintf("; fallback: kill -QUIT %d dumps goroutines to stderr and terminates the daemon", e.PID)
+		advice += fmt.Sprintf(". As a fallback, kill -QUIT %d dumps goroutines to stderr and terminates the daemon", e.PID)
 	} else if e.verifiedProcess && goruntime.GOOS == "windows" {
-		advice += fmt.Sprintf("; stop the failed process with taskkill /PID %d /F", e.PID)
+		advice += fmt.Sprintf(". Stop the failed process with taskkill /PID %d /F", e.PID)
 	}
 	if !e.verifiedProcess {
-		advice += "; verify the process identity before stopping it for recovery"
+		advice += ". Verify the process identity before stopping it for recovery"
 	}
-	advice += "; after it exits, use its supervisor or the original foreground launch command for those launch modes"
+	advice += ". After it exits, use its supervisor or the original foreground launch command for those launch modes"
 	if e.recoverCommand != "" {
-		advice += "; for an applicable named profile, run " + e.recoverCommand
+		advice += ". For a named profile, run " + e.recoverCommand
 	} else {
-		advice += "; for an auto-started current home, run kata daemon restart with the original KATA_HOME and storage environment"
+		advice += ". For an auto-started current home, run kata daemon restart with the original KATA_HOME and storage environment"
 	}
-	return advice
+	return advice + "."
 }
 
 // liveDaemon is one runtime record that answered /api/v1/ping: the record
