@@ -35,7 +35,12 @@ test('installs built-in search, restarts, and reconnects', async ({ page, kata }
     await page.getByRole('button', { name: 'Turn on' }).click()
     const button = page.getByRole('button', { name: 'Restart daemon' })
     await expect(button).toBeVisible()
-    page.once('dialog', (dialog) => dialog.accept())
+    page.once('dialog', async (dialog) => {
+      expect(dialog.message()).toContain(
+        'If a service manager runs this daemon, restart it there instead.',
+      )
+      await dialog.accept()
+    })
     await button.click()
     await expect
       .poll(

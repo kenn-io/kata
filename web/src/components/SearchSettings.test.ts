@@ -72,6 +72,9 @@ describe('SearchSettings', () => {
     const button = screen.getByRole('button', { name: 'Restart daemon' })
     await fireEvent.click(button)
     expect(postFetch).not.toHaveBeenCalled()
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining('If a service manager runs this daemon, restart it there instead.'),
+    )
     await fireEvent.click(button)
     await fireEvent.click(button)
     expect(postFetch).toHaveBeenCalledOnce()

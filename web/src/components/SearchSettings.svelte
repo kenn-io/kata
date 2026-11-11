@@ -203,7 +203,7 @@
     const reopen = originStable ? '' : `\n\n${reopenGuidance}`
     if (
       !confirm(
-        `Restart this daemon? All projects and clients on it will disconnect briefly.${reopen}`,
+        `Restart this daemon? All projects and clients on it will disconnect briefly.\n\nIf a service manager runs this daemon, restart it there instead.${reopen}`,
       )
     )
       return
