@@ -1,9 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -23,29 +23,35 @@ func TestDoctorAgentProbeDeadline(t *testing.T) {
 	check := doctorAgent(t.Context(), "codex")
 	require.Less(t, time.Since(start), 8*time.Second)
 	require.Contains(t, check.Summary, "deadline exceeded")
+	installCodexAgentFixture(t, "normal")
+	t.Setenv("TEST_HOOK_TRUST", "untrusted")
+	check = doctorAgent(t.Context(), "codex")
+	require.Equal(t, "warn", string(check.Status))
+	require.Contains(t, check.Summary, "3 Kata hooks wait for review")
+	require.Contains(t, check.Fix, "/hooks")
+	t.Setenv("TEST_HOOK_TRUST", "trusted")
+	check = doctorAgent(t.Context(), "codex")
+	require.Equal(t, "ok", string(check.Status))
 }
 
-func TestDoctorClaudeUsesIsolatedProfile(t *testing.T) {
-	require.Equal(t, filepath.Join(os.Getenv("CODEX_HOME"), "claude"), os.Getenv("CLAUDE_CONFIG_DIR"))
+func TestDoctorClaudeDisabledHooks(t *testing.T) {
 	home := isolateAgentHookHomes(t)
-	dir := t.TempDir()
-	name := "claude"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0700)) //nolint:gosec // The fixture must be executable.
-	t.Setenv("PATH", dir)
+	installClaudeAgentFixture(t)
+	_, err := runHookSetup(t, "install", "claude", "--executable", os.Args[0])
+	require.NoError(t, err)
 	path := filepath.Join(home, "claude", "settings.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
-	require.NoError(t, os.WriteFile(path, []byte(`{"disableAllHooks":true}`), 0600))
-	_, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude")
-	require.Error(t, err)
-	resetFlags(t)
-	report := collectDoctor(t.Context())
-	check := doctorFinding(t, report, "agent.claude")
+	data, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(data, &doc))
+	doc["disableAllHooks"] = true
+	data, err = json.Marshal(doc)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0600))
+	check := doctorAgent(t.Context(), "claude")
 	require.Equal(t, "warn", string(check.Status))
 	require.Contains(t, check.Fix, "disableAllHooks")
-	codex := doctorFinding(t, report, "agent.codex")
+	codex := doctorAgent(t.Context(), "codex")
 	require.Equal(t, "info", string(codex.Status))
 }
 

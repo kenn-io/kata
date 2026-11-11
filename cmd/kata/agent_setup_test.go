@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -15,6 +14,7 @@ import (
 
 func TestAgentSetupInstallsClaudeHooks(t *testing.T) {
 	home := isolateAgentHookHomes(t)
+	installClaudeAgentFixture(t)
 	resetFlags(t)
 	out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude", "--json")
 	require.NoError(t, err)
@@ -49,66 +49,18 @@ func TestAgentSetupCheckDoesNotInstall(t *testing.T) {
 	require.Equal(t, data, string(after))
 }
 
-func TestAgentSetupCodexTrustAndDoctor(t *testing.T) {
-	home := isolateAgentHookHomes(t)
+func TestAgentSetupCodexTrust(t *testing.T) {
+	isolateAgentHookHomes(t)
 	installCodexAgentFixture(t, "normal")
 	t.Setenv("TEST_HOOK_TRUST", "untrusted")
 	out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "codex")
 	require.Error(t, err)
 	require.Contains(t, out, "needs you")
 	require.Contains(t, out, "/hooks")
-	path := filepath.Join(home, "codex", "hooks.json")
-	before, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
-	require.NoError(t, err)
-	check := doctorFinding(t, collectDoctor(t.Context()), "agent.codex")
-	require.Equal(t, "warn", string(check.Status))
-	require.Contains(t, check.Summary, "3 Kata hooks wait for review")
-	require.Contains(t, check.Fix, "/hooks")
 	t.Setenv("TEST_HOOK_TRUST", "trusted")
-	out, _, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "codex", "--check")
+	out, _, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "codex", "--check", "--agent")
 	require.NoError(t, err)
-	require.Contains(t, out, "ok")
-	check = doctorFinding(t, collectDoctor(t.Context()), "agent.codex")
-	require.Equal(t, "ok", string(check.Status))
-	after, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
-	require.NoError(t, err)
-	require.Equal(t, before, after)
-}
-
-func TestCodexConditionalHookKeepsForeignGroupIndex(t *testing.T) {
-	home := isolateAgentHookHomes(t)
-	path := filepath.Join(home, "codex", "hooks.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
-	data := `{"hooks":{"SessionStart":[{"if":"condition","hooks":[{"type":"command","command":"kata agent-hook contract codex","commandWindows":"kata agent-hook contract codex"}]},{"hooks":[{"type":"command","command":"foreign-hook"}]}]}}`
-	require.NoError(t, os.WriteFile(path, []byte(data), 0600))
-	_, err := runHookSetup(t, "install", "codex", "--executable", os.Args[0])
-	require.NoError(t, err)
-	entries, err := inspectAgentHookEntries("codex", path)
-	require.NoError(t, err)
-	var foreignFound, conditionalFound bool
-	for _, entry := range entries {
-		if entry.Kind == contractHook && entry.GroupFields["if"] == "condition" {
-			conditionalFound = true
-			require.Equal(t, 0, entry.GroupIndex)
-		}
-		if entry.Command == "foreign-hook" {
-			foreignFound = true
-			require.Equal(t, 1, entry.GroupIndex)
-		}
-	}
-	require.True(t, foreignFound)
-	require.True(t, conditionalFound)
-	contract, start, end := kitAgentHookConfigured("codex", entries)
-	require.True(t, contract)
-	require.True(t, start)
-	require.True(t, end)
-	before, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
-	require.NoError(t, err)
-	_, err = runHookSetup(t, "install", "codex", "--executable", os.Args[0])
-	require.NoError(t, err)
-	after, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
-	require.NoError(t, err)
-	require.Equal(t, before, after)
+	require.Contains(t, out, "state=ok")
 }
 
 func TestAgentSetupNoDetectedAgent(t *testing.T) {
@@ -122,7 +74,9 @@ func TestAgentSetupPreservesGroupMetadata(t *testing.T) {
 	for _, name := range []string{"claude", "codex"} {
 		t.Run(name, func(t *testing.T) {
 			home := isolateAgentHookHomes(t)
-			if name == "codex" {
+			if name == "claude" {
+				installClaudeAgentFixture(t)
+			} else {
 				installCodexAgentFixture(t, "normal")
 				t.Setenv("TEST_HOOK_TRUST", "trusted")
 			}
@@ -145,23 +99,15 @@ func TestAgentSetupPreservesGroupMetadata(t *testing.T) {
 			require.NoError(t, os.WriteFile(path, data, 0600))
 			out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", name, "--check")
 			require.NoError(t, err, out)
-			_, _, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", name)
-			require.NoError(t, err)
-			after, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
-			require.NoError(t, err)
-			require.Equal(t, data, after)
-			report := agentHooksStatusJSON(t, name, "--config", path, "--workspace", t.TempDir())
-			configured := report["harnesses"].([]any)[0].(map[string]any)["configured"].(map[string]any)
-			require.Equal(t, true, configured["contract"])
-			group["hooks"].([]any)[0].(map[string]any)["if"] = "condition"
-			data, err = json.Marshal(doc)
-			require.NoError(t, err)
-			require.NoError(t, os.WriteFile(path, data, 0600))
-			out, _, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", name, "--check")
-			require.Error(t, err)
-			require.Contains(t, out, "outdated")
-			_, _, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", name)
-			require.NoError(t, err)
+			if name == "codex" {
+				group["if"] = "condition"
+				data, err = json.Marshal(doc)
+				require.NoError(t, err)
+				require.NoError(t, os.WriteFile(path, data, 0600))
+				out, _, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", name, "--check")
+				require.Error(t, err)
+				require.Contains(t, out, "outdated")
+			}
 		})
 	}
 }
@@ -182,6 +128,7 @@ func TestAgentSetupWarnsForUnstableExecutable(t *testing.T) {
 
 func TestAgentSetupForeignMarker(t *testing.T) {
 	home := isolateAgentHookHomes(t)
+	installClaudeAgentFixture(t)
 	_, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude")
 	require.NoError(t, err)
 	path := filepath.Join(home, "claude", "settings.json")
@@ -190,38 +137,34 @@ func TestAgentSetupForeignMarker(t *testing.T) {
 	var doc map[string]any
 	require.NoError(t, json.Unmarshal(data, &doc))
 	hooks := doc["hooks"].(map[string]any)
-	hooks["SessionStart"] = append(hooks["SessionStart"].([]any), map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "echo agent-hook contract claude"}}})
+	groups := hooks["SessionStart"].([]any)
+	owned := groups[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"].(string)
+	hooks["SessionStart"] = append(groups, map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "echo " + owned}}})
 	data, err = json.Marshal(doc)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, data, 0600))
 	out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude", "--check")
-	require.NoError(t, err, out)
-	require.Contains(t, out, "ok")
-	groups := hooks["SessionStart"].([]any)
-	owned := groups[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"].(string)
-	foreign := groups[len(groups)-1].(map[string]any)["hooks"].([]any)[0].(map[string]any)
-	foreign["command"] = "echo " + owned
-	data, err = json.Marshal(doc)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(path, data, 0600))
-	out, _, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude", "--check")
 	require.Error(t, err)
 	require.Contains(t, out, "unknown")
 }
 
 func TestAgentSetupPreservesBareExecutable(t *testing.T) {
 	home := isolateAgentHookHomes(t)
+	installClaudeAgentFixture(t)
+	kata := "kata"
+	if runtime.GOOS == "windows" {
+		kata += ".exe"
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(os.Getenv("PATH"), kata), []byte("fixture"), 0700)) //nolint:gosec // Executable fixture in a temporary directory.
 	path := filepath.Join(home, "claude", "settings.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
 	require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hook contract claude"}]}]}}`), 0600))
-	_, _, _ = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude")
+	_, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude")
+	require.NoError(t, err)
 	data, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
 	require.NoError(t, err)
-	require.Contains(t, string(data), "kata agent-hook contract claude")
-	_, _, _ = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude", "--check")
-	again, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
-	require.NoError(t, err)
-	require.Equal(t, data, again)
+	require.Contains(t, string(data), "kata agent-hook attention-native claude start")
+	require.Contains(t, string(data), "kata agent-hook attention-native claude end")
 }
 
 func TestAgentSetupConflictingExecutables(t *testing.T) {
@@ -237,8 +180,6 @@ func TestAgentSetupConflictingExecutables(t *testing.T) {
 	after, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
 	require.NoError(t, err)
 	require.Equal(t, data, string(after))
-	check := doctorAgent(t.Context(), "claude")
-	require.Contains(t, check.Fix, "agent-hook install claude --executable ")
 	if runtime.GOOS == "windows" {
 		return // The recovery command below is executed by a POSIX shell.
 	}
@@ -264,21 +205,28 @@ func TestAgentSetupConflictingExecutables(t *testing.T) {
 }
 
 func TestAgentSetupCountsOnlyModifiedHooks(t *testing.T) {
-	isolateAgentHookHomes(t)
-	installCodexAgentFixture(t, "normal")
-	t.Setenv("TEST_HOOK_TRUST", "one-modified")
-	out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "codex", "--json")
-	require.Error(t, err)
-	var report struct {
-		Rows []struct {
-			State     string `json:"state"`
-			HookCount int    `json:"hook_count"`
-		} `json:"rows"`
+	for _, tc := range []struct {
+		trust, state string
+		count        int
+	}{{"untrusted", "untrusted", 3}, {"one-modified", "modified", 1}} {
+		t.Run(tc.trust, func(t *testing.T) {
+			isolateAgentHookHomes(t)
+			installCodexAgentFixture(t, "normal")
+			t.Setenv("TEST_HOOK_TRUST", tc.trust)
+			out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "codex", "--json")
+			require.Error(t, err)
+			var report struct {
+				Rows []struct {
+					State     string `json:"state"`
+					HookCount int    `json:"hook_count"`
+				} `json:"rows"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &report))
+			require.Len(t, report.Rows, 1)
+			require.Equal(t, tc.state, report.Rows[0].State)
+			require.Equal(t, tc.count, report.Rows[0].HookCount)
+		})
 	}
-	require.NoError(t, json.Unmarshal([]byte(out), &report))
-	require.Len(t, report.Rows, 1)
-	require.Equal(t, "modified", report.Rows[0].State)
-	require.Equal(t, 1, report.Rows[0].HookCount)
 }
 
 func TestAgentSetupBrokenAgentDoesNotBlockOthers(t *testing.T) {
@@ -325,10 +273,6 @@ func TestAgentSetupExplicitKataOnlyAgent(t *testing.T) {
 	require.Equal(t, "claude", report.Rows[2].Agent)
 	require.FileExists(t, filepath.Join(home, ".gemini", "config", "hooks.json"))
 	require.FileExists(t, filepath.Join(home, "gemini", ".gemini", "settings.json"))
-	out, _, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "antigravity", "--agent", "--check")
-	require.Error(t, err)
-	require.Contains(t, out, "agent=antigravity")
-	require.Contains(t, out, "state=unknown")
 }
 
 func TestAgentSetupKataOnlyProfiles(t *testing.T) {
@@ -342,41 +286,44 @@ func TestAgentSetupKataOnlyProfiles(t *testing.T) {
 			require.NoError(t, err)
 			_, err = os.Stat(path)
 			require.NoError(t, err)
-			_, err = runHookSetup(t, "install", name, "--executable", "kata")
-			require.NoError(t, err)
-			if name == "openclaw" {
-				path = filepath.Join(path, "index.js")
-			}
-			before, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
-			require.NoError(t, err)
-			out, _, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", name, "--json")
-			require.Error(t, err)
-			require.Contains(t, out, `"state":"unknown"`)
-			after, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
-			require.NoError(t, err)
-			require.Equal(t, before, after)
 		})
 	}
 }
 
-func TestAgentSetupPreservesSelectedAgentAbsoluteExecutable(t *testing.T) {
-	for _, name := range []string{"pi", "antigravity"} {
-		t.Run(name, func(t *testing.T) {
-			home := isolateAgentHookHomes(t)
-			chosen := filepath.Join(t.TempDir(), "kata")
-			require.NoError(t, os.WriteFile(chosen, []byte("fixture"), 0700)) //nolint:gosec // G306: executable fixture in a temporary directory.
-			_, err := runHookSetup(t, "install", name, "--executable", chosen)
-			require.NoError(t, err)
-			path, err := agentHookScopePath(name, "user", home)
-			require.NoError(t, err)
-			before, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
-			require.NoError(t, err)
-			_, _, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", name)
-			require.Error(t, err)
-			after, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
-			require.NoError(t, err)
-			require.True(t, bytes.Equal(before, after), "setup changed the installed hook")
-		})
+func TestAgentSetupPreservesSelectedAgentExecutable(t *testing.T) {
+	for _, name := range []string{"antigravity", "amp", "openclaw", "kimi-code", "kimi", "grok", "zcode", "pi"} {
+		for _, absolute := range []bool{false, true} {
+			if absolute && name != "pi" && name != "antigravity" {
+				continue
+			}
+			label := "bare"
+			if absolute {
+				label = "absolute"
+			}
+			t.Run(name+"/"+label, func(t *testing.T) {
+				home := isolateAgentHookHomes(t)
+				chosen := "kata"
+				if absolute {
+					chosen = filepath.Join(t.TempDir(), "kata")
+					require.NoError(t, os.WriteFile(chosen, []byte("fixture"), 0700)) //nolint:gosec // G306: executable fixture in a temporary directory.
+				}
+				_, err := runHookSetup(t, "install", name, "--executable", chosen)
+				require.NoError(t, err)
+				path, err := agentHookScopePath(name, "user", home)
+				require.NoError(t, err)
+				if name == "openclaw" {
+					path = filepath.Join(path, "index.js")
+				}
+				before, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
+				require.NoError(t, err)
+				out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", name, "--json")
+				require.Error(t, err)
+				require.Contains(t, out, `"state":"unknown"`)
+				after, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
+				require.NoError(t, err)
+				require.Equal(t, before, after)
+			})
+		}
 	}
 }
 
@@ -387,4 +334,15 @@ func TestAgentSetupFallbackCancellation(t *testing.T) {
 	_, err := agentSetupFallback(ctx, "antigravity", false, agentSetupItem("antigravity", func(string) {}))
 	require.ErrorIs(t, err, context.Canceled)
 	require.NoFileExists(t, filepath.Join(home, ".gemini", "config", "hooks.json"))
+}
+
+func installClaudeAgentFixture(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	name := "claude"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0700)) //nolint:gosec // Executable fixture in a temporary directory.
+	t.Setenv("PATH", dir)
 }

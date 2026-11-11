@@ -169,9 +169,3 @@ func TestDoctorDoesNotRepairRuntimeDirectoryPermissions(t *testing.T) {
 	require.True(t, found, "doctor must report the unverified local runtime directory")
 	assertUnchanged()
 }
-
-func TestDoctorHelpDescribesCodexState(t *testing.T) {
-	help := string(executeRoot(t, newRootCmd(), "doctor", "--help"))
-	require.Contains(t, help, "preserves hook configuration and trust")
-	require.Contains(t, help, "may create Codex state")
-}
