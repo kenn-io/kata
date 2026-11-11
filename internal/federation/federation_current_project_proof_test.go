@@ -123,6 +123,7 @@ func TestSyncFederationMissingEnrollmentDoesNotBlockOtherPushes(t *testing.T) {
 	require.NotNil(t, status.LastError)
 	require.Contains(t, *status.LastError, projects[1].Name)
 	require.Contains(t, *status.LastError, issue.UID)
+	require.Contains(t, *status.LastError, "matching project enrollment or push proof is missing")
 	binding, err := sender.env.DB.FederationBindingByProject(t.Context(), sender.projects[0].ID)
 	require.NoError(t, err)
 	require.Less(t, binding.PushCursorEventID, commentEvent.ID, "retain the original rejected event for retry")

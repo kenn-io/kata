@@ -2266,6 +2266,8 @@ batch. Quarantine blocks further push and can block reset.
 A direct spoke continues independent pushes when an
 issue has moved into a project it has not joined. Both peers must support
 per-event rejections. Upgrade the hub first so it understands partial acknowledgments.
+An older hub can report `auth_invalid` for missing project proof, so check the
+project enrollment and push access as well as the credential before retrying.
 The status error names the issue and its current project and asks for matching
 push access and actor. Independent events reach the hub across later pages,
 while events that depend on a rejected creation wait for enrollment. Push rejection

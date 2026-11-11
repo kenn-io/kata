@@ -1091,6 +1091,8 @@ func federationIngestError(err error) error {
 	switch {
 	case errors.Is(err, db.ErrTransactionFinalizationFailed):
 		return internalAPIError(err)
+	case errors.As(err, new(*db.FederationProjectNotEnrolledError)):
+		return api.NewError(http.StatusForbidden, db.FederationProjectNotEnrolledCode, err.Error(), "", nil)
 	case errors.Is(err, db.ErrFederationMoveSourceUnauthorized):
 		return federationCredentialDenied()
 	case errors.Is(err, ErrHostAccessDenied):
