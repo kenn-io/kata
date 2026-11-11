@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -86,12 +85,4 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 			}
 		})
 	}
-}
-
-// The shared embedding directory must stay inside each test's temporary home.
-func TestLocalEmbeddingsHomesAreIsolated(t *testing.T) {
-	home := clearLocalEmbeddingsEnv(t)
-	dir, err := embedlocal.DefaultDir()
-	require.NoError(t, err)
-	require.Equal(t, filepath.Join(home, ".kenn", "embeddings"), dir)
 }

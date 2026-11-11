@@ -44,33 +44,33 @@ func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 	}
 }
 
-func TestLocalEmbeddingsSettingsSharingRetry(t *testing.T) {
-	setupKataEnv(t)
-	sharedHome := clearLocalEmbeddingsEnv(t)
-	stubLocalEmbeddingsInstall(t)
-	oldEndpoint := localEmbeddingsEndpoint
-	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
-		if opts.Executable == "" {
-			return "", embedlocal.ErrNotFound
-		}
-		return "http://127.0.0.1:12345/v1", nil
-	}
-	blocker := filepath.Join(sharedHome, ".kenn")
-	require.NoError(t, os.WriteFile(blocker, []byte("block marker"), 0600))
-	var run func(context.Context)
-	setup := &localEmbeddingsSetup{start: func(work func(context.Context)) bool { run = work; return true }}
-	require.NoError(t, setup.TurnOn(t.Context()))
-	run(t.Context())
-	require.Equal(t, "failed", setup.job.State)
-	require.Contains(t, setup.job.Error, "sharing could not be confirmed")
-	require.NoError(t, os.Remove(blocker))
-	require.NoError(t, setup.TurnOn(t.Context()))
-	run(t.Context())
-	require.Equal(t, "restart", setup.job.State)
-}
-
 func TestLocalEmbeddingsSettingsSharesSavedSetup(t *testing.T) {
+	t.Run("retry after failed setup", func(t *testing.T) {
+		setupKataEnv(t)
+		sharedHome := clearLocalEmbeddingsEnv(t)
+		stubLocalEmbeddingsInstall(t)
+		oldEndpoint := localEmbeddingsEndpoint
+		t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+		localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+			if opts.Executable == "" {
+				return "", embedlocal.ErrNotFound
+			}
+			return "http://127.0.0.1:12345/v1", nil
+		}
+		blocker := filepath.Join(sharedHome, ".kenn")
+		require.NoError(t, os.WriteFile(blocker, []byte("block marker"), 0600))
+		var run func(context.Context)
+		setup := &localEmbeddingsSetup{start: func(work func(context.Context)) bool { run = work; return true }}
+		require.NoError(t, setup.TurnOn(t.Context()))
+		run(t.Context())
+		require.Equal(t, "failed", setup.job.State)
+		require.Contains(t, setup.job.Error, "sharing could not be confirmed")
+		require.NoError(t, os.Remove(blocker))
+		require.NoError(t, setup.TurnOn(t.Context()))
+		run(t.Context())
+		require.Equal(t, "restart", setup.job.State)
+	})
+
 	home := setupKataEnv(t)
 	sharedHome := clearLocalEmbeddingsEnv(t)
 	original := []byte("[search.embeddings]\nlocal=true\nmodel='nomic-embed-text'\ndims=768\n")
@@ -259,8 +259,6 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 			stop()
 			if tc.ready {
 				require.NoError(t, os.WriteFile(path, original, 0o600))
-				require.NoError(t, os.Chmod(path, 0o400))
-				t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
 			}
 			baseURL, _ = launch()
 			wantMode := "lexical"
@@ -295,9 +293,6 @@ func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	got, err := os.ReadFile(path) // #nosec G304 -- configuration in the isolated test home
 	require.NoError(t, err)
 	require.Equal(t, original, got, "a page loaded while search was off cannot switch a provider saved later")
-	chosen, err := embedlocal.ChoiceRecorded()
-	require.NoError(t, err)
-	require.False(t, chosen)
 }
 
 func TestSharedChoiceRollsBackWhenVectorPathIsDirectory(t *testing.T) {

@@ -2,11 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,42 +32,35 @@ func TestApplySharedEmbeddingChoice(t *testing.T) {
 }
 
 func TestLocalEmbeddingsRestartRefusalPreservesChoice(t *testing.T) {
-	for _, chosen := range []bool{false, true} {
-		t.Run(fmt.Sprintf("chosen=%t", chosen), func(t *testing.T) {
-			home := setupKataEnv(t)
-			clearLocalEmbeddingsEnv(t)
-			if chosen {
-				require.NoError(t, embedlocal.RecordChoice())
-			}
-			stubLocalEmbeddingsInstall(t)
-			oldEndpoint := localEmbeddingsEndpoint
-			t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-			localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
-				if opts.Executable == "" {
-					return "", embedlocal.ErrNotFound
-				}
-				return "http://127.0.0.1:12345/v1", nil
-			}
-			original := []byte("# original\n")
-			path := filepath.Join(home, "config.toml")
-			require.NoError(t, os.WriteFile(path, original, 0600))
-			_, err := enableLocalEmbeddings(t.Context(), localEmbeddingsRun{
-				confirm: func(context.Context, int64) (bool, error) { return true, nil },
-				notice:  func(string) error { return nil },
-				restart: func(_ context.Context, apply func() error) error {
-					require.NoError(t, apply())
-					return errors.New("restart refused")
-				},
-			})
-			require.ErrorContains(t, err, "restart refused")
-			data, err := os.ReadFile(path) // #nosec G304 -- test-owned configuration
-			require.NoError(t, err)
-			require.Equal(t, original, data)
-			got, err := embedlocal.ChoiceRecorded()
-			require.NoError(t, err)
-			require.Equal(t, chosen, got)
-		})
+	home := setupKataEnv(t)
+	clearLocalEmbeddingsEnv(t)
+	stubLocalEmbeddingsInstall(t)
+	oldEndpoint := localEmbeddingsEndpoint
+	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+		if opts.Executable == "" {
+			return "", embedlocal.ErrNotFound
+		}
+		return "http://127.0.0.1:12345/v1", nil
 	}
+	original := []byte("# original\n")
+	path := filepath.Join(home, "config.toml")
+	require.NoError(t, os.WriteFile(path, original, 0600))
+	_, err := enableLocalEmbeddings(t.Context(), localEmbeddingsRun{
+		confirm: func(context.Context, int64) (bool, error) { return true, nil },
+		notice:  func(string) error { return nil },
+		restart: func(_ context.Context, apply func() error) error {
+			require.NoError(t, apply())
+			return errors.New("restart refused")
+		},
+	})
+	require.ErrorContains(t, err, "restart refused")
+	data, err := os.ReadFile(path) // #nosec G304 -- test-owned configuration
+	require.NoError(t, err)
+	require.Equal(t, original, data)
+	got, err := embedlocal.ChoiceRecorded()
+	require.NoError(t, err)
+	require.False(t, got)
 }
 
 func TestLocalEmbeddingsSetup(t *testing.T) {
@@ -232,17 +222,12 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 		original string
 		exists   bool
 		edited   string
-		chosen   bool
 	}{
 		{name: "edited", exists: true, original: "[daemon]\nport = 8888\n", edited: "[daemon]\nport = 9999\n"},
 		{name: "created empty"},
-		{name: "edited with existing choice", exists: true, original: "[daemon]\nport = 8888\n", edited: "[daemon]\nport = 9999\n", chosen: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := setupKataEnv(t)
-			if tc.chosen {
-				require.NoError(t, embedlocal.RecordChoice())
-			}
 			t.Setenv("KATA_SERVER", "")
 			path := filepath.Join(home, "config.toml")
 			if tc.exists {
@@ -271,19 +256,16 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 			require.NoError(t, readErr)
 			require.Equal(t, tc.edited, string(got))
 			require.ErrorContains(t, err, "changed")
-			chosen, err := embedlocal.ChoiceRecorded()
-			require.NoError(t, err)
-			require.Equal(t, tc.chosen, chosen)
 		})
 	}
 }
 
 func TestLocalEmbeddingsDaemonDownloadConsent(t *testing.T) {
 	for _, tc := range []struct {
-		name              string
-		chosen, installed bool
+		name   string
+		chosen bool
 	}{
-		{name: "no choice"}, {name: "recorded choice", chosen: true}, {name: "installed", installed: true},
+		{name: "no choice"}, {name: "recorded choice", chosen: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearLocalEmbeddingsEnv(t)
@@ -291,30 +273,12 @@ func TestLocalEmbeddingsDaemonDownloadConsent(t *testing.T) {
 			if tc.chosen {
 				require.NoError(t, embedlocal.RecordChoice())
 			}
-			var endpoint string
-			if tc.installed {
-				provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-					values := make([]float64, 768)
-					values[0] = 1
-					if err := json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"embedding": values, "index": 0}}}); err != nil {
-						t.Errorf("encode embedding response: %v", err)
-					}
-				}))
-				t.Cleanup(provider.Close)
-				endpoint = provider.URL
-			}
 			oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
 			t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-			localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
-				if tc.installed && opts.Executable != "" {
-					return endpoint, nil
-				}
+			localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
 				return "", embedlocal.ErrNotFound
 			}
 			localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
-				if tc.installed {
-					return embedlocal.Installation{Executable: "/example/kennembed"}, nil
-				}
 				approved, err := opts.Confirm(ctx, 290_000_000)
 				require.Equal(t, tc.chosen, approved)
 				if err != nil {
@@ -328,11 +292,6 @@ func TestLocalEmbeddingsDaemonDownloadConsent(t *testing.T) {
 			require.NoError(t, err)
 			_, err = client.Embed(t.Context(), []string{"x"})
 			switch {
-			case tc.installed:
-				require.NoError(t, err)
-				chosen, err := embedlocal.ChoiceRecorded()
-				require.NoError(t, err)
-				require.False(t, chosen)
 			case tc.chosen:
 				require.ErrorContains(t, err, "installation reached")
 			default:

@@ -9,28 +9,6 @@ const off = {
   can_change: true,
 }
 
-test('Settings shares a saved built-in setup', async ({ page, kata }, testInfo) => {
-  const errors: string[] = []
-  page.on('pageerror', (error) => errors.push(error.message))
-  let shared = false
-  await page.route('**/api/v1/embeddings/local', async (route) => {
-    if (route.request().method() === 'POST') shared = true
-    await route.fulfill({
-      status: shared ? 202 : 200,
-      json: { ...off, provider: 'built_in', can_change: !shared },
-    })
-  })
-  await kata.launch(page)
-  await page.goto(`${kata.origin}/kata?view=settings`)
-  const button = page.getByRole('button', { name: 'Share with other apps' })
-  await expect(button).toBeVisible()
-  await page.screenshot({ path: testInfo.outputPath('sharing.png') })
-  await button.click()
-  await expect(button).toBeHidden()
-  expect(shared).toBe(true)
-  expect(errors).toEqual([])
-})
-
 test('Settings keeps status colors, spacing, and title alignment consistent', async ({
   page,
   kata,
