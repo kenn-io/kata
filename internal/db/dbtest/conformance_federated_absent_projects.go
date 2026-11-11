@@ -3,9 +3,11 @@ package dbtest
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // Direct pulls retain issue history and missing move endpoints atomically.
@@ -49,10 +51,14 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		_, err = receiver.ProjectByUID(ctx, source.UID)
 		require.ErrorIs(t, err, db.ErrNotFound)
 		foreignProjectEvent := creation
+		foreignProjectEvent.EventUID, err = uid.New()
+		require.NoError(t, err)
 		foreignProjectEvent.Type = "project.updated"
 		foreignProjectEvent.IssueUID = nil
+		foreignProjectEvent.HLCCounter++
+		foreignProjectEvent.Payload = []byte(`{"name":"renamed-source"}`)
 		resignNativeEvent(t, &foreignProjectEvent)
-		// A previously processed counterpart must not bypass later event validation.
+		// Foreign project events are rejected even after retaining their project.
 		_, err = receiver.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{creation, foreignProjectEvent})
 		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 		_, err = receiver.ProjectByUID(ctx, source.UID)
@@ -169,9 +175,36 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.NoError(t, err)
 		_, _, err = edited.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: local.ID, ToIssueID: peer.ID, Type: "blocks", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: peer.ID, FromShortID: peer.ShortID, FromUID: peer.UID, ToShortID: local.ShortID, ToUID: local.UID, Actor: "worker"})
 		require.NoError(t, err)
+		now := time.Now().UTC()
+		root, _, err := edited.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+			ProjectID: editedRoute.ID, IssueID: local.ID, ConnectorInstance: "notes",
+			ExternalRootKey: "root", ExternalAccountKey: "account", Actor: "worker", ReceiveCommentsAfter: now,
+		})
+		require.NoError(t, err)
+		root, claimed, err := edited.ClaimExternalRootBinding(ctx, root.ID, "worker-token", now, now.Add(-db.ExternalRootClaimStaleAfter))
+		require.NoError(t, err)
+		require.True(t, claimed)
+		comment, _, changed, err := edited.UpsertExternalCommentProjection(ctx, db.ExternalCommentProjectionParams{
+			BindingID: root.ID, ClaimToken: root.ClaimToken, ExternalID: "comment", ExternalRevision: "one",
+			Body: "External comment", ExternalActorID: "person", ExternalActorName: "Person",
+			ExternalCreatedAt: now, ExternalUpdatedAt: now, IntegrationActor: "connector:notes",
+		})
+		require.NoError(t, err)
+		require.True(t, changed)
 		_, err = edited.InsertRemoteEvents(ctx, editedRoute.ID, []db.RemoteEvent{move})
 		require.NoError(t, err)
 		require.NoError(t, edited.MaterializeFederatedProject(ctx, editedRoute.ID))
+		comments, err := edited.CommentsByIssue(ctx, local.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1)
+		require.Equal(t, comment.UID, comments[0].UID)
+		require.Equal(t, comment.Body, comments[0].Body)
+		mapping, err := edited.ImportMappingBySource(ctx, editedRoute.ID, db.ExternalRootCommentMappingSource(root), "comment", "comment")
+		require.NoError(t, err)
+		require.NotNil(t, mapping.CommentID)
+		require.Equal(t, comment.ID, *mapping.CommentID)
+		_, _, _, err = edited.EditComment(ctx, db.EditCommentParams{IssueID: local.ID, CommentUID: comment.UID, Body: "Forbidden edit", Actor: "worker"})
+		require.ErrorIs(t, err, db.ErrExternalCommentContentOwned)
 		links, err := edited.LinksByIssue(ctx, peer.ID)
 		require.NoError(t, err)
 		require.Len(t, links, 1)
@@ -184,7 +217,16 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 			}
 			require.True(t, found, "history must retain event %s", eventUID)
 		}
-
+		current, err := hub.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		returned, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: target.ID, ToProjectID: source.ID, IfMatchRev: current.Revision, Actor: "worker"})
+		require.NoError(t, err)
+		_, err = edited.InsertRemoteEvents(ctx, editedRoute.ID, []db.RemoteEvent{portableNativeEvent(*returned.Event)})
+		require.NoError(t, err)
+		require.NoError(t, edited.MaterializeFederatedProject(ctx, editedRoute.ID))
+		restored, err := edited.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, editedRoute.ID, restored.ProjectID)
 	})
 
 	return nil
