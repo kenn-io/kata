@@ -28,6 +28,18 @@ func TestApplySharedEmbeddingChoiceKeepsConfiguredProvider(t *testing.T) {
 	require.Equal(t, configured, got)
 }
 
+func TestApplySharedEmbeddingChoiceResetsIncompatibleRecipe(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	require.NoError(t, embedlocal.RecordChoice())
+	current := config.EmbeddingsConfig{
+		Dims: 1024, DocumentPrefix: "document prefix", DocumentSuffix: "document suffix",
+		QueryPrefix: "query prefix", QuerySuffix: "query suffix", FingerprintSalt: "salt", RequestDimensions: true,
+	}
+	got, err := applySharedEmbeddingChoice(t.Context(), current)
+	require.NoError(t, err)
+	require.Equal(t, config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", Dims: 768}, got)
+}
+
 func TestLocalEmbeddingsSetup(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
 	tmp := setupKataEnv(t)

@@ -193,8 +193,6 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 				require.NoError(t, os.WriteFile(path, original, 0o600))
 				require.NoError(t, os.Chmod(path, 0o400))
 				t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
-			} else {
-				require.NoError(t, embedlocal.RecordChoice())
 			}
 			baseURL, _ = launch()
 			saved, err := os.ReadFile(path) // #nosec G304 -- isolated test configuration
