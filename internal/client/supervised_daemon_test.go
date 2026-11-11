@@ -20,33 +20,35 @@ import (
 )
 
 func TestManagedExternallyDoesNotAutostart(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		// A zero deadline keeps the default context: the documented limit is 30s.
-		for _, tc := range []struct{ deadline, waited time.Duration }{
-			{100 * time.Millisecond, 100 * time.Millisecond}, {0, 30 * time.Second},
-		} {
-			t.Run(tc.waited.String(), func(t *testing.T) {
+	for _, defaultLimit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("default_limit=%t", defaultLimit), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				// The default context has no deadline: the documented limit is 30s.
+				deadline, waited := 100*time.Millisecond, 100*time.Millisecond
+				if defaultLimit {
+					deadline, waited = 0, 30*time.Second
+				}
 				home := setupKataEnv(t)
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n[auth]\ntoken_env = 'SUPERVISOR_ONLY_TOKEN'\n"), 0600))
 				state := patchEnsureHooks(t, "v0.2.0", "http://spawned")
 				ctx := t.Context()
-				if tc.deadline > 0 {
+				if deadline > 0 {
 					var cancel context.CancelFunc
-					ctx, cancel = context.WithTimeout(ctx, tc.deadline)
+					ctx, cancel = context.WithTimeout(ctx, deadline)
 					defer cancel()
 				}
 				start := time.Now()
 				_, err := ensureLocalRunningTarget(ctx)
 				require.ErrorContains(t, err, "managed externally")
-				require.Equal(t, tc.waited, time.Since(start))
+				require.Equal(t, waited, time.Since(start))
 				require.Zero(t, state.startCalls)
 				require.Zero(t, state.stopCalls)
-				if tc.deadline > 0 {
+				if deadline > 0 {
 					require.ErrorIs(t, err, context.DeadlineExceeded)
 				}
 			})
-		}
-	})
+		})
+	}
 }
 
 func TestManagedExternallyUnreachableDetail(t *testing.T) {
