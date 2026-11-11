@@ -32,10 +32,13 @@ func DecodeWorkflow(input []byte) (WorkflowDefinition, error) {
 // argv and null fences. It is only for retaining owner history, not execution.
 func DecodeHistoricalWorkflow(input []byte) (WorkflowDefinition, error) {
 	var workflow WorkflowDefinition
-	err := decode(input, &workflow, DefinitionLimit)
-	if err == nil {
-		err = rejectWorkflowArgvMember(input)
+	if len(input) > DefinitionLimit {
+		return workflow, invalid("document exceeds size limit")
 	}
+	if err := rejectWorkflowArgvMember(input); err != nil {
+		return workflow, err
+	}
+	err := decode(input, &workflow, DefinitionLimit)
 	return workflow, err
 }
 
