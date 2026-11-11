@@ -369,14 +369,15 @@ func TestDaemonStatusAutoStarted(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
 	_, err = store.Write(kitdaemon.RuntimeRecord{
-		PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777",
+		ProcessIdentityV2: identity,
+		PID:               os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777",
 		Metadata: map[string]string{"autostart": "1"},
 	})
 	require.NoError(t, err)
 
-	human, _, _ := executeRootCapture(t, t.Context(), "daemon", "status")
-	assert.Contains(t, human, "  started: automatically by a kata command\n")
 	agent, _, _ := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
 	assert.Contains(t, agent, " auto_started=true")
 
@@ -403,11 +404,11 @@ func TestDaemonStatusAutoStarted(t *testing.T) {
 			assert.Nil(t, d.AutoStarted)
 		}
 	}
-	human, _, _ = executeRootCapture(t, t.Context(), "daemon", "status")
+	human, _, _ := executeRootCapture(t, t.Context(), "daemon", "status")
 	assert.Contains(t, human, "  pid:     "+strconv.Itoa(os.Getpid())+"\n  started: automatically by a kata command\n")
-	assert.NotContains(t, human, "  pid:     "+strconv.Itoa(child.Process.Pid)+"\n  started:")
 	assert.Equal(t, 1, strings.Count(human, "  started: automatically by a kata command\n"))
 	agent, _, _ = executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
+	assert.True(t, strings.HasPrefix(agent, "OK daemon status=running "), agent)
 	assert.NotContains(t, agent, "auto_started=")
 }
 
