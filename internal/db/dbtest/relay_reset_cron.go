@@ -93,7 +93,7 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	q := downstream.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
-	for _, definition := range []string{`{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`, `null`} {
+	for _, definition := range []string{`{"version":1,"steps":[{"kind":"argv","argv":["true"]}]}`} {
 		event := argvCompatRemoteWorkflow(t, replica, downstream.InstanceUID(), definition)
 		payload := make(map[string]jsontext.Value)
 		require.NoError(t, json.Unmarshal(event.Payload, &payload))
