@@ -21,7 +21,8 @@ import (
 
 func TestLocalEmbeddingsSetup(t *testing.T) {
 	clearLocalEmbeddingsEnv(t)
-	home := filepath.Join(setupKataEnv(t), "fresh")
+	tmp := setupKataEnv(t)
+	home := filepath.Join(tmp, "fresh")
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
 	t.Setenv("KATA_SERVER", "")
@@ -44,7 +45,7 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		installed = true
 		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
 	}
-	blocker := filepath.Join(os.Getenv("HOME"), ".kenn")
+	blocker := filepath.Join(tmp, ".kenn")
 	require.NoError(t, os.WriteFile(blocker, []byte("blocks marker directory"), 0o600))
 	_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 	require.ErrorContains(t, err, "record built-in embeddings choice")
