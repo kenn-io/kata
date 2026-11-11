@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -104,7 +105,7 @@ func newTestHTTPHandler(t *testing.T, client *kataclient.Client, scope *Scope) h
 	options.Events = true
 	current, err := New(options)
 	require.NoError(t, err)
-	return NewHTTPHandler(legacy, current)
+	return NewHTTPHandler(func(*http.Request) *sdkmcp.Server { return legacy }, func(*http.Request) *sdkmcp.Server { return current }, HTTPOptions{})
 }
 
 func boundTestScope(t *testing.T) *Scope {
