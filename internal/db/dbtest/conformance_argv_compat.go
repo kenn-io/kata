@@ -298,3 +298,29 @@ func uidForGuard(t *testing.T) string {
 	require.NoError(t, err)
 	return id
 }
+
+// Adoption may replace valid argv history only after the target advertises it.
+func checkArgvAdoptionNegotiation(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	for _, features := range []string{"", db.CronWorkflowArgvEventFeature} {
+		project, err := store.CreateProject(ctx, "adopt-argv-"+uidForGuard(t))
+		require.NoError(t, err)
+		workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "argv", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "argv", Argv: []string{"echo", "", "a b"}}}}})
+		require.NoError(t, err)
+		target := uidForGuard(t)
+		result, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: target, Actor: "worker", TargetEventFeatures: features})
+		if features == "" {
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+			current, lookupErr := store.ProjectByID(ctx, project.ID)
+			require.NoError(t, lookupErr)
+			require.Equal(t, project.UID, current.UID)
+			continue
+		}
+		require.NoError(t, err)
+		require.Equal(t, target, result.Project.UID)
+		retained, err := store.CronWorkflow(ctx, project.ID, workflow.UID)
+		require.NoError(t, err)
+		require.Equal(t, []string{"echo", "", "a b"}, retained.Definition.Steps[0].Argv)
+	}
+	return nil
+}
