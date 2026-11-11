@@ -12,33 +12,77 @@ func cronWorkflowDefinition() map[string]any {
 	return map[string]any{"version": 1, "steps": []any{map[string]any{"key": "inspect", "kind": "prompt", "prompt": "Inspect synthetic fixture"}}}
 }
 func TestCronWorkflowLifecycleAndInUseConflict(t *testing.T) {
-	f := newCronFixture(t)
-	id := cronNewUID(t, f.session)
-	args := map[string]any{"uid": id, "name": "Fixture workflow", "definition": cronWorkflowDefinition()}
-	workflow := cronRecord(t, f.session, "cron_workflow_create", args, "workflow")
-	require.Equal(t, id, workflow["uid"])
-	require.Equal(t, "example-agent", workflow["author"])
-	require.Equal(t, workflow, cronRecord(t, f.session, "cron_workflow", map[string]any{"uid": id}, "workflow"))
-	require.True(t, cronCall(t, f.session, "cron_workflow_create", args).IsError)
-	require.True(t, cronCall(t, f.session, "cron_workflow_update", args).IsError, "CAS must be caller supplied")
-	args["expected_event_uid"] = workflow["definition_event_uid"]
-	args["name"] = "Replacement"
-	workflow = cronRecord(t, f.session, "cron_workflow_update", args, "workflow")
-	require.True(t, cronCall(t, f.session, "cron_workflow_update", args).IsError, "stale CAS conflicts")
-	definition := cronDefinition()
-	definition["action"] = map[string]any{"kind": "execute", "workflow_uid": id}
-	job := cronRecord(t, f.session, "cron_job_create", map[string]any{"uid": cronNewUID(t, f.session), "name": "Workflow job", "definition": definition}, "job")
-	action := map[string]any{"uid": id, "expected_event_uid": workflow["definition_event_uid"]}
-	require.True(t, cronCall(t, f.session, "cron_workflow_delete", action).IsError, "in-use workflow cannot be archived")
-	cronOK(t, f.session, "cron_job_delete", map[string]any{"uid": job["uid"], "expected_event_uid": job["definition_event_uid"]})
-	deleted := cronRecord(t, f.session, "cron_workflow_delete", action, "workflow")
-	require.NotNil(t, deleted["deleted_at"])
-	require.Empty(t, cronOK(t, f.session, "cron_workflows", map[string]any{})["workflows"])
-	require.Len(t, cronOK(t, f.session, "cron_workflows", map[string]any{"include_deleted": true})["workflows"], 1)
-	require.True(t, cronCall(t, f.session, "cron_workflow_restore", action).IsError, "restore also requires current tombstone event")
-	restored := cronRecord(t, f.session, "cron_workflow_restore", map[string]any{"uid": id, "expected_event_uid": deleted["definition_event_uid"]}, "workflow")
-	require.Nil(t, restored["deleted_at"])
+	for _, tc := range []struct {
+		name       string
+		definition map[string]any
+	}{
+		{"prompt", cronWorkflowDefinition()},
+		{"argv", map[string]any{"version": 1, "steps": []any{map[string]any{"key": "run", "kind": "argv", "argv": []any{"printf", "", "a b"}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCronFixture(t)
+			id := cronNewUID(t, f.session)
+			args := map[string]any{"uid": id, "name": "Fixture workflow", "definition": tc.definition}
+			var expectedDefinition map[string]any
+			require.NoError(t, json.Unmarshal(mustJSON(t, tc.definition), &expectedDefinition))
+			check := func(workflow map[string]any) {
+				t.Helper()
+				require.Equal(t, expectedDefinition, workflow["definition"])
+			}
+			workflow := cronRecord(t, f.session, "cron_workflow_create", args, "workflow")
+			require.Equal(t, id, workflow["uid"])
+			require.Equal(t, "example-agent", workflow["author"])
+			check(workflow)
+			require.Equal(t, workflow, cronRecord(t, f.session, "cron_workflow", map[string]any{"uid": id}, "workflow"))
+			listed := cronOK(t, f.session, "cron_workflows", map[string]any{})["workflows"].([]any)
+			require.Len(t, listed, 1)
+			check(listed[0].(map[string]any))
+			require.True(t, cronCall(t, f.session, "cron_workflow_create", args).IsError)
+			require.True(t, cronCall(t, f.session, "cron_workflow_update", args).IsError, "CAS must be caller supplied")
+			args["expected_event_uid"] = workflow["definition_event_uid"]
+			args["name"] = "Replacement"
+			workflow = cronRecord(t, f.session, "cron_workflow_update", args, "workflow")
+			check(workflow)
+			t.Run("stale replacement", func(t *testing.T) {
+				conflict := cronCall(t, f.session, "cron_workflow_update", args)
+				require.True(t, conflict.IsError, "stale CAS conflicts")
+				require.NotEmpty(t, conflict.Content)
+				var envelope struct {
+					Status int `json:"status"`
+					Error  struct {
+						Code string `json:"code"`
+						Data struct {
+							Current map[string]any `json:"current"`
+						} `json:"data"`
+					} `json:"error"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(conflict.Content[0].(*sdkmcp.TextContent).Text), &envelope))
+				require.Equal(t, 409, envelope.Status)
+				require.Equal(t, "cron_conflict", envelope.Error.Code)
+				require.Equal(t, workflow["definition_event_uid"], envelope.Error.Data.Current["definition_event_uid"])
+				check(envelope.Error.Data.Current)
+			})
+			definition := cronDefinition()
+			definition["action"] = map[string]any{"kind": "execute", "workflow_uid": id}
+			job := cronRecord(t, f.session, "cron_job_create", map[string]any{"uid": cronNewUID(t, f.session), "name": "Workflow job", "definition": definition}, "job")
+			action := map[string]any{"uid": id, "expected_event_uid": workflow["definition_event_uid"]}
+			require.True(t, cronCall(t, f.session, "cron_workflow_delete", action).IsError, "in-use workflow cannot be archived")
+			cronOK(t, f.session, "cron_job_delete", map[string]any{"uid": job["uid"], "expected_event_uid": job["definition_event_uid"]})
+			deleted := cronRecord(t, f.session, "cron_workflow_delete", action, "workflow")
+			check(deleted)
+			require.NotNil(t, deleted["deleted_at"])
+			require.Empty(t, cronOK(t, f.session, "cron_workflows", map[string]any{})["workflows"])
+			listed = cronOK(t, f.session, "cron_workflows", map[string]any{"include_deleted": true})["workflows"].([]any)
+			require.Len(t, listed, 1)
+			check(listed[0].(map[string]any))
+			require.True(t, cronCall(t, f.session, "cron_workflow_restore", action).IsError, "restore also requires current tombstone event")
+			restored := cronRecord(t, f.session, "cron_workflow_restore", map[string]any{"uid": id, "expected_event_uid": deleted["definition_event_uid"]}, "workflow")
+			check(restored)
+			require.Nil(t, restored["deleted_at"])
+		})
+	}
 }
+
 func TestCronWorkflowStrictDefinitions(t *testing.T) {
 	f := newCronFixture(t)
 	for _, definition := range []map[string]any{

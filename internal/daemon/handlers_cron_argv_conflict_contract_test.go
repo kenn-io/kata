@@ -122,9 +122,30 @@ func TestWorkflowRawValidationFollowsBootstrapAttributionRefusal(t *testing.T) {
 	workflow, _, err := env.DB.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, Name: "command", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "run", Kind: "command", Command: "true"}}}})
 	require.NoError(t, err)
 	path := fmt.Sprintf("/api/v1/projects/%d/cron/workflows", project.ID)
+	before, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
 	for _, tc := range []struct{ method, path, expected string }{{http.MethodPost, path, ""}, {http.MethodPut, path + "/" + workflow.UID, workflow.DefinitionEventUID}} {
-		body := fmt.Sprintf(`{"actor":"worker","name":"command","expected_event_uid":%q,"definition":{"version":1,"steps":[{"key":"run","kind":"command","command":"true","argv":null}]}}`, tc.expected)
-		status, raw := argvRequest(t, env, tc.method, tc.path, body, "")
-		require.Equalf(t, http.StatusForbidden, status, "%s", raw)
+		t.Run(tc.method+" raw invalid", func(t *testing.T) {
+			// Optional null is schema-admissible but rejected by custom raw parsing.
+			body := fmt.Sprintf(`{"actor":"worker","name":"command","expected_event_uid":%q,"definition":{"version":1,"steps":[{"key":"run","kind":"command","command":"true","argv":null}]}}`, tc.expected)
+			status, raw := argvRequest(t, env, tc.method, tc.path, body, "")
+			require.Equalf(t, http.StatusForbidden, status, "%s", raw)
+			var response api.ErrorEnvelope
+			require.NoError(t, json.Unmarshal([]byte(raw), &response))
+			require.Equal(t, "bootstrap_token_write_forbidden", response.Error.Code)
+
+		})
+		t.Run(tc.method+" schema invalid", func(t *testing.T) {
+			// Huma rejects a missing required definition before handler entry.
+			body := fmt.Sprintf(`{"actor":"worker","name":"command","expected_event_uid":%q}`, tc.expected)
+			status, raw := argvRequest(t, env, tc.method, tc.path, body, "")
+			require.Equalf(t, http.StatusBadRequest, status, "%s", raw)
+		})
 	}
+	after, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	got, err := env.DB.CronWorkflow(t.Context(), project.ID, workflow.UID)
+	require.NoError(t, err)
+	require.Equal(t, workflow, got)
 }

@@ -92,46 +92,75 @@ func TestCronCLIDefinitionsPreserveOpaqueNumbers(t *testing.T) {
 }
 
 func TestCronCLIDefinitionRevisionAndWorkflowCRUD(t *testing.T) {
-	t.Setenv("KATA_AUTHOR", "worker")
-	env := testenv.New(t)
-	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
-	require.NoError(t, err)
-	workflowUID := cronCLIUID(t)
-	input := api.PutCronWorkflowBody{Name: "Inspection", Definition: api.CronWorkflowDefinition{Version: 1, Steps: []api.CronWorkflowStep{{Key: "inspect", Kind: "command", Command: "git status"}}}}
-	file := cronCLIFile(t, input)
-	out, _, err := executeCronCLI(t, env.URL, nil, "workflow", "create", "--uid", workflowUID, "--file", file)
-	require.NoError(t, err)
-	var created struct {
-		Workflow api.CronWorkflow `json:"workflow"`
+	for _, step := range []api.CronWorkflowStep{
+		{Key: "inspect", Kind: "command", Command: "git status"},
+		{Key: "run", Kind: "argv", Argv: []string{"printf", "", "a b"}},
+	} {
+		t.Run(step.Kind, func(t *testing.T) {
+			t.Setenv("KATA_AUTHOR", "worker")
+			env := testenv.New(t)
+			_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			workflowUID := cronCLIUID(t)
+			input := api.PutCronWorkflowBody{Name: "Inspection", Definition: api.CronWorkflowDefinition{Version: 1, Steps: []api.CronWorkflowStep{step}}}
+			check := func(out string) api.CronWorkflow {
+				t.Helper()
+				var result struct {
+					Workflow api.CronWorkflow `json:"workflow"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(out), &result))
+				require.Equal(t, step, result.Workflow.Definition.Steps[0])
+				return result.Workflow
+			}
+			out, _, err := executeCronCLI(t, env.URL, nil, "workflow", "create", "--uid", workflowUID, "--file", cronCLIFile(t, input))
+			require.NoError(t, err)
+			created := check(out)
+			out, _, err = executeCronCLI(t, env.URL, nil, "workflow", "show", workflowUID)
+			require.NoError(t, err)
+			check(out)
+			out, _, err = executeCronCLI(t, env.URL, nil, "workflow", "list")
+			require.NoError(t, err)
+			var list struct {
+				Workflows []api.CronWorkflow `json:"workflows"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &list))
+			require.Len(t, list.Workflows, 1)
+			require.Equal(t, step, list.Workflows[0].Definition.Steps[0])
+			input.Name = "Updated inspection"
+			input.ExpectedEventUID = created.DefinitionEventUID
+			out, _, err = executeCronCLI(t, env.URL, nil, "workflow", "update", workflowUID, "--file", cronCLIFile(t, input))
+			require.NoError(t, err)
+			updated := check(out)
+			t.Run("stale replacement", func(t *testing.T) {
+				_, _, err := executeCronCLI(t, env.URL, nil, "workflow", "update", workflowUID, "--file", cronCLIFile(t, input))
+				require.Error(t, err)
+				var conflict *cliError
+				require.ErrorAs(t, err, &conflict)
+				require.Equal(t, "cron_conflict", conflict.Code)
+				var data struct {
+					Current api.CronWorkflow `json:"current"`
+				}
+				require.NoError(t, json.Unmarshal(conflict.Data, &data))
+				require.Equal(t, updated.DefinitionEventUID, data.Current.DefinitionEventUID)
+				require.Equal(t, step, data.Current.Definition.Steps[0])
+			})
+			_, _, err = executeCronCLI(t, env.URL, nil, "workflow", "delete", workflowUID, "--expected-event-uid", created.DefinitionEventUID)
+			require.Error(t, err)
+			out, _, err = executeCronCLI(t, env.URL, nil, "workflow", "delete", workflowUID, "--expected-event-uid", updated.DefinitionEventUID)
+			require.NoError(t, err)
+			deleted := check(out)
+			require.NotNil(t, deleted.DeletedAt)
+			out, _, err = executeCronCLI(t, env.URL, nil, "workflow", "list", "--include-deleted")
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal([]byte(out), &list))
+			require.Len(t, list.Workflows, 1)
+			require.Equal(t, step, list.Workflows[0].Definition.Steps[0])
+			out, _, err = executeCronCLI(t, env.URL, nil, "workflow", "restore", workflowUID, "--expected-event-uid", deleted.DefinitionEventUID)
+			require.NoError(t, err)
+			restored := check(out)
+			require.Nil(t, restored.DeletedAt)
+		})
 	}
-	require.NoError(t, json.Unmarshal([]byte(out), &created))
-	input.Name = "Updated inspection"
-	input.ExpectedEventUID = created.Workflow.DefinitionEventUID
-	out, _, err = executeCronCLI(t, env.URL, nil, "workflow", "update", workflowUID, "--file", cronCLIFile(t, input))
-	require.NoError(t, err)
-	var updated struct {
-		Workflow api.CronWorkflow `json:"workflow"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &updated))
-	_, _, err = executeCronCLI(t, env.URL, nil, "workflow", "delete", workflowUID, "--expected-event-uid", created.Workflow.DefinitionEventUID)
-	require.Error(t, err)
-	out, _, err = executeCronCLI(t, env.URL, nil, "workflow", "delete", workflowUID, "--expected-event-uid", updated.Workflow.DefinitionEventUID)
-	require.NoError(t, err)
-	var deleted struct {
-		Workflow api.CronWorkflow `json:"workflow"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &deleted))
-	require.NotNil(t, deleted.Workflow.DeletedAt)
-	out, _, err = executeCronCLI(t, env.URL, nil, "workflow", "list", "--include-deleted")
-	require.NoError(t, err)
-	require.Contains(t, out, workflowUID)
-	out, _, err = executeCronCLI(t, env.URL, nil, "workflow", "restore", workflowUID, "--expected-event-uid", deleted.Workflow.DefinitionEventUID)
-	require.NoError(t, err)
-	var restored struct {
-		Workflow api.CronWorkflow `json:"workflow"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &restored))
-	require.Nil(t, restored.Workflow.DeletedAt)
 }
 
 func TestCronCLIRejectsInvalidInputBeforeNetwork(t *testing.T) {
