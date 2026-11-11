@@ -13,7 +13,7 @@ import (
 func daemonRecoveryAdvice(e *client.LocalDaemonUnreachableError, profile, goos string) string {
 	advice := fmt.Sprintf("Read %q, if present, or the daemon's retained stderr", filepath.Join(e.DataDir, "daemon.log"))
 	if e.WebOrigin != "" {
-		advice += fmt.Sprintf(". If %[1]s responds, capture %[1]s/debug/pprof/goroutine?debug=2 with daemon-owner access, using the owner's credential when authentication is configured", e.WebOrigin)
+		advice += fmt.Sprintf(". After independently confirming %[1]s is this daemon's browser origin, capture %[1]s/debug/pprof/goroutine?debug=2 with daemon-owner access", e.WebOrigin)
 	}
 	advice += fmt.Sprintf(". If you choose to stop it, immediately recheck that PID %d is still this daemon and the selected endpoint still fails", e.PID)
 	if e.VerifiedProcess && goos == "windows" {
@@ -33,7 +33,7 @@ func daemonRecoveryAdvice(e *client.LocalDaemonUnreachableError, profile, goos s
 func profileRecoveryCommand(name, goos string) string {
 	arg := "--daemon=" + name
 	if goos != "windows" {
-		return "kata " + shellQuoteArg(arg) + " daemon recover"
+		return "kata " + shellQuoteGlobSafeArg(arg) + " daemon recover"
 	}
 	commands, _ := agenthook.BuildCommand("kata", arg, "daemon", "recover") // the executable is never blank
 	return "in PowerShell " + commands.PowerShell
