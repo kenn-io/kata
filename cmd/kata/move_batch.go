@@ -148,6 +148,9 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 		}
 		items = append(items, parsed...)
 	}
+	if opts.DryRun && len(items) > 1 {
+		return moveBatchUsage("dry run accepts one item")
+	}
 	if sel.Project != "" {
 		if defaultTarget == "" {
 			return moveBatchUsage("selector requires a target project")
@@ -292,6 +295,9 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptions) error {
 	if len(items) > 5000 {
 		return moveBatchUsage("batch move accepts at most 5,000 items; split the input into separate runs")
+	}
+	if opts.DryRun && len(items) > 1 {
+		return moveBatchUsage("dry run accepts one item")
 	}
 	if opts.Subtree && len(items) > 1 {
 		return moveBatchUsage("--subtree accepts one issue")

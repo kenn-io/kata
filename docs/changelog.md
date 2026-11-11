@@ -31,10 +31,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   project filters. Batch moves default to single issues, report each refusal,
   and continue automatically across request budgets. Inputs over 5,000 items or
   1 MiB are refused before any write. A subtree move accepts one input.
-  Batch previews rehearse the ordered moves and comments without saving them,
-  holding database write locks until completion or the 45-second deadline.
-  Comments commit with the
-  moves and are not repeated on safe reruns. Requires daemon API 0.45.0 or newer;
+  Previews accept one item. Comments commit with the moves and are not repeated
+  on safe reruns. Requires daemon API 0.45.0 or newer;
   [the CLI reference](reference/cli.md#move-many-issues) explains the formats
   and the unchanged same-hub federation limits.
 

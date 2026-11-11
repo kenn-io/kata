@@ -229,6 +229,44 @@ func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 	})
 }
 
+func TestMoveBatchCLI_DryRunRejectsMultipleItems(t *testing.T) {
+	for _, mode := range []string{"refs", "file", "selector"} {
+		t.Run(mode, func(t *testing.T) {
+			env, dir, source, target, first := setupMoveCLIProjects(t)
+			second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "second", Author: "tester"})
+			require.NoError(t, err)
+			origin, err := url.Parse(env.URL)
+			require.NoError(t, err)
+			proxy := httputil.NewSingleHostReverseProxy(origin)
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				r.Host = origin.Host
+				proxy.ServeHTTP(w, r)
+			}))
+			t.Cleanup(server.Close)
+			args := []string{"--workspace", dir, "move", "--dry"}
+			input := ""
+			switch mode {
+			case "refs":
+				args = append(args, first.UID, second.UID, target.Name)
+			case "file":
+				args = append(args, "--refs-from", "-", target.Name)
+				input = first.UID + "\n" + second.UID + "\n"
+			case "selector":
+				args = append(args, "--from-project", source.Name, "--status", "all", target.Name)
+			}
+			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, args...)
+			require.ErrorContains(t, err, "dry run accepts one item")
+			require.Equal(t, ExitUsage, exitCodeForErr(err, true))
+			require.Empty(t, out)
+			if mode != "selector" {
+				require.Zero(t, requests)
+			}
+		})
+	}
+}
+
 func TestMoveBatchCLI_SubtreeRestrictions(t *testing.T) {
 	for _, mode := range []string{"refs", "single", "file", "selector"} {
 		t.Run(mode, func(t *testing.T) {

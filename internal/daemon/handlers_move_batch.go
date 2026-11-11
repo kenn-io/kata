@@ -156,7 +156,7 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 				apiErr, _ := errors.AsType[*api.APIError](resultErr)
 				if errors.Is(ctx.Err(), context.DeadlineExceeded) && (apiErr == nil || apiErr.Code != "access_unavailable") {
 					out = nil
-					resultErr = api.NewError(http.StatusRequestTimeout, "move_preview_timeout", "move preview timed out", "Reduce the number of items and retry.", nil)
+					resultErr = api.NewError(http.StatusRequestTimeout, "move_preview_timeout", "move preview timed out", "Retry the preview.", nil)
 				}
 			}()
 			if len(in.Body.Items) > 1 || in.Body.StartIndex != 0 || len(in.Body.Completed) != 0 {

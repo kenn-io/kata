@@ -670,6 +670,7 @@ func TestMoveBatchClaimDeadline(t *testing.T) {
 	var apiErr *api.APIError
 	require.ErrorAs(t, err, &apiErr)
 	require.Equal(t, "move_preview_timeout", apiErr.Code)
+	require.Equal(t, "Retry the preview.", apiErr.Hint)
 	got, err := store.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, source.ID, got.ProjectID)
