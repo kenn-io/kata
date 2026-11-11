@@ -905,7 +905,8 @@
     if (state.kind === 'uncertain') {
       return 'The write result is uncertain. Kata refreshed current authority before retry.'
     }
-    if (state.kind === 'blocked') return 'This issue is read-only or its authority is stale.'
+    if (state.kind === 'blocked')
+      return "You can't make changes right now. Refresh or check your access."
     return undefined
   }
 
@@ -1243,7 +1244,7 @@
     {:else if authority?.error && !authority.loading}
       <section class="kata-authority-recovery" role="alert">
         <span>{authority.error}</span>
-        <Button label="Retry Kata snapshot" onclick={() => void startAuthority()} />
+        <Button label="Retry" onclick={() => void startAuthority()} />
         {#if daemonInfos.length > 0}
           <KataDaemonSwitcher
             daemons={daemonInfos}

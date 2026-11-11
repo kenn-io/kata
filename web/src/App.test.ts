@@ -1266,13 +1266,13 @@ describe('App', () => {
 
     render(App)
 
-    const retry = await screen.findByRole('button', { name: 'Retry Kata snapshot' })
-    expect(screen.getByRole('alert').textContent).toContain('Snapshot unavailable')
+    const retry = await screen.findByRole('button', { name: 'Retry' })
+    expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
     await fireEvent.click(retry)
 
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
     expect(snapshotReads).toBe(2)
-    expect(screen.queryByRole('button', { name: 'Retry Kata snapshot' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
   })
 
   it('fences browser authority when project creation rejects the session', async () => {
@@ -2083,7 +2083,7 @@ describe('App', () => {
 
     render(App)
 
-    expect((await screen.findByRole('alert')).textContent).toContain('Snapshot unavailable')
+    expect((await screen.findByRole('alert')).textContent).toContain("Couldn't load workspace")
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
@@ -2739,6 +2739,9 @@ describe('App', () => {
       expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session'),
     )
     await waitFor(() => expect(renewedSnapshotAccepted).toBe(true))
+    expect(
+      screen.getByText("You can't make changes right now. Refresh or check your access."),
+    ).toBeTruthy()
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
@@ -3295,7 +3298,9 @@ describe('App', () => {
     await waitFor(() => expect(snapshotRequests).toHaveLength(3))
     expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
     await waitFor(() =>
-      expect(screen.queryByText('Snapshot may be out of date. Changes are paused.')).toBeNull(),
+      expect(
+        screen.queryByText('Workspace data may be out of date. Editing is paused.'),
+      ).toBeNull(),
     )
   })
 
