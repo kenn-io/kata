@@ -880,11 +880,6 @@ func (d *Store) insertRemoteEventTx(
 	}); err != nil {
 		return false, err
 	}
-	if ev.OriginInstanceUID == d.instanceUID {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO federation_local_replays(event_uid) VALUES($1)`, ev.EventUID); err != nil {
-			return false, fmt.Errorf("record local federation replay: %w", err)
-		}
-	}
 	return true, nil
 }
 
@@ -3334,11 +3329,4 @@ func (d *Store) quarantineRelayBindingTx(ctx context.Context, tx *sql.Tx, projec
 		return false, nil
 	}
 	return binding.RelayConfig != nil, err
-}
-
-// FederationLocalReplay reports whether this local event was restored by a pull.
-func (d *Store) FederationLocalReplay(ctx context.Context, eventUID string) (bool, error) {
-	var exists bool
-	err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_local_replays WHERE event_uid=$1)`, eventUID).Scan(&exists)
-	return exists, err
 }

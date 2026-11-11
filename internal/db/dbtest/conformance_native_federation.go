@@ -387,29 +387,3 @@ func checkNativeCronValidation(t *testing.T, store db.Storage, backend Backend) 
 	}
 	return nil
 }
-
-// checkFederationLocalReplayStorage carries the replay lifecycle across backends.
-func checkFederationLocalReplayStorage(t *testing.T, store db.Storage) error {
-	ctx := t.Context()
-	project, err := store.CreateProject(ctx, "spoke-project")
-	require.NoError(t, err)
-	_, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local event", Author: "tester"})
-	require.NoError(t, err)
-	sqlStore := store.(interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	})
-	_, err = sqlStore.ExecContext(ctx, `DELETE FROM events WHERE uid=$1`, event.UID)
-	require.NoError(t, err)
-	inserted, err := store.InsertRemoteEvent(ctx, project.ID, portableNativeEvent(event))
-	require.NoError(t, err)
-	require.True(t, inserted)
-	replay, err := store.FederationLocalReplay(ctx, event.UID)
-	require.NoError(t, err)
-	require.True(t, replay)
-	_, other, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "ordinary local event", Author: "tester"})
-	require.NoError(t, err)
-	replay, err = store.FederationLocalReplay(ctx, other.UID)
-	require.NoError(t, err)
-	require.False(t, replay, "ordinary local events are not restored replays")
-	return nil
-}

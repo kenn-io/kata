@@ -464,6 +464,6 @@ Start the matching schema 50 binary after migration. Older binaries cannot open
 schema 50. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
 
-## Schema 51: federation replay tracking
+## Schema 51: federation push acknowledgments
 
-The 50 to 51 migration adds `federation_local_replays` to track local-origin events restored by a pull. It starts empty, except that the migration records local-origin events an interrupted reset restored: events created before the project's last recorded reset, in a project whose pull cursor still sits at the reset horizon and whose last successful pull predates that reset. The next pull delivers those events because hub acknowledgment does not establish that consumers received them. The migration also creates an empty `federation_push_accepted` table for acknowledgments above each binding's push cursor. SQLite makes the same changes in place. Stop the daemon, back up the database, and run `kata storage postgres migrate` with schema-owner credentials before starting the new binary. Grant the runtime role access to the new tables using the normal PostgreSQL role setup. Older binaries cannot reopen schema 51; rollback requires the backup and matching older binary.
+The 50 to 51 migration creates an empty `federation_push_accepted` table. It records events acknowledged above a binding's push cursor. SQLite creates the same table in place. Stop the daemon, back up the database, and run `kata storage postgres migrate` with schema-owner credentials before starting the new binary. Grant the runtime role access to the new table using the normal PostgreSQL role setup. Older binaries cannot reopen schema 51; rollback requires the backup and matching older binary.

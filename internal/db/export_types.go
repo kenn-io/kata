@@ -504,8 +504,8 @@ type EventExport struct {
 	HLCCounter        int64          `json:"hlc_counter"`
 	ContentHash       string         `json:"content_hash"`
 	CreatedAt         string         `json:"created_at"`
-	// A non-nil value records a local event restored by a pull.
-	LocalReplay *int `json:"local_replay,omitempty"`
+	// AcceptedProjectIDs records bindings that acknowledged this event.
+	AcceptedProjectIDs []int64 `json:"accepted_project_ids,omitempty"`
 }
 
 // ImportKind reports the NDJSON kind this payload replays as.

@@ -1899,7 +1899,7 @@ func TestSyncFederationDeliversReplayAfterSameMillisecondUpgrade(t *testing.T) {
 	require.NoError(t, err)
 	_, err = store.ExecContext(ctx, `DELETE FROM issues WHERE uid=?`, issue.UID)
 	require.NoError(t, err)
-	_, err = store.ExecContext(ctx, `DROP TABLE federation_local_replays`)
+	_, err = store.ExecContext(ctx, `DROP TABLE federation_push_accepted`)
 	require.NoError(t, err)
 	_, err = store.ExecContext(ctx, `UPDATE meta SET value='50' WHERE key='schema_version'`)
 	require.NoError(t, err)
@@ -1928,11 +1928,11 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testin
 	testResetRetryLocalProjectEvent(t, false, false)
 }
 
-func TestSyncFederationOnceResetRetryDeliversAcknowledgedLocalProjectEvent(t *testing.T) {
+func TestSyncFederationOnceResetRetryRepairsAcknowledgedLocalProjectEvent(t *testing.T) {
 	testResetRetryLocalProjectEvent(t, true, false)
 }
 
-func TestSyncFederationOnceResetRetryDeliversProjectEventAfterInterruptedPush(t *testing.T) {
+func TestSyncFederationOnceResetRetryRepairsProjectEventAfterInterruptedPush(t *testing.T) {
 	testResetRetryLocalProjectEvent(t, false, true)
 }
 
@@ -2054,9 +2054,13 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged, interruptedPush
 		delivered = append(delivered, events...)
 	}))
 
-	require.Len(t, delivered, 1)
-	assert.Equal(t, localEvent.UID, delivered[0].UID)
-	assert.Greater(t, delivered[0].ID, localEvent.ID)
+	if acknowledged || interruptedPush {
+		assert.Empty(t, delivered)
+	} else {
+		require.Len(t, delivered, 1)
+		assert.Equal(t, localEvent.UID, delivered[0].UID)
+		assert.Greater(t, delivered[0].ID, localEvent.ID)
+	}
 	repaired, err := spoke.DB.ProjectByID(ctx, project.ID)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"area":"ops"}`, string(repaired.Metadata))

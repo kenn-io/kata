@@ -513,7 +513,7 @@ func federationEventRejectionMessage(rejected []db.FederationEventRejection, ack
 	if unknown {
 		return fmt.Sprintf("%d events rejected, including unknown reasons (showing up to five): %s; hub acknowledged %d other events", len(rejected), strings.Join(messages, "; "), acknowledged)
 	}
-	return fmt.Sprintf("%d events need project access (showing up to five issues): %s; hub acknowledged %d other events; pending push includes accepted later events as replays until recovery", len(rejected), strings.Join(messages, "; "), acknowledged)
+	return fmt.Sprintf("%d events need project access (showing up to five issues): %s; hub acknowledged %d other events", len(rejected), strings.Join(messages, "; "), acknowledged)
 }
 
 // PushDirectSpoke drains pending direct-spoke events without requiring pull authority.

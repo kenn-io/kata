@@ -2273,11 +2273,12 @@ The pull fix is tracked in [kata#1049](https://github.com/kenn-io/kata/issues/10
 Keep the local data and wait for a build with that fix before relying on the
 join to restore pull.
 The event keeps its original UID and content hash. Until recovery, the durable
-push cursor stays before the earliest rejected event, so accepted later events
-can safely replay as duplicates. The status diagnostic counts the other events
-the hub acknowledged. Pending push includes accepted later events as replays
-until recovery, and each sync sends that growing tail again. Missing enrollment
-alone does not create a quarantine or offer a skip action. A later poisoned
+push cursor stays before the earliest rejected event. The spoke records later
+accepted events and excludes them from pending push and future retries. The
+status diagnostic counts the other events the hub acknowledged. Full backups
+preserve these acknowledgments.
+
+Missing enrollment alone does not create a quarantine or offer a skip action. A later poisoned
 batch retains both the rejected events and the poison batch in blocking
 quarantine. Only that quarantined range can be skipped;
 skip deliberately abandons its outbound events. Older peers keep atomic batch

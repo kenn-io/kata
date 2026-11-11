@@ -828,15 +828,15 @@ func (s *Store) ExportEvents(ctx context.Context, filter db.ExportFilter) iter.S
 		subjectLive = `((events.issue_id IS NULL AND subject_issue.id IS NULL)
 OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
 	}
-	localReplay := `NULL`
+	acceptedProjects := `NULL`
 	if filter.ProjectID == nil {
-		localReplay = `(SELECT 1 FROM federation_local_replays WHERE event_uid=events.uid)`
+		acceptedProjects = `(SELECT json_agg(project_id) FROM federation_push_accepted WHERE event_id=events.id)`
 	}
 	query := `SELECT events.id, events.uid, events.origin_instance_uid, events.project_id,
        export_project.uid, events.project_name, ` + issueIDExpression + `, events.issue_uid,
        ` + relatedIDExpression + `, ` + relatedUIDExpression + `,
        events.type, events.actor, events.payload, events.hlc_physical_ms,
-       events.hlc_counter, events.content_hash, events.created_at, ` + localReplay + `
+       events.hlc_counter, events.content_hash, events.created_at, ` + acceptedProjects + `
   FROM events
   JOIN projects export_project ON export_project.id = events.project_id
   LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
@@ -863,12 +863,18 @@ AND (events.related_issue_uid IS NULL OR NOT EXISTS (
 		func(rows *sql.Rows) (db.EventExport, error) {
 			var record db.EventExport
 			var payload string
+			var acceptedProjects *string
 			if err := rows.Scan(&record.ID, &record.UID, &record.OriginInstanceUID,
 				&record.ProjectID, &record.ProjectUID, &record.ProjectName, &record.IssueID,
 				&record.IssueUID, &record.RelatedIssueID, &record.RelatedIssueUID,
 				&record.Type, &record.Actor, &payload, &record.HLCPhysicalMS,
-				&record.HLCCounter, &record.ContentHash, &record.CreatedAt, &record.LocalReplay); err != nil {
+				&record.HLCCounter, &record.ContentHash, &record.CreatedAt, &acceptedProjects); err != nil {
 				return db.EventExport{}, pgExportScanError("event", err)
+			}
+			if acceptedProjects != nil {
+				if err := json.Unmarshal([]byte(*acceptedProjects), &record.AcceptedProjectIDs); err != nil {
+					return db.EventExport{}, fmt.Errorf("decode accepted federation projects: %w", err)
+				}
 			}
 			if !jsontext.Value([]byte(payload)).IsValid() {
 				return db.EventExport{}, pgInvalidJSONError("event", record.ID, "payload")

@@ -77,8 +77,8 @@ var cronRunUIDIndexMigrationSQL string
 //go:embed migrations/000050_mcp_event_subscriptions.up.sql
 var mcpEventSubscriptionsMigrationSQL string
 
-//go:embed migrations/000051_federation_local_replays.up.sql
-var federationLocalReplaysMigrationSQL string
+//go:embed migrations/000051_federation_push_accepted.up.sql
+var federationPushAcceptedMigrationSQL string
 
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
@@ -141,7 +141,7 @@ var migrationAssets = []Migration{
 	{FromVersion: 47, ToVersion: 48, Name: "000048_event_moved_from_id_index.up.sql", SQL: eventMovedFromIDIndexMigrationSQL},
 	{FromVersion: 48, ToVersion: 49, Name: "000049_cron_run_uid_index.up.sql", SQL: cronRunUIDIndexMigrationSQL},
 	{FromVersion: 49, ToVersion: 50, Name: "000050_mcp_event_subscriptions.up.sql", SQL: mcpEventSubscriptionsMigrationSQL},
-	{FromVersion: 50, ToVersion: 51, Name: "000051_federation_local_replays.up.sql", SQL: federationLocalReplaysMigrationSQL},
+	{FromVersion: 50, ToVersion: 51, Name: "000051_federation_push_accepted.up.sql", SQL: federationPushAcceptedMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres
