@@ -31,3 +31,22 @@ func TestArgvCompatHistoricalDecodeKeepsLegacyRules(t *testing.T) {
 	_, err = cron.ParseWorkflow(input)
 	require.Error(t, err)
 }
+
+func TestArgvMemberRemainsRefused(t *testing.T) {
+	for _, member := range []string{`"argv":null`, `"argv":[]`, `"argv":["echo", ""]`} {
+		for _, step := range []string{`"kind":"command","command":"true"`, `"kind":"prompt","prompt":"hello"`, `"kind":"argv"`} {
+			raw := []byte(`{"version":1,"steps":[{"key":"step",` + step + `,` + member + `}]}`)
+			_, err := cron.DecodeHistoricalWorkflow(raw)
+			require.Error(t, err, string(raw))
+			_, err = cron.DecodeWorkflow(raw)
+			require.Error(t, err, string(raw))
+			_, err = cron.ParseWorkflow(raw)
+			require.Error(t, err, string(raw))
+		}
+	}
+	for _, argv := range [][]string{{}, {"echo", ""}} {
+		workflow := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "step", Kind: "command", Command: "true", Argv: argv}}}
+		require.Error(t, workflow.Validate())
+		require.Error(t, cron.CheckWorkflowSupported(workflow))
+	}
+}

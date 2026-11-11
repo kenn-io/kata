@@ -191,3 +191,14 @@ func TestWorkflowFormRoundTripsThroughDaemon(t *testing.T) {
 	require.Nil(t, m.cron.form)
 	require.Equal(t, "Saved Renamed", m.toast.text)
 }
+
+func TestWorkflowEditorRefusesReservedArgvWithoutMutation(t *testing.T) {
+	for _, member := range []string{`"argv":null`, `"argv":[]`, `"argv":["echo",""]`} {
+		m, api := openWorkflow(t, workflowRecord(), false)
+		m.cron.form.val[cfDefinition] = `{"version":1,"steps":[{"key":"ship","kind":"prompt","prompt":"Ship",` + member + `}]}`
+		m, cmd := press(m, ctrlKey('o'))
+		require.Nil(t, cmd)
+		require.NotNil(t, m.cron.form)
+		require.Empty(t, api.workflowPuts)
+	}
+}
