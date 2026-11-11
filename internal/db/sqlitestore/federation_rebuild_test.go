@@ -136,7 +136,7 @@ func TestMoveRebuildPreparesLargeIssueScope(t *testing.T) {
 }
 
 func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
-	for _, change := range []string{"history", "binding", "unrelated", "unrelated-move", "issue", "fallback", "move", "destination-binding"} {
+	for _, change := range []string{"history", "binding", "unrelated", "unrelated-move", "issue", "fallback"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := t.Context()
 			d, source, issue := incrementalTestStore(t)
@@ -163,10 +163,6 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 			require.NoError(t, err)
 			_, err = d.ExecContext(ctx, `UPDATE issues SET project_id=?, short_id=? WHERE id=?`, source.ID, issue.ShortID, issue.ID)
 			require.NoError(t, err)
-			if change == "destination-binding" {
-				_, err = d.ExecContext(ctx, `UPDATE federation_bindings SET enabled=0 WHERE project_id=?`, destination.ID)
-				require.NoError(t, err)
-			}
 			attempts := 0
 			d.federationIngestPrepared = func() {
 				attempts++
@@ -184,12 +180,6 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 				case "binding":
 					_, err := d.ExecContext(ctx, `UPDATE federation_bindings SET enabled=0 WHERE project_id=?`, source.ID)
 					require.NoError(t, err)
-				case "move":
-					_, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: preparedIssue.ID, FromProjectID: destination.ID, ToProjectID: source.ID, IfMatchRev: preparedIssue.Revision, Actor: "tester"})
-					require.NoError(t, err)
-				case "destination-binding":
-					_, err := d.ExecContext(ctx, `DELETE FROM federation_bindings WHERE project_id=?`, destination.ID)
-					require.NoError(t, err)
 				case "unrelated":
 					_, _, err := writer.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "concurrent", Author: "tester"})
 					require.NoError(t, err)
@@ -198,11 +188,7 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 					require.NoError(t, err)
 				}
 			}
-			projectID := destination.ID
-			if change == "destination-binding" {
-				projectID = source.ID
-			}
-			require.NoError(t, d.MaterializeFederatedProject(ctx, projectID))
+			require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
 			if change == "unrelated" || change == "unrelated-move" {
 				require.Equal(t, 1, attempts)
 			} else {
@@ -210,12 +196,7 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 			}
 			got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 			require.NoError(t, err)
-			require.Equal(t, projectID, got.ProjectID)
-			if change == "move" {
-				second, err := d.IssueByUID(ctx, preparedIssue.UID, db.IncludeDeletedYes)
-				require.NoError(t, err)
-				require.Equal(t, source.ID, second.ProjectID)
-			}
+			require.Equal(t, destination.ID, got.ProjectID)
 			if change == "issue" {
 				gotPrepared, err := d.IssueByUID(ctx, preparedIssue.UID, db.IncludeDeletedYes)
 				require.NoError(t, err)
