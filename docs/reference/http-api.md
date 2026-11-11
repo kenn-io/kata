@@ -669,7 +669,8 @@ a full candidate window must not be treated as the whole matching set.
 These are the current intentions, not a contractual guarantee:
 
 - **Contract changes bump `api_schema_version`.** New endpoints and schema fields,
-  including optional response fields, take a new version. Response objects use
+  including optional response fields, take a new version. Documentation-only edits
+  keep the existing version. Response objects use
   `additionalProperties: true`, so older clients accept unknown optional response
   fields. Request schemas remain strict by default and reject unknown fields unless
   a type explicitly opts in. The OpenAPI 3.0 flavor (`kata openapi --version 3.0`)
@@ -688,7 +689,7 @@ When changing the contract, bump `APISchemaVersion`, regenerate the API artifact
 and add a version-history row. Run the API version record test and add the empty
 marker file named in its output. If two branches claim the same version, take the
 next version named by the test, update any new feature minimums, and recompute your
-marker for the combined contract. Keep earlier markers.
+marker for the combined contract. Marker history is permanent; keep every earlier marker.
 
 If you build against this schema and hit a gap, please open an issue. The
 contract is meant to be useful to external clients, and feedback shapes how far
