@@ -51,12 +51,8 @@ func newCronNextCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "next <uid>",
 		Short: "preview future occurrences of a saved job without changing it",
-		Long: `Preview future schedule instants from the saved definition and native progress.
-Saved interval timing and delivery history stay unchanged. Paused
-jobs and closed parents have no next occurrences. Adapter cron and once times
-are trigger times; they do not promise execution. Other adapter triggers are
-unavailable. State may change between reads. This preview neither reserves work nor replays missed occurrences.
---from never rewinds progress.`,
+		Long: `Preview future times from a saved job and its delivery progress.
+--from cannot rewind delivered progress. Adapter times are triggers and do not promise execution.`,
 		Example: "  kata cron job next <job-uid> --count 3 --json\n  kata cron job next <job-uid> --from 2026-11-08T12:00:00Z",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

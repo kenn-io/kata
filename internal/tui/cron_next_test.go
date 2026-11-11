@@ -435,3 +435,11 @@ func TestCronReloadsWhenNativeParentChanges(t *testing.T) {
 		})
 	}
 }
+
+func TestCronJobDetailPausedUnsupportedTriggerHidden(t *testing.T) {
+	got := nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
+		d.Trigger = generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))}
+		d.Enabled = false
+	}, nil)
+	require.NotContains(t, got, "Triggers:")
+}

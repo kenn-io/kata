@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
@@ -25,9 +23,16 @@ func TestCronNextRejectsInvalidInput(t *testing.T) {
 
 func TestCronNextSavedSchedules(t *testing.T) {
 	const id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-	for _, tc := range []struct{ name, definition, parent, want string }{
-		{"local once", `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"once","at":"2026-06-01T08:00:00Z","timezone":"Local"},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Inspection"},"overlap":"forbid","catchup":"all"}`, "", "2026-06-01T08:00:00Z"},
-		{"native interval", `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"interval","interval_seconds":7200,"timezone":"Local"},"action":{"kind":"notify","recipient":"current-owner-or-author"},"issue":{"kind":"per-run","parent_uid":"01ARZ3NDEKTSV4RRFFQ69G5FB9","title":"Inspection"},"overlap":"allow","catchup":"all"}`, `{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FB9","project_id":1,"status":"open","revision":7,"metadata":{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{"version":1,"anchor":"2026-06-01T00:00:00Z","through":"2026-06-01T06:00:00Z"}}}`, "2026-06-01T08:00:00Z"},
+	native := `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"interval","interval_seconds":7200,"timezone":"Local"},"action":{"kind":"notify","recipient":"current-owner-or-author"},"issue":{"kind":"per-run","parent_uid":"01ARZ3NDEKTSV4RRFFQ69G5FB9","title":"Inspection"},"overlap":"allow","catchup":"all"}`
+	parent := `{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FB9","project_id":1,"status":"open","revision":7,"metadata":{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{"version":1,"anchor":"2026-06-01T00:00:00Z","through":"2026-06-01T06:00:00Z"}}}`
+	for _, tc := range []struct {
+		name, definition, parent, want string
+		invalid                        bool
+	}{
+		{"local once", `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"once","at":"2026-06-01T08:00:00Z","timezone":"Local"},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Inspection"},"overlap":"forbid","catchup":"all"}`, "", "2026-06-01T08:00:00Z", false},
+		{"native interval", native, parent, "2026-06-01T08:00:00Z", false},
+		{"archived parent", native, strings.Replace(parent, `"status":"open"`, `"status":"open","deleted_at":"2026-01-01T00:00:00Z"`, 1), `"status":"parent_closed"`, false},
+		{"future definition", strings.Replace(native, `"version":1`, `"version":2`, 1), parent, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +52,11 @@ func TestCronNextSavedSchedules(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 			out, _, err := executeCronCLI(t, server.URL, nil, "job", "next", id, "--count", "1", "--from", "2026-06-01T01:00:00Z")
+			if tc.invalid {
+				require.Error(t, err)
+				require.Empty(t, out)
+				return
+			}
 			require.NoError(t, err)
 			require.Contains(t, out, tc.want)
 		})
@@ -108,39 +118,46 @@ func TestCronNextParentReadErrors(t *testing.T) {
 	}
 }
 
-func TestCronNextOutputModes(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		mode  outputMode
-		quiet bool
-		want  string
-	}{
-		{"human", outputHuman, false, "Adapter trigger times (UTC, exhausted):\n  exhausted"},
-		{"json", outputJSON, false, `"status":"exhausted"`},
-		{"agent", outputAgent, false, `"status":"exhausted"`},
-		{"quiet", outputHuman, true, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			resetFlags(t)
-			flags.Mode, flags.Quiet = tc.mode, tc.quiet
-			var out bytes.Buffer
-			cmd := &cobra.Command{}
-			cmd.SetOut(&out)
-			err := emitCronNext(cmd, cronNextResult{Delivery: "adapter", Timezone: "UTC", Status: "exhausted", Occurrences: []cronNextOccurrence{}, Warnings: []string{}})
-			require.NoError(t, err)
-			if tc.quiet {
-				require.Empty(t, out.String())
-			} else {
-				require.Contains(t, out.String(), tc.want)
-			}
-		})
-	}
-}
-
 func TestCronNextRootErrorEnvelope(t *testing.T) {
 	out, diagnostic, err := executeRootCapture(t, t.Context(), "--json", "cron", "job", "next", "bad")
 	require.Error(t, err)
 	require.Empty(t, out)
 	envelope := parseErrorEnvelope(t, []byte(diagnostic))
 	require.Equal(t, "validation", envelope.Error.Kind)
+}
+
+func TestCronNextModes(t *testing.T) {
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	def := cronCLIJob(t)
+	def.Definition.Enabled = true
+	def.Definition.Trigger = cron.Trigger{Kind: "once", At: "2090-01-01T12:00:00Z", Timezone: "UTC"}
+	jobID := cronCLIUID(t)
+	_, _, err = executeCronCLI(t, env.URL, nil, "job", "create", "--uid", jobID, "--file", cronCLIFile(t, def))
+	require.NoError(t, err)
+	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--project", project.Name, "cron", "job", "next", jobID, "--from", "2091-01-01T00:00:00Z")
+	require.NoError(t, err)
+	require.Contains(t, out, "  exhausted")
+	for _, tc := range []struct {
+		name  string
+		flags []string
+		want  string
+	}{
+		{"human", nil, "Adapter trigger times"},
+		{"json", []string{"--json"}, `"status":"ready"`},
+		{"agent", []string{"--agent"}, `"status":"ready"`},
+		{"quiet", []string{"--quiet"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append(tc.flags, "--project", project.Name, "cron", "job", "next", jobID, "--from", "2089-01-01T00:00:00Z")
+			out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), args...)
+			require.NoError(t, err)
+			if tc.name == "quiet" {
+				require.Empty(t, out)
+			} else {
+				require.Contains(t, out, tc.want)
+			}
+		})
+	}
 }
