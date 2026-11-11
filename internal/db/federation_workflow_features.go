@@ -19,6 +19,16 @@ func workflowDefinitionEvent(kind string) bool {
 	return isCronDefinitionEvent(kind) && strings.HasPrefix(kind, "cron.workflow.")
 }
 
+func workflowDefinitionEventTypesSQL() string {
+	var names []string
+	for _, declared := range federationEventTypes {
+		if workflowDefinitionEvent(declared.name) {
+			names = append(names, declared.name)
+		}
+	}
+	return sqlStringList(names)
+}
+
 // Classify raw envelopes independently of typed decoding: an unsupported kind
 // must be fenced even when its argument member is missing or malformed.
 func payloadHasArgvWorkflow(kind, payload string) (bool, error) {
@@ -89,11 +99,11 @@ func payloadHasArgvWorkflow(kind, payload string) (bool, error) {
 func ProjectWorkflowRequiredFeatures(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, projectUID string) (string, error) {
-	const query = `SELECT 'projection',w.definition_json FROM cron_workflows w JOIN projects p ON p.id=w.project_id
+	query := `SELECT 'projection',w.definition_json FROM cron_workflows w JOIN projects p ON p.id=w.project_id
 WHERE p.uid=$1 AND (w.definition_json LIKE '%argv%' OR w.definition_json LIKE '%null%' OR w.definition_json LIKE '%\u%' ESCAPE '!')
 UNION ALL
 SELECT e.type,e.payload FROM events e JOIN projects p ON p.id=e.project_id
-WHERE p.uid=$1 AND e.type IN ('cron.workflow.created','cron.workflow.updated','cron.workflow.deleted','cron.workflow.restored','cron.workflow.snapshot')
+WHERE p.uid=$1 AND e.type IN (` + workflowDefinitionEventTypesSQL() + `)
 AND (e.payload LIKE '%argv%' OR e.payload LIKE '%null%' OR e.payload LIKE '%\u%' ESCAPE '!')`
 	rows, err := q.QueryContext(ctx, query, projectUID)
 	if err != nil {

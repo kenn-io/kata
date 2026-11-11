@@ -1,9 +1,11 @@
 package daemon_test
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -228,6 +230,36 @@ func TestCronWorkflowAPI(t *testing.T) {
 	response.Workflow = db.CronWorkflow{}
 	require.NoError(t, json.Unmarshal(raw, &response))
 	require.Nil(t, response.Workflow.DeletedAt)
+}
+
+func TestCronWorkflowHTTPAcceptsLargeIndentedDefinition(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "workflow-example")
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/workflows", project.ID)
+	definition := jsontext.Value(`{"version":1,"steps":[{"key":"inspect","kind":"command","command":"true"}],"options":{"values":[` + strings.Repeat("0,", 39999) + `0]}}`)
+	require.Less(t, len(definition), cron.DefinitionLimit)
+	require.NoError(t, definition.Indent(jsontext.WithIndent("  ")))
+	require.Greater(t, len(definition), cron.DefinitionLimit)
+	body := `{"actor":"worker","name":"Workflow","definition":` + string(definition) + `}`
+	require.Less(t, len(body), 1<<20)
+	for _, member := range []string{`"argv": null`, `"argv": ["true"]`} {
+		invalid := strings.Replace(body, `"kind": "command"`, `"kind": "command", `+member, 1)
+		response := doReqEnv(t, env, http.MethodPost, env.URL+path, invalid, "")
+		raw := readClose(t, response)
+		require.Equalf(t, http.StatusBadRequest, response.StatusCode, "%s", raw)
+		require.Contains(t, string(raw), "argv")
+	}
+	response := doReqEnv(t, env, http.MethodPost, env.URL+path, body, "")
+	raw := readClose(t, response)
+	require.Equalf(t, http.StatusCreated, response.StatusCode, "%s", raw)
+	var created struct {
+		Workflow db.CronWorkflow `json:"workflow"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &created))
+	body = fmt.Sprintf(`{"actor":"worker","name":"Edited","expected_event_uid":%q,"definition":%s}`, created.Workflow.DefinitionEventUID, definition)
+	response = doReqEnv(t, env, http.MethodPut, env.URL+path+"/"+created.Workflow.UID, body, "")
+	raw = readClose(t, response)
+	require.Equalf(t, http.StatusOK, response.StatusCode, "%s", raw)
 }
 
 func TestCronWorkflowHTTPRejectsNullArgv(t *testing.T) {

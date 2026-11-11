@@ -26,6 +26,9 @@ type exampleOutcome struct {
 }
 
 func (a *exampleAdapter) run(ctx context.Context, workflow generated.CronWorkflowDefinitionResponse) exampleOutcome {
+	if workflow.Version != 1 {
+		return exampleOutcome{status: "failed", message: "reason: unsupported_version"}
+	}
 	for _, step := range workflow.Steps {
 		if step.Kind != "command" && (step.Kind != "argv" || !a.supportsArgv) {
 			return exampleOutcome{status: "failed", message: "reason: unsupported_step\nstep: " + step.Key}

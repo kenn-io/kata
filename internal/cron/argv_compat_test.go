@@ -28,9 +28,13 @@ func TestArgvCompatStoredDecodeRefusesReservedKind(t *testing.T) {
 func TestArgvCompatHistoricalDecodeKeepsLegacyRules(t *testing.T) {
 	// Current authoring rejects this retry count; accepted history still decodes.
 	input := []byte(`{"version":1,"steps":[{"key":"legacy","kind":"command","command":"true","retries":101}]}`)
-	workflow, err := cron.DecodeWorkflow(input)
+	workflow, err := cron.DecodeHistoricalWorkflow(input)
 	require.NoError(t, err)
 	require.Equal(t, 101, workflow.Steps[0].Retries)
+	_, err = cron.DecodeHistoricalWorkflow([]byte(`{"version":1,"steps":[{"kind":"argv"}]}`))
+	require.NoError(t, err)
+	_, err = cron.DecodeWorkflow([]byte(`{"version":1,"steps":[{"kind":"argv"}]}`))
+	require.Error(t, err)
 	_, err = cron.ParseWorkflow(input)
 	require.Error(t, err)
 }

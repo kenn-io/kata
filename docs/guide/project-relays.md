@@ -17,6 +17,10 @@ The connection preview checks the upstream daemon's protocol support.
 
 ## Workflow compatibility
 
+Before creating a project's first `argv` workflow, upgrade every participating
+peer to support it. See [Cron upgrade limits](../reference/cron.md#upgrade-limits)
+for the retained-history requirement and its effect on project synchronization.
+
 Relay peers refuse synchronization when the project's retained workflow history
 requires a format they cannot support. Upgrade the affected peer before retrying.
 A held legacy workflow also blocks relay, even if the peer advertises support.

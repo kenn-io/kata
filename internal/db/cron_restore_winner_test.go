@@ -17,6 +17,7 @@ func TestOwnerRestoreRetainedWorkflowWinner(t *testing.T) {
 	project := &ProjectExport{ID: 1, UID: projectUID}
 	var originalValue CronWorkflowExport
 	originalValue.CronDefinition = CronDefinition{ID: 1, ProjectID: 1, UID: workflowUID, Name: "old", Author: "worker", Revision: 1, CreatedAt: now, UpdatedAt: now, DefinitionEventUID: newUID(t), DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: 1, OriginInstanceUID: origin}}
+	originalValue.Definition.Version = 1
 	original := &originalValue
 	for _, tc := range []struct {
 		name, document   string
@@ -69,6 +70,7 @@ func TestOwnerRestoreRepairsSameRevisionHeldOriginal(t *testing.T) {
 	project := &ProjectExport{ID: 1, UID: projectUID}
 	var rowValue CronWorkflowExport
 	rowValue.CronDefinition = CronDefinition{ID: 1, ProjectID: 1, UID: workflowUID, Name: "Review", Author: "worker", Revision: 1, CreatedAt: now, UpdatedAt: now, DefinitionEventUID: eventUID, DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: 2, OriginInstanceUID: origin}}
+	rowValue.Definition.Version = 1
 	row := &rowValue
 	body := CronDefinitionEvent{UID: workflowUID, ProjectUID: projectUID, Name: row.Name, Author: row.Author, CreatedAt: now, UpdatedAt: now, Definition: jsontext.Value(`{"version":1,"steps":[null]}`)}
 	payload, err := json.Marshal(body)

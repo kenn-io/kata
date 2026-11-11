@@ -69,8 +69,7 @@ func TestArgvCompatReplayKeepsKindOnlyWinners(t *testing.T) {
 	}
 }
 
-// Both updates and tombstones with unknown fields must block materialization.
-// The backend conformance test verifies the project-scoped refusal.
+// Ordinary unknown historical fields retain the fold warning policy.
 func TestCronFoldWarnsForUnknownHistory(t *testing.T) {
 	for _, deleted := range []bool{false, true} {
 		older := cronFoldEvent(t, "workflow", 1, false)

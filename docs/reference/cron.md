@@ -635,7 +635,9 @@ used in new jobs or fresh running observations. Terminal run evidence can still
 reference an exact held revision. Ordinary workflow lists omit held workflows and
 show supported siblings. A held workflow row or retained unsupported workflow
 event blocks direct and relay project synchronization as well as federation
-snapshots and adoption.
+snapshots and adoption. Project merge also refuses retained unsupported workflow
+events. `kata cron workflow show` reports a validation failure for a held
+definition.
 
 Retained events whose definitions cannot be represented in storage, or whose
 future fields cannot be decoded, can block cron rematerialization for their
@@ -646,10 +648,14 @@ To recover, take an [owner backup](../operations/backup-restore.md#full-backup)
 and find the `cron_workflow` record and its UID and definition in the JSONL. If
 the definition cannot be represented in a workflow row, find its UID and raw
 definition in the retained `event` record instead. Create a supported workflow
-with a new UID, then update affected jobs to use it. A full replacement using a
-held row's current event UID is also accepted, but retained unsupported events
-continue to block direct and relay synchronization, federation snapshots, and
-adoption. Preserve that evidence for recovery with a compatible version.
+with a new UID, then update affected jobs to use it. For a full replacement of a
+held row, use its `cron_workflow.definition_event_uid` from the owner backup as
+`expected_event_uid` or `--expected-event-uid`. In a retained snapshot,
+`definition_event_uid` identifies the original revision, not the snapshot
+envelope's event UID. Retained unsupported events continue to block federation
+snapshots, direct and relay synchronization, adoption, and project merge after
+replacement. Preserve the backup and evidence for recovery with a compatible
+version.
 
 Signed federation checkpoints with unsupported workflow evidence cannot be
 downloaded, forwarded, installed, or activated. Taking an owner backup retains
@@ -823,11 +829,14 @@ checkout and secret mappings, process lifecycle, and conversation recovery.
 A second adapter may independently execute the same occurrence. Each execution
 keeps a separate run UID; no shared observation reserves the issue or occurrence.
 
-Before admission or starting any step, an adapter must check the entire workflow
-for step kinds it cannot execute. If it finds one, it starts no steps and records
-a failed run observation with `reason: unsupported_step` as the first line of
-`summary.message`, identifying the unsupported step in the detail. This includes
-a step that appears after a supported step.
+Before recording a running observation or starting any step, an adapter must
+check the entire workflow for step kinds it cannot execute, including steps after
+supported ones. If it finds one, it starts no steps and records a failed
+observation directly. For a new run UID, use expected revision 0; no preceding
+running observation is needed. Put `reason: unsupported_step` on the first line
+of `summary.message` and identify the unsupported step key and kind in the
+human-readable detail. For example, the detail may include `step: <key>`; its
+format is not a fixed protocol.
 
 An adapter that supports an `argv` step passes the vector literally to the
 process: the first element is the executable and the remaining elements are

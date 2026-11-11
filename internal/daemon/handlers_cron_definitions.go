@@ -349,6 +349,9 @@ func decodeCronWorkflowBody(raw []byte, body *api.PutCronWorkflowBody) error {
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return errors.Join(cron.ErrInvalid, err)
 	}
+	if err := envelope.Definition.Compact(); err != nil {
+		return errors.Join(cron.ErrInvalid, err)
+	}
 	definition, err := cron.ParseWorkflow(envelope.Definition)
 	if err != nil {
 		return err
