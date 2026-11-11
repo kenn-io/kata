@@ -232,6 +232,7 @@ var storageScenarios = []scenario{
 	{name: "run observation validation", methods: []string{"CreateProject", "PutCronJob", "PutCronWorkflow", "ObserveCronRun", "CronRun"}, run: checkRunObservationValidation},
 	{name: "run reference restore", methods: []string{"ImportReplay"}, runWithBackend: checkRunReferenceRestore},
 	{name: "run reference federation", methods: []string{"InsertRemoteEvent", "IngestFederationEvents"}, run: checkRunReferenceFederation},
+	{name: "run argv admission", methods: []string{"ObserveCronRun", "CronRun"}, run: checkRunArgvAdmission},
 	{name: "run compacted provenance", methods: []string{"ResetFederatedProject", "MaterializeFederatedProject"}, runWithBackend: checkRunCompactedProvenance},
 	{name: "issue planning dates", methods: []string{"IssuePlanningDates"}, run: checkIssuePlanningDates},
 	{name: "native cron remote validation", methods: []string{}, runWithBackend: checkNativeCronValidation},

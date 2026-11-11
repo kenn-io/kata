@@ -186,7 +186,7 @@ func (a CronSQL) observeRunTx(ctx context.Context, tx *sql.Tx, in ObserveCronRun
 		if in.ExpectedRevision != 0 {
 			return result, ErrCronConflict
 		}
-		if err := a.checkFreshRunReferences(ctx, tx, project, value); err != nil {
+		if err := a.checkFreshRunReferences(ctx, tx, project, value, in.EventFeatures); err != nil {
 			return result, err
 		}
 	} else {
@@ -239,7 +239,7 @@ func continueCronRun(value *CronRun, current CronRun, in ObserveCronRun, request
 
 // checkFreshRunReferences requires a new run's job, workflow and issue
 // references to belong to its project.
-func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, project Project, value CronRun) error {
+func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, project Project, value CronRun, features string) error {
 	validator := NewCronReplayValidator(tx, a.Postgres)
 	refs, err := cronRunReferences(project.ID, value)
 	if err != nil {
@@ -262,29 +262,29 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 					return fmt.Errorf("%w: workflow revision document is unavailable", cron.ErrInvalid)
 				}
 				if known {
-					if _, err := cron.DecodeWorkflow([]byte(document)); err != nil {
-						return fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
+					if err := checkRunWorkflowDocument(document, features, value.Status == "running"); err != nil {
+						return err
 					}
 				}
 			}
 		}
 	}
-	if value.Status == "running" && value.WorkflowUID == nil && value.JobUID != nil {
+	if value.Status == "running" && value.JobUID != nil {
 		ref := cronDefinitionReference{projectID: project.ID, kind: "job", uid: *value.JobUID, event: *value.DefinitionEventUID}
 		if document, known := validator.idx.documents[ref]; known {
 			job, err := cron.DecodeJob([]byte(document))
 			if err != nil {
 				return fmt.Errorf("%w: job revision is unsupported: %v", cron.ErrInvalid, err)
 			}
-			if job.Action.WorkflowUID != "" {
+			if job.Action.WorkflowUID != "" && (value.WorkflowUID == nil || *value.WorkflowUID != job.Action.WorkflowUID) {
 				var workflowDocument string
 				err := tx.QueryRowContext(ctx, `SELECT definition_json FROM cron_workflows WHERE project_id=$1 AND uid=$2`, project.ID, job.Action.WorkflowUID).Scan(&workflowDocument)
 				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return err
 				}
 				if err == nil {
-					if _, err := cron.DecodeWorkflow([]byte(workflowDocument)); err != nil {
-						return fmt.Errorf("%w: workflow dependency is unsupported: %v", cron.ErrInvalid, err)
+					if err := checkRunWorkflowDocument(workflowDocument, features, true); err != nil {
+						return err
 					}
 				}
 			}
@@ -299,6 +299,23 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 		return fmt.Errorf("%w: issue reference does not belong to project", cron.ErrInvalid)
 	}
 	return err
+}
+
+// checkRunWorkflowDocument preserves the historical decode fence before
+// checking the capability needed to start a known valid argv workflow.
+func checkRunWorkflowDocument(document, features string, running bool) error {
+	workflow, err := cron.DecodeWorkflow([]byte(document))
+	if err != nil {
+		return fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
+	}
+	if running {
+		for _, step := range workflow.Steps {
+			if step.Kind == "argv" {
+				return RequireEventFeatures(features, CronWorkflowArgvEventFeature)
+			}
+		}
+	}
+	return nil
 }
 
 func (a CronSQL) insertCronRunEvent(ctx context.Context, tx *sql.Tx, project Project, value CronRun, actor string) (Event, error) {
