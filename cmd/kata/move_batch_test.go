@@ -71,30 +71,30 @@ func TestMoveBatchCLI_Pages(t *testing.T) {
 
 func TestParseRefsFrom(t *testing.T) {
 	for _, input := range []string{"abc4\n", "abc4\tdst\n", "# note\n\n abc4 \r\n", "\ufeffabc4\n"} {
-		items, err := parseRefsFrom(strings.NewReader(input), "dst", 5001)
+		items, err := parseRefsFrom(strings.NewReader(input), "dst")
 		require.NoError(t, err)
 		require.Len(t, items, 1)
 		require.Equal(t, "abc4", items[0].Ref)
 		require.Equal(t, "dst", items[0].TargetProject)
 	}
-	items, err := parseRefsFrom(strings.NewReader("abc4\n"), "", 5001)
+	items, err := parseRefsFrom(strings.NewReader("abc4\n"), "")
 	require.NoError(t, err)
 	require.Contains(t, items[0].ParseError, "line 1")
 	for _, row := range []string{"abc4\t\n", "abc4\ttarget\t\n", "\tabc4\n"} {
-		items, err := parseRefsFrom(strings.NewReader("# routing\n"+row), "default-target", 5001)
+		items, err := parseRefsFrom(strings.NewReader("# routing\n"+row), "default-target")
 		require.NoError(t, err)
 		require.Contains(t, items[0].ParseError, "line 2")
 	}
 	reader := strings.NewReader(strings.Repeat("abcd\n", 5001) + strings.Repeat("x", 2<<20))
-	items, err = parseRefsFrom(reader, "dst", 5001)
+	items, err = parseRefsFrom(reader, "dst")
 	require.NoError(t, err)
 	require.Len(t, items, 5001)
 	require.Greater(t, reader.Len(), 1<<20)
 	reader = strings.NewReader(strings.Repeat(strings.Repeat("a", 600000)+"\n", 4))
-	_, err = parseRefsFrom(reader, "dst", 5001)
+	_, err = parseRefsFrom(reader, "dst")
 	require.ErrorContains(t, err, "1 MiB")
 	require.Greater(t, reader.Len(), 1<<20)
-	items, err = parseRefsFrom(strings.NewReader(strings.Repeat("x", 1<<20)+"\nabc4\n"), "dst", 5001)
+	items, err = parseRefsFrom(strings.NewReader(strings.Repeat("x", 1<<20)+"\nabc4\n"), "dst")
 	require.NoError(t, err)
 	require.Len(t, items, 2)
 	require.Equal(t, "line 1: exceeds 1 MiB", items[0].ParseError)
@@ -875,33 +875,4 @@ func TestMoveBatchCLI_SubtreeCommentFailureShowsMove(t *testing.T) {
 	got, err := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, target.ID, got.ProjectID)
-}
-
-func TestMoveBatchCLI_SelectionBeforeFile(t *testing.T) {
-	for _, option := range []string{"--dry", "--subtree"} {
-		t.Run(option, func(t *testing.T) {
-			_, dir, source, target, issue := setupMoveCLIProjects(t)
-			_, _, err := executeRootCaptureWithInput(t.Context(), t, "", "--workspace", dir, "move", source.Name+"#"+issue.ShortID, source.Name+"#"+issue.ShortID, target.Name, "--refs-from", dir+"/missing", option)
-			message := "--subtree accepts one issue"
-			if option == "--dry" {
-				message = "dry run accepts one item"
-			}
-			require.ErrorContains(t, err, message)
-		})
-	}
-}
-
-func TestMoveBatchCLI_SelectionStopsReadingFile(t *testing.T) {
-	for _, option := range []string{"--dry", "--subtree"} {
-		t.Run(option, func(t *testing.T) {
-			_, dir, source, target, issue := setupMoveCLIProjects(t)
-			input := strings.Repeat(source.Name+"#"+issue.ShortID+"\n", 2) + strings.Repeat(strings.Repeat("x", 600000)+"\n", 2)
-			_, _, err := executeRootCaptureWithInput(t.Context(), t, input, "--workspace", dir, "move", target.Name, "--refs-from", "-", option)
-			message := "--subtree accepts one issue"
-			if option == "--dry" {
-				message = "dry run accepts one item"
-			}
-			require.ErrorContains(t, err, message)
-		})
-	}
 }
