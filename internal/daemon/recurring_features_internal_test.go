@@ -46,3 +46,22 @@ func TestRecurringFederationFeatureRecoveryHint(t *testing.T) {
 	require.Contains(t, response.Message, "cron_v1")
 	require.Contains(t, response.Hint, "required event features")
 }
+
+func TestFederationAdoptionWorkflowRecoveryHints(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		hint string
+	}{
+		{"held legacy evidence", db.ErrHeldWorkflowEvidence, "Take an owner backup and consult the held legacy workflows recovery procedure; retained history may continue to block relay."},
+		{"argv history", db.ErrUnsupportedEventFeatures, "Projects with argv workflow history cannot be adopted yet; join an empty project and recreate the workflows."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var response *api.APIError
+			require.ErrorAs(t, federationReplicaAPIError(fmt.Errorf("adoption: %w", tc.err)), &response)
+			require.Equal(t, http.StatusConflict, response.Status)
+			require.Equal(t, "unsupported_event_features", response.Code)
+			require.Equal(t, tc.hint, response.Hint)
+		})
+	}
+}

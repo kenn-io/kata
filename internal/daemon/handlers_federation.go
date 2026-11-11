@@ -1197,6 +1197,9 @@ func abortFederationReplicaLeave(
 }
 
 func federationReplicaAPIError(err error) error {
+	if errors.Is(err, db.ErrHeldWorkflowEvidence) {
+		return federationFeatureError(err)
+	}
 	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
 		return api.NewError(
 			http.StatusConflict, "unsupported_event_features", err.Error(),
