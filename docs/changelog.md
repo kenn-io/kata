@@ -1,13 +1,17 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Watch project sync progress refresh every 30 seconds in a visible web tab and
+  when you return. A temporary read failure marks the last summary as stale;
+  use **Refresh sync** to retry after a permanent error.
 
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 

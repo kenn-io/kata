@@ -32,6 +32,165 @@ function response(projectID = 7, uid = projectUID): Response {
 }
 afterEach(cleanup)
 describe('ProjectSyncStatus', () => {
+  it('accepts a slow read after multiple refresh cycles', async () => {
+    let resolveSlow!: (value: Response) => void
+    let signal: AbortSignal | undefined
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockImplementationOnce((_url, init) => {
+        signal = init.signal
+        return new Promise<Response>((resolve) => {
+          resolveSlow = resolve
+        })
+      })
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Pending: 2')
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await waitFor(() => expect(signal).toBeDefined())
+    vi.useFakeTimers()
+    await vi.advanceTimersByTimeAsync(30_000)
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    await vi.advanceTimersByTimeAsync(35_000)
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 3 })
+    expect(signal?.aborted).toBe(false)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    resolveSlow(
+      Response.json({
+        statuses: [
+          {
+            project_id: 7,
+            project_uid: projectUID,
+            enabled: true,
+            role: 'replica',
+            pending_push_count: 0,
+          },
+        ],
+      }),
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(screen.getByText('Pending: 0')).not.toBeNull()
+    vi.useRealTimers()
+  })
+
+  it('waits until visible for its initial read', async () => {
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    const fetcher = vi.fn(async () => response())
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(screen.getByText('Reading sync status…')).not.toBeNull()
+    hidden.mockReturnValue(false)
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await screen.findByText('Pending: 2')
+    hidden.mockRestore()
+  })
+
+  it('keeps a slow read across refresh cycles and lets manual refresh replace it', async () => {
+    let resolveSlow!: (value: Response) => void
+    let slowSignal: AbortSignal | undefined
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockImplementationOnce((_url, init) => {
+        slowSignal = init.signal
+        return new Promise<Response>((resolve) => {
+          resolveSlow = resolve
+        })
+      })
+      .mockResolvedValueOnce(response())
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Pending: 2')
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await waitFor(() => expect(slowSignal).toBeDefined())
+    vi.useFakeTimers()
+    await vi.advanceTimersByTimeAsync(30_000)
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    await vi.advanceTimersByTimeAsync(30_000)
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 3 })
+    await vi.advanceTimersByTimeAsync(5_000)
+    vi.useRealTimers()
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(slowSignal?.aborted).toBe(false)
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh sync' }))
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3))
+    expect(slowSignal?.aborted).toBe(true)
+    resolveSlow(response(9))
+    await screen.findByText('Pending: 2')
+  })
+
+  it('preserves a stale summary after a temporary failure and recovers', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(response())
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Pending: 2')
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await screen.findByText('Sync status may be out of date.')
+    expect(screen.getByText('Pending: 2')).not.toBeNull()
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    await waitFor(() => expect(screen.queryByText('Sync status may be out of date.')).toBeNull())
+  })
+
+  it.each([403, 404])('clears status after %i and waits for manual refresh', async (code) => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response())
+      .mockResolvedValueOnce(new Response('', { status: code }))
+      .mockResolvedValueOnce(response())
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Pending: 2')
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await screen.findByText('Sync status unavailable. Refresh to retry.')
+    expect(screen.queryByText('Pending: 2')).toBeNull()
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 2 })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh sync' }))
+    await screen.findByText('Pending: 2')
+  })
+
+  it('clears obsolete status after a mismatched identity', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(response(9))
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Pending: 2')
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await screen.findByText('Sync status unavailable. Refresh to retry.')
+    expect(screen.queryByText('Pending: 2')).toBeNull()
+  })
+
+  it('updates an empty local project when federation appears', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ statuses: [] }))
+      .mockResolvedValueOnce(response())
+    setGeneratedFetch(fetcher)
+    const view = render(ProjectSyncStatus, {
+      props: { projectID: 7, projectUID, refreshGeneration: 0 },
+    })
+    await screen.findByText('Local project')
+    await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
+    await screen.findByText('Pending: 2')
+  })
+
   it('reads only the selected project and shows bounded retained counts without private errors', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => response())
     setGeneratedFetch(fetcher)
