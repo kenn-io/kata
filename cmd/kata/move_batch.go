@@ -40,7 +40,7 @@ type moveSelector struct {
 func moveBatchUsage(message string) error {
 	return &cliError{Message: message, Kind: kindUsage, ExitCode: ExitUsage}
 }
-func parseRefsFrom(r io.Reader, defaultTarget string) ([]moveBatchItem, error) {
+func parseRefsFrom(r io.Reader, defaultTarget string, maxItems int) ([]moveBatchItem, error) {
 	reader := bufio.NewReader(r)
 	var items []moveBatchItem
 	retained := 0
@@ -75,7 +75,7 @@ func parseRefsFrom(r io.Reader, defaultTarget string) ([]moveBatchItem, error) {
 				items = append(items, item)
 			}
 		}
-		if err == io.EOF || len(items) > 5000 {
+		if err == io.EOF || len(items) >= maxItems {
 			break
 		}
 	}
@@ -116,6 +116,25 @@ func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string)
 	return uid, nil
 }
 
+func moveBatchReadLimit(items []moveBatchItem, opts moveBatchOptions) int {
+	if opts.DryRun || opts.Subtree {
+		return 2 - len(items)
+	}
+	return 5001
+}
+
+func validateMoveBatchSelection(items []moveBatchItem, opts moveBatchOptions) error {
+	if len(items) > 1 {
+		if opts.DryRun {
+			return moveBatchUsage("dry run accepts one item")
+		}
+		if opts.Subtree {
+			return moveBatchUsage("--subtree accepts one issue")
+		}
+	}
+	return nil
+}
+
 func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel moveSelector, opts moveBatchOptions) error {
 	defaultTarget := ""
 	var items []moveBatchItem
@@ -124,6 +143,9 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 		for _, ref := range args[:len(args)-1] {
 			items = append(items, moveBatchItem{Ref: ref, TargetProject: defaultTarget})
 		}
+	}
+	if err := validateMoveBatchSelection(items, opts); err != nil {
+		return err
 	}
 	if refsFrom != "" {
 		reader := cmd.InOrStdin()
@@ -138,14 +160,14 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 			defer func() { _ = file.Close() }()
 			reader = file
 		}
-		parsed, err := parseRefsFrom(reader, defaultTarget)
+		parsed, err := parseRefsFrom(reader, defaultTarget, moveBatchReadLimit(items, opts))
 		if err != nil {
 			return err
 		}
 		items = append(items, parsed...)
 	}
-	if opts.DryRun && len(items) > 1 {
-		return moveBatchUsage("dry run accepts one item")
+	if err := validateMoveBatchSelection(items, opts); err != nil {
+		return err
 	}
 	if sel.Project != "" {
 		if defaultTarget == "" {
@@ -176,11 +198,8 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 	if len(items) > 5000 {
 		return moveBatchUsage("batch move accepts at most 5,000 items; split the input into separate runs")
 	}
-	if (opts.DryRun || opts.Subtree) && len(items) > 1 {
-		if opts.DryRun {
-			return moveBatchUsage("dry run accepts one item")
-		}
-		return moveBatchUsage("--subtree accepts one issue")
+	if err := validateMoveBatchSelection(items, opts); err != nil {
+		return err
 	}
 	if (opts.DryRun || opts.Subtree) && len(items) == 1 && items[0].ParseError == "" {
 		previousProject := flags.Project
@@ -212,7 +231,7 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 			}
 			flags.Project = project.Name
 		}
-		return runMove(cmd, items[0].Ref, items[0].TargetProject, opts.DryRun, !opts.Subtree)
+		return runMove(cmd, items[0].Ref, items[0].TargetProject, opts.DryRun, !opts.Subtree, items[0].ExpectedRevision)
 	}
 	if len(items) == 0 && sel.Project == "" {
 		return moveBatchUsage("move requires issue refs and a target project")

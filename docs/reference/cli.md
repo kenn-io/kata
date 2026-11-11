@@ -1021,10 +1021,7 @@ If a request fails, confirmed results remain visible. Submitted items without a 
 
 Other refusals retain the single-move rule codes and explain how to resolve
 them. One refusal leaves successful items committed. A denied descendant
-refuses its whole selected subtree. `--comment` adds the comment, including
-teammate attribution, to each issue that moves in the same transaction.
-Unchanged issues receive no comment, so rerunning an old ref file is safe
-while its move-history aliases remain available.
+refuses its whole selected subtree. For batch moves, `--comment` adds the comment with teammate attribution to each issue in the move transaction. Unchanged issues receive no comment. For a single subtree move, the comment is posted to the selected issue after the move; a failure leaves the move committed and visible in the output.
 
 Inputs over 5,000 items or a 1 MiB request body are refused before any write.
 The combined text of noncomment refs-file rows is also
