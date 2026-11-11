@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -120,7 +122,7 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			dir := t.TempDir()
 			identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
 			require.True(t, ok)
-			_, err := (kitdaemon.RuntimeStore{Dir: dir}).Write(kitdaemon.RuntimeRecord{ProcessIdentityV2: identity, Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Metadata: map[string]string{"web_origin": tc.origin}})
+			_, err := (kitdaemon.RuntimeStore{Dir: dir}).Write(kitdaemon.RuntimeRecord{ProcessIdentityV2: identity, Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://"), Metadata: map[string]string{"web_origin": tc.origin, "web_origin_stable": "true", "web_capabilities": "board"}})
 			require.NoError(t, err)
 			_, found, err := DiscoverResolvedReadOnly(t.Context(), dir)
 			require.False(t, found)
@@ -132,6 +134,57 @@ func TestLiveUnreachableRecoveryAdvice(t *testing.T) {
 			require.Equal(t, dir, observed.DataDir)
 			require.Equal(t, tc.want, observed.WebOrigin)
 			require.True(t, observed.VerifiedProcess)
+		})
+	}
+	for _, deadline := range []bool{true, false} {
+		name := "cancel"
+		if deadline {
+			name = "deadline"
+		}
+		t.Run(name, func(t *testing.T) {
+			var ctx context.Context
+			var cancel context.CancelFunc
+			if deadline {
+				ctx, cancel = context.WithTimeout(t.Context(), 20*time.Millisecond)
+			} else {
+				ctx, cancel = context.WithCancel(t.Context())
+			}
+			defer cancel()
+			started := make(chan struct{})
+			calls := 0
+			reader := func(string) ([]kitdaemon.RuntimeRecord, error) {
+				return []kitdaemon.RuntimeRecord{{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}, {PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:2"}}, nil
+			}
+			probe := func(ctx context.Context, addr string) (string, PingInfo, error) {
+				calls++
+				if calls == 1 {
+					close(started)
+				}
+				<-ctx.Done()
+				return "", PingInfo{}, &url.Error{Op: "Get", URL: "http://" + addr + "/api/v1/ping", Err: ctx.Err()}
+			}
+			if !deadline {
+				go func() { <-started; cancel() }()
+			}
+			var errs []error
+			for _, err := range liveDaemonsUsing(ctx, t.TempDir(), reader, probe) {
+				errs = append(errs, err)
+			}
+			require.Len(t, errs, 1)
+			require.Equal(t, 1, calls)
+			if deadline {
+				require.ErrorIs(t, errs[0], context.DeadlineExceeded)
+				require.ErrorIs(t, errs[0], ErrLocalDaemonUnreachable)
+				var evidence *LocalDaemonUnreachableError
+				require.ErrorAs(t, errs[0], &evidence)
+				require.Equal(t, os.Getpid(), evidence.PID)
+				require.Equal(t, "127.0.0.1:1", evidence.Address)
+			} else {
+				require.ErrorIs(t, errs[0], context.Canceled)
+				require.NotErrorIs(t, errs[0], ErrLocalDaemonUnreachable)
+				var evidence *LocalDaemonUnreachableError
+				require.False(t, errors.As(errs[0], &evidence))
+			}
 		})
 	}
 	t.Run("unverified", func(t *testing.T) {

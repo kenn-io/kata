@@ -141,11 +141,12 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			address := ep.ConfigAddress()
 			url, info, probeErr := probe(ctx, address)
 			if probeErr != nil {
-				if err := ctx.Err(); err != nil {
+				if err := ctx.Err(); errors.Is(err, context.Canceled) {
 					yield(liveDaemon{}, err)
 					return
 				}
-				if !yield(liveDaemon{}, unreachableRuntime(r, dataDir, probeErr)) {
+				// A deadline preserves this probe as evidence, but ends the scan.
+				if !yield(liveDaemon{}, unreachableRuntime(r, dataDir, probeErr)) || ctx.Err() != nil {
 					return
 				}
 				continue
@@ -171,9 +172,9 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 }
 
 func unreachableRuntime(r kitdaemon.RuntimeRecord, dataDir string, cause error) *LocalDaemonUnreachableError {
-	origin := r.Metadata["web_origin"]
-	if !validWebOrigin(origin) {
-		origin = ""
+	origin := ""
+	if web, err := DiscoverWebRuntime(r); err == nil {
+		origin = web.Origin
 	}
 	return &LocalDaemonUnreachableError{
 		PID: r.PID, Address: r.Endpoint().ConfigAddress(), DataDir: dataDir,
@@ -458,7 +459,7 @@ func newHTTPClientWithoutAuth(ctx context.Context, baseURL string, opts Opts) (*
 	}
 	for candidate, err := range liveDaemons(ctx, ns.DataDir) {
 		if err != nil {
-			if errors.Is(err, ErrLocalDaemonUnreachable) {
+			if errors.Is(err, ErrLocalDaemonUnreachable) && ctx.Err() == nil {
 				continue
 			}
 			return nil, err
