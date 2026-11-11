@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -184,10 +185,8 @@ func TestAgentSetupConflictingExecutables(t *testing.T) {
 		return // The recovery command below is executed by a POSIX shell.
 	}
 	// Recovery must work when Kata runs by absolute path and is absent from PATH.
-	bin := filepath.Join(t.TempDir(), "kata with spaces")
-	build := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".") //nolint:gosec // Test-owned output path and fixed package.
-	output, err := build.CombinedOutput()
-	require.NoError(t, err, string(output))
+	bin := buildAgentSetupRecovery(t)
+	var output []byte
 	t.Setenv("PATH", t.TempDir())
 	setup := exec.CommandContext(t.Context(), bin, "agent", "setup", "claude", "--check", "--json") //nolint:gosec // Test-built executable and fixed arguments.
 	output, err = setup.Output()
@@ -345,4 +344,220 @@ func installClaudeAgentFixture(t *testing.T) {
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0700)) //nolint:gosec // Executable fixture in a temporary directory.
 	t.Setenv("PATH", dir)
+}
+
+func TestAgentSetupConditionalClaude(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		t.Run(strconv.FormatBool(disabled), func(t *testing.T) {
+			home := isolateAgentHookHomes(t)
+			installClaudeAgentFixture(t)
+			path := filepath.Join(home, "claude", "settings.json")
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
+			_, err := runHookSetup(t, "install", "claude", "--executable", os.Args[0])
+			require.NoError(t, err)
+			data, err := os.ReadFile(path) //nolint:gosec // Isolated fixture.
+			require.NoError(t, err)
+			var doc map[string]any
+			require.NoError(t, json.Unmarshal(data, &doc))
+			doc["disableAllHooks"] = disabled
+			group := doc["hooks"].(map[string]any)["SessionStart"].([]any)[0].(map[string]any)
+			group["if"] = "condition"
+			data, err = json.Marshal(doc)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(path, data, 0600))
+			out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude", "--json")
+			if disabled {
+				require.Error(t, err)
+				require.Contains(t, out, `"state":"disabled"`)
+			} else {
+				require.NoError(t, err)
+				require.Contains(t, out, `"state":"ok"`)
+				require.Contains(t, out, `"hook_count":3`)
+			}
+			before, err := os.ReadFile(path) //nolint:gosec // Isolated fixture.
+			require.NoError(t, err)
+			require.Contains(t, string(before), `"if": "condition"`)
+			out, _, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude", "--check", "--json")
+			if disabled {
+				require.Error(t, err)
+				require.Contains(t, out, `"state":"disabled"`)
+			} else {
+				require.NoError(t, err)
+				require.Contains(t, out, `"state":"ok"`)
+			}
+			after, err := os.ReadFile(path) //nolint:gosec // Isolated fixture.
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+		})
+	}
+}
+
+func TestAgentSetupMissingExecutable(t *testing.T) {
+	for _, name := range []string{"claude", "pi"} {
+		t.Run(name, func(t *testing.T) {
+			home := isolateAgentHookHomes(t)
+			var bin string
+			if name == "claude" && runtime.GOOS != "windows" {
+				bin = buildAgentSetupRecovery(t)
+			}
+			installClaudeAgentFixture(t)
+			exe := filepath.Join(t.TempDir(), "old-kata")
+			require.NoError(t, os.WriteFile(exe, []byte("fixture"), 0700)) //nolint:gosec // Executable fixture.
+			_, err := runHookSetup(t, "install", name, "--executable", exe)
+			require.NoError(t, err)
+			path, err := agentHookScopePath(name, "user", home)
+			require.NoError(t, err)
+			before, err := os.ReadFile(path) //nolint:gosec // Isolated fixture.
+			require.NoError(t, err)
+			require.NoError(t, os.Remove(exe))
+			for _, args := range [][]string{{}, {"--check"}} {
+				out, _, err := executeAgentHook(t, unreadableHookInput{}, append([]string{"agent", "setup", name, "--json"}, args...)...)
+				require.Error(t, err)
+				require.Contains(t, out, `"state":"unknown"`)
+				require.Contains(t, out, exe)
+				require.Contains(t, out, "agent-hook install "+name+" --executable")
+				after, err := os.ReadFile(path) //nolint:gosec // Isolated fixture.
+				require.NoError(t, err)
+				require.Equal(t, before, after)
+			}
+			if bin != "" {
+				setup := exec.CommandContext(t.Context(), bin, "agent", "setup", "claude", "--check", "--json") //nolint:gosec // Test-built executable.
+				output, err := setup.Output()
+				require.Error(t, err)
+				var report struct {
+					Rows []struct {
+						NextStep string `json:"next_step"`
+					} `json:"rows"`
+				}
+				require.NoError(t, json.Unmarshal(output, &report))
+				require.Len(t, report.Rows, 1)
+				require.Contains(t, report.Rows[0].NextStep, bin)
+				repair := exec.CommandContext(t.Context(), "/bin/sh", "-c", report.Rows[0].NextStep) //nolint:gosec // Suggested command in isolated home.
+				output, err = repair.CombinedOutput()
+				require.NoError(t, err, string(output))
+				output, err = exec.CommandContext(t.Context(), bin, "agent", "setup", "claude", "--check", "--json").CombinedOutput() //nolint:gosec // Test-built executable.
+				require.NoError(t, err, string(output))
+				require.Contains(t, string(output), `"state":"ok"`)
+			}
+		})
+	}
+}
+
+func TestAgentSetupSettingsWithoutHooks(t *testing.T) {
+	for _, tc := range []struct{ name, dir, data string }{{"muse", ".config/muse", `{"schema_version":1,"theme":"dark"}`}, {"droid", ".factory", `{"theme":"dark"}`}} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := isolateAgentHookHomes(t)
+			path := filepath.Join(home, tc.dir, "settings.json")
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
+			require.NoError(t, os.WriteFile(path, []byte(tc.data), 0600))
+			check, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", tc.name, "--check", "--json")
+			require.Error(t, err)
+			require.Contains(t, check, `"state":"missing"`)
+			before, err := os.ReadFile(path) //nolint:gosec // Isolated fixture.
+			require.NoError(t, err)
+			require.Equal(t, tc.data, string(before))
+			out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", tc.name, "--json")
+			require.Error(t, err)
+			require.Contains(t, out, `"state":"unknown"`)
+			if tc.name == "muse" {
+				require.Contains(t, out, "permission")
+			}
+			after, err := os.ReadFile(path) //nolint:gosec // Isolated fixture.
+			require.NoError(t, err)
+			require.Contains(t, string(after), `"dark"`)
+			require.Contains(t, string(after), "agent-hook contract "+tc.name)
+		})
+	}
+}
+
+func TestAgentSetupOpenCodeMissingEntry(t *testing.T) {
+	for _, absolute := range []bool{false, true} {
+		t.Run(strconv.FormatBool(absolute), func(t *testing.T) {
+			home := isolateAgentHookHomes(t)
+			installOpenCodeVersionFixture(t, `printf '2.0.0\n'`)
+			chosen := "kata"
+			if absolute {
+				chosen = filepath.Join(t.TempDir(), "kata with spaces")
+				require.NoError(t, os.WriteFile(chosen, []byte("fixture"), 0700)) //nolint:gosec // Executable fixture.
+			}
+			_, err := runHookSetup(t, "install", "opencode", "--api", "v2", "--executable", chosen)
+			require.NoError(t, err)
+			root := filepath.Join(home, ".config", "opencode", "plugins", "kata-user")
+			js, manifest := filepath.Join(root, "index.js"), filepath.Join(root, "package.json")
+			before, err := os.ReadFile(manifest) //nolint:gosec // Isolated fixture.
+			require.NoError(t, err)
+			require.NoError(t, os.Remove(js))
+			out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "opencode", "--json")
+			require.Error(t, err)
+			require.Contains(t, out, `"state":"unknown"`)
+			code, err := os.ReadFile(js) //nolint:gosec // Isolated fixture.
+			require.NoError(t, err)
+			require.Contains(t, string(code), strconv.Quote(chosen))
+			require.Contains(t, string(before), strconv.Quote(chosen))
+			after, err := os.ReadFile(manifest) //nolint:gosec // Isolated fixture.
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			_, _, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "opencode", "--json")
+			require.Error(t, err)
+			again, err := os.ReadFile(js) //nolint:gosec // Isolated fixture.
+			require.NoError(t, err)
+			require.Equal(t, code, again)
+			last, err := os.ReadFile(manifest) //nolint:gosec // Isolated fixture.
+			require.NoError(t, err)
+			require.Equal(t, before, last)
+		})
+	}
+}
+
+func buildAgentSetupRecovery(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "kata with spaces")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".") //nolint:gosec // Test-owned output and fixed package.
+	output, err := build.CombinedOutput()
+	require.NoError(t, err, string(output))
+	return bin
+}
+
+func TestAgentSetupConditionalClaudeMissingBareExecutable(t *testing.T) {
+	home := isolateAgentHookHomes(t)
+	installClaudeAgentFixture(t)
+	kata := filepath.Join(os.Getenv("PATH"), "kata")
+	if runtime.GOOS == "windows" {
+		kata += ".exe"
+	}
+	require.NoError(t, os.WriteFile(kata, []byte("fixture"), 0700)) //nolint:gosec // Executable fixture.
+	_, err := runHookSetup(t, "install", "claude", "--executable", "kata")
+	require.NoError(t, err)
+	path := filepath.Join(home, "claude", "settings.json")
+	data, err := os.ReadFile(path) //nolint:gosec // Isolated fixture.
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(data, &doc))
+	group := doc["hooks"].(map[string]any)["SessionStart"].([]any)[0].(map[string]any)
+	group["if"] = "condition"
+	data, err = json.Marshal(doc)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0600))
+	_, _, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude")
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(kata)) //nolint:gosec // Isolated fixture path.
+	out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude", "--check", "--json")
+	require.Error(t, err)
+	require.Contains(t, out, `"state":"unknown"`)
+	require.Contains(t, out, "PATH")
+}
+
+func TestAgentSetupDroidStandaloneHooks(t *testing.T) {
+	home := isolateAgentHookHomes(t)
+	_, err := runHookSetup(t, "install", "droid", "--executable", "kata")
+	require.NoError(t, err)
+	path := filepath.Join(home, ".factory", "hooks.json")
+	before, err := os.ReadFile(path) //nolint:gosec // Isolated fixture.
+	require.NoError(t, err)
+	out, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "droid", "--json")
+	require.Error(t, err)
+	require.Contains(t, out, `"state":"unknown"`)
+	after, err := os.ReadFile(path) //nolint:gosec // Isolated fixture.
+	require.NoError(t, err)
+	require.Equal(t, before, after)
 }

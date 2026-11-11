@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -17,6 +19,7 @@ import (
 )
 
 var errAgentSetupExecutables = errors.New("kata hooks use different executables")
+var errAgentSetupMissingExecutable = errors.New("hook executable is missing or unusable")
 
 func agentSetupOptions(name string) (nativeAgentHookOptions, string, error) {
 	dir, err := agentHookWorkspacePath()
@@ -61,7 +64,11 @@ func agentSetupOptions(name string) (nativeAgentHookOptions, string, error) {
 					executable = meta.Executable
 				}
 			case "opencode", "amp":
-				if meta, err := parsePluginAgentHookMetadata(change.Original); err == nil {
+				parse := parsePluginAgentHookMetadata
+				if name == "opencode" && filepath.Base(change.Path) == "package.json" {
+					parse = parsePluginAgentHookPackage
+				}
+				if meta, err := parse(change.Original); err == nil {
 					executable = meta.Executable
 				}
 			case "openclaw":
@@ -73,7 +80,7 @@ func agentSetupOptions(name string) (nativeAgentHookOptions, string, error) {
 					}
 				}
 			default:
-				values, err := agentSetupExtraExecutables(name, change.Original)
+				values, err := agentSetupExtraExecutables(name, change.Path, change.Original)
 				if err != nil {
 					return opts, "", err
 				}
@@ -98,6 +105,12 @@ func agentSetupOptions(name string) (nativeAgentHookOptions, string, error) {
 			return nativeAgentHookOptions{}, "", err
 		}
 	}
+	if filepath.IsAbs(exe) {
+		info, statErr := os.Stat(exe)
+		if statErr != nil || !info.Mode().IsRegular() {
+			return opts, "", fmt.Errorf("%w: %s", errAgentSetupMissingExecutable, exe)
+		}
+	}
 	opts.Executable = exe
 	return opts, warning, nil
 }
@@ -111,7 +124,7 @@ func agentSetupPlanCurrent(plan nativeAgentHookPlan) bool {
 	return true
 }
 
-func agentSetupExtraExecutables(name string, data []byte) ([]string, error) {
+func agentSetupExtraExecutables(name, path string, data []byte) ([]string, error) {
 	var handlers []map[string]any
 	if name == "kimi" || name == "kimi-code" {
 		blocks, err := parseExtraTOMLHooks(data)
@@ -135,11 +148,17 @@ func agentSetupExtraExecutables(name string, data []byte) ([]string, error) {
 			}
 		} else {
 			section := root
-			if hooks, ok := root["hooks"].(map[string]any); ok {
-				section = hooks
+			if name != "droid" || filepath.Base(path) == "settings.json" {
+				section, err = extraJSONObject(root, "hooks")
+				if err != nil {
+					return nil, err
+				}
 			}
 			if name == "zcode" {
-				section, _ = section["events"].(map[string]any)
+				section, err = extraJSONObject(section, "events")
+				if err != nil {
+					return nil, err
+				}
 			}
 			sections[""] = section
 		}
@@ -190,7 +209,7 @@ func agentSetupRecovery(name string) string {
 func agentSetupItem(name string, warn func(string)) agentsetup.Item {
 	return agentsetup.Item{Name: "hooks", Install: func(ctx context.Context) error {
 		opts, warning, err := agentSetupOptions(name)
-		if errors.Is(err, errAgentSetupExecutables) {
+		if errors.Is(err, errAgentSetupExecutables) || errors.Is(err, errAgentSetupMissingExecutable) {
 			return nil
 		}
 		if err != nil {
@@ -217,7 +236,7 @@ func agentSetupItem(name string, warn func(string)) agentsetup.Item {
 		return err
 	}, Check: func(ctx context.Context) (agentsetup.Status, error) {
 		opts, _, err := agentSetupOptions(name)
-		if errors.Is(err, errAgentSetupExecutables) {
+		if errors.Is(err, errAgentSetupExecutables) || errors.Is(err, errAgentSetupMissingExecutable) {
 			return agentsetup.Status{State: agentsetup.StateUnknown, Reason: err.Error(), NextStep: agentSetupRecovery(name)}, nil
 		}
 		if err != nil {
@@ -285,7 +304,7 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nati
 		// ambiguous match before asking it for native trust or policy state.
 		registration.Marker = ""
 		for _, entry := range entries {
-			if classifyAgentHookHandlerFromEntry(entry) == kind {
+			if classifyAgentHookHandlerFromEntry(entry) == kind && sameAgentHookGroupBehavior(entry.GroupFields, nil) {
 				registration.Marker = agentSetupCheckCommand(entry)
 				break
 			}
@@ -300,6 +319,27 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nati
 			return status, err
 		}
 		state := agentsetup.State(result.State)
+		if opts.Agent == "claude" && state == agentsetup.StateOutdated {
+			conditional := false
+			valid := true
+			for _, entry := range entries {
+				command := agentSetupCheckCommand(entry)
+				if !strings.Contains(command, registration.Marker) {
+					continue
+				}
+				if classifyAgentHookHandlerFromEntry(entry) != kind || command != registration.Marker {
+					valid = false
+				} else if !sameAgentHookGroupBehavior(entry.GroupFields, nil) {
+					conditional = true
+				}
+			}
+			if valid && conditional {
+				if _, err := exec.LookPath(opts.Executable); err != nil {
+					return agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: opts.ConfigPath, Reason: fmt.Sprintf("Hook executable %q cannot be resolved", opts.Executable), NextStep: "Install the executable or add its directory to PATH"}, nil
+				}
+				state, result.HookCount = agentsetup.StateOK, 1
+			}
+		}
 		counts[state] += result.HookCount
 		if state == agentsetup.StateMissing || state == agentsetup.StateOutdated {
 			return conflict, nil
