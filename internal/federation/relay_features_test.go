@@ -20,7 +20,7 @@ func TestRelayClientRefusesUnsupportedBatchBeforePost(t *testing.T) {
 	t.Cleanup(srv.Close)
 	client, err := NewClient(t.Context(), srv.URL, "fixture-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	event := db.RemoteEvent{Type: "cron.workflow.created", Payload: jsontext.Value(`{"definition":{"steps":[{"kind":"argv","argv":["echo"]}]}}`)}
+	event := db.RemoteEvent{Type: "cron.workflow.created", Payload: jsontext.Value(`{"definition":{"version":1,"steps":[{"key":"run","kind":"argv","argv":["echo"]}]}}`)}
 	event.ContentHash, err = db.RemoteEventContentHash(event)
 	require.NoError(t, err)
 	body, err := db.EncodeRelaySourceEvent(event)
