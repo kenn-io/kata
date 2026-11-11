@@ -229,10 +229,6 @@ func (f WorkflowDefinition) Validate() error {
 			if strings.TrimSpace(step.Prompt) == "" || step.Command != "" {
 				return stepError("prompt step requires only prompt")
 			}
-		case "argv":
-			// The shared compatibility check above validates the vector.
-		default:
-			return stepError("unknown step kind")
 		}
 		if err := validateOptions(step.Options); err != nil {
 			return fmt.Errorf("step %d %q: %w", i+1, step.Key, err)

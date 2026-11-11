@@ -126,8 +126,8 @@ func TestWorkflowRawValidationFollowsBootstrapAttributionRefusal(t *testing.T) {
 	require.NoError(t, err)
 	for _, tc := range []struct{ method, path, expected string }{{http.MethodPost, path, ""}, {http.MethodPut, path + "/" + workflow.UID, workflow.DefinitionEventUID}} {
 		t.Run(tc.method+" raw invalid", func(t *testing.T) {
-			// Optional null is schema-admissible but rejected by custom raw parsing.
-			body := fmt.Sprintf(`{"actor":"worker","name":"command","expected_event_uid":%q,"definition":{"version":1,"steps":[{"key":"run","kind":"command","command":"true","argv":null}]}}`, tc.expected)
+			// An empty array is schema-admissible, but argv presence on a command step is invalid.
+			body := fmt.Sprintf(`{"actor":"worker","name":"command","expected_event_uid":%q,"definition":{"version":1,"steps":[{"key":"run","kind":"command","command":"true","argv":[]}]}}`, tc.expected)
 			status, raw := argvRequest(t, env, tc.method, tc.path, body, "")
 			require.Equalf(t, http.StatusForbidden, status, "%s", raw)
 			var response api.ErrorEnvelope

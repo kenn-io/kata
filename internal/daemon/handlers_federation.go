@@ -1766,7 +1766,7 @@ func federationFeatureError(err error) error {
 		return api.NewError(http.StatusConflict, "unsupported_event_features", err.Error(), "Take an owner backup and consult the held legacy workflows recovery procedure; retained history may continue to block relay.", nil)
 	}
 	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
-		return api.NewError(http.StatusConflict, "unsupported_event_features", err.Error(), "Upgrade the peer to support the required event features listed in this error", nil)
+		return api.NewError(http.StatusConflict, "unsupported_event_features", err.Error(), "Upgrade the peer or client to support the required event features listed in this error and advertise them through X-Kata-Event-Features", nil)
 	}
 	return federationError(err)
 }
