@@ -803,10 +803,9 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 	defer func() { _ = tx.Rollback() }()
 
 	validator := db.NewCronReplayValidator(tx, false)
-	resolver := db.NewRemoteIssueProjectResolver(tx, projectID)
 	inserted := make([]bool, len(events))
 	for i, ev := range events {
-		inserted[i], err = d.insertRemoteEventTx(ctx, tx, ev, payloads[i], createdAts[i], validator, resolver)
+		inserted[i], err = d.insertRemoteEventTx(ctx, tx, projectID, ev, payloads[i], createdAts[i], validator)
 		if err != nil {
 			return nil, fmt.Errorf("remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 		}
@@ -820,13 +819,13 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 func (d *Store) insertRemoteEventTx(
 	ctx context.Context,
 	tx *sql.Tx,
+	routeID int64,
 	ev db.RemoteEvent,
 	payload jsontext.Value,
 	createdAt string,
 	validator *db.CronReplayValidator,
-	resolver *db.RemoteIssueProjectResolver,
 ) (bool, error) {
-	projectID, err := resolver.Resolve(ctx, ev)
+	projectID, err := db.RemoteIssueEventProject(ctx, tx, routeID, ev)
 	if err != nil {
 		return false, err
 	}
