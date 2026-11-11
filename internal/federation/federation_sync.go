@@ -252,12 +252,10 @@ func pushDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	if binding.PushEnabled {
-		status, err := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
-		if err != nil && !errors.Is(err, db.ErrNotFound) {
+		resetAt, err := interruptedFederationReset(ctx, store, binding.ProjectID)
+		if err != nil {
 			return err
 		}
-		interruptedReset := status.LastResetAt != nil && status.LastPullStartedAt != nil &&
-			(status.LastPullSuccessAt == nil || status.LastPullStartedAt.After(*status.LastPullSuccessAt))
 		scanCursor := binding.PushCursorEventID
 		acknowledged := 0
 		var rejectedEvents []db.Event
@@ -265,7 +263,6 @@ func pushDirectSpoke(
 		var firstRejected int64
 		retained := db.FederationRejectedCreations{}
 		for {
-			scanCursor = max(scanCursor, binding.PushCursorEventID)
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
 				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
 				if eventErr != nil {
@@ -290,22 +287,9 @@ func pushDirectSpoke(
 			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
-			pending, err := store.PendingFederationPushEvents(
-				ctx, binding.ProjectID, store.InstanceUID(), scanCursor, federationPollLimit)
+			pending, err := pendingFederationPushEvents(ctx, store, binding, max(scanCursor, binding.PushCursorEventID), resetAt, validateLease)
 			if err != nil {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-			}
-			if interruptedReset {
-				for _, event := range pending {
-					if strings.HasPrefix(event.Type, "project.") && !event.CreatedAt.After(*status.LastResetAt) {
-						if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-							return err
-						}
-						if err := store.RecordFederationLocalReplayDue(ctx, event.UID); err != nil {
-							return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-						}
-					}
-				}
+				return err
 			}
 			if len(pending) == 0 {
 				through, err := store.FederationPushAcceptedThrough(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID)
@@ -380,16 +364,14 @@ func pushDirectSpoke(
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
+				rejectedIDs := make(map[int64]bool, len(rejected))
 				for _, item := range rejected {
+					rejectedIDs[item.event.ID] = true
 					if firstRejected == 0 || item.event.ID < firstRejected {
 						firstRejected = item.event.ID
 					}
 					retained.Remember(db.RemoteEventFromStored(item.event), item.rejection)
 					rejectedEvents = append(rejectedEvents, item.event)
-				}
-				rejectedIDs := make(map[int64]bool, len(rejected))
-				for _, item := range rejected {
-					rejectedIDs[item.event.ID] = true
 				}
 				var acceptedIDs []int64
 				for _, event := range batch {
@@ -440,6 +422,47 @@ func pushDirectSpoke(
 		}
 	}
 	return nil
+}
+
+// interruptedFederationReset returns when the project was reset if a pull since then never finished.
+func interruptedFederationReset(ctx context.Context, store db.Storage, projectID int64) (*time.Time, error) {
+	status, err := store.FederationSyncStatusByProject(ctx, projectID)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return nil, err
+	}
+	if status.LastResetAt != nil && status.LastPullStartedAt != nil &&
+		(status.LastPullSuccessAt == nil || status.LastPullStartedAt.After(*status.LastPullSuccessAt)) {
+		return status.LastResetAt, nil
+	}
+	return nil, nil
+}
+
+// pendingFederationPushEvents loads the next push events, first marking project events that predate an
+// interrupted reset as due for local replay so advancing the push cursor cannot hide them.
+func pendingFederationPushEvents(
+	ctx context.Context,
+	store db.Storage,
+	binding *db.FederationBinding,
+	cursor int64,
+	resetAt *time.Time,
+	validateLease func(context.Context) error,
+) ([]db.Event, error) {
+	pending, err := store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), cursor, federationPollLimit)
+	if err != nil {
+		return nil, recordFederationSyncError(ctx, store, binding.ProjectID, err)
+	}
+	for _, event := range pending {
+		if resetAt == nil || !strings.HasPrefix(event.Type, "project.") || event.CreatedAt.After(*resetAt) {
+			continue
+		}
+		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+			return nil, err
+		}
+		if err := store.RecordFederationLocalReplayDue(ctx, event.UID); err != nil {
+			return nil, recordFederationSyncError(ctx, store, binding.ProjectID, err)
+		}
+	}
+	return pending, nil
 }
 
 type rejectedFederationEvent struct {
