@@ -561,7 +561,7 @@ func (s *localEmbeddingsSetup) inspectDownload(ctx context.Context, status *api.
 	return nil
 }
 
-func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
+func (s *localEmbeddingsSetup) TurnOn(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.job != nil && s.job.State != "failed" {
@@ -584,7 +584,7 @@ func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
 		}
 		release = lease.Release
 	}
-	s.job = &api.LocalEmbeddingsJob{State: "downloading"}
+	s.job = s.newJob(ctx, sharing)
 	if !s.start(func(ctx context.Context) {
 		if release != nil {
 			defer release()
@@ -598,6 +598,16 @@ func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {
 		return errors.New("daemon is shutting down")
 	}
 	return nil
+}
+
+func (s *localEmbeddingsSetup) newJob(ctx context.Context, sharing bool) *api.LocalEmbeddingsJob {
+	job := &api.LocalEmbeddingsJob{State: "downloading"}
+	if sharing {
+		status := api.LocalEmbeddingsStatus{Provider: "built_in", CanChange: true}
+		_ = s.inspectDownload(ctx, &status)
+		job.Total = status.DownloadBytes
+	}
+	return job
 }
 
 func (s *localEmbeddingsSetup) setProgress(downloaded, total int64) {

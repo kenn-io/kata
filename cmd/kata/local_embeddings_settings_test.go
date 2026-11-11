@@ -366,7 +366,15 @@ func TestLocalEmbeddingsSavedSetupMissingModelTurnOn(t *testing.T) {
 	}
 	var run func(context.Context)
 	setup := &localEmbeddingsSetup{embeddings: config.EmbeddingsConfig{Local: true}, start: func(work func(context.Context)) bool { run = work; return true }}
+	status, err := setup.Status(t.Context())
+	require.NoError(t, err)
+	require.Positive(t, status.DownloadBytes)
 	require.NoError(t, setup.TurnOn(t.Context()))
+	accepted, err := setup.Status(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, accepted.Job)
+	require.Equal(t, "downloading", accepted.Job.State)
+	require.Equal(t, status.DownloadBytes, accepted.Job.Total)
 	run(t.Context())
 	require.Equal(t, 1, attempts)
 	require.Equal(t, "failed", setup.job.State)
