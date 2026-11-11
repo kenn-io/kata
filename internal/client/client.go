@@ -82,7 +82,7 @@ type LocalDaemonUnreachableError struct {
 }
 
 func (e *LocalDaemonUnreachableError) Error() string {
-	return e.Summary() + "; " + e.RecoveryAdvice(e.recoverCommand)
+	return e.Summary() + "; " + e.RecoveryAdvice()
 }
 
 // Summary describes the probe failure without assuming a recovery target.
@@ -98,9 +98,8 @@ func (e *LocalDaemonUnreachableError) Is(target error) bool {
 	return target == ErrLocalDaemonUnreachable
 }
 
-// RecoveryAdvice describes manual evidence capture and recovery. A nonempty
-// recoverCommand must be a safely quoted command for the selected local profile.
-func (e *LocalDaemonUnreachableError) RecoveryAdvice(recoverCommand string) string {
+// RecoveryAdvice describes manual evidence capture and recovery for the selected daemon.
+func (e *LocalDaemonUnreachableError) RecoveryAdvice() string {
 	advice := fmt.Sprintf("inspect %q or the supervisor stderr log", filepath.Join(e.dataDir, "daemon.log"))
 	if validWebOrigin(e.webOrigin) {
 		advice += "; if responsive, capture " + e.webOrigin + "/debug/pprof/goroutine?debug=2 with daemon-owner authentication (a signed-in browser alone is insufficient)"
@@ -111,12 +110,13 @@ func (e *LocalDaemonUnreachableError) RecoveryAdvice(recoverCommand string) stri
 		advice += fmt.Sprintf("; stop the failed process with taskkill /PID %d /F", e.PID)
 	}
 	if !e.verifiedProcess {
-		advice += "; verify the process identity and stop it using your supervisor before recovery"
+		advice += "; verify the process identity before stopping it for recovery"
 	}
-	if recoverCommand != "" {
-		advice += "; after it exits, run " + recoverCommand
+	advice += "; after it exits, use its supervisor or the original foreground launch command for those launch modes"
+	if e.recoverCommand != "" {
+		advice += "; for an applicable named profile, run " + e.recoverCommand
 	} else {
-		advice += "; run kata daemon restart with the original KATA_HOME and storage environment"
+		advice += "; for an auto-started current home, run kata daemon restart with the original KATA_HOME and storage environment"
 	}
 	return advice
 }
