@@ -55,7 +55,8 @@ func TestCronHistoryIsNotRevalidatedAgainstCurrentRules(t *testing.T) {
 
 	stale, err := cron.DecodeJob([]byte(staleJobDocument))
 	require.NoError(t, err)
-	record := CronJobExport{CronDefinition: {ID: 1, ProjectID: 1, UID: newUID(t), Name: "Review", DefinitionEventUID: newUID(t), DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: now.UnixMilli(), OriginInstanceUID: newUID(t)}, Author: "worker", Revision: 2, CreatedAt: now, UpdatedAt: now, DeletedAt: &now}, Definition: stale}
+	record := CronJobExport{Definition: stale}
+	record.CronDefinition = CronDefinition{ID: 1, ProjectID: 1, UID: newUID(t), Name: "Review", DefinitionEventUID: newUID(t), DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: now.UnixMilli(), OriginInstanceUID: newUID(t)}, Author: "worker", Revision: 2, CreatedAt: now, UpdatedAt: now, DeletedAt: &now}
 	require.NoError(t, ValidateCronRecord(&record), "a backup's deleted definition must restore")
 	record.DeletedAt = nil
 	require.NoError(t, ValidateCronRecord(&record), "a backup taken under older rules must restore its live definitions")
@@ -63,7 +64,8 @@ func TestCronHistoryIsNotRevalidatedAgainstCurrentRules(t *testing.T) {
 
 func TestCronWorkflowBackupRetainsLegacyRawDocuments(t *testing.T) {
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
-	base := CronWorkflowExport{CronDefinition: {ID: 1, ProjectID: 1, UID: newUID(t), Name: "Review", DefinitionEventUID: newUID(t), DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: now.UnixMilli(), OriginInstanceUID: newUID(t)}, Author: "worker", Revision: 1, CreatedAt: now, UpdatedAt: now}}
+	base := CronWorkflowExport{}
+	base.CronDefinition = CronDefinition{ID: 1, ProjectID: 1, UID: newUID(t), Name: "Review", DefinitionEventUID: newUID(t), DefinitionHLC: CronDefinitionHLC{Version: 1, PhysicalMS: now.UnixMilli(), OriginInstanceUID: newUID(t)}, Author: "worker", Revision: 1, CreatedAt: now, UpdatedAt: now}
 	for _, document := range []string{`null`, `{"steps":null}`, `{"steps":[null]}`, `{"steps":[{"kind":null}]}`, `{"version":1,"steps":[{"kind":"argv"}]}`} {
 		base.RawDefinition = jsontext.Value(document)
 		raw, err := json.Marshal(base)
