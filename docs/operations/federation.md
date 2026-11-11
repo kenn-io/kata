@@ -2278,7 +2278,7 @@ The event keeps its original UID and content hash. Until recovery, the durable
 push cursor stays before the earliest rejected event. The spoke records later accepted events to suppress duplicate local notifications.
 The status diagnostic counts the other events the hub acknowledged.
 
-Missing enrollment alone does not create a quarantine or offer a skip action. A later poisoned batch enters blocking quarantine. Skipping it abandons outbound events through that batch. Older peers keep atomic batch
+Missing enrollment alone does not create a quarantine or offer a skip action. A later poisoned batch enters blocking quarantine. Skipping it abandons only that batch's events. Older peers keep atomic batch
 failure. Adoption snapshot
 baselines remain atomic: a missing enrollment keeps the whole baseline pending
 until joining allows its original snapshots to retry.
