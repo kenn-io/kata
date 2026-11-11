@@ -832,7 +832,7 @@ func reconcileFederatedComments(
 			return err
 		}
 		if owned {
-			return fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, db.ErrExternalCommentContentOwned)
+			continue
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM comments WHERE id=$1`, row.id); err != nil {
 			return mapSQLError(err, nil)
