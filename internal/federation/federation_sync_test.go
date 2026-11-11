@@ -1838,13 +1838,18 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 			IssueID: earlierIssue.ID, Body: "Comment on the earlier page's issue", Author: "tester",
 		})
 		require.NoError(t, err)
+		title := "Updated after the first page"
+		_, earlierIssueUpdate, changed, err := spoke.EditIssue(ctx, db.EditIssueParams{IssueID: earlierIssue.ID, Title: &title, Actor: "tester"})
+		require.NoError(t, err)
+		require.True(t, changed)
 		earlierIssueCommentUID = commentOnEarlierIssue.UID
-		acknowledged = earlierIssueComment.ID
-		lastID = 103
+		acknowledged = earlierIssueUpdate.ID
+		lastID = 104
 		laterPage = []api.EventEnvelope{
 			eventEnvelopeForSyncTest(localEvent, 101),
 			eventEnvelopeForSyncTest(comment, 102),
-			eventEnvelopeForSyncTest(earlierIssueComment, lastID),
+			eventEnvelopeForSyncTest(earlierIssueComment, 103),
+			eventEnvelopeForSyncTest(*earlierIssueUpdate, lastID),
 		}
 	}
 	envelope := eventEnvelopeForSyncTest(localEvent, 100)
@@ -2005,10 +2010,11 @@ func testResetRetryLocalOriginEvent(t *testing.T, recovery string) {
 		}
 		earlier, err := spoke.IssueByUID(ctx, earlierIssue.UID, db.IncludeDeletedYes)
 		require.NoError(t, err)
+		assert.Equal(t, "Updated after the first page", earlier.Title)
 		commentIssueIDs, err := spoke.CommentIssueIDsByUIDs(ctx, []string{earlierIssueCommentUID})
 		require.NoError(t, err)
 		assert.Equal(t, earlier.ID, commentIssueIDs[earlierIssueCommentUID], "retry projects the later comment on the existing issue")
-		assert.ElementsMatch(t, []string{laterPage[0].EventUID, laterPage[1].EventUID, laterPage[2].EventUID}, deliveredUIDs)
+		assert.ElementsMatch(t, []string{laterPage[0].EventUID, laterPage[1].EventUID, laterPage[2].EventUID, laterPage[3].EventUID}, deliveredUIDs)
 		return
 	}
 	require.NotEmpty(t, delivered)

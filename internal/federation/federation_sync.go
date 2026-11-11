@@ -854,18 +854,8 @@ func shouldDeliverDuplicateLocalEcho(
 		return due, err
 	}
 
-	// Older data may lack a marker on later reset pages. Limit repair to
-	// unfinished, unadvanced history with a missing local projection.
-	if projectID != binding.ProjectID {
-		binding, err = store.FederationBindingByProject(ctx, projectID)
-		if errors.Is(err, db.ErrNotFound) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-	}
-	if binding.PullCursorEventID >= ev.EventID {
+	// Older data may lack a marker on later reset pages.
+	if projectID == binding.ProjectID && binding.PullCursorEventID >= ev.EventID {
 		return false, nil
 	}
 	events, err := store.EventsByUIDs(ctx, projectID, []string{ev.EventUID})
@@ -873,12 +863,29 @@ func shouldDeliverDuplicateLocalEcho(
 		return false, err
 	}
 	event := events[0]
-	if event.IssueID != nil || event.IssueUID == nil {
+	if event.IssueUID == nil {
 		return false, nil
 	}
 	_, err = store.IssueByUID(ctx, *event.IssueUID, db.IncludeDeletedYes)
 	if errors.Is(err, db.ErrNotFound) {
+		// A destination can replay source history after the source cursor passed it.
+		if projectID != binding.ProjectID {
+			status, statusErr := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
+			if statusErr != nil || status.LastResetAt == nil {
+				return false, statusErr
+			}
+		}
 		return true, store.RecordFederationLocalReplayDue(ctx, ev.EventUID)
+	}
+	if err == nil && projectID == binding.ProjectID {
+		// A later reset page can update an issue projected by an earlier page.
+		status, statusErr := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
+		if statusErr != nil {
+			return false, statusErr
+		}
+		if status.LastResetAt != nil && !event.CreatedAt.After(*status.LastResetAt) {
+			return true, store.RecordFederationLocalReplayDue(ctx, ev.EventUID)
+		}
 	}
 	if err != nil || event.Type != "issue.commented" {
 		return false, err
