@@ -47,9 +47,13 @@ func TestRecurringDeliveryExternalSQLite(t *testing.T) {
 				require.NoError(t, err, "%s: %s", command, out)
 				return string(out)
 			}
+			if upgrade {
+				require.Equal(t, "idx_issues_recurring_delivery\n", run(path, "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_issues_recurring_delivery';"))
+			}
 			require.Equal(t, "ok\n", run(path, "PRAGMA integrity_check;"))
 			run(path, "REINDEX;")
 			run(path, fmt.Sprintf(`INSERT INTO issues(uid,project_id,short_id,title,author) VALUES('00000000000000000000000001',%d,'000001','Extra','operator')`, p.ID))
+			// Restored metadata can contain malformed occurrence values.
 			run(path, `UPDATE issues SET metadata='{"cron.occurrence":"not an object"}' WHERE uid='00000000000000000000000001'`)
 			run(path, fmt.Sprintf(`UPDATE issues SET metadata=json_set(metadata,'$."cron.occurrence".scheduled_at','2025-01-01T00:00:00.123456789Z') WHERE id=%d`, children[0].ID))
 			backup := filepath.Join(t.TempDir(), "backup.db")

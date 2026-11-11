@@ -64,6 +64,7 @@ func TestMCPEventSubscriptionsMigrationMatchesFreshSchema(t *testing.T) {
 	_, err = admin.ExecContext(ctx, `UPDATE mcp_events_upgrade.meta SET value='49' WHERE key='schema_version'`)
 	require.NoError(t, err)
 
+	// Opening also validates the migrated index and function against the schema manifest.
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })

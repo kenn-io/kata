@@ -22,10 +22,6 @@ func deliveryExec(t *testing.T, s db.Storage, query string, args ...any) {
 	require.NoError(t, err)
 }
 
-func deliveryStamp(t *testing.T, s db.Storage, child db.Issue, stamp time.Time) {
-	deliveryStampText(t, s, child, stamp.UTC().Format(time.RFC3339Nano))
-}
-
 func deliveryStampText(t *testing.T, s db.Storage, child db.Issue, stamp string) {
 	t.Helper()
 	var metadata, occurrence map[string]jsontext.Value
@@ -222,6 +218,7 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 	require.NoError(t, err)
 	require.Len(t, children, 2)
 	t.Run("occurrence versions", func(t *testing.T) {
+		// Imports retain occurrence metadata, including invalid values and numeric spellings.
 		second, _, err := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Healthy parent", Author: "operator"})
 		require.NoError(t, err)
 		definition := j.Definition
@@ -290,6 +287,7 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 			instant       string
 		}{
 			{"2025-01-01T00:59:59.999999999+01:00", "2025-01-01T00:00:00Z", 1, "2025-01-01T00:00:00Z"},
+			{"2026-10-01T09:00:00.123456789Z", "2026-10-01T09:00:00.123456788Z", 0, "2026-10-01T09:00:00.123456789Z"},
 			{"9999-12-31T23:59:59.5-01:00", "9999-12-31T23:59:59Z", 0, "9999-12-31T23:59:59.5-01:00"},
 			{"0000-01-01T00:00:00+02:00", "0000-01-01T00:00:00+01:00", 1, "0000-01-01T00:00:00+01:00"},
 			{"0000-01-01T00:00:00+01:00", "0000-01-01T00:00:00Z", 1, "0000-01-01T00:00:00Z"},
@@ -322,6 +320,7 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 		}
 		require.Equal(t, winner, deliveryRead(t, s, p, j, now).LastChild.UID)
 		deliveryStampText(t, s, children[1], "2025-01-01T00:00:00Z")
+		// Restored metadata may contain invalid timestamps.
 		for _, invalid := range []string{"2099-02-30T23:59:59Z", "now"} {
 			deliveryStampText(t, s, children[0], invalid)
 			scoped := db.WithExposedIssues(db.WithAuthorizedProjects(ctx, []string{p.UID}))
@@ -334,35 +333,9 @@ func checkRecurringDeliveryEvidence(t *testing.T, s db.Storage, b Backend) error
 			deliveryExec(t, s, `UPDATE issues SET metadata=$1 WHERE id=$2`, child.Metadata, child.ID)
 		}
 	})
-	t.Run("last child", func(t *testing.T) {
-		// Give the smaller UID the later occurrence, using fractional stamps that do not sort lexically.
-		if children[0].UID > children[1].UID {
-			children[0], children[1] = children[1], children[0]
-		}
-		stamps := []string{"2026-10-01T09:00:00.1Z", "2026-10-01T09:00:00Z"}
-		for i, child := range children {
-			stamp, err := time.Parse(time.RFC3339Nano, stamps[i])
-			require.NoError(t, err)
-			deliveryStamp(t, s, child, stamp)
-		}
-		require.Equal(t, children[0].UID, deliveryRead(t, s, p, j, now).LastChild.UID)
-		for i, stamp := range []string{"2026-10-01T09:00:00.123456789Z", "2026-10-01T09:00:00.123456788Z"} {
-			parsed, err := time.Parse(time.RFC3339Nano, stamp)
-			require.NoError(t, err)
-			deliveryStamp(t, s, children[i], parsed)
-		}
-		require.Equal(t, children[0].UID, deliveryRead(t, s, p, j, now).LastChild.UID)
-		readCtx := db.WithExposedIssues(db.WithAuthorizedProjects(ctx, []string{p.UID}))
-		_, err = s.RecurringCronDelivery(readCtx, db.CronDeliveryQuery{ProjectID: p.ID, JobUID: j.UID}, now)
-		require.NoError(t, err)
-		require.ElementsMatch(t, []int64{parent.ID, children[0].ID}, db.ExposedIssues(readCtx))
-		tied, err := time.Parse(time.RFC3339Nano, "2026-10-01T09:00:00.123456789Z")
-		require.NoError(t, err)
-		deliveryStamp(t, s, children[1], tied)
-		require.Equal(t, children[1].UID, deliveryRead(t, s, p, j, now).LastChild.UID, "larger UID wins an occurrence-time tie")
-		older, err := time.Parse(time.RFC3339Nano, stamps[1])
-		require.NoError(t, err)
-		deliveryStamp(t, s, children[1], older)
+	t.Run("child visibility", func(t *testing.T) {
+		deliveryStampText(t, s, children[0], "2026-10-01T09:00:00.123456789Z")
+		deliveryStampText(t, s, children[1], "2026-10-01T09:00:00Z")
 
 		hidden, err := s.CreateProject(ctx, "hidden-project")
 		require.NoError(t, err)
