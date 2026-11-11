@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -179,19 +182,42 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 }
 
 func TestLocalEmbeddingsDaemonDownloadConsent(t *testing.T) {
-	for _, chosen := range []bool{false, true} {
-		t.Run(fmt.Sprint(chosen), func(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		chosen, installed bool
+	}{
+		{name: "no choice"}, {name: "recorded choice", chosen: true}, {name: "installed", installed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			clearLocalEmbeddingsEnv(t)
 			home := setupKataEnv(t)
-			if chosen {
+			if tc.chosen {
 				require.NoError(t, embedlocal.RecordChoice())
+			}
+			var endpoint string
+			if tc.installed {
+				provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					values := make([]float64, 768)
+					values[0] = 1
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"embedding": values, "index": 0}}}))
+				}))
+				t.Cleanup(provider.Close)
+				endpoint = provider.URL
 			}
 			oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
 			t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-			localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "", embedlocal.ErrNotFound }
+			localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+				if tc.installed && opts.Executable != "" {
+					return endpoint, nil
+				}
+				return "", embedlocal.ErrNotFound
+			}
 			localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
+				if tc.installed {
+					return embedlocal.Installation{Executable: "/example/kennembed"}, nil
+				}
 				approved, err := opts.Confirm(ctx, 290_000_000)
-				require.Equal(t, chosen, approved)
+				require.Equal(t, tc.chosen, approved)
 				if err != nil {
 					return embedlocal.Installation{}, err
 				}
@@ -202,9 +228,15 @@ func TestLocalEmbeddingsDaemonDownloadConsent(t *testing.T) {
 			client, _, err := preflightEmbeddingStartup(cfg.Embeddings, filepath.Join(home, "kata.db"))
 			require.NoError(t, err)
 			_, err = client.Embed(t.Context(), []string{"x"})
-			if chosen {
+			switch {
+			case tc.installed:
+				require.NoError(t, err)
+				chosen, err := embedlocal.ChoiceRecorded()
+				require.NoError(t, err)
+				require.False(t, chosen)
+			case tc.chosen:
 				require.ErrorContains(t, err, "installation reached")
-			} else {
+			default:
 				require.ErrorContains(t, err, "kata daemon local-embeddings")
 			}
 		})
