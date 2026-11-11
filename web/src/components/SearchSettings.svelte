@@ -157,7 +157,8 @@
     }
     if (signal.aborted || post !== posts) return
     if (next) {
-      if (next.job?.state === 'restarting' && !restartPending) restartDeadline = Date.now() + 120_000
+      if (next.job?.state === 'restarting' && !restartPending)
+        restartDeadline = Date.now() + 120_000
       if (
         next.job?.error ||
         next.job?.state !== status?.job?.state ||

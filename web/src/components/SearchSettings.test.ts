@@ -169,10 +169,11 @@ describe('SearchSettings', () => {
       .mockResolvedValueOnce(
         Response.json(status({ job: { state: 'restarting', downloaded: 1, total: 1 } })),
       )
-      .mockImplementation((_input, init) =>
-        new Promise((_resolve, reject) => {
-          init?.signal?.addEventListener('abort', () => reject(new TypeError('disconnected')))
-        }),
+      .mockImplementation(
+        (_input, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new TypeError('disconnected')))
+          }),
       )
     setGeneratedFetch(read)
     renderSettings({ originStable: true })
