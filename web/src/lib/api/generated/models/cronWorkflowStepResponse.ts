@@ -5,6 +5,7 @@ import type { CronWorkflowStepResponseOptions } from './cronWorkflowStepResponse
 
 export interface CronWorkflowStepResponse {
   after?: string[]
+  argv?: string[]
   command?: string
   key: string
   kind: string

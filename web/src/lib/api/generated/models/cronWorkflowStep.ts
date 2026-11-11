@@ -5,6 +5,7 @@ import type { CronWorkflowStepOptions } from './cronWorkflowStepOptions.ts'
 
 export interface CronWorkflowStep {
   after?: string[]
+  argv?: string[]
   command?: string
   key: string
   kind: string

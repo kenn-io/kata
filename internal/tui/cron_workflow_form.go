@@ -70,7 +70,7 @@ func (f *cronForm) workflowBuild() (string, cron.WorkflowDefinition, error) {
 		column := utf8.RuneCountInString(before[strings.LastIndex(before, "\n")+1:]) + 1
 		return "", def, fieldErr(cfDefinition, "line %d, column %d: /definition%s: %s", line, column, path, err)
 	}
-	if err := def.Validate(); err != nil {
+	if _, err := cron.ParseWorkflow([]byte(text)); err != nil {
 		return "", def, fieldErr(cfDefinition, "%s", err)
 	}
 	return strings.TrimSpace(f.val[cfName]), def, nil
