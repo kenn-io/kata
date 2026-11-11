@@ -61,6 +61,9 @@ func TestPreviewJobAdapterStates(t *testing.T) {
 		{"adapter every", Trigger{Kind: "cron", Cron: "@every 1h"}, "unsupported"},
 		{"local timezone", Trigger{Kind: "cron", Cron: "0 9 * * *", Timezone: "Local"}, "unavailable"},
 		{"local directive", Trigger{Kind: "cron", Cron: "TZ=Local 0 9 * * *"}, "unavailable"},
+		{"double quoted local", Trigger{Kind: "cron", Cron: `CRON_TZ="Local" 0 9 * * *`}, "unavailable"},
+		{"single quoted local", Trigger{Kind: "cron", Cron: `TZ='Local' 0 9 * * *`}, "unavailable"},
+		{"quoted named override", Trigger{Kind: "cron", Cron: `TZ="America/New_York" 0 9 * * *`, Timezone: "Local"}, "ready"},
 		{"explicit zone", Trigger{Kind: "cron", Cron: "TZ=UTC 0 9 * * *", Timezone: "Local"}, "ready"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

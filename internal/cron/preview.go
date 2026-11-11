@@ -1,6 +1,10 @@
 package cron
 
-import "time"
+import (
+	"time"
+
+	cronparser "github.com/netresearch/go-cron"
+)
 
 // PreviewParent contains the observed parent state and its decoded checkpoint.
 type PreviewParent struct {
@@ -22,8 +26,14 @@ func PreviewJob(def JobDefinition, parent *PreviewParent, after time.Time, count
 	if !def.Enabled {
 		return JobPreview{Status: "paused"}, nil
 	}
-	if localCron(def.Trigger) {
-		return JobPreview{Status: "unavailable"}, nil
+	var schedule cronparser.Schedule
+	var scheduleErr error
+	if def.Trigger.Kind == "cron" {
+		schedule, scheduleErr = adapterCronSchedule(def.Trigger)
+		_, _, hasZone, _ := splitCronDirective(def.Trigger.Cron)
+		if parsed, ok := schedule.(*cronparser.SpecSchedule); scheduleErr == nil && ok && parsed.Location == time.Local && (hasZone || def.Trigger.Timezone != "") {
+			return JobPreview{Status: "unavailable"}, nil
+		}
 	}
 	var progress RecurringProgress
 	if IsRecurringIssueJob(def) {
@@ -38,9 +48,8 @@ func PreviewJob(def JobDefinition, parent *PreviewParent, after time.Time, count
 		if def.Trigger.Kind != "cron" {
 			return JobPreview{Status: "unsupported"}, nil
 		}
-		schedule, err := adapterCronSchedule(def.Trigger)
-		if err != nil {
-			return JobPreview{}, err
+		if scheduleErr != nil {
+			return JobPreview{}, scheduleErr
 		}
 		if schedule == nil {
 			return JobPreview{Status: "unsupported"}, nil
@@ -55,9 +64,4 @@ func PreviewJob(def JobDefinition, parent *PreviewParent, after time.Time, count
 		status = "exhausted"
 	}
 	return JobPreview{Status: status, Times: occurrences}, nil
-}
-
-func localCron(t Trigger) bool {
-	zone, _, has, _ := splitCronDirective(t.Cron)
-	return t.Kind == "cron" && (has && zone == "Local" || !has && t.Timezone == "Local")
 }

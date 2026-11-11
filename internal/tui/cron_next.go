@@ -36,9 +36,12 @@ func cronNextRuns(p cronData, j generated.CronJob, now time.Time) (label string,
 	if kind := j.Definition.Trigger.Kind; !native && kind != "cron" && kind != "once" || native && kind != "cron" && kind != "interval" {
 		return "", nil
 	}
-	var def cron.JobDefinition
 	raw, err := json.Marshal(j.Definition)
-	if err != nil || json.Unmarshal(raw, &def) != nil {
+	if err != nil {
+		return label, []string{"unavailable"}
+	}
+	def, err := cron.DecodeJob(raw)
+	if err != nil {
 		return label, []string{"unavailable"}
 	}
 	var parent *cron.PreviewParent
