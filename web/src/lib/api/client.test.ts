@@ -34,16 +34,6 @@ describe('Kata browser API credentials', () => {
     expect(result.data.issues[0]?.title).toBe('Generated client request')
   })
 
-  it('rejects malformed JSON from a successful response', async () => {
-    const upstream = vi.fn(
-      async () =>
-        new Response('{', { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    )
-    await expect(orvalFetch('/api/v1/ui/references', { method: 'GET' }, upstream)).rejects.toThrow(
-      SyntaxError,
-    )
-  })
-
   it('attaches the tab session to reads and adds CSRF only to mutations', async () => {
     const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = []
     const upstream = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

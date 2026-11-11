@@ -11,8 +11,7 @@
   let status = $state<FederationProjectStatus>()
   let loading = $state(true)
   let error = $state(false)
-  let hasResult = $state(false)
-  let refresh: ((manual?: boolean) => void) | undefined
+  let refresh: (() => void) | undefined
   let identity = $derived(`${projectID}:${projectUID}`)
   let counts = $derived.by(() => {
     const result: Record<string, number> = {}
@@ -27,20 +26,16 @@
     void identity
     const [id, uid] = untrack(() => [projectID, projectUID] as const)
     let current: AbortController | undefined
-    let pending = false
     let disposed = false
     status = undefined
-    hasResult = false
     loading = true
     error = false
 
-    async function read(manual = false): Promise<void> {
-      if (document.hidden) return
-      if (current) {
-        pending = true
-        return
-      }
-      if (manual) loading = true
+    async function read(): Promise<void> {
+      if (document.hidden || current) return
+      status = undefined
+      error = false
+      loading = true
       const abort = new AbortController()
       current = abort
       const finish = () => {
@@ -49,10 +44,6 @@
         current = undefined
         if (disposed) return
         loading = false
-        if (pending) {
-          pending = false
-          if (!document.hidden) void read()
-        }
       }
       const timeout = setTimeout(() => {
         error = true
@@ -67,39 +58,20 @@
           { signal: abort.signal },
         )
         if (abort.signal.aborted || disposed) return
-        if (response.status !== 200) {
-          if (
-            response.status >= 400 &&
-            response.status < 500 &&
-            response.status !== 408 &&
-            response.status !== 429
-          ) {
-            status = undefined
-            hasResult = false
-          }
-          error = true
-          return
-        }
+        if (response.status !== 200) throw new Error()
         const found = response.data.statuses.find(
           (entry) => entry.project_id === id && entry.project_uid === uid,
         )
-        if (response.data.statuses.length && !found) {
-          status = undefined
-          hasResult = false
-          error = true
-          return
-        }
+        if (response.data.statuses.length && !found) throw new Error()
         status = found
-        hasResult = true
-        error = false
       } catch {
         if (!abort.signal.aborted && !disposed) error = true
       } finally {
         finish()
       }
     }
-    refresh = (manual) => {
-      void read(manual)
+    refresh = () => {
+      void read()
     }
     return () => {
       disposed = true
@@ -120,7 +92,7 @@
   <strong>Project sync</strong>
   {#if loading}
     <span role="status">Reading sync status…</span>
-  {:else if error && !hasResult}
+  {:else if error}
     <span role="status">Sync status unavailable. Refresh to retry.</span>
   {:else if !status}
     <span>Local project</span>
@@ -155,9 +127,7 @@
       >
     {/if}
   {/if}
-  {#if error && hasResult}<span class="stale" role="status">Sync status may be out of date.</span
-    >{/if}
-  <button type="button" onclick={() => refresh?.(true)}>Refresh sync</button>
+  <button type="button" disabled={loading} onclick={() => refresh?.()}>Refresh sync</button>
 </section>
 
 <style>
@@ -175,13 +145,6 @@
   }
   .project-sync span {
     min-width: 0;
-  }
-  .stale {
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--accent-amber) 14%, transparent);
-    color: var(--accent-amber);
-    padding: var(--space-1) var(--space-2);
-    font-weight: var(--font-weight-semibold);
   }
   button {
     color: var(--text-primary);

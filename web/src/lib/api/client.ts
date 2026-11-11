@@ -55,13 +55,7 @@ async function readResponseBody(response: Response): Promise<unknown> {
     return response.blob()
   }
   const text = await response.text()
-  if (!text || !contentType?.includes('json')) return text || undefined
-  try {
-    return JSON.parse(text)
-  } catch (error) {
-    if (response.ok) throw error
-    return undefined
-  }
+  return text ? (contentType?.includes('json') ? JSON.parse(text) : text) : undefined
 }
 
 export async function orvalFetch<T>(

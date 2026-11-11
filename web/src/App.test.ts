@@ -1775,19 +1775,21 @@ describe('App', () => {
 
   it('refreshes selected project sync on the visible app cycle', async () => {
     vi.useFakeTimers()
-    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
     history.replaceState(null, '', '/kata?scope=01J00000000000000000000002#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
     )
     let pending = 2
+    let reads = 0
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const request = requestOf(input, init)
         const path = new URL(request.url).pathname
         if (path.endsWith('/federation/status')) {
+          reads++
           return Response.json({
             statuses: [
               {
@@ -1821,7 +1823,12 @@ describe('App', () => {
     await vi.advanceTimersByTimeAsync(30_000)
     await tick()
     expect(screen.getByText('Pending: 0')).not.toBeNull()
+    hidden.mockReturnValue(true)
+    const visibleReads = reads
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(reads).toBe(visibleReads)
     pending = 3
+    hidden.mockReturnValue(false)
     document.dispatchEvent(new Event('visibilitychange'))
     await vi.advanceTimersByTimeAsync(0)
     await tick()
