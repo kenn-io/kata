@@ -54,7 +54,8 @@ func ReconcileOwnerCronWorkflowReplay(records []ImportRecord) []ImportRecord {
 		if err != nil || definition.Version != 1 {
 			continue
 		}
-		if _, err := cron.DecodeWorkflow(latest.document); err == nil {
+		_, supportedErr := cron.DecodeWorkflow(latest.document)
+		if supportedErr == nil && order == 0 {
 			result = append(result, record)
 			continue
 		}
@@ -71,7 +72,10 @@ func ReconcileOwnerCronWorkflowReplay(records []ImportRecord) []ImportRecord {
 		replacement.ID, replacement.ProjectID, replacement.Revision = row.ID, row.ProjectID, row.Revision
 		replacement.Author = row.Author
 		replacement.Definition = definition
-		replacement.RawDefinition = append(jsontext.Value(nil), latest.document...)
+		replacement.RawDefinition = nil
+		if supportedErr != nil {
+			replacement.RawDefinition = append(jsontext.Value(nil), latest.document...)
+		}
 		result = append(result, &replacement)
 	}
 	return result

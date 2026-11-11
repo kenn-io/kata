@@ -2353,6 +2353,7 @@ func (o *ObserveCronRunRequestOptions) Validate() error {
 			}
 		}
 	}
+
 	if o.Header != nil {
 		if v, ok := any(o.Header).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -2414,6 +2415,7 @@ func (o *ListCronWorkflowsRequestOptions) Validate() error {
 			}
 		}
 	}
+
 	if o.Header != nil {
 		if v, ok := any(o.Header).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -2572,6 +2574,7 @@ func (o *ShowCronWorkflowRequestOptions) Validate() error {
 			}
 		}
 	}
+
 	if o.Header != nil {
 		if v, ok := any(o.Header).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {

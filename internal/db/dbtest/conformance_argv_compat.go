@@ -332,8 +332,8 @@ func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
 			_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, "cron.workflow.deleted", "worker", string(event.Payload), event.HLCPhysicalMS, 0, event.ContentHash)
 			require.NoError(t, err)
 			if operation == "adopt" {
-				target, err := uid.New()
-				require.NoError(t, err)
+				target, uidErr := uid.New()
+				require.NoError(t, uidErr)
 				_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: target, ReplayHorizonEventID: 1, Actor: "worker"})
 			} else {
 				_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, PullCursorEventID: 17, Enabled: true})

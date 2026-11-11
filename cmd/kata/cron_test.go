@@ -839,7 +839,7 @@ func TestCronWorkflowHTTPRefusesArgvWithoutMutation(t *testing.T) {
 		request.Header.Set("Content-Type", "application/json")
 		response, err := env.HTTP.Do(request)
 		require.NoError(t, err)
-		response.Body.Close()
+		require.NoError(t, response.Body.Close())
 		require.Equal(t, http.StatusBadRequest, response.StatusCode)
 	}
 	workflows, err := env.DB.ListCronWorkflows(t.Context(), db.CronList{ProjectID: project.ID})

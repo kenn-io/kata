@@ -263,7 +263,6 @@ func (a CronSQL) checkFreshRunReferences(ctx context.Context, tx *sql.Tx, projec
 				}
 				if err := checkRunWorkflowDocument(document, features, true); err != nil {
 					return err
-
 				}
 			}
 		}

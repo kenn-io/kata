@@ -18,7 +18,6 @@ func DecodeJob(input []byte) (JobDefinition, error) {
 }
 
 // DecodeWorkflow reads stored workflows and rejects unsupported shapes and kinds.
-
 func DecodeWorkflow(input []byte) (WorkflowDefinition, error) {
 	var workflow WorkflowDefinition
 	err := decode(input, &workflow, DefinitionLimit)
@@ -91,9 +90,12 @@ func CheckWorkflowStepJSON(raw []byte) error {
 	return nil
 }
 
-// DecodeHistoricalWorkflow decodes the bounded shape accepted before the
-// argv and null fences. It is only for retaining owner history, not execution.
+// DecodeHistoricalWorkflow accepts supported workflows and the bounded legacy
+// shapes retained for owner history, without applying modern authoring rules.
 func DecodeHistoricalWorkflow(input []byte) (WorkflowDefinition, error) {
+	if workflow, err := DecodeWorkflow(input); err == nil {
+		return workflow, nil
+	}
 	var workflow WorkflowDefinition
 	err := decode(input, &workflow, DefinitionLimit)
 	if err == nil {
@@ -164,7 +166,6 @@ func checkWorkflowNullShapes(input []byte) error {
 
 // CheckWorkflowSupported checks supported versions and steps without applying
 // modern authoring rules to historical documents.
-
 func CheckWorkflowSupported(workflow WorkflowDefinition) error {
 	if workflow.Version != 1 {
 		return invalid("workflow version is not supported")
