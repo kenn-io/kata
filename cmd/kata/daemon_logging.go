@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -13,7 +14,7 @@ import (
 
 // startDaemonLogging owns the process-wide diagnostic sink until shutdown and
 // restart reporting finish. Detached launches already send stderr to this file.
-func startDaemonLogging() (io.Writer, io.Writer, func()) {
+func startDaemonLogging(_ context.Context) (io.Writer, io.Writer, func()) {
 	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "kata daemon: cannot resolve daemon.log: %v\n", err)
@@ -29,6 +30,12 @@ func startDaemonLogging() (io.Writer, io.Writer, func()) {
 	stderrInfo, stderrErr := os.Stderr.Stat()
 	fileInfo, fileErr := file.Stat()
 	sameFile := stderrErr == nil && fileErr == nil && os.SameFile(stderrInfo, fileInfo)
+	if !sameFile && stderrErr == nil {
+		nullInfo, err := os.Stat(os.DevNull)
+		if err == nil && os.SameFile(stderrInfo, nullInfo) && redirectDaemonStderr(file) == nil {
+			sameFile = true
+		}
+	}
 	if sameFile {
 		writer = os.Stderr
 		errorFile = nil

@@ -28,14 +28,27 @@ func TestForegroundDaemonLoggingProcess(t *testing.T) {
 		main()
 		return
 	}
-	if mode == "startup-panic" {
+	if mode == "startup-panic" || mode == "panic-discarded" {
 		resolveDaemonExecutable = func() (string, error) { panic("fixture fatal diagnostic") }
 		_ = runDaemonWithListen(t.Context(), "not-a-host-port", false, true)
 		return
 	}
+	if mode == "restart-after" {
+		writer, _, closeLog := startDaemonLogging(t.Context())
+		fmt.Fprintln(writer, "fixture after exec")
+		fmt.Fprintln(os.Stderr, "fixture direct after exec")
+		closeLog()
+		return
+	}
 	oldOutput := log.Writer()
-	writer, _, closeLog := startDaemonLogging()
+	writer, _, closeLog := startDaemonLogging(t.Context())
 	fmt.Fprintln(writer, "fixture plain diagnostic")
+	fmt.Fprintln(os.Stderr, "fixture direct stderr")
+	if mode == "restart" {
+		require.NoError(t, os.Setenv("KATA_LOGGING_HELPER", "restart-after"))
+		err := reexecDaemon(t.Context(), os.Args[0], []string{"-test.run=^TestForegroundDaemonLoggingProcess$"}, os.Environ(), nil)
+		require.NoError(t, err)
+	}
 	slog.Warn("fixture structured diagnostic")
 	log.Print("fixture standard diagnostic")
 	closeLog()
@@ -44,8 +57,8 @@ func TestForegroundDaemonLoggingProcess(t *testing.T) {
 }
 
 func TestForegroundDaemonEntrypointErrorOnce(t *testing.T) {
-	for _, sameFile := range []bool{false, true} {
-		t.Run(fmt.Sprintf("same-file=%t", sameFile), func(t *testing.T) {
+	for _, mode := range []string{"separate", "same-file", "discarded"} {
+		t.Run(mode, func(t *testing.T) {
 			setupKataEnv(t)
 			t.Setenv("KATA_DSN", "")
 			t.Setenv("PORT", "")
@@ -54,7 +67,7 @@ func TestForegroundDaemonEntrypointErrorOnce(t *testing.T) {
 			require.NoError(t, os.MkdirAll(ns.DataDir, 0o700))
 			logPath := filepath.Join(ns.DataDir, "daemon.log")
 			stderrPath := filepath.Join(t.TempDir(), "stderr")
-			if sameFile {
+			if mode == "same-file" {
 				stderrPath = logPath
 			}
 			stderr, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
@@ -62,9 +75,17 @@ func TestForegroundDaemonEntrypointErrorOnce(t *testing.T) {
 			t.Cleanup(func() { _ = stderr.Close() })
 			child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestForegroundDaemonLoggingProcess$")
 			child.Env = append(os.Environ(), "KATA_LOGGING_HELPER=entrypoint")
-			child.Stderr = stderr
+			if mode != "discarded" {
+				child.Stderr = stderr
+			} else if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+				t.Skip("null stderr redirection is supported on Linux and macOS")
+			}
 			require.Error(t, child.Run())
-			for _, path := range []string{stderrPath, logPath} {
+			paths := []string{stderrPath, logPath}
+			if mode == "discarded" {
+				paths = []string{logPath}
+			}
+			for _, path := range paths {
 				data, err := os.ReadFile(path)
 				require.NoError(t, err)
 				assert.Equal(t, 1, strings.Count(string(data), "invalid --listen value"), "%s: %s", path, data)
@@ -77,8 +98,11 @@ func TestForegroundDaemonEntrypointErrorOnce(t *testing.T) {
 // Logging and crash configuration are process-global, so each mode runs in its
 // own child so the startup panic never reaches the test runner.
 func TestForegroundDaemonLoggingSinks(t *testing.T) {
-	for _, mode := range []string{"discarded", "same-file", "stderr-failed", "startup-panic", "unavailable"} {
+	for _, mode := range []string{"discarded", "restart", "separate", "same-file", "stderr-failed", "startup-panic", "panic-discarded", "unavailable"} {
 		t.Run(mode, func(t *testing.T) {
+			if mode == "restart" && runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+				t.Skip("in-place exec fixture requires Linux or macOS")
+			}
 			if mode == "stderr-failed" && runtime.GOOS != "linux" {
 				t.Skip("fixture requires /dev/full")
 			}
@@ -107,11 +131,11 @@ func TestForegroundDaemonLoggingSinks(t *testing.T) {
 			defer cancel()
 			child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestForegroundDaemonLoggingProcess$")
 			child.Env = append(os.Environ(), "KATA_LOGGING_HELPER="+mode, "GOTRACEBACK=all")
-			if mode != "discarded" {
+			if mode != "discarded" && mode != "restart" && mode != "panic-discarded" {
 				child.Stderr = stderr
 			}
 			err = child.Run()
-			if mode == "startup-panic" {
+			if mode == "startup-panic" || mode == "panic-discarded" {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
@@ -125,15 +149,31 @@ func TestForegroundDaemonLoggingSinks(t *testing.T) {
 			}
 			contents, err := os.ReadFile(path)
 			require.NoError(t, err)
-			if mode != "startup-panic" {
+			if mode != "startup-panic" && mode != "panic-discarded" && mode != "restart" {
 				for _, diagnostic := range []string{"fixture plain diagnostic", "fixture structured diagnostic", "fixture standard diagnostic"} {
 					assert.Equal(t, 1, strings.Count(string(contents), diagnostic), diagnostic)
 				}
 			}
+			if mode == "separate" {
+				stderrContents, err := os.ReadFile(stderrPath)
+				require.NoError(t, err)
+				assert.Contains(t, string(stderrContents), "fixture direct stderr")
+				assert.Contains(t, string(stderrContents), "fixture plain diagnostic")
+				assert.NotContains(t, string(contents), "fixture direct stderr")
+			}
+			if mode == "restart" {
+				for _, diagnostic := range []string{"fixture direct stderr", "fixture after exec", "fixture direct after exec"} {
+					assert.Equal(t, 1, strings.Count(string(contents), diagnostic), diagnostic)
+				}
+			}
+			if mode == "discarded" && (runtime.GOOS == "linux" || runtime.GOOS == "darwin") {
+				assert.Equal(t, 1, strings.Count(string(contents), "fixture direct stderr"))
+			}
 			if mode == "same-file" {
+				assert.Equal(t, 1, strings.Count(string(contents), "fixture direct stderr"))
 				assert.Contains(t, string(contents), "previous diagnostic")
 			}
-			if mode == "startup-panic" {
+			if mode == "startup-panic" || mode == "panic-discarded" {
 				assert.Contains(t, string(contents), "panic: fixture fatal diagnostic")
 				assert.Contains(t, string(contents), "goroutine ")
 			}
