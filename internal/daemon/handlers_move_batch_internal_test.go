@@ -117,25 +117,6 @@ func TestMoveIssuesBatch_SubtreeClaimDenialAndDryRun(t *testing.T) {
 	}
 }
 
-func TestMoveIssuesBatch_RejectsMoreThan50(t *testing.T) {
-	store := openClaimGateHelperDB(t)
-	source, issue := createClaimGateHelperIssue(t, store)
-	target, err := store.CreateProject(t.Context(), "target")
-	require.NoError(t, err)
-	req := &api.MoveIssuesRequest{}
-	req.Body.Actor, req.Body.ToProjectUID = "agent", target.UID
-	for range 51 {
-		req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: issue.UID})
-	}
-	_, err = moveIssuesHandler(ServerConfig{DB: store})(t.Context(), req)
-	var apiErr *api.APIError
-	require.ErrorAs(t, err, &apiErr)
-	require.Equal(t, 400, apiErr.Status)
-	got, err := store.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, source.ID, got.ProjectID)
-}
-
 func TestMoveIssuesBatch_RejectsMultiItemPreview(t *testing.T) {
 	store := openClaimGateHelperDB(t)
 	_, issue := createClaimGateHelperIssue(t, store)

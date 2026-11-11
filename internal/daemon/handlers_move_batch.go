@@ -149,9 +149,6 @@ func moveIssuesHandler(cfg ServerConfig) func(context.Context, *api.MoveIssuesRe
 		if err != nil {
 			return nil, err
 		}
-		if len(in.Body.Items) > moveBatchChunkIssues {
-			return nil, api.NewError(400, "validation", "batch move accepts at most 50 items", "", nil)
-		}
 		if in.Body.Subtree && len(in.Body.Items) > 1 {
 			return nil, api.NewError(400, "validation", "subtree move accepts one item", "", nil)
 		}

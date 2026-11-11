@@ -36,6 +36,24 @@ func postMoveBatch(t *testing.T, env *testenv.Env, body string) batchReply {
 	require.NoError(t, json.Unmarshal(raw, &out))
 	return out
 }
+
+func TestMoveIssuesBatch_HTTPRejectsMoreThan50(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	source, target, issue := seedMovePair(t, env)
+	items := make([]map[string]string, 51)
+	for i := range items {
+		items[i] = map[string]string{"ref": issue.UID}
+	}
+	body, err := json.Marshal(map[string]any{"actor": "tester", "to_project_uid": target.UID, "items": items})
+	require.NoError(t, err)
+	resp := doPostWithIfMatch(t, env, env.URL+"/api/v1/issues/actions/move", string(body), "")
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, source.ID, got.ProjectID)
+}
+
 func TestMoveIssuesBatch_MixedTargetsAndRerun(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	src, a, first := seedMovePair(t, env)

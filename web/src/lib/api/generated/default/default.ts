@@ -1722,7 +1722,7 @@ export const getMoveIssuesUrl = () => {
 }
 
 /**
- * Move independent issues in chunks. On a batch execution error, error.data contains completed results and next_index, where retry can begin. Results may include completed items at or after next_index; reconcile them by index before retrying.
+ * Move independent issues. On an execution error, error.data contains completed results.
  */
 export const moveIssues = async (
   moveIssuesRequestBody: MoveIssuesRequestBody,
