@@ -10,13 +10,14 @@ import (
 )
 
 type preparedFederationRebuildProject struct {
-	id              int64
-	events          []db.FoldEvent
-	projection      db.FoldProjection
-	moveProjection  db.FoldProjection
-	moved           db.FoldProjection
-	decisions       []db.FederatedMoveDecision
-	materialization federationMaterialization
+	id               int64
+	events           []db.FoldEvent
+	projection       db.FoldProjection
+	moveProjection   db.FoldProjection
+	moved            db.FoldProjection
+	decisions        []db.FederatedMoveDecision
+	materialization  federationMaterialization
+	linksUnderWriter bool
 }
 
 type preparedFederationRebuild struct {
@@ -98,10 +99,13 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		p.moved.Issues = maps.Clone(p.projection.Issues)
 		p.moved.Comments = maps.Clone(p.projection.Comments)
 		p.moved.Labels = maps.Clone(p.projection.Labels)
-		db.RestrictFoldProjectWhere(&p.projection, projectUID, func(uid string) bool { _, ok := result.moved[uid]; return !ok })
+		db.RestrictFoldProjectWhere(&p.projection, projectUID, func(uid string) bool {
+			decision, ok := result.moved[uid]
+			return !ok || (decision.Joined && (decision.Active || decision.Exists) && !isFederationRehome(decision))
+		})
 		db.RestrictFoldProjectWhere(&p.moved, projectUID, func(uid string) bool {
 			decision, ok := result.moved[uid]
-			return ok && decision.Joined && (decision.Active || decision.Exists)
+			return ok && isFederationRehome(decision)
 		})
 		m.projection = p.projection
 		m.cronAffected = true
@@ -113,15 +117,13 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		}
 		movedIssueIDs := map[int64]struct{}{}
 		for uid, decision := range result.moved {
-			if !decision.Joined {
+			if !isFederationRehome(decision) {
 				continue
 			}
 			delete(m.staleIssues, uid)
 			delete(m.issueRows, uid)
-			if decision.Exists && decision.SourceID == p.id {
+			if decision.SourceID == p.id {
 				movedIssueIDs[decision.IssueID] = struct{}{}
-			}
-			if decision.Active && slices.Contains(m.linkProjects, decision.TargetID) {
 				m.issueIDs[uid] = decision.IssueID
 			}
 		}
@@ -139,6 +141,16 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 	}
 	for i := range result.projects {
 		p := &result.projects[i]
+		// A former source outside this group can hold links until rehome.
+		for _, decision := range result.moved {
+			if isFederationRehome(decision) && slices.Contains(p.materialization.linkProjects, decision.TargetID) && !slices.Contains(p.materialization.linkProjects, decision.SourceID) {
+				p.linksUnderWriter = true
+				break
+			}
+		}
+		if p.linksUnderWriter {
+			continue
+		}
 		included := map[string]int64{}
 		excluded := map[string]bool{}
 		for _, other := range result.projects {
@@ -209,7 +221,10 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 				if err := moved.apply(ctx, tx, p.id, validator); err != nil {
 					return err
 				}
-				maps.Copy(p.materialization.linkIDs, moved.issueIDs)
+				maps.Copy(p.materialization.issueIDs, moved.issueIDs)
+				if p.materialization.linkIDs != nil {
+					maps.Copy(p.materialization.linkIDs, moved.issueIDs)
+				}
 			}
 		}
 		var groups [][]int64
@@ -219,10 +234,26 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 				continue
 			}
 			groups = append(groups, m.linkProjects)
-			for _, other := range prepared.projects {
-				for uid, id := range other.materialization.linkIDs {
-					if _, ok := m.linkIDs[uid]; ok && id != 0 {
-						m.linkIDs[uid] = id
+			if p.linksUnderWriter {
+				included := map[string]int64{}
+				excluded := map[string]bool{}
+				for _, other := range prepared.projects {
+					if slices.Contains(m.linkProjects, other.id) {
+						maps.Copy(included, other.materialization.issueIDs)
+						for uid := range other.materialization.staleIssues {
+							excluded[uid] = true
+						}
+					}
+				}
+				if err := m.prepareLinks(ctx, tx, p.id, nil, included, excluded); err != nil {
+					return err
+				}
+			} else {
+				for _, other := range prepared.projects {
+					for uid, id := range other.materialization.linkIDs {
+						if _, ok := m.linkIDs[uid]; ok && id != 0 {
+							m.linkIDs[uid] = id
+						}
 					}
 				}
 			}
@@ -237,4 +268,8 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 		}
 		return nil
 	})
+}
+
+func isFederationRehome(decision db.FederatedMoveDecision) bool {
+	return decision.Joined && decision.Active && decision.Exists && decision.SourceID != decision.TargetID
 }
