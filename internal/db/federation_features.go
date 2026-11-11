@@ -190,9 +190,12 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	if err != nil {
 		return "", err
 	}
-	required, err := ProjectWorkflowRequiredFeatures(ctx, q, projectUID)
-	if err != nil {
-		return "", err
+	var required string
+	if cronPresent {
+		required, err = ProjectWorkflowRequiredFeatures(ctx, q, projectUID)
+		if err != nil {
+			return "", err
+		}
 	}
 	if issueMoved {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
