@@ -117,7 +117,7 @@ kata agent setup
 
 Open Codex and run `/hooks` to trust its hooks. Run `kata agent setup --check` to check readiness.
 
-Use `kata agent-hook install` for advanced options and other agents. User scope is the default. Bare installation discovers configured agents and
+Use `kata agent-hook install` for advanced options. User scope is the default. Bare installation discovers configured agents and
 installs their contract plus every available attention direction. Dedicated agent
 configuration directories count as evidence; `.github/` and `.agents/` alone do
 not. `--all` uses the same discovery. Name agents to select them explicitly, even

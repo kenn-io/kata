@@ -247,7 +247,7 @@ the other output modes.
 
 ## Agent setup
 
-In unreleased builds, `kata agent setup [<harness>...]` installs user hooks for Claude Code and Codex. With no names it selects installed agents. Add `--check` to inspect readiness without installing. Open Codex and run `/hooks` when its hooks need review. The command exits 1 when a selected agent needs attention.
+In unreleased builds, `kata agent setup [<harness>...]` installs user hooks for selected agents. With no names it selects installed Claude Code and Codex. Add `--check` to inspect readiness without installing. Open Codex and run `/hooks` when its hooks need review. The command exits 1 when a selected agent needs attention.
 
 ## Agent hook
 

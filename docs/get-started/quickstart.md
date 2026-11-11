@@ -160,8 +160,6 @@ workspace on this machine. Sessions in other directories stay silent:
 kata agent setup
 ```
 
-On released builds, run `kata agent-hook install` instead.
-
 For Codex, open Codex and run `/hooks` to trust the hooks. Run `kata agent setup --check` to check readiness in unreleased builds. See
 [Contract in every session](../workflows/agents.md#contract-in-every-session)
 for harness selection, Hermes's first-turn behavior, and additional Codex
