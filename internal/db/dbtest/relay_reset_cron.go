@@ -2,6 +2,9 @@ package dbtest
 
 import (
 	"crypto/ed25519"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -68,6 +71,22 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, err)
 	_, err = downstream.SetRelayBindingConfig(ctx, replica.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID, AuthorityUID: root.InstanceUID(), UpstreamInstanceUID: root.InstanceUID(), HubPath: []string{root.InstanceUID(), downstream.InstanceUID()}, LocalActor: "company-member", ResetEpoch: 1})
 	require.NoError(t, err)
+	for _, section := range []string{"source", "entity"} {
+		for _, definition := range []string{
+			`{"version":1,"steps":[{"key":"literal","kind":"argv","argv":["echo","hi"]}]}`,
+			`{"version":1,"steps":[{"key":"literal","kind":"argv"}]}`,
+			`{"version":1,"steps":null}`,
+		} {
+			bad := checkpointWithWorkflowDefinition(t, checkpoint, project, pin, private, section, definition)
+			_, _, err := db.DecodeRootResetPayload(pin, bad.Snapshot)
+			require.NoError(t, err, "owner backup integrity decoding preserves held content")
+			err = installer.InstallRelayReset(ctx, bindingUID, bad.Manifest, bad.Snapshot, bad.Translation)
+			require.Error(t, err, "unsupported signed workflow must not be installed")
+			binding, err := downstream.FederationBindingByProject(ctx, replica.ID)
+			require.NoError(t, err)
+			require.Equal(t, int64(1), binding.RelayConfig.ResetEpoch)
+		}
+	}
 	require.NoError(t, installer.InstallRelayReset(ctx, bindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation))
 
 	installedJob, err := downstream.CronJob(ctx, replica.ID, job.UID)
@@ -88,4 +107,41 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	require.NoError(t, installer.InstallRelayReset(ctx, bindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation), "lost commit response retries the exact retained checkpoint")
+}
+
+// checkpointWithWorkflowDefinition signs a historical record without changing
+// the existing records or their creation receipts.
+func checkpointWithWorkflowDefinition(t *testing.T, checkpoint db.RelayResetCheckpoint, project db.Project, pin db.RootKeyPin, private ed25519.PrivateKey, section, definition string) db.RelayResetCheckpoint {
+	t.Helper()
+	var bodies [][]byte
+	selected := &checkpoint.Snapshot.Events
+	if section == "entity" {
+		selected = &checkpoint.Snapshot.Entities
+	}
+	require.NoError(t, json.Unmarshal(*selected, &bodies))
+	var original db.RemoteEvent
+	for _, body := range bodies {
+		event, err := db.DecodeRelaySourceEvent(body)
+		require.NoError(t, err)
+		if strings.HasPrefix(event.Type, "cron.workflow.") {
+			original = event
+			break
+		}
+	}
+	require.NotEmpty(t, original.Type)
+	var payload map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal(original.Payload, &payload))
+	payload["definition"] = jsontext.Value(definition)
+	raw, err := json.Marshal(payload)
+	require.NoError(t, err)
+	event := newRemoteEvent(t, project, nil, original.Type, original.Actor, pin.AuthorityUID, original.HLCPhysicalMS, jsontext.Value(raw))
+	body, err := db.EncodeRelaySourceEvent(event)
+	require.NoError(t, err)
+	bodies = append(bodies, body)
+	*selected, err = json.Marshal(bodies)
+	require.NoError(t, err)
+	checkpoint.Manifest, err = db.SignRootResetManifest(checkpoint.Manifest, checkpoint.Snapshot, private)
+	require.NoError(t, err)
+	checkpoint.Translation.SnapshotDigest = checkpoint.Manifest.SnapshotDigest
+	return checkpoint
 }
