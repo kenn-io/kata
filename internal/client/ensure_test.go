@@ -1457,3 +1457,39 @@ func TestStopRunningDaemonsDoesNotSignalAfterProbeDeadline(t *testing.T) {
 	assert.Contains(t, err.Error(), fmt.Sprintf("pid %d", os.Getpid()))
 	assert.Zero(t, signals, "deadline must prevent signaling collected daemons")
 }
+
+func TestDiscoverForStartKeepsProbeDeadlineEvidence(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	setupKataEnv(t)
+	entered := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		entered <- struct{}{}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	identity, _ := kitdaemon.ReadProcessIdentity(os.Getpid())
+	address := strings.TrimPrefix(server.URL, "http://")
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Network: "tcp", Address: address, StartedAt: time.Now(), ProcessIdentityV2: identity,
+	})
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond) //nolint:kennlint // deadlinetest: the probe waits until the deadline
+	defer cancel()
+	_, release, err := discoverForStart(ctx, ns.DataDir)
+	select {
+	case <-entered:
+	default:
+		t.Fatal("probe did not start")
+	}
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Contains(t, err.Error(), fmt.Sprintf("pid %d", os.Getpid()))
+	assert.Contains(t, err.Error(), address)
+	assert.NotContains(t, err.Error(), "start lock")
+	require.NotNil(t, release)
+	release()
+}
