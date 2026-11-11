@@ -296,6 +296,17 @@ func checkArgvRetainedFeatureProbe(t *testing.T, store db.Storage) error {
 	for _, kind := range []string{"cron.workflow.created", "cron.workflow.updated", "cron.workflow.deleted", "cron.workflow.restored", "cron.workflow.snapshot"} {
 		event := argvCompatRemoteWorkflow(t, project, store.InstanceUID(), supported)
 		event.Type = kind
+		var body db.CronDefinitionEvent
+		require.NoError(t, json.Unmarshal(event.Payload, &body))
+		if kind == "cron.workflow.deleted" {
+			body.DeletedAt = &body.UpdatedAt
+		}
+		if kind == "cron.workflow.snapshot" {
+			body.DefinitionEventUID = workflow.DefinitionEventUID
+			body.DefinitionHLC = &workflow.DefinitionHLC
+		}
+		event.Payload, err = json.Marshal(body)
+		require.NoError(t, err)
 		event.ContentHash, err = db.RemoteEventContentHash(event)
 		require.NoError(t, err)
 		_, err = q.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, event.EventUID, store.InstanceUID(), project.ID, project.Name, kind, "worker", string(event.Payload), event.HLCPhysicalMS, event.HLCCounter, event.ContentHash, event.CreatedAt.UTC().Format(db.EventTimestampFormat))
@@ -357,6 +368,7 @@ func checkArgvDestructiveGuards(t *testing.T, store db.Storage) error {
 			require.NoError(t, json.Unmarshal(event.Payload, &payload))
 			payload["uid"], err = json.Marshal(workflow.UID)
 			require.NoError(t, err)
+			payload["deleted_at"] = payload["updated_at"]
 			raw, err := json.Marshal(payload)
 			require.NoError(t, err)
 			event = newRemoteEvent(t, project, nil, "cron.workflow.deleted", "worker", store.InstanceUID(), event.HLCPhysicalMS, raw)

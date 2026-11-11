@@ -105,6 +105,7 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 		require.NoError(t, json.Unmarshal(event.Payload, &payload))
 		payload["uid"], err = json.Marshal(localWinner.UID)
 		require.NoError(t, err)
+		payload["deleted_at"] = payload["updated_at"]
 		event.Payload, err = json.Marshal(payload)
 		require.NoError(t, err)
 		event = newRemoteEvent(t, replica, nil, "cron.workflow.deleted", "worker", downstream.InstanceUID(), event.HLCPhysicalMS, event.Payload)
