@@ -194,9 +194,9 @@ func emitCronNext(cmd *cobra.Command, result cronNextResult) error {
 	if result.Delivery == "adapter" {
 		label = "Adapter trigger times"
 	}
-	lines := []string{fmt.Sprintf("%s (%s, %s):", label, result.Timezone, result.Status)}
-	if len(result.Occurrences) == 0 {
-		lines = append(lines, "  "+result.Status)
+	lines := []string{fmt.Sprintf("%s (%s, %s)", label, result.Timezone, result.Status)}
+	if len(result.Occurrences) > 0 {
+		lines[0] += ":"
 	}
 	for _, occurrence := range result.Occurrences {
 		lines = append(lines, "  "+occurrence.Local)

@@ -178,7 +178,7 @@ func TestCronNextModes(t *testing.T) {
 	require.NoError(t, err)
 	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--project", project.Name, "cron", "job", "next", jobID, "--from", "2091-01-01T00:00:00Z")
 	require.NoError(t, err)
-	require.Contains(t, out, "  exhausted")
+	require.Equal(t, "Adapter trigger times (UTC, exhausted)\nadapter trigger times do not promise execution\n", out)
 	for _, tc := range []struct {
 		name  string
 		flags []string
