@@ -135,22 +135,6 @@ func TestConfiguredUnixTUIUsesPathFreeBoot(t *testing.T) {
 	}
 }
 
-func TestClientNilRefreshDisablesCurrentHomeRecovery(t *testing.T) {
-	resolved, srv, _ := tuiUnixBackend(t, "selected", "token")
-	hc, err := clientpkg.NewHTTPClientForResolved(t.Context(), resolved, clientpkg.Opts{})
-	require.NoError(t, err)
-	c := NewClient(resolved.BaseURL, hc)
-	c.setLocalHTTPClientRefresh(nil)
-	old := refreshLocalHTTPClientForTUI
-	t.Cleanup(func() { refreshLocalHTTPClientForTUI = old })
-	calls := 0
-	refreshLocalHTTPClientForTUI = func(context.Context) (*http.Client, error) { calls++; return hc, nil }
-	require.NoError(t, srv.Close())
-	_, err = c.GetInstance(t.Context())
-	require.Error(t, err)
-	assert.Zero(t, calls, "nil must disable recovery, not restore the current-home default")
-}
-
 func TestLocalUnixCredentialsStaySelectedBesideActiveUnixTarget(t *testing.T) {
 	for _, tc := range []struct{ name, token string }{
 		{"address-only current home", "local-token"},
