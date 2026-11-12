@@ -18,15 +18,26 @@ On the daemon host, save this example as an executable script, such as
 absolute `kata` path and named daemon with values for that daemon. Use an open
 issue in the configured project. Closing it hides existing requests and prevents
 new notifications; monitor the issue and reopen it or configure another open
-target. The daemon must have authority to write the notification. The example
-requires Python 3. Ensure the hook's CLI environment can resolve the named
-daemon; for a local home without a catalog entry, omit `--daemon` and select
-the same Kata home in the hook environment and verification commands.
+target. The example requires Python 3. Ensure the hook's CLI environment can
+resolve the named daemon; for a local home without a catalog entry, omit
+`--daemon` and select the same Kata home in the hook environment and
+verification commands.
+
+The hook inherits the daemon's environment, plus configured hook variables and
+Kata event variables. Set `KATA_AUTHOR` in the daemon environment for the
+desired local actor; otherwise `USER`, Git `user.name`, then `anonymous` are
+used. Identity mode derives the actor from the token instead; see [Actor](concepts.md#actor).
+Give the CLI a credential with notification write authority: a named daemon
+can use catalog `token`, `token_file`, or `token_env`, while `KATA_AUTH_TOKEN`
+can supply a token and local selection can use the home's `[auth].token`.
+Pinned profiles use their own auth configuration. See [daemon selection and
+credentials](../reference/go-client.md#connect-to-a-catalog-daemon-by-name) for precedence
+and profile details. Set `KATA_*` variables in the daemon environment, not
+`hook.env`.
 
 ```python
 #!/usr/bin/env python3
 import json
-import re
 import subprocess
 import sys
 
@@ -45,9 +56,7 @@ if event.get("project", {}).get("name") != PROJECT:
     sys.exit(0)
 status = event.get("payload", {}).get("status")
 if status in ("failed", "unknown"):
-    uid = event["payload"].get("uid")
-    if not isinstance(uid, str) or not re.fullmatch(r"[0-7][0-9A-HJKMNP-TV-Z]{25}", uid):
-        raise SystemExit("invalid run UID")
+    uid = event["payload"]["uid"]
     subprocess.run(
         [KATA, "--daemon", DAEMON, "--project", PROJECT, "notify", ISSUE_UID,
          "--to", RECIPIENT, "--message",
@@ -62,6 +71,9 @@ with `kata --daemon example-daemon --project example-project cron run show <run-
 The command uses an argument list, so event
 data is not interpreted by a shell. Protect the script and daemon configuration
 from modification by untrusted users: [hooks run with the daemon's authority](../design/architecture.md#hooks-local-automation-with-a-hard-boundary).
+The filter uses the project name resolved when the hook runs. After a project
+rename, update `PROJECT` in the script; otherwise the hook silently
+skips observations and the hook log can still show success.
 
 Add this entry to `<KATA_HOME>/hooks.toml`, using the script's absolute path:
 
@@ -74,7 +86,8 @@ command = "/opt/kata/bin/cron-alert"
 Restart the daemon to load the configuration. Verify the exact project and open
 target on the selected daemon, then record a synthetic failed observation using
 a test job, issue, and recipient. Use the same daemon, project, and exact
-recipient as the hook configuration:
+recipient as the hook configuration. Use a fresh valid run UID for every probe;
+the UID below is an example to replace:
 
 ```sh
 kata --daemon example-daemon projects show example-project
@@ -85,8 +98,11 @@ kata --daemon example-daemon --project example-project inbox --for example-agent
 
 Prepare `observation.json` with `status: "failed"` and valid test-job references;
 the [cron reference](../reference/cron.md#independent-run-evidence) describes the
-fields. On the daemon host, select its `KATA_HOME` and run
-`kata daemon logs --hooks` to check the hook result. Daemon administration uses
+fields. The hook runs asynchronously: wait and recheck the inbox for this run
+UID and the hook log for its result before treating an empty inbox as a failure.
+On the daemon host, select its `KATA_HOME` and run `kata daemon logs --hooks` to check the
+hook result. A replay of identical evidence emits no event and cannot test a
+changed hook. Daemon administration uses
 the current home, not `--daemon`. Compare the configured project and recipient
 exactly: a different project is filtered out, and a different valid recipient
 has a separate inbox.
@@ -109,8 +125,9 @@ handling it, use `kata --daemon example-daemon --project example-project notify
 01J00000000000000000000010 --to example-agent/worker --clear` and inspect run
 history for the full picture.
 
-A spoke can run its own hook for a locally recorded observation. When its event
-is accepted by the hub, the hub also publishes it to its hooks. Configuring the
-recipe on both can therefore notify twice; choose the daemon and route that fit
-your deployment. Federation and hook delivery are asynchronous, so neither a
-spoke observation nor its hub alert implies immediate delivery.
+Hooks can fire for local writes, events accepted from a spoke push, events
+accepted by a relay, and events delivered by federation or relay pulls. A spoke
+that pulls the project can therefore alert on another spoke's run. Configuring
+the recipe on multiple daemons can produce duplicate alerts; choose the daemon
+and route that fit your deployment. Federation and hook delivery are
+asynchronous, so a spoke observation does not imply immediate delivery.
