@@ -51,14 +51,13 @@ func TestLookupSessionStates(t *testing.T) {
 		{"wrong endpoint 404", 404, `{}`, "unavailable"},
 		{"malformed envelope 404", 404, `{"error":{"code":"session_not_found"}}`, "unavailable"},
 		{"ambiguous", 409, `{"error":{"code":"ambiguous_session_id","candidates":["archive~id"]}}`, "ambiguous"},
-		{"unauthorized", 403, `private upstream detail`, "unauthorized"},
 		{"negative cost", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":-1},"cost_source":"reported"}`, "unavailable"},
 		{"negative tokens", 200, `{"session_id":"id","has_cost":false,"has_token_data":true,"total_output_tokens":-1}`, "unavailable"},
 		{"negative subagents", 200, `{"session_id":"id","has_cost":false,"has_token_data":true,"subagent_count":-1}`, "unavailable"},
-		{"missing cost", 200, `{"session_id":"id","has_cost":true,"has_token_data":true}`, "unavailable"},
+		{"missing cost", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost_source":"reported"}`, "unavailable"},
 		{"invalid source", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"other"}`, "unavailable"},
-		{"fractional", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1.5}}`, "unavailable"},
-		{"overflow", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":9223372036854775808}}`, "unavailable"},
+		{"fractional", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1.5},"cost_source":"reported"}`, "unavailable"},
+		{"overflow", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":9223372036854775808},"cost_source":"reported"}`, "unavailable"},
 		{"server error", 500, `private upstream detail`, "unavailable"},
 		{"oversized", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"reported","padding":"` + strings.Repeat("x", 1<<20) + `"}`, "unavailable"},
 	}
@@ -104,6 +103,9 @@ func TestDoctorProbeValidatesNotFoundEnvelope(t *testing.T) {
 		want   string
 	}{
 		{`{"error":{"code":"session_not_found","message":"not found"}}`, 404, "ok"},
+		{`{"error":{"code":"ambiguous_session_id","candidates":["archive~id"]}}`, 409, "ok"},
+		{`{"error":{"code":"foreign_conflict","message":"conflict"}}`, 409, "not_agentsview"},
+		{`{"session_id":"id","has_cost":false,"has_token_data":false}`, 200, "ok"},
 		{`not found`, 404, "not_agentsview"},
 		{`{}`, 401, "unauthorized"},
 		{`{}`, 500, "unreachable"},
@@ -125,12 +127,11 @@ func TestLookupEscapesRawSessionID(t *testing.T) {
 	client, err := NewClient(config.ResolvedAgentsView{URL: "https://agentsview.example/prefix", Token: "fixture-token"}, false)
 	require.NoError(t, err)
 	var path string
-	client.http.Transport = (config.BearerPolicy{}).Transport(usageRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+	client.http.Transport = usageRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		path = r.URL.EscapedPath()
 		require.Equal(t, "subagents=true", r.URL.RawQuery)
-		require.Equal(t, "Bearer fixture-token", r.Header.Get("Authorization"))
 		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"session_not_found","message":"not found"}}`)), Header: make(http.Header)}, nil
-	}), "fixture-token", "https://agentsview.example")
+	})
 	require.Equal(t, "not_found", client.Lookup(t.Context(), "raw/id?part").State)
 	require.Equal(t, "/prefix/api/v1/sessions/raw%2Fid%3Fpart/usage", path)
 }

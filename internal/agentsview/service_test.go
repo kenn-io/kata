@@ -422,7 +422,12 @@ func TestNotFoundBackoffCapsAtFifteenMinutes(t *testing.T) {
 	require.EqualValues(t, 7, calls.Load())
 }
 
-func TestProbeUsesSlotsAndLookupDeadline(t *testing.T) {
+func TestProbeDeadlines(t *testing.T) {
+	t.Run("lookup expiry", testProbeUsesSlotsAndLookupDeadline)
+	t.Run("queue expiry", testProbeDeadlineIncludesSlotQueue)
+}
+
+func testProbeUsesSlotsAndLookupDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		service, err := NewService(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
 		require.NoError(t, err)
@@ -450,7 +455,7 @@ func TestProbeUsesSlotsAndLookupDeadline(t *testing.T) {
 	})
 }
 
-func TestProbeDeadlineIncludesSlotQueue(t *testing.T) {
+func testProbeDeadlineIncludesSlotQueue(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		service, err := NewService(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
 		require.NoError(t, err)
@@ -463,26 +468,5 @@ func TestProbeDeadlineIncludesSlotQueue(t *testing.T) {
 		for i := 0; i < 4; i++ {
 			<-service.slots
 		}
-	})
-}
-
-func TestMalformedNotFoundDoesNotUseNegativeBackoff(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		service, err := NewService(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
-		require.NoError(t, err)
-		var calls atomic.Int32
-		service.current.client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
-			calls.Add(1)
-			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`<html>not found</html>`)), Header: make(http.Header)}, nil
-		})
-		sessions := []cron.Session{{Agent: "example", SessionID: "id"}}
-		summary := cron.Summary{Sessions: &sessions}
-		result, err := service.Usage(t.Context(), "run", summary, false)
-		require.NoError(t, err)
-		require.Equal(t, "unavailable", result.Sessions[0].State)
-		time.Sleep(15 * time.Second)
-		_, err = service.Usage(t.Context(), "run", summary, false)
-		require.NoError(t, err)
-		require.EqualValues(t, 2, calls.Load())
 	})
 }

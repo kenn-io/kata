@@ -35,6 +35,9 @@ func TestReloadAgentsViewKeepsChangedTargetAndRefreshesCredential(t *testing.T) 
 	changed, err = reloadAgentsView(t.Context(), home, service, false)
 	require.NoError(t, err)
 	require.True(t, changed)
+	t.Run("invalid credential keeps client", func(t *testing.T) {
+		assertAgentsViewInvalidCredentialReloadKeepsClient(t)
+	})
 }
 
 func TestAgentsViewDaemonStartupAndReloadLogs(t *testing.T) {
@@ -100,22 +103,30 @@ func TestAgentsViewInvalidConfigStopsDaemonStartup(t *testing.T) {
 	_ = daemonLifecycleEnvironment(t)
 	home := setupKataEnv(t)
 	t.Setenv("KATA_WORKSPACE", t.TempDir())
-	t.Setenv("EXAMPLE_USAGE_TOKEN", "invalid\r\nsecret")
-	for _, configText := range []string{
-		"[agentsview]\nurl = 'https://user:secret@example.com'\n",
-		"[agentsview]\nurl = 'https://agentsview.example'\ntoken_file = '/missing/example-token'\n",
-		"[agentsview]\nurl = 'https://agentsview.example'\ntoken_env = 'EXAMPLE_USAGE_TOKEN'\n",
+	file := filepath.Join(home, "fixture-selector-secret")
+	require.NoError(t, os.WriteFile(file, []byte("fixture\r\ntoken"), 0o600))
+	t.Setenv("FIXTURE_SELECTOR_SECRET", "fixture\r\ntoken")
+	for _, tc := range []struct{ name, kind, selector string }{
+		{"missing file", "token_file", file + "-missing"},
+		{"missing env", "token_env", "FIXTURE_SELECTOR_SECRET_MISSING"},
+		{"invalid file", "token_file", file},
+		{"invalid env", "token_env", "FIXTURE_SELECTOR_SECRET"},
 	} {
-		t.Run(configText, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
+			configText := "[agentsview]\nurl = 'https://agentsview.example'\n" + tc.kind + " = '" + tc.selector + "'\n"
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(configText), 0o600))
 			_, err := preflightDaemonStartup(t.Context(), "127.0.0.1:0", false, true)
 			require.ErrorContains(t, err, "[agentsview]")
-			require.NotContains(t, err.Error(), "secret")
+			require.ErrorContains(t, err, tc.kind)
+			require.ErrorIs(t, err, config.ErrCredentialSource)
+			require.NotContains(t, err.Error(), tc.selector)
+			require.NotContains(t, err.Error(), "fixture\r\ntoken")
 		})
 	}
 }
 
-func TestAgentsViewInvalidCredentialReloadKeepsClient(t *testing.T) {
+func assertAgentsViewInvalidCredentialReloadKeepsClient(t *testing.T) {
+	t.Helper()
 	home := t.TempDir()
 	headers := make(chan string, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -124,16 +135,25 @@ func TestAgentsViewInvalidCredentialReloadKeepsClient(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"code":"session_not_found","message":"not found"}}`))
 	}))
 	t.Cleanup(upstream.Close)
-	t.Setenv("EXAMPLE_USAGE_TOKEN", "good-token")
-	cfg := config.AgentsViewConfig{URL: upstream.URL, TokenEnv: "EXAMPLE_USAGE_TOKEN"}
+	t.Setenv("FIXTURE_SELECTOR_SECRET", "good-token")
+	cfg := config.AgentsViewConfig{URL: upstream.URL, TokenEnv: "FIXTURE_SELECTOR_SECRET"}
 	resolved, err := cfg.Resolve(t.Context(), false)
 	require.NoError(t, err)
 	service, err := agentsview.NewService(resolved, false)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[agentsview]\nurl = '"+upstream.URL+"'\ntoken_env = 'EXAMPLE_USAGE_TOKEN'\n"), 0600))
-	t.Setenv("EXAMPLE_USAGE_TOKEN", "bad\r\ntoken")
+	missingFile := filepath.Join(home, "fixture-selector-secret")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[agentsview]\nurl = '"+upstream.URL+"'\ntoken_file = '"+missingFile+"'\n"), 0600))
+	_, err = reloadAgentsView(t.Context(), home, service, false)
+	require.ErrorIs(t, err, config.ErrCredentialSource)
+	require.ErrorContains(t, err, "token_file")
+	require.NotContains(t, err.Error(), missingFile)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[agentsview]\nurl = '"+upstream.URL+"'\ntoken_env = 'FIXTURE_SELECTOR_SECRET'\n"), 0600))
+	t.Setenv("FIXTURE_SELECTOR_SECRET", "bad\r\ntoken")
 	_, err = reloadAgentsView(t.Context(), home, service, false)
 	require.ErrorContains(t, err, "credential")
+	require.ErrorContains(t, err, "token_env")
+	require.ErrorIs(t, err, config.ErrCredentialSource)
+	require.NotContains(t, err.Error(), "FIXTURE_SELECTOR_SECRET")
 	require.NotContains(t, err.Error(), "bad")
 	sessions := []cron.Session{{Agent: "example", SessionID: "id"}}
 	result, err := service.Usage(t.Context(), "run", cron.Summary{Sessions: &sessions}, false)

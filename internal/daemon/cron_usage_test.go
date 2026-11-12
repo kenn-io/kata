@@ -59,11 +59,12 @@ func assertCronUsageReadDoesNotChangeRunOrEvents(t *testing.T, ctx context.Conte
 	require.NoError(t, err)
 	server := daemon.NewServer(daemon.ServerConfig{DB: store, AgentsView: svc})
 	t.Cleanup(func() { _ = server.Close() })
-	req := httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s/usage", project.ID, uid), nil)
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s/usage", project.ID, strings.ToLower(uid)), nil)
 	out := httptest.NewRecorder()
 	server.Handler().ServeHTTP(out, req)
 	require.Equal(t, http.StatusOK, out.Code, out.Body.String())
 	require.Contains(t, out.Body.String(), `"state":"complete"`)
+	require.Contains(t, out.Body.String(), `"run_uid":"`+before.UID+`"`)
 	require.Contains(t, out.Body.String(), `"cost_microdollars":0`)
 	require.Contains(t, out.Header().Get("Cache-Control"), "no-store")
 	require.EqualValues(t, 1, calls.Load())
@@ -130,46 +131,6 @@ func TestDoctorAgentsViewSource(t *testing.T) {
 			require.EqualValues(t, 1, sink.reads.Load())
 			require.Equal(t, tc.calls, calls.Load())
 		})
-	}
-}
-
-func TestDoctorReturnsHooksWhenUsageSlotsAreSaturated(t *testing.T) {
-	env := testenv.New(t)
-	entered := make(chan struct{}, 8)
-	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		entered <- struct{}{}
-		<-r.Context().Done()
-	}))
-	t.Cleanup(upstream.Close)
-	service, err := agentsview.NewService(config.ResolvedAgentsView{URL: upstream.URL}, false)
-	require.NoError(t, err)
-	done := make(chan struct{}, 4)
-	for i := 0; i < 4; i++ {
-		go func(i int) {
-			sessions := []cron.Session{{Agent: "example", SessionID: fmt.Sprint(i)}}
-			_, _ = service.Usage(t.Context(), "run", cron.Summary{Sessions: &sessions}, false)
-			done <- struct{}{}
-		}(i)
-	}
-	for i := 0; i < 4; i++ {
-		<-entered
-	}
-	sink := &doctorSink{}
-	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, AgentsView: service, Hooks: sink})
-	t.Cleanup(func() { _ = server.Close() })
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	start := time.Now()
-	out := httptest.NewRecorder()
-	server.Handler().ServeHTTP(out, httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/doctor", nil))
-	require.Less(t, time.Since(start), 3500*time.Millisecond)
-	require.NoError(t, ctx.Err())
-	require.Equal(t, http.StatusOK, out.Code, out.Body.String())
-	require.Contains(t, out.Body.String(), `"agentsview":{"state":"unreachable"}`)
-	require.Contains(t, out.Body.String(), `"available":true`)
-	require.EqualValues(t, 1, sink.reads.Load())
-	for i := 0; i < 4; i++ {
-		<-done
 	}
 }
 

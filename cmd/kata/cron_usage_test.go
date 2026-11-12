@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +14,8 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-func TestCronUsageRejectsUnsupportedHumanStates(t *testing.T) {
-	// Human output must refuse unknown states instead of guessing their meaning.
+func TestCronUsageOutputStatesAndSanitization(t *testing.T) {
+	// A newer daemon may return states this client does not recognize.
 	for _, tc := range []struct {
 		name  string
 		usage generated.RunUsage
@@ -22,14 +23,11 @@ func TestCronUsageRejectsUnsupportedHumanStates(t *testing.T) {
 		{"run", generated.RunUsage{State: "future_run_state"}},
 		{"session", generated.RunUsage{State: "unknown", Sessions: []generated.RunSession{{Agent: "example", SessionID: "fixture", State: "future_session_state"}}}},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run("newer daemon "+tc.name, func(t *testing.T) {
 			var out bytes.Buffer
 			require.Error(t, writeCronUsage(&out, tc.usage))
 		})
 	}
-}
-
-func TestCronUsageOutputStatesAndSanitization(t *testing.T) {
 	amount := int64(2410000)
 	step := "main"
 	source := "computed"
@@ -60,6 +58,7 @@ func TestCronUsageOutputStatesAndSanitization(t *testing.T) {
 		want  string
 	}{
 		{generated.RunUsage{State: "complete", CostMicrodollars: &amount, Sessions: []generated.RunSession{{Agent: "example", SessionID: "id", State: "priced", CostMicrodollars: &amount}}}, "Cost: $2.41\n"},
+		{generated.RunUsage{State: "partial", CostMicrodollars: &amount, SessionsIncomplete: true, Sessions: []generated.RunSession{{Agent: "example", SessionID: "id", State: "priced", CostMicrodollars: &amount}}}, "Cost: $2.41+ (0 of 1 sessions not priced)\n"},
 		{generated.RunUsage{State: "unknown", Sessions: []generated.RunSession{{Agent: "example", SessionID: "id", State: "not_found"}}}, "Cost: unknown\n"},
 		{generated.RunUsage{State: "no_sessions"}, "Cost: no sessions\n"},
 	} {
@@ -69,31 +68,12 @@ func TestCronUsageOutputStatesAndSanitization(t *testing.T) {
 			require.True(t, strings.HasPrefix(output.String(), tc.want))
 		})
 	}
-	t.Run("source none", func(t *testing.T) {
-		var usageCalls atomic.Int32
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			switch r.URL.Path {
-			case "/api/v1/projects":
-				_, _ = io.WriteString(w, `{"projects":[{"id":7,"name":"spoke-project"}]}`)
-			case "/api/v1/projects/7":
-				_, _ = io.WriteString(w, `{"project":{"id":7,"name":"spoke-project"}}`)
-			case "/api/v1/projects/7/cron/capabilities":
-				_, _ = io.WriteString(w, `{"project_uid":"id","event_features":[],"usage":{"source":"none"}}`)
-			default:
-				usageCalls.Add(1)
-				w.WriteHeader(http.StatusInternalServerError)
-			}
-		}))
-		t.Cleanup(server.Close)
-		_, _, err := executeCronCLI(t, server.URL, nil, "run", "usage", cronCLIUID(t))
-		require.ErrorContains(t, err, "usage source is disabled")
-		require.Zero(t, usageCalls.Load())
-	})
 }
 
 func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
 	var queries []string
+	var disabled atomic.Bool
+	var disabledCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -102,8 +82,15 @@ func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
 		case "/api/v1/projects/7":
 			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"spoke-project"}}`)
 		case "/api/v1/projects/7/cron/capabilities":
-			_, _ = io.WriteString(w, `{"project_uid":"id","event_features":[],"usage":{"source":"agentsview"}}`)
+			source := "agentsview"
+			if disabled.Load() {
+				source = "none"
+			}
+			_, _ = fmt.Fprintf(w, `{"project_uid":"id","event_features":[],"usage":{"source":%q}}`, source)
 		default:
+			if disabled.Load() {
+				disabledCalls.Add(1)
+			}
 			queries = append(queries, r.URL.RawQuery)
 			_, _ = io.WriteString(w, `{"run_uid":"fixture","state":"complete","cost_microdollars":1000000,"estimated":false,"sessions_incomplete":false,"fetched_at":"2026-01-01T00:00:00Z","sessions":[{"agent":"example","session_id":"id","state":"priced","cost_microdollars":1000000,"cost_source":"reported"}]}`)
 		}
@@ -117,6 +104,7 @@ func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
 		{"human", nil, "Cost: $1.00"},
 		{"json", []string{"--json"}, `"cost_microdollars":1000000`},
 		{"quiet", []string{"--quiet"}, ""},
+		{"agent", []string{"--agent"}, "run_uid=fixture"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resetFlags(t)
@@ -133,7 +121,63 @@ func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
 			} else {
 				require.Contains(t, out.String(), tc.want)
 			}
+			if tc.name == "agent" {
+				require.True(t, strings.HasPrefix(out.String(), "OK "))
+				require.Contains(t, out.String(), "state=complete")
+				require.Contains(t, out.String(), "example id")
+			}
 		})
 	}
-	require.Equal(t, []string{"refresh=true", "refresh=true", "refresh=true"}, queries)
+	require.Equal(t, []string{"refresh=true", "refresh=true", "refresh=true", "refresh=true"}, queries)
+	t.Run("source none", func(t *testing.T) {
+		disabled.Store(true)
+		_, _, err := executeCronCLI(t, server.URL, nil, "run", "usage", cronCLIUID(t))
+		require.ErrorContains(t, err, "usage source is disabled")
+		require.Zero(t, disabledCalls.Load())
+	})
+}
+
+func TestCronUsageCommandAcceptsLargeValidAggregate(t *testing.T) {
+	// Each session can be produced by an upstream response below its 1 MiB cap.
+	sessions := make([]string, 64)
+	for i := range sessions {
+		sessions[i] = fmt.Sprintf(`{"agent":"example","session_id":"id%d","state":"unpriced","unpriced_models":[%q]}`, i, strings.Repeat("m", 40<<10))
+	}
+	body := `{"run_uid":"fixture","state":"unknown","estimated":false,"sessions_incomplete":false,"fetched_at":"2026-01-01T00:00:00Z","sessions":[` + strings.Join(sessions, ",") + `]}`
+	require.Greater(t, len(body), 2<<20)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/projects":
+			_, _ = io.WriteString(w, `{"projects":[{"id":7,"name":"spoke-project"}]}`)
+		case "/api/v1/projects/7":
+			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"spoke-project"}}`)
+		case "/api/v1/projects/7/cron/capabilities":
+			_, _ = io.WriteString(w, `{"project_uid":"id","event_features":[],"usage":{"source":"agentsview"}}`)
+		default:
+			_, _ = io.WriteString(w, body)
+		}
+	}))
+	t.Cleanup(server.Close)
+	for _, tc := range []struct {
+		name  string
+		flags []string
+		want  string
+	}{
+		{"human", nil, "id63"},
+		{"json", []string{"--json"}, `"session_id":"id63"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetFlags(t)
+			command := newRootCmd()
+			var out bytes.Buffer
+			command.SetOut(&out)
+			command.SetErr(io.Discard)
+			command.SetContext(contextWithBaseURL(t.Context(), server.URL))
+			args := append([]string{"--project", "spoke-project"}, tc.flags...)
+			command.SetArgs(append(args, "cron", "run", "usage", cronCLIUID(t)))
+			require.NoError(t, command.Execute())
+			require.Contains(t, out.String(), tc.want)
+		})
+	}
 }
