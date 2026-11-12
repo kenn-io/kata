@@ -101,19 +101,19 @@ func TestCronAdmissionOutlivesProbeDeadlineAcrossPostgresStores(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	lockCtx, lockCancel := context.WithTimeout(ctx, 300*time.Millisecond)
-	defer lockCancel()
-	exclusive, err := other.AcquireFederationProjectExclusiveLock(lockCtx, project.ID)
-	if err == nil {
-		exclusive()
-		t.Fatal("exclusive lock acquired before observation commit")
-	}
-	require.ErrorIs(t, err, context.DeadlineExceeded)
+	// Try the same project-scoped exclusive advisory lock from the other store.
+	// The statement transaction releases it immediately if it was acquired.
+	var acquired bool
+	err = other.QueryRowContext(ctx, `SELECT pg_catalog.pg_try_advisory_xact_lock(
+		pg_catalog.hashtextextended(pg_catalog.current_database() || ':kata:federation:project:' ||
+		pg_catalog.current_schema() || ':' || $1::bigint::text, 0))`, project.ID).Scan(&acquired)
+	require.NoError(t, err)
+	require.False(t, acquired, "exclusive lock acquired before observation commit")
 	close(paused.resume)
 	require.NoError(t, <-done)
 	_, err = writer.CronRun(ctx, project.ID, runUID)
 	require.NoError(t, err)
-	exclusive, err = other.AcquireFederationProjectExclusiveLock(ctx, project.ID)
+	exclusive, err := other.AcquireFederationProjectExclusiveLock(ctx, project.ID)
 	require.NoError(t, err)
 	exclusive()
 }

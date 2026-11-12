@@ -540,12 +540,13 @@ func TestCronSessionObservationRequiresHubFeature(t *testing.T) {
 				_, err = f.spoke.DB.CronRun(t.Context(), f.sp.ID, id)
 				require.NoError(t, err)
 			} else {
-				if mode == "unsupported" {
+				switch mode {
+				case "unsupported":
 					require.Equalf(t, http.StatusConflict, response.StatusCode, "%s", raw)
 					require.Contains(t, string(raw), "unsupported_event_features")
-				} else if mode == "unreachable" {
+				case "unreachable":
 					require.Equalf(t, http.StatusServiceUnavailable, response.StatusCode, "%s", raw)
-				} else {
+				default:
 					require.Equalf(t, http.StatusConflict, response.StatusCode, "%s", raw)
 					require.Contains(t, string(raw), "federated_read_only")
 					require.Contains(t, string(raw), "run sessions")

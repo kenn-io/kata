@@ -13,7 +13,7 @@ func TestSummarySessionsContract(t *testing.T) {
 	session := `{"agent":"claude","session_id":"00000000-0000-4000-8000-000000000001","step":"main"}`
 	sessions := func(n int) string {
 		var entries []string
-		for i := 0; i < n; i++ {
+		for i := range n {
 			entries = append(entries, fmt.Sprintf(`{"agent":"claude","session_id":"00000000-0000-4000-8000-%012d"}`, i))
 		}
 		return strings.Join(entries, ",")

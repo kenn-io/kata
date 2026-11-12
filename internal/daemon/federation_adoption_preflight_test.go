@@ -156,7 +156,7 @@ func TestAdoptionLateSessionRefusesAndCompatibleRetry(t *testing.T) {
 		return &http.Client{Transport: adoptionTransport(func(r *http.Request) (*http.Response, error) {
 			clone := r.Clone(r.Context())
 			u := *r.URL
-			target, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+			target, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, server.URL, nil)
 			u.Scheme, u.Host = target.URL.Scheme, target.URL.Host
 			clone.URL = &u
 			return server.Client().Transport.RoundTrip(clone)
