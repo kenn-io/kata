@@ -95,10 +95,13 @@ func doctorAgentsView(state string) diagnostics.Check {
 		result.Summary = "AgentsView usage: ok"
 	case "unauthorized":
 		result.Summary = "AgentsView usage: unauthorized"
+		result.Fix = "Repair the configured AgentsView token on the daemon host."
 	case "unreachable":
 		result.Summary = "AgentsView usage: unreachable"
+		result.Fix = "Check the configured AgentsView URL and connectivity from the daemon host."
 	case "not_agentsview":
 		result.Summary = "AgentsView usage: not AgentsView"
+		result.Fix = "Select a valid AgentsView base URL running v0.47.0 or newer."
 	default:
 		result.Status = diagnostics.StatusInfo
 		result.Summary = "AgentsView usage: unavailable from selected daemon"
