@@ -15,11 +15,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
+	"go.kenn.io/kit/embedlocal"
 )
 
 // R7/R9: owners can export an exact preferred recipe from local configuration
 // without document generation, daemon connectivity, or credential disclosure.
 func TestFederationEmbeddingRecipeExport(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
 	var calls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	t.Cleanup(provider.Close)
@@ -27,6 +29,7 @@ func TestFederationEmbeddingRecipeExport(t *testing.T) {
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 	t.Setenv("KATA_SERVER", "https://unreachable.example")
+	t.Setenv("KATA_DSN", "invalid://database")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nbase_url = \""+provider.URL+"\"\nmodel = \"example-model\"\ndims = 2\napi_key = \"recipe-test-secret-never-export\"\n"+untrustedWebConfig), 0600))
 	var output bytes.Buffer
 	cmd := newFederationCmd()
@@ -64,7 +67,8 @@ func TestFederationEmbeddingRecipeExport(t *testing.T) {
 	require.Equal(t, recipe, producer.Recipe)
 }
 
-func TestFederationEmbeddingRecipeUnconfigured(t *testing.T) {
+func TestFederationEmbeddingRecipeUnconfiguredAndSharedChoice(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 	var output bytes.Buffer
 	cmd := newFederationCmd()
@@ -74,5 +78,12 @@ func TestFederationEmbeddingRecipeUnconfigured(t *testing.T) {
 	cmd.SetArgs([]string{"embedding-recipe"})
 	err := cmd.Execute()
 	require.ErrorContains(t, err, "embeddings are not configured")
+	require.Empty(t, output.String())
+	require.NoError(t, embedlocal.RecordChoice())
+	require.NoError(t, cmd.Execute())
+	require.NotEmpty(t, output.String())
+	output.Reset()
+	t.Setenv("KATA_DSN", "postgres://example.invalid/kata")
+	require.ErrorContains(t, cmd.Execute(), "embeddings are not configured")
 	require.Empty(t, output.String())
 }

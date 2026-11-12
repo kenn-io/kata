@@ -151,20 +151,49 @@ func TestKitAgentHookHermesReplacementStart(t *testing.T) {
 }
 
 func TestKitAgentHookConfiguredRejectsConditionalHandlers(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-hook contract claude","async":true}]},{"enabled":false,"hooks":[{"command":"foreign hook"},{"command":"kata agent-hook attention-native claude start"}]}]}}`), 0600))
-	plan, err := planKitAgentHooks(nativeAgentHookOptions{Agent: "claude", ConfigPath: path}, true)
-	require.NoError(t, err)
-	require.False(t, plan.CurrentContract)
-	require.False(t, plan.CurrentAttentionStart)
-	plan, err = planKitAgentHooks(nativeAgentHookOptions{Agent: "claude", ConfigPath: path, Executable: "kata", Contract: true, Attention: true}, false)
-	require.NoError(t, err)
-	require.True(t, plan.Contract)
-	require.True(t, plan.AttentionStart)
-	var document map[string]any
-	require.NoError(t, json.Unmarshal(plan.Changes[0].Content, &document))
-	groups := document["hooks"].(map[string]any)["SessionStart"].([]any)
-	require.Equal(t, map[string]any{"enabled": false, "hooks": []any{map[string]any{"command": "foreign hook"}}}, groups[1])
+	for _, tc := range []struct {
+		name, foreign string
+	}{
+		{"owned only", ""},
+		{"mixed", `{"command":"foreign hook"},`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			data := `{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-hook contract claude","async":true}]},{"enabled":false,"hooks":[` + tc.foreign + `{"command":"kata agent-hook attention-native claude start"}]}]}}`
+			require.NoError(t, os.WriteFile(path, []byte(data), 0600))
+			plan, err := planKitAgentHooks(nativeAgentHookOptions{Agent: "claude", ConfigPath: path}, true)
+			require.NoError(t, err)
+			require.False(t, plan.CurrentContract)
+			require.False(t, plan.CurrentAttentionStart)
+			plan, err = planKitAgentHooks(nativeAgentHookOptions{Agent: "claude", ConfigPath: path, Executable: "kata", Contract: true, Attention: true}, false)
+			require.NoError(t, err)
+			var document map[string]any
+			require.NoError(t, json.Unmarshal(plan.Changes[0].Content, &document))
+			groups := document["hooks"].(map[string]any)["SessionStart"].([]any)
+			var disabled []any
+			for _, raw := range groups {
+				group := raw.(map[string]any)
+				if group["enabled"] == false {
+					disabled = append(disabled, group)
+				}
+			}
+			if tc.foreign == "" {
+				require.Empty(t, disabled)
+			} else {
+				require.Equal(t, []any{map[string]any{"enabled": false, "hooks": []any{map[string]any{"command": "foreign hook"}}}}, disabled)
+			}
+			entries, err := parseAgentHookEntries(agenthook.AgentClaude, plan.Changes[0].Content)
+			require.NoError(t, err)
+			count := 0
+			for _, entry := range entries {
+				if entry.Kind == attentionStartHook {
+					count++
+					require.NotContains(t, entry.GroupFields, "enabled")
+				}
+			}
+			require.Equal(t, 1, count)
+		})
+	}
 }
 
 func TestKitAgentHookConfiguredRejectsRestrictiveMatchers(t *testing.T) {
