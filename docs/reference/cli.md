@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-11
+last_edited: 2026-11-12
 ---
 
 # CLI reference
@@ -865,7 +865,9 @@ exclusive and force a strategy:
 For an exhaustive lexical scan, use `--lexical --json`, then pass each
 `next_cursor` back with `--cursor` and the same query and filters until
 `complete` is true. Agent output also includes completeness and continuation;
-human output prints an incomplete-results hint to stderr. Other modes keep
+human output prints a command to continue the search to stderr. The command
+retains the query and filters and uses POSIX syntax on Unix or PowerShell
+syntax on Windows. Other modes keep
 ranked, bounded results without continuation. Their `complete` field is false
 when retrieval is truncated, degraded, or cannot establish exhaustion.
 
@@ -2012,9 +2014,11 @@ it was automatically started; it omits the field when multiple processes are
 listed. An existing process's startup marker survives an in-place restart or
 re-exec. The command exits 0 only when the selected daemon is ready. Stopped or
 unavailable selections and the `version_mismatch` state exit 7; an unknown
-named daemon exits 3. Diagnostics are printed in every output mode.
+named daemon exits 3; other invalid routing configuration, such as a malformed
+`KATA_SERVER` URL, exits 1. Diagnostics are printed in every output mode.
 In agent mode, the `OK daemon` report on stdout indicates that the report was
-produced; a non-ready selection also emits an `ERR status` line on stderr.
+produced; a non-ready selection also emits an `ERR status` line on stderr. See
+the [agent output contract](agent-output.md#stability-contract).
 `daemon diagnose` inspects selection, home,
 database/project identity, schema, process, and federation origin without
 starting or changing anything.

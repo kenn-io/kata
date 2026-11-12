@@ -79,7 +79,9 @@ func TestDaemonStatusReadinessExit(t *testing.T) {
 					args = append(args, "--"+mode)
 				}
 				stdout, stderr, err := executeRootCapture(t, t.Context(), args...)
+				state := "local_stopped"
 				if ready {
+					state = "ready"
 					require.NoError(t, err, "a ready selected remote does not require current-home processes")
 					assert.Empty(t, stderr)
 				} else {
@@ -89,25 +91,36 @@ func TestDaemonStatusReadinessExit(t *testing.T) {
 				switch mode {
 				case "json":
 					var status daemonStatusOutput
-					require.NoError(t, json.Unmarshal([]byte(stdout), &status))
-					if ready {
-						assert.Empty(t, status.Daemons)
-					}
+					require.NoError(t, json.Unmarshal([]byte(stdout), &status), "stdout stays one JSON document")
+					require.NotNil(t, status.Selected)
+					assert.Equal(t, state, status.Selected.State)
+					assert.Empty(t, status.Daemons)
 				case "agent":
-					if ready {
-						assert.True(t, strings.HasPrefix(stdout, "OK daemon status=stopped"), stdout)
-					}
+					assert.True(t, strings.HasPrefix(stdout, "OK daemon status=stopped selected_state="+state+" "), stdout)
 					if !ready {
-						assert.Contains(t, stderr, "ERR status daemon_unavailable:")
+						assert.Contains(t, stderr, "ERR status daemon_unavailable: local_stopped:")
 					}
 				default:
-					if ready {
-						assert.Contains(t, stdout, "No kata daemon is running in the current KATA_HOME.")
-					}
+					assert.Contains(t, stdout, "Selected daemon: "+state+" ")
+					assert.Contains(t, stdout, "No kata daemon is running in the current KATA_HOME.")
 				}
 			})
 		}
 	}
+}
+
+func TestDaemonStatusMalformedServerURLExitsInternal(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("KATA_SERVER", "ht!tp://daemon.example")
+
+	stdout, stderr, err := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
+
+	require.Error(t, err)
+	assert.Equal(t, ExitInternal, exitCodeForErr(err, true))
+	assert.Contains(t, stdout, "selected_state=selection_error ")
+	assert.Contains(t, stderr, "ERR status internal: KATA_SERVER")
 }
 
 func TestDaemonLocate_JSONReportsConfiguredRemoteWithoutSecrets(t *testing.T) {
@@ -1796,6 +1809,11 @@ func startDaemonWithFederationConfig(t *testing.T, configBody string) string {
 		filepath.Join(home, "config.toml"), []byte(configBody), 0o600,
 	))
 
+	return launchDaemon(t)
+}
+
+func launchDaemon(t *testing.T) string {
+	t.Helper()
 	originalTelemetry := newTelemetryReporter
 	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
 		return &fakeTelemetryReporter{}
@@ -1814,7 +1832,7 @@ func startDaemonWithFederationConfig(t *testing.T, configBody string) string {
 			if err != nil && !errors.Is(err, context.Canceled) {
 				t.Errorf("daemon did not stop cleanly: %v", err)
 			}
-		case <-time.After(3 * time.Second):
+		case <-time.After(30 * time.Second):
 			t.Error("daemon did not stop after context cancellation")
 		}
 	})

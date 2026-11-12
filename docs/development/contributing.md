@@ -132,6 +132,16 @@ As of Roborev 0.75, `roborev job show <sha>` and `roborev job wait <sha>` find
 a review of that single commit only. They report no review for a commit that
 a range review covers, so read `roborev job list --json` instead.
 
+### API contract changes
+
+Every HTTP wire-contract change, including an optional response field, needs a new `APISchemaVersion`.
+
+1. Bump `APISchemaVersion` and run `make api-generate`.
+2. Run `go test ./internal/daemon -run '^TestAPISchemaVersionMatchesRecordedContract$'`.
+3. Add the suggested marker with a one-line summary. Keep all base markers and their summaries; you may correct a summary in its existing file.
+
+If another change takes your version, move your marker and any feature minimum checks introduced by your change to the next minor version. Regenerate the combined contract and use its digest in the marker name, retaining the summary suffix.
+
 ### Native agent plugins
 
 The `native-agent-plugins` job in

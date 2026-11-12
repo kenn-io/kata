@@ -3202,24 +3202,29 @@ const toastResyncedTTL = 2 * time.Second
 // resynced toast because the user has to act on the hint, not just notice.
 const toastNoBindingTTL = 3 * time.Second
 
+// tickAfter builds every timer command in this package. Production uses
+// tea.Tick. Tests that run commands inline replace it so a timer does not
+// hold the test for its real duration.
+var tickAfter = tea.Tick
+
 // dayTick checks the wall clock within a minute of resuming from suspend.
 // A fixed interval also avoids constructing midnight inside a DST gap.
 func dayTick() tea.Cmd {
-	return tea.Tick(time.Minute, func(time.Time) tea.Msg { return dayTickMsg{} })
+	return tickAfter(time.Minute, func(time.Time) tea.Msg { return dayTickMsg{} })
 }
 
 // debouncedRefetch returns a tea.Cmd that emits refetchTickMsg after d.
 // The TEA loop receives the message, checks the cache, and dispatches
 // the actual list refetch via lm.refetchCmd.
 func debouncedRefetch(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(time.Time) tea.Msg { return refetchTickMsg{} })
+	return tickAfter(d, func(time.Time) tea.Msg { return refetchTickMsg{} })
 }
 
 // toastExpireCmd schedules a toastExpiredMsg at d. The Update branch
 // double-checks the wall clock before clearing the toast so a fresher
 // toast cannot be cut short by an earlier timer.
 func toastExpireCmd(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(time.Time) tea.Msg { return toastExpiredMsg{} })
+	return tickAfter(d, func(time.Time) tea.Msg { return toastExpiredMsg{} })
 }
 
 // canQuit reports whether a global keystroke (q, ?, R) should be
@@ -3645,7 +3650,7 @@ func (m Model) scheduleDetailFollow() (Model, tea.Cmd) {
 	m = m.markSearchSplitDetailOwned()
 	m.nextDetailFollowGen++
 	tickGen := m.nextDetailFollowGen
-	return m, tea.Tick(detailFollowDebounce, func(time.Time) tea.Msg {
+	return m, tickAfter(detailFollowDebounce, func(time.Time) tea.Msg {
 		return detailFollowTickMsg{gen: tickGen}
 	})
 }

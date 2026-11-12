@@ -194,12 +194,14 @@ func TestRunnerLeavesFailedTurnsOnTheInterval(t *testing.T) {
 				require.NoError(t, err)
 			}
 			failed := make(chan error, 1)
-			runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Hour, OnError: func(err error) {
+			wake := make(chan struct{})
+			runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Hour, Wake: wake, OnError: func(err error) {
 				select {
 				case failed <- err:
 				default:
 				}
 			}}
+			debouncing := observeRunnerDebounce(runner)
 			runCtx, cancel := context.WithCancel(ctx)
 			done := make(chan error, 1)
 			go func() { done <- runner.Run(runCtx) }()
@@ -214,8 +216,8 @@ func TestRunnerLeavesFailedTurnsOnTheInterval(t *testing.T) {
 			case <-time.After(20 * time.Second):
 				t.Fatal("the second turn did not report the outage")
 			}
-			//nolint:kennlint // sleeptest: The runner drives real HTTP relay hops; a bounded observation window shows no third attempt follows the failure.
-			require.Never(t, func() bool { return metadata.Load() > 2 }, time.Second, 20*time.Millisecond, "the failed second turn is not retried until the interval")
+			requireRunnerWaitsForInterval(t, wake, debouncing)
+			require.EqualValues(t, 2, metadata.Load(), "the failed second turn is not retried until the interval")
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
 			require.Equal(t, 2, mirrored(), "the first budgeted turn applied one batch before the outage")
@@ -338,12 +340,14 @@ func TestRunnerLeavesSpokesWithFailedClaimRetriesOnTheInterval(t *testing.T) {
 			}
 			metadata.Store(0)
 			failed := make(chan error, 1)
-			runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Hour, OnError: func(err error) {
+			wake := make(chan struct{})
+			runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Hour, Wake: wake, OnError: func(err error) {
 				select {
 				case failed <- err:
 				default:
 				}
 			}}
+			debouncing := observeRunnerDebounce(runner)
 			runCtx, cancel := context.WithCancel(ctx)
 			done := make(chan error, 1)
 			go func() { done <- runner.Run(runCtx) }()
@@ -353,8 +357,8 @@ func TestRunnerLeavesSpokesWithFailedClaimRetriesOnTheInterval(t *testing.T) {
 			case <-time.After(20 * time.Second):
 				t.Fatal("the failed claim retry was not reported")
 			}
-			//nolint:kennlint // sleeptest: The runner drives real HTTP relay hops; a bounded observation window shows the spoke is not repeated.
-			require.Never(t, func() bool { return metadata.Load() > 1 }, time.Second, 20*time.Millisecond, "a turn with a failed claim retry is not repeated before the interval")
+			requireRunnerWaitsForInterval(t, wake, debouncing)
+			require.EqualValues(t, 1, metadata.Load(), "a turn with a failed claim retry is not repeated before the interval")
 			cancel()
 			require.ErrorIs(t, <-done, context.Canceled)
 			issues, err = relay.store.ListIssues(ctx, db.ListIssuesParams{ProjectID: relay.project.ID})
@@ -410,12 +414,25 @@ func TestRunnerRelayRefusalBackoff(t *testing.T) {
 	require.NoError(t, relay.credentials.StoreFederationCredential(ctx, project.UID, config.FederationCredential{}))
 	wake := make(chan struct{}, 1)
 	outcomes := make(chan error, 128)
+	recovered := make(chan struct{}, 1)
 	runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Second, Wake: wake, Debounce: time.Millisecond, OnError: func(err error) {
 		select {
 		case outcomes <- err:
 		default:
 		}
+	}, OnSpokeResult: func(projectID int64, err error) {
+		if projectID == relay.project.ID && err == nil {
+			select {
+			case recovered <- struct{}{}:
+			default:
+			}
+		}
 	}}
+	// The runner reads refusal time from this clock, so the test crosses the
+	// production one-minute delay without waiting for it.
+	refused := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var sinceRefusal atomic.Int64
+	runner.SetRefusalClockForTest(func() time.Time { return refused.Add(time.Duration(sinceRefusal.Load())) })
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() { done <- runner.Run(runCtx) }()
@@ -439,6 +456,7 @@ func TestRunnerRelayRefusalBackoff(t *testing.T) {
 	if !t.Run("not due", func(t *testing.T) {
 		before := metadata.Load()
 		progress := other.Load()
+		sinceRefusal.Store(int64(time.Minute - time.Nanosecond))
 		wake <- struct{}{}
 		//nolint:kennlint // sleeptest: Observe an independent request after the wake without depending on result callback counts.
 		require.Eventually(t, func() bool { return other.Load() > progress }, 5*time.Second, 20*time.Millisecond)
@@ -449,11 +467,48 @@ func TestRunnerRelayRefusalBackoff(t *testing.T) {
 	}
 	t.Run("due retry and recovery", func(t *testing.T) {
 		repaired.Store(true)
-		//nolint:kennlint // sleeptest: Exercise the production one-minute refusal delay once; lifecycle tests own its full schedule.
-		require.Eventually(t, func() bool {
-			status, err := relay.store.FederationSyncStatusByProject(ctx, relay.project.ID)
-			return err == nil && status.LastError == nil
-		}, 70*time.Second, 20*time.Millisecond)
+		// Exercise the production one-minute refusal delay once; lifecycle tests
+		// own its full schedule.
+		sinceRefusal.Store(int64(time.Minute))
+		wake <- struct{}{}
+		select {
+		case <-recovered:
+		case <-time.After(10 * time.Second):
+			t.Fatal("runner did not retry the refused project once its delay had passed")
+		}
+		status, err := relay.store.FederationSyncStatusByProject(ctx, relay.project.ID)
+		require.NoError(t, err)
+		require.Nil(t, status.LastError)
 		require.Equal(t, int32(2), resets.Load())
 	})
+}
+
+// observeRunnerDebounce reports each wake debounce the runner starts. The
+// debounce never ends, so a woken runner makes no further pass.
+func observeRunnerDebounce(runner *federation.Runner) <-chan struct{} {
+	clock := newManualClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	debouncing := make(chan struct{}, 1)
+	runner.SetDebounceTimerForTest(func(delay time.Duration) federation.Timer {
+		debouncing <- struct{}{}
+		return clock.NewTimer(delay)
+	})
+	return debouncing
+}
+
+// requireRunnerWaitsForInterval proves the runner has no turn left to repeat.
+// It takes an unbuffered wake only between passes, and it debounces that wake
+// only when it was waiting for its interval; a runner that still had a turn to
+// repeat runs it at once instead.
+func requireRunnerWaitsForInterval(t *testing.T, wake chan<- struct{}, debouncing <-chan struct{}) {
+	t.Helper()
+	select {
+	case wake <- struct{}{}:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the runner did not finish its pass")
+	}
+	select {
+	case <-debouncing:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the runner repeated a turn instead of waiting for its interval")
+	}
 }

@@ -29,6 +29,169 @@ describe('App', () => {
     vi.restoreAllMocks()
   })
 
+  it('shows a clicked project from the loaded list and keeps it current', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    history.replaceState(null, '', '/kata?view=all-open')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const otherProjectUID = '01J00000000000000000000003'
+    const initial = snapshot()
+    initial.catalog.push({
+      project: {
+        active: true,
+        id: 8,
+        uid: otherProjectUID,
+        name: 'other-project',
+        metadata: { area: 'Personal' },
+        revision: 1,
+        created_at: '2026-08-01T09:00:00.000Z',
+      },
+      stats: { Open: 1, Closed: 0, LastEventAt: '2026-08-01T12:00:00.000Z' },
+    })
+    const otherIssue = (id: number, uid: string, shortID: string, title: string) => ({
+      ...initial.collection[0]!,
+      id,
+      uid,
+      project_id: 8,
+      project_uid: otherProjectUID,
+      project_name: 'other-project',
+      short_id: shortID,
+      qualified_id: `other-project#${shortID}`,
+      title,
+    })
+    initial.collection.push(otherIssue(2, '01J00000000000000000000004', 'b2', 'Other issue'))
+    const refreshed = structuredClone(initial)
+    refreshed.cursor = 13
+    refreshed.catalog[1]!.stats.Open = 2
+    refreshed.collection.push(
+      otherIssue(3, '01J00000000000000000000005', 'c3', 'Issue from another client'),
+    )
+    const snapshotRequests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotRequests.push(request)
+          if (snapshotRequests.length === 1) {
+            return Response.json(initial, { headers: { ETag: '"snapshot-1"' } })
+          }
+          return Response.json(refreshed, { headers: { ETag: '"snapshot-2"' } })
+        }
+        return Response.json({ error: { code: 'not_found' } }, { status: 404 })
+      }),
+    )
+    render(App)
+    await screen.findByRole('button', { name: /Other issue/ })
+    await waitFor(() => expect(snapshotRequests).toHaveLength(1))
+
+    const projectButton = [
+      ...document.querySelectorAll<HTMLButtonElement>('.project-select-button'),
+    ].find((button) => button.textContent?.includes('other-project'))!
+    await fireEvent.click(projectButton)
+
+    expect(new URL(window.location.href).searchParams.get('scope')).toBe(otherProjectUID)
+    expect(screen.getByRole('heading', { name: 'other-project' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: /Other issue/ })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /Example issue/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled')).not.toBe(
+      'true',
+    )
+    expect(snapshotRequests).toHaveLength(1)
+
+    await fireEvent(window, new Event('focus'))
+
+    expect(await screen.findByRole('button', { name: /Issue from another client/ })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /Example issue/ })).toBeNull()
+    const refresh = new URL(snapshotRequests[1]!.url)
+    expect(refresh.searchParams.get('project_uid')).toBeNull()
+    expect(snapshotRequests[1]!.headers.get('If-None-Match')).toBe('"snapshot-1"')
+  })
+
+  it('blocks a task-limited New task after leaving the task for its project list', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const projectUID = '01J00000000000000000000002'
+    const issueUID = '01J00000000000000000000001'
+    history.replaceState(null, '', `/kata?view=all-open&issue=${issueUID}`)
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const scoped = {
+      ...snapshot(),
+      capabilities: {
+        writable: true,
+        updates: 'poll',
+        actor_policy: 'token',
+        token_audit_read: false,
+        scope: { kind: 'issue_subtree', project_uid: projectUID, root_issue_uid: issueUID },
+        expires_at: '2099-01-01T00:00:00Z',
+        allowed_actions: ['issue.read', 'issue.create_child'],
+        close_requires_evidence: true,
+      },
+    }
+    const selected = {
+      ...scoped,
+      selected: {
+        state: 'available',
+        issue: { ...scoped.collection[0]! },
+        comments: [],
+        labels: [],
+        links: [],
+        recurrences: [],
+        history: [],
+      },
+    }
+    let snapshotReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = new URL(requestOf(input, init).url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+          // Later reads stay in flight, so the list keeps showing the task's snapshot.
+          if (snapshotReads > 1) return new Promise<Response>(() => {})
+          return Response.json(selected, { headers: { ETag: '"snapshot-1"' } })
+        }
+        return Response.json({ error: { code: 'not_found' } }, { status: 404 })
+      }),
+    )
+    render(App)
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
+    )
+
+    const projectButton = [
+      ...document.querySelectorAll<HTMLButtonElement>('.project-select-button'),
+    ].find((button) => button.textContent?.includes('example-project'))!
+    await fireEvent.click(projectButton)
+
+    expect(new URL(window.location.href).searchParams.get('issue')).toBeNull()
+    expect(
+      screen
+        .getByRole('button', {
+          name: 'New task',
+          description: 'Open a task first. This credential can only add subtasks.',
+        })
+        .getAttribute('aria-disabled'),
+    ).toBe('true')
+  })
+
   it('keeps the normalized collection when focus revalidation returns unchanged', async () => {
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
     sessionStorage.setItem(
@@ -585,6 +748,67 @@ describe('App', () => {
     expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
   })
 
+  it.each([false, true])(
+    'recovers an initial daemon roster failure, exhausted: %s',
+    async (exhausted) => {
+      vi.useFakeTimers()
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      let reads = 0
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const target = new URL(String(input), window.location.origin)
+          if (target.pathname === '/api/v1/ui/daemons') {
+            reads++
+            return reads <= (exhausted ? 4 : 1)
+              ? new Response('', { status: 503 })
+              : Response.json(daemonRoster())
+          }
+          if (target.pathname.endsWith('/api/v1/ui/snapshot'))
+            return Response.json(snapshot(), { headers: { ETag: '"snapshot"' } })
+          return Response.json({})
+        }),
+      )
+      render(App)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(screen.queryByRole('button', { name: 'Retry daemon roster' })).toBeNull()
+      await vi.advanceTimersByTimeAsync(exhausted ? 7000 : 1000)
+      await tick()
+      if (exhausted) {
+        await fireEvent.click(screen.getByRole('button', { name: 'Retry daemon roster' }))
+        await vi.advanceTimersByTimeAsync(0)
+        await tick()
+      }
+      expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+      expect(reads).toBe(exhausted ? 5 : 2)
+    },
+  )
+
+  it('cancels pending daemon roster retries on unmount', async () => {
+    vi.useFakeTimers()
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let reads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (new URL(String(input), window.location.origin).pathname === '/api/v1/ui/daemons')
+          reads++
+        return new Response('', { status: 503 })
+      }),
+    )
+    render(App)
+    await vi.advanceTimersByTimeAsync(0)
+    cleanup()
+    await vi.advanceTimersByTimeAsync(7000)
+    expect(reads).toBe(1)
+  })
+
   it('does not fall through to local authority when the initial roster is empty', async () => {
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -708,7 +932,7 @@ describe('App', () => {
         }
         if (target.pathname === '/api/v1/ui/daemons') {
           rosterReads += 1
-          if (rosterReads === 1) return new Response('', { status: 503 })
+          if (rosterReads === 1) return new Response('', { status: 403 })
           markRosterRequested()
           return rosterResponse
         }
@@ -1238,42 +1462,42 @@ describe('App', () => {
     expect(paths).toEqual(['/api/v1/ui/daemons'])
   })
 
-  it('recovers an initial snapshot failure through an in-app retry', async () => {
-    history.replaceState(null, '', '/kata?view=all-open#direct=1')
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    let snapshotReads = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const target = new URL(String(input), window.location.origin)
-        if (target.pathname !== '/api/v1/ui/snapshot') {
-          return new Response('{}', {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        snapshotReads += 1
-        if (snapshotReads === 1) return new Response('', { status: 503 })
-        return new Response(JSON.stringify(snapshot()), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
-        })
-      }),
-    )
-
-    render(App)
-
-    const retry = await screen.findByRole('button', { name: 'Retry' })
-    expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
-    await fireEvent.click(retry)
-
-    expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
-    expect(snapshotReads).toBe(2)
-    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
-  })
+  it.each([false, true])(
+    'recovers an initial snapshot failure, exhausted: %s',
+    async (exhausted) => {
+      vi.useFakeTimers()
+      history.replaceState(null, '', '/kata?view=all-open#direct=1')
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      let snapshotReads = 0
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const target = new URL(String(input), window.location.origin)
+          if (target.pathname !== '/api/v1/ui/snapshot') return Response.json({})
+          snapshotReads++
+          if (snapshotReads <= (exhausted ? 4 : 1)) return new Response('', { status: 503 })
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
+      render(App)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+      await vi.advanceTimersByTimeAsync(exhausted ? 7000 : 1000)
+      await tick()
+      if (exhausted) {
+        expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
+        await fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+        await vi.advanceTimersByTimeAsync(0)
+        await tick()
+      }
+      expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+      expect(snapshotReads).toBe(exhausted ? 5 : 2)
+    },
+  )
 
   it('fences browser authority when project creation rejects the session', async () => {
     history.replaceState(null, '', '/kata#direct=1')
@@ -2036,6 +2260,7 @@ describe('App', () => {
   })
 
   it('offers daemon switching when the default snapshot is unavailable', async () => {
+    vi.useFakeTimers()
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -2083,10 +2308,14 @@ describe('App', () => {
 
     render(App)
 
-    expect((await screen.findByRole('alert')).textContent).toContain("Couldn't load workspace")
+    await vi.advanceTimersByTimeAsync(7000)
+    await tick()
+    expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
-    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await vi.advanceTimersByTimeAsync(0)
+    await tick()
+    expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
   })
 
   it.each(['success', 'creation refusal', 'designation retry', 'conflict', 'event overlap'])(

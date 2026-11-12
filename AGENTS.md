@@ -43,8 +43,6 @@
   or verified section in pull request descriptions.
 - User or Developer Benefit: Pull requests must have a user-facing benefit or improve the developer
   experience, and the body must say which one.
-- Useful Alone: A pull request must be useful if nothing after it merges. Put groundwork in the first
-  PR that uses it, and open a stack's PRs one at a time, each after the one below has been reviewed.
 - English: Write issues and pull requests in English.
 - AI Attribution: End every commit message with a `Co-authored-by:` trailer naming the agent that
   wrote the change.
@@ -67,6 +65,38 @@
   own validation command, or writing a real parser-backed test. If direct
   behavior coverage is not practical, document the manual check instead of
   adding a brittle shell content test.
+
+## Before opening a pull request
+
+- Build for a use you have. Run the change on your own real data, such as an
+  export, archive, or photo library, and say in the body what it did there. If
+  nothing you use needs it yet, don't open it.
+- Make it useful if nothing after it merges. Don't add code that works only
+  once a later PR lands, or a guard for something `main` can't do yet.
+- Start from what the repo already does. Find the closest command, importer,
+  query, or library it already uses, extend it, and name it in the body. If it
+  can't be extended, say why.
+- Add only what the change uses now. Leave out options, states, paging, flags,
+  and API surface until something calls them.
+- Review your diff as a maintainer would: cut what `main` already does and
+  anything without a caller.
+- When review findings keep landing in the same code, rethink the design there
+  instead of patching each one.
+- Before each push, check that your schema, API, and protocol version numbers
+  are still the next ones free on `main`.
+
+## Pull requests from a fork
+
+This section applies only to PRs opened from a fork. PRs from branches in this
+repository are not limited by it.
+
+- Keep one unreviewed PR per stack. Open the next only after a maintainer has
+  reviewed the one below, even if you were asked to open the whole plan.
+  Review usually reshapes a PR, and everything built on it then has to be
+  rebuilt.
+- Keep at most 10 PRs open. Each one waits for a maintainer, and the ones
+  nobody gets to go stale. At 10, hold the next PR and tell the user. Leave
+  open PRs as they are.
 
 ## Commit messages
 
@@ -120,6 +150,9 @@ release, from a breaking change to `feat` to `fix`.
   `lostcancel`; see `.golangci.yml`.
 
 ## Documentation
+
+- Follow the [API contract workflow](docs/development/contributing.md#api-contract-changes)
+  when changing the daemon HTTP API.
 
 - Follow the [page frontmatter policy](docs/development/contributing.md#page-frontmatter)
   when creating or editing guide, operations, and reference pages.

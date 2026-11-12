@@ -587,17 +587,22 @@ func TestList_EmptyStatusHintRetryKeepsFilters(t *testing.T) {
 	}
 	assert.Equal(t, cliHint{Code: "excluded_open", Message: "no closed issues match the filters; 1 open match; see " + next, Next: next}, got.Hints[0])
 
-	// The shell prints the arguments it would pass to kata, one per line.
-	shell := []string{"sh", "-c", `kata() { printf '%s\n' "$@"; }; ` + got.Hints[0].Next}
-	if runtime.GOOS == "windows" {
-		shell = []string{"pwsh", "-NoProfile", "-Command", "function kata { $args }; " + got.Hints[0].Next}
-	}
-	output, err := exec.CommandContext(t.Context(), shell[0], shell[1:]...).Output() //nolint:gosec // G204: the test runs the emitted retry.
-	require.NoError(t, err)
-	out, stderr, err = executeRootCapture(t, ctx, strings.Split(strings.TrimSpace(strings.ReplaceAll(string(output), "\r\n", "\n")), "\n")...)
+	out, stderr, err = executeRootCapture(t, ctx, retryShellArgs(t, got.Hints[0].Next)...)
 	require.NoError(t, err, stderr)
 	assert.Contains(t, out, "hidden match")
 	assert.NotContains(t, out, "unrelated")
+}
+
+func retryShellArgs(t *testing.T, command string) []string {
+	t.Helper()
+	// The shell prints the arguments it would pass to kata, one per line.
+	shell := []string{"sh", "-c", `kata() { printf '%s\n' "$@"; }; ` + command}
+	if runtime.GOOS == "windows" {
+		shell = []string{"pwsh", "-NoProfile", "-Command", "function kata { $args }; " + command}
+	}
+	output, err := exec.CommandContext(t.Context(), shell[0], shell[1:]...).Output() //nolint:gosec // G204: the test runs the emitted retry.
+	require.NoError(t, err)
+	return strings.Split(strings.TrimSpace(strings.ReplaceAll(string(output), "\r\n", "\n")), "\n")
 }
 
 // The count runs once, scoped to the listed project, only for an empty first

@@ -371,8 +371,24 @@ func testUpdateInstallDaemonLifecycle(t *testing.T, fixture func(*testing.T, str
 				require.NoError(t, err)
 				assert.Equal(t, http.StatusOK, status)
 			case "idle shutdown":
-				// Observe the actual exit without sending requests that reset the idle timer.
-				require.Eventually(t, func() bool { return f.record().PID == 0 }, 20*time.Second, 50*time.Millisecond) //nolint:kennlint // sleeptest: idle shutdown is observed through the external daemon runtime record
+				// The replacement advertises the idle policy it inherited. A health
+				// probe does not count as activity, so the deadline stays armed.
+				status, body, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/health", nil)
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, status)
+				var health struct {
+					IdleShutdown *struct {
+						Timeout  string     `json:"timeout"`
+						State    string     `json:"state"`
+						Deadline *time.Time `json:"deadline"`
+					} `json:"idle_shutdown"`
+				}
+				require.NoError(t, json.Unmarshal(body, &health))
+				require.NotNil(t, health.IdleShutdown, "the replacement must still stop itself when idle: %s", body)
+				assert.Equal(t, "10s", health.IdleShutdown.Timeout)
+				assert.Equal(t, "armed", health.IdleShutdown.State)
+				require.NotNil(t, health.IdleShutdown.Deadline)
+				assert.True(t, health.IdleShutdown.Deadline.After(after.StartedAt), "the idle deadline must belong to the replacement")
 			case "read-only TCP":
 				assert.False(t, after.Endpoint().IsUnix())
 				// Anonymous read-only mode must survive the automatic restart.

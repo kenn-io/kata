@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # Configuration
@@ -1129,8 +1129,10 @@ widths up to 768. Widths below 768 require `request_dimensions = true`. A
 precedence over `local = true`. API key settings are ignored only while the
 built-in server is selected. The setup command refuses while that environment
 variable is set and restores the config if a daemon refuses its restart.
-The daemon reuses
-installed files and asks you to run the setup command if a download is needed.
+On SQLite, a recorded shared choice enables the built-in server when no provider
+is configured. PostgreSQL requires explicit setup. The daemon reuses installed
+files. On SQLite, a recorded shared choice allows it to download missing built-in
+files. Otherwise, run the setup command to approve the download.
 Older Kata releases reject the `local` key.
 
 With embeddings disabled, search matches words only. To use an external
