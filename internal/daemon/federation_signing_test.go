@@ -123,7 +123,7 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		t.Cleanup(func() { http.DefaultTransport = previous })
 		require.NoError(t, err)
 		access := &countingFederationAccess{}
-		server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, HostFederationAccess: access, StartedAt: time.Now(), FederationSigning: v, FederationSigningRequired: true})
+		server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, HostFederationAccess: access, StartedAt: time.Now(), FederationSigning: v, FederationSigningRequired: true, FederationSigningExternalURL: base})
 		ingress, err = server.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
 		require.NoError(t, err)
 		client, err := federation.NewClient(t.Context(), base, enrollment.Token, clientpkg.Opts{FederationSigning: &source, Timeout: 60 * time.Second})
@@ -354,7 +354,7 @@ func TestSignedRelayAcceptAllowsSupportedBulkBody(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, verifier.Close()) })
 		time.Sleep(federationsigning.Quarantine)
 		server := daemon.NewServer(daemon.ServerConfig{
-			DB: store, FederationSigning: verifier, FederationSigningRequired: true,
+			DB: store, FederationSigning: verifier, FederationSigningRequired: true, FederationSigningExternalURL: "https://daemon.example",
 		})
 		t.Cleanup(func() { require.NoError(t, server.Close()) })
 
@@ -442,7 +442,11 @@ func TestFederationIngressBoundsConnections(t *testing.T) {
 }
 
 func TestRequiredSigningPreservesLocalBearerLeaseAuthority(t *testing.T) {
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Auth.Token = "owner-bearer"; cfg.FederationSigningRequired = true })
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.Auth.Token = "owner-bearer"
+		cfg.FederationSigningRequired = true
+		cfg.FederationSigningExternalURL = "https://daemon.example"
+	})
 	project, issue := createClaimHubIssueNamed(t, env, "hub-project")
 	resp, raw := envDoRaw(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issues/%s/lease", project.ID, issue.ShortID), nil, map[string]string{"Authorization": "Bearer owner-bearer"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
@@ -483,7 +487,7 @@ func TestSignedNativeCronEnrollment(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = verifier.Close() })
 		access := &countingFederationAccess{}
-		server := daemon.NewServer(daemon.ServerConfig{HostFederationAccess: access, DB: env.DB, Auth: config.AuthConfig{Token: "owner-token"}, FederationSigning: verifier, FederationSigningRequired: true})
+		server := daemon.NewServer(daemon.ServerConfig{HostFederationAccess: access, DB: env.DB, Auth: config.AuthConfig{Token: "owner-token"}, FederationSigning: verifier, FederationSigningRequired: true, FederationSigningExternalURL: "https://daemon.example"})
 		ingress, err := server.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
 		require.NoError(t, err)
 		time.Sleep(federationsigning.Quarantine)
@@ -527,7 +531,7 @@ func TestSignedNativeCronEnrollment(t *testing.T) {
 				_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: token, Actor: "credential-actor", AdminActor: "admin"})
 				require.NoError(t, err)
 			}
-			ordinary := daemon.NewServer(daemon.ServerConfig{DB: env.DB, Auth: auth, FederationSigning: verifier, FederationSigningRequired: true})
+			ordinary := daemon.NewServer(daemon.ServerConfig{DB: env.DB, Auth: auth, FederationSigning: verifier, FederationSigningRequired: true, FederationSigningExternalURL: "https://daemon.example"})
 			t.Cleanup(func() { require.NoError(t, ordinary.Close()) })
 			result := send(ordinary.Handler(), http.MethodPost, path, token, false, payload)
 			want := http.StatusCreated
