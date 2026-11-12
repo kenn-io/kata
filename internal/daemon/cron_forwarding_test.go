@@ -568,7 +568,7 @@ func TestCronSessionObservationDuringAdoption(t *testing.T) {
 	require.NoError(t, err)
 	before, err := f.spoke.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
-	paused := &pausedCronAdoption{TransactionalStore: {Storage: f.spoke.DB}, entered: make(chan struct{}), resume: make(chan struct{})}
+	paused := &pausedCronAdoption{Storage: f.spoke.DB, entered: make(chan struct{}), resume: make(chan struct{})}
 	params := replicaServiceParams()
 	params.ProjectName = project.Name
 	params.AdoptExisting = true

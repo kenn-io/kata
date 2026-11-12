@@ -159,7 +159,7 @@ func TestFederationReplicaWaitsForCommittedObservation(t *testing.T) {
 				require.NoError(t, err)
 				params = rejoinParams(project, "http://hub.example")
 			}
-			wrapped := &signaledProjectLockStore{TransactionalStore: {Storage: store}, entered: make(chan struct{})}
+			wrapped := &signaledProjectLockStore{Storage: store, entered: make(chan struct{})}
 			release, err := federationcoord.BeginSync(t.Context(), "other-process-"+federationcoord.Key(store.InstanceUID(), project.ID), wrapped, project.ID)
 			require.NoError(t, err)
 			t.Cleanup(release)
