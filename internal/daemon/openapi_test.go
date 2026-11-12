@@ -342,6 +342,31 @@ func TestOpenAPICronRunObservationTeammateIsNullable(t *testing.T) {
 	require.True(t, teammate.Nullable, "explicit null freezes an absent teammate attribution")
 }
 
+func TestOpenAPICronSummaryIncompleteOnlyAcceptsTrue(t *testing.T) {
+	doc := OpenAPIDocument()
+	schema := doc.Components.Schemas.Map()["Summary"]
+	require.NotNil(t, schema)
+	for _, tc := range []struct {
+		name  string
+		value map[string]any
+		valid bool
+	}{
+		{"omitted", map[string]any{"version": float64(1)}, true},
+		{"true", map[string]any{"version": float64(1), "sessions_incomplete": true}, true},
+		{"false", map[string]any{"version": float64(1), "sessions_incomplete": false}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := &huma.ValidateResult{}
+			huma.Validate(doc.Components.Schemas, schema, huma.NewPathBuffer(nil, 0), huma.ModeReadFromServer, tc.value, result)
+			if tc.valid {
+				require.Empty(t, result.Errors)
+			} else {
+				require.NotEmpty(t, result.Errors)
+			}
+		})
+	}
+}
+
 func TestOpenAPIDocumentDefinesIdleShutdownHealthStates(t *testing.T) {
 	doc := OpenAPIDocument()
 	health := doc.Components.Schemas.Map()["HealthResponseBody"]
