@@ -7,7 +7,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"strings"
 )
 
 // CronDefinitionSnapshots captures portable definitions and run history
@@ -171,7 +170,7 @@ func RequireAdoptionEventFeatures(advertised string, events []CronEvent) error {
 			return err
 		}
 		required = MergeEventFeatures(required, features)
-		hasSessions = hasSessions || strings.Contains(","+features+",", ","+CronRunSessionsEventFeature+",")
+		hasSessions = hasSessions || RequireEventFeatures(features, CronRunSessionsEventFeature) == nil
 	}
 	if !hasSessions {
 		return nil

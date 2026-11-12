@@ -552,44 +552,44 @@ func fetchFederationRebindMetadata(
 func readFederationHubMetadata(ctx context.Context, client *http.Client, hubURL string, hubProjectID int64) (api.ProjectFederationBody, string, error) {
 	apiClient, err := generated.NewDefaultClient(hubURL, runtime.WithHTTPClient(boundedProbeDoer{client: client, limit: federationRebindResponseLimit + 1}))
 	if err != nil {
-		return api.ProjectFederationBody{}, "", federationReplicaError(ErrFederationReplicaInvalidInput, "build replacement hub metadata request", "")
+		return api.ProjectFederationBody{}, "", federationReplicaError(ErrFederationReplicaInvalidInput, "build hub metadata request", "")
 	}
 	features := db.SupportedEventFeatures
 	result, _ := apiClient.GetFederationProjectMetadataWithResponse(ctx, &generated.GetFederationProjectMetadataRequestOptions{PathParams: &generated.GetFederationProjectMetadataPath{ProjectID: hubProjectID}, Header: &generated.GetFederationProjectMetadataHeaders{XKataEventFeatures: &features}})
 	if result == nil {
-		return api.ProjectFederationBody{}, "", federationReplicaError(ErrFederationReplicaHubUnavailable, "replacement hub metadata request failed", "check the HTTPS catalog endpoint and retry")
+		return api.ProjectFederationBody{}, "", federationReplicaError(ErrFederationReplicaHubUnavailable, "hub metadata request failed", "check the hub endpoint and retry")
 	}
 	response := result.HTTPResponse
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
 		return api.ProjectFederationBody{}, "", federationReplicaError(
 			ErrFederationReplicaCredentialConflict,
-			"replacement hub rejected the existing federation enrollment",
-			"verify this catalog entry points to the same hub",
+			"hub rejected the federation enrollment",
+			"check the hub and enrollment credentials",
 		)
 	}
 	if response.StatusCode == http.StatusNotFound {
 		return api.ProjectFederationBody{}, "", federationReplicaError(
 			ErrFederationReplicaBindingConflict,
-			"replacement hub does not contain the bound federation project",
-			"verify this catalog entry points to the same hub",
+			"hub does not contain the federation project",
+			"check the hub and project",
 		)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return api.ProjectFederationBody{}, "", federationReplicaError(
 			ErrFederationReplicaHubUnavailable,
-			"replacement hub metadata request returned an error",
-			"check the HTTPS catalog endpoint and retry",
+			"hub metadata request returned an error",
+			"check the hub endpoint and retry",
 		)
 	}
 	if len(result.Body) > federationRebindResponseLimit {
-		return api.ProjectFederationBody{}, "", federationReplicaError(ErrFederationReplicaHubUnavailable, "replacement hub metadata response is too large", "check the HTTPS catalog endpoint and retry")
+		return api.ProjectFederationBody{}, "", federationReplicaError(ErrFederationReplicaHubUnavailable, "hub metadata response is too large", "check the hub endpoint and retry")
 	}
 	var metadata api.ProjectFederationBody
 	if err := json.Unmarshal(result.Body, &metadata); err != nil {
 		return api.ProjectFederationBody{}, "", federationReplicaError(
 			ErrFederationReplicaHubUnavailable,
-			"replacement hub returned invalid federation metadata",
-			"check the HTTPS catalog endpoint and retry",
+			"hub returned invalid federation metadata",
+			"check the hub endpoint and retry",
 		)
 	}
 	return metadata, response.Header.Get(db.EventFeaturesHeader), nil
