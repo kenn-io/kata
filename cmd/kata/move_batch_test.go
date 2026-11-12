@@ -93,6 +93,11 @@ func TestParseRefsFrom(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 5001)
 	require.Greater(t, reader.Len(), 1<<20)
+	for _, ending := range []string{"", "\n"} {
+		items, err = parseRefsFrom(strings.NewReader("abc4"+strings.Repeat(" ", (1<<20)-5)+ending), "dst", 5001)
+		require.NoError(t, err)
+		require.Equal(t, []moveBatchItem{{Ref: "abc4", TargetProject: "dst"}}, items)
+	}
 	items, err = parseRefsFrom(strings.NewReader(strings.Repeat("x", 1<<20)+"\nabc4\n"), "dst", 5001)
 	require.NoError(t, err)
 	require.Len(t, items, 2)

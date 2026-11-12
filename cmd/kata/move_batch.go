@@ -96,6 +96,7 @@ func readMoveBatchLine(reader *bufio.Reader) (string, bool, error) {
 	oversized := false
 	for {
 		part, err := reader.ReadSlice('\n')
+		part = bytes.TrimSuffix(part, []byte("\n"))
 		if !oversized {
 			if len(line)+len(part) >= 1<<20 {
 				line, oversized = nil, true
@@ -104,15 +105,12 @@ func readMoveBatchLine(reader *bufio.Reader) (string, bool, error) {
 			}
 		}
 		if err != bufio.ErrBufferFull {
-			return strings.TrimSuffix(string(line), "\n"), oversized, err
+			return string(line), oversized, err
 		}
 	}
 }
 
 func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string) (string, error) {
-	if item.ParseError != "" {
-		return "", &cliError{Message: item.ParseError, Code: "validation", Kind: kindUsage, ExitCode: ExitUsage}
-	}
 	if _, err := shortid.Parse(item.Ref); err != nil {
 		return "", &cliError{Message: "invalid issue ref", Code: "validation", Kind: kindUsage, ExitCode: ExitUsage}
 	}
