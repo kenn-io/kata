@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -296,8 +297,9 @@ func TestAdoptionSameUIDSessionBaselineAndBoundRejoin(t *testing.T) {
 
 // D24: omitted enrollment tokens use the saved hub credential without writing it.
 func TestAdoptionPreflightEmptyTokenUsesSavedCredential(t *testing.T) {
+	t.Setenv("TEST_REPLICA_SIGNING_KEY", strings.Repeat("k", 64))
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
-		for _, name := range []string{"supporting hub", "unsupporting hub", "explicit signing", "late rekey retry", "replaced during probe", "removed during probe", "no saved credential", "different origin", "different project", "session-free"} {
+		for _, name := range []string{"supporting hub after late rekey", "unsupporting hub", "explicit signing", "replaced during probe", "removed during probe", "no saved credential", "different origin", "different project", "session-free"} {
 			t.Run(name, func(t *testing.T) {
 				projectUID, err := uid.New()
 				require.NoError(t, err)
@@ -315,7 +317,7 @@ func TestAdoptionPreflightEmptyTokenUsesSavedCredential(t *testing.T) {
 				credentials := newReplicaCredentialStore()
 				var calls atomic.Int32
 				var saved, replacement config.FederationCredential
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					calls.Add(1)
 					switch name {
 					case "replaced during probe":
@@ -334,7 +336,7 @@ func TestAdoptionPreflightEmptyTokenUsesSavedCredential(t *testing.T) {
 				params := adoptionParams(project, server.URL)
 				params.HubProjectUID = hubUID
 				saved = params.Credential
-				saved.Signing = &signingpolicy.Source{KeyID: "saved", HubURL: server.URL}
+				saved.Signing = &signingpolicy.Source{KeyID: "saved", KeyEnv: "TEST_REPLICA_SIGNING_KEY", HubURL: server.URL}
 				if name == "different origin" {
 					saved.HubURL = "http://other.example"
 				}
@@ -348,14 +350,14 @@ func TestAdoptionPreflightEmptyTokenUsesSavedCredential(t *testing.T) {
 				}
 				params.Credential.Token = ""
 				if name == "explicit signing" {
-					params.Credential.Signing = &signingpolicy.Source{KeyID: "requested", HubURL: server.URL}
+					params.Credential.Signing = &signingpolicy.Source{KeyID: "requested", KeyEnv: "TEST_REPLICA_SIGNING_KEY", HubURL: server.URL}
 				}
 				params.HubClientFactory = func(_ context.Context, c config.FederationCredential) (*http.Client, error) {
 					require.Equal(t, saved, c)
 					return server.Client(), nil
 				}
 				_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
-				success := name == "supporting hub" || name == "explicit signing" || name == "late rekey retry" || name == "session-free"
+				success := name == "supporting hub after late rekey" || name == "explicit signing" || name == "session-free"
 				if success {
 					require.NoError(t, err)
 				} else {
