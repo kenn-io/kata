@@ -1535,11 +1535,10 @@ For a new empty spoke replica, do the same runbook but skip `--adopt-existing`
 in Step 3. The printed `--project <hub-project>` can be used unchanged unless
 you intentionally want a different spoke project name.
 
-For a plaintext private-network hostname, `--hub-url` is the hub API URL used
-for enrollment and, unless the hub requires signing, the URL the spoke stores
-for later pull, push, and lease requests. A hub that requires signing uses its
-`external_url` instead; see [federation signing](federation-signing.md). Use
-plaintext only on trusted private networks; use HTTPS for public networks.
+For a plaintext private-network hostname, `--hub-url` is both the hub API URL
+used for enrollment and the URL the spoke stores for later pull, push, and
+lease requests. Use this only on trusted private networks; use HTTPS for public
+networks.
 
 ```sh
 export HUB_ADMIN_TOKEN="<hub-admin-token>"

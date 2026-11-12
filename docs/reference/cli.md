@@ -2584,14 +2584,8 @@ a missing project selected with `--project` and enable it. The CLI
 should otherwise remain pointed at the spoke daemon so the printed join
 command can include `--adopt-existing` when the spoke project already exists.
 A required-signing hub prints its configured `external_url` in the join command
-with signing key ID and file path placeholders. Replace each whole quoted
-placeholder, including the angle brackets: for example, `'<signing-key-id>'`
-becomes `spoke-key-1` and `'<absolute-path-to-spoke-key>'` becomes
-`/path/to/spoke.key`. Alternatively, use `--signing-key-env` instead of the file
-flag before running it on the spoke.
-If the original enrollment predates required signing or these instructions,
-re-run the same `enroll` command with the same `--token` to print the signed
-join command for the same enrollment.
+with signing key placeholders. See [federation signing](../operations/federation-signing.md#prepare-the-hub-and-spoke)
+for replacing them and re-running enrollment.
 Each `enroll` with a new token creates another grant and leaves earlier tokens
 valid. Replace a project-scoped token with the
 [rotation API](http-api.md#federation-enrollment-and-health-endpoints), which
@@ -2643,9 +2637,7 @@ hub. Do not repair quarantine state by editing SQLite directly.
 `kata federation join` accepts `--signing-key-id` and exactly one of
 `--signing-key-env` or `--signing-key-file`. These select an independent
 secret source for native outbound federation, including metadata, replication
-and leases. Required-signing enrollment commands include placeholders for the
-key ID and file path. The source must be available to both the CLI and spoke
-daemon.
+and leases. The source must be available to both the CLI and spoke daemon.
 
 `kata federation signing configure --project-uid <uid> --key-id <id>` selects
 `--key-env <variable>` or `--key-file <absolute-path>` for an existing credential

@@ -73,9 +73,7 @@ is optional on the ordinary daemon listeners.
    replace `--signing-key-file` with
    `--signing-key-env KATA_SPOKE_SIGNING_KEY`. The same source must exist in
    the spoke CLI and daemon environments because the CLI fetches metadata
-   before saving the enrollment. A spoke that has already joined follows the
-   next paragraph. Optional-signing hubs keep the main API URL in the printed
-   join command.
+   before saving the enrollment.
 
 For an existing spoke, select the key without replacing its bearer. This
 command uses the selected daemon, including `KATA_SERVER` or a daemon catalog
