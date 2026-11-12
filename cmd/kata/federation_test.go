@@ -295,6 +295,8 @@ func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
 	} {
 		assert.Contains(t, out, want)
 	}
+	out = requireCmdOutput(t, env, "federation", "status", "--project", "spoke-cli")
+	assert.Contains(t, out, "hub rejected batch")
 }
 
 func TestFederationQuarantineListHumanAndShow(t *testing.T) {

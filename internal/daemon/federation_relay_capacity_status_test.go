@@ -82,6 +82,12 @@ func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 	}
 	wrapped.failFor = broken.ID
 	require.NoError(t, store.RecordFederationSyncError(ctx, relayed.ID, errors.New("example sync failure"), time.Now().UTC()))
+	_, err = store.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
+		ProjectID: relayed.ID, Direction: db.FederationQuarantineDirectionPush,
+		FirstEventID: 7, LastEventID: 7, EventUIDs: []string{"example-event"},
+		Error: "example held-back batch failure", CreatedAt: time.Now().UTC(),
+	})
+	require.NoError(t, err)
 
 	server := daemon.NewServer(daemon.ServerConfig{DB: wrapped, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
@@ -153,6 +159,11 @@ func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 	require.Equal(t, "example sync failure", *full.LastError)
 	require.NotEmpty(t, *compact.LastError)
 	require.NotContains(t, *compact.LastError, "example sync failure", "the browser's compact status withholds sync error text")
+	require.Len(t, full.ActiveQuarantines, 1)
+	require.Len(t, compact.ActiveQuarantines, 1)
+	require.Equal(t, "example held-back batch failure", full.ActiveQuarantines[0].Error)
+	require.NotContains(t, compact.ActiveQuarantines[0].Error, "example held-back batch failure", "the browser's compact status withholds held-back batch error text")
 	full.LastError = compact.LastError
+	full.ActiveQuarantines[0].Error = compact.ActiveQuarantines[0].Error
 	require.Equal(t, full, compact)
 }
