@@ -267,6 +267,8 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 ### Version history
 
+This table highlights notable changes.
+
 | Version | Change |
 | --- | --- |
 | `0.44.0` | Attachment routes return `503 docbank_key_unavailable` instead of `502 docbank_unauthorized` when the daemon cannot resolve its own Docbank key. Health diagnostics add a `docbank` block. |
@@ -685,9 +687,9 @@ These are the current intentions, not a contractual guarantee:
   `api/openapi.yaml` drifts from the routes, so the published schema cannot
   silently fall out of date with the daemon it describes.
 
-When changing the contract, bump `APISchemaVersion`, regenerate the API artifacts,
-and add a version-history row. Run the API version record test and add the empty
-marker file named in its output. Marker history is permanent; keep every earlier marker.
+When changing the contract, bump `APISchemaVersion` and regenerate the API artifacts.
+Run the API version record test and add the empty marker file named in its output.
+Marker history is permanent; keep every earlier marker.
 
 If you build against this schema and hit a gap, please open an issue. The
 contract is meant to be useful to external clients, and feedback shapes how far

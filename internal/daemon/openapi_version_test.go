@@ -99,9 +99,9 @@ func checkAPIVersionRecord(dir, version string, doc []byte) error {
 	}
 	suggested := fmt.Sprintf("%s.%d.0", strings.TrimPrefix(semver.Major(next), "v"), minor+1)
 	if semver.Compare("v"+version, next) == 0 && count == 1 {
-		return fmt.Errorf("API contract version %s has a stale record (%s); if %s is not yet on origin/main, delete your old marker and add %s; otherwise take %s in APISchemaVersion, api/openapi.yaml, and the version-history row, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), version, filepath.Join(dir, marker), suggested)
+		return fmt.Errorf("API contract version %s has a stale record (%s); if %s is not yet on origin/main, delete your old marker and add %s; otherwise take %s in APISchemaVersion and api/openapi.yaml, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), version, filepath.Join(dir, marker), suggested)
 	}
-	return fmt.Errorf("API contract version %s has older, conflicting, or stale records (%s); take %s in APISchemaVersion, api/openapi.yaml, and the version-history row, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), suggested)
+	return fmt.Errorf("API contract version %s has older, conflicting, or stale records (%s); take %s in APISchemaVersion and api/openapi.yaml, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), suggested)
 }
 
 // contractDocument removes documentation fields from Huma objects while leaving
