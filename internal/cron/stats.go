@@ -7,9 +7,12 @@ import (
 )
 
 const (
+	// RunStatsDefaultWindow is the default time window for run statistics.
 	RunStatsDefaultWindow = 30 * 24 * time.Hour
-	RunStatsMaxWindow     = 366 * 24 * time.Hour
-	RunStatsScanLimit     = 10_000
+	// RunStatsMaxWindow is the maximum time window for run statistics.
+	RunStatsMaxWindow = 366 * 24 * time.Hour
+	// RunStatsScanLimit is the maximum number of runs scanned for statistics.
+	RunStatsScanLimit = 10_000
 )
 
 // RunStatRow contains only the evidence needed for statistics, newest first.
