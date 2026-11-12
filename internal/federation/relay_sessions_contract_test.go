@@ -279,7 +279,7 @@ func TestRelaySessionDirectConversionPublicationRetry(t *testing.T) {
 					project, err := root.store.CreateProject(t.Context(), "shared-project")
 					require.NoError(t, err)
 					root.project = project
-					_, err = root.store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
+					hubBinding, err := root.store.EnableProjectFederation(t.Context(), project.ID, root.account)
 					require.NoError(t, err)
 					public := root.signer.PrivateKey.Public().(ed25519.PublicKey)
 					require.NoError(t, root.store.PinRootAuthority(t.Context(), db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: root.store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
@@ -333,7 +333,7 @@ func TestRelaySessionDirectConversionPublicationRetry(t *testing.T) {
 					}
 					relaySessionHistory(t, peer, true, false)
 					joined, err := daemon.EnsureFederationReplica(t.Context(), peer.store, peer.credentials, nil, daemon.EnsureFederationReplicaParams{
-						HubURL: root.http.URL, HubProjectID: project.ID, HubProjectUID: project.UID, ProjectName: peer.project.Name,
+						HubURL: root.http.URL, HubProjectID: project.ID, HubProjectUID: project.UID, ProjectName: peer.project.Name, ReplayHorizonEventID: hubBinding.ReplayHorizonEventID,
 						Credential: peer.credential, PushEnabled: true, Relay: grant.Relay, RelayLocalActor: peer.account, RelayServeDownstream: true,
 					})
 					require.NoError(t, err)
