@@ -265,8 +265,7 @@ kata agent setup
 
 For Codex, open Codex and run `/hooks` to trust the hooks. Run `kata agent setup --check` to check readiness.
 
-Name other agents with `kata agent setup gemini pi`, or run `kata agent-hook install`
-to set up every configured agent. `kata agent-hook` requires Kata 0.19.0 or later. See
+`kata agent-hook` requires Kata 0.19.0 or later. See
 [Contract in every session](docs/workflows/agents.md#contract-in-every-session)
 for all 18 targets, runtime requirements, attention capabilities and additional
 Codex homes. Contract and available attention hooks are enabled by default;

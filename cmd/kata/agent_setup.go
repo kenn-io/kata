@@ -50,9 +50,8 @@ func checkAgentSetup(ctx context.Context, name string) (agentsetup.Status, error
 		return agentsetup.Status{}, err
 	}
 	plan, err := planNativeAgentHooks(opts, false)
-	// Muse without permission and a Claude or Codex contract-only install keep attention off.
-	contractOnly := err == nil && (name == "claude" || name == "codex") && plan.CurrentContract && !plan.CurrentOwnedAttention
-	if contractOnly || errors.Is(err, errMuseAttentionPermission) {
+	// Muse without permission keeps attention off.
+	if errors.Is(err, errMuseAttentionPermission) {
 		opts.Attention = false
 		plan, err = planNativeAgentHooks(opts, false)
 	}
@@ -68,9 +67,6 @@ func checkAgentSetup(ctx context.Context, name string) (agentsetup.Status, error
 		return status, nil
 	}
 	if name != "claude" && name != "codex" {
-		if name == "muse" && !opts.Attention {
-			return agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: plan.Path, Reason: "Muse attention hooks need permission", NextStep: "kata agent-hook install muse --managed-attention"}, nil
-		}
 		status.State, status.Reason, status.NextStep = agentsetup.StateUnknown, "Hook inspection is unavailable for this agent", "Inspect hooks in the agent"
 		return status, nil
 	}
@@ -98,10 +94,7 @@ func checkAgentSetup(ctx context.Context, name string) (agentsetup.Status, error
 		}
 		state := agentsetup.State(result.State)
 		counts[state] += result.HookCount
-		if state == agentsetup.StateMissing || state == agentsetup.StateOutdated {
-			return agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: plan.Path, Reason: "Hook inspection found conflicting commands", NextStep: "Inspect hooks in the agent"}, nil
-		}
-		if state == agentsetup.StateUnknown || state == agentsetup.StateDisabled {
+		if state == agentsetup.StateMissing || state == agentsetup.StateOutdated || state == agentsetup.StateUnknown || state == agentsetup.StateDisabled {
 			status.State, status.Reason, status.NextStep = state, result.Reason, result.NextStep
 			return status, nil
 		}
@@ -152,24 +145,26 @@ func newAgentSetupCmd() *cobra.Command {
 				names = append(names, capability.Name)
 			}
 		}
+		var kitNames, otherNames []string
+		for _, name := range names {
+			if _, err := agenthook.ParseAgent(name); err == nil {
+				kitNames = append(kitNames, name)
+			} else {
+				otherNames = append(otherNames, name)
+			}
+		}
 		var report agentsetup.Report
 		var err error
-		if len(names) == 0 {
-			report, err = agentsetup.Run(cmd.Context(), agentsetup.Options{CheckOnly: check, SetupCommand: "kata agent setup", Items: items})
+		if len(kitNames) > 0 || len(names) == 0 {
+			report, err = agentsetup.Run(cmd.Context(), agentsetup.Options{Agents: kitNames, CheckOnly: check, SetupCommand: "kata agent setup", Items: items})
 		}
-		for _, name := range names {
-			if _, parseErr := agenthook.ParseAgent(name); parseErr == nil {
-				var result agentsetup.Report
-				result, err = agentsetup.Run(cmd.Context(), agentsetup.Options{Agents: []string{name}, CheckOnly: check, SetupCommand: "kata agent setup", Items: items})
-				report.Rows = append(report.Rows, result.Rows...)
-			} else {
-				var row agentsetup.Row
-				row, err = agentSetupFallback(cmd.Context(), name, check, agentSetupItem(name, output))
-				report.Rows = append(report.Rows, row)
-			}
+		for _, name := range otherNames {
 			if err != nil {
 				break
 			}
+			var row agentsetup.Row
+			row, err = agentSetupFallback(cmd.Context(), name, check, agentSetupItem(name, output))
+			report.Rows = append(report.Rows, row)
 		}
 		if err != nil {
 			return fmt.Errorf("%s", strings.ReplaceAll(err.Error(), "or pass --agent", "or name an agent"))
@@ -181,12 +176,6 @@ func newAgentSetupCmd() *cobra.Command {
 		switch currentOutputMode() {
 		case outputJSON:
 			err = emitJSON(cmd.OutOrStdout(), report)
-		case outputAgent:
-			for _, row := range report.Rows {
-				if _, err = fmt.Fprintf(cmd.OutOrStdout(), "agent=%s piece=%s state=%s reason=%s next_step=%s\n", agentValue(row.Agent), agentValue(row.Piece), row.State, agentValue(row.Reason), agentValue(row.NextStep)); err != nil {
-					return err
-				}
-			}
 		default:
 			err = report.WriteText(cmd.OutOrStdout(), "kata agent setup --check")
 		}

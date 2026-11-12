@@ -160,7 +160,7 @@ workspace on this machine. Setup selects whichever are installed. Sessions in ot
 kata agent setup
 ```
 
-Name other agents with `kata agent setup gemini pi`, or run `kata agent-hook install` to set up every configured agent. The `agent-hook install` command and `--contract-only` require Kata 0.19.0 or later.
+The `agent-hook install` command and `--contract-only` require Kata 0.19.0 or later.
 For Codex, open Codex and run `/hooks` to trust the hooks. Run `kata agent setup --check` to check readiness in unreleased builds. See
 [Contract in every session](../workflows/agents.md#contract-in-every-session)
 for harness selection, Hermes's first-turn behavior, and additional Codex

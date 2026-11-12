@@ -36,7 +36,7 @@ type nativeAgentHookPlan struct {
 	Changes                                                     []nativeAgentHookChange
 	Contract, AttentionStart, AttentionEnd                      bool
 	CurrentContract, CurrentAttentionStart, CurrentAttentionEnd bool
-	CurrentOwnedContract, CurrentOwnedAttention                 bool
+	CurrentOwnedContract                                        bool
 	CurrentAPI                                                  string
 	Warnings                                                    []string
 }

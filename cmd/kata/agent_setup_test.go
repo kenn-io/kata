@@ -49,19 +49,6 @@ func writeAgentHookConfig(t *testing.T, path string, doc any) {
 	require.NoError(t, os.WriteFile(path, data, 0600))
 }
 
-// contractGroup returns the unconditional SessionStart group running the agent's contract hook.
-func contractGroup(doc map[string]any, agent string) map[string]any {
-	for _, raw := range doc["hooks"].(map[string]any)["SessionStart"].([]any) {
-		group := raw.(map[string]any)
-		for _, handler := range group["hooks"].([]any) {
-			if _, conditional := group["if"]; !conditional && strings.Contains(handler.(map[string]any)["command"].(string), "agent-hook contract "+agent) {
-				return group
-			}
-		}
-	}
-	return nil
-}
-
 func TestAgentSetupInstallsClaudeHooks(t *testing.T) {
 	home := isolateAgentHookHomes(t)
 	installClaudeAgentFixture(t)
@@ -108,39 +95,13 @@ func TestAgentSetupCountsOnlyModifiedHooks(t *testing.T) {
 	isolateAgentHookHomes(t)
 	installCodexAgentFixture(t, "normal")
 	t.Setenv("TEST_HOOK_TRUST", "one-modified")
-	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "codex")
+	_, err := runAgentSetup(t, "codex")
 	require.Error(t, err)
-	require.Equal(t, 1, strings.Count(stderr, "Native SessionEnd requires a current Codex runtime"))
 	report, err := runAgentSetup(t, "codex", "--check")
 	require.Error(t, err)
 	require.Equal(t, "modified", report.Rows[0].State)
 	require.Equal(t, 1, report.Rows[0].HookCount)
 	require.Contains(t, report.Rows[0].NextStep, "/hooks")
-}
-
-func TestAgentSetupRepairsConditionalExecutableConflict(t *testing.T) {
-	home := isolateAgentHookHomes(t)
-	installClaudeAgentFixture(t)
-	path := filepath.Join(home, "claude", "settings.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
-	data := `{"hooks":{"SessionStart":[{"if":"condition","hooks":[{"type":"command","command":"/old/kata agent-hook contract claude"}]},{"hooks":[{"type":"command","command":"/other/kata agent-hook contract claude"}]}]}}`
-	require.NoError(t, os.WriteFile(path, []byte(data), 0600))
-	report, err := runAgentSetup(t, "claude")
-	require.NoError(t, err)
-	require.Equal(t, "ok", report.Rows[0].State, report.Rows[0].Reason)
-	doc := readAgentHookConfig(t, path)
-	require.NotNil(t, contractGroup(doc, "claude"))
-	for _, raw := range doc["hooks"].(map[string]any)["SessionStart"].([]any) {
-		group := raw.(map[string]any)
-		if _, conditional := group["if"]; conditional {
-			for _, handler := range group["hooks"].([]any) {
-				require.NotContains(t, handler.(map[string]any)["command"], "agent-hook contract claude")
-			}
-		}
-	}
-	report, err = runAgentSetup(t, "claude", "--check")
-	require.NoError(t, err)
-	require.Equal(t, "ok", report.Rows[0].State, report.Rows[0].Reason)
 }
 
 func TestAgentSetupCodexConditionalGroups(t *testing.T) {
@@ -182,13 +143,6 @@ func TestAgentSetupCodexConditionalGroups(t *testing.T) {
 	doc := readAgentHookConfig(t, path)
 	groups := doc["hooks"].(map[string]any)["SessionStart"].([]any)
 	require.Equal(t, "foreign-hook", groups[1].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"])
-	group := contractGroup(doc, "codex")
-	require.NotNil(t, group, "contract hook must run without a condition")
-	group["if"] = "condition"
-	writeAgentHookConfig(t, path, doc)
-	report, err := runAgentSetup(t, "codex", "--check")
-	require.Error(t, err)
-	require.Equal(t, "outdated", report.Rows[0].State)
 }
 
 func TestAgentSetupExplicitMixedProfiles(t *testing.T) {
@@ -196,11 +150,11 @@ func TestAgentSetupExplicitMixedProfiles(t *testing.T) {
 	report, err := runAgentSetup(t, "antigravity", "gemini", "claude")
 	require.Error(t, err)
 	require.Len(t, report.Rows, 3)
-	for i, agent := range []string{"antigravity", "gemini"} {
+	for i, agent := range []string{"gemini", "claude", "antigravity"} {
 		require.Equal(t, agent, report.Rows[i].Agent)
-		require.Equal(t, "unknown", report.Rows[i].State)
 	}
-	require.Equal(t, "claude", report.Rows[2].Agent)
+	require.Equal(t, "unknown", report.Rows[0].State)
+	require.Equal(t, "unknown", report.Rows[2].State)
 	require.FileExists(t, filepath.Join(home, ".gemini", "config", "hooks.json"))
 	require.FileExists(t, filepath.Join(home, "gemini", ".gemini", "settings.json"))
 }

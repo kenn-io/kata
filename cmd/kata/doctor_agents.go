@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"time"
 
 	"go.kenn.io/kata/internal/diagnostics"
 	"go.kenn.io/kit/agentsetup"
@@ -12,9 +11,7 @@ import (
 
 func doctorAgent(ctx context.Context, name string) diagnostics.Check {
 	display := map[string]string{"claude": "Claude Code", "codex": "Codex"}[name]
-	probe, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	status, err := checkAgentSetup(probe, name)
+	status, err := checkAgentSetup(ctx, name)
 	if err != nil {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: display + ": " + err.Error()}
 	}

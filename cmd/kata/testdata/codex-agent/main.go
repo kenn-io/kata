@@ -16,7 +16,7 @@ func main() { os.Exit(run(os.Getenv("KATA_TEST_CODEX_AGENT"))) }
 // run answers the app-server requests agenthook.Check sends. Trust keys follow
 // Codex's group and handler indices so tests can observe index changes.
 func run(mode string) int {
-	time.Sleep(map[string]time.Duration{"slow": 2 * time.Second, "slower": 4 * time.Second}[mode])
+	time.Sleep(map[string]time.Duration{"slow": 2 * time.Second}[mode])
 	if mode == "hang" {
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		return 0

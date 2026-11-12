@@ -22,25 +22,12 @@ func TestDoctorAgentCodexTrustAndDeadlines(t *testing.T) {
 	t.Setenv("TEST_HOOK_TRUST", "trusted")
 	check = doctorAgent(t.Context(), "codex")
 	require.Equal(t, "ok", string(check.Status), check.Summary)
-	// Three four-second starts exceed the ten-second row bound; one hung start exceeds its five-second bound.
-	for mode, limit := range map[string]time.Duration{"slower": 12 * time.Second, "hang": 8 * time.Second} {
-		t.Setenv("KATA_TEST_CODEX_AGENT", mode)
-		start := time.Now()
-		check = doctorAgent(t.Context(), "codex")
-		require.Less(t, time.Since(start), limit, mode)
-		require.Contains(t, check.Summary, "deadline exceeded", mode)
-	}
-}
-
-func TestDoctorAgentContractOnly(t *testing.T) {
-	isolateAgentHookHomes(t)
-	installClaudeAgentFixture(t)
-	opts, err := agentSetupOptions("claude")
-	require.NoError(t, err)
-	_, err = runHookSetup(t, "install", "claude", "--executable", opts.Executable, "--contract-only")
-	require.NoError(t, err)
-	check := doctorAgent(t.Context(), "claude")
-	require.Equal(t, "ok", string(check.Status), check.Summary)
+	// A hung start exceeds its five-second bound.
+	t.Setenv("KATA_TEST_CODEX_AGENT", "hang")
+	start := time.Now()
+	check = doctorAgent(t.Context(), "codex")
+	require.Less(t, time.Since(start), 8*time.Second)
+	require.Contains(t, check.Summary, "deadline exceeded")
 }
 
 func TestDoctorClaudeHooksAndAbsentCodex(t *testing.T) {

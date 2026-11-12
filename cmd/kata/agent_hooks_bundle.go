@@ -26,7 +26,6 @@ func planKitAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHoo
 	plan.CurrentContract, plan.CurrentAttentionStart, plan.CurrentAttentionEnd = kitAgentHookConfigured(agent, current)
 	for _, entry := range current {
 		plan.CurrentOwnedContract = plan.CurrentOwnedContract || entry.Kind == contractHook
-		plan.CurrentOwnedAttention = plan.CurrentOwnedAttention || entry.Kind == attentionStartHook || entry.Kind == attentionEndHook
 	}
 	data := bytes.Clone(original)
 	dataExists := exists
