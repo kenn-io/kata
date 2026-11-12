@@ -60,3 +60,49 @@ func TestCronUsageChecksCapabilitiesBeforeUsage(t *testing.T) {
 	require.ErrorContains(t, err, "usage source is disabled")
 	require.Zero(t, usageCalls.Load())
 }
+
+func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
+	var queries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/projects":
+			_, _ = io.WriteString(w, `{"projects":[{"id":7,"name":"spoke-project"}]}`)
+		case "/api/v1/projects/7":
+			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"spoke-project"}}`)
+		case "/api/v1/projects/7/cron/capabilities":
+			_, _ = io.WriteString(w, `{"project_uid":"id","event_features":[],"usage":{"source":"agentsview"}}`)
+		default:
+			queries = append(queries, r.URL.RawQuery)
+			_, _ = io.WriteString(w, `{"run_uid":"fixture","state":"complete","cost_microdollars":1000000,"estimated":false,"sessions_incomplete":false,"fetched_at":"2026-01-01T00:00:00Z","sessions":[]}`)
+		}
+	}))
+	t.Cleanup(server.Close)
+	for _, tc := range []struct {
+		name  string
+		flags []string
+		want  string
+	}{
+		{"human", nil, "Cost: $1.00"},
+		{"json", []string{"--json"}, `"cost_microdollars":1000000`},
+		{"quiet", []string{"--quiet"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetFlags(t)
+			command := newRootCmd()
+			var out bytes.Buffer
+			command.SetOut(&out)
+			command.SetErr(io.Discard)
+			command.SetContext(contextWithBaseURL(t.Context(), server.URL))
+			args := append([]string{"--project", "spoke-project"}, tc.flags...)
+			command.SetArgs(append(args, "cron", "run", "usage", cronCLIUID(t), "--refresh"))
+			require.NoError(t, command.Execute())
+			if tc.want == "" {
+				require.Empty(t, out.String())
+			} else {
+				require.Contains(t, out.String(), tc.want)
+			}
+		})
+	}
+	require.Equal(t, []string{"refresh=true", "refresh=true", "refresh=true"}, queries)
+}

@@ -273,3 +273,174 @@ func TestRequestBudgetExpiryDoesNotPoisonCache(t *testing.T) {
 	require.Equal(t, "not_found", gen.lookup(t.Context(), slots, "example", "id", false).fact.State)
 	require.EqualValues(t, 2, calls.Load())
 }
+
+func TestUsageAssemblesRecordedSession(t *testing.T) {
+	service, err := NewService(config.ResolvedAgentsView{URL: "https://api.example", BrowserURL: "https://browser.example/archive"}, false)
+	require.NoError(t, err)
+	service.current.client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"session_id":"archive~canonical","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"reported"}`)), Header: make(http.Header)}, nil
+	})
+	step := "inspect"
+	sessions := []cron.Session{{Agent: "example", SessionID: "raw-id", Step: &step}}
+	result, err := service.Usage(t.Context(), "run", cron.Summary{Sessions: &sessions}, false)
+	require.NoError(t, err)
+	require.Len(t, result.Sessions, 1)
+	require.Equal(t, "archive~canonical", result.Sessions[0].CanonicalSessionID)
+	require.Equal(t, &step, result.Sessions[0].Step)
+	require.Equal(t, "https://browser.example/archive/sessions/example/raw-id", result.Sessions[0].URL)
+}
+
+func TestSharedLookupSurvivesFirstCallerCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service, err := NewService(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
+		require.NoError(t, err)
+		var calls atomic.Int32
+		release := make(chan struct{})
+		service.current.client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls.Add(1)
+			<-release
+			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header)}, nil
+		})
+		sessions := []cron.Session{{Agent: "example", SessionID: "id"}}
+		summary := cron.Summary{Sessions: &sessions}
+		ctx, cancel := context.WithCancel(t.Context())
+		first, second := make(chan RunUsage, 1), make(chan RunUsage, 1)
+		go func() { result, _ := service.Usage(ctx, "run", summary, false); first <- result }()
+		synctest.Wait()
+		go func() { result, _ := service.Usage(t.Context(), "run", summary, false); second <- result }()
+		synctest.Wait()
+		cancel()
+		require.Equal(t, "unavailable", (<-first).Sessions[0].State)
+		close(release)
+		require.Equal(t, "not_found", (<-second).Sessions[0].State)
+		require.EqualValues(t, 1, calls.Load())
+	})
+}
+
+func TestUsageQueueGetsFullLookupDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service, err := NewService(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
+		require.NoError(t, err)
+		service.current.client.http.Transport = usageRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			select {
+			case <-time.After(1500 * time.Millisecond):
+				return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header)}, nil
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			}
+		})
+		sessions := make([]cron.Session, 8)
+		for i := range sessions {
+			sessions[i] = cron.Session{Agent: "example", SessionID: fmt.Sprint(i)}
+		}
+		result, err := service.Usage(t.Context(), "run", cron.Summary{Sessions: &sessions}, false)
+		require.NoError(t, err)
+		require.Len(t, result.Sessions, 8)
+		for _, session := range result.Sessions {
+			require.Equal(t, "not_found", session.State)
+		}
+	})
+}
+
+func TestLookupTimeoutCachedForFifteenSeconds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gen := testGeneration(t)
+		var calls atomic.Int32
+		gen.client.http.Transport = usageRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calls.Add(1)
+			<-r.Context().Done()
+			return nil, r.Context().Err()
+		})
+		slots := make(chan struct{}, 4)
+		start := time.Now()
+		require.Equal(t, "unavailable", gen.lookup(t.Context(), slots, "example", "id", false).fact.State)
+		require.Equal(t, 2*time.Second, time.Since(start))
+		time.Sleep(15*time.Second - time.Nanosecond)
+		gen.lookup(t.Context(), slots, "example", "id", false)
+		require.EqualValues(t, 1, calls.Load())
+		time.Sleep(time.Nanosecond)
+		gen.lookup(t.Context(), slots, "example", "id", false)
+		require.EqualValues(t, 2, calls.Load())
+	})
+}
+
+func TestUsageRequestBudgetExpiresWhileQueued(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service, err := NewService(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
+		require.NoError(t, err)
+		var calls atomic.Int32
+		service.current.client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls.Add(1)
+			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header)}, nil
+		})
+		for i := 0; i < 4; i++ {
+			service.slots <- struct{}{}
+		}
+		sessions := []cron.Session{{Agent: "example", SessionID: "id"}}
+		start := time.Now()
+		result, err := service.Usage(t.Context(), "run", cron.Summary{Sessions: &sessions}, false)
+		require.NoError(t, err)
+		require.Equal(t, 5*time.Second, time.Since(start))
+		require.Equal(t, "unavailable", result.Sessions[0].State)
+		require.Zero(t, calls.Load())
+		for i := 0; i < 4; i++ {
+			<-service.slots
+		}
+		// Let the expired flight finish before starting a new request.
+		synctest.Wait()
+		result, err = service.Usage(t.Context(), "run", cron.Summary{Sessions: &sessions}, false)
+		require.NoError(t, err)
+		require.Equal(t, "not_found", result.Sessions[0].State)
+		require.EqualValues(t, 1, calls.Load())
+	})
+}
+
+func TestNotFoundBackoffCapsAtFifteenMinutes(t *testing.T) {
+	gen := testGeneration(t)
+	var calls atomic.Int32
+	gen.client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header)}, nil
+	})
+	now := time.Now()
+	gen.now = func() time.Time { return now }
+	slots := make(chan struct{}, 4)
+	for _, ttl := range []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 15 * time.Minute, 15 * time.Minute} {
+		gen.lookup(t.Context(), slots, "example", "id", false)
+		expected := calls.Load()
+		now = now.Add(ttl - time.Nanosecond)
+		gen.lookup(t.Context(), slots, "example", "id", false)
+		require.Equal(t, expected, calls.Load())
+		now = now.Add(time.Nanosecond)
+	}
+	gen.lookup(t.Context(), slots, "example", "id", false)
+	require.EqualValues(t, 7, calls.Load())
+}
+
+func TestProbeUsesSlotsAndLookupDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service, err := NewService(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
+		require.NoError(t, err)
+		var calls atomic.Int32
+		service.current.client.http.Transport = usageRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calls.Add(1)
+			<-r.Context().Done()
+			return nil, r.Context().Err()
+		})
+		for i := 0; i < 4; i++ {
+			service.slots <- struct{}{}
+		}
+		done := make(chan string, 1)
+		start := time.Now()
+		go func() { done <- service.Probe(t.Context()) }()
+		synctest.Wait()
+		require.Zero(t, calls.Load())
+		<-service.slots
+		require.Equal(t, "unreachable", <-done)
+		require.Equal(t, 2*time.Second, time.Since(start))
+		require.EqualValues(t, 1, calls.Load())
+		for i := 0; i < 3; i++ {
+			<-service.slots
+		}
+	})
+}

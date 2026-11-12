@@ -24,6 +24,11 @@ func TestLookupSessionStates(t *testing.T) {
 		{"not found", 404, `{}`, "not_found"},
 		{"ambiguous", 409, `{"error":{"code":"ambiguous_session_id","candidates":["archive~id"]}}`, "ambiguous"},
 		{"unauthorized", 403, `private upstream detail`, "unauthorized"},
+		{"negative cost", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":-1},"cost_source":"reported"}`, "unavailable"},
+		{"negative tokens", 200, `{"session_id":"id","has_cost":false,"has_token_data":true,"total_output_tokens":-1}`, "unavailable"},
+		{"negative subagents", 200, `{"session_id":"id","has_cost":false,"has_token_data":true,"subagent_count":-1}`, "unavailable"},
+		{"missing cost", 200, `{"session_id":"id","has_cost":true,"has_token_data":true}`, "unavailable"},
+		{"invalid source", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"other"}`, "unavailable"},
 		{"fractional", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1.5}}`, "unavailable"},
 		{"overflow", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":9223372036854775808}}`, "unavailable"},
 		{"server error", 500, `private upstream detail`, "unavailable"},
@@ -102,4 +107,16 @@ func TestDoctorProbeValidatesNotFoundEnvelope(t *testing.T) {
 			require.Equal(t, tc.want, client.Probe(t.Context()))
 		})
 	}
+}
+
+func TestLookupEscapesRawSessionID(t *testing.T) {
+	client, err := NewClient(config.ResolvedAgentsView{URL: "https://agentsview.example/prefix"}, false)
+	require.NoError(t, err)
+	var path string
+	client.http.Transport = usageRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		path = r.URL.EscapedPath()
+		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header)}, nil
+	})
+	require.Equal(t, "not_found", client.Lookup(t.Context(), "raw/id?part").State)
+	require.Equal(t, "/prefix/api/v1/sessions/raw%2Fid%3Fpart/usage", path)
 }

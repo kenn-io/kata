@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,4 +35,24 @@ func TestAgentsViewConfigTargetAndCredential(t *testing.T) {
 	_, err = cfg.Resolve(t.Context(), true)
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "/missing/fixture")
+}
+
+func TestAgentsViewConfigBrowserAndFileCredential(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.WriteFile(file, []byte("fixture-token\n"), 0o600))
+	cfg := AgentsViewConfig{URL: "https://agentsview.example/archive", TokenFile: file}
+	got, err := cfg.Resolve(t.Context(), false)
+	require.NoError(t, err)
+	require.Equal(t, got.URL, got.BrowserURL)
+	require.Equal(t, "fixture-token", got.Token)
+	cfg.BrowserURL = "https://user:secret@browser.example"
+	_, err = cfg.Resolve(t.Context(), false)
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "secret")
+	cfg.BrowserURL = ""
+	cfg.URL = "http://100.64.0.1"
+	_, err = cfg.Resolve(t.Context(), false)
+	require.Error(t, err)
+	_, err = cfg.Resolve(t.Context(), true)
+	require.NoError(t, err)
 }

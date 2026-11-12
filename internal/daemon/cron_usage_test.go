@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -109,4 +110,58 @@ func TestCronUsageAnonymousDoesNotContactEnabledSource(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, out.Code, out.Body.String())
 	require.Contains(t, out.Body.String(), "usage_forbidden")
 	require.Zero(t, calls.Load())
+}
+
+func TestCronUsageCapabilitiesAndHTTPErrors(t *testing.T) {
+	env := testenv.New(t)
+	ctx := t.Context()
+	project, err := env.DB.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	job, _, err := env.DB.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Example", Actor: "worker", Definition: cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Example"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Example"}, Overlap: "allow", Catchup: "skip"}})
+	require.NoError(t, err)
+	sessions := []cron.Session{{Agent: "example", SessionID: "one"}, {Agent: "example", SessionID: "two"}}
+	uid := cronHTTPUID(t)
+	_, err = env.DB.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: uid, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "worker", Status: "succeeded", Summary: cron.Summary{Version: 1, Sessions: &sessions}})
+	require.NoError(t, err)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := "one"
+		if strings.Contains(r.URL.Path, "/two/") {
+			id = "two"
+		}
+		_, _ = fmt.Fprintf(w, `{"session_id":%q,"has_cost":true,"has_token_data":true,"cost":{"microdollars":9223372036854775807},"cost_source":"reported"}`, id)
+	}))
+	t.Cleanup(upstream.Close)
+	enabled, err := agentsview.NewService(config.ResolvedAgentsView{URL: upstream.URL, BrowserURL: upstream.URL}, false)
+	require.NoError(t, err)
+	disabled, err := agentsview.NewService(config.ResolvedAgentsView{}, false)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, source string
+		service      *agentsview.Service
+	}{{"off", "none", disabled}, {"on", "agentsview", enabled}} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, AgentsView: tc.service})
+			t.Cleanup(func() { _ = server.Close() })
+			request := httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", project.ID), nil)
+			out := httptest.NewRecorder()
+			server.Handler().ServeHTTP(out, request)
+			require.Equal(t, http.StatusOK, out.Code, out.Body.String())
+			require.Contains(t, out.Body.String(), `"source":"`+tc.source+`"`)
+		})
+	}
+	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, AgentsView: enabled})
+	t.Cleanup(func() { _ = server.Close() })
+	for _, tc := range []struct {
+		uid    string
+		status int
+		code   string
+	}{{uid, http.StatusBadGateway, "usage_total_overflow"}, {cronHTTPUID(t), http.StatusNotFound, ""}} {
+		request := httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s/usage", project.ID, tc.uid), nil)
+		out := httptest.NewRecorder()
+		server.Handler().ServeHTTP(out, request)
+		require.Equal(t, tc.status, out.Code, out.Body.String())
+		if tc.code != "" {
+			require.Contains(t, out.Body.String(), tc.code)
+		}
+	}
 }
