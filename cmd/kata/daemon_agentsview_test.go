@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/agentsview"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
 )
 
 func TestReloadAgentsViewKeepsChangedTargetAndRefreshesCredential(t *testing.T) {
@@ -78,6 +80,9 @@ func TestAgentsViewDaemonStartupAndReloadLogs(t *testing.T) {
 				status.Env = env
 				return status.Run() == nil
 			}, 20*time.Second, 50*time.Millisecond) //nolint:kennlint // external daemon readiness and logs
+			if tc.name == "off" {
+				return
+			}
 			changed := "[agentsview]\nurl = 'https://other.example'\n"
 			require.NoError(t, os.WriteFile(configPath, []byte(changed), 0o600))
 			reload := exec.CommandContext(t.Context(), binary, "daemon", "reload") //nolint:gosec // isolated test-built CLI
@@ -95,10 +100,44 @@ func TestAgentsViewInvalidConfigStopsDaemonStartup(t *testing.T) {
 	_ = daemonLifecycleEnvironment(t)
 	home := setupKataEnv(t)
 	t.Setenv("KATA_WORKSPACE", t.TempDir())
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[agentsview]\nurl = 'https://user:secret@example.com'\n"), 0o600))
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	err := runDaemonProcess(ctx, "127.0.0.1:0", false, true, newDaemonRestart(io.Discard))
-	require.ErrorContains(t, err, "[agentsview]")
-	require.NotContains(t, err.Error(), "secret")
+	t.Setenv("EXAMPLE_USAGE_TOKEN", "invalid\r\nsecret")
+	for _, configText := range []string{
+		"[agentsview]\nurl = 'https://user:secret@example.com'\n",
+		"[agentsview]\nurl = 'https://agentsview.example'\ntoken_file = '/missing/example-token'\n",
+		"[agentsview]\nurl = 'https://agentsview.example'\ntoken_env = 'EXAMPLE_USAGE_TOKEN'\n",
+	} {
+		t.Run(configText, func(t *testing.T) {
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(configText), 0o600))
+			_, err := preflightDaemonStartup(t.Context(), "127.0.0.1:0", false, true)
+			require.ErrorContains(t, err, "[agentsview]")
+			require.NotContains(t, err.Error(), "secret")
+		})
+	}
+}
+
+func TestAgentsViewInvalidCredentialReloadKeepsClient(t *testing.T) {
+	home := t.TempDir()
+	headers := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers <- r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":"session_not_found","message":"not found"}}`))
+	}))
+	t.Cleanup(upstream.Close)
+	t.Setenv("EXAMPLE_USAGE_TOKEN", "good-token")
+	cfg := config.AgentsViewConfig{URL: upstream.URL, TokenEnv: "EXAMPLE_USAGE_TOKEN"}
+	resolved, err := cfg.Resolve(t.Context(), false)
+	require.NoError(t, err)
+	service, err := agentsview.NewService(resolved, false)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[agentsview]\nurl = '"+upstream.URL+"'\ntoken_env = 'EXAMPLE_USAGE_TOKEN'\n"), 0600))
+	t.Setenv("EXAMPLE_USAGE_TOKEN", "bad\r\ntoken")
+	_, err = reloadAgentsView(t.Context(), home, service, false)
+	require.ErrorContains(t, err, "credential")
+	require.NotContains(t, err.Error(), "bad")
+	sessions := []cron.Session{{Agent: "example", SessionID: "id"}}
+	result, err := service.Usage(t.Context(), "run", cron.Summary{Sessions: &sessions}, false)
+	require.NoError(t, err)
+	require.Equal(t, "not_found", result.Sessions[0].State)
+	require.Equal(t, "Bearer good-token", <-headers)
 }

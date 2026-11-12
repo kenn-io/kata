@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -37,28 +38,42 @@ func TestCronUsageOutputStatesAndSanitization(t *testing.T) {
 		require.Contains(t, out.String(), text)
 	}
 	require.NotContains(t, out.String(), "\x1b")
-}
-
-func TestCronUsageChecksCapabilitiesBeforeUsage(t *testing.T) {
-	var usageCalls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/v1/projects":
-			_, _ = io.WriteString(w, `{"projects":[{"id":7,"name":"spoke-project"}]}`)
-		case "/api/v1/projects/7":
-			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"spoke-project"}}`)
-		case "/api/v1/projects/7/cron/capabilities":
-			_, _ = io.WriteString(w, `{"project_uid":"id","event_features":[],"usage":{"source":"none"}}`)
-		default:
-			usageCalls.Add(1)
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-	}))
-	t.Cleanup(server.Close)
-	_, _, err := executeCronCLI(t, server.URL, nil, "run", "usage", cronCLIUID(t))
-	require.ErrorContains(t, err, "usage source is disabled")
-	require.Zero(t, usageCalls.Load())
+	for _, tc := range []struct {
+		total    agentsview.Total
+		sessions []agentsview.RunSession
+		want     string
+	}{
+		{agentsview.Total{State: "complete", CostMicrodollars: &amount}, []agentsview.RunSession{{Agent: "example", SessionID: "id", SessionUsage: agentsview.SessionUsage{State: "priced", CostMicrodollars: &amount}}}, "Cost: $2.41\n"},
+		{agentsview.Total{State: "unknown"}, []agentsview.RunSession{{Agent: "example", SessionID: "id", SessionUsage: agentsview.SessionUsage{State: "not_found"}}}, "Cost: unknown\n"},
+		{agentsview.Total{State: "no_sessions"}, nil, "Cost: no sessions\n"},
+	} {
+		t.Run(tc.total.State, func(t *testing.T) {
+			var output bytes.Buffer
+			require.NoError(t, writeCronUsage(&output, agentsview.RunUsage{Total: tc.total, Sessions: tc.sessions}))
+			require.True(t, strings.HasPrefix(output.String(), tc.want))
+		})
+	}
+	t.Run("source none", func(t *testing.T) {
+		var usageCalls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/api/v1/projects":
+				_, _ = io.WriteString(w, `{"projects":[{"id":7,"name":"spoke-project"}]}`)
+			case "/api/v1/projects/7":
+				_, _ = io.WriteString(w, `{"project":{"id":7,"name":"spoke-project"}}`)
+			case "/api/v1/projects/7/cron/capabilities":
+				_, _ = io.WriteString(w, `{"project_uid":"id","event_features":[],"usage":{"source":"none"}}`)
+			default:
+				usageCalls.Add(1)
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+		}))
+		t.Cleanup(server.Close)
+		_, _, err := executeCronCLI(t, server.URL, nil, "run", "usage", cronCLIUID(t))
+		require.ErrorContains(t, err, "usage source is disabled")
+		require.Zero(t, usageCalls.Load())
+	})
 }
 
 func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
@@ -74,7 +89,7 @@ func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
 			_, _ = io.WriteString(w, `{"project_uid":"id","event_features":[],"usage":{"source":"agentsview"}}`)
 		default:
 			queries = append(queries, r.URL.RawQuery)
-			_, _ = io.WriteString(w, `{"run_uid":"fixture","state":"complete","cost_microdollars":1000000,"estimated":false,"sessions_incomplete":false,"fetched_at":"2026-01-01T00:00:00Z","sessions":[]}`)
+			_, _ = io.WriteString(w, `{"run_uid":"fixture","state":"complete","cost_microdollars":1000000,"estimated":false,"sessions_incomplete":false,"fetched_at":"2026-01-01T00:00:00Z","sessions":[{"agent":"example","session_id":"id","state":"priced","cost_microdollars":1000000,"cost_source":"reported"}]}`)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -105,22 +120,4 @@ func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
 		})
 	}
 	require.Equal(t, []string{"refresh=true", "refresh=true", "refresh=true"}, queries)
-}
-
-func TestCronUsageHumanTotalStates(t *testing.T) {
-	amount := int64(1250000)
-	for _, tc := range []struct {
-		total agentsview.Total
-		want  string
-	}{
-		{agentsview.Total{State: "complete", CostMicrodollars: &amount}, "Cost: $1.25\n"},
-		{agentsview.Total{State: "unknown"}, "Cost: unknown\n"},
-		{agentsview.Total{State: "no_sessions"}, "Cost: no sessions\n"},
-	} {
-		t.Run(tc.total.State, func(t *testing.T) {
-			var out bytes.Buffer
-			require.NoError(t, writeCronUsage(&out, agentsview.RunUsage{Total: tc.total}))
-			require.Equal(t, tc.want, out.String())
-		})
-	}
 }

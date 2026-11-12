@@ -21,10 +21,19 @@ import (
 
 func TestCronUsageReadDoesNotChangeRunOrEvents(t *testing.T) {
 	env := testenv.New(t)
-	assertCronUsageReadDoesNotChangeRunOrEvents(t, t.Context(), env.DB)
+	refresh := assertCronUsageReadDoesNotChangeRunOrEvents(t, t.Context(), env.DB)
+	// The handler check uses the real service clock; service timing is tested separately.
+	timer := time.NewTimer(11 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-t.Context().Done():
+		t.Fatal(t.Context().Err())
+	}
+	refresh()
 }
 
-func assertCronUsageReadDoesNotChangeRunOrEvents(t *testing.T, ctx context.Context, store db.Storage) {
+func assertCronUsageReadDoesNotChangeRunOrEvents(t *testing.T, ctx context.Context, store db.Storage) func() {
 	t.Helper()
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -58,32 +67,25 @@ func assertCronUsageReadDoesNotChangeRunOrEvents(t *testing.T, ctx context.Conte
 	require.Contains(t, out.Body.String(), `"cost_microdollars":0`)
 	require.Contains(t, out.Header().Get("Cache-Control"), "no-store")
 	require.EqualValues(t, 1, calls.Load())
-	// The service clock is private to its package; wait past the documented
-	// refresh threshold to exercise the HTTP query through the real service.
-	timer := time.NewTimer(11 * time.Second)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	cached := httptest.NewRecorder()
-	server.Handler().ServeHTTP(cached, httptest.NewRequestWithContext(ctx, http.MethodGet, req.URL.String(), nil))
-	require.Equal(t, http.StatusOK, cached.Code, cached.Body.String())
-	require.EqualValues(t, 1, calls.Load())
-	refreshed := httptest.NewRecorder()
-	server.Handler().ServeHTTP(refreshed, httptest.NewRequestWithContext(ctx, http.MethodGet, req.URL.String()+"?refresh=true", nil))
-	require.Equal(t, http.StatusOK, refreshed.Code, refreshed.Body.String())
-	require.EqualValues(t, 2, calls.Load())
 	after, err := store.CronRun(ctx, project.ID, uid)
 	require.NoError(t, err)
 	require.Equal(t, before, after)
 	afterCursor, err := uiStore.UIEventCursor(ctx)
 	require.NoError(t, err)
 	require.Equal(t, cursor, afterCursor)
+	return func() {
+		cached := httptest.NewRecorder()
+		server.Handler().ServeHTTP(cached, httptest.NewRequestWithContext(ctx, http.MethodGet, req.URL.String(), nil))
+		require.Equal(t, http.StatusOK, cached.Code, cached.Body.String())
+		require.EqualValues(t, 1, calls.Load())
+		refreshed := httptest.NewRecorder()
+		server.Handler().ServeHTTP(refreshed, httptest.NewRequestWithContext(ctx, http.MethodGet, req.URL.String()+"?refresh=true", nil))
+		require.Equal(t, http.StatusOK, refreshed.Code, refreshed.Body.String())
+		require.EqualValues(t, 2, calls.Load())
+	}
 }
 
-func TestCronUsageDisabledAndAnonymous(t *testing.T) {
+func TestCronUsageDisabled(t *testing.T) {
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
@@ -98,17 +100,77 @@ func TestCronUsageDisabledAndAnonymous(t *testing.T) {
 	require.Contains(t, out.Body.String(), "usage_source_disabled")
 }
 
-func TestDoctorReportsAgentsViewOff(t *testing.T) {
+func TestDoctorAgentsViewSource(t *testing.T) {
 	env := testenv.New(t)
-	service, err := agentsview.NewService(config.ResolvedAgentsView{}, false)
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":"session_not_found","message":"not found"}}`))
+	}))
+	t.Cleanup(upstream.Close)
+	for _, tc := range []struct {
+		name, url, state string
+		calls            int32
+	}{
+		{"off", "", "off", 0},
+		{"on", upstream.URL, "ok", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &doctorSink{}
+			service, err := agentsview.NewService(config.ResolvedAgentsView{URL: tc.url, BrowserURL: tc.url}, false)
+			require.NoError(t, err)
+			server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, AgentsView: service, Hooks: sink})
+			t.Cleanup(func() { _ = server.Close() })
+			out := httptest.NewRecorder()
+			server.Handler().ServeHTTP(out, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/doctor", nil))
+			require.Equal(t, http.StatusOK, out.Code, out.Body.String())
+			require.Contains(t, out.Body.String(), `"agentsview":{"state":"`+tc.state+`"}`)
+			require.Contains(t, out.Body.String(), `"available":true`)
+			require.EqualValues(t, 1, sink.reads.Load())
+			require.Equal(t, tc.calls, calls.Load())
+		})
+	}
+}
+
+func TestDoctorReturnsHooksWhenUsageSlotsAreSaturated(t *testing.T) {
+	env := testenv.New(t)
+	entered := make(chan struct{}, 8)
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		entered <- struct{}{}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(upstream.Close)
+	service, err := agentsview.NewService(config.ResolvedAgentsView{URL: upstream.URL}, false)
 	require.NoError(t, err)
-	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, AgentsView: service})
-	defer func() { _ = server.Close() }()
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/doctor", nil)
+	done := make(chan struct{}, 4)
+	for i := 0; i < 4; i++ {
+		go func(i int) {
+			sessions := []cron.Session{{Agent: "example", SessionID: fmt.Sprint(i)}}
+			_, _ = service.Usage(t.Context(), "run", cron.Summary{Sessions: &sessions}, false)
+			done <- struct{}{}
+		}(i)
+	}
+	for i := 0; i < 4; i++ {
+		<-entered
+	}
+	sink := &doctorSink{}
+	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, AgentsView: service, Hooks: sink})
+	t.Cleanup(func() { _ = server.Close() })
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
 	out := httptest.NewRecorder()
-	server.Handler().ServeHTTP(out, req)
+	server.Handler().ServeHTTP(out, httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/doctor", nil))
+	require.Less(t, time.Since(start), 3500*time.Millisecond)
+	require.NoError(t, ctx.Err())
 	require.Equal(t, http.StatusOK, out.Code, out.Body.String())
-	require.Contains(t, out.Body.String(), `"agentsview":{"state":"off"}`)
+	require.Contains(t, out.Body.String(), `"agentsview":{"state":"unreachable"}`)
+	require.Contains(t, out.Body.String(), `"available":true`)
+	require.EqualValues(t, 1, sink.reads.Load())
+	for i := 0; i < 4; i++ {
+		<-done
+	}
 }
 
 func TestCronUsageAnonymousDoesNotContactEnabledSource(t *testing.T) {
@@ -182,24 +244,4 @@ func TestCronUsageCapabilitiesAndHTTPErrors(t *testing.T) {
 			require.Contains(t, out.Body.String(), tc.code)
 		}
 	}
-}
-
-func TestDoctorAgentsViewEnabledSource(t *testing.T) {
-	env := testenv.New(t)
-	var calls atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":{"code":"session_not_found","message":"not found"}}`))
-	}))
-	t.Cleanup(upstream.Close)
-	service, err := agentsview.NewService(config.ResolvedAgentsView{URL: upstream.URL, BrowserURL: upstream.URL}, false)
-	require.NoError(t, err)
-	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, AgentsView: service})
-	t.Cleanup(func() { _ = server.Close() })
-	out := httptest.NewRecorder()
-	server.Handler().ServeHTTP(out, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/doctor", nil))
-	require.Equal(t, http.StatusOK, out.Code, out.Body.String())
-	require.Contains(t, out.Body.String(), `"agentsview":{"state":"ok"}`)
-	require.EqualValues(t, 1, calls.Load())
 }

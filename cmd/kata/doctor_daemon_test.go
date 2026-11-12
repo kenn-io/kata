@@ -586,6 +586,7 @@ func TestDoctorAgentsViewSelectedDaemonResponse(t *testing.T) {
 		status              int
 	}{
 		{"enabled", `{"hooks":{"available":true,"hooks":[]},"agentsview":{"state":"ok"}}`, "AgentsView usage: ok", 0},
+		{"saturated source", `{"hooks":{"available":true,"hooks":[]},"agentsview":{"state":"unreachable"}}`, "AgentsView usage: unreachable", 0},
 		{"old daemon", `{"hooks":{"available":true,"hooks":[]}}`, "AgentsView usage: unavailable from selected daemon", 0},
 		{"unavailable", "", "AgentsView usage: unavailable from selected daemon", http.StatusServiceUnavailable},
 	} {
@@ -593,8 +594,12 @@ func TestDoctorAgentsViewSelectedDaemonResponse(t *testing.T) {
 			_, workspace := doctorTestEnv(t)
 			flags = globalFlags{Workspace: workspace, Project: "example-project"}
 			ctx := doctorServerContext(t, map[string]string{"/api/v1/doctor": tc.body}, map[string]int{"/api/v1/doctor": tc.status})
-			check := doctorFinding(t, collectDoctor(ctx), "daemon.agentsview")
+			checks := collectDoctor(ctx)
+			check := doctorFinding(t, checks, "daemon.agentsview")
 			require.Equal(t, tc.summary, check.Summary)
+			if tc.name == "saturated source" {
+				require.Equal(t, "info", string(doctorFinding(t, checks, "daemon.hooks").Status))
+			}
 		})
 	}
 }

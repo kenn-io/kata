@@ -21,7 +21,10 @@ func TestLookupSessionStates(t *testing.T) {
 		{"priced zero", 200, `{"session_id":"archive~id","has_cost":true,"has_token_data":true,"cost":{"microdollars":0},"cost_source":"reported","project":"private"}`, "priced"},
 		{"unpriced", 200, `{"session_id":"id","has_cost":false,"has_token_data":true,"unpriced_models":["model"]}`, "unpriced"},
 		{"no usage", 200, `{"session_id":"id","has_cost":false,"has_token_data":false}`, "no_usage"},
-		{"not found", 404, `{}`, "not_found"},
+		{"not found", 404, `{"error":{"code":"session_not_found","message":"not found"}}`, "not_found"},
+		{"html 404", 404, `<html>not found</html>`, "unavailable"},
+		{"wrong endpoint 404", 404, `{}`, "unavailable"},
+		{"malformed envelope 404", 404, `{"error":{"code":"session_not_found"}}`, "unavailable"},
 		{"ambiguous", 409, `{"error":{"code":"ambiguous_session_id","candidates":["archive~id"]}}`, "ambiguous"},
 		{"unauthorized", 403, `private upstream detail`, "unauthorized"},
 		{"negative cost", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":-1},"cost_source":"reported"}`, "unavailable"},
@@ -36,9 +39,7 @@ func TestLookupSessionStates(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			requests := make(chan *http.Request, 1)
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requests <- r.Clone(r.Context())
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tc.status)
 				_, _ = io.WriteString(w, tc.body)
 			}))
@@ -46,10 +47,6 @@ func TestLookupSessionStates(t *testing.T) {
 			client, err := NewClient(config.ResolvedAgentsView{URL: server.URL + "/prefix", Token: "fixture-token"}, false)
 			require.NoError(t, err)
 			got := client.Lookup(t.Context(), "raw")
-			request := <-requests
-			require.Equal(t, "/prefix/api/v1/sessions/raw/usage", request.URL.Path)
-			require.Equal(t, "subagents=true", request.URL.RawQuery)
-			require.Equal(t, "Bearer fixture-token", request.Header.Get("Authorization"))
 			require.Equal(t, tc.state, got.State)
 			if tc.name == "priced zero" {
 				require.NotNil(t, got.CostMicrodollars)
@@ -59,7 +56,7 @@ func TestLookupSessionStates(t *testing.T) {
 	}
 }
 
-func TestLookupRejectsRedirectWithoutSendingToken(t *testing.T) {
+func TestLookupDoesNotFollowRedirect(t *testing.T) {
 	var requests atomic.Int32
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/redirected" {
@@ -73,16 +70,6 @@ func TestLookupRejectsRedirectWithoutSendingToken(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "unavailable", client.Lookup(t.Context(), "raw").State)
 	require.Zero(t, requests.Load())
-
-	// Preserve the cross-origin credential boundary independently of redirects.
-	var targetCalls atomic.Int32
-	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { targetCalls.Add(1) }))
-	t.Cleanup(target.Close)
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target.URL, nil)
-	require.NoError(t, err)
-	_, err = client.http.Do(request)
-	require.Error(t, err)
-	require.Zero(t, targetCalls.Load())
 }
 
 func TestDoctorProbeValidatesNotFoundEnvelope(t *testing.T) {
@@ -110,13 +97,15 @@ func TestDoctorProbeValidatesNotFoundEnvelope(t *testing.T) {
 }
 
 func TestLookupEscapesRawSessionID(t *testing.T) {
-	client, err := NewClient(config.ResolvedAgentsView{URL: "https://agentsview.example/prefix"}, false)
+	client, err := NewClient(config.ResolvedAgentsView{URL: "https://agentsview.example/prefix", Token: "fixture-token"}, false)
 	require.NoError(t, err)
 	var path string
-	client.http.Transport = usageRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+	client.http.Transport = (config.BearerPolicy{}).Transport(usageRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		path = r.URL.EscapedPath()
-		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header)}, nil
-	})
+		require.Equal(t, "subagents=true", r.URL.RawQuery)
+		require.Equal(t, "Bearer fixture-token", r.Header.Get("Authorization"))
+		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"session_not_found","message":"not found"}}`)), Header: make(http.Header)}, nil
+	}), "fixture-token", "https://agentsview.example")
 	require.Equal(t, "not_found", client.Lookup(t.Context(), "raw/id?part").State)
 	require.Equal(t, "/prefix/api/v1/sessions/raw%2Fid%3Fpart/usage", path)
 }

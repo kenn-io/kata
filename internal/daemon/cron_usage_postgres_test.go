@@ -23,5 +23,5 @@ func TestCronUsagePostgresDoesNotWrite(t *testing.T) {
 	store, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
-	assertCronUsageReadDoesNotChangeRunOrEvents(t, ctx, store)
+	_ = assertCronUsageReadDoesNotChangeRunOrEvents(t, ctx, store)
 }
