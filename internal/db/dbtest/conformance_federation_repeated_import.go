@@ -439,6 +439,24 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 		require.ErrorContains(t, err, "fresh "+eventType+" targets existing issue "+h.issueUID)
 	}
+
+	// The hub moves the issue to another project. A retry of the adoption it
+	// already consumed still succeeds and leaves the moved issue alone.
+	movedTo, err := hub.CreateProject(ctx, "moved-to-project")
+	require.NoError(t, err)
+	_, err = hub.EnableProjectFederation(ctx, movedTo.ID, "operator")
+	require.NoError(t, err)
+	heldIssue, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: heldIssue.ID, FromProjectID: h.target.ID, ToProjectID: movedTo.ID, IfMatchRev: heldIssue.Revision, Actor: "operator"})
+	require.NoError(t, err)
+	result, err = pushRepeatedImportBaseline(t, hub, h.target.ID, newerEnrollment, newerOrigin, newer)
+	require.NoError(t, err, "a retry after the issue moved is still the adoption the hub consumed")
+	require.Zero(t, result.Accepted)
+	moved, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, movedTo.ID, moved.ProjectID)
+	require.Equal(t, heldIssue.Title, moved.Title)
 	return nil
 }
 

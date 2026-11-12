@@ -239,7 +239,7 @@ func (d *Store) ingestFederationEventsOnce(
 		// changes nothing; that includes the retry of a consumed baseline.
 		repeated, err := repeatedAdoptionSnapshotIssueTx(ctx, tx, p.ProjectID, ev, db.AllowsRepeatedIssueSnapshot(ev.Type,
 			adoptionSnapshotAuthorState.allowAuthorPreservation || adoptionSnapshotAuthorState.overrideSnapshotAuthors ||
-				adoptionSnapshotAuthorState.duplicateOnly, p.EventFeatures))
+				adoptionSnapshotAuthorState.duplicateOnly, p.EventFeatures), adoptionSnapshotAuthorState.duplicateOnly)
 		if err != nil {
 			return db.FederationIngestResult{}, err
 		}
@@ -1183,7 +1183,7 @@ type repeatedAdoptionSnapshot struct {
 // repeatedAdoptionSnapshotIssueTx returns the issue an adoption snapshot
 // repeats, or nil when the event is not one or the project does not hold the
 // issue yet. An issue held by another project is refused.
-func repeatedAdoptionSnapshotIssueTx(ctx context.Context, tx *sql.Tx, projectID int64, ev db.RemoteEvent, allowed bool) (*db.Issue, error) {
+func repeatedAdoptionSnapshotIssueTx(ctx context.Context, tx *sql.Tx, projectID int64, ev db.RemoteEvent, allowed, consumedRetry bool) (*db.Issue, error) {
 	if !allowed {
 		return nil, nil
 	}
@@ -1191,8 +1191,13 @@ func repeatedAdoptionSnapshotIssueTx(ctx context.Context, tx *sql.Tx, projectID 
 	if err != nil || issueUID == "" {
 		return nil, err
 	}
-	if err := db.CheckFederationFreshIssueHolder(ctx, tx, projectID, ev.Type, issueUID); err != nil {
-		return nil, err
+	// A retry of a consumed adoption stored or skipped every snapshot the
+	// first time. The hub may have moved the issue to another project since,
+	// so the holder is not checked again.
+	if !consumedRetry {
+		if err := db.CheckFederationFreshIssueHolder(ctx, tx, projectID, ev.Type, issueUID); err != nil {
+			return nil, err
+		}
 	}
 	issue, err := eventIssueByUID(ctx, tx, issueUID)
 	if errors.Is(err, db.ErrNotFound) {

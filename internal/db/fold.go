@@ -114,7 +114,13 @@ func (p *FoldProjection) applyEvent(e FoldEvent, payload map[string]jsontext.Val
 		if uid := issueUID(e, payload); uid != "" {
 			if _, restated := p.restatedIssues[uid]; restated {
 				p.sinceBaseline[uid] = nil
-				p.baselineUpdatedAt[uid] = p.Issues[uid].UpdatedAt
+				// A baseline can be dated ahead of the clock that wrote it. It
+				// stands for the issue no later than the moment it was written.
+				baselineAt := p.Issues[uid].UpdatedAt
+				if e.CreatedAt != "" && timestampBefore(e.CreatedAt, baselineAt) {
+					baselineAt = e.CreatedAt
+				}
+				p.baselineUpdatedAt[uid] = baselineAt
 			}
 		}
 	case "issue.updated":
