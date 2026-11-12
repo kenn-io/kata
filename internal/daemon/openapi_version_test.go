@@ -161,10 +161,15 @@ func TestAPIVersionBaseRecords(t *testing.T) {
 	if !explicit {
 		ref = "origin/main"
 	}
-	headRecords, err := baseAPIVersionRecords(t, "HEAD")
-	if !explicit && errors.Is(err, exec.ErrNotFound) {
-		t.Skip("git unavailable")
+	head := exec.CommandContext(t.Context(), "git", "rev-parse", "--verify", "--quiet", "HEAD")
+	if err := head.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if !explicit && t.Context().Err() == nil && (errors.Is(err, exec.ErrNotFound) || errors.As(err, &exitErr) && (exitErr.ExitCode() == 1 || exitErr.ExitCode() == 128)) {
+			t.Skip("git metadata unavailable")
+		}
+		t.Fatalf("resolve HEAD: %v", err)
 	}
+	headRecords, err := baseAPIVersionRecords(t, "HEAD")
 	require.NoError(t, err)
 	require.Contains(t, headRecords, "0.44.0.dcc4a8689ae0d97113d2349d9afcbbf7fe95caa08a516bcc2e376d021d998166.sha256")
 	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--verify", "--quiet", ref+"^{commit}") //nolint:gosec // The base ref is supplied by the developer or CI.
