@@ -117,16 +117,14 @@ func TestConcurrentIdenticalLookupsShareRequest(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var calls atomic.Int32
 		release := make(chan struct{})
-		client, err := NewClient(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
-		require.NoError(t, err)
-		client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		gen := testGeneration(t)
+		gen.client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
 			calls.Add(1)
 			<-release
 			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header)}, nil
 		})
-		gen := newGeneration(client)
 		slots := make(chan struct{}, 4)
-		results := make(chan SessionUsage, 2)
+		results := make(chan cacheEntry, 2)
 		go func() { results <- gen.lookup(t.Context(), slots, "example", "id", false) }()
 		synctest.Wait()
 		go func() { results <- gen.lookup(t.Context(), slots, "example", "id", false) }()
@@ -134,9 +132,16 @@ func TestConcurrentIdenticalLookupsShareRequest(t *testing.T) {
 		gotCalls := calls.Load()
 		close(release)
 		require.EqualValues(t, 1, gotCalls)
-		require.Equal(t, "not_found", (<-results).State)
-		require.Equal(t, "not_found", (<-results).State)
+		require.Equal(t, "not_found", (<-results).fact.State)
+		require.Equal(t, "not_found", (<-results).fact.State)
 	})
+}
+
+func testGeneration(t *testing.T) *generation {
+	t.Helper()
+	client, err := NewClient(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
+	require.NoError(t, err)
+	return newGeneration(client)
 }
 
 type usageRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -160,13 +165,11 @@ func TestCacheLifetimesAndBoundedEviction(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32
-			client, err := NewClient(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
-			require.NoError(t, err)
-			client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			gen := testGeneration(t)
+			gen.client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
 				calls.Add(1)
 				return &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader(tc.body)), Header: make(http.Header)}, nil
 			})
-			gen := newGeneration(client)
 			now := time.Now()
 			gen.now = func() time.Time { return now }
 			slots := make(chan struct{}, 4)
@@ -194,13 +197,11 @@ func TestCacheLifetimesAndBoundedEviction(t *testing.T) {
 		})
 	}
 	var calls atomic.Int32
-	client, err := NewClient(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
-	require.NoError(t, err)
-	client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
+	gen := testGeneration(t)
+	gen.client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		calls.Add(1)
 		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header)}, nil
 	})
-	gen := newGeneration(client)
 	slots := make(chan struct{}, 4)
 	for i := 0; i < 2049; i++ {
 		gen.lookup(t.Context(), slots, "example", fmt.Sprint(i), false)
@@ -251,9 +252,8 @@ func TestUsageLimitsConcurrentRequestsToFour(t *testing.T) {
 func TestRequestBudgetExpiryDoesNotPoisonCache(t *testing.T) {
 	var calls atomic.Int32
 	entered := make(chan struct{}, 1)
-	client, err := NewClient(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
-	require.NoError(t, err)
-	client.http.Transport = usageRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+	gen := testGeneration(t)
+	gen.client.http.Transport = usageRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if calls.Add(1) == 1 {
 			entered <- struct{}{}
 			<-r.Context().Done()
@@ -261,16 +261,15 @@ func TestRequestBudgetExpiryDoesNotPoisonCache(t *testing.T) {
 		}
 		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header)}, nil
 	})
-	gen := newGeneration(client)
 	slots := make(chan struct{}, 4)
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
-	done := make(chan SessionUsage, 1)
+	done := make(chan cacheEntry, 1)
 	go func() { done <- gen.lookup(ctx, slots, "example", "id", false) }()
 	<-entered
-	require.Equal(t, "unavailable", (<-done).State)
+	require.Equal(t, "unavailable", (<-done).fact.State)
 	// Join any still-finishing flight before inspecting the next request.
 	_, _, _ = gen.flights.Do("example\x00id", func() (any, error) { return nil, nil })
-	require.Equal(t, "not_found", gen.lookup(t.Context(), slots, "example", "id", false).State)
+	require.Equal(t, "not_found", gen.lookup(t.Context(), slots, "example", "id", false).fact.State)
 	require.EqualValues(t, 2, calls.Load())
 }

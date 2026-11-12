@@ -40,11 +40,7 @@ type RunUsage struct {
 }
 
 func aggregate(sessions []SessionUsage, incomplete bool) (Total, error) {
-	result := Total{State: "no_sessions"}
-	if len(sessions) == 0 {
-		return result, nil
-	}
-	result.State = "unknown"
+	result := Total{State: "unknown"}
 	var sum int64
 	seen := make(map[string]bool)
 	priced, partial := false, incomplete
@@ -147,13 +143,14 @@ func (s *Service) Usage(ctx context.Context, uid string, summary cron.Summary, r
 	defer cancel()
 	result := RunUsage{RunUID: uid, FetchedAt: time.Now().UTC(), Sessions: []RunSession{}}
 	result.SessionsIncomplete = summary.SessionsIncomplete != nil && *summary.SessionsIncomplete
-	if summary.Sessions == nil {
+	if summary.Sessions == nil || len(*summary.Sessions) == 0 {
 		result.Total.State = "no_sessions"
 		return result, nil
 	}
 	entries := *summary.Sessions
 	result.Sessions = make([]RunSession, len(entries))
 	facts := make([]SessionUsage, len(entries))
+	times := make([]time.Time, len(entries))
 	var wg sync.WaitGroup
 	for i, entry := range entries {
 		wg.Add(1)
@@ -161,8 +158,8 @@ func (s *Service) Usage(ctx context.Context, uid string, summary cron.Summary, r
 			defer wg.Done()
 			link, _ := (transcript.Transcript{Agent: entry.Agent, SessionID: entry.SessionID}).Link(cfg.BrowserURL)
 			fact := gen.lookup(ctx, s.slots, entry.Agent, entry.SessionID, refresh)
-			facts[i] = fact
-			result.Sessions[i] = RunSession{Agent: entry.Agent, SessionID: entry.SessionID, Step: entry.Step, URL: link, SessionUsage: fact}
+			facts[i], times[i] = fact.fact, fact.at
+			result.Sessions[i] = RunSession{Agent: entry.Agent, SessionID: entry.SessionID, Step: entry.Step, URL: link, SessionUsage: fact.fact}
 		}(i, entry)
 	}
 	wg.Wait()
@@ -171,18 +168,26 @@ func (s *Service) Usage(ctx context.Context, uid string, summary cron.Summary, r
 		return RunUsage{}, err
 	}
 	result.Total = total
-	result.FetchedAt = time.Now().UTC()
+	result.FetchedAt = times[0]
+	for _, at := range times[1:] {
+		if at.Before(result.FetchedAt) {
+			result.FetchedAt = at
+		}
+	}
+	result.FetchedAt = result.FetchedAt.UTC()
 	return result, nil
 }
 
-func (g *generation) lookup(ctx context.Context, slots chan struct{}, agent, id string, refresh bool) SessionUsage {
-	unavailable := SessionUsage{State: "unavailable"}
+func (g *generation) lookup(ctx context.Context, slots chan struct{}, agent, id string, refresh bool) cacheEntry {
+	unavailable := func() cacheEntry {
+		return cacheEntry{fact: SessionUsage{State: "unavailable"}, at: g.now()}
+	}
 	if ctx.Err() != nil {
-		return unavailable
+		return unavailable()
 	}
 	key := agent + "\x00" + id
 	if entry, ok := g.cache.Get(key); ok && g.now().Sub(entry.at) < entry.ttl && (!refresh || g.now().Sub(entry.at) <= 10*time.Second) {
-		return entry.fact
+		return entry
 	}
 	deadline, ok := ctx.Deadline()
 	if !ok {
@@ -196,14 +201,14 @@ func (g *generation) lookup(ctx context.Context, slots chan struct{}, agent, id 
 		select {
 		case slots <- struct{}{}:
 		case <-shared.Done():
-			return unavailable, nil
+			return unavailable(), nil
 		}
 		defer func() { <-slots }()
 		lookup, stop := context.WithTimeout(shared, 2*time.Second)
 		defer stop()
 		fact := g.client.Lookup(lookup, id)
 		if shared.Err() != nil {
-			return unavailable, nil
+			return unavailable(), nil
 		}
 		ttl, misses := 5*time.Minute, 0
 		switch fact.State {
@@ -218,14 +223,15 @@ func (g *generation) lookup(ctx context.Context, slots chan struct{}, agent, id 
 		case "unauthorized", "unavailable":
 			ttl = 15 * time.Second
 		}
-		g.cache.Add(key, cacheEntry{fact: fact, at: g.now(), ttl: ttl, misses: misses})
-		return fact, nil
+		entry := cacheEntry{fact: fact, at: g.now(), ttl: ttl, misses: misses}
+		g.cache.Add(key, entry)
+		return entry, nil
 	})
 	select {
 	case <-ctx.Done():
-		return unavailable
+		return unavailable()
 	case value := <-ch:
-		return value.Val.(SessionUsage)
+		return value.Val.(cacheEntry)
 	}
 }
 

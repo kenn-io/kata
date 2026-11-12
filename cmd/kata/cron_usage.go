@@ -111,6 +111,9 @@ func usageAmount(value int64, estimated bool) string {
 	if estimated {
 		prefix = "~"
 	}
+	if value > 0 && cents == 0 {
+		return prefix + "<$0.01"
+	}
 	return fmt.Sprintf("%s$%d.%02d", prefix, cents/100, cents%100)
 }
 

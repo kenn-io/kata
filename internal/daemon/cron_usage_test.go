@@ -34,7 +34,9 @@ func assertCronUsageReadDoesNotChangeRunOrEvents(t *testing.T, ctx context.Conte
 	require.NoError(t, err)
 	before, err := store.CronRun(ctx, project.ID, uid)
 	require.NoError(t, err)
-	cursor, err := store.UIEventCursor(ctx)
+	uiStore, ok := store.(db.UIStore)
+	require.True(t, ok)
+	cursor, err := uiStore.UIEventCursor(ctx)
 	require.NoError(t, err)
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -57,7 +59,7 @@ func assertCronUsageReadDoesNotChangeRunOrEvents(t *testing.T, ctx context.Conte
 	after, err := store.CronRun(ctx, project.ID, uid)
 	require.NoError(t, err)
 	require.Equal(t, before, after)
-	afterCursor, err := store.UIEventCursor(ctx)
+	afterCursor, err := uiStore.UIEventCursor(ctx)
 	require.NoError(t, err)
 	require.Equal(t, cursor, afterCursor)
 }
