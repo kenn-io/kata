@@ -12,7 +12,7 @@ export interface SummaryResponse {
    * @maxItems 64
    */
   sessions?: SessionResponse[]
-  sessions_incomplete?: boolean
+  sessions_incomplete?: true
   version: number
   [key: string]: unknown
 }

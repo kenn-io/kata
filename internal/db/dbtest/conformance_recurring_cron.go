@@ -665,7 +665,7 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	probe := &recurringCountingProbe{recurringProbeQuerier: s.(recurringProbeQuerier)}
 	features, err := db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
-	require.Equal(t, "cron_v1", features)
+	require.Equal(t, db.CronEventFeature, features)
 	require.Equal(t, []int{0}, probe.candidates, "ordinary jobs must not reach JSON decoding")
 	require.Equal(t, []int{0}, probe.sessionCandidates, "session-free runs must not reach JSON decoding")
 	definition.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review service"}
@@ -682,7 +682,7 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	probe.candidates = nil
 	features, err = db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
-	require.Equal(t, "cron_v1", features)
+	require.Equal(t, db.CronEventFeature, features)
 	require.Equal(t, []int{1}, probe.candidates, "escaped native definition remains the only candidate")
 	return nil
 }

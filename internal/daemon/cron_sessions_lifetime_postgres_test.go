@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -37,8 +38,8 @@ func (s *pausedSessionObservation) ObserveCronRun(ctx context.Context, in db.Obs
 	return s.Storage.ObserveCronRun(ctx, in)
 }
 
-// The PostgreSQL admission must cover the observation commit after the probe deadline.
-func TestCronAdmissionOutlivesProbeDeadlineAcrossPostgresStores(t *testing.T) {
+// The PostgreSQL admission must cover the observation commit after the probe context ends.
+func TestCronAdmissionOutlivesProbeContextAcrossPostgresStores(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
@@ -57,8 +58,23 @@ func TestCronAdmissionOutlivesProbeDeadlineAcrossPostgresStores(t *testing.T) {
 	definition := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
 	job, _, err := writer.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "worker", Definition: definition})
 	require.NoError(t, err)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
+		_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, project.UID)
+	}))
+	t.Cleanup(hub.Close)
+	_, err = writer.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: 42, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
+	require.NoError(t, err)
+	credentials := newReplicaCredentialStore()
+	credentials.put(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "enrollment-token", Actor: "worker"})
+	probeDone := make(chan (<-chan struct{}), 1)
 	paused := &pausedSessionObservation{Storage: writer, store: writer, entered: make(chan struct{}), resume: make(chan struct{})}
-	srv := daemon.NewServer(forwardingTestConfig(daemon.ServerConfig{DB: paused}))
+	cfg := forwardingTestConfig(daemon.ServerConfig{DB: paused, FederationCredentials: credentials})
+	cfg.FederationHubClient = func(ctx context.Context, _ config.FederationCredential) (*http.Client, error) {
+		probeDone <- ctx.Done()
+		return hub.Client(), nil
+	}
+	srv := daemon.NewServer(cfg)
 	t.Cleanup(func() { require.NoError(t, srv.Close()) })
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
@@ -97,7 +113,7 @@ func TestCronAdmissionOutlivesProbeDeadlineAcrossPostgresStores(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 	select {
-	case <-time.After(16 * time.Second):
+	case <-<-probeDone:
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}

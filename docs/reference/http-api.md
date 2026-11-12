@@ -278,6 +278,8 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 ### Version history
 
+This table highlights notable changes. Marker history starts at `0.44.0`.
+
 | Version | Change |
 | --- | --- |
 | `0.46.0` | Read live cron run usage, discover the configured usage source in cron capabilities, and inspect AgentsView status in doctor diagnostics. See [live run cost](cron.md#live-run-cost). |
@@ -681,21 +683,14 @@ a full candidate window must not be treated as the whole matching set.
 
 These are the current intentions, not a contractual guarantee:
 
-- **Additive changes are not signalled.** New endpoints, and new optional
-  response fields, can appear without an `api_schema_version` change. Response
-  objects are published with `additionalProperties: true`, so a client generated
-  from the schema tolerates fields it does not yet know about even under strict
-  validation. The response relaxation never loosens request schemas: those keep
-  the strictness their types declare: `additionalProperties: false` by default,
-  so unknown request fields are rejected unless a type explicitly opts in.
-  New optional request fields and query parameters do bump
-  `api_schema_version`: generated clients may emit them, and older strict
-  daemons may reject them.
-  The OpenAPI 3.0 flavor (`kata openapi --version 3.0`), which exists as
-  code-generator input, leaves `additionalProperties` unset on response
-  schemas instead: the same permissive meaning, phrased so generators model
-  optional object-valued response fields (such as `parent`) as pointers
-  rather than always-present values.
+- **Contract changes bump `api_schema_version`.** New endpoints and schema fields,
+  including optional response fields, take a new version. Documentation-only edits
+  keep the existing version. Response objects use
+  `additionalProperties: true`, so older clients accept unknown optional response
+  fields. Request schemas remain strict by default and reject unknown fields unless
+  a type explicitly opts in. The OpenAPI 3.0 flavor (`kata openapi --version 3.0`)
+  leaves `additionalProperties` unset on response schemas so generators model
+  optional object-valued response fields as pointers.
 - **Breaking changes bump `api_schema_version`.** Removing or renaming a field,
   changing a field's type, or removing an endpoint is a breaking change and is
   signalled by a change to `api_schema_version`. A client that pins or checks
@@ -704,6 +699,8 @@ These are the current intentions, not a contractual guarantee:
 - **Regeneration stays honest.** A committed golden test fails if
   `api/openapi.yaml` drifts from the routes, so the published schema cannot
   silently fall out of date with the daemon it describes.
+
+See the [API contract workflow](../development/contributing.md#api-contract-changes) for version bumps and marker records.
 
 If you build against this schema and hit a gap, please open an issue. The
 contract is meant to be useful to external clients, and feedback shapes how far

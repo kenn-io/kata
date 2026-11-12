@@ -545,6 +545,14 @@ func fetchFederationRebindMetadata(
 		}
 	}
 	metadata, _, err := readFederationHubMetadata(ctx, httpClient, hubURL, hubProjectID)
+	// The shared reader is operation-neutral; rebind restores its catalog guidance.
+	if replicaErr, ok := errors.AsType[*FederationReplicaError](err); ok && replicaErr.hint != "" {
+		hint := "verify this catalog entry points to the same hub"
+		if errors.Is(err, ErrFederationReplicaHubUnavailable) {
+			hint = "check the HTTPS catalog endpoint and retry"
+		}
+		err = federationReplicaError(replicaErr.kind, replicaErr.message, hint)
+	}
 	return metadata, err
 }
 

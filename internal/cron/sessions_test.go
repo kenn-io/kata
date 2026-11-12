@@ -30,7 +30,7 @@ func TestSummarySessionsContract(t *testing.T) {
 		{"empty", `{"version":1,"sessions":[]}`, false},
 		{"null", `{"version":1,"sessions":null}`, false},
 		{"invalid id", `{"version":1,"sessions":[{"agent":"claude","session_id":"bad"}]}`, false},
-		{"invalid agent", `{"version":1,"sessions":[{"agent":"CLAUDE","session_id":"bad"}]}`, false},
+		{"invalid agent", `{"version":1,"sessions":[{"agent":"CLAUDE","session_id":"00000000-0000-4000-8000-000000000001"}]}`, false},
 		{"empty step", `{"version":1,"sessions":[{"agent":"codex","session_id":"00000000-0000-4000-8000-000000000001","step":""}]}`, false},
 		{"null step", `{"version":1,"sessions":[{"agent":"codex","session_id":"00000000-0000-4000-8000-000000000001","step":null}]}`, false},
 		{"invalid step", `{"version":1,"sessions":[{"agent":"codex","session_id":"00000000-0000-4000-8000-000000000001","step":"a/b"}]}`, false},

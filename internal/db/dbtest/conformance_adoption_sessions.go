@@ -13,6 +13,20 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
+// prepareAdoptionBaseline reads the cron baseline the adoption would emit and
+// rolls the read-only transaction back.
+func prepareAdoptionBaseline(t *testing.T, store db.Storage, project db.Project, hubUID string) []db.CronEvent {
+	t.Helper()
+	tx, err := store.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	}).BeginTx(t.Context(), nil)
+	require.NoError(t, err)
+	baseline, err := db.PrepareCronAdoption(t.Context(), tx, project, hubUID, false)
+	require.NoError(t, err)
+	require.NoError(t, tx.Rollback())
+	return baseline
+}
+
 // Session-bearing adoption requires all features of the emitted baseline.
 // Refusal preserves the project and its evidence, so upgrading permits retry.
 func checkAdoptionSessionFeatures(t *testing.T, store db.Storage) error {
@@ -48,13 +62,7 @@ func checkAdoptionSessionFeatures(t *testing.T, store db.Storage) error {
 				hubUID, err = uid.New()
 				require.NoError(t, err)
 			}
-			tx, err := store.(interface {
-				BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
-			}).BeginTx(ctx, nil)
-			require.NoError(t, err)
-			baseline, err := db.PrepareCronAdoption(ctx, tx, project, hubUID, false)
-			require.NoError(t, err)
-			require.NoError(t, tx.Rollback())
+			baseline := prepareAdoptionBaseline(t, store, project, hubUID)
 			params := db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://daemon.example", HubProjectID: 1, HubProjectUID: hubUID, Actor: "worker"}
 			params.HubEventFeatures = db.CronEventFeature
 			_, err = store.AdoptProjectIntoFederation(ctx, params)
@@ -100,9 +108,45 @@ func checkAdoptionSessionFeatures(t *testing.T, store db.Storage) error {
 				require.NoError(t, err)
 				required = db.MergeEventFeatures(required, features)
 			}
+			// The moved issue's history does not demand issue_move_v1: the snapshot replaces it.
 			require.NoError(t, db.RequireEventFeatures(params.HubEventFeatures, required))
-			require.Error(t, db.RequireEventFeatures(db.CronRunSessionsEventFeature, required))
 		})
 	}
+	t.Run("session-free-prepared-baseline", func(t *testing.T) {
+		project, err := store.CreateProject(ctx, "prepared-baseline-example")
+		require.NoError(t, err)
+		job, _ := nativeFederationDefinitions(t, store, project)
+		runUID, err := uid.New()
+		require.NoError(t, err)
+		summary := cron.Summary{Version: 1, Message: "sessions are described here but none were recorded"}
+		_, err = store.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "worker", Status: "succeeded", Summary: summary})
+		require.NoError(t, err)
+		hubUID, err := uid.New()
+		require.NoError(t, err)
+		baseline := prepareAdoptionBaseline(t, store, project, hubUID)
+		var prepared string
+		for _, event := range baseline {
+			if event.Type == "cron.run.snapshot" {
+				prepared = event.Payload
+			}
+		}
+		require.NotEmpty(t, prepared)
+		require.Contains(t, prepared, "sessions are described")
+		features, err := db.PayloadRequiredFeatures("cron.run.snapshot", prepared)
+		require.NoError(t, err)
+		require.NotContains(t, features, db.CronRunSessionsEventFeature)
+		_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://daemon.example", HubProjectID: 1, HubProjectUID: hubUID, Actor: "worker"})
+		require.NoError(t, err)
+		events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+		require.NoError(t, err)
+		var emitted string
+		for _, event := range events {
+			if event.Type == "cron.run.snapshot" {
+				emitted = event.Payload
+			}
+		}
+		require.NotEmpty(t, emitted)
+		require.JSONEq(t, prepared, emitted, "the feature check applies to the emitted prepared record")
+	})
 	return nil
 }

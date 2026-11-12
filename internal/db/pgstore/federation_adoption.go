@@ -104,30 +104,7 @@ func (s *Store) AdoptProjectIntoFederation(
 		if err != nil {
 			return err
 		}
-		// Prepare the emitted baseline before changing the project or its history.
-		baseline := append([]db.CronEvent(nil), cron...)
-		issuePayloads := make([]string, 0, len(issues))
-		for _, issue := range issues {
-			payload, err := federationIssueSnapshotPayload(ctx, tx, issue)
-			if err != nil {
-				return err
-			}
-			issuePayloads = append(issuePayloads, payload)
-			baseline = append(baseline, db.CronEvent{Type: "issue.snapshot", Payload: payload})
-		}
-		emitMetadataBaseline := len(project.Metadata) > 0 && string(project.Metadata) != "{}"
-		if !emitMetadataBaseline && len(issues) == 0 {
-			emitMetadataBaseline = true
-		}
-		metadataPayload := ""
-		if emitMetadataBaseline {
-			metadataPayload, err = db.ProjectMetadataAdoptionPayload(project.Metadata)
-			if err != nil {
-				return err
-			}
-			baseline = append(baseline, db.CronEvent{Type: "project.metadata_updated", Payload: metadataPayload})
-		}
-		if err := db.RequireAdoptionEventFeatures(params.HubEventFeatures, baseline); err != nil {
+		if err := db.RequireAdoptionEventFeatures(params.HubEventFeatures, cron); err != nil {
 			return err
 		}
 
@@ -181,10 +158,18 @@ push_cursor_event_id,bound_actor,allow_insecure,enabled
 			return fmt.Errorf("insert adoption federation binding: %w", mapSQLError(err, nil))
 		}
 
+		emitMetadataBaseline := len(project.Metadata) > 0 && string(project.Metadata) != "{}"
+		if !emitMetadataBaseline && len(issues) == 0 {
+			emitMetadataBaseline = true
+		}
 		if emitMetadataBaseline {
+			payload, err := db.ProjectMetadataAdoptionPayload(project.Metadata)
+			if err != nil {
+				return err
+			}
 			event, err := s.insertEventTx(ctx, tx, eventInsert{
 				ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
-				Type: "project.metadata_updated", Actor: actor, Payload: metadataPayload,
+				Type: "project.metadata_updated", Actor: actor, Payload: payload,
 				HLC: &boundary, CreatedAt: baselineCreatedAt,
 			})
 			if err != nil {
@@ -201,8 +186,11 @@ push_cursor_event_id,bound_actor,allow_insecure,enabled
 			output.ResetAfterEventID = event.ID
 		}
 
-		for i, issue := range issues {
-			payload := issuePayloads[i]
+		for _, issue := range issues {
+			payload, err := federationIssueSnapshotPayload(ctx, tx, issue)
+			if err != nil {
+				return err
+			}
 			issueUID := issue.UID
 			event, err := s.insertEventTx(ctx, tx, eventInsert{
 				ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,

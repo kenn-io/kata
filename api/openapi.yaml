@@ -7078,6 +7078,7 @@ components:
           minItems: 1
           type: array
         sessions_incomplete:
+          const: true
           type: boolean
         version:
           format: int64
@@ -7103,6 +7104,7 @@ components:
           minItems: 1
           type: array
         sessions_incomplete:
+          const: true
           type: boolean
         version:
           format: int64
@@ -10037,6 +10039,10 @@ paths:
           name: Authorization
           schema:
             type: string
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - explode: false
           in: query
           name: stream
@@ -10095,6 +10101,10 @@ paths:
             type: integer
         - in: header
           name: Authorization
+          schema:
+            type: string
+        - in: header
+          name: X-Kata-Event-Features
           schema:
             type: string
       responses:

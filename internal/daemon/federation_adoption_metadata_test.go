@@ -18,21 +18,19 @@ func TestAdoptionMetadataReader(t *testing.T) {
 	const uid = "01HZNQ7VFPK1XGD8R5MABCD4EX"
 	for _, tc := range []struct {
 		name, body, features string
-		status               int
 		wantError            bool
 	}{
-		{"compatible", `{"project_id":41,"project_uid":"` + uid + `"}`, db.SupportedEventFeatures, 200, false},
-		{"wrong ID", `{"project_id":42,"project_uid":"` + uid + `"}`, db.SupportedEventFeatures, 200, true},
-		{"wrong UID", `{"project_id":41,"project_uid":"other"}`, db.SupportedEventFeatures, 200, true},
-		{"invalid", `{`, "", 200, true},
-		{"oversized", strings.Repeat(" ", federationRebindResponseLimit) + `{"project_id":41,"project_uid":"` + uid + `"}`, db.SupportedEventFeatures, 200, true},
+		{"compatible", `{"project_id":41,"project_uid":"` + uid + `"}`, db.SupportedEventFeatures, false},
+		{"wrong ID", `{"project_id":42,"project_uid":"` + uid + `"}`, db.SupportedEventFeatures, true},
+		{"wrong UID", `{"project_id":41,"project_uid":"other"}`, db.SupportedEventFeatures, true},
+		{"invalid", `{remote-secret-body`, "", true},
+		{"oversized", strings.Repeat(" ", federationRebindResponseLimit) + `{"project_id":41,"project_uid":"` + uid + `"}`, db.SupportedEventFeatures, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var auth, path, features string
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				auth, path, features = r.Header.Get("Authorization"), r.URL.Path, r.Header.Get(db.EventFeaturesHeader)
 				w.Header().Set(db.EventFeaturesHeader, tc.features)
-				w.WriteHeader(tc.status)
 				_, _ = fmt.Fprint(w, tc.body)
 			}))
 			t.Cleanup(server.Close)

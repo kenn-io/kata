@@ -12,6 +12,6 @@ export interface Summary {
    * @maxItems 64
    */
   sessions?: Session[]
-  sessions_incomplete?: boolean
+  sessions_incomplete?: true
   version: number
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"strings"
 	"testing"
 	"time"
 
@@ -158,6 +159,21 @@ func TestCronRunSessionsPassThrough(t *testing.T) {
 	summary := shown["summary"].(map[string]any)
 	require.Equal(t, true, summary["sessions_incomplete"])
 	require.Len(t, summary["sessions"], 1)
+
+	// The advertised tool must explain that a later summary replaces all evidence.
+	tools, err := f.session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	for _, tool := range tools.Tools {
+		if tool.Name != "kata.cron_run_observe" {
+			continue
+		}
+		help := strings.ToLower(tool.Description)
+		require.Contains(t, help, "replac")
+		require.Contains(t, help, "omit")
+		require.Contains(t, help, "clear")
+		return
+	}
+	t.Fatal("cron run observation tool was not advertised")
 }
 
 func TestCronRunObserveSessionInputSchema(t *testing.T) {
@@ -165,8 +181,6 @@ func TestCronRunObserveSessionInputSchema(t *testing.T) {
 	require.NoError(t, err)
 
 	session := map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001"}
-	withStep := maps.Clone(session)
-	withStep["step"] = "main"
 	nullStep := maps.Clone(session)
 	nullStep["step"] = nil
 	emptyStep := maps.Clone(session)
@@ -175,6 +189,8 @@ func TestCronRunObserveSessionInputSchema(t *testing.T) {
 	for i := range sixtyFour {
 		sixtyFour[i] = map[string]any{"agent": "codex", "session_id": fmt.Sprintf("00000000-0000-4000-8000-%012d", i)}
 	}
+	// One accepted control: the maximum count, a step and the incomplete marker together.
+	sixtyFour[0].(map[string]any)["step"] = "main"
 	tooMany := append(append([]any{}, sixtyFour...), map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000064"})
 	for _, tc := range []struct {
 		name    string
@@ -182,9 +198,7 @@ func TestCronRunObserveSessionInputSchema(t *testing.T) {
 		valid   bool
 	}{
 		{"omitted", map[string]any{"version": 1}, true},
-		{"one session", map[string]any{"version": 1, "sessions": []any{session}}, true},
-		{"bounded sessions and marker", map[string]any{"version": 1, "sessions": sixtyFour, "sessions_incomplete": true}, true},
-		{"step", map[string]any{"version": 1, "sessions": []any{withStep}}, true},
+		{"bounded sessions, step and marker", map[string]any{"version": 1, "sessions": sixtyFour, "sessions_incomplete": true}, true},
 		{"null sessions", map[string]any{"version": 1, "sessions": nil}, false},
 		{"empty sessions", map[string]any{"version": 1, "sessions": []any{}}, false},
 		{"too many sessions", map[string]any{"version": 1, "sessions": tooMany}, false},
