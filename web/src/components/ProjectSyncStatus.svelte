@@ -146,7 +146,7 @@
       {@const powershellCommand =
         legacyName === powershellName
           ? `kata federation status --project '${powershellName}'`
-        : `kata federation status --project $(if ($PSVersionTable.PSVersion -lt [version]'7.3' -or $PSNativeCommandArgumentPassing -eq 'Legacy') { '${legacyName}' } else { '${powershellName}' })`}
+          : `kata federation status --project $(if ($PSVersionTable.PSVersion -lt [version]'7.3' -or $PSNativeCommandArgumentPassing -eq 'Legacy') { '${legacyName}' } else { '${powershellName}' })`}
       <div class="sync-attention">
         <span class="attention">Sync needs attention</span>
         <span>Run in a CLI connected to this daemon.</span>
