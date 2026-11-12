@@ -4,7 +4,6 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import { setGeneratedFetch } from '../lib/api/client'
 import type { LocalEmbeddingsStatus } from '../lib/api/generated'
 import SearchSettings from './SearchSettings.svelte'
-import SearchSettingsMain from './fixtures/SearchSettingsMain.svelte'
 
 function status(patch: Partial<LocalEmbeddingsStatus> = {}): LocalEmbeddingsStatus {
   return {
@@ -40,29 +39,6 @@ describe('SearchSettings', () => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     vi.useRealTimers()
-  })
-
-  test('older Settings polls through a new daemon restart', async () => {
-    vi.useFakeTimers()
-    const waiting = status({
-      can_change: false,
-      can_restart: false,
-      job: { state: 'restart', downloaded: 1, total: 1 },
-    })
-    setGeneratedFetch(
-      vi
-        .fn<typeof fetch>()
-        .mockResolvedValueOnce(Response.json(waiting))
-        .mockResolvedValueOnce(Response.json(waiting))
-        .mockResolvedValue(Response.json(status({ provider: 'built_in', can_change: false }))),
-    )
-    render(SearchSettingsMain, {
-      props: { canAdministerDaemon: true, onback: vi.fn(), postFetch: fetch },
-    })
-    await settle()
-    expect(screen.getByText('Turning on')).not.toBeNull()
-    await vi.advanceTimersByTimeAsync(4000)
-    expect(screen.getByText('On', { exact: true })).not.toBeNull()
   })
 
   test('confirms a restart and shows On when the daemon returns', async () => {

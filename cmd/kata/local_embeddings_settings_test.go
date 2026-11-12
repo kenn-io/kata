@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -94,7 +95,7 @@ func TestLocalEmbeddingsRestart(t *testing.T) {
 	}
 	t.Run("status during restart start", func(t *testing.T) {
 		started, release, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
-		setup := &localEmbeddingsSetup{job: &api.LocalEmbeddingsJob{State: "restart"}, restart: func() error {
+		setup := &localEmbeddingsSetup{job: &api.LocalEmbeddingsJob{State: "restart", Downloaded: 42, Total: 42}, restart: func() error {
 			close(started)
 			<-release
 			return nil
@@ -108,6 +109,21 @@ func TestLocalEmbeddingsRestart(t *testing.T) {
 		case status := <-statusDone:
 			require.Equal(t, "restart", status.Job.State)
 			require.False(t, status.CanRestart)
+			body, err := jsonv2.Marshal(status)
+			require.NoError(t, err)
+			var olderClient struct {
+				Provider string `json:"provider"`
+				Job      struct {
+					State      string `json:"state"`
+					Downloaded int64  `json:"downloaded"`
+					Total      int64  `json:"total"`
+				} `json:"job"`
+			}
+			require.NoError(t, jsonv2.Unmarshal(body, &olderClient))
+			require.Equal(t, "none", olderClient.Provider)
+			require.Equal(t, "restart", olderClient.Job.State)
+			require.Equal(t, int64(42), olderClient.Job.Downloaded)
+			require.Equal(t, int64(42), olderClient.Job.Total)
 		case <-time.After(time.Second):
 			t.Fatal("status blocked while restart was starting")
 		}
