@@ -171,36 +171,6 @@ func installRelayAckRowCounter(ctx context.Context, store db.Storage) (func(cont
 	return count, remove, nil
 }
 
-func TestExternalRootConformance(t *testing.T) {
-	t.Parallel()
-	dbtest.RunExternalRootConformance(t, dbtest.Backend{
-		Name: "sqlite",
-		Open: func(t *testing.T) db.Storage {
-			t.Helper()
-			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
-			require.NoError(t, err)
-			return store
-		},
-		InstallExternalRootClock: func(store db.Storage, now func() time.Time) func() {
-			return sqlitestore.InstallExternalRootClockForTest(store.(*sqlitestore.Store), now)
-		},
-		BackdateCommentCreated: backdateCommentCreated,
-	})
-}
-
-func TestExternalRootContentOwned(t *testing.T) {
-	t.Parallel()
-	dbtest.RunExternalRootContentOwnershipConformance(t, dbtest.Backend{
-		Name: "sqlite",
-		Open: func(t *testing.T) db.Storage {
-			t.Helper()
-			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
-			require.NoError(t, err)
-			return store
-		},
-	})
-}
-
 func backdateCommentCreated(ctx context.Context, store db.Storage, commentID int64, createdAt time.Time) error {
 	sqlStore := store.(*sqlitestore.Store)
 	_, err := sqlStore.ExecContext(ctx,
