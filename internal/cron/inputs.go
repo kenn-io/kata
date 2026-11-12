@@ -14,6 +14,9 @@ import (
 	"go.kenn.io/kata/internal/jsonutil"
 )
 
+// APIVersionJobInputs is the first daemon API with input resolution.
+const APIVersionJobInputs = "0.48.0"
+
 var inputName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
 type inputDeclaration struct {

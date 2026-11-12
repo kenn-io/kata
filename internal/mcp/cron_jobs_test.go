@@ -364,3 +364,13 @@ func TestCronJobInputs(t *testing.T) {
 	require.Equal(t, float64(4), inputs[3].(map[string]any)["value"])
 	require.NotContains(t, inputs[4].(map[string]any), "value")
 }
+
+func TestCronJobInputsRequiresDaemonVersion(t *testing.T) {
+	_, wrapped, session, _, _, _, _ := mcpFixedScopeFixture(t)
+	wrapped.requestsMu.Lock()
+	wrapped.healthAPIVersion = "0.47.0"
+	wrapped.requestsMu.Unlock()
+	result := cronCall(t, session, "cron_job_inputs", map[string]any{"uid": "01J00000000000000000000010"})
+	require.True(t, result.IsError)
+	require.Contains(t, string(mustJSON(t, result)), "requires daemon API 0.48.0 or newer")
+}

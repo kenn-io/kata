@@ -50,6 +50,13 @@ func (h toolHandlers) cronJobInputs(ctx context.Context, _ *sdkmcp.CallToolReque
 	if err != nil {
 		return nil, generated.GetCronJobInputsResponse{}, err
 	}
+	supported, err := h.daemonSupportsAPIVersion(ctx, cron.APIVersionJobInputs)
+	if err != nil {
+		return nil, generated.GetCronJobInputsResponse{}, err
+	}
+	if !supported {
+		return nil, generated.GetCronJobInputsResponse{}, fmt.Errorf("cron job inputs requires daemon API %s or newer", cron.APIVersionJobInputs)
+	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
 		return nil, generated.GetCronJobInputsResponse{}, err

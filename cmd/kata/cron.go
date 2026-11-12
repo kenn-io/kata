@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -260,7 +261,7 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 		return err
 	}
 	if o.resource == "job" && o.action == "inputs" {
-		if err := requireDaemonAPIVersion(cmd.Context(), daemon.client, daemon.baseURL, "0.48.0", "cron job inputs"); err != nil {
+		if err := requireDaemonAPIVersion(cmd.Context(), daemon.client, daemon.baseURL, cron.APIVersionJobInputs, "cron job inputs"); err != nil {
 			return err
 		}
 	}
