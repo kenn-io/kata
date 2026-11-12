@@ -2,11 +2,15 @@ package cron
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"unicode"
+
+	"go.kenn.io/kata/internal/jsonutil"
 )
 
 var inputName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
@@ -24,6 +28,7 @@ type inputDeclaration struct {
 	Max         *int64   `json:"max,omitempty"`
 }
 
+// ResolvedInput describes a declaration and its selected value.
 type ResolvedInput struct {
 	Name        string   `json:"name"`
 	Type        string   `json:"type"`
@@ -38,28 +43,32 @@ type ResolvedInput struct {
 	Value       any      `json:"value,omitzero"`
 	Source      string   `json:"source"`
 }
+
+// InputError describes a problem resolving a declared input.
 type InputError struct {
 	Name    string `json:"name,omitempty"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
+
+// InputResolution contains the resolved inputs and their diagnostics.
 type InputResolution struct {
 	DeclaredBy string          `json:"declared_by"`
 	Inputs     []ResolvedInput `json:"inputs"`
 	Errors     []InputError    `json:"errors"`
 }
 
-func inputObject(raw []byte) (map[string]json.RawMessage, error) {
+func inputObject(raw []byte) (map[string]jsontext.Value, error) {
 	if len(raw) == 0 {
-		return map[string]json.RawMessage{}, nil
+		return map[string]jsontext.Value{}, nil
 	}
-	var m map[string]json.RawMessage
+	var m map[string]jsontext.Value
 	if err := json.Unmarshal(raw, &m); err != nil || m == nil {
 		return nil, fmt.Errorf("must be an object")
 	}
 	return m, nil
 }
-func declarations(raw json.RawMessage) (map[string]inputDeclaration, error) {
+func declarations(raw jsontext.Value) (map[string]inputDeclaration, error) {
 	out := map[string]inputDeclaration{}
 	if raw == nil {
 		return out, nil
@@ -85,7 +94,7 @@ func declarations(raw json.RawMessage) (map[string]inputDeclaration, error) {
 	}
 	return out, nil
 }
-func parseInputDeclaration(name string, raw json.RawMessage) (inputDeclaration, error) {
+func parseInputDeclaration(name string, raw jsontext.Value) (inputDeclaration, error) {
 	if !inputName.MatchString(name) {
 		return inputDeclaration{}, fmt.Errorf("%s: invalid input name", name)
 	}
@@ -106,11 +115,8 @@ func parseInputDeclaration(name string, raw json.RawMessage) (inputDeclaration, 
 			return inputDeclaration{}, fmt.Errorf("%s: %s cannot be null", name, field)
 		}
 	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	dec.UseNumber()
 	var d inputDeclaration
-	if err = dec.Decode(&d); err != nil {
+	if err = json.Unmarshal(raw, &d, json.RejectUnknownMembers(true), jsonutil.PreserveNumberLiterals()); err != nil {
 		return inputDeclaration{}, fmt.Errorf("%s: %v", name, err)
 	}
 	if len(d.Title) > 80 || len(d.Description) > 400 {
@@ -186,9 +192,9 @@ func validInputValue(d inputDeclaration, v any) bool {
 	case "int":
 		var n int64
 		switch x := v.(type) {
-		case json.Number:
+		case jsontext.Value:
 			var err error
-			n, err = x.Int64()
+			n, err = strconv.ParseInt(string(x), 10, 64)
 			if err != nil {
 				return false
 			}
@@ -199,14 +205,12 @@ func validInputValue(d inputDeclaration, v any) bool {
 	}
 	return false
 }
-func inputValues(raw json.RawMessage) (map[string]any, error) {
+func inputValues(raw jsontext.Value) (map[string]any, error) {
 	if raw == nil {
 		return map[string]any{}, nil
 	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
 	var m map[string]any
-	if err := dec.Decode(&m); err != nil || m == nil {
+	if err := json.Unmarshal(raw, &m, jsonutil.PreserveNumberLiterals()); err != nil || m == nil {
 		return nil, fmt.Errorf("input_values must be an object")
 	}
 	return m, nil
@@ -250,7 +254,7 @@ func ValidateWorkflowInputs(options []byte) error {
 }
 
 // selectInputDeclaration shares the job/workflow declaration selection rules.
-func selectInputDeclaration(o map[string]json.RawMessage, workflowUID string, workflowOptions []byte) (json.RawMessage, string, []InputError) {
+func selectInputDeclaration(o map[string]jsontext.Value, workflowUID string, workflowOptions []byte) (jsontext.Value, string, []InputError) {
 	raw := o["inputs"]
 	if workflowUID == "" {
 		if raw != nil {

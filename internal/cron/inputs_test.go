@@ -151,7 +151,7 @@ func TestInputDeclarationRules(t *testing.T) {
 		require.Equal(t, tc.valid, ValidateInputs(options, "", nil) == nil)
 	}
 	fields := map[string]any{}
-	for i := 0; i < 33; i++ {
+	for i := range 33 {
 		fields["x"+strconv.Itoa(i)] = map[string]any{"type": "bool"}
 	}
 	raw, err := json.Marshal(map[string]any{"inputs": fields})

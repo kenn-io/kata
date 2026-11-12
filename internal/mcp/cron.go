@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	jsonv1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -97,10 +96,23 @@ func cronExpected(value string) (string, error) {
 func cronOutputSchema[Out any](name string) *jsonschema.Schema {
 	schema := schemaFor[Out]()
 	if name == "kata.cron_job_inputs" {
-		schema.Properties["inputs"].Items.Properties["value"] = &jsonschema.Schema{Types: []string{"string", "integer", "boolean"}}
+		inputs := schema.Properties["inputs"]
+		if inputs == nil || inputs.Items == nil {
+			panic("cron job inputs output schema lacks inputs items")
+		}
+		inputs.Items.Properties["value"] = &jsonschema.Schema{Types: []string{"string", "integer", "boolean"}}
 	}
 	return schema
 }
+
+// Preserve the presence of an optional scalar even when its JSON value is empty.
+var cronInputMarshalers = json.WithMarshalers(json.MarshalFunc(func(input generated.CronResolvedInput) ([]byte, error) {
+	type plainInput generated.CronResolvedInput
+	return json.Marshal(struct {
+		plainInput
+		Value *generated.CronResolvedInput_Value `json:"value,omitzero"`
+	}{plainInput: plainInput(input), Value: input.Value})
+}))
 
 // addCronTool retains original JSON bytes across validation. The SDK's generic
 // typed adapter re-marshals a float64 validation copy and rounds opaque options
@@ -143,7 +155,7 @@ func addCronTool[In, Out any](server *sdkmcp.Server, name, title, description st
 		var encoded []byte
 		if name == "kata.cron_job_inputs" {
 			// Generated optional scalar wrappers must retain an explicitly set empty string.
-			encoded, err = jsonv1.Marshal(output)
+			encoded, err = json.Marshal(output, cronInputMarshalers)
 		} else {
 			encoded, err = json.Marshal(output)
 		}
