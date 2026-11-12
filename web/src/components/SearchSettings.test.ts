@@ -97,6 +97,36 @@ describe('SearchSettings', () => {
     expect(screen.getByText('On', { exact: true })).not.toBeNull()
   })
 
+  test('continues showing progress while a reachable daemon is restarting', async () => {
+    vi.useFakeTimers()
+    const waiting = status({
+      can_change: false,
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+    })
+    const progress = { ...waiting, can_restart: false, restart_in_progress: true }
+    setGeneratedFetch(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(waiting))
+        .mockResolvedValue(Response.json(progress)),
+    )
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    renderSettings({
+      originStable: true,
+      postFetch: vi.fn(async () => new Response(null, { status: 202 })),
+    })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(130_000)
+    expect(screen.getByText('Restarting...')).not.toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+  })
+
   test('recovers while the restart request is pending and ignores its late failure', async () => {
     vi.useFakeTimers()
     const waiting = status({
