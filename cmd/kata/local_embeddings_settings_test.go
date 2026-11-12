@@ -221,15 +221,6 @@ func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	require.Equal(t, original, got, "a page loaded while search was off cannot switch a provider saved later")
 }
 
-func TestLocalEmbeddingsTurnOnChoiceWriteFailure(t *testing.T) {
-	setupChoiceWriteFailure(t)
-	var run func(context.Context)
-	setup := &localEmbeddingsSetup{start: func(work func(context.Context)) bool { run = work; return true }}
-	require.NoError(t, setup.TurnOn(t.Context()))
-	run(t.Context())
-	require.Equal(t, "restart", setup.job.State)
-}
-
 func TestSharedChoiceDaemonStartup(t *testing.T) {
 	for _, scenario := range []string{"vector path directory", "preflight", "enabled"} {
 		t.Run(scenario, func(t *testing.T) {

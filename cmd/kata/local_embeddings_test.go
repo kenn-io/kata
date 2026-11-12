@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -72,8 +74,24 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		require.True(t, chosen)
 	})
 	t.Run("marker write failure", func(t *testing.T) {
-		setupChoiceWriteFailure(t)
-		logs := captureSlog(t)
+		setupKataEnv(t)
+		home := clearLocalEmbeddingsEnv(t)
+		t.Setenv("KATA_SERVER", "")
+		stubLocalEmbeddingsInstall(t)
+		oldEndpoint := localEmbeddingsEndpoint
+		t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+		localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+			if opts.Executable == "" {
+				return "", embedlocal.ErrNotFound
+			}
+			return "http://127.0.0.1:12345/v1", nil
+		}
+		marker := filepath.Join(home, ".kenn", "embeddings", "search-by-meaning")
+		require.NoError(t, os.MkdirAll(marker, 0o700))
+		var logs bytes.Buffer
+		original := slog.Default()
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+		t.Cleanup(func() { slog.SetDefault(original) })
 		_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 		require.NoError(t, err)
 		require.Contains(t, logs.String(), "could not confirm that the shared search by meaning choice was saved")
@@ -82,24 +100,6 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, cfg.Embeddings.Local)
 	})
-}
-
-func setupChoiceWriteFailure(t *testing.T) {
-	t.Helper()
-	setupKataEnv(t)
-	home := clearLocalEmbeddingsEnv(t)
-	t.Setenv("KATA_SERVER", "")
-	stubLocalEmbeddingsInstall(t)
-	oldEndpoint := localEmbeddingsEndpoint
-	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
-		if opts.Executable == "" {
-			return "", embedlocal.ErrNotFound
-		}
-		return "http://127.0.0.1:12345/v1", nil
-	}
-	marker := filepath.Join(home, ".kenn", "embeddings", "search-by-meaning")
-	require.NoError(t, os.MkdirAll(marker, 0o700))
 }
 
 func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +29,10 @@ import (
 )
 
 func TestDaemonMCPUnavailableHandler(t *testing.T) {
-	logs := captureSlog(t)
+	var logs bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(original) })
 	handler := daemonMCPUnavailableHandler(errors.New(`project "missing" was not found`))
 	buildLog := logs.String()
 	var entry map[string]any

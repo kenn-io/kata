@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -29,15 +28,6 @@ import (
 	kitdaemon "go.kenn.io/kit/daemon"
 	gitcmd "go.kenn.io/kit/git/cmd"
 )
-
-func captureSlog(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	logs := new(bytes.Buffer)
-	original := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(original) })
-	return logs
-}
 
 // setupKataEnv points KATA_HOME and KATA_DB at a fresh temp dir so the test
 // runs in isolation from any developer-local state. Returns the temp dir.
