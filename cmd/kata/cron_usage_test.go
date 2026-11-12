@@ -106,3 +106,21 @@ func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
 	}
 	require.Equal(t, []string{"refresh=true", "refresh=true", "refresh=true"}, queries)
 }
+
+func TestCronUsageHumanTotalStates(t *testing.T) {
+	amount := int64(1250000)
+	for _, tc := range []struct {
+		total agentsview.Total
+		want  string
+	}{
+		{agentsview.Total{State: "complete", CostMicrodollars: &amount}, "Cost: $1.25\n"},
+		{agentsview.Total{State: "unknown"}, "Cost: unknown\n"},
+		{agentsview.Total{State: "no_sessions"}, "Cost: no sessions\n"},
+	} {
+		t.Run(tc.total.State, func(t *testing.T) {
+			var out bytes.Buffer
+			require.NoError(t, writeCronUsage(&out, agentsview.RunUsage{Total: tc.total}))
+			require.Equal(t, tc.want, out.String())
+		})
+	}
+}

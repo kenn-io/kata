@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/agentsview"
@@ -57,6 +58,23 @@ func assertCronUsageReadDoesNotChangeRunOrEvents(t *testing.T, ctx context.Conte
 	require.Contains(t, out.Body.String(), `"cost_microdollars":0`)
 	require.Contains(t, out.Header().Get("Cache-Control"), "no-store")
 	require.EqualValues(t, 1, calls.Load())
+	// The service clock is private to its package; wait past the documented
+	// refresh threshold to exercise the HTTP query through the real service.
+	timer := time.NewTimer(11 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	cached := httptest.NewRecorder()
+	server.Handler().ServeHTTP(cached, httptest.NewRequestWithContext(ctx, http.MethodGet, req.URL.String(), nil))
+	require.Equal(t, http.StatusOK, cached.Code, cached.Body.String())
+	require.EqualValues(t, 1, calls.Load())
+	refreshed := httptest.NewRecorder()
+	server.Handler().ServeHTTP(refreshed, httptest.NewRequestWithContext(ctx, http.MethodGet, req.URL.String()+"?refresh=true", nil))
+	require.Equal(t, http.StatusOK, refreshed.Code, refreshed.Body.String())
+	require.EqualValues(t, 2, calls.Load())
 	after, err := store.CronRun(ctx, project.ID, uid)
 	require.NoError(t, err)
 	require.Equal(t, before, after)
@@ -164,4 +182,24 @@ func TestCronUsageCapabilitiesAndHTTPErrors(t *testing.T) {
 			require.Contains(t, out.Body.String(), tc.code)
 		}
 	}
+}
+
+func TestDoctorAgentsViewEnabledSource(t *testing.T) {
+	env := testenv.New(t)
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":"session_not_found","message":"not found"}}`))
+	}))
+	t.Cleanup(upstream.Close)
+	service, err := agentsview.NewService(config.ResolvedAgentsView{URL: upstream.URL, BrowserURL: upstream.URL}, false)
+	require.NoError(t, err)
+	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, AgentsView: service})
+	t.Cleanup(func() { _ = server.Close() })
+	out := httptest.NewRecorder()
+	server.Handler().ServeHTTP(out, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/doctor", nil))
+	require.Equal(t, http.StatusOK, out.Code, out.Body.String())
+	require.Contains(t, out.Body.String(), `"agentsview":{"state":"ok"}`)
+	require.EqualValues(t, 1, calls.Load())
 }

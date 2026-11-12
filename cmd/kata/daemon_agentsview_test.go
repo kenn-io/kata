@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/agentsview"
@@ -28,4 +33,72 @@ func TestReloadAgentsViewKeepsChangedTargetAndRefreshesCredential(t *testing.T) 
 	changed, err = reloadAgentsView(t.Context(), home, service, false)
 	require.NoError(t, err)
 	require.True(t, changed)
+}
+
+func TestAgentsViewDaemonStartupAndReloadLogs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs an isolated daemon")
+	}
+	binary := kataTestBinary(t, "agentsview-contract")
+	childEnv := daemonLifecycleEnvironment(t)
+	for _, tc := range []struct{ name, initial, startup string }{
+		{"off", "", "AgentsView usage: off"},
+		{"on", "[agentsview]\nurl = 'https://agentsview.example'\n", "AgentsView usage: on (agentsview.example)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			workspace := t.TempDir()
+			env := append(append([]string(nil), childEnv...), "KATA_HOME="+home, "KATA_DB="+filepath.Join(home, "kata.db"), "KATA_WORKSPACE="+workspace)
+			configPath := filepath.Join(home, "config.toml")
+			require.NoError(t, os.WriteFile(configPath, []byte(tc.initial), 0o600))
+			logfile := filepath.Join(home, "fixture.log")
+			log, err := os.Create(logfile)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = log.Close() })
+			process := exec.CommandContext(context.WithoutCancel(t.Context()), binary, "daemon", "start", "--foreground", "--listen", "127.0.0.1:0") //nolint:gosec // isolated test-built daemon
+			process.Env = env
+			process.Stdout, process.Stderr = log, log
+			require.NoError(t, process.Start())
+			done := make(chan error, 1)
+			go func() { done <- process.Wait() }()
+			t.Cleanup(func() {
+				_ = process.Process.Kill()
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					t.Error("daemon did not exit")
+				}
+			})
+			readLog := func() string { data, _ := os.ReadFile(logfile); return string(data) }
+			require.Eventually(t, func() bool {
+				if !strings.Contains(readLog(), tc.startup) {
+					return false
+				}
+				status := exec.CommandContext(t.Context(), binary, "daemon", "status") //nolint:gosec // isolated test-built CLI
+				status.Env = env
+				return status.Run() == nil
+			}, 20*time.Second, 50*time.Millisecond) //nolint:kennlint // external daemon readiness and logs
+			changed := "[agentsview]\nurl = 'https://other.example'\n"
+			require.NoError(t, os.WriteFile(configPath, []byte(changed), 0o600))
+			reload := exec.CommandContext(t.Context(), binary, "daemon", "reload") //nolint:gosec // isolated test-built CLI
+			reload.Env = env
+			output, err := reload.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+			require.Eventually(t, func() bool {
+				return strings.Contains(readLog(), "AgentsView target or enabled state changed; restart required")
+			}, 10*time.Second, 50*time.Millisecond) //nolint:kennlint // asynchronous daemon reload log
+		})
+	}
+}
+
+func TestAgentsViewInvalidConfigStopsDaemonStartup(t *testing.T) {
+	_ = daemonLifecycleEnvironment(t)
+	home := setupKataEnv(t)
+	t.Setenv("KATA_WORKSPACE", t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[agentsview]\nurl = 'https://user:secret@example.com'\n"), 0o600))
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	err := runDaemonProcess(ctx, "127.0.0.1:0", false, true, newDaemonRestart(io.Discard))
+	require.ErrorContains(t, err, "[agentsview]")
+	require.NotContains(t, err.Error(), "secret")
 }
