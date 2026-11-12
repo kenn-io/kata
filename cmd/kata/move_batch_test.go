@@ -80,6 +80,8 @@ func TestMoveBatchCLI_PreflightFailureReportsAll(t *testing.T) {
 	require.Len(t, reply.Results, 3)
 	require.Equal(t, "refused", reply.Results[0].Result)
 	require.Equal(t, "unattempted", reply.Results[1].Result)
+	require.Equal(t, 1, reply.Results[1].Index)
+	require.Equal(t, issue.UID, reply.Results[1].Ref)
 	require.Equal(t, "unattempted", reply.Results[2].Result)
 	require.Equal(t, issue.UID, reply.Results[2].Ref)
 }

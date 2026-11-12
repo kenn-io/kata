@@ -130,10 +130,10 @@ func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string)
 func moveBatchTargetError(index int, ref string, err error) (api.MoveIssuesResult, error) {
 	ce, ok := errors.AsType[*cliError](err)
 	if !ok || ce.Kind == kindDaemonUnavail || ce.Kind == kindInternal && ce.HTTPStatus < 500 {
-		return api.MoveIssuesResult{}, err
+		return api.MoveIssuesResult{Index: index, Ref: ref}, err
 	}
 	if ce.HTTPStatus >= 500 {
-		return api.MoveIssuesResult{}, &cliError{Message: ce.Message, Code: ce.Code, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
+		return api.MoveIssuesResult{Index: index, Ref: ref}, &cliError{Message: ce.Message, Code: ce.Code, Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
 	}
 	return api.MoveIssuesResult{Index: index, Ref: ref, Result: "refused", Code: ce.Code, Message: ce.Message, Hint: ce.Hint}, nil
 }
