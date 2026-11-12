@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-30
+last_edited: 2026-11-10
 ---
 
 # Dormant native cron storage
@@ -63,3 +63,33 @@ See [Cron](../reference/cron.md) for API/CLI documents,
 [Backup and restore](../operations/backup-restore.md) for replacement protections,
 and [PostgreSQL migrations](../development/postgres-migrations.md) for schema
 history and startup validation.
+
+## Reserved argv step kind
+
+The event feature `cron_workflow_argv_v1` is reserved for a future `argv`
+workflow step kind and the `argv` string-array step member. Kata does not
+accept the kind or the member, even when the member is empty or null. Client
+representations reserve the member without granting execution. Historical
+decoding continues to reject raw documents containing the member. Workflow
+decoding rejects any argv step, including one that carries only its kind, on
+reads, lists, snapshots and remote admission. Legacy federation push inspects the raw
+workflow payload and sends an argv workflow only to a target that advertises
+the feature.
+
+Workflow definitions with a null document, steps array, step or step kind are
+also invalid for execution and remote admission. Owner backup and restore retain
+historically decodable documents and their original event payloads. Folding
+retains the winning document and its definition clock, including tombstones.
+Any undecodable retained workflow event blocks materialization of its owning project's
+cron state instead of allowing an older version to reappear.
+
+An older daemon could store either shape from an imported backup or federated
+history. SQLite schema 31 through 40 can upgrade with these held documents.
+Reads and snapshots remain unavailable for a held workflow. A full replacement
+with its current event UID is accepted; retained unsupported history still
+blocks snapshots and adoption.
+See the [recovery procedure](../reference/cron.md#held-legacy-workflows).
+
+Enabling argv needs coordinated relay publication, project-history negotiation,
+reset and adoption handling, client preservation and adapter conformance. These
+dependencies are tracked in [issue 1072](https://github.com/kenn-io/kata/issues/1072).

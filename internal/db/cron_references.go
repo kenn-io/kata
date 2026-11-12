@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"go.kenn.io/kata/internal/cron"
 )
 
 // This index is derived from ordinary documents inside a read/transaction.
@@ -17,8 +19,9 @@ type cronDefinitionReference struct {
 }
 type cronDefinitionIdentity struct{ kind, uid string }
 type cronReferenceIndex struct {
-	owners map[cronDefinitionIdentity]int64
-	events map[string]cronDefinitionReference
+	owners    map[cronDefinitionIdentity]int64
+	events    map[string]cronDefinitionReference
+	documents map[cronDefinitionReference]string
 }
 
 // Only relationship/document failures carry this marker. SQL query, scan,
@@ -38,7 +41,7 @@ func classifyCronReferenceError(err, validation error) error {
 }
 
 func newCronReferenceIndex() *cronReferenceIndex {
-	return &cronReferenceIndex{owners: map[cronDefinitionIdentity]int64{}, events: map[string]cronDefinitionReference{}}
+	return &cronReferenceIndex{owners: map[cronDefinitionIdentity]int64{}, events: map[string]cronDefinitionReference{}, documents: map[cronDefinitionReference]string{}}
 }
 func (idx *cronReferenceIndex) check(ref cronDefinitionReference) error {
 	if owner, known := idx.owners[cronDefinitionIdentity{ref.kind, ref.uid}]; known && owner != ref.projectID {
@@ -78,7 +81,7 @@ func cronRunReferences(projectID int64, run CronRun) ([]cronDefinitionReference,
 // a definition version. Ordinary unrelated event UIDs cannot serve as versions.
 func (idx *cronReferenceIndex) event(projectID int64, e FoldEvent) ([]cronDefinitionReference, error) {
 	if isCronDefinitionEvent(e.Type) {
-		_, value, err := parseCronDefinitionEvent(e)
+		body, value, err := parseCronDefinitionEvent(e)
 		if err != nil {
 			return nil, invalidCronReference(err)
 		}
@@ -86,8 +89,12 @@ func (idx *cronReferenceIndex) event(projectID int64, e FoldEvent) ([]cronDefini
 		if strings.HasPrefix(e.Type, "cron.job.") {
 			kind = "job"
 		}
-		if err := idx.add(cronDefinitionReference{projectID: projectID, kind: kind, uid: value.UID, event: value.DefinitionEventUID}); err != nil {
+		ref := cronDefinitionReference{projectID: projectID, kind: kind, uid: value.UID, event: value.DefinitionEventUID}
+		if err := idx.add(ref); err != nil {
 			return nil, err
+		}
+		if old, exists := idx.documents[ref]; !exists || (kind == "workflow" && workflowDocumentHeld(string(body.Definition)) && !workflowDocumentHeld(old)) {
+			idx.documents[ref] = string(body.Definition)
 		}
 		if e.UID == value.DefinitionEventUID {
 			return nil, nil
@@ -112,6 +119,12 @@ func (idx *cronReferenceIndex) event(projectID int64, e FoldEvent) ([]cronDefini
 		return nil, invalidCronReference(err)
 	}
 	return cronRunReferences(projectID, value.CronRun)
+}
+
+// Preserve unsupported evidence regardless of event and projection read order.
+func workflowDocumentHeld(document string) bool {
+	_, err := cron.DecodeWorkflow([]byte(document))
+	return err != nil
 }
 
 func validateCronImportReferences(records []ImportRecord) error {
@@ -188,6 +201,7 @@ type CronReplayValidator struct {
 	historyPrepared map[cronDefinitionReference]bool
 	ownersLoaded    map[cronDefinitionIdentity]bool
 	eventsLoaded    map[string]bool
+	eventsFound     map[string]bool
 	runsLoaded      map[string]bool
 	runs            map[string]CronRun
 }
@@ -197,7 +211,7 @@ type CronReplayValidator struct {
 // NewCronReplayValidator validates cron replay inside one transaction.
 // postgres selects PostgreSQL SQL for the shared history queries.
 func NewCronReplayValidator(tx *sql.Tx, postgres bool) *CronReplayValidator {
-	return &CronReplayValidator{tx: tx, postgres: postgres, idx: newCronReferenceIndex(), loaded: map[cronDefinitionReference]bool{}, historyPrepared: map[cronDefinitionReference]bool{}, ownersLoaded: map[cronDefinitionIdentity]bool{}, eventsLoaded: map[string]bool{}, runsLoaded: map[string]bool{}, runs: map[string]CronRun{}}
+	return &CronReplayValidator{tx: tx, postgres: postgres, idx: newCronReferenceIndex(), loaded: map[cronDefinitionReference]bool{}, historyPrepared: map[cronDefinitionReference]bool{}, ownersLoaded: map[cronDefinitionIdentity]bool{}, eventsLoaded: map[string]bool{}, eventsFound: map[string]bool{}, runsLoaded: map[string]bool{}, runs: map[string]CronRun{}}
 }
 
 func (v *CronReplayValidator) loadKnown(ctx context.Context, ref cronDefinitionReference) error {
@@ -208,13 +222,17 @@ func (v *CronReplayValidator) loadKnown(ctx context.Context, ref cronDefinitionR
 			table = "cron_workflows"
 		}
 		current := cronDefinitionReference{kind: ref.kind, uid: ref.uid}
-		err := v.tx.QueryRowContext(ctx, "SELECT project_id,definition_event_uid FROM "+table+" WHERE uid=$1", ref.uid).Scan(&current.projectID, &current.event)
+		var document string
+		err := v.tx.QueryRowContext(ctx, "SELECT project_id,definition_event_uid,definition_json FROM "+table+" WHERE uid=$1", ref.uid).Scan(&current.projectID, &current.event, &document)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		if err == nil {
 			if err := v.idx.add(current); err != nil {
 				return err
+			}
+			if old, exists := v.idx.documents[current]; !exists || (current.kind == "workflow" && workflowDocumentHeld(document) && !workflowDocumentHeld(old)) {
+				v.idx.documents[current] = document
 			}
 		}
 		v.ownersLoaded[identity] = true
@@ -228,6 +246,7 @@ func (v *CronReplayValidator) loadKnown(ctx context.Context, ref cronDefinitionR
 			return err
 		}
 		if err == nil {
+			v.eventsFound[ref.event] = true
 			e.Payload = []byte(payload)
 			refs, err := v.idx.event(projectID, e)
 			if err != nil {
@@ -301,7 +320,7 @@ func (v *CronReplayValidator) prepareReferences(ctx context.Context, refs []cron
 		if err := v.loadKnown(ctx, ref); err != nil {
 			return err
 		}
-		if actual, known := v.idx.events[ref.event]; known && actual == ref {
+		if actual, known := v.idx.events[ref.event]; known && actual == ref && (ref.kind != "workflow" || v.eventsFound[ref.event]) {
 			v.historyPrepared[ref] = true
 			continue
 		}
@@ -424,4 +443,15 @@ UNION SELECT DISTINCT project_id,'workflow',workflow_uid,workflow_definition_eve
 SELECT project_id,uid,type,origin_instance_uid,hlc_physical_ms,hlc_counter,payload FROM events
 WHERE type LIKE 'cron.%' AND (((type LIKE 'cron.job.%' OR type LIKE 'cron.workflow.%') AND (json_extract(payload,'$.uid') IN (SELECT value FROM requested_uids) OR json_extract(payload,'$.definition_event_uid') IN (SELECT value FROM requested_versions))) OR (type IN ('cron.run.observed','cron.run.snapshot') AND (json_extract(payload,'$.job_uid') IN (SELECT value FROM requested_uids) OR json_extract(payload,'$.workflow_uid') IN (SELECT value FROM requested_uids) OR json_extract(payload,'$.definition_event_uid') IN (SELECT value FROM requested_versions) OR json_extract(payload,'$.workflow_definition_event_uid') IN (SELECT value FROM requested_versions))))`,
 	}
+}
+
+// cronRetainedWorkflowRevisionQuery finds only project-scoped definition evidence.
+func cronRetainedWorkflowRevisionQuery(postgres bool) string {
+	versions, reference := "SELECT value FROM json_each($2)", "json_extract(payload,'$.definition_event_uid')"
+	if postgres {
+		versions, reference = "SELECT jsonb_array_elements_text($2::jsonb) AS value", "(payload::jsonb ->> 'definition_event_uid')"
+	}
+	return `WITH requested_versions AS (` + versions + `)
+SELECT uid,type,origin_instance_uid,hlc_physical_ms,hlc_counter,` + reference + `,payload FROM events
+WHERE project_id=$1 AND type LIKE 'cron.%' AND type LIKE 'cron.workflow.%' AND (uid IN (SELECT value FROM requested_versions) OR ` + reference + ` IN (SELECT value FROM requested_versions))`
 }

@@ -66,6 +66,9 @@ func (s *Store) IngestFederationEvents(
 		for _, input := range params.Events {
 			feature, err := db.PayloadRequiredFeatures(input.Event.Type, string(input.Event.Payload))
 			if err != nil {
+				if strings.HasPrefix(input.Event.Type, "cron.workflow.") {
+					return fmt.Errorf("%w: invalid workflow event payload: %v", db.ErrFederationIngestValidation, err)
+				}
 				return err
 			}
 			if err := db.CheckRecurringSpokeEvent(ctx, tx, input.Event); err != nil {

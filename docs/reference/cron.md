@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-10
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -387,6 +387,7 @@ options). Each step has these fields:
 | --- | --- |
 | `key` | Required portable name, unique within the workflow. |
 | `kind` | `command` (requires `command`, no `prompt`) or `prompt` (requires `prompt`, no `command`). |
+| `argv` | Reserved string array; any presence, including `null` or an empty array, is refused until argv steps are enabled. |
 | `after` | Optional keys of earlier steps this step depends on. |
 | `retries` | Optional; 0–100. |
 | `options` | Optional JSON object for the adapter. |
@@ -590,6 +591,48 @@ unknown, or failed advertisements remain distinct outcomes. This is an ordinary 
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
 
+### Held legacy workflows
+
+Older databases can contain workflows with a reserved `argv` step or a null
+definition, steps array, step, or step kind. Owner backup and restore preserve
+historically decodable documents and their event evidence; JSON formatting may
+change. These workflows remain unavailable to adapters and cannot be shown or
+used in new jobs or fresh running observations. Terminal run evidence can still
+reference an exact held revision. Ordinary workflow lists omit held workflows and
+show supported siblings. Federation snapshots and adoption fail when a held
+workflow row or retained unsupported workflow event exists. Project merge also
+refuses retained unsupported workflow events. `kata cron workflow show` reports
+a validation failure for a held definition.
+
+Retained events whose definitions cannot be represented in storage, or whose
+future fields cannot be decoded, can block cron rematerialization for their
+project even when a later supported event exists. Preserve the backup for
+recovery with a compatible version.
+
+To recover, take an [owner backup](../operations/backup-restore.md#full-backup)
+and find the `cron_workflow` record and its UID and definition in the JSONL. If
+the definition cannot be represented in a workflow row, find its UID and raw
+definition in the retained `event` record instead. Create a supported workflow
+with a new UID, then update affected jobs to use it. For a full replacement of a
+held row, use its `cron_workflow.definition_event_uid` from the owner backup as
+`expected_event_uid` or `--expected-event-uid`. In a retained snapshot,
+`definition_event_uid` identifies the original revision, not the snapshot
+envelope's event UID. Retained unsupported events continue to block federation
+snapshots, adoption, and project merge after replacement. Preserve the backup and
+evidence for recovery with a compatible version. The remaining work for argv
+support is tracked in [issue 1072](https://github.com/kenn-io/kata/issues/1072).
+
+Signed federation checkpoints with unsupported workflow evidence cannot be
+downloaded, forwarded, installed, or activated. Taking an owner backup retains
+the evidence; it does not make the checkpoint usable by an older version.
+Use a version that understands the retained format for recovery. A newer
+supported workflow does not clear older retained evidence.
+Legacy replay-horizon resets and signed checkpoint installation also refuse when
+local workflow rows or retained events are unsupported. The reset remains
+blocked on later polls until that evidence can be handled safely. The owner
+backup and replacement workflow above preserve recovery options. They do not
+authorize deleting evidence or bypassing the reset refusal.
+
 ### Upgrade limits
 
 These limits apply to projects with cron data and the adapters that consume
@@ -749,6 +792,31 @@ adapter owns its local activation, scheduler, overlap and catchup handling,
 checkout and secret mappings, process lifecycle, and conversation recovery.
 A second adapter may independently execute the same occurrence. Each execution
 keeps a separate run UID; no shared observation reserves the issue or occurrence.
+
+Before recording a running observation or starting any step, an adapter must
+refuse workflow versions it does not understand and check the entire workflow
+for step kinds it cannot execute, including steps after supported ones. The
+reference example uses `reason: unsupported_version` for an unsupported version
+under the adapter-defined reason convention above. If the adapter finds an
+unsupported step, it starts no steps and records a failed
+observation directly. For a new run UID, use expected revision 0; no preceding
+running observation is needed. Put `reason: unsupported_step` on the first line
+of `summary.message` and identify the unsupported step key and kind in the
+human-readable detail. For example, the detail may include `step: <key>` and
+`kind: <kind>`; its format is not a fixed protocol.
+
+When argv reads are enabled, clients that support the argv representation declare
+`cron_workflow_argv_v1` in the request's `X-Kata-Event-Features` header. This
+declares format support, while the capabilities response describes daemon
+features. Each adapter separately checks which step kinds it can execute before
+starting work.
+
+An adapter that supports an `argv` step passes the vector literally to the
+process: the first element is the executable and the remaining elements are
+separate arguments. It does not join arguments, interpolate or expand them, or
+retry through a shell if launch fails. A workflow can explicitly request a shell
+by naming it in the vector; then that shell interprets its own arguments. The
+`argv` kind remains reserved until workflow authoring and reads enable it.
 
 A job may name its adapter in `options.adapter`. An adapter neither schedules
 nor manually runs a job whose key names another adapter, and says why in its own

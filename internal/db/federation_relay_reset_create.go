@@ -148,6 +148,16 @@ func (p RelayResetProtocol) retainedCheckpoint(ctx context.Context, create relay
 	if err := VerifyRootResetManifest(historical, result.Manifest, result.Snapshot); err != nil {
 		return RelayResetCheckpoint{}, false, err
 	}
+	events, _, err := DecodeRootResetPayload(historical, result.Snapshot)
+	if err != nil {
+		return RelayResetCheckpoint{}, false, err
+	}
+	if err := requireUsableResetEvents(events); err != nil {
+		return RelayResetCheckpoint{}, false, err
+	}
+	if err := requireResetPeerFeatures(ctx, create.bindingUID, events); err != nil {
+		return RelayResetCheckpoint{}, false, err
+	}
 	refresh, err := p.Backend.RelayCheckpointNeedsRefresh(ctx, create.project.UID, result)
 	if err != nil {
 		return RelayResetCheckpoint{}, false, err
@@ -197,7 +207,14 @@ func (p RelayResetProtocol) captureRootCheckpoint(ctx context.Context, create re
 	if err := size.CapacityError(project.UID); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
-	if _, _, err := DecodeRootResetPayload(pin, snapshot); err != nil {
+	events, _, err := DecodeRootResetPayload(pin, snapshot)
+	if err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	if err := requireUsableResetEvents(events); err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	if err := requireResetPeerFeatures(ctx, create.bindingUID, events); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
 	retained, err := p.Backend.MetaValuesWithPrefix(ctx, RelayResetMetadataPrefix+project.UID+".")

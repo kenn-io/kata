@@ -57,6 +57,7 @@ func RunRelayResetRepeatedBeforeDownstreamActivation(t *testing.T, store db.Stor
 
 	// The root purges that issue and the relay installs the next checkpoint
 	// before the downstream ever asked for the first forwarded epoch.
+
 	manifest, snapshot, translation = root.checkpoint(4, 4, kept)
 	require.NoError(t, installer.InstallRelayReset(ctx, upstream, manifest, snapshot, translation))
 	_, err = store.IssueByUID(ctx, late.entity.EntityUID, db.IncludeDeletedYes)

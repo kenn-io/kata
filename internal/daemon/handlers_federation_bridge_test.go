@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -249,6 +251,26 @@ func TestRelayHTTPTransportPrefixAndRevocation(t *testing.T) {
 		envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{Version: 1, BindingUID: grant.Enrollment.RelayBindingUID, ProjectUID: f.private.UID, AuthorityUID: store.InstanceUID(), SenderInstanceUID: grant.Enrollment.SpokeInstanceUID, ReceiverInstanceUID: store.InstanceUID(), Epoch: 1, Sequence: 15, Stream: db.RelayStreamEvent, Path: []string{event.OriginInstanceUID, grant.Enrollment.SpokeInstanceUID}, SourceUID: event.EventUID, SourceHash: event.ContentHash, Body: body})
 		require.NoError(t, err)
 		batch := db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}}
+		held := event
+		held.IssueUID, held.RelatedIssueUID = nil, nil
+		held.Type = "cron.workflow.created"
+		held.Payload = jsontext.Value(`{"definition":null}`)
+		held.ContentHash, err = db.RemoteEventContentHash(held)
+		require.NoError(t, err)
+		heldBody, err := db.EncodeRelaySourceEvent(held)
+		require.NoError(t, err)
+		heldEnvelope := envelope
+		heldEnvelope.Body, heldEnvelope.SourceHash = heldBody, held.ContentHash
+		heldEnvelope, err = db.SealRelayEnvelope(heldEnvelope)
+		require.NoError(t, err)
+		status, _, raw = f.request(t, http.MethodPost, base+":accept", "", db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{heldEnvelope}}, headers)
+		require.Equal(t, http.StatusConflict, status, string(raw))
+		var heldResponse api.ErrorEnvelope
+		require.NoError(t, json.Unmarshal(raw, &heldResponse))
+		require.Equal(t, "unsupported_event_features", heldResponse.Error.Code)
+		require.Contains(t, heldResponse.Error.Hint, "backup")
+		require.Contains(t, heldResponse.Error.Hint, "retained history")
+		require.NotContains(t, heldResponse.Error.Hint, "Upgrade the peer")
 		status, _, raw = f.request(t, http.MethodPost, base+":accept", "", batch, headers)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var accepted db.RelayAcceptance
