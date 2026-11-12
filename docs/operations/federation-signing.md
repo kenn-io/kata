@@ -16,6 +16,9 @@ Existing private deployments stay unsigned unless the hub enables required
 signing. Optional mode rejects invalid supplied signatures. Required mode
 rejects unsigned enrollment requests on every daemon listener, including the
 Unix socket, with `428 hub_signing_required`; a spoke cannot negotiate it away.
+Enabling `required = true` stops every spoke that joined unsigned, over TCP
+and the Unix socket, until its signing key is registered on the hub and selected
+on the spoke.
 Owner-local administration keeps its existing authority.
 The restricted ingress listener always requires signatures, even when signing
 is optional on the ordinary daemon listeners.
@@ -60,9 +63,10 @@ is optional on the ordinary daemon listeners.
    listen = "127.0.0.1:7780"
    ```
 
-5. Start the hub normally. Signing initially returns `503` for at least
-   96 seconds, and until wall time has passed the persisted maximum admitted
-   signature expiry. This gate also applies after a restart.
+5. Start the hub normally. Requests that reach signature verification initially
+   receive `503` for at least 96 seconds, and until wall time has passed the
+   persisted maximum admitted signature expiry; this gate also applies after a
+   restart. Unsigned requests receive `428` immediately.
 6. Run the native enrollment join command on the spoke with
    `--hub-url https://daemon.example/federation`, adding
    `--signing-key-id spoke-key-1 --signing-key-env KATA_SPOKE_SIGNING_KEY`.
@@ -102,10 +106,11 @@ not credentials.
 A bridge created with `kata federation bridge connect` signs its relay
 requests when its credential selects a signing source. A hub with
 `required = true` advertises `federation_signing_required`, and bridge connect
-refuses it with `hub_signing_required` until the bridge has a source. The same
-code with HTTP 428 answers unsigned requests on any federation listener. An
-older bridge keeps its grant and reports `offline` instead of `signing_rejected`
-when this response causes its sync to fail, unless a higher-priority state applies.
+refuses it with `409 hub_signing_required` until the bridge has a source. An
+unsigned request receives `428 hub_signing_required` on any federation listener.
+An older bridge keeps its grant and reports `offline` instead of
+`signing_rejected` when this response causes its sync to fail, unless a
+higher-priority state applies.
 
 1. On the daemon that will hold the bridge, provision the secret as above and
    connect with `--signing-key-id <key-id>` plus `--signing-key-env <var>` or

@@ -167,7 +167,7 @@ func TestSignedFederationRestrictedIngressRoundTrip(t *testing.T) {
 		headRequest.Header.Set("Authorization", "Bearer "+enrollment.Token)
 		headResponse := httptest.NewRecorder()
 		mainHandler.ServeHTTP(headResponse, headRequest)
-		require.Equal(t, http.StatusUnauthorized, headResponse.Code, "HEAD must not bypass required federation signing")
+		require.Equal(t, http.StatusPreconditionRequired, headResponse.Code, "HEAD must not bypass required federation signing")
 		// Signed main-listener ingest shares the verified authorization instead of
 		// charging the native host federation admission policy a second time.
 		mainPayload, err := json.Marshal(federationIngestBody())
@@ -509,7 +509,10 @@ func TestSignedNativeCronEnrollment(t *testing.T) {
 		}
 		for _, handler := range []http.Handler{server.Handler(), ingress} {
 			unsigned := send(handler, http.MethodPost, path, enrollment.Token, false, payload)
-			require.Equal(t, http.StatusUnauthorized, unsigned.Code, unsigned.Body.String())
+			require.Equal(t, http.StatusPreconditionRequired, unsigned.Code, unsigned.Body.String())
+			var envelope api.ErrorEnvelope
+			require.NoError(t, json.Unmarshal(unsigned.Body.Bytes(), &envelope))
+			require.Equal(t, "hub_signing_required", envelope.Error.Code)
 		}
 		owner := send(server.Handler(), http.MethodPost, path, "owner-token", false, payload)
 		require.Equal(t, http.StatusCreated, owner.Code, owner.Body.String())

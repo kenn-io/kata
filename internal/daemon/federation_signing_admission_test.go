@@ -53,7 +53,7 @@ func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
 			want    int
 		}{
 			{"private unsigned", srv.Handler(), false, http.StatusOK},
-			{"ingress unsigned", ingress, false, http.StatusUnauthorized},
+			{"ingress unsigned", ingress, false, http.StatusPreconditionRequired},
 			{"ingress signed", ingress, true, http.StatusOK},
 		} {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
