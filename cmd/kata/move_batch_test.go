@@ -23,55 +23,6 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestMoveBatchCLI_Pages(t *testing.T) {
-	for _, failSecond := range []bool{false, true} {
-		t.Run(fmt.Sprint(failSecond), func(t *testing.T) {
-			env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("synthetic-page-token"))
-			source, err := env.DB.CreateProject(t.Context(), "source-project")
-			require.NoError(t, err)
-			target, err := env.DB.CreateProject(t.Context(), "target-project")
-			require.NoError(t, err)
-			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "issue", Author: "tester"})
-			require.NoError(t, err)
-			origin, err := url.Parse(env.URL)
-			require.NoError(t, err)
-			proxy := httputil.NewSingleHostReverseProxy(origin)
-			calls := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/api/v1/issues/actions/move" {
-					calls++
-					if failSecond && calls == 2 {
-						http.Error(w, "unavailable", http.StatusInternalServerError)
-						return
-					}
-				}
-				r.Host = origin.Host
-				proxy.ServeHTTP(w, r)
-			}))
-			t.Cleanup(server.Close)
-			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, strings.Repeat(issue.UID+"\n", 51), "--workspace", dir, "move", target.Name, "--refs-from", "-", "--json")
-			if failSecond {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-			}
-			require.Equal(t, 2, calls)
-			var reply struct {
-				Results []api.MoveIssuesResult `json:"results"`
-			}
-			require.NoError(t, json.Unmarshal([]byte(out), &reply))
-			require.Len(t, reply.Results, 51)
-			if failSecond {
-				require.Equal(t, "unknown", reply.Results[50].Result)
-			}
-			require.Equal(t, "moved", reply.Results[0].Result)
-			got, err := env.DB.IssueByID(t.Context(), issue.ID)
-			require.NoError(t, err)
-			require.Equal(t, target.ID, got.ProjectID)
-		})
-	}
-}
-
 func TestParseRefsFrom(t *testing.T) {
 	for _, input := range []string{"abc4\n", "abc4\tdst\n", "# note\n\n abc4 \r\n", "\ufeffabc4\n"} {
 		items, err := parseRefsFrom(strings.NewReader(input), "dst", 5001)
@@ -133,8 +84,8 @@ func TestMoveBatchCLI_PreflightFailureReportsAll(t *testing.T) {
 	require.Equal(t, issue.UID, reply.Results[2].Ref)
 }
 
-func TestMoveBatchCLI_RejectedPageIsUnattempted(t *testing.T) {
-	for _, status := range []int{http.StatusBadRequest, http.StatusNotFound} {
+func TestMoveBatchCLI_Pages(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusBadRequest, http.StatusNotFound, http.StatusInternalServerError} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("synthetic-rejected-page-token"))
 			src, err := env.DB.CreateProject(t.Context(), "source")
@@ -163,8 +114,8 @@ func TestMoveBatchCLI_RejectedPageIsUnattempted(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api/v1/issues/actions/move" {
 					calls++
-					if calls == 2 && status == http.StatusBadRequest {
-						http.Error(w, "rejected", http.StatusBadRequest)
+					if calls == 2 && (status == http.StatusBadRequest || status == http.StatusInternalServerError) {
+						http.Error(w, "rejected", status)
 						return
 					}
 				}
@@ -173,7 +124,11 @@ func TestMoveBatchCLI_RejectedPageIsUnattempted(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, strings.Repeat(issue.UID+"\n", 50)+last.UID+"\n", "--workspace", dir, "move", dst.Name, "--refs-from", "-", "--json")
-			require.Error(t, err)
+			if status == http.StatusOK {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
 			var reply struct {
 				Results []api.MoveIssuesResult `json:"results"`
 			}
@@ -182,11 +137,18 @@ func TestMoveBatchCLI_RejectedPageIsUnattempted(t *testing.T) {
 			require.Equal(t, "moved", reply.Results[0].Result)
 			got, err := env.DB.IssueByID(t.Context(), last.ID)
 			require.NoError(t, err)
-			if status == http.StatusBadRequest {
+			switch status {
+			case http.StatusBadRequest:
 				require.Equal(t, "unattempted", reply.Results[50].Result)
 				require.Equal(t, src.ID, got.ProjectID)
-			} else {
+			case http.StatusNotFound:
 				require.Equal(t, "unknown", reply.Results[50].Result)
+				require.Equal(t, dst.ID, got.ProjectID)
+			case http.StatusInternalServerError:
+				require.Equal(t, "unknown", reply.Results[50].Result)
+				require.Equal(t, src.ID, got.ProjectID)
+			default:
+				require.Equal(t, "moved", reply.Results[50].Result)
 				require.Equal(t, dst.ID, got.ProjectID)
 			}
 		})
@@ -194,9 +156,16 @@ func TestMoveBatchCLI_RejectedPageIsUnattempted(t *testing.T) {
 }
 
 func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
-	for _, kind := range []string{"positional", "targets", "later-page", "qualified"} {
+	for _, kind := range []string{"positional", "targets", "later-page", "qualified", "utf8-file", "utf8-target", "utf8-positional"} {
 		t.Run(kind, func(t *testing.T) {
 			env, dir, _, dst, issue := setupMoveCLIProjects(t)
+			var collision db.Issue
+			if kind == "utf8-file" || kind == "utf8-positional" {
+				project, err := env.DB.CreateProject(t.Context(), "bad\ufffd")
+				require.NoError(t, err)
+				collision, _, err = env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "collision", Author: "tester", UID: "01K0000000000000000000ABCD"})
+				require.NoError(t, err)
+			}
 			args := []string{"--workspace", dir, "move"}
 			input, prefixCount := "", 0
 			switch kind {
@@ -213,6 +182,17 @@ func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 			case "qualified":
 				prefixCount = 1
 				args = append(args, strings.Repeat("<", 180000)+"#abcd", issue.UID, dst.Name)
+			case "utf8-file":
+				prefixCount = 1
+				input = "bad\xff#abcd\n" + issue.UID + "\n"
+				args = append(args, dst.Name, "--refs-from", "-")
+			case "utf8-target":
+				prefixCount = 1
+				input = issue.UID + "\tbad\xff\n" + issue.UID + "\t" + dst.Name + "\n"
+				args = append(args, "--refs-from", "-")
+			case "utf8-positional":
+				prefixCount = 1
+				args = append(args, "bad\xff#abcd", issue.UID, dst.Name)
 			case "later-page":
 				prefixCount = 50
 				input = strings.Repeat(issue.UID+"\n", 50) + strings.Repeat("<", 200000) + "\n"
@@ -224,6 +204,12 @@ func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 			var reply api.MoveIssuesResponse
 			require.NoError(t, json.Unmarshal([]byte(out), &reply.Body))
 			require.Len(t, reply.Body.Results, prefixCount+1)
+			if kind == "utf8-file" || kind == "utf8-positional" {
+				require.Equal(t, "bad\ufffd#abcd", reply.Body.Results[0].Ref)
+				got, err := env.DB.IssueByID(t.Context(), collision.ID)
+				require.NoError(t, err)
+				require.Equal(t, collision.ProjectID, got.ProjectID)
+			}
 			for i, result := range reply.Body.Results {
 				require.Equal(t, i, result.Index)
 				want := "refused"

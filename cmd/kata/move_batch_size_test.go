@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json/v2"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -31,6 +32,11 @@ func TestMoveBatchCLI_EncodedPages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/issues/actions/move" {
 			pages++
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.LessOrEqual(t, len(body), 1<<20)
+			require.Contains(t, string(body), `\u003c`)
+			r.Body = io.NopCloser(strings.NewReader(string(body)))
 			if failSecond && pages == 2 {
 				http.Error(w, "unavailable", http.StatusInternalServerError)
 				return

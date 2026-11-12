@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json/jsontext"
+	stdjson "encoding/json"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
@@ -231,6 +232,12 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 	if err := validateMoveBatchSelection(items, opts); err != nil {
 		return err
 	}
+	for i := range items {
+		if !utf8.ValidString(items[i].Ref) || !utf8.ValidString(items[i].TargetProject) {
+			items[i].ParseError = "ref and target project must be valid UTF-8"
+			items[i].Ref = strings.ToValidUTF8(items[i].Ref, "\ufffd")
+		}
+	}
 	if (opts.DryRun || opts.Subtree) && len(items) == 1 && items[0].ParseError == "" {
 		previousProject := flags.Project
 		defer func() { flags.Project = previousProject }()
@@ -378,19 +385,10 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector, max
 	return out, nil
 }
 
-func packMoveBatchPages(request *api.MoveIssuesBody, indexes []int, results []api.MoveIssuesResult) ([]generated.MoveIssuesBody, []int, error) {
+func packMoveBatchPages(request *generated.MoveIssuesBody, indexes []int, results []api.MoveIssuesResult) ([]generated.MoveIssuesBody, []int, error) {
 	base := *request
-	base.Items = nil
-	raw, err := json.Marshal(base)
-	if err != nil {
-		return nil, nil, err
-	}
-	var page generated.MoveIssuesBody
-	if err := json.Unmarshal(raw, &page); err != nil {
-		return nil, nil, err
-	}
-	page.Items = []generated.MoveIssuesItem{}
-	raw, err = json.Marshal(page, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+	base.Items = []generated.MoveIssuesItem{}
+	raw, err := stdjson.Marshal(base)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -400,18 +398,10 @@ func packMoveBatchPages(request *api.MoveIssuesBody, indexes []int, results []ap
 	}
 	var pages []generated.MoveIssuesBody
 	keptIndexes := indexes[:0]
-	keptItems := request.Items[:0]
+	page := base
 	size := baseSize
 	for i, item := range request.Items {
-		raw, err = json.Marshal(item)
-		if err != nil {
-			return nil, nil, err
-		}
-		var wire generated.MoveIssuesItem
-		if err := json.Unmarshal(raw, &wire); err != nil {
-			return nil, nil, err
-		}
-		raw, err = json.Marshal(wire, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+		raw, err = stdjson.Marshal(item)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -427,15 +417,13 @@ func packMoveBatchPages(request *api.MoveIssuesBody, indexes []int, results []ap
 		if len(page.Items) > 0 {
 			size++
 		}
-		page.Items = append(page.Items, wire)
+		page.Items = append(page.Items, item)
 		size += len(raw)
 		keptIndexes = append(keptIndexes, indexes[i])
-		keptItems = append(keptItems, item)
 	}
 	if len(page.Items) > 0 {
 		pages = append(pages, page)
 	}
-	request.Items = keptItems
 	return pages, keptIndexes, nil
 }
 
@@ -474,12 +462,21 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		return err
 	}
 	actor, _ := resolveActor(a.ctx, flags.As, nil)
-	request := api.MoveIssuesRequest{}
-	request.Body.Actor = actor
-	request.Body.Comment = opts.Comment
-	request.Body.Teammate = opts.Teammate
+	request := generated.MoveIssuesBody{}
+	if actor != "" {
+		request.Actor = &actor
+	}
+	if opts.Comment != "" {
+		request.Comment = &opts.Comment
+	}
+	if opts.Teammate != "" {
+		request.Teammate = &opts.Teammate
+	}
 	needsDefault := false
 	for _, item := range items {
+		if item.ParseError != "" {
+			continue
+		}
 		parsed, err := shortid.Parse(item.Ref)
 		if err == nil {
 			needsDefault = needsDefault || (parsed.ULID == "" && parsed.Project == "")
@@ -490,7 +487,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		if err == nil {
 			pid, _, err := resolveProjectIDAndNameWithClient(a, start)
 			if err == nil {
-				request.Body.DefaultProjectID = pid
+				request.DefaultProjectID = &pid
 			}
 		}
 	}
@@ -509,9 +506,13 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			continue
 		}
 		indexes = append(indexes, i)
-		request.Body.Items = append(request.Body.Items, api.MoveIssuesItem{Ref: item.Ref, ToProjectUID: uid, ExpectedRevision: item.ExpectedRevision})
+		wire := generated.MoveIssuesItem{Ref: &item.Ref, ToProjectUID: &uid}
+		if item.ExpectedRevision != 0 {
+			wire.ExpectedRevision = &item.ExpectedRevision
+		}
+		request.Items = append(request.Items, wire)
 	}
-	if len(request.Body.Items) == 0 {
+	if len(request.Items) == 0 {
 		preflight = false
 		if err := printMoveBatch(cmd, results, len(items)); err != nil {
 			return err
@@ -522,7 +523,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		return nil
 	}
 	// Encode every page before sending any mutation.
-	pages, indexes, err := packMoveBatchPages(&request.Body, indexes, results)
+	pages, indexes, err := packMoveBatchPages(&request, indexes, results)
 	if err != nil {
 		return err
 	}
@@ -563,7 +564,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 				}
 				if json.Unmarshal(ce.Data, &partial) == nil {
 					for _, r := range partial.Results {
-						if r.Index >= 0 && r.Index < len(body.Items) && r.Ref == request.Body.Items[start+r.Index].Ref && (r.Result == "moved" || r.Result == "unchanged" || r.Result == "refused") && results[indexes[start+r.Index]].Result == "" {
+						if r.Index >= 0 && r.Index < len(body.Items) && body.Items[r.Index].Ref != nil && r.Ref == *body.Items[r.Index].Ref && (r.Result == "moved" || r.Result == "unchanged" || r.Result == "refused") && results[indexes[start+r.Index]].Result == "" {
 							r.Index = indexes[start+r.Index]
 							results[r.Index] = r
 						}
@@ -601,7 +602,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			return fmt.Errorf("invalid batch move result count")
 		}
 		for j, r := range reply.Results {
-			if r.Index != j || r.Index >= len(body.Items) || r.Ref != request.Body.Items[start+j].Ref || (r.Result != "moved" && r.Result != "unchanged" && r.Result != "refused") {
+			if r.Index != j || r.Index >= len(body.Items) || body.Items[j].Ref == nil || r.Ref != *body.Items[j].Ref || (r.Result != "moved" && r.Result != "unchanged" && r.Result != "refused") {
 				classify()
 				if printErr := printResults(); printErr != nil {
 					return printErr

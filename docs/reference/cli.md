@@ -1023,9 +1023,7 @@ Other refusals retain the single-move rule codes and explain how to resolve
 them. One refusal leaves successful items committed. A denied descendant
 refuses its whole selected subtree. For batch moves, `--comment` adds the comment with teammate attribution to each issue in the move transaction. Unchanged issues receive no comment. For a single subtree move, the comment is posted to the selected issue after the move; a failure leaves the move committed and visible in the output.
 
-Inputs over 5,000 items or a 1 MiB request body are refused before any write.
-An oversized refs-file line receives its own refusal. Split larger input into separate runs.
-The CLI sends up to 50 items per request; each request commits independently.
+Inputs over 5,000 items are refused before any write. The CLI splits requests at 50 items or 1 MiB of encoded data; each request commits independently. An oversized refs-file line or an item that cannot fit in one request receives its own refusal.
 A later item with a stale expected revision is refused. Exit 0 means every item succeeded
 or was unchanged; exit 5 means at least one refusal; exit 2 means invalid input
 before a move request. An interrupted request prints confirmed results, including committed chunks returned in an error response. A transport failure exits 7.
