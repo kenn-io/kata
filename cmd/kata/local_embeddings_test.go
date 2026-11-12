@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -72,6 +74,10 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		require.True(t, chosen)
 	})
 	t.Run("marker write failure", func(t *testing.T) {
+		var logs bytes.Buffer
+		originalLogger := slog.Default()
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+		t.Cleanup(func() { slog.SetDefault(originalLogger) })
 		setupKataEnv(t)
 		home := clearLocalEmbeddingsEnv(t)
 		stubLocalEmbeddingsInstall(t)
@@ -89,9 +95,11 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 			t.Skipf("symlink unavailable: %v", err)
 		}
 		t.Setenv("KATA_SERVER", "")
-		_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-		require.ErrorContains(t, err, "sharing could not be confirmed")
-		require.ErrorContains(t, err, "record search by meaning choice")
+		out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
+		require.NoError(t, err)
+		require.Contains(t, out, "kata health --json")
+		require.Contains(t, logs.String(), "record search by meaning choice")
+		require.Contains(t, logs.String(), "symlink")
 		cfg, err := config.ReadSearchConfig()
 		require.NoError(t, err)
 		require.True(t, cfg.Embeddings.Local)
