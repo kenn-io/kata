@@ -1389,7 +1389,7 @@ func (c *Client) CheckDateFilter(ctx context.Context) error {
 func requireAPIVersion(ctx context.Context, apiClient *generated.Client, minimum, requirement string) error {
 	health, err := apiClient.Health(ctx)
 	if err != nil {
-		return fmt.Errorf("check daemon API version: %w", err)
+		return fmt.Errorf("%s: %w", requirement, err)
 	}
 	reported := ""
 	if health.APISchemaVersion != nil {

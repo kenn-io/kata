@@ -183,6 +183,59 @@ func TestCronJobStatsLine(t *testing.T) {
 		m = deliverCron(m, cmd)
 		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      unavailable:"), "a failed refresh replaces the line")
 	})
+	t.Run("opens during a stalled list read", func(t *testing.T) {
+		m, a := cronStatsModel(t)
+		m, stalled := updateModel(m, keyRune('r'))
+		require.NotNil(t, stalled)
+		m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		require.NotNil(t, cmd, "opening the detail reads statistics without waiting for the list read")
+		m = deliverCron(m, cmd)
+		require.Zero(t, a.calls, "only the statistics were read")
+		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      42 runs"), cronStatsLine(t, m))
+		m, cmd = updateModel(m, runCmdTree(stalled)[0])
+		require.Nil(t, cmd, "the list answer does not read the statistics again")
+		require.Len(t, a.statsUIDs, 1)
+	})
+	t.Run("a newer refresh supersedes the older reply", func(t *testing.T) {
+		m, a := cronStatsModel(t)
+		m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = deliverCron(m, cmd)
+		a.stats[cronStatsJobUID] = cronStatsFixture(43)
+		m, older := updateModel(m, keyRune('r'))
+		var list, stats tea.Msg
+		for _, msg := range runCmdTree(older) {
+			switch msg.(type) {
+			case cronLoadedMsg:
+				list = msg
+			case cronStatsMsg:
+				stats = msg
+			}
+		}
+		require.NotNil(t, list)
+		require.NotNil(t, stats)
+		a.stats[cronStatsJobUID] = cronStatsFixture(44)
+		// A second refresh arrives while the first list read is still out.
+		m, _ = updateModel(m, keyRune('r'))
+		m, _ = updateModel(m, stats)
+		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      42 runs"), "the superseded reply is not shown: %s", cronStatsLine(t, m))
+		m, next := updateModel(m, list)
+		require.NotNil(t, next)
+		m = deliverCron(m, next)
+		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      44 runs"), cronStatsLine(t, m))
+	})
+	t.Run("reads only a job the detail can show", func(t *testing.T) {
+		m, a := cronStatsModel(t)
+		m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = deliverCron(m, cmd)
+		a.data.jobs = nil
+		m, cmd = updateModel(m, keyRune('r'))
+		m = deliverCron(m, cmd)
+		require.Contains(t, stripANSI(m.viewBody()), "no longer in the loaded data")
+		reads := len(a.statsUIDs)
+		m, cmd = updateModel(m, keyRune('r'))
+		deliverCron(m, cmd)
+		require.Len(t, a.statsUIDs, reads, "no read for a job absent from the loaded data")
+	})
 	t.Run("a stalled read does not hold the run refresh", func(t *testing.T) {
 		m, a := cronStatsModel(t)
 		m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -212,16 +265,33 @@ func TestCronJobStatsLine(t *testing.T) {
 		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      43 runs"), cronStatsLine(t, m))
 	})
 	t.Run("fits the cron detail widths", func(t *testing.T) {
-		m, _ := cronStatsModel(t)
-		m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-		m = deliverCron(m, cmd)
-		for _, width := range []int{12, 24, 40, 80, 120} {
-			m.width = width + 2
-			text := cronDetailText(m)
-			for line := range strings.SplitSeq(text, "\n") {
-				require.LessOrEqual(t, ansi.StringWidth(line), width, line)
-			}
-			require.Contains(t, strings.Join(strings.Fields(text), ""), "30d:42runs·92%ok·median3m12s·p958m40s·failing×3")
+		truncated := cronStatsFixture(10000)
+		truncated.Truncated, truncated.Window.Since = true, snapshotFixedNow.AddDate(0, 0, -7)
+		for _, tc := range []struct {
+			name string
+			body *generated.CronRunStatsResponseBody
+			err  error
+			want string
+		}{
+			{"loaded", cronStatsFixture(42), nil, "30d:42runs·92%ok·median3m12s·p958m40s·failing×3"},
+			{"since", truncated, nil, "Since:04-2412:00·10000+runs·92%ok·median3m12s·p958m40s·failing×3"},
+			{"unavailable", nil, errors.New("Get http://daemon.example:7777/api/v1/projects/7/cron/runs/stats: connection refused"), "30d:unavailable:Gethttp://daemon.example:7777/api/v1/projects/7/cron/runs/stats:connectionrefused"},
+			{"unsupported", nil, apiVersionError{"run statistics require daemon API 0.47.0 or newer"}, "30d:needsdaemonAPI0.47.0ornewer"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				m, a := cronStatsModel(t)
+				a.stats[cronStatsJobUID], a.statsErr = tc.body, tc.err
+				m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+				m = deliverCron(m, cmd)
+				for _, width := range []int{12, 24, 40, 80, 120} {
+					m.width = width + 2
+					text := cronDetailText(m)
+					for line := range strings.SplitSeq(text, "\n") {
+						require.LessOrEqual(t, ansi.StringWidth(line), width, line)
+					}
+					require.Contains(t, strings.Join(strings.Fields(text), ""), tc.want)
+				}
+			})
 		}
 	})
 	t.Run("workflow detail has no line", func(t *testing.T) {
@@ -267,7 +337,11 @@ func TestCronStatsText(t *testing.T) {
 		}, "30d", "42 runs · 92% ok · median 41s · p95 1h2m6s · failing ×3"},
 		{"duration beyond a time.Duration", func(s *generated.CronRunStatsResponseBody) {
 			s.DurationSeconds = &generated.DurationStats{Count: 1, Median: 1.89342144e10, P95: 1.89342144e10}
-		}, "30d", "42 runs · 92% ok · median 5259504h · p95 5259504h · failing ×3"},
+		}, "30d", "42 runs · 92% ok · median 5259504h0m0s · p95 5259504h0m0s · failing ×3"},
+		// Past the time.Duration bound the value keeps whole seconds.
+		{"duration across the time.Duration bound", func(s *generated.CronRunStatsResponseBody) {
+			s.DurationSeconds = &generated.DurationStats{Count: 2, Median: 9223372036, P95: 9223372037}
+		}, "30d", "42 runs · 92% ok · median 2562047h47m16s · p95 2562047h47m17s · failing ×3"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := full
@@ -323,5 +397,13 @@ func TestCronClientRunStats(t *testing.T) {
 		var tooOld apiVersionError
 		require.False(t, errors.As(err, &tooOld))
 		require.NotContains(t, err.Error(), "require daemon API", "a failed check does not blame the daemon version")
+		require.Contains(t, err.Error(), "check daemon API version")
+	})
+	t.Run("other features keep their failed check text", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		})
+		err := c.CheckDateFilter(t.Context())
+		require.ErrorContains(t, err, "date filters require daemon API 0.36.0 or newer: ")
 	})
 }

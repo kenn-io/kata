@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -28,10 +29,15 @@ type cronStatsMsg struct {
 	err              error
 }
 
-// cronStatsJob is the job whose detail is shown, if any.
+// cronStatsJob is the job whose detail is shown, if any. A job missing from
+// the loaded data has no detail to show the line in.
 func (m Model) cronStatsJob() string {
-	if n := len(m.cron.stack); m.view == viewCron && n > 0 && m.cron.stack[n-1].ref.kind == cronJobs {
-		return m.cron.stack[n-1].ref.uid
+	n := len(m.cron.stack)
+	if m.view != viewCron || n == 0 || m.cron.data == nil {
+		return ""
+	}
+	if ref := m.cron.stack[n-1].ref; ref.kind == cronJobs && m.cron.data.job(ref.uid) != nil {
+		return ref.uid
 	}
 	return ""
 }
@@ -54,7 +60,7 @@ func (m Model) cronStatsLeave() Model {
 
 // cronStatsBegin starts a read for the open job detail. A different job drops
 // the previous line; the same job keeps it until the new result arrives.
-func (m Model) cronStatsBegin() (Model, func() cronStatsMsg) {
+func (m Model) cronStatsBegin() (Model, tea.Cmd) {
 	uid := m.cronStatsJob()
 	if uid == "" {
 		return m, nil
@@ -66,12 +72,27 @@ func (m Model) cronStatsBegin() (Model, func() cronStatsMsg) {
 	m.cron.stats.seq, m.cron.stats.events = seq, m.cron.events
 	reader, id := m.api, m.scope.projectID
 	msg := cronStatsMsg{conn: m.connGen, scope: m.scopeGen, seq: seq}
-	return m, func() cronStatsMsg {
+	return m, func() tea.Msg {
 		msg.body, msg.err = cronRead(func(ctx context.Context, id int64) (*generated.CronRunStatsResponseBody, error) {
 			return reader.CronRunStats(ctx, id, uid)
 		}, id)
 		return msg
 	}
+}
+
+// cronStatsWhileListing runs while the cron list read is out. A newly opened
+// job detail reads at once. A refresh fences off the older read instead, and
+// its own read starts with the list read that the refresh then requires.
+func (m Model) cronStatsWhileListing() (Model, tea.Cmd) {
+	uid := m.cronStatsJob()
+	switch {
+	case uid == "":
+	case m.cron.stats.uid != uid:
+		return m.cronStatsBegin()
+	case m.cron.stats.events != m.cron.events:
+		m.cron.stats.seq, m.cron.stats.events = m.cron.stats.seq+1, m.cron.events
+	}
+	return m, nil
 }
 
 // cronStatsLoaded keeps only the answer to the latest read on this daemon and
@@ -123,11 +144,14 @@ func cronStatsText(s generated.CronRunStatsResponseBody) (label, value string) {
 	return label, strings.Join(parts, " · ")
 }
 
-// cronStatsDuration uses the cron views' Duration form, in whole seconds,
-// and whole hours past what a Duration holds.
+// cronStatsDuration uses the cron views' Duration form in whole seconds,
+// also past what a Duration holds.
 func cronStatsDuration(seconds float64) string {
 	if seconds >= float64(math.MaxInt64/int64(time.Second)) {
-		return fmt.Sprintf("%.0fh", seconds/3600)
+		total := math.Round(seconds)
+		hours := math.Floor(total / 3600)
+		rest := int64(total - hours*3600)
+		return fmt.Sprintf("%.0fh%dm%ds", hours, rest/60, rest%60)
 	}
 	return (time.Duration(math.Round(seconds)) * time.Second).String()
 }

@@ -79,27 +79,24 @@ func (m Model) cronSync() (Model, tea.Cmd) {
 		m.cron = cronState{tab: m.cron.tab, conn: m.connGen, scope: m.scopeGen}
 	}
 	m = m.cronStatsLeave()
-	if m.view != viewCron || m.scope.allProjects || m.scope.projectID == 0 || m.cron.out {
+	if m.view != viewCron || m.scope.allProjects || m.scope.projectID == 0 {
 		return m, nil
+	}
+	if m.cron.out {
+		return m.cronStatsWhileListing()
 	}
 	if m.cron.data != nil && m.cron.data.events == m.cron.events {
 		if !m.cronStatsDue() {
 			return m, nil
 		}
-		var stats func() cronStatsMsg
-		m, stats = m.cronStatsBegin()
-		return m, func() tea.Msg { return stats() }
+		return m.cronStatsBegin()
 	}
 	m.cron.out = true
 	// An open job detail's statistics refresh with the runs, as a separate
 	// read so a slow statistics answer never holds the lists.
 	fetch := m.fetchCron()
-	var stats func() cronStatsMsg
-	m, stats = m.cronStatsBegin()
-	if stats == nil {
-		return m, fetch
-	}
-	return m, tea.Batch(fetch, func() tea.Msg { return stats() })
+	m, stats := m.cronStatsBegin()
+	return m, tea.Batch(fetch, stats)
 }
 func (m Model) fetchCron() tea.Cmd {
 	reader, id := m.api, m.scope.projectID
