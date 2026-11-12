@@ -1683,7 +1683,7 @@ func runDaemonProcess(
 	if restart != nil {
 		localSetup.restart = func() error {
 			var output bytes.Buffer
-			// The caller must hold the start lock after this daemon shuts down.
+			// The helper acquires the start lock before replacing this daemon.
 			return kitdaemon.StartDetached(context.WithoutCancel(ctx), kitdaemon.StartDetachedOptions{
 				Executable: restart.executable,
 				Args:       []string{"daemon", "restart", "--generation", restartGeneration(rec)},

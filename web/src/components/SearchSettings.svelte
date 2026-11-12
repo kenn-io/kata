@@ -68,7 +68,12 @@
   let row = $derived(turning ? turningOn : base)
   let count = $derived(row?.kind === 'indexing' ? row.total : 0)
   let restartLabels = $derived({
-    off: restartPending || job?.state === 'restarting' ? 'Restarting...' : 'Turning on',
+    off:
+      restartPending && requestError
+        ? 'Reconnecting...'
+        : restartPending || job?.state === 'restarting'
+          ? 'Restarting...'
+          : 'Turning on',
     turnOn: 'Restart daemon',
     downloaded: remoteHost
       ? `Restart the daemon on ${remoteHost} to finish.`
@@ -79,7 +84,10 @@
         : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
   })
   let failure = $derived(
-    requestError ?? (job?.state === 'failed' || job?.state === 'restart' ? job.error : undefined),
+    requestError ??
+      (!restartPending && (job?.state === 'failed' || job?.state === 'restart')
+        ? job.error
+        : undefined),
   )
   // Indexing keeps polling while failed, so the note clears once a pass succeeds.
   let indexingFailed = $derived(status?.indexing?.failed === true)

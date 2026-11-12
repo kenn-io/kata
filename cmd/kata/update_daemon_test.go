@@ -231,6 +231,7 @@ func TestDaemonLifecycle(t *testing.T) {
 		stale.StartedAt = stale.StartedAt.Add(-time.Second)
 		output, err := f.restart(t, "--generation", restartGeneration(stale))
 		require.Error(t, err, "%s", output)
+		require.Contains(t, output, "no longer running")
 		require.Equal(t, before.StartedAt, f.record().StartedAt)
 	})
 	t.Run("stop waits for held request", func(t *testing.T) {

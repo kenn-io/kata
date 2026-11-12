@@ -83,7 +83,8 @@ describe('SearchSettings', () => {
       vi
         .fn<typeof fetch>()
         .mockResolvedValueOnce(Response.json(pending))
-        .mockImplementation(async () => Response.json(failed)),
+        .mockResolvedValueOnce(Response.json(failed))
+        .mockRejectedValue(new TypeError('disconnected')),
     )
     vi.stubGlobal(
       'confirm',
@@ -105,6 +106,8 @@ describe('SearchSettings', () => {
     expect(screen.getByRole('alert').textContent).toContain('Restart failed')
     await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
     expect(postFetch).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   test('ignores a late restart response after status confirms success', async () => {
@@ -207,6 +210,7 @@ describe('SearchSettings', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
     await vi.advanceTimersByTimeAsync(120_000)
     expect(screen.getByRole('alert').textContent).toBe(message)
+    expect(screen.getByText('Reconnecting...', { exact: true })).not.toBeNull()
     if (originStable) {
       available = true
       await vi.advanceTimersByTimeAsync(4000)
@@ -264,9 +268,7 @@ describe('SearchSettings', () => {
       vi
         .fn<typeof fetch>()
         .mockResolvedValueOnce(
-          Response.json(
-            status({ can_restart: true, job: { state: 'restarting', downloaded: 1, total: 1 } }),
-          ),
+          Response.json(status({ job: { state: 'restarting', downloaded: 1, total: 1 } })),
         )
         .mockRejectedValue(new TypeError('disconnected')),
     )
@@ -463,7 +465,6 @@ describe('SearchSettings', () => {
           Response.json(
             status({
               can_change: false,
-              can_restart: !!remoteHost,
               job: { state: 'restart', downloaded: 290_000_000, total: 290_000_000 },
             }),
           ),

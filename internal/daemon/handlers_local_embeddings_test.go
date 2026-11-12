@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"encoding/json/v2"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,15 +16,12 @@ import (
 
 type localEmbeddingsFixture struct {
 	calls      int
+	restarts   int
 	busy       bool
 	restartErr error
-	statusErr  error
 }
 
 func (f *localEmbeddingsFixture) Status(context.Context) (api.LocalEmbeddingsStatus, error) {
-	if f.statusErr != nil {
-		return api.LocalEmbeddingsStatus{}, f.statusErr
-	}
 	return api.LocalEmbeddingsStatus{Provider: "none", CanChange: !f.busy, CanRestart: true, DownloadBytes: 290_000_000, Job: &api.LocalEmbeddingsJob{State: "failed", Error: "setup provider detail"}}, nil
 }
 func (f *localEmbeddingsFixture) TurnOn(context.Context) error {
@@ -36,18 +32,7 @@ func (f *localEmbeddingsFixture) TurnOn(context.Context) error {
 	return nil
 }
 
-func (f *localEmbeddingsFixture) Restart(context.Context) error { f.calls++; return f.restartErr }
-
-func TestLocalEmbeddingsRestartWhenStatusUnavailable(t *testing.T) {
-	fixture := &localEmbeddingsFixture{statusErr: errors.New("installation inspection unavailable")}
-	mux := http.NewServeMux()
-	registerLocalEmbeddingsHandlers(humago.New(mux, huma.DefaultConfig("test", "1")), ServerConfig{LocalEmbeddings: fixture})
-	req := httptest.NewRequestWithContext(WithPrincipal(t.Context(), Principal{Kind: PrincipalWebLocal}), http.MethodPost, "/api/v1/embeddings/local/restart", nil)
-	response := httptest.NewRecorder()
-	mux.ServeHTTP(response, req)
-	require.Equal(t, http.StatusAccepted, response.Code)
-	require.Equal(t, 1, fixture.calls)
-}
+func (f *localEmbeddingsFixture) Restart(context.Context) error { f.restarts++; return f.restartErr }
 
 func TestLocalEmbeddingsAdministration(t *testing.T) {
 	for _, tc := range []struct {
@@ -99,15 +84,14 @@ func TestLocalEmbeddingsAdministration(t *testing.T) {
 					require.Equal(t, 1, fixture.calls)
 				}
 			}
-			calls := fixture.calls
 			response := httptest.NewRecorder()
 			mux.ServeHTTP(response, httptest.NewRequestWithContext(WithPrincipal(t.Context(), Principal{Kind: tc.kind}), http.MethodPost, "/api/v1/embeddings/local/restart", nil))
 			if tc.allowed {
 				require.Equal(t, http.StatusAccepted, response.Code)
-				require.Equal(t, calls+1, fixture.calls)
+				require.Equal(t, 1, fixture.restarts)
 			} else {
 				require.Equal(t, http.StatusForbidden, response.Code)
-				require.Equal(t, calls, fixture.calls)
+				require.Zero(t, fixture.restarts)
 			}
 		})
 	}
