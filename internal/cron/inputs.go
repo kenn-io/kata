@@ -77,72 +77,84 @@ func declarations(raw json.RawMessage) (map[string]inputDeclaration, error) {
 	}
 	slices.Sort(names)
 	for _, name := range names {
-		if !inputName.MatchString(name) {
-			return nil, fmt.Errorf("%s: invalid input name", name)
-		}
-		if err := validateOptions([]byte(`{"` + name + `":null}`)); err != nil {
-			return nil, fmt.Errorf("%s: forbidden input name", name)
-		}
-		fields, err := inputObject(fields[name])
+		d, err := parseInputDeclaration(name, fields[name])
 		if err != nil {
-			return nil, fmt.Errorf("%s: declaration %w", name, err)
-		}
-		for field, value := range fields {
-			if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
-				return nil, fmt.Errorf("%s: %s cannot be null", name, field)
-			}
-		}
-		rawFields, _ := json.Marshal(fields)
-		dec := json.NewDecoder(bytes.NewReader(rawFields))
-		dec.DisallowUnknownFields()
-		dec.UseNumber()
-		var d inputDeclaration
-		if err = dec.Decode(&d); err != nil {
-			return nil, fmt.Errorf("%s: %v", name, err)
-		}
-		if len(d.Title) > 80 || len(d.Description) > 400 {
-			return nil, fmt.Errorf("%s: display text too long", name)
-		}
-		switch d.Type {
-		case "string":
-			if d.MaxLength != nil && (*d.MaxLength < 1 || *d.MaxLength > 2048) {
-				return nil, fmt.Errorf("%s: invalid max_length", name)
-			}
-			if fields["values"] != nil || fields["min"] != nil || fields["max"] != nil {
-				return nil, fmt.Errorf("%s: incompatible fields", name)
-			}
-		case "int":
-			if d.Min != nil && d.Max != nil && *d.Min > *d.Max {
-				return nil, fmt.Errorf("%s: min exceeds max", name)
-			}
-			if fields["values"] != nil || fields["max_length"] != nil || fields["multiline"] != nil {
-				return nil, fmt.Errorf("%s: incompatible fields", name)
-			}
-		case "bool":
-			if fields["values"] != nil || fields["max_length"] != nil || fields["multiline"] != nil || fields["min"] != nil || fields["max"] != nil {
-				return nil, fmt.Errorf("%s: incompatible fields", name)
-			}
-		case "enum":
-			if len(d.Values) < 1 || len(d.Values) > 64 || fields["max_length"] != nil || fields["multiline"] != nil || fields["min"] != nil || fields["max"] != nil {
-				return nil, fmt.Errorf("%s: invalid enum", name)
-			}
-			seen := map[string]bool{}
-			for _, v := range d.Values {
-				if len(v) < 1 || len(v) > 128 || seen[v] {
-					return nil, fmt.Errorf("%s: invalid enum values", name)
-				}
-				seen[v] = true
-			}
-		default:
-			return nil, fmt.Errorf("%s: invalid type", name)
-		}
-		if fields["default"] != nil && !validInputValue(d, d.Default) {
-			return nil, fmt.Errorf("%s: invalid default", name)
+			return nil, err
 		}
 		out[name] = d
 	}
 	return out, nil
 }
+func parseInputDeclaration(name string, raw json.RawMessage) (inputDeclaration, error) {
+	if !inputName.MatchString(name) {
+		return inputDeclaration{}, fmt.Errorf("%s: invalid input name", name)
+	}
+	if err := validateOptions([]byte(`{"` + name + `":null}`)); err != nil {
+		return inputDeclaration{}, fmt.Errorf("%s: forbidden input name", name)
+	}
+	fields, err := inputObject(raw)
+	if err != nil {
+		return inputDeclaration{}, fmt.Errorf("%s: declaration %w", name, err)
+	}
+	for field, value := range fields {
+		switch field {
+		case "type", "title", "description", "required", "default", "values", "max_length", "multiline", "min", "max":
+		default:
+			return inputDeclaration{}, fmt.Errorf("%s: unknown field %s", name, field)
+		}
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return inputDeclaration{}, fmt.Errorf("%s: %s cannot be null", name, field)
+		}
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	dec.UseNumber()
+	var d inputDeclaration
+	if err = dec.Decode(&d); err != nil {
+		return inputDeclaration{}, fmt.Errorf("%s: %v", name, err)
+	}
+	if len(d.Title) > 80 || len(d.Description) > 400 {
+		return inputDeclaration{}, fmt.Errorf("%s: display text too long", name)
+	}
+	switch d.Type {
+	case "string":
+		if d.MaxLength != nil && (*d.MaxLength < 1 || *d.MaxLength > 2048) {
+			return inputDeclaration{}, fmt.Errorf("%s: invalid max_length", name)
+		}
+		if fields["values"] != nil || fields["min"] != nil || fields["max"] != nil {
+			return inputDeclaration{}, fmt.Errorf("%s: incompatible fields", name)
+		}
+	case "int":
+		if d.Min != nil && d.Max != nil && *d.Min > *d.Max {
+			return inputDeclaration{}, fmt.Errorf("%s: min exceeds max", name)
+		}
+		if fields["values"] != nil || fields["max_length"] != nil || fields["multiline"] != nil {
+			return inputDeclaration{}, fmt.Errorf("%s: incompatible fields", name)
+		}
+	case "bool":
+		if fields["values"] != nil || fields["max_length"] != nil || fields["multiline"] != nil || fields["min"] != nil || fields["max"] != nil {
+			return inputDeclaration{}, fmt.Errorf("%s: incompatible fields", name)
+		}
+	case "enum":
+		if len(d.Values) < 1 || len(d.Values) > 64 || fields["max_length"] != nil || fields["multiline"] != nil || fields["min"] != nil || fields["max"] != nil {
+			return inputDeclaration{}, fmt.Errorf("%s: invalid enum", name)
+		}
+		seen := map[string]bool{}
+		for _, v := range d.Values {
+			if len(v) < 1 || len(v) > 128 || seen[v] {
+				return inputDeclaration{}, fmt.Errorf("%s: invalid enum values", name)
+			}
+			seen[v] = true
+		}
+	default:
+		return inputDeclaration{}, fmt.Errorf("%s: invalid type", name)
+	}
+	if fields["default"] != nil && !validInputValue(d, d.Default) {
+		return inputDeclaration{}, fmt.Errorf("%s: invalid default", name)
+	}
+	return d, nil
+}
+
 func validInputValue(d inputDeclaration, v any) bool {
 	switch d.Type {
 	case "string":
@@ -180,8 +192,6 @@ func validInputValue(d inputDeclaration, v any) bool {
 			if err != nil {
 				return false
 			}
-		case int64:
-			n = x
 		default:
 			return false
 		}
@@ -214,6 +224,33 @@ func ValidateWorkflowInputs(options []byte) error {
 	return nil
 }
 
+// selectInputDeclaration shares the job/workflow declaration selection rules.
+func selectInputDeclaration(o map[string]json.RawMessage, workflowUID string, workflowOptions []byte) (json.RawMessage, string, []InputError) {
+	raw := o["inputs"]
+	if workflowUID == "" {
+		if raw != nil {
+			return raw, "job", nil
+		}
+		return nil, "none", nil
+	}
+	var errs []InputError
+	if raw != nil {
+		errs = append(errs, InputError{Code: "declaration_invalid", Message: "workflow jobs cannot declare inputs"})
+	}
+	if workflowOptions == nil {
+		return nil, "none", append(errs, InputError{Code: "declaration_invalid", Message: "referenced workflow not found"})
+	}
+	w, err := inputObject(workflowOptions)
+	if err != nil {
+		return nil, "none", append(errs, InputError{Code: "declaration_invalid", Message: err.Error()})
+	}
+	raw = w["inputs"]
+	if raw != nil {
+		return raw, "workflow", errs
+	}
+	return nil, "none", errs
+}
+
 // ValidateInputs applies the input convention at client write boundaries only.
 func ValidateInputs(options []byte, workflowUID string, workflowOptions []byte) error {
 	o, err := inputObject(options)
@@ -223,19 +260,18 @@ func ValidateInputs(options []byte, workflowUID string, workflowOptions []byte) 
 	if workflowUID != "" && o["inputs"] != nil {
 		return invalid("inputs: workflow jobs cannot declare inputs")
 	}
-	declaration := o["inputs"]
-	if workflowUID != "" {
-		w, e := inputObject(workflowOptions)
-		if e != nil {
-			return invalid(e.Error())
-		}
-		declaration = w["inputs"]
-	}
-	ds, err := declarations(declaration)
+	values, err := inputValues(o["input_values"])
 	if err != nil {
 		return invalid(err.Error())
 	}
-	values, err := inputValues(o["input_values"])
+	if workflowUID != "" && len(values) == 0 {
+		return nil
+	}
+	declaration, _, problems := selectInputDeclaration(o, workflowUID, workflowOptions)
+	if len(problems) > 0 {
+		return invalid(problems[0].Message)
+	}
+	ds, err := declarations(declaration)
 	if err != nil {
 		return invalid(err.Error())
 	}
@@ -259,33 +295,23 @@ func ResolveInputs(job JobDefinition, workflow *WorkflowDefinition) InputResolut
 		r.Errors = append(r.Errors, InputError{Code: "declaration_invalid", Message: err.Error()})
 		return r
 	}
-	raw := o["inputs"]
-	if job.Action.WorkflowUID != "" {
-		if raw != nil {
-			r.Errors = append(r.Errors, InputError{Code: "declaration_invalid", Message: "workflow jobs cannot declare inputs"})
+	var workflowOptions []byte
+	if workflow != nil {
+		workflowOptions = workflow.Options
+		if workflowOptions == nil {
+			workflowOptions = []byte(`{}`)
 		}
-		raw = nil
-		if workflow != nil {
-			w, e := inputObject(workflow.Options)
-			if e != nil {
-				r.Errors = append(r.Errors, InputError{Code: "declaration_invalid", Message: e.Error()})
-				return r
-			}
-			raw = w["inputs"]
-			if raw != nil {
-				r.DeclaredBy = "workflow"
-			}
-		}
-	} else if raw != nil {
-		r.DeclaredBy = "job"
 	}
+	raw, declaredBy, problems := selectInputDeclaration(o, job.Action.WorkflowUID, workflowOptions)
+	r.DeclaredBy = declaredBy
+	r.Errors = append(r.Errors, problems...)
 	ds := map[string]inputDeclaration{}
 	declared := map[string]bool{}
 	if raw != nil {
 		fields, err := inputObject(raw)
 		if err != nil || len(fields) > 32 {
 			r.Errors = append(r.Errors, InputError{Code: "declaration_invalid", Message: "inputs must be an object of at most 32 declarations"})
-			return r
+			fields = nil
 		}
 		names := make([]string, 0, len(fields))
 		for name := range fields {
@@ -294,19 +320,18 @@ func ResolveInputs(job JobDefinition, workflow *WorkflowDefinition) InputResolut
 		slices.Sort(names)
 		for _, name := range names {
 			declared[name] = true
-			single, _ := json.Marshal(map[string]json.RawMessage{name: fields[name]})
-			parsed, err := declarations(single)
+			parsed, err := parseInputDeclaration(name, fields[name])
 			if err != nil {
 				r.Errors = append(r.Errors, InputError{Name: name, Code: "declaration_invalid", Message: err.Error()})
 				continue
 			}
-			ds[name] = parsed[name]
+			ds[name] = parsed
 		}
 	}
 	values, err := inputValues(o["input_values"])
 	if err != nil {
 		r.Errors = append(r.Errors, InputError{Code: "invalid_value", Message: err.Error()})
-		return r
+		values = map[string]any{}
 	}
 	names := make([]string, 0, len(ds))
 	for n := range ds {
@@ -325,6 +350,7 @@ func ResolveInputs(job JobDefinition, workflow *WorkflowDefinition) InputResolut
 			source = "job"
 			if !validInputValue(d, v) {
 				r.Errors = append(r.Errors, InputError{Name: n, Code: "invalid_value", Message: "invalid input value"})
+				v = nil
 			}
 		}
 		if source == "unset" && d.Required {

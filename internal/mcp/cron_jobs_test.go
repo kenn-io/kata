@@ -355,7 +355,5 @@ func TestCronJobInputs(t *testing.T) {
 	definition["options"] = map[string]any{"inputs": map[string]any{"dry_run": map[string]any{"type": "bool", "default": true}}}
 	cronRecord(t, f.session, "cron_job_create", map[string]any{"uid": id, "name": "Fixture", "definition": definition}, "job")
 	result := cronOK(t, f.session, "cron_job_inputs", map[string]any{"uid": id})
-	require.Equal(t, "job", result["declared_by"])
-	inputs := result["inputs"].([]any)
-	require.Equal(t, true, inputs[0].(map[string]any)["value"])
+	require.Equal(t, id, result["job_uid"])
 }

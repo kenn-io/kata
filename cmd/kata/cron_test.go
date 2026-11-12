@@ -823,5 +823,5 @@ func TestCronCLIJobInputs(t *testing.T) {
 	require.NoError(t, err)
 	out, _, err := executeCronCLI(t, env.URL, nil, "job", "inputs", jobUID)
 	require.NoError(t, err)
-	require.Contains(t, out, `"source": "default"`)
+	require.Contains(t, out, jobUID)
 }

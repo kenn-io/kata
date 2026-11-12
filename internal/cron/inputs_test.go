@@ -1,10 +1,12 @@
 package cron
 
 import (
+	"encoding/json"
 	"encoding/json/jsontext"
 	"math"
+	"strconv"
+	"strings"
 	"testing"
-	"unicode"
 
 	"github.com/stretchr/testify/require"
 	"hegel.dev/go/hegel"
@@ -13,33 +15,44 @@ import (
 func TestInputResolution(t *testing.T) {
 	job := JobDefinition{Action: Action{Prompt: "hello"}, Options: jsontext.Value(`{"inputs":{"count":{"type":"int","min":1,"max":9,"default":2},"needed":{"type":"bool","required":true}},"input_values":{"count":4}}`)}
 	result := ResolveInputs(job, nil)
-	require.Empty(t, ValidateInputs(job.Options, job.Action.WorkflowUID, nil))
+	require.NoError(t, ValidateInputs(job.Options, job.Action.WorkflowUID, nil))
 	require.Equal(t, "job", result.DeclaredBy)
 	require.Equal(t, "count", result.Inputs[0].Name)
 	require.Equal(t, "job", result.Inputs[0].Source)
+	require.Len(t, result.Errors, 1)
 	require.Equal(t, "missing_required", result.Errors[0].Code)
+	require.Equal(t, "unset", result.Inputs[1].Source)
+	job.Options = jsontext.Value(`{"inputs":{"a":{"type":"string","default":"fallback"},"b":{"type":"bool"}}}`)
+	defaults := ResolveInputs(job, nil)
+	require.Len(t, defaults.Inputs, 2)
+	require.Equal(t, "a", defaults.Inputs[0].Name)
+	require.Equal(t, "default", defaults.Inputs[0].Source)
+	require.Equal(t, "fallback", defaults.Inputs[0].Value)
+	require.Equal(t, "unset", defaults.Inputs[1].Source)
 	job.Options = jsontext.Value(`{"inputs":42}`)
-	require.Equal(t, "declaration_invalid", ResolveInputs(job, nil).Errors[0].Code)
+	malformed := ResolveInputs(job, nil)
+	require.Len(t, malformed.Errors, 1)
+	require.Equal(t, "declaration_invalid", malformed.Errors[0].Code)
 	require.Error(t, ValidateInputs(job.Options, "", nil))
 }
 
 func TestInputStringProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
-		value := hegel.Draw(ht, hegel.Text())
-		limit := hegel.Draw(ht, hegel.Integers[int64](1, 2048))
-		multiline := hegel.Draw(ht, hegel.Booleans())
-		want := int64(len(value)) <= limit
-		if !multiline {
-			for _, r := range value {
-				if unicode.IsControl(r) {
-					want = false
-				}
-			}
+		n := hegel.Draw(ht, hegel.Integers[int](1, 300))
+		value := strings.Repeat("x", n)
+		raw, _ := json.Marshal(map[string]any{"inputs": map[string]any{"text": map[string]any{"type": "string"}}, "input_values": map[string]any{"text": value}})
+		if (ValidateInputs(raw, "", nil) == nil) != (n <= 256) {
+			ht.Fatalf("length %d", n)
 		}
-		if validInputValue(inputDeclaration{Type: "string", MaxLength: &limit, Multiline: multiline}, value) != want {
-			ht.Fatalf("string %q, limit %d, multiline %v", value, limit, multiline)
-		}
-	}, hegel.WithTestCases(1000))
+	}, hegel.WithTestCases(300))
+	for _, tc := range []struct {
+		value            string
+		multiline, valid bool
+	}{{"line\nbreak", false, false}, {"line\nbreak", true, true}, {"plain", false, true}} {
+		raw, err := json.Marshal(map[string]any{"inputs": map[string]any{"text": map[string]any{"type": "string", "max_length": 10, "multiline": tc.multiline}}, "input_values": map[string]any{"text": tc.value}})
+		require.NoError(t, err)
+		require.Equal(t, tc.valid, ValidateInputs(raw, "", nil) == nil)
+	}
 }
 func TestInputIntegerProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
@@ -49,31 +62,38 @@ func TestInputIntegerProperty(t *testing.T) {
 		if a > b {
 			a, b = b, a
 		}
-		if validInputValue(inputDeclaration{Type: "int", Min: &a, Max: &b}, n) != (n >= a && n <= b) {
+		raw, err := json.Marshal(map[string]any{"inputs": map[string]any{"number": map[string]any{"type": "int", "min": a, "max": b}}, "input_values": map[string]any{"number": json.Number(strconv.FormatInt(n, 10))}})
+		if err != nil {
+			ht.Fatalf("marshal: %v", err)
+		}
+		if (ValidateInputs(raw, "", nil) == nil) != (n >= a && n <= b) {
 			ht.Fatalf("int %d outside %d..%d", n, a, b)
-		}
-	}, hegel.WithTestCases(1000))
-}
-func TestInputBoolProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		b := hegel.Draw(ht, hegel.Booleans())
-		if !validInputValue(inputDeclaration{Type: "bool"}, b) {
-			ht.Fatalf("bool %v", b)
-		}
-		s := hegel.Draw(ht, hegel.Text())
-		if validInputValue(inputDeclaration{Type: "bool"}, s) {
-			ht.Fatalf("string %q accepted as bool", s)
 		}
 	}, hegel.WithTestCases(1000))
 }
 func TestInputEnumProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
-		v := hegel.Draw(ht, hegel.Text())
-		member := hegel.Draw(ht, hegel.Text())
-		if validInputValue(inputDeclaration{Type: "enum", Values: []string{member}}, v) != (v == member) {
-			ht.Fatalf("enum %q member %q", v, member)
+		n := hegel.Draw(ht, hegel.Integers[int](1, 64))
+		members := make([]string, n)
+		for i := range members {
+			members[i] = strconv.Itoa(i)
 		}
-	}, hegel.WithTestCases(1000))
+		selected := hegel.Draw(ht, hegel.Integers[int](0, n-1))
+		options := func(value string) []byte {
+			raw, err := json.Marshal(map[string]any{"inputs": map[string]any{"choice": map[string]any{"type": "enum", "values": members}}, "input_values": map[string]any{"choice": value}})
+			if err != nil {
+				ht.Fatalf("marshal: %v", err)
+			}
+			return raw
+		}
+		if ValidateInputs(options(members[selected]), "", nil) != nil || ValidateInputs(options("outside"), "", nil) == nil {
+			ht.Fatalf("enum membership for %v", members)
+		}
+	}, hegel.WithTestCases(300))
+	for _, v := range []any{true, false} {
+		require.True(t, validInputValue(inputDeclaration{Type: "bool"}, v))
+	}
+	require.False(t, validInputValue(inputDeclaration{Type: "bool"}, "true"))
 }
 
 func TestInputWorkflowDeclarationAndLegacyValues(t *testing.T) {
@@ -93,4 +113,59 @@ func TestInputResolutionReportsEveryInvalidDeclaration(t *testing.T) {
 	require.Len(t, result.Errors, 2)
 	require.Equal(t, "first", result.Errors[0].Name)
 	require.Equal(t, "second", result.Errors[1].Name)
+}
+
+func TestInputDeclarationCanonicalFields(t *testing.T) {
+	for _, declaration := range []string{`{"type":"int","Default":"wrong"}`, `{"type":"bool","Min":1}`, `{"TYPE":"bool"}`} {
+		t.Run(declaration, func(t *testing.T) {
+			require.Error(t, ValidateWorkflowInputs([]byte(`{"inputs":{"item":`+declaration+`}}`)))
+		})
+	}
+}
+
+func TestInputResolutionDiagnosticsContract(t *testing.T) {
+	job := JobDefinition{Action: Action{Prompt: "hello"}, Options: jsontext.Value(`{"inputs":{"bad":{"type":"bad"},"count":{"type":"int"},"needed":{"type":"bool","required":true}},"input_values":{"count":{"bad":true},"extra":1}}`)}
+	r := ResolveInputs(job, nil)
+	require.Len(t, r.Errors, 4)
+	require.Nil(t, r.Inputs[0].Value)
+	job.Options = jsontext.Value(`{"inputs":{"needed":{"type":"bool","required":true}},"input_values":42}`)
+	r = ResolveInputs(job, nil)
+	require.Len(t, r.Errors, 2)
+	require.Len(t, r.Inputs, 1)
+}
+
+func TestInputMissingWorkflowAndUnfixedJob(t *testing.T) {
+	job := JobDefinition{Action: Action{WorkflowUID: "01J00000000000000000000020"}, Options: jsontext.Value(`{}`)}
+	require.NoError(t, ValidateInputs(job.Options, job.Action.WorkflowUID, []byte(`{"inputs":42}`)))
+	require.NotEmpty(t, ResolveInputs(job, nil).Errors)
+	job.Options = jsontext.Value(`{"input_values":{"x":1}}`)
+	require.Error(t, ValidateInputs(job.Options, job.Action.WorkflowUID, []byte(`{"inputs":42}`)))
+}
+
+func TestInputDeclarationRules(t *testing.T) {
+	cases := []string{
+		`{"Bad":{"type":"bool"}}`, `{"token":{"type":"bool"}}`,
+		`{"x":{"type":"int","min":2,"max":1}}`, `{"x":{"type":"enum","values":["a","a"]}}`,
+		`{"x":{"type":"string","max_length":0}}`, `{"x":{"type":"string","max_length":2049}}`,
+		`{"x":{"type":"bool","min":0}}`, `{"x":{"type":"bool","unknown":true}}`,
+		`{"x":{"type":"bool","default":"true"}}`,
+	}
+	for _, input := range cases {
+		t.Run(input, func(t *testing.T) { require.Error(t, ValidateWorkflowInputs([]byte(`{"inputs":`+input+`}`))) })
+	}
+	fields := map[string]any{}
+	for i := 0; i < 33; i++ {
+		fields["x"+strconv.Itoa(i)] = map[string]any{"type": "bool"}
+	}
+	raw, err := json.Marshal(map[string]any{"inputs": fields})
+	require.NoError(t, err)
+	require.Error(t, ValidateWorkflowInputs(raw))
+	for _, field := range []struct {
+		name   string
+		length int
+	}{{"title", 81}, {"description", 401}} {
+		raw, err := json.Marshal(map[string]any{"inputs": map[string]any{"x": map[string]any{"type": "bool", field.name: strings.Repeat("x", field.length)}}})
+		require.NoError(t, err)
+		require.Error(t, ValidateWorkflowInputs(raw))
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.kenn.io/kata/internal/jsonutil"
 	"go.kenn.io/kata/internal/uid"
@@ -91,11 +92,20 @@ func cronExpected(value string) (string, error) {
 	return id, nil
 }
 
+// cronOutputSchema replaces the generated union wrapper with its wire scalar schema.
+func cronOutputSchema[Out any](name string) *jsonschema.Schema {
+	schema := schemaFor[Out]()
+	if name == "kata.cron_job_inputs" {
+		schema.Properties["inputs"].Items.Properties["value"] = &jsonschema.Schema{Types: []string{"string", "integer", "boolean"}}
+	}
+	return schema
+}
+
 // addCronTool retains original JSON bytes across validation. The SDK's generic
 // typed adapter re-marshals a float64 validation copy and rounds opaque options
 // and exact int64 evidence. Validate separately, then decode the original.
 func addCronTool[In, Out any](server *sdkmcp.Server, name, title, description string, hints *sdkmcp.ToolAnnotations, handler sdkmcp.ToolHandlerFor[In, Out]) {
-	inputSchema, outputSchema := inputSchemaFor[In](name), schemaFor[Out]()
+	inputSchema, outputSchema := inputSchemaFor[In](name), cronOutputSchema[Out](name)
 	// Generated response pointers infer a nullable root. MCP requires an
 	// object outputSchema; handler failures return IsError instead.
 	if len(outputSchema.Types) == 2 && slices.Contains(outputSchema.Types, "object") && slices.Contains(outputSchema.Types, "null") {

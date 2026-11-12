@@ -49,7 +49,7 @@ func RunRelayIngestValidatesCronReplay(t *testing.T, store db.Storage) {
 	definition, err := json.Marshal(cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review open work"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"})
 	require.NoError(t, err)
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	cronEvent := func(target db.Project, kind, jobUID string, versionEventUID string) db.RemoteEvent {
+	cronEventWithDefinition := func(target db.Project, kind, jobUID string, versionEventUID string, definition []byte) db.RemoteEvent {
 		document := db.CronDefinitionEvent{UID: jobUID, ProjectUID: target.UID, Name: "Nightly review", Definition: definition, Author: "source-assistant", CreatedAt: now, UpdatedAt: now}
 		if versionEventUID != "" {
 			document.DefinitionEventUID = versionEventUID
@@ -58,6 +58,10 @@ func RunRelayIngestValidatesCronReplay(t *testing.T, store db.Storage) {
 		payload, err := json.Marshal(document)
 		require.NoError(t, err)
 		return newRemoteEvent(t, target, nil, kind, "source-assistant", downstream, 310, jsontext.Value(payload))
+	}
+
+	cronEvent := func(target db.Project, kind, jobUID string, versionEventUID string) db.RemoteEvent {
+		return cronEventWithDefinition(target, kind, jobUID, versionEventUID, definition)
 	}
 
 	issueUID, err := uid.New()
@@ -99,16 +103,26 @@ func RunRelayIngestValidatesCronReplay(t *testing.T, store db.Storage) {
 	require.Equal(t, created.EventUID, job.DefinitionEventUID)
 
 	// An older peer may have used options.inputs for a different shape.
-	definition, err = json.Marshal(cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip", Options: jsontext.Value(`{"inputs":42}`)})
+	legacyDefinition, err := json.Marshal(cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip", Options: jsontext.Value(`{"inputs":42}`)})
 	require.NoError(t, err)
 	legacyUID, err := uid.New()
 	require.NoError(t, err)
-	legacyInput := cronEvent(legacy, "cron.job.created", legacyUID, "")
+	legacyInput := cronEventWithDefinition(legacy, "cron.job.created", legacyUID, "", legacyDefinition)
 	_, err = store.InsertRemoteEvent(ctx, legacy.ID, legacyInput)
 	require.NoError(t, err)
 	legacyStored, err := store.CronJob(ctx, legacy.ID, legacyUID)
 	require.NoError(t, err)
-	resolved := cron.ResolveInputs(legacyStored.Definition, nil)
+	require.JSONEq(t, `{"inputs":42}`, string(legacyStored.Definition.Options))
+	relayUID, err := uid.New()
+	require.NoError(t, err)
+	relayInput := cronEventWithDefinition(project, "cron.job.created", relayUID, "", legacyDefinition)
+	_, err = store.AcceptRelayDeliveries(ctx, binding, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{seal(relayInput, 3)}})
+	require.NoError(t, err)
+	relayed, err := store.CronJob(ctx, project.ID, relayUID)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"inputs":42}`, string(relayed.Definition.Options))
+	resolved := cron.ResolveInputs(relayed.Definition, nil)
+	require.NotEmpty(t, resolved.Errors)
 	require.Equal(t, "declaration_invalid", resolved.Errors[0].Code)
 
 	// Admission must compare pending run history before a projection exists.
