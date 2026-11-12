@@ -89,7 +89,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, func(ctx context.Context, in *api.ReadProjectByNameRequest) (*api.ResolveProjectResponse, error) {
 		out, err := resolveByName(ctx, cfg.DB, in.Name)
 		if err != nil {
-			return nil, err
+			return nil, hideMissingProject(ctx, err)
 		}
 		if _, err := authorizeHostProjectScope(ctx, []int64{out.Project.ID}, nil, false); err != nil {
 			return nil, err

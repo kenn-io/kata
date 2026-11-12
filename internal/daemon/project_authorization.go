@@ -69,6 +69,16 @@ func projectAccessDenied() error {
 	return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
 }
 
+// hideMissingProject gives a missing project the same response as a project
+// outside a mounted host's scope, so a lookup cannot reveal which names exist.
+func hideMissingProject(ctx context.Context, err error) error {
+	apiErr, ok := errors.AsType[*api.APIError](err)
+	if _, mounted := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); ok && mounted && apiErr.Code == "project_not_initialized" {
+		return projectAccessDenied()
+	}
+	return err
+}
+
 func authorizeProjectTarget(ctx context.Context, projectUID string) error {
 	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
 	if decision == nil || decision.owner && decision.fixedUIDs == nil {
