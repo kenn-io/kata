@@ -438,13 +438,12 @@ the original winning definition event UID and HLC. Enabling federation,
 adopting a project, joining a second peer, and rebuilding after a purge all carry
 pre-existing cron definitions and portable run history.
 
-Upgrade hubs before publishing cron. Federation clients advertise every event
-feature they support in `X-Kata-Event-Features`; cron uses `cron_v1`.
-Successful metadata, event-poll, and ingest responses advertise server support
-in that same header. A project's `X-Kata-Required-Event-Features` header
-instead lists the features its history requires, such as `cron_v1`. The
-`cron_v1` requirement latches after the first event requiring it and survives
-deletion of its definitions. Missing support causes
+Upgrade hubs before publishing cron. Federation clients advertise
+`X-Kata-Event-Features: cron_v1`. Successful metadata, event-poll, and
+ingest responses advertise server support in that same header. A project's
+`X-Kata-Required-Event-Features: cron_v1` header instead means that its
+history requires the feature. This requirement latches after the first event
+requiring `cron_v1` and survives deletion of its definitions. Missing support causes
 HTTP 409 `unsupported_event_features` before returning events or a reset cursor,
 or accepting a push. An unknown required response feature stops the new client
 before it accepts any response cursor. An empty requirement from an unused old

@@ -1378,9 +1378,6 @@ func ensureFederationReplicaState(
 	}
 
 	result, err := ensureReplicaBindingOrAdopt(ctx, store, p)
-	if p.Relay != nil && errors.Is(err, db.ErrUnsupportedEventFeatures) {
-		err = db.ErrFederatedReadOnly
-	}
 	if releaseAdoption != nil {
 		releaseAdoption()
 	}

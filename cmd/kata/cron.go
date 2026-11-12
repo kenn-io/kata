@@ -684,11 +684,7 @@ func (o cronCLIOptions) callWrite(a daemonAPI, c *kataclient.Client, projectID i
 		if err := json.Unmarshal(raw, &fields); err != nil {
 			return nil, cronCLIValidation("invalid cron request: " + err.Error())
 		}
-		summary, ok := fields["summary"]
-		if !ok {
-			return nil, cronCLIValidation("summary required")
-		}
-		if _, err := cron.ParseSummary(summary); err != nil {
+		if _, err := cron.ParseSummary(fields["summary"]); err != nil {
 			return nil, cronCLIValidation("invalid run summary: " + err.Error())
 		}
 		var body generated.ObserveCronRunBody

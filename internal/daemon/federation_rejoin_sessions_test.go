@@ -233,6 +233,11 @@ func TestRejoinCompatibleHubPushesRetainedSessions(t *testing.T) {
 	params.HubClientFactory = federation.CredentialHTTPClient
 	_, err = daemon.EnsureFederationReplica(t.Context(), f.spoke.DB, newReplicaCredentialStore(), nil, params)
 	require.NoError(t, err)
+	requireRetainedObservationsPushed(t, f)
+}
+
+func requireRetainedObservationsPushed(t *testing.T, f *cronForwardFixture) {
+	t.Helper()
 	binding, err := f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)
 	require.NoError(t, err)
 	pending, err := f.spoke.DB.PendingFederationPushEvents(t.Context(), f.sp.ID, f.spoke.DB.InstanceUID(), 0, 100)
@@ -308,31 +313,7 @@ func TestRejoinEmptyTokenUsesSavedCredential(t *testing.T) {
 				require.Equal(t, before, after)
 			} else {
 				require.NoError(t, err)
-				binding, e := f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)
-				require.NoError(t, e)
-				pending, e := f.spoke.DB.PendingFederationPushEvents(t.Context(), f.sp.ID, f.spoke.DB.InstanceUID(), 0, 100)
-				require.NoError(t, e)
-				require.NotEmpty(t, pending)
-				require.NoError(t, federation.SyncFederationOnce(t.Context(), f.spoke.DB, binding, f.credential))
-				binding, e = f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)
-				require.NoError(t, e)
-				require.GreaterOrEqual(t, binding.PushCursorEventID, pending[len(pending)-1].ID)
-				hubEvents, e := f.hub.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: f.hp.ID, Limit: 100})
-				require.NoError(t, e)
-				remote := make(map[string]string, len(hubEvents))
-				for _, event := range hubEvents {
-					remote[event.UID] = event.Actor
-				}
-				observations := 0
-				for _, event := range pending {
-					if event.Type == "cron.run.observed" {
-						observations++
-						actor, found := remote[event.UID]
-						require.True(t, found)
-						require.Equal(t, event.Actor, actor)
-					}
-				}
-				require.Positive(t, observations)
+				requireRetainedObservationsPushed(t, f)
 			}
 			require.Equal(t, 1, calls)
 			credential, found, err := credentials.FederationCredential(t.Context(), f.sp.UID)

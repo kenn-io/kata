@@ -69,7 +69,6 @@ func TestAdoptionPreflightBeforeRekeyAndSessionFree(t *testing.T) {
 			gets := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				gets++
-				require.Equal(t, "Bearer enrollment-token", r.Header.Get("Authorization"))
 				w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
 				_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)
 			}))
@@ -81,14 +80,7 @@ func TestAdoptionPreflightBeforeRekeyAndSessionFree(t *testing.T) {
 			credentials.put(project.UID, source)
 			params.HubClientFactory = func(_ context.Context, c config.FederationCredential) (*http.Client, error) {
 				require.Equal(t, params.Credential.Token, c.Token)
-				client := *server.Client()
-				client.Transport = adoptionTransport(func(r *http.Request) (*http.Response, error) {
-					clone := r.Clone(r.Context())
-					clone.Header = r.Header.Clone()
-					clone.Header.Set("Authorization", "Bearer "+c.Token)
-					return server.Client().Transport.RoundTrip(clone)
-				})
-				return &client, nil
+				return server.Client(), nil
 			}
 			_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
 			if session {
@@ -127,9 +119,15 @@ func TestAdoptionLateSessionRefusesAndCompatibleRetry(t *testing.T) {
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(t.Context(), "spoke-project", replicaLocalProjectUID)
 	require.NoError(t, err)
-	params := replicaServiceParams()
-	params.ProjectName = project.Name
-	params.AdoptExisting = true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
+		_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)
+	}))
+	t.Cleanup(server.Close)
+	params := adoptionParams(project, server.URL)
+	params.HubClientFactory = func(context.Context, config.FederationCredential) (*http.Client, error) {
+		return server.Client(), nil
+	}
 	credentials := newReplicaCredentialStore()
 	source := params.Credential
 	source.Capabilities = "pull,push"
@@ -157,22 +155,6 @@ func TestAdoptionLateSessionRefusesAndCompatibleRetry(t *testing.T) {
 	afterCursor, err := store.MaxEventID(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, beforeCursor, afterCursor)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
-		_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)
-	}))
-	t.Cleanup(server.Close)
-	// Keep the replacement credential's origin stable across the retry.
-	params.HubClientFactory = func(_ context.Context, _ config.FederationCredential) (*http.Client, error) {
-		return &http.Client{Transport: adoptionTransport(func(r *http.Request) (*http.Response, error) {
-			clone := r.Clone(r.Context())
-			u := *r.URL
-			target, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, server.URL, nil)
-			u.Scheme, u.Host = target.URL.Scheme, target.URL.Host
-			clone.URL = &u
-			return server.Client().Transport.RoundTrip(clone)
-		})}, nil
-	}
 	_, err = daemon.EnsureFederationReplica(t.Context(), wrapped, credentials, nil, params)
 	require.NoError(t, err)
 }

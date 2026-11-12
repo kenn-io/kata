@@ -515,10 +515,18 @@ func fetchFederationRebindMetadata(
 ) (api.ProjectFederationBody, error) {
 	httpClient, err := newFederationRebindHTTPClient(ctx, hubURL, token)
 	if err != nil {
-		return api.ProjectFederationBody{}, federationReplicaError(ErrFederationReplicaHubUnavailable, "configure replacement hub transport", "check the HTTPS catalog endpoint")
+		return api.ProjectFederationBody{}, federationReplicaError(
+			ErrFederationReplicaHubUnavailable,
+			"configure replacement hub transport",
+			"check the HTTPS catalog endpoint",
+		)
 	}
 	if err := configureFederationRebindRedirects(httpClient, hubURL); err != nil {
-		return api.ProjectFederationBody{}, federationReplicaError(ErrFederationReplicaHubUnavailable, "configure replacement hub redirect policy", "check the HTTPS catalog endpoint")
+		return api.ProjectFederationBody{}, federationReplicaError(
+			ErrFederationReplicaHubUnavailable,
+			"configure replacement hub redirect policy",
+			"check the HTTPS catalog endpoint",
+		)
 	}
 	if signing != nil {
 		if signing.HubURL != "" {
