@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -71,17 +72,31 @@ func TestFederationClientSignsRelayBatchAbovePreviousBodyLimit(t *testing.T) {
 		FederationSigning: &source,
 	})
 	require.NoError(t, err)
+	metadata := db.JSONBlob(`{"note":"` + strings.Repeat("x", 38<<20) + `"}`)
+	payload, err := db.ProjectMetadataAdoptionPayload(metadata)
+	require.NoError(t, err)
+	event := db.RemoteEvent{
+		EventUID: "01HZNQ7VFPK1XGD8R5MABCD4EF", OriginInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4ED",
+		ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EB", ProjectName: "spoke-project",
+		Type: "project.metadata_updated", Actor: "worker", HLCPhysicalMS: 1700000000000,
+		CreatedAt: time.UnixMilli(1700000000000).UTC(), Payload: jsontext.Value(payload),
+	}
+	event.ContentHash, err = db.RemoteEventContentHash(event)
+	require.NoError(t, err)
+	body, err := db.EncodeRelaySourceEvent(event)
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(body), db.MaxRelayEnvelopeBytes)
+	envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{
+		Version: 1, BindingUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
+		ProjectUID: event.ProjectUID, AuthorityUID: "01HZNQ7VFPK1XGD8R5MABCD4EC",
+		SenderInstanceUID: event.OriginInstanceUID, ReceiverInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EE",
+		Epoch: 1, Sequence: 1, Stream: db.RelayStreamEvent, Path: []string{event.OriginInstanceUID},
+		SourceUID: event.EventUID, SourceHash: event.ContentHash, Body: body,
+	})
+	require.NoError(t, err)
 	_, err = client.AcceptRelayDeliveries(t.Context(), 42, db.RelayBatch{
-		Stream: db.RelayStreamEvent,
-		Envelopes: []db.RelayEnvelope{{
-			Version: 1, BindingUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
-			ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EB", AuthorityUID: "01HZNQ7VFPK1XGD8R5MABCD4EC",
-			SenderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4ED", ReceiverInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EE",
-			Epoch: 1, Sequence: 1, Stream: db.RelayStreamEvent,
-			Path:      []string{"01HZNQ7VFPK1XGD8R5MABCD4ED"},
-			SourceUID: "01HZNQ7VFPK1XGD8R5MABCD4EF", SourceHash: strings.Repeat("b", 64),
-			Body: bytes.Repeat([]byte("x"), 50<<20), Digest: strings.Repeat("c", 64),
-		}},
+		Stream:    db.RelayStreamEvent,
+		Envelopes: []db.RelayEnvelope{envelope},
 	})
 	require.NoError(t, err)
 	require.Greater(t, receivedBodyBytes, int64(64<<20), "base64 JSON metadata pushes this valid raw envelope over the previous request cap")
