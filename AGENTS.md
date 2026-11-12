@@ -94,7 +94,9 @@
   repository are not limited by this rule.
 - For PRs opened from a fork, keep at most five open per person in this repo,
   counting every agent working for you. Each one waits for a maintainer, and
-  the ones nobody gets to go stale. PRs from branches pushed directly to this
+  the ones nobody gets to go stale. This is a soft limit you check before
+  opening a new PR: at five, hold the new PR and tell the user. Leave PRs that
+  are already open as they are. PRs from branches pushed directly to this
   repository are not counted and are not limited by this rule.
 - Before each push, check that your schema, API, and protocol version numbers
   are still the next ones free on `main`.
