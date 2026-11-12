@@ -85,9 +85,6 @@ func checkAPIVersionRecord(dir, version string, doc []byte) error {
 			continue
 		}
 		recorded := "v" + strings.Join(parts[:3], ".")
-		if !semver.IsValid(recorded) {
-			continue
-		}
 		if err := checkAPIVersionSummary(filepath.Join(dir, name)); err != nil {
 			return err
 		}
@@ -146,7 +143,6 @@ func checkAPIVersionSummary(path string) error {
 // schema property names, extension values, defaults, and validation intact.
 func contractDocument(doc *huma.OpenAPI) ([]byte, error) {
 	doc.Info = &huma.Info{}
-	seen := map[uintptr]bool{}
 	var strip func(reflect.Value)
 	strip = func(v reflect.Value) {
 		switch v.Kind() {
@@ -157,11 +153,9 @@ func contractDocument(doc *huma.OpenAPI) ([]byte, error) {
 				}
 			}
 		case reflect.Pointer:
-			if v.IsNil() || seen[v.Pointer()] {
-				return
+			if !v.IsNil() {
+				strip(v.Elem())
 			}
-			seen[v.Pointer()] = true
-			strip(v.Elem())
 		case reflect.Slice:
 			for i := 0; i < v.Len(); i++ {
 				strip(v.Index(i))
@@ -224,16 +218,10 @@ func baseAPIVersionRecords(t *testing.T, ref string) ([]string, error) {
 }
 
 func checkBaseAPIVersionRecords(dir string, records []string) error {
-	var missing []string
 	for _, name := range records {
-		if err := checkAPIVersionSummary(filepath.Join(dir, name)); os.IsNotExist(err) {
-			missing = append(missing, name)
-		} else if err != nil {
-			return err
+		if err := checkAPIVersionSummary(filepath.Join(dir, name)); err != nil {
+			return fmt.Errorf("base API contract record %s must be preserved with a one-line summary; if your branch is behind the base, rebase and rerun the test: %w", name, err)
 		}
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("base API contract records must be preserved: %s; if your branch is behind the base, rebase and rerun the test", strings.Join(missing, ", "))
 	}
 	return nil
 }
