@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	clientpkg "go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/daemonruntime"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 // These are TUI boundary backends: real socket transports and authentication,
@@ -30,6 +32,10 @@ func tuiUnixBackend(t *testing.T, name, token string) (clientpkg.ResolvedDaemon,
 	calls := new(atomic.Int64)
 	srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
+		if r.URL.Path == "/api/v1/ping" {
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"test","pid":%d}`, os.Getpid())
+			return
+		}
 		if r.Header.Get("Authorization") != "Bearer "+token {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -143,4 +149,75 @@ func TestClientNilRefreshDisablesCurrentHomeRecovery(t *testing.T) {
 	_, err = c.GetInstance(t.Context())
 	require.Error(t, err)
 	assert.Zero(t, calls, "nil must disable recovery, not restore the current-home default")
+}
+
+func TestLocalUnixCredentialsStaySelectedBesideActiveUnixTarget(t *testing.T) {
+	for _, tc := range []struct{ name, token string }{
+		{"address-only current home", "local-token"},
+		{"selected hub recovery", "catalog-token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
+			t.Setenv("KATA_DSN", "")
+			t.Setenv("KATA_SERVER", "")
+			t.Setenv("KATA_AUTH_TOKEN", "")
+			t.Setenv("KATA_AUTH_TOKEN_FILE", "")
+			t.Chdir(t.TempDir())
+			active, _, activeCalls := tuiUnixBackend(t, "active-other", "remote-token")
+			local, _, _ := tuiUnixBackend(t, "selected-local", tc.token)
+			body := fmt.Sprintf("active_daemon=\"other\"\n[auth]\ntoken=\"local-token\"\n[[daemon]]\nname=\"other\"\nurl=%q\ntoken=\"remote-token\"\n", active.Address)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0600))
+			ns, err := daemonruntime.NewNamespace()
+			require.NoError(t, err)
+			require.NoError(t, ns.EnsureDirs())
+			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+				PID: os.Getpid(), Network: "unix", Address: local.UnixSocket, Version: "test",
+			})
+			require.NoError(t, err)
+
+			if tc.name == "address-only current home" {
+				hc, err := clientpkg.NewHTTPClient(t.Context(), clientpkg.UnixBase, clientpkg.Opts{})
+				require.NoError(t, err)
+				t.Cleanup(hc.CloseIdleConnections)
+				instance, err := NewClient(clientpkg.UnixBase, hc).GetInstance(t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, "selected-local", instance.InstanceUID)
+			} else {
+				oldEnsure, oldRefresh := ensureLocalRunningTargetForTUI, refreshLocalHTTPClientForTUI
+				t.Cleanup(func() {
+					ensureLocalRunningTargetForTUI, refreshLocalHTTPClientForTUI = oldEnsure, oldRefresh
+				})
+				localRefreshes, defaultRefreshes := 0, 0
+				ensureLocalRunningTargetForTUI = func(context.Context) (clientpkg.RunningDaemon, error) {
+					localRefreshes++
+					running := local.Running()
+					running.ConfiguredRemote = false
+					return running, nil
+				}
+				refreshLocalHTTPClientForTUI = func(ctx context.Context) (*http.Client, error) {
+					defaultRefreshes++
+					// Model the generic current-home recovery result without
+					// authorizing any process launch from a failing test.
+					return clientpkg.NewHTTPClient(ctx, clientpkg.UnixBase, clientpkg.Opts{})
+				}
+				stale := filepath.Join(home, "stale.sock")
+				hub, _, err := newHubAdminClient(t.Context(), daemonTarget{
+					Name: "local-admin", Local: true, resolved: clientpkg.ResolvedDaemon{
+						Source: clientpkg.DaemonSourceNamedCatalog, Name: "local-admin",
+						BaseURL: clientpkg.UnixBase, Address: "unix://" + stale,
+						Network: "unix", Scheme: "http", UnixSocket: stale, Token: tc.token,
+					},
+				})
+				require.NoError(t, err)
+				instance, err := hub.GetInstance(t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, "selected-local", instance.InstanceUID)
+				assert.Equal(t, 1, localRefreshes)
+				assert.Zero(t, defaultRefreshes, "a selected target must not use generic current-home recovery")
+			}
+			assert.Zero(t, activeCalls.Load(), "the active target must remain unused")
+		})
+	}
 }

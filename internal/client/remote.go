@@ -303,18 +303,19 @@ func activeRemoteFromConfig() (activeRemoteTarget, bool, error) {
 }
 
 // activeRemoteTargetAuthForBaseURL is the compatibility bridge for callers
-// that retained only the selected active daemon's URL. It reads configuration
-// but never re-probes the endpoint.
+// that retained only the selected active HTTP daemon's URL. The shared Unix
+// request base cannot identify a socket or its credential. No endpoint is probed.
 // Deprecated: use EnsureResolvedInWorkspace and NewHTTPClientForResolved.
 func activeRemoteTargetAuthForBaseURL(ctx context.Context, baseURL, workspaceStart string) (TargetAuth, bool, error) {
-	if globalAuthTokenOverrideSet() || higherPriorityRemoteSourceMatchesBaseURL(ctx, baseURL, workspaceStart) {
+	baseURL = strings.TrimRight(baseURL, "/")
+	if baseURL == UnixBase || globalAuthTokenOverrideSet() || higherPriorityRemoteSourceMatchesBaseURL(ctx, baseURL, workspaceStart) {
 		return TargetAuth{}, false, nil
 	}
 	target, ok, err := activeRemoteFromConfig()
 	if err != nil || !ok {
 		return TargetAuth{}, false, err
 	}
-	if target.resolved.BaseURL != strings.TrimRight(baseURL, "/") {
+	if target.resolved.BaseURL != baseURL {
 		return TargetAuth{}, false, nil
 	}
 	token, err := target.entry.ClientToken()

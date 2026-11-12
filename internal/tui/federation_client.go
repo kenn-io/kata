@@ -62,7 +62,13 @@ func newHubAdminClient(ctx context.Context, target daemonTarget) (*Client, daemo
 	if err != nil {
 		return nil, daemonTarget{}, err
 	}
-	return NewClient(endpoint, hc), target, nil
+	c := NewClient(endpoint, hc)
+	if target.Local && endpoint == clientpkg.UnixBase {
+		c.setLocalHTTPClientRefresh(localHTTPClientRefreshForTarget(endpoint, target))
+	} else {
+		c.setLocalHTTPClientRefresh(nil)
+	}
+	return c, target, nil
 }
 
 // federationHubTargetToken resolves only the credential attached to the

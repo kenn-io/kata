@@ -1,7 +1,7 @@
 ---
 title: Go client
 description: Connect Go programs to a Kata daemon with the typed client, CLI-compatible daemon discovery, and an in-process test server.
-last_edited: 2026-11-11
+last_edited: 2026-11-12
 ---
 
 # Go client
@@ -66,6 +66,10 @@ catalog URLs accept explicit `unix:///absolute/path/daemon.sock` endpoints. Disc
 require a runtime record or probe that socket. The first request reports
 reachability. `StartWith` is never used for an explicit endpoint, even when the
 socket is missing.
+
+A local reconnection retains its selected target and credential source. The
+shared internal `http://kata.invalid` request base is not a socket identity;
+it never selects another active target's credentials.
 
 Discover finds a PostgreSQL-backed default local daemon from its storage DSN.
 Client-only programs do not include the PostgreSQL driver, so they cannot
