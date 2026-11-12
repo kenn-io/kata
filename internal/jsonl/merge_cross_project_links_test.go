@@ -2,8 +2,7 @@ package jsonl_test
 
 import (
 	"bytes"
-	"context"
-	"database/sql"
+	"crypto/ed25519"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -149,13 +148,20 @@ func checkMergeRefusesLinkAcrossRelayedProject(t *testing.T, target db.Storage) 
 	require.NoError(t, err)
 	_, err = target.EnableProjectFederation(ctx, first.ID, "operator")
 	require.NoError(t, err)
-	_, err = target.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
-		SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA", ProjectID: &first.ID, Actor: "operator", Capabilities: "pull,push",
+	public, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	require.NoError(t, target.PinRootAuthority(ctx, db.RootKeyPin{
+		ProjectUID: first.UID, AuthorityUID: target.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public,
+	}))
+	parent, _, err := target.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "relay-parent-test-token", Actor: "member", AdminActor: "operator",
 	})
 	require.NoError(t, err)
-	_, err = target.(interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	}).ExecContext(ctx, `UPDATE federation_enrollments SET relay_protocol_version=1 WHERE project_id=$1`, first.ID)
+	//nolint:gosec // This token is a deterministic fixture credential, never an operational secret.
+	_, err = target.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
+		ProjectID: first.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000006",
+		ProtocolVersion: db.RelayProtocolVersion, Token: "relay-peer-test-token",
+	})
 	require.NoError(t, err)
 
 	err = jsonl.ImportWithOptions(ctx, bytes.NewReader(source.secondExport), target,
