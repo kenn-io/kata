@@ -99,6 +99,9 @@ func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int
 	if payloadCarriesCommentReply(kind, payload) {
 		version = max(version, commentReplyWireVersion)
 	}
+	if issueUpdateReplacesWholeSets(kind, string(payload)) {
+		feature = MergeEventFeatures(feature, RepeatedAdoptionEventFeature)
+	}
 	return version, feature, nil
 }
 

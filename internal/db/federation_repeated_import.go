@@ -92,20 +92,14 @@ func RepeatedSnapshotSQLLookups(ctx context.Context, tx federationHistoryQuery, 
 	return lookups
 }
 
-// repeatedSnapshotAuditEventTypesSQL lists the events that name an issue
-// without changing what the fold builds for it.
-var repeatedSnapshotAuditEventTypesSQL = sqlStringList([]string{
-	"claim.acquired", "claim.released", "claim.expired", "claim.force_released", "claim.violated",
-	"close.throttled", "issue.scheduled_reached",
-	"issue.external_root_bound", "issue.external_root_paused", "issue.external_root_resumed", "issue.external_root_unbound",
-	"issue.external_comment_resolved", "issue.external_field_conflicted", "issue.external_field_resolved",
-})
-
 // RepeatedSnapshotDeltaClock places the hub's events for a winning repeated
 // snapshot in the log. They take the data's updated_at as their time, so an
 // edit made after the snapshot replays after them whenever it reaches the
-// hub. They never sort before the latest event that changed the issue on the
-// hub, which is the state the snapshot was compared with.
+// hub. They never sort before the issue's baseline on the hub, because an
+// adoption snapshot carries the clock of its push and not of its data, and the
+// baseline would otherwise replay over them. No other event moves them: an
+// ordinary edit's clock is its data's time, and repairs and audit records
+// leave the compared state alone.
 func RepeatedSnapshotDeltaClock(ctx context.Context, tx federationHistoryQuery, issueUID string, incoming jsontext.Value) (EventHLCTimestamp, error) {
 	var doc struct {
 		UpdatedAt string `json:"updated_at"`
@@ -119,11 +113,8 @@ func RepeatedSnapshotDeltaClock(ctx context.Context, tx federationHistoryQuery, 
 	}
 	clock := EventHLCTimestamp{PhysicalMS: updatedAt.UnixMilli()}
 	var latestMS, latestCounter int64
-	// Claim and throttle records carry the issue but change none of its state,
-	// so they are not part of what the snapshot was compared with.
-	//nolint:gosec // G202: the concatenated list holds fixed event type names.
 	err = tx.QueryRowContext(ctx, `SELECT hlc_physical_ms, hlc_counter FROM events WHERE issue_uid=$1
- AND type NOT IN (`+repeatedSnapshotAuditEventTypesSQL+`)
+ AND type IN ('issue.created','issue.snapshot','issue.moved')
  ORDER BY hlc_physical_ms DESC, hlc_counter DESC LIMIT 1`, issueUID).Scan(&latestMS, &latestCounter)
 	if errors.Is(err, sql.ErrNoRows) {
 		return clock, nil
@@ -178,17 +169,23 @@ func ValidateAdoptionBaselineSingleClock(events []FederationIngestEvent) error {
 	return nil
 }
 
-// federationExec runs one write statement.
-type federationExec interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
+// ErrFederationPushAwaitsPull reports a push the hub accepted that this home
+// cannot acknowledge yet. The hub did not store some of the home's adoption
+// snapshots, and the home has no other history of those issues until a pull
+// brings the hub's. The next sync cycle pulls and then repeats the push.
+var ErrFederationPushAwaitsPull = errors.New("federation push waits for the hub's history of issues it already held")
 
-// DropSupersededFederationSnapshots deletes a spoke's own adoption snapshots
-// that the hub did not store because its project already held the issues.
-// The spoke then replays only what the hub holds, so the two agree; the next
-// pull brings the hub's history for those issues. Only this home's own
-// issue.snapshot events qualify, and deleting them again is a no-op.
-func DropSupersededFederationSnapshots(ctx context.Context, exec federationExec, projectID int64, originInstanceUID string, eventUIDs []string) error {
+// AcknowledgeSupersededFederationSnapshots deletes a spoke's own adoption
+// snapshots that the hub did not store because its project already held the
+// issues. The spoke then replays only what the hub holds, so the two agree.
+// Only this home's own issue.snapshot events qualify, and deleting them again
+// is a no-op.
+//
+// A snapshot is deleted only when the log holds another creation of its issue,
+// which a pull brings from the hub. Without one the snapshot is the home's
+// only record of the issue, and the function changes nothing and returns
+// ErrFederationPushAwaitsPull.
+func AcknowledgeSupersededFederationSnapshots(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, eventUIDs []string) error {
 	for chunk := range slices.Chunk(eventUIDs, 500) {
 		slots, args := make([]string, len(chunk)), []any{projectID, originInstanceUID}
 		for i, uid := range chunk {
@@ -196,8 +193,27 @@ func DropSupersededFederationSnapshots(ctx context.Context, exec federationExec,
 			args = append(args, uid)
 		}
 		// Only generated placeholders enter the SQL; UIDs are bound parameters.
+		named := ` AND s.uid IN (` + strings.Join(slots, ",") + `)`
+		var waiting int
 		//nolint:gosec // G202: the concatenated SQL fragments contain no user data.
-		if _, err := exec.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1 AND origin_instance_uid=$2
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM events s WHERE s.project_id=$1 AND s.origin_instance_uid=$2
+ AND s.type='issue.snapshot'`+named+` AND NOT EXISTS (SELECT 1 FROM events r WHERE r.project_id=s.project_id
+ AND r.issue_uid=s.issue_uid AND r.origin_instance_uid<>$2 AND r.type IN ('issue.created','issue.snapshot')) LIMIT 1`, args...).Scan(&waiting)
+		if err == nil {
+			return ErrFederationPushAwaitsPull
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("check superseded federation snapshots: %w", err)
+		}
+	}
+	for chunk := range slices.Chunk(eventUIDs, 500) {
+		slots, args := make([]string, len(chunk)), []any{projectID, originInstanceUID}
+		for i, uid := range chunk {
+			slots[i] = fmt.Sprintf("$%d", i+3)
+			args = append(args, uid)
+		}
+		//nolint:gosec // G202: the concatenated SQL fragments contain no user data.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1 AND origin_instance_uid=$2
  AND type='issue.snapshot' AND uid IN (`+strings.Join(slots, ",")+`)`, args...); err != nil {
 			return fmt.Errorf("drop superseded federation snapshots: %w", err)
 		}

@@ -1171,6 +1171,13 @@ func (d *Store) insertFederationBaselineEventsTx(
 // MaterializeFederatedProject rebuilds the local read model for a spoke project
 // from its stored remote events. Event rows are retained.
 func (d *Store) MaterializeFederatedProject(ctx context.Context, projectID int64) error {
+	return d.materializeFederatedProjectAfter(ctx, projectID, nil)
+}
+
+// materializeFederatedProjectAfter runs before in the transaction that then
+// rebuilds the project, so a change to the event log and the rows built from
+// it commit together.
+func (d *Store) materializeFederatedProjectAfter(ctx context.Context, projectID int64, before func(context.Context, *sql.Tx) error) error {
 	// Ownership can change while retained history is folded. Take the policy
 	// writer lock before request fences or project rows to avoid lock upgrades.
 	original := ctx
@@ -1180,6 +1187,18 @@ func (d *Store) MaterializeFederatedProject(ctx context.Context, projectID int64
 		}
 		return db.ApplyTransactionFence(original, tx)
 	})
+	if before != nil {
+		// before changes the event log in the rebuild's transaction, so the
+		// fold cannot be prepared ahead of the writer.
+		return d.RetryTransient(ctx, func() error {
+			return d.withFederationMaterialization(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				if err := before(ctx, tx); err != nil {
+					return err
+				}
+				return d.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil)
+			})
+		})
+	}
 	return d.retryFederationPreparation(ctx, func(locked bool) error {
 		if locked {
 			return d.materializeFederatedProject(ctx, projectID)

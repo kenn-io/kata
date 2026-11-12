@@ -1763,22 +1763,24 @@ When a newer snapshot wins:
 - The issue keeps its author.
 
 The hub does not store the pushed snapshot for an issue it already holds. It
-writes its own ordinary events that restate the copy, such as `issue.updated`,
-`issue.labeled`, and `issue.commented`, with the pushing actor as their actor.
-The events carry the copy's values even where the hub already agreed, so an
-older edit that reaches the hub later cannot replace them. Other spokes receive
-those events like any other change. An older or identical copy leaves no event,
-so pushing the same copy again changes nothing.
+writes its own ordinary events that restate the copy, with the pushing actor
+as their actor:
+
+- One `issue.updated` event carries every field of the copy and its whole
+  label set and metadata. Labels and metadata keys the copy does not have are
+  removed, including ones an older edit adds when it reaches the hub later.
+  The metadata keys that the hub's recurrence scheduler owns stay.
+- `issue.commented`, `issue.comment_edited`, and `issue.linked` events carry
+  the comments and links the hub lacked.
+
+An older or identical copy leaves no event, so pushing the same copy again
+changes nothing.
 
 Those events take the snapshot's `updated_at` as their place in the project's
-history, and never sit before the latest event that changed the issue on the
-hub. Claim records do not count as changes. An edit made after the snapshot
-therefore still applies, whether it reaches the hub before or after the copy.
-A comment edit from the copy sits at the comment's own edit time.
-
-One case depends on arrival order. A label or metadata key that neither copy
-has can appear after the import, when an older edit that added it reaches the
-hub later. Remove it on the hub.
+history, and never sit before the adoption snapshot that first brought the
+issue to the hub. An edit made after the snapshot therefore still applies,
+whether it reaches the hub before or after the copy. A comment edit from the
+copy sits at the comment's own edit time.
 
 A link in the snapshot to an issue of another hub project needs the same
 authority as any other push that touches that project. Without it the hub
@@ -1787,14 +1789,18 @@ refuses the push.
 Issues the hub does not hold are created as usual.
 
 The hub's answer names the snapshots it did not store. The Kata home that
-pushed them deletes those snapshots from its own history and takes the hub's
-state on its next pull. If its copy was older, the comments and links only
-that home had are gone from it afterwards.
+pushed them deletes those snapshots from its own history and shows the hub's
+state. It does this only after a pull has brought the hub's history of those
+issues, so the push is acknowledged one sync cycle later than usual. If its
+copy was older, the comments and links only that home had are gone from it
+afterwards.
 
-Both sides must support this. The hub accepts a repeated snapshot only from a
-spoke that advertises the `repeated_adoption_v1` event feature. An older spoke
-gets `400 validation` with `targets existing issue`, as before, and
-quarantines the push; upgrade it and resume.
+Every Kata home that reads the project must support this. The hub accepts a
+repeated snapshot only from a spoke that advertises the `repeated_adoption_v1`
+event feature. An older spoke gets `400 validation` with `targets existing
+issue`, as before, and quarantines the push; upgrade it and resume. After a
+newer copy wins, a spoke without the feature cannot pull the project until it
+is upgraded, because it would not apply the whole label set and metadata.
 
 The create-only rule still applies outside an adoption push. A fresh
 `issue.created`, or an `issue.snapshot` in an ordinary push, for an issue the

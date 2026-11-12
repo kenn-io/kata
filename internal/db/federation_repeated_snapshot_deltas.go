@@ -4,7 +4,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"maps"
 	"slices"
 	"time"
 )
@@ -125,6 +124,15 @@ type repeatedSnapshotDoc struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// An issue.updated event that a hub writes for a winning repeated import
+// carries the copy's whole label set and metadata under these payload keys.
+// The fold replaces the issue's labels and ordinary metadata with them. A
+// reader must support RepeatedAdoptionEventFeature to replay such an event.
+const (
+	IssueUpdatedReplaceLabelsKey   = "replace_labels"
+	IssueUpdatedReplaceMetadataKey = "replace_metadata"
+)
+
 // RepeatedSnapshotWins reports whether an adoption snapshot of an issue the
 // hub project already holds is strictly newer than the hub's copy. The data's
 // updated_at decides, compared as a time at the millisecond precision both
@@ -200,27 +208,23 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 	if want.Status != "" {
 		fields["status"] = want.Status
 	}
+	// The whole label set and metadata travel in the same event. A label or
+	// key that neither copy has, added by an older edit that arrives late, is
+	// then removed too.
+	labels := slices.Sorted(slices.Values(want.Labels))
+	if labels == nil {
+		labels = []string{}
+	}
+	fields[IssueUpdatedReplaceLabelsKey] = labels
+	metadata := map[string]jsontext.Value{}
+	for key, value := range parseRawObject(want.Metadata) {
+		if !recurringMetadataKey(key) {
+			metadata[key] = value
+		}
+	}
+	fields[IssueUpdatedReplaceMetadataKey] = metadata
 	if err := add("issue.updated", actor, fields); err != nil {
 		return nil, err
-	}
-
-	for _, label := range slices.Sorted(slices.Values(have.Labels)) {
-		if !slices.Contains(want.Labels, label) {
-			if err := add("issue.unlabeled", actor, map[string]any{"label": label, "updated_at": want.UpdatedAt}); err != nil {
-				return nil, err
-			}
-		}
-	}
-	for _, label := range slices.Sorted(slices.Values(want.Labels)) {
-		if err := add("issue.labeled", actor, map[string]any{"label": label, "updated_at": want.UpdatedAt}); err != nil {
-			return nil, err
-		}
-	}
-
-	if diff := repeatedSnapshotMetadataDiff(have.Metadata, want.Metadata); len(diff) > 0 {
-		if err := add("issue.metadata_updated", actor, map[string]any{"diff": diff, "updated_at": want.UpdatedAt}); err != nil {
-			return nil, err
-		}
 	}
 
 	known := map[string]string{}
@@ -328,34 +332,6 @@ func snapshotLinkKey(issueUID string, link repeatedSnapshotLink) FoldLinkKey {
 		from, to = to, from
 	}
 	return FoldLinkKey{FromUID: from, ToUID: to, Type: link.Type}
-}
-
-func repeatedSnapshotMetadataDiff(have, want jsontext.Value) map[string]map[string]jsontext.Value {
-	current, target := parseRawObject(have), parseRawObject(want)
-	diff := map[string]map[string]jsontext.Value{}
-	for _, key := range slices.Sorted(maps.Keys(current)) {
-		// The hub owns the recurring-work keys. A copy from another home never
-		// carries them, so their absence is not a removal.
-		if recurringMetadataKey(key) {
-			continue
-		}
-		if _, kept := target[key]; !kept {
-			diff[key] = map[string]jsontext.Value{"from": current[key], "to": jsontext.Value("null")}
-		}
-	}
-	for _, key := range slices.Sorted(maps.Keys(target)) {
-		if recurringMetadataKey(key) {
-			continue
-		}
-		// A key the copy shares with the hub is restated too, for the same
-		// reason as an unchanged field.
-		from, exists := current[key]
-		if !exists {
-			from = jsontext.Value("null")
-		}
-		diff[key] = map[string]jsontext.Value{"from": from, "to": target[key]}
-	}
-	return diff
 }
 
 // timestampBefore reports whether timestamp a is earlier than b. An empty a is

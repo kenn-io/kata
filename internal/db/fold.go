@@ -215,7 +215,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		p.IssueMetadata[uid] = canonicalJSON(in.Metadata)
 	}
 	for _, label := range in.Labels {
-		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clockOf(e)}
+		p.setLabel(uid, label, FoldElementState{Present: true, Clock: clockOf(e)})
 	}
 	for _, link := range in.Links {
 		if link.ToIssueUID == "" {
@@ -283,6 +283,17 @@ func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsont
 	}
 	advanceIssueUpdatedAt(&issue, updatedAt)
 	p.Issues[uid] = issue
+	// A hub restates a whole issue from a repeated import with these two
+	// keys. See RepeatedSnapshotDeltas.
+	if raw := payload[IssueUpdatedReplaceLabelsKey]; len(raw) > 0 {
+		var labels []string
+		if json.Unmarshal(raw, &labels) == nil {
+			p.replaceIssueLabels(uid, labels, clockOf(e))
+		}
+	}
+	if raw := payload[IssueUpdatedReplaceMetadataKey]; rawJSONObject(raw) {
+		p.IssueMetadata[uid] = replaceOrdinaryMetadata(p.IssueMetadata[uid], raw)
+	}
 }
 
 func (p *FoldProjection) applyOwner(e FoldEvent, payload map[string]jsontext.Value) {
@@ -538,8 +549,60 @@ func (p *FoldProjection) applyLabel(e FoldEvent, payload map[string]jsontext.Val
 	if !ok || uid == "" {
 		return
 	}
-	p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: present, Clock: clockOf(e)}
+	p.setLabel(uid, label, FoldElementState{Present: present, Clock: clockOf(e)})
 	p.touchIssue(uid, issueUpdatedAt(e, payload))
+}
+
+func (p *FoldProjection) setLabel(issueUID, label string, state FoldElementState) {
+	p.Labels[FoldLabelKey{IssueUID: issueUID, Label: label}] = state
+	if p.labelsByIssue != nil {
+		if p.labelsByIssue[issueUID] == nil {
+			p.labelsByIssue[issueUID] = map[string]struct{}{}
+		}
+		p.labelsByIssue[issueUID][label] = struct{}{}
+	}
+}
+
+// replaceIssueLabels makes labels the issue's whole label set as of clock.
+// Every other label the fold has seen for the issue is removed, including one
+// an older event added after the replacing copy was taken.
+func (p *FoldProjection) replaceIssueLabels(issueUID string, labels []string, clock FoldClock) {
+	if p.labelsByIssue == nil {
+		p.labelsByIssue = map[string]map[string]struct{}{}
+		for key := range p.Labels {
+			if p.labelsByIssue[key.IssueUID] == nil {
+				p.labelsByIssue[key.IssueUID] = map[string]struct{}{}
+			}
+			p.labelsByIssue[key.IssueUID][key.Label] = struct{}{}
+		}
+	}
+	for label := range p.labelsByIssue[issueUID] {
+		p.setLabel(issueUID, label, FoldElementState{Present: false, Clock: clock})
+	}
+	for _, label := range labels {
+		p.setLabel(issueUID, label, FoldElementState{Present: true, Clock: clock})
+	}
+}
+
+// replaceOrdinaryMetadata returns replacement as the issue's whole metadata,
+// keeping only the recurrence keys of current, which the hub's scheduler owns.
+func replaceOrdinaryMetadata(current, replacement jsontext.Value) jsontext.Value {
+	out := map[string]jsontext.Value{}
+	for key, value := range parseRawObject(replacement) {
+		if !recurringMetadataKey(key) {
+			out[key] = canonicalJSON(value)
+		}
+	}
+	for key, value := range parseRawObject(current) {
+		if recurringMetadataKey(key) {
+			out[key] = value
+		}
+	}
+	raw, err := json.Marshal(out, json.Deterministic(true))
+	if err != nil {
+		return current
+	}
+	return raw
 }
 
 func (p *FoldProjection) applyLinkEvent(e FoldEvent, payload map[string]jsontext.Value, present bool) {

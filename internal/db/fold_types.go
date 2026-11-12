@@ -28,12 +28,15 @@ type FoldClock struct {
 
 // FoldProjection is the folded state derived from a set of portable events.
 type FoldProjection struct {
-	CronRuns        map[string]FoldCronRun
-	CronJobs        map[string]FoldCronJob
-	CronWorkflows   map[string]FoldCronWorkflow
-	Issues          map[string]FoldIssue
-	Comments        map[string]FoldComment
-	Labels          map[FoldLabelKey]FoldElementState
+	CronRuns      map[string]FoldCronRun
+	CronJobs      map[string]FoldCronJob
+	CronWorkflows map[string]FoldCronWorkflow
+	Issues        map[string]FoldIssue
+	Comments      map[string]FoldComment
+	Labels        map[FoldLabelKey]FoldElementState
+	// labelsByIssue indexes Labels for a whole-set replacement. It is built on
+	// the first replacement and kept current by every later label write.
+	labelsByIssue   map[string]map[string]struct{}
 	Links           map[FoldLinkKey]FoldElementState
 	IssueMetadata   map[string]jsontext.Value
 	ProjectMetadata map[string]jsontext.Value

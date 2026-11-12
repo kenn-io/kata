@@ -494,8 +494,10 @@ func checkFederationImportIssueHeldElsewhere(t *testing.T, source db.Storage, ba
 }
 
 // A home acknowledges a push by deleting its own adoption snapshots that the
-// hub did not store and advancing its push cursor together. Nothing else may
-// go: not another event of this home, and not a snapshot another home wrote.
+// hub did not store, advancing its push cursor, and rebuilding the project,
+// all together. It waits while one of those snapshots is its only record of an
+// issue. Nothing else may go: not another event of this home, and not a
+// snapshot another home wrote.
 func checkFederationAcknowledgePush(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "spoke-project")
@@ -504,50 +506,71 @@ func checkFederationAcknowledgePush(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "second", Author: "alice"})
 	require.NoError(t, err)
-	_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+	adopted, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
 		ProjectID: project.ID, HubURL: "https://daemon.example", HubProjectID: 7, HubProjectUID: project.UID, Actor: "operator",
 	})
 	require.NoError(t, err)
-	edited := "first, edited"
-	first, err := store.ListIssues(ctx, db.ListIssuesParams{ProjectID: project.ID})
+	listSnapshots := func() []string {
+		events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Types: []string{"issue.snapshot"}, Limit: 10})
+		require.NoError(t, err)
+		uids := make([]string, 0, len(events))
+		for _, event := range events {
+			uids = append(uids, event.UID)
+		}
+		return uids
+	}
+	snapshots, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Types: []string{"issue.snapshot"}, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, first, 2)
-	_, edit, _, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: first[0].ID, Title: &edited, Actor: "alice"})
+	require.Len(t, snapshots, 2)
+	waiting, held := snapshots[0], snapshots[1]
+
+	// The home edits the issue whose snapshot stays.
+	kept, err := store.IssueByUID(ctx, *waiting.IssueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	edited := "edited at home"
+	_, edit, _, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: kept.ID, Title: &edited, Actor: "alice"})
 	require.NoError(t, err)
 	require.NotNil(t, edit)
 
-	listSnapshots := func() []db.Event {
-		events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Types: []string{"issue.snapshot"}, Limit: 10})
-		require.NoError(t, err)
-		return events
-	}
-	snapshots := listSnapshots()
-	require.Len(t, snapshots, 2)
-	foreign := snapshots[1]
+	// A pull brought the hub's copy of the other issue.
 	otherHome, err := uid.New()
 	require.NoError(t, err)
 	foreignUID, err := uid.New()
 	require.NoError(t, err)
-	remote := portableNativeEvent(foreign)
+	remote := portableNativeEvent(held)
 	remote.EventUID, remote.OriginInstanceUID = foreignUID, otherHome
+	payload := map[string]any{}
+	require.NoError(t, json.Unmarshal(remote.Payload, &payload))
+	payload["title"] = "hub copy"
+	remote.Payload = mustNativeJSON(t, payload)
 	resignNativeEvent(t, &remote)
 	_, err = store.InsertRemoteEvents(ctx, project.ID, []db.RemoteEvent{remote})
 	require.NoError(t, err)
 
+	// The first snapshot is the home's only record of its issue, so nothing
+	// is acknowledged.
+	err = store.AcknowledgeFederationPush(ctx, project.ID, edit.ID, []string{waiting.UID, held.UID})
+	require.ErrorIs(t, err, db.ErrFederationPushAwaitsPull)
+	require.ElementsMatch(t, []string{waiting.UID, held.UID, foreignUID}, listSnapshots())
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, adopted.Binding.PushCursorEventID, binding.PushCursorEventID, "a waiting push leaves the cursor")
+
 	for range 2 {
-		require.NoError(t, store.AcknowledgeFederationPush(ctx, project.ID, edit.ID, []string{snapshots[0].UID, edit.UID, foreignUID}))
+		require.NoError(t, store.AcknowledgeFederationPush(ctx, project.ID, edit.ID, []string{held.UID, edit.UID, foreignUID}))
 		binding, err := store.FederationBindingByProject(ctx, project.ID)
 		require.NoError(t, err)
 		require.Equal(t, edit.ID, binding.PushCursorEventID, "the push cursor advances with the deletion")
-		left := listSnapshots()
-		var uids []string
-		for _, event := range left {
-			uids = append(uids, event.UID)
-		}
-		require.ElementsMatch(t, []string{snapshots[1].UID, foreignUID}, uids, "only this home's named snapshot is deleted")
-		kept, err := store.EventsByUIDs(ctx, project.ID, []string{edit.UID})
+		require.ElementsMatch(t, []string{waiting.UID, foreignUID}, listSnapshots(), "only this home's named snapshot is deleted")
+		stays, err := store.EventsByUIDs(ctx, project.ID, []string{edit.UID})
 		require.NoError(t, err)
-		require.Len(t, kept, 1, "an event that is not a snapshot stays")
+		require.Len(t, stays, 1, "an event that is not a snapshot stays")
+		rebuilt, err := store.IssueByUID(ctx, *held.IssueUID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, "hub copy", rebuilt.Title, "the issue is rebuilt from the history that remains")
+		untouched, err := store.IssueByUID(ctx, *waiting.IssueUID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, "edited at home", untouched.Title)
 	}
 	return nil
 }

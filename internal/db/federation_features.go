@@ -18,10 +18,11 @@ const CronEventFeature = "cron_v1"
 // IssueMoveEventFeature identifies support for moving issues between projects.
 const IssueMoveEventFeature = "issue_move_v1"
 
-// RepeatedAdoptionEventFeature identifies a spoke whose replay skips its own
-// adoption snapshot when a hub that already held the issue has a copy at
-// least as new. A hub accepts a repeated adoption snapshot only from such a
-// spoke; an older spoke would keep its stale copy.
+// RepeatedAdoptionEventFeature identifies a peer that understands a repeated
+// adoption. A spoke with it deletes its own adoption snapshot when the hub
+// already held the issue, and a hub accepts a repeated adoption snapshot only
+// from such a spoke. A reader with it replays the whole label set and metadata
+// that a hub's issue.updated event carries for a winning copy.
 const RepeatedAdoptionEventFeature = "repeated_adoption_v1"
 
 // SupportedEventFeatures lists event capabilities understood by this daemon.
@@ -60,7 +61,21 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
 	}
+	if issueUpdateReplacesWholeSets(kind, payload) {
+		required = MergeEventFeatures(required, RepeatedAdoptionEventFeature)
+	}
 	return required, nil
+}
+
+// issueUpdateReplacesWholeSets identifies the update a hub writes for a
+// winning repeated import. A reader that predates it would apply the fields
+// and silently keep stale labels and metadata.
+func issueUpdateReplacesWholeSets(kind, payload string) bool {
+	if kind != "issue.updated" || !strings.Contains(payload, `"replace_`) {
+		return false
+	}
+	body := PayloadMap(jsontext.Value(payload))
+	return len(body[IssueUpdatedReplaceLabelsKey]) > 0 || len(body[IssueUpdatedReplaceMetadataKey]) > 0
 }
 
 // payloadHasNativeRecurringState identifies hub-owned state independently of

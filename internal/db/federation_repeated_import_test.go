@@ -146,12 +146,13 @@ func TestRepeatedSnapshotDeltasAlwaysAdvanceUpdatedAt(t *testing.T) {
 
 // An edit older than the winning copy can reach the hub after the import. It
 // replays before the hub's events for the copy, so those events must restate
-// the values the copy shares with the hub, not only the ones that differed.
+// the whole copy: the values it shares with the hub, and its complete label
+// set and metadata, which a late edit may have added to.
 func TestRepeatedSnapshotDeltasOutlastADelayedOlderEdit(t *testing.T) {
 	current := `{"uid":"issue-1","title":"agreed title","body":"agreed body","owner":"bob","priority":2,"status":"open",
-"metadata":{"team":"core"},"labels":["bug"],"updated_at":"2026-05-01T09:00:00.000Z"}`
+"metadata":{"team":{"name":"core"},"cron.occurrence":{"n":3}},"labels":["bug"],"updated_at":"2026-05-01T09:00:00.000Z"}`
 	incoming := `{"uid":"issue-1","title":"agreed title","body":"agreed body","owner":"bob","priority":2,"status":"open",
-"metadata":{"team":"core"},"labels":["bug"],"updated_at":"2026-06-01T09:00:00.000Z"}`
+"metadata":{"team":{"name":"core"}},"labels":["bug"],"updated_at":"2026-06-01T09:00:00.000Z"}`
 	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
 	require.NoError(t, err)
 
@@ -159,11 +160,13 @@ func TestRepeatedSnapshotDeltasOutlastADelayedOlderEdit(t *testing.T) {
 		testEvent("issue.snapshot", 1, current),
 		testEvent("issue.updated", 5, `{"title":"delayed title","body":"delayed body","owner":null,"priority":null,"status":"closed","closed_reason":"done","updated_at":"2026-05-10T09:00:00.000Z"}`),
 		testEvent("issue.unlabeled", 6, `{"label":"bug"}`),
-		testEvent("issue.metadata_updated", 7, `{"diff":{"team":{"from":"core","to":"delayed"}}}`),
+		testEvent("issue.labeled", 7, `{"label":"stray"}`),
+		testEvent("issue.metadata_updated", 8, `{"diff":{"team":{"from":{"name":"core"},"to":{"name":"core","lead":"zed"}},"stray":{"from":null,"to":"x"}}}`),
 	}
 	for i, delta := range deltas {
 		events = append(events, testEvent(delta.Type, int64(10+i), string(delta.Payload)))
 	}
+	events = append(events, testEvent("issue.labeled", 30, `{"label":"later"}`))
 	got := FoldEvents(events)
 	issue := got.Issues["issue-1"]
 	assert.Equal(t, "agreed title", issue.Title)
@@ -175,8 +178,9 @@ func TestRepeatedSnapshotDeltasOutlastADelayedOlderEdit(t *testing.T) {
 	assert.Equal(t, "open", issue.Status)
 	assert.Nil(t, issue.ClosedReason)
 	assert.Nil(t, issue.ClosedAt)
-	assert.Equal(t, []string{"bug"}, presentLabels(got, "issue-1"))
-	assert.JSONEq(t, `{"team":"core"}`, string(got.IssueMetadata["issue-1"]))
+	assert.ElementsMatch(t, []string{"bug", "later"}, presentLabels(got, "issue-1"), "a label added after the copy stays")
+	assert.JSONEq(t, `{"team":{"name":"core"},"cron.occurrence":{"n":3}}`, string(got.IssueMetadata["issue-1"]),
+		"the copy's metadata replaces the rest, and the hub's recurrence keys stay")
 }
 
 // A comment the hub lacks can arrive again later as its original creation and
@@ -288,4 +292,25 @@ func TestRepeatedSnapshotDeltasPlaceACommentEditAtItsEditTime(t *testing.T) {
 	comment := FoldEvents(events).Comments["comment-1"]
 	assert.Equal(t, "later edit", comment.Body)
 	assert.Equal(t, "2026-05-20T10:00:00.000Z", comment.EditedAt)
+}
+
+// A reader that predates repeated imports would ignore the whole label set
+// and metadata in the hub's update event and keep stale values. Such an event
+// therefore needs the repeated adoption feature, and an ordinary update does
+// not.
+func TestRepeatedImportUpdateRequiresTheFeature(t *testing.T) {
+	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(repeatedImportHubCopy), jsontext.Value(repeatedImportNewerCopy), repeatedImportLookups())
+	require.NoError(t, err)
+	require.Equal(t, "issue.updated", deltas[0].Type)
+
+	required, err := PayloadRequiredFeatures(deltas[0].Type, string(deltas[0].Payload))
+	require.NoError(t, err)
+	assert.Equal(t, RepeatedAdoptionEventFeature, required)
+	_, wire, err := FederationEventPayloadWireVersion(deltas[0].Type, deltas[0].Payload)
+	require.NoError(t, err)
+	assert.Equal(t, RepeatedAdoptionEventFeature, wire)
+
+	required, err = PayloadRequiredFeatures("issue.updated", `{"title":"plain edit"}`)
+	require.NoError(t, err)
+	assert.Empty(t, required)
 }

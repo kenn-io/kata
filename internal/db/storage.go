@@ -475,9 +475,11 @@ type Storage interface {
 	PendingFederationPushEvents(ctx context.Context, projectID int64, originInstanceUID string, afterID int64, limit int) ([]Event, error)
 	PendingFederationPushStats(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, int64, error)
 	AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error
-	// AcknowledgeFederationPush advances the push cursor and deletes this
-	// home's own adoption snapshots that the hub acknowledged without storing,
-	// in one transaction.
+	// AcknowledgeFederationPush advances the push cursor. It also deletes this
+	// home's own adoption snapshots that the hub acknowledged without storing
+	// and rebuilds the project from the remaining history, all in one
+	// transaction. It changes nothing and returns ErrFederationPushAwaitsPull
+	// while the home has no other history of one of those issues.
 	AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error
 	EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (FederationBinding, error)
 	ResetFederatedProjectIfNoPendingPush(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64, originInstanceUID string, pushCursorEventID int64) error

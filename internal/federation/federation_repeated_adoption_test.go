@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
@@ -170,4 +171,38 @@ func TestSyncFederationRepeatedAdoptionKeepsAnEditMadeAfterTheSnapshot(t *testin
 	require.Equal(t, "edited afterward", title)
 	title, _ = repeatedAdoptionState(t, home.env.DB, seed.UID)
 	require.Equal(t, "edited afterward", title)
+}
+
+// The hub names the snapshots it did not store, and the pushing home deletes
+// them. Until the hub's history for the issue has arrived, the home's own
+// snapshot is the only record it has of the issue, so it must keep it. Once
+// the history is there, the home drops the snapshot and shows the hub's state
+// without waiting for another event.
+func TestSyncFederationRepeatedAdoptionKeepsItsSnapshotUntilTheHubHistoryArrives(t *testing.T) {
+	ctx := t.Context()
+	hub := testenv.New(t)
+	hubProject := createFederatedHubForPush(t, hub)
+	seed, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: hubProject.ID, Title: "hub copy", Author: "worker"})
+	require.NoError(t, err)
+	older := seed.UpdatedAt.UTC().Truncate(time.Millisecond).Add(-time.Hour)
+	home := newRepeatedAdoptionCopy(t, hub, hubProject, seed.UID, "older copy", "home comment", older)
+
+	// Stop the first cycle after its push, before any pull.
+	binding, err := home.env.DB.FederationBindingByProject(ctx, home.projectID)
+	require.NoError(t, err)
+	client, err := NewClient(ctx, home.creds.HubURL, home.creds.Token, clientpkg.Opts{})
+	require.NoError(t, err)
+	require.ErrorIs(t, PushDirectSpoke(ctx, home.env.DB, binding, hubProject.ID, client), db.ErrFederationPushAwaitsPull)
+	require.Len(t, home.ownSnapshots(t, seed.UID), 1, "the home keeps its snapshot while it has no other history of the issue")
+	title, _ := repeatedAdoptionState(t, home.env.DB, seed.UID)
+	require.Equal(t, "older copy", title)
+	waiting, err := home.env.DB.FederationBindingByProject(ctx, home.projectID)
+	require.NoError(t, err)
+	require.Equal(t, binding.PushCursorEventID, waiting.PushCursorEventID, "the push is not acknowledged yet")
+
+	home.sync(t)
+	require.Empty(t, home.ownSnapshots(t, seed.UID))
+	title, comments := repeatedAdoptionState(t, home.env.DB, seed.UID)
+	require.Equal(t, "hub copy", title, "the home shows the hub's state as soon as it drops its snapshot")
+	require.Empty(t, comments)
 }

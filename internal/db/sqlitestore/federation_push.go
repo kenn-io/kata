@@ -133,24 +133,20 @@ func federationPushEventTypeCondition(column string) string {
 	return column + " IN (" + db.FederationPushEventTypesSQL() + ")"
 }
 
-// AcknowledgeFederationPush advances the push cursor and deletes this home's
-// own adoption snapshots that the hub acknowledged without storing. One
-// transaction holds both, so an interrupted acknowledgement leaves either the
-// whole batch to push again or the finished progress.
+// AcknowledgeFederationPush advances the push cursor. When the hub named
+// adoption snapshots it did not store, the same transaction deletes them and
+// rebuilds the project, so an interruption leaves either the whole batch to
+// push again or the finished progress, and the home never shows rows built
+// from a snapshot it no longer holds.
 func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
-	return d.RetryTransient(ctx, func() error {
-		tx, err := d.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("begin acknowledge federation push: %w", err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		if err := db.DropSupersededFederationSnapshots(ctx, tx, projectID, d.instanceUID, supersededEventUIDs); err != nil {
+	if len(supersededEventUIDs) == 0 {
+		return d.AdvanceFederationPushCursor(ctx, projectID, nextCursor)
+	}
+	return d.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
+		if err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, d.instanceUID, supersededEventUIDs); err != nil {
 			return err
 		}
-		if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
-			return err
-		}
-		return tx.Commit()
+		return advanceFederationPushCursor(ctx, tx, projectID, nextCursor)
 	})
 }
 

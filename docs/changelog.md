@@ -32,7 +32,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   archived one, now returns `400 validation` naming the issue and is
   quarantined on the spoke; before, it returned 404 and the spoke retried
   without showing an error. The hub and the pushing spoke must both run this
-  version. See
+  version. After a newer copy wins, every other spoke of the project must run
+  it too before it can pull again. See
   [repeating an adoption](operations/federation.md#repeating-an-adoption).
 
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
