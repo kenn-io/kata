@@ -428,6 +428,8 @@ func packMoveBatchPages(request *generated.MoveIssuesBody, indexes []int, result
 }
 
 func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptions) (resultErr error) {
+	var resolveErr, projectErr error
+	defer func() { resultErr = errors.Join(resolveErr, resultErr) }()
 	results := make([]api.MoveIssuesResult, len(items))
 	for i, item := range items {
 		results[i] = api.MoveIssuesResult{Index: i, Ref: item.Ref}
@@ -485,9 +487,18 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	if needsDefault {
 		start, err := resolveStartPath(flags.Workspace)
 		if err == nil {
-			pid, _, err := resolveProjectIDAndNameWithClient(a, start)
+			var pid int64
+			pid, _, err = resolveProjectIDAndNameWithClient(a, start)
 			if err == nil {
 				request.DefaultProjectID = &pid
+			}
+		}
+		var ce *cliError
+		if err != nil {
+			if errors.As(err, &ce) && ce.Kind != kindInternal && ce.HTTPStatus >= 400 && ce.HTTPStatus < 500 {
+				projectErr = err
+			} else {
+				resolveErr = err
 			}
 		}
 	}
@@ -495,6 +506,14 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 	indexes := make([]int, 0, len(items))
 	for i, item := range items {
 		if results[i].Result != "" {
+			continue
+		}
+		if parsed, err := shortid.Parse(item.Ref); (resolveErr != nil || projectErr != nil) && err == nil && parsed.ULID == "" && parsed.Project == "" {
+			if projectErr != nil {
+				results[i], _ = moveBatchTargetError(i, item.Ref, projectErr)
+			} else {
+				results[i].Result = "unattempted"
+			}
 			continue
 		}
 		uid, err := moveBatchTarget(a, item, targets)
@@ -517,8 +536,10 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		if err := printMoveBatch(cmd, results, len(items)); err != nil {
 			return err
 		}
-		if len(results) > 0 {
-			return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: !flags.Quiet}
+		for _, result := range results {
+			if result.Result == "refused" {
+				return &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict, HumanReported: !flags.Quiet}
+			}
 		}
 		return nil
 	}

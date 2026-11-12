@@ -86,6 +86,45 @@ func TestMoveBatchCLI_PreflightFailureReportsAll(t *testing.T) {
 	require.Equal(t, issue.UID, reply.Results[2].Ref)
 }
 
+func TestMoveBatchCLI_ProjectResolutionFailureIsIsolated(t *testing.T) {
+	env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("synthetic-resolve-token"))
+	src, err := env.DB.CreateProject(t.Context(), "source")
+	require.NoError(t, err)
+	dst, err := env.DB.CreateProject(t.Context(), "target")
+	require.NoError(t, err)
+	first, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "first", Author: "tester"})
+	require.NoError(t, err)
+	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "independent", Author: "tester"})
+	require.NoError(t, err)
+	origin, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(origin)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects/resolve" {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Host = origin.Host
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, "", "--workspace", dir, "move", first.ShortID, second.UID, dst.Name, "--json")
+	require.ErrorContains(t, err, "503")
+	var reply api.MoveIssuesResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &reply.Body))
+	require.Len(t, reply.Body.Results, 2)
+	require.Equal(t, "unattempted", reply.Body.Results[0].Result)
+	require.Equal(t, 0, reply.Body.Results[0].Index)
+	require.Equal(t, first.ShortID, reply.Body.Results[0].Ref)
+	require.Equal(t, "moved", reply.Body.Results[1].Result, "error: %v; output: %s", err, out)
+	require.Equal(t, 1, reply.Body.Results[1].Index)
+	for _, tc := range []struct{ id, project int64 }{{first.ID, src.ID}, {second.ID, dst.ID}} {
+		got, err := env.DB.IssueByID(t.Context(), tc.id)
+		require.NoError(t, err)
+		require.Equal(t, tc.project, got.ProjectID)
+	}
+}
+
 func TestMoveBatchCLI_Pages(t *testing.T) {
 	for _, status := range []int{http.StatusOK, http.StatusBadRequest, http.StatusNotFound, http.StatusInternalServerError} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
