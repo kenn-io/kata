@@ -873,6 +873,7 @@ entries follow `kata.`. CLI and MCP create definitions through stable-UID
 | `POST` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}/restore` | `restoreCronWorkflow` | `workflow restore` | `cron_workflow_restore` |
 | `GET` | `/api/v1/projects/{project_id}/cron/runs` | `listCronRuns` | `run list` | `cron_runs` |
 | `GET` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `showCronRun` | `run show` | `cron_run` |
+| `GET` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}/usage` | `getCronRunUsage` | `run usage` | — |
 | `PUT` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `observeCronRun` | `run observe` | `cron_run_observe` |
 
 `kata.cron_new_uid` generates a UID locally and has no HTTP route.

@@ -57,6 +57,9 @@ func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int, bool
 		return unavailable, 0, false
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return SessionUsage{State: "unauthorized"}, resp.StatusCode, false
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
 	if err != nil || len(body) > 1<<20 {
 		return unavailable, resp.StatusCode, false
@@ -70,8 +73,6 @@ func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int, bool
 	}
 	validEnvelope := json.Unmarshal(body, &envelope) == nil && envelope.Error.Code != ""
 	switch resp.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return SessionUsage{State: "unauthorized"}, resp.StatusCode, validEnvelope
 	case http.StatusNotFound:
 		if validEnvelope && envelope.Error.Code == "session_not_found" && envelope.Error.Message != "" {
 			return SessionUsage{State: "not_found"}, resp.StatusCode, true

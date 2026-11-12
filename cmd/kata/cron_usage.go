@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"go.kenn.io/kata/internal/agentsview"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -86,24 +85,9 @@ func newCronUsageCmd() *cobra.Command {
 		if flags.Quiet {
 			return nil
 		}
-		return writeCronUsage(cmd.OutOrStdout(), cronUsageFromResponse(*response.JSON200))
+		return writeCronUsage(cmd.OutOrStdout(), *response.JSON200)
 	}
 	return cmd
-}
-
-func cronUsageFromResponse(input generated.RunUsage) agentsview.RunUsage {
-	usage := agentsview.RunUsage{Total: agentsview.Total{State: string(input.State), CostMicrodollars: input.CostMicrodollars, Estimated: input.Estimated}, SessionsIncomplete: input.SessionsIncomplete}
-	for _, item := range input.Sessions {
-		session := agentsview.RunSession{Agent: item.Agent, SessionID: item.SessionID, Step: item.Step, SessionUsage: agentsview.SessionUsage{State: string(item.State), CostMicrodollars: item.CostMicrodollars, Candidates: item.Candidates, UnpricedModels: item.UnpricedModels}}
-		if item.CostSource != nil {
-			session.CostSource = *item.CostSource
-		}
-		if item.URL != nil {
-			session.URL = *item.URL
-		}
-		usage.Sessions = append(usage.Sessions, session)
-	}
-	return usage
 }
 
 func usageAmount(value int64, estimated bool) string {
@@ -121,7 +105,19 @@ func usageAmount(value int64, estimated bool) string {
 	return fmt.Sprintf("%s$%d.%02d", prefix, cents/100, cents%100)
 }
 
-func writeCronUsage(out io.Writer, usage agentsview.RunUsage) error {
+func writeCronUsage(out io.Writer, usage generated.RunUsage) error {
+	switch usage.State {
+	case "no_sessions", "unknown", "complete", "partial":
+	default:
+		return errors.New("unsupported cron usage state")
+	}
+	for _, session := range usage.Sessions {
+		switch session.State {
+		case "priced", "unpriced", "no_usage", "not_found", "ambiguous", "unauthorized", "unavailable":
+		default:
+			return errors.New("unsupported cron session usage state")
+		}
+	}
 	total := "no sessions"
 	switch usage.State {
 	case "unknown":
@@ -155,7 +151,7 @@ func writeCronUsage(out io.Writer, usage agentsview.RunUsage) error {
 		switch s.State {
 		case "priced":
 			if s.CostMicrodollars != nil {
-				desc = usageAmount(*s.CostMicrodollars, s.CostSource == "computed" || s.CostSource == "mixed")
+				desc = usageAmount(*s.CostMicrodollars, s.CostSource != nil && (*s.CostSource == "computed" || *s.CostSource == "mixed"))
 			}
 		case "unpriced":
 			desc = "unpriced"
@@ -179,8 +175,8 @@ func writeCronUsage(out io.Writer, usage agentsview.RunUsage) error {
 			step = " " + textsafe.Line(*s.Step)
 		}
 		link := ""
-		if s.URL != "" {
-			link = " " + textsafe.Line(s.URL)
+		if s.URL != nil && *s.URL != "" {
+			link = " " + textsafe.Line(*s.URL)
 		}
 		if _, err := fmt.Fprintf(out, "%s %s%s: %s%s\n", textsafe.Line(s.Agent), textsafe.Line(s.SessionID), step, desc, link); err != nil {
 			return err

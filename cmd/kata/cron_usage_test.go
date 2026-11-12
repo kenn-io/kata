@@ -10,17 +10,17 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/agentsview"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func TestCronUsageRejectsUnsupportedHumanStates(t *testing.T) {
 	// Human output must refuse unknown states instead of guessing their meaning.
 	for _, tc := range []struct {
 		name  string
-		usage agentsview.RunUsage
+		usage generated.RunUsage
 	}{
-		{"run", agentsview.RunUsage{Total: agentsview.Total{State: "future_run_state"}}},
-		{"session", agentsview.RunUsage{Total: agentsview.Total{State: "unknown"}, Sessions: []agentsview.RunSession{{Agent: "example", SessionID: "fixture", SessionUsage: agentsview.SessionUsage{State: "future_session_state"}}}}},
+		{"run", generated.RunUsage{State: "future_run_state"}},
+		{"session", generated.RunUsage{State: "unknown", Sessions: []generated.RunSession{{Agent: "example", SessionID: "fixture", State: "future_session_state"}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
@@ -32,14 +32,15 @@ func TestCronUsageRejectsUnsupportedHumanStates(t *testing.T) {
 func TestCronUsageOutputStatesAndSanitization(t *testing.T) {
 	amount := int64(2410000)
 	step := "main"
-	usage := agentsview.RunUsage{Total: agentsview.Total{State: "partial", CostMicrodollars: &amount, Estimated: true}, SessionsIncomplete: true, Sessions: []agentsview.RunSession{
-		{Agent: "example", SessionID: "one", Step: &step, SessionUsage: agentsview.SessionUsage{State: "priced", CostMicrodollars: &amount, CostSource: "computed"}},
-		{Agent: "example", SessionID: "two", SessionUsage: agentsview.SessionUsage{State: "unpriced", UnpricedModels: []string{"model\x1b[31m"}}},
-		{Agent: "example", SessionID: "three", SessionUsage: agentsview.SessionUsage{State: "not_found"}},
-		{Agent: "example", SessionID: "four", SessionUsage: agentsview.SessionUsage{State: "ambiguous", Candidates: []string{"archive~id"}}},
-		{Agent: "example", SessionID: "five", SessionUsage: agentsview.SessionUsage{State: "no_usage"}},
-		{Agent: "example", SessionID: "six", SessionUsage: agentsview.SessionUsage{State: "unauthorized"}},
-		{Agent: "example", SessionID: "seven", SessionUsage: agentsview.SessionUsage{State: "unavailable"}},
+	source := "computed"
+	usage := generated.RunUsage{State: "partial", CostMicrodollars: &amount, Estimated: true, SessionsIncomplete: true, Sessions: []generated.RunSession{
+		{Agent: "example", SessionID: "one", Step: &step, State: "priced", CostMicrodollars: &amount, CostSource: &source},
+		{Agent: "example", SessionID: "two", State: "unpriced", UnpricedModels: []string{"model\x1b[31m"}},
+		{Agent: "example", SessionID: "three", State: "not_found"},
+		{Agent: "example", SessionID: "four", State: "ambiguous", Candidates: []string{"archive~id"}},
+		{Agent: "example", SessionID: "five", State: "no_usage"},
+		{Agent: "example", SessionID: "six", State: "unauthorized"},
+		{Agent: "example", SessionID: "seven", State: "unavailable"},
 	}}
 	for _, tc := range []struct {
 		value     int64
@@ -55,17 +56,16 @@ func TestCronUsageOutputStatesAndSanitization(t *testing.T) {
 	}
 	require.NotContains(t, out.String(), "\x1b")
 	for _, tc := range []struct {
-		total    agentsview.Total
-		sessions []agentsview.RunSession
-		want     string
+		usage generated.RunUsage
+		want  string
 	}{
-		{agentsview.Total{State: "complete", CostMicrodollars: &amount}, []agentsview.RunSession{{Agent: "example", SessionID: "id", SessionUsage: agentsview.SessionUsage{State: "priced", CostMicrodollars: &amount}}}, "Cost: $2.41\n"},
-		{agentsview.Total{State: "unknown"}, []agentsview.RunSession{{Agent: "example", SessionID: "id", SessionUsage: agentsview.SessionUsage{State: "not_found"}}}, "Cost: unknown\n"},
-		{agentsview.Total{State: "no_sessions"}, nil, "Cost: no sessions\n"},
+		{generated.RunUsage{State: "complete", CostMicrodollars: &amount, Sessions: []generated.RunSession{{Agent: "example", SessionID: "id", State: "priced", CostMicrodollars: &amount}}}, "Cost: $2.41\n"},
+		{generated.RunUsage{State: "unknown", Sessions: []generated.RunSession{{Agent: "example", SessionID: "id", State: "not_found"}}}, "Cost: unknown\n"},
+		{generated.RunUsage{State: "no_sessions"}, "Cost: no sessions\n"},
 	} {
-		t.Run(tc.total.State, func(t *testing.T) {
+		t.Run(string(tc.usage.State), func(t *testing.T) {
 			var output bytes.Buffer
-			require.NoError(t, writeCronUsage(&output, agentsview.RunUsage{Total: tc.total, Sessions: tc.sessions}))
+			require.NoError(t, writeCronUsage(&output, tc.usage))
 			require.True(t, strings.HasPrefix(output.String(), tc.want))
 		})
 	}
