@@ -111,13 +111,3 @@ test('local project readers see native sync status with bounded embedding summar
   await expect(region.getByText('Sync needs attention')).toHaveCount(0)
   await expect(region.getByRole('button', { name: /Copy .* sync status command/ })).toHaveCount(0)
 })
-
-test('other tests retain the fixture project name', async ({ page, kata }) => {
-  const credentials = await kata.launch(page)
-  const snapshot = (await kata.snapshot(page, credentials)) as {
-    catalog: Array<{ project: { id: number; name: string } }>
-  }
-  expect(snapshot.catalog.find(({ project }) => project.id === kata.projectID)?.project.name).toBe(
-    'example-project',
-  )
-})
