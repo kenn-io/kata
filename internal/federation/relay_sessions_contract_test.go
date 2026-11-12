@@ -462,51 +462,170 @@ func TestRelaySessionOfferPageBoundary(t *testing.T) {
 func TestRelaySessionForwardedResetRefusesAndRetries(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, cached := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/cached=%t", backend, cached), func(t *testing.T) {
-				root, relay := relaySessionPair(t, backend)
-				relaySessionHistory(t, root, true, false)
-				syncRelayMatrixNode(t, relay)
-				binding, err := relay.store.FederationBindingByProject(t.Context(), relay.project.ID)
-				require.NoError(t, err)
-				creator := root.store.(db.RelayResetStore)
-				original, err := creator.CreateRelayReset(t.Context(), binding.RelayConfig.BindingUID, root.signer)
-				require.NoError(t, err)
-				query := "DELETE FROM events WHERE project_id=?"
-				if backend == "postgres" {
-					query = "DELETE FROM events WHERE project_id=$1"
-				}
-				_, err = root.store.(interface {
-					ExecContext(context.Context, string, ...any) (sql.Result, error)
-				}).ExecContext(t.Context(), query, root.project.ID)
-				require.NoError(t, err)
-				syncRelayMatrixNode(t, relay)
-				leaf := newRelayMatrixNode(t, backend, "leaf-member")
-				enrollRelayMatrixReplica(t, relay, leaf, "leaf-project", false)
-				syncRelayMatrixNode(t, leaf)
-				path := fmt.Sprintf("/api/v1/projects/%d/federation/relay/reset", relay.project.ID)
-				var retained []byte
-				if cached {
-					status, raw := relaySessionGET(t, relay, leaf.credential.Token, path, db.SupportedEventFeatures)
+			for _, currentOnly := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/cached=%t/current-only=%t", backend, cached, currentOnly), func(t *testing.T) {
+					root, relay := relaySessionPair(t, backend)
+					relaySessionHistory(t, root, !currentOnly, false)
+					syncRelayMatrixNode(t, relay)
+					binding, err := relay.store.FederationBindingByProject(t.Context(), relay.project.ID)
+					require.NoError(t, err)
+					creator := root.store.(db.RelayResetStore)
+					if currentOnly {
+						query := "DELETE FROM events WHERE project_id=? AND type='cron.run.observed'"
+						if backend == "postgres" {
+							query = "DELETE FROM events WHERE project_id=$1 AND type='cron.run.observed'"
+						}
+						_, err = root.store.(interface {
+							ExecContext(context.Context, string, ...any) (sql.Result, error)
+						}).ExecContext(t.Context(), query, root.project.ID)
+						require.NoError(t, err)
+					}
+					original, err := creator.CreateRelayReset(t.Context(), binding.RelayConfig.BindingUID, root.signer)
+					require.NoError(t, err)
+					query := "DELETE FROM events WHERE project_id=?"
+					if backend == "postgres" {
+						query = "DELETE FROM events WHERE project_id=$1"
+					}
+					_, err = root.store.(interface {
+						ExecContext(context.Context, string, ...any) (sql.Result, error)
+					}).ExecContext(t.Context(), query, root.project.ID)
+					require.NoError(t, err)
+					syncRelayMatrixNode(t, relay)
+					leaf := newRelayMatrixNode(t, backend, "leaf-member")
+					enrollRelayMatrixReplica(t, relay, leaf, "leaf-project", false)
+					syncRelayMatrixNode(t, leaf)
+					path := fmt.Sprintf("/api/v1/projects/%d/federation/relay/reset", relay.project.ID)
+					var retained []byte
+					if cached {
+						status, raw := relaySessionGET(t, relay, leaf.credential.Token, path, db.SupportedEventFeatures)
+						require.Equal(t, http.StatusOK, status, string(raw))
+						retained = raw
+					}
+					before := relayRows(t, relay.store)
+					status, raw := relaySessionGET(t, relay, leaf.credential.Token, path, "")
+					require.Equal(t, http.StatusConflict, status, string(raw))
+					require.Contains(t, string(raw), "unsupported_event_features")
+					require.NotContains(t, string(raw), "snapshot_uid")
+					require.Equal(t, before, relayRows(t, relay.store))
+					status, raw = relaySessionGET(t, relay, leaf.credential.Token, path, db.SupportedEventFeatures)
 					require.Equal(t, http.StatusOK, status, string(raw))
-					retained = raw
-				}
-				before := relayRows(t, relay.store)
-				status, raw := relaySessionGET(t, relay, leaf.credential.Token, path, "")
-				require.Equal(t, http.StatusConflict, status, string(raw))
-				require.Contains(t, string(raw), "unsupported_event_features")
-				require.NotContains(t, string(raw), "snapshot_uid")
-				require.Equal(t, before, relayRows(t, relay.store))
-				status, raw = relaySessionGET(t, relay, leaf.credential.Token, path, db.SupportedEventFeatures)
-				require.Equal(t, http.StatusOK, status, string(raw))
-				var forwarded db.RelayResetCheckpoint
-				require.NoError(t, json.Unmarshal(raw, &forwarded))
-				require.Equal(t, original.Manifest, forwarded.Manifest)
-				require.Equal(t, original.Snapshot, forwarded.Snapshot)
-				require.True(t, relaySectionHasSessions(t, forwarded.Snapshot.Events))
-				if cached {
-					require.JSONEq(t, string(retained), string(raw))
-				}
-			})
+					var forwarded db.RelayResetCheckpoint
+					require.NoError(t, json.Unmarshal(raw, &forwarded))
+					require.Equal(t, original.Manifest, forwarded.Manifest)
+					require.Equal(t, original.Snapshot, forwarded.Snapshot)
+					require.Equal(t, !currentOnly, relaySectionHasSessions(t, forwarded.Snapshot.Events))
+					require.Equal(t, currentOnly, relaySectionHasSessions(t, forwarded.Snapshot.Entities))
+					pin, err := root.store.RootAuthority(t.Context(), root.project.UID)
+					require.NoError(t, err)
+					require.NoError(t, db.VerifyRootResetManifest(pin, forwarded.Manifest, forwarded.Snapshot))
+					if cached {
+						require.JSONEq(t, string(retained), string(raw))
+					}
+				})
+			}
 		}
+	}
+}
+
+// A post-checkpoint observation must be gated in the newly requested epoch;
+// refusal also rolls back the grant activation that the request would perform.
+func TestRelaySessionNewEpochOfferRefusal(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root, peer := relaySessionPair(t, backend)
+			binding, err := peer.store.FederationBindingByProject(t.Context(), peer.project.ID)
+			require.NoError(t, err)
+			checkpoint, err := root.store.(db.RelayResetStore).CreateRelayReset(t.Context(), binding.RelayConfig.BindingUID, root.signer)
+			require.NoError(t, err)
+			require.NoError(t, peer.store.(db.RelayResetStore).InstallRelayReset(t.Context(), binding.RelayConfig.BindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation))
+			relaySessionHistory(t, root, false, false)
+			path := fmt.Sprintf("/api/v1/projects/%d/federation/relay?stream=events&limit=100&epoch=%d", root.project.ID, checkpoint.Translation.Authority.Epoch)
+			before := relayRows(t, root.store)
+			status, raw := relaySessionGET(t, root, peer.credential.Token, path, "")
+			require.Equal(t, http.StatusConflict, status, string(raw))
+			require.Contains(t, string(raw), "unsupported_event_features")
+			require.NotContains(t, string(raw), "envelopes")
+			require.Equal(t, before, relayRows(t, root.store))
+			status, raw = relaySessionGET(t, root, peer.credential.Token, path, db.SupportedEventFeatures)
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var batch db.RelayBatch
+			require.NoError(t, json.Unmarshal(raw, &batch))
+			require.NotEmpty(t, batch.Envelopes)
+			found := false
+			for _, envelope := range batch.Envelopes {
+				require.Equal(t, checkpoint.Translation.Authority.Epoch, envelope.Epoch)
+				event, err := db.DecodeRelaySourceEvent(envelope.Body)
+				require.NoError(t, err)
+				features, err := db.PayloadRequiredFeatures(event.Type, string(event.Payload))
+				require.NoError(t, err)
+				found = found || strings.Contains(features, db.CronRunSessionsEventFeature)
+			}
+			require.True(t, found)
+			accepted, err := peer.store.AcceptRelayDeliveries(t.Context(), binding.RelayConfig.BindingUID, batch)
+			require.NoError(t, err)
+			require.NoError(t, root.store.AckRelayDeliveries(t.Context(), binding.RelayConfig.BindingUID, checkpoint.Translation.Authority.Epoch, batch.Stream, accepted.Through, accepted.Digest))
+		})
+	}
+}
+
+// Session-free event batches must not add a metadata request to direct accept.
+func TestRelaySessionFreeDirectAcceptDoesNotProbe(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root, peer := relaySessionPair(t, backend)
+			_, _, err := root.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: root.project.ID, Author: root.account, Title: "Session-free event"})
+			require.NoError(t, err)
+			binding, err := peer.store.FederationBindingByProject(t.Context(), peer.project.ID)
+			require.NoError(t, err)
+			envelopes, err := root.store.PendingRelayDeliveries(t.Context(), binding.RelayConfig.BindingUID, db.RelayStreamEvent, 100)
+			require.NoError(t, err)
+			require.NotEmpty(t, envelopes)
+			gets, posts := 0, 0
+			var posted db.RelayBatch
+			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					gets++
+					http.Error(w, "unexpected metadata probe", http.StatusInternalServerError)
+					return
+				}
+				posts++
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&posted))
+				_ = json.NewEncoder(w).Encode(db.RelayAcceptance{Through: envelopes[len(envelopes)-1].Sequence, Digest: envelopes[len(envelopes)-1].Digest})
+			}))
+			t.Cleanup(hub.Close)
+			client, err := federation.NewClient(t.Context(), hub.URL, "enrollment-token", clientpkg.Opts{})
+			require.NoError(t, err)
+			batch := db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: envelopes}
+			_, err = client.AcceptRelayDeliveries(t.Context(), 42, batch)
+			require.NoError(t, err)
+			require.Zero(t, gets)
+			require.Equal(t, 1, posts)
+			require.Equal(t, batch, posted)
+		})
+	}
+}
+
+// Independent receipt and artifact streams remain usable by old peers even
+// while a session-bearing event is pending on the event stream.
+func TestRelaySessionLegacyReceiptAndArtifactOffers(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root, peer := relaySessionPair(t, backend)
+			issue, _, err := root.store.CreateIssue(db.WithRootAttribution(t.Context(), root.signer, root.account), db.CreateIssueParams{ProjectID: root.project.ID, Author: root.account, Title: "Artifact source"})
+			require.NoError(t, err)
+			artifact := relayBackupArtifact(t, root, issue)
+			_, err = root.store.(db.EmbeddingArtifactStorage).RetainEmbeddingArtifact(t.Context(), artifact)
+			require.NoError(t, err)
+			relaySessionHistory(t, root, false, false)
+			for _, stream := range []string{db.RelayStreamReceipt, db.RelayStreamArtifact} {
+				path := fmt.Sprintf("/api/v1/projects/%d/federation/relay?stream=%s&limit=100", root.project.ID, stream)
+				status, raw := relaySessionGET(t, root, peer.credential.Token, path, "")
+				require.Equal(t, http.StatusOK, status, string(raw))
+				var batch db.RelayBatch
+				require.NoError(t, json.Unmarshal(raw, &batch))
+				require.Equal(t, stream, batch.Stream)
+				require.NotEmpty(t, batch.Envelopes)
+			}
+		})
 	}
 }
