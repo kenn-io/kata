@@ -32,12 +32,7 @@ func newCronUsageCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		var project projectRef
-		if strings.TrimSpace(flags.Project) != "" {
-			project, err = resolveProjectSelectorIncludingArchived(daemon, flags.Project)
-		} else {
-			project, err = resolveProjectArgFlagOrWorkspace(daemon, nil)
-		}
+		project, err := resolveCronProject(daemon)
 		if err != nil {
 			return err
 		}

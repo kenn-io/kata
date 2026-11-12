@@ -260,10 +260,8 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	var project projectRef
 	if o.parent != "" {
 		project, body, err = o.applyParent(cmd, daemon, body)
-	} else if strings.TrimSpace(flags.Project) != "" {
-		project, err = resolveProjectSelectorIncludingArchived(daemon, flags.Project)
 	} else {
-		project, err = resolveProjectArgFlagOrWorkspace(daemon, nil)
+		project, err = resolveCronProject(daemon)
 	}
 	if err != nil {
 		return err
@@ -325,12 +323,7 @@ func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw [
 		return projectRef{}, nil, err
 	}
 	if strings.TrimSpace(flags.Project) != "" || workspaceProjectName(start) != "" {
-		var selected projectRef
-		if strings.TrimSpace(flags.Project) != "" {
-			selected, err = resolveProjectSelectorIncludingArchived(daemon, flags.Project)
-		} else {
-			selected, err = resolveProjectArgFlagOrWorkspace(daemon, nil)
-		}
+		selected, err := resolveCronProject(daemon)
 		if err != nil {
 			return projectRef{}, nil, err
 		}
@@ -377,6 +370,13 @@ func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw [
 	}
 	patched, err := json.Marshal(fields)
 	return project, patched, err
+}
+
+func resolveCronProject(daemon daemonAPI) (projectRef, error) {
+	if strings.TrimSpace(flags.Project) != "" {
+		return resolveProjectSelectorIncludingArchived(daemon, flags.Project)
+	}
+	return resolveProjectArgFlagOrWorkspace(daemon, nil)
 }
 
 // cronDefinitionRequestLimit bounds a job or workflow request read by the CLI.
