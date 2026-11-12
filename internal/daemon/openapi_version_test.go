@@ -1,8 +1,8 @@
 package daemon
 
 import (
+	"cmp"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,18 +26,22 @@ func TestCheckAPIVersionRecord(t *testing.T) {
 		name, doc, version string
 		markers            []string
 		contains           []string
+		summary            string
 	}{
-		{"collision", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256"}, []string{"0.46.0", "0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256", "feature minimum checks introduced by this change"}},
-		{"stale", b, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, []string{"not yet on origin/main", "0.45.0." + hashB + ".sha256", "0.46.0"}},
-		{"next recorded", b, "0.46.0", []string{"0.45.0." + hashA + ".sha256", "0.46.0." + hashB + ".sha256"}, nil},
-		{"older matching", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256", "0.46.0." + hashB + ".sha256"}, []string{"0.47.0"}},
-		{"older missing", a, "0.45.0", []string{"0.46.0." + hashB + ".sha256"}, []string{"0.47.0"}},
-		{"missing", a, "0.45.0", nil, []string{"0.45.0." + hashA + ".sha256"}},
+		{"collision", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256"}, []string{"0.46.0", "0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256", "feature minimum checks introduced by this change"}, ""},
+		{"stale", b, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, []string{"not yet on origin/main", "0.45.0." + hashB + ".sha256", "0.46.0"}, ""},
+		{"next recorded", b, "0.46.0", []string{"0.45.0." + hashA + ".sha256", "0.46.0." + hashB + ".sha256"}, nil, ""},
+		{"older matching", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256", "0.46.0." + hashB + ".sha256"}, []string{"0.47.0"}, ""},
+		{"older missing", a, "0.45.0", []string{"0.46.0." + hashB + ".sha256"}, []string{"0.47.0"}, ""},
+		{"missing", a, "0.45.0", nil, []string{"0.45.0." + hashA + ".sha256"}, ""},
+		{"summary", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, nil, "Add route"},
+		{"blank summary", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, []string{"0.45.0." + hashA + ".sha256"}, " \n"},
+		{"multiline summary", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, []string{"0.45.0." + hashA + ".sha256"}, "Add route\nAdd field\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			for _, name := range tc.markers {
-				require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("Add route\n"), 0600))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(cmp.Or(tc.summary, "Add route\n")), 0600))
 			}
 			err := checkAPIVersionRecord(dir, tc.version, []byte(tc.doc))
 			if len(tc.contains) == 0 {
@@ -56,31 +60,6 @@ func TestAPISchemaVersionMatchesRecordedContract(t *testing.T) {
 	doc, err := contractDocument(OpenAPIDocument())
 	require.NoError(t, err)
 	require.NoError(t, checkAPIVersionRecord("testdata/api-contracts", APISchemaVersion, doc))
-}
-
-func TestAPIVersionRecordSummary(t *testing.T) {
-	doc := []byte(`{"info":{"version":""},"paths":{"/a":{}}}`)
-	name := "0.45.0.a796a0b24a661cae44ecfaf054e4e53ee32d80f219424fb40c319a1d036aba5f.sha256"
-	for _, tc := range []struct {
-		name, summary string
-		valid         bool
-	}{
-		{"summary", "Add route", true},
-		{"trailing newline", "Add route\n", true},
-		{"blank", " \n", false},
-		{"multiple lines", "Add route\nAdd field\n", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(tc.summary), 0600))
-			err := checkAPIVersionRecord(dir, "0.45.0", doc)
-			if tc.valid {
-				require.NoError(t, err)
-			} else {
-				require.ErrorContains(t, err, name)
-			}
-		})
-	}
 }
 
 func checkAPIVersionRecord(dir, version string, doc []byte) error {
@@ -207,25 +186,8 @@ func contractDocument(doc *huma.OpenAPI) ([]byte, error) {
 
 func TestAPIVersionBaseRecords(t *testing.T) {
 	ref := os.Getenv("API_VERSION_BASE_REF")
-	explicit := ref != ""
-	if !explicit {
-		ref = "origin/main"
-	}
-	head := exec.CommandContext(t.Context(), "git", "rev-parse", "--verify", "--quiet", "HEAD")
-	if err := head.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if !explicit && t.Context().Err() == nil && (errors.Is(err, exec.ErrNotFound) || errors.As(err, &exitErr) && (exitErr.ExitCode() == 1 || exitErr.ExitCode() == 128)) {
-			t.Skip("git metadata unavailable")
-		}
-		t.Fatalf("resolve HEAD: %v", err)
-	}
-	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--verify", "--quiet", ref+"^{commit}") //nolint:gosec // The base ref is supplied by the developer or CI.
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if !explicit && t.Context().Err() == nil && errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-			t.Skip("origin/main unavailable")
-		}
-		t.Fatalf("resolve API version base %q: %v", ref, err)
+	if ref == "" {
+		t.Skip("set by make api-breaking")
 	}
 	records, err := baseAPIVersionRecords(t, ref)
 	require.NoError(t, err)

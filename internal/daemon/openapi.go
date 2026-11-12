@@ -165,9 +165,8 @@ func OpenAPIJSONVersion(version string) ([]byte, error) {
 // relaxResponseAdditionalProperties lets response bodies carry fields a client's
 // generated schema does not yet know about. Huma stamps additionalProperties:false
 // on every struct it emits, which would make a strict client validator reject
-// additive response fields. Older clients tolerate unknown optional fields,
-// which still require an api_schema_version bump when added. It walks every
-// response schema and flips that strict default to an explicit additionalProperties:true, while leaving
+// additive response fields. It walks every response schema and flips that
+// strict default to an explicit additionalProperties:true, while leaving
 // request schemas untouched so request validation is unchanged.
 func relaxResponseAdditionalProperties(doc *huma.OpenAPI) {
 	replaceStrictResponseAdditionalProperties(doc, true)
