@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -74,19 +74,23 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		require.True(t, chosen)
 	})
 	t.Run("marker write failure", func(t *testing.T) {
-		logs := setupChoiceWriteFailure(t)
+		logs, marker := setupChoiceWriteFailure(t)
 		out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 		require.NoError(t, err)
 		require.Contains(t, out, "kata health --json")
 		require.Contains(t, logs.String(), "other apps may not pick it up")
-		require.Contains(t, logs.String(), "symlink")
+		var entry struct {
+			Err string `json:"err"`
+		}
+		require.NoError(t, json.Unmarshal(logs.Bytes(), &entry))
+		require.Contains(t, entry.Err, marker)
 		cfg, err := config.ReadSearchConfig()
 		require.NoError(t, err)
 		require.True(t, cfg.Embeddings.Local)
 	})
 }
 
-func setupChoiceWriteFailure(t *testing.T) *bytes.Buffer {
+func setupChoiceWriteFailure(t *testing.T) (*bytes.Buffer, string) {
 	t.Helper()
 	setupKataEnv(t)
 	home := clearLocalEmbeddingsEnv(t)
@@ -101,15 +105,8 @@ func setupChoiceWriteFailure(t *testing.T) *bytes.Buffer {
 		return "http://127.0.0.1:12345/v1", nil
 	}
 	marker := filepath.Join(home, ".kenn", "embeddings", "search-by-meaning")
-	require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0o700))
-	if err := os.Symlink("missing", marker); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
-	logs := new(bytes.Buffer)
-	originalLogger := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(logs, nil)))
-	t.Cleanup(func() { slog.SetDefault(originalLogger) })
-	return logs
+	require.NoError(t, os.MkdirAll(marker, 0o700))
+	return captureSlog(t), marker
 }
 
 func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {
