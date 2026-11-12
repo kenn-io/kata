@@ -356,9 +356,9 @@ func TestRelaySessionDirectConversionPublicationRetry(t *testing.T) {
 					err = federation.SyncFederationOnce(t.Context(), sender, binding, peer.credential)
 					require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
 					require.Zero(t, posts, "no incompatible accept is sent")
-					after := relayRows(t, sender)
-					delete(after, "federation_sync_status")
-					require.Equal(t, before, after, "refusal retains un-emitted source rows and cursors")
+					afterRefusal := relayRows(t, sender)
+					delete(afterRefusal, "federation_sync_status")
+					require.Equal(t, before, afterRefusal, "refusal retains un-emitted source rows and cursors")
 					upgraded = true
 					require.NoError(t, federation.SyncFederationOnce(t.Context(), sender, binding, peer.credential))
 					require.Positive(t, posts)
