@@ -14,7 +14,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
@@ -40,9 +39,6 @@ type Client struct {
 	mu                     sync.RWMutex
 	telemetry              *telemetryGate
 	telemetryTarget        string
-	// cronStatsSupported records a passed statistics version check; each
-	// daemon connection has its own Client.
-	cronStatsSupported atomic.Bool
 }
 
 type suppressIssueActionTelemetryKey struct{}

@@ -106,16 +106,12 @@ func (c *Client) CronRunStats(ctx context.Context, projectID int64, jobUID strin
 	if err != nil {
 		return nil, err
 	}
-	// Only a pass is kept: an older daemon may be upgraded while connected.
-	if !c.cronStatsSupported.Load() {
-		if err := requireAPIVersion(ctx, client, kataapi.CronRunStatsAPIVersion, "run statistics require daemon API "+kataapi.CronRunStatsAPIVersion+" or newer"); err != nil {
-			// A failed health check says nothing about the daemon's version.
-			if _, ok := errors.AsType[apiVersionError](err); !ok {
-				err = fmt.Errorf("check daemon API version: %w", errors.Unwrap(err))
-			}
-			return nil, err
+	if err := requireAPIVersion(ctx, client, kataapi.CronRunStatsAPIVersion, "run statistics require daemon API "+kataapi.CronRunStatsAPIVersion+" or newer"); err != nil {
+		// A failed health check says nothing about the daemon's version.
+		if _, ok := errors.AsType[apiVersionError](err); !ok {
+			err = fmt.Errorf("check daemon API version: %w", errors.Unwrap(err))
 		}
-		c.cronStatsSupported.Store(true)
+		return nil, err
 	}
 	wire, callErr := client.GetCronRunStatsWithResponse(ctx, &generated.GetCronRunStatsRequestOptions{
 		PathParams: &generated.GetCronRunStatsPath{ProjectID: projectID},

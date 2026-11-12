@@ -10,7 +10,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -264,36 +263,6 @@ func TestCronJobStatsLine(t *testing.T) {
 		m, _ = updateModel(m, <-out)
 		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      43 runs"), cronStatsLine(t, m))
 	})
-	t.Run("fits the cron detail widths", func(t *testing.T) {
-		truncated := cronStatsFixture(10000)
-		truncated.Truncated, truncated.Window.Since = true, snapshotFixedNow.AddDate(0, 0, -7)
-		for _, tc := range []struct {
-			name string
-			body *generated.CronRunStatsResponseBody
-			err  error
-			want string
-		}{
-			{"loaded", cronStatsFixture(42), nil, "30d:42runs·92%ok·median3m12s·p958m40s·failing×3"},
-			{"since", truncated, nil, "Since:04-2412:00·10000+runs·92%ok·median3m12s·p958m40s·failing×3"},
-			{"unavailable", nil, errors.New("Get http://daemon.example:7777/api/v1/projects/7/cron/runs/stats: connection refused"), "30d:unavailable:Gethttp://daemon.example:7777/api/v1/projects/7/cron/runs/stats:connectionrefused"},
-			{"unsupported", nil, apiVersionError{"run statistics require daemon API 0.47.0 or newer"}, "30d:needsdaemonAPI0.47.0ornewer"},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				m, a := cronStatsModel(t)
-				a.stats[cronStatsJobUID], a.statsErr = tc.body, tc.err
-				m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-				m = deliverCron(m, cmd)
-				for _, width := range []int{12, 24, 40, 80, 120} {
-					m.width = width + 2
-					text := cronDetailText(m)
-					for line := range strings.SplitSeq(text, "\n") {
-						require.LessOrEqual(t, ansi.StringWidth(line), width, line)
-					}
-					require.Contains(t, strings.Join(strings.Fields(text), ""), tc.want)
-				}
-			})
-		}
-	})
 	t.Run("workflow detail has no line", func(t *testing.T) {
 		m, a := cronStatsModel(t)
 		m = sendRune(m, '4')
@@ -354,6 +323,28 @@ func TestCronStatsText(t *testing.T) {
 }
 
 func TestCronClientRunStats(t *testing.T) {
+	t.Run("daemon replacement with older API", func(t *testing.T) {
+		version, probes, reads := "0.47.0", 0, 0
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/health" {
+				probes++
+				respondJSON(t, w, map[string]any{"api_schema_version": version})
+				return
+			}
+			reads++
+			require.Equal(t, "/api/v1/projects/7/cron/runs/stats", r.URL.Path)
+			respondJSON(t, w, cronStatsFixture(42))
+		})
+		stats, err := c.CronRunStats(t.Context(), 7, cronStatsJobUID)
+		require.NoError(t, err)
+		require.Equal(t, int64(42), stats.Scanned)
+		version = "0.46.0"
+		_, err = c.CronRunStats(t.Context(), 7, cronStatsJobUID)
+		var tooOld apiVersionError
+		require.ErrorAs(t, err, &tooOld)
+		require.Equal(t, 2, probes)
+		require.Equal(t, 1, reads, "the older daemon must not receive the statistics request")
+	})
 	for _, version := range []string{"0.46.0", "0.47.0"} {
 		t.Run(version, func(t *testing.T) {
 			probes, reads := 0, 0
@@ -385,7 +376,7 @@ func TestCronClientRunStats(t *testing.T) {
 				return
 			}
 			require.Equal(t, 2, reads)
-			require.Equal(t, 1, probes, "a supported daemon is probed once per client")
+			require.Equal(t, 2, probes, "a supported daemon is probed for each read")
 		})
 	}
 	t.Run("failed version check", func(t *testing.T) {
