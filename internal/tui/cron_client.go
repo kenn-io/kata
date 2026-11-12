@@ -113,8 +113,7 @@ func (c *Client) CronRunStats(ctx context.Context, projectID int64, jobUID strin
 	if !c.cronStatsSupported.Load() {
 		if err := requireAPIVersion(ctx, client, cronStatsAPIVersion, "run statistics require daemon API "+cronStatsAPIVersion+" or newer"); err != nil {
 			// A failed health check says nothing about the daemon's version.
-			var tooOld apiVersionError
-			if !errors.As(err, &tooOld) {
+			if _, ok := errors.AsType[apiVersionError](err); !ok {
 				err = fmt.Errorf("check daemon API version: %w", errors.Unwrap(err))
 			}
 			return nil, err

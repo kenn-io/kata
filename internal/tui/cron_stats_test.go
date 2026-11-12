@@ -192,7 +192,7 @@ func TestCronJobStatsLine(t *testing.T) {
 		m = deliverCron(m, cmd)
 		require.Zero(t, a.calls, "only the statistics were read")
 		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      42 runs"), cronStatsLine(t, m))
-		m, cmd = updateModel(m, runCmdTree(stalled)[0])
+		_, cmd = updateModel(m, runCmdTree(stalled)[0])
 		require.Nil(t, cmd, "the list answer does not read the statistics again")
 		require.Len(t, a.statsUIDs, 1)
 	})
