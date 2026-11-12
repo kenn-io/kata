@@ -89,7 +89,11 @@ func TestFederationRebuildRetriesChangedRows(t *testing.T) {
 				require.NoError(t, locked.materializeFederatedProject(ctx, project.ID))
 			}
 			require.NoError(t, d.MaterializeFederatedProject(ctx, project.ID))
-			require.Equal(t, 2, attempts)
+			if change == "link" {
+				require.Equal(t, 1, attempts)
+			} else {
+				require.Equal(t, 2, attempts)
+			}
 			require.Equal(t, federationProjectionRows(t, locked, project.ID), federationProjectionRows(t, d, project.ID))
 		})
 	}
@@ -389,6 +393,78 @@ func TestMoveRebuildDoesNotResurrectArchivedDestination(t *testing.T) {
 }
 
 func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
+	t.Run("pending relay link", func(t *testing.T) {
+		ctx := t.Context()
+		d, source, issue := incrementalTestStore(t)
+		destination, err := d.CreateProject(ctx, "destination")
+		require.NoError(t, err)
+		_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
+		require.NoError(t, err)
+		peerUID := "01HZNQ7VFPK1XGD8R5MABC0001"
+		sameUID := "01HZNQ7VFPK1XGD8R5MABC0002"
+		peer := incrementalRemoteEvent(t, destination, peerUID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":"0001","title":"peer","author":"tester","status":"open","links":[{"type":"related","to_issue_uid":%q,"author":"tester"}]}`, peerUID, sameUID), 9_000_000_000_000)
+		same := incrementalRemoteEvent(t, destination, sameUID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":"0002","title":"same","author":"tester","status":"open"}`, sameUID), 9_000_000_000_001)
+		link := incrementalRemoteEvent(t, source, issue.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, issue.UID, peerUID), 9_000_000_000_002)
+		_, err = d.InsertRemoteEvents(ctx, destination.ID, []db.RemoteEvent{peer, same})
+		require.NoError(t, err)
+		_, err = d.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{link})
+		require.NoError(t, err)
+		_, err = d.ExecContext(ctx, `INSERT INTO federation_root_keys(project_uid,authority_uid,key_id,public_key) VALUES(?,?,?,?)`, source.UID, "authority", "key", "public")
+		require.NoError(t, err)
+		_, err = d.ExecContext(ctx, `INSERT INTO federation_event_provenance(project_uid,event_uid,content_hash,reset_epoch,sequence,key_id,receipt) VALUES(?,?,?,?,?,?,?)`, source.UID, link.EventUID, link.ContentHash, 1, 1, "key", `{"ingress_instance_uid":"remote"}`)
+		require.NoError(t, err)
+		locked := cloneIncrementalStore(t, d)
+		attempts := 0
+		d.federationIngestPrepared = func() { attempts++ }
+		require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
+		require.Equal(t, 1, attempts)
+		require.NoError(t, locked.materializeFederatedProject(ctx, destination.ID))
+		for _, project := range []db.Project{source, destination} {
+			require.Equal(t, federationProjectionRows(t, locked, project.ID), federationProjectionRows(t, d, project.ID))
+		}
+		links, err := d.LinksByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Empty(t, links)
+		created, err := d.IssueByUID(ctx, peerUID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		links, err = d.LinksByIssue(ctx, created.ID)
+		require.NoError(t, err)
+		require.Len(t, links, 1)
+	})
+	t.Run("paused destination", func(t *testing.T) {
+		ctx := t.Context()
+		d, source, issue := incrementalTestStore(t)
+		destination, err := d.CreateProject(ctx, "destination")
+		require.NoError(t, err)
+		_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
+		require.NoError(t, err)
+		peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "peer", Author: "tester"})
+		require.NoError(t, err)
+		link := incrementalRemoteEvent(t, source, issue.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, issue.UID, peer.UID), 8_000_000_000_001)
+		unapplyMove(t, d, issue, source, destination, true)
+		_, err = d.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{link})
+		require.NoError(t, err)
+		_, err = d.ExecContext(ctx, `UPDATE federation_bindings SET enabled=0 WHERE project_id=?`, destination.ID)
+		require.NoError(t, err)
+		before, err := d.LinksByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Empty(t, before)
+		locked := cloneIncrementalStore(t, d)
+		attempts := 0
+		d.federationIngestPrepared = func() { attempts++ }
+		require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
+		require.Equal(t, 1, attempts)
+		require.NoError(t, locked.materializeFederatedProject(ctx, destination.ID))
+		moved, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		require.Equal(t, destination.ID, moved.ProjectID)
+		for _, project := range []db.Project{source, destination} {
+			require.Equal(t, federationProjectionRows(t, locked, project.ID), federationProjectionRows(t, d, project.ID))
+		}
+		links, err := d.LinksByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Empty(t, links)
+	})
 	ctx := t.Context()
 	prepared, source, issue := incrementalTestStore(t)
 	destination, err := prepared.CreateProject(ctx, "destination")
@@ -505,11 +581,7 @@ func TestMoveRebuildPreservesLinks(t *testing.T) {
 			}
 			require.NoError(t, d.MaterializeFederatedProject(ctx, projectID))
 			require.NoError(t, locked.materializeFederatedProject(ctx, projectID))
-			if scenario == "former-source-changed" {
-				require.Equal(t, 2, attempts)
-			} else {
-				require.Equal(t, 1, attempts)
-			}
+			require.Equal(t, 1, attempts)
 			if scenario == "archived" {
 				_, _, _, err = locked.RestoreProject(ctx, destination.ID, "tester")
 				require.NoError(t, err)

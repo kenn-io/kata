@@ -3,11 +3,10 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -218,21 +217,12 @@ func checkFullPullPreparation(ctx context.Context, tx *sql.Tx, projectID int64, 
 			}
 		}
 	}
-	rowStamp, err := federationRowStamp(ctx, tx, projectID, m.linkProjects)
+	rowStamp, err := federationRowStamp(ctx, tx, projectID, m.linkProjects, m.linksUnderWriter)
 	if err != nil {
 		return err
 	}
 	if rowStamp != m.rowStamp {
 		return errStaleFederationPreparation
-	}
-	if len(m.movingLinkIDs) > 0 {
-		rows, err := federatedMovingLinkRows(ctx, tx, m.movingLinkIDs)
-		if err != nil {
-			return err
-		}
-		if !maps.Equal(rows, m.movingLinkRows) {
-			return errStaleFederationPreparation
-		}
 	}
 	for _, check := range m.shortIDChecks {
 		shortID, err := resolveFederatedIssueShortID(ctx, tx, projectID, check.uid, check.preferred, &check.row)

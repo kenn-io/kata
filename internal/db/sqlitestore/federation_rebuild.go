@@ -17,6 +17,7 @@ type preparedFederationRebuildProject struct {
 	moveProjection  db.FoldProjection
 	moved           db.FoldProjection
 	decisions       []db.FederatedMoveDecision
+	linkEvents      []db.FoldEvent
 	materialization federationMaterialization
 }
 
@@ -82,11 +83,11 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		if err != nil {
 			return preparedFederationRebuild{}, err
 		}
-		m := federationMaterialization{binding: binding}
+		m := federationMaterialization{binding: binding, linksUnderWriter: true}
 		if err := m.prepareFullHistory(ctx, tx, p.id, p.events, true); err != nil {
 			return preparedFederationRebuild{}, err
 		}
-		if err := m.foldLinks(ctx, tx, nil, true); err != nil {
+		if err := m.foldLinks(ctx, tx, nil, true, &p.linkEvents); err != nil {
 			return preparedFederationRebuild{}, err
 		}
 		if err := m.stampFullHistoryLinks(ctx, tx, p.id); err != nil {
@@ -142,42 +143,47 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 	}
 	for i := range result.projects {
 		p := &result.projects[i]
-		included := map[string]int64{}
-		// A former source outside this group can hold links until rehome.
-		for _, decision := range result.moved {
-			if isFederationRehome(decision) && slices.Contains(p.materialization.linkProjects, decision.TargetID) && !slices.Contains(p.materialization.linkProjects, decision.SourceID) {
-				p.materialization.movingLinkIDs = append(p.materialization.movingLinkIDs, decision.IssueID)
-				included[decision.IssueUID] = decision.IssueID
-			}
-		}
-		if len(p.materialization.movingLinkIDs) > 0 {
-			slices.Sort(p.materialization.movingLinkIDs)
-			var err error
-			p.materialization.movingLinkRows, err = federatedMovingLinkRows(ctx, tx, p.materialization.movingLinkIDs)
+		m := &p.materialization
+		if slices.ContainsFunc(p.linkEvents, m.relayOrigins.relaySourced) {
+			owners, err := relayLinkEndpointProjects(ctx, tx, m.linkProjects)
 			if err != nil {
 				return preparedFederationRebuild{}, err
 			}
-		}
-		excluded := map[string]bool{}
-		for _, other := range result.projects {
-			if !slices.Contains(p.materialization.linkProjects, other.id) {
-				continue
-			}
-			maps.Copy(included, other.materialization.issueIDs)
-			for uid := range other.materialization.projection.Issues {
-				if _, ok := included[uid]; !ok {
-					included[uid] = 0
+			for _, decision := range result.moved {
+				if isFederationRehome(decision) {
+					delete(owners, decision.IssueUID)
 				}
 			}
-			for uid := range other.materialization.staleIssues {
-				excluded[uid] = true
+			for _, other := range result.projects {
+				for uid := range other.materialization.staleIssues {
+					delete(owners, uid)
+				}
+				if !slices.Contains(m.linkProjects, other.id) {
+					continue
+				}
+				projectUID, err := projectUIDTx(ctx, tx, other.id)
+				if err != nil {
+					return preparedFederationRebuild{}, err
+				}
+				for uid := range other.projection.Issues {
+					owners[uid] = projectUID
+				}
+				for uid := range other.moved.Issues {
+					owners[uid] = projectUID
+				}
 			}
+			events, err := filterRelayLinkEvents(p.linkEvents, m.relayOrigins, owners)
+			if err != nil {
+				return preparedFederationRebuild{}, err
+			}
+			m.links = db.FoldEvents(events)
 		}
-		if err := p.materialization.prepareLinks(ctx, tx, p.id, nil, included, excluded); err != nil {
+		if _, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, 0, nil, nil, m.rowHasher); err != nil {
 			return preparedFederationRebuild{}, err
 		}
-		p.materialization.rowStamp = p.materialization.rowHasher.sum()
+		m.rowStamp = m.rowHasher.sum()
 	}
+
 	return result, nil
 }
 
@@ -224,7 +230,8 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 		}
 
 		validator := db.NewCronReplayValidator(tx, false)
-		for _, p := range prepared.projects {
+		for i := range prepared.projects {
+			p := prepared.projects[(i+1)%len(prepared.projects)]
 			m := p.materialization
 			m.linkProjects = nil
 			m.staleIssues = nil
@@ -240,10 +247,6 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 				if err := moved.apply(ctx, tx, p.id, validator); err != nil {
 					return err
 				}
-				maps.Copy(p.materialization.issueIDs, moved.issueIDs)
-				if p.materialization.linkIDs != nil {
-					maps.Copy(p.materialization.linkIDs, moved.issueIDs)
-				}
 			}
 		}
 		var groups [][]int64
@@ -253,14 +256,20 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 				continue
 			}
 			groups = append(groups, m.linkProjects)
+			ids, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, 0, nil, nil, nil)
+			if err != nil {
+				return err
+			}
 			for _, other := range prepared.projects {
-				for uid, id := range other.materialization.linkIDs {
-					if _, ok := m.linkIDs[uid]; ok && id != 0 {
-						m.linkIDs[uid] = id
-					}
+				for uid := range other.materialization.staleIssues {
+					delete(ids, uid)
 				}
 			}
-			if err := reconcileFederatedLinkRows(ctx, tx, m.links, m.linkIDs, m.linkRows); err != nil {
+			rows, err := federatedLinkRows(ctx, tx, m.linkProjects, nil)
+			if err != nil {
+				return err
+			}
+			if err := reconcileFederatedLinkRows(ctx, tx, m.links, ids, rows); err != nil {
 				return err
 			}
 		}
