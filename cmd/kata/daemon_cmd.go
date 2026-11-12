@@ -1001,6 +1001,8 @@ type daemonStartupPreflight struct {
 	HookConfig     hooks.LoadedConfig
 	Embedder       *embedding.Client
 	VectorsPath    string
+	SavedEmbedding config.EmbeddingsConfig
+	ChoiceErr      error
 }
 
 func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartupPreflight, error) {
@@ -1099,7 +1101,17 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	if err != nil {
 		return daemonStartupPreflight{}, fmt.Errorf("hooks: %w", err)
 	}
+	savedEmbeddings := dcfg.Search.Embeddings
+	chosen, choiceErr := applySharedEmbeddingChoice(ctx, savedEmbeddings, dbPath)
+	if choiceErr == nil {
+		dcfg.Search.Embeddings = chosen
+	}
 	embedder, vectorsPath, err := preflightEmbeddingStartup(dcfg.Search.Embeddings, dbPath)
+	if err != nil && chosen != savedEmbeddings {
+		choiceErr = fmt.Errorf("preflight: %w", err)
+		dcfg.Search.Embeddings = savedEmbeddings
+		embedder, vectorsPath, err = preflightEmbeddingStartup(savedEmbeddings, dbPath)
+	}
 	if err != nil {
 		return daemonStartupPreflight{}, err
 	}
@@ -1119,6 +1131,8 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		HookConfig:     loadedHooks,
 		Embedder:       embedder,
 		VectorsPath:    vectorsPath,
+		SavedEmbedding: savedEmbeddings,
+		ChoiceErr:      choiceErr,
 	}, nil
 }
 
@@ -1505,13 +1519,21 @@ func runDaemonProcess(
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
 	maps.Copy(rec.Metadata, restart.metadata())
 
+	if startup.ChoiceErr != nil {
+		daemonLog.Printf("shared embeddings choice: %v", startup.ChoiceErr)
+	}
+
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)
 	embedder, vectorIndex, reconcilerHealth, embeddingWake, err := startEmbeddingReconciler(
 		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog, publisher,
 	)
 	if err != nil {
-		return err
+		if dcfg.Search.Embeddings == startup.SavedEmbedding {
+			return err
+		}
+		daemonLog.Printf("shared embeddings choice: %v", err)
+		dcfg.Search.Embeddings = startup.SavedEmbedding
 	}
 	defer func() {
 		if closeDependencies && vectorIndex != nil {
@@ -1534,7 +1556,7 @@ func runDaemonProcess(
 			} else if !swapped {
 				daemonLog.Printf("AgentsView target or enabled state changed; restart required")
 			}
-			if err := reloadEmbeddingCredentials(dcfg.Search.Embeddings, embedder, embeddingWake); err != nil {
+			if err := reloadEmbeddingCredentials(ctx, dcfg.Search.Embeddings, startup.DBPath, embedder, embeddingWake); err != nil {
 				daemonLog.Printf("embedding credential reload failed: %v", err)
 			}
 		})
@@ -2153,6 +2175,24 @@ func preflightEmbeddingStartup(
 		return nil, "", nil
 	}
 	cfg := embeddingClientConfig(ec)
+	if ec.UsesLocal() {
+		cfg.Endpoint = func(ctx context.Context) (string, error) {
+			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
+				backend, err := storeopen.BackendForDSN(dbPath)
+				if err != nil {
+					return false, err
+				}
+				chosen := false
+				if backend == storeopen.BackendSQLite {
+					chosen, err = embedlocal.ChoiceRecorded()
+				}
+				if err == nil && !chosen {
+					err = errors.New("run kata daemon local-embeddings to approve the download")
+				}
+				return chosen, err
+			})
+		}
+	}
 	embedder, err := embedding.New(cfg)
 	if err != nil {
 		return nil, "", fmt.Errorf("embedding client: %w", err)
@@ -2192,11 +2232,6 @@ func embeddingClientConfig(ec config.EmbeddingsConfig) embedding.Config {
 		}
 		if cfg.Timeout == 0 {
 			cfg.Timeout = embedlocal.RequestTimeout
-		}
-		cfg.Endpoint = func(ctx context.Context) (string, error) {
-			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
-				return false, errors.New("run kata daemon local-embeddings to approve the download")
-			})
 		}
 	}
 	return cfg

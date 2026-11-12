@@ -22,6 +22,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kit/atomicfile"
 	"go.kenn.io/kit/embedlocal"
 )
@@ -220,7 +221,48 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 		}
 		return "", err
 	}
+	if next.Embeddings.UsesLocal() {
+		if err := embedlocal.RecordChoice(); err != nil {
+			return "", fmt.Errorf("built-in embeddings are configured, but sharing could not be confirmed; retry setup: %w", err)
+		}
+	}
 	return index, nil
+}
+
+// applySharedEmbeddingChoice derives the active provider without changing the config file.
+func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsConfig, dsn string) (config.EmbeddingsConfig, error) {
+	if current.Enabled() {
+		return current, nil
+	}
+	backend, err := storeopen.BackendForDSN(dsn)
+	if err != nil {
+		return current, err
+	}
+	if backend != storeopen.BackendSQLite {
+		return current, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return current, err
+	}
+	chosen, err := embedlocal.ChoiceRecorded()
+	if err != nil || !chosen {
+		return current, err
+	}
+	next := current
+	next.Local = true
+	next.Model = "nomic-embed-text"
+	if localEmbeddingRecipeNeedsReset(current, current) {
+		next.Dims = 768
+		next.DocumentPrefix, next.DocumentSuffix = "", ""
+		next.QueryPrefix, next.QuerySuffix = "", ""
+		next.FingerprintSalt = ""
+		next.RequestDimensions = false
+	}
+	return next, nil
+}
+
+func localEmbeddingRecipeNeedsReset(written, current config.EmbeddingsConfig) bool {
+	return !written.LocalRecipeCompatible() || current.FingerprintSalt != "" && !current.UsesLocal()
 }
 
 type preparedLocalEmbeddingsConfig struct {
@@ -301,7 +343,7 @@ func localEmbeddingsConfig(data []byte, current config.EmbeddingsConfig, baseURL
 	previous := maps.Clone(fields)
 	delete(fields, "base_url")
 	// Environment overrides don't persist, so the written recipe must suit the built-in server.
-	if !written.Embeddings.LocalRecipeCompatible() || current.FingerprintSalt != "" && !current.UsesLocal() {
+	if localEmbeddingRecipeNeedsReset(written.Embeddings, current) {
 		for _, key := range []string{"model", "dims", "document_prefix", "document_suffix", "query_prefix", "query_suffix", "fingerprint_salt", "request_dimensions"} {
 			delete(fields, key)
 		}
