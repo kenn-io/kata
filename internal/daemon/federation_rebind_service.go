@@ -515,18 +515,10 @@ func fetchFederationRebindMetadata(
 ) (api.ProjectFederationBody, error) {
 	httpClient, err := newFederationRebindHTTPClient(ctx, hubURL, token)
 	if err != nil {
-		return api.ProjectFederationBody{}, federationReplicaError(
-			ErrFederationReplicaHubUnavailable,
-			"configure replacement hub transport",
-			"check the HTTPS catalog endpoint",
-		)
+		return api.ProjectFederationBody{}, federationReplicaError(ErrFederationReplicaHubUnavailable, "configure replacement hub transport", "check the HTTPS catalog endpoint")
 	}
 	if err := configureFederationRebindRedirects(httpClient, hubURL); err != nil {
-		return api.ProjectFederationBody{}, federationReplicaError(
-			ErrFederationReplicaHubUnavailable,
-			"configure replacement hub redirect policy",
-			"check the HTTPS catalog endpoint",
-		)
+		return api.ProjectFederationBody{}, federationReplicaError(ErrFederationReplicaHubUnavailable, "configure replacement hub redirect policy", "check the HTTPS catalog endpoint")
 	}
 	if signing != nil {
 		if signing.HubURL != "" {
@@ -545,6 +537,14 @@ func fetchFederationRebindMetadata(
 		}
 	}
 	metadata, _, err := readFederationHubMetadata(ctx, httpClient, hubURL, hubProjectID)
+	// The shared reader is operation-neutral; rebind restores its catalog guidance.
+	if replicaErr, ok := errors.AsType[*FederationReplicaError](err); ok && replicaErr.hint != "" {
+		hint := "verify this catalog entry points to the same hub"
+		if errors.Is(err, ErrFederationReplicaHubUnavailable) {
+			hint = "check the HTTPS catalog endpoint and retry"
+		}
+		err = federationReplicaError(replicaErr.kind, replicaErr.message, hint)
+	}
 	return metadata, err
 }
 
