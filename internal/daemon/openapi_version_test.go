@@ -37,7 +37,7 @@ func TestCheckAPIVersionRecord(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			for _, name := range tc.markers {
-				require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0600))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("Add route\n"), 0600))
 			}
 			err := checkAPIVersionRecord(dir, tc.version, []byte(tc.doc))
 			if len(tc.contains) == 0 {
@@ -58,12 +58,29 @@ func TestAPISchemaVersionMatchesRecordedContract(t *testing.T) {
 	require.NoError(t, checkAPIVersionRecord("testdata/api-contracts", APISchemaVersion, doc))
 }
 
-func TestAPIVersionRecordMustBeEmpty(t *testing.T) {
-	dir := t.TempDir()
+func TestAPIVersionRecordSummary(t *testing.T) {
 	doc := []byte(`{"info":{"version":""},"paths":{"/a":{}}}`)
 	name := "0.45.0.a796a0b24a661cae44ecfaf054e4e53ee32d80f219424fb40c319a1d036aba5f.sha256"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("content"), 0600))
-	require.ErrorContains(t, checkAPIVersionRecord(dir, "0.45.0", doc), name)
+	for _, tc := range []struct {
+		name, summary string
+		valid         bool
+	}{
+		{"summary", "Add route", true},
+		{"trailing newline", "Add route\n", true},
+		{"blank", " \n", false},
+		{"multiple lines", "Add route\nAdd field\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(tc.summary), 0600))
+			err := checkAPIVersionRecord(dir, "0.45.0", doc)
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, name)
+			}
+		})
+	}
 }
 
 func checkAPIVersionRecord(dir, version string, doc []byte) error {
@@ -86,12 +103,8 @@ func checkAPIVersionRecord(dir, version string, doc []byte) error {
 		if !semver.IsValid(recorded) {
 			continue
 		}
-		info, err := entry.Info()
-		if err != nil {
+		if err := checkAPIVersionSummary(filepath.Join(dir, name)); err != nil {
 			return err
-		}
-		if !info.Mode().IsRegular() || info.Size() != 0 {
-			return fmt.Errorf("API contract record must be an empty regular file: %s", filepath.Join(dir, name))
 		}
 		if semver.Compare(recorded, next) > 0 {
 			next = recorded
@@ -106,7 +119,7 @@ func checkAPIVersionRecord(dir, version string, doc []byte) error {
 		return nil
 	}
 	if semver.Compare("v"+version, next) == 0 && count == 0 {
-		return fmt.Errorf("API contract has no record; add empty marker %s", filepath.Join(dir, marker))
+		return fmt.Errorf("API contract has no record; add marker %s with a one-line summary", filepath.Join(dir, marker))
 	}
 	minor, err := strconv.Atoi(strings.TrimPrefix(semver.MajorMinor(next), semver.Major(next)+"."))
 	if err != nil {
@@ -114,9 +127,27 @@ func checkAPIVersionRecord(dir, version string, doc []byte) error {
 	}
 	suggested := fmt.Sprintf("%s.%d.0", strings.TrimPrefix(semver.Major(next), "v"), minor+1)
 	if semver.Compare("v"+version, next) == 0 && count == 1 {
-		return fmt.Errorf("API contract version %s has a stale record (%s); if %s is not yet on origin/main, delete your old marker and add %s; otherwise take %s in APISchemaVersion and api/openapi.yaml, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), version, filepath.Join(dir, marker), suggested)
+		return fmt.Errorf("API contract version %s has a stale record (%s); if %s is not yet on origin/main, delete your old marker and add %s with a one-line summary; otherwise take %s in APISchemaVersion and api/openapi.yaml, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), version, filepath.Join(dir, marker), suggested)
 	}
 	return fmt.Errorf("API contract version %s has older, conflicting, or stale records (%s); take %s in APISchemaVersion and api/openapi.yaml, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), suggested)
+}
+
+func checkAPIVersionSummary(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode().IsRegular() {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		summary := strings.TrimSuffix(string(content), "\n")
+		if strings.TrimSpace(summary) != "" && !strings.ContainsAny(summary, "\r\n") {
+			return nil
+		}
+	}
+	return fmt.Errorf("API contract record must be a regular file with a one-line summary: %s", path)
 }
 
 // contractDocument removes documentation fields from Huma objects while leaving
@@ -220,12 +251,10 @@ func baseAPIVersionRecords(t *testing.T, ref string) ([]string, error) {
 func checkBaseAPIVersionRecords(dir string, records []string) error {
 	var missing []string
 	for _, name := range records {
-		if info, err := os.Lstat(filepath.Join(dir, name)); os.IsNotExist(err) {
+		if err := checkAPIVersionSummary(filepath.Join(dir, name)); os.IsNotExist(err) {
 			missing = append(missing, name)
 		} else if err != nil {
 			return err
-		} else if !info.Mode().IsRegular() || info.Size() != 0 {
-			missing = append(missing, name)
 		}
 	}
 	if len(missing) > 0 {
@@ -268,9 +297,16 @@ func TestAPIBaseRecordLoading(t *testing.T) {
 	dir := t.TempDir()
 	require.ErrorContains(t, checkBaseAPIVersionRecords(dir, records), records[0])
 	for _, name := range records {
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("Add route\n"), 0600))
 	}
 	require.NoError(t, checkBaseAPIVersionRecords(dir, records))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, records[0]), []byte("changed"), 0600))
-	require.ErrorContains(t, checkBaseAPIVersionRecords(dir, records), records[0])
+	for _, summary := range []string{"Corrected wording", "", " \n", "First\nSecond\n"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, records[0]), []byte(summary), 0600))
+		err := checkBaseAPIVersionRecords(dir, records)
+		if summary == "Corrected wording" {
+			require.NoError(t, err)
+		} else {
+			require.ErrorContains(t, err, records[0])
+		}
+	}
 }

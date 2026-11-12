@@ -688,8 +688,8 @@ These are the current intentions, not a contractual guarantee:
   silently fall out of date with the daemon it describes.
 
 When changing the contract, bump `APISchemaVersion` and regenerate the API artifacts.
-Run the API version record test and add the empty marker file named in its output.
-Marker history is permanent; keep every earlier marker.
+Run the API version record test and add the marker file named in its output with a one-line summary.
+Marker history is permanent; keep every earlier marker and its summary.
 
 If you build against this schema and hit a gap, please open an issue. The
 contract is meant to be useful to external clients, and feedback shapes how far
