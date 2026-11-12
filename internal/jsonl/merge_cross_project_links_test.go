@@ -153,6 +153,7 @@ func checkMergeRefusesLinkAcrossRelayedProject(t *testing.T, target db.Storage) 
 	require.NoError(t, target.PinRootAuthority(ctx, db.RootKeyPin{
 		ProjectUID: first.UID, AuthorityUID: target.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public,
 	}))
+	//nolint:gosec // This token is a deterministic fixture credential, never an operational secret.
 	parent, _, err := target.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "relay-parent-test-token", Actor: "member", AdminActor: "operator",
 	})
