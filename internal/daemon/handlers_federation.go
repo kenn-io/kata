@@ -446,11 +446,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if join != nil {
 			join.Token, join.Actor, join.Capabilities = created.Token, created.Enrollment.Actor, created.Enrollment.Capabilities
 			join.PushEnabled = slices.Contains(strings.Split(created.Enrollment.Capabilities, ","), "push")
+			var options []joincommand.Option
 			if signingTemplate {
-				join.JoinCommand = joincommand.Build(*join, joincommand.SigningTemplate())
-			} else {
-				join.JoinCommand = joincommand.Build(*join)
+				options = append(options, joincommand.SigningTemplate())
 			}
+			join.JoinCommand = joincommand.Build(*join, options...)
 			out.Join = join
 		}
 		return &api.CreateFederationEnrollmentResponse{Body: out}, nil

@@ -44,7 +44,7 @@ func Build(in api.FederationJoinInstructions, opts ...Option) string {
 	if in.PushEnabled {
 		args = append(args, "--push")
 	}
-	if in.AllowInsecure && !settings.signingTemplate {
+	if in.AllowInsecure {
 		args = append(args, "--allow-insecure")
 	}
 	if in.AdoptExisting {

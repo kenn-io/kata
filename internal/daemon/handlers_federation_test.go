@@ -4612,17 +4612,18 @@ func TestFederationIngestPublishesCommittedPeerEvents(t *testing.T) {
 
 func TestFederationEnrollmentRequiredSigningJoinInstructions(t *testing.T) {
 	for _, tc := range []struct {
-		name, supplied, want string
-		required, insecure   bool
+		name, supplied, external, want string
+		required, insecure, signing    bool
 	}{
-		{"required without URL", "", "https://daemon.example/federation", true, false},
-		{"required with URL", "http://127.0.0.1:7777", "https://daemon.example/federation", true, true},
-		{"optional", "http://127.0.0.1:7777", "http://127.0.0.1:7777", false, true},
+		{"required without supplied hub URL", "", "https://DAEMON.example:443/federation", "https://daemon.example/federation", true, false, true},
+		{"required with supplied hub URL", "http://127.0.0.1:7777", "https://DAEMON.example:443/federation", "https://daemon.example/federation", true, true, true},
+		{"optional", "http://127.0.0.1:7777", "https://DAEMON.example:443/federation", "http://127.0.0.1:7777", false, true, false},
+		{"required without external URL", "http://127.0.0.1:7777", "", "http://127.0.0.1:7777", true, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := testenv.New(t, func(cfg *daemon.ServerConfig) {
 				cfg.FederationSigningRequired = tc.required
-				cfg.FederationSigningExternalURL = "https://DAEMON.example:443/federation"
+				cfg.FederationSigningExternalURL = tc.external
 			})
 			project := createFederatedHubProject(t, env, "hub-project")
 			resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
@@ -4633,10 +4634,10 @@ func TestFederationEnrollmentRequiredSigningJoinInstructions(t *testing.T) {
 			require.NoError(t, json.Unmarshal(raw, &out))
 			require.NotNil(t, out.Join)
 			assert.Equal(t, tc.want, out.Join.HubURL)
-			assert.Equal(t, tc.insecure && !tc.required, out.Join.AllowInsecure)
-			assert.Equal(t, tc.required, strings.Contains(out.Join.JoinCommand, "--signing-key-id"))
-			assert.Equal(t, tc.required, strings.Contains(out.Join.JoinCommand, "--signing-key-file"))
-			assert.Equal(t, tc.insecure && !tc.required, strings.Contains(out.Join.JoinCommand, "--allow-insecure"))
+			assert.Equal(t, tc.insecure && !tc.signing, out.Join.AllowInsecure)
+			assert.Equal(t, tc.signing, strings.Contains(out.Join.JoinCommand, "--signing-key-id"))
+			assert.Equal(t, tc.signing, strings.Contains(out.Join.JoinCommand, "--signing-key-file"))
+			assert.Equal(t, tc.insecure && !tc.signing, strings.Contains(out.Join.JoinCommand, "--allow-insecure"))
 		})
 	}
 }
