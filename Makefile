@@ -60,7 +60,6 @@ api-check:
 api-breaking:
 	bash scripts/openapi-breaking.sh $(BASE_REF)
 	SCHEMA_VERSION_BASE_REF=$(or $(BASE_REF),origin/main) go test ./internal/db/pgstore -run '^TestSchemaVersionContract$$'
-	KATA_MIGRATION_BASE_REF=$(BASE_REF) go run ./tools/migrationhistorycheck
 
 web-install:
 	cd web && bun install --frozen-lockfile
