@@ -668,6 +668,18 @@ instants; an end cannot precede a start. An occurrence key is at most 1024
 characters; actor and optional executor label are at most 256 bytes. Teammates
 use Kata's existing 1–64 character ASCII names.
 
+A summary may record `sessions`, a list of 1–64 `{agent, session_id, step}`
+objects. `step` is an optional portable step key. Agent names and session IDs
+follow the [closing-session transcript rules](configuration.md#closing-session-transcripts).
+Each exact agent and session ID pair must be unique. Set `sessions_incomplete`
+to `true` when the list may omit sessions; omit it otherwise. Observations replace
+the complete summary. Sessions are visible to project readers, federated peers,
+and in backups. They require the `cron_run_sessions_v1` event feature.
+`kata cron capabilities --json` includes `cli_features` so adapters can check
+that their installed CLI accepts these fields before sending them. Older CLIs
+reject unknown summary fields.
+
+
 A new observation uses expected revision 0. A changed observation requires its
 current revision. An identical retry of the same UID and canonical evidence
 returns `replayed: true`, emits no event, and changes no revision even when its

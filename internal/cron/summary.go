@@ -18,10 +18,12 @@ func (h HLC) Validate() error {
 
 // Summary is bounded shared evidence, excluding local paths and raw logs.
 type Summary struct {
-	Version      int    `json:"version"`
-	Message      string `json:"message,omitempty"`
-	InputTokens  int64  `json:"input_tokens,omitzero"`
-	OutputTokens int64  `json:"output_tokens,omitzero"`
+	Version            int        `json:"version"`
+	Message            string     `json:"message,omitempty"`
+	InputTokens        int64      `json:"input_tokens,omitzero"`
+	OutputTokens       int64      `json:"output_tokens,omitzero"`
+	Sessions           *[]Session `json:"sessions,omitempty" minItems:"1" maxItems:"64"`
+	SessionsIncomplete *bool      `json:"sessions_incomplete,omitempty"`
 }
 
 // ParseSummary decodes and validates one bounded observation summary.
@@ -32,6 +34,9 @@ func ParseSummary(input []byte) (Summary, error) {
 	}
 	if value.Version != 1 || value.InputTokens < 0 || value.OutputTokens < 0 {
 		return value, invalid("invalid run summary")
+	}
+	if err := value.validateSessions(input); err != nil {
+		return value, err
 	}
 	return value, nil
 }

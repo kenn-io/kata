@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -678,6 +679,13 @@ func (o cronCLIOptions) callCapabilities(a daemonAPI, c *kataclient.Client, proj
 
 func (o cronCLIOptions) callWrite(a daemonAPI, c *kataclient.Client, projectID int64, raw []byte) ([]byte, error) {
 	if o.resource == "run" && o.action == "observe" {
+		var fields map[string]jsontext.Value
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return nil, err
+		}
+		if _, err := cron.ParseSummary(fields["summary"]); err != nil {
+			return nil, err
+		}
 		var body generated.ObserveCronRunBody
 		if err := decodeCronCLIRequest(raw, &body); err != nil {
 			return nil, err
@@ -771,5 +779,6 @@ func cronCapabilitiesCLIResponse(raw []byte, header string) ([]byte, error) {
 		return nil, err
 	}
 	body["event_features"] = encoded
+	body["cli_features"] = jsontext.Value(`["cron_run_sessions_v1"]`)
 	return json.Marshal(body)
 }

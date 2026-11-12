@@ -54,5 +54,27 @@ func checkRunObservationValidation(t *testing.T, store db.Storage) error {
 			require.ErrorIs(t, err, db.ErrNotFound, "a rejected observation stores nothing")
 		})
 	}
+	session := []cron.Session{{Agent: "claude", SessionID: "00000000-0000-4000-8000-000000000001"}}
+	incomplete := true
+	runUID, err := uid.New()
+	require.NoError(t, err)
+	result, err := store.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "worker", Status: "succeeded", Summary: cron.Summary{Version: 1, Sessions: &session, SessionsIncomplete: &incomplete}})
+	require.NoError(t, err)
+	require.Equal(t, &session, result.Run.Summary.Sessions)
+	restored, err := store.CronRun(ctx, project.ID, runUID)
+	require.NoError(t, err)
+	require.Equal(t, result.Run.Summary, restored.Summary)
+	found := false
+	for record, err := range store.ExportCronRuns(ctx, db.ExportFilter{ProjectID: &project.ID}) {
+		require.NoError(t, err)
+		if record.UID == runUID {
+			found = true
+			require.Equal(t, result.Run.Summary, record.Summary)
+		}
+	}
+	require.True(t, found)
+	features, err := db.ProjectRequiredEventFeatures(ctx, store.(recurringProbeQuerier), project.UID)
+	require.NoError(t, err)
+	require.Equal(t, "cron_run_sessions_v1,cron_v1", features)
 	return nil
 }

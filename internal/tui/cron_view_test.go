@@ -673,3 +673,18 @@ func TestCronSearchClickGuards(t *testing.T) {
 		require.False(t, m.cron.filtering, state)
 	}
 }
+
+func TestCronRunDetailSessions(t *testing.T) {
+	m := cronFixture(t)
+	m.cron.data.runs[0].Summary.Sessions = []generated.SessionResponse{{Agent: "claude", SessionID: "00000000-0000-4000-8000-000000000001", Step: new("main")}}
+	m.cron.data.runs[0].Summary.SessionsIncomplete = new(true)
+	_, _, lines := cronDetail(m, cronRef{cronRuns, m.cron.data.runs[0].UID})
+	var text strings.Builder
+	for _, line := range lines {
+		text.WriteString(line.text)
+	}
+	require.Contains(t, text.String(), "claude")
+	require.Contains(t, text.String(), "00000000-000")
+	require.Contains(t, text.String(), "main")
+	require.Contains(t, text.String(), "incomplete")
+}

@@ -144,3 +144,17 @@ func TestCronRunProjectSelectionAndInvalidEvidence(t *testing.T) {
 	}
 	require.Empty(t, cronOK(t, f.session, "cron_runs", map[string]any{})["runs"])
 }
+
+func TestCronRunSessionsPassThrough(t *testing.T) {
+	f := newCronFixture(t)
+	job := cronTestJob(t, f)
+	id := cronNewUID(t, f.session)
+	args := cronObservation(id, job)
+	args["summary"] = map[string]any{"version": 1, "sessions": []map[string]string{{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001", "step": "main"}}, "sessions_incomplete": true}
+	recorded := cronRecord(t, f.session, "cron_run_observe", args, "run")
+	shown := cronRecord(t, f.session, "cron_run", map[string]any{"uid": id}, "run")
+	require.Equal(t, recorded["summary"], shown["summary"])
+	summary := shown["summary"].(map[string]any)
+	require.Equal(t, true, summary["sessions_incomplete"])
+	require.Len(t, summary["sessions"], 1)
+}

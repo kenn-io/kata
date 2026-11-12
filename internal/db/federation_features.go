@@ -15,11 +15,14 @@ import (
 // CronEventFeature identifies support for all cron definitions, runs and native delivery state.
 const CronEventFeature = "cron_v1"
 
+// CronRunSessionsEventFeature identifies session-bearing run summaries.
+const CronRunSessionsEventFeature = "cron_run_sessions_v1"
+
 // IssueMoveEventFeature identifies support for moving issues between projects.
 const IssueMoveEventFeature = "issue_move_v1"
 
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + CronRunSessionsEventFeature + "," + IssueMoveEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -54,7 +57,34 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
 	}
+	if kind == "projection.run" || strings.HasPrefix(kind, "cron.run.") {
+		if payload == "" {
+			payload = "{}"
+		}
+		var body map[string]jsontext.Value
+		if err := json.Unmarshal([]byte(payload), &body); err != nil {
+			return "", err
+		}
+		if has, err := summaryHasSessionFields(body["summary"]); err != nil {
+			return "", err
+		} else if has {
+			required = MergeEventFeatures(required, CronRunSessionsEventFeature)
+		}
+	}
 	return required, nil
+}
+
+func summaryHasSessionFields(raw jsontext.Value) (bool, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false, nil
+	}
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return false, err
+	}
+	_, sessions := fields["sessions"]
+	_, incomplete := fields["sessions_incomplete"]
+	return sessions || incomplete, nil
 }
 
 // payloadHasNativeRecurringState identifies hub-owned state independently of
@@ -179,6 +209,33 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
 	}
 	if cronPresent {
+		rows, err := q.QueryContext(ctx, `SELECT r.summary_json FROM cron_runs r JOIN projects p ON p.id=r.project_id WHERE p.uid=$1`, projectUID)
+		if err != nil {
+			return "", err
+		}
+		for rows.Next() {
+			var raw string
+			if err := rows.Scan(&raw); err != nil {
+				_ = rows.Close()
+				return "", err
+			}
+			has, err := summaryHasSessionFields(jsontext.Value(raw))
+			if err != nil {
+				_ = rows.Close()
+				return "", err
+			}
+			if has {
+				required = MergeEventFeatures(required, CronRunSessionsEventFeature)
+				break
+			}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return "", err
+		}
+		if err := rows.Close(); err != nil {
+			return "", err
+		}
 		required = MergeEventFeatures(required, CronEventFeature)
 		if _, cached := nativeProjectFeatureCache.Load(projectUID); cached {
 			return MergeEventFeatures(required, CronEventFeature), nil

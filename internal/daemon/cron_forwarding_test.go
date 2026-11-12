@@ -490,3 +490,44 @@ func TestCronSpokeForwardPreservesUIDPath(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, initial.Body.Job.DefinitionEventUID, current.DefinitionEventUID)
 }
+
+func TestCronSessionObservationRequiresHubFeature(t *testing.T) {
+	for _, supported := range []bool{false, true} {
+		t.Run(fmt.Sprintf("supported=%t", supported), func(t *testing.T) {
+			f := newCronForwardFixture(t, func(f *cronForwardFixture, _ *daemon.ServerConfig) {
+				if supported {
+					return
+				}
+				endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
+					_, _ = w.Write([]byte(`{}`))
+				}))
+				t.Cleanup(endpoint.Close)
+				b, err := f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)
+				require.NoError(t, err)
+				b.HubURL = endpoint.URL
+				_, err = f.spoke.DB.UpsertFederationBinding(t.Context(), b)
+				require.NoError(t, err)
+				c := f.credential
+				c.HubURL = endpoint.URL
+				require.NoError(t, config.WriteFederationCredential(f.sp.UID, c))
+			})
+			definition := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
+			job, _, err := f.spoke.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.sp.ID, Name: "Review", Actor: "tester", Definition: definition})
+			require.NoError(t, err)
+			id := cronHTTPUID(t)
+			body := map[string]any{"job_uid": job.UID, "definition_event_uid": job.DefinitionEventUID, "status": "running", "summary": map[string]any{"version": 1, "sessions": []map[string]string{{"agent": "claude", "session_id": "00000000-0000-4000-8000-000000000001"}}}}
+			response, raw := envDoRaw(t, f.target, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", f.sp.ID, id), body, nil)
+			if supported {
+				require.Equalf(t, http.StatusOK, response.StatusCode, "%s", raw)
+				_, err = f.spoke.DB.CronRun(t.Context(), f.sp.ID, id)
+				require.NoError(t, err)
+			} else {
+				require.Equalf(t, http.StatusConflict, response.StatusCode, "%s", raw)
+				require.Contains(t, string(raw), "unsupported_event_features")
+				_, err = f.spoke.DB.CronRun(t.Context(), f.sp.ID, id)
+				require.ErrorIs(t, err, db.ErrNotFound)
+			}
+		})
+	}
+}

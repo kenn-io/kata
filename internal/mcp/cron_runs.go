@@ -33,7 +33,7 @@ type CronRunObserveInput struct {
 	OccurrenceKey              *string                            `json:"occurrence_key,omitempty"`
 	ExecutorLabel              *string                            `json:"executor_label,omitempty"`
 	Status                     generated.ObserveCronRunBodyStatus `json:"status"`
-	Summary                    generated.Summary                  `json:"summary"`
+	Summary                    cron.Summary                       `json:"summary"`
 	StartedAt                  *time.Time                         `json:"started_at,omitempty"`
 	EndedAt                    *time.Time                         `json:"ended_at,omitempty"`
 }
@@ -98,9 +98,13 @@ func (h toolHandlers) cronRunObserve(ctx context.Context, _ *sdkmcp.CallToolRequ
 	if _, err = cron.ParseSummary(raw); err != nil {
 		return nil, generated.ObserveCronRunResponse{}, err
 	}
+	var summary generated.Summary
+	if err := json.Unmarshal(raw, &summary); err != nil {
+		return nil, generated.ObserveCronRunResponse{}, err
+	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
 		return nil, generated.ObserveCronRunResponse{}, err
 	}
-	return cronResult(h.options.Client.ObserveCronRun(ctx, &generated.ObserveCronRunRequestOptions{PathParams: &generated.ObserveCronRunPath{ProjectID: p.ID, RunUID: id}, Body: &generated.ObserveCronRunBody{Actor: &h.options.Actor, ExpectedRevision: in.ExpectedRevision, Teammate: optionalString(handle), JobUID: in.JobUID, DefinitionEventUID: in.DefinitionEventUID, WorkflowUID: in.WorkflowUID, WorkflowDefinitionEventUID: in.WorkflowDefinitionEventUID, IssueUID: in.IssueUID, OccurrenceKey: in.OccurrenceKey, ExecutorLabel: in.ExecutorLabel, Status: in.Status, Summary: in.Summary, StartedAt: in.StartedAt, EndedAt: in.EndedAt}}))
+	return cronResult(h.options.Client.ObserveCronRun(ctx, &generated.ObserveCronRunRequestOptions{PathParams: &generated.ObserveCronRunPath{ProjectID: p.ID, RunUID: id}, Body: &generated.ObserveCronRunBody{Actor: &h.options.Actor, ExpectedRevision: in.ExpectedRevision, Teammate: optionalString(handle), JobUID: in.JobUID, DefinitionEventUID: in.DefinitionEventUID, WorkflowUID: in.WorkflowUID, WorkflowDefinitionEventUID: in.WorkflowDefinitionEventUID, IssueUID: in.IssueUID, OccurrenceKey: in.OccurrenceKey, ExecutorLabel: in.ExecutorLabel, Status: in.Status, Summary: summary, StartedAt: in.StartedAt, EndedAt: in.EndedAt}}))
 }
