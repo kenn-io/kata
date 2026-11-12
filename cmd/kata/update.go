@@ -143,6 +143,9 @@ func newUpdateCmd() *cobra.Command {
 // with its own arguments and environment, so the updater needs neither its
 // startup options nor its credentials. A stopped daemon stays stopped.
 func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer, executable, installedVersion string) error {
+	if err := requireUnmanagedCurrentDaemon(ctx); err != nil {
+		return err
+	}
 	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return err
@@ -152,6 +155,9 @@ func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer, executable,
 		return err
 	}
 	defer release()
+	if err := requireUnmanagedRecords(records); err != nil {
+		return err
+	}
 	for _, record := range records {
 		if !daemonruntime.RuntimeRecordRestartable(record) {
 			return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon stop', then 'kata daemon start' in its original host shell or service with its original startup options", record.PID)

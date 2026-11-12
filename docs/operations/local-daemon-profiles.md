@@ -1,7 +1,7 @@
 ---
 title: Local daemon profiles
 description: Keep personal and work spokes separate and recover a stopped spoke without changing its database identity.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # Local daemon profiles
@@ -185,6 +185,12 @@ service in the selected home:
 KATA_HOME=/absolute/work-home kata daemon start
 KATA_HOME=/absolute/work-home kata daemon stop
 ```
+
+Not in the latest release yet: if the selected home's `socket_activation`
+setting delegates ownership to a service manager, neither implicit startup nor
+profile recovery may replace it. Use the manager to start or restart that home.
+For cold activation without a runtime record, select its explicit Unix address
+instead. See [Unix socket activation](socket-activation.md).
 
 These home administration commands, plus restart, reload, and logs, reject
 `--daemon`. Clear inherited storage overrides when administering a home.

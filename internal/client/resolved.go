@@ -75,6 +75,19 @@ type ResolvedDaemon struct {
 	implicitToken   bool
 }
 
+// WithTargetAuth selects an independent credential policy without changing the
+// endpoint. An empty token is anonymous; discarded credential-source errors and
+// implicit owner-token discovery do not survive the replacement.
+func (d ResolvedDaemon) WithTargetAuth(auth TargetAuth) ResolvedDaemon {
+	d.Token = auth.Token
+	d.AllowInsecure = auth.AllowInsecure
+	d.TrustPrivateNetwork = auth.TrustPrivateNetwork
+	d.credentialError = nil
+	d.persistedAuth = false
+	d.implicitToken = false
+	return d
+}
+
 // ConfiguredRemote reports whether resolution selected configured remote
 // endpoint metadata rather than local discovery or an injected test target.
 func (d ResolvedDaemon) ConfiguredRemote() bool {

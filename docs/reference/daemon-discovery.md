@@ -49,6 +49,14 @@ current home. None auto-start during discovery. A named remote,
 `KATA_SERVER`, workspace override, or active remote is normalized and probed
 but never replaced with another target.
 
+Not in the latest release yet: `KATA_SERVER`, workspace `server.url`, and named
+catalog URLs accept `unix:///absolute/path/daemon.sock`. Explicit socket selection does not
+read a local runtime record or start a detached daemon; an unavailable socket
+is an error, never permission to choose another target. A socket connection
+can still trigger an operating-system service manager configured for activation.
+`kind=remote` describes its explicit selection and conservative filesystem
+semantics, while `network=unix` describes its transport.
+
 The JSON `source` field groups the selected source as follows:
 
 | `source` | Selection |
@@ -88,7 +96,7 @@ looks like this:
 | `kind` | `local` or `remote`. |
 | `network` | `unix` or `tcp`. |
 | `scheme` | HTTP request scheme, `http` or `https`. Unix sockets use HTTP over the socket and therefore report `http`. |
-| `address` | Transport address: `unix:///path` for a Unix socket, `host:port` for local TCP, or a canonical HTTP(S) origin for a configured remote. |
+| `address` | Transport address: `unix:///path` for a Unix socket, `host:port` for local TCP, or a canonical HTTP(S) origin for a configured TCP endpoint. |
 | `request_base_url` | Base URL for HTTP requests over TCP. This field is omitted for Unix sockets. |
 
 The address forms are:
@@ -96,6 +104,7 @@ The address forms are:
 | Target | `network` | `address` | `request_base_url` |
 | --- | --- | --- | --- |
 | Local Unix socket | `unix` | `unix:///path/to/kata.sock` | Omitted |
+| Explicit Unix socket | `unix` | `unix:///path/to/kata.sock` | Omitted |
 | Local TCP daemon | `tcp` | `127.0.0.1:7777` | `http://127.0.0.1:7777` |
 | Configured remote | `tcp` | `https://daemon.example` | `https://daemon.example` |
 

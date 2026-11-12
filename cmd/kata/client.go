@@ -222,7 +222,7 @@ func httpClientForResolved(ctx context.Context, resolved client.ResolvedDaemon) 
 	if err != nil {
 		return nil, err
 	}
-	return markDaemonHTTPClient(resolved.BaseURL, hc)
+	return markResolvedDaemonHTTPClient(resolved, hc)
 }
 
 // longRunningClientFor builds a variant with no overall Client.Timeout for
@@ -249,7 +249,7 @@ func longRunningClientForResolved(ctx context.Context, resolved client.ResolvedD
 	if err != nil {
 		return nil, err
 	}
-	return markDaemonHTTPClient(resolved.BaseURL, hc)
+	return markResolvedDaemonHTTPClient(resolved, hc)
 }
 
 // streamingClientFor builds the SSE-friendly variant. Body cancellation comes
@@ -280,7 +280,7 @@ func streamingClientForResolved(ctx context.Context, resolved client.ResolvedDae
 	if err != nil {
 		return nil, err
 	}
-	return markDaemonHTTPClient(resolved.BaseURL, hc)
+	return markResolvedDaemonHTTPClient(resolved, hc)
 }
 
 type daemonTransportError struct {
@@ -397,6 +397,18 @@ func daemonBudgetFromContext(ctx context.Context) *daemonRequestBudget {
 	return state
 }
 
+func markResolvedDaemonHTTPClient(resolved client.ResolvedDaemon, hc *http.Client) (*http.Client, error) {
+	hc, err := markDaemonHTTPClient(resolved.BaseURL, hc)
+	if err != nil {
+		return nil, err
+	}
+	transport := hc.Transport.(daemonErrorTransport)
+	transport.endpoint = safeResolvedDaemonEndpoint(resolved)
+	transport.unixSocket = resolved.UnixSocket != ""
+	hc.Transport = transport
+	return hc, nil
+}
+
 // Only clients built for the selected daemon mark its dial failures. Hub
 // clients and requests redirected to other origins retain their own errors.
 func markDaemonHTTPClient(baseURL string, hc *http.Client) (*http.Client, error) {
@@ -435,8 +447,10 @@ func markDaemonHTTPClient(baseURL string, hc *http.Client) (*http.Client, error)
 
 type daemonErrorTransport struct {
 	http.RoundTripper
-	origin  *url.URL
-	timeout time.Duration
+	origin     *url.URL
+	timeout    time.Duration
+	endpoint   string
+	unixSocket bool
 }
 
 // CloseIdleConnections lets http.Client.CloseIdleConnections reach the
@@ -451,6 +465,10 @@ func (t daemonErrorTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	state := daemonBudgetFromContext(req.Context())
 	if state == nil {
 		state = newDaemonRequestBudget(req, t.timeout, t.origin)
+		if t.endpoint != "" {
+			state.selectedOrigin = t.endpoint
+			state.unixSocket = t.unixSocket
+		}
 	}
 	selected := req.URL.Scheme == t.origin.Scheme && req.URL.Host == t.origin.Host
 	request := req.Clone(state.ctx)

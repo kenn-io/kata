@@ -463,9 +463,9 @@ func webDaemonEffectiveActorPolicy(target, source string) (string, bool) {
 func (g *webDaemonGateway) effectiveCatalog() []config.CatalogDaemonConfig {
 	visible := make([]config.CatalogDaemonConfig, 0, len(g.catalog))
 	for _, entry := range g.catalog {
-		// A home-bearing profile belongs to another process. It cannot alias the
-		// serving daemon in the browser credential broker.
-		if entry.Home == "" {
+		// Profiles belong to another process, and configured Unix APIs have
+		// no browser gateway. Neither can be a browser switcher target.
+		if entry.Home == "" && !strings.HasPrefix(strings.TrimSpace(entry.URL), "unix://") {
 			visible = append(visible, entry)
 		}
 	}

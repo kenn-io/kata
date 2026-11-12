@@ -191,6 +191,10 @@ func catalogByOrigin(
 		if strings.TrimSpace(cat.Daemons[i].URL) == "" {
 			continue
 		}
+		if _, socket, err := clientpkg.UnixSocketPath(cat.Daemons[i].URL); socket && err == nil {
+			// A Unix entry may select the spoke, but cannot match an HTTP hub.
+			continue
+		}
 		entryOrigin, err := httpurl.CanonicalHTTPOrigin(cat.Daemons[i].URL)
 		if err != nil {
 			return nil, fmt.Errorf(

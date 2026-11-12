@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # Configuration
@@ -172,7 +172,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_TRANSCRIPT_AGENT` | Agent name for an explicit `KATA_TRANSCRIPT_SESSION_ID`, using the token rules above; setting it skips variable discovery, and an agent alone warns and skips attachment. Preserves the original agent when replaying a keyed close from another shell. |
 | `KATA_TRANSCRIPT_SESSION_ID` | Explicit current closing session ID. Used only when close transcript attachment is enabled; overrides the configured session variables. |
 | `KATA_INBOX_USER` | Exact actor or `actor/teammate` inbox address for `kata inbox` when `--for` is omitted and the TUI Attention view (`T`), which otherwise falls back to the authenticated actor. It does not set attribution and is independent of `KATA_AUTHOR` and `KATA_TEAMMATE`. |
-| `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
+| `KATA_SERVER` | Explicit daemon endpoint: HTTP(S), or `unix:///absolute/path/daemon.sock`. Skips local discovery and auto-start. |
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |
 | `KATA_AUTH_TOKEN_FILE` | Overrides `[auth].token_file`. A nonempty `KATA_AUTH_TOKEN` continues to win. A selected file failure stops startup and client construction. |
 | `KATA_LISTEN` | Daemon API bind address. Overrides `listen` in the daemon config; `--listen` wins over both. |
@@ -322,6 +322,21 @@ version = 1
 [server]
 url = "http://100.64.0.5:7777"
 ```
+
+Not in the latest release yet: `KATA_SERVER`, workspace `server.url`, and
+catalog `url` entries also accept `unix:///absolute/path/daemon.sock`. An explicit socket is dialed
+without a runtime record and never starts a detached daemon or falls back to
+another database. Requests fail if the selected socket is unavailable. Use the
+existing `KATA_AUTH_TOKEN_FILE` or global auth configuration when it requires a
+bearer credential.
+
+An explicit socket is not a pinned local-home profile: clients do not assume it
+can access the caller's filesystem. `kata ui` requires an HTTP(S) browser origin
+and does not substitute a local gateway for an explicit Unix API target.
+Named socket entries remain URL targets, not `local = true` profiles. Their
+credentials use the existing catalog precedence; a separate
+`KATA_AUTH_TOKEN_FILE` does not replace a selected catalog token file. The
+existing deliberate `KATA_AUTH_TOKEN` override still applies.
 
 `KATA_SERVER` wins over the local file unless a command passes
 `--daemon <name>`.
@@ -587,6 +602,16 @@ Plain `kata daemon start` starts the daemon in the background and returns after
 startup is confirmed; use `kata daemon start --foreground` for service-manager
 and hosted deployments. Auto-started daemons also read the config-file listener
 value.
+
+Not in the latest release yet: `socket_activation = "systemd"` or
+`socket_activation = "launchd:api"` adopts one manager-owned Unix stream listener
+and requires foreground startup. It conflicts
+with API bind overrides and disables detached startup, stale-version replacement
+and Kata-controlled stop/restart for that home, even while the daemon is stopped.
+The empty or absent value preserves ordinary behavior. Use the service manager
+for lifecycle changes; see [Unix socket activation](../operations/socket-activation.md)
+for listener permissions, credentials and systemd user units.
+
 An empty `[storage].dsn` means "no storage override"; env vars or the default
 database path still apply.
 

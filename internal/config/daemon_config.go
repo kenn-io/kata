@@ -34,6 +34,9 @@ type DaemonConfig struct {
 	// An empty value (or a missing file) means the platform default:
 	// Unix socket on Unix platforms, loopback TCP on Windows.
 	Listen string `toml:"listen"`
+	// SocketActivation delegates the API listener and process lifecycle to
+	// systemd or a named launchd socket (launchd:NAME). Empty uses own-bind.
+	SocketActivation string `toml:"socket_activation"`
 	// AutostartIdleTimeout stops implicitly auto-started local daemons after
 	// foreground inactivity. Empty or zero disables idle shutdown.
 	AutostartIdleTimeout string `toml:"autostart_idle_timeout"`
@@ -490,6 +493,9 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 		// caught the same way a TOML-only one is.
 	default:
 		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	if err := ValidateSocketActivation(cfg.SocketActivation); err != nil {
+		return nil, err
 	}
 	initializeDeploymentSources(&cfg)
 	if mergeEnv {

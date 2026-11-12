@@ -28,17 +28,17 @@ type DiscoverOptions struct {
 	// StartWith is the path of a kata executable. When it is set and the
 	// selected local daemon has no runtime, Discover runs `kata daemon start`,
 	// or `kata daemon recover` for a pinned local profile, then connects. Empty
-	// never starts a daemon, and a remote is never started.
+	// never starts a daemon. Explicit HTTP(S) and Unix endpoints are never started.
 	StartWith string
 }
 
 // DiscoveredDaemon describes the daemon Discover selected. It carries no
 // credentials or endpoint details.
 type DiscoveredDaemon struct {
-	// Remote reports a configured remote daemon, matching `kata daemon
-	// locate`'s kind=remote. Kata treats such a daemon as unable to read the
-	// caller's files, even at a loopback address. A pinned local profile is
-	// not remote.
+	// Remote reports a configured endpoint, matching `kata daemon locate`'s
+	// kind=remote. This includes an explicit Unix socket: clients must not
+	// assume it can read the caller's files or belongs to the current home.
+	// A pinned local profile is not remote.
 	Remote bool
 }
 

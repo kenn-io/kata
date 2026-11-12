@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -773,40 +774,49 @@ token = "hub-token"
 }
 
 func TestFederationEnrollCLIActiveLegacyLocalUsesSelectedSpokeToken(t *testing.T) {
-	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
-	resetFlags(t)
-	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
-	const spokeUID = "01HZZZZZZZZZZZZZZZZZZZZZ01"
-	var apiAuthorizations []string
-	spoke := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/ping" {
-			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
-			return
-		}
-		apiAuthorizations = append(apiAuthorizations, r.Header.Get("Authorization"))
-		if r.Header.Get("Authorization") != "Bearer spoke-token" {
-			http.Error(w, "wrong selected spoke credential", http.StatusUnauthorized)
-			return
-		}
-		switch r.URL.Path {
-		case "/api/v1/instance":
-			_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, spokeUID)
-		case "/api/v1/projects":
-			_, _ = fmt.Fprint(w, `{"projects":[{"name":"spoke-project","uid":"01HZZZZZZZZZZZZZZZZZZZZZ02"}]}`)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer spoke.Close()
+	for _, network := range []string{"tcp", "unix"} {
+		t.Run(network, func(t *testing.T) {
+			if network == "unix" && runtime.GOOS == "windows" {
+				t.Skip("Unix runtime fixture is unsupported on Windows")
+			}
+			t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
+			resetFlags(t)
+			flags.Workspace = t.TempDir()
+			hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
+			const spokeUID = "01HZZZZZZZZZZZZZZZZZZZZZ01"
+			var apiAuthorizations []string
+			var authMu sync.Mutex
+			spoke := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/ping" {
+					_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+					return
+				}
+				authMu.Lock()
+				apiAuthorizations = append(apiAuthorizations, r.Header.Get("Authorization"))
+				authMu.Unlock()
+				if r.Header.Get("Authorization") != "Bearer spoke-token" {
+					http.Error(w, "wrong selected spoke credential", http.StatusUnauthorized)
+					return
+				}
+				switch r.URL.Path {
+				case "/api/v1/instance":
+					_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, spokeUID)
+				case "/api/v1/projects":
+					_, _ = fmt.Fprint(w, `{"projects":[{"name":"spoke-project","uid":"01HZZZZZZZZZZZZZZZZZZZZZ02"}]}`)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer spoke.Close()
 
-	clientHome := t.TempDir()
-	t.Setenv("KATA_HOME", clientHome)
-	t.Setenv("KATA_DB", filepath.Join(clientHome, "kata.db"))
-	t.Setenv("KATA_DSN", "")
-	t.Setenv("KATA_SERVER", "")
-	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
-	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "1")
-	require.NoError(t, os.WriteFile(filepath.Join(clientHome, "config.toml"), []byte(`active_daemon = "spoke"
+			clientHome := t.TempDir()
+			t.Setenv("KATA_HOME", clientHome)
+			t.Setenv("KATA_DB", filepath.Join(clientHome, "kata.db"))
+			t.Setenv("KATA_DSN", "")
+			t.Setenv("KATA_SERVER", "")
+			t.Setenv("KATA_AUTH_TOKEN", "hub-token")
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "1")
+			require.NoError(t, os.WriteFile(filepath.Join(clientHome, "config.toml"), []byte(`active_daemon = "spoke"
 [[daemon]]
 name = "spoke"
 local = true
@@ -816,29 +826,42 @@ name = "hub-admin"
 url = "`+hub.URL+`"
 token = "hub-token"
 `), 0600))
-	require.NoError(t, writeRuntimeFor(clientHome, strings.TrimPrefix(spoke.URL, "http://")))
+			address := strings.TrimPrefix(spoke.URL, "http://")
+			if network == "unix" {
+				socket, _ := unixConsumerEndpoint(t, spoke.URL)
+				address = "unix://" + socket
+			}
+			require.NoError(t, writeRuntimeFor(clientHome, address))
 
-	cmd := newRootCmd()
-	cmd.SetArgs([]string{
-		"--project", "spoke-project",
-		"federation", "enroll",
-		"--spoke-instance", spokeUID,
-		"--hub-url", hub.URL,
-		"--hub-token-env", "EXAMPLE_HUB_TOKEN",
-		"--actor", "operator",
-	})
-	err := cmd.Execute()
+			cmd := newRootCmd()
+			var output strings.Builder
+			cmd.SetOut(&output)
+			cmd.SetErr(&output)
+			cmd.SetArgs([]string{
+				"--project", "spoke-project",
+				"federation", "enroll",
+				"--spoke-instance", spokeUID,
+				"--hub-url", hub.URL,
+				"--hub-token-env", "EXAMPLE_HUB_TOKEN",
+				"--actor", "operator",
+			})
+			err := cmd.Execute()
 
-	require.NoError(t, err)
-	require.NotEmpty(t, apiAuthorizations, "the active spoke must be probed")
-	for _, authorization := range apiAuthorizations {
-		assert.Equal(t, "Bearer spoke-token", authorization)
-		assert.NotEqual(t, "Bearer hub-token", authorization, "the hub credential must not reach the spoke")
+			require.NoError(t, err)
+			assert.Contains(t, output.String(), "--adopt-existing")
+			authMu.Lock()
+			defer authMu.Unlock()
+			require.NotEmpty(t, apiAuthorizations, "the active spoke must be probed")
+			for _, authorization := range apiAuthorizations {
+				assert.Equal(t, "Bearer spoke-token", authorization)
+				assert.NotEqual(t, "Bearer hub-token", authorization, "the hub credential must not reach the spoke")
+			}
+			enrollments, err := hub.DB.ListFederationEnrollments(t.Context())
+			require.NoError(t, err)
+			require.Len(t, enrollments, 1)
+			assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors, "the selected spoke credential should permit project adoption detection")
+		})
 	}
-	enrollments, err := hub.DB.ListFederationEnrollments(t.Context())
-	require.NoError(t, err)
-	require.Len(t, enrollments, 1)
-	assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors, "the selected spoke credential should permit project adoption detection")
 }
 
 func TestFederationEnrollCLIKATAServerSpokeAuthFailureErrors(t *testing.T) {

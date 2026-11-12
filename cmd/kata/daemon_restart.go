@@ -375,6 +375,9 @@ func restartRunningDaemons(ctx context.Context, ns *daemonruntime.Namespace, run
 }
 
 func requireRestartable(running []kitdaemon.RuntimeRecord) error {
+	if err := requireUnmanagedRecords(running); err != nil {
+		return err
+	}
 	for _, rec := range running {
 		if rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] != "1" {
 			return unsupportedDaemonRestartError(rec)
