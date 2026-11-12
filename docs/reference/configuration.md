@@ -1112,6 +1112,9 @@ logging supplied origins or addresses. No environment variable grants callback t
 The serving daemon can read live cost for recorded cron sessions from
 AgentsView v0.47.0 or newer:
 
+Recorded agent names, including custom names, must match the names used by
+AgentsView for those sessions. A mismatch reports usage as unavailable.
+
 ```toml
 [agentsview]
 url = "https://agentsview.example/archive"

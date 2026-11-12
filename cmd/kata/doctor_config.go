@@ -27,14 +27,20 @@ func (s *doctorState) add(id, category string, fn func() diagnostics.Check) {
 }
 
 func (s *doctorState) localChecks(ctx context.Context) {
-	s.add("config.daemon", "config", doctorDaemonConfig)
+	s.add("config.daemon", "config", func() diagnostics.Check { return doctorDaemonConfig(ctx) })
 	s.add("config.workspace", "config", func() diagnostics.Check { return s.workspaceConfig(ctx) })
 	s.add("config.hooks", "config", doctorHookConfig)
 }
 
-func doctorDaemonConfig() diagnostics.Check {
-	if _, err := config.ReadDaemonConfig(); err != nil {
+func doctorDaemonConfig(ctx context.Context) diagnostics.Check {
+	cfg, err := config.ReadDaemonConfig()
+	if err != nil {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Local daemon configuration or environment overrides are invalid", Fix: "Correct <KATA_HOME>/config.toml using kata's configuration reference; check spelling, value types, URLs and environment overrides."}
+	}
+	target := cfg.AgentsView
+	target.TokenFile, target.TokenEnv = "", ""
+	if _, err := target.Resolve(ctx, cfg.Auth.TrustPrivateNetwork); err != nil {
+		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Local AgentsView configuration is invalid", Fix: "Correct [agentsview] URLs and network trust in <KATA_HOME>/config.toml."}
 	}
 	if _, err := config.ReadDisplayConfig(); err != nil {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Local display configuration is invalid", Fix: "Correct [display] in <KATA_HOME>/config.toml; markdown_renderer must begin with an executable."}

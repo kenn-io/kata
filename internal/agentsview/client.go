@@ -42,11 +42,11 @@ func NewClient(cfg config.ResolvedAgentsView, trustPrivate bool) (*Client, error
 // Lookup makes one bounded-body request. Deadlines and concurrency belong to
 // the caller, which can distinguish its request budget from the GET timeout.
 func (c *Client) Lookup(ctx context.Context, id string) SessionUsage {
-	result, _ := c.lookup(ctx, id)
+	result, _ := c.lookup(ctx, id, nil)
 	return result
 }
 
-func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int) {
+func (c *Client) lookup(ctx context.Context, id string, expectedAgent *string) (SessionUsage, int) {
 	unavailable := SessionUsage{State: "unavailable"}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v1/sessions/"+url.PathEscape(id)+"/usage?subagents=true", nil)
 	if err != nil {
@@ -88,6 +88,7 @@ func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int) {
 		return unavailable, resp.StatusCode
 	}
 	var v struct {
+		Agent        string `json:"agent"`
 		SessionID    string `json:"session_id"`
 		HasCost      *bool  `json:"has_cost"`
 		HasTokenData *bool  `json:"has_token_data"`
@@ -100,7 +101,7 @@ func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int) {
 		TotalOutputTokens *int64   `json:"total_output_tokens"`
 		SubagentCount     *int64   `json:"subagent_count"`
 	}
-	if json.Unmarshal(body, &v) != nil || v.SessionID == "" || v.HasCost == nil || v.HasTokenData == nil || (v.TotalOutputTokens != nil && *v.TotalOutputTokens < 0) || (v.SubagentCount != nil && *v.SubagentCount < 0) || (v.Cost != nil && v.Cost.Microdollars != nil && *v.Cost.Microdollars < 0) {
+	if json.Unmarshal(body, &v) != nil || (expectedAgent != nil && (v.Agent == "" || v.Agent != *expectedAgent)) || v.SessionID == "" || v.HasCost == nil || v.HasTokenData == nil || (v.TotalOutputTokens != nil && *v.TotalOutputTokens < 0) || (v.SubagentCount != nil && *v.SubagentCount < 0) || (v.Cost != nil && v.Cost.Microdollars != nil && *v.Cost.Microdollars < 0) {
 		return unavailable, resp.StatusCode
 	}
 	result := SessionUsage{CanonicalSessionID: v.SessionID, Models: v.Models, UnpricedModels: v.UnpricedModels, TotalOutputTokens: v.TotalOutputTokens, SubagentCount: v.SubagentCount}
@@ -122,13 +123,13 @@ func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int) {
 
 // Probe checks one synthetic identity through the same credential-pinned client.
 func (c *Client) Probe(ctx context.Context) string {
-	result, status := c.lookup(ctx, "00000000-0000-4000-8000-000000000000")
+	result, status := c.lookup(ctx, "00000000-0000-4000-8000-000000000000", nil)
 	switch {
 	case result.State == "unauthorized":
 		return "unauthorized"
 	case result.State == "priced" || result.State == "unpriced" || result.State == "no_usage" || result.State == "not_found" || result.State == "ambiguous":
 		return "ok"
-	case status == 0 || status >= 500 || status >= 300 && status < 400:
+	case status == 0 || status == http.StatusTooManyRequests || status >= 500 || status >= 300 && status < 400:
 		return "unreachable"
 	default:
 		return "not_agentsview"

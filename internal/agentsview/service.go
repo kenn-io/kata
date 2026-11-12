@@ -203,7 +203,7 @@ func (g *generation) lookup(ctx context.Context, slots chan struct{}, agent, id 
 		defer func() { <-slots }()
 		lookup, stop := context.WithTimeout(shared, 2*time.Second)
 		defer stop()
-		fact := g.client.Lookup(lookup, id)
+		fact, _ := g.client.lookup(lookup, id, &agent)
 		if shared.Err() != nil {
 			return unavailable(), nil
 		}
