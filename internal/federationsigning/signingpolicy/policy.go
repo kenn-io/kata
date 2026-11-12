@@ -140,17 +140,16 @@ func ValidatePolicy(base string, keys []Key) error {
 	if err := ValidatePolicyShape(base, keys); err != nil {
 		return err
 	}
-	for _, k := range keys {
-		if _, err := k.Load(); err != nil {
-			return err
-		}
-	}
-	return CheckDistinctSecrets(keys, time.Now())
+	return distinctSecrets(keys, time.Time{}, true)
 }
 
 // CheckDistinctSecrets rejects equal available secrets among unexpired keys.
 // Unavailable sources remain non-fatal at daemon startup.
 func CheckDistinctSecrets(keys []Key, now time.Time) error {
+	return distinctSecrets(keys, now, false)
+}
+
+func distinctSecrets(keys []Key, now time.Time, strict bool) error {
 	secrets := map[string]string{}
 	for _, k := range keys {
 		if k.NotAfter != 0 && now.Unix() >= k.NotAfter {
@@ -158,6 +157,9 @@ func CheckDistinctSecrets(keys []Key, now time.Time) error {
 		}
 		secret, err := k.Load()
 		if err != nil {
+			if strict {
+				return err
+			}
 			continue
 		}
 		if first, ok := secrets[string(secret)]; ok {
