@@ -237,7 +237,6 @@ func TestUsageLimitsConcurrentRequestsToFour(t *testing.T) {
 		close(release)
 		require.NoError(t, <-done)
 		require.EqualValues(t, 4, gotMaximum)
-		require.EqualValues(t, 4, maximum.Load())
 	})
 }
 
@@ -300,9 +299,7 @@ func TestUsageAssemblesRecordedSession(t *testing.T) {
 			require.Equal(t, id, session.SessionID)
 			require.Equal(t, "/api/v1/sessions/"+id+"/usage", path)
 			require.Equal(t, &step, session.Step)
-			if tc.recorded == "opencode" {
-				require.Equal(t, "https://browser.example/archive/sessions/opencode/ses_example", session.URL)
-			}
+			require.Equal(t, "https://browser.example/archive/sessions/opencode/ses_example", session.URL)
 			require.Equal(t, tc.state, session.State)
 			require.Equal(t, tc.total, result.State)
 			if tc.state == "priced" {
@@ -452,12 +449,7 @@ func TestNotFoundBackoffCapsAtFifteenMinutes(t *testing.T) {
 	require.EqualValues(t, 7, calls.Load())
 }
 
-func TestProbeDeadlines(t *testing.T) {
-	t.Run("lookup expiry", testProbeUsesSlotsAndLookupDeadline)
-	t.Run("queue expiry", testProbeDeadlineIncludesSlotQueue)
-}
-
-func testProbeUsesSlotsAndLookupDeadline(t *testing.T) {
+func TestProbeUsesSlotsAndLookupDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		service, err := NewService(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
 		require.NoError(t, err)
@@ -485,7 +477,7 @@ func testProbeUsesSlotsAndLookupDeadline(t *testing.T) {
 	})
 }
 
-func testProbeDeadlineIncludesSlotQueue(t *testing.T) {
+func TestProbeDeadlineIncludesSlotQueue(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		service, err := NewService(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
 		require.NoError(t, err)

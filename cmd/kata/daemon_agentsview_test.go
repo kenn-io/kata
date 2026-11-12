@@ -49,9 +49,6 @@ func TestReloadAgentsViewKeepsChangedTargetAndRefreshesCredential(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, "not_found", result.Sessions[0].State)
 	require.Equal(t, "Bearer second", <-headers)
-	t.Run("invalid credential keeps client", func(t *testing.T) {
-		assertAgentsViewInvalidCredentialReloadKeepsClient(t)
-	})
 }
 
 func TestAgentsViewDaemonStartupAndReloadLogs(t *testing.T) {
@@ -135,8 +132,7 @@ func TestAgentsViewInvalidConfigStopsDaemonStartup(t *testing.T) {
 	}
 }
 
-func assertAgentsViewInvalidCredentialReloadKeepsClient(t *testing.T) {
-	t.Helper()
+func TestReloadAgentsViewInvalidCredentialKeepsClient(t *testing.T) {
 	home := t.TempDir()
 	headers := make(chan string, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

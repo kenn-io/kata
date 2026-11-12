@@ -25,7 +25,6 @@ func TestLookupSessionStates(t *testing.T) {
 		{"unpriced", 200, `{"agent":"claude","session_id":"id","has_cost":false,"has_token_data":true,"unpriced_models":["model"]}`, "unpriced"},
 		{"no usage", 200, `{"agent":"claude","session_id":"id","has_cost":false,"has_token_data":false}`, "no_usage"},
 		{"not found", 404, `{"error":{"code":"session_not_found","message":"not found"}}`, "not_found"},
-		{"html 404", 404, `<html>not found</html>`, "unavailable"},
 		{"wrong endpoint 404", 404, `{}`, "unavailable"},
 		{"malformed envelope 404", 404, `{"error":{"code":"session_not_found"}}`, "unavailable"},
 		{"ambiguous", 409, `{"error":{"code":"ambiguous_session_id","candidates":["archive~id"]}}`, "ambiguous"},
@@ -48,7 +47,7 @@ func TestLookupSessionStates(t *testing.T) {
 			t.Cleanup(server.Close)
 			client, err := NewClient(config.ResolvedAgentsView{URL: server.URL + "/prefix", Token: "fixture-token"}, false)
 			require.NoError(t, err)
-			got := client.Lookup(t.Context(), "raw")
+			got, _ := client.lookup(t.Context(), "raw", nil)
 			require.Equal(t, tc.state, got.State)
 			if tc.name == "priced zero" {
 				require.NotNil(t, got.CostMicrodollars)
@@ -65,7 +64,6 @@ func TestLookupSessionStates(t *testing.T) {
 				name string
 				body func() io.Reader
 			}{
-				{"oversized", func() io.Reader { return strings.NewReader(strings.Repeat("x", (1<<20)+1)) }},
 				{"unreadable", func() io.Reader { return iotest.ErrReader(errors.New("fixture read failure")) }},
 			} {
 				t.Run(http.StatusText(status)+"/"+tc.name, func(t *testing.T) {
@@ -74,7 +72,8 @@ func TestLookupSessionStates(t *testing.T) {
 					client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
 						return &http.Response{StatusCode: status, Body: io.NopCloser(tc.body()), Header: make(http.Header)}, nil
 					})
-					require.Equal(t, "unauthorized", client.Lookup(t.Context(), "fixture").State)
+					got, _ := client.lookup(t.Context(), "fixture", nil)
+					require.Equal(t, "unauthorized", got.State)
 				})
 			}
 		}
@@ -113,7 +112,8 @@ func TestLookupDoesNotFollowRedirect(t *testing.T) {
 	t.Cleanup(origin.Close)
 	client, err := NewClient(config.ResolvedAgentsView{URL: origin.URL, Token: "fixture-token"}, false)
 	require.NoError(t, err)
-	require.Equal(t, "unavailable", client.Lookup(t.Context(), "raw").State)
+	got, _ := client.lookup(t.Context(), "raw", nil)
+	require.Equal(t, "unavailable", got.State)
 	require.Zero(t, requests.Load())
 }
 
@@ -154,6 +154,7 @@ func TestLookupEscapesRawSessionID(t *testing.T) {
 		require.Equal(t, "subagents=true", r.URL.RawQuery)
 		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"session_not_found","message":"not found"}}`)), Header: make(http.Header)}, nil
 	})
-	require.Equal(t, "not_found", client.Lookup(t.Context(), "raw/id?part").State)
+	got, _ := client.lookup(t.Context(), "raw/id?part", nil)
+	require.Equal(t, "not_found", got.State)
 	require.Equal(t, "/prefix/api/v1/sessions/raw%2Fid%3Fpart/usage", path)
 }

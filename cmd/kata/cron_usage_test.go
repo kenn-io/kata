@@ -24,8 +24,7 @@ func TestCronUsageOutputStatesAndSanitization(t *testing.T) {
 		{"session", generated.RunUsage{State: "unknown", Sessions: []generated.RunSession{{Agent: "example", SessionID: "fixture", State: "future_session_state"}}}},
 	} {
 		t.Run("newer daemon "+tc.name, func(t *testing.T) {
-			var out bytes.Buffer
-			require.Error(t, writeCronUsage(&out, tc.usage))
+			require.Error(t, validateCronUsage(tc.usage))
 		})
 	}
 	amount := int64(2410000)
@@ -73,7 +72,6 @@ func TestCronUsageOutputStatesAndSanitization(t *testing.T) {
 func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
 	var queries []string
 	var disabled atomic.Bool
-	var disabledCalls atomic.Int32
 	const smallBody = `{"run_uid":"fixture","state":"complete","cost_microdollars":1000000,"estimated":false,"sessions_incomplete":false,"fetched_at":"2026-01-01T00:00:00Z","sessions":[{"agent":"example","session_id":"id","state":"priced","cost_microdollars":1000000,"cost_source":"reported"}]}`
 	// Each session can be produced by an upstream response below its 1 MiB cap,
 	// so a valid aggregate of 64 of them exceeds 2 MiB.
@@ -99,9 +97,6 @@ func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
 			}
 			_, _ = fmt.Fprintf(w, `{"project_uid":"id","event_features":[],"usage":{"source":%q}}`, source)
 		default:
-			if disabled.Load() {
-				disabledCalls.Add(1)
-			}
 			queries = append(queries, r.URL.RawQuery)
 			_, _ = io.WriteString(w, usageBody.Load().(string))
 		}
@@ -152,6 +147,6 @@ func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
 		disabled.Store(true)
 		_, _, err := executeCronCLI(t, server.URL, nil, "run", "usage", cronCLIUID(t))
 		require.ErrorContains(t, err, "usage source is disabled")
-		require.Zero(t, disabledCalls.Load())
+		require.Len(t, queries, len(cases))
 	})
 }

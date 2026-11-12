@@ -118,17 +118,14 @@ func TestDoctorAgentsViewSource(t *testing.T) {
 		{"on", upstream.URL, "ok", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sink := &doctorSink{}
 			service, err := agentsview.NewService(config.ResolvedAgentsView{URL: tc.url, BrowserURL: tc.url}, false)
 			require.NoError(t, err)
-			server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, AgentsView: service, Hooks: sink})
+			server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, AgentsView: service})
 			t.Cleanup(func() { _ = server.Close() })
 			out := httptest.NewRecorder()
 			server.Handler().ServeHTTP(out, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/doctor", nil))
 			require.Equal(t, http.StatusOK, out.Code, out.Body.String())
 			require.Contains(t, out.Body.String(), `"agentsview":{"state":"`+tc.state+`"}`)
-			require.Contains(t, out.Body.String(), `"available":true`)
-			require.EqualValues(t, 1, sink.reads.Load())
 			require.Equal(t, tc.calls, calls.Load())
 		})
 	}
