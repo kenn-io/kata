@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/diagnostics"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/version"
@@ -562,4 +563,19 @@ func TestDoctorHookNamesPATHMismatch(t *testing.T) {
 	check := doctorFinding(t, collectDoctor(ctx), "daemon.hooks")
 	require.EqualValues(t, "fail", check.Status)
 	require.Contains(t, fmt.Sprint(check.Details), "PATH")
+}
+
+func TestDoctorAgentsViewState(t *testing.T) {
+	for _, tc := range []struct {
+		state  string
+		status diagnostics.Status
+	}{
+		{"off", diagnostics.StatusInfo}, {"ok", diagnostics.StatusOK}, {"unauthorized", diagnostics.StatusWarn}, {"unreachable", diagnostics.StatusWarn}, {"not_agentsview", diagnostics.StatusWarn},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			got := doctorAgentsView(tc.state)
+			require.Equal(t, tc.status, got.Status)
+			require.Contains(t, got.Details, "Raw session IDs require AgentsView v0.47.0 or newer.")
+		})
+	}
 }

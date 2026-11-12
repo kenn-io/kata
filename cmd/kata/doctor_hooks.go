@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 
 func (s *doctorState) hookChecks(ctx context.Context, apiClient *kataapi.Client) {
 	var h generated.Hooks
+	var usageState string
 	s.add("daemon.hooks", "hooks", func() diagnostics.Check {
 		if apiClient == nil {
 			return skippedDoctorCheck("Daemon connection could not be verified")
@@ -21,6 +23,16 @@ func (s *doctorState) hookChecks(ctx context.Context, apiClient *kataapi.Client)
 		status := 0
 		if response != nil {
 			status = response.StatusCode
+		}
+		if err == nil && response != nil && status == http.StatusOK {
+			var wire struct {
+				AgentsView struct {
+					State string `json:"state"`
+				} `json:"agentsview"`
+			}
+			if json.Unmarshal(response.Body, &wire) == nil {
+				usageState = wire.AgentsView.State
+			}
 		}
 		if err != nil || response == nil || status != http.StatusOK || response.JSON200 == nil || !response.JSON200.Hooks.Available {
 			return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Live hook diagnostics are unsupported, unavailable or not visible to this principal", Details: doctorHTTPStatus(status), Fix: "Use operator credentials and a daemon with hook diagnostics support; custom hook sinks may not provide diagnostics."}
@@ -49,6 +61,7 @@ func (s *doctorState) hookChecks(ctx context.Context, apiClient *kataapi.Client)
 		}
 		return check
 	})
+	s.add("daemon.agentsview", "integration", func() diagnostics.Check { return doctorAgentsView(usageState) })
 	s.add("daemon.hook_queue", "hooks", func() diagnostics.Check {
 		if !h.Available {
 			return skippedDoctorCheck("Live hook diagnostics are unavailable")
@@ -77,4 +90,26 @@ func (s *doctorState) hookChecks(ctx context.Context, apiClient *kataapi.Client)
 		}
 		return check
 	})
+}
+
+func doctorAgentsView(state string) diagnostics.Check {
+	result := diagnostics.Check{Status: diagnostics.StatusWarn, Details: []string{"Raw session IDs require AgentsView v0.47.0 or newer."}}
+	switch state {
+	case "off":
+		result.Status = diagnostics.StatusInfo
+		result.Summary = "AgentsView usage: off"
+	case "ok":
+		result.Status = diagnostics.StatusOK
+		result.Summary = "AgentsView usage: ok"
+	case "unauthorized":
+		result.Summary = "AgentsView usage: unauthorized"
+	case "unreachable":
+		result.Summary = "AgentsView usage: unreachable"
+	case "not_agentsview":
+		result.Summary = "AgentsView usage: not AgentsView"
+	default:
+		result.Status = diagnostics.StatusInfo
+		result.Summary = "AgentsView usage: unavailable from selected daemon"
+	}
+	return result
 }

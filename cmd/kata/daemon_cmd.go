@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/activity"
+	"go.kenn.io/kata/internal/agentsview"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -1150,7 +1152,7 @@ func joinInts(values []int, sep string) string {
 func daemonReloadCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "reload",
-		Short: "ask a running daemon to reload hooks and embedding credentials",
+		Short: "ask a running daemon to reload hooks and embedding and AgentsView credentials",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
@@ -1276,6 +1278,14 @@ func runDaemonProcess(
 		return err
 	}
 	dcfg := startup.Config
+	usageConfig, err := dcfg.AgentsView.Resolve(ctx, dcfg.Auth.TrustPrivateNetwork)
+	if err != nil {
+		return err
+	}
+	usageService, err := agentsview.NewService(usageConfig, dcfg.Auth.TrustPrivateNetwork)
+	if err != nil {
+		return errors.New("[agentsview] unable to initialize usage source")
+	}
 	listen = startup.Listen
 	ns := startup.Namespace
 	endpoint := startup.Endpoint
@@ -1420,6 +1430,12 @@ func runDaemonProcess(
 			_ = disp.Shutdown(fallbackCtx)
 		}
 	}()
+	if usageConfig.Enabled() {
+		origin, _ := url.Parse(usageConfig.URL)
+		daemonLog.Printf("AgentsView usage: on (%s)", origin.Host)
+	} else {
+		daemonLog.Printf("AgentsView usage: off")
+	}
 	hookCfgPath := startup.HookConfigPath
 	if dcfg.Auth.Source == "generated_file" {
 		daemonLog.Printf("auth token persisted at %s", filepath.Join(startup.KataHome, "auth-token"))
@@ -1505,6 +1521,11 @@ func runDaemonProcess(
 	sigs, reloadCleanup := installReloadSource(ctx, ns.DBHash)
 	workers.Go(func() {
 		runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog, func() {
+			if swapped, err := reloadAgentsView(ctx, startup.KataHome, usageService, dcfg.Auth.TrustPrivateNetwork); err != nil {
+				daemonLog.Printf("AgentsView credential reload failed: %v", err)
+			} else if !swapped {
+				daemonLog.Printf("AgentsView target or enabled state changed; restart required")
+			}
 			if err := reloadEmbeddingCredentials(dcfg.Search.Embeddings, embedder, embeddingWake); err != nil {
 				daemonLog.Printf("embedding credential reload failed: %v", err)
 			}
@@ -1659,6 +1680,7 @@ func runDaemonProcess(
 	mcpEvents, mcpEventsReason := startDaemonMCPEvents(ctx, workers, dcfg, ns.DBHash, store, broadcaster, daemonLog)
 	srv := daemon.NewServer(daemon.ServerConfig{
 		LocalEmbeddings:           localSetup,
+		AgentsView:                usageService,
 		MCPHandler:                mcpHandler,
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,

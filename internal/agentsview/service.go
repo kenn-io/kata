@@ -177,6 +177,9 @@ func (s *Service) Usage(ctx context.Context, uid string, summary cron.Summary, r
 
 func (g *generation) lookup(ctx context.Context, slots chan struct{}, agent, id string, refresh bool) SessionUsage {
 	unavailable := SessionUsage{State: "unavailable"}
+	if ctx.Err() != nil {
+		return unavailable
+	}
 	key := agent + "\x00" + id
 	if entry, ok := g.cache.Get(key); ok && g.now().Sub(entry.at) < entry.ttl && (!refresh || g.now().Sub(entry.at) <= 10*time.Second) {
 		return entry.fact
@@ -234,7 +237,22 @@ func (s *Service) Probe(ctx context.Context) string {
 	if gen == nil {
 		return "off"
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	return gen.client.Probe(ctx)
+	select {
+	case s.slots <- struct{}{}:
+	case <-ctx.Done():
+		return "unreachable"
+	}
+	defer func() { <-s.slots }()
+	lookup, stop := context.WithTimeout(ctx, 2*time.Second)
+	defer stop()
+	return gen.client.Probe(lookup)
+}
+
+// SameTarget compares only the configuration that cannot change on reload.
+func (s *Service) SameTarget(cfg config.ResolvedAgentsView) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg.URL == cfg.URL && s.cfg.BrowserURL == cfg.BrowserURL && s.cfg.Enabled() == cfg.Enabled()
 }

@@ -1,6 +1,7 @@
 package agentsview
 
 import (
+	"context"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -109,4 +110,50 @@ func TestReloadRetainsTargetAndClearsCacheForCredentialChange(t *testing.T) {
 	_, err = service.Usage(t.Context(), "run", summary, false)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, requests.Load())
+}
+
+func TestCanceledQueueWaitIsNotCached(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { requests.Add(1); w.WriteHeader(http.StatusNotFound) }))
+	t.Cleanup(server.Close)
+	client, err := NewClient(config.ResolvedAgentsView{URL: server.URL}, false)
+	require.NoError(t, err)
+	gen := newGeneration(client)
+	slots := make(chan struct{}, 4)
+	for range 4 {
+		slots <- struct{}{}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.Equal(t, "unavailable", gen.lookup(ctx, slots, "example", "id", false).State)
+	<-slots
+	require.Equal(t, "not_found", gen.lookup(t.Context(), slots, "example", "id", false).State)
+	require.EqualValues(t, 1, requests.Load())
+}
+
+func TestConcurrentIdenticalLookupsShareRequest(t *testing.T) {
+	var requests atomic.Int32
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		entered <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(server.Close)
+	client, err := NewClient(config.ResolvedAgentsView{URL: server.URL}, false)
+	require.NoError(t, err)
+	gen := newGeneration(client)
+	slots := make(chan struct{}, 4)
+	results := make(chan SessionUsage, 2)
+	go func() { results <- gen.lookup(t.Context(), slots, "example", "id", false) }()
+	<-entered
+	go func() { results <- gen.lookup(t.Context(), slots, "example", "id", false) }()
+	// Both callers can observe the same cached result even if scheduling makes
+	// the second arrive after the first lookup has completed.
+	close(release)
+	require.Equal(t, "not_found", (<-results).State)
+	require.Equal(t, "not_found", (<-results).State)
+	require.EqualValues(t, 1, requests.Load())
 }
