@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -291,4 +292,116 @@ func TestAdoptionSameUIDSessionBaselineAndBoundRejoin(t *testing.T) {
 	_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
 	require.NoError(t, err)
 	require.Equal(t, 1, gets)
+}
+
+// D24: omitted enrollment tokens use the saved hub credential without writing it.
+func TestAdoptionPreflightEmptyTokenUsesSavedCredential(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		for _, name := range []string{"supporting hub", "unsupporting hub", "explicit signing", "late rekey retry", "replaced during probe", "removed during probe", "no saved credential", "different origin", "different project", "session-free"} {
+			t.Run(name, func(t *testing.T) {
+				projectUID, err := uid.New()
+				require.NoError(t, err)
+				hubUID, err := uid.New()
+				require.NoError(t, err)
+				project, err := store.CreateProjectWithUID(t.Context(), "spoke-"+projectUID, projectUID)
+				require.NoError(t, err)
+				adoptionRun(t, store, project, name != "session-free")
+				before, err := store.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+				require.NoError(t, err)
+				cursor, err := store.MaxEventID(t.Context())
+				require.NoError(t, err)
+				runs, err := store.ListCronRuns(t.Context(), db.CronRunList{ProjectID: project.ID})
+				require.NoError(t, err)
+				credentials := newReplicaCredentialStore()
+				var calls atomic.Int32
+				var saved, replacement config.FederationCredential
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					calls.Add(1)
+					switch name {
+					case "replaced during probe":
+						credentials.put(hubUID, replacement)
+					case "removed during probe":
+						_ = credentials.DeleteFederationCredential(t.Context(), hubUID)
+					}
+					features := db.SupportedEventFeatures
+					if name == "unsupporting hub" {
+						features = db.CronEventFeature
+					}
+					w.Header().Set(db.EventFeaturesHeader, features)
+					_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, hubUID)
+				}))
+				t.Cleanup(server.Close)
+				params := adoptionParams(project, server.URL)
+				params.HubProjectUID = hubUID
+				saved = params.Credential
+				saved.Signing = &signingpolicy.Source{KeyID: "saved", HubURL: server.URL}
+				if name == "different origin" {
+					saved.HubURL = "http://other.example"
+				}
+				if name == "different project" {
+					saved.HubProjectID++
+				}
+				replacement = saved
+				replacement.Token = "replacement-token"
+				if name != "no saved credential" && name != "session-free" {
+					credentials.put(hubUID, saved)
+				}
+				params.Credential.Token = ""
+				if name == "explicit signing" {
+					params.Credential.Signing = &signingpolicy.Source{KeyID: "requested", HubURL: server.URL}
+				}
+				params.HubClientFactory = func(_ context.Context, c config.FederationCredential) (*http.Client, error) {
+					require.Equal(t, saved, c)
+					return server.Client(), nil
+				}
+				_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
+				success := name == "supporting hub" || name == "explicit signing" || name == "late rekey retry" || name == "session-free"
+				if success {
+					require.NoError(t, err)
+				} else {
+					if name == "unsupporting hub" {
+						require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+					} else {
+						require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict)
+					}
+					if name == "replaced during probe" || name == "removed during probe" {
+						require.Contains(t, err.Error(), "federation credential changed while contacting the hub")
+					}
+					current, e := store.ProjectByID(t.Context(), project.ID)
+					require.NoError(t, e)
+					require.Equal(t, project, current)
+					_, e = store.FederationBindingByProject(t.Context(), project.ID)
+					require.ErrorIs(t, e, db.ErrNotFound)
+					after, e := store.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+					require.NoError(t, e)
+					require.Equal(t, before, after)
+					afterCursor, e := store.MaxEventID(t.Context())
+					require.NoError(t, e)
+					require.Equal(t, cursor, afterCursor)
+					afterRuns, e := store.ListCronRuns(t.Context(), db.CronRunList{ProjectID: project.ID})
+					require.NoError(t, e)
+					require.Equal(t, runs, afterRuns)
+				}
+				if name == "no saved credential" || name == "different origin" || name == "different project" || name == "session-free" {
+					require.Zero(t, calls.Load())
+				} else {
+					require.EqualValues(t, 1, calls.Load())
+				}
+				currentCredential, found, err := credentials.FederationCredential(t.Context(), hubUID)
+				require.NoError(t, err)
+				if name == "no saved credential" || name == "session-free" || name == "removed during probe" {
+					require.False(t, found)
+				} else {
+					require.True(t, found)
+					if name == "replaced during probe" {
+						require.Equal(t, replacement, currentCredential)
+					} else {
+						require.Equal(t, saved, currentCredential)
+					}
+				}
+				require.Zero(t, credentials.storeCalls)
+				require.Zero(t, credentials.rekeyCalls)
+			})
+		}
+	})
 }

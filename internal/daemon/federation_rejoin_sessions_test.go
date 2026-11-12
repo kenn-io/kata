@@ -260,3 +260,88 @@ func TestRejoinCompatibleHubPushesRetainedSessions(t *testing.T) {
 	}
 	require.Positive(t, observations)
 }
+
+// D24: a rejoin may probe and push with the credential saved under its hub UID.
+func TestRejoinEmptyTokenUsesSavedCredential(t *testing.T) {
+	for _, compatible := range []bool{true, false} {
+		t.Run(fmt.Sprint(compatible), func(t *testing.T) {
+			f := newCronForwardFixture(t, nil)
+			_, err := f.spoke.DB.LeaveFederationReplica(t.Context(), f.sp.ID)
+			require.NoError(t, err)
+			adoptionRunAs(t, f.spoke.DB, f.sp, true, f.credential.Actor)
+			before, err := f.spoke.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: f.sp.ID, Limit: 100})
+			require.NoError(t, err)
+			params := rejoinParams(f.sp, f.credential.HubURL)
+			params.HubProjectID = f.hp.ID
+			params.Credential = f.credential
+			params.Credential.Token = ""
+			params.ReplayHorizonEventID = 1
+			credentials := newReplicaCredentialStore()
+			credentials.put(f.sp.UID, f.credential)
+			calls := 0
+			params.HubClientFactory = func(ctx context.Context, c config.FederationCredential) (*http.Client, error) {
+				calls++
+				require.Equal(t, f.credential, c)
+				client, e := federation.CredentialHTTPClient(ctx, c)
+				if e != nil {
+					return nil, e
+				}
+				transport := client.Transport
+				client.Transport = adoptionTransport(func(r *http.Request) (*http.Response, error) {
+					response, e := transport.RoundTrip(r)
+					if e == nil && !compatible {
+						response.Header.Set(db.EventFeaturesHeader, db.CronEventFeature)
+					}
+					return response, e
+				})
+				return client, nil
+			}
+			_, err = daemon.EnsureFederationReplica(t.Context(), f.spoke.DB, credentials, nil, params)
+			if !compatible {
+				require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+				current, e := f.spoke.DB.ProjectByID(t.Context(), f.sp.ID)
+				require.NoError(t, e)
+				require.Equal(t, f.sp, current)
+				_, e = f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)
+				require.ErrorIs(t, e, db.ErrNotFound)
+				after, e := f.spoke.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: f.sp.ID, Limit: 100})
+				require.NoError(t, e)
+				require.Equal(t, before, after)
+			} else {
+				require.NoError(t, err)
+				binding, e := f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)
+				require.NoError(t, e)
+				pending, e := f.spoke.DB.PendingFederationPushEvents(t.Context(), f.sp.ID, f.spoke.DB.InstanceUID(), 0, 100)
+				require.NoError(t, e)
+				require.NotEmpty(t, pending)
+				require.NoError(t, federation.SyncFederationOnce(t.Context(), f.spoke.DB, binding, f.credential))
+				binding, e = f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)
+				require.NoError(t, e)
+				require.GreaterOrEqual(t, binding.PushCursorEventID, pending[len(pending)-1].ID)
+				hubEvents, e := f.hub.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: f.hp.ID, Limit: 100})
+				require.NoError(t, e)
+				remote := make(map[string]string, len(hubEvents))
+				for _, event := range hubEvents {
+					remote[event.UID] = event.Actor
+				}
+				observations := 0
+				for _, event := range pending {
+					if event.Type == "cron.run.observed" {
+						observations++
+						actor, found := remote[event.UID]
+						require.True(t, found)
+						require.Equal(t, event.Actor, actor)
+					}
+				}
+				require.Positive(t, observations)
+			}
+			require.Equal(t, 1, calls)
+			credential, found, err := credentials.FederationCredential(t.Context(), f.sp.UID)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, f.credential, credential)
+			require.Zero(t, credentials.storeCalls)
+			require.Zero(t, credentials.rekeyCalls)
+		})
+	}
+}
