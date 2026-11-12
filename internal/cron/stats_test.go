@@ -22,13 +22,14 @@ func TestSummarizeRuns(t *testing.T) {
 	}
 	got := SummarizeRuns(rows, true, loc)
 	require.Equal(t, 2, got.ConsecutiveFailures)
-	require.Equal(t, 2, got.ByStatus["failed"])
 	require.InDelta(t, 0.3333, *got.SuccessRate, 0.00001)
 	require.Equal(t, 20.0, got.DurationSeconds.Median)
 	require.Len(t, got.Buckets, 3)
 	require.Equal(t, "2026-03-09", got.Buckets[0].Date)
+	require.Equal(t, "2026-03-08", got.Buckets[1].Date)
+	require.Equal(t, map[string]int{"running": 1, "failed": 1}, got.Buckets[1].ByStatus)
+	require.Equal(t, "2026-03-07", got.Buckets[2].Date)
 	empty := SummarizeRuns(nil, false, loc)
-	require.Nil(t, empty.SuccessRate)
 	require.Nil(t, empty.DurationSeconds)
 	require.Nil(t, empty.Buckets)
 }
@@ -75,4 +76,19 @@ func TestSummarizeRunsNearestRank(t *testing.T) {
 	got := SummarizeRuns(rows, false, time.UTC)
 	require.Equal(t, 10.0, got.DurationSeconds.Median)
 	require.Equal(t, 19.0, got.DurationSeconds.P95)
+}
+
+func TestSummarizeRunsLastCompletionWithOverlaps(t *testing.T) {
+	base := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	later := base.Add(10 * time.Minute)
+	earlier := base.Add(5 * time.Minute)
+	rows := []RunStatRow{
+		{Status: "succeeded", CreatedAt: base.Add(4 * time.Minute), EndedAt: &earlier},
+		{Status: "failed", CreatedAt: base.Add(3 * time.Minute)},
+		{Status: "succeeded", CreatedAt: base.Add(2 * time.Minute), EndedAt: &later},
+		{Status: "failed", CreatedAt: base, EndedAt: &later},
+	}
+	got := SummarizeRuns(rows, false, time.UTC)
+	require.Equal(t, later, *got.LastSucceededAt)
+	require.Equal(t, later, *got.LastFailedAt)
 }

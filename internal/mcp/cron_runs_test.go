@@ -148,7 +148,21 @@ func TestCronRunProjectSelectionAndInvalidEvidence(t *testing.T) {
 func TestCronRunStats(t *testing.T) {
 	f := newCronFixture(t)
 	result := cronOK(t, f.session, "cron_run_stats", map[string]any{"bucket": "day", "until": "2026-11-01T00:00:00Z"})
-	require.Nil(t, result["success_rate"])
-	require.Nil(t, result["duration_seconds"])
+	require.Equal(t, []any{}, result["buckets"])
+	require.Equal(t, "2026-11-01T00:00:00Z", result["window"].(map[string]any)["until"])
 	require.True(t, cronCall(t, f.session, "cron_run_stats", map[string]any{"job_uid": "01J00000000000000000000010", "workflow_uid": "01J00000000000000000000020"}).IsError)
+	job := cronTestJob(t, f)
+	args := cronObservation(cronNewUID(t, f.session), job)
+	args["status"] = "succeeded"
+	args["started_at"] = "2026-10-18T12:00:00Z"
+	args["ended_at"] = "2026-10-18T12:01:00Z"
+	cronOK(t, f.session, "cron_run_observe", args)
+	result = cronOK(t, f.session, "cron_run_stats", map[string]any{"job_uid": job["uid"], "bucket": "day"})
+	require.Equal(t, float64(1), result["scanned"])
+	require.Equal(t, float64(1), result["success_rate"])
+	require.Len(t, result["buckets"], 1)
+	require.Equal(t, float64(60), result["duration_seconds"].(map[string]any)["median"])
+	result = cronOK(t, f.session, "cron_run_stats", map[string]any{"job_uid": "01J00000000000000000000010"})
+	require.Equal(t, float64(0), result["scanned"])
+	require.NotContains(t, result, "buckets")
 }

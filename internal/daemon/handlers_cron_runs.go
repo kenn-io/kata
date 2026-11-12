@@ -72,9 +72,6 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		invalid := func(message string) error { return api.NewError(400, "validation", message, "", nil) }
-		if in.JobUID != "" && in.WorkflowUID != "" {
-			return nil, invalid("job_uid and workflow_uid are mutually exclusive")
-		}
 		until := time.Now().UTC()
 		if in.Until != "" {
 			until, err = time.Parse(time.RFC3339, in.Until)
@@ -89,8 +86,8 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 				return nil, invalid("invalid since")
 			}
 		}
-		if !since.Before(until) || until.Sub(since) > 366*24*time.Hour {
-			return nil, invalid("window must be positive and at most 366 days")
+		if until.Sub(since) > 366*24*time.Hour {
+			return nil, invalid("window must be at most 366 days")
 		}
 		if in.Bucket != "" && in.Bucket != "none" && in.Bucket != "day" {
 			return nil, invalid("invalid bucket")

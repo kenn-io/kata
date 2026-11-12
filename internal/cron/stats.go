@@ -65,11 +65,11 @@ func SummarizeRuns(rows []RunStatRow, day bool, loc *time.Location) RunStatistic
 		if r.EndedAt != nil {
 			instant = *r.EndedAt
 		}
-		if r.Status == "succeeded" && out.LastSucceededAt == nil {
+		if r.Status == "succeeded" && (out.LastSucceededAt == nil || instant.After(*out.LastSucceededAt)) {
 			v := instant
 			out.LastSucceededAt = &v
 		}
-		if r.Status == "failed" && out.LastFailedAt == nil {
+		if r.Status == "failed" && (out.LastFailedAt == nil || instant.After(*out.LastFailedAt)) {
 			v := instant
 			out.LastFailedAt = &v
 		}

@@ -635,7 +635,15 @@ func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID in
 	case o.resource == "run" && o.action == "stats":
 		since := o.since
 		if since != "" {
-			instant, err := parseSinceUntil(since, time.Now())
+			anchor := time.Now()
+			if o.until != "" {
+				var err error
+				anchor, err = time.Parse(time.RFC3339, o.until)
+				if err != nil {
+					return nil, cronCLIValidation("invalid until")
+				}
+			}
+			instant, err := parseSinceUntil(since, anchor)
 			if err != nil {
 				return nil, cronCLIValidation(err.Error())
 			}

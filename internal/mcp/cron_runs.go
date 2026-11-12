@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -76,6 +77,9 @@ func (h toolHandlers) cronRunStats(ctx context.Context, _ *sdkmcp.CallToolReques
 	response, err := h.options.Client.GetCronRunStatsWithResponse(ctx, &generated.GetCronRunStatsRequestOptions{PathParams: &generated.GetCronRunStatsPath{ProjectID: p.ID}, Query: &generated.GetCronRunStatsQuery{JobUID: optionalString(in.JobUID), WorkflowUID: optionalString(in.WorkflowUID), Since: optionalString(in.Since), Until: optionalString(in.Until), Bucket: optionalString(in.Bucket), Timezone: optionalString(in.Timezone)}})
 	if err != nil {
 		return nil, CronRunStatsOutput{}, err
+	}
+	if response.StatusCode != 200 {
+		return nil, CronRunStatsOutput{}, fmt.Errorf("cron run stats: HTTP %d: %s", response.StatusCode, response.Body)
 	}
 	var out CronRunStatsOutput
 	if err := json.Unmarshal(response.Body, &out); err != nil {

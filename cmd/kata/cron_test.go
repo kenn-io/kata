@@ -815,9 +815,12 @@ func TestCronRunStatsCLI(t *testing.T) {
 	env := testenv.New(t)
 	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
-	raw, _, err := executeCronCLI(t, env.URL, nil, "run", "stats", "--since", "2d", "--bucket", "day")
+	raw, _, err := executeCronCLI(t, env.URL, nil, "run", "stats", "--since", "2d", "--until", "2026-11-01T00:00:00Z", "--bucket", "day")
 	require.NoError(t, err)
 	var result map[string]any
 	require.NoError(t, json.Unmarshal([]byte(raw), &result))
-	require.Nil(t, result["success_rate"])
+	require.Equal(t, []any{}, result["buckets"])
+	window := result["window"].(map[string]any)
+	require.Equal(t, "2026-10-30T00:00:00Z", window["since"])
+	require.Equal(t, "2026-11-01T00:00:00Z", window["until"])
 }
