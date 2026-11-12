@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process'
+
 import { expect, test, type BrowserCredentials } from './fixtures'
 
 test('local project readers see native sync status with bounded embedding summaries at narrow widths', async ({
@@ -76,10 +78,18 @@ test('local project readers see native sync status with bounded embedding summar
     ['bash', 'Bash/Zsh'],
     ['pwsh', 'PowerShell'],
   ] as const) {
-    await region.getByRole('button', { name: `Copy ${label} sync status command` }).click()
-    const command = await page.evaluate(() => navigator.clipboard.readText())
-    expect(kata.runSyncDiagnostic(shell, command, false)).toContain('example sync failure')
-    expect(kata.runSyncDiagnostic(shell, command, true)).toContain('remote sync failure')
+    await test.step(`Run the ${label} diagnostic`, async (step) => {
+      if (shell === 'pwsh') {
+        const probe = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'])
+        step.skip(probe.error?.code === 'ENOENT', 'PowerShell is not installed')
+        if (probe.error) throw probe.error
+        expect(probe.status).toBe(0)
+      }
+      await region.getByRole('button', { name: `Copy ${label} sync status command` }).click()
+      const command = await page.evaluate(() => navigator.clipboard.readText())
+      expect(kata.runSyncDiagnostic(shell, command, false)).toContain('example sync failure')
+      expect(kata.runSyncDiagnostic(shell, command, true)).toContain('remote sync failure')
+    })
   }
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 1000 })

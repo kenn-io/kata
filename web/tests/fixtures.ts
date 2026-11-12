@@ -234,7 +234,8 @@ listen = "127.0.0.1:${port}"
           encoding: 'utf8',
         },
       )
-      if (result.status !== 0) throw new Error(`${shell} diagnostic failed: ${result.stderr}`)
+      if (result.status !== 0)
+        throw new Error(`${shell} diagnostic failed: ${result.error?.message ?? result.stderr}`)
       return result.stdout
     },
     async launch(page, route = '/kata?view=all-open') {

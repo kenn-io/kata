@@ -122,6 +122,8 @@ make web-e2e
 
 The browser check creates a real session inside its isolated run; it
 does not use an installed daemon or a developer database.
+Install PowerShell (`pwsh`) to run the copied PowerShell diagnostic in the
+project sync browser test. The Bash diagnostic runs without it.
 
 Before release packaging, run:
 
