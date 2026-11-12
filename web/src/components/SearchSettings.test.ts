@@ -219,49 +219,6 @@ describe('SearchSettings', () => {
     }
   })
 
-  test.each([true, false])(
-    'retries a stalled status read during restart, initiated here=%s',
-    async (localRequest) => {
-      vi.useFakeTimers()
-      vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
-        const controller = new AbortController()
-        setTimeout(() => controller.abort(), ms)
-        return controller.signal
-      })
-      const initial = status({
-        can_restart: localRequest,
-        job: { state: localRequest ? 'restart' : 'restarting', downloaded: 1, total: 1 },
-      })
-      setGeneratedFetch(
-        vi
-          .fn<typeof fetch>()
-          .mockResolvedValueOnce(Response.json(initial))
-          .mockImplementationOnce(
-            (_input, init) =>
-              new Promise((_resolve, reject) => {
-                init?.signal?.addEventListener('abort', () => reject(new TypeError('disconnected')))
-              }),
-          )
-          .mockImplementation(async () =>
-            Response.json(status({ provider: 'built_in', can_change: false })),
-          ),
-      )
-      vi.stubGlobal(
-        'confirm',
-        vi.fn(() => true),
-      )
-      renderSettings({
-        postFetch: vi.fn(async () => new Response(null, { status: 202 })),
-        originStable: true,
-      })
-      await settle()
-      if (localRequest)
-        await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
-      await vi.advanceTimersByTimeAsync(16_000)
-      expect(screen.getByText('On', { exact: true })).not.toBeNull()
-    },
-  )
-
   test('keeps remote restart guidance during another client restart and outage', async () => {
     vi.useFakeTimers()
     setGeneratedFetch(
@@ -310,6 +267,11 @@ describe('SearchSettings', () => {
     'shows a helper failure after an interrupted read, local request=%s',
     async (localRequest) => {
       vi.useFakeTimers()
+      vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+        const controller = new AbortController()
+        setTimeout(() => controller.abort(), ms)
+        return controller.signal
+      })
       const pending = status({
         can_restart: localRequest,
         job: { state: localRequest ? 'restart' : 'restarting', downloaded: 1, total: 1 },
@@ -322,7 +284,12 @@ describe('SearchSettings', () => {
         vi
           .fn<typeof fetch>()
           .mockResolvedValueOnce(Response.json(pending))
-          .mockRejectedValueOnce(new TypeError('disconnected'))
+          .mockImplementationOnce(
+            (_input, init) =>
+              new Promise((_resolve, reject) => {
+                init?.signal?.addEventListener('abort', () => reject(new TypeError('disconnected')))
+              }),
+          )
           .mockResolvedValue(Response.json(failed)),
       )
       vi.stubGlobal(
@@ -335,7 +302,7 @@ describe('SearchSettings', () => {
         await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
       expect(screen.getByText('Restarting...', { exact: true })).not.toBeNull()
       expect(screen.queryByText(/run kata daemon restart/)).toBeNull()
-      await vi.advanceTimersByTimeAsync(4000)
+      await vi.advanceTimersByTimeAsync(16_000)
       expect(screen.getByRole('alert').textContent).toContain('Restart failed')
       expect(screen.getByRole('button', { name: 'Restart daemon' })).not.toBeNull()
     },
