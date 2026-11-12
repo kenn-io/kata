@@ -7,6 +7,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIndexFederatedMoveEvents(t *testing.T) {
+	events := []FoldEvent{
+		{UID: "latest-b", IssueUID: "a", Type: "issue.moved", HLCPhysicalMS: 10, HLCCounter: 1, OriginInstanceUID: "b"},
+		{UID: "later-edit", IssueUID: "a", Type: "issue.updated", HLCPhysicalMS: 20},
+		{UID: "older", IssueUID: "a", Type: "issue.moved", HLCPhysicalMS: 9},
+		{UID: "latest-a", IssueUID: "a", Type: "issue.moved", HLCPhysicalMS: 10, HLCCounter: 1, OriginInstanceUID: "a"},
+		{UID: "second-issue", IssueUID: "b", Type: "issue.moved", HLCPhysicalMS: 2},
+	}
+	winners := IndexFederatedMoveEvents(events)
+	require.Len(t, winners, 2)
+	require.Equal(t, "latest-b", winners["a"].UID)
+	require.Equal(t, "second-issue", winners["b"].UID)
+}
+
 func TestFederationMoveBaselineUsesLatestApplicableSourceSnapshot(t *testing.T) {
 	events := []FoldEvent{
 		{UID: "creation", ProjectUID: "source", IssueUID: "issue", Type: "issue.created", HLCPhysicalMS: 1, Payload: jsontext.Value(`{"uid":"issue","author":"original-author","title":"original title"}`)},

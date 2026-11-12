@@ -174,13 +174,16 @@ func TestFullPulledMaterializationRetriesChanges(t *testing.T) {
 			initial, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 			require.NoError(t, err)
 			require.Equal(t, "work", initial.Title)
+			other, err := Open(ctx, d.Path())
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, other.Close()) })
 			attempts := 0
 			d.federationIngestPrepared = func() {
 				attempts++
 				if attempts != 1 {
 					return
 				}
-				require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+				require.NoError(t, other.MaterializeFederatedProject(ctx, p.ID))
 				current, err := d.ProjectByID(ctx, p.ID)
 				require.NoError(t, err)
 				require.JSONEq(t, `{"area":"docs"}`, string(current.Metadata))
@@ -253,11 +256,14 @@ func TestFullPulledMaterializationRetriesChanges(t *testing.T) {
 			require.NoError(t, err)
 			_, err = d.ExecContext(ctx, `INSERT INTO federation_event_provenance(project_uid,event_uid,content_hash,reset_epoch,sequence,key_id,receipt) VALUES(?,?,?,?,?,?,?)`, p.UID, linkEvent.EventUID, linkEvent.ContentHash, 1, 1, "key", `{"ingress_instance_uid":"remote"}`)
 			require.NoError(t, err)
+			other, err := Open(ctx, d.Path())
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, other.Close()) })
 			attempts := 0
 			d.federationIngestPrepared = func() {
 				attempts++
 				if attempts == 1 {
-					require.NoError(t, d.MaterializeFederatedProject(ctx, sibling.ID))
+					require.NoError(t, other.MaterializeFederatedProject(ctx, sibling.ID))
 				}
 			}
 			require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{projectEvent.EventUID, linkEvent.EventUID}))

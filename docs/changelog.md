@@ -35,6 +35,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Keep search focus and text when keyboard selection opens task detail.
 - Keep local writes responsive while a federation pull updates projects with long histories.
+- Keep local writes responsive while moved issues and claim changes trigger a federation rebuild.
 - See why Docbank attachments fail when the daemon cannot read its own key.
   With daemon API 0.44.0 or newer, uploads, reads, and links return HTTP 503
   `docbank_key_unavailable` with the reason, such as
