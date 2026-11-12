@@ -71,7 +71,7 @@
     const abort = (listAbort = new AbortController())
     loading = true
     try {
-      const response = await listTeams({ signal: abort.signal })
+      const response = await listTeams({ signal: abort.signal, retry: true })
       if (abort.signal.aborted || lifetime.signal.aborted) return
       if (response.status !== 200) throw new Error()
       teams = response.data.teams
@@ -183,6 +183,8 @@
         deleteTeam({ teamUid: uid }, { headers: context.headers, signal: lifetime.signal }),
       )
     ) {
+      teams = teams.filter((team) => team.uid !== uid)
+      if (teamUID === uid) teamUID = ''
       await refresh()
       if (selectedProjectID && projectID === selectedProjectID) await loadPolicy(selectedProjectID)
     }
@@ -235,7 +237,7 @@
           <button
             type="button"
             aria-label={`Remove ${account}`}
-            disabled={disabled || teamLoading}
+            disabled={disabled || teamLoading || loading}
             onclick={() => void changeMember(account, false)}>Remove</button
           >
         </li>{/each}
@@ -250,13 +252,17 @@
         >Member account <input
           bind:value={member}
           required
-          disabled={disabled || teamLoading}
+          disabled={disabled || teamLoading || loading}
         /></label
       >
-      <button type="submit" disabled={disabled || teamLoading || !member.trim()}>Add member</button>
+      <button type="submit" disabled={disabled || teamLoading || loading || !member.trim()}
+        >Add member</button
+      >
     </form>
-    <button type="button" disabled={disabled || teamLoading} onclick={() => void removeTeam()}
-      >Delete team</button
+    <button
+      type="button"
+      disabled={disabled || teamLoading || loading}
+      onclick={() => void removeTeam()}>Delete team</button
     >
   {/if}
   <label for={`${controlID}-project`}>Project visibility</label>

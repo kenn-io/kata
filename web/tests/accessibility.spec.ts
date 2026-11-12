@@ -43,38 +43,37 @@ test('standalone issue table retains its own vertical scroll plane', async ({ pa
   await expect.poll(() => tableBody.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
 })
 
-test('desktop and responsive detail remain focused, contrasted, and axe-clean', async ({
-  page,
-  kata,
-}) => {
-  const credentials = await kata.launch(page)
-  const issue = await kata.seedIssue(page, credentials, {
-    title: 'Accessible example task',
-    body: 'Accessible content',
+// Give each full-page audit its own test deadline.
+for (const view of ['desktop detail', 'desktop editor', 'responsive editor']) {
+  test(`${view} stays axe-clean`, async ({ page, kata }) => {
+    const credentials = await kata.launch(page)
+    const issue = await kata.seedIssue(page, credentials, {
+      title: 'Accessible example task',
+      body: 'Accessible content',
+    })
+    await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
+
+    await expect(page.getByRole('button', { name: 'Switch daemon' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Open workspace' })).toHaveCount(0)
+    await expect(page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0)
+    await expect(page.getByRole('region', { name: 'Kata issue detail' })).toBeVisible()
+
+    if (view !== 'desktop detail') {
+      await page.getByRole('button', { name: 'Edit issue' }).click()
+      await page.getByRole('button', { name: 'Edit title' }).click()
+      await expect(page.getByRole('textbox', { name: 'Edit title' })).toBeFocused()
+      await page.getByRole('textbox', { name: 'Edit title' }).press('Escape')
+    }
+
+    if (view === 'responsive editor') {
+      await page.setViewportSize({ width: 390, height: 844 })
+      await expect(page.getByRole('region', { name: 'Task detail' })).toBeVisible()
+    }
+
+    const results = await new AxeBuilder({ page }).analyze()
+    expect(results.violations).toEqual([])
   })
-  await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-
-  await expect(page.getByRole('button', { name: 'Switch daemon' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Open workspace' })).toHaveCount(0)
-  await expect(page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0)
-  await expect(page.getByRole('region', { name: 'Kata issue detail' })).toBeVisible()
-
-  let results = await new AxeBuilder({ page }).analyze()
-  expect(results.violations).toEqual([])
-
-  await page.getByRole('button', { name: 'Edit issue' }).click()
-  await page.getByRole('button', { name: 'Edit title' }).click()
-  await expect(page.getByRole('textbox', { name: 'Edit title' })).toBeFocused()
-  await page.getByRole('textbox', { name: 'Edit title' }).press('Escape')
-
-  results = await new AxeBuilder({ page }).analyze()
-  expect(results.violations).toEqual([])
-
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect(page.getByRole('region', { name: 'Task detail' })).toBeVisible()
-  results = await new AxeBuilder({ page }).analyze()
-  expect(results.violations).toEqual([])
-})
+}
 
 test('dark read-only detail actions keep a dark Kit UI surface', async ({ page, kata }) => {
   await page.emulateMedia({ colorScheme: 'dark' })

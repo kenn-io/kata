@@ -11,6 +11,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Record the agent sessions used by a cron run and view them in run details. Session data follows the run through federation and backups.
 
+- Recover automatically when the web UI's first daemon roster, workspace, or teams read fails briefly. Retry and Refresh teams remain available after persistent failures or refusals.
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 
 - Upgrade a large PostgreSQL database without the schema migration rolling
