@@ -177,7 +177,7 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
       generation,
       loading: false,
       stale: this.state.snapshot !== undefined,
-      error: 'Snapshot unavailable',
+      error: "Couldn't load workspace",
       canMutate: false,
       authenticationRequired: false,
     })

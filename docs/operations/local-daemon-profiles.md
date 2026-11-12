@@ -93,8 +93,9 @@ unverified assertion as `ready`.
 Diagnosis, status, health, and locate never start the selected daemon.
 `daemon status` lists current-home processes and reports `selected` separately.
 Use that selected state to distinguish a healthy personal process from a
-stopped work profile. Diagnose returns the state even when it is not ready;
-failed recovery, health, and locate return an error.
+stopped work profile. Diagnose returns the state even when it is not ready.
+A non-ready `daemon status`, failed recovery, health, and locate return an
+error. See the [CLI reference](../reference/cli.md) for exit codes.
 
 If routing configuration is invalid, diagnose reports `state=selection_error`
 and a `message` explaining the failure. Status still lists current-home processes

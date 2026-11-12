@@ -419,7 +419,6 @@ func (d *Store) ExportAttribution(ctx context.Context, filter db.ExportFilter) i
 				yield(nil, err)
 				return
 			}
-			keep := true
 			for rows.Next() {
 				var record db.ImportRecord
 				switch kind {
@@ -449,17 +448,14 @@ func (d *Store) ExportAttribution(ctx context.Context, filter db.ExportFilter) i
 					record = &ref
 				}
 				if !yield(record, nil) {
-					keep = false
-					break
+					_ = rows.Close()
+					return
 				}
 			}
 			err = rows.Err()
 			_ = rows.Close()
 			if err != nil {
 				yield(nil, fmt.Errorf("export root provenance: %w", err))
-				return
-			}
-			if !keep {
 				return
 			}
 		}

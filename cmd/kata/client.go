@@ -136,10 +136,7 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 	})
 	if err != nil || !found {
 		if resolved.LocalProfile != nil {
-			diagnosis, _, diagnoseErr := diagnoseDaemon(ctx, "")
-			if diagnoseErr != nil {
-				return resolved, diagnoseErr
-			}
+			diagnosis, _, _ := diagnoseDaemon(ctx, "")
 			return resolved, diagnosisError(diagnosis)
 		}
 		if err != nil {

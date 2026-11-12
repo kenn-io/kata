@@ -40,7 +40,7 @@ func TestTypedReplyFormCapturesTarget(t *testing.T) {
 	m.input.fields[0].area.SetValue("Too short")
 	m, cmd := m.commitFormInput(inputCommentForm)
 	require.Nil(t, cmd)
-	require.Contains(t, m.input.err, "40")
+	require.Contains(t, m.input.err, "Confirm and refute replies need at least 40 characters of evidence")
 }
 
 func forcedReplyDraft(t *testing.T, body string) Model {
@@ -132,6 +132,7 @@ func TestIncomingRelationSummaryAndEvidencePicker(t *testing.T) {
 		{UID: "replacement-two", IssueUID: "other", Handle: "bbbb:444444", Kind: "supersede"},
 	}}
 	rendered := stripANSI(renderCommentsTab([]CommentEntry{c}, 80, 40, 0, tabState{}))
+	require.Contains(t, rendered, "Open the reply to read its text")
 	for _, label := range []string{"Confirmations 1", "Refutations 1", "Superseding replies 2", "worker-a / reviewer", "Original finding"} {
 		require.Contains(t, rendered, label)
 	}

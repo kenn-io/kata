@@ -49,6 +49,7 @@ import (
 	kataweb "go.kenn.io/kata/internal/web"
 	kataclient "go.kenn.io/kata/pkg/client"
 	kitdaemon "go.kenn.io/kit/daemon"
+	"go.kenn.io/kit/embedlocal"
 	"go.kenn.io/kit/safefileio"
 	kitvec "go.kenn.io/kit/vector"
 )
@@ -682,17 +683,19 @@ func daemonStatusCmd() *cobra.Command {
 			}
 			out := daemonStatusOutput{Daemons: make([]daemonStatusEntry, 0, len(recs))}
 			selected, _, err := diagnoseDaemon(cmd.Context(), "")
-			if err != nil {
-				// Current-home inventory remains useful when workspace routing is
-				// invalid. This partial result never substitutes a selected target.
-				selected = selectionErrorDiagnosis(err)
-			}
 			out.Selected = &selected
+			var statusErr error
+			if err != nil {
+				statusErr = cliDaemonTargetError(err)
+			} else if selected.State != "ready" {
+				statusErr = diagnosisError(selected)
+			}
 			for _, r := range recs {
 				// Match discovery, which can select a record controls skip.
 				if daemonruntime.RuntimeRecordWorthProbing(r) {
 					out.Daemons = append(out.Daemons, daemonStatusEntry{
 						PID:           r.PID,
+						AutoStarted:   r.Metadata[daemonruntime.RuntimeAutoStartKey] == "1",
 						Version:       daemonRuntimeVersion(r),
 						Address:       r.Endpoint().ConfigAddress(),
 						WebURL:        r.Metadata["web_origin"],
@@ -716,6 +719,9 @@ func daemonStatusCmd() *cobra.Command {
 				if len(out.Daemons) == 1 && out.Daemons[0].MCP != "" {
 					daemonFields += " mcp=" + out.Daemons[0].MCP
 				}
+				if len(out.Daemons) == 1 && out.Daemons[0].AutoStarted {
+					daemonFields += " auto_started=true"
+				}
 				message := ""
 				if selected.Message != "" {
 					message = " message=" + agentValue(selected.Message)
@@ -723,10 +729,15 @@ func daemonStatusCmd() *cobra.Command {
 				if selected.RootSigning != nil {
 					message += " root_signing=unavailable"
 				}
-				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK daemon status=%s%s selected_state=%s selected_profile=%s%s\n", status, daemonFields, selected.State, agentValue(selected.Profile), message)
-				return err
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK daemon status=%s%s selected_state=%s selected_profile=%s%s\n", status, daemonFields, selected.State, agentValue(selected.Profile), message); err != nil {
+					return err
+				}
+				return statusErr
 			case outputJSON:
-				return emitJSON(cmd.OutOrStdout(), out)
+				if err := emitJSON(cmd.OutOrStdout(), out); err != nil {
+					return err
+				}
+				return statusErr
 			}
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Selected daemon: %s (source: %s)\n", selected.State, selected.Source); err != nil {
 				return err
@@ -743,7 +754,7 @@ func daemonStatusCmd() *cobra.Command {
 			}
 			if len(out.Daemons) == 0 {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No kata daemon is running in the current KATA_HOME.")
-				return nil
+				return statusErr
 			}
 			for _, d := range out.Daemons {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "kata running at %s\n", daemonStatusAddress(d.Address))
@@ -754,13 +765,16 @@ func daemonStatusCmd() *cobra.Command {
 					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  MCP:     %s\n", d.MCP)
 				}
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  pid:     %d\n", d.PID)
+				if d.AutoStarted {
+					_, _ = fmt.Fprintln(cmd.OutOrStdout(), "  started: automatically by a kata command")
+				}
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  version: %s\n", d.Version)
 				if !d.StartedAt.IsZero() {
 					uptime := time.Since(d.StartedAt).Round(time.Second)
 					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  uptime:  %s\n", uptime)
 				}
 			}
-			return nil
+			return statusErr
 		},
 	}
 }
@@ -786,6 +800,7 @@ type daemonStatusEntry struct {
 	StartedAt     time.Time         `json:"started_at"`
 	MCP           string            `json:"mcp,omitempty"` // "serving" or "unavailable" when [mcp] is enabled
 	ConfigSources map[string]string `json:"config_sources,omitempty"`
+	AutoStarted   bool              `json:"auto_started,omitzero"`
 }
 
 func runtimeConfigSources(metadata map[string]string) map[string]string {
@@ -1538,6 +1553,9 @@ func runDaemonProcess(
 	rec := kitdaemon.NewRuntimeRecord("kata", version.Version, runtimeEndpoint)
 	rec.Address = runtimeEndpoint.ConfigAddress()
 	rec.Metadata = map[string]string{"db_path": redactRuntimeDSN(dbPath)}
+	if os.Getenv(daemonruntime.AutoStartMarkerEnv) == "1" {
+		rec.Metadata[daemonruntime.RuntimeAutoStartKey] = "1"
+	}
 	for key, source := range dcfg.Sources {
 		rec.Metadata["config_"+key+"_source"] = source
 	}
@@ -2188,6 +2206,25 @@ func preflightEmbeddingStartup(
 	if !ec.Enabled() {
 		return nil, "", nil
 	}
+	cfg := embeddingClientConfig(ec)
+	embedder, err := embedding.New(cfg)
+	if err != nil {
+		return nil, "", fmt.Errorf("embedding client: %w", err)
+	}
+	batchOptions := embeddingBatchOptions(ec, embedder.BatchSize())
+	if _, err := kitvec.EncodeBatched(
+		context.Background(), embedder.EncodeFunc(), nil, batchOptions...,
+	); err != nil {
+		return nil, "", fmt.Errorf("embedding batching: %w", err)
+	}
+	vectorsPath, err := vectorsPathForDSN(dbPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("embedding index: %w", err)
+	}
+	return embedder, vectorsPath, nil
+}
+
+func embeddingClientConfig(ec config.EmbeddingsConfig) embedding.Config {
 	cfg := embedding.Config{
 		BaseURL:             ec.BaseURL,
 		Model:               ec.Model,
@@ -2204,27 +2241,19 @@ func preflightEmbeddingStartup(
 		TrustPrivateNetwork: ec.TrustPrivateNetwork,
 	}
 	if ec.UsesLocal() {
+		if cfg.BatchSize == 0 {
+			cfg.BatchSize = embedlocal.BatchItems
+		}
+		if cfg.Timeout == 0 {
+			cfg.Timeout = embedlocal.RequestTimeout
+		}
 		cfg.Endpoint = func(ctx context.Context) (string, error) {
 			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
 				return false, errors.New("run kata daemon local-embeddings to approve the download")
 			})
 		}
 	}
-	embedder, err := embedding.New(cfg)
-	if err != nil {
-		return nil, "", fmt.Errorf("embedding client: %w", err)
-	}
-	batchOptions := embeddingBatchOptions(ec, embedder.BatchSize())
-	if _, err := kitvec.EncodeBatched(
-		context.Background(), embedder.EncodeFunc(), nil, batchOptions...,
-	); err != nil {
-		return nil, "", fmt.Errorf("embedding batching: %w", err)
-	}
-	vectorsPath, err := vectorsPathForDSN(dbPath)
-	if err != nil {
-		return nil, "", fmt.Errorf("embedding index: %w", err)
-	}
-	return embedder, vectorsPath, nil
+	return cfg
 }
 
 func embeddingBatchOptions(ec config.EmbeddingsConfig, batchSize int) []kitvec.BatchOption {

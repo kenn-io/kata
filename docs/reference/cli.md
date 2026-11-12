@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-09
+last_edited: 2026-11-11
 ---
 
 # CLI reference
@@ -2002,8 +2002,22 @@ resolved web UI URL on its own line after the daemon transport address.
 `daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
 `KATA_HOME` and reject `--daemon`. Set the home explicitly for those operations.
 `daemon status` reports current-home processes and a separate selected-daemon
-diagnosis. `daemon diagnose` inspects selection, home, database/project identity,
-schema, process, and federation origin without starting or changing anything.
+diagnosis. For a process automatically started by a Kata command, human output
+shows `started: automatically by a kata command` and JSON includes
+`auto_started: true`. This includes a registered local profile started by
+`daemon recover` or by a command that routes to it. An omitted JSON field means
+the startup origin is unknown.
+Agent output includes `auto_started=true` when there is exactly one process and
+it was automatically started; it omits the field when multiple processes are
+listed. An existing process's startup marker survives an in-place restart or
+re-exec. The command exits 0 only when the selected daemon is ready. Stopped or
+unavailable selections and the `version_mismatch` state exit 7; an unknown
+named daemon exits 3. Diagnostics are printed in every output mode.
+In agent mode, the `OK daemon` report on stdout indicates that the report was
+produced; a non-ready selection also emits an `ERR status` line on stderr.
+`daemon diagnose` inspects selection, home,
+database/project identity, schema, process, and federation origin without
+starting or changing anything.
 `daemon recover` starts only a registered existing local profile, verifies its
 pinned database UID, and optionally checks `--expect-project-uid` before and
 after startup. It never initializes storage or projects or changes routing. See
