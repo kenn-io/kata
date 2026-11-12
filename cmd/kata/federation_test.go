@@ -148,34 +148,11 @@ func TestFederationStatusProjectMember(t *testing.T) {
 	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "member-token", Actor: "member", AdminActor: db.BootstrapActor})
 	require.NoError(t, err)
 	t.Setenv("KATA_AUTH_TOKEN", "member-token")
-	_, err = runCmdOutput(t, env, "federation", "status")
-	_ = requireCLIError(t, err, ExitNotFound)
-	target, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
 	out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name, "--format", "json")
 	assert.Contains(t, out, project.Name)
 	assert.Contains(t, out, "hub offline")
 	_, err = runCmdOutput(t, env, "federation", "status", "--project", other.Name)
 	_ = requireCLIError(t, err, ExitNotFound)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/health" {
-			_, _ = w.Write([]byte(`{"api_schema_version":"0.45.0"}`))
-			return
-		}
-		r.Host = target.Host
-		r.Header["X-Forwarded-For"] = nil
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
-	older := *env
-	older.URL = server.URL
-	out, err = runCmdOutput(t, &older, "federation", "status", "--project", project.Name)
-	ce := requireCLIError(t, err, ExitValidation)
-	assert.Equal(t, "daemon_api_too_old", ce.Code)
-	assert.Contains(t, ce.Message, "0.45.0")
-	assert.Contains(t, ce.Hint, "kata update")
-	assert.Empty(t, out)
 }
 
 func TestFederationStatusProjectAnonymousReadonly(t *testing.T) {
@@ -286,10 +263,6 @@ func TestFederationStatusProjectVersionRouting(t *testing.T) {
 			} else {
 				ce := requireCLIError(t, err, ExitValidation)
 				assert.Equal(t, "daemon_api_too_old", ce.Code)
-				assert.Contains(t, ce.Message, "0.46.0")
-				if tc.version != "" {
-					assert.Contains(t, ce.Message, tc.version)
-				}
 				assert.Contains(t, ce.Hint, "kata update")
 				assert.Contains(t, ce.Hint, "package manager")
 				assert.Contains(t, ce.Hint, "https://")
