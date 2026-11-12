@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	stdjson "encoding/json"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -388,7 +388,7 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector, max
 func packMoveBatchPages(request *generated.MoveIssuesBody, indexes []int, results []api.MoveIssuesResult) ([]generated.MoveIssuesBody, []int, error) {
 	base := *request
 	base.Items = []generated.MoveIssuesItem{}
-	raw, err := stdjson.Marshal(base)
+	raw, err := json.Marshal(base, jsontext.AllowInvalidUTF8(true), jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -397,11 +397,11 @@ func packMoveBatchPages(request *generated.MoveIssuesBody, indexes []int, result
 		return nil, nil, moveBatchUsage("batch move exceeds the 1 MiB request limit; split the input into separate runs")
 	}
 	var pages []generated.MoveIssuesBody
-	keptIndexes := indexes[:0]
+	keptIndexes := make([]int, 0, len(indexes))
 	page := base
 	size := baseSize
 	for i, item := range request.Items {
-		raw, err = stdjson.Marshal(item)
+		raw, err = json.Marshal(item, jsontext.AllowInvalidUTF8(true), jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
 		if err != nil {
 			return nil, nil, err
 		}
