@@ -233,7 +233,12 @@ func TestCronRunStatsWindow(t *testing.T) {
 type truncatedStatsStore struct{ db.Storage }
 
 func (s truncatedStatsStore) CronRunStats(_ context.Context, _ db.CronRunStatsQuery) ([]cron.RunStatRow, bool, error) {
-	return []cron.RunStatRow{{Status: "failed", CreatedAt: time.Date(2026, 11, 1, 1, 0, 0, 0, time.UTC)}}, true, nil
+	newest := time.Date(2026, 11, 1, 1, 0, 0, 0, time.UTC)
+	rows := make([]cron.RunStatRow, cron.RunStatsScanLimit)
+	for i := range rows {
+		rows[i] = cron.RunStatRow{Status: "failed", CreatedAt: newest.Add(-time.Duration(i) * time.Second)}
+	}
+	return rows, true, nil
 }
 func TestCronRunStatsEffectiveSinceAndTimezone(t *testing.T) {
 	env := testenv.New(t)
@@ -248,6 +253,7 @@ func TestCronRunStatsEffectiveSinceAndTimezone(t *testing.T) {
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(raw, &result))
 	require.Equal(t, true, result["truncated"])
-	require.Equal(t, "2026-11-01T01:00:00Z", result["window"].(map[string]any)["since"])
+	require.Equal(t, float64(cron.RunStatsScanLimit), result["scanned"])
+	require.Equal(t, "2026-10-31T22:13:21Z", result["window"].(map[string]any)["since"])
 	require.Equal(t, "2026-10-31", result["buckets"].([]any)[0].(map[string]any)["date"])
 }
