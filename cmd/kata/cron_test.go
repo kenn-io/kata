@@ -842,14 +842,21 @@ func TestCronRunStatsCLI(t *testing.T) {
 
 func TestCronRunStatsRequiresAPIVersion(t *testing.T) {
 	var statsCalls atomic.Int32
+	var healthCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/health":
+			healthCalls.Add(1)
 			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.46.0"}`))
-		case "/api/v1/projects/resolve":
+		case "/api/v1/projects":
+			_, _ = w.Write([]byte(`{"projects":[{"id":1,"name":"example-project","uid":"01HAAAAAAAAAAAAAAAAAAAAAAA"}]}`))
+		case "/api/v1/projects/1":
 			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project","uid":"01HAAAAAAAAAAAAAAAAAAAAAAA"}}`))
-		default:
+		case "/api/v1/projects/1/cron/runs/stats":
 			statsCalls.Add(1)
+			http.NotFound(w, r)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
 			http.NotFound(w, r)
 		}
 	}))
@@ -858,5 +865,6 @@ func TestCronRunStatsRequiresAPIVersion(t *testing.T) {
 	var cliErr *cliError
 	require.ErrorAs(t, err, &cliErr)
 	require.Equal(t, "daemon_api_too_old", cliErr.Code)
+	require.EqualValues(t, 1, healthCalls.Load())
 	require.Zero(t, statsCalls.Load())
 }
