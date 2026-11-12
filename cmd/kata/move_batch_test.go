@@ -792,7 +792,9 @@ func TestMoveBatchCLI_LongMutationAndCancellation(t *testing.T) {
 					return
 				}
 				if cancelRequest {
+					_, _ = io.Copy(io.Discard, r.Body)
 					cancel()
+					<-r.Context().Done()
 					return
 				}
 				//nolint:kennlint // sleeptest: Exercise a healthy mutation beyond the normal HTTP client deadline.
@@ -839,7 +841,7 @@ func TestMoveBatchCLI_RejectsUnknownResult(t *testing.T) {
 }
 
 func TestMoveBatchCLI_PreservesResultsOnError(t *testing.T) {
-	for _, mode := range []string{"decode", "continuation", "transport"} {
+	for _, mode := range []string{"malformed response", "continuation", "transport"} {
 		t.Run(mode, func(t *testing.T) {
 			env, dir, source, target, issue := setupMoveCLIProjects(t)
 			issues := []db.Issue{issue}
@@ -876,7 +878,7 @@ func TestMoveBatchCLI_PreservesResultsOnError(t *testing.T) {
 					return
 				}
 				switch mode {
-				case "decode":
+				case "malformed response":
 					_, err := io.WriteString(w, "{")
 					require.NoError(t, err)
 				case "continuation":
@@ -1244,18 +1246,17 @@ func TestMoveBatchCLI_PreviewUID(t *testing.T) {
 		require.Equal(t, "daemon_api_too_old", cliErr.Code)
 		require.Zero(t, lookups.Load())
 	})
-}
-
-func TestMoveBatchCLI_PreviewAlreadyInTarget(t *testing.T) {
-	env, dir, source, _, issue := setupMoveCLIProjects(t)
-	ref := source.Name + "#" + issue.ShortID
-	_, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, ref+"\n", "--workspace", dir, "move", source.Name, "--refs-from", "-", "--dry", "--json")
-	var cliErr *cliError
-	require.ErrorAs(t, err, &cliErr)
-	require.Equal(t, "same_project", cliErr.Code)
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, ref+"\n", "--workspace", dir, "move", source.Name, "--refs-from", "-", "--json")
-	require.NoError(t, err)
-	require.Contains(t, out, issue.UID)
-	require.Contains(t, out, `"result":"unchanged"`)
-	require.Contains(t, out, `"ref":"`+ref+`"`)
+	t.Run("already in target", func(t *testing.T) {
+		env, dir, source, _, issue := setupMoveCLIProjects(t)
+		ref := source.Name + "#" + issue.ShortID
+		_, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, ref+"\n", "--workspace", dir, "move", source.Name, "--refs-from", "-", "--dry", "--json")
+		var cliErr *cliError
+		require.ErrorAs(t, err, &cliErr)
+		require.Equal(t, "same_project", cliErr.Code)
+		out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, ref+"\n", "--workspace", dir, "move", source.Name, "--refs-from", "-", "--json")
+		require.NoError(t, err)
+		require.Contains(t, out, issue.UID)
+		require.Contains(t, out, `"result":"unchanged"`)
+		require.Contains(t, out, `"ref":"`+ref+`"`)
+	})
 }

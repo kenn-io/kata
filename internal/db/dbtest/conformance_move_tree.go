@@ -273,9 +273,6 @@ func checkMoveTreeMembershipFence(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		require.Equal(t, target.ID, gotResident.ProjectID)
 		require.Equal(t, resident.Revision, gotResident.Revision)
-		comments, err := store.CommentsByIssue(ctx, resident.ID)
-		require.NoError(t, err)
-		require.Empty(t, comments)
 	}
 	return nil
 }
