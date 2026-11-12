@@ -47,7 +47,7 @@ test('local project readers see native sync status with bounded embedding summar
   expect(browserBody).not.toContain('example sync failure')
   expect(browserBody).not.toContain('example held-back batch failure')
   await expect(region.getByText('Sync needs attention')).toBeVisible()
-  await expect(region.getByText('hub', { exact: true })).toBeVisible()
+  await expect(region.getByText('Sync disabled', { exact: true })).toBeVisible()
   await expect(region.getByText('Embeddings: unconfigured')).toBeVisible()
 
   // This response fixture covers browser rendering; native artifact reuse,

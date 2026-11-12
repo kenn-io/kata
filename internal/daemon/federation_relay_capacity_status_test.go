@@ -146,7 +146,7 @@ func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 	require.Equal(t, 2, wrapped.count(relayed.ID))
 	require.Positive(t, full.RelayCheckpointBytes)
 	require.EqualValues(t, db.RelayCheckpointCapacityBytes, full.RelayCheckpointCapacity)
-	compact, compactRaw := readProject(relayed.ID, "?compact=true")
+	compact, _ := readProject(relayed.ID, "?compact=true")
 	require.Equal(t, 2, wrapped.count(relayed.ID), "compact status must skip checkpoint measurement")
 	full.RelayCheckpointBytes = 0
 	full.RelayCheckpointCapacity = 0
@@ -154,8 +154,6 @@ func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 	require.Len(t, full.ActiveQuarantines, 1)
 	require.Equal(t, "example held-back batch failure", full.ActiveQuarantines[0].Error)
 	t.Run("compact keeps diagnostic details", func(t *testing.T) {
-		require.Contains(t, string(compactRaw), "example sync failure")
-		require.Contains(t, string(compactRaw), "example held-back batch failure")
 		require.Equal(t, full, compact)
 	})
 	t.Run("browser omits diagnostic details", func(t *testing.T) {

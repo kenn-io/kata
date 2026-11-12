@@ -210,6 +210,12 @@ listen = "127.0.0.1:${port}"
     recordSyncDiagnosticError() {
       const database = new DatabaseSync(join(home, 'kata.db'))
       try {
+        // A spoke awaiting leave can retain its last error while transport is disabled.
+        database
+          .prepare(
+            `UPDATE federation_bindings SET role='spoke', enabled=0, hub_url='http://127.0.0.1:9', hub_project_id=42, bound_actor='example-owner' WHERE project_id=?`,
+          )
+          .run(project.id)
         database
           .prepare(
             `INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
