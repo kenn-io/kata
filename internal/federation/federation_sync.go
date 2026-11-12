@@ -1076,6 +1076,16 @@ type Runner struct {
 	// refusalClock reads the time that schedules relay refusal retries. Nil
 	// means time.Now.
 	refusalClock func() time.Time
+	// debounceTimer starts the wait between a wake and the pass it causes. Nil
+	// means a real timer.
+	debounceTimer func(time.Duration) Timer
+}
+
+func (r *Runner) newDebounceTimer(delay time.Duration) Timer {
+	if r.debounceTimer != nil {
+		return r.debounceTimer(delay)
+	}
+	return wallTimer{timer: time.NewTimer(delay)}
 }
 
 func (r *Runner) refusalNow() time.Time {
@@ -1632,12 +1642,12 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 			return ctx.Err()
 		case <-ticker.C:
 		case <-r.Wake:
-			timer := time.NewTimer(debounce)
+			timer := r.newDebounceTimer(debounce)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
 				return ctx.Err()
-			case <-timer.C:
+			case <-timer.C():
 			}
 		}
 	}
