@@ -63,8 +63,8 @@ is optional on the ordinary daemon listeners.
    listen = "127.0.0.1:7780"
    ```
 
-5. Start the hub normally. Requests that reach signature verification initially
-   receive `503` for at least 96 seconds, and until wall time has passed the
+5. Start the hub normally. Signed requests initially receive `503` for at least
+   96 seconds, and until wall time has passed the
    persisted maximum admitted signature expiry; this gate also applies after a
    restart. Unsigned requests receive `428` immediately.
 6. Run the native enrollment join command on the spoke with

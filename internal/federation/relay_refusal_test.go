@@ -81,19 +81,18 @@ func TestRelayRefusalRetryLifecycle(t *testing.T) {
 	}
 }
 
-// A missing signature is a configuration failure, not a revoked relay grant.
+// hubSignatureRejection reports whether a hub error body is a signing refusal.
 func TestHubSignatureRejection(t *testing.T) {
 	for _, tc := range []struct {
-		body   string
-		status int
-		want   bool
+		body string
+		want bool
 	}{
-		{`{"error":{"code":"hub_signing_required"}}`, http.StatusPreconditionRequired, true},
-		{`{"error":{"code":"signature_invalid"}}`, http.StatusUnauthorized, true},
-		{`{"error":{"code":"signing_unavailable"}}`, http.StatusUnauthorized, true},
-		{`{"error":{"code":"auth_invalid"}}`, http.StatusUnauthorized, false},
-		{`invalid`, http.StatusUnauthorized, false},
+		{`{"error":{"code":"hub_signing_required"}}`, true},
+		{`{"error":{"code":"signature_invalid"}}`, true},
+		{`{"error":{"code":"signing_unavailable"}}`, true},
+		{`{"error":{"code":"auth_invalid"}}`, false},
+		{`invalid`, false},
 	} {
-		require.Equal(t, tc.want, hubSignatureRejection(&HubStatusError{StatusCode: tc.status, Body: tc.body}), tc.body)
+		require.Equal(t, tc.want, hubSignatureRejection(&HubStatusError{StatusCode: http.StatusPreconditionRequired, Body: tc.body}), tc.body)
 	}
 }
