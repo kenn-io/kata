@@ -64,7 +64,7 @@ func parseRefsFrom(r io.Reader, defaultTarget string, maxItems int) ([]moveBatch
 				fields := strings.Split(value, "\t")
 				item := moveBatchItem{Ref: strings.TrimSpace(fields[0]), TargetProject: defaultTarget}
 				if len(fields) >= 2 {
-					item.TargetProject = strings.TrimSpace(fields[1])
+					item.TargetProject = strings.Clone(strings.TrimSpace(fields[1]))
 				}
 				_, refErr := shortid.Parse(item.Ref)
 				if len(fields) > 2 || item.Ref == "" || item.TargetProject == "" {
@@ -76,11 +76,10 @@ func parseRefsFrom(r io.Reader, defaultTarget string, maxItems int) ([]moveBatch
 					invalidRetained += len(item.Ref)
 					if invalidRetained > 1<<20 {
 						item.Ref = ""
-					} else {
-						item.Ref = strings.Clone(item.Ref)
 					}
 					item.TargetProject = ""
 				}
+				item.Ref = strings.Clone(item.Ref)
 				items = append(items, item)
 			}
 		}

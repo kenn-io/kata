@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -61,6 +62,26 @@ func TestParseRefsFrom(t *testing.T) {
 			require.Equal(t, moveBatchItem{Ref: "abc4", TargetProject: "dst"}, items[1])
 		}
 	}
+}
+
+func TestParseRefsFromDoesNotRetainPadding(t *testing.T) {
+	line := "abc4" + strings.Repeat(" ", 128<<10) + "\ttarget" + strings.Repeat(" ", 128<<10) + "\n"
+	readers := make([]io.Reader, 128)
+	for i := range readers {
+		readers[i] = strings.NewReader(line)
+	}
+	reader := io.MultiReader(readers...)
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	items, err := parseRefsFrom(reader, "", 5001)
+	require.NoError(t, err)
+	require.Len(t, items, 128)
+	require.Equal(t, moveBatchItem{Ref: "abc4", TargetProject: "target"}, items[0])
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(items)
+	require.Less(t, int64(after.HeapAlloc)-int64(before.HeapAlloc), int64(8<<20))
 }
 
 func TestMoveBatchCLI_PreflightFailureReportsAll(t *testing.T) {
