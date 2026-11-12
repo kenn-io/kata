@@ -141,7 +141,6 @@ func TestCacheLifetimes(t *testing.T) {
 		{"ambiguous", `{"error":{"code":"ambiguous_session_id","candidates":["archive~id"]}}`, 409, 5 * time.Minute},
 		{"unauthorized", `{}`, 401, 15 * time.Second},
 		{"unavailable", `{}`, 500, 15 * time.Second},
-		{"not_found", notFoundBody, 404, time.Minute},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -276,21 +275,14 @@ func TestUsageAssemblesRecordedSession(t *testing.T) {
 	for _, tc := range []struct {
 		name, recorded, returned, state, total string
 	}{
-		{"claude", "claude", "claude", "priced", "complete"},
-		{"codex", "codex", "codex", "priced", "complete"},
-		{"pi", "pi", "pi", "priced", "complete"},
-		{"omp", "omp", "omp", "priced", "complete"},
 		{"opencode", "opencode", "opencode", "priced", "complete"},
+		// The client owns the identity rule; this one row proves the recorded agent reaches it.
 		{"overlapping raw ID", "opencode", "kilo", "unavailable", "unknown"},
-		{"empty returned agent", "opencode", "", "unavailable", "unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service, err := NewService(config.ResolvedAgentsView{URL: "https://api.example", BrowserURL: "https://browser.example/archive"}, false)
 			require.NoError(t, err)
 			id := "ses_example"
-			if tc.recorded == "claude" || tc.recorded == "codex" {
-				id = "00000000-0000-4000-8000-000000000001"
-			}
 			var path string
 			service.current.client.http.Transport = usageRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 				path = r.URL.Path

@@ -28,7 +28,6 @@ func TestDoctorLocalConfiguration(t *testing.T) {
 		{"unknown daemon key", "config.toml", "litsen = '127.0.0.1:7777'", "config.daemon", "fail"},
 		{"untrusted web origin", "config.toml", untrustedWebConfig, "config.daemon", "fail"},
 		{"invalid display config", "config.toml", "[display]\nmarkdown_renderer=['']", "config.daemon", "fail"},
-		{"invalid AgentsView URL", "config.toml", "[agentsview]\nurl='not-a-url'", "config.daemon", "fail"},
 		{"invalid AgentsView browser URL", "config.toml", "[agentsview]\nurl='https://agentsview.example'\nbrowser_url='not-a-url'", "config.daemon", "fail"},
 		{"untrusted AgentsView HTTP", "config.toml", "[agentsview]\nurl='http://100.64.0.5'", "config.daemon", "fail"},
 		{"trusted AgentsView HTTP", "config.toml", "[auth]\ntrust_private_network=true\n[agentsview]\nurl='http://100.64.0.5'", "config.daemon", "ok"},

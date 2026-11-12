@@ -153,7 +153,32 @@ func TestCronUsageAnonymousDoesNotContactEnabledSource(t *testing.T) {
 	require.Zero(t, calls.Load())
 }
 
-func TestCronUsageCapabilitiesAndHTTPErrors(t *testing.T) {
+func TestCronCapabilitiesAdvertiseUsageSource(t *testing.T) {
+	env := testenv.New(t)
+	ctx := t.Context()
+	project, err := env.DB.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	enabled, err := agentsview.NewService(config.ResolvedAgentsView{URL: "https://agentsview.example", BrowserURL: "https://agentsview.example"}, false)
+	require.NoError(t, err)
+	disabled, err := agentsview.NewService(config.ResolvedAgentsView{}, false)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, source string
+		service      *agentsview.Service
+	}{{"off", "none", disabled}, {"on", "agentsview", enabled}} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, AgentsView: tc.service})
+			t.Cleanup(func() { _ = server.Close() })
+			request := httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", project.ID), nil)
+			out := httptest.NewRecorder()
+			server.Handler().ServeHTTP(out, request)
+			require.Equal(t, http.StatusOK, out.Code, out.Body.String())
+			require.Contains(t, out.Body.String(), `"source":"`+tc.source+`"`)
+		})
+	}
+}
+
+func TestCronUsageHTTPErrors(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "example-project")
@@ -174,22 +199,6 @@ func TestCronUsageCapabilitiesAndHTTPErrors(t *testing.T) {
 	t.Cleanup(upstream.Close)
 	enabled, err := agentsview.NewService(config.ResolvedAgentsView{URL: upstream.URL, BrowserURL: upstream.URL}, false)
 	require.NoError(t, err)
-	disabled, err := agentsview.NewService(config.ResolvedAgentsView{}, false)
-	require.NoError(t, err)
-	for _, tc := range []struct {
-		name, source string
-		service      *agentsview.Service
-	}{{"off", "none", disabled}, {"on", "agentsview", enabled}} {
-		t.Run(tc.name, func(t *testing.T) {
-			server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, AgentsView: tc.service})
-			t.Cleanup(func() { _ = server.Close() })
-			request := httptest.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", project.ID), nil)
-			out := httptest.NewRecorder()
-			server.Handler().ServeHTTP(out, request)
-			require.Equal(t, http.StatusOK, out.Code, out.Body.String())
-			require.Contains(t, out.Body.String(), `"source":"`+tc.source+`"`)
-		})
-	}
 	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, AgentsView: enabled})
 	t.Cleanup(func() { _ = server.Close() })
 	for _, tc := range []struct {

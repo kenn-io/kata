@@ -14,20 +14,13 @@ func TestAgentsViewConfigDisabledDoesNotResolveSecret(t *testing.T) {
 	require.False(t, got.Enabled())
 }
 
-func TestAgentsViewRejectsInvalidHeaderCredential(t *testing.T) {
-	t.Setenv("EXAMPLE_AGENTSVIEW_TOKEN", "fixture\r\nsecret")
-	_, err := (AgentsViewConfig{URL: "https://agentsview.example", TokenEnv: "EXAMPLE_AGENTSVIEW_TOKEN"}).Resolve(t.Context(), false)
-	require.ErrorContains(t, err, "credential")
-	require.ErrorContains(t, err, "token_env")
-	require.NotContains(t, err.Error(), "fixture")
-	require.NotContains(t, err.Error(), "secret")
-}
-
 func TestAgentsViewCredentialSelectorsAreNotDisclosed(t *testing.T) {
 	selector := "fixture-selector-secret"
+	// Neither fragment of the invalid value, nor its escaped form, may be echoed.
+	token := "leak-first\r\nleak-second"
 	file := filepath.Join(t.TempDir(), selector)
-	require.NoError(t, os.WriteFile(file, []byte("fixture\r\ntoken"), 0o600))
-	t.Setenv(selector, "fixture\r\ntoken")
+	require.NoError(t, os.WriteFile(file, []byte(token), 0o600))
+	t.Setenv(selector, token)
 	for _, tc := range []struct {
 		name         string
 		cfg          AgentsViewConfig
@@ -45,7 +38,8 @@ func TestAgentsViewCredentialSelectorsAreNotDisclosed(t *testing.T) {
 			require.ErrorContains(t, err, tc.kind)
 			require.ErrorContains(t, err, tc.reason)
 			require.NotContains(t, err.Error(), selector)
-			require.NotContains(t, err.Error(), "fixture\r\ntoken")
+			require.NotContains(t, err.Error(), "leak-first")
+			require.NotContains(t, err.Error(), "leak-second")
 		})
 	}
 }
@@ -66,7 +60,6 @@ func TestAgentsViewConfigResolve(t *testing.T) {
 		{"userinfo", AgentsViewConfig{URL: "https://user:secret@agentsview.example"}, "", true},
 		{"query", AgentsViewConfig{URL: "https://agentsview.example?token=secret"}, "", true},
 		{"browser userinfo", AgentsViewConfig{URL: "https://agentsview.example", BrowserURL: "https://user:secret@browser.example"}, "", true},
-		{"missing credential", AgentsViewConfig{URL: "https://agentsview.example", TokenFile: "/missing/example-token"}, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := tc.cfg.Resolve(t.Context(), false)

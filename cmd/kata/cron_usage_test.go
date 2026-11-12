@@ -74,6 +74,17 @@ func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
 	var queries []string
 	var disabled atomic.Bool
 	var disabledCalls atomic.Int32
+	const smallBody = `{"run_uid":"fixture","state":"complete","cost_microdollars":1000000,"estimated":false,"sessions_incomplete":false,"fetched_at":"2026-01-01T00:00:00Z","sessions":[{"agent":"example","session_id":"id","state":"priced","cost_microdollars":1000000,"cost_source":"reported"}]}`
+	// Each session can be produced by an upstream response below its 1 MiB cap,
+	// so a valid aggregate of 64 of them exceeds 2 MiB.
+	sessions := make([]string, 64)
+	for i := range sessions {
+		sessions[i] = fmt.Sprintf(`{"agent":"example","session_id":"id%d","state":"unpriced","unpriced_models":[%q]}`, i, strings.Repeat("m", 40<<10))
+	}
+	largeBody := `{"run_uid":"fixture","state":"unknown","estimated":false,"sessions_incomplete":false,"fetched_at":"2026-01-01T00:00:00Z","sessions":[` + strings.Join(sessions, ",") + `]}`
+	require.Greater(t, len(largeBody), 2<<20)
+	var usageBody atomic.Value
+	usageBody.Store(smallBody)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -92,21 +103,26 @@ func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
 				disabledCalls.Add(1)
 			}
 			queries = append(queries, r.URL.RawQuery)
-			_, _ = io.WriteString(w, `{"run_uid":"fixture","state":"complete","cost_microdollars":1000000,"estimated":false,"sessions_incomplete":false,"fetched_at":"2026-01-01T00:00:00Z","sessions":[{"agent":"example","session_id":"id","state":"priced","cost_microdollars":1000000,"cost_source":"reported"}]}`)
+			_, _ = io.WriteString(w, usageBody.Load().(string))
 		}
 	}))
 	t.Cleanup(server.Close)
-	for _, tc := range []struct {
+	cases := []struct {
 		name  string
 		flags []string
 		want  string
+		body  string
 	}{
-		{"human", nil, "Cost: $1.00"},
-		{"json", []string{"--json"}, `"cost_microdollars":1000000`},
-		{"quiet", []string{"--quiet"}, ""},
-		{"agent", []string{"--agent"}, "run_uid=fixture"},
-	} {
+		{"human", nil, "Cost: $1.00", smallBody},
+		{"json", []string{"--json"}, `"cost_microdollars":1000000`, smallBody},
+		{"quiet", []string{"--quiet"}, "", smallBody},
+		{"agent", []string{"--agent"}, "run_uid=fixture", smallBody},
+		{"large human", nil, "id63", largeBody},
+		{"large json", []string{"--json"}, `"session_id":"id63"`, largeBody},
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			usageBody.Store(tc.body)
 			resetFlags(t)
 			command := newRootCmd()
 			var out bytes.Buffer
@@ -128,56 +144,14 @@ func TestCronUsageCommandOutputAndRefresh(t *testing.T) {
 			}
 		})
 	}
-	require.Equal(t, []string{"refresh=true", "refresh=true", "refresh=true", "refresh=true"}, queries)
+	require.Len(t, queries, len(cases))
+	for _, query := range queries {
+		require.Equal(t, "refresh=true", query)
+	}
 	t.Run("source none", func(t *testing.T) {
 		disabled.Store(true)
 		_, _, err := executeCronCLI(t, server.URL, nil, "run", "usage", cronCLIUID(t))
 		require.ErrorContains(t, err, "usage source is disabled")
 		require.Zero(t, disabledCalls.Load())
 	})
-}
-
-func TestCronUsageCommandAcceptsLargeValidAggregate(t *testing.T) {
-	// Each session can be produced by an upstream response below its 1 MiB cap.
-	sessions := make([]string, 64)
-	for i := range sessions {
-		sessions[i] = fmt.Sprintf(`{"agent":"example","session_id":"id%d","state":"unpriced","unpriced_models":[%q]}`, i, strings.Repeat("m", 40<<10))
-	}
-	body := `{"run_uid":"fixture","state":"unknown","estimated":false,"sessions_incomplete":false,"fetched_at":"2026-01-01T00:00:00Z","sessions":[` + strings.Join(sessions, ",") + `]}`
-	require.Greater(t, len(body), 2<<20)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/v1/projects":
-			_, _ = io.WriteString(w, `{"projects":[{"id":7,"name":"spoke-project"}]}`)
-		case "/api/v1/projects/7":
-			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"spoke-project"}}`)
-		case "/api/v1/projects/7/cron/capabilities":
-			_, _ = io.WriteString(w, `{"project_uid":"id","event_features":[],"usage":{"source":"agentsview"}}`)
-		default:
-			_, _ = io.WriteString(w, body)
-		}
-	}))
-	t.Cleanup(server.Close)
-	for _, tc := range []struct {
-		name  string
-		flags []string
-		want  string
-	}{
-		{"human", nil, "id63"},
-		{"json", []string{"--json"}, `"session_id":"id63"`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			resetFlags(t)
-			command := newRootCmd()
-			var out bytes.Buffer
-			command.SetOut(&out)
-			command.SetErr(io.Discard)
-			command.SetContext(contextWithBaseURL(t.Context(), server.URL))
-			args := append([]string{"--project", "spoke-project"}, tc.flags...)
-			command.SetArgs(append(args, "cron", "run", "usage", cronCLIUID(t)))
-			require.NoError(t, command.Execute())
-			require.Contains(t, out.String(), tc.want)
-		})
-	}
 }

@@ -2,6 +2,7 @@ package agentsview
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,29 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 )
-
-func TestCronUsageUnauthorizedStatusIgnoresBodyFailure(t *testing.T) {
-	// The usage status contract maps both 401 and 403 to unauthorized,
-	// regardless of whether their response bodies can be read.
-	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
-		for _, tc := range []struct {
-			name string
-			body func() io.Reader
-		}{
-			{"oversized", func() io.Reader { return strings.NewReader(strings.Repeat("x", (1<<20)+1)) }},
-			{"unreadable", func() io.Reader { return iotest.ErrReader(errors.New("fixture read failure")) }},
-		} {
-			t.Run(http.StatusText(status)+"/"+tc.name, func(t *testing.T) {
-				client, err := NewClient(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
-				require.NoError(t, err)
-				client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
-					return &http.Response{StatusCode: status, Body: io.NopCloser(tc.body()), Header: make(http.Header)}, nil
-				})
-				require.Equal(t, "unauthorized", client.Lookup(t.Context(), "fixture").State)
-			})
-		}
-	}
-}
 
 func TestLookupSessionStates(t *testing.T) {
 	cases := []struct {
@@ -78,6 +56,49 @@ func TestLookupSessionStates(t *testing.T) {
 			}
 		})
 	}
+
+	// The usage status contract maps both 401 and 403 to unauthorized,
+	// regardless of whether their response bodies can be read.
+	t.Run("unauthorized ignores body failure", func(t *testing.T) {
+		for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+			for _, tc := range []struct {
+				name string
+				body func() io.Reader
+			}{
+				{"oversized", func() io.Reader { return strings.NewReader(strings.Repeat("x", (1<<20)+1)) }},
+				{"unreadable", func() io.Reader { return iotest.ErrReader(errors.New("fixture read failure")) }},
+			} {
+				t.Run(http.StatusText(status)+"/"+tc.name, func(t *testing.T) {
+					client, err := NewClient(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
+					require.NoError(t, err)
+					client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
+						return &http.Response{StatusCode: status, Body: io.NopCloser(tc.body()), Header: make(http.Header)}, nil
+					})
+					require.Equal(t, "unauthorized", client.Lookup(t.Context(), "fixture").State)
+				})
+			}
+		}
+	})
+	// The service passes the recorded agent; the client owns the identity rule.
+	t.Run("returned agent must match recorded agent", func(t *testing.T) {
+		for _, tc := range []struct{ name, returned string }{
+			{"overlapping raw ID", "kilo"},
+			{"empty returned agent", ""},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				client, err := NewClient(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
+				require.NoError(t, err)
+				client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
+					body := fmt.Sprintf(`{"agent":%q,"session_id":"archive~canonical","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"reported"}`, tc.returned)
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+				})
+				recorded := "opencode"
+				got, _ := client.lookup(t.Context(), "ses_example", &recorded)
+				require.Equal(t, "unavailable", got.State)
+				require.Nil(t, got.CostMicrodollars)
+			})
+		}
+	})
 }
 
 func TestLookupDoesNotFollowRedirect(t *testing.T) {
