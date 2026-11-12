@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -3285,4 +3286,54 @@ func TestPrintFederationEnrollmentAgentKeepsRowsWhenJoinCommandMissing(t *testin
 	require.Contains(t, out.String(), "join command unavailable")
 	require.NotContains(t, out.String(), "issued-token")
 	require.NotContains(t, out.String(), "{")
+}
+
+func TestFederationEnrollCLIRequiredSigningInstructions(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("shell argument parsing requires a POSIX shell")
+	}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.FederationSigningRequired = true
+		cfg.FederationSigningExternalURL = "https://daemon.example/federation"
+	})
+	savedArgs := os.Args
+	os.Args = []string{"/opt/kata_custom"}
+	t.Cleanup(func() { os.Args = savedArgs })
+	args := []string{"--project", "hub-project", "federation", "enroll", "--spoke-instance", env.DB.InstanceUID(), "--hub-url", env.URL, "--actor", "tester", "--capabilities", "pull", "--token", "join-token", "--allow-insecure"}
+	human := requireCmdOutput(t, env, args...)
+	jsonOut := requireCmdOutput(t, env, append([]string{"--json"}, args...)...)
+	agent := requireCmdOutput(t, env, append([]string{"--agent"}, args...)...)
+	var body struct {
+		Join federationJoinBundle `json:"join"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(jsonOut), &body))
+	command := body.Join.JoinCommand
+	require.NotEmpty(t, command)
+	assert.Contains(t, human, "join: "+command+"\n")
+	assert.Contains(t, agent, "join_command="+agentValue(command))
+	assert.Equal(t, "https://daemon.example/federation", body.Join.HubURL)
+	assert.False(t, body.Join.AllowInsecure)
+	assert.NotContains(t, command, env.URL)
+	// Capture POSIX shell words, then pass them to the real join command parser.
+	script := `kata_custom() { printf '%s\0' "$@"; }; ` + command
+	out, err := exec.CommandContext(t.Context(), "sh", "-c", script).CombinedOutput() //nolint:gosec // Shell invokes only the capturing function.
+	require.NoError(t, err, "%s", out)
+	joinArgs := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
+	assert.Contains(t, joinArgs, "<signing-key-id>")
+	assert.Contains(t, joinArgs, "<absolute-path-to-spoke-key>")
+	assert.NotContains(t, joinArgs, "--allow-insecure")
+	metadataCalled := false
+	originalFetch := fetchFederationJoinMetadata
+	fetchFederationJoinMetadata = func(context.Context, federationJoinBundle) (api.ProjectFederationBody, error) {
+		metadataCalled = true
+		return api.ProjectFederationBody{}, errors.New("unexpected metadata request")
+	}
+	t.Cleanup(func() { fetchFederationJoinMetadata = originalFetch })
+	_, err = runCmdOutput(t, env, joinArgs...)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "signing")
+	assert.False(t, metadataCalled)
+	grants, err := env.DB.ListFederationEnrollments(t.Context())
+	require.NoError(t, err)
+	require.Len(t, grants, 1)
 }

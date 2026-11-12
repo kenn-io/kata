@@ -55,3 +55,15 @@ func TestJoinCommandRequiresJoinAuthority(t *testing.T) {
 		assert.Empty(t, joincommand.Build(in))
 	}
 }
+
+// Required-signing instructions must remain shell-safe and must not opt into HTTP.
+func TestJoinCommandSigningPlaceholders(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("shell argument parsing requires a POSIX shell")
+	}
+	in := api.FederationJoinInstructions{ProjectName: "spoke-project", HubURL: "https://daemon.example/federation", HubProjectID: 42, Token: "join-token", Capabilities: "pull", Actor: "tester", AllowInsecure: true}
+	script := `kata() { printf '%s\0' "$@"; }; ` + joincommand.Build(in, joincommand.SigningTemplate())
+	out, err := exec.CommandContext(t.Context(), "sh", "-c", script).CombinedOutput() //nolint:gosec // Capture shell arguments without running kata.
+	require.NoError(t, err, "%s", out)
+	assert.Equal(t, []string{"federation", "join", "--project", "spoke-project", "--hub-url", "https://daemon.example/federation", "--hub-project-id", "42", "--token", "join-token", "--capabilities", "pull", "--actor", "tester", "--signing-key-id", "<signing-key-id>", "--signing-key-file", "<absolute-path-to-spoke-key>"}, strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00"))
+}

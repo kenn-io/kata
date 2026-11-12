@@ -11,9 +11,21 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// Option controls optional join instruction rendering.
+type Option func(*options)
+
+type options struct{ signingTemplate bool }
+
+// SigningTemplate adds placeholders for a required signing source.
+func SigningTemplate() Option { return func(o *options) { o.signingTemplate = true } }
+
 // Build returns a shell command for joining the supplied grant, or an empty
 // string when the instructions lack the authority or target needed for a join.
-func Build(in api.FederationJoinInstructions) string {
+func Build(in api.FederationJoinInstructions, opts ...Option) string {
+	var settings options
+	for _, opt := range opts {
+		opt(&settings)
+	}
 	caps, err := db.CanonicalFederationCapabilities(in.Capabilities)
 	if err != nil || !slices.Contains(strings.Split(caps, ","), "pull") ||
 		in.HubURL == "" || in.ProjectName == "" || in.HubProjectID <= 0 ||
@@ -32,11 +44,14 @@ func Build(in api.FederationJoinInstructions) string {
 	if in.PushEnabled {
 		args = append(args, "--push")
 	}
-	if in.AllowInsecure {
+	if in.AllowInsecure && !settings.signingTemplate {
 		args = append(args, "--allow-insecure")
 	}
 	if in.AdoptExisting {
 		args = append(args, "--adopt-existing")
+	}
+	if settings.signingTemplate {
+		args = append(args, "--signing-key-id", "<signing-key-id>", "--signing-key-file", "<absolute-path-to-spoke-key>")
 	}
 	for i, arg := range args {
 		args[i] = ShellQuote(arg)

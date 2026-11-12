@@ -4609,3 +4609,34 @@ func TestFederationIngestPublishesCommittedPeerEvents(t *testing.T) {
 	require.Equal(t, peer.ID, message.ProjectID)
 	require.Equal(t, event.UID, message.Event.UID)
 }
+
+func TestFederationEnrollmentRequiredSigningJoinInstructions(t *testing.T) {
+	for _, tc := range []struct {
+		name, supplied, want string
+		required, insecure   bool
+	}{
+		{"required without URL", "", "https://daemon.example/federation", true, false},
+		{"required with URL", "http://127.0.0.1:7777", "https://daemon.example/federation", true, true},
+		{"optional", "http://127.0.0.1:7777", "http://127.0.0.1:7777", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+				cfg.FederationSigningRequired = tc.required
+				cfg.FederationSigningExternalURL = "https://DAEMON.example:443/federation"
+			})
+			project := createFederatedHubProject(t, env, "hub-project")
+			resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+				"spoke_instance_uid": federationTestSpokeUID, "project_id": project.ID, "capabilities": "pull", "token": "join-token", "actor": "tester", "hub_url": tc.supplied, "allow_insecure": tc.insecure,
+			}, nil)
+			require.Equal(t, http.StatusOK, resp.StatusCode, "%s", raw)
+			var out api.FederationEnrollmentOut
+			require.NoError(t, json.Unmarshal(raw, &out))
+			require.NotNil(t, out.Join)
+			assert.Equal(t, tc.want, out.Join.HubURL)
+			assert.Equal(t, tc.insecure && !tc.required, out.Join.AllowInsecure)
+			assert.Equal(t, tc.required, strings.Contains(out.Join.JoinCommand, "--signing-key-id"))
+			assert.Equal(t, tc.required, strings.Contains(out.Join.JoinCommand, "--signing-key-file"))
+			assert.Equal(t, tc.insecure && !tc.required, strings.Contains(out.Join.JoinCommand, "--allow-insecure"))
+		})
+	}
+}

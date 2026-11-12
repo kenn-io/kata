@@ -393,6 +393,14 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			hubURL = baseURL
 			allowInsecure, _ = httpurl.EffectiveHTTPAllowInsecure(hubURL, allowInsecure)
 		}
+		signingTemplate := cfg.FederationSigningRequired && cfg.FederationSigningExternalURL != ""
+		if signingTemplate {
+			hubURL, err = httpurl.CanonicalHTTPBaseURL(cfg.FederationSigningExternalURL)
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			allowInsecure = false
+		}
 		// Resolve all response metadata before issuing a durable credential.
 		var join *api.FederationJoinInstructions
 		if in.Body.ProjectID != nil {
@@ -438,7 +446,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if join != nil {
 			join.Token, join.Actor, join.Capabilities = created.Token, created.Enrollment.Actor, created.Enrollment.Capabilities
 			join.PushEnabled = slices.Contains(strings.Split(created.Enrollment.Capabilities, ","), "push")
-			join.JoinCommand = joincommand.Build(*join)
+			if signingTemplate {
+				join.JoinCommand = joincommand.Build(*join, joincommand.SigningTemplate())
+			} else {
+				join.JoinCommand = joincommand.Build(*join)
+			}
 			out.Join = join
 		}
 		return &api.CreateFederationEnrollmentResponse{Body: out}, nil
