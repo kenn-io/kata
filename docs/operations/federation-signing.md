@@ -25,7 +25,8 @@ is optional on the ordinary daemon listeners.
    [the native enrollment workflow](federation.md). Use CLI enrollment and join
    for required-signing hubs. The TUI wizard does not accept signing references
    and its metadata step cannot complete against a required-signing hub.
-   Pass an explicit `--token` and record it along with the enrollment ID.
+   Pass an explicit `--token` and record it along with the enrollment ID from
+   the `enrollment.id` field in `--json` output.
    Ingress rejects global enrollments, even when the signature is valid.
 2. Provision a separate secret with at least 64 bytes, independently of the
    enrollment bearer. For example, `openssl rand -hex 32` produces 64 ASCII
@@ -65,9 +66,11 @@ is optional on the ordinary daemon listeners.
 6. Re-run the same `enroll` command against the hub's main API with the same
    `--token`. An exact retry returns the same enrollment and prints its signed
    join command. The command uses `external_url` and includes placeholders for
-   the signing key ID and absolute spoke key file path. Replace the text inside
-   the angle brackets, keeping the surrounding quotes, before running it on the
-   spoke. Alternatively, replace `--signing-key-file` with
+   the signing key ID and absolute spoke key file path. Replace each whole
+   quoted placeholder, including the angle brackets, before running it on the
+   spoke: for example, `'<signing-key-id>'` becomes `spoke-key-1` and
+   `'<absolute-path-to-spoke-key>'` becomes `/path/to/spoke.key`. Alternatively,
+   replace `--signing-key-file` with
    `--signing-key-env KATA_SPOKE_SIGNING_KEY`. The same source must exist in
    the spoke CLI and daemon environments because the CLI fetches metadata
    before saving the enrollment. A spoke that has already joined follows the

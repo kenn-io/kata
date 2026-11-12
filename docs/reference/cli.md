@@ -2584,8 +2584,11 @@ a missing project selected with `--project` and enable it. The CLI
 should otherwise remain pointed at the spoke daemon so the printed join
 command can include `--adopt-existing` when the spoke project already exists.
 A required-signing hub prints its configured `external_url` in the join command
-with signing key ID and file path placeholders. Replace both placeholders, or
-use `--signing-key-env` instead of the file flag, before running it on the spoke.
+with signing key ID and file path placeholders. Replace each whole quoted
+placeholder, including the angle brackets: for example, `'<signing-key-id>'`
+becomes `spoke-key-1` and `'<absolute-path-to-spoke-key>'` becomes
+`/path/to/spoke.key`. Alternatively, use `--signing-key-env` instead of the file
+flag before running it on the spoke.
 If the original enrollment predates required signing or these instructions,
 re-run the same `enroll` command with the same `--token` to print the signed
 join command for the same enrollment.
