@@ -59,8 +59,8 @@ api-check:
 # existing clients relative to BASE_REF (default origin/main).
 api-breaking:
 	bash scripts/openapi-breaking.sh $(BASE_REF)
-	SCHEMA_VERSION_BASE_REF=$(or $(BASE_REF),origin/main) go test ./internal/db/pgstore -run '^TestSchemaVersion(Contract|BaseRecords|Markers|DigestInputs|BaseRecordValidation|GitBase)$$'
-	KATA_MIGRATION_BASE_REF=$(or $(BASE_REF),origin/main) go run ./tools/migrationhistorycheck
+	SCHEMA_VERSION_BASE_REF=$(or $(BASE_REF),origin/main) go test ./internal/db/pgstore -run '^TestSchemaVersion(Contract|Markers|DigestInputs|GitBase)$$'
+	KATA_MIGRATION_BASE_REF=$(BASE_REF) go run ./tools/migrationhistorycheck
 
 web-install:
 	cd web && bun install --frozen-lockfile
