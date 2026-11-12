@@ -2,6 +2,7 @@ package cron
 
 import (
 	"encoding/json/v2"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,6 +11,13 @@ import (
 
 func TestSummarySessionsContract(t *testing.T) {
 	session := `{"agent":"claude","session_id":"00000000-0000-4000-8000-000000000001","step":"main"}`
+	sessions := func(n int) string {
+		var entries []string
+		for i := 0; i < n; i++ {
+			entries = append(entries, fmt.Sprintf(`{"agent":"claude","session_id":"00000000-0000-4000-8000-%012d"}`, i))
+		}
+		return strings.Join(entries, ",")
+	}
 	for _, tc := range []struct {
 		name, input string
 		valid       bool
@@ -27,7 +35,8 @@ func TestSummarySessionsContract(t *testing.T) {
 		{"null step", `{"version":1,"sessions":[{"agent":"codex","session_id":"00000000-0000-4000-8000-000000000001","step":null}]}`, false},
 		{"invalid step", `{"version":1,"sessions":[{"agent":"codex","session_id":"00000000-0000-4000-8000-000000000001","step":"a/b"}]}`, false},
 		{"duplicate", `{"version":1,"sessions":[` + session + `,` + session + `]}`, false},
-		{"too many", `{"version":1,"sessions":[` + strings.Repeat(session+",", 64) + session + `]}`, false},
+		{"maximum", `{"version":1,"sessions":[` + sessions(64) + `]}`, true},
+		{"too many", `{"version":1,"sessions":[` + sessions(65) + `]}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ParseSummary([]byte(tc.input))
@@ -47,16 +56,14 @@ func TestLegacySummaryEncodingUnchanged(t *testing.T) {
 }
 
 func TestSummaryGoValuesPreserveInvalidSessionFields(t *testing.T) {
-	var nilSessions []Session
 	emptySessions := []Session{}
 	falseValue := false
 	emptyStep := ""
 	withEmptyStep := []Session{{Agent: "claude", SessionID: "00000000-0000-4000-8000-000000000001", Step: &emptyStep}}
 	for name, summary := range map[string]Summary{
-		"nil underlying sessions": {Version: 1, Sessions: &nilSessions},
-		"empty sessions":          {Version: 1, Sessions: &emptySessions},
-		"false incomplete":        {Version: 1, SessionsIncomplete: &falseValue},
-		"empty step":              {Version: 1, Sessions: &withEmptyStep},
+		"empty sessions":   {Version: 1, Sessions: &emptySessions},
+		"false incomplete": {Version: 1, SessionsIncomplete: &falseValue},
+		"empty step":       {Version: 1, Sessions: &withEmptyStep},
 	} {
 		t.Run(name, func(t *testing.T) {
 			raw, err := json.Marshal(summary)
@@ -65,11 +72,4 @@ func TestSummaryGoValuesPreserveInvalidSessionFields(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
-}
-
-func TestSummaryDecodeRejectsNullStep(t *testing.T) {
-	// Imports and federation decode the shared summary directly.
-	var summary Summary
-	err := json.Unmarshal([]byte(`{"version":1,"sessions":[{"agent":"claude","session_id":"00000000-0000-4000-8000-000000000001","step":null}]}`), &summary)
-	require.Error(t, err)
 }

@@ -2925,7 +2925,9 @@ func TestFederationIngestRejectsSessionEventWithoutFeature(t *testing.T) {
 	ev := federationRemoteIssueCreatedEvent(t, project, federationTestSpokeUID)
 	ev.Type = "cron.run.observed"
 	ev.IssueUID = nil
-	ev.Payload = jsontext.Value(`{"summary":{"version":1,"sessions":[{"agent":"claude","session_id":"00000000-0000-4000-8000-000000000001"}]}}`)
+	ev.Payload = jsontext.Value(fmt.Sprintf(`{"project_uid":%q,"uid":"01HZNQ7VFPK1XGD8R5MABCD4ED","job_uid":"01HZNQ7VFPK1XGD8R5MABCD4EE","definition_event_uid":"01HZNQ7VFPK1XGD8R5MABCD4EF","actor":"tester","status":"succeeded","summary":{"version":1,"sessions":[{"agent":"claude","session_id":"00000000-0000-4000-8000-000000000001"}]},"revision":1,"created_at":"2026-05-23T12:00:00Z","updated_at":"2026-05-23T12:00:00Z"}`, project.UID))
+	ev.ContentHash, err = db.EventContentHash(db.EventHashInput{UID: ev.EventUID, OriginInstanceUID: ev.OriginInstanceUID, ProjectUID: ev.ProjectUID, ProjectName: ev.ProjectName, Type: ev.Type, Actor: ev.Actor, HLCPhysicalMS: ev.HLCPhysicalMS, HLCCounter: ev.HLCCounter, CreatedAt: ev.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"), Payload: ev.Payload})
+	require.NoError(t, err)
 	body := federationIngestBody(federationIngestEnvelope(t, 17, ev))
 	headers := bearer(created.Token)
 	headers[db.EventFeaturesHeader] = db.CronEventFeature

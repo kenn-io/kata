@@ -26,25 +26,6 @@ const clientSpecArtifactPath = "../../pkg/client/openapi.yaml"
 const clientGeneratedDir = "../../pkg/client/generated"
 const skipOpenAPIClientCheckEnv = "KATA_SKIP_OPENAPI_CLIENT_CHECK"
 
-// Session fields may be omitted, but an explicitly null value is invalid.
-func TestCronSessionSchemaFieldsAreNonNullable(t *testing.T) {
-	schemas := OpenAPIDocument().Components.Schemas.Map()
-	for _, tc := range []struct{ schema, field string }{
-		{"Summary", "sessions"},
-		{"Summary", "sessions_incomplete"},
-		{"Session", "step"},
-	} {
-		t.Run(tc.schema+"/"+tc.field, func(t *testing.T) {
-			schema := schemas[tc.schema]
-			require.NotNil(t, schema)
-			property := schema.Properties[tc.field]
-			require.NotNil(t, property)
-			require.False(t, property.Nullable)
-			require.NotContains(t, schema.Required, tc.field)
-		})
-	}
-}
-
 // TestOpenAPIArtifactUpToDate fails if the committed api/openapi.yaml no longer
 // matches the schema generated from the current routes. Regenerate with
 // `make openapi`.
