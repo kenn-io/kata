@@ -1,8 +1,6 @@
 package db
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -13,14 +11,9 @@ import (
 // RepeatedImportEventType is the event a hub writes for a winning repeated
 // adoption snapshot. Its payload is the whole issue as the copy had it: every
 // field, the label set, the metadata and the comments, with the copy's
-// updated_at.
-//
-// The hub writes it only for a copy newer than the issue it held. The fold
-// applies it as the issue's state at that updated_at: changes not newer than
-// the copy yield to it and newer ones apply on top. The event therefore gives
-// the same result wherever it sits among those changes, and it takes the
-// hub's ordinary clock. A reader needs RepeatedAdoptionEventFeature to replay
-// it.
+// updated_at. The hub decides that the copy wins when it arrives, and writes
+// the event with the snapshot's clock, so replay applies it where the snapshot
+// would have been. A reader needs RepeatedAdoptionEventFeature to replay it.
 const RepeatedImportEventType = "issue.restated"
 
 // RepeatedSnapshotDelta is one event the hub writes in place of a repeated
@@ -133,41 +126,6 @@ func RepeatedSnapshotWins(incoming jsontext.Value, hubUpdatedAt time.Time) bool 
 		return false
 	}
 	return updatedAt.Truncate(time.Millisecond).After(hubUpdatedAt.Truncate(time.Millisecond))
-}
-
-// RepeatedSnapshotAlreadyAccepted reports whether the hub already recorded a
-// whole copy of this issue with the snapshot's updated_at. The issue row's
-// updated_at cannot answer that: a hub edit after a copy dated ahead of the
-// hub's clock gives the row an earlier time, and a retry of the same push
-// would then look newer again.
-func RepeatedSnapshotAlreadyAccepted(ctx context.Context, q interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, issueUID string, incoming jsontext.Value) (bool, error) {
-	var doc struct {
-		UpdatedAt string `json:"updated_at"`
-	}
-	if err := json.Unmarshal(incoming, &doc); err != nil || doc.UpdatedAt == "" {
-		return false, nil
-	}
-	rows, err := q.QueryContext(ctx, `SELECT payload FROM events WHERE issue_uid=$1 AND type=$2`, issueUID, RepeatedImportEventType)
-	if err != nil {
-		return false, fmt.Errorf("read accepted repeated imports: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return false, err
-		}
-		var accepted repeatedImportPayload
-		if json.Unmarshal([]byte(payload), &accepted) != nil {
-			continue
-		}
-		if !repeatedCopyIsNewer(accepted.UpdatedAt, doc.UpdatedAt) && !repeatedCopyIsNewer(doc.UpdatedAt, accepted.UpdatedAt) {
-			return true, rows.Err()
-		}
-	}
-	return false, rows.Err()
 }
 
 // repeatedImportComment is one comment of a RepeatedImportEventType payload.
@@ -320,25 +278,6 @@ func snapshotLinkKey(issueUID string, link repeatedSnapshotLink) FoldLinkKey {
 		from, to = to, from
 	}
 	return FoldLinkKey{FromUID: from, ToUID: to, Type: link.Type}
-}
-
-// repeatedCopyIsNewer reports whether a copy's updated_at is later than an
-// issue's, at the millisecond precision both stores keep. An issue with no
-// time yet is older than any copy, and a copy with no readable time is never
-// newer.
-func repeatedCopyIsNewer(issueUpdatedAt, copyUpdatedAt string) bool {
-	copied, err := time.Parse(time.RFC3339Nano, copyUpdatedAt)
-	if err != nil {
-		return false
-	}
-	if issueUpdatedAt == "" {
-		return true
-	}
-	held, err := time.Parse(time.RFC3339Nano, issueUpdatedAt)
-	if err != nil {
-		return copyUpdatedAt > issueUpdatedAt
-	}
-	return copied.Truncate(time.Millisecond).After(held.Truncate(time.Millisecond))
 }
 
 // timestampBefore reports whether timestamp a is earlier than b. An empty a is

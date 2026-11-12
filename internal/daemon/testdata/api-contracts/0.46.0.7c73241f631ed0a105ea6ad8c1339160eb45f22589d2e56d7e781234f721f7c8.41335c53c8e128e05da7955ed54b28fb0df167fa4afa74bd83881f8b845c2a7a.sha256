@@ -1,1 +1,0 @@
-Federation ingest responses add optional `superseded_event_uids`, and relay offers accept the `X-Kata-Event-Features` request header.

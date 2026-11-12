@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/v2"
 	"strings"
 	"testing"
@@ -87,11 +86,7 @@ func pushRepeatedImportBaselineWithFeatures(t *testing.T, hub db.Storage, projec
 	for index, event := range events {
 		batch = append(batch, db.FederationIngestEvent{SourceEventID: int64(index + 1), Event: event})
 	}
-	return pushRepeatedImportBaselineIn(t.Context(), hub, projectID, enrollmentID, spokeUID, batch, features)
-}
-
-func pushRepeatedImportBaselineIn(ctx context.Context, hub db.Storage, projectID, enrollmentID int64, spokeUID string, batch []db.FederationIngestEvent, features string) (db.FederationIngestResult, error) {
-	return hub.IngestFederationEvents(ctx, db.FederationIngestParams{
+	return hub.IngestFederationEvents(t.Context(), db.FederationIngestParams{
 		EventFeatures: features, ProjectID: projectID, FederationEnrollmentID: enrollmentID,
 		SpokeInstanceUID: spokeUID, BoundActor: "operator", AllowSnapshotAuthorPreservation: true,
 		AdoptionBaseline:                 db.FederationAdoptionBaselineComplete,
@@ -168,7 +163,9 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 		if issueUID != h.issueUID {
 			return
 		}
-		repeatedImportShiftUpdatedAt(t, payload, 24*time.Hour)
+		// The copy is newer than the hub issue and older than anything the
+		// hub writes from now on.
+		repeatedImportShiftUpdatedAt(t, payload, 10*time.Millisecond)
 		payload["title"] = "Current copy"
 		payload["body"] = "new body"
 		payload["status"] = "closed"
@@ -266,49 +263,34 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 	require.NoError(t, err)
 	require.Equal(t, lastEvent, afterRetry, "an identical copy writes no event")
 
-	// The accepted copy is dated ahead of the hub's clock, so a hub edit
-	// gives the issue an earlier updated_at. A retry of the same push must
-	// still be recognized as the copy the hub already accepted.
-	accepted, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.True(t, accepted.UpdatedAt.After(time.Now()), "the fixture's copy is dated ahead")
-	// Another copy, older than the accepted one and also dated ahead, is
-	// skipped. The hub keeps no record of a skipped copy.
-	between := time.Now().Add(time.Until(accepted.UpdatedAt) / 2).UTC().Format(db.EventTimestampFormat)
-	skippedOrigin, skippedEnrollment, skipped := h.repeatedImportCopy(t, h.target, func(issueUID string, payload map[string]any) {
-		if issueUID == h.issueUID {
-			payload["updated_at"] = between
-			payload["title"] = "Skipped copy"
-		}
-	})
-	result, err = pushRepeatedImportBaseline(t, hub, h.target.ID, skippedEnrollment, skippedOrigin, skipped)
-	require.NoError(t, err)
-	require.Zero(t, result.Accepted)
+	// Someone edits the issue on the hub. Importing the same copy again, as a
+	// retry or from another home, leaves the edit in place.
 	hubBody := "edited on the hub"
-	_, _, _, err = hub.EditIssue(ctx, db.EditIssueParams{IssueID: accepted.ID, Actor: "worker", Body: &hubBody})
+	_, _, _, err = hub.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Actor: "worker", Body: &hubBody})
 	require.NoError(t, err)
 	lastEvent, err = hub.MaxEventID(ctx)
 	require.NoError(t, err)
 	result, err = pushRepeatedImportBaseline(t, hub, h.target.ID, newerEnrollment, newerOrigin, newer)
-	require.NoError(t, err, "a retry after a hub edit is still the copy the hub accepted")
+	require.NoError(t, err)
 	require.Zero(t, result.Accepted)
-	require.ElementsMatch(t, held, result.SupersededEventUIDs)
+	againOrigin, againEnrollment, againCopy := h.repeatedImportCopy(t, h.target, func(issueUID string, payload map[string]any) {
+		if issueUID == h.issueUID {
+			repeatedImportShiftUpdatedAt(t, payload, 10*time.Millisecond)
+			payload["title"] = "Current copy"
+			payload["body"] = "new body"
+		}
+	})
+	result, err = pushRepeatedImportBaseline(t, hub, h.target.ID, againEnrollment, againOrigin, againCopy)
+	require.NoError(t, err)
+	require.Zero(t, result.Accepted)
 	afterRetry, err = hub.MaxEventID(ctx)
 	require.NoError(t, err)
-	require.Equal(t, lastEvent, afterRetry)
-	// The retry of the skipped copy now looks newer than the edited issue.
-	// Its adoption was already consumed, so it changes nothing.
-	result, err = pushRepeatedImportBaseline(t, hub, h.target.ID, skippedEnrollment, skippedOrigin, skipped)
-	require.NoError(t, err, "a retry of a skipped copy stays skipped")
-	require.Zero(t, result.Accepted)
-	require.Len(t, result.SupersededEventUIDs, len(skipped))
-	afterRetry, err = hub.MaxEventID(ctx)
-	require.NoError(t, err)
-	require.Equal(t, lastEvent, afterRetry)
+	require.Equal(t, lastEvent, afterRetry, "importing the same copy after an edit writes nothing")
 	edited, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	require.Equal(t, hubBody, edited.Body)
+	require.Equal(t, hubBody, edited.Body, "the edit wins over the same copy imported again")
 	require.Equal(t, "Current copy", edited.Title)
+	issue = edited
 	again, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, issue.Revision, again.Revision)
@@ -444,40 +426,11 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 		require.ErrorContains(t, err, "fresh "+eventType+" targets existing issue "+h.issueUID)
 	}
-
-	// The hub moves the issue to another project. A retry of the adoption it
-	// already consumed still succeeds and leaves the moved issue alone.
-	movedTo, err := hub.CreateProject(ctx, "moved-to-project")
-	require.NoError(t, err)
-	_, err = hub.EnableProjectFederation(ctx, movedTo.ID, "operator")
-	require.NoError(t, err)
-	heldIssue, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	_, err = hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: heldIssue.ID, FromProjectID: h.target.ID, ToProjectID: movedTo.ID, IfMatchRev: heldIssue.Revision, Actor: "operator"})
-	require.NoError(t, err)
-	result, err = pushRepeatedImportBaseline(t, hub, h.target.ID, newerEnrollment, newerOrigin, newer)
-	require.NoError(t, err, "a retry after the issue moved is still the adoption the hub consumed")
-	require.Zero(t, result.Accepted)
-	// A pushing home is allowed only its own project, so it cannot see where
-	// the issue went. Its retry is still the adoption the hub consumed.
-	retry := make([]db.FederationIngestEvent, 0, len(newer))
-	for index, event := range newer {
-		retry = append(retry, db.FederationIngestEvent{SourceEventID: int64(index + 1), Event: event})
-	}
-	result, err = pushRepeatedImportBaselineIn(db.WithAuthorizedProjects(ctx, []string{h.target.UID}), hub,
-		h.target.ID, newerEnrollment, newerOrigin, retry, db.SupportedEventFeatures)
-	require.NoError(t, err, "a retry that cannot see the moved issue is still the adoption the hub consumed")
-	require.Zero(t, result.Accepted)
-	moved, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.Equal(t, movedTo.ID, moved.ProjectID)
-	require.Equal(t, heldIssue.Title, moved.Title)
 	return nil
 }
 
-// A winning copy beats older data whatever clock that data's event carries, a
-// reader without the feature is refused the result, and a copy can give a
-// parent to an issue that has none.
+// A reader without the feature is refused a project with a winning copy, and
+// a copy can give a parent to an issue that has none.
 func checkFederationRepeatedImportPlacement(t *testing.T, source db.Storage, backend Backend) error {
 	ctx := t.Context()
 	h := newRepeatedImportHub(t, source, backend)
@@ -485,30 +438,9 @@ func checkFederationRepeatedImportPlacement(t *testing.T, source db.Storage, bac
 	issue, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 
-	// An event's clock is not its data's time. The first home edits the title
-	// now, and its clock runs two days ahead, so the edit's event sorts after
-	// any time a copy taken tomorrow could carry.
-	edit := portableNativeEvent(h.first[0])
-	edit.EventUID, err = uid.New()
-	require.NoError(t, err)
-	edit.Type, edit.IssueUID = "issue.updated", &h.issueUID
-	edit.HLCPhysicalMS = time.Now().Add(48 * time.Hour).UnixMilli()
-	edit.Actor = "operator"
-	edit.Payload = mustNativeJSON(t, map[string]any{"title": "Older edit with a fast clock"})
-	resignNativeEvent(t, &edit)
-	_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{
-		EventFeatures: db.SupportedEventFeatures, ProjectID: h.target.ID, FederationEnrollmentID: h.firstID,
-		SpokeInstanceUID: h.firstUID, BoundActor: "operator",
-		Events: []db.FederationIngestEvent{{SourceEventID: 1000, Event: edit}},
-	})
-	require.NoError(t, err)
-	edited, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.Equal(t, "Older edit with a fast clock", edited.Title)
-
 	origin, enrollment, copied := h.repeatedImportCopy(t, h.target, func(issueUID string, payload map[string]any) {
 		if issueUID == h.issueUID {
-			payload["updated_at"] = edited.UpdatedAt.Add(time.Hour).UTC().Format(db.EventTimestampFormat)
+			repeatedImportShiftUpdatedAt(t, payload, 10*time.Millisecond)
 			payload["title"] = "Newer copy"
 		}
 	})
@@ -516,7 +448,7 @@ func checkFederationRepeatedImportPlacement(t *testing.T, source db.Storage, bac
 	require.NoError(t, err)
 	won, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	require.Equal(t, "Newer copy", won.Title, "the newer copy wins over older data with a later event clock")
+	require.Equal(t, "Newer copy", won.Title)
 
 	// A reader that does not know the hub's event for a winning copy would
 	// skip it and keep stale state, so the hub refuses to serve the project to

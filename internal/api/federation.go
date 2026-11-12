@@ -251,7 +251,6 @@ type RelayOfferRequest struct {
 	Limit           int      `query:"limit" default:"100" minimum:"1" maximum:"1024"`
 	ArtifactDigests []string `query:"artifact_digest,explode" maxItems:"32"`
 	Epoch           int64    `query:"epoch" minimum:"0"`
-	EventFeatures   string   `header:"X-Kata-Event-Features"`
 }
 
 // RelayResetRequest requests a checkpoint for the presented project transport grant.

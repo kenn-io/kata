@@ -79,11 +79,6 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, relayTransportError(err)
 		}
-		if in.Stream == db.RelayStreamEvent {
-			if envelopes, err = db.RelayOfferReadablePrefix(in.EventFeatures, envelopes); err != nil {
-				return nil, federationFeatureError(err)
-			}
-		}
 		// Zero is a valid replay baseline. Durable per-hop acceptance rejects
 		// skipped prefixes and deduplicates the retained envelopes after lost ACKs.
 		return &api.RelayOfferResponse{Body: db.RelayBatch{Stream: in.Stream, Envelopes: envelopes}}, nil

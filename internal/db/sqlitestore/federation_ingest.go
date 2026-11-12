@@ -239,7 +239,7 @@ func (d *Store) ingestFederationEventsOnce(
 		// changes nothing; that includes the retry of a consumed baseline.
 		repeated, err := repeatedAdoptionSnapshotIssueTx(ctx, tx, p.ProjectID, ev, db.AllowsRepeatedIssueSnapshot(ev.Type,
 			adoptionSnapshotAuthorState.allowAuthorPreservation || adoptionSnapshotAuthorState.overrideSnapshotAuthors ||
-				adoptionSnapshotAuthorState.duplicateOnly, p.EventFeatures), adoptionSnapshotAuthorState.duplicateOnly)
+				adoptionSnapshotAuthorState.duplicateOnly, p.EventFeatures))
 		if err != nil {
 			return db.FederationIngestResult{}, err
 		}
@@ -254,13 +254,6 @@ func (d *Store) ingestFederationEventsOnce(
 		// A retry of a consumed adoption decided each copy the first time. The
 		// issue's updated_at can have moved since, so it is not asked again.
 		wins := repeated != nil && !adoptionSnapshotAuthorState.duplicateOnly && db.RepeatedSnapshotWins(ev.Payload, repeated.UpdatedAt)
-		if wins {
-			accepted, err := db.RepeatedSnapshotAlreadyAccepted(ctx, tx, repeated.UID, ev.Payload)
-			if err != nil {
-				return db.FederationIngestResult{}, err
-			}
-			wins = !accepted
-		}
 		if repeated != nil && !wins {
 			result.Duplicates++
 			repeatedSkipped++
@@ -406,6 +399,9 @@ func (d *Store) ingestFederationEventsOnce(
 				ProjectID: p.ProjectID, ProjectUID: projectUID, ProjectName: projectName,
 				IssueID: &winner.issue.ID, IssueUID: &winner.issue.UID,
 				Type: delta.Type, Actor: delta.Actor, Payload: string(delta.Payload),
+				// The copy takes the place of the snapshot it replaces, so changes
+				// the home made after that snapshot replay after the copy.
+				HLC: &db.EventHLCTimestamp{PhysicalMS: winner.event.HLCPhysicalMS, Counter: winner.event.HLCCounter},
 			}
 			if delta.RelatedIssueUID != "" {
 				insert.RelatedIssueUID = &delta.RelatedIssueUID
@@ -1183,19 +1179,13 @@ type repeatedAdoptionSnapshot struct {
 // repeatedAdoptionSnapshotIssueTx returns the issue an adoption snapshot
 // repeats, or nil when the event is not one or the project does not hold the
 // issue yet. An issue held by another project is refused.
-func repeatedAdoptionSnapshotIssueTx(ctx context.Context, tx *sql.Tx, projectID int64, ev db.RemoteEvent, allowed, consumedRetry bool) (*db.Issue, error) {
+func repeatedAdoptionSnapshotIssueTx(ctx context.Context, tx *sql.Tx, projectID int64, ev db.RemoteEvent, allowed bool) (*db.Issue, error) {
 	if !allowed {
 		return nil, nil
 	}
 	issueUID, err := payloadIssueUID(ev, db.PayloadMap(ev.Payload))
 	if err != nil || issueUID == "" {
 		return nil, err
-	}
-	// A retry of a consumed adoption stored or skipped every snapshot the
-	// first time. The hub may have moved the issue to another project since,
-	// so neither the holder nor the caller's project access is checked again.
-	if consumedRetry {
-		return db.ConsumedAdoptionIssue(ctx, tx, issueUID)
 	}
 	if err := db.CheckFederationFreshIssueHolder(ctx, tx, projectID, ev.Type, issueUID); err != nil {
 		return nil, err

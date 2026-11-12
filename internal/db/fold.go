@@ -53,65 +53,10 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 			}
 		}
 	}
-	p.noteRestatedIssues(ordered)
 	for _, e := range ordered {
 		p.apply(e)
 	}
 	return p
-}
-
-// foldBaselineKey names one creation or snapshot of an issue in a replay.
-type foldBaselineKey struct {
-	issueUID string
-	clock    FoldClock
-}
-
-// noteRestatedIssues records which issues have a whole-copy event, so that
-// only their changes are kept for a copy that replays after them. A creation
-// or snapshot starts the issue again, and a replica that begins at that
-// snapshot never sees a copy before it. The record is therefore kept for each
-// stretch between baselines: a copy affects only the events that share its
-// stretch.
-func (p *FoldProjection) noteRestatedIssues(events []FoldEvent) {
-	stretch := map[string]foldBaselineKey{}
-	for _, e := range events {
-		switch e.Type {
-		case "issue.created", "issue.snapshot":
-			if uid := issueUID(e, PayloadMap(e.Payload)); uid != "" {
-				stretch[uid] = foldBaselineKey{uid, clockOf(e)}
-			}
-		case RepeatedImportEventType:
-			uid := issueUID(e, nil)
-			if uid == "" {
-				continue
-			}
-			if p.restatedIssues == nil {
-				p.restatedIssues = map[string]struct{}{}
-				p.restatedAfter = map[foldBaselineKey]bool{}
-				p.sinceBaseline = map[string][]FoldEvent{}
-				p.hasBaseline = map[string]bool{}
-				p.keptTouchedAt = map[string]string{}
-			}
-			if baseline, started := stretch[uid]; started {
-				p.restatedAfter[baseline] = true
-			} else {
-				p.restatedIssues[uid] = struct{}{}
-			}
-		}
-	}
-}
-
-// enterBaselineStretch records whether a copy follows this creation or
-// snapshot before the issue's next one.
-func (p *FoldProjection) enterBaselineStretch(uid string, clock FoldClock) {
-	if p.restatedIssues == nil {
-		return
-	}
-	if p.restatedAfter[foldBaselineKey{uid, clock}] {
-		p.restatedIssues[uid] = struct{}{}
-	} else {
-		delete(p.restatedIssues, uid)
-	}
 }
 
 func (p *FoldProjection) apply(e FoldEvent) {
@@ -124,41 +69,9 @@ func (p *FoldProjection) apply(e FoldEvent) {
 		return
 	}
 	payload := PayloadMap(e.Payload)
-	if wholeCopyReplaces(e.Type) {
-		uid := issueUID(e, payload)
-		if p.yieldsToRestatedCopy(uid, e, payload) {
-			// A creation time repair is not part of what a copy replaces.
-			if e.Type == "issue.updated" {
-				p.healIssueCreatedAt(uid, payload)
-			}
-			return
-		}
-		if _, restated := p.restatedIssues[uid]; restated {
-			p.sinceBaseline[uid] = append(p.sinceBaseline[uid], e)
-		}
-	}
-	p.applyEvent(e, payload)
-}
-
-func (p *FoldProjection) applyEvent(e FoldEvent, payload map[string]jsontext.Value) {
 	switch e.Type {
 	case "issue.created", "issue.snapshot":
 		p.applyIssueCreated(e)
-		// A creation or snapshot is the whole issue again, so no earlier
-		// copy or change bounds what follows it. A replica that starts here
-		// replays the later events without the copy, and so does this one.
-		if uid := issueUID(e, payload); uid != "" {
-			if issue, held := p.Issues[uid]; held && issue.RestatedAt != "" {
-				issue.RestatedAt = ""
-				p.Issues[uid] = issue
-			}
-			p.enterBaselineStretch(uid, clockOf(e))
-			if _, restated := p.restatedIssues[uid]; restated {
-				p.sinceBaseline[uid] = nil
-				p.hasBaseline[uid] = true
-				delete(p.keptTouchedAt, uid)
-			}
-		}
 	case "issue.updated":
 		p.applyIssueUpdated(e, payload)
 	case RepeatedImportEventType:
@@ -221,47 +134,6 @@ func (p *FoldProjection) applyEvent(e FoldEvent, payload map[string]jsontext.Val
 		// Bridge events are issue-scoped audit records. The receiving side keeps
 		// its own connector state and must not project these onto native content.
 		return
-	}
-}
-
-func (p *FoldProjection) noteKeptTouch(uid, at string) {
-	if _, restated := p.restatedIssues[uid]; restated && at != "" && (p.keptTouchedAt[uid] == "" || at > p.keptTouchedAt[uid]) {
-		p.keptTouchedAt[uid] = at
-	}
-}
-
-// wholeCopyReplaces reports whether an event of this type changes values that
-// a whole copy sets: fields, status, labels, and metadata. Comments merge and
-// links are only added, so their events are not bounded by a copy.
-func wholeCopyReplaces(eventType string) bool {
-	switch eventType {
-	case "issue.updated", "issue.assigned", "issue.unassigned", "issue.assignment_renewed",
-		"issue.assignment_expired", "issue.priority_set", "issue.priority_cleared",
-		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",
-		"issue.labeled", "issue.unlabeled", "issue.metadata_updated":
-		return true
-	}
-	return false
-}
-
-// yieldsToRestatedCopy reports whether e is not newer than a whole copy that
-// already set this issue. Event clocks do not track the data's time, so such
-// a change can replay after the copy's event. The copy held every field,
-// label, and metadata key as of its time, so only a later change applies.
-func (p *FoldProjection) yieldsToRestatedCopy(uid string, e FoldEvent, payload map[string]jsontext.Value) bool {
-	restatedAt := p.Issues[uid].RestatedAt
-	return restatedAt != "" && !repeatedCopyIsNewer(restatedAt, issueUpdatedAt(e, payload))
-}
-
-// healIssueCreatedAt applies the one part of an issue.updated event that only
-// ever moves a value earlier: an import repair of the creation time.
-func (p *FoldProjection) healIssueCreatedAt(uid string, payload map[string]jsontext.Value) {
-	if v, ok := stringValue(payload["created_at"]); ok && v != "" {
-		issue := p.ensureIssue(uid)
-		if issue.CreatedAt == "" || v < issue.CreatedAt {
-			issue.CreatedAt = v
-			p.Issues[uid] = issue
-		}
 	}
 }
 
@@ -345,7 +217,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		p.IssueMetadata[uid] = canonicalJSON(in.Metadata)
 	}
 	for _, label := range in.Labels {
-		p.setLabel(uid, label, FoldElementState{Present: true, Clock: clockOf(e)})
+		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clockOf(e)}
 	}
 	for _, link := range in.Links {
 		if link.ToIssueUID == "" {
@@ -416,35 +288,17 @@ func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsont
 }
 
 // applyIssueRestated applies the whole copy a hub recorded for a winning
-// repeated adoption snapshot. The hub compared the copy with the issue it held
-// when the copy arrived, so replay applies it over the issue's baseline. An
-// edit made after the copy can reach the hub later and replay before this
-// event; the copy then yields to it, as it would have had the edit arrived
-// first.
+// repeated adoption snapshot. The hub decided the copy was newer than the
+// issue it held when the copy arrived, so replay applies it in event order
+// like any other change: the copy's fields, labels, and metadata replace the
+// issue's, and its comments merge by UID.
 func (p *FoldProjection) applyIssueRestated(e FoldEvent) {
 	uid := issueUID(e, nil)
 	var in repeatedImportPayload
-	if uid == "" || json.Unmarshal(e.Payload, &in) != nil || in.UpdatedAt == "" {
+	if uid == "" || json.Unmarshal(e.Payload, &in) != nil {
 		return
 	}
-	// The hub wrote this event because the copy was newer than the issue it
-	// held, so the copy applies over a baseline that replays before it. That
-	// baseline's own date is not compared again: a home whose clock runs ahead
-	// dates its snapshot in the future, and a hub edit since then gave the
-	// issue the earlier time the hub compared. A hub refuses a fresh creation
-	// or snapshot of an issue it holds, and a snapshot it writes for a move
-	// takes a later clock, so no newer baseline replays before the copy.
 	issue := p.ensureIssue(uid)
-	if len(p.sinceBaseline[uid]) == 0 && !p.hasBaseline[uid] && !repeatedCopyIsNewer(issue.UpdatedAt, in.UpdatedAt) {
-		// No history of this issue is held to apply the copy underneath.
-		return
-	}
-	// A copy can be dated ahead of the hub's clock. Changes yield only up to
-	// the time the hub accepted it, so a later edit still applies.
-	restatedAt := in.UpdatedAt
-	if e.CreatedAt != "" && timestampBefore(e.CreatedAt, restatedAt) {
-		restatedAt = e.CreatedAt
-	}
 	issue.Title, issue.Body = in.Title, in.Body
 	issue.Owner = cloneStringPtr(in.Owner)
 	clearFoldAssignmentExpiry(&issue)
@@ -456,19 +310,19 @@ func (p *FoldProjection) applyIssueRestated(e FoldEvent) {
 	issue.ClosedReason = cloneStringPtr(in.ClosedReason)
 	issue.ClosedAt = cloneStringPtr(in.ClosedAt)
 	issue.DeletedAt = cloneStringPtr(in.DeletedAt)
-	issue.UpdatedAt = in.UpdatedAt
-	// The time of an earlier copy is replaced with that copy. Comments merge
-	// and links are only added, so their times still count, and so do the
-	// changes applied again below.
-	advanceIssueUpdatedAt(&issue, p.keptTouchedAt[uid])
-	if issue.RestatedAt == "" || timestampBefore(issue.RestatedAt, restatedAt) {
-		issue.RestatedAt = restatedAt
-	}
+	advanceIssueUpdatedAt(&issue, in.UpdatedAt)
 	p.Issues[uid] = issue
 
-	p.replaceIssueLabels(uid, in.Labels, clockOf(e))
-	metadata, err := json.Marshal(in.Metadata, json.Deterministic(true))
-	if err == nil {
+	clock := clockOf(e)
+	for key := range p.Labels {
+		if key.IssueUID == uid {
+			p.Labels[key] = FoldElementState{Present: false, Clock: clock}
+		}
+	}
+	for _, label := range in.Labels {
+		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clock}
+	}
+	if metadata, err := json.Marshal(in.Metadata, json.Deterministic(true)); err == nil {
 		p.IssueMetadata[uid] = replaceOrdinaryMetadata(p.IssueMetadata[uid], metadata)
 	}
 	for _, comment := range in.Comments {
@@ -478,26 +332,35 @@ func (p *FoldProjection) applyIssueRestated(e FoldEvent) {
 		existing, known := p.Comments[comment.CommentUID]
 		if !known || existing.CreatedAt == "" {
 			p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt,
-				comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e))
-			existing, known = p.Comments[comment.CommentUID]
-		}
-		// A comment's text follows its edit time, not the order of events.
-		if known && comment.EditedAt != "" && timestampBefore(existing.EditedAt, comment.EditedAt) {
-			p.editCommentBody(comment.CommentUID, uid, comment.Body, comment.EditedAt, clockOf(e))
-		}
-	}
-	// Changes made after the copy that replayed before this event apply again
-	// on top of it. What they name is theirs, and the rest is the copy's.
-	newer := p.sinceBaseline[uid][:0]
-	for _, change := range p.sinceBaseline[uid] {
-		payload := PayloadMap(change.Payload)
-		if p.yieldsToRestatedCopy(uid, change, payload) {
+				comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clock)
 			continue
 		}
-		newer = append(newer, change)
-		p.applyEvent(change, payload)
+		// A comment both sides hold keeps the text with the later edit.
+		if comment.EditedAt != "" && timestampBefore(existing.EditedAt, comment.EditedAt) {
+			p.editCommentBody(comment.CommentUID, uid, comment.Body, comment.EditedAt, clock)
+		}
 	}
-	p.sinceBaseline[uid] = newer
+}
+
+// replaceOrdinaryMetadata returns replacement as the issue's whole metadata,
+// keeping only the recurrence keys of current, which the hub's scheduler owns.
+func replaceOrdinaryMetadata(current, replacement jsontext.Value) jsontext.Value {
+	out := map[string]jsontext.Value{}
+	for key, value := range parseRawObject(replacement) {
+		if !recurringMetadataKey(key) {
+			out[key] = canonicalJSON(value)
+		}
+	}
+	for key, value := range parseRawObject(current) {
+		if recurringMetadataKey(key) {
+			out[key] = value
+		}
+	}
+	raw, err := json.Marshal(out, json.Deterministic(true))
+	if err != nil {
+		return current
+	}
+	return raw
 }
 
 func (p *FoldProjection) applyOwner(e FoldEvent, payload map[string]jsontext.Value) {
@@ -685,7 +548,6 @@ func (p *FoldProjection) applyComment(e FoldEvent, payload map[string]jsontext.V
 	}
 	p.setComment(commentUID, uid, author, teammate, body, createdAt, replyTo, replyKind, editedAt, clockOf(e))
 	p.touchIssue(uid, createdAt)
-	p.noteKeptTouch(uid, createdAt)
 }
 
 func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]jsontext.Value) {
@@ -702,19 +564,8 @@ func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]json
 	if v, ok := stringValue(payload["edited_at"]); ok && v != "" {
 		editedAt = v
 	}
-	// For an issue that has a whole copy, a comment's text follows its edit
-	// time through the whole replay: an older edit that replays later does
-	// not replace a newer one, before or after the copy's event. Edits with
-	// the same time keep event order.
-	_, restated := p.restatedIssues[uid]
-	if restated || p.Issues[uid].RestatedAt != "" {
-		if existing, known := p.Comments[commentUID]; known && existing.EditedAt != "" && timestampBefore(editedAt, existing.EditedAt) {
-			return
-		}
-	}
 	p.editCommentBody(commentUID, uid, body, editedAt, clockOf(e))
 	p.touchIssue(uid, editedAt)
-	p.noteKeptTouch(uid, editedAt)
 }
 
 func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, body, createdAt, replyTo, replyKind, editedAt string, clock FoldClock) {
@@ -765,60 +616,8 @@ func (p *FoldProjection) applyLabel(e FoldEvent, payload map[string]jsontext.Val
 	if !ok || uid == "" {
 		return
 	}
-	p.setLabel(uid, label, FoldElementState{Present: present, Clock: clockOf(e)})
+	p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: present, Clock: clockOf(e)}
 	p.touchIssue(uid, issueUpdatedAt(e, payload))
-}
-
-func (p *FoldProjection) setLabel(issueUID, label string, state FoldElementState) {
-	p.Labels[FoldLabelKey{IssueUID: issueUID, Label: label}] = state
-	if p.labelsByIssue != nil {
-		if p.labelsByIssue[issueUID] == nil {
-			p.labelsByIssue[issueUID] = map[string]struct{}{}
-		}
-		p.labelsByIssue[issueUID][label] = struct{}{}
-	}
-}
-
-// replaceIssueLabels makes labels the issue's whole label set as of clock.
-// Every other label the fold has seen for the issue is removed, including one
-// an older event added after the replacing copy was taken.
-func (p *FoldProjection) replaceIssueLabels(issueUID string, labels []string, clock FoldClock) {
-	if p.labelsByIssue == nil {
-		p.labelsByIssue = map[string]map[string]struct{}{}
-		for key := range p.Labels {
-			if p.labelsByIssue[key.IssueUID] == nil {
-				p.labelsByIssue[key.IssueUID] = map[string]struct{}{}
-			}
-			p.labelsByIssue[key.IssueUID][key.Label] = struct{}{}
-		}
-	}
-	for label := range p.labelsByIssue[issueUID] {
-		p.setLabel(issueUID, label, FoldElementState{Present: false, Clock: clock})
-	}
-	for _, label := range labels {
-		p.setLabel(issueUID, label, FoldElementState{Present: true, Clock: clock})
-	}
-}
-
-// replaceOrdinaryMetadata returns replacement as the issue's whole metadata,
-// keeping only the recurrence keys of current, which the hub's scheduler owns.
-func replaceOrdinaryMetadata(current, replacement jsontext.Value) jsontext.Value {
-	out := map[string]jsontext.Value{}
-	for key, value := range parseRawObject(replacement) {
-		if !recurringMetadataKey(key) {
-			out[key] = canonicalJSON(value)
-		}
-	}
-	for key, value := range parseRawObject(current) {
-		if recurringMetadataKey(key) {
-			out[key] = value
-		}
-	}
-	raw, err := json.Marshal(out, json.Deterministic(true))
-	if err != nil {
-		return current
-	}
-	return raw
 }
 
 func (p *FoldProjection) applyLinkEvent(e FoldEvent, payload map[string]jsontext.Value, present bool) {
@@ -840,7 +639,6 @@ func (p *FoldProjection) applyLinkEvent(e FoldEvent, payload map[string]jsontext
 	}
 	p.setLink(from, to, typ, present, clockOf(e), e.Actor, "")
 	p.touchIssue(issueUID(e, payload), issueUpdatedAt(e, payload))
-	p.noteKeptTouch(issueUID(e, payload), issueUpdatedAt(e, payload))
 }
 
 func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]jsontext.Value) {
@@ -849,7 +647,6 @@ func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]jsont
 		return
 	}
 	defer p.touchIssue(base, issueUpdatedAt(e, payload))
-	p.noteKeptTouch(base, issueUpdatedAt(e, payload))
 	p.applyUIDList(base, payload["parent_set_uid"], "parent", true, false, clockOf(e), e.Actor)
 	p.applyUIDList(base, payload["parent_removed_uid"], "parent", false, false, clockOf(e), e.Actor)
 	for _, uid := range stringSlice(payload["blocks_added_uids"]) {

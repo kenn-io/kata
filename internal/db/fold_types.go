@@ -28,32 +28,12 @@ type FoldClock struct {
 
 // FoldProjection is the folded state derived from a set of portable events.
 type FoldProjection struct {
-	CronRuns      map[string]FoldCronRun
-	CronJobs      map[string]FoldCronJob
-	CronWorkflows map[string]FoldCronWorkflow
-	Issues        map[string]FoldIssue
-	Comments      map[string]FoldComment
-	Labels        map[FoldLabelKey]FoldElementState
-	// labelsByIssue indexes Labels for a whole-set replacement. It is built on
-	// the first replacement and kept current by every later label write.
-	labelsByIssue map[string]map[string]struct{}
-	// restatedIssues names the issues that have a whole-copy event in the
-	// events being folded. Only their changes are kept in sinceBaseline.
-	restatedIssues map[string]struct{}
-	// restatedAfter marks each creation or snapshot that a whole-copy event
-	// follows before the issue's next creation or snapshot.
-	restatedAfter map[foldBaselineKey]bool
-	// sinceBaseline holds, per such issue, the changes applied since its
-	// baseline that a whole copy would replace. A copy that replays after a
-	// newer change applies underneath it: the copy is applied and the newer
-	// changes are applied again on top.
-	sinceBaseline map[string][]FoldEvent
-	// keptTouchedAt is the latest comment or link change time of each such
-	// issue. A copy replaces an earlier copy's updated_at, and the changes a
-	// copy does not replace still count.
-	keptTouchedAt map[string]string
-	// hasBaseline marks each such issue whose creation or snapshot replayed.
-	hasBaseline     map[string]bool
+	CronRuns        map[string]FoldCronRun
+	CronJobs        map[string]FoldCronJob
+	CronWorkflows   map[string]FoldCronWorkflow
+	Issues          map[string]FoldIssue
+	Comments        map[string]FoldComment
+	Labels          map[FoldLabelKey]FoldElementState
 	Links           map[FoldLinkKey]FoldElementState
 	IssueMetadata   map[string]jsontext.Value
 	ProjectMetadata map[string]jsontext.Value
@@ -99,9 +79,6 @@ type FoldIssue struct {
 	// restatements. Newly accepted intent must outrank the previous projection's
 	// writer; an older delayed event cannot manufacture a pending pointer.
 	StatusClock FoldClock `json:"-"`
-	// RestatedAt is the time up to which a whole copy set this issue. A
-	// change that is not newer yields to the copy, wherever it replays.
-	RestatedAt string `json:"-"`
 }
 
 // FoldComment is the replayed comment state keyed by stable comment UID.

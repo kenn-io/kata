@@ -118,23 +118,6 @@ func CheckFederationFreshIssueHolder(ctx context.Context, tx federationHistoryQu
 		ErrFederationIngestValidation, eventType, issueUID)
 }
 
-// ConsumedAdoptionIssue returns the issue a retried snapshot of a consumed
-// adoption repeats, or nil when the hub holds no such issue. The hub decided
-// the snapshot the first time and may have moved the issue to a project the
-// pushing home cannot read, so the lookup ignores project access. It returns
-// only the UID the caller sent, and the retry changes nothing.
-func ConsumedAdoptionIssue(ctx context.Context, tx federationHistoryQuery, issueUID string) (*Issue, error) {
-	var held string
-	err := tx.QueryRowContext(ctx, `SELECT uid FROM issues WHERE uid=$1`, issueUID).Scan(&held)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &Issue{UID: held}, nil
-}
-
 // ValidateAdoptionBaselineSingleClock checks that a continuation chunk is one
 // baseline when the hub stored no earlier snapshot to compare its clock with.
 func ValidateAdoptionBaselineSingleClock(events []FederationIngestEvent) error {

@@ -9913,10 +9913,6 @@ paths:
             format: int64
             minimum: 0
             type: integer
-        - in: header
-          name: X-Kata-Event-Features
-          schema:
-            type: string
       responses:
         "200":
           content:
