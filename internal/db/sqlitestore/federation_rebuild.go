@@ -144,6 +144,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 	for i := range result.projects {
 		p := &result.projects[i]
 		m := &p.materialization
+		events := p.linkEvents
 		if slices.ContainsFunc(p.linkEvents, m.relayOrigins.relaySourced) {
 			owners, err := relayLinkEndpointProjects(ctx, tx, m.linkProjects)
 			if err != nil {
@@ -172,12 +173,12 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 					owners[uid] = projectUID
 				}
 			}
-			events, err := filterRelayLinkEvents(p.linkEvents, m.relayOrigins, owners)
+			events, err = filterRelayLinkEvents(events, m.relayOrigins, owners)
 			if err != nil {
 				return preparedFederationRebuild{}, err
 			}
-			m.links = db.FoldEvents(events)
 		}
+		m.links = db.FoldEvents(events)
 		if _, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, 0, nil, nil, m.rowHasher); err != nil {
 			return preparedFederationRebuild{}, err
 		}

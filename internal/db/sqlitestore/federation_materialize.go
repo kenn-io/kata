@@ -243,6 +243,10 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 	}
 	if raw != nil {
 		*raw = events
+		if len(m.linkProjects) > 0 {
+			m.relayOrigins, err = loadRelayOriginClassifier(ctx, tx, m.linkProjects)
+		}
+		return err
 	}
 	events, m.relayOrigins, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, events)
 	if err != nil {
