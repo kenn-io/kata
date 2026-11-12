@@ -107,6 +107,9 @@ type CronUsageRequest struct {
 	Refresh bool `query:"refresh"`
 }
 
+// CronUsageCacheControl protects both successful and error responses.
+const CronUsageCacheControl = "private, no-store"
+
 // CronUsageResponse is private because it spends an operator credential.
 type CronUsageResponse struct {
 	CacheControl string `header:"Cache-Control"`

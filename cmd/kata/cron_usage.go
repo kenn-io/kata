@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -18,7 +17,12 @@ import (
 
 func newCronUsageCmd() *cobra.Command {
 	var refresh bool
-	cmd := &cobra.Command{Use: "usage <run-uid>", Short: "show live usage for a recorded run", Args: cobra.ExactArgs(1)}
+	cmd := &cobra.Command{
+		Use: "usage <run-uid>", Short: "show live usage for a recorded run",
+		Long:    "Show live AgentsView cost and per-session usage for a recorded cron run.",
+		Example: "  kata cron run usage 01HXYZ00000000000000000000\n  kata cron run usage 01HXYZ00000000000000000000 --refresh",
+		Args:    cobra.ExactArgs(1),
+	}
 	cmd.Flags().BoolVar(&refresh, "refresh", false, "refresh cached usage older than ten seconds")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		id, err := normalizedCronCLIUID(args[0])
@@ -46,19 +50,11 @@ func newCronUsageCmd() *cobra.Command {
 		if caps == nil {
 			return externalCLITransportError(caps, err)
 		}
-		raw, err := cronCLIResponse(caps.StatusCode, caps.Body, err)
+		_, err = cronCLIResponse(caps.StatusCode, caps.Body, err)
 		if err != nil {
 			return err
 		}
-		var capability struct {
-			Usage struct {
-				Source string `json:"source"`
-			} `json:"usage"`
-		}
-		if err = json.Unmarshal(raw, &capability); err != nil {
-			return err
-		}
-		if capability.Usage.Source != "agentsview" {
+		if caps.JSON200 == nil || caps.JSON200.Usage.Source != generated.Agentsview {
 			return errors.New("usage source is disabled or unsupported on the selected daemon")
 		}
 		hc, err := longRunningClientForResolved(cmd.Context(), daemon.resolved)
@@ -66,40 +62,48 @@ func newCronUsageCmd() *cobra.Command {
 			return err
 		}
 		hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-		endpoint := fmt.Sprintf("%s/api/v1/projects/%d/cron/runs/%s/usage?refresh=%t", daemon.baseURL, project.ID, id, refresh)
-		request, err := http.NewRequestWithContext(daemon.ctx, http.MethodGet, endpoint, nil)
+		usageClient, err := kataclient.NewWithHTTPClient(daemon.baseURL, hc)
 		if err != nil {
 			return err
 		}
-		response, err := hc.Do(request) //nolint:gosec // Validated run UID and resolved daemon origin; redirects are refused.
-		if err != nil {
-			return err
+		response, err := usageClient.WithResponseLimit(2<<20).GetCronRunUsageWithResponse(daemon.ctx, &generated.GetCronRunUsageRequestOptions{
+			PathParams: &generated.GetCronRunUsagePath{ProjectID: project.ID, RunUID: id},
+			Query:      &generated.GetCronRunUsageQuery{Refresh: &refresh},
+		})
+		if response == nil {
+			return externalCLITransportError(response, err)
 		}
-		defer func() { _ = response.Body.Close() }()
-		body, err := io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
-		if err != nil {
-			return err
-		}
-		if len(body) > 2<<20 {
-			return errors.New("cron usage response exceeds its byte limit")
-		}
-		body, err = cronCLIResponse(response.StatusCode, body, nil)
+		body, err := cronCLIResponse(response.StatusCode, response.Body, err)
 		if err != nil {
 			return err
 		}
 		if currentOutputMode() == outputJSON {
 			return emitJSON(cmd.OutOrStdout(), jsontext.Value(body))
 		}
-		var usage agentsview.RunUsage
-		if err = json.Unmarshal(body, &usage); err != nil {
-			return err
+		if response.JSON200 == nil {
+			return errors.New("cron usage response is empty")
 		}
 		if flags.Quiet {
 			return nil
 		}
-		return writeCronUsage(cmd.OutOrStdout(), usage)
+		return writeCronUsage(cmd.OutOrStdout(), cronUsageFromResponse(*response.JSON200))
 	}
 	return cmd
+}
+
+func cronUsageFromResponse(input generated.RunUsage) agentsview.RunUsage {
+	usage := agentsview.RunUsage{Total: agentsview.Total{State: string(input.State), CostMicrodollars: input.CostMicrodollars, Estimated: input.Estimated}, SessionsIncomplete: input.SessionsIncomplete}
+	for _, item := range input.Sessions {
+		session := agentsview.RunSession{Agent: item.Agent, SessionID: item.SessionID, Step: item.Step, SessionUsage: agentsview.SessionUsage{State: string(item.State), CostMicrodollars: item.CostMicrodollars, Candidates: item.Candidates, UnpricedModels: item.UnpricedModels}}
+		if item.CostSource != nil {
+			session.CostSource = *item.CostSource
+		}
+		if item.URL != nil {
+			session.URL = *item.URL
+		}
+		usage.Sessions = append(usage.Sessions, session)
+	}
+	return usage
 }
 
 func usageAmount(value int64, estimated bool) string {

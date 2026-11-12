@@ -1,7 +1,7 @@
 ---
 title: Diagnosing setup
 description: Read-only setup diagnostics with kata doctor.
-last_edited: 2026-11-08
+last_edited: 2026-11-12
 ---
 
 # Diagnosing setup

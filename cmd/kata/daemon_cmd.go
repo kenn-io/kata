@@ -986,19 +986,21 @@ func daemonRestartCmd() *cobra.Command {
 }
 
 type daemonStartupPreflight struct {
-	Config         *config.DaemonConfig
-	Web            config.WebConfig
-	MCPToken       string
-	Listen         string
-	Namespace      *daemonruntime.Namespace
-	Endpoint       kitdaemon.Endpoint
-	DBPath         string
-	StoreConfig    storeopen.Config
-	KataHome       string
-	HookConfigPath string
-	HookConfig     hooks.LoadedConfig
-	Embedder       *embedding.Client
-	VectorsPath    string
+	Config           *config.DaemonConfig
+	Web              config.WebConfig
+	MCPToken         string
+	AgentsView       *agentsview.Service
+	AgentsViewConfig config.ResolvedAgentsView
+	Listen           string
+	Namespace        *daemonruntime.Namespace
+	Endpoint         kitdaemon.Endpoint
+	DBPath           string
+	StoreConfig      storeopen.Config
+	KataHome         string
+	HookConfigPath   string
+	HookConfig       hooks.LoadedConfig
+	Embedder         *embedding.Client
+	VectorsPath      string
 }
 
 func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartupPreflight, error) {
@@ -1008,6 +1010,14 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	}
 	if err := validateFederationStartupConfig(dcfg); err != nil {
 		return daemonStartupPreflight{}, err
+	}
+	usageConfig, err := dcfg.AgentsView.Resolve(ctx, dcfg.Auth.TrustPrivateNetwork)
+	if err != nil {
+		return daemonStartupPreflight{}, err
+	}
+	usageService, err := agentsview.NewService(usageConfig, dcfg.Auth.TrustPrivateNetwork)
+	if err != nil {
+		return daemonStartupPreflight{}, errors.New("[agentsview] unable to initialize usage source")
 	}
 	if listen != "" {
 		dcfg.Sources["listen"] = "--listen"
@@ -1094,19 +1104,21 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		return daemonStartupPreflight{}, err
 	}
 	return daemonStartupPreflight{
-		Config:         dcfg,
-		Web:            dcfg.Web,
-		MCPToken:       mcpToken,
-		Listen:         listen,
-		Namespace:      ns,
-		Endpoint:       endpoint,
-		DBPath:         dbPath,
-		StoreConfig:    storeConfig,
-		KataHome:       home,
-		HookConfigPath: hookCfgPath,
-		HookConfig:     loadedHooks,
-		Embedder:       embedder,
-		VectorsPath:    vectorsPath,
+		Config:           dcfg,
+		Web:              dcfg.Web,
+		MCPToken:         mcpToken,
+		AgentsView:       usageService,
+		AgentsViewConfig: usageConfig,
+		Listen:           listen,
+		Namespace:        ns,
+		Endpoint:         endpoint,
+		DBPath:           dbPath,
+		StoreConfig:      storeConfig,
+		KataHome:         home,
+		HookConfigPath:   hookCfgPath,
+		HookConfig:       loadedHooks,
+		Embedder:         embedder,
+		VectorsPath:      vectorsPath,
 	}, nil
 }
 
@@ -1278,14 +1290,8 @@ func runDaemonProcess(
 		return err
 	}
 	dcfg := startup.Config
-	usageConfig, err := dcfg.AgentsView.Resolve(ctx, dcfg.Auth.TrustPrivateNetwork)
-	if err != nil {
-		return err
-	}
-	usageService, err := agentsview.NewService(usageConfig, dcfg.Auth.TrustPrivateNetwork)
-	if err != nil {
-		return errors.New("[agentsview] unable to initialize usage source")
-	}
+	usageService := startup.AgentsView
+	usageConfig := startup.AgentsViewConfig
 	listen = startup.Listen
 	ns := startup.Namespace
 	endpoint := startup.Endpoint

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -24,15 +23,8 @@ func (s *doctorState) hookChecks(ctx context.Context, apiClient *kataapi.Client)
 		if response != nil {
 			status = response.StatusCode
 		}
-		if err == nil && response != nil && status == http.StatusOK {
-			var wire struct {
-				AgentsView struct {
-					State string `json:"state"`
-				} `json:"agentsview"`
-			}
-			if json.Unmarshal(response.Body, &wire) == nil {
-				usageState = wire.AgentsView.State
-			}
+		if err == nil && response != nil && status == http.StatusOK && response.JSON200 != nil {
+			usageState = string(response.JSON200.Agentsview.State)
 		}
 		if err != nil || response == nil || status != http.StatusOK || response.JSON200 == nil || !response.JSON200.Hooks.Available {
 			return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Live hook diagnostics are unsupported, unavailable or not visible to this principal", Details: doctorHTTPStatus(status), Fix: "Use operator credentials and a daemon with hook diagnostics support; custom hook sinks may not provide diagnostics."}

@@ -38,7 +38,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "getCronRunUsage", Method: http.MethodGet, Path: base + "/runs/{run_uid}/usage", Middlewares: huma.Middlewares{func(ctx huma.Context, next func(huma.Context)) {
-		ctx.SetHeader("Cache-Control", "private, no-store")
+		ctx.SetHeader("Cache-Control", api.CronUsageCacheControl)
 		next(ctx)
 	}}}, func(ctx context.Context, in *api.CronUsageRequest) (*api.CronUsageResponse, error) {
 		if insecureReadonlyRequest(ctx) {
@@ -61,7 +61,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, api.NewError(503, "usage_source_disabled", "usage source is disabled", "", nil)
 		}
-		return &api.CronUsageResponse{CacheControl: "private, no-store", Body: usage}, nil
+		return &api.CronUsageResponse{CacheControl: api.CronUsageCacheControl, Body: usage}, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "observeCronRun", Method: http.MethodPut, Path: base + "/runs/{run_uid}", MaxBodyBytes: db.CronObservationLimit}, func(ctx context.Context, in *api.ObserveCronRunRequest) (*api.ObserveCronRunResponse, error) {
 		ctx, actor, err := cronWriteContext(ctx, in.Body.Actor)

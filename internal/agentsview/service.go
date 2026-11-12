@@ -117,7 +117,7 @@ func (s *Service) Enabled() bool { s.mu.RLock(); defer s.mu.RUnlock(); return s.
 func (s *Service) Reload(cfg config.ResolvedAgentsView, trustPrivate bool) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cfg.URL != cfg.URL || s.cfg.BrowserURL != cfg.BrowserURL || s.cfg.Enabled() != cfg.Enabled() {
+	if !sameTarget(s.cfg, cfg) {
 		return false, nil
 	}
 	if !cfg.Enabled() {
@@ -189,10 +189,7 @@ func (g *generation) lookup(ctx context.Context, slots chan struct{}, agent, id 
 	if entry, ok := g.cache.Get(key); ok && g.now().Sub(entry.at) < entry.ttl && (!refresh || g.now().Sub(entry.at) <= 10*time.Second) {
 		return entry
 	}
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		deadline = time.Now().Add(5 * time.Second)
-	}
+	deadline, _ := ctx.Deadline() // Usage always supplies its five-second budget.
 	ch := g.flights.DoChan(key, func() (any, error) {
 		// Shared work can outlive one canceled caller for other waiters, but the
 		// originating request deadline bounds queueing and the lookup together.
@@ -258,5 +255,9 @@ func (s *Service) Probe(ctx context.Context) string {
 func (s *Service) SameTarget(cfg config.ResolvedAgentsView) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.cfg.URL == cfg.URL && s.cfg.BrowserURL == cfg.BrowserURL && s.cfg.Enabled() == cfg.Enabled()
+	return sameTarget(s.cfg, cfg)
+}
+
+func sameTarget(a, b config.ResolvedAgentsView) bool {
+	return a.URL == b.URL && a.BrowserURL == b.BrowserURL
 }

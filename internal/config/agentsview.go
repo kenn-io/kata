@@ -3,10 +3,11 @@ package config
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"go.kenn.io/kata/internal/httpurl"
-	"go.kenn.io/kata/internal/transcript"
+	"golang.org/x/net/http/httpguts"
 )
 
 // AgentsViewConfig selects the serving daemon's optional usage source.
@@ -23,7 +24,7 @@ type ResolvedAgentsView struct{ URL, BrowserURL, Token string }
 func (c ResolvedAgentsView) Enabled() bool { return c.URL != "" }
 
 // Resolve leaves a partially configured, disabled source untouched, including
-// its secret. Errors intentionally exclude input values and credential paths.
+// its secret. Errors exclude credential values and unsafe URL input.
 func (c AgentsViewConfig) Resolve(ctx context.Context, trustPrivate bool) (ResolvedAgentsView, error) {
 	if err := ctx.Err(); err != nil {
 		return ResolvedAgentsView{}, err
@@ -33,9 +34,6 @@ func (c AgentsViewConfig) Resolve(ctx context.Context, trustPrivate bool) (Resol
 	}
 	base, err := httpurl.CanonicalHTTPBaseURL(c.URL)
 	if err != nil {
-		return ResolvedAgentsView{}, errors.New("[agentsview] invalid URL")
-	}
-	if _, err = (configURLValidator{}).validate(base); err != nil {
 		return ResolvedAgentsView{}, errors.New("[agentsview] invalid URL")
 	}
 	if _, err = (BearerPolicy{TrustPrivateNetwork: trustPrivate}).OriginForBaseURL(base); err != nil {
@@ -49,18 +47,12 @@ func (c AgentsViewConfig) Resolve(ctx context.Context, trustPrivate bool) (Resol
 	if err != nil {
 		return ResolvedAgentsView{}, errors.New("[agentsview] invalid browser URL")
 	}
-	if _, err = (configURLValidator{}).validate(browser); err != nil {
-		return ResolvedAgentsView{}, errors.New("[agentsview] invalid browser URL")
-	}
-	token, _, err := ResolveSecret("", c.TokenFile, c.TokenEnv)
+	token, source, err := ResolveSecret("", c.TokenFile, c.TokenEnv)
 	if err != nil {
-		return ResolvedAgentsView{}, errors.New("[agentsview] selected credential is unavailable")
+		return ResolvedAgentsView{}, fmt.Errorf("[agentsview] %w", err)
+	}
+	if !httpguts.ValidHeaderFieldValue(token) {
+		return ResolvedAgentsView{}, fmt.Errorf("[agentsview] %w", &CredentialSourceError{Source: source, Reason: "credential contains invalid HTTP header bytes"})
 	}
 	return ResolvedAgentsView{URL: base, BrowserURL: browser, Token: token}, nil
-}
-
-type configURLValidator struct{}
-
-func (configURLValidator) validate(base string) (string, error) {
-	return (transcript.Transcript{Agent: "example", SessionID: "example"}).Link(base)
 }
