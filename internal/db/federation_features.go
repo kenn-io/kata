@@ -154,6 +154,35 @@ func RequireEventFeatures(supported, required string) error {
 	return nil
 }
 
+// relayBaselineEventFeatures are the formats every relay read before relay
+// offers carried a feature header. A relay that sends no header reads these.
+const relayBaselineEventFeatures = CronEventFeature + "," + IssueMoveEventFeature
+
+// RelayOfferReadablePrefix returns the event envelopes a relay advertising
+// supported can read, up to the first one it cannot. Offering that one would
+// make an older relay reject it and block its own pulls, so the relay gets the
+// upgrade error when it is the next envelope. An offer changes nothing until
+// the relay acknowledges it, so the relay resumes once it is upgraded.
+func RelayOfferReadablePrefix(supported string, envelopes []RelayEnvelope) ([]RelayEnvelope, error) {
+	if supported == "" {
+		supported = relayBaselineEventFeatures
+	}
+	for index, envelope := range envelopes {
+		event, err := DecodeRelaySourceEvent(envelope.Body)
+		if err != nil {
+			// The receiver validates the body. This check reads only its type.
+			continue
+		}
+		if err := RequireEventFeatures(supported, EventRequiredFeatures(event.Type)); err != nil {
+			if index == 0 {
+				return nil, err
+			}
+			return envelopes[:index], nil
+		}
+	}
+	return envelopes, nil
+}
+
 // EventRequiredFeatures returns the wire feature needed for an event type.
 func EventRequiredFeatures(kind string) string {
 	if kind == "issue.moved" {

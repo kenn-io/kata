@@ -1,1 +1,0 @@
-Federation ingest responses add optional `superseded_event_uids`, the adoption snapshots the hub did not store.

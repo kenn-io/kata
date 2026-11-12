@@ -1804,7 +1804,10 @@ repeated snapshot only from a spoke that advertises the `repeated_adoption_v1`
 event feature. An older spoke gets `400 validation` with `targets existing
 issue`, as before, and quarantines the push; upgrade it and resume. After a
 newer copy wins, the project holds an `issue.restated` event, and a spoke or
-relay without the feature cannot pull the project until it is upgraded.
+relay without the feature cannot pull the project until it is upgraded. A
+relay is offered the events before that one, then gets
+`409 unsupported_event_features`. It resumes after the upgrade with no other
+step.
 
 Limits:
 
@@ -1816,6 +1819,10 @@ Limits:
 - Links are compared only when a copy wins and are not part of the
   `updated_at` rule. An unlink that reaches the hub later still removes a link
   that a winning copy added.
+- An issue whose `updated_at` is ahead of the hub's clock can lose that date
+  when someone edits it on the hub, and get it back when the hub rebuilds the
+  project from history. While the date is back, a copy dated before it is
+  skipped. This ends when the hub's clock passes that date.
 
 The create-only rule still applies outside an adoption push. A fresh
 `issue.created`, or an `issue.snapshot` in an ordinary push, for an issue the
