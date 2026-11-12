@@ -55,8 +55,7 @@
   let requestError = $state<string>()
   // Aborted when the page goes away.
   let page: AbortController | undefined
-  // Counts Turn on requests, so a read that started before the latest one
-  // can't land an Off it answered before the daemon accepted.
+  // Fences reads across setup requests and settled restart responses.
   let posts = 0
   let previousRestartError: string | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -253,6 +252,7 @@
     } finally {
       if (post === posts) {
         posting = false
+        posts++
         if (!signal.aborted) poll()
       }
     }

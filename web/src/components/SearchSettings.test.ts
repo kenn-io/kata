@@ -161,6 +161,51 @@ describe('SearchSettings', () => {
     expect(screen.getByRole('alert').textContent).toContain("Couldn't restart the daemon")
   })
 
+  test('ignores an old failure read that arrives after the retry is accepted', async () => {
+    vi.useFakeTimers()
+    const failed = status({
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1, error: 'Restart failed' },
+    })
+    let resolveRead!: (response: Response) => void
+    setGeneratedFetch(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(failed))
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveRead = resolve
+            }),
+        )
+        .mockResolvedValue(Response.json(status({ provider: 'built_in', can_change: false }))),
+    )
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    let resolvePost!: (response: Response) => void
+    const postFetch = vi.fn<typeof fetch>(
+      () =>
+        new Promise((resolve) => {
+          resolvePost = resolve
+        }),
+    )
+    renderSettings({ postFetch, originStable: true })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(2000)
+    resolvePost(new Response(null, { status: 202 }))
+    await settle()
+    resolveRead(Response.json(failed))
+    await settle()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByText('Restarting...')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(screen.getByText('On', { exact: true })).not.toBeNull()
+  })
+
   test('ignores a late restart response after status confirms success', async () => {
     vi.useFakeTimers()
     const pending = status({
