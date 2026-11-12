@@ -719,6 +719,47 @@ func (r RelayAckRequestBodyStream) Validate() error {
 	}
 }
 
+type RunSessionState string
+
+const (
+	Ambiguous                   RunSessionState = "ambiguous"
+	NoUsage                     RunSessionState = "no_usage"
+	NotFound                    RunSessionState = "not_found"
+	Priced                      RunSessionState = "priced"
+	RunSessionStateUnauthorized RunSessionState = "unauthorized"
+	RunSessionStateUnavailable  RunSessionState = "unavailable"
+	Unpriced                    RunSessionState = "unpriced"
+)
+
+// Validate checks if the RunSessionState value is valid
+func (r RunSessionState) Validate() error {
+	switch r {
+	case Ambiguous, NoUsage, NotFound, Priced, RunSessionStateUnauthorized, RunSessionStateUnavailable, Unpriced:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid RunSessionState value, got: %v", r))
+	}
+}
+
+type RunUsageState string
+
+const (
+	Complete             RunUsageState = "complete"
+	NoSessions           RunUsageState = "no_sessions"
+	Partial              RunUsageState = "partial"
+	RunUsageStateUnknown RunUsageState = "unknown"
+)
+
+// Validate checks if the RunUsageState value is valid
+func (r RunUsageState) Validate() error {
+	switch r {
+	case Complete, NoSessions, Partial, RunUsageStateUnknown:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid RunUsageState value, got: %v", r))
+	}
+}
+
 type SetProjectAccessRequestBodyVisibility string
 
 const (

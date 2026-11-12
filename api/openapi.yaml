@@ -6685,6 +6685,14 @@ components:
         session_id:
           type: string
         state:
+          enum:
+            - priced
+            - unpriced
+            - no_usage
+            - not_found
+            - ambiguous
+            - unauthorized
+            - unavailable
           type: string
         step:
           type: string
@@ -6725,6 +6733,11 @@ components:
         sessions_incomplete:
           type: boolean
         state:
+          enum:
+            - complete
+            - partial
+            - unknown
+            - no_sessions
           type: string
       required:
         - run_uid

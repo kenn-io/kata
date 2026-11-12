@@ -6746,33 +6746,48 @@ func (r RunIssueSyncOnceResponseBody) Validate() error {
 }
 
 type RunSession struct {
-	Agent              string   `json:"agent" validate:"required"`
-	Candidates         []string `json:"candidates,omitempty"`
-	CanonicalSessionID *string  `json:"canonical_session_id,omitempty"`
-	CostMicrodollars   *int64   `json:"cost_microdollars,omitempty"`
-	CostSource         *string  `json:"cost_source,omitempty"`
-	Models             []string `json:"models,omitempty"`
-	SessionID          string   `json:"session_id" validate:"required"`
-	State              string   `json:"state" validate:"required"`
-	Step               *string  `json:"step,omitempty"`
-	SubagentCount      *int64   `json:"subagent_count,omitempty"`
-	TotalOutputTokens  *int64   `json:"total_output_tokens,omitempty"`
-	UnpricedModels     []string `json:"unpriced_models,omitempty"`
-	URL                *string  `json:"url,omitempty"`
+	Agent              string          `json:"agent" validate:"required"`
+	Candidates         []string        `json:"candidates,omitempty"`
+	CanonicalSessionID *string         `json:"canonical_session_id,omitempty"`
+	CostMicrodollars   *int64          `json:"cost_microdollars,omitempty"`
+	CostSource         *string         `json:"cost_source,omitempty"`
+	Models             []string        `json:"models,omitempty"`
+	SessionID          string          `json:"session_id" validate:"required"`
+	State              RunSessionState `json:"state" validate:"required"`
+	Step               *string         `json:"step,omitempty"`
+	SubagentCount      *int64          `json:"subagent_count,omitempty"`
+	TotalOutputTokens  *int64          `json:"total_output_tokens,omitempty"`
+	UnpricedModels     []string        `json:"unpriced_models,omitempty"`
+	URL                *string         `json:"url,omitempty"`
 }
 
 func (r RunSession) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(r.Agent, "required"); err != nil {
+		errors = errors.Append("Agent", err)
+	}
+	if err := typesValidator.Var(r.SessionID, "required"); err != nil {
+		errors = errors.Append("SessionID", err)
+	}
+	if v, ok := any(r.State).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("State", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type RunUsage struct {
-	CostMicrodollars   *int64       `json:"cost_microdollars,omitempty"`
-	Estimated          bool         `json:"estimated"`
-	FetchedAt          time.Time    `json:"fetched_at" validate:"required"`
-	RunUID             string       `json:"run_uid" validate:"required"`
-	Sessions           []RunSession `json:"sessions" validate:"required"`
-	SessionsIncomplete bool         `json:"sessions_incomplete"`
-	State              string       `json:"state" validate:"required"`
+	CostMicrodollars   *int64        `json:"cost_microdollars,omitempty"`
+	Estimated          bool          `json:"estimated"`
+	FetchedAt          time.Time     `json:"fetched_at" validate:"required"`
+	RunUID             string        `json:"run_uid" validate:"required"`
+	Sessions           []RunSession  `json:"sessions" validate:"required"`
+	SessionsIncomplete bool          `json:"sessions_incomplete"`
+	State              RunUsageState `json:"state" validate:"required"`
 }
 
 func (r RunUsage) Validate() error {
@@ -6793,8 +6808,10 @@ func (r RunUsage) Validate() error {
 			}
 		}
 	}
-	if err := typesValidator.Var(r.State, "required"); err != nil {
-		errors = errors.Append("State", err)
+	if v, ok := any(r.State).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("State", err)
+		}
 	}
 	if len(errors) == 0 {
 		return nil
