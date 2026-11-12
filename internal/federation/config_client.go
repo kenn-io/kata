@@ -382,7 +382,7 @@ func hubCallError(err error, operation string) error {
 
 func hubStatusKind(status int) error {
 	switch {
-	case status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusPreconditionRequired:
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return ErrHubAuthentication
 	case status == http.StatusRequestTimeout || status == http.StatusTooManyRequests:
 		return ErrHubUnavailable

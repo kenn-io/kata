@@ -43,6 +43,7 @@ func TestFederationBridgeGeneratedTransportBounds(t *testing.T) {
 		{"oversized", 200, strings.Repeat("x", (1<<20)+1), "invalid_hub_response", 502},
 		{"unauthenticated", 401, `{}`, "hub_credential_rejected", 502},
 		{"forbidden", 403, `{}`, "hub_credential_rejected", 502},
+		{"signing required", 428, `{}`, "hub_credential_rejected", 502},
 		{"missing", 404, `{}`, "hub_request_rejected", 502},
 		{"conflict", 409, `{}`, "hub_request_rejected", 502},
 		{"oversized relay conflict", 409, fmt.Sprintf(`{"error":{"code":"relay_cross_project_links","message":"%s"}}`, strings.Repeat("x", (1<<20)+1)), "hub_request_rejected", 502},
@@ -81,18 +82,6 @@ func TestFederationBridgeGeneratedTransportBounds(t *testing.T) {
 			require.LessOrEqual(t, len(test.body)-reader.Len(), (1<<20)+1, "response reads must stop after the size limit plus one detection byte")
 			require.Equal(t, 1, transport.attempts)
 			require.True(t, body.closed, "the original response body must close after bounded capture")
-		})
-	}
-}
-
-func TestFederationBridgeHubCredentialRejection(t *testing.T) {
-	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusPreconditionRequired} {
-		t.Run(fmt.Sprint(status), func(t *testing.T) {
-			failure := federationBridgeHubRejection(status)
-			require.Equal(t, http.StatusBadGateway, failure.Status)
-			require.Equal(t, "hub_credential_rejected", failure.Code)
-			require.Contains(t, failure.Hint, "signing policy")
-			require.Equal(t, status, failure.Data["hub_status"])
 		})
 	}
 }
