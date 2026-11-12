@@ -149,7 +149,7 @@ func TestSchemaVersionContract(t *testing.T) {
 
 func TestSchemaVersionMarkers(t *testing.T) {
 	a, b := strings.Repeat("a", 64), strings.Repeat("b", 64)
-	old, current, replacement := markerName(49, a), markerName(50, a), markerName(50, b)
+	current, replacement := markerName(50, a), markerName(50, b)
 	cases := []struct {
 		name  string
 		files map[string]string
@@ -158,12 +158,12 @@ func TestSchemaVersionMarkers(t *testing.T) {
 	}{
 		{"match", map[string]string{replacement: "Summary.\n"}, nil, ""},
 		{"missing", nil, nil, replacement},
-		{"draft", map[string]string{current: "Summary.\n"}, []string{}, "replace draft marker"},
-		{"base", map[string]string{current: "Summary.\n"}, []string{current}, "preserve base marker"},
+		{"draft", map[string]string{current: "Summary.\n"}, []string{}, fmt.Sprintf("replace draft marker %s with %s and keep version 50", current, replacement)},
+		{"base", map[string]string{current: "Summary.\n"}, []string{current}, fmt.Sprintf("preserve base marker %s and move to version 51: %s", current, markerName(51, b))},
 		{"deleted base", map[string]string{replacement: "Summary.\n"}, []string{current}, "restore base schema marker"},
-		{"unknown base", map[string]string{current: "Summary.\n"}, nil, "if it is on the base"},
-		{"historical duplicate", map[string]string{old: "One\n", markerName(49, b): "Two\n", replacement: "Current\n"}, nil, "multiple markers"},
-		{"future", map[string]string{markerName(51, a): "Future\n"}, nil, "exceeds current version"},
+		{"unknown base", map[string]string{current: "Summary.\n"}, nil, fmt.Sprintf("replace draft marker %s with %s and keep version 50; if it is on the base, preserve it and move to version 51: %s", current, replacement, markerName(51, b))},
+		{"duplicate", map[string]string{current: "One\n", replacement: "Two\n"}, []string{current}, fmt.Sprintf("schema version 50 has multiple markers %s and %s; preserve the base marker and move to version 51: %s", current, replacement, markerName(51, b))},
+		{"future", map[string]string{markerName(51, a): "Future\n"}, nil, fmt.Sprintf("marker exceeds current version 50; move to version 52: %s", markerName(52, b))},
 		{"bad name", map[string]string{"bad.txt": "Summary\n"}, nil, "invalid schema marker"},
 		{"empty", map[string]string{replacement: "\n"}, nil, "one-line summary"},
 		{"multiline", map[string]string{replacement: "one\ntwo\n"}, nil, "one-line summary"},
@@ -210,8 +210,12 @@ func TestSchemaVersionGitBase(t *testing.T) {
 	require.NoError(t, os.MkdirAll(markerDir, 0700))
 	marker := markerName(50, strings.Repeat("a", 64))
 	require.NoError(t, os.WriteFile(filepath.Join(markerDir, marker), []byte("Summary\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "unrelated.txt"), []byte("Unrelated\n"), 0600))
 	git("add", ".")
-	base, err := baseSchemaMarkers(t, repo, git("write-tree"), env)
+	git("-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "base")
+	base, err := baseSchemaMarkers(t, repo, "HEAD", env)
 	require.NoError(t, err)
 	require.Equal(t, []string{marker}, base)
+	_, err = baseSchemaMarkers(t, repo, "missing-ref", env)
+	require.ErrorContains(t, err, `read schema markers at "missing-ref"`)
 }
