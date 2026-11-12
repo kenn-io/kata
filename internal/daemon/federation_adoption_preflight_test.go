@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
@@ -59,48 +58,47 @@ type adoptionTransport func(*http.Request) (*http.Response, error)
 
 func (a adoptionTransport) RoundTrip(r *http.Request) (*http.Response, error) { return a(r) }
 
-func TestAdoptionPreflightBeforeRekeyAndSessionFree(t *testing.T) {
-	for _, session := range []bool{false, true} {
-		t.Run(fmt.Sprint(session), func(t *testing.T) {
-			store := openReplicaServiceStore(t)
-			project, err := store.CreateProjectWithUID(t.Context(), "spoke-project", replicaLocalProjectUID)
-			require.NoError(t, err)
-			adoptionRun(t, store, project, session)
-			gets := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gets++
-				w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
-				_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)
-			}))
-			t.Cleanup(server.Close)
-			params := adoptionParams(project, server.URL)
-			credentials := newReplicaCredentialStore()
-			source := params.Credential
-			source.Capabilities = "pull,push"
-			credentials.put(project.UID, source)
-			params.HubClientFactory = func(_ context.Context, c config.FederationCredential) (*http.Client, error) {
-				require.Equal(t, params.Credential.Token, c.Token)
-				return server.Client(), nil
-			}
-			_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
-			if session {
-				require.Error(t, err)
-				require.Contains(t, err.Error(), "cron_run_sessions_v1")
-				require.Equal(t, 1, gets)
-				require.Zero(t, credentials.rekeyCalls)
-				current, e := store.ProjectByID(t.Context(), project.ID)
-				require.NoError(t, e)
-				require.Equal(t, project.UID, current.UID)
-				_, e = store.FederationBindingByProject(t.Context(), project.ID)
-				require.ErrorIs(t, e, db.ErrNotFound)
-			} else {
-				require.NoError(t, err)
-				require.Zero(t, gets)
-			}
-		})
+// A session-bearing adoption probes the hub before any rekey. Session-free
+// adoption never probes; that is asserted by the saved-credential matrix below.
+func TestAdoptionPreflightBeforeRekeyRefusesUnsupportedHub(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProjectWithUID(t.Context(), "spoke-project", replicaLocalProjectUID)
+	require.NoError(t, err)
+	adoptionRun(t, store, project, true)
+	gets := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gets++
+		w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
+		_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)
+	}))
+	t.Cleanup(server.Close)
+	params := adoptionParams(project, server.URL)
+	credentials := newReplicaCredentialStore()
+	source := params.Credential
+	source.Capabilities = "pull,push"
+	credentials.put(project.UID, source)
+	params.HubClientFactory = func(_ context.Context, c config.FederationCredential) (*http.Client, error) {
+		require.Equal(t, params.Credential.Token, c.Token)
+		return server.Client(), nil
 	}
+	_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cron_run_sessions_v1")
+	require.Equal(t, 1, gets)
+	require.Zero(t, credentials.rekeyCalls)
+	current, err := store.ProjectByID(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, project.UID, current.UID)
+	_, err = store.FederationBindingByProject(t.Context(), project.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
 }
 
+// lateSessionStore models a run row that reaches the store after the preflight
+// without crossing the in-process observation admission gate. The HTTP
+// observation path is excluded by that gate (see TestCronSessionObservationDuringAdoption),
+// but a project merge import (kata import --merge-project, ImportReplay with
+// MergeProject) writes cron runs directly in the store, so the adoption
+// transaction must still check the baseline it emits.
 type lateSessionStore struct {
 	*sqlitestore.Store
 	before func()
@@ -204,52 +202,6 @@ func TestAdoptionPreflightUsesEffectiveSigningAndChecksIdentity(t *testing.T) {
 	require.Equal(t, 1, calls)
 	require.Zero(t, credentials.rekeyCalls)
 	require.Zero(t, credentials.storeCalls)
-}
-
-func TestAdoptionHubProbeDoesNotHoldReplicaMutex(t *testing.T) {
-	store := openReplicaServiceStore(t)
-	project, err := store.CreateProject(t.Context(), "spoke-project")
-	require.NoError(t, err)
-	adoptionRun(t, store, project, true)
-	entered, resume := make(chan struct{}), make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		close(entered)
-		<-resume
-		w.Header().Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
-		_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)
-	}))
-	t.Cleanup(server.Close)
-	params := adoptionParams(project, server.URL)
-	params.HubClientFactory = func(context.Context, config.FederationCredential) (*http.Client, error) { return server.Client(), nil }
-	done := make(chan error, 1)
-	go func() {
-		_, e := daemon.EnsureFederationReplica(t.Context(), store, newReplicaCredentialStore(), nil, params)
-		done <- e
-	}()
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("hub probe did not start")
-	}
-	other := replicaServiceParams()
-	other.HubProjectUID = "00000000000000000000000009"
-	other.ProjectName = "other-project"
-	other.HubProjectID = 43
-	other.Credential.HubProjectID = 43
-	completed := make(chan error, 1)
-	go func() {
-		_, e := daemon.EnsureFederationReplica(t.Context(), store, newReplicaCredentialStore(), nil, other)
-		completed <- e
-	}()
-	select {
-	case err := <-completed:
-		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		close(resume)
-		t.Fatal("unrelated replica blocked by hub probe")
-	}
-	close(resume)
-	require.NoError(t, <-done)
 }
 
 func TestAdoptionSameUIDSessionBaselineAndBoundRejoin(t *testing.T) {

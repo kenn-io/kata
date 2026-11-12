@@ -492,33 +492,17 @@ func TestCronSpokeForwardPreservesUIDPath(t *testing.T) {
 	require.Equal(t, initial.Body.Job.DefinitionEventUID, current.DefinitionEventUID)
 }
 
+// The unsupported-hub row lives in TestCronSessionProbeClassifiesHubFailures,
+// which owns the hub metadata classifications; these modes use the real hub.
 func TestCronSessionObservationRequiresHubFeature(t *testing.T) {
-	for _, mode := range []string{"unsupported", "supported", "unreachable", "push disabled"} {
+	for _, mode := range []string{"supported", "unreachable", "push disabled"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newCronForwardFixture(t, func(f *cronForwardFixture, cfg *daemon.ServerConfig) {
-				if mode == "supported" || mode == "push disabled" {
-					return
-				}
 				if mode == "unreachable" {
 					cfg.FederationHubClient = func(context.Context, config.FederationCredential) (*http.Client, error) {
 						return nil, errors.New("unreachable")
 					}
-					return
 				}
-				endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-					w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
-					w.Header().Set("Content-Type", "application/json")
-					_, _ = fmt.Fprintf(w, `{"project_id":%d,"project_uid":%q}`, f.hp.ID, f.hp.UID)
-				}))
-				t.Cleanup(endpoint.Close)
-				b, err := f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)
-				require.NoError(t, err)
-				b.HubURL = endpoint.URL
-				_, err = f.spoke.DB.UpsertFederationBinding(t.Context(), b)
-				require.NoError(t, err)
-				c := f.credential
-				c.HubURL = endpoint.URL
-				require.NoError(t, config.WriteFederationCredential(f.sp.UID, c))
 			})
 			definition := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
 			job, _, err := f.spoke.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.sp.ID, Name: "Review", Actor: "tester", Definition: definition})
@@ -539,25 +523,21 @@ func TestCronSessionObservationRequiresHubFeature(t *testing.T) {
 				require.Equalf(t, http.StatusOK, response.StatusCode, "%s", raw)
 				_, err = f.spoke.DB.CronRun(t.Context(), f.sp.ID, id)
 				require.NoError(t, err)
-			} else {
-				switch mode {
-				case "unsupported":
-					require.Equalf(t, http.StatusConflict, response.StatusCode, "%s", raw)
-					require.Contains(t, string(raw), "unsupported_event_features")
-				case "unreachable":
-					require.Equalf(t, http.StatusServiceUnavailable, response.StatusCode, "%s", raw)
-				default:
-					require.Equalf(t, http.StatusConflict, response.StatusCode, "%s", raw)
-					require.Contains(t, string(raw), "federated_read_only")
-					require.Contains(t, string(raw), "run sessions")
-					require.NotContains(t, string(raw), "native recurring")
-				}
-				_, err = f.spoke.DB.CronRun(t.Context(), f.sp.ID, id)
-				require.ErrorIs(t, err, db.ErrNotFound)
-				after, err := f.spoke.DB.MaxEventID(t.Context())
-				require.NoError(t, err)
-				require.Equal(t, before, after)
+				return
 			}
+			if mode == "unreachable" {
+				require.Equalf(t, http.StatusServiceUnavailable, response.StatusCode, "%s", raw)
+			} else {
+				require.Equalf(t, http.StatusConflict, response.StatusCode, "%s", raw)
+				require.Contains(t, string(raw), "federated_read_only")
+				require.Contains(t, string(raw), "run sessions")
+				require.NotContains(t, string(raw), "native recurring")
+			}
+			_, err = f.spoke.DB.CronRun(t.Context(), f.sp.ID, id)
+			require.ErrorIs(t, err, db.ErrNotFound)
+			after, err := f.spoke.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, before, after)
 		})
 	}
 }

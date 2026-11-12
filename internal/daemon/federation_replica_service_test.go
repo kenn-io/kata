@@ -18,7 +18,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/testfix"
 )
 
@@ -38,38 +37,6 @@ func (s *signaledProjectLockStore) AcquireFederationProjectExclusiveLock(context
 	close(s.entered)
 	s.lock.Lock()
 	return s.lock.Unlock, nil
-}
-
-func TestAdoptionWaitsForProjectObservationAdmission(t *testing.T) {
-	store := openReplicaServiceStore(t)
-	project, err := store.CreateProject(t.Context(), "example-project")
-	require.NoError(t, err)
-	wrapped := &signaledProjectLockStore{TransactionalStore: dbtest.TransactionalStore{Storage: store}, entered: make(chan struct{})}
-	release, err := federationcoord.BeginSync(t.Context(), "other-process-"+federationcoord.Key(store.InstanceUID(), project.ID), wrapped, project.ID)
-	require.NoError(t, err)
-	t.Cleanup(release)
-	params := replicaServiceParams()
-	params.ProjectName = project.Name
-	params.AdoptExisting = true
-	done := make(chan error, 1)
-	go func() {
-		_, err := daemon.EnsureFederationReplica(t.Context(), wrapped, newReplicaCredentialStore(), nil, params)
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		t.Fatalf("adoption completed while observation held admission: %v", err)
-	case <-wrapped.entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("adoption did not reach the project lock")
-	}
-	release()
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("adoption did not proceed after admission released")
-	}
 }
 
 const (

@@ -24,6 +24,7 @@ func TestCronSessionProbeClassifiesHubFailures(t *testing.T) {
 		for _, tc := range []struct {
 			name                         string
 			status                       int
+			features                     string
 			wrongID, wrongUID, transport bool
 			wantStatus                   int
 			wantCode                     string
@@ -33,6 +34,7 @@ func TestCronSessionProbeClassifiesHubFailures(t *testing.T) {
 			{name: "missing project", status: 404, wantStatus: 409, wantCode: "federation_binding_conflict"},
 			{name: "wrong ID", status: 200, wrongID: true, wantStatus: 409, wantCode: "federation_binding_conflict"},
 			{name: "wrong UID", status: 200, wrongUID: true, wantStatus: 409, wantCode: "federation_binding_conflict"},
+			{name: "unsupported", status: 200, features: db.CronEventFeature, wantStatus: 409, wantCode: "unsupported_event_features"},
 			{name: "unavailable", status: 503, wantStatus: 503, wantCode: "federation_offline"},
 			{name: "transport", transport: true, wantStatus: 503, wantCode: "federation_offline"},
 		} {
@@ -54,7 +56,11 @@ func TestCronSessionProbeClassifiesHubFailures(t *testing.T) {
 					if tc.wrongUID {
 						projectUID = "01HZNQ7VFPK1XGD8R5MABCD4EX"
 					}
-					w.Header().Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
+					advertised := db.SupportedEventFeatures
+					if tc.features != "" {
+						advertised = tc.features
+					}
+					w.Header().Set(db.EventFeaturesHeader, advertised)
 					_, _ = fmt.Fprintf(w, `{"project_id":%d,"project_uid":%q}`, id, projectUID)
 				}))
 				t.Cleanup(hub.Close)
