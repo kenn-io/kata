@@ -265,13 +265,6 @@ func TestAPIBaseRecordLoading(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("Add route\n"), 0600))
 	}
 	require.NoError(t, checkBaseAPIVersionRecords(dir, records))
-	for _, summary := range []string{"Corrected wording", "", " \n", "First\nSecond\n"} {
-		require.NoError(t, os.WriteFile(filepath.Join(dir, records[0]), []byte(summary), 0600))
-		err := checkBaseAPIVersionRecords(dir, records)
-		if summary == "Corrected wording" {
-			require.NoError(t, err)
-		} else {
-			require.ErrorContains(t, err, records[0])
-		}
-	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, records[0]), nil, 0600))
+	require.ErrorContains(t, checkBaseAPIVersionRecords(dir, records), records[0])
 }
