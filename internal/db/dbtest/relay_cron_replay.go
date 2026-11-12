@@ -123,7 +123,7 @@ func RunRelayIngestValidatesCronReplay(t *testing.T, store db.Storage) {
 
 	// Replicated declarations over the client limit retain names and independent diagnostics.
 	fields := map[string]any{}
-	for i := 0; i < 33; i++ {
+	for i := range 33 {
 		fields[fmt.Sprintf("item_%02d", i)] = map[string]any{"type": "bool"}
 	}
 	fields["item_00"] = map[string]any{"type": "invalid"}

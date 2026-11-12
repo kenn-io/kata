@@ -217,7 +217,7 @@ func TestInputNULDeliveryContract(t *testing.T) {
 // TestInputLegacyOverLimitDiagnostics retains each declared name and independent error.
 func TestInputLegacyOverLimitDiagnostics(t *testing.T) {
 	fields := map[string]any{}
-	for i := 0; i < 33; i++ {
+	for i := range 33 {
 		fields[fmt.Sprintf("item_%02d", i)] = map[string]any{"type": "bool"}
 	}
 	fields["item_00"] = map[string]any{"type": "invalid"}
