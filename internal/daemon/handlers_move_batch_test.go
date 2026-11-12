@@ -43,7 +43,7 @@ func postMoveBatch(t *testing.T, env *testenv.Env, body string) batchReply {
 }
 
 func TestMoveIssuesBatch_RejectsInvalidRequest(t *testing.T) {
-	for _, mode := range []string{"too many", "subtree", "dry_run", "blank comment", "invalid teammate"} {
+	for _, mode := range []string{"too many", "subtree", "dry_run", "unknown", "null items", "blank comment", "invalid teammate"} {
 		t.Run(mode, func(t *testing.T) {
 			env := testenv.New(t, testenv.WithAuthToken("tok"))
 			source, target, issue := seedMovePair(t, env)
@@ -57,6 +57,10 @@ func TestMoveIssuesBatch_RejectsInvalidRequest(t *testing.T) {
 				body["items"] = items
 			case "subtree", "dry_run":
 				body[mode] = true
+			case "unknown":
+				body["unexpected"] = true
+			case "null items":
+				body["items"] = nil
 			case "blank comment":
 				body["comment"] = "  \t "
 			case "invalid teammate":
@@ -225,7 +229,7 @@ func TestMoveIssuesBatch_InvalidRowsDoNotConflict(t *testing.T) {
 }
 
 func TestMoveIssuesBatch_InvalidJSONItemDoesNotBlockNeighbor(t *testing.T) {
-	for _, invalid := range []string{`{"ref":42}`, `{"ref":true}`, `{"ref":"abc4","to_project_uid":42}`, `{"expected_revision":"1","ref":"abc4"}`, `{"ref":"$issue","expected_revision":null}`, `42`} {
+	for _, invalid := range []string{`{"ref":42}`, `{"ref":true}`, `{"ref":"abc4","to_project_uid":42}`, `{"expected_revision":"1","ref":"abc4"}`, `{"ref":"$issue","expected_revision":null}`, `{"ref":"$issue","unexpected":true}`, `42`} {
 		t.Run(invalid, func(t *testing.T) {
 			env := testenv.New(t, testenv.WithAuthToken("tok"))
 			_, target, issue := seedMovePair(t, env)
