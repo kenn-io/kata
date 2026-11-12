@@ -246,7 +246,7 @@ func federationEnrollCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&spokeName, "spoke-name", "", "unique hub-local name for this spoke instance")
 	cmd.Flags().StringVar(&spokeInstance, "spoke-instance", "", "spoke instance UID from `kata federation identity`")
-	cmd.Flags().StringVar(&hubURL, "hub-url", "", "hub main API URL used for enrollment")
+	cmd.Flags().StringVar(&hubURL, "hub-url", "", "hub API URL for enrollment; the join command also stores it unless the hub requires signing")
 	cmd.Flags().StringVar(&capabilities, "capabilities", "pull,push,lease", "comma-separated capabilities: pull,push,lease (claim is the API name for lease)")
 	cmd.Flags().StringVar(&token, "token", "", "explicit enrollment token (default: generated)")
 	cmd.Flags().StringVar(&hubTokenEnv, "hub-token-env", "", "environment variable containing the hub admin token (highest precedence)")
