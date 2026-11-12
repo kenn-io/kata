@@ -1801,7 +1801,7 @@ func federationJoinCommand(bundle federationJoinBundle) string {
 		BaselineThroughEventID: bundle.BaselineThroughEventID, Token: bundle.Token, Actor: bundle.Actor,
 		Capabilities: bundle.Capabilities, PushEnabled: bundle.PushEnabled,
 		AdoptExisting: bundle.AdoptExisting, AllowInsecure: bundle.AllowInsecure,
-	})
+	}, false)
 	if command == "" {
 		return ""
 	}

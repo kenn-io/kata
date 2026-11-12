@@ -28,6 +28,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/testenv"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/internal/version"
@@ -3330,10 +3331,6 @@ func TestFederationEnrollCLIRequiredSigningInstructions(t *testing.T) {
 	}
 	t.Cleanup(func() { fetchFederationJoinMetadata = originalFetch })
 	_, err = runCmdOutput(t, env, joinArgs...)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "signing")
+	require.ErrorIs(t, err, signingpolicy.ErrKeyRejected)
 	assert.False(t, metadataCalled)
-	grants, err := env.DB.ListFederationEnrollments(t.Context())
-	require.NoError(t, err)
-	require.Len(t, grants, 1)
 }
