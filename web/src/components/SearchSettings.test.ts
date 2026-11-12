@@ -97,36 +97,6 @@ describe('SearchSettings', () => {
     expect(screen.getByText('On', { exact: true })).not.toBeNull()
   })
 
-  test('continues showing progress while a reachable daemon is restarting', async () => {
-    vi.useFakeTimers()
-    const waiting = status({
-      can_change: false,
-      can_restart: true,
-      job: { state: 'restart', downloaded: 1, total: 1 },
-    })
-    const progress = { ...waiting, can_restart: false, restart_in_progress: true }
-    setGeneratedFetch(
-      vi
-        .fn<typeof fetch>()
-        .mockResolvedValueOnce(Response.json(waiting))
-        .mockImplementation(async () => Response.json(progress)),
-    )
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => true),
-    )
-    renderSettings({
-      originStable: true,
-      postFetch: vi.fn(async () => new Response(null, { status: 202 })),
-    })
-    await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
-    await vi.advanceTimersByTimeAsync(130_000)
-    expect(screen.getByText('Restarting...')).not.toBeNull()
-    expect(screen.queryByRole('alert')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
-  })
-
   test('recovers while the restart request is pending and ignores its late failure', async () => {
     vi.useFakeTimers()
     const waiting = status({
@@ -238,6 +208,8 @@ describe('SearchSettings', () => {
       expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
       await vi.advanceTimersByTimeAsync(2001)
       if (inProgress) {
+        await vi.advanceTimersByTimeAsync(120_000)
+        expect(screen.queryByRole('alert')).toBeNull()
         expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
         const count = read.mock.calls.length
         current = status({ provider: 'built_in', can_change: false })
@@ -339,22 +311,20 @@ describe('SearchSettings', () => {
 
   test('clears outage guidance when a restart in progress is reported again', async () => {
     vi.useFakeTimers()
-    let reachable = false
+    let reachable = true
     const progress = status({
       can_change: false,
       job: { state: 'restart', downloaded: 1, total: 1 },
       restart_in_progress: true,
     })
     setGeneratedFetch(
-      vi
-        .fn<typeof fetch>()
-        .mockResolvedValueOnce(Response.json(progress))
-        .mockImplementation(async () =>
-          reachable ? Response.json(progress) : new Response(null, { status: 503 }),
-        ),
+      vi.fn(async () =>
+        reachable ? Response.json(progress) : new Response(null, { status: 503 }),
+      ),
     )
     renderSettings({ originStable: true })
     await settle()
+    reachable = false
     await vi.advanceTimersByTimeAsync(120_000)
     expect(screen.getByRole('alert').textContent).toContain("Couldn't reconnect")
     reachable = true
