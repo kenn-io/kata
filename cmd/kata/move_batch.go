@@ -105,7 +105,7 @@ func readMoveBatchLine(reader *bufio.Reader) (string, bool, error) {
 			}
 		}
 		if err != bufio.ErrBufferFull {
-			return string(line), oversized || len(line) > 1<<20 && !(err == nil && line[len(line)-1] == '\r'), err
+			return string(line), oversized || len(line) > 1<<20 && (err != nil || line[len(line)-1] != '\r'), err
 		}
 	}
 }
