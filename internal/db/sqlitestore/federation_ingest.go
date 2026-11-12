@@ -297,11 +297,7 @@ func (d *Store) ingestFederationEventsOnce(
 			if err != nil {
 				return db.FederationIngestResult{}, err
 			}
-			clock, err := db.RepeatedSnapshotDeltaClock(ctx, tx, repeated.UID, ev.Payload)
-			if err != nil {
-				return db.FederationIngestResult{}, err
-			}
-			repeatedWinners = append(repeatedWinners, repeatedAdoptionSnapshot{issue: *repeated, event: ev, deltas: deltas, clock: clock})
+			repeatedWinners = append(repeatedWinners, repeatedAdoptionSnapshot{issue: *repeated, event: ev, deltas: deltas})
 			freshSnapshotSeen = true
 			seenBatch[ev.EventUID] = ev.ContentHash
 			continue
@@ -395,12 +391,11 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 	}
 	for _, winner := range repeatedWinners {
-		for index, delta := range winner.deltas {
-			clock := delta.Clock(winner.clock, index)
+		for _, delta := range winner.deltas {
 			insert := eventInsert{
 				ProjectID: p.ProjectID, ProjectUID: projectUID, ProjectName: projectName,
 				IssueID: &winner.issue.ID, IssueUID: &winner.issue.UID,
-				Type: delta.Type, Actor: delta.Actor, Payload: string(delta.Payload), HLC: &clock,
+				Type: delta.Type, Actor: delta.Actor, Payload: string(delta.Payload),
 			}
 			if delta.RelatedIssueUID != "" {
 				insert.RelatedIssueUID = &delta.RelatedIssueUID
@@ -1128,7 +1123,7 @@ func validateFederationProjectEvent(
 		if issueUID == "" {
 			return fmt.Errorf("%w: %s missing issue uid", db.ErrFederationIngestValidation, ev.Type)
 		}
-	case "issue.moved", "issue.updated", "issue.assigned", "issue.unassigned",
+	case "issue.moved", "issue.updated", db.RepeatedImportEventType, "issue.assigned", "issue.unassigned",
 		"issue.assignment_renewed", "issue.assignment_expired",
 		"issue.priority_set", "issue.priority_cleared",
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",
@@ -1173,7 +1168,6 @@ type repeatedAdoptionSnapshot struct {
 	issue  db.Issue
 	event  db.RemoteEvent
 	deltas []db.RepeatedSnapshotDelta
-	clock  db.EventHLCTimestamp
 }
 
 // repeatedAdoptionSnapshotIssueTx returns the issue an adoption snapshot

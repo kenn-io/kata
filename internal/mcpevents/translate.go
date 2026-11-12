@@ -16,7 +16,7 @@ var inboxVisibilityTypes = map[string]bool{
 // inboxRequestTypes wake a subscription only when their payload touches the
 // recipient's request or an issue's parent.
 var inboxRequestTypes = map[string]bool{
-	"issue.created": true, "issue.snapshot": true, "issue.metadata_updated": true, "issue.updated": true,
+	"issue.created": true, "issue.snapshot": true, "issue.metadata_updated": true, "issue.updated": true, "issue.restated": true,
 	"issue.linked": true, "issue.unlinked": true, "issue.links_changed": true,
 }
 
@@ -27,7 +27,7 @@ func issueLifecycle(o Occurrence) bool {
 	switch o.Type {
 	case "issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored":
 		return true
-	case "issue.updated":
+	case "issue.updated", "issue.restated":
 		var payload map[string]any
 		if json.Unmarshal(o.Payload, &payload) != nil {
 			return false
@@ -98,7 +98,7 @@ func inboxEventReason(o Occurrence, args Arguments) string {
 		if from || to {
 			return "notification"
 		}
-	case "issue.updated":
+	case "issue.updated", "issue.restated":
 		for _, field := range []string{"status", "deleted_at", "closed_at"} {
 			if _, ok := payload[field]; ok {
 				return "visibility"

@@ -26,8 +26,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   A snapshot with a newer `updated_at` updates the issue and merges its
   comments by UID with their original author and time. An older or identical
   one is acknowledged and writes nothing. Links are added and never removed.
-  The hub records a winning copy as ordinary change events, not as a second
-  snapshot, and the Kata home that pushed it then takes the hub's state. A
+  The hub records a winning copy as one `issue.restated` event, not as a
+  second snapshot, and the Kata home that pushed it then takes the hub's state. A
   push for an issue that another project on the hub holds, including an
   archived one, now returns `400 validation` naming the issue and is
   quarantined on the spoke; before, it returned 404 and the spoke retried

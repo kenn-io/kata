@@ -3,13 +3,11 @@ package db
 import (
 	"context"
 	"database/sql"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 )
 
 // AllowsRepeatedIssueSnapshot reports whether a fresh event may target an
@@ -92,42 +90,6 @@ func RepeatedSnapshotSQLLookups(ctx context.Context, tx federationHistoryQuery, 
 	return lookups
 }
 
-// RepeatedSnapshotDeltaClock places the hub's events for a winning repeated
-// snapshot in the log. They take the data's updated_at as their time, so an
-// edit made after the snapshot replays after them whenever it reaches the
-// hub. They never sort before the issue's baseline on the hub, because an
-// adoption snapshot carries the clock of its push and not of its data, and the
-// baseline would otherwise replay over them. No other event moves them: an
-// ordinary edit's clock is its data's time, and repairs and audit records
-// leave the compared state alone.
-func RepeatedSnapshotDeltaClock(ctx context.Context, tx federationHistoryQuery, issueUID string, incoming jsontext.Value) (EventHLCTimestamp, error) {
-	var doc struct {
-		UpdatedAt string `json:"updated_at"`
-	}
-	if err := json.Unmarshal(incoming, &doc); err != nil {
-		return EventHLCTimestamp{}, fmt.Errorf("%w: decode repeated issue snapshot: %w", ErrFederationIngestValidation, err)
-	}
-	updatedAt, err := time.Parse(time.RFC3339Nano, doc.UpdatedAt)
-	if err != nil {
-		return EventHLCTimestamp{}, fmt.Errorf("%w: repeated issue snapshot updated_at: %w", ErrFederationIngestValidation, err)
-	}
-	clock := EventHLCTimestamp{PhysicalMS: updatedAt.UnixMilli()}
-	var latestMS, latestCounter int64
-	err = tx.QueryRowContext(ctx, `SELECT hlc_physical_ms, hlc_counter FROM events WHERE issue_uid=$1
- AND type IN ('issue.created','issue.snapshot','issue.moved')
- ORDER BY hlc_physical_ms DESC, hlc_counter DESC LIMIT 1`, issueUID).Scan(&latestMS, &latestCounter)
-	if errors.Is(err, sql.ErrNoRows) {
-		return clock, nil
-	}
-	if err != nil {
-		return EventHLCTimestamp{}, err
-	}
-	if latestMS >= clock.PhysicalMS {
-		clock = EventHLCTimestamp{PhysicalMS: latestMS, Counter: latestCounter + 1}
-	}
-	return clock, nil
-}
-
 // CheckFederationFreshIssueHolder refuses a fresh issue.created or
 // issue.snapshot whose issue UID is held by a different project on this hub.
 // Issue UIDs are unique across a hub, and an archived project keeps its
@@ -177,15 +139,16 @@ var ErrFederationPushAwaitsPull = errors.New("federation push waits for the hub'
 
 // AcknowledgeSupersededFederationSnapshots deletes a spoke's own adoption
 // snapshots that the hub did not store because its project already held the
-// issues. The spoke then replays only what the hub holds, so the two agree.
-// Only this home's own issue.snapshot events qualify, and deleting them again
-// is a no-op.
+// issues, and reports how many it deleted. The spoke then replays only what
+// the hub holds, so the two agree. Only this home's own issue.snapshot events
+// qualify, and deleting them again is a no-op.
 //
 // A snapshot is deleted only when the log holds another creation of its issue,
-// which a pull brings from the hub. Without one the snapshot is the home's
-// only record of the issue, and the function changes nothing and returns
-// ErrFederationPushAwaitsPull.
-func AcknowledgeSupersededFederationSnapshots(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, eventUIDs []string) error {
+// which a pull brings from the hub. That creation can be another home's, this
+// home's own from an earlier adoption, or a move into the project. Without one
+// the snapshot is the home's only record of the issue, and the function
+// changes nothing and returns ErrFederationPushAwaitsPull.
+func AcknowledgeSupersededFederationSnapshots(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, eventUIDs []string) (int64, error) {
 	for chunk := range slices.Chunk(eventUIDs, 500) {
 		slots, args := make([]string, len(chunk)), []any{projectID, originInstanceUID}
 		for i, uid := range chunk {
@@ -197,15 +160,16 @@ func AcknowledgeSupersededFederationSnapshots(ctx context.Context, tx *sql.Tx, p
 		var waiting int
 		//nolint:gosec // G202: the concatenated SQL fragments contain no user data.
 		err := tx.QueryRowContext(ctx, `SELECT 1 FROM events s WHERE s.project_id=$1 AND s.origin_instance_uid=$2
- AND s.type='issue.snapshot'`+named+` AND NOT EXISTS (SELECT 1 FROM events r WHERE r.project_id=s.project_id
- AND r.issue_uid=s.issue_uid AND r.origin_instance_uid<>$2 AND r.type IN ('issue.created','issue.snapshot')) LIMIT 1`, args...).Scan(&waiting)
+ AND s.type='issue.snapshot'`+named+` AND NOT EXISTS (SELECT 1 FROM events r WHERE r.issue_uid=s.issue_uid
+ AND r.id<>s.id AND r.type IN ('issue.created','issue.snapshot','issue.moved')) LIMIT 1`, args...).Scan(&waiting)
 		if err == nil {
-			return ErrFederationPushAwaitsPull
+			return 0, ErrFederationPushAwaitsPull
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("check superseded federation snapshots: %w", err)
+			return 0, fmt.Errorf("check superseded federation snapshots: %w", err)
 		}
 	}
+	var deleted int64
 	for chunk := range slices.Chunk(eventUIDs, 500) {
 		slots, args := make([]string, len(chunk)), []any{projectID, originInstanceUID}
 		for i, uid := range chunk {
@@ -213,10 +177,16 @@ func AcknowledgeSupersededFederationSnapshots(ctx context.Context, tx *sql.Tx, p
 			args = append(args, uid)
 		}
 		//nolint:gosec // G202: the concatenated SQL fragments contain no user data.
-		if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1 AND origin_instance_uid=$2
- AND type='issue.snapshot' AND uid IN (`+strings.Join(slots, ",")+`)`, args...); err != nil {
-			return fmt.Errorf("drop superseded federation snapshots: %w", err)
+		result, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1 AND origin_instance_uid=$2
+ AND type='issue.snapshot' AND uid IN (`+strings.Join(slots, ",")+`)`, args...)
+		if err != nil {
+			return 0, fmt.Errorf("drop superseded federation snapshots: %w", err)
 		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("drop superseded federation snapshots: %w", err)
+		}
+		deleted += count
 	}
-	return nil
+	return deleted, nil
 }

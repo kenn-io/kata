@@ -13,7 +13,7 @@ import (
 // knownEventTypes is the persisted-events set per master spec §3.3. New
 // entries belong here whenever a new hook-eligible event is added.
 var knownEventTypes = map[string]struct{}{
-	"issue.created": {}, "issue.updated": {}, "issue.closed": {},
+	"issue.created": {}, "issue.updated": {}, "issue.restated": {}, "issue.closed": {},
 	"issue.reopened": {}, "issue.commented": {}, "issue.comment_edited": {}, "issue.linked": {},
 	"issue.unlinked": {}, "issue.labeled": {}, "issue.unlabeled": {},
 	"issue.assigned": {}, "issue.unassigned": {},

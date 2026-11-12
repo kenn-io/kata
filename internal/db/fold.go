@@ -74,6 +74,8 @@ func (p *FoldProjection) apply(e FoldEvent) {
 		p.applyIssueCreated(e)
 	case "issue.updated":
 		p.applyIssueUpdated(e, payload)
+	case RepeatedImportEventType:
+		p.applyIssueRestated(e)
 	case "issue.assigned", "issue.unassigned":
 		p.applyOwner(e, payload)
 	case "issue.assignment_renewed":
@@ -283,16 +285,57 @@ func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsont
 	}
 	advanceIssueUpdatedAt(&issue, updatedAt)
 	p.Issues[uid] = issue
-	// A hub restates a whole issue from a repeated import with these two
-	// keys. See RepeatedSnapshotDeltas.
-	if raw := payload[IssueUpdatedReplaceLabelsKey]; len(raw) > 0 {
-		var labels []string
-		if json.Unmarshal(raw, &labels) == nil {
-			p.replaceIssueLabels(uid, labels, clockOf(e))
-		}
+}
+
+// applyIssueRestated applies the whole copy a hub recorded for a winning
+// repeated adoption snapshot. It applies only when the copy is newer than the
+// issue at this point of the replay, by updated_at to the millisecond, which
+// is the comparison the hub made when the copy arrived. An edit made after the
+// copy can reach the hub later and replay before this event; the copy then
+// yields to it, as it would have had the edit arrived first.
+func (p *FoldProjection) applyIssueRestated(e FoldEvent) {
+	uid := issueUID(e, nil)
+	var in repeatedImportPayload
+	if uid == "" || json.Unmarshal(e.Payload, &in) != nil || in.UpdatedAt == "" {
+		return
 	}
-	if raw := payload[IssueUpdatedReplaceMetadataKey]; rawJSONObject(raw) {
-		p.IssueMetadata[uid] = replaceOrdinaryMetadata(p.IssueMetadata[uid], raw)
+	issue := p.ensureIssue(uid)
+	if !repeatedCopyIsNewer(issue.UpdatedAt, in.UpdatedAt) {
+		return
+	}
+	issue.Title, issue.Body = in.Title, in.Body
+	issue.Owner = cloneStringPtr(in.Owner)
+	clearFoldAssignmentExpiry(&issue)
+	setFoldAssignmentExpiry(&issue, in.AssignmentExpiresOn)
+	issue.Priority = cloneInt64Ptr(in.Priority)
+	if in.Status != "" {
+		setFoldStatus(&issue, in.Status, e, false)
+	}
+	issue.ClosedReason = cloneStringPtr(in.ClosedReason)
+	issue.ClosedAt = cloneStringPtr(in.ClosedAt)
+	issue.DeletedAt = cloneStringPtr(in.DeletedAt)
+	issue.UpdatedAt = in.UpdatedAt
+	p.Issues[uid] = issue
+
+	p.replaceIssueLabels(uid, in.Labels, clockOf(e))
+	metadata, err := json.Marshal(in.Metadata, json.Deterministic(true))
+	if err == nil {
+		p.IssueMetadata[uid] = replaceOrdinaryMetadata(p.IssueMetadata[uid], metadata)
+	}
+	for _, comment := range in.Comments {
+		if comment.CommentUID == "" {
+			continue
+		}
+		existing, known := p.Comments[comment.CommentUID]
+		if !known || existing.CreatedAt == "" {
+			p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt,
+				comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e))
+			existing, known = p.Comments[comment.CommentUID]
+		}
+		// A comment's text follows its edit time, not the order of events.
+		if known && comment.EditedAt != "" && timestampBefore(existing.EditedAt, comment.EditedAt) {
+			p.editCommentBody(comment.CommentUID, uid, comment.Body, comment.EditedAt, clockOf(e))
+		}
 	}
 }
 

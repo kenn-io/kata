@@ -388,7 +388,7 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 		fresh.Payload = mustNativeJSON(t, payload)
 		resignNativeEvent(t, &fresh)
 		_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{
-			EventFeatures: db.CronEventFeature, ProjectID: h.target.ID, FederationEnrollmentID: h.firstID,
+			EventFeatures: db.SupportedEventFeatures, ProjectID: h.target.ID, FederationEnrollmentID: h.firstID,
 			SpokeInstanceUID: h.firstUID, BoundActor: "operator",
 			Events: []db.FederationIngestEvent{{SourceEventID: 1000, Event: fresh}},
 		})
@@ -398,8 +398,9 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 	return nil
 }
 
-// The hub's events for a winning copy sit at the data's time, and a copy can
-// give a parent to an issue that has none.
+// A winning copy beats older data whatever clock that data's event carries, a
+// reader without the feature is refused the result, and a copy can give a
+// parent to an issue that has none.
 func checkFederationRepeatedImportPlacement(t *testing.T, source db.Storage, backend Backend) error {
 	ctx := t.Context()
 	h := newRepeatedImportHub(t, source, backend)
@@ -407,37 +408,47 @@ func checkFederationRepeatedImportPlacement(t *testing.T, source db.Storage, bac
 	issue, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 
-	// A claim is an audit record, not issue state. Its later clock must not
-	// pull the import's events forward, or an edit made between the copy and
-	// the claim would replay before them and be lost.
-	holder, err := uid.New()
+	// An event's clock is not its data's time. The first home edits the title
+	// now, and its clock runs two days ahead, so the edit's event sorts after
+	// any time a copy taken tomorrow could carry.
+	edit := portableNativeEvent(h.first[0])
+	edit.EventUID, err = uid.New()
 	require.NoError(t, err)
-	_, err = hub.AcquireClaim(ctx, db.AcquireClaimParams{
-		ProjectID: h.target.ID, IssueRef: issue.ShortID, ClaimKind: "hard", Now: time.Now().UTC(),
-		Principal: db.ClaimPrincipal{HolderInstanceUID: holder, Holder: "holder"},
+	edit.Type, edit.IssueUID = "issue.updated", &h.issueUID
+	edit.HLCPhysicalMS = time.Now().Add(48 * time.Hour).UnixMilli()
+	edit.Actor = "operator"
+	edit.Payload = mustNativeJSON(t, map[string]any{"title": "Older edit with a fast clock"})
+	resignNativeEvent(t, &edit)
+	_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{
+		EventFeatures: db.SupportedEventFeatures, ProjectID: h.target.ID, FederationEnrollmentID: h.firstID,
+		SpokeInstanceUID: h.firstUID, BoundActor: "operator",
+		Events: []db.FederationIngestEvent{{SourceEventID: 1000, Event: edit}},
 	})
 	require.NoError(t, err)
+	edited, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Older edit with a fast clock", edited.Title)
+
 	origin, enrollment, copied := h.repeatedImportCopy(t, h.target, func(issueUID string, payload map[string]any) {
 		if issueUID == h.issueUID {
-			repeatedImportShiftUpdatedAt(t, payload, time.Millisecond)
-			payload["title"] = "Edited before the claim"
+			payload["updated_at"] = edited.UpdatedAt.Add(time.Hour).UTC().Format(db.EventTimestampFormat)
+			payload["title"] = "Newer copy"
 		}
 	})
 	_, err = pushRepeatedImportBaseline(t, hub, h.target.ID, enrollment, origin, copied)
 	require.NoError(t, err)
-	history, err := hub.EventsAfter(ctx, db.EventsAfterParams{
-		ProjectID: h.target.ID, IssueUID: h.issueUID, Types: []string{"issue.updated", "claim.acquired"}, Limit: 10,
-	})
+	won, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	clocks := map[string][2]int64{}
-	for _, event := range history {
-		clocks[event.Type] = [2]int64{event.HLCPhysicalMS, event.HLCCounter}
-	}
-	require.Contains(t, clocks, "issue.updated")
-	require.Contains(t, clocks, "claim.acquired")
-	imported, claimed := clocks["issue.updated"], clocks["claim.acquired"]
-	require.False(t, imported[0] > claimed[0] || (imported[0] == claimed[0] && imported[1] > claimed[1]),
-		"the later claim does not pull the import's events after it: import %v, claim %v", imported, claimed)
+	require.Equal(t, "Newer copy", won.Title, "the newer copy wins over older data with a later event clock")
+
+	// A reader that does not know the hub's event for a winning copy would
+	// skip it and keep stale state, so the hub refuses to serve the project to
+	// it, as it does for a move.
+	older := db.CronEventFeature + "," + db.IssueMoveEventFeature
+	_, err = hub.ReadFederation(ctx, db.FederationReadParams{ProjectID: h.target.ID, Features: older, Limit: 100})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	_, err = hub.ReadFederation(ctx, db.FederationReadParams{ProjectID: h.target.ID, Features: db.SupportedEventFeatures, Limit: 100})
+	require.NoError(t, err)
 
 	// Neither issue has a parent on the hub. The newer copy makes one the
 	// child of the other, and both of its snapshots list the link.
@@ -556,8 +567,13 @@ func checkFederationAcknowledgePush(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	require.Equal(t, adopted.Binding.PushCursorEventID, binding.PushCursorEventID, "a waiting push leaves the cursor")
 
+	shown, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
 	for range 2 {
 		require.NoError(t, store.AcknowledgeFederationPush(ctx, project.ID, edit.ID, []string{held.UID, edit.UID, foreignUID}))
+		cursor, err := store.MaxEventID(ctx)
+		require.NoError(t, err)
+		require.Greater(t, cursor, shown, "the rebuild changes visible rows, so it writes an event that moves a browser's cursor")
 		binding, err := store.FederationBindingByProject(ctx, project.ID)
 		require.NoError(t, err)
 		require.Equal(t, edit.ID, binding.PushCursorEventID, "the push cursor advances with the deletion")
@@ -572,5 +588,18 @@ func checkFederationAcknowledgePush(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		require.Equal(t, "edited at home", untouched.Title)
 	}
+
+	// The hub's history of an issue is not always another home's creation.
+	// When this home adopted the issue before, the hub returns the home's own
+	// earlier creation, and that is enough to let the newer snapshot go.
+	earlier := portableNativeEvent(waiting)
+	earlier.EventUID, err = uid.New()
+	require.NoError(t, err)
+	earlier.HLCPhysicalMS -= 60_000
+	resignNativeEvent(t, &earlier)
+	_, err = store.InsertRemoteEvents(ctx, project.ID, []db.RemoteEvent{earlier})
+	require.NoError(t, err)
+	require.NoError(t, store.AcknowledgeFederationPush(ctx, project.ID, edit.ID, []string{waiting.UID}))
+	require.ElementsMatch(t, []string{earlier.EventUID, foreignUID}, listSnapshots())
 	return nil
 }

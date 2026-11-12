@@ -270,11 +270,7 @@ func (s *Store) IngestFederationEvents(
 				if err != nil {
 					return err
 				}
-				clock, err := db.RepeatedSnapshotDeltaClock(ctx, tx, repeated.UID, event.Payload)
-				if err != nil {
-					return err
-				}
-				repeatedWinners = append(repeatedWinners, repeatedAdoptionSnapshot{issue: *repeated, event: event, deltas: deltas, clock: clock})
+				repeatedWinners = append(repeatedWinners, repeatedAdoptionSnapshot{issue: *repeated, event: event, deltas: deltas})
 				freshSnapshotSeen = true
 				seenBatch[event.EventUID] = event.ContentHash
 				continue
@@ -358,12 +354,11 @@ func (s *Store) IngestFederationEvents(
 			}
 		}
 		for _, winner := range repeatedWinners {
-			for index, delta := range winner.deltas {
-				clock := delta.Clock(winner.clock, index)
+			for _, delta := range winner.deltas {
 				insert := eventInsert{
 					ProjectID: params.ProjectID, ProjectUID: projectUID, ProjectName: projectName,
 					IssueID: &winner.issue.ID, IssueUID: &winner.issue.UID,
-					Type: delta.Type, Actor: delta.Actor, Payload: string(delta.Payload), HLC: &clock,
+					Type: delta.Type, Actor: delta.Actor, Payload: string(delta.Payload),
 				}
 				if delta.RelatedIssueUID != "" {
 					insert.RelatedIssueUID = &delta.RelatedIssueUID
@@ -585,7 +580,7 @@ func validateFederationProjectEvent(
 		if issueUID == "" {
 			return fmt.Errorf("%w: %s missing issue uid", db.ErrFederationIngestValidation, event.Type)
 		}
-	case "issue.moved", "issue.updated", "issue.assigned", "issue.unassigned",
+	case "issue.moved", "issue.updated", db.RepeatedImportEventType, "issue.assigned", "issue.unassigned",
 		"issue.assignment_renewed", "issue.assignment_expired",
 		"issue.priority_set", "issue.priority_cleared", "issue.closed", "issue.reopened",
 		"issue.soft_deleted", "issue.restored", "issue.commented", "issue.comment_edited",
@@ -633,7 +628,6 @@ type repeatedAdoptionSnapshot struct {
 	issue  db.Issue
 	event  db.RemoteEvent
 	deltas []db.RepeatedSnapshotDelta
-	clock  db.EventHLCTimestamp
 }
 
 // repeatedAdoptionSnapshotIssueTx returns the issue an adoption snapshot

@@ -139,7 +139,7 @@ func TestRepeatedSnapshotDeltasAlwaysAdvanceUpdatedAt(t *testing.T) {
 	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
 	require.NoError(t, err)
 	require.Len(t, deltas, 1)
-	assert.Equal(t, "issue.updated", deltas[0].Type)
+	assert.Equal(t, RepeatedImportEventType, deltas[0].Type)
 	got := FoldEvents([]FoldEvent{testEvent("issue.snapshot", 1, current), testEvent(deltas[0].Type, 10, string(deltas[0].Payload))})
 	assert.Equal(t, "2026-06-01T09:00:00.000Z", got.Issues["issue-1"].UpdatedAt)
 }
@@ -232,17 +232,17 @@ func TestRepeatedSnapshotDeltasRefuseParentCycleAndRepeatedLink(t *testing.T) {
 	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(hubX), jsontext.Value(
 		`{"uid":"issue-x","title":"x","status":"open","links":[{"type":"parent","to_issue_uid":"issue-y"}],"updated_at":"2026-06-01T09:00:00.000Z"}`), lookups)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"issue.updated"}, types(deltas), "the cycle-closing parent link is left out")
+	assert.Equal(t, []string{RepeatedImportEventType}, types(deltas), "the cycle-closing parent link is left out")
 
 	child := `{"uid":"issue-c","title":"c","status":"open","links":[{"type":"parent","to_issue_uid":"issue-a"}],"updated_at":"2026-06-01T09:00:00.000Z"}`
 	parent := `{"uid":"issue-a","title":"a","status":"open","links":[{"type":"parent","to_issue_uid":"issue-c","incoming":true}],"updated_at":"2026-06-01T09:00:00.000Z"}`
 	first, err := RepeatedSnapshotDeltas("importer", jsontext.Value(`{"uid":"issue-c","title":"c","status":"open","updated_at":"2026-05-01T09:00:00.000Z"}`), jsontext.Value(child), lookups)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"issue.updated", "issue.linked"}, types(first))
+	assert.Equal(t, []string{RepeatedImportEventType, "issue.linked"}, types(first))
 	assert.Equal(t, "issue-a", first[1].RelatedIssueUID, "a link event names the other issue")
 	second, err := RepeatedSnapshotDeltas("importer", jsontext.Value(`{"uid":"issue-a","title":"a","status":"open","updated_at":"2026-05-01T09:00:00.000Z"}`), jsontext.Value(parent), lookups)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"issue.updated"}, types(second), "the second copy does not write the same link again")
+	assert.Equal(t, []string{RepeatedImportEventType}, types(second), "the second copy does not write the same link again")
 }
 
 // The hub owns the recurring-work keys in issue metadata. A copy from another
@@ -261,56 +261,73 @@ func TestRepeatedSnapshotDeltasKeepHubOwnedRecurringMetadata(t *testing.T) {
 		string(FoldEvents(events).IssueMetadata["issue-1"]))
 }
 
-// A comment edit from a winning copy sits at the comment's own edit time. A
-// later edit of the same comment that the copy never saw can reach the hub
-// after the import, and it must still win.
-func TestRepeatedSnapshotDeltasPlaceACommentEditAtItsEditTime(t *testing.T) {
+// A comment's text follows its edit time, not the order of events. A later
+// edit of the same comment that the copy never saw must win, whether its event
+// replays before or after the hub's event for the copy.
+func TestRepeatedSnapshotDeltasKeepALaterCommentEdit(t *testing.T) {
 	current := `{"uid":"issue-1","title":"t","status":"open","comments":[
  {"comment_uid":"comment-1","author":"alice","body":"first","created_at":"2026-05-01T10:00:00.000Z"}],
 "updated_at":"2026-05-01T10:00:00.000Z"}`
 	incoming := `{"uid":"issue-1","title":"t","status":"open","comments":[
  {"comment_uid":"comment-1","author":"alice","body":"copy edit","created_at":"2026-05-01T10:00:00.000Z","edited_at":"2026-05-10T10:00:00.000Z"}],
-"updated_at":"2026-06-01T09:00:00.000Z"}`
+"updated_at":"2026-05-11T09:00:00.000Z"}`
 	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
 	require.NoError(t, err)
-
-	ms := func(timestamp string) int64 {
-		parsed, err := time.Parse(time.RFC3339Nano, timestamp)
-		require.NoError(t, err)
-		return parsed.UnixMilli()
+	require.Len(t, deltas, 1)
+	later := `{"comment_uid":"comment-1","body":"later edit","edited_at":"2026-05-20T10:00:00.000Z"}`
+	for name, laterClock := range map[string]int64{"the later edit replays first": 5, "the later edit replays last": 20} {
+		t.Run(name, func(t *testing.T) {
+			comment := FoldEvents([]FoldEvent{
+				testEvent("issue.snapshot", 1, current),
+				testEvent("issue.comment_edited", laterClock, later),
+				testEvent(deltas[0].Type, 10, string(deltas[0].Payload)),
+			}).Comments["comment-1"]
+			assert.Equal(t, "later edit", comment.Body)
+			assert.Equal(t, "2026-05-20T10:00:00.000Z", comment.EditedAt)
+		})
 	}
-	base := EventHLCTimestamp{PhysicalMS: ms("2026-06-01T09:00:00.000Z")}
-	events := []FoldEvent{testEvent("issue.snapshot", ms("2026-05-01T10:00:00.000Z"), current)}
-	for i, delta := range deltas {
-		clock := delta.Clock(base, i)
-		event := testEvent(delta.Type, clock.PhysicalMS, string(delta.Payload))
-		event.HLCCounter = clock.Counter
-		events = append(events, event)
-	}
-	events = append(events, testEvent("issue.comment_edited", ms("2026-05-20T10:00:00.000Z"),
-		`{"comment_uid":"comment-1","body":"later edit","edited_at":"2026-05-20T10:00:00.000Z"}`))
-	comment := FoldEvents(events).Comments["comment-1"]
-	assert.Equal(t, "later edit", comment.Body)
-	assert.Equal(t, "2026-05-20T10:00:00.000Z", comment.EditedAt)
 }
 
-// A reader that predates repeated imports would ignore the whole label set
-// and metadata in the hub's update event and keep stale values. Such an event
-// therefore needs the repeated adoption feature, and an ordinary update does
-// not.
-func TestRepeatedImportUpdateRequiresTheFeature(t *testing.T) {
-	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(repeatedImportHubCopy), jsontext.Value(repeatedImportNewerCopy), repeatedImportLookups())
+// The hub decides by updated_at when the copy arrives, and replay must decide
+// the same way whatever arrives afterwards. An edit made after the copy can
+// reach the hub later and sort before the hub's event for the copy. The issue
+// is then newer than the copy at that point of the replay, so the copy does
+// not apply: this is the result the hub would have reached had the edit
+// arrived first.
+func TestRepeatedImportEventYieldsToANewerIssue(t *testing.T) {
+	current := `{"uid":"issue-1","title":"hub title","status":"open","labels":["bug"],"updated_at":"2026-05-01T09:00:00.000Z"}`
+	incoming := `{"uid":"issue-1","title":"copy title","status":"open","labels":["shipped"],"updated_at":"2026-06-01T09:00:00.000Z"}`
+	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
 	require.NoError(t, err)
-	require.Equal(t, "issue.updated", deltas[0].Type)
+	require.Len(t, deltas, 1)
 
-	required, err := PayloadRequiredFeatures(deltas[0].Type, string(deltas[0].Payload))
-	require.NoError(t, err)
-	assert.Equal(t, RepeatedAdoptionEventFeature, required)
-	_, wire, err := FederationEventPayloadWireVersion(deltas[0].Type, deltas[0].Payload)
+	got := FoldEvents([]FoldEvent{
+		testEvent("issue.snapshot", 1, current),
+		testEvent("issue.updated", 50, `{"title":"edited after the copy","updated_at":"2026-06-15T09:00:00.000Z"}`),
+		testEvent(deltas[0].Type, 100, string(deltas[0].Payload)),
+	})
+	assert.Equal(t, "edited after the copy", got.Issues["issue-1"].Title)
+	assert.Equal(t, "2026-06-15T09:00:00.000Z", got.Issues["issue-1"].UpdatedAt)
+	assert.Equal(t, []string{"bug"}, presentLabels(got, "issue-1"), "a copy that does not apply changes nothing")
+
+	// An older edit whose event clock is later than the copy's data time
+	// replays before the hub's event, which sits at the hub's own clock.
+	got = FoldEvents([]FoldEvent{
+		testEvent("issue.snapshot", 1, current),
+		testEvent("issue.updated", 50, `{"title":"older hub edit","updated_at":"2026-05-10T09:00:00.000Z"}`),
+		testEvent(deltas[0].Type, 100, string(deltas[0].Payload)),
+	})
+	assert.Equal(t, "copy title", got.Issues["issue-1"].Title)
+	assert.Equal(t, []string{"shipped"}, presentLabels(got, "issue-1"))
+}
+
+// A reader that predates repeated imports does not know the hub's event for a
+// winning copy and would skip it. The event type therefore needs the repeated
+// adoption feature, like a move needs its own.
+func TestRepeatedImportEventRequiresTheFeature(t *testing.T) {
+	assert.Equal(t, RepeatedAdoptionEventFeature, EventRequiredFeatures(RepeatedImportEventType))
+	_, wire, err := FederationEventWireVersion(RepeatedImportEventType)
 	require.NoError(t, err)
 	assert.Equal(t, RepeatedAdoptionEventFeature, wire)
-
-	required, err = PayloadRequiredFeatures("issue.updated", `{"title":"plain edit"}`)
-	require.NoError(t, err)
-	assert.Empty(t, required)
+	assert.Empty(t, EventRequiredFeatures("issue.updated"))
 }

@@ -21,8 +21,8 @@ const IssueMoveEventFeature = "issue_move_v1"
 // RepeatedAdoptionEventFeature identifies a peer that understands a repeated
 // adoption. A spoke with it deletes its own adoption snapshot when the hub
 // already held the issue, and a hub accepts a repeated adoption snapshot only
-// from such a spoke. A reader with it replays the whole label set and metadata
-// that a hub's issue.updated event carries for a winning copy.
+// from such a spoke. A reader with it replays the RepeatedImportEventType
+// event a hub writes for a winning copy.
 const RepeatedAdoptionEventFeature = "repeated_adoption_v1"
 
 // SupportedEventFeatures lists event capabilities understood by this daemon.
@@ -61,21 +61,7 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
 	}
-	if issueUpdateReplacesWholeSets(kind, payload) {
-		required = MergeEventFeatures(required, RepeatedAdoptionEventFeature)
-	}
 	return required, nil
-}
-
-// issueUpdateReplacesWholeSets identifies the update a hub writes for a
-// winning repeated import. A reader that predates it would apply the fields
-// and silently keep stale labels and metadata.
-func issueUpdateReplacesWholeSets(kind, payload string) bool {
-	if kind != "issue.updated" || !strings.Contains(payload, `"replace_`) {
-		return false
-	}
-	body := PayloadMap(jsontext.Value(payload))
-	return len(body[IssueUpdatedReplaceLabelsKey]) > 0 || len(body[IssueUpdatedReplaceMetadataKey]) > 0
 }
 
 // payloadHasNativeRecurringState identifies hub-owned state independently of
@@ -172,6 +158,9 @@ func RequireEventFeatures(supported, required string) error {
 func EventRequiredFeatures(kind string) string {
 	if kind == "issue.moved" {
 		return IssueMoveEventFeature
+	}
+	if kind == RepeatedImportEventType {
+		return RepeatedAdoptionEventFeature
 	}
 	if strings.HasPrefix(kind, "cron.") {
 		return CronEventFeature

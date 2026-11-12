@@ -143,10 +143,28 @@ func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 		return d.AdvanceFederationPushCursor(ctx, projectID, nextCursor)
 	}
 	return d.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
-		if err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, d.instanceUID, supersededEventUIDs); err != nil {
+		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, d.instanceUID, supersededEventUIDs)
+		if err != nil {
 			return err
 		}
-		return advanceFederationPushCursor(ctx, tx, projectID, nextCursor)
+		if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
+			return err
+		}
+		if deleted == 0 {
+			return nil
+		}
+		// The rebuild that follows changes visible rows without a new event of
+		// its own. A reset event moves every reader's cursor past the state
+		// built from the deleted snapshots.
+		var projectUID, projectName string
+		if err := tx.QueryRowContext(ctx, `SELECT uid, name FROM projects WHERE id=?`, projectID).Scan(&projectUID, &projectName); err != nil {
+			return fmt.Errorf("read project for federation push acknowledgement: %w", err)
+		}
+		_, err = d.insertEventTx(ctx, tx, eventInsert{
+			ProjectID: projectID, ProjectUID: projectUID, ProjectName: projectName,
+			Type: db.ProjectScopeResetEventType, Actor: "system", Payload: "{}", SkipRelay: true,
+		})
+		return err
 	})
 }
 

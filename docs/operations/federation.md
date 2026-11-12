@@ -1762,25 +1762,28 @@ When a newer snapshot wins:
   with `kata edit --parent`.
 - The issue keeps its author.
 
-The hub does not store the pushed snapshot for an issue it already holds. It
-writes its own ordinary events that restate the copy, with the pushing actor
-as their actor:
+The hub does not store the pushed snapshot for an issue it already holds. For
+a winning copy it writes its own events, with the pushing actor as their
+actor:
 
-- One `issue.updated` event carries every field of the copy and its whole
-  label set and metadata. Labels and metadata keys the copy does not have are
-  removed, including ones an older edit adds when it reaches the hub later.
-  The metadata keys that the hub's recurrence scheduler owns stay.
-- `issue.commented`, `issue.comment_edited`, and `issue.linked` events carry
-  the comments and links the hub lacked.
+- One `issue.restated` event carries the whole copy: every field, the label
+  set, the metadata, the comments, and the copy's `updated_at`. Labels and
+  metadata keys the copy does not have are removed. The metadata keys that the
+  hub's recurrence scheduler owns stay.
+- `issue.linked` events carry the links the hub lacked.
+
+An `issue.restated` event applies only when its `updated_at` is newer than the
+issue's at that point in the project's history. Its place in the history
+therefore does not decide the result. An edit with a later `updated_at` still
+applies, and an older edit that reaches the hub afterwards does not undo the
+copy.
 
 An older or identical copy leaves no event, so pushing the same copy again
 changes nothing.
 
-Those events take the snapshot's `updated_at` as their place in the project's
-history, and never sit before the adoption snapshot that first brought the
-issue to the hub. An edit made after the snapshot therefore still applies,
-whether it reaches the hub before or after the copy. A comment edit from the
-copy sits at the comment's own edit time.
+Hooks that subscribe to `issue.closed`, `issue.assigned`, or another specific
+change do not fire for a copy that restates the issue. Subscribe to
+`issue.restated` to react to a winning copy.
 
 A link in the snapshot to an issue of another hub project needs the same
 authority as any other push that touches that project. Without it the hub
@@ -1791,16 +1794,28 @@ Issues the hub does not hold are created as usual.
 The hub's answer names the snapshots it did not store. The Kata home that
 pushed them deletes those snapshots from its own history and shows the hub's
 state. It does this only after a pull has brought the hub's history of those
-issues, so the push is acknowledged one sync cycle later than usual. If its
-copy was older, the comments and links only that home had are gone from it
-afterwards.
+issues, so the push is acknowledged one sync cycle later than usual. Until
+then `kata federation status` shows that the push waits for the hub's history.
+If its copy was older, the comments and links only that home had are gone from
+it afterwards.
 
 Every Kata home that reads the project must support this. The hub accepts a
 repeated snapshot only from a spoke that advertises the `repeated_adoption_v1`
 event feature. An older spoke gets `400 validation` with `targets existing
 issue`, as before, and quarantines the push; upgrade it and resume. After a
-newer copy wins, a spoke without the feature cannot pull the project until it
-is upgraded, because it would not apply the whole label set and metadata.
+newer copy wins, the project holds an `issue.restated` event, and a spoke or
+relay without the feature cannot pull the project until it is upgraded.
+
+Limits:
+
+- A Kata home that already completed an adoption of a project cannot adopt
+  the same project into the same hub again. Push a newer copy from another
+  home.
+- A link from a held issue to an issue that arrives in a later chunk of the
+  same adoption is not created. Add it on the hub afterwards.
+- Links are compared only when a copy wins and are not part of the
+  `updated_at` rule. An unlink that reaches the hub later still removes a link
+  that a winning copy added.
 
 The create-only rule still applies outside an adoption push. A fresh
 `issue.created`, or an `issue.snapshot` in an ordinary push, for an issue the

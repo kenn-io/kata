@@ -24,7 +24,7 @@ func ReconcileFoldStatusIntent(previous, current FoldIssue, pendingUID string, a
 			continue
 		}
 		switch event.Type {
-		case "issue.created", "issue.snapshot", "issue.updated", "issue.closed", "issue.reopened":
+		case "issue.created", "issue.snapshot", "issue.updated", RepeatedImportEventType, "issue.closed", "issue.reopened":
 			projection.apply(event)
 		}
 	}

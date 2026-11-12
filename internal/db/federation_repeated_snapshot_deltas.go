@@ -8,28 +8,26 @@ import (
 	"time"
 )
 
-// RepeatedSnapshotDelta is one ordinary event the hub writes in place of a
-// repeated issue.snapshot. Actor is the event actor. RelatedIssueUID names the
-// other end of a link event, as ordinary link events do.
+// RepeatedImportEventType is the event a hub writes for a winning repeated
+// adoption snapshot. Its payload is the whole issue as the copy had it: every
+// field, the label set, the metadata and the comments, with the copy's
+// updated_at.
+//
+// The fold applies it only when that updated_at is later than the issue's at
+// that point of the replay, which is the comparison the hub made when the copy
+// arrived. The event therefore gives the same result wherever it sits among
+// the other events, and it takes the hub's ordinary clock. A reader needs
+// RepeatedAdoptionEventFeature to replay it.
+const RepeatedImportEventType = "issue.restated"
+
+// RepeatedSnapshotDelta is one event the hub writes in place of a repeated
+// issue.snapshot. Actor is the event actor. RelatedIssueUID names the other
+// end of a link event, as ordinary link events do.
 type RepeatedSnapshotDelta struct {
 	Type            string
 	Actor           string
 	Payload         jsontext.Value
 	RelatedIssueUID string
-	// At is the data's own time for the change, when it has one that is
-	// earlier than the copy's updated_at. A comment edit has its edit time.
-	At string
-}
-
-// Clock places the delta at position index among a winning copy's events,
-// which start at base. A delta with its own earlier time sits there instead,
-// so a later change to the same data that the copy never saw still replays
-// after it.
-func (d RepeatedSnapshotDelta) Clock(base EventHLCTimestamp, index int) EventHLCTimestamp {
-	if at, err := time.Parse(time.RFC3339Nano, d.At); err == nil && at.UnixMilli() < base.PhysicalMS {
-		return EventHLCTimestamp{PhysicalMS: at.UnixMilli(), Counter: int64(index)}
-	}
-	return EventHLCTimestamp{PhysicalMS: base.PhysicalMS, Counter: base.Counter + int64(index)}
 }
 
 // RepeatedSnapshotLookups answers the questions about other issues that one
@@ -98,40 +96,22 @@ type repeatedSnapshotLink struct {
 }
 
 type repeatedSnapshotDoc struct {
-	UID                 string                 `json:"uid"`
-	Title               string                 `json:"title"`
-	Body                string                 `json:"body"`
-	Owner               *string                `json:"owner"`
-	AssignmentExpiresOn *string                `json:"assignment_expires_on"`
-	Priority            *int64                 `json:"priority"`
-	Status              string                 `json:"status"`
-	ClosedReason        *string                `json:"closed_reason"`
-	ClosedAt            *string                `json:"closed_at"`
-	DeletedAt           *string                `json:"deleted_at"`
-	Metadata            jsontext.Value         `json:"metadata"`
-	Labels              []string               `json:"labels"`
-	Links               []repeatedSnapshotLink `json:"links"`
-	Comments            []struct {
-		CommentUID string `json:"comment_uid"`
-		Author     string `json:"author"`
-		Teammate   string `json:"teammate,omitempty"`
-		Body       string `json:"body"`
-		CreatedAt  string `json:"created_at"`
-		EditedAt   string `json:"edited_at"`
-		ReplyToUID string `json:"reply_to_uid"`
-		ReplyKind  string `json:"reply_kind"`
-	} `json:"comments"`
-	UpdatedAt string `json:"updated_at"`
+	UID                 string                  `json:"uid"`
+	Title               string                  `json:"title"`
+	Body                string                  `json:"body"`
+	Owner               *string                 `json:"owner"`
+	AssignmentExpiresOn *string                 `json:"assignment_expires_on"`
+	Priority            *int64                  `json:"priority"`
+	Status              string                  `json:"status"`
+	ClosedReason        *string                 `json:"closed_reason"`
+	ClosedAt            *string                 `json:"closed_at"`
+	DeletedAt           *string                 `json:"deleted_at"`
+	Metadata            jsontext.Value          `json:"metadata"`
+	Labels              []string                `json:"labels"`
+	Links               []repeatedSnapshotLink  `json:"links"`
+	Comments            []repeatedImportComment `json:"comments"`
+	UpdatedAt           string                  `json:"updated_at"`
 }
-
-// An issue.updated event that a hub writes for a winning repeated import
-// carries the copy's whole label set and metadata under these payload keys.
-// The fold replaces the issue's labels and ordinary metadata with them. A
-// reader must support RepeatedAdoptionEventFeature to replay such an event.
-const (
-	IssueUpdatedReplaceLabelsKey   = "replace_labels"
-	IssueUpdatedReplaceMetadataKey = "replace_metadata"
-)
 
 // RepeatedSnapshotWins reports whether an adoption snapshot of an issue the
 // hub project already holds is strictly newer than the hub's copy. The data's
@@ -152,23 +132,51 @@ func RepeatedSnapshotWins(incoming jsontext.Value, hubUpdatedAt time.Time) bool 
 	return updatedAt.Truncate(time.Millisecond).After(hubUpdatedAt.Truncate(time.Millisecond))
 }
 
-// RepeatedSnapshotDeltas turns a winning repeated snapshot into the ordinary
-// events that bring the hub's copy to it. current is the hub's own snapshot of
-// the issue and incoming is the pushed one.
+// repeatedImportComment is one comment of a RepeatedImportEventType payload.
+type repeatedImportComment struct {
+	CommentUID string `json:"comment_uid"`
+	Author     string `json:"author"`
+	Teammate   string `json:"teammate,omitempty"`
+	Body       string `json:"body"`
+	CreatedAt  string `json:"created_at"`
+	EditedAt   string `json:"edited_at,omitempty"`
+	ReplyToUID string `json:"reply_to_uid,omitempty"`
+	ReplyKind  string `json:"reply_kind,omitempty"`
+}
+
+// repeatedImportPayload is the payload of a RepeatedImportEventType event.
+type repeatedImportPayload struct {
+	Title               string                    `json:"title"`
+	Body                string                    `json:"body"`
+	Owner               *string                   `json:"owner"`
+	AssignmentExpiresOn *string                   `json:"assignment_expires_on"`
+	Priority            *int64                    `json:"priority"`
+	Status              string                    `json:"status,omitempty"`
+	ClosedReason        *string                   `json:"closed_reason"`
+	ClosedAt            *string                   `json:"closed_at"`
+	DeletedAt           *string                   `json:"deleted_at"`
+	Metadata            map[string]jsontext.Value `json:"metadata"`
+	Labels              []string                  `json:"labels"`
+	Comments            []repeatedImportComment   `json:"comments"`
+	UpdatedAt           string                    `json:"updated_at"`
+}
+
+// RepeatedSnapshotDeltas turns a winning repeated snapshot into the events the
+// hub writes for it. current is the hub's own snapshot of the issue and
+// incoming is the pushed one.
 //
 // The hub stores these events and not the snapshot. A stored snapshot is read
 // as the complete state of an issue by the move replay, the move history
-// filter and the relay, and a repeated snapshot is not complete: comments
-// merge by UID and links are only added. Ordinary events keep every snapshot
-// in a hub's log complete.
+// filter and the relay, and a repeated snapshot is not complete: the issue
+// keeps its author, comments merge by UID and links are only added.
 //
-// Fields, labels and metadata end up equal to the incoming copy, and the
-// events restate the values the two copies share. A comment the
-// hub lacks is added with its author and created time; a known comment keeps
-// both and takes the incoming text only with a later edit time. Links are only
-// added. An import never replaces an issue's parent or closes a parent cycle,
-// and a link to an issue the hub does not hold is left out. The first event always carries the
-// incoming updated_at, so the same copy pushed again compares equal.
+// The first event is a RepeatedImportEventType with the whole copy. Fields,
+// labels and metadata become the copy's, and the recurrence keys the hub's
+// scheduler owns stay. A comment the hub lacks is added with its author and
+// created time; a known comment keeps both and takes the copy's text only
+// with a later edit time. An issue.linked event follows for each link the hub
+// lacks. An import never replaces an issue's parent or closes a parent cycle,
+// and a link to an issue the hub does not hold is left out.
 func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, lookups *RepeatedSnapshotLookups) ([]RepeatedSnapshotDelta, error) {
 	if lookups == nil {
 		lookups = &RepeatedSnapshotLookups{}
@@ -181,7 +189,7 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 		return nil, fmt.Errorf("%w: decode repeated issue snapshot: %w", ErrFederationIngestValidation, err)
 	}
 	var deltas []RepeatedSnapshotDelta
-	emit := func(delta RepeatedSnapshotDelta, payload map[string]any) error {
+	emit := func(delta RepeatedSnapshotDelta, payload any) error {
 		raw, err := json.Marshal(payload, json.Deterministic(true))
 		if err != nil {
 			return fmt.Errorf("encode %s for repeated issue snapshot: %w", delta.Type, err)
@@ -190,86 +198,28 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 		deltas = append(deltas, delta)
 		return nil
 	}
-	add := func(eventType, eventActor string, payload map[string]any) error {
-		return emit(RepeatedSnapshotDelta{Type: eventType, Actor: eventActor}, payload)
-	}
 
-	// The events restate the whole copy, including the values it shares with
-	// the hub. An older edit can reach the hub after the import and replays
-	// before these events, so a value they left out would fall back to it.
-	fields := map[string]any{
-		"updated_at": want.UpdatedAt, "title": want.Title, "body": want.Body,
-		// The fold clears the assignment expiry whenever it sets the owner, so
-		// the two travel together.
-		"owner": want.Owner, "assignment_expires_on": want.AssignmentExpiresOn,
-		"priority": want.Priority, "closed_reason": want.ClosedReason,
-		"closed_at": want.ClosedAt, "deleted_at": want.DeletedAt,
+	restated := repeatedImportPayload{
+		Title: want.Title, Body: want.Body, Owner: want.Owner, AssignmentExpiresOn: want.AssignmentExpiresOn,
+		Priority: want.Priority, Status: want.Status, ClosedReason: want.ClosedReason, ClosedAt: want.ClosedAt,
+		DeletedAt: want.DeletedAt, Metadata: map[string]jsontext.Value{},
+		Labels: slices.Sorted(slices.Values(want.Labels)), Comments: []repeatedImportComment{}, UpdatedAt: want.UpdatedAt,
 	}
-	if want.Status != "" {
-		fields["status"] = want.Status
+	if restated.Labels == nil {
+		restated.Labels = []string{}
 	}
-	// The whole label set and metadata travel in the same event. A label or
-	// key that neither copy has, added by an older edit that arrives late, is
-	// then removed too.
-	labels := slices.Sorted(slices.Values(want.Labels))
-	if labels == nil {
-		labels = []string{}
-	}
-	fields[IssueUpdatedReplaceLabelsKey] = labels
-	metadata := map[string]jsontext.Value{}
 	for key, value := range parseRawObject(want.Metadata) {
 		if !recurringMetadataKey(key) {
-			metadata[key] = value
+			restated.Metadata[key] = value
 		}
-	}
-	fields[IssueUpdatedReplaceMetadataKey] = metadata
-	if err := add("issue.updated", actor, fields); err != nil {
-		return nil, err
-	}
-
-	known := map[string]string{}
-	for _, comment := range have.Comments {
-		known[comment.CommentUID] = comment.EditedAt
 	}
 	for _, comment := range want.Comments {
-		if comment.CommentUID == "" {
-			continue
+		if comment.CommentUID != "" {
+			restated.Comments = append(restated.Comments, comment)
 		}
-		editedAt, exists := known[comment.CommentUID]
-		if !exists {
-			payload := map[string]any{
-				"comment_uid": comment.CommentUID, "author": comment.Author, "body": comment.Body, "created_at": comment.CreatedAt,
-			}
-			for key, value := range map[string]string{
-				"teammate": comment.Teammate, "edited_at": comment.EditedAt,
-				"reply_to_uid": comment.ReplyToUID, "reply_kind": comment.ReplyKind,
-			} {
-				if value != "" {
-					payload[key] = value
-				}
-			}
-			if err := add("issue.commented", actor, payload); err != nil {
-				return nil, err
-			}
-			// The comment's creation can arrive again later from another
-			// home, with earlier edits. The fold keeps the first creation it
-			// replays, so a separate edit event carries the copy's text.
-			if comment.EditedAt != "" {
-				if err := emit(RepeatedSnapshotDelta{Type: "issue.comment_edited", Actor: actor, At: comment.EditedAt}, map[string]any{
-					"comment_uid": comment.CommentUID, "body": comment.Body, "edited_at": comment.EditedAt,
-				}); err != nil {
-					return nil, err
-				}
-			}
-			continue
-		}
-		if comment.EditedAt != "" && timestampBefore(editedAt, comment.EditedAt) {
-			if err := emit(RepeatedSnapshotDelta{Type: "issue.comment_edited", Actor: actor, At: comment.EditedAt}, map[string]any{
-				"comment_uid": comment.CommentUID, "body": comment.Body, "edited_at": comment.EditedAt,
-			}); err != nil {
-				return nil, err
-			}
-		}
+	}
+	if err := emit(RepeatedSnapshotDelta{Type: RepeatedImportEventType, Actor: actor}, restated); err != nil {
+		return nil, err
 	}
 
 	held := map[FoldLinkKey]bool{}
@@ -332,6 +282,25 @@ func snapshotLinkKey(issueUID string, link repeatedSnapshotLink) FoldLinkKey {
 		from, to = to, from
 	}
 	return FoldLinkKey{FromUID: from, ToUID: to, Type: link.Type}
+}
+
+// repeatedCopyIsNewer reports whether a copy's updated_at is later than an
+// issue's, at the millisecond precision both stores keep. An issue with no
+// time yet is older than any copy, and a copy with no readable time is never
+// newer.
+func repeatedCopyIsNewer(issueUpdatedAt, copyUpdatedAt string) bool {
+	copied, err := time.Parse(time.RFC3339Nano, copyUpdatedAt)
+	if err != nil {
+		return false
+	}
+	if issueUpdatedAt == "" {
+		return true
+	}
+	held, err := time.Parse(time.RFC3339Nano, issueUpdatedAt)
+	if err != nil {
+		return copyUpdatedAt > issueUpdatedAt
+	}
+	return copied.Truncate(time.Millisecond).After(held.Truncate(time.Millisecond))
 }
 
 // timestampBefore reports whether timestamp a is earlier than b. An empty a is

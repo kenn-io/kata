@@ -322,11 +322,10 @@ func pushDirectSpoke(
 				// snapshot for them. Those snapshots go, and the project is
 				// rebuilt, in the same transaction that moves the cursor.
 				if err := store.AcknowledgeFederationPush(ctx, binding.ProjectID, ack.PushCursorEventID, ack.SupersededEventUIDs); err != nil {
-					// Not a failure: the next pull brings the hub's history of
-					// those issues, and the push after it is acknowledged.
-					if errors.Is(err, db.ErrFederationPushAwaitsPull) {
-						return err
-					}
+					// A push that waits for the hub's history is finished by the
+					// next pull and the push after it. The reason is recorded
+					// like any other, so a wait that does not end is visible in
+					// the federation status.
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
 				binding.PushCursorEventID = ack.PushCursorEventID
