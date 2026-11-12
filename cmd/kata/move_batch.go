@@ -98,7 +98,7 @@ func readMoveBatchLine(reader *bufio.Reader) (string, bool, error) {
 		part, err := reader.ReadSlice('\n')
 		part = bytes.TrimSuffix(part, []byte("\n"))
 		if !oversized {
-			if len(line)+len(part) >= 1<<20 {
+			if len(line)+len(part) > 1<<20 {
 				line, oversized = nil, true
 			} else {
 				line = append(line, part...)
