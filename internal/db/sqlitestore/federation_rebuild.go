@@ -11,6 +11,7 @@ import (
 
 type preparedFederationRebuildProject struct {
 	id              int64
+	uid             string
 	events          []db.FoldEvent
 	moveEvents      map[string]db.FoldEvent
 	projection      db.FoldProjection
@@ -97,6 +98,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		if err != nil {
 			return preparedFederationRebuild{}, err
 		}
+		p.uid = projectUID
 		p.moved = p.projection
 		p.moved.Issues = maps.Clone(p.projection.Issues)
 		p.moved.Comments = maps.Clone(p.projection.Comments)
@@ -162,15 +164,11 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 				if !slices.Contains(m.linkProjects, other.id) {
 					continue
 				}
-				projectUID, err := projectUIDTx(ctx, tx, other.id)
-				if err != nil {
-					return preparedFederationRebuild{}, err
-				}
 				for uid := range other.projection.Issues {
-					owners[uid] = projectUID
+					owners[uid] = other.uid
 				}
 				for uid := range other.moved.Issues {
-					owners[uid] = projectUID
+					owners[uid] = other.uid
 				}
 			}
 			events, err = filterRelayLinkEvents(events, m.relayOrigins, owners)
