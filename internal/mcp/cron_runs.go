@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/teammate"
@@ -36,6 +37,19 @@ type CronRunObserveInput struct {
 	Summary                    cron.Summary                       `json:"summary"`
 	StartedAt                  *time.Time                         `json:"started_at,omitempty"`
 	EndedAt                    *time.Time                         `json:"ended_at,omitempty"`
+}
+
+// restrictCronSessionSchema narrows the inferred nullable session fields to the
+// contract cron.ParseSummary enforces: 1-64 sessions, a non-empty step, and a
+// true-only incomplete marker, none of them null.
+func restrictCronSessionSchema(schema *jsonschema.Schema) {
+	summary := schema.Properties["summary"].Properties
+	sessions, incomplete := summary["sessions"], summary["sessions_incomplete"]
+	step := sessions.Items.Properties["step"]
+	one, most, marker := 1, 64, any(true)
+	sessions.Type, sessions.Types, sessions.MinItems, sessions.MaxItems = "array", nil, &one, &most
+	step.Type, step.Types, step.MinLength = "string", nil, &one
+	incomplete.Type, incomplete.Types, incomplete.Const = "boolean", nil, &marker
 }
 
 func registerCronRunTools(server *sdkmcp.Server, h toolHandlers) {
