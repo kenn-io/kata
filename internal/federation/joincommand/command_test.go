@@ -56,7 +56,7 @@ func TestJoinCommandRequiresJoinAuthority(t *testing.T) {
 	}
 }
 
-// Required-signing instructions must remain shell-safe and must not opt into HTTP.
+// Required-signing instructions must remain shell-safe.
 func TestJoinCommandSigningPlaceholders(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("shell argument parsing requires a POSIX shell")
