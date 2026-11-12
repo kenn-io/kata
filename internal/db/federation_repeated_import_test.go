@@ -348,6 +348,22 @@ func TestRepeatedImportEventComparesWithTheLatestCommentEdit(t *testing.T) {
 	assert.Equal(t, "latest edit", got.Comments["comment-1"].Body)
 }
 
+// A copy does not replace links, so a link change that replays before the
+// copy keeps its place in the issue's updated_at, as a comment does.
+func TestRepeatedImportEventKeepsALaterLinkChangesTime(t *testing.T) {
+	linked := testEvent("issue.linked", 5, `{"type":"related","from_uid":"issue-1","to_uid":"issue-2"}`)
+	linked.CreatedAt = "2026-07-01T09:00:00.000Z"
+	accepted := testEvent(RepeatedImportEventType, 10, `{"title":"copy title","status":"open","updated_at":"2026-06-01T09:00:00.000Z"}`)
+	accepted.CreatedAt = "2026-07-02T09:00:00.000Z"
+	got := FoldEvents([]FoldEvent{
+		testEvent("issue.snapshot", 1, `{"uid":"issue-1","title":"t","status":"open","updated_at":"2026-05-01T10:00:00.000Z"}`),
+		linked,
+		accepted,
+	})
+	assert.Equal(t, "copy title", got.Issues["issue-1"].Title)
+	assert.Equal(t, "2026-07-01T09:00:00.000Z", got.Issues["issue-1"].UpdatedAt)
+}
+
 // Two edits of one comment in the same millisecond keep event order.
 func TestRepeatedImportEventKeepsEventOrderForEqualCommentEditTimes(t *testing.T) {
 	current := `{"uid":"issue-1","title":"t","status":"open","comments":[

@@ -72,7 +72,7 @@ func (p *FoldProjection) noteRestatedIssues(events []FoldEvent) {
 				p.restatedIssues = map[string]struct{}{}
 				p.sinceBaseline = map[string][]FoldEvent{}
 				p.hasBaseline = map[string]bool{}
-				p.commentTouchedAt = map[string]string{}
+				p.keptTouchedAt = map[string]string{}
 			}
 			p.restatedIssues[uid] = struct{}{}
 		}
@@ -182,9 +182,9 @@ func (p *FoldProjection) applyEvent(e FoldEvent, payload map[string]jsontext.Val
 	}
 }
 
-func (p *FoldProjection) noteCommentTouched(uid, at string) {
-	if _, restated := p.restatedIssues[uid]; restated && at != "" && (p.commentTouchedAt[uid] == "" || at > p.commentTouchedAt[uid]) {
-		p.commentTouchedAt[uid] = at
+func (p *FoldProjection) noteKeptTouch(uid, at string) {
+	if _, restated := p.restatedIssues[uid]; restated && at != "" && (p.keptTouchedAt[uid] == "" || at > p.keptTouchedAt[uid]) {
+		p.keptTouchedAt[uid] = at
 	}
 }
 
@@ -415,9 +415,10 @@ func (p *FoldProjection) applyIssueRestated(e FoldEvent) {
 	issue.ClosedAt = cloneStringPtr(in.ClosedAt)
 	issue.DeletedAt = cloneStringPtr(in.DeletedAt)
 	issue.UpdatedAt = in.UpdatedAt
-	// The time of an earlier copy is replaced with that copy. Comments merge,
-	// so their times still count, and so do the changes applied again below.
-	advanceIssueUpdatedAt(&issue, p.commentTouchedAt[uid])
+	// The time of an earlier copy is replaced with that copy. Comments merge
+	// and links are only added, so their times still count, and so do the
+	// changes applied again below.
+	advanceIssueUpdatedAt(&issue, p.keptTouchedAt[uid])
 	if issue.RestatedAt == "" || timestampBefore(issue.RestatedAt, restatedAt) {
 		issue.RestatedAt = restatedAt
 	}
@@ -642,7 +643,7 @@ func (p *FoldProjection) applyComment(e FoldEvent, payload map[string]jsontext.V
 	}
 	p.setComment(commentUID, uid, author, teammate, body, createdAt, replyTo, replyKind, editedAt, clockOf(e))
 	p.touchIssue(uid, createdAt)
-	p.noteCommentTouched(uid, createdAt)
+	p.noteKeptTouch(uid, createdAt)
 }
 
 func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]jsontext.Value) {
@@ -671,7 +672,7 @@ func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]json
 	}
 	p.editCommentBody(commentUID, uid, body, editedAt, clockOf(e))
 	p.touchIssue(uid, editedAt)
-	p.noteCommentTouched(uid, editedAt)
+	p.noteKeptTouch(uid, editedAt)
 }
 
 func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, body, createdAt, replyTo, replyKind, editedAt string, clock FoldClock) {
@@ -797,6 +798,7 @@ func (p *FoldProjection) applyLinkEvent(e FoldEvent, payload map[string]jsontext
 	}
 	p.setLink(from, to, typ, present, clockOf(e), e.Actor, "")
 	p.touchIssue(issueUID(e, payload), issueUpdatedAt(e, payload))
+	p.noteKeptTouch(issueUID(e, payload), issueUpdatedAt(e, payload))
 }
 
 func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]jsontext.Value) {
@@ -805,6 +807,7 @@ func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]jsont
 		return
 	}
 	defer p.touchIssue(base, issueUpdatedAt(e, payload))
+	p.noteKeptTouch(base, issueUpdatedAt(e, payload))
 	p.applyUIDList(base, payload["parent_set_uid"], "parent", true, false, clockOf(e), e.Actor)
 	p.applyUIDList(base, payload["parent_removed_uid"], "parent", false, false, clockOf(e), e.Actor)
 	for _, uid := range stringSlice(payload["blocks_added_uids"]) {
