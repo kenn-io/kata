@@ -45,9 +45,16 @@ func checkFederatedMoveSnapshotCommentFromRepeatedImport(t *testing.T, store db.
 		"body": "edited discussion", "created_at": comment.CreatedAt.UTC().Format(time.RFC3339Nano),
 		"edited_at": editedAt.Format(time.RFC3339Nano),
 	}
+	// The copy records another creation time for the comment. The hub keeps
+	// the one it holds and takes the copy's text.
+	copied := map[string]any{
+		"comment_uid": comment.UID, "author": comment.Author,
+		"body": "edited discussion", "created_at": comment.CreatedAt.UTC().Add(-time.Hour).Format(time.RFC3339Nano),
+		"edited_at": editedAt.Format(time.RFC3339Nano),
+	}
 	restatedPayload, err := json.Marshal(map[string]any{
 		"title": issue.Title, "body": issue.Body, "status": issue.Status,
-		"comments": []any{edited}, "updated_at": editedAt.Format(time.RFC3339Nano),
+		"comments": []any{copied}, "updated_at": editedAt.Format(time.RFC3339Nano),
 	})
 	require.NoError(t, err)
 	restated := newRemoteEvent(t, source, &issue.UID, db.RepeatedImportEventType, "worker", origin, editedAt.UnixMilli(), jsontext.Value(restatedPayload))

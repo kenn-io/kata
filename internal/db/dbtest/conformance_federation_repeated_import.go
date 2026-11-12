@@ -267,6 +267,18 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 	accepted, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.True(t, accepted.UpdatedAt.After(time.Now()), "the fixture's copy is dated ahead")
+	// Another copy, older than the accepted one and also dated ahead, is
+	// skipped. The hub keeps no record of a skipped copy.
+	between := time.Now().Add(time.Until(accepted.UpdatedAt) / 2).UTC().Format(db.EventTimestampFormat)
+	skippedOrigin, skippedEnrollment, skipped := h.repeatedImportCopy(t, h.target, func(issueUID string, payload map[string]any) {
+		if issueUID == h.issueUID {
+			payload["updated_at"] = between
+			payload["title"] = "Skipped copy"
+		}
+	})
+	result, err = pushRepeatedImportBaseline(t, hub, h.target.ID, skippedEnrollment, skippedOrigin, skipped)
+	require.NoError(t, err)
+	require.Zero(t, result.Accepted)
 	hubBody := "edited on the hub"
 	_, _, _, err = hub.EditIssue(ctx, db.EditIssueParams{IssueID: accepted.ID, Actor: "worker", Body: &hubBody})
 	require.NoError(t, err)
@@ -279,9 +291,19 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 	afterRetry, err = hub.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, lastEvent, afterRetry)
+	// The retry of the skipped copy now looks newer than the edited issue.
+	// Its adoption was already consumed, so it changes nothing.
+	result, err = pushRepeatedImportBaseline(t, hub, h.target.ID, skippedEnrollment, skippedOrigin, skipped)
+	require.NoError(t, err, "a retry of a skipped copy stays skipped")
+	require.Zero(t, result.Accepted)
+	require.Len(t, result.SupersededEventUIDs, len(skipped))
+	afterRetry, err = hub.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, lastEvent, afterRetry)
 	edited, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, hubBody, edited.Body)
+	require.Equal(t, "Current copy", edited.Title)
 	again, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, issue.Revision, again.Revision)

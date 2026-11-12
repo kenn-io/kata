@@ -319,7 +319,7 @@ func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event Remot
 	history = FederationMoveBaselineEvents(history)
 	for _, retained := range history {
 		switch retained.Type {
-		case "issue.created", "issue.snapshot", RepeatedImportEventType, "issue.commented", "issue.linked", "issue.links_changed":
+		case "issue.created", "issue.snapshot", "issue.commented", "issue.linked", "issue.links_changed":
 		default:
 			continue // In particular, nested move snapshots never prove themselves.
 		}
@@ -335,6 +335,40 @@ func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event Remot
 		for key, state := range projection.Links {
 			if state.Present && (key.FromUID == uid || key.ToUID == uid) {
 				proof.links[snapshotLinkIdentity(key, state.Author)] = true
+			}
+		}
+	}
+	// A whole copy merges into the comments the issue holds. A comment it
+	// brought new is proven as written. For a comment the issue already had,
+	// the copy proves its text and edit time under the author and creation
+	// time that were kept, never under the ones the copy carried.
+	for _, retained := range history {
+		if retained.Type != RepeatedImportEventType || retained.IssueUID != uid {
+			continue
+		}
+		var copied struct {
+			Comments []moveSnapshotComment `json:"comments"`
+		}
+		if json.Unmarshal(retained.Payload, &copied) != nil {
+			continue
+		}
+		for _, comment := range copied.Comments {
+			comment = comment.normalized()
+			if comment.UID == "" || comment.Author == "" {
+				continue
+			}
+			if !proof.commentUIDs[comment.UID] {
+				proof.addComment(comment)
+				continue
+			}
+			if comment.EditedAt == "" {
+				continue
+			}
+			for identity := range proof.identities {
+				if identity.UID == comment.UID {
+					identity.Body, identity.EditedAt = comment.Body, comment.EditedAt
+					proof.comments[identity] = true
+				}
 			}
 		}
 	}

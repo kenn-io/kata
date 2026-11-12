@@ -72,6 +72,7 @@ func (p *FoldProjection) noteRestatedIssues(events []FoldEvent) {
 				p.restatedIssues = map[string]struct{}{}
 				p.sinceBaseline = map[string][]FoldEvent{}
 				p.baselineUpdatedAt = map[string]string{}
+				p.commentTouchedAt = map[string]string{}
 			}
 			p.restatedIssues[uid] = struct{}{}
 		}
@@ -178,6 +179,12 @@ func (p *FoldProjection) applyEvent(e FoldEvent, payload map[string]jsontext.Val
 		// Bridge events are issue-scoped audit records. The receiving side keeps
 		// its own connector state and must not project these onto native content.
 		return
+	}
+}
+
+func (p *FoldProjection) noteCommentTouched(uid, at string) {
+	if _, restated := p.restatedIssues[uid]; restated && at != "" && (p.commentTouchedAt[uid] == "" || at > p.commentTouchedAt[uid]) {
+		p.commentTouchedAt[uid] = at
 	}
 }
 
@@ -388,7 +395,6 @@ func (p *FoldProjection) applyIssueRestated(e FoldEvent) {
 		// No history of this issue is held to apply the copy underneath.
 		return
 	}
-	heldUpdatedAt := issue.UpdatedAt
 	// A copy can be dated ahead of the hub's clock. Changes yield only up to
 	// the time the hub accepted it, so a later edit still applies.
 	restatedAt := in.UpdatedAt
@@ -407,7 +413,9 @@ func (p *FoldProjection) applyIssueRestated(e FoldEvent) {
 	issue.ClosedAt = cloneStringPtr(in.ClosedAt)
 	issue.DeletedAt = cloneStringPtr(in.DeletedAt)
 	issue.UpdatedAt = in.UpdatedAt
-	advanceIssueUpdatedAt(&issue, heldUpdatedAt)
+	// The time of an earlier copy is replaced with that copy. Comments merge,
+	// so their times still count, and so do the changes applied again below.
+	advanceIssueUpdatedAt(&issue, p.commentTouchedAt[uid])
 	if issue.RestatedAt == "" || timestampBefore(issue.RestatedAt, restatedAt) {
 		issue.RestatedAt = restatedAt
 	}
@@ -632,6 +640,7 @@ func (p *FoldProjection) applyComment(e FoldEvent, payload map[string]jsontext.V
 	}
 	p.setComment(commentUID, uid, author, teammate, body, createdAt, replyTo, replyKind, editedAt, clockOf(e))
 	p.touchIssue(uid, createdAt)
+	p.noteCommentTouched(uid, createdAt)
 }
 
 func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]jsontext.Value) {
@@ -660,6 +669,7 @@ func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]json
 	}
 	p.editCommentBody(commentUID, uid, body, editedAt, clockOf(e))
 	p.touchIssue(uid, editedAt)
+	p.noteCommentTouched(uid, editedAt)
 }
 
 func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, body, createdAt, replyTo, replyKind, editedAt string, clock FoldClock) {

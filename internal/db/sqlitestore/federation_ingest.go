@@ -251,7 +251,9 @@ func (d *Store) ingestFederationEventsOnce(
 			repeatedSeen[repeated.UID] = true
 			result.SupersededEventUIDs = append(result.SupersededEventUIDs, ev.EventUID)
 		}
-		wins := repeated != nil && db.RepeatedSnapshotWins(ev.Payload, repeated.UpdatedAt)
+		// A retry of a consumed adoption decided each copy the first time. The
+		// issue's updated_at can have moved since, so it is not asked again.
+		wins := repeated != nil && !adoptionSnapshotAuthorState.duplicateOnly && db.RepeatedSnapshotWins(ev.Payload, repeated.UpdatedAt)
 		if wins {
 			accepted, err := db.RepeatedSnapshotAlreadyAccepted(ctx, tx, repeated.UID, ev.Payload)
 			if err != nil {

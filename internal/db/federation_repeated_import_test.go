@@ -414,6 +414,27 @@ func TestRepeatedImportEventDatedAheadDoesNotBlockLaterEdits(t *testing.T) {
 	assert.Empty(t, got.Issues["issue-1"].Body, "a change older than the acceptance still yields")
 }
 
+// A later copy replaces an earlier one, including its time. The issue's
+// updated_at comes from the winning copy and the changes that survive it, so a
+// copy dated ahead that was since replaced does not hold back newer copies.
+func TestRepeatedImportEventDropsAReplacedCopysTime(t *testing.T) {
+	current := `{"uid":"issue-1","title":"hub title","status":"open","updated_at":"2026-05-01T09:00:00.000Z"}`
+	copyAt := func(title, updatedAt, acceptedAt string, clock int64) FoldEvent {
+		event := testEvent(RepeatedImportEventType, clock, `{"title":"`+title+`","status":"open","updated_at":"`+updatedAt+`"}`)
+		event.CreatedAt = acceptedAt
+		return event
+	}
+	got := FoldEvents([]FoldEvent{
+		testEvent("issue.snapshot", 1, current),
+		copyAt("december copy", "2026-12-01T09:00:00.000Z", "2026-06-01T09:00:00.000Z", 10),
+		testEvent("issue.updated", 20, `{"body":"june edit","updated_at":"2026-06-02T09:00:00.000Z"}`),
+		copyAt("july copy", "2026-07-01T09:00:00.000Z", "2026-07-01T10:00:00.000Z", 30),
+	})
+	issue := got.Issues["issue-1"]
+	assert.Equal(t, "july copy", issue.Title)
+	assert.Equal(t, "2026-07-01T09:00:00.000Z", issue.UpdatedAt, "the replaced copy's time is gone")
+}
+
 // An import repair moves an issue's creation time earlier and carries the
 // issue's unchanged update time. It must survive a whole copy.
 func TestRepeatedImportEventKeepsACreationTimeRepair(t *testing.T) {

@@ -45,6 +45,9 @@ type FoldProjection struct {
 	// newer change applies underneath it: the copy is applied and the newer
 	// changes are applied again on top.
 	sinceBaseline map[string][]FoldEvent
+	// commentTouchedAt is the latest comment time of each such issue. A copy
+	// replaces an earlier copy's updated_at, and comments still count.
+	commentTouchedAt map[string]string
 	// baselineUpdatedAt is the updated_at of each such issue's baseline.
 	baselineUpdatedAt map[string]string
 	Links             map[FoldLinkKey]FoldElementState
