@@ -71,10 +71,11 @@ is optional on the ordinary daemon listeners.
 
 When enabling required signing on an existing hub, add a
 `[[federation.signing.key]]` entry for each unsigned spoke enrollment and
-restart the hub. Provision the same secret on the spoke, then select the key
-without replacing its bearer. The spoke is refused until it signs requests. This
-command uses the selected daemon, including `KATA_SERVER` or a daemon catalog
-selection, and requires daemon-owner authority:
+restart the hub. Wait for the replay warmup in step 5, then configure the
+spoke with the same secret without replacing its bearer. The spoke is refused
+until it signs requests. The following command uses the selected daemon,
+including `KATA_SERVER` or a daemon catalog selection, and requires
+daemon-owner authority:
 
 ```sh
 kata federation signing configure --project-uid <local-project-uid> \
@@ -101,7 +102,11 @@ not credentials.
 A bridge created with `kata federation bridge connect` signs its relay
 requests when its credential selects a signing source. A hub with
 `required = true` advertises `federation_signing_required`, and bridge connect
-refuses it with `hub_signing_required` until the bridge has a source.
+refuses it with `hub_signing_required` until the bridge has a source. The same
+code with HTTP 401 answers unsigned requests on any federation listener. Before
+enabling required signing, update older bridges or give them a signing key:
+an older bridge treats this code as a revoked grant until it next signs
+successfully.
 
 1. On the daemon that will hold the bridge, provision the secret as above and
    connect with `--signing-key-id <key-id>` plus `--signing-key-env <var>` or
