@@ -207,4 +207,6 @@ export interface KataIssueDetailProps {
   onReplyComment?: (commentUID: string, kind: KataReplyKind) => void
   commentActionsDisabled?: boolean
   selectedCommentUID?: string | undefined
+  /** True while the host shows a summary and loads the comments. */
+  pending?: boolean | undefined
 }

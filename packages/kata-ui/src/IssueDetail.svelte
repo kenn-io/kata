@@ -22,6 +22,7 @@
     commentActionsDisabled = false,
     selectedCommentUID,
     returnComment,
+    pending = false,
   }: KataIssueDetailProps = $props()
 
   function invoke(action: KataIssueHostAction): void {
@@ -82,7 +83,7 @@
     <section class="claim-state" aria-label="Claim state">
       {#if detail.claim}<span>Claimed by {detail.claim.holder}</span>{/if}
       {#each detail.pendingClaims as claim, index (`${claim.holder}-${index}`)}
-        <span>Pending: {claim.holder}</span>
+        <span>Claim requested by {claim.holder}</span>
       {/each}
     </section>
   {/if}
@@ -99,6 +100,7 @@
     {onReplyComment}
     {selectedCommentUID}
     actionsDisabled={commentActionsDisabled || detail.issue.status !== 'open'}
+    {pending}
   />
 </section>
 

@@ -22,6 +22,7 @@
     onReplyComment?: KataIssueDetailProps['onReplyComment']
     actionsDisabled?: boolean
     selectedCommentUID?: string | undefined
+    pending?: boolean | undefined
   }
 
   let {
@@ -31,6 +32,7 @@
     onReplyComment,
     actionsDisabled = false,
     selectedCommentUID,
+    pending = false,
   }: Props = $props()
   let listElement = $state<HTMLOListElement>()
   let requestedCommentUID: string | undefined
@@ -73,7 +75,9 @@
   <h3 id="kata-comments-heading">
     Comments{#if comments.length > 0}<span class="count">{comments.length}</span>{/if}
   </h3>
-  {#if comments.length === 0}
+  {#if pending}
+    <p role="status" aria-label="Loading comments">Loading comments…</p>
+  {:else if comments.length === 0}
     <p>No comments.</p>
   {:else}
     <ol bind:this={listElement}>

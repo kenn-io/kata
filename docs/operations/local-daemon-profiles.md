@@ -1,7 +1,7 @@
 ---
 title: Local daemon profiles
 description: Keep personal and work spokes separate and recover a stopped spoke without changing its database identity.
-last_edited: 2026-11-07
+last_edited: 2026-11-10
 ---
 
 # Local daemon profiles
@@ -93,8 +93,9 @@ unverified assertion as `ready`.
 Diagnosis, status, health, and locate never start the selected daemon.
 `daemon status` lists current-home processes and reports `selected` separately.
 Use that selected state to distinguish a healthy personal process from a
-stopped work profile. Diagnose returns the state even when it is not ready;
-failed recovery, health, and locate return an error.
+stopped work profile. Diagnose returns the state even when it is not ready.
+A non-ready `daemon status`, failed recovery, health, and locate return an
+error. See the [CLI reference](../reference/cli.md) for exit codes.
 
 If routing configuration is invalid, diagnose reports `state=selection_error`
 and a `message` explaining the failure. Status still lists current-home processes
@@ -160,9 +161,10 @@ profile daemon with `[docbank] local = true` finds the same Docbank vault as the
 `docbank` CLI instead of falling back to `~/.docbank`.
 
 The profile's own auth token is used for its API and identity checks. A catalog
-`token` or `token_env` can select a client credential for identity-token mode;
-it does not replace the selected daemon's configured auth. Use a neutral,
-non-reserved environment name for a referenced credential.
+`token`, `token_file` or `token_env` can select a client credential for
+identity-token mode, in that order of precedence. It does not replace the
+selected daemon's configured auth. Use a neutral, non-reserved environment
+name for a referenced credential.
 
 SQLite storage paths must be absolute. PostgreSQL profiles require a complete
 single-host URL with an explicit port, database, and user. Service routing,

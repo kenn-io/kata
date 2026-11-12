@@ -84,7 +84,7 @@ func (o cronCLIOptions) edit(ctx context.Context, cmd *cobra.Command, daemon dae
 	if base.deleted {
 		return cronCLIValidation("definition is deleted; restore it first")
 	}
-	baseFields, err := cronEditParse(o.resource, base.body)
+	baseFields, err := cronEditParseStored(o.resource, base.body)
 	if err != nil {
 		return err
 	}
@@ -189,7 +189,7 @@ func (o cronCLIOptions) edit(ctx context.Context, cmd *cobra.Command, daemon dae
 			if current.deleted {
 				return &cliError{Message: "definition was deleted while editing; restore it first", Kind: kindConflict, ExitCode: ExitConflict}
 			}
-			fields, err := cronEditParse(o.resource, current.body)
+			fields, err := cronEditParseStored(o.resource, current.body)
 			if err != nil {
 				return err
 			}

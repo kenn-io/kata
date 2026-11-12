@@ -169,7 +169,11 @@ func TestAgentHooksInstallKitManagedProfiles(t *testing.T) {
 			require.NoError(t, err, stderr)
 			handlers = nativeContractHandlers(t, profile.Agent, path)
 			require.Len(t, handlers, 3)
-			for i, marker := range []string{"example-before", "example-after", "agent-hook contract"} {
+			markers := []string{"example-before", "example-after", "agent-hook contract"}
+			if profile.Agent == agenthook.AgentClaude || profile.Agent == agenthook.AgentCodex || profile.Agent == agenthook.AgentGemini || profile.Agent == agenthook.AgentQwen {
+				markers = []string{"example-before", "agent-hook contract", "example-after"}
+			}
+			for i, marker := range markers {
 				require.Contains(t, nativeHandlerCommandLine(handlers[i]), marker)
 			}
 		})

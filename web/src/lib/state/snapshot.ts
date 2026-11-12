@@ -177,7 +177,7 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
       generation,
       loading: false,
       stale: this.state.snapshot !== undefined,
-      error: 'Snapshot unavailable',
+      error: "Couldn't load workspace",
       canMutate: false,
       authenticationRequired: false,
     })
@@ -261,6 +261,18 @@ export function snapshotIntentForRoute(
 
 export function uiSnapshotIntentKey(intent: UISnapshotIntent): string {
   return JSON.stringify(intent)
+}
+
+// Names the task list an intent loads, ignoring which task it selects. Two
+// routes with the same key show the same list.
+export function collectionIntentKey(intent: UISnapshotIntent): string {
+  // JSON.stringify drops the undefined fields.
+  return JSON.stringify({
+    ...intent,
+    selectedIssueUID: undefined,
+    includeGraph: undefined,
+    includeHistory: undefined,
+  })
 }
 
 type ReadUISnapshot = typeof readUISnapshot

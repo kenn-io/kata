@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # Configuration
@@ -357,12 +357,30 @@ isolated credentials, PostgreSQL restrictions, and recovery.
 Committed `.kata.toml` files bind the project name only; do not put daemon
 routing or tokens there.
 
-A catalog entry's `token`, or the value of the variable its `token_env` names,
-is the bearer credential clients send to that daemon. A command that connects
-to an entry whose `token_env` variable is unset or empty fails; kata never
-falls back to another credential. `kata daemon locate` reports a remote or
-plain local entry without reading its credential. `KATA_AUTH_TOKEN` replaces a
-remote entry's credential, so its `token_env` is not read then.
+A catalog entry's bearer credential uses `token` > `token_file` > `token_env`.
+Prefer `token_file` on a device to keep the token out of `config.toml`:
+
+```toml
+[[daemon]]
+name = "team-hub"
+url = "https://hub.example"
+token_file = "~/.config/kata/tokens/team-hub"
+```
+
+The file must use an absolute or `~/` path, be a regular file owned by the
+user running Kata, and have no group or world permissions (`chmod 600`). On
+Windows it must be a private current-user file. The file must be at most
+64 KiB; its trimmed contents must be nonempty. Use `token_env` for containers or service
+managers that already inject secrets.
+
+Loading or listing the catalog does not read its credentials. Selection,
+including `kata daemon locate`, may inspect a selected credential. Remote and
+plain local entries defer source errors until connection. A failed selected
+file or an unset or empty selected environment variable stops the connection
+without fallback.
+`KATA_AUTH_TOKEN` replaces a remote entry's credential, so its file or variable
+is not read then. Hub administration uses only the hub's catalog credential;
+the local daemon's global token never replaces it.
 
 For trusted private-network hostnames that cannot be represented as literal
 non-public IP addresses, opt in per target:
@@ -780,10 +798,11 @@ actor = "user-a"
 
 `hub` names a remote `[[daemon]]` entry; its URL, authentication, and
 `allow_insecure` policy are reused without falling back to the spoke daemon's
-global bearer token. Prefer `token_env` so the hub administration credential
-does not appear in `config.toml`. An unset or empty selected `token_env` is a
-runtime authentication failure: the spoke stays available and retries without
-sending another credential.
+global bearer token. Prefer `token_file` on a device, or `token_env` when the
+service environment already injects secrets, to keep the hub administration
+credential out of `config.toml`. A failed selected file or an unset or empty
+selected variable is a runtime authentication failure: the spoke stays
+available and retries without sending another credential.
 
 Each mapping ensures the named hub project and a `pull,push,lease` enrollment,
 then creates the local `spoke_project` if it is missing or adopts the existing
@@ -822,8 +841,8 @@ The selected spoke daemon resolves `team-hub` from its own startup config. It
 requires HTTPS, validates the existing enrollment against the same hub project
 ID and UID at the new endpoint, then updates the stored endpoint without
 changing the enrollment token, capabilities, actor, project identity, or sync
-cursors. The catalog entry's administration `token` or `token_env` is not used
-for this validation. Restart first if the edited catalog has not yet been
+cursors. The catalog entry's administration `token`, `token_file` or
+`token_env` is not used for this validation. Restart first if the edited catalog has not yet been
 loaded by the daemon.
 
 Before changing either local endpoint record, rebind drains in-flight
@@ -884,7 +903,7 @@ credential_provider = ["access-helper", "credentials", "--profile", "work"]
 | `intent` | Required: `read_only`, `collaborate`, or `migrate`. |
 | `credential_provider` | Nonempty executable/argument array. Kata executes it directly, without a shell. |
 | `actor` | Must be absent; the provider supplies the approved actor. |
-| Catalog `token`, `token_env` | Must be absent for a provider mapping. |
+| Catalog `token`, `token_file`, `token_env` | Must be absent for a provider mapping. |
 
 Provider mappings require HTTPS even if the catalog sets `allow_insecure`.
 The helper approves a credential for an exact HTTPS destination; the catalog's
@@ -1016,6 +1035,7 @@ allow_no_expiry = true
 | `enabled` | `false` | Starts Events delivery and accepts subscriptions. |
 | `max_ttl` | `"720h"` (30 days) | Longest lifetime of a finite subscription grant. Go duration syntax; at least `"60s"`. |
 | `allow_no_expiry` | `true` | Honors requests for a subscription that never expires. Set `false` to give those requests a `max_ttl` grant instead. |
+| `trusted_callbacks` | `[]` | Grants exact HTTPS origins static private addresses; see [Trusted private callbacks](#trusted-private-callbacks). |
 
 Subscribers choose their own lifetime. A request without one gets 24 hours
 capped by `max_ttl`, and a finite request is clamped to between 60 seconds and
@@ -1041,6 +1061,51 @@ Programs that embed the Go `Service` set `Config.MCPEvents.Enabled` and
 supply `Config.MCPEvents.Key` instead. `Config.MCPEvents.MaxTTL` and
 `Config.MCPEvents.RefuseNoExpiry` match `max_ttl` and `allow_no_expiry = false`. Without a key provider, Events is
 disabled with `events_not_configured` and the other workers still run.
+
+### Trusted private callbacks
+
+Operators can grant one exact HTTPS origin access to static private addresses:
+
+```toml
+[[mcp_events.trusted_callbacks]]
+origin = "https://receiver.example"
+addresses = ["100.64.0.1", "fd00::1"]
+```
+
+Each entry needs at least one numeric address from RFC1918 IPv4
+(`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), CGNAT
+(`100.64.0.0/10`), or IPv6 ULA (`fc00::/7`). Loopback, link-local,
+unspecified, multicast, public, and other reserved addresses are
+not permitted. The metadata addresses `100.100.100.200`, `fd00:ec2::254`,
+and `fd20:ce::254` are also excluded. Do not use
+CIDRs, zones or hostnames in `addresses`.
+
+An origin includes the scheme, hostname and optional port. The default
+HTTPS port `:443` equals an omitted port. Hostname case is ignored.
+Origins cannot contain credentials, wildcards, non-root paths, queries or
+fragments. Exact pinned `.internal`, `home.arpa`, and `.local` names are permitted;
+`localhost` remains forbidden.
+Duplicate origins or addresses within an entry disable Events. A private
+literal-IP origin must pin only that same IP.
+
+A matching callback always connects to its pins without DNS or a public
+fallback. Other callbacks remain public-only; every address in a DNS answer
+must be public before any connection is attempted. TLS still checks the
+original callback hostname and certificate using system roots. Install a
+trusted certificate chain on the receiver; literal-IP callbacks need a
+matching IP subject alternative name. Signing and receiver verification
+remain required. Subscribers cannot grant private access.
+
+Restart the daemon after changing these entries. Removing an entry withdraws
+its private access: subsequent delivery attempts and subscription refreshes
+that resolve to private addresses fail with `destination_not_allowed`.
+Unsubscribe remains available. Cached public consent can still be refreshed
+during a DNS outage; delivery independently checks DNS when it connects.
+An invalid policy that parses successfully disables Events with `events_start_failed`
+while the daemon keeps serving other requests. Malformed configuration prevents
+the daemon from starting. The diagnostic identifies the zero-based entry index and
+`origin` or `addresses` field, plus the address index when applicable, without
+logging supplied origins or addresses. No environment variable grants callback trust.
 
 ## Semantic search
 
@@ -1096,6 +1161,13 @@ For an external provider, `base_url` and `model` are both required; setting only
 one is a startup error rather than a silent disable. With no credential source
 configured, requests omit the `Authorization` header. Keyless local providers
 such as Ollama need only `base_url` and `model`.
+
+The built-in server defaults to 8 inputs per request and a 300-second request
+timeout. Configured endpoints default to 64 inputs and 30 seconds. Set
+`batch_size` or `timeout_seconds` to override either default. Kata sends one
+embedding request at a time during indexing. If a multi-input request times
+out, Kata splits it into smaller requests. If a single input also times out,
+later fills use smaller batches until the daemon restarts.
 
 Affixes preserve every space and newline. Kata applies document affixes once
 around each prepared issue chunk and query affixes once around the search
