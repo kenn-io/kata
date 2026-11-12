@@ -69,3 +69,41 @@ func TestAttachmentLinkCLIInvalidSelector(t *testing.T) {
 		})
 	}
 }
+
+func TestAttachmentReuseCLI(t *testing.T) {
+	env, f, ref := attachmentCLIEnv(t)
+	f.Seed("/reports/report.pdf", docbank.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: uuid.MustParse(cliLinkVersion)}, map[uuid.UUID][]byte{uuid.MustParse(cliLinkVersion): []byte("sample bytes")})
+	var first, second api.AddAttachmentResponseBody
+	out, err := executeAttachmentCLI(t, env.URL, "link", ref, "42", "--json")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(out), &first))
+	out, err = executeAttachmentCLI(t, env.URL, "link", ref, "42", "--reuse-existing", "--json")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(out), &second))
+	require.Equal(t, first.ID, second.ID)
+}
+
+func TestAttachmentReuseCLIRequiresCurrentAPIVersion(t *testing.T) {
+	env, _, ref := attachmentCLIEnv(t)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var writes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.44.0"}`))
+			return
+		}
+		if r.Method == http.MethodPost {
+			writes.Add(1)
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	for _, args := range [][]string{{"add", ref, "file.txt", "--reuse-existing"}, {"link", ref, "42", "--reuse-existing"}} {
+		_, err := executeAttachmentCLI(t, server.URL, args...)
+		require.ErrorContains(t, err, "requires daemon API 0.45.0 or newer")
+	}
+	require.Zero(t, writes.Load())
+}

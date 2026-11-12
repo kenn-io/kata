@@ -2667,14 +2667,14 @@ Legacy numeric refs no longer resolve.
 Attach files to an issue with Docbank, then list, download, or remove their references. See [Issue attachments](../guide/attachments.md).
 
 ```sh
-kata docbank attachments add <issue> <file>...
-kata docbank attachments link <issue> <node-id|/path> [--version UUID]
+kata docbank attachments add <issue> <file>... [--reuse-existing]
+kata docbank attachments link <issue> <node-id|/path> [--version UUID] [--reuse-existing]
 kata docbank attachments ls <issue>
 kata docbank attachments get <issue> <attachment> [-o PATH] [--force]
 kata docbank attachments rm <issue> <attachment>
 ```
 
-`<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
+`--reuse-existing` returns an existing reference to the resolved version, or creates one if absent; it requires daemon API 0.45.0 or newer. Without it, each add or link creates a reference. `<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
 
 Point the current `KATA_HOME`'s daemon at a Docbank:
 

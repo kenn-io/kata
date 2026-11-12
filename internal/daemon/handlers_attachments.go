@@ -174,6 +174,9 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, docbankError(err, docbankUploadErrors)
 		}
+		if in.ReuseExisting {
+			return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, e, &e.DocbankVersion)
+		}
 		return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, e, nil)
 	})
 	huma.Register(h, huma.Operation{OperationID: "attachmentContent", Method: "GET", Path: attachmentPath + "/{attachment_id}/content", Responses: map[string]*huma.Response{"200": {Description: "Attachment content.", Content: binaryContent("*/*")}}}, func(ctx context.Context, in *api.AttachmentReadRequest) (*huma.StreamResponse, error) {

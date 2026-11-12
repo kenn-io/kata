@@ -78,7 +78,7 @@ kata docbank attachments get abc4 <attachment-id-or-suffix> -o screenshot.png
 kata docbank attachments rm abc4 <attachment-id-or-suffix>
 ```
 
-Each upload gets a new ID. Failed uploads add no reference. Retrying after a lost response may add another reference to the same Docbank file; remove the extra with `rm`. Downloads check the bytes against Docbank's `X-Docbank-Blob-Hash` header and the byte count against the reference before publishing the destination. Replacing an existing file requires `--force`.
+Each upload gets a new ID by default. Use `add --reuse-existing` to return an existing reference to the same uploaded version, making retries after a lost response safe. Identical file names and bytes in the same project resolve to the same Docbank version. Different names or bytes produce different versions. Failed uploads add no reference. Downloads check the bytes against Docbank's `X-Docbank-Blob-Hash` header and the byte count against the reference before publishing the destination. Replacing an existing file requires `--force`.
 
 Removal drops the reference. Docbank retains the bytes under its own retention rules.
 
@@ -95,7 +95,7 @@ Choose one positive node ID or an absolute Docbank path. The link pins the curre
 
 Linking requires daemon API 0.38.0 or newer.
 
-Kata refuses directories, trashed files, versions belonging to another node, and file names that fail the same rules as uploads. Names must be valid UTF-8, contain 1 to 255 bytes, and contain no `/`, `\`, or control characters. The names `.` and `..` are invalid. A missing Docbank file or version returns 404 `docbank_not_found`. A trashed node returns 410 `attachment_content_missing`. Each link adds a new reference by default, even when that version is already attached. API clients on daemons that support API 0.39.0 or newer can set `reuse_existing` to return the smallest existing attachment ID for the selected version, or create one if no reference exists. Remove extra references with `rm`.
+Kata refuses directories, trashed files, versions belonging to another node, and file names that fail the same rules as uploads. Names must be valid UTF-8, contain 1 to 255 bytes, and contain no `/`, `\`, or control characters. The names `.` and `..` are invalid. A missing Docbank file or version returns 404 `docbank_not_found`. A trashed node returns 410 `attachment_content_missing`. Each link adds a new reference by default, even when that version is already attached. Use `link --reuse-existing` to return the smallest existing attachment ID for the selected version, or create one if no reference exists. Both CLI reuse flags require daemon API 0.45.0 or newer. API clients can set `reuse_existing` on links since 0.39.0 and uploads since 0.45.0. Remove extra references with `rm`.
 
 The saved name and size come from link time. Later changes in Docbank leave the reference pinned to the selected version.
 

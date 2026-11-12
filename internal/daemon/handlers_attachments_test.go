@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/metadata"
@@ -391,5 +394,110 @@ func TestAttachmentUploadStatusErrors(t *testing.T) {
 			require.NoError(t, err)
 			require.JSONEq(t, `{}`, string(stored.Metadata))
 		})
+	}
+}
+
+func TestAttachmentUploadReuseConcurrent(t *testing.T) {
+	env, f := attachmentEnv(t)
+	checkAttachmentUploadReuseConcurrent(t, env, env.DB, f)
+}
+
+func TestAttachmentUploadReuseConcurrentPostgres(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(t.Context(), dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	f := docbanktest.New(t)
+	client := docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })
+	d := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC(), Broadcaster: daemon.NewEventBroadcaster(), Docbank: client, DocbankFolder: "/kata"})
+	t.Cleanup(func() { _ = d.Close() })
+	server := httptest.NewServer(d.Handler())
+	t.Cleanup(server.Close)
+	checkAttachmentUploadReuseConcurrent(t, &testenv.Env{URL: server.URL, HTTP: server.Client()}, store, f)
+}
+
+func checkAttachmentUploadReuseConcurrent(t *testing.T, env *testenv.Env, store db.Storage, f *docbanktest.Fake) {
+	t.Helper()
+	p, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	iss, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Attachment", Author: "operator"})
+	require.NoError(t, err)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID)
+	code, raw := attachmentUpload(t, env, endpoint, "warmup.txt", strings.NewReader("warmup"))
+	require.Equal(t, 200, code, string(raw))
+	before, err := store.MaxEventID(t.Context())
+	require.NoError(t, err)
+	both := make(chan struct{})
+	release := make(chan struct{})
+	var count atomic.Int32
+	var releaseOnce sync.Once
+	f.BeforeResponse = func(method, path string) {
+		if method == http.MethodPost && path == "/api/v1/uploads" {
+			if count.Add(1) == 2 {
+				close(both)
+			}
+			<-release
+		}
+	}
+	defer releaseOnce.Do(func() { close(release) })
+	type response struct {
+		status int
+		body   []byte
+		err    error
+	}
+	responses := make(chan response, 2)
+	for range 2 {
+		go func() {
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, env.URL+endpoint+"?name=report.txt&actor=operator&reuse_existing=true", strings.NewReader("same bytes"))
+			if err != nil {
+				responses <- response{err: err}
+				return
+			}
+			req.Header.Set("Content-Type", "application/octet-stream")
+			resp, err := env.HTTP.Do(req)
+			if err != nil {
+				responses <- response{err: err}
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			body, err := io.ReadAll(resp.Body)
+			responses <- response{status: resp.StatusCode, body: body, err: err}
+		}()
+	}
+	select {
+	case <-both:
+		releaseOnce.Do(func() { close(release) })
+	case <-time.After(5 * time.Second):
+		t.Fatal("uploads did not reach Docbank")
+	}
+	var ids []string
+	for range 2 {
+		got := <-responses
+		require.NoError(t, got.err)
+		require.Equal(t, 200, got.status, string(got.body))
+		var out api.AddAttachmentResponseBody
+		require.NoError(t, json.Unmarshal(got.body, &out))
+		ids = append(ids, out.ID)
+	}
+	require.Equal(t, ids[0], ids[1])
+	after, err := store.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, before+1, after)
+	stored, err := store.IssueByID(t.Context(), iss.ID)
+	require.NoError(t, err)
+	var values map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(stored.Metadata), &values))
+	require.Len(t, values, 2)
+	f.BeforeResponse = nil
+	for _, input := range []struct{ name, data string }{{"report.txt", "different bytes"}, {"other.txt", "same bytes"}} {
+		code, raw := attachmentUpload(t, env, endpoint, input.name+"&reuse_existing=true", strings.NewReader(input.data))
+		require.Equal(t, 200, code, string(raw))
+		var out api.AddAttachmentResponseBody
+		require.NoError(t, json.Unmarshal(raw, &out))
+		require.NotEqual(t, ids[0], out.ID)
 	}
 }

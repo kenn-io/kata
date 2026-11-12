@@ -16,6 +16,7 @@ import (
 
 func newAttachmentLinkCmd() *cobra.Command {
 	var version string
+	var reuseExisting bool
 	cmd := &cobra.Command{Use: "link <issue> <node-id|/path>", Short: "link an existing Docbank file version", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		input, err := parseDocbankSelector(args[1])
 		if err != nil {
@@ -36,7 +37,12 @@ func newAttachmentLinkCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if err := requireDaemonAPIVersion(ctx, hc, base, apiVersionDocbankAttachmentLink, "Docbank attachment linking"); err != nil {
+		versionFloor, feature := apiVersionDocbankAttachmentLink, "Docbank attachment linking"
+		if reuseExisting {
+			versionFloor, feature = apiVersionDocbankAttachmentReuse, "Docbank attachment reuse"
+			input.ReuseExisting = &reuseExisting
+		}
+		if err := requireDaemonAPIVersion(ctx, hc, base, versionFloor, feature); err != nil {
 			return err
 		}
 		actor, _ := resolveActor(ctx, flags.As, nil)
@@ -54,6 +60,7 @@ func newAttachmentLinkCmd() *cobra.Command {
 		}
 		return printAttachmentsCLI(cmd, map[string]metadata.Attachment{out.AttachmentID: {Name: out.Attachment.Name, MediaType: out.Attachment.MediaType, Size: out.Attachment.Size}})
 	}}
+	cmd.Flags().BoolVar(&reuseExisting, "reuse-existing", false, "reuse an existing reference to the selected version")
 	cmd.Flags().StringVar(&version, "version", "", "immutable content-version UUID (defaults to current version)")
 	return cmd
 }

@@ -10950,6 +10950,11 @@ paths:
           name: actor
           schema:
             type: string
+        - explode: false
+          in: query
+          name: reuse_existing
+          schema:
+            type: boolean
       requestBody:
         content:
           application/octet-stream:

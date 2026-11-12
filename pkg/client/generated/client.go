@@ -6935,8 +6935,9 @@ func (c *Client) AddAttachment(ctx context.Context, options *AddAttachmentReques
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"actor": {Style: "form", Explode: &[]bool{false}[0]},
-		"name":  {Style: "form", Explode: &[]bool{false}[0]},
+		"actor":          {Style: "form", Explode: &[]bool{false}[0]},
+		"name":           {Style: "form", Explode: &[]bool{false}[0]},
+		"reuse_existing": {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/attachments",
