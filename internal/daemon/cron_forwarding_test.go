@@ -533,7 +533,7 @@ func TestCronSessionObservationRequiresHubFeature(t *testing.T) {
 			id := cronHTTPUID(t)
 			before, err := f.spoke.DB.MaxEventID(t.Context())
 			require.NoError(t, err)
-			body := map[string]any{"job_uid": job.UID, "definition_event_uid": job.DefinitionEventUID, "status": "running", "expected_revision": 0, "summary": map[string]any{"version": 1, "sessions": []map[string]string{{"agent": "claude", "session_id": "00000000-0000-4000-8000-000000000001"}}}}
+			body := map[string]any{"actor": "tester", "job_uid": job.UID, "definition_event_uid": job.DefinitionEventUID, "status": "running", "expected_revision": 0, "summary": map[string]any{"version": 1, "sessions": []map[string]string{{"agent": "claude", "session_id": "00000000-0000-4000-8000-000000000001"}}}}
 			response, raw := envDoRaw(t, f.target, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", f.sp.ID, id), body, nil)
 			if mode == "supported" {
 				require.Equalf(t, http.StatusOK, response.StatusCode, "%s", raw)
@@ -621,7 +621,7 @@ func TestCronSessionObservationDuringAdoption(t *testing.T) {
 		t.Fatal("adoption did not reach the transaction")
 	}
 	id := cronHTTPUID(t)
-	body := map[string]any{"job_uid": job.UID, "definition_event_uid": job.DefinitionEventUID, "status": "running", "expected_revision": 0, "summary": map[string]any{"version": 1, "sessions": []map[string]string{{"agent": "claude", "session_id": "00000000-0000-4000-8000-000000000001"}}}}
+	body := map[string]any{"actor": "tester", "job_uid": job.UID, "definition_event_uid": job.DefinitionEventUID, "status": "running", "expected_revision": 0, "summary": map[string]any{"version": 1, "sessions": []map[string]string{{"agent": "claude", "session_id": "00000000-0000-4000-8000-000000000001"}}}}
 	response, _ := envDoRaw(t, f.target, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, id), body, nil)
 	require.Equal(t, http.StatusServiceUnavailable, response.StatusCode)
 	_, err = f.spoke.DB.CronRun(t.Context(), project.ID, id)
