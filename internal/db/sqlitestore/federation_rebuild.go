@@ -212,9 +212,6 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 			if err != nil {
 				return err
 			}
-			if len(decisions) != len(p.decisions) {
-				return errStaleFederationPreparation
-			}
 			for i, decision := range decisions {
 				if !changed[decision.IssueUID] && decision != p.decisions[i] {
 					return errStaleFederationPreparation
