@@ -9,6 +9,8 @@ import (
 	"context"
 	"iter"
 	"time"
+
+	"go.kenn.io/kata/internal/cron"
 )
 
 // Storage is the backend-neutral domain API implemented by both SQLite and
@@ -20,6 +22,7 @@ type Storage interface {
 	ObserveCronRun(context.Context, ObserveCronRun) (CronRunObservationResult, error)
 	CronRun(context.Context, int64, string) (CronRun, error)
 	ListCronRuns(context.Context, CronRunList) ([]CronRun, error)
+	CronRunStats(context.Context, CronRunStatsQuery) ([]cron.RunStatRow, bool, error)
 	PutCronJob(context.Context, PutCronJob) (CronJob, []Event, error)
 	PutCronWorkflow(context.Context, PutCronWorkflow) (CronWorkflow, Event, error)
 	CronJob(context.Context, int64, string) (CronJob, error)

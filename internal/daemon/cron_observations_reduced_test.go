@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -174,4 +175,85 @@ func TestCronObservationRechecksRevokedActorToken(t *testing.T) {
 	runs, err := env.DB.ListCronRuns(t.Context(), db.CronRunList{ProjectID: project.ID})
 	require.NoError(t, err)
 	require.Empty(t, runs)
+}
+
+func TestCronRunStatsWindow(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "example-project")
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/runs/stats", project.ID)
+	status, raw := cronHTTP(t, env, http.MethodGet, path+"?until=2026-11-01T00:00:00Z&bucket=day", nil)
+	require.Equalf(t, http.StatusOK, status, "%s", raw)
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(raw, &result))
+	require.Contains(t, result, "success_rate")
+	require.Nil(t, result["success_rate"])
+	require.Contains(t, result, "duration_seconds")
+	require.Nil(t, result["duration_seconds"])
+	require.Equal(t, "2026-10-02T00:00:00Z", result["window"].(map[string]any)["since"])
+	status, _ = cronHTTP(t, env, http.MethodGet, path+"?job_uid=01J00000000000000000000010&workflow_uid=01J00000000000000000000020", nil)
+	require.Equal(t, http.StatusBadRequest, status)
+	status, _ = cronHTTP(t, env, http.MethodGet, path+"?since=2026-11-01T00:00:00Z&until=2026-11-01T00:00:00Z", nil)
+	require.Equal(t, http.StatusBadRequest, status)
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Stats", Actor: "worker", Definition: cronHTTPDefinition(t)})
+	require.NoError(t, err)
+	_, err = env.DB.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: project.ID, UID: cronHTTPUID(t), JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "worker", Status: "failed", Summary: cron.Summary{Version: 1}})
+	require.NoError(t, err)
+	status, raw = cronHTTP(t, env, http.MethodGet, path+"?job_uid="+strings.ToLower(job.UID)+"&bucket=day", nil)
+	require.Equalf(t, http.StatusOK, status, "%s", raw)
+	result = nil
+	require.NoError(t, json.Unmarshal(raw, &result))
+	require.Equal(t, float64(1), result["scanned"])
+	require.Equal(t, job.UID, result["job_uid"])
+	status, raw = cronHTTP(t, env, http.MethodGet, path+"?workflow_uid=01j00000000000000000000020", nil)
+	require.Equalf(t, http.StatusOK, status, "%s", raw)
+	result = nil
+	require.NoError(t, json.Unmarshal(raw, &result))
+	require.Equal(t, "01J00000000000000000000020", result["workflow_uid"])
+	for _, query := range []string{
+		"since=2025-11-01T00:00:00Z&until=2026-11-02T00:00:00Z",
+		"since=0000-01-01T00:00:00Z&until=0000-01-02T00:00:00Z",
+		"since=9999-12-30T23:59:59Z&until=9999-12-31T23:59:59Z",
+	} {
+		status, raw = cronHTTP(t, env, http.MethodGet, path+"?"+query, nil)
+		require.Equalf(t, http.StatusOK, status, "%s: %s", query, raw)
+	}
+	for _, query := range []string{
+		"since=2025-01-01T00:00:00Z&until=2026-11-01T00:00:00Z", "bucket=week", "timezone=Local", "timezone=Not%2FAZone",
+		"since=0000-01-01T00:00:00%2B14:00&until=0000-01-02T00:00:00%2B14:00",
+		"since=9999-12-30T00:00:00-14:00&until=9999-12-31T23:59:59-14:00",
+		"until=0000-01-01T00:00:00Z", "since=9999-12-31T23:00:00-14:00&until=9999-12-31T23:30:00-14:00",
+		"since=2d&until=2026-11-01T00:00:00Z",
+	} {
+		status, _ = cronHTTP(t, env, http.MethodGet, path+"?"+query, nil)
+		require.Equal(t, http.StatusBadRequest, status, query)
+	}
+}
+
+// A truncated store read returns the oldest retained instant to the handler.
+type truncatedStatsStore struct{ db.Storage }
+
+func (s truncatedStatsStore) CronRunStats(_ context.Context, _ db.CronRunStatsQuery) ([]cron.RunStatRow, bool, error) {
+	newest := time.Date(2026, 11, 1, 1, 0, 0, 0, time.UTC)
+	rows := make([]cron.RunStatRow, cron.RunStatsScanLimit)
+	for i := range rows {
+		rows[i] = cron.RunStatRow{Status: "failed", CreatedAt: newest.Add(-time.Duration(i) * time.Second)}
+	}
+	return rows, true, nil
+}
+func TestCronRunStatsEffectiveSinceAndTimezone(t *testing.T) {
+	env := testenv.New(t)
+	project := seedProject(t, env, "example-project")
+	ts := startTestServer(t, daemon.ServerConfig{DB: truncatedStatsStore{env.DB}})
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+fmt.Sprintf("/api/v1/projects/%d/cron/runs/stats?since=2026-10-01T00:00:00Z&until=2026-11-02T00:00:00Z&bucket=day&timezone=America%%2FNew_York", project.ID), nil)
+	require.NoError(t, err)
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	raw := readClose(t, resp)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "%s", raw)
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(raw, &result))
+	require.Equal(t, true, result["truncated"])
+	require.Equal(t, float64(cron.RunStatsScanLimit), result["scanned"])
+	require.Equal(t, "2026-10-31T22:13:21Z", result["window"].(map[string]any)["since"])
+	require.Equal(t, "2026-10-31", result["buckets"].([]any)[0].(map[string]any)["date"])
 }

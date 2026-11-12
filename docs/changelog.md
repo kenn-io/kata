@@ -18,6 +18,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Continue an incomplete lexical search by copying the command printed with its results.
 
 - Recover automatically when the web UI's first daemon roster, workspace, or teams read fails briefly. Retry and Refresh teams remain available after persistent failures or refusals.
+- Summarize retained cron runs by status, duration and day with CLI, HTTP and MCP statistics (daemon API 0.47.0). See [cron statistics](reference/cron.md).
+
+- See a job's 30-day run count, success rate, median and p95 duration, and failure streak in its `kata tui` job detail. See [cron statistics](reference/cron.md#run-statistics).
 
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 - Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot confirm the shared choice was saved, setup succeeds and Kata logs the failure; other apps may miss the choice if it wasn't saved. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).

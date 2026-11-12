@@ -1392,10 +1392,16 @@ func requireAPIVersion(ctx context.Context, apiClient *generated.Client, minimum
 		reported = *health.APISchemaVersion
 	}
 	if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v"+minimum) < 0 {
-		return fmt.Errorf("%s; upgrade the daemon", requirement)
+		return apiVersionError{requirement}
 	}
 	return nil
 }
+
+// apiVersionError reports a daemon older than an operation requires, as
+// distinct from a failed version check.
+type apiVersionError struct{ requirement string }
+
+func (e apiVersionError) Error() string { return e.requirement + "; upgrade the daemon" }
 
 // AddCommentReply sends an attributed typed reply with a retry-stable key.
 func (c *Client) AddCommentReply(ctx context.Context, projectID int64, ref, body, actor, target, kind string, force bool, key string) (*MutationResp, error) {

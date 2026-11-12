@@ -67,6 +67,7 @@ type cronState struct {
 	conn, scope     uint64
 	form            *cronForm
 	editSeq         uint64
+	stats           cronStats
 }
 
 // Synchronize after every update and retain visible records during refresh.
@@ -77,14 +78,25 @@ func (m Model) cronSync() (Model, tea.Cmd) {
 		}
 		m.cron = cronState{tab: m.cron.tab, conn: m.connGen, scope: m.scopeGen}
 	}
-	if m.view != viewCron || m.scope.allProjects || m.scope.projectID == 0 || m.cron.out {
+	m = m.cronStatsLeave()
+	if m.view != viewCron || m.scope.allProjects || m.scope.projectID == 0 {
 		return m, nil
+	}
+	if m.cron.out {
+		return m.cronStatsWhileListing()
 	}
 	if m.cron.data != nil && m.cron.data.events == m.cron.events {
-		return m, nil
+		if !m.cronStatsDue() {
+			return m, nil
+		}
+		return m.cronStatsBegin()
 	}
 	m.cron.out = true
-	return m, m.fetchCron()
+	// An open job detail's statistics refresh with the runs, as a separate
+	// read so a slow statistics answer never holds the lists.
+	fetch := m.fetchCron()
+	m, stats := m.cronStatsBegin()
+	return m, tea.Batch(fetch, stats)
 }
 func (m Model) fetchCron() tea.Cmd {
 	reader, id := m.api, m.scope.projectID

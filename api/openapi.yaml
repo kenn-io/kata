@@ -1303,6 +1303,76 @@ components:
       required:
         - run
       type: object
+    CronRunStatsResponseBody:
+      additionalProperties: true
+      properties:
+        buckets:
+          items:
+            $ref: "#/components/schemas/RunStatBucket"
+          type: array
+        by_status:
+          additionalProperties:
+            format: int64
+            type: integer
+          type: object
+        consecutive_failures:
+          format: int64
+          type: integer
+        duration_seconds:
+          $ref: "#/components/schemas/DurationStats"
+        job_uid:
+          type: string
+        last_failed_at:
+          format: date-time
+          type:
+            - string
+            - "null"
+        last_succeeded_at:
+          format: date-time
+          type:
+            - string
+            - "null"
+        project_uid:
+          type: string
+        scanned:
+          format: int64
+          type: integer
+        success_rate:
+          format: double
+          type:
+            - number
+            - "null"
+        truncated:
+          type: boolean
+        window:
+          $ref: "#/components/schemas/CronRunStatsWindow"
+        workflow_uid:
+          type: string
+      required:
+        - project_uid
+        - window
+        - truncated
+        - scanned
+        - by_status
+        - success_rate
+        - duration_seconds
+        - last_succeeded_at
+        - last_failed_at
+        - consecutive_failures
+      type: object
+    CronRunStatsWindow:
+      additionalProperties: true
+      properties:
+        since:
+          format: date-time
+          type: string
+        until:
+          format: date-time
+          type: string
+      required:
+        - since
+        - until
+      type: object
     CronRunsResponseBody:
       additionalProperties: true
       properties:
@@ -1677,6 +1747,33 @@ components:
       required:
         - hooks
       type: object
+    DurationStats:
+      additionalProperties: true
+      properties:
+        count:
+          format: int64
+          type: integer
+        max:
+          format: double
+          type: number
+        median:
+          format: double
+          type: number
+        min:
+          format: double
+          type: number
+        p95:
+          format: double
+          type: number
+      required:
+        - count
+        - min
+        - median
+        - p95
+        - max
+      type:
+        - object
+        - "null"
     EditCommentRequestBody:
       additionalProperties: false
       properties:
@@ -6631,6 +6728,26 @@ components:
         - status
         - import
       type: object
+    RunStatBucket:
+      additionalProperties: true
+      properties:
+        by_status:
+          additionalProperties:
+            format: int64
+            type: integer
+          type: object
+        date:
+          type: string
+        median_duration_seconds:
+          format: double
+          type:
+            - number
+            - "null"
+      required:
+        - date
+        - by_status
+        - median_duration_seconds
+      type: object
     SearchHit:
       additionalProperties: true
       properties:
@@ -7545,7 +7662,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.44.0
+  version: 0.47.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -9178,6 +9295,59 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CronRunsResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/cron/runs/stats:
+    get:
+      operationId: getCronRunStats
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: job_uid
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: workflow_uid
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: since
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: until
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: bucket
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: timezone
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronRunStatsResponseBody"
           description: OK
         default:
           content:

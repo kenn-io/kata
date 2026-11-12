@@ -3,6 +3,8 @@ package mcpserver
 import (
 	"encoding/json"
 	"maps"
+	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -143,4 +145,66 @@ func TestCronRunProjectSelectionAndInvalidEvidence(t *testing.T) {
 		require.True(t, cronCall(t, f.session, "cron_run_observe", args).IsError)
 	}
 	require.Empty(t, cronOK(t, f.session, "cron_runs", map[string]any{})["runs"])
+}
+
+func TestCronRunStats(t *testing.T) {
+	f := newCronFixture(t)
+	result := cronOK(t, f.session, "cron_run_stats", map[string]any{"bucket": "day", "until": "2026-11-01T00:00:00Z"})
+	require.Equal(t, []any{}, result["buckets"])
+	require.Contains(t, result, "success_rate")
+	require.Nil(t, result["success_rate"])
+	require.Contains(t, result, "duration_seconds")
+	require.Nil(t, result["duration_seconds"])
+	relative := cronOK(t, f.session, "cron_run_stats", map[string]any{"since": "2d", "until": "2026-11-01T00:00:00Z"})
+	require.Equal(t, "2026-10-30T00:00:00Z", relative["window"].(map[string]any)["since"])
+	maximum := cronOK(t, f.session, "cron_run_stats", map[string]any{"since": "366d"})
+	window := maximum["window"].(map[string]any)
+	start, err := time.Parse(time.RFC3339Nano, window["since"].(string))
+	require.NoError(t, err)
+	end, err := time.Parse(time.RFC3339Nano, window["until"].(string))
+	require.NoError(t, err)
+	require.Equal(t, 366*24*time.Hour, end.Sub(start))
+	badUID := cronCall(t, f.session, "cron_run_stats", map[string]any{"job_uid": "invalid"})
+	require.True(t, badUID.IsError)
+	require.Contains(t, badUID.Content[0].(*sdkmcp.TextContent).Text, "cron UID must be a full ULID")
+	failure := cronCall(t, f.session, "cron_run_stats", map[string]any{"bucket": "week"})
+	require.True(t, failure.IsError)
+	require.Contains(t, failure.Content[0].(*sdkmcp.TextContent).Text, "invalid bucket")
+	require.NotContains(t, failure.Content[0].(*sdkmcp.TextContent).Text, `"error":`)
+	for _, since := range []string{"213504d", "-213504d"} {
+		require.True(t, cronCall(t, f.session, "cron_run_stats", map[string]any{"since": since, "until": "2026-11-01T00:00:00Z"}).IsError)
+		require.True(t, cronCall(t, f.session, "cron_run_stats", map[string]any{"since": since}).IsError)
+	}
+	require.Equal(t, "2026-11-01T00:00:00Z", result["window"].(map[string]any)["until"])
+	require.True(t, cronCall(t, f.session, "cron_run_stats", map[string]any{"job_uid": "01J00000000000000000000010", "workflow_uid": "01J00000000000000000000020"}).IsError)
+	job := cronTestJob(t, f)
+	args := cronObservation(cronNewUID(t, f.session), job)
+	args["status"] = "succeeded"
+	args["started_at"] = "2026-10-18T12:00:00Z"
+	args["ended_at"] = "2026-10-18T12:01:00Z"
+	cronOK(t, f.session, "cron_run_observe", args)
+	result = cronOK(t, f.session, "cron_run_stats", map[string]any{"job_uid": job["uid"], "bucket": "day"})
+	require.Equal(t, float64(1), result["scanned"])
+	require.Equal(t, float64(1), result["success_rate"])
+	require.Len(t, result["buckets"], 1)
+	require.Equal(t, float64(60), result["duration_seconds"].(map[string]any)["median"])
+	result = cronOK(t, f.session, "cron_run_stats", map[string]any{"job_uid": "01J00000000000000000000010"})
+	require.Equal(t, float64(0), result["scanned"])
+	require.NotContains(t, result, "buckets")
+}
+
+func TestCronRunStatsRequiresAPIVersion(t *testing.T) {
+	var calls atomic.Int32
+	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			writeJSON(w, map[string]any{"api_schema_version": "0.46.0"})
+			return
+		}
+		calls.Add(1)
+		http.NotFound(w, r)
+	})
+	h := toolHandlers{options: Options{Client: client}}
+	_, _, err := h.cronRunStats(t.Context(), nil, CronRunStatsInput{})
+	require.ErrorContains(t, err, "upgrade the daemon")
+	require.Zero(t, calls.Load())
 }

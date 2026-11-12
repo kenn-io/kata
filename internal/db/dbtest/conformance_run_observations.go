@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -15,10 +16,8 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-// Run creation instants are stored at a fixed nanosecond width, so text order
-// is time order. Equal instants tie-break by UID on both the first page and its
-// cursor, and the database refuses a variable-width instant.
-func checkRunHistoryInstants(t *testing.T, store db.Storage) error {
+func runTimestampFixture(t *testing.T, store db.Storage) (db.Project, db.CronJob, []string, []string) {
+	t.Helper()
 	project, err := store.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	definition, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
@@ -36,12 +35,26 @@ func checkRunHistoryInstants(t *testing.T, store db.Storage) error {
 		instant, err := time.Parse(time.RFC3339Nano, timestamp)
 		require.NoError(t, err)
 		fixed := instant.UTC().Format(db.CronRunCreatedAtFormat)
-		if fixed != timestamp {
+		_, err = q.ExecContext(t.Context(), "UPDATE cron_runs SET created_at=$1 WHERE uid=$2", fixed, ids[i])
+		require.NoError(t, err)
+	}
+	return project, job, times, ids
+}
+
+// Run creation instants have fixed nanosecond width and equal instants
+// tie-break by UID on both pages and cursors.
+func checkRunHistoryInstants(t *testing.T, store db.Storage) error {
+	project, _, times, ids := runTimestampFixture(t, store)
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	for i, timestamp := range times {
+		instant, err := time.Parse(time.RFC3339Nano, timestamp)
+		require.NoError(t, err)
+		if instant.UTC().Format(db.CronRunCreatedAtFormat) != timestamp {
 			_, err = q.ExecContext(t.Context(), "UPDATE cron_runs SET created_at=$1 WHERE uid=$2", timestamp, ids[i])
 			require.Error(t, err, "variable-width instant %s must be refused", timestamp)
 		}
-		_, err = q.ExecContext(t.Context(), "UPDATE cron_runs SET created_at=$1 WHERE uid=$2", fixed, ids[i])
-		require.NoError(t, err)
 	}
 	want := []string{ids[6], ids[5], ids[4], ids[3], ids[2], ids[1], ids[0]}
 	for _, size := range []int{1, 2, 3, 100} {
@@ -67,6 +80,70 @@ func checkRunHistoryInstants(t *testing.T, store db.Storage) error {
 		}
 		require.Equal(t, want, got, "page size %d", size)
 	}
+	return nil
+}
+
+func checkCronRunStats(t *testing.T, store db.Storage) error {
+	project, job, _, ids := runTimestampFixture(t, store)
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	var err error
+
+	_, err = q.ExecContext(t.Context(), "UPDATE cron_runs SET status=$1, started_at=$2, ended_at=$3 WHERE uid=$4", "succeeded", "2026-10-06T08:59:00Z", "2026-10-06T09:01:00Z", ids[6])
+	require.NoError(t, err)
+	since, err := time.Parse(time.RFC3339, "2026-10-06T09:00:00Z")
+	require.NoError(t, err)
+	rows, truncated, err := store.CronRunStats(t.Context(), db.CronRunStatsQuery{ProjectID: project.ID, JobUID: strings.ToLower(job.UID), Since: since, Until: since.Add(time.Second)})
+	require.NoError(t, err)
+	require.False(t, truncated)
+	require.Len(t, rows, len(ids))
+	require.Equal(t, "succeeded", rows[0].Status)
+	require.Equal(t, since.Add(100000001*time.Nanosecond), rows[0].CreatedAt)
+	require.Equal(t, since.Add(-time.Minute), *rows[0].StartedAt)
+	require.Equal(t, since.Add(time.Minute), *rows[0].EndedAt)
+	edge, _, err := store.CronRunStats(t.Context(), db.CronRunStatsQuery{ProjectID: project.ID, Since: since, Until: since.Add(100000001 * time.Nanosecond)})
+	require.NoError(t, err)
+	require.Len(t, edge, len(ids)-1)
+	_, _, err = store.CronRunStats(t.Context(), db.CronRunStatsQuery{ProjectID: project.ID, JobUID: job.UID, WorkflowUID: job.UID, Since: since, Until: since.Add(time.Second)})
+	require.Error(t, err)
+	// One more than the scan limit exercises truncation.
+	// Equal timestamps at the scan boundary still require truncation.
+	additional := cron.RunStatsScanLimit + 1 - len(ids)
+	for offset := 0; offset < additional; offset += 100 {
+		var selects []string
+		var args []any
+		for i := offset; i < offset+100 && i < additional; i++ {
+			id, err := uid.New()
+			require.NoError(t, err)
+			args = append(args, id)
+			selects = append(selects, fmt.Sprintf("SELECT $%d,project_id,job_uid,definition_event_uid,actor,status,summary_json,revision,created_at,updated_at FROM cron_runs WHERE uid='%s'", len(args), ids[0]))
+		}
+		_, err = q.ExecContext(t.Context(), `INSERT INTO cron_runs(uid,project_id,job_uid,definition_event_uid,actor,status,summary_json,revision,created_at,updated_at) `+strings.Join(selects, " UNION ALL "), args...)
+		require.NoError(t, err)
+	}
+	rows, truncated, err = store.CronRunStats(t.Context(), db.CronRunStatsQuery{ProjectID: project.ID, Since: since, Until: since.Add(time.Second)})
+	require.NoError(t, err)
+	require.True(t, truncated)
+	require.Len(t, rows, cron.RunStatsScanLimit)
+	require.True(t, rows[len(rows)-1].CreatedAt.Equal(since))
+	other, err := store.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	workflow, _, err := store.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, Name: "Review workflow", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "review", Kind: "command", Command: "git status"}}}})
+	require.NoError(t, err)
+	workflowRunUID, err := uid.New()
+	require.NoError(t, err)
+	workflowRun, err := store.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: project.ID, UID: workflowRunUID, WorkflowUID: &workflow.UID, WorkflowDefinitionEventUID: &workflow.DefinitionEventUID, Actor: "worker", Status: "unknown", Summary: cron.Summary{Version: 1}})
+	require.NoError(t, err)
+	windowStart := workflowRun.Run.CreatedAt.Add(-time.Hour)
+	windowEnd := workflowRun.Run.CreatedAt.Add(time.Hour)
+	statsRows, _, err := store.CronRunStats(t.Context(), db.CronRunStatsQuery{ProjectID: project.ID, WorkflowUID: workflow.UID, Since: windowStart, Until: windowEnd})
+	require.NoError(t, err)
+	require.Len(t, statsRows, 1)
+	otherRows, _, err := store.CronRunStats(t.Context(), db.CronRunStatsQuery{ProjectID: other.ID, WorkflowUID: workflow.UID, Since: windowStart, Until: windowEnd})
+	require.NoError(t, err)
+	require.Empty(t, otherRows)
+
 	return nil
 }
 

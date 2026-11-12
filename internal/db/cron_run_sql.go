@@ -316,3 +316,48 @@ func (v *CronReplayValidator) validateLocalReference(ctx context.Context, projec
 	}
 	return fmt.Errorf("%w: definition event reference does not belong to project", cron.ErrInvalid)
 }
+
+// RunStats scans only statistics evidence, with one extra row to detect truncation.
+func (a CronSQL) RunStats(ctx context.Context, in CronRunStatsQuery) ([]cron.RunStatRow, bool, error) {
+	if in.JobUID != "" && in.WorkflowUID != "" {
+		return nil, false, fmt.Errorf("%w: job and workflow filters are mutually exclusive", cron.ErrInvalid)
+	}
+	if !in.Since.Before(in.Until) {
+		return nil, false, fmt.Errorf("%w: invalid window", cron.ErrInvalid)
+	}
+	var query strings.Builder
+	query.WriteString("SELECT status,created_at,started_at,ended_at FROM cron_runs WHERE project_id=$1 AND created_at >= $2 AND created_at < $3")
+	args := []any{in.ProjectID, in.Since.UTC().Format(CronRunCreatedAtFormat), in.Until.UTC().Format(CronRunCreatedAtFormat)}
+	for _, filter := range []struct{ column, value string }{{"job_uid", in.JobUID}, {"workflow_uid", in.WorkflowUID}} {
+		if filter.value == "" {
+			continue
+		}
+		value := strings.ToUpper(filter.value)
+		if !cronUID(value) {
+			return nil, false, fmt.Errorf("%w: invalid %s", cron.ErrInvalid, filter.column)
+		}
+		args = append(args, value)
+		_, _ = fmt.Fprintf(&query, " AND %s=$%d", filter.column, len(args))
+	}
+	_, _ = fmt.Fprintf(&query, " ORDER BY created_at DESC,uid DESC LIMIT %d", cron.RunStatsScanLimit+1)
+	rows, err := a.Query.QueryContext(ctx, query.String(), args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = rows.Close() }()
+	result := []cron.RunStatRow{}
+	for rows.Next() {
+		var row cron.RunStatRow
+		if err := rows.Scan(&row.Status, cronTime{&row.CreatedAt}, cronOptionalTime{&row.StartedAt}, cronOptionalTime{&row.EndedAt}); err != nil {
+			return nil, false, err
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	if len(result) > cron.RunStatsScanLimit {
+		return result[:cron.RunStatsScanLimit], true, nil
+	}
+	return result, false, nil
+}
