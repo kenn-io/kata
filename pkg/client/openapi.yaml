@@ -9665,6 +9665,10 @@ paths:
           name: Authorization
           schema:
             type: string
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - explode: false
           in: query
           name: stream
@@ -9723,6 +9727,10 @@ paths:
             type: integer
         - in: header
           name: Authorization
+          schema:
+            type: string
+        - in: header
+          name: X-Kata-Event-Features
           schema:
             type: string
       responses:
