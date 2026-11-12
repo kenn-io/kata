@@ -11,7 +11,6 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
-	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -179,7 +178,7 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bo
 		return err
 	}
 	if dryRun {
-		return printMoveDryResponse(ctx, cmd, client, baseURL, pid, rawRef, ref.ProjectName, target.Name, target.ID, moved)
+		return printMoveDryResponse(ctx, cmd, client, baseURL, pid, ref.ProjectName, target.Name, moved)
 	}
 	printErr := printMove(cmd, bs, sourceProject, sourceIssue.ShortID, target.Name)
 	commentErr := postFollowupComment(ctx, client, baseURL, moved.Issue.ProjectID, moved.Issue.ShortID, actor, comment, handle)
@@ -197,10 +196,7 @@ func moveRevisionHeader(dry bool, selected, current int64) *generated.MoveIssueH
 	return &generated.MoveIssueHeaders{IfMatch: &etag}
 }
 
-func printMoveDryResponse(ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, pid int64, rawRef, source, target string, targetID int64, moved moveResponseWire) error {
-	if moved.Issue.ProjectID == targetID {
-		return printSameProjectPreview(cmd, rawRef, moved.Issue.UID)
-	}
+func printMoveDryResponse(ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, pid int64, source, target string, moved moveResponseWire) error {
 	name, err := moveSourceProjectName(ctx, client, baseURL, pid, moved.Issue.ProjectID, source)
 	if err != nil {
 		return err
@@ -214,13 +210,6 @@ func printMoveDryResponse(ctx context.Context, cmd *cobra.Command, client *http.
 		return err
 	}
 	return printMovePreview(cmd, name, moved.Issue.ShortID, target, moved.Issues, refs)
-}
-
-func printSameProjectPreview(cmd *cobra.Command, ref, uid string) error {
-	if !cmd.Flags().Changed("refs-from") && !cmd.Flags().Changed("from-project") {
-		return &cliError{Code: "same_project", Message: "to_project_uid resolves to the issue's current project", Kind: kindValidation, ExitCode: ExitValidation}
-	}
-	return printMoveBatch(cmd, []api.MoveIssuesResult{{Ref: ref, UID: uid, Result: "unchanged", Code: "already_in_target"}}, 1)
 }
 
 func moveSourceProjectName(ctx context.Context, client *http.Client, baseURL string, requestedProjectID, currentProjectID int64, requestedName string) (string, error) {

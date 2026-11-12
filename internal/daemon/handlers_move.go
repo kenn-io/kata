@@ -72,7 +72,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			return nil, err
 		}
 		if tgt.ID == iss.ProjectID {
-			return sameProjectMovePreview(in, iss, rev)
+			return nil, api.NewError(400, "same_project", "to_project_uid resolves to the issue's current project", "", nil)
 		}
 
 		move := db.MoveIssueProjectIn{
@@ -116,19 +116,6 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		}
 		return out, nil
 	}
-}
-
-func sameProjectMovePreview(in *api.MoveIssueRequest, issue db.Issue, rev int64) (*api.MoveIssueResponse, error) {
-	if !in.Body.DryRun || !in.Body.Single {
-		return nil, api.NewError(400, "same_project", "to_project_uid resolves to the issue's current project", "", nil)
-	}
-	if rev != issue.Revision {
-		return nil, moveIssueAPIError(&db.RevisionConflictError{CurrentRevision: issue.Revision})
-	}
-	out := &api.MoveIssueResponse{}
-	out.ETag = fmt.Sprintf(`"rev-%d"`, issue.Revision)
-	out.Body.Issue = issue
-	return out, nil
 }
 
 // moveIssueAPIError maps a refused move. A descendant's refusal keeps its rule's

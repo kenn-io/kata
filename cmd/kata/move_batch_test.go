@@ -1248,9 +1248,14 @@ func TestMoveBatchCLI_PreviewUID(t *testing.T) {
 
 func TestMoveBatchCLI_PreviewAlreadyInTarget(t *testing.T) {
 	env, dir, source, _, issue := setupMoveCLIProjects(t)
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, source.Name+"#"+issue.ShortID+"\n", "--workspace", dir, "move", source.Name, "--refs-from", "-", "--dry", "--json")
+	ref := source.Name + "#" + issue.ShortID
+	_, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, ref+"\n", "--workspace", dir, "move", source.Name, "--refs-from", "-", "--dry", "--json")
+	var cliErr *cliError
+	require.ErrorAs(t, err, &cliErr)
+	require.Equal(t, "same_project", cliErr.Code)
+	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, ref+"\n", "--workspace", dir, "move", source.Name, "--refs-from", "-", "--json")
 	require.NoError(t, err)
 	require.Contains(t, out, issue.UID)
 	require.Contains(t, out, `"result":"unchanged"`)
-	require.Contains(t, out, `"ref":"`+source.Name+"#"+issue.ShortID+`"`)
+	require.Contains(t, out, `"ref":"`+ref+`"`)
 }
