@@ -1580,7 +1580,7 @@ func printFederationEnrollment(
 	if enrollment.Join != nil && enrollment.Join.JoinCommand != "" {
 		bundle.HubURL = enrollment.Join.HubURL
 		bundle.AllowInsecure = enrollment.Join.AllowInsecure
-		bundle.JoinCommand = shellQuote(invokedKataCommand()) + strings.TrimPrefix(enrollment.Join.JoinCommand, "kata")
+		bundle.JoinCommand = joinCommandWithInvokedBinary(enrollment.Join.JoinCommand)
 	} else {
 		bundle.JoinCommand = federationJoinCommand(bundle)
 	}
@@ -1805,6 +1805,10 @@ func federationJoinCommand(bundle federationJoinBundle) string {
 	if command == "" {
 		return ""
 	}
+	return joinCommandWithInvokedBinary(command)
+}
+
+func joinCommandWithInvokedBinary(command string) string {
 	return shellQuote(invokedKataCommand()) + strings.TrimPrefix(command, "kata")
 }
 
