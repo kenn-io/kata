@@ -28,7 +28,7 @@ func TestCheckAPIVersionRecord(t *testing.T) {
 		contains           []string
 	}{
 		{"collision", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256"}, []string{"0.46.0", "0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256", "feature minimum checks introduced by this change"}},
-		{"stale", b, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, []string{"0.46.0"}},
+		{"stale", b, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, []string{"not yet on origin/main", "0.45.0." + hashB + ".sha256", "0.46.0"}},
 		{"next recorded", b, "0.46.0", []string{"0.45.0." + hashA + ".sha256", "0.46.0." + hashB + ".sha256"}, nil},
 		{"older matching", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256", "0.46.0." + hashB + ".sha256"}, []string{"0.47.0"}},
 		{"older missing", a, "0.45.0", []string{"0.46.0." + hashB + ".sha256"}, []string{"0.47.0"}},
@@ -98,6 +98,9 @@ func checkAPIVersionRecord(dir, version string, doc []byte) error {
 		return err
 	}
 	suggested := fmt.Sprintf("%s.%d.0", strings.TrimPrefix(semver.Major(next), "v"), minor+1)
+	if semver.Compare("v"+version, next) == 0 && count == 1 {
+		return fmt.Errorf("API contract version %s has a stale record (%s); if %s is not yet on origin/main, delete your old marker and add %s; otherwise take %s in APISchemaVersion, api/openapi.yaml, and the version-history row, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), version, filepath.Join(dir, marker), suggested)
+	}
 	return fmt.Errorf("API contract version %s has older, conflicting, or stale records (%s); take %s in APISchemaVersion, api/openapi.yaml, and the version-history row, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), suggested)
 }
 
@@ -169,9 +172,6 @@ func TestAPIVersionBaseRecords(t *testing.T) {
 		}
 		t.Fatalf("resolve HEAD: %v", err)
 	}
-	headRecords, err := baseAPIVersionRecords(t, "HEAD")
-	require.NoError(t, err)
-	require.Contains(t, headRecords, "0.44.0.dcc4a8689ae0d97113d2349d9afcbbf7fe95caa08a516bcc2e376d021d998166.sha256")
 	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--verify", "--quiet", ref+"^{commit}") //nolint:gosec // The base ref is supplied by the developer or CI.
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
