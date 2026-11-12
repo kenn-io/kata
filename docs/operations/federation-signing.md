@@ -69,11 +69,13 @@ is optional on the ordinary daemon listeners.
    admitted signature expiry. This gate also applies after a restart. A
    `signing_warming` answer means wait and retry, not check keys or clocks.
    Unsigned requests receive `428` immediately.
-6. Run the native enrollment join command on the spoke with
-   `--hub-url https://daemon.example/federation`, adding
-   `--signing-key-id spoke-key-1 --signing-key-env KATA_SPOKE_SIGNING_KEY`.
-   The same source must exist in the spoke CLI and daemon environments because
-   the CLI fetches metadata before saving the enrollment.
+6. For enrollment in step 1, use the hub's main API as `--hub-url`. On a
+   hub that already requires signing, the printed join command uses `external_url` and includes placeholders
+   for the signing key ID and absolute spoke key file path. Replace both before
+   running it on the spoke, or replace `--signing-key-file` with
+   `--signing-key-env KATA_SPOKE_SIGNING_KEY`. The same source must exist in
+   the spoke CLI and daemon environments because the CLI fetches metadata before
+   saving the enrollment.
 
 When enabling required signing on an existing hub, add a
 `[[federation.signing.key]]` entry for each unsigned spoke enrollment and
