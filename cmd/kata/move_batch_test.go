@@ -44,16 +44,23 @@ func TestParseRefsFrom(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 5001)
 	require.Greater(t, reader.Len(), 1<<20)
-	for _, ending := range []string{"", "\n"} {
+	for _, ending := range []string{"", "\n", "\r\n"} {
 		items, err = parseRefsFrom(strings.NewReader("abc4"+strings.Repeat(" ", (1<<20)-4)+ending), "dst", 5001)
 		require.NoError(t, err)
 		require.Equal(t, []moveBatchItem{{Ref: "abc4", TargetProject: "dst"}}, items)
 	}
-	items, err = parseRefsFrom(strings.NewReader(strings.Repeat("x", (1<<20)+1)+"\nabc4\n"), "dst", 5001)
+	input := strings.Repeat(" ", 4090) + "abc4\n" + "def5" + strings.Repeat(" ", (1<<20)-4) + "\r\nabc4\n"
+	items, err = parseRefsFrom(strings.NewReader(input), "dst", 5001)
 	require.NoError(t, err)
-	require.Len(t, items, 2)
-	require.Equal(t, "line 1: exceeds 1 MiB", items[0].ParseError)
-	require.Equal(t, moveBatchItem{Ref: "abc4", TargetProject: "dst"}, items[1])
+	require.Equal(t, []moveBatchItem{{Ref: "abc4", TargetProject: "dst"}, {Ref: "def5", TargetProject: "dst"}, {Ref: "abc4", TargetProject: "dst"}}, items)
+	for _, input := range []string{strings.Repeat("x", (1<<20)+1) + "\nabc4\n", strings.Repeat("x", (1<<20)+1) + "\r\nabc4\n", strings.Repeat("x", 1<<20) + "\r"} {
+		items, err = parseRefsFrom(strings.NewReader(input), "dst", 5001)
+		require.NoError(t, err)
+		require.Equal(t, "line 1: exceeds 1 MiB", items[0].ParseError)
+		if len(items) > 1 {
+			require.Equal(t, moveBatchItem{Ref: "abc4", TargetProject: "dst"}, items[1])
+		}
+	}
 }
 
 func TestMoveBatchCLI_PreflightFailureReportsAll(t *testing.T) {
