@@ -112,7 +112,8 @@ func TestCronJobStatsLine(t *testing.T) {
 		want string
 	}{
 		{"unsupported daemon", apiVersionError{"run statistics require daemon API 0.47.0 or newer"}, "30d:      needs daemon API 0.47.0 or newer"},
-		{"failed read", errors.New("stats read failed"), "30d:      unavailable: stats read failed"},
+		{"failed read", errors.New("stats read failed"), "30d:      unavailable"},
+		{"transport failure", errors.New("Get http://daemon.example:7777/api/v1/projects/7/cron/runs/stats: connection refused"), "30d:      unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, a := cronStatsModel(t)
@@ -146,7 +147,7 @@ func TestCronJobStatsLine(t *testing.T) {
 		a.statsErr = errors.New("offline")
 		m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 		m = deliverCron(m, cmd)
-		require.Equal(t, "30d:      unavailable: offline", cronStatsLine(t, m))
+		require.Equal(t, "30d:      unavailable", cronStatsLine(t, m))
 		// The service recovers: reopening reads again instead of keeping the notice.
 		a.statsErr = nil
 		m = sendRune(m, 'h')
@@ -180,7 +181,7 @@ func TestCronJobStatsLine(t *testing.T) {
 		a.statsErr = errors.New("offline")
 		m, cmd = updateModel(m, keyRune('r'))
 		m = deliverCron(m, cmd)
-		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      unavailable:"), "a failed refresh replaces the line")
+		require.Equal(t, "30d:      unavailable", cronStatsLine(t, m), "a failed refresh replaces the line")
 	})
 	t.Run("opens during a stalled list read", func(t *testing.T) {
 		m, a := cronStatsModel(t)

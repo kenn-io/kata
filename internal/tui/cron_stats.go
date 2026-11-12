@@ -118,7 +118,7 @@ func cronStatsField(d *cronDoc, s cronStats, uid string) {
 	case errors.As(s.err, &tooOld):
 		value = "needs daemon API " + kataapi.CronRunStatsAPIVersion + " or newer"
 	case s.err != nil:
-		value = "unavailable: " + sanitizeForLine(s.err.Error())
+		value = "unavailable"
 	}
 	d.field(label, value)
 }

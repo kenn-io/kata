@@ -13,12 +13,7 @@ kata カタ [jobs] runs workflows
   Action:   workflow
   Summary flow
   Workflow: Summary flow
-  30d:      unavailable:
-  Get
-  http://daemon.example:77
-  77/api/v1/projects/7/cro
-  n/runs/stats: connection
-  refused
+  30d:      unavailable
 
   Definition
   {
@@ -33,6 +28,11 @@ kata カタ [jobs] runs workflows
     "issue": {
       "kind": "per-run",
       "title": "Summary
+  result"
+    },
+    "kind": "job",
+    "overlap": "forbid",
+    "trigger": {
 
  j/k move  ▕ ↵/l follow
  h/esc back▕ n/e new/edit

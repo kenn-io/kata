@@ -9,7 +9,7 @@ kata カタ [jobs] runs workflows
             2026-05-04 07:00 UTC
   Action:   workflow Summary flow
   Workflow: Summary flow
-  30d:      unavailable: Get http://daemon.example:7777/api/v1/projects/7/cron/runs/stats: connection refused
+  30d:      unavailable
 
   Definition
   {

@@ -21,14 +21,14 @@ kata カタ [jobs] runs workflows
   Workflow:
   Summary flow
   30d:
-  unavailable:
-  Get
-  http://daemo
-  n.example:77
-  77/api/v1/pr
-  ojects/7/cro
-  n/runs/stats
-  : connection
+  unavailable
+
+  Definition
+  {
+    "action":
+  {
+      "kind":
+  "execute",
 
  j/k move
  ↵/l follow
