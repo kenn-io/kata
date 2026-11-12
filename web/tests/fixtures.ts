@@ -56,7 +56,6 @@ export interface KataFixture {
   restart(): Promise<void>
   restartReadonly(): Promise<void>
   restartIdentity(enabled?: boolean): Promise<void>
-  prepareSearch(baseURL: string): Promise<void>
 }
 
 interface RunningFixture {
@@ -101,7 +100,6 @@ async function startProductionFixture(): Promise<RunningFixture> {
     }),
     KATA_AUTH_TOKEN: 'example-local-token',
     KATA_SERVER: '',
-    KATA_BROWSER_EMBEDDINGS_FIXTURE: join(home, 'embedding-fixture'),
     HOME: home,
     USERPROFILE: home,
   }
@@ -182,7 +180,6 @@ listen = "127.0.0.1:${port}"
   })
   const { origin } = local
   let daemon = local.daemon
-  let preparedSearch = false
   run(binary, ['projects', 'create', 'example-project'], workspace, environment)
   run(binary, ['projects', 'create', 'example-inbox'], workspace, environment)
   await writeFile(
@@ -246,10 +243,6 @@ listen = "127.0.0.1:${port}"
       if (!response.ok()) throw new Error(`issue seed failed with status ${response.status()}`)
       return ((await response.json()) as { issue: SeededIssue }).issue
     },
-    async prepareSearch(baseURL) {
-      await writeFile(join(home, 'embedding-fixture'), baseURL, { mode: 0o600 })
-      preparedSearch = true
-    },
     async restart() {
       await stopDaemon(daemon)
       daemon = startDaemon(binary, workspace, environment)
@@ -280,12 +273,8 @@ listen = "127.0.0.1:${port}"
   return {
     fixture,
     async stop() {
-      try {
-        if (preparedSearch) run(binary, ['daemon', 'stop'], workspace, environment)
-      } finally {
-        await Promise.all([stopDaemon(daemon), stopDaemon(remoteDaemon)])
-        await rm(root, { recursive: true, force: true })
-      }
+      await Promise.all([stopDaemon(daemon), stopDaemon(remoteDaemon)])
+      await rm(root, { recursive: true, force: true })
     },
   }
 }

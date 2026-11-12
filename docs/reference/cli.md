@@ -1963,9 +1963,8 @@ setup where the daemon process should stay attached to the terminal.
 environment, using the installed executable invoked by the CLI and retaining
 its startup options, credentials, network, and idle policy. The CLI and daemon
 must see the same process IDs and executable paths. Separate PID or filesystem
-views can prevent daemon discovery or executable handoff. On Windows, restart
-starts a detached replacement, so a supervisor tracking the original process
-loses control of it. The selected executable validates configuration in the
+views can prevent daemon discovery or executable handoff. The selected
+executable validates configuration in the
 daemon's environment before stopping it. Configuration validation errors leave
 the daemon serving; listener binding happens during replacement startup.
 Explicit restart flags override startup options and persist through later

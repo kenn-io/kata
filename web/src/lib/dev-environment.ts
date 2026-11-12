@@ -9,16 +9,8 @@ export interface DevRuntimePaths {
   database: string
 }
 
-export function developmentKataBuildArguments(binary: string, tags?: string): string[] {
-  return [
-    'build',
-    '-trimpath',
-    '-buildvcs=false',
-    '-o',
-    binary,
-    ...(tags ? [`-tags=${tags}`] : []),
-    './cmd/kata',
-  ]
+export function developmentKataBuildArguments(binary: string): string[] {
+  return ['build', '-trimpath', '-buildvcs=false', '-o', binary, './cmd/kata']
 }
 
 export interface BrowserTestRuntime {
@@ -64,7 +56,7 @@ export async function prepareBrowserTestRuntime(
       environment,
     )
     runCommand(
-      ['go', ...developmentKataBuildArguments(binary, 'kata_browser_fixture')],
+      ['go', ...developmentKataBuildArguments(binary)],
       options.repositoryRoot,
       environment,
     )

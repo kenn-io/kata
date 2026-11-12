@@ -1,5 +1,3 @@
-import { createServer } from 'node:http'
-
 import { expect, test } from './fixtures'
 
 test.use({ colorScheme: 'dark' })
@@ -10,50 +8,6 @@ const off = {
   ollama_available: false,
   can_change: true,
 }
-
-test('installs built-in search, restarts, and reconnects', async ({ page, kata }) => {
-  const provider = createServer((request, response) => {
-    const chunks: Buffer[] = []
-    request.on('data', (chunk: Buffer) => chunks.push(chunk))
-    request.on('end', () => {
-      const input = JSON.parse(Buffer.concat(chunks).toString()) as { input: string[] }
-      response.writeHead(200, { 'Content-Type': 'application/json' })
-      response.end(
-        JSON.stringify({
-          data: input.input.map((_, index) => ({ index, embedding: Array(768).fill(0.1) })),
-        }),
-      )
-    })
-  })
-  await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve))
-  try {
-    const address = provider.address()
-    if (!address || typeof address === 'string') throw new Error('provider has no TCP address')
-    const before = await kata.launch(page)
-    await kata.prepareSearch(`http://127.0.0.1:${address.port}/v1`)
-    await page.goto(`${kata.origin}/kata?view=settings`)
-    await page.getByRole('button', { name: 'Turn on' }).click()
-    const button = page.getByRole('button', { name: 'Restart daemon' })
-    await expect(button).toBeVisible()
-    page.once('dialog', (dialog) => dialog.accept())
-    await button.click()
-    await expect
-      .poll(
-        async () => {
-          const value = await page.evaluate(() => sessionStorage.getItem('kata.web.session.v1'))
-          const session = value ? (JSON.parse(value) as { session: string }).session : ''
-          return !!session && session !== before.session
-        },
-        { timeout: 30_000 },
-      )
-      .toBe(true)
-    await expect(page.getByText('On', { exact: true })).toBeVisible({ timeout: 30_000 })
-  } finally {
-    await new Promise<void>((resolve, reject) =>
-      provider.close((error) => (error ? reject(error) : resolve())),
-    )
-  }
-})
 
 test('Settings keeps status colors, spacing, and title alignment consistent', async ({
   page,

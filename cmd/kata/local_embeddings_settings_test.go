@@ -59,10 +59,10 @@ func TestLocalEmbeddingsRestart(t *testing.T) {
 		wantErr              error
 		canRestart           bool
 	}{
-		{name: "repeated request", initial: "restart", final: "restarting", callback: true, attempts: 2, calls: 1},
+		{name: "repeated request", initial: "restart", final: "restart", callback: true, attempts: 2, calls: 1},
 		{name: "missing callback", initial: "restart", final: "restart", attempts: 1, wantErr: daemon.ErrLocalEmbeddingsBusy},
 		{name: "start failure", initial: "restart", final: "restart", callback: true, startErr: startErr, attempts: 1, calls: 1, wantErr: startErr, canRestart: true},
-		{name: "helper exit", initial: "restarting", final: "restart", callback: true, exitErr: exitErr, canRestart: true},
+		{name: "helper exit", initial: "restart", final: "restart", callback: true, attempts: 1, calls: 1, exitErr: exitErr, canRestart: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
@@ -106,7 +106,8 @@ func TestLocalEmbeddingsRestart(t *testing.T) {
 		go func() { status, _ := setup.Status(t.Context()); statusDone <- status }()
 		select {
 		case status := <-statusDone:
-			require.Equal(t, "restarting", status.Job.State)
+			require.Equal(t, "restart", status.Job.State)
+			require.False(t, status.CanRestart)
 		case <-time.After(time.Second):
 			t.Fatal("status blocked while restart was starting")
 		}

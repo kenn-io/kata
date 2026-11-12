@@ -94,7 +94,6 @@ describe('prepareBrowserTestRuntime', () => {
       '-buildvcs=false',
       '-o',
       runtime.binary,
-      '-tags=kata_browser_fixture',
       './cmd/kata',
     ])
     expect(commands[0]?.env.KATA_HOME).toBeTruthy()

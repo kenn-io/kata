@@ -510,6 +510,7 @@ type localEmbeddingsSetup struct {
 	restart     func() error
 	mu          sync.Mutex
 	job         *api.LocalEmbeddingsJob
+	restarting  bool
 }
 
 func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsStatus, error) {
@@ -537,7 +538,7 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 		job := *s.job
 		status.Job = &job
 	}
-	status.CanRestart = s.restart != nil && s.job != nil && s.job.State == "restart"
+	status.CanRestart = s.restart != nil && s.job != nil && s.job.State == "restart" && !s.restarting
 	s.mu.Unlock()
 	status.CanChange = status.Provider == "none" && (status.Job == nil || status.Job.State == "failed")
 	return status, nil
@@ -545,7 +546,7 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 
 func (s *localEmbeddingsSetup) Restart(_ context.Context) error {
 	s.mu.Lock()
-	if s.job != nil && s.job.State == "restarting" {
+	if s.restarting {
 		s.mu.Unlock()
 		return nil
 	}
@@ -553,11 +554,11 @@ func (s *localEmbeddingsSetup) Restart(_ context.Context) error {
 		s.mu.Unlock()
 		return daemon.ErrLocalEmbeddingsBusy
 	}
-	s.job.State, s.job.Error = "restarting", ""
+	s.restarting, s.job.Error = true, ""
 	s.mu.Unlock()
 	if err := s.restart(); err != nil {
 		s.mu.Lock()
-		s.job.State, s.job.Error = "restart", err.Error()
+		s.restarting, s.job.Error = false, err.Error()
 		s.mu.Unlock()
 		return err
 	}
@@ -570,8 +571,8 @@ func (s *localEmbeddingsSetup) restartExited(err error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.job != nil && s.job.State == "restarting" {
-		s.job.State, s.job.Error = "restart", err.Error()
+	if s.job != nil && s.restarting {
+		s.restarting, s.job.Error = false, err.Error()
 	}
 }
 

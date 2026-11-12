@@ -57,34 +57,25 @@
   let page: AbortController | undefined
   // Fences reads across setup requests and settled restart responses.
   let posts = 0
-  let previousRestartError: string | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
 
   let job = $derived(status?.job)
-  let restarting = $derived(job?.state === 'restart' || job?.state === 'restarting')
+  let restarting = $derived(job?.state === 'restart')
   let base = $derived(status ? rowState(status) : undefined)
   let countFree = $derived(base?.kind === 'indexing' && !base.total)
   let turning = $derived(restarting || countFree)
   let row = $derived(turning ? turningOn : base)
   let count = $derived(row?.kind === 'indexing' ? row.total : 0)
   let restartLabels = $derived({
-    off:
-      restartPending && requestError
-        ? 'Reconnecting...'
-        : restartPending || job?.state === 'restarting'
-          ? 'Restarting...'
-          : 'Turning on',
+    off: restartPending ? 'Restarting...' : 'Turning on',
     turnOn: 'Restart daemon',
-    downloaded:
-      job?.state === 'restarting' && (remoteHost || !canAdministerDaemon)
-        ? ''
-        : remoteHost
-          ? `Restart the daemon on ${remoteHost} to finish.`
-          : (status?.can_restart || job?.state === 'restarting') && canAdministerDaemon
-            ? originStable
-              ? ''
-              : reopenGuidance
-            : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
+    downloaded: remoteHost
+      ? `Restart the daemon on ${remoteHost} to finish.`
+      : (status?.can_restart && canAdministerDaemon) || restartPending
+        ? originStable
+          ? ''
+          : reopenGuidance
+        : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
   })
   let failure = $derived(
     requestError ??
@@ -145,78 +136,45 @@
   // Polling runs only while something is under way.
   function active(current: LocalEmbeddingsStatus | undefined): boolean {
     const state = current?.job?.state
-    return (
-      state === 'downloading' ||
-      state === 'restart' ||
-      state === 'restarting' ||
-      !!current?.indexing
-    )
+    return state === 'downloading' || state === 'restart' || !!current?.indexing
   }
 
   // Adopts every successful read and keeps the last one through failed reads.
   async function refresh(): Promise<void> {
     clearTimeout(timer)
-    if (!page || page.signal.aborted || (posting && !restartPending)) return
+    if (!page || page.signal.aborted || posting) return
     const signal = page.signal
     const post = posts
     let next: LocalEmbeddingsStatus | undefined
     try {
-      const remaining = restartDeadline - Date.now()
-      const readSignal = restartPending
-        ? AbortSignal.any([
-            signal,
-            AbortSignal.timeout(remaining > 0 ? Math.min(pollMs * 5, remaining) : pollMs * 5),
-          ])
-        : signal
-      const response = await getLocalEmbeddings({ signal: readSignal })
+      const response = await getLocalEmbeddings({ signal })
       if (response.status === 200) next = response.data
     } catch {
-      // The next poll retries while setup is under way.
+      // Keep polling while setup is under way.
     }
     if (signal.aborted || post !== posts) return
     if (next) {
-      if (next.job?.state === 'restarting') previousRestartError = undefined
-      const previousError =
-        posting && !!previousRestartError && next.job?.error === previousRestartError
-      if (next.job?.state === 'restarting' && (!restartPending || remoteHost))
-        restartDeadline = Date.now() + restartWaitMs
       if (
         next.job?.error ||
-        (remoteHost && next.job?.state === 'restarting') ||
         next.job?.state !== status?.job?.state ||
         next.provider !== status?.provider ||
         next.indexing
       )
         requestError = undefined
       status = next
-      if (
-        restartPending &&
-        ((next.job?.error && !previousError) ||
-          (next.job?.state !== 'restart' && next.job?.state !== 'restarting'))
-      )
-        restartDeadline = 0
+      if (restartPending && (next.job?.error || next.job?.state !== 'restart')) restartDeadline = 0
     }
-    if (restartPending && Date.now() >= restartDeadline) {
-      if (remoteHost) {
-        requestError = `Couldn't reconnect. Check the daemon on ${remoteHost}.`
-      } else if (next?.job?.state === 'restart') {
-        restartDeadline = 0
-        requestError = "Couldn't confirm restart. Try again or run kata daemon restart."
-      } else {
-        requestError = originStable ? `Couldn't reconnect. ${recoveryGuidance}` : recoveryGuidance
-      }
-    }
-    if (posting && !restartPending) {
-      posting = false
-      posts++
-    }
+    if (restartPending && Date.now() >= restartDeadline)
+      requestError = originStable
+        ? `Couldn't reconnect. ${recoveryGuidance}`
+        : 'Run kata daemon status.'
     loading = false
     poll()
   }
 
   function poll(): void {
     clearTimeout(timer)
-    if (page?.signal.aborted || (!restartPending && (posting || !active(status)))) return
+    if (page?.signal.aborted || posting || (!restartPending && !active(status))) return
     timer = setTimeout(() => void refresh(), pollMs)
   }
 
@@ -230,31 +188,22 @@
     )
       return
     const signal = page.signal
-    previousRestartError = status?.job?.error
     posting = true
     restartDeadline = Date.now() + restartWaitMs
     requestError = undefined
-    const post = ++posts
-    poll()
+    posts++
+    clearTimeout(timer)
     try {
-      const postSignal = AbortSignal.any([signal, AbortSignal.timeout(restartWaitMs)])
-      const response = await postFetch(getRestartLocalEmbeddingsUrl(), {
-        method: 'POST',
-        signal: postSignal,
-      })
-      if (post === posts && !response.ok) {
+      const response = await postFetch(getRestartLocalEmbeddingsUrl(), { method: 'POST', signal })
+      if (!response.ok) {
         restartDeadline = 0
         requestError = "Couldn't restart the daemon. Try again or run kata daemon restart."
       }
     } catch {
-      if (post === posts && !signal.aborted && !originStable && restartPending)
-        requestError = `Couldn't confirm restart. ${recoveryGuidance}`
+      // A lost response can mean the daemon is restarting.
     } finally {
-      if (post === posts) {
-        posting = false
-        posts++
-        if (!signal.aborted) poll()
-      }
+      posting = false
+      if (!signal.aborted) poll()
     }
   }
 
