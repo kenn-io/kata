@@ -459,7 +459,7 @@ func TestProbeUsesSlotsAndLookupDeadline(t *testing.T) {
 			<-r.Context().Done()
 			return nil, r.Context().Err()
 		})
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			service.slots <- struct{}{}
 		}
 		done := make(chan string, 1)
@@ -471,7 +471,7 @@ func TestProbeUsesSlotsAndLookupDeadline(t *testing.T) {
 		require.Equal(t, "unreachable", <-done)
 		require.Equal(t, 2*time.Second, time.Since(start))
 		require.EqualValues(t, 1, calls.Load())
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			<-service.slots
 		}
 	})
@@ -481,7 +481,7 @@ func TestProbeDeadlineIncludesSlotQueue(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		service, err := NewService(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
 		require.NoError(t, err)
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			service.slots <- struct{}{}
 		}
 		start := time.Now()

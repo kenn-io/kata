@@ -89,14 +89,14 @@ func TestAgentsViewDaemonStartupAndReloadLogs(t *testing.T) {
 				data, _ := os.ReadFile(logfile) //nolint:gosec // logfile is inside the test temporary home
 				return string(data)
 			}
-			require.Eventually(t, func() bool {
+			require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: external daemon readiness cannot run in a synctest bubble
 				if !strings.Contains(readLog(), tc.startup) {
 					return false
 				}
 				status := exec.CommandContext(t.Context(), binary, "daemon", "status") //nolint:gosec // isolated test-built CLI
 				status.Env = env
 				return status.Run() == nil
-			}, 20*time.Second, 50*time.Millisecond) //nolint:kennlint // sleeptest: external daemon readiness cannot run in a synctest bubble
+			}, 20*time.Second, 50*time.Millisecond)
 			if tc.name == "off" {
 				return
 			}
@@ -106,9 +106,9 @@ func TestAgentsViewDaemonStartupAndReloadLogs(t *testing.T) {
 			reload.Env = env
 			output, err := reload.CombinedOutput()
 			require.NoError(t, err, "%s", output)
-			require.Eventually(t, func() bool {
+			require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: external daemon reload cannot run in a synctest bubble
 				return strings.Contains(readLog(), "AgentsView target or enabled state changed; restart required")
-			}, 10*time.Second, 50*time.Millisecond) //nolint:kennlint // sleeptest: external daemon reload cannot run in a synctest bubble
+			}, 10*time.Second, 50*time.Millisecond)
 		})
 	}
 }
