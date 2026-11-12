@@ -588,6 +588,8 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 	if err := normalizeDaemonCatalog(&cfg); err != nil {
 		return nil, err
 	}
+	// SafeDiagnosticError shows these errors in kata doctor, so errors added to
+	// normalizeFederationSigning must not contain credentials, file contents, or parser output.
 	if err := normalizeFederationSigning(&cfg, filepath.Dir(path)); err != nil {
 		return nil, &SafeDiagnosticError{err: err}
 	}
