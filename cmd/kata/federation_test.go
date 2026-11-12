@@ -259,8 +259,12 @@ func TestFederationStatusProjectVersionRouting(t *testing.T) {
 			require.Error(t, err)
 			var ce *cliError
 			require.ErrorAs(t, err, &ce)
-			assert.Equal(t, tc.status, ce.HTTPStatus)
-			assert.NotEqual(t, "daemon_api_too_old", ce.Code)
+			if tc.global {
+				assert.Equal(t, "daemon_api_too_old", ce.Code)
+				assert.Contains(t, ce.Message, "upgrade the daemon")
+			} else {
+				assert.Equal(t, tc.status, ce.HTTPStatus)
+			}
 			assert.Equal(t, !tc.global, lookup.Load() == 1)
 			assert.Equal(t, tc.global, global.Load() == 1)
 		})

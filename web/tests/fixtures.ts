@@ -59,7 +59,12 @@ interface KataFixture {
   restartIdentity(enabled?: boolean): Promise<void>
   prepareSyncDiagnostic(): Promise<void>
   recordSyncDiagnosticError(): void
-  runSyncDiagnostic(shell: 'bash' | 'pwsh', command: string, remote: boolean): string
+  runSyncDiagnostic(
+    shell: 'bash' | 'pwsh',
+    command: string,
+    remote: boolean,
+    legacy?: boolean,
+  ): string
 }
 
 interface RunningFixture {
@@ -194,7 +199,7 @@ listen = "127.0.0.1:${port}"
     projectID: project.id,
     projectUID: project.uid,
     async prepareSyncDiagnostic() {
-      const name = "spoke project’s'"
+      const name = `spoke \\"project"’s'\\`
       run(binary, ['projects', 'rename', 'example-project', name], workspace, environment)
       run(binary, ['projects', 'create', name], remoteWorkspace, remoteEnvironment)
       run(binary, ['federation', 'enable', name], remoteWorkspace, remoteEnvironment)
@@ -211,23 +216,30 @@ listen = "127.0.0.1:${port}"
             .prepare(
               `UPDATE federation_bindings SET role='spoke', hub_url='http://127.0.0.1:9', hub_project_id=42, bound_actor='example-owner' WHERE project_id=(SELECT id FROM projects WHERE name=?)`,
             )
-            .run("spoke project’s'")
+            .run(`spoke \\"project"’s'\\`)
           database
             .prepare(
               `INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
             SELECT id, '2026-10-01T12:00:00Z', ? FROM projects WHERE name = ?
             ON CONFLICT(project_id) DO UPDATE SET last_error_at=excluded.last_error_at, last_error=excluded.last_error`,
             )
-            .run(message, "spoke project’s'")
+            .run(message, `spoke \\"project"’s'\\`)
         } finally {
           database.close()
         }
       }
     },
-    runSyncDiagnostic(shell, command, remote) {
+    runSyncDiagnostic(shell, command, remote, legacy = false) {
       const result = spawnSync(
         shell,
-        shell === 'bash' ? ['-c', command] : ['-NoProfile', '-NonInteractive', '-Command', command],
+        shell === 'bash'
+          ? ['-c', command]
+          : [
+              '-NoProfile',
+              '-NonInteractive',
+              '-Command',
+              legacy ? `$PSNativeCommandArgumentPassing='Legacy'; ${command}` : command,
+            ],
         {
           cwd: workspace,
           env: {

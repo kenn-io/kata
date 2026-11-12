@@ -1382,6 +1382,9 @@ func federationStatusCmd() *cobra.Command {
 				return err
 			}
 			if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+				if versionErr != nil && (callResp.StatusCode == http.StatusForbidden || callResp.StatusCode == http.StatusNotFound) {
+					return versionErr
+				}
 				return err
 			}
 			if flags.Project != "" {

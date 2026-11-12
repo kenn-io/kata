@@ -82,6 +82,11 @@ test('local project readers see native sync status with bounded embedding summar
       const command = await page.evaluate(() => navigator.clipboard.readText())
       expect(kata.runSyncDiagnostic(shell, command, false)).toContain('example sync failure')
       expect(kata.runSyncDiagnostic(shell, command, true)).toContain('remote sync failure')
+      if (shell === 'pwsh') {
+        expect(kata.runSyncDiagnostic(shell, command, false, true)).toContain(
+          'example sync failure',
+        )
+      }
     })
   }
   for (const width of [1280, 390]) {
