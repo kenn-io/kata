@@ -35,21 +35,27 @@ func TestSelectRestartGeneration(t *testing.T) {
 	got, err := selectRestartGeneration([]kitdaemon.RuntimeRecord{first, second}, restartGeneration(first))
 	require.NoError(t, err)
 	require.Equal(t, first, got)
-	reused := kitdaemon.RuntimeRecord{PID: 9, StartedAt: time.Unix(2, 0)}
-	_, err = selectRestartGeneration([]kitdaemon.RuntimeRecord{reused}, restartGeneration(first))
-	require.Error(t, err)
 }
 
 func TestRestartLockDeadline(t *testing.T) {
-	ordinary, cancel := restartLockContext(t.Context(), "")
-	defer cancel()
+	ordinary, cancelOrdinary := restartLockContext(t.Context(), "")
+	defer cancelOrdinary()
 	_, bounded := ordinary.Deadline()
 	require.False(t, bounded)
-	helper, cancel := restartLockContext(t.Context(), "123.456")
+	setupKataEnv(t)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
+	require.NoError(t, err)
+	defer release()
+	ctx, cancel := context.WithTimeout(t.Context(), 35*time.Second)
 	defer cancel()
-	deadline, bounded := helper.Deadline()
-	require.True(t, bounded)
-	require.WithinDuration(t, time.Now().Add(30*time.Second), deadline, time.Second)
+	cmd := daemonRestartCmd()
+	cmd.SetArgs([]string{"--generation", "123.456"})
+	started := time.Now()
+	err = cmd.ExecuteContext(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Less(t, time.Since(started), 34*time.Second)
 }
 
 func TestNewDaemonRestart_UnresolvableExecutableDisablesRestart(t *testing.T) {

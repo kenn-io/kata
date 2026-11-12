@@ -209,9 +209,9 @@ func TestDaemonLifecycle(t *testing.T) {
 		code, _, err := httpDoJSON(t.Context(), httpClient, http.MethodPost, baseURL+"/api/v1/embeddings/local", nil)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusAccepted, code)
-		var status api.LocalEmbeddingsStatus
 		require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: observes the setup worker
 			_, body, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/embeddings/local", nil)
+			var status api.LocalEmbeddingsStatus
 			return err == nil && json.Unmarshal(body, &status) == nil && status.Job != nil && status.Job.State == "restart"
 		}, 10*time.Second, 20*time.Millisecond)
 		require.NoError(t, os.WriteFile(path, []byte("[invalid"), 0o600))
@@ -220,6 +220,7 @@ func TestDaemonLifecycle(t *testing.T) {
 		require.Equal(t, http.StatusAccepted, code)
 		require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: observes the detached helper exit
 			_, body, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/embeddings/local", nil)
+			var status api.LocalEmbeddingsStatus
 			return err == nil && json.Unmarshal(body, &status) == nil && status.Job != nil && status.Job.State == "restart" && status.Job.Error != "" && status.CanRestart
 		}, 10*time.Second, 20*time.Millisecond)
 	})

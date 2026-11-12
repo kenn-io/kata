@@ -96,27 +96,6 @@ describe('SearchSettings', () => {
     expect(screen.getByText('On', { exact: true })).not.toBeNull()
   })
 
-  test('permits retry when the request never reaches the daemon', async () => {
-    vi.useFakeTimers()
-    const waiting = status({
-      can_change: false,
-      can_restart: true,
-      job: { state: 'restart', downloaded: 1, total: 1 },
-    })
-    setGeneratedFetch(vi.fn(async () => Response.json(waiting)))
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => true),
-    )
-    const postFetch = vi.fn<typeof fetch>().mockRejectedValue(new TypeError('disconnected'))
-    renderSettings({ postFetch, originStable: true })
-    await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
-    await vi.advanceTimersByTimeAsync(2000)
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
-    expect(postFetch).toHaveBeenCalledTimes(2)
-  })
-
   test.each([
     ['POST', true, "Couldn't reconnect. Run kata daemon status, then reopen kata ui."],
     ['GET', false, 'Run kata daemon status.'],
@@ -158,7 +137,7 @@ describe('SearchSettings', () => {
     expect(screen.getByRole('alert').textContent).toBe(message)
     await vi.advanceTimersByTimeAsync(2000)
     expect(screen.getByText('On', { exact: true })).not.toBeNull()
-    resolveLate(new Response(null, { status: 500 }))
+    resolveLate(hung === 'GET' ? Response.json(waiting) : new Response(null, { status: 500 }))
     await settle()
     expect(screen.queryByRole('alert')).toBeNull()
   })
@@ -187,7 +166,7 @@ describe('SearchSettings', () => {
     expect(screen.getByRole('button', { name: 'Restart daemon' })).not.toBeNull()
   })
 
-  test('reports a helper failure and permits retry', async () => {
+  test.each(['disconnected', 'helper failure'])('permits retry after %s', async (failure) => {
     vi.useFakeTimers()
     const waiting = status({
       can_change: false,
@@ -199,19 +178,30 @@ describe('SearchSettings', () => {
         .fn<typeof fetch>()
         .mockResolvedValueOnce(Response.json(waiting))
         .mockResolvedValue(
-          Response.json({ ...waiting, job: { ...waiting.job, error: 'Restart failed' } }),
+          Response.json(
+            failure === 'helper failure'
+              ? { ...waiting, job: { ...waiting.job, error: 'Restart failed' } }
+              : waiting,
+          ),
         ),
     )
     vi.stubGlobal(
       'confirm',
       vi.fn(() => true),
     )
-    renderSettings({ postFetch: vi.fn(async () => new Response(null, { status: 202 })) })
+    const postFetch =
+      failure === 'disconnected'
+        ? vi.fn<typeof fetch>().mockRejectedValue(new TypeError('disconnected'))
+        : vi.fn<typeof fetch>(async () => new Response(null, { status: 202 }))
+    renderSettings({ postFetch, originStable: true })
     await settle()
     await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
     await vi.advanceTimersByTimeAsync(2000)
-    expect(screen.getByRole('alert').textContent).toContain('Restart failed')
-    expect(screen.getByRole('button', { name: 'Restart daemon' })).not.toBeNull()
+    if (failure === 'helper failure') {
+      expect(screen.getByRole('alert').textContent).toContain('Restart failed')
+    }
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    expect(postFetch).toHaveBeenCalledTimes(2)
   })
 
   test.each([

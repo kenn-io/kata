@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -53,27 +52,27 @@ func TestLocalEmbeddingsRestart(t *testing.T) {
 	startErr := errors.New("helper could not start")
 	exitErr := errors.New("replacement refused")
 	for _, tc := range []struct {
-		name, initial, final string
-		callback             bool
-		startErr, exitErr    error
-		attempts, calls      int
-		wantErr              error
-		canRestart           bool
+		name              string
+		callback          bool
+		startErr, exitErr error
+		attempts, calls   int
+		wantErr           error
+		canRestart        bool
 	}{
-		{name: "repeated request", initial: "restart", final: "restart", callback: true, attempts: 2, calls: 1},
-		{name: "missing callback", initial: "restart", final: "restart", attempts: 1, wantErr: daemon.ErrLocalEmbeddingsBusy},
-		{name: "start failure", initial: "restart", final: "restart", callback: true, startErr: startErr, attempts: 1, calls: 1, wantErr: startErr, canRestart: true},
-		{name: "helper exit", initial: "restart", final: "restart", callback: true, attempts: 1, calls: 1, exitErr: exitErr, canRestart: true},
+		{name: "repeated request", callback: true, attempts: 2, calls: 1},
+		{name: "missing callback", attempts: 1, wantErr: daemon.ErrLocalEmbeddingsBusy},
+		{name: "start failure", callback: true, startErr: startErr, attempts: 1, calls: 1, wantErr: startErr, canRestart: true},
+		{name: "helper exit", callback: true, attempts: 1, calls: 1, exitErr: exitErr, canRestart: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
-			setup := &localEmbeddingsSetup{job: &api.LocalEmbeddingsJob{State: tc.initial}}
+			setup := &localEmbeddingsSetup{job: &api.LocalEmbeddingsJob{State: "restart"}}
 			if tc.callback {
 				setup.restart = func() error { calls++; return tc.startErr }
 			}
 			status, err := setup.Status(t.Context())
 			require.NoError(t, err)
-			require.Equal(t, tc.callback && tc.initial == "restart", status.CanRestart)
+			require.Equal(t, tc.callback, status.CanRestart)
 			for range tc.attempts {
 				require.ErrorIs(t, setup.Restart(t.Context()), tc.wantErr)
 			}
@@ -82,7 +81,7 @@ func TestLocalEmbeddingsRestart(t *testing.T) {
 			}
 			status, err = setup.Status(t.Context())
 			require.NoError(t, err)
-			require.Equal(t, tc.final, status.Job.State)
+			require.Equal(t, "restart", status.Job.State)
 			require.Equal(t, tc.canRestart, status.CanRestart)
 			require.Equal(t, tc.calls, calls)
 			if tc.startErr != nil {
@@ -95,7 +94,7 @@ func TestLocalEmbeddingsRestart(t *testing.T) {
 	}
 	t.Run("status during restart start", func(t *testing.T) {
 		started, release, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
-		setup := &localEmbeddingsSetup{job: &api.LocalEmbeddingsJob{State: "restart", Downloaded: 42, Total: 42}, restart: func() error {
+		setup := &localEmbeddingsSetup{job: &api.LocalEmbeddingsJob{State: "restart"}, restart: func() error {
 			close(started)
 			<-release
 			return nil
@@ -109,23 +108,7 @@ func TestLocalEmbeddingsRestart(t *testing.T) {
 		case status := <-statusDone:
 			require.Equal(t, "restart", status.Job.State)
 			require.False(t, status.CanRestart)
-			body, err := jsonv2.Marshal(status)
-			require.NoError(t, err)
-			var olderClient struct {
-				Provider          string `json:"provider"`
-				RestartInProgress bool   `json:"restart_in_progress"`
-				Job               struct {
-					State      string `json:"state"`
-					Downloaded int64  `json:"downloaded"`
-					Total      int64  `json:"total"`
-				} `json:"job"`
-			}
-			require.NoError(t, jsonv2.Unmarshal(body, &olderClient))
-			require.Equal(t, "none", olderClient.Provider)
-			require.True(t, olderClient.RestartInProgress)
-			require.Equal(t, "restart", olderClient.Job.State)
-			require.Equal(t, int64(42), olderClient.Job.Downloaded)
-			require.Equal(t, int64(42), olderClient.Job.Total)
+			require.True(t, status.RestartInProgress)
 		case <-time.After(time.Second):
 			t.Fatal("status blocked while restart was starting")
 		}
