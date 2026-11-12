@@ -65,7 +65,7 @@ func newCronUsageCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		response, err := usageClient.WithResponseLimit(2<<20).GetCronRunUsageWithResponse(daemon.ctx, &generated.GetCronRunUsageRequestOptions{
+		response, err := usageClient.GetCronRunUsageWithResponse(daemon.ctx, &generated.GetCronRunUsageRequestOptions{
 			PathParams: &generated.GetCronRunUsagePath{ProjectID: project.ID, RunUID: id},
 			Query:      &generated.GetCronRunUsageQuery{Refresh: &refresh},
 		})
@@ -84,6 +84,14 @@ func newCronUsageCmd() *cobra.Command {
 		}
 		if flags.Quiet {
 			return nil
+		}
+		if currentOutputMode() == outputAgent {
+			if err := validateCronUsage(*response.JSON200); err != nil {
+				return err
+			}
+			if err := writeAgentOKLine(cmd.OutOrStdout(), "cron-run-usage", agentRowField("run_uid", response.JSON200.RunUID), agentRowField("state", string(response.JSON200.State))); err != nil {
+				return err
+			}
 		}
 		return writeCronUsage(cmd.OutOrStdout(), *response.JSON200)
 	}
@@ -105,18 +113,21 @@ func usageAmount(value int64, estimated bool) string {
 	return fmt.Sprintf("%s$%d.%02d", prefix, cents/100, cents%100)
 }
 
-func writeCronUsage(out io.Writer, usage generated.RunUsage) error {
-	switch usage.State {
-	case "no_sessions", "unknown", "complete", "partial":
-	default:
+func validateCronUsage(usage generated.RunUsage) error {
+	if err := usage.State.Validate(); err != nil {
 		return errors.New("unsupported cron usage state")
 	}
 	for _, session := range usage.Sessions {
-		switch session.State {
-		case "priced", "unpriced", "no_usage", "not_found", "ambiguous", "unauthorized", "unavailable":
-		default:
+		if err := session.State.Validate(); err != nil {
 			return errors.New("unsupported cron session usage state")
 		}
+	}
+	return nil
+}
+
+func writeCronUsage(out io.Writer, usage generated.RunUsage) error {
+	if err := validateCronUsage(usage); err != nil {
+		return err
 	}
 	total := "no sessions"
 	switch usage.State {

@@ -54,7 +54,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, cronRunAPIError(ctx, cfg, err, in.ProjectID, in.RunUID)
 		}
-		usage, err := cfg.AgentsView.Usage(ctx, in.RunUID, run.Summary, in.Refresh)
+		usage, err := cfg.AgentsView.Usage(ctx, run.UID, run.Summary, in.Refresh)
 		if errors.Is(err, agentsview.ErrTotalOverflow) {
 			return nil, api.NewError(502, "usage_total_overflow", "usage total cannot be represented", "", nil)
 		}

@@ -47,9 +47,17 @@ func (c AgentsViewConfig) Resolve(ctx context.Context, trustPrivate bool) (Resol
 	if err != nil {
 		return ResolvedAgentsView{}, errors.New("[agentsview] invalid browser URL")
 	}
-	token, source, err := ResolveSecret("", c.TokenFile, c.TokenEnv)
+	token, _, err := ResolveSecret("", c.TokenFile, c.TokenEnv)
+	source := "token_env"
+	if strings.TrimSpace(c.TokenFile) != "" {
+		source = "token_file"
+	}
 	if err != nil {
-		return ResolvedAgentsView{}, fmt.Errorf("[agentsview] %w", err)
+		var credentialErr *CredentialSourceError
+		if errors.As(err, &credentialErr) {
+			return ResolvedAgentsView{}, fmt.Errorf("[agentsview] %w", &CredentialSourceError{Source: source, Reason: credentialErr.Reason})
+		}
+		return ResolvedAgentsView{}, fmt.Errorf("[agentsview] %w", &CredentialSourceError{Source: source, Reason: "cannot resolve credential"})
 	}
 	if !httpguts.ValidHeaderFieldValue(token) {
 		return ResolvedAgentsView{}, fmt.Errorf("[agentsview] %w", &CredentialSourceError{Source: source, Reason: "credential contains invalid HTTP header bytes"})
