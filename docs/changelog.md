@@ -157,6 +157,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   `signature_invalid`, so spoke operators retry instead of checking keys and
   clocks. See [federation request signing](operations/federation-signing.md).
 
+- Enroll a spoke on a hub that requires signing and get a join command with the
+  hub's `external_url` and signing key ID and file placeholders. See
+  [federation signing](operations/federation-signing.md).
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 - Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot confirm the shared choice was saved, setup succeeds and Kata logs the failure; other apps may miss the choice if it wasn't saved. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 
