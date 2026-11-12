@@ -487,7 +487,7 @@ func TestProbeDeadlineIncludesSlotQueue(t *testing.T) {
 		start := time.Now()
 		require.Equal(t, "unreachable", service.Probe(t.Context()))
 		require.Equal(t, 2*time.Second, time.Since(start))
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			<-service.slots
 		}
 	})
