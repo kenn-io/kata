@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"go.kenn.io/kata/internal/testfix"
@@ -39,6 +43,10 @@ func TestMain(m *testing.M) {
 			}
 		}
 	}
+	if err := useSelectedNode(); err != nil {
+		fmt.Fprintf(os.Stderr, "select test Node executable: %v\n", err)
+		os.Exit(1)
+	}
 	home, err := os.MkdirTemp("", "kata-test-codex-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create test Codex home: %v\n", err)
@@ -59,4 +67,20 @@ func TestMain(m *testing.M) {
 		code = 1
 	}
 	os.Exit(code)
+}
+
+// useSelectedNode puts the Node executable a version manager selects first
+// on PATH. The tests run Node under a temporary HOME, where the manager's
+// shim can no longer find its own configuration. Without Node on PATH the
+// tests that need it skip.
+func useSelectedNode() error {
+	output, err := exec.CommandContext(context.Background(), "node", "-p", "process.execPath").Output()
+	if err != nil {
+		return nil
+	}
+	executable := strings.TrimSpace(string(output))
+	if !filepath.IsAbs(executable) {
+		return nil
+	}
+	return os.Setenv("PATH", filepath.Dir(executable)+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
