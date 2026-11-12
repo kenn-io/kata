@@ -64,7 +64,6 @@ test('local project readers see native sync status with bounded embedding summar
   await region.getByRole('button', { name: 'Refresh sync' }).click()
   await expect(region.getByText('Reused: 1')).toBeVisible()
   await expect(region.getByText('Run in a CLI connected to this daemon.')).toBeVisible()
-  await expect(region.getByText(`Browser: ${kata.origin}`)).toBeVisible()
   await page
     .context()
     .grantPermissions(['clipboard-read', 'clipboard-write'], { origin: kata.origin })

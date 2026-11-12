@@ -82,7 +82,7 @@ func requireDaemonAPIVersionHealth(
 	if valid && compatible {
 		return health, nil
 	}
-	return health, &cliError{
+	return daemonAPIHealth{}, &cliError{
 		Message:  daemonAPITooOldMessage(feature, required, reported),
 		Kind:     kindValidation,
 		Code:     "daemon_api_too_old",

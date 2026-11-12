@@ -1352,17 +1352,11 @@ func federationStatusCmd() *cobra.Command {
 			var callErr error
 			var versionErr error
 			if flags.Project != "" {
-				health, err := requireDaemonAPIVersionHealth(a.ctx, a.client, a.baseURL, apiVersionFederationProjectLookup, "project federation status")
+				err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, apiVersionFederationProjectLookup, "project federation status")
 				if err != nil {
 					var cliErr *cliError
 					if errors.As(err, &cliErr) && cliErr.Code == "daemon_api_too_old" {
-						cliErr.Hint = "Update the selected daemon on its host to a release with the required API: use kata update for an official installation or its owning package manager. For service-managed installs, see https://katatracker.com/docs/get-started/install/#updating-kata"
-						_, valid := apiVersionAtLeast(health.APISchemaVersion, apiVersionFederationProjectLookup)
-						if valid {
-							versionErr = err
-						} else {
-							return err
-						}
+						versionErr = err
 					} else {
 						return err
 					}
@@ -1388,9 +1382,6 @@ func federationStatusCmd() *cobra.Command {
 				return err
 			}
 			if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
-				if versionErr != nil && (callResp.StatusCode == http.StatusForbidden || callResp.StatusCode == http.StatusNotFound) {
-					return versionErr
-				}
 				return err
 			}
 			if flags.Project != "" {
@@ -1559,16 +1550,10 @@ func readFederationProjectByName(a daemonAPI, name string) (projectRef, error) {
 	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
 		return projectRef{}, err
 	}
-	var resp struct {
-		Project struct {
-			ID   int64  `json:"id"`
-			Name string `json:"name"`
-		} `json:"project"`
+	if callResp.JSON200 == nil {
+		return projectRef{}, errors.New("missing project lookup response")
 	}
-	if err := json.Unmarshal(callResp.Body, &resp); err != nil {
-		return projectRef{}, err
-	}
-	return projectRef{ID: resp.Project.ID, Name: resp.Project.Name}, nil
+	return projectRef{ID: callResp.JSON200.Project.ID, Name: callResp.JSON200.Project.Name}, nil
 }
 
 func ensureFederationProjectByName(

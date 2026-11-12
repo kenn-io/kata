@@ -234,8 +234,8 @@ func TestFederationStatusProjectVersionRouting(t *testing.T) {
 	}{
 		{"older denied", "0.45.0", http.StatusForbidden, true},
 		{"older not found", "0.45.0", http.StatusNotFound, true},
-		{"missing version", "", 0, false},
-		{"malformed version", "invalid", 0, false},
+		{"missing version", "", http.StatusNotFound, true},
+		{"malformed version", "invalid", http.StatusNotFound, true},
 		{"current denied", "0.46.0", http.StatusForbidden, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -256,18 +256,12 @@ func TestFederationStatusProjectVersionRouting(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 			_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "federation", "status", "--project", "spoke-project")
-			if tc.version == "0.46.0" {
-				require.Error(t, err)
-				assert.NotContains(t, err.Error(), "requires daemon API")
-				assert.EqualValues(t, 1, lookup.Load())
-			} else {
-				ce := requireCLIError(t, err, ExitValidation)
-				assert.Equal(t, "daemon_api_too_old", ce.Code)
-				assert.Contains(t, ce.Hint, "kata update")
-				assert.Contains(t, ce.Hint, "package manager")
-				assert.Contains(t, ce.Hint, "https://")
-				assert.Zero(t, lookup.Load())
-			}
+			require.Error(t, err)
+			var ce *cliError
+			require.ErrorAs(t, err, &ce)
+			assert.Equal(t, tc.status, ce.HTTPStatus)
+			assert.NotEqual(t, "daemon_api_too_old", ce.Code)
+			assert.Equal(t, !tc.global, lookup.Load() == 1)
 			assert.Equal(t, tc.global, global.Load() == 1)
 		})
 	}

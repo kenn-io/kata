@@ -776,8 +776,7 @@ requests or billing.
 When sync needs attention, copy the diagnostic command for Bash/Zsh or
 PowerShell. Connect the CLI to the same daemon with your own credential. A local
 install uses its existing home or registered daemon profile. For a remote daemon,
-select its configured API connection with `--daemon` or `KATA_SERVER`. The
-browser address shown in the summary can differ from the CLI connection.
+select its configured API connection with `--daemon` or `KATA_SERVER`.
 Project readers need daemon API 0.46.0 or later. Owners can use the diagnostic
 against older daemons. Remove the older-daemon path, its dedicated tests, and
 its filtering helper if unused when the CLI's documented minimum supported

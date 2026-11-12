@@ -11,17 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRequireDaemonAPIVersionHealthReturnsOldVersion(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"api_schema_version":"0.45.0"}`))
-	}))
-	t.Cleanup(server.Close)
-	health, err := requireDaemonAPIVersionHealth(t.Context(), server.Client(), server.URL, "0.46.0", "project federation status")
-	ce := requireCLIError(t, err, ExitValidation)
-	assert.Equal(t, "daemon_api_too_old", ce.Code)
-	assert.Equal(t, "0.45.0", health.APISchemaVersion)
-}
-
 func TestFilteredReadyAllRejectsOldDaemonBeforeQuery(t *testing.T) {
 	var readyCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
