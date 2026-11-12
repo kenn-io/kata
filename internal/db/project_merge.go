@@ -2,9 +2,12 @@ package db
 
 import (
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"math"
 	"time"
+
+	"go.kenn.io/kata/internal/cron"
 )
 
 // Keep imported rows in the lower half of the signed ID range. This leaves
@@ -65,6 +68,16 @@ func PrepareProjectMergeRecords(
 	importedExternalMappings := make(map[externalFieldMappingIdentity]struct{})
 	for _, rec := range recs {
 		switch rec := rec.(type) {
+		case *EventExport:
+			if workflowDefinitionEvent(rec.Type) {
+				var body CronDefinitionEvent
+				if err := json.Unmarshal(rec.Payload, &body); err != nil {
+					return nil, err
+				}
+				if _, err := cron.DecodeWorkflow(body.Definition); err != nil {
+					return nil, err
+				}
+			}
 		case *RelayOutboxExport, *RelayInboxExport, *RelayCursorExport:
 			return nil, fmt.Errorf("project merge does not accept hub-local relay delivery records")
 		case *RootKeyPin, *AttributionReceipt, *EntityProvenance:
@@ -156,6 +169,11 @@ func PrepareProjectMergeRecords(
 				payload.ID, err = addMergeOffset(payload.ID, offsets.CronJob, payload.ImportKind())
 			}
 		case *CronWorkflowExport:
+			if len(payload.RawDefinition) != 0 {
+				if _, err = cron.DecodeWorkflow(payload.RawDefinition); err != nil {
+					return nil, err
+				}
+			}
 			if err = requireMergeProjectID(payload.ProjectID, projectID, payload.ImportKind()); err == nil {
 				payload.ProjectID = offsets.TargetProjectID
 				payload.ID, err = addMergeOffset(payload.ID, offsets.CronWorkflow, payload.ImportKind())

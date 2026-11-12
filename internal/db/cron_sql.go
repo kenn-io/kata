@@ -130,7 +130,15 @@ func (a CronSQL) Workflow(ctx context.Context, project int64, id string) (CronWo
 	if err != nil {
 		return CronWorkflow{}, err
 	}
-	return workflowFromRow(row)
+	value, err := workflowFromRow(row)
+	if err != nil {
+		return CronWorkflow{}, err
+	}
+	support, err := workflowRevisionSupport(ctx, a.Query, a.Postgres, project, map[string]string{row.DefinitionEventUID: row.UID})
+	if err == nil {
+		err = support[row.DefinitionEventUID]
+	}
+	return value, err
 }
 
 func (a CronSQL) list(ctx context.Context, in CronList, job bool) ([]cronRow, error) {
@@ -174,19 +182,46 @@ func (a CronSQL) Jobs(ctx context.Context, in CronList) ([]CronJob, error) {
 
 // Workflows lists project-scoped workflow documents under the requested tombstone policy.
 func (a CronSQL) Workflows(ctx context.Context, in CronList) ([]CronWorkflow, error) {
+	return a.workflows(ctx, in, false)
+}
+
+// workflows keeps federation snapshots strict while ordinary lists omit only
+// documents accepted by the historical decoder and fenced by the strict one.
+func (a CronSQL) workflows(ctx context.Context, in CronList, strict bool) ([]CronWorkflow, error) {
 	rows, err := a.list(ctx, in, false)
 	if err != nil {
 		return nil, err
 	}
 	result := []CronWorkflow{}
+	revisions := map[string]string{}
 	for _, row := range rows {
 		value, err := workflowFromRow(row)
 		if err != nil {
+			if !strict {
+				if _, historicalErr := cron.DecodeHistoricalWorkflow(row.document); historicalErr == nil {
+					continue
+				}
+			}
 			return nil, err
 		}
 		result = append(result, value)
+		revisions[row.DefinitionEventUID] = row.UID
 	}
-	return result, nil
+	// CronDefinitionSnapshots has already checked retained events for strict callers.
+	if strict {
+		return result, nil
+	}
+	support, err := workflowRevisionSupport(ctx, a.Query, a.Postgres, in.ProjectID, revisions)
+	if err != nil {
+		return nil, err
+	}
+	filtered := result[:0]
+	for _, value := range result {
+		if support[value.DefinitionEventUID] == nil {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered, nil
 }
 
 // validateLiveDefinition applies the current rules to a definition that will
@@ -362,7 +397,7 @@ func (a CronSQL) checkCronPutDependencies(ctx context.Context, tx *sql.Tx, req c
 		}
 	}
 	if req.job && !req.deleted {
-		return CheckCronDependencies(ctx, tx, req.projectID, req.definition.(cron.JobDefinition))
+		return CheckCronDependencies(ctx, tx, a.Postgres, req.projectID, req.definition.(cron.JobDefinition))
 	}
 	if !req.job && req.deleted && current.DeletedAt == nil {
 		return checkWorkflowUnused(ctx, tx, a.Postgres, req.projectID, req.id)

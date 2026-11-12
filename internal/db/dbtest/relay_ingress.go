@@ -98,6 +98,18 @@ func RunRelayIngressAtomicity(t *testing.T, store db.Storage) {
 	require.Equal(t, accepted.Digest, retry.Digest)
 	require.Empty(t, retry.InsertedEventUIDs)
 	require.Empty(t, retry.InsertedEvents, "replayed acceptance must not republish previously committed events")
+	// Held workflow bytes must refuse before acceptance, even when the sender
+	// claims the reserved feature. An ordinary headerless retry still succeeds.
+	for _, definition := range []string{`null`} {
+		held := argvCompatRemoteWorkflow(t, project, leaf, definition)
+		heldBatch := db.RelayBatch{Stream: db.RelayStreamEvent, After: 40, Envelopes: []db.RelayEnvelope{seal(held, 41)}}
+		claimed := db.WithRelayPeerFeatures(writeCtx, grant.Enrollment.RelayBindingUID, db.CronWorkflowArgvEventFeature)
+		_, err = store.AcceptRelayDeliveries(claimed, grant.Enrollment.RelayBindingUID, heldBatch)
+		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		retry, err = store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, batch)
+		require.NoError(t, err)
+		require.Equal(t, int64(40), retry.Through)
+	}
 	duplicateSource := seal(created, 45)
 	_, err = store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, db.RelayBatch{
 		Stream: db.RelayStreamEvent, After: 40, Envelopes: []db.RelayEnvelope{duplicateSource},

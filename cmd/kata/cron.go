@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -451,6 +452,17 @@ func (o *cronCLIOptions) decodeRequest(raw []byte) (map[string]jsontext.Value, e
 	shape, err := o.requestShape()
 	if err != nil {
 		return nil, err
+	}
+	if o.resource == "workflow" && (o.action == "create" || o.action == "update") {
+		if rawDefinition, ok := fields["definition"]; ok {
+			definition := rawDefinition.Clone()
+			if err := definition.Compact(); err != nil {
+				return nil, cronCLIValidation("invalid workflow definition: " + err.Error())
+			}
+			if _, err := cron.DecodeHistoricalWorkflow(definition); err != nil {
+				return nil, cronCLIValidation("invalid workflow definition: " + err.Error())
+			}
+		}
 	}
 	if err := json.Unmarshal(raw, shape, json.RejectUnknownMembers(true)); err != nil {
 		return nil, cronCLIValidation("invalid cron request: " + err.Error())

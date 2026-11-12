@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"encoding/json/jsontext"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,6 +75,30 @@ func TestWorkflowEditorReturnAndValidation(t *testing.T) {
 	_, err := cron.ParseWorkflow([]byte(invalid))
 	require.Error(t, err)
 	require.Contains(t, stripANSI(m.viewBody()), err.Error())
+}
+
+func TestWorkflowEditorAcceptsLargeIndentedDefinition(t *testing.T) {
+	definition := jsontext.Value(`{"version":1,"steps":[{"key":"ship","kind":"prompt","prompt":"Ship"}],"options":{"values":[` + strings.Repeat("0,", 39999) + `0]}}`)
+	require.Less(t, len(definition), cron.DefinitionLimit)
+	require.NoError(t, definition.Indent(jsontext.WithIndent("  ")))
+	require.Greater(t, len(definition), cron.DefinitionLimit)
+	m, api := openWorkflow(t, workflowRecord(), false)
+	for _, member := range []string{`"argv": null`, `"argv": ["true"]`} {
+		invalid := strings.Replace(string(definition), `"kind": "prompt"`, `"kind": "prompt", `+member, 1)
+		m, _ = updateModel(m, editorReturnedMsg{formGen: m.nextFormGen, content: invalid})
+		m, cmd := press(m, ctrlKey('o'))
+		require.Nil(t, cmd)
+		require.NotNil(t, m.cron.form)
+		require.Empty(t, api.workflowPuts)
+		require.NotNil(t, m.cron.form.err)
+		require.Contains(t, m.cron.form.err.text, "argv")
+	}
+	m, _ = updateModel(m, editorReturnedMsg{formGen: m.nextFormGen, content: string(definition)})
+	m, cmd := press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	require.Nil(t, m.cron.form)
+	require.Len(t, api.workflowPuts, 1)
+	require.Equal(t, "Ship", api.workflowPuts[0].write.Definition.Steps[0].Prompt)
 }
 
 func TestWorkflowConflictKeepsDraftAndGuardsReplacement(t *testing.T) {
@@ -190,4 +216,15 @@ func TestWorkflowFormRoundTripsThroughDaemon(t *testing.T) {
 	m = settle(t, m, cmd)
 	require.Nil(t, m.cron.form)
 	require.Equal(t, "Saved Renamed", m.toast.text)
+}
+
+func TestWorkflowEditorRefusesReservedArgvWithoutMutation(t *testing.T) {
+	for _, member := range []string{`"argv":null`} {
+		m, api := openWorkflow(t, workflowRecord(), false)
+		m.cron.form.val[cfDefinition] = `{"version":1,"steps":[{"key":"ship","kind":"prompt","prompt":"Ship",` + member + `}]}`
+		m, cmd := press(m, ctrlKey('o'))
+		require.Nil(t, cmd)
+		require.NotNil(t, m.cron.form)
+		require.Empty(t, api.workflowPuts)
+	}
 }
