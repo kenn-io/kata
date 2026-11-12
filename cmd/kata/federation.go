@@ -1417,7 +1417,7 @@ func federationStatusCmd() *cobra.Command {
 }
 
 func filterFederationStatusProject(body []byte, name string) ([]byte, error) {
-	var response map[string]jsontext.Value
+	response := make(map[string]jsontext.Value)
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, err
 	}
