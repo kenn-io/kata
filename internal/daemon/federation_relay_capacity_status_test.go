@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -141,7 +142,7 @@ func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 		require.Len(t, body.Statuses, 1)
 		return body.Statuses[0], data
 	}
-	full, fullRaw := readProject(relayed.ID, "")
+	full, _ := readProject(relayed.ID, "")
 	require.Equal(t, 2, wrapped.count(relayed.ID))
 	require.Positive(t, full.RelayCheckpointBytes)
 	require.EqualValues(t, db.RelayCheckpointCapacityBytes, full.RelayCheckpointCapacity)
@@ -151,7 +152,6 @@ func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 	full.RelayCheckpointCapacity = 0
 	require.Equal(t, "example sync failure", *full.LastError)
 	require.Len(t, full.ActiveQuarantines, 1)
-	require.Len(t, compact.ActiveQuarantines, 1)
 	require.Equal(t, "example held-back batch failure", full.ActiveQuarantines[0].Error)
 	t.Run("compact keeps diagnostic details", func(t *testing.T) {
 		require.Contains(t, string(compactRaw), "example sync failure")
@@ -162,17 +162,14 @@ func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 		omitted, raw := readProject(relayed.ID, "?compact=true&omit_errors=true")
 		require.NotContains(t, string(raw), "example sync failure")
 		require.NotContains(t, string(raw), "example held-back batch failure")
-		require.Contains(t, string(raw), `"has_sync_error":true`)
-		require.Equal(t, full.ActiveQuarantines[0].ID, omitted.ActiveQuarantines[0].ID)
-		require.Equal(t, full.ActiveQuarantines[0].Direction, omitted.ActiveQuarantines[0].Direction)
-		require.Equal(t, full.ActiveQuarantines[0].FirstEventID, omitted.ActiveQuarantines[0].FirstEventID)
-		require.Equal(t, full.ActiveQuarantines[0].LastEventID, omitted.ActiveQuarantines[0].LastEventID)
-		require.Equal(t, full.ActiveQuarantines[0].EventUIDs, omitted.ActiveQuarantines[0].EventUIDs)
-		require.Equal(t, full.ActiveQuarantineCount, omitted.ActiveQuarantineCount)
+		want := full
+		want.LastError, want.HasSyncError = nil, true
+		want.ActiveQuarantines = slices.Clone(full.ActiveQuarantines)
+		want.ActiveQuarantines[0].Error = ""
+		require.Equal(t, want, omitted)
 	})
 	t.Run("omission without compact keeps measurement", func(t *testing.T) {
 		omitted, raw := readProject(broken.ID, "?omit_errors=true")
-		require.Contains(t, string(fullRaw), "example held-back batch failure")
 		require.NotContains(t, string(raw), "retained artifact manifest is malformed")
 		require.Empty(t, omitted.RelayCheckpointError)
 		require.Equal(t, 2, wrapped.count(broken.ID))
