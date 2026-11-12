@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -151,7 +152,7 @@ func TestKitAgentHookHermesReplacementStart(t *testing.T) {
 
 func TestKitAgentHookConfiguredRejectsConditionalHandlers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-hook contract claude","async":true}]},{"enabled":false,"hooks":[{"command":"kata agent-hook attention-native claude start"}]}]}}`), 0600))
+	require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-hook contract claude","async":true}]},{"enabled":false,"hooks":[{"command":"foreign hook"},{"command":"kata agent-hook attention-native claude start"}]}]}}`), 0600))
 	plan, err := planKitAgentHooks(nativeAgentHookOptions{Agent: "claude", ConfigPath: path}, true)
 	require.NoError(t, err)
 	require.False(t, plan.CurrentContract)
@@ -160,6 +161,10 @@ func TestKitAgentHookConfiguredRejectsConditionalHandlers(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, plan.Contract)
 	require.True(t, plan.AttentionStart)
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(plan.Changes[0].Content, &document))
+	groups := document["hooks"].(map[string]any)["SessionStart"].([]any)
+	require.Equal(t, map[string]any{"enabled": false, "hooks": []any{map[string]any{"command": "foreign hook"}}}, groups[1])
 }
 
 func TestKitAgentHookConfiguredRejectsRestrictiveMatchers(t *testing.T) {
