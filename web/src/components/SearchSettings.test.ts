@@ -171,6 +171,56 @@ describe('SearchSettings', () => {
     },
   )
 
+  test.each([false, true])(
+    'handles a timed-out POST with restart in progress=%s',
+    async (inProgress) => {
+      vi.useFakeTimers()
+      vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+        const controller = new AbortController()
+        setTimeout(() => controller.abort(), ms)
+        return controller.signal
+      })
+      const waiting = status({
+        can_change: false,
+        can_restart: true,
+        job: { state: 'restart', downloaded: 1, total: 1 },
+      })
+      let current = waiting
+      const read = vi.fn<typeof fetch>(async () => Response.json(current))
+      setGeneratedFetch(read)
+      const postFetch = vi.fn<typeof fetch>(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(new DOMException('Aborted', 'AbortError')),
+            )
+          }),
+      )
+      vi.stubGlobal(
+        'confirm',
+        vi.fn(() => true),
+      )
+      renderSettings({ postFetch })
+      await settle()
+      await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+      if (inProgress) current = { ...waiting, can_restart: false, restart_in_progress: true }
+      await vi.advanceTimersByTimeAsync(9999)
+      expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+      await vi.advanceTimersByTimeAsync(2001)
+      if (inProgress) {
+        expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+        const count = read.mock.calls.length
+        current = status({ provider: 'built_in', can_change: false })
+        await vi.advanceTimersByTimeAsync(2000)
+        expect(read.mock.calls.length).toBeGreaterThan(count)
+        expect(screen.getByText('On', { exact: true })).not.toBeNull()
+      } else {
+        expect(screen.getByRole('button', { name: 'Restart daemon' })).not.toBeNull()
+        expect(screen.getByRole('alert').textContent).toContain("Couldn't confirm restart")
+      }
+    },
+  )
+
   test('ignores an earlier status read after the restart request is accepted', async () => {
     vi.useFakeTimers()
     const waiting = status({

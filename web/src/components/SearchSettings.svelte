@@ -179,7 +179,7 @@
           requestError = "Couldn't confirm restart. Try again or run kata daemon restart."
       }
     }
-    if (restartPending && Date.now() >= restartDeadline) {
+    if (restartPending && !next?.can_restart && Date.now() >= restartDeadline) {
       requestError = remoteHost
         ? `Couldn't reconnect. Run kata daemon status on ${remoteHost}.`
         : originStable
@@ -212,7 +212,10 @@
     restartRequestPending = true
     poll()
     try {
-      const response = await postFetch(getRestartLocalEmbeddingsUrl(), { method: 'POST', signal })
+      const response = await postFetch(getRestartLocalEmbeddingsUrl(), {
+        method: 'POST',
+        signal: AbortSignal.any([signal, AbortSignal.timeout(pollMs * 5)]),
+      })
       if (post === posts && !response.ok) {
         restartDeadline = 0
         requestError = "Couldn't restart the daemon. Try again or run kata daemon restart."
