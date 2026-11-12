@@ -47,7 +47,7 @@ func TestMigrateProjectsOneAtATimeKeepsCrossProjectLinks(t *testing.T) {
 	for index, sourceProject := range sourceProjects {
 		var export bytes.Buffer
 		require.NoError(t, jsonl.Export(ctx, source.DB, &export, jsonl.ExportOptions{IncludeDeleted: true, ProjectID: sourceProject.ID}))
-		require.NoError(t, jsonl.ImportWithOptions(ctx, &export, home.DB, jsonl.ImportOptions{MergeProject: true, LinkExistingIssues: true}))
+		require.NoError(t, jsonl.ImportWithOptions(ctx, &export, home.DB, jsonl.ImportOptions{MergeProject: true}))
 		local, err := home.DB.ProjectByName(ctx, sourceProject.Name)
 		require.NoError(t, err)
 

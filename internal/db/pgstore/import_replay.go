@@ -48,6 +48,8 @@ const (
 	replayLinkMissingPeer
 	replayLinkDuplicate
 	replayLinkMapping
+	replayLinkUndeliverable
+	replayLinkParentCycle
 )
 
 func (s *Store) importReplayTx(
@@ -60,7 +62,7 @@ func (s *Store) importReplayTx(
 	var preservedCreatedAt string
 	var err error
 	if opts.MergeProject {
-		records, err = s.prepareProjectMergeTx(ctx, tx, records, opts.LinkExistingIssues)
+		records, err = s.prepareProjectMergeTx(ctx, tx, records)
 		if err != nil {
 			return err
 		}
@@ -71,7 +73,7 @@ func (s *Store) importReplayTx(
 		}
 	}
 
-	var missingPeers, duplicates, skippedMappings int
+	var missingPeers, duplicates, skippedMappings, skippedUndeliverable, skippedCycles int
 	skippedLinkIDs := make(map[int64]struct{})
 	sequenceFloors := make(map[string]int64)
 	for _, record := range records {
@@ -85,20 +87,35 @@ func (s *Store) importReplayTx(
 			if link, ok := record.(*db.LinkExport); ok {
 				skippedLinkIDs[link.ID] = struct{}{}
 			}
+		case replayLinkUndeliverable, replayLinkParentCycle:
+			if skip == replayLinkUndeliverable {
+				skippedUndeliverable++
+			} else {
+				skippedCycles++
+			}
+			if link, ok := record.(*db.LinkExport); ok {
+				skippedLinkIDs[link.ID] = struct{}{}
+			}
 		case replayLinkDuplicate:
 			duplicates++
 		case replayLinkMapping:
 			skippedMappings++
 		}
 	}
+	if skippedUndeliverable > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d link record(s) between projects that a relay between hubs cannot deliver\n",
+			skippedUndeliverable)
+	}
+	if skippedCycles > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d parent link record(s) that would close a cycle with links already in the target\n",
+			skippedCycles)
+	}
 	if missingPeers > 0 {
 		fmt.Fprintf(os.Stderr,
 			"note: skipped %d link record(s) whose peer issue is not in this envelope or database\n",
 			missingPeers)
-		if opts.MergeProject {
-			fmt.Fprintln(os.Stderr,
-				"note: a merge creates links to issues of other projects only with --link-existing, and only when that issue is already in the target")
-		}
 	}
 	if duplicates > 0 {
 		fmt.Fprintf(os.Stderr,

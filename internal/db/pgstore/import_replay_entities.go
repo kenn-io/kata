@@ -237,17 +237,21 @@ SELECT 1 FROM links WHERE type=$1 AND (
 		return replayLinkDuplicate, nil
 	}
 	// A merge can link the imported project to one already in the target.
-	// Refuse what an ordinary link write refuses: a relay cannot deliver a
-	// link between projects, and a parent link must not close a cycle with
-	// the links the target already holds. A full restore keeps the links it
-	// exported.
+	// It leaves out what an ordinary link write refuses: a relay cannot
+	// deliver a link between projects, and a parent link must not close a
+	// cycle with the links the target already holds. The rest of the project
+	// still merges. A full restore keeps the links it exported.
 	if mergeProject {
 		if link.Type == "parent" {
-			if err := assertNoParentCycleTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+			if err := assertNoParentCycleTx(ctx, tx, link.FromIssueID, link.ToIssueID); errors.Is(err, db.ErrParentCycle) {
+				return replayLinkParentCycle, nil
+			} else if err != nil {
 				return replayLinkInserted, fmt.Errorf("project merge parent link from issue %s to %s: %w", link.FromIssueUID, link.ToIssueUID, err)
 			}
 		}
-		if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) {
+			return replayLinkUndeliverable, nil
+		} else if err != nil {
 			return replayLinkInserted, fmt.Errorf("project merge link between issues %s and %s: %w", link.FromIssueUID, link.ToIssueUID, err)
 		}
 	}

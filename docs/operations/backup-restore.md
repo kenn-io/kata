@@ -380,10 +380,8 @@ import-mapping records that reference those links, and prints an aggregate
 `note: skipped N link record(s)…` to stderr. A full-database snapshot preserves
 links when it contains both endpoints.
 
-A project merge also skips them by default, even when the peer issue is
-already in the target, so a scoped snapshot cannot change another project's
-links. Pass `--link-existing` to create them; see
-[links between merged projects](#links-between-merged-projects).
+A project merge creates such a link when the peer issue is already in the
+target; see [links between merged projects](#links-between-merged-projects).
 
 ## Merge a single-project snapshot
 
@@ -415,40 +413,36 @@ projects.
 ### Links between merged projects
 
 Each scoped snapshot carries the links between its project and other projects.
-By default a merge skips them and prints `note: skipped N link record(s)…`.
-
-Add `--link-existing` to create a link when its peer issue is already in the
-target, matched by issue UID:
+A merge creates such a link when its peer issue is already in the target,
+matched by issue UID:
 
 ```sh
-kata import --merge --link-existing --input backups/second-project.jsonl \
+kata import --merge --input backups/second-project.jsonl \
   --target ~/.kata/kata.db
 ```
 
 - The link keeps its original type, author, and created time.
-- A link whose peer is not in the target yet is still skipped. The peer
-  project's own snapshot carries the same link, so merging that project with
-  `--link-existing` creates it. The order of the merges does not matter.
+- A link whose peer is not in the target yet is skipped, and the merge prints
+  `note: skipped N link record(s)…`. The peer project's own snapshot carries
+  the same link, so merging that project creates it. The order of the merges
+  does not matter.
 - The merge adds the link to an issue of a project that is already in the
-  target. It changes nothing else in that project. Use the flag only with a
-  snapshot you trust to describe those links.
-- Pass the flag on every merge of a set of linked projects. A snapshot cannot
-  be merged twice, so links skipped by a merge without the flag come back only
-  from the peer project's merge.
-- The merge fails, and imports nothing, when such a link would join a project
-  that Kata relays between hubs. A relay cannot deliver a link between
-  projects, so the ordinary link commands refuse it too. Merge that snapshot
-  without the flag.
-- The merge also fails, and imports nothing, when a parent link from the
-  snapshot would close a cycle with the parent links already in the target.
-  This can happen when the snapshots were taken at different times. Export the
-  projects again from one point in time, or merge that snapshot without the
-  flag.
+  target. It changes nothing else in that project.
 
-To move linked projects to another hub one at a time, merge each project with
-`--link-existing` and then adopt it with
-`kata federation join --adopt-existing`. Adoption sends each issue's links in
-its snapshot, and the hub creates a link once both projects have arrived.
+A merge leaves out two kinds of link, prints a note with the count, and still
+merges the rest of the project:
+
+- A link that would join a project that Kata relays between hubs. A relay
+  cannot deliver a link between projects, so the ordinary link commands refuse
+  it too.
+- A parent link that would close a cycle with the parent links already in the
+  target. This can happen when the snapshots were taken at different times.
+  Set the parent on the target afterwards with `kata edit --parent`.
+
+To move linked projects to another hub one at a time, merge each project and
+then adopt it with `kata federation join --adopt-existing`. Adoption sends each
+issue's links in its snapshot, and the hub creates a link once both projects
+have arrived.
 
 Merge refuses snapshots containing hub-local teams, memberships or visibility
 policies. It also refuses root pins and verified provenance: a project merge

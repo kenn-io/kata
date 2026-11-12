@@ -15,7 +15,6 @@ func (s *Store) prepareProjectMergeTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	records []db.ImportRecord,
-	linkExistingIssues bool,
 ) ([]db.ImportRecord, error) {
 	if err := acquireExclusiveServingLease(ctx, tx, s.schema); err != nil {
 		return nil, fmt.Errorf("quiesce serving daemons for project merge: %w", err)
@@ -41,7 +40,6 @@ func (s *Store) prepareProjectMergeTx(
 	if err != nil {
 		return nil, err
 	}
-	offsets.LinkExistingIssues = linkExistingIssues
 	prepared, err := db.PrepareProjectMergeRecords(records, offsets,
 		func(uid string) (int64, bool, error) {
 			var id int64

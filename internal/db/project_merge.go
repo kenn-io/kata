@@ -39,17 +39,10 @@ type ProjectMergeOffsets struct {
 	Event           int64
 	PurgeLog        int64
 	ProjectPurgeLog int64
-
-	// LinkExistingIssues is a merge choice, not an offset. It lets a link
-	// whose far end is outside the imported project attach to that issue
-	// when it is already in the target. Unset, such a link is always dropped,
-	// so a snapshot cannot change another project's links.
-	LinkExistingIssues bool
 }
 
 // ExistingIssueLookup resolves an issue UID already present in the merge
-// target. It resolves informational event references. With
-// ProjectMergeOffsets.LinkExistingIssues it also resolves the far end of a
+// target. It resolves informational event references and the far end of a
 // link between the imported project and a project already in the target.
 type ExistingIssueLookup func(uid string) (id int64, found bool, err error)
 
@@ -136,17 +129,16 @@ func PrepareProjectMergeRecords(
 		}
 		return id, nil
 	}
-	// A link's far end may belong to another project. A zero ID makes the
-	// replay skip the link, which is the default: a scoped snapshot is not
-	// trusted to change another project's links. When the operator opts in,
-	// the far end resolves by UID if that issue is already in the target.
-	// Projects merge one at a time, and each project's export carries the
-	// links that touch it, so the link is created when the later one merges.
+	// A link's far end may belong to another project. It resolves by UID when
+	// that issue is already in the target, and a zero ID makes the replay skip
+	// the link when it is not. Projects merge one at a time, and each
+	// project's export carries the links that touch it, so the link is created
+	// when the later one merges.
 	resolveLinkIssue := func(sourceID int64, uid string) (int64, error) {
 		if _, ok := importedIssues[sourceID]; ok {
 			return addMergeOffset(sourceID, offsets.Issue, "link issue")
 		}
-		if !offsets.LinkExistingIssues || uid == "" || lookupExistingIssue == nil {
+		if uid == "" || lookupExistingIssue == nil {
 			return 0, nil
 		}
 		id, found, err := lookupExistingIssue(uid)

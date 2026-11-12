@@ -61,7 +61,6 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		if err != nil {
 			return err
 		}
-		offsets.LinkExistingIssues = opts.LinkExistingIssues
 		recs, err = db.PrepareProjectMergeRecords(recs, offsets,
 			func(uid string) (int64, bool, error) {
 				var id int64
@@ -122,7 +121,7 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		}
 	}
 
-	var skippedMissingPeer, skippedDup, skippedMappings int
+	var skippedMissingPeer, skippedDup, skippedMappings, skippedUndeliverable, skippedCycles int
 	skippedLinkIDs := make(map[int64]struct{})
 	for _, r := range db.OrderImportRecords(recs) {
 		skip, err := importRecord(ctx, tx, r, opts, skippedLinkIDs)
@@ -135,20 +134,35 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 			if link, ok := r.(*db.LinkExport); ok {
 				skippedLinkIDs[link.ID] = struct{}{}
 			}
+		case linkSkipUndeliverable, linkSkipParentCycle:
+			if skip == linkSkipUndeliverable {
+				skippedUndeliverable++
+			} else {
+				skippedCycles++
+			}
+			if link, ok := r.(*db.LinkExport); ok {
+				skippedLinkIDs[link.ID] = struct{}{}
+			}
 		case linkSkipDuplicate:
 			skippedDup++
 		case linkSkipMapping:
 			skippedMappings++
 		}
 	}
+	if skippedUndeliverable > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d link record(s) between projects that a relay between hubs cannot deliver\n",
+			skippedUndeliverable)
+	}
+	if skippedCycles > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d parent link record(s) that would close a cycle with links already in the target\n",
+			skippedCycles)
+	}
 	if skippedMissingPeer > 0 {
 		fmt.Fprintf(os.Stderr,
 			"note: skipped %d link record(s) whose peer issue is not in this envelope or database\n",
 			skippedMissingPeer)
-		if opts.MergeProject {
-			fmt.Fprintln(os.Stderr,
-				"note: a merge creates links to issues of other projects only with --link-existing, and only when that issue is already in the target")
-		}
 	}
 	if skippedDup > 0 {
 		fmt.Fprintf(os.Stderr,
@@ -450,10 +464,12 @@ func validateFreshReplayTarget(
 type linkSkip int
 
 const (
-	linkSkipNone        linkSkip = iota // not skipped; record was inserted
-	linkSkipMissingPeer                 // peer issue absent from envelope/database
-	linkSkipDuplicate                   // edge already present (natural-key no-op)
-	linkSkipMapping                     // import_mapping references a skipped link
+	linkSkipNone          linkSkip = iota // not skipped; record was inserted
+	linkSkipMissingPeer                   // peer issue absent from envelope/database
+	linkSkipDuplicate                     // edge already present (natural-key no-op)
+	linkSkipMapping                       // import_mapping references a skipped link
+	linkSkipUndeliverable                 // merge link between projects that a relay cannot deliver
+	linkSkipParentCycle                   // merge parent link that would close a cycle in the target
 )
 
 // importRecord applies one record. For link records importLink may signal a
@@ -799,17 +815,21 @@ func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport, mergeProject
 		return linkSkipDuplicate, nil
 	}
 	// A merge can link the imported project to one already in the target.
-	// Refuse what an ordinary link write refuses: a relay cannot deliver a
-	// link between projects, and a parent link must not close a cycle with
-	// the links the target already holds. A full restore keeps the links it
-	// exported.
+	// It leaves out what an ordinary link write refuses: a relay cannot
+	// deliver a link between projects, and a parent link must not close a
+	// cycle with the links the target already holds. The rest of the project
+	// still merges. A full restore keeps the links it exported.
 	if mergeProject {
 		if lk.Type == "parent" {
-			if err := assertNoParentCycleTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); err != nil {
+			if err := assertNoParentCycleTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); errors.Is(err, db.ErrParentCycle) {
+				return linkSkipParentCycle, nil
+			} else if err != nil {
 				return linkSkipNone, fmt.Errorf("project merge parent link from issue %s to %s: %w", lk.FromIssueUID, lk.ToIssueUID, err)
 			}
 		}
-		if err := ensureRelayLinkBoundaryTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); err != nil {
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); errors.Is(err, db.ErrFederationCrossProjectBoundary) {
+			return linkSkipUndeliverable, nil
+		} else if err != nil {
 			return linkSkipNone, fmt.Errorf("project merge link between issues %s and %s: %w", lk.FromIssueUID, lk.ToIssueUID, err)
 		}
 	}

@@ -328,31 +328,17 @@ func TestImportMergeRefusesMultiProjectSnapshotWithoutMutation(t *testing.T) {
 	assert.Equal(t, existing.Name, got.Name)
 }
 
-func TestImportMergeSkipsCrossProjectLink(t *testing.T) {
+func TestImportMergeCreatesCrossProjectLink(t *testing.T) {
 	merged, importedID, peerID := mergeCrossProjectLinkFixture(t)
-	_, err := merged.LinkByEndpoints(t.Context(), importedID, peerID, "blocks")
-	require.ErrorIs(t, err, db.ErrNotFound)
-}
-
-func TestImportMergeLinkExistingCreatesCrossProjectLink(t *testing.T) {
-	merged, importedID, peerID := mergeCrossProjectLinkFixture(t, "--link-existing")
 	link, err := merged.LinkByEndpoints(t.Context(), importedID, peerID, "blocks")
 	require.NoError(t, err)
 	assert.Equal(t, "fixture-author", link.Author)
 }
 
-func TestImportLinkExistingRequiresMerge(t *testing.T) {
-	setupKataEnv(t)
-	_, err := runCmdOutput(t, nil,
-		"import", "--link-existing", "--input", "snapshot.jsonl", "--target", "target.db")
-	ce := requireCLIError(t, err, ExitValidation)
-	assert.Contains(t, ce.Message, "--link-existing requires --merge")
-}
-
 // mergeCrossProjectLinkFixture merges one project into a target that already
 // holds the project its issue is linked to, and returns the merged store with
 // the local IDs of the imported issue and its peer.
-func mergeCrossProjectLinkFixture(t *testing.T, mergeFlags ...string) (db.Storage, int64, int64) {
+func mergeCrossProjectLinkFixture(t *testing.T) (db.Storage, int64, int64) {
 	t.Helper()
 	home := setupKataEnv(t)
 	ctx := t.Context()
@@ -391,8 +377,7 @@ func mergeCrossProjectLinkFixture(t *testing.T, mergeFlags ...string) (db.Storag
 	input := filepath.Join(home, "spoke-links.jsonl")
 	require.NoError(t, os.WriteFile(input, importedSnapshot.Bytes(), 0o600))
 
-	args := append([]string{"import", "--merge"}, mergeFlags...)
-	_, err = runCmdOutput(t, nil, append(args, "--input", input, "--target", target)...)
+	_, err = runCmdOutput(t, nil, "import", "--merge", "--input", input, "--target", target)
 	require.NoError(t, err)
 
 	merged := openKataTestDB(t, target)
