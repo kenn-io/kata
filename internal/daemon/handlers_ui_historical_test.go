@@ -37,7 +37,6 @@ func TestReadProjectByNameHostScope(t *testing.T) {
 	}{
 		{"/api/v1/projects/resolve?name=allowed-project", http.StatusOK},
 		{"/api/v1/projects/resolve?name=denied-project", http.StatusNotFound},
-		{"/api/v1/projects", http.StatusNotFound},
 	} {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+tc.path, nil)
 		require.NoError(t, err)

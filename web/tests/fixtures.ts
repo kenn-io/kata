@@ -201,32 +201,35 @@ listen = "127.0.0.1:${port}"
       await symlink(binary, join(root, 'kata'))
     },
     recordSyncDiagnosticError() {
-      for (const path of [join(home, 'kata.db'), join(remoteHome, 'kata.db')]) {
+      for (const [path, message] of [
+        [join(home, 'kata.db'), 'example sync failure'],
+        [join(remoteHome, 'kata.db'), 'remote sync failure'],
+      ]) {
         const database = new DatabaseSync(path)
         try {
           database
             .prepare(
               `INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
-            SELECT id, '2026-10-01T12:00:00Z', 'example sync failure' FROM projects WHERE name = ?
+            SELECT id, '2026-10-01T12:00:00Z', ? FROM projects WHERE name = ?
             ON CONFLICT(project_id) DO UPDATE SET last_error_at=excluded.last_error_at, last_error=excluded.last_error`,
             )
-            .run("spoke project’s'")
+            .run(message, "spoke project’s'")
         } finally {
           database.close()
         }
       }
     },
     runSyncDiagnostic(shell, command, remote) {
-      const env = remote ? remoteEnvironment : environment
       const result = spawnSync(
         shell,
         shell === 'bash' ? ['-c', command] : ['-NoProfile', '-NonInteractive', '-Command', command],
         {
-          cwd: remote ? remoteWorkspace : workspace,
+          cwd: workspace,
           env: {
-            ...env,
+            ...environment,
+            KATA_AUTH_TOKEN: remote ? 'example-remote-token' : 'example-local-token',
             KATA_SERVER: remote ? remoteOrigin : '',
-            PATH: `${root}${delimiter}${env.PATH}`,
+            PATH: `${root}${delimiter}${environment.PATH}`,
           },
           encoding: 'utf8',
         },

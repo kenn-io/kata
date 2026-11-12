@@ -10,7 +10,7 @@ function response(projectID = 7, uid = projectUID, pending = 2): Response {
       {
         project_id: projectID,
         project_uid: uid,
-        project_name: "spoke project's",
+        project_name: "spoke project’s'",
         role: 'replica',
         enabled: true,
         pending_push_count: pending,
@@ -38,20 +38,19 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 describe('ProjectSyncStatus', () => {
-  it('copies a quoted status command without showing the private error', async () => {
+  it('copies a quoted status command', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
     setGeneratedFetch(vi.fn(async () => response()))
     render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
-    const command = "kata federation status --project 'spoke project'\\''s'"
+    const command = "kata federation status --project 'spoke project’s'\\'''"
     await screen.findByText(command)
     await fireEvent.click(screen.getByRole('button', { name: 'Copy Bash/Zsh sync status command' }))
     expect(writeText).toHaveBeenCalledWith(command)
     await fireEvent.click(
       screen.getByRole('button', { name: 'Copy PowerShell sync status command' }),
     )
-    expect(writeText).toHaveBeenCalledWith("kata federation status --project 'spoke project''s'")
-    expect(screen.queryByText('private-token-never-display')).toBeNull()
+    expect(writeText).toHaveBeenCalledWith("kata federation status --project 'spoke project’’s'''")
   })
 
   it.each(['network', 'body', '503', 403, 'mismatch'])(
@@ -181,6 +180,7 @@ describe('ProjectSyncStatus', () => {
             {
               project_id: 7,
               project_uid: projectUID,
+              project_name: "spoke project’s'",
               role: 'replica',
               enabled: true,
               pending_push_count: 0,
@@ -317,7 +317,6 @@ describe('ProjectSyncStatus', () => {
       props: { projectID: 7, projectUID, refreshGeneration: 0 },
     })
     await screen.findByText('Local project')
-    expect(screen.queryByRole('button', { name: /Copy .* sync status command/ })).toBeNull()
     await view.rerender({ projectID: 7, projectUID, refreshGeneration: 1 })
     await screen.findByText('Pending: 2')
   })

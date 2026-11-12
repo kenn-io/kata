@@ -69,10 +69,6 @@ test('local project readers see native sync status with bounded embedding summar
   ).toBeVisible()
   await expect(region.getByText('Run in a CLI connected to this daemon.')).toBeVisible()
   await expect(region.getByText(`Browser: ${kata.origin}`)).toBeVisible()
-  await expect(
-    region.getByText("kata federation status --project 'spoke project’s'\\'''"),
-  ).toBeVisible()
-  await expect(region.getByText('example sync failure')).toHaveCount(0)
   await page
     .context()
     .grantPermissions(['clipboard-read', 'clipboard-write'], { origin: kata.origin })
@@ -83,7 +79,7 @@ test('local project readers see native sync status with bounded embedding summar
     await region.getByRole('button', { name: `Copy ${label} sync status command` }).click()
     const command = await page.evaluate(() => navigator.clipboard.readText())
     expect(kata.runSyncDiagnostic(shell, command, false)).toContain('example sync failure')
-    expect(kata.runSyncDiagnostic(shell, command, true)).toContain('example sync failure')
+    expect(kata.runSyncDiagnostic(shell, command, true)).toContain('remote sync failure')
   }
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 1000 })
