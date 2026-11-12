@@ -1193,11 +1193,12 @@ func repeatedAdoptionSnapshotIssueTx(ctx context.Context, tx *sql.Tx, projectID 
 	}
 	// A retry of a consumed adoption stored or skipped every snapshot the
 	// first time. The hub may have moved the issue to another project since,
-	// so the holder is not checked again.
-	if !consumedRetry {
-		if err := db.CheckFederationFreshIssueHolder(ctx, tx, projectID, ev.Type, issueUID); err != nil {
-			return nil, err
-		}
+	// so neither the holder nor the caller's project access is checked again.
+	if consumedRetry {
+		return db.ConsumedAdoptionIssue(ctx, tx, issueUID)
+	}
+	if err := db.CheckFederationFreshIssueHolder(ctx, tx, projectID, ev.Type, issueUID); err != nil {
+		return nil, err
 	}
 	issue, err := eventIssueByUID(ctx, tx, issueUID)
 	if errors.Is(err, db.ErrNotFound) {

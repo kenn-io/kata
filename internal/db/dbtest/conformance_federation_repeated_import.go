@@ -1,6 +1,7 @@
 package dbtest
 
 import (
+	"context"
 	"encoding/json/v2"
 	"strings"
 	"testing"
@@ -86,7 +87,11 @@ func pushRepeatedImportBaselineWithFeatures(t *testing.T, hub db.Storage, projec
 	for index, event := range events {
 		batch = append(batch, db.FederationIngestEvent{SourceEventID: int64(index + 1), Event: event})
 	}
-	return hub.IngestFederationEvents(t.Context(), db.FederationIngestParams{
+	return pushRepeatedImportBaselineIn(t.Context(), hub, projectID, enrollmentID, spokeUID, batch, features)
+}
+
+func pushRepeatedImportBaselineIn(ctx context.Context, hub db.Storage, projectID, enrollmentID int64, spokeUID string, batch []db.FederationIngestEvent, features string) (db.FederationIngestResult, error) {
+	return hub.IngestFederationEvents(ctx, db.FederationIngestParams{
 		EventFeatures: features, ProjectID: projectID, FederationEnrollmentID: enrollmentID,
 		SpokeInstanceUID: spokeUID, BoundActor: "operator", AllowSnapshotAuthorPreservation: true,
 		AdoptionBaseline:                 db.FederationAdoptionBaselineComplete,
@@ -452,6 +457,16 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 	require.NoError(t, err)
 	result, err = pushRepeatedImportBaseline(t, hub, h.target.ID, newerEnrollment, newerOrigin, newer)
 	require.NoError(t, err, "a retry after the issue moved is still the adoption the hub consumed")
+	require.Zero(t, result.Accepted)
+	// A pushing home is allowed only its own project, so it cannot see where
+	// the issue went. Its retry is still the adoption the hub consumed.
+	retry := make([]db.FederationIngestEvent, 0, len(newer))
+	for index, event := range newer {
+		retry = append(retry, db.FederationIngestEvent{SourceEventID: int64(index + 1), Event: event})
+	}
+	result, err = pushRepeatedImportBaselineIn(db.WithAuthorizedProjects(ctx, []string{h.target.UID}), hub,
+		h.target.ID, newerEnrollment, newerOrigin, retry, db.SupportedEventFeatures)
+	require.NoError(t, err, "a retry that cannot see the moved issue is still the adoption the hub consumed")
 	require.Zero(t, result.Accepted)
 	moved, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
