@@ -337,7 +337,7 @@ func (a CronSQL) RunStats(ctx context.Context, in CronRunStatsQuery) ([]cron.Run
 			return nil, false, fmt.Errorf("%w: invalid %s", cron.ErrInvalid, filter.column)
 		}
 		args = append(args, value)
-		query.WriteString(fmt.Sprintf(" AND %s=$%d", filter.column, len(args)))
+		_, _ = fmt.Fprintf(&query, " AND %s=$%d", filter.column, len(args))
 	}
 	query.WriteString(" ORDER BY created_at DESC,uid DESC LIMIT 10001")
 	rows, err := a.Query.QueryContext(ctx, query.String(), args...)

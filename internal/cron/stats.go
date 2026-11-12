@@ -56,7 +56,7 @@ func SummarizeRuns(rows []RunStatRow, day bool, loc *time.Location) RunStatistic
 	out := RunStatistics{Scanned: len(rows), ByStatus: map[string]int{"running": 0, "succeeded": 0, "failed": 0, "cancelled": 0, "unknown": 0}}
 	var durations []float64
 	byDay := map[string]int{}
-	var daily []struct{ durations []float64 }
+	daily := []struct{ durations []float64 }{}
 	streak := true
 	for _, r := range rows {
 		out.ByStatus[r.Status]++
