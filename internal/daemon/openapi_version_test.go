@@ -58,6 +58,14 @@ func TestAPISchemaVersionMatchesRecordedContract(t *testing.T) {
 	require.NoError(t, checkAPIVersionRecord("testdata/api-contracts", APISchemaVersion, doc))
 }
 
+func TestAPIVersionRecordMustBeEmpty(t *testing.T) {
+	dir := t.TempDir()
+	doc := []byte(`{"info":{"version":""},"paths":{"/a":{}}}`)
+	name := "0.45.0.a796a0b24a661cae44ecfaf054e4e53ee32d80f219424fb40c319a1d036aba5f.sha256"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("content"), 0600))
+	require.ErrorContains(t, checkAPIVersionRecord(dir, "0.45.0", doc), name)
+}
+
 func checkAPIVersionRecord(dir, version string, doc []byte) error {
 	digest := sha256.Sum256(doc)
 	marker := fmt.Sprintf("%s.%x.sha256", version, digest)
@@ -77,6 +85,13 @@ func checkAPIVersionRecord(dir, version string, doc []byte) error {
 		recorded := "v" + strings.Join(parts[:3], ".")
 		if !semver.IsValid(recorded) {
 			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() || info.Size() != 0 {
+			return fmt.Errorf("API contract record must be an empty regular file: %s", filepath.Join(dir, name))
 		}
 		if semver.Compare(recorded, next) > 0 {
 			next = recorded
