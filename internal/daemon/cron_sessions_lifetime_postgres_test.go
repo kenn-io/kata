@@ -63,10 +63,10 @@ func TestCronAdmissionOutlivesProbeContextAcrossPostgresStores(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, project.UID)
 	}))
 	t.Cleanup(hub.Close)
-	_, err = writer.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: 42, HubProjectUID: project.UID, Enabled: true, PushEnabled: true})
+	_, err = writer.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: 42, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
 	require.NoError(t, err)
 	credentials := newReplicaCredentialStore()
-	credentials.put(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "enrollment-token"})
+	credentials.put(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "enrollment-token", Actor: "worker"})
 	probeDone := make(chan (<-chan struct{}), 1)
 	paused := &pausedSessionObservation{Storage: writer, store: writer, entered: make(chan struct{}), resume: make(chan struct{})}
 	cfg := forwardingTestConfig(daemon.ServerConfig{DB: paused, FederationCredentials: credentials})
