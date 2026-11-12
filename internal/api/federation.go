@@ -45,8 +45,9 @@ type FederationStatusRequest struct {
 // ProjectFederationStatusRequest reads status for one locally bound
 // federation project through the normal local/admin daemon auth surface.
 type ProjectFederationStatusRequest struct {
-	ProjectID int64 `path:"project_id"`
-	Compact   bool  `query:"compact,omitempty" doc:"Omit relay checkpoint capacity measurement and replace non-empty sync error text with a fixed marker. Full status retains the error details."`
+	ProjectID  int64 `path:"project_id"`
+	Compact    bool  `query:"compact,omitempty" doc:"Omit relay checkpoint capacity measurement. Error details are unchanged unless omit_errors is also set."`
+	OmitErrors bool  `query:"omit_errors,omitempty" doc:"Remove error text from the status: the sync error, held-back batch errors, the embedding producer error, and the relay checkpoint error. State, timestamps, and counts remain, and has_sync_error reports whether a sync error was removed."`
 }
 
 // SkipFederationQuarantineRequest skips one quarantined federation batch
@@ -161,6 +162,7 @@ type FederationProjectStatus struct {
 	LastPushSuccessAt           *time.Time                    `json:"last_push_success_at,omitempty"`
 	LastErrorAt                 *time.Time                    `json:"last_error_at,omitempty"`
 	LastError                   *string                       `json:"last_error,omitempty"`
+	HasSyncError                bool                          `json:"has_sync_error,omitempty" doc:"True when a sync error was recorded and omit_errors removed its text."`
 	LastResetAt                 *time.Time                    `json:"last_reset_at,omitempty"`
 }
 

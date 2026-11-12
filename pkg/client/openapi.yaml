@@ -2659,6 +2659,9 @@ components:
         enrollment_count:
           format: int64
           type: integer
+        has_sync_error:
+          description: True when a sync error was recorded and omit_errors removed its text.
+          type: boolean
         hub_project_id:
           format: int64
           type: integer
@@ -9829,12 +9832,19 @@ paths:
           schema:
             format: int64
             type: integer
-        - description: Omit relay checkpoint capacity measurement and replace non-empty sync error text with a fixed marker. Full status retains the error details.
+        - description: Omit relay checkpoint capacity measurement. Error details are unchanged unless omit_errors is also set.
           explode: false
           in: query
           name: compact
           schema:
-            description: Omit relay checkpoint capacity measurement and replace non-empty sync error text with a fixed marker. Full status retains the error details.
+            description: Omit relay checkpoint capacity measurement. Error details are unchanged unless omit_errors is also set.
+            type: boolean
+        - description: "Remove error text from the status: the sync error, held-back batch errors, the embedding producer error, and the relay checkpoint error. State, timestamps, and counts remain, and has_sync_error reports whether a sync error was removed."
+          explode: false
+          in: query
+          name: omit_errors
+          schema:
+            description: "Remove error text from the status: the sync error, held-back batch errors, the embedding producer error, and the relay checkpoint error. State, timestamps, and counts remain, and has_sync_error reports whether a sync error was removed."
             type: boolean
       responses:
         "200":

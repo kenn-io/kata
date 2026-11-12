@@ -249,8 +249,11 @@ func (o OfferRelayDeliveriesQuery) Validate() error {
 }
 
 type GetProjectFederationStatusQuery struct {
-	// Compact Omit relay checkpoint capacity measurement and replace non-empty sync error text with a fixed marker. Full status retains the error details.
+	// Compact Omit relay checkpoint capacity measurement. Error details are unchanged unless omit_errors is also set.
 	Compact *bool `json:"compact,omitempty"`
+
+	// OmitErrors Remove error text from the status: the sync error, held-back batch errors, the embedding producer error, and the relay checkpoint error. State, timestamps, and counts remain, and has_sync_error reports whether a sync error was removed.
+	OmitErrors *bool `json:"omit_errors,omitempty"`
 }
 
 type ListIssuesQuery struct {

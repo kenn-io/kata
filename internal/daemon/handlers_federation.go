@@ -221,7 +221,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := addFederationRootSigningStatus(ctx, cfg, &body); err != nil {
 			return nil, err
 		}
-		if err := finishFederationProjectStatus(ctx, cfg, &body, in.Compact); err != nil {
+		if err := finishFederationProjectStatus(ctx, cfg, &body, in.Compact, in.OmitErrors); err != nil {
 			return nil, err
 		}
 		return &api.FederationStatusResponse{Body: body}, nil
@@ -1459,23 +1459,36 @@ func federationStatusBindings(ctx context.Context, store db.Storage, projectID *
 	return []db.FederationBinding{binding}, nil
 }
 
-// compactSyncErrorMarker stands in for a sync error's text in compact status,
-// which the browser reads; the full text stays in the CLI's status.
-const compactSyncErrorMarker = "details withheld; run kata federation status"
-
 // finishFederationProjectStatus completes a project status. Compact reads skip
-// relay checkpoint measurement and report a sync error without its text.
-func finishFederationProjectStatus(ctx context.Context, cfg ServerConfig, body *api.FederationStatusBody, compact bool) error {
+// relay checkpoint measurement; omitErrors then removes error text, which the
+// browser must not receive.
+func finishFederationProjectStatus(ctx context.Context, cfg ServerConfig, body *api.FederationStatusBody, compact, omitErrors bool) error {
 	if !compact {
-		return addFederationRelayCapacityStatus(ctx, cfg, body)
-	}
-	for i := range body.Statuses {
-		if e := body.Statuses[i].LastError; e != nil && *e != "" {
-			marker := compactSyncErrorMarker
-			body.Statuses[i].LastError = &marker
+		if err := addFederationRelayCapacityStatus(ctx, cfg, body); err != nil {
+			return err
 		}
 	}
+	if omitErrors {
+		omitFederationStatusErrors(body.Statuses)
+	}
 	return nil
+}
+
+// omitFederationStatusErrors clears every error text in statuses and flags a
+// removed sync error so readers can still show that attention is needed.
+func omitFederationStatusErrors(statuses []api.FederationProjectStatus) {
+	for i := range statuses {
+		s := &statuses[i]
+		s.HasSyncError = s.LastError != nil && *s.LastError != ""
+		s.LastError = nil
+		s.RelayCheckpointError = ""
+		if s.Embedding != nil {
+			s.Embedding.LastError = ""
+		}
+		for j := range s.ActiveQuarantines {
+			s.ActiveQuarantines[j].Error = ""
+		}
+	}
 }
 
 func federationProjectStatus(

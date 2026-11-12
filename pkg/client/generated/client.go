@@ -5662,7 +5662,8 @@ func (c *Client) GetProjectFederationStatus(ctx context.Context, options *GetPro
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"compact": {Style: "form", Explode: &[]bool{false}[0]},
+		"compact":     {Style: "form", Explode: &[]bool{false}[0]},
+		"omit_errors": {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/status",
