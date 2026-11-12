@@ -106,6 +106,7 @@ type EnsureFederationReplicaParams struct {
 	ManagedReservation         *FederationReplicaManagedReservation
 	ProjectEventSink           func(db.Event)
 	ProjectResetSink           func(projectID, cursor int64)
+	HubClientFactory           FederationHubClientFactory
 	PushEnabled, AdoptExisting bool
 	AttachEmpty                bool
 	Relay                      *api.RelayHandshake

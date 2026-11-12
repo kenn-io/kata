@@ -1147,6 +1147,7 @@ func convergeLocalMapping(
 	}
 
 	params := daemon.EnsureFederationReplicaParams{
+		HubClientFactory:     CredentialHTTPClient,
 		HubURL:               preflight.hubBaseURL,
 		HubProjectID:         preflight.hubProject.ID,
 		HubProjectUID:        preflight.hubProject.UID,

@@ -663,6 +663,11 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	_, err = s.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: p.ID, UID: runUID, JobUID: &adapter.UID, DefinitionEventUID: &adapter.DefinitionEventUID, Actor: "operator", Status: "succeeded", Summary: cron.Summary{Version: 1}})
 	require.NoError(t, err)
 	probe := &recurringCountingProbe{recurringProbeQuerier: s.(recurringProbeQuerier)}
+	hasSessions, err := db.ProjectHasCronRunSessions(ctx, probe, p.UID)
+	require.NoError(t, err)
+	require.False(t, hasSessions)
+	require.Equal(t, []int{0}, probe.sessionCandidates)
+	probe.sessionCandidates = nil
 	features, err := db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
 	require.Equal(t, db.CronEventFeature, features)
@@ -672,6 +677,11 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	}).ExecContext(ctx, `UPDATE cron_runs SET summary_json=$1 WHERE uid=$2`, `{"version":1,"\u0073essions_incomplete":true}`, runUID)
 	require.NoError(t, err)
+	probe.sessionCandidates = nil
+	hasSessions, err = db.ProjectHasCronRunSessions(ctx, probe, p.UID)
+	require.NoError(t, err)
+	require.True(t, hasSessions, "escaped session keys must be found")
+	require.Equal(t, []int{1}, probe.sessionCandidates)
 	probe.sessionCandidates = nil
 	features, err = db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)

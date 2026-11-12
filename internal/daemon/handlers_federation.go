@@ -589,6 +589,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			cfg.federationCredentialStore(),
 			cfg.FederationWake,
 			EnsureFederationReplicaParams{
+				HubClientFactory:     cfg.FederationHubClient,
 				HubURL:               in.Body.HubURL,
 				HubProjectID:         in.Body.HubProjectID,
 				HubProjectUID:        in.Body.HubProjectUID,

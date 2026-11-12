@@ -199,6 +199,47 @@ func EventRequiredFeatures(kind string) string {
 	return ""
 }
 
+// ProjectHasCronRunSessions scans retained run summaries for session evidence.
+// Escaped JSON keys remain candidates, as in the native cron probe.
+func ProjectHasCronRunSessions(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, projectUID string) (bool, error) {
+	rows, err := q.QueryContext(ctx, `SELECT r.summary_json FROM cron_runs r JOIN projects p ON p.id=r.project_id WHERE p.uid=$1 AND (r.summary_json LIKE '%"sessions%' OR r.summary_json LIKE '%\u%' ESCAPE '!')`, projectUID)
+	if err != nil {
+		return false, err
+	}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			_ = rows.Close()
+			return false, err
+		}
+		has, err := summaryHasSessionFields(jsontext.Value(raw))
+		if err != nil {
+			_ = rows.Close()
+			return false, err
+		}
+		if has {
+			if err := rows.Err(); err != nil {
+				_ = rows.Close()
+				return false, err
+			}
+			if err := rows.Close(); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return false, err
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
 // ProjectRequiredEventFeatures inspects current cron data and native issue state.
 func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
@@ -220,33 +261,12 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
 	}
 	if cronPresent {
-		// Escaped JSON keys remain candidates, as in the native cron probe.
-		rows, err := q.QueryContext(ctx, `SELECT r.summary_json FROM cron_runs r JOIN projects p ON p.id=r.project_id WHERE p.uid=$1 AND (r.summary_json LIKE '%"sessions%' OR r.summary_json LIKE '%\u%' ESCAPE '!')`, projectUID)
+		hasSessions, err := ProjectHasCronRunSessions(ctx, q, projectUID)
 		if err != nil {
 			return "", err
 		}
-		for rows.Next() {
-			var raw string
-			if err := rows.Scan(&raw); err != nil {
-				_ = rows.Close()
-				return "", err
-			}
-			has, err := summaryHasSessionFields(jsontext.Value(raw))
-			if err != nil {
-				_ = rows.Close()
-				return "", err
-			}
-			if has {
-				required = MergeEventFeatures(required, CronRunSessionsEventFeature)
-				break
-			}
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return "", err
-		}
-		if err := rows.Close(); err != nil {
-			return "", err
+		if hasSessions {
+			required = MergeEventFeatures(required, CronRunSessionsEventFeature)
 		}
 		required = MergeEventFeatures(required, CronEventFeature)
 		if _, cached := nativeProjectFeatureCache.Load(projectUID); cached {
