@@ -17,3 +17,7 @@ func SetEmbeddingProducerClockForTest(now func() time.Time) func() {
 	producerNow = now
 	return func() { producerNow = previous }
 }
+
+// SetRefusalClockForTest replaces the clock that schedules this runner's relay
+// refusal retries.
+func (r *Runner) SetRefusalClockForTest(now func() time.Time) { r.refusalClock = now }
