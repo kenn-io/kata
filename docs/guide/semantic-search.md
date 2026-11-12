@@ -41,7 +41,7 @@ Kata can run a shared local embeddings server or use an OpenAI-compatible
 
 ## Enabling it
 
-Open `kata ui`, click the gear in the top bar, and choose **Turn on** under **Search by meaning**. Settings applies to every project on the daemon. Turn on downloads what is missing and saves the setting. When offered, choose **Restart daemon** and confirm. Every project and client on the daemon disconnects briefly. A stable browser address reconnects; otherwise run `kata ui` to reopen it. If the daemon uses a custom home, set `KATA_HOME` first. A local owner session or a daemon access administrator can use the action. Other viewers, including viewers connected through the daemon switcher, see the status.
+Open `kata ui`, click the gear in the top bar, and choose **Turn on** under **Search by meaning**. Settings applies to every project on the daemon. Turn on downloads what is missing and saves the setting. When offered, choose **Restart daemon** and confirm. Every project and client on the daemon disconnects briefly. At a stable browser address, a direct local session reconnects; token-login users log in again. If the address changes, run `kata ui` to reopen it. If the daemon uses a custom home, set `KATA_HOME` first. A local owner session or a daemon access administrator can use the action. Other viewers, including viewers connected through the daemon switcher, see the status.
 
 If Settings cannot restart the daemon, run `kata daemon restart` on its host, or use its service manager. Reopen `kata ui` to see indexing progress and errors while it retries.
 

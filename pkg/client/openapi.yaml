@@ -4322,6 +4322,8 @@ components:
             - built_in
             - other
           type: string
+        restart_in_progress:
+          type: boolean
       required:
         - provider
         - download_bytes

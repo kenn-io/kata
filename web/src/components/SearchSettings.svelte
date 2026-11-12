@@ -68,15 +68,18 @@
   let row = $derived(turning ? turningOn : base)
   let count = $derived(row?.kind === 'indexing' ? row.total : 0)
   let restartLabels = $derived({
-    off: restartPending ? 'Restarting...' : 'Turning on',
+    off: restartPending || status?.restart_in_progress ? 'Restarting...' : 'Turning on',
     turnOn: 'Restart daemon',
-    downloaded: remoteHost
-      ? `Restart the daemon on ${remoteHost} to finish.`
-      : (status?.can_restart && canAdministerDaemon) || restartPending
-        ? originStable
-          ? ''
-          : reopenGuidance
-        : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
+    downloaded:
+      status?.restart_in_progress && !restartPending
+        ? ''
+        : remoteHost
+          ? `Restart the daemon on ${remoteHost} to finish.`
+          : (status?.can_restart && canAdministerDaemon) || restartPending
+            ? originStable
+              ? ''
+              : reopenGuidance
+            : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
   })
   let failure = $derived(
     requestError ??

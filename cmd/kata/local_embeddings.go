@@ -538,7 +538,7 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 		job := *s.job
 		status.Job = &job
 	}
-	status.CanRestart = s.restart != nil && s.job != nil && s.job.State == "restart" && !s.restarting
+	status.CanRestart, status.RestartInProgress = s.restart != nil && s.job != nil && s.job.State == "restart" && !s.restarting, s.restarting
 	s.mu.Unlock()
 	status.CanChange = status.Provider == "none" && (status.Job == nil || status.Job.State == "failed")
 	return status, nil

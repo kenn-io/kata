@@ -41,6 +41,34 @@ describe('SearchSettings', () => {
     vi.useRealTimers()
   })
 
+  test.each([
+    [true, undefined],
+    [false, undefined],
+    [true, 'daemon.example'],
+    [false, 'daemon.example'],
+  ])(
+    'shows another tab restarting for admin=%s and host=%s',
+    async (canAdministerDaemon, remoteHost) => {
+      vi.useFakeTimers()
+      setGeneratedFetch(
+        vi.fn(async () =>
+          Response.json({
+            ...status({
+              can_change: false,
+              can_restart: false,
+              job: { state: 'restart', downloaded: 1, total: 1 },
+            }),
+            restart_in_progress: true,
+          }),
+        ),
+      )
+      const { container } = renderSettings({ canAdministerDaemon, remoteHost })
+      await settle()
+      expect(screen.getByText('Restarting...')).not.toBeNull()
+      expect(container.textContent).not.toContain('Restart the daemon')
+    },
+  )
+
   test('confirms a restart and shows On when the daemon returns', async () => {
     vi.useFakeTimers()
     const waiting = status({

@@ -13,5 +13,6 @@ export interface LocalEmbeddingsStatus {
   job?: LocalEmbeddingsJob
   ollama_available: boolean
   provider: LocalEmbeddingsStatusProvider
+  restart_in_progress?: boolean
   [key: string]: unknown
 }

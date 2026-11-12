@@ -112,8 +112,9 @@ func TestLocalEmbeddingsRestart(t *testing.T) {
 			body, err := jsonv2.Marshal(status)
 			require.NoError(t, err)
 			var olderClient struct {
-				Provider string `json:"provider"`
-				Job      struct {
+				Provider          string `json:"provider"`
+				RestartInProgress bool   `json:"restart_in_progress"`
+				Job               struct {
 					State      string `json:"state"`
 					Downloaded int64  `json:"downloaded"`
 					Total      int64  `json:"total"`
@@ -121,6 +122,7 @@ func TestLocalEmbeddingsRestart(t *testing.T) {
 			}
 			require.NoError(t, jsonv2.Unmarshal(body, &olderClient))
 			require.Equal(t, "none", olderClient.Provider)
+			require.True(t, olderClient.RestartInProgress)
 			require.Equal(t, "restart", olderClient.Job.State)
 			require.Equal(t, int64(42), olderClient.Job.Downloaded)
 			require.Equal(t, int64(42), olderClient.Job.Total)

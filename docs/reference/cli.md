@@ -1964,12 +1964,11 @@ environment, using the installed executable invoked by the CLI and retaining
 its startup options, credentials, network, and idle policy. The CLI and daemon
 must see the same process IDs and executable paths. Separate PID or filesystem
 views can prevent daemon discovery or executable handoff. The selected
-executable validates configuration in the
-daemon's environment before stopping it. Configuration validation errors leave
-the daemon serving; listener binding happens during replacement startup.
-Explicit restart flags override startup options and persist through later
-restarts. `kata daemon stop` followed by `kata daemon start` clears these
-overrides and uses the current startup settings.
+executable validates configuration in the daemon's environment before stopping
+it. Configuration validation errors leave the daemon serving; listener binding
+happens during replacement startup. Explicit restart flags override startup
+options and persist through later restarts. `kata daemon stop` followed by
+`kata daemon start` clears these overrides and uses the current startup settings.
 
 `kata daemon local-embeddings` configures semantic search for the current
 `KATA_HOME` and rejects `--daemon`. A home without embeddings configured uses
