@@ -59,14 +59,7 @@ func (s Source) Load() ([]byte, error) {
 		}
 		b = []byte(value)
 	} else {
-		info, err := os.Stat(s.KeyFile)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, ErrKeyRejected
-		}
-		if err != nil || !info.Mode().IsRegular() {
-			return nil, ErrKey
-		}
-		f, err := os.Open(s.KeyFile) //nolint:gosec // G304: operator-configured secret source.
+		f, err := openKeyFile(s.KeyFile)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return nil, ErrKeyRejected
@@ -74,7 +67,7 @@ func (s Source) Load() ([]byte, error) {
 			return nil, ErrKey
 		}
 		defer func() { _ = f.Close() }()
-		info, err = f.Stat()
+		info, err := f.Stat()
 		if err != nil || !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0) {
 			return nil, ErrKey
 		}
