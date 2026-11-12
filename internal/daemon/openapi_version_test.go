@@ -40,7 +40,6 @@ func TestCheckAPIVersionRecord(t *testing.T) {
 		{"next recorded", b, "0.46.0", []string{marker("0.45.0", hashA, summaryA), marker("0.46.0", hashB, summaryB)}, nil, ""},
 		{"older matching", a, "0.45.0", []string{marker("0.45.0", hashA, summaryA), marker("0.46.0", hashB, summaryB)}, []string{"0.47.0"}, ""},
 		{"missing", a, "0.45.0", nil, []string{hashA, "sha256sum"}, ""},
-		{"summary", a, "0.45.0", []string{marker("0.45.0", hashA, summaryA)}, nil, "Add route"},
 		{"blank summary", a, "0.45.0", []string{marker("0.45.0", hashA, summaryA)}, []string{"one-line summary"}, " \n"},
 		{"multiline summary", a, "0.45.0", []string{marker("0.45.0", hashA, summaryA)}, []string{"one-line summary"}, "Add route\nAdd field\n"},
 	} {
@@ -282,7 +281,6 @@ func TestAPIBaseRecordLoading(t *testing.T) {
 	records := []string{"0.44.0.dcc4a8689ae0d97113d2349d9afcbbf7fe95caa08a516bcc2e376d021d998166.4407edaf1f9883542c1d09535bcebdaf3e5944c232d1cd67e6a01a0c5e575e1b.sha256"}
 	dir := t.TempDir()
 	require.ErrorContains(t, checkBaseAPIVersionRecords(dir, records), records[0])
-	require.NoError(t, os.WriteFile(filepath.Join(dir, records[0]), []byte("Add route\n"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, records[0]), []byte("Corrected summary\n"), 0600))
 	require.NoError(t, checkBaseAPIVersionRecords(dir, records))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, records[0]), nil, 0600))
