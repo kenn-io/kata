@@ -227,10 +227,7 @@ func TestLocalEmbeddingsTurnOnChoiceWriteFailure(t *testing.T) {
 	setup := &localEmbeddingsSetup{start: func(work func(context.Context)) bool { run = work; return true }}
 	require.NoError(t, setup.TurnOn(t.Context()))
 	run(t.Context())
-	status, err := setup.Status(t.Context())
-	require.NoError(t, err)
-	require.NotNil(t, status.Job)
-	require.Equal(t, "restart", status.Job.State)
+	require.Equal(t, "restart", setup.job.State)
 }
 
 func TestSharedChoiceDaemonStartup(t *testing.T) {
