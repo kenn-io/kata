@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
@@ -43,6 +44,7 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 		switch resource {
 		case "job":
 			group.Short = "manage recurring issue and adapter job definitions"
+			group.AddCommand(newCronOperationCmd(resource, "next"))
 			group.Long = "Manage shared jobs. Enabled notify jobs with a per-run parent issue are delivered by the owning daemon; other jobs require an external adapter."
 		case "workflow":
 			group.Long = "Manage reusable command or prompt steps. For issue stages with human approval, see docs/workflows/gated-workflows.md."
@@ -70,10 +72,11 @@ type cronCLIOptions struct {
 	includeDeleted                   bool
 	limit                            int64
 	beforeUID, jobUID                string
+	from                             string
 }
 
 func (o cronCLIOptions) mutation() bool {
-	return o.action != "list" && o.action != "show" && o.action != "edit"
+	return o.action != "list" && o.action != "show" && o.action != "edit" && o.action != "next"
 }
 func (o cronCLIOptions) definition() bool { return o.resource == "job" || o.resource == "workflow" }
 func newCronOperationCmd(resource, action string) *cobra.Command {
@@ -122,6 +125,11 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 		command.Flags().StringVar(&options.beforeUID, "before-uid", "", "run UID cursor from next_before_uid")
 		command.Flags().StringVar(&options.jobUID, "job-uid", "", "list only runs of this job")
 	}
+	if resource == "job" && action == "next" {
+		command.Short = "preview future occurrences of a saved job without changing it"
+		command.Flags().Int64Var(&options.limit, "count", 3, "number of future occurrences (1–100)")
+		command.Flags().StringVar(&options.from, "from", "", "RFC3339 lower bound (defaults to now)")
+	}
 	return command
 }
 
@@ -129,6 +137,9 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 func cronOperationHelp(resource, action string) (string, string) {
 	cmd := "kata cron " + resource + " " + action
 	switch resource + " " + action {
+	case "job next":
+		return `Preview future times from a saved job and its delivery progress.
+--from cannot rewind delivered progress. Adapter times are triggers and do not promise execution.`, "  " + cmd + " <job-uid> --count 3 --json\n  " + cmd + " <job-uid> --from 2026-11-08T12:00:00Z"
 	case "capabilities show":
 		return `Show whether the daemon supports shared cron and recurring child issues for
 this project (cron_v1 covers all cron features). Reads only; creates no cron state.`, "  kata cron capabilities --json"
@@ -219,6 +230,9 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if cmd.Flags().Changed("parent") && strings.TrimSpace(o.parent) == "" {
 		return cronCLIValidation("--parent must not be empty")
 	}
+	if o.action == "next" && o.identity == "" {
+		return cronCLIValidation("cron identity must be a 26-character ULID")
+	}
 	for _, value := range []*string{&o.identity, &o.beforeUID, &o.jobUID} {
 		if *value != "" {
 			normalized, err := normalizedCronCLIUID(*value)
@@ -229,7 +243,18 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 		}
 	}
 	if o.limit < 1 || o.limit > 100 {
+		if o.action == "next" {
+			return cronCLIValidation("count must be between 1 and 100")
+		}
 		return cronCLIValidation("limit must be between 1 and 100")
+	}
+	from := time.Now().UTC()
+	if o.action == "next" && cmd.Flags().Changed("from") {
+		var err error
+		from, err = time.Parse(time.RFC3339, o.from)
+		if err != nil {
+			return cronCLIValidation("from must be RFC3339")
+		}
 	}
 	var body []byte
 	if o.mutation() {
@@ -281,6 +306,13 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	}
 	if o.action == "edit" {
 		return o.edit(cmd.Context(), cmd, daemon, client, project.ID)
+	}
+	if o.action == "next" {
+		result, err := readCronNext(daemon, client, project.ID, o.identity, from, int(o.limit))
+		if err != nil {
+			return err
+		}
+		return emitCronNext(cmd, result)
 	}
 	raw, err := o.call(daemon, client, project.ID, body)
 	if err != nil {

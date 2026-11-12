@@ -65,10 +65,18 @@ func portableKey(value string) bool {
 	return true
 }
 
-// Validate checks the portable job contract without granting execution.
-func (j JobDefinition) Validate() error {
+// ValidateVersion rejects stored definitions this client cannot interpret.
+func (j JobDefinition) ValidateVersion() error {
 	if j.Version != 1 {
 		return invalid("unsupported job version")
+	}
+	return nil
+}
+
+// Validate checks the portable job contract without granting execution.
+func (j JobDefinition) Validate() error {
+	if err := j.ValidateVersion(); err != nil {
+		return err
 	}
 	if j.Kind != "job" {
 		return invalid("unknown job kind")

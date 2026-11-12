@@ -33,7 +33,7 @@ func cronFixture(t *testing.T) Model {
 		DefinitionEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB2", DefinitionHlc: clock,
 		Definition: generated.CronJobDefinitionResponse{
 			Version: 1, Kind: "job", Enabled: true,
-			Trigger: generated.TriggerResponse{Kind: "cron", Cron: new("0 7 * * *")},
+			Trigger: generated.TriggerResponse{Kind: "cron", Cron: new("0 7 * * *"), Timezone: new("UTC")},
 			Action:  generated.ActionResponse{Kind: "execute", WorkflowUID: new("01ARZ3NDEKTSV4RRFFQ69G5FAW")},
 			Issue:   &generated.IssuePolicyResponse{Kind: "per-run", Title: new("Summary result")},
 			Overlap: "forbid", Catchup: "skip",

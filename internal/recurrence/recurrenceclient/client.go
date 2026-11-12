@@ -7,6 +7,7 @@ package recurrenceclient
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -199,6 +200,31 @@ func statusErr(status int, body []byte, httpResp *http.Response, callErr error) 
 		e.Method, e.URI = httpResp.Request.Method, httpResp.Request.URL.RequestURI()
 	}
 	return e
+}
+
+// CronParent is the observed parent and its retained cron metadata.
+type CronParent struct {
+	Status    string                    `json:"status"`
+	DeletedAt *time.Time                `json:"deleted_at"`
+	Metadata  map[string]jsontext.Value `json:"metadata"`
+}
+
+// ReadCronParent reads a parent including its deletion and checkpoint state.
+func ReadCronParent(ctx context.Context, api *generated.Client, projectID int64, uid string) (CronParent, error) {
+	response, callErr := api.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{PathParams: &generated.ShowIssuePath{ProjectID: projectID, Ref: uid}, Query: &generated.ShowIssueQuery{IncludeDeleted: new(true)}})
+	if response == nil {
+		return CronParent{}, callErr
+	}
+	if err := statusErr(response.StatusCode, response.Body, response.HTTPResponse, callErr); err != nil {
+		return CronParent{}, err
+	}
+	var envelope struct {
+		Issue CronParent `json:"issue"`
+	}
+	if err := json.Unmarshal(response.Body, &envelope); err != nil {
+		return CronParent{}, fmt.Errorf("decode cron parent: %w", err)
+	}
+	return envelope.Issue, nil
 }
 
 // List reads the project's live recurrences.

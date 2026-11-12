@@ -12,6 +12,7 @@ import (
 	kataapi "go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -112,34 +113,26 @@ func (c *Client) readCronParent(ctx context.Context, projectID int64, parentUID 
 	if err != nil {
 		return cronParent{}, err
 	}
-	wire, callErr := client.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{
-		PathParams: &generated.ShowIssuePath{ProjectID: projectID, Ref: parentUID},
-		Query:      &generated.ShowIssueQuery{IncludeDeleted: new(true)},
-	})
-	if wire == nil {
-		return cronParent{}, callErr
+	parent, err := recurrenceclient.ReadCronParent(ctx, client, projectID, parentUID)
+	if status, ok := errors.AsType[*recurrenceclient.StatusError](err); ok {
+		return cronParent{}, decodeError(status.Body, status.Status, status.Method, status.URI)
 	}
-	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
+	if err != nil {
 		return cronParent{}, err
 	}
-	issue := wire.JSON200.Issue
-	return cronParent{open: issue.Status == "open" && issue.DeletedAt == nil, progress: cronProgressFromMetadata(issue.Metadata)}, nil
+	return cronParent{open: parent.Status == "open" && parent.DeletedAt == nil, progress: cronProgressFromMetadata(parent.Metadata)}, nil
 }
 
 // cronProgressFromMetadata decodes each cron.progress.<job-uid> value. An entry
 // that does not decode is skipped, so only its own job loses the preview.
-func cronProgressFromMetadata(metadata map[string]any) map[string]cron.RecurringProgress {
+func cronProgressFromMetadata(metadata map[string]jsontext.Value) map[string]cron.RecurringProgress {
 	out := map[string]cron.RecurringProgress{}
 	for key, value := range metadata {
-		jobUID, ok := strings.CutPrefix(key, "cron.progress.")
+		jobUID, ok := strings.CutPrefix(key, recurrenceclient.CronProgressPrefix)
 		if !ok {
 			continue
 		}
-		raw, err := json.Marshal(value)
-		if err != nil {
-			continue
-		}
-		if progress, err := cron.DecodeRecurringProgress(raw); err == nil {
+		if progress, err := cron.DecodeRecurringProgress(value); err == nil {
 			out[jobUID] = progress
 		}
 	}

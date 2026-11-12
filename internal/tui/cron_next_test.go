@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
@@ -38,6 +39,8 @@ func nextRunsDetailParent(t *testing.T, now string, edit func(*generated.CronJob
 	m.cron.data.jobs[0].Definition = def
 	if progress != nil {
 		m.cron.data.progress = map[string]cron.RecurringProgress{nextJobUID: *progress}
+	}
+	if progress != nil || !parentOpen {
 		m.cron.data.parentOpen = map[string]bool{nextParentUID: parentOpen}
 	}
 	m = sendKey(m, tea.KeyEnter)
@@ -118,6 +121,12 @@ func TestCronJobDetailAdapterTriggerTimes(t *testing.T) {
 	}, nil)
 	require.NotContains(t, got, "Triggers:")
 	require.NotContains(t, got, "Next:")
+	got = nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
+		d.Trigger = generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))}
+		d.Enabled = false
+	}, nil)
+	require.NotContains(t, got, "Triggers:")
+	require.NotContains(t, got, "Next:")
 }
 
 func TestCronJobDetailPausedJobHasNoNextRuns(t *testing.T) {
@@ -130,6 +139,12 @@ func TestCronJobDetailPausedJobHasNoNextRuns(t *testing.T) {
 	require.Regexp(t, `Next:\s+none while paused`, got)
 
 	got = nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) { d.Enabled = false }, nil)
+	require.Regexp(t, `Triggers:\s+none while paused`, got)
+
+	got = nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
+		d.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new("0 0 30 2 *")}
+		d.Enabled = false
+	}, nil)
 	require.Regexp(t, `Triggers:\s+none while paused`, got)
 
 	for _, native := range []bool{false, true} {
@@ -151,6 +166,8 @@ func TestCronJobDetailNativeClosedParentHasNoNextRuns(t *testing.T) {
 	got := nextRunsDetailParent(t, "2026-06-01T05:00:00Z", nativeNotify(generated.TriggerResponse{Kind: "cron", Cron: new("0 7 * * *")}), &progress, false)
 	require.Regexp(t, `Next:\s+none while the parent is closed`, got)
 	require.NotContains(t, got, "2026-06-02 07:00")
+	got = nextRunsDetailParent(t, "2026-06-01T05:00:00Z", nativeNotify(generated.TriggerResponse{Kind: "cron", Cron: new("0 7 * * *")}), nil, false)
+	require.Regexp(t, `Next:\s+unavailable`, got)
 }
 
 func TestCronJobDetailAdapterCronUsesOwnGrammar(t *testing.T) {
@@ -163,6 +180,25 @@ func TestCronJobDetailAdapterCronUsesOwnGrammar(t *testing.T) {
 	}, nil)
 	require.NotContains(t, got, "Triggers:")
 	require.NotContains(t, got, "unavailable")
+}
+
+func TestCronJobDetailLocalCron(t *testing.T) {
+	previous := time.Local
+	time.Local = time.FixedZone("adapter", -4*3600)
+	t.Cleanup(func() { time.Local = previous })
+	progress := cron.RecurringProgress{Version: 1, Anchor: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), Through: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)}
+	got := nextRunsDetail(t, "2026-06-01T05:00:00Z", nativeNotify(generated.TriggerResponse{Kind: "cron", Cron: new("0 9 * * *"), Timezone: new("Local")}), &progress)
+	require.Regexp(t, `Next:\s+2026-06-01 09:00 UTC`, got)
+	require.Contains(t, got, "2026-06-02 09:00 UTC")
+	require.Contains(t, got, "2026-06-03 09:00 UTC")
+	got = nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
+		d.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new("TZ=Local 0 9 * * *")}
+	}, nil)
+	require.Regexp(t, `Triggers:\s+unavailable`, got)
+	got = nextRunsDetail(t, "2026-06-01T05:00:00Z", func(d *generated.CronJobDefinitionResponse) {
+		d.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new("0 9 * * *")}
+	}, nil)
+	require.Regexp(t, `Triggers:\s+unavailable`, got)
 }
 
 func TestCronScheduleNamesDeadlineLead(t *testing.T) {
@@ -308,13 +344,12 @@ func TestCronClientReportsClosedParent(t *testing.T) {
 }
 
 func TestCronProgressSkipsOneCorruptEntry(t *testing.T) {
-	good := map[string]any{"version": 1, "anchor": "2026-06-01T00:00:00Z", "through": "2026-06-01T00:00:00Z"}
-	got := cronProgressFromMetadata(map[string]any{
-		"cron.progress." + nextJobUID: good,
-		"cron.progress.BROKEN":        map[string]any{"version": "one", "anchor": 12},
-		"cron.progress.UNKNOWN":       map[string]any{"version": 1, "anchor": "2026-06-01T00:00:00Z", "through": "2026-06-01T00:00:00Z", "future": true},
-		"cron.progress.NEWER":         map[string]any{"version": 2, "anchor": "2026-06-01T00:00:00Z", "through": "2026-06-01T00:00:00Z"},
-		"cron.occurrence":             "ignored",
+	got := cronProgressFromMetadata(map[string]jsontext.Value{
+		"cron.progress." + nextJobUID: jsontext.Value(`{"version":1,"anchor":"2026-06-01T00:00:00Z","through":"2026-06-01T00:00:00Z"}`),
+		"cron.progress.BROKEN":        jsontext.Value(`{"version":"one"}`),
+		"cron.progress.UNKNOWN":       jsontext.Value(`{"version":1,"anchor":"2026-06-01T00:00:00Z","through":"2026-06-01T00:00:00Z","future":true}`),
+		"cron.progress.NEWER":         jsontext.Value(`{"version":2,"anchor":"2026-06-01T00:00:00Z","through":"2026-06-01T00:00:00Z"}`),
+		"cron.occurrence":             jsontext.Value(`"ignored"`),
 	})
 	require.Len(t, got, 1, "a corrupt checkpoint hides only its own job")
 	require.Contains(t, got, nextJobUID)

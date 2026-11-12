@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Preview a saved job’s next times with `kata cron job next`. `Local` times display in UTC; adapter cron schedules with `Local` or no timezone are unavailable. See [Cron](reference/cron.md#preview-saved-jobs).
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 
 - Upgrade a large PostgreSQL database without the schema migration rolling
