@@ -964,7 +964,9 @@ or issue-sync ownership conflicts just as a real move does. Any descendant that
 fails a rule rejects the whole move, and the error names that descendant. A
 descendant in an archived project also rejects the move with
 `issue_move_descendant_archived`; restore its project or remove its parent link
-first. A preview validates the current state; a later move checks it again.
+first. If subtree membership or a member's project changes during validation,
+the move returns `issue_move_tree_changed`; retry to validate every member.
+A preview validates the current state; a later move checks it again.
 The target short ID is assigned only during the real move. `--comment` is ignored
 by a preview. Subtree moves require daemon API 0.35.0 or newer. With older
 daemons, `--single` preserves the legacy move request; `--single --dry` requires
@@ -1017,11 +1019,10 @@ If a request fails, confirmed results remain visible. Submitted items without a 
 | `duplicate_item` | An earlier successful input names the same issue and target in this request. |
 | `duplicate_conflicting_target` | An earlier successful input names the same issue and another target in this request. |
 | `revision_conflict` | A selected issue changed after selection. Reselect outstanding work to get its current revision. |
-| `issue_move_tree_changed` | Subtree membership changed after validation. Retry to validate every member. |
+| `issue_move_tree_changed` | The issue's project changed during validation. Retry the item. |
 
 Other refusals retain the single-move rule codes and explain how to resolve
-them. One refusal leaves successful items committed. A denied descendant
-refuses its whole selected subtree. For batch moves, `--comment` adds the comment with teammate attribution to each issue in the move transaction. Unchanged issues receive no comment. For a single subtree move, the comment is posted to the selected issue after the move; a failure leaves the move committed and visible in the output.
+them. One refusal leaves successful items committed. For batch moves, `--comment` adds the comment with teammate attribution to each issue in the move transaction. Unchanged issues receive no comment. For a single subtree move, the comment is posted to the selected issue after the move; a failure leaves the move committed and visible in the output.
 
 Inputs over 5,000 items are refused before any write. The CLI splits requests at 50 items or 1 MiB of encoded data; each request commits independently. An oversized refs-file line or an item that cannot fit in one request receives its own refusal.
 A later item with a stale expected revision is refused. Exit 0 means every item succeeded
