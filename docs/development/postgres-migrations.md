@@ -10,6 +10,12 @@ This applies to canonical DDL, schema-version changes, migration assets and
 registries, extensions, functions, triggers, indexes, and other persisted
 objects. Approval for a feature is not approval for its database design.
 
+## Schema version markers
+
+Each schema version has a marker in `internal/db/testdata/schema-contracts` named `NNNNNN-<digest>.txt`. Its contents are a one-line summary. Run `make api-breaking BASE_REF=origin/main` to check the database layouts and migration history against the base branch.
+
+If the schema check names a replacement for your draft marker, replace that file and keep the version. If the marker already exists on the base branch, preserve it and use the next schema version and the marker named by the check.
+
 ## Adding a migration
 
 After the persisted-state change is approved:
