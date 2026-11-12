@@ -359,7 +359,7 @@ func (s *Store) IngestFederationEvents(
 		}
 		for _, winner := range repeatedWinners {
 			for index, delta := range winner.deltas {
-				clock := db.EventHLCTimestamp{PhysicalMS: winner.clock.PhysicalMS, Counter: winner.clock.Counter + int64(index)}
+				clock := delta.Clock(winner.clock, index)
 				insert := eventInsert{
 					ProjectID: params.ProjectID, ProjectUID: projectUID, ProjectName: projectName,
 					IssueID: &winner.issue.ID, IssueUID: &winner.issue.UID,

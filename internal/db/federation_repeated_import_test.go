@@ -256,3 +256,36 @@ func TestRepeatedSnapshotDeltasKeepHubOwnedRecurringMetadata(t *testing.T) {
 	assert.JSONEq(t, `{"cron.occurrence":{"n":3},"cron.progress.job-1":{"n":3},"team":"platform"}`,
 		string(FoldEvents(events).IssueMetadata["issue-1"]))
 }
+
+// A comment edit from a winning copy sits at the comment's own edit time. A
+// later edit of the same comment that the copy never saw can reach the hub
+// after the import, and it must still win.
+func TestRepeatedSnapshotDeltasPlaceACommentEditAtItsEditTime(t *testing.T) {
+	current := `{"uid":"issue-1","title":"t","status":"open","comments":[
+ {"comment_uid":"comment-1","author":"alice","body":"first","created_at":"2026-05-01T10:00:00.000Z"}],
+"updated_at":"2026-05-01T10:00:00.000Z"}`
+	incoming := `{"uid":"issue-1","title":"t","status":"open","comments":[
+ {"comment_uid":"comment-1","author":"alice","body":"copy edit","created_at":"2026-05-01T10:00:00.000Z","edited_at":"2026-05-10T10:00:00.000Z"}],
+"updated_at":"2026-06-01T09:00:00.000Z"}`
+	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
+	require.NoError(t, err)
+
+	ms := func(timestamp string) int64 {
+		parsed, err := time.Parse(time.RFC3339Nano, timestamp)
+		require.NoError(t, err)
+		return parsed.UnixMilli()
+	}
+	base := EventHLCTimestamp{PhysicalMS: ms("2026-06-01T09:00:00.000Z")}
+	events := []FoldEvent{testEvent("issue.snapshot", ms("2026-05-01T10:00:00.000Z"), current)}
+	for i, delta := range deltas {
+		clock := delta.Clock(base, i)
+		event := testEvent(delta.Type, clock.PhysicalMS, string(delta.Payload))
+		event.HLCCounter = clock.Counter
+		events = append(events, event)
+	}
+	events = append(events, testEvent("issue.comment_edited", ms("2026-05-20T10:00:00.000Z"),
+		`{"comment_uid":"comment-1","body":"later edit","edited_at":"2026-05-20T10:00:00.000Z"}`))
+	comment := FoldEvents(events).Comments["comment-1"]
+	assert.Equal(t, "later edit", comment.Body)
+	assert.Equal(t, "2026-05-20T10:00:00.000Z", comment.EditedAt)
+}

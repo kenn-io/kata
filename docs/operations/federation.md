@@ -1774,6 +1774,11 @@ Those events take the snapshot's `updated_at` as their place in the project's
 history, and never sit before the latest event that changed the issue on the
 hub. Claim records do not count as changes. An edit made after the snapshot
 therefore still applies, whether it reaches the hub before or after the copy.
+A comment edit from the copy sits at the comment's own edit time.
+
+One case depends on arrival order. A label or metadata key that neither copy
+has can appear after the import, when an older edit that added it reaches the
+hub later. Remove it on the hub.
 
 A link in the snapshot to an issue of another hub project needs the same
 authority as any other push that touches that project. Without it the hub

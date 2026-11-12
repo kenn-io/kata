@@ -17,6 +17,20 @@ type RepeatedSnapshotDelta struct {
 	Actor           string
 	Payload         jsontext.Value
 	RelatedIssueUID string
+	// At is the data's own time for the change, when it has one that is
+	// earlier than the copy's updated_at. A comment edit has its edit time.
+	At string
+}
+
+// Clock places the delta at position index among a winning copy's events,
+// which start at base. A delta with its own earlier time sits there instead,
+// so a later change to the same data that the copy never saw still replays
+// after it.
+func (d RepeatedSnapshotDelta) Clock(base EventHLCTimestamp, index int) EventHLCTimestamp {
+	if at, err := time.Parse(time.RFC3339Nano, d.At); err == nil && at.UnixMilli() < base.PhysicalMS {
+		return EventHLCTimestamp{PhysicalMS: at.UnixMilli(), Counter: int64(index)}
+	}
+	return EventHLCTimestamp{PhysicalMS: base.PhysicalMS, Counter: base.Counter + int64(index)}
 }
 
 // RepeatedSnapshotLookups answers the questions about other issues that one
@@ -159,18 +173,17 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 		return nil, fmt.Errorf("%w: decode repeated issue snapshot: %w", ErrFederationIngestValidation, err)
 	}
 	var deltas []RepeatedSnapshotDelta
-	addRelated := func(eventType, eventActor, relatedIssueUID string, payload map[string]any) error {
+	emit := func(delta RepeatedSnapshotDelta, payload map[string]any) error {
 		raw, err := json.Marshal(payload, json.Deterministic(true))
 		if err != nil {
-			return fmt.Errorf("encode %s for repeated issue snapshot: %w", eventType, err)
+			return fmt.Errorf("encode %s for repeated issue snapshot: %w", delta.Type, err)
 		}
-		deltas = append(deltas, RepeatedSnapshotDelta{
-			Type: eventType, Actor: eventActor, Payload: raw, RelatedIssueUID: relatedIssueUID,
-		})
+		delta.Payload = raw
+		deltas = append(deltas, delta)
 		return nil
 	}
 	add := func(eventType, eventActor string, payload map[string]any) error {
-		return addRelated(eventType, eventActor, "", payload)
+		return emit(RepeatedSnapshotDelta{Type: eventType, Actor: eventActor}, payload)
 	}
 
 	// The events restate the whole copy, including the values it shares with
@@ -238,7 +251,7 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 			// home, with earlier edits. The fold keeps the first creation it
 			// replays, so a separate edit event carries the copy's text.
 			if comment.EditedAt != "" {
-				if err := add("issue.comment_edited", actor, map[string]any{
+				if err := emit(RepeatedSnapshotDelta{Type: "issue.comment_edited", Actor: actor, At: comment.EditedAt}, map[string]any{
 					"comment_uid": comment.CommentUID, "body": comment.Body, "edited_at": comment.EditedAt,
 				}); err != nil {
 					return nil, err
@@ -247,7 +260,7 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 			continue
 		}
 		if comment.EditedAt != "" && timestampBefore(editedAt, comment.EditedAt) {
-			if err := add("issue.comment_edited", actor, map[string]any{
+			if err := emit(RepeatedSnapshotDelta{Type: "issue.comment_edited", Actor: actor, At: comment.EditedAt}, map[string]any{
 				"comment_uid": comment.CommentUID, "body": comment.Body, "edited_at": comment.EditedAt,
 			}); err != nil {
 				return nil, err
@@ -299,7 +312,7 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 			linkActor = actor
 		}
 		lookups.links[key] = true
-		if err := addRelated("issue.linked", linkActor, link.ToIssueUID, map[string]any{
+		if err := emit(RepeatedSnapshotDelta{Type: "issue.linked", Actor: linkActor, RelatedIssueUID: link.ToIssueUID}, map[string]any{
 			"type": key.Type, "from_uid": key.FromUID, "to_uid": key.ToUID, "updated_at": want.UpdatedAt,
 		}); err != nil {
 			return nil, err

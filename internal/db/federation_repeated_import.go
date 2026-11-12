@@ -97,6 +97,8 @@ func RepeatedSnapshotSQLLookups(ctx context.Context, tx federationHistoryQuery, 
 var repeatedSnapshotAuditEventTypesSQL = sqlStringList([]string{
 	"claim.acquired", "claim.released", "claim.expired", "claim.force_released", "claim.violated",
 	"close.throttled", "issue.scheduled_reached",
+	"issue.external_root_bound", "issue.external_root_paused", "issue.external_root_resumed", "issue.external_root_unbound",
+	"issue.external_comment_resolved", "issue.external_field_conflicted", "issue.external_field_resolved",
 })
 
 // RepeatedSnapshotDeltaClock places the hub's events for a winning repeated
