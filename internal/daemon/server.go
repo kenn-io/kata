@@ -83,6 +83,8 @@ type ServerConfig struct {
 	// supplied binding and credential. It is used when a forwarded claim
 	// discovers that the issue has moved into another joined hub project.
 	FederationPullOnce func(context.Context, db.FederationBinding, config.FederationCredential) error
+	// FederationSyncOnce exchanges pending project events before an origin write.
+	FederationSyncOnce func(context.Context, db.FederationBinding, config.FederationCredential) error
 	// EmbeddingWake notifies the existing local worker after artifact commit.
 	EmbeddingWake                 func()
 	FederationCredentials         config.FederationCredentialStore
@@ -276,14 +278,16 @@ func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
 
 // Server bundles the http handler and lifecycle.
 type Server struct {
-	federationIngestAdmission  chan struct{}
-	federationControlAdmission chan struct{}
-	cfg                        ServerConfig
-	baseHandler                http.Handler
-	handler                    http.Handler
-	api                        huma.API
-	authPolicy                 authPolicy
-	noProjectDataRoutes        noProjectDataRouteMatcher
+	federationIngestAdmission   chan struct{}
+	federationTransferAdmission chan struct{}
+	federationReadAdmission     chan struct{}
+	federationControlAdmission  chan struct{}
+	cfg                         ServerConfig
+	baseHandler                 http.Handler
+	handler                     http.Handler
+	api                         huma.API
+	authPolicy                  authPolicy
+	noProjectDataRoutes         noProjectDataRouteMatcher
 
 	shutdownTimeout time.Duration
 }
@@ -387,8 +391,10 @@ func NewServer(cfg ServerConfig) *Server {
 
 	s := &Server{
 		cfg: cfg, api: humaAPI,
-		federationIngestAdmission:  make(chan struct{}, 2),
-		federationControlAdmission: make(chan struct{}, 16),
+		federationIngestAdmission:   make(chan struct{}, 2),
+		federationTransferAdmission: make(chan struct{}, 2),
+		federationReadAdmission:     make(chan struct{}, 16),
+		federationControlAdmission:  make(chan struct{}, 16),
 	}
 	registerRoutes(humaAPI, mux, cfg)
 	if cfg.WebSessions != nil {

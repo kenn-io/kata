@@ -13,12 +13,16 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func pgReplayMeta(ctx context.Context, tx *sql.Tx, meta *db.MetaKV, opts db.ImportOptions) error {
+func pgReplayMeta(ctx context.Context, tx *sql.Tx, meta *db.MetaKV, opts db.ImportOptions, targetUID string) error {
 	if meta.Key == "export_version" || meta.Key == "schema_version" {
 		return nil
 	}
 	if meta.Key == "instance_uid" && opts.NewInstance {
-		return nil
+		if meta.Value == targetUID {
+			return nil
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'') ON CONFLICT(key) DO NOTHING`, db.FormerInstanceUIDMetaPrefix+meta.Value)
+		return pgReplayError(db.ImportKindMeta, err)
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)
 ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, meta.Key, meta.Value)

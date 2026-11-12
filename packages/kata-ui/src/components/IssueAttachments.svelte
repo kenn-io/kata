@@ -31,18 +31,27 @@
   const canUpload = $derived(attachmentsEnabled && Boolean(uploadAttachment))
   const uploadDisabled = $derived(uploading || actionsDisabled)
   const entries = $derived(
-    Object.entries(attachments).map(([id, e]) => ({
-      ...e,
-      id,
-      reference: JSON.stringify([e.name, e.media_type, e.size, e.docbank_version]),
-      image:
-        ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(e.media_type) &&
-        e.size <= 20 << 20,
-      video:
-        ['video/mp4', 'video/x-m4v', 'video/quicktime', 'video/webm', 'video/ogg'].includes(
+    Object.entries(attachments).map(([id, e]) => {
+      return {
+        ...e,
+        id,
+        reference: JSON.stringify([
+          attachmentsEnabled,
+          e.origin ?? 'local',
+          e.name,
           e.media_type,
-        ) && e.size <= 100 << 20,
-    })),
+          e.size,
+          e.docbank_version,
+        ]),
+        image:
+          ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(e.media_type) &&
+          e.size <= 20 << 20,
+        video:
+          ['video/mp4', 'video/x-m4v', 'video/quicktime', 'video/webm', 'video/ogg'].includes(
+            e.media_type,
+          ) && e.size <= 100 << 20,
+      }
+    }),
   )
   const references = new Map<string, string>()
   let previousBaseURL: string | undefined

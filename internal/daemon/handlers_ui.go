@@ -147,7 +147,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err := normalizeIssueScopeForUISnapshot(ctx, &intent); err != nil {
 				return nil, err
 			}
-			policy := effectiveUIPolicy(ctx, cfg)
+			policy := effectiveUIPolicy(ctx, cfg, intent.SelectedIssueUID)
 			if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 				policy.ProjectAccessActor = decision.Actor
 				policy.ProjectAccessEpoch = decision.PolicyRevision
@@ -325,7 +325,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				if err != nil {
 					return nil, err
 				}
-				policy := effectiveUIPolicy(ctx, cfg)
+				policy := effectiveUIPolicy(ctx, cfg, "")
 				if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 					policy.ProjectAccessActor = decision.Actor
 					policy.ProjectAccessEpoch = decision.PolicyRevision
@@ -344,7 +344,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
-			policy := effectiveUIPolicy(ctx, cfg)
+			policy := effectiveUIPolicy(ctx, cfg, "")
 			if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 				policy.ProjectAccessActor = decision.Actor
 				policy.ProjectAccessEpoch = decision.PolicyRevision
@@ -720,11 +720,25 @@ func uiValidationError(field, message string, data map[string]any) error {
 	return api.NewError(http.StatusBadRequest, "validation", message, "", data)
 }
 
-func effectiveUIPolicy(ctx context.Context, cfg ServerConfig) uiPolicy {
+// selectedIssueIsSpoke reports whether the selected issue is visible to the
+// caller and its project replicates from a hub that stores its attachments.
+func selectedIssueIsSpoke(ctx context.Context, cfg ServerConfig, issueUID string) bool {
+	if issueUID == "" || cfg.DB == nil {
+		return false
+	}
+	issue, err := cfg.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+	if err != nil || authorizeIssueScopedIssue(ctx, cfg.DB, issue) != nil {
+		return false
+	}
+	binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
+	return err == nil && binding.Role == db.FederationRoleSpoke && binding.Enabled
+}
+
+func effectiveUIPolicy(ctx context.Context, cfg ServerConfig, selectedIssueUID string) uiPolicy {
 	policy := uiPolicy{Capabilities: api.UICapabilities{
-		Attachments: cfg.Docbank != nil,
-		Writable:    !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
+		Writable: !cfg.InsecureReadonly, Updates: "sse", ActorPolicy: "request",
 	}}
+	policy.Capabilities.Attachments = cfg.Docbank != nil || selectedIssueIsSpoke(ctx, cfg, selectedIssueUID)
 	if cfg.WebSessions != nil {
 		principal, _ := PrincipalFromContext(ctx)
 		policy.Capabilities.Writable = cfg.WebSessions.CanWrite(principal)

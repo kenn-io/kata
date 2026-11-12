@@ -38,7 +38,10 @@ func ValidateImportReplay(records []ImportRecord, opts ImportOptions) error {
 		return err
 	}
 	if opts.NewInstance {
-		for _, record := range records {
+		for i, record := range records {
+			if meta, ok := record.(*MetaKV); ok && meta.Key == "instance_uid" && !uid.Valid(meta.Value) {
+				return fmt.Errorf("import record %d: invalid source instance UID", i)
+			}
 			binding, ok := record.(*FederationBindingExport)
 			if ok && binding.RelayConfig != nil {
 				return errors.New("--new-instance cannot restore negotiated relay configuration; use --as-standalone to detach the copy")
@@ -293,7 +296,13 @@ func validateImportRecord(record ImportRecord) error {
 		}
 		return embedding.ValidateArtifact(rec.EmbeddingArtifact, "", "")
 	case *MetaKV:
-		return requireImportPayload(rec, ImportKindMeta)
+		if err := requireImportPayload(rec, ImportKindMeta); err != nil {
+			return err
+		}
+		if value, ok := strings.CutPrefix(rec.Key, FormerInstanceUIDMetaPrefix); ok && !uid.Valid(value) {
+			return errors.New("invalid former instance UID")
+		}
+		return nil
 	case *ProjectExport:
 		return requireImportPayload(rec, ImportKindProject)
 	case *RelayOutboxExport, *RelayInboxExport, *RelayCursorExport:

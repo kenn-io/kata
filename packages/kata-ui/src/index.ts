@@ -3,6 +3,7 @@ export { default as CommentRelations } from './components/CommentRelations.svelt
 export { default as IssueDetail } from './IssueDetail.svelte'
 export { projectIssueDetail } from './projectIssueDetail.js'
 export type {
+  KataAttachment,
   KataChecklistItem,
   KataCreationAttributionModel,
   KataCreationAttributionWire,

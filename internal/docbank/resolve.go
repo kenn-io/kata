@@ -9,6 +9,9 @@ import (
 
 // Node is the file identity returned by Docbank's path and node reads.
 type Node struct {
+	// Path is supplied by Docbank's live single-node/path reads, never inferred
+	// from caller input. Federation uses it to bound the exposed subtree.
+	Path             string    `json:"path"`
 	ID               int64     `json:"id"`
 	Name             string    `json:"name"`
 	Kind             string    `json:"kind"`

@@ -23,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/testfix"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -210,16 +211,12 @@ func TestAttachmentAdmissionBeforeBody(t *testing.T) {
 	}
 }
 
-type attachmentZeros struct{}
-
-func (attachmentZeros) Read(b []byte) (int, error) { clear(b); return len(b), nil }
-
 // TestAttachmentOversizeBeforeVault streams 256 MiB through a temporary file.
 func TestAttachmentOversizeBeforeVault(t *testing.T) {
 	env, f := attachmentEnv(t)
 	p, iss := seedProjectAndIssue(t, env)
 	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID)
-	body := io.LimitReader(attachmentZeros{}, (256<<20)+1)
+	body := io.LimitReader(testfix.ZeroReader{}, (256<<20)+1)
 	status, raw := attachmentUpload(t, env, endpoint, "shot.png", body)
 	require.Equal(t, 413, status, string(raw))
 	require.Contains(t, string(raw), "attachment_too_large")

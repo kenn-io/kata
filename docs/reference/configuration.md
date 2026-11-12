@@ -1630,7 +1630,7 @@ Kata 0.21.0 and later: `[docbank]` enables issue file uploads and reads through 
 Docbank, either separately hosted (`url`) or running on the same machine
 (`local`). `kata docbank setup` writes and checks this section. See
 [Issue attachments](../guide/attachments.md#configure-the-daemon) for setup and
-the shared-vault trust boundary.
+the shared-vault trust boundary. Shared projects use the root daemon's configuration; upgrade every daemon on the route. The configured folder is visible to enrolled project readers and metadata writers, and `/` exposes the entire vault.
 
 | Key | Default | Meaning |
 | --- | --- | --- |

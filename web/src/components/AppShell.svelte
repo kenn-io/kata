@@ -932,7 +932,7 @@
         actionsDisabled={!canMutate || mutationPending || projection.selected_pending === true}
         authorityBlocked={!canMutate || projection.selected_pending === true}
         pending={projection.selected_pending === true}
-        attachmentsEnabled={snapshot.capabilities.attachments ?? false}
+        attachmentsEnabled={Boolean(snapshot.capabilities.attachments)}
         {onUploadAttachment}
         administrativeActionsAllowed={!scopedAuthority}
         {draftResetGeneration}

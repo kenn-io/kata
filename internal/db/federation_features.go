@@ -19,7 +19,7 @@ const CronEventFeature = "cron_v1"
 const IssueMoveEventFeature = "issue_move_v1"
 
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + DocbankOriginEventFeature + "," + IssueMoveEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -47,12 +47,31 @@ func MergeEventFeatures(values ...string) string {
 // PayloadRequiredFeatures supplements type classification with native delivery state.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	required := EventRequiredFeatures(kind)
-	native, err := payloadHasNativeRecurringState(kind, payload)
+	issueState := kind == "projection.issue" || strings.HasPrefix(kind, "issue.")
+	jobDefinition := kind == "projection.job" || strings.HasPrefix(kind, "cron.job.")
+	if !issueState && !jobDefinition {
+		return required, nil
+	}
+	if payload == "" {
+		payload = "{}"
+	}
+	var body map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(payload), &body); err != nil {
+		return "", err
+	}
+	native, err := nativeStateFromBody(issueState, body)
 	if err != nil {
 		return "", err
 	}
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
+	}
+	origin, err := docbankOriginFromBody(kind, body)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
+	}
+	if origin {
+		required = MergeEventFeatures(required, DocbankOriginEventFeature)
 	}
 	return required, nil
 }
@@ -74,14 +93,14 @@ func payloadHasNativeRecurringState(kind, payload string) (bool, error) {
 	if err := json.Unmarshal([]byte(payload), &body); err != nil {
 		return false, err
 	}
-	var native bool
-	var err error
+	return nativeStateFromBody(issueState, body)
+}
+
+func nativeStateFromBody(issueState bool, body map[string]jsontext.Value) (bool, error) {
 	if issueState {
-		native, err = nativeIssueMetadata(body)
-	} else {
-		native, err = nativeJobDefinition(body["definition"])
+		return nativeIssueMetadata(body)
 	}
-	return native, err
+	return nativeJobDefinition(body["definition"])
 }
 
 func nativeIssueMetadata(body map[string]jsontext.Value) (bool, error) {

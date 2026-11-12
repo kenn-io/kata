@@ -36,4 +36,11 @@ func TestAttachmentValid(t *testing.T) {
 	}
 	_, ok = Valid(jsontext.Value(strings.TrimSuffix(good, "}") + `,"schema_version":2}`))
 	require.False(t, ok, "unknown reference shapes are unreadable")
+	const fields = `"name":"report.pdf","media_type":"application/pdf","size":12,"docbank_version":"6f1c2e8a-2222-4222-8222-222222222222"`
+	_, valid := Valid(jsontext.Value(`{` + fields + `,"origin":"01ARZ3NDEKTSV4RRFFQ69G5FAV"}`))
+	require.True(t, valid)
+	for _, origin := range []string{`"upstream"`, `""`, `null`} {
+		_, valid := Valid(jsontext.Value(`{` + fields + `,"origin":` + origin + `}`))
+		require.False(t, valid, origin)
+	}
 }

@@ -353,10 +353,12 @@ type ClaimStatus struct {
 // ClaimGateParams checks whether a local mutation can proceed using the
 // cached authoritative claim state available to this database.
 type ClaimGateParams struct {
-	ProjectID int64
-	IssueRef  string
-	Principal ClaimPrincipal
-	Now       time.Time
+	// ApplyTransactionFence admits external effects even without a local mutation.
+	ApplyTransactionFence bool
+	ProjectID             int64
+	IssueRef              string
+	Principal             ClaimPrincipal
+	Now                   time.Time
 }
 
 // ProjectAlias mirrors a row in project_aliases.

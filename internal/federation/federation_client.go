@@ -238,6 +238,19 @@ func (c *Client) OfferRelayDeliveries(ctx context.Context, projectID int64, stre
 
 // AcceptRelayDeliveries submits an authenticated hop batch and returns its accepted prefix.
 func (c *Client) AcceptRelayDeliveries(ctx context.Context, projectID int64, batch db.RelayBatch) (db.RelayAcceptance, error) {
+	required, err := db.RelayBatchRequiredFeatures(batch)
+	if err != nil {
+		return db.RelayAcceptance{}, err
+	}
+	if required != "" {
+		_, supported, err := c.projectFederationFeatures(ctx, projectID)
+		if err != nil {
+			return db.RelayAcceptance{}, err
+		}
+		if err := db.RequireEventFeatures(supported, required); err != nil {
+			return db.RelayAcceptance{}, err
+		}
+	}
 	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
 	if err != nil {
 		return db.RelayAcceptance{}, err

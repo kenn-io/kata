@@ -61,6 +61,9 @@ func TestRelayClaimHolderMappingSupportsLeafMutationAndPendingRetry(t *testing.T
 			TargetHubURL: offlineURL,
 		})
 		require.NoError(t, err)
+		credential := leaf.credential
+		credential.HubURL = offlineURL
+		require.NoError(t, leaf.credentials.StoreFederationCredential(t.Context(), leaf.project.UID, credential))
 		status, pendingResponse := relayClaimAction(t, leaf, issue.UID, "acquire", "cli")
 		require.Equal(t, http.StatusOK, status)
 		require.True(t, pendingResponse.Pending)
@@ -72,8 +75,8 @@ func TestRelayClaimHolderMappingSupportsLeafMutationAndPendingRetry(t *testing.T
 			TargetHubURL: relay.http.URL,
 		})
 		require.NoError(t, err)
-		credential := leaf.credential
 		credential.HubURL = relay.http.URL
+		require.NoError(t, leaf.credentials.StoreFederationCredential(t.Context(), leaf.project.UID, credential))
 		require.NoError(t, federation.RetryPendingClaimsOnce(
 			t.Context(), leaf.store, binding, credential, clientpkg.Opts{},
 		))
@@ -132,7 +135,15 @@ func TestRelayPendingClaimRetainsIncomingLeafHolder(t *testing.T) {
 
 func newRelayClaimChain(t *testing.T) (*relayMatrixNode, *relayMatrixNode, *relayMatrixNode, db.Issue) {
 	t.Helper()
+	return newRelayClaimChainWithSetup(t, nil)
+}
+
+func newRelayClaimChainWithSetup(t *testing.T, setup func(*relayMatrixNode)) (*relayMatrixNode, *relayMatrixNode, *relayMatrixNode, db.Issue) {
+	t.Helper()
 	root := newRelayMatrixNode(t, "sqlite", "company-member")
+	if setup != nil {
+		setup(root)
+	}
 	project, err := root.store.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	root.project = project
@@ -153,6 +164,10 @@ func newRelayClaimChain(t *testing.T) (*relayMatrixNode, *relayMatrixNode, *rela
 
 	relay := newRelayMatrixNode(t, "sqlite", "personal-member")
 	leaf := newRelayMatrixNode(t, "sqlite", "leaf-member")
+	if setup != nil {
+		setup(relay)
+		setup(leaf)
+	}
 	enrollRelayMatrixReplica(t, root, relay, "relay-project", true)
 	syncRelayMatrixNode(t, relay)
 	enrollRelayMatrixReplica(t, relay, leaf, "leaf-project", false)

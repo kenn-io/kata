@@ -1,7 +1,7 @@
 ---
 title: Issue attachments
 description: Attach files through Docbank and view images and videos in Kata.
-last_edited: 2026-11-08
+last_edited: 2026-11-10
 ---
 
 # Issue attachments
@@ -67,7 +67,49 @@ Make the key file private to the daemon user, following the [key file rules](../
 
 If the daemon cannot read its key, upload, content, and link requests return `docbank_key_unavailable` (daemon API 0.44.0 or newer) without contacting Docbank. Run `kata doctor` on the daemon host, or with a daemon-owner token, to see which key source failed and why.
 
-Without Docbank configured, references still appear in lists, and the web UI shows their names and details. Upload and content requests return `docbank_not_configured`. If a referenced version is absent from the configured Docbank, reads return `attachment_content_missing`.
+Without Docbank configured, references still appear in lists, and the web UI shows their names and details. Local upload and content requests return `docbank_not_configured`. A relayed project uses its origin's configuration instead. If a referenced version is absent from the selected Docbank, reads return `attachment_content_missing`.
+
+## Use attachments through project relays
+
+New attachments for a shared project use the root hub's Docbank. Hub links must be inside the configured folder; move a file there before linking it. A folder of `/` exposes the entire vault. Add and link
+commands stay the same on a leaf or intermediate relay. Only the root needs
+the Docbank key; every connection uses its own project enrollment credential.
+Upgrade the CLI and every daemon on the path before using this feature.
+An unsupported hop returns an explicit upgrade error.
+When a spoke's federation is disabled, uploads and links return `503 federation_offline`, even if that spoke has a local Docbank. Re-enable the spoke to add shared references; unmarked references remain readable from its local vault. After a spoke is detached, references to a different origin return `410 attachment_origin_unavailable` because the route to that origin is gone.
+
+The root exposes its configured `folder` subtree to each enrolled project's
+readers and metadata writers. This includes upload folders for other projects
+under that same subtree. Use a separate Docbank instance or folder audience
+when those files must not be shared. Forwarded links accept only files whose
+live canonical path is inside the exposed folder, including links selected by
+node ID or historical version. Moving a file outside that folder makes its
+origin references unreadable to replicas; the owner can still read them. Membership checks and content reads are separate
+Docbank operations; they do not provide an atomic folder ACL during moves.
+
+An origin service uploads or resolves the file and returns a pinned descriptor.
+The requesting daemon saves the issue reference locally, so it can be cited in
+an immediate close before metadata synchronization reaches the root. For a new
+issue, the replica synchronizes pending project events before forwarding an
+upload or link when its upstream has not seen the issue yet.
+
+Shared-project references carry the root Kata instance UID in `origin`. Every
+replica stores the same value. Standalone references have no origin marker and
+continue to use the serving daemon's local Docbank after sharing or adoption.
+Restored copies and their existing relays resolve references from former identities in the restored root’s configured Docbank.
+To make those files available on other replicas, copy or link them into the
+root's vault and add new shared references. On a hub, `reuse_existing` creates
+an origin-marked reference when the only match is an unmarked reference, so
+other replicas can read the new link. A marked
+reference never falls back to a different local vault: an unreachable upstream
+returns `federation_offline`; a missing or changed route is an explicit origin
+error; a missing version at a reachable origin remains
+`attachment_content_missing`.
+
+Signed uploads use bounded temporary disk files for digest verification at
+each hop. The 256 MiB file limit remains. Transfer failures or a denied final
+metadata write can leave an unreferenced Docbank version; Docbank retention
+owns those bytes. A lost upload response can create another reference on retry.
 
 ## Add, read, and remove files
 
@@ -140,7 +182,7 @@ that version. Removed or changed references retain their frozen description.
 
 ## Read references as metadata
 
-Each file uses an `attachment.<ULID>` key with `name`, `media_type`, `size`, and `docbank_version` fields. These are ordinary opaque metadata keys. The browser checks field types for display; the daemon validates the full reference when serving content.
+Each file uses an `attachment.<ULID>` key with `name`, `media_type`, `size`, and `docbank_version` fields, plus optional `origin` for origin-routed references. An absent marker keeps local resolution. These are ordinary opaque metadata keys. The browser checks field types for display; the daemon validates the full reference when serving content. Version reuse compares both origin and content version.
 
 ```sh
 kata meta get abc4

@@ -1672,6 +1672,9 @@ func runDaemonProcess(
 		MCPEvents:                 mcpEvents,
 		MCPEventsDisabledReason:   mcpEventsReason,
 		FederationWake:            federationWake,
+		FederationSyncOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+			return federation.SyncFederationOnceWithPulledEvents(ctx, store, binding, credential, client.Opts{}, publisher.Events)
+		},
 		FederationPullOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
 			return federation.SyncFederationPullOnlyOnceWithPulledEvents(ctx, store, binding, credential, client.Opts{}, publisher.Events)
 		},

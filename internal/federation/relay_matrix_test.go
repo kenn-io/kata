@@ -42,7 +42,9 @@ type relayMatrixNode struct {
 // serve starts a daemon over the node's store with its current signer.
 func (n *relayMatrixNode) serve(t *testing.T) {
 	t.Helper()
-	server := daemon.NewServer(daemon.ServerConfig{DB: n.store, FederationCredentials: n.credentials, RootSigning: daemon.NewRootSigning(n.signer), Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
+	server := daemon.NewServer(daemon.ServerConfig{FederationSyncOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+		return federation.SyncFederationOnce(ctx, n.store, binding, credential, n.credentials)
+	}, DB: n.store, FederationCredentials: n.credentials, RootSigning: daemon.NewRootSigning(n.signer), Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	handler := server.Handler()
 	n.handler.Store(&handler)

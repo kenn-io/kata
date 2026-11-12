@@ -196,6 +196,43 @@ func (g GetProjectFederationQuery) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(g))
 }
 
+type FederatedDocbankCapabilitiesQuery struct {
+	ProjectUID string  `json:"project_uid" validate:"required"`
+	Origin     *string `json:"origin,omitempty"`
+}
+
+func (f FederatedDocbankCapabilitiesQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
+type LinkFederatedDocbankQuery struct {
+	Origin     string `json:"origin" validate:"required"`
+	ProjectUID string `json:"project_uid" validate:"required"`
+}
+
+func (l LinkFederatedDocbankQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
+type UploadFederatedDocbankQuery struct {
+	Origin     string `json:"origin" validate:"required"`
+	ProjectUID string `json:"project_uid" validate:"required"`
+	Name       string `json:"name" validate:"required"`
+}
+
+func (u UploadFederatedDocbankQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
+type FederatedDocbankContentQuery struct {
+	ProjectUID string `json:"project_uid" validate:"required"`
+	Origin     string `json:"origin" validate:"required"`
+}
+
+func (f FederatedDocbankContentQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
 type PollFederationProjectEventsQuery struct {
 	AfterID *int64 `json:"after_id,omitempty"`
 
