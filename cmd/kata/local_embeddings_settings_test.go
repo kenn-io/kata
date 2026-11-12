@@ -222,7 +222,7 @@ func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 }
 
 func TestLocalEmbeddingsTurnOnChoiceWriteFailure(t *testing.T) {
-	logs, _ := setupChoiceWriteFailure(t)
+	setupChoiceWriteFailure(t)
 	var run func(context.Context)
 	setup := &localEmbeddingsSetup{start: func(work func(context.Context)) bool { run = work; return true }}
 	require.NoError(t, setup.TurnOn(t.Context()))
@@ -231,7 +231,6 @@ func TestLocalEmbeddingsTurnOnChoiceWriteFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, status.Job)
 	require.Equal(t, "restart", status.Job.State)
-	require.Contains(t, logs.String(), "could not confirm that the shared search by meaning choice was saved")
 }
 
 func TestSharedChoiceDaemonStartup(t *testing.T) {

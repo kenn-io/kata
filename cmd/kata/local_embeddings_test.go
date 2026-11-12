@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -74,7 +73,8 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		require.True(t, chosen)
 	})
 	t.Run("marker write failure", func(t *testing.T) {
-		logs, marker := setupChoiceWriteFailure(t)
+		marker := setupChoiceWriteFailure(t)
+		logs := captureSlog(t)
 		out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 		require.NoError(t, err)
 		require.Contains(t, out, "kata health --json")
@@ -90,7 +90,7 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 	})
 }
 
-func setupChoiceWriteFailure(t *testing.T) (*bytes.Buffer, string) {
+func setupChoiceWriteFailure(t *testing.T) string {
 	t.Helper()
 	setupKataEnv(t)
 	home := clearLocalEmbeddingsEnv(t)
@@ -106,7 +106,7 @@ func setupChoiceWriteFailure(t *testing.T) (*bytes.Buffer, string) {
 	}
 	marker := filepath.Join(home, ".kenn", "embeddings", "search-by-meaning")
 	require.NoError(t, os.MkdirAll(marker, 0o700))
-	return captureSlog(t), marker
+	return marker
 }
 
 func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {
