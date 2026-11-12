@@ -17,7 +17,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/shortid"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -318,12 +317,9 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector, max
 		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
 			return nil, err
 		}
-		var page struct {
-			Issues     []db.Issue `json:"issues"`
-			NextCursor string     `json:"next_cursor"`
-		}
-		if err := json.Unmarshal(response.Body, &page); err != nil {
-			return nil, err
+		page := response.JSON200
+		if page == nil {
+			return nil, fmt.Errorf("unexpected list response status %d", response.StatusCode)
 		}
 		for _, issue := range page.Issues {
 			selected = append(selected, moveBatchItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
@@ -331,13 +327,13 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector, max
 				return selected, nil
 			}
 		}
-		if page.NextCursor == "" {
+		if page.NextCursor == nil || *page.NextCursor == "" {
 			break
 		}
-		if page.NextCursor == cursor {
+		if *page.NextCursor == cursor {
 			return nil, fmt.Errorf("could not list all issues")
 		}
-		cursor = page.NextCursor
+		cursor = *page.NextCursor
 	}
 	if sel.Query == "" {
 		return selected, nil
@@ -345,6 +341,10 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector, max
 	// Intersect existing list filters with the exhaustive lexical search result.
 	// This preserves owner and metadata semantics, which search does not expose.
 	matches := map[string]bool{}
+	listed := make(map[string]bool, len(selected))
+	for _, item := range selected {
+		listed[item.Ref] = true
+	}
 	cursor = ""
 	for {
 		query := &generated.SearchIssuesQuery{Q: sel.Query, Mode: new(generated.Lexical), Sort: new(generated.SearchIssuesQuerySortOldest), Limit: new(int64(200)), Label: sel.Labels, ExcludeLabel: sel.NoLabels}
@@ -366,9 +366,14 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector, max
 			return nil, fmt.Errorf("unexpected search response status %d", response.StatusCode)
 		}
 		for _, row := range page.Results {
-			matches[row.Issue.UID] = true
+			if listed[row.Issue.UID] {
+				matches[row.Issue.UID] = true
+				if len(matches) >= maxItems {
+					break
+				}
+			}
 		}
-		if page.NextCursor == nil || *page.NextCursor == "" {
+		if len(matches) >= maxItems || page.NextCursor == nil || *page.NextCursor == "" {
 			break
 		}
 		if *page.NextCursor == cursor {

@@ -624,6 +624,54 @@ func TestMoveBatchCLI_SelectorStopsAtLimit(t *testing.T) {
 			}
 		})
 	}
+	t.Run("matching-search-pages", func(t *testing.T) {
+		env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("synthetic-selector-token"))
+		source, err := env.DB.CreateProject(t.Context(), "selector-source")
+		require.NoError(t, err)
+		target, err := env.DB.CreateProject(t.Context(), "selector-target")
+		require.NoError(t, err)
+		origin, err := url.Parse(env.URL)
+		require.NoError(t, err)
+		proxy := httputil.NewSingleHostReverseProxy(origin)
+		lists, searches := 0, 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			listing := r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/issues", source.ID)
+			searching := strings.HasSuffix(r.URL.Path, "/search")
+			if listing || searching {
+				page := &lists
+				if searching {
+					page = &searches
+				}
+				*page++
+				rows := make([]map[string]any, 200)
+				for i := range rows {
+					issue := map[string]any{"uid": fmt.Sprintf("%026d", (*page-1)*200+i+1), "revision": 1}
+					rows[i] = issue
+					if searching {
+						rows[i] = map[string]any{"issue": issue}
+					}
+				}
+				cursor := fmt.Sprint(*page)
+				if *page == 27 {
+					cursor = ""
+				}
+				key := "issues"
+				if searching {
+					key = "results"
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.MarshalWrite(w, map[string]any{key: rows, "next_cursor": cursor})
+				return
+			}
+			r.Host = origin.Host
+			proxy.ServeHTTP(w, r)
+		}))
+		t.Cleanup(server.Close)
+		_, _, err = runCLIAgainst(t, server.URL, dir, "move", "--from-project", source.Name, "--status", "all", "--query", "match", target.Name, "--json")
+		require.ErrorContains(t, err, "5,000")
+		require.Equal(t, 27, lists)
+		require.Equal(t, 26, searches)
+	})
 }
 
 // Oversized invocations stop before any write.
