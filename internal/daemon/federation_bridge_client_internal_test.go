@@ -85,6 +85,18 @@ func TestFederationBridgeGeneratedTransportBounds(t *testing.T) {
 	}
 }
 
+func TestFederationBridgeHubCredentialRejection(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusPreconditionRequired} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			failure := federationBridgeHubRejection(status)
+			require.Equal(t, http.StatusBadGateway, failure.Status)
+			require.Equal(t, "hub_credential_rejected", failure.Code)
+			require.Contains(t, failure.Hint, "signing policy")
+			require.Equal(t, status, failure.Data["hub_status"])
+		})
+	}
+}
+
 func TestRelayCrossProjectLinksErrorMapping(t *testing.T) {
 	err := errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
 	mapped := federationReplicaAPIError(err)
