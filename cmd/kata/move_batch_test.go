@@ -380,9 +380,12 @@ func TestMoveBatchCLI_SelectionRestrictions(t *testing.T) {
 			origin, err := url.Parse(env.URL)
 			require.NoError(t, err)
 			proxy := httputil.NewSingleHostReverseProxy(origin)
-			requests := 0
+			requests, listPages := 0, 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests++
+				if tc.mode == "selector" && strings.HasSuffix(r.URL.Path, "/issues") {
+					listPages++
+				}
 				r.Host = origin.Host
 				proxy.ServeHTTP(w, r)
 			}))
@@ -395,6 +398,10 @@ func TestMoveBatchCLI_SelectionRestrictions(t *testing.T) {
 			case "single":
 				args = append(args, "--single", first.UID, target.Name)
 			case "selector":
+				for i := 0; i < 199; i++ {
+					_, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "extra", Author: "tester"})
+					require.NoError(t, err)
+				}
 				args = append(args, "--from-project", source.Name, "--status", "all", target.Name)
 			}
 			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, input, args...)
@@ -407,6 +414,9 @@ func TestMoveBatchCLI_SelectionRestrictions(t *testing.T) {
 			require.ErrorContains(t, err, message)
 			require.Equal(t, ExitUsage, exitCodeForErr(err, true))
 			require.Empty(t, out)
+			if tc.mode == "selector" {
+				require.Equal(t, 1, listPages)
+			}
 			if tc.rule == "dry" && tc.mode != "selector" {
 				require.Zero(t, requests)
 			}
@@ -610,9 +620,9 @@ func TestMoveBatchCLI_SelectorStopsAtLimit(t *testing.T) {
 				proxy.ServeHTTP(w, r)
 			}))
 			t.Cleanup(server.Close)
-			args := []string{"move", "--from-project", source.Name, "--status", "all", "--dry"}
+			args := []string{"move", "--from-project", source.Name, "--status", "all"}
 			if query {
-				args = append(args, "--query", "unique")
+				args = append(args, "--query", "unique", "--dry")
 			}
 			args = append(args, target.Name, "--json")
 			out, _, err := runCLIAgainst(t, server.URL, dir, args...)

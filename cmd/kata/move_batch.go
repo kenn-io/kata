@@ -218,7 +218,7 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 		if err != nil {
 			return err
 		}
-		selected, err := resolveMoveSelector(a.ctx, a, sel)
+		selected, err := resolveMoveSelector(a.ctx, a, sel, moveBatchReadLimit(items, opts))
 		if err != nil {
 			return err
 		}
@@ -277,7 +277,7 @@ func runMoveBatchCommand(cmd *cobra.Command, args []string, refsFrom string, sel
 	return runMoveBatch(cmd, items, opts)
 }
 
-func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]moveBatchItem, error) {
+func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector, maxItems int) ([]moveBatchItem, error) {
 	project, err := resolveProjectSelector(a, sel.Project)
 	if err != nil {
 		return nil, err
@@ -322,7 +322,7 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector) ([]
 		}
 		for _, issue := range page.Issues {
 			selected = append(selected, moveBatchItem{Ref: issue.UID, ExpectedRevision: issue.Revision})
-			if sel.Query == "" && len(selected) > 5000 {
+			if sel.Query == "" && len(selected) >= maxItems {
 				return selected, nil
 			}
 		}

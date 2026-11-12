@@ -267,6 +267,8 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 Batch moves accept up to 50 items per request. Use the single-issue move endpoint for previews. Duplicate decisions apply within each request; a stale expected revision is refused on a later request.
 
+A single-issue move preview with `single: true` and the issue's current project as its destination returns `changed: false` and the current issue. A stale `If-Match` revision is refused. A subtree preview or a write to the current project returns `same_project`.
+
 ### Version history
 
 | Version | Change |
