@@ -1,8 +1,8 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
-import { delimiter, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 
@@ -203,7 +203,6 @@ listen = "127.0.0.1:${port}"
       run(binary, ['projects', 'rename', 'example-project', name], workspace, environment)
       run(binary, ['projects', 'create', name], remoteWorkspace, remoteEnvironment)
       run(binary, ['federation', 'enable', name], remoteWorkspace, remoteEnvironment)
-      await symlink(binary, join(root, 'kata'))
     },
     recordSyncDiagnosticError() {
       for (const [path, message] of [
@@ -246,7 +245,7 @@ listen = "127.0.0.1:${port}"
             ...environment,
             KATA_AUTH_TOKEN: remote ? 'example-remote-token' : 'example-local-token',
             KATA_SERVER: remote ? remoteOrigin : '',
-            PATH: `${root}${delimiter}${environment.PATH}`,
+            PATH: `${dirname(binary)}${delimiter}${environment.PATH ?? environment.Path ?? ''}`,
           },
           encoding: 'utf8',
         },
