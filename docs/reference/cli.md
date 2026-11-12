@@ -2004,7 +2004,9 @@ resolved web UI URL on its own line after the daemon transport address.
 `daemon status` reports current-home processes and a separate selected-daemon
 diagnosis. For a process automatically started by a Kata command, human output
 shows `started: automatically by a kata command` and JSON includes
-`auto_started: true`. An omitted JSON field means the startup origin is unknown.
+`auto_started: true`. This includes a registered local profile started by
+`daemon recover` or by a command that routes to it. An omitted JSON field means
+the startup origin is unknown.
 Agent output includes `auto_started=true` when there is exactly one process and
 it was automatically started; it omits the field when multiple processes are
 listed. An existing process's startup marker survives an in-place restart or

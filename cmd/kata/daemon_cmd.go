@@ -673,7 +673,7 @@ func daemonStatusCmd() *cobra.Command {
 				if daemonruntime.RuntimeRecordWorthProbing(r) {
 					out.Daemons = append(out.Daemons, daemonStatusEntry{
 						PID:           r.PID,
-						AutoStarted:   r.Metadata["autostart"] == "1",
+						AutoStarted:   r.Metadata[daemonruntime.RuntimeAutoStartKey] == "1",
 						Version:       daemonRuntimeVersion(r),
 						Address:       r.Endpoint().ConfigAddress(),
 						WebURL:        r.Metadata["web_origin"],
@@ -1472,7 +1472,7 @@ func runDaemonProcess(
 	rec.Address = runtimeEndpoint.ConfigAddress()
 	rec.Metadata = map[string]string{"db_path": redactRuntimeDSN(dbPath)}
 	if os.Getenv(daemonruntime.AutoStartMarkerEnv) == "1" {
-		rec.Metadata["autostart"] = "1"
+		rec.Metadata[daemonruntime.RuntimeAutoStartKey] = "1"
 	}
 	for key, source := range dcfg.Sources {
 		rec.Metadata["config_"+key+"_source"] = source
