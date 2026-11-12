@@ -116,6 +116,7 @@ func TestCronFreshness(t *testing.T) {
 		{"disappearing record", keyRune('r'), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			useInstantTicks(t)
 			m := cronFixture(t)
 			m.sseCh = nil
 			a := &cronReadTestAPI{KataAPI: &inboxTestAPI{}, data: *m.cron.data}

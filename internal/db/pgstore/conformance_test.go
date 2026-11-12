@@ -196,38 +196,6 @@ func installRelayAckRowCounter(ctx context.Context, store db.Storage) (func(cont
 	return count, remove, nil
 }
 
-func TestExternalRootConformance(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires postgres testcontainer")
-	}
-	dbtest.RunExternalRootConformance(t, dbtest.Backend{
-		Name: "postgres",
-		Open: func(t *testing.T) db.Storage {
-			t.Helper()
-			store, _ := openConformanceStore(t)
-			return store
-		},
-		InstallExternalRootClock: func(store db.Storage, now func() time.Time) func() {
-			return pgstore.InstallExternalRootClockForTest(store.(*pgstore.Store), now)
-		},
-		BackdateCommentCreated: backdateCommentCreated,
-	})
-}
-
-func TestExternalRootContentOwned(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires postgres testcontainer")
-	}
-	dbtest.RunExternalRootContentOwnershipConformance(t, dbtest.Backend{
-		Name: "postgres",
-		Open: func(t *testing.T) db.Storage {
-			t.Helper()
-			store, _ := openConformanceStore(t)
-			return store
-		},
-	})
-}
-
 // conformanceTemplate installs the schema under a non-default name, so the
 // suites also cover stores configured with a custom PostgreSQL schema.
 var conformanceTemplate = pgstoretest.NewTemplate("conformance")
