@@ -63,6 +63,7 @@ var kataCommandGroups = map[string]string{
 	"agent-hook":          "coord",
 	"agent-contract-hook": "coord",
 	"cron":                "admin",
+	"agent":               "setup",
 	"init":                "setup",
 	"doctor":              "setup",
 	"health":              "setup",

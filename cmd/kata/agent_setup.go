@@ -50,7 +50,7 @@ func checkAgentSetup(ctx context.Context, name string) (agentsetup.Status, error
 		return agentsetup.Status{}, err
 	}
 	plan, err := planNativeAgentHooks(opts, false)
-	if errors.Is(err, errMuseAttentionPermission) || (err == nil && plan.CurrentContract && !plan.CurrentAttentionStart && !plan.CurrentAttentionEnd) {
+	if errors.Is(err, errMuseAttentionPermission) || (err == nil && plan.CurrentContract && !plan.CurrentOwnedAttention && !plan.CurrentAttentionStart && !plan.CurrentAttentionEnd) {
 		opts.Attention = false
 		plan, err = planNativeAgentHooks(opts, false)
 	}
@@ -164,8 +164,10 @@ func newAgentSetupCmd() *cobra.Command {
 			return fmt.Errorf("%s", strings.ReplaceAll(err.Error(), "or pass --agent", "or name an agent"))
 		}
 		// Kata's global --agent selects output mode, so setup takes positional names.
-		for i := range report.Rows {
-			report.Rows[i].NextStep = strings.Replace(report.Rows[i].NextStep, "kata agent setup --agent ", "kata agent setup ", 1)
+		for i, row := range report.Rows {
+			if names, ok := strings.CutPrefix(row.NextStep, "kata agent setup --agent "); ok {
+				report.Rows[i].NextStep = "kata agent setup " + strings.ReplaceAll(names, ",", " ")
+			}
 		}
 		switch currentOutputMode() {
 		case outputJSON:

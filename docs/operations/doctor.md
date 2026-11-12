@@ -50,7 +50,7 @@ files; remote process findings come from the selected daemon.
 
 | Check ID | What it checks | Suggested next step |
 | --- | --- | --- |
-| `agent.claude`, `agent.codex` | User hook configuration and readiness | Run `kata agent setup`; for untrusted Codex hooks, open Codex and run `/hooks`. |
+| `agent.claude`, `agent.codex` | User-scope hook configuration and readiness; project hooks from `kata init --agent-hooks` do not clear it | Run `kata agent setup`; for untrusted Codex hooks, open Codex and run `/hooks`. |
 | `config.daemon` | Local daemon/display config and environment overrides | Check spelling, types, URLs and supported fields in `<KATA_HOME>/config.toml`. |
 | `config.workspace` | Workspace path, project binding and local override syntax; ignored keys | Correct `.kata.toml`/`.kata.local.toml`, or supply `--project`. |
 | `config.hooks` | Local `hooks.toml` validation, including events that can fire | Correct events, commands, timeouts and tunable fields. |

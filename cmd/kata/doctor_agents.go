@@ -11,6 +11,9 @@ import (
 
 func doctorAgent(ctx context.Context, name string) diagnostics.Check {
 	display := map[string]string{"claude": "Claude Code", "codex": "Codex"}[name]
+	if _, err := exec.LookPath(name); err != nil {
+		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: display + " is not installed"}
+	}
 	status, err := checkAgentSetup(ctx, name)
 	if err != nil {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: display + ": " + err.Error()}
@@ -22,11 +25,6 @@ func doctorAgent(ctx context.Context, name string) diagnostics.Check {
 		result.Summary = display + ": Kata hooks are ready"
 	case agentsetup.StateUntrusted:
 		result.Summary = fmt.Sprintf("%s: %d Kata hooks wait for review", display, status.HookCount)
-	case agentsetup.StateMissing:
-		// Setup checks configured hooks first; an absent agent with none is informational.
-		if _, err := exec.LookPath(name); err != nil {
-			return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: display + " is not installed"}
-		}
 	}
 	return result
 }

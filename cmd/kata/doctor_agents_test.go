@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -60,4 +62,39 @@ func TestDoctorAgentContractOnly(t *testing.T) {
 	require.NoError(t, err)
 	check := doctorAgent(t.Context(), "claude")
 	require.Equal(t, "ok", string(check.Status), check.Summary)
+}
+
+func TestDoctorAgentRepairsIneffectiveAttention(t *testing.T) {
+	home := isolateAgentHookHomes(t)
+	installClaudeAgentFixture(t)
+	_, err := runAgentSetup(t, "claude")
+	require.NoError(t, err)
+	path := filepath.Join(home, "claude", "settings.json")
+	doc := readAgentHookConfig(t, path)
+	for _, event := range []string{"SessionStart", "SessionEnd"} {
+		for _, group := range doc["hooks"].(map[string]any)[event].([]any) {
+			if strings.Contains(fmt.Sprint(group), "attention-native") {
+				group.(map[string]any)["matcher"] = "never-matches"
+			}
+		}
+	}
+	writeAgentHookConfig(t, path, doc)
+	check := doctorAgent(t.Context(), "claude")
+	require.Equal(t, "warn", string(check.Status), check.Summary)
+	require.Equal(t, "kata agent setup claude", check.Fix)
+	_, err = runAgentSetup(t, "claude")
+	require.NoError(t, err)
+	check = doctorAgent(t.Context(), "claude")
+	require.Equal(t, "ok", string(check.Status), check.Summary)
+}
+
+func TestDoctorAgentRemovedAfterSetup(t *testing.T) {
+	isolateAgentHookHomes(t)
+	installClaudeAgentFixture(t)
+	_, err := runAgentSetup(t, "claude")
+	require.NoError(t, err)
+	t.Setenv("PATH", t.TempDir())
+	check := doctorAgent(t.Context(), "claude")
+	require.Equal(t, "info", string(check.Status), check.Summary)
+	require.Contains(t, check.Summary, "not installed")
 }
