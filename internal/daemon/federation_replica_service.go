@@ -1155,6 +1155,44 @@ func preflightFederationAdoption(ctx context.Context, store db.Storage, credenti
 	if !errors.Is(err, db.ErrNotFound) {
 		return "", nil, err
 	}
+	if !p.AdoptExisting && !p.AttachEmpty {
+		// A direct rejoin re-offers local-origin history from cursor zero.
+		// Fold every page: a later event may need a different feature.
+		var required string
+		var cursor int64
+		for {
+			events, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), cursor, 1000)
+			if err != nil {
+				return "", nil, err
+			}
+			if len(events) == 0 {
+				break
+			}
+			for _, event := range events {
+				_, features, err := db.FederationEventPayloadWireVersion(event.Type, []byte(event.Payload))
+				if err != nil {
+					return "", nil, err
+				}
+				required = db.MergeEventFeatures(required, features)
+			}
+			cursor = events[len(events)-1].ID
+		}
+		if db.RequireEventFeatures(required, db.CronRunSessionsEventFeature) != nil {
+			return "", nil, nil
+		}
+		credential, err := adoptionEffectiveCredential(ctx, credentials, p, projectID, store)
+		if err != nil {
+			return "", nil, err
+		}
+		features, err := fetchFederationAdoptionMetadata(ctx, p.HubURL, p.HubProjectID, p.HubProjectUID, credential, p.HubClientFactory)
+		if err != nil {
+			return "", nil, err
+		}
+		if err = db.RequireEventFeatures(features, required); err != nil {
+			return "", nil, err
+		}
+		return features, &credential, nil
+	}
 	beginner, ok := store.(interface {
 		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 	})
@@ -1235,7 +1273,7 @@ func ensureFederationReplicaState(
 	credentials config.FederationCredentialStore,
 	p EnsureFederationReplicaParams,
 ) (EnsureFederationReplicaResult, error) {
-	// Adoption can turn a standalone project into a spoke. Drain observations
+	// Adoption or rejoin can turn a standalone project into a spoke. Drain observations
 	// before taking the replica mutex, matching the rebind lock order.
 	var adoptionProjectID int64
 	var releaseAdoption func()
@@ -1246,12 +1284,22 @@ func ensureFederationReplicaState(
 		}
 		return project, err
 	}
-	if p.AdoptExisting || p.AttachEmpty {
+	revalidateProject := p.AdoptExisting || p.AttachEmpty
+	if revalidateProject || (p.PushEnabled && p.Relay == nil) {
 		project, err := lookupProject()
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
 			return EnsureFederationReplicaResult{}, err
 		}
-		if err == nil {
+		guard := revalidateProject
+		if err == nil && !guard && project.UID == p.HubProjectUID && project.Name == p.ProjectName && project.DeletedAt == nil {
+			_, bindErr := store.FederationBindingByProject(ctx, project.ID)
+			if bindErr != nil && !errors.Is(bindErr, db.ErrNotFound) {
+				return EnsureFederationReplicaResult{}, bindErr
+			}
+			guard = errors.Is(bindErr, db.ErrNotFound)
+		}
+		if err == nil && guard {
+			revalidateProject = true
 			adoptionProjectID = project.ID
 			releaseAdoption, err = federationcoord.BeginRebind(ctx, federationcoord.Key(store.InstanceUID(), project.ID), store, project.ID)
 			if err != nil {
@@ -1270,7 +1318,7 @@ func ensureFederationReplicaState(
 	}
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
-	if p.AdoptExisting || p.AttachEmpty {
+	if revalidateProject {
 		project, err := lookupProject()
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
 			return EnsureFederationReplicaResult{}, err

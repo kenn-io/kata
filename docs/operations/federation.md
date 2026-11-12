@@ -1706,10 +1706,11 @@ The spoke and hub project names do not have to match. For that flow, run
 `--project` in the printed join command and the hub project with the hub
 selector.
 
-Before adopting a standalone project with retained cron run sessions, upgrade the
-direct hub to support those sessions. Adoption refuses an incompatible or
-unreachable hub; relay adoption with sessions is also refused. Retry after the
-hub upgrade.
+Before adopting a standalone project with retained cron run sessions, or
+rejoining it with `--push` when its local history contains sessions, upgrade
+the direct hub to support those sessions and the other retained event features.
+Adoption and push-enabled rejoin refuse an incompatible or unreachable hub;
+relay adoption with sessions is also refused. Retry after the hub upgrade.
 
 Adoption preserves the current state of local issues, including closed and
 soft-deleted issues, comments, labels, metadata, priority, owner, and
