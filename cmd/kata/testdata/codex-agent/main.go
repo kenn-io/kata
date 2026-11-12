@@ -26,9 +26,19 @@ func run(mode string) int {
 		var req struct {
 			ID     int    `json:"id"`
 			Method string `json:"method"`
+			Params struct {
+				Cwd  string   `json:"cwd"`
+				Cwds []string `json:"cwds"`
+			} `json:"params"`
 		}
 		if json.Unmarshal(scanner.Bytes(), &req) != nil {
 			return 1
+		}
+		if want := os.Getenv("KATA_TEST_EXPECT_WORKSPACE"); want != "" {
+			cwd, err := os.Getwd()
+			if err != nil || cwd != want || (req.Method == "config/read" && req.Params.Cwd != want) || (req.Method == "hooks/list" && (len(req.Params.Cwds) != 1 || req.Params.Cwds[0] != want)) {
+				return 1
+			}
 		}
 		var result any = map[string]any{}
 		switch req.Method {

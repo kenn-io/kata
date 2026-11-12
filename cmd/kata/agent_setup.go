@@ -57,6 +57,27 @@ func checkAgentSetup(ctx context.Context, name string) (agentsetup.Status, error
 	if err != nil {
 		return agentsetup.Status{}, err
 	}
+	if name == "claude" || name == "codex" {
+		installed, inspectErr := readAgentHookStatus(agenthook.Agent(name), plan.Path, opts.Dir)
+		if inspectErr != nil {
+			return agentsetup.Status{}, inspectErr
+		}
+		var executable string
+		for _, entry := range installed.Entries {
+			if !entry.ExecutableExists || !isKataHookExecutable(entry.Executable) || strings.ContainsAny(entry.Executable, "/\\") || (executable != "" && executable != entry.Executable) {
+				executable = ""
+				break
+			}
+			executable = entry.Executable
+		}
+		if executable != "" {
+			opts.Executable = executable
+			plan, err = planNativeAgentHooks(opts, false)
+			if err != nil {
+				return agentsetup.Status{}, err
+			}
+		}
+	}
 	status := agentsetup.Status{State: agentsetup.StateOK, ConfigPath: plan.Path}
 	if nativeAgentHookPlanChanged(plan) {
 		status.State, status.Reason, status.NextStep = agentsetup.StateMissing, "Kata hooks are not installed", "kata agent setup "+name

@@ -36,7 +36,7 @@ func collectDoctor(ctx context.Context) diagnostics.Report {
 	s := &doctorState{}
 	s.localChecks(ctx)
 	for _, name := range []string{"claude", "codex"} {
-		s.add("agent."+name, "agent", func() diagnostics.Check { return doctorAgent(ctx, name) })
+		s.add("agent."+name, "agent", func() diagnostics.Check { return doctorAgentInWorkspace(ctx, name, s.workspace) })
 	}
 	s.daemonChecks(ctx)
 	return diagnostics.NewReport(s.checks)
