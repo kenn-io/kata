@@ -1,13 +1,16 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-10
+last_edited: 2026-11-12
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- See which two signing keys share a secret when the daemon refuses to start.
+  `kata doctor` also reports shared secrets available in its own environment.
 
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 

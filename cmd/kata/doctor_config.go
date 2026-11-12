@@ -7,11 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/diagnostics"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/hooks"
 )
 
@@ -30,6 +32,7 @@ func (s *doctorState) localChecks(ctx context.Context) {
 	s.add("config.daemon", "config", doctorDaemonConfig)
 	s.add("config.workspace", "config", func() diagnostics.Check { return s.workspaceConfig(ctx) })
 	s.add("config.hooks", "config", doctorHookConfig)
+	s.add("config.federation_signing", "config", doctorFederationSigningConfig)
 }
 
 func doctorDaemonConfig() diagnostics.Check {
@@ -50,6 +53,20 @@ func doctorDaemonConfig() diagnostics.Check {
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "No optional local daemon config file; defaults and environment overrides validated"}
 	}
 	return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Local daemon and client configuration are valid"}
+}
+
+func doctorFederationSigningConfig() diagnostics.Check {
+	cfg, err := config.ReadDaemonConfig()
+	if err != nil {
+		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Not checked; config.daemon reports the configuration error"}
+	}
+	if cfg.Federation.Signing.ExternalURL == "" {
+		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Federation signing is not configured"}
+	}
+	if err := signingpolicy.CheckDistinctSecrets(cfg.Federation.Signing.Keys, time.Now()); err != nil {
+		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Two federation signing keys share one secret", Details: []string{err.Error()}, Fix: "Give each [[federation.signing.key]] its own key_file or key_env secret, then rotate the shared secret"}
+	}
+	return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Available federation signing keys have distinct secrets"}
 }
 
 func doctorHookConfig() diagnostics.Check {

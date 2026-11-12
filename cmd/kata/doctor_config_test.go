@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -24,6 +26,7 @@ func doctorFinding(t *testing.T, r diagnostics.Report, id string) diagnostics.Ch
 func TestDoctorLocalConfiguration(t *testing.T) {
 	for _, tc := range []struct{ name, file, content, id, status string }{
 		{"missing daemon config", "", "", "config.daemon", "info"},
+		{"no signing", "", "", "config.federation_signing", "info"},
 		{"invalid daemon config", "config.toml", "[auth]\ntoken = [secret-token\n", "config.daemon", "fail"},
 		{"unknown daemon key", "config.toml", "litsen = '127.0.0.1:7777'", "config.daemon", "fail"},
 		{"untrusted web origin", "config.toml", untrustedWebConfig, "config.daemon", "fail"},
@@ -125,4 +128,33 @@ func TestDoctorValidatesClosestLocalOverride(t *testing.T) {
 			require.Equal(t, "example-project", state.project)
 		})
 	}
+}
+
+func TestDoctorReportsSharedFederationSigningSecret(t *testing.T) {
+	home, workspace := doctorTestEnv(t)
+	secret := strings.Repeat("k", 64)
+	keyFile := filepath.Join(home, "signing.key")
+	require.NoError(t, os.WriteFile(keyFile, []byte(secret), 0600))
+	body := fmt.Sprintf(`[federation.signing]
+external_url = "https://hub.example"
+[[federation.signing.key]]
+key_id = "key-a"
+enrollment_id = 1
+key_file = %q
+[[federation.signing.key]]
+key_id = "key-b"
+enrollment_id = 2
+key_file = %q
+`, keyFile, keyFile)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0600))
+	flags = globalFlags{Workspace: workspace}
+	r := collectDoctor(t.Context())
+	finding := doctorFinding(t, r, "config.federation_signing")
+	require.EqualValues(t, "fail", finding.Status)
+	require.Contains(t, strings.Join(finding.Details, " "), "key-a")
+	require.Contains(t, strings.Join(finding.Details, " "), "key-b")
+	data, err := json.Marshal(r)
+	require.NoError(t, err)
+	require.NotContains(t, string(data), keyFile)
+	require.NotContains(t, string(data), secret)
 }

@@ -40,3 +40,12 @@ func TestSourceRejectsKeyFileReadableByOthersOnUnix(t *testing.T) {
 	require.ErrorIs(t, err, ErrKey)
 	require.Nil(t, got)
 }
+
+func TestValidatePolicyRejectsSharedSecrets(t *testing.T) {
+	t.Setenv("TEST_SHARED_SIGNING_KEY", strings.Repeat("k", 64))
+	keys := []Key{
+		{Source: Source{KeyID: "key-a", KeyEnv: "TEST_SHARED_SIGNING_KEY"}, EnrollmentID: 1},
+		{Source: Source{KeyID: "key-b", KeyEnv: "TEST_SHARED_SIGNING_KEY"}, EnrollmentID: 2},
+	}
+	require.ErrorIs(t, ValidatePolicy("https://hub.example", keys), ErrSharedSecret)
+}

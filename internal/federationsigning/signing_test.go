@@ -214,15 +214,38 @@ func TestVerifierStartsAfterRetiredSourceRemoval(t *testing.T) {
 }
 
 func TestVerifierRejectsDuplicateAvailableSecrets(t *testing.T) {
-	source := testSource(t)
-	other := source
-	other.KeyID = "other-key"
-	state := filepath.Join(t.TempDir(), "replay.state")
-	require.NoError(t, InitializeReplayState(state))
-	_, err := NewVerifier("https://hub.example", []signingpolicy.Key{
-		{Source: source, EnrollmentID: 7}, {Source: other, EnrollmentID: 8},
-	}, state)
-	require.ErrorIs(t, err, signingpolicy.ErrKey)
+	for _, mode := range []string{"environment", "shared file", "equal files", "expired"} {
+		t.Run(mode, func(t *testing.T) {
+			source := testSource(t)
+			other := source
+			other.KeyID = "other-key"
+			if mode == "shared file" || mode == "equal files" {
+				source.KeyEnv = ""
+				source.KeyFile = filepath.Join(t.TempDir(), "first.key")
+				require.NoError(t, os.WriteFile(source.KeyFile, []byte(strings.Repeat("a", 64)), 0600))
+				other.KeyEnv = ""
+				other.KeyFile = source.KeyFile
+				if mode == "equal files" {
+					other.KeyFile = filepath.Join(t.TempDir(), "second.key")
+					require.NoError(t, os.WriteFile(other.KeyFile, []byte(strings.Repeat("a", 64)), 0600))
+				}
+			}
+			keys := []signingpolicy.Key{{Source: source, EnrollmentID: 7}, {Source: other, EnrollmentID: 8}}
+			if mode == "expired" {
+				keys[1].NotAfter = time.Now().Add(-time.Minute).Unix()
+			}
+			state := filepath.Join(t.TempDir(), "replay.state")
+			require.NoError(t, InitializeReplayState(state))
+			v, err := NewVerifier("https://hub.example", keys, state)
+			if mode == "expired" {
+				require.NoError(t, err)
+				require.NoError(t, v.Close())
+				return
+			}
+			require.ErrorIs(t, err, signingpolicy.ErrSharedSecret)
+			require.NotErrorIs(t, err, signingpolicy.ErrKey)
+		})
+	}
 }
 
 func signedWithoutKey(t *testing.T) *http.Request {
