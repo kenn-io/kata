@@ -52,6 +52,16 @@ func openPageBudgetDB(t *testing.T) (*sql.DB, int64) {
 	return raw, p.ID
 }
 
+// prepareSeed compiles a seeding statement once for the transaction, which
+// closes it. Compiling the same SQL text for every row costs about as much
+// as inserting the rows.
+func prepareSeed(t *testing.T, tx *sql.Tx, query string) *sql.Stmt {
+	t.Helper()
+	statement, err := tx.PrepareContext(t.Context(), query)
+	require.NoError(t, err)
+	return statement
+}
+
 // assertSchemaVersion checks that the schema_version row in meta matches the
 // expected version.
 func assertSchemaVersion(t *testing.T, d *sqlitestore.Store, expected int) {
