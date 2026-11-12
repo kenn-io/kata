@@ -20,7 +20,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Restart a local daemon from Settings after turning on search by meaning. Confirm the interruption for every project and client, then reopen `kata ui` if the browser address changes. The API reports the `restart` job state and `restart_in_progress` during the handoff.
 
 - Diagnose unsigned requests to a hub that requires signing: enrolled spokes
-  receive HTTP 401 `hub_signing_required`, while bad signatures still receive
+  receive HTTP 428 `hub_signing_required`, while bad signatures still receive
   `signature_invalid`. Relay bridges keep their grant on the new response. See
   [federation signing](operations/federation-signing.md).
 

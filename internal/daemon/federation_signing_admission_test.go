@@ -99,10 +99,11 @@ func TestRequiredSigningRejectsUnsignedEnrollment(t *testing.T) {
 				path := "https://hub.example" + projectPath(project.ID) + "/federation/metadata"
 				for _, tc := range []struct {
 					name, token, signature, code string
+					status                       int
 				}{
-					{"unsigned", enrollment.Token, "", "hub_signing_required"},
-					{"tampered", enrollment.Token, "tampered", "signature_invalid"},
-					{"unauthorized", "", "", ""},
+					{"unsigned", enrollment.Token, "", "hub_signing_required", http.StatusPreconditionRequired},
+					{"tampered", enrollment.Token, "tampered", "signature_invalid", http.StatusUnauthorized},
+					{"unauthorized", "", "", "", http.StatusUnauthorized},
 				} {
 					t.Run(tc.name, func(t *testing.T) {
 						req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
@@ -115,7 +116,7 @@ func TestRequiredSigningRejectsUnsignedEnrollment(t *testing.T) {
 						}
 						w := httptest.NewRecorder()
 						handler.ServeHTTP(w, req)
-						require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+						require.Equal(t, tc.status, w.Code, w.Body.String())
 						var envelope api.ErrorEnvelope
 						require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
 						if tc.token == "" {

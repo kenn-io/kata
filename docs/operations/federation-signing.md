@@ -15,7 +15,7 @@ later on the hub and its spokes.
 Existing private deployments stay unsigned unless the hub enables required
 signing. Optional mode rejects invalid supplied signatures. Required mode
 rejects unsigned enrollment requests on every daemon listener, including the
-Unix socket, with `401 hub_signing_required`; a spoke cannot negotiate it away.
+Unix socket, with `428 hub_signing_required`; a spoke cannot negotiate it away.
 Owner-local administration keeps its existing authority.
 The restricted ingress listener always requires signatures, even when signing
 is optional on the ordinary daemon listeners.
@@ -103,10 +103,9 @@ A bridge created with `kata federation bridge connect` signs its relay
 requests when its credential selects a signing source. A hub with
 `required = true` advertises `federation_signing_required`, and bridge connect
 refuses it with `hub_signing_required` until the bridge has a source. The same
-code with HTTP 401 answers unsigned requests on any federation listener. Before
-enabling required signing, update older bridges or give them a signing key:
-an older bridge treats this code as a revoked grant until it next signs
-successfully.
+code with HTTP 428 answers unsigned requests on any federation listener. An
+older bridge keeps its grant and reports `offline` instead of `signing_rejected`
+when this response causes its sync to fail, unless a higher-priority state applies.
 
 1. On the daemon that will hold the bridge, provision the secret as above and
    connect with `--signing-key-id <key-id>` plus `--signing-key-env <var>` or
