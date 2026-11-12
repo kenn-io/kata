@@ -18,13 +18,14 @@ func checkCronProjectMergeRestore(t *testing.T, source db.Storage, backend Backe
 	require.NoError(t, err)
 
 	job, workflow := nativeFederationDefinitions(t, source, sourceProject)
+	sessions := []cron.Session{{Agent: "codex", SessionID: "00000000-0000-4000-8000-000000000001"}}
 	runUID, err := uid.New()
 	require.NoError(t, err)
 	_, err = source.ObserveCronRun(ctx, db.ObserveCronRun{
 		ProjectID: sourceProject.ID, UID: runUID, JobUID: &job.UID,
 		DefinitionEventUID: &job.DefinitionEventUID, WorkflowUID: &workflow.UID,
 		WorkflowDefinitionEventUID: &workflow.DefinitionEventUID, Actor: "worker",
-		Status: "running", Summary: cron.Summary{Version: 1},
+		Status: "running", Summary: cron.Summary{Version: 1, Sessions: &sessions},
 	})
 	require.NoError(t, err)
 
@@ -68,6 +69,7 @@ func checkCronProjectMergeRestore(t *testing.T, source db.Storage, backend Backe
 	restoredRun, err := restored.CronRun(ctx, target.ID, runUID)
 	require.NoError(t, err)
 	require.Equal(t, runUID, restoredRun.UID)
+	require.Equal(t, &sessions, restoredRun.Summary.Sessions)
 
 	return nil
 }

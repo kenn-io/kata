@@ -1,7 +1,7 @@
 ---
 title: Diagnosing setup
 description: Read-only setup diagnostics with kata doctor.
-last_edited: 2026-11-08
+last_edited: 2026-11-12
 ---
 
 # Diagnosing setup
@@ -59,6 +59,7 @@ files; remote process findings come from the selected daemon.
 | `daemon.hooks` | Currently loaded hook executable and working-directory availability | Fix the daemon service's PATH or working directory, then explicitly reload/restart it. |
 | `daemon.hook_queue` | Current queue and process-lifetime dropped count | Inspect hook capacity and slow or failing commands. |
 | `daemon.hook_runs` | Failures among scanned runs ended in the last seven days | Inspect `kata daemon logs --hooks` and the hook output on its host. |
+| `daemon.agentsview` | Selected daemon’s on-demand AgentsView usage probe | Check the daemon’s source URL and token; raw IDs require AgentsView v0.47.0 or newer. |
 | `daemon.embeddings` | Existing reconciler error and backlog aggregate | Check model/provider credentials and daemon logs. |
 | `daemon.docbank` | The daemon can resolve its `[docbank]` API key; Docbank itself is not contacted, and `local = true` has no key source to check | Fix the key source the check names on the daemon host; see the [key file rules](../reference/configuration.md#credentials-and-batching). |
 | `daemon.federation` | Declarative mapping convergence | Resolve pending/conflicting mappings and credential origin problems. |
@@ -88,6 +89,8 @@ Ordinary identity tokens, browser sessions, trusted-proxy principals, anonymous
 read-only access and tokenless private-network writes cannot obtain them.
 A missing/hidden endpoint warns that diagnostics are unsupported or not visible;
 it does not prove the daemon is old. Other checks still run.
+
+The AgentsView check makes one synthetic usage request through the selected daemon. It reports off, ok, unreachable, unauthorized, or not AgentsView; the CLI does not read the daemon host’s token.
 
 Embedding health does not make a provider call. When the daemon exposes
 diagnostics but omits embedding health, doctor reports embeddings as disabled

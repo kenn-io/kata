@@ -276,6 +276,7 @@ func TestCronCLICapabilitiesEmptyProject(t *testing.T) {
 	out, _, err := executeCronCLI(t, env.URL, nil, "capabilities")
 	require.NoError(t, err)
 	require.Contains(t, out, `"cron_v1"`)
+	require.Contains(t, out, `"cli_features":["cron_run_sessions_v1"]`)
 	require.Contains(t, out, project.UID)
 	after, err := env.DB.UIEventCursor(t.Context())
 	require.NoError(t, err)
@@ -809,4 +810,29 @@ func TestCronCLIParentUpdateKeepsBindingProtections(t *testing.T) {
 	stored, err := env.DB.CronJob(t.Context(), project.ID, jobUID)
 	require.NoError(t, err)
 	require.Equal(t, parents[0].UID, stored.Definition.Issue.ParentUID)
+}
+
+func TestCronCLIObservationSessionsRoundTrip(t *testing.T) {
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Definition: cronCLIJob(t).Definition.Native(), Actor: "worker"})
+	require.NoError(t, err)
+	id := cronCLIUID(t)
+	body := map[string]any{"job_uid": job.UID, "definition_event_uid": job.DefinitionEventUID, "status": "running", "summary": map[string]any{"version": 1, "sessions": []map[string]string{{"agent": "claude", "session_id": "00000000-0000-4000-8000-000000000001", "step": "main"}}, "sessions_incomplete": true}}
+	_, _, err = executeCronCLI(t, env.URL, strings.NewReader(`{"status":"running"}`), "run", "observe", id, "--json-input", "-")
+	require.ErrorContains(t, err, "invalid run summary")
+	nullStep := strings.Replace(string(mustCronJSON(t, body)), `"step":"main"`, `"step":null`, 1)
+	_, _, err = executeCronCLI(t, env.URL, strings.NewReader(nullStep), "run", "observe", id, "--json-input", "-")
+	var cliErr *cliError
+	require.ErrorAs(t, err, &cliErr)
+	require.Equal(t, ExitValidation, cliErr.ExitCode)
+	_, err = env.DB.CronRun(t.Context(), project.ID, id)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	out, _, err := executeCronCLI(t, env.URL, strings.NewReader(string(mustCronJSON(t, body))), "run", "observe", id, "--json-input", "-")
+	require.NoError(t, err)
+	require.Contains(t, out, `"session_id":"00000000-0000-4000-8000-000000000001"`)
+	out, _, err = executeCronCLI(t, env.URL, nil, "run", "show", id)
+	require.NoError(t, err)
+	require.Contains(t, out, `"sessions_incomplete":true`)
 }

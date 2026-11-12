@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federation"
 )
@@ -252,7 +253,7 @@ func (s baseCredentialStore) DeleteFederationCredential(
 }
 
 type failAdoptionLookupAfterRekeyStore struct {
-	db.Storage
+	dbtest.TransactionalStore
 	mu          sync.Mutex
 	credentials *fakeCredentialStore
 	localUID    string
@@ -263,7 +264,7 @@ type failAdoptionLookupAfterRekeyStore struct {
 type replicaCallKindContextKey struct{}
 
 type orderedReplicaServiceStore struct {
-	db.Storage
+	dbtest.TransactionalStore
 	hubProjectUID string
 	mu            sync.Mutex
 	seen          map[string]bool
@@ -286,11 +287,16 @@ func newOrderedReplicaServiceStore(
 	}
 }
 
-func (s *orderedReplicaServiceStore) ProjectByUID(
-	ctx context.Context, projectUID string,
-) (db.Project, error) {
+// AdoptProjectIntoFederation pauses the tagged call at its adoption write. By
+// then the adopting join holds the project rebind gate and the process-wide
+// replica mutex, so a concurrent config reservation cannot run until the join
+// has committed. Earlier project lookups happen before the mutex is taken and
+// would not order the two paths.
+func (s *orderedReplicaServiceStore) AdoptProjectIntoFederation(
+	ctx context.Context, p db.AdoptProjectIntoFederationParams,
+) (db.AdoptProjectIntoFederationResult, error) {
 	kind, _ := ctx.Value(replicaCallKindContextKey{}).(string)
-	if projectUID == s.hubProjectUID && kind != "" {
+	if p.HubProjectUID == s.hubProjectUID && kind != "" {
 		s.mu.Lock()
 		first := !s.seen[kind]
 		s.seen[kind] = true
@@ -302,11 +308,11 @@ func (s *orderedReplicaServiceStore) ProjectByUID(
 			select {
 			case <-release:
 			case <-ctx.Done():
-				return db.Project{}, ctx.Err()
+				return db.AdoptProjectIntoFederationResult{}, ctx.Err()
 			}
 		}
 	}
-	return s.Storage.ProjectByUID(ctx, projectUID)
+	return s.Storage.AdoptProjectIntoFederation(ctx, p)
 }
 
 func (s *failAdoptionLookupAfterRekeyStore) ProjectByUID(

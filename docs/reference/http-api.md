@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-11
+last_edited: 2026-11-12
 ---
 
 # HTTP API schema
@@ -14,6 +14,17 @@ Use [`kata daemon locate`](daemon-discovery.md) to discover the endpoint and
 transport for those requests with the same selection rules as the CLI. Go
 programs can use the generated [Go client](go-client.md), which includes
 discovery. [Cron](cron.md) documents job and workflow resources.
+
+## Cron run usage
+
+`GET /api/v1/projects/{project_id}/cron/runs/{run_uid}/usage` reads live
+AgentsView session cost. Ordinary project read authority is required; anonymous
+read-only callers receive `403`. When the source is off, the daemon returns
+`503` with `usage_source_disabled`. A total that cannot fit in a signed 64-bit
+integer returns `502` with `usage_total_overflow`. Responses are private and
+non-cacheable. Read cron capabilities first: `usage.source` is `agentsview` or
+`none`. Pass `refresh=true` to bypass entries older than ten seconds. See
+[Live run cost](cron.md#live-run-cost) for states and limitations.
 
 ## Search configuration header
 
@@ -271,6 +282,8 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.46.0` | Read live cron run usage, discover the configured usage source in cron capabilities, and inspect AgentsView status in doctor diagnostics. See [live run cost](cron.md#live-run-cost). |
+| `0.45.0` | Cron run summaries can carry validated agent sessions and an incomplete marker. See the [cron reference](cron.md#independent-run-evidence). |
 | `0.44.0` | Attachment routes return `503 docbank_key_unavailable` instead of `502 docbank_unauthorized` when the daemon cannot resolve its own Docbank key. Health diagnostics add a `docbank` block. |
 | `0.43.0` | Adds the daemon-owned MCP Events routes `POST /api/v1/mcp-events/list`, `POST /api/v1/mcp-events/subscribe`, `POST /api/v1/mcp-events/unsubscribe`, and `GET /api/v1/mcp-events/subscriptions` (status). Subscribe and unsubscribe arguments name either a non-empty `project_uids` list or `all_projects: true`. Failures return an `mcp_events` error whose `data` carries `mcp_code` and `mcp_data`. Older daemons do not serve these routes. Both issue list routes accept `compact=true`. |
 | `0.42.0` | Adds daemon-wide local embeddings setup and status at `GET` and `POST /embeddings/local`, and the `X-Kata-Embeddings-Configured` search response header. |

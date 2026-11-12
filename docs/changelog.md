@@ -1,13 +1,17 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-11
+last_edited: 2026-11-12
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- See live cost for a recorded cron run with `kata cron run usage` when the serving daemon is configured for AgentsView v0.47.0 or newer. Doctor checks the configured source.
+
+- Record the agent sessions used by a cron run and view them in run details. Session data follows the run through federation and backups.
 
 - Use `kata daemon status` in scripts to check the selected daemon's readiness.
   It exits 0 only for a ready selected daemon. Stopped or unavailable

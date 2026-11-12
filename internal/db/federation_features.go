@@ -15,11 +15,14 @@ import (
 // CronEventFeature identifies support for all cron definitions, runs and native delivery state.
 const CronEventFeature = "cron_v1"
 
+// CronRunSessionsEventFeature identifies session-bearing run summaries.
+const CronRunSessionsEventFeature = "cron_run_sessions_v1"
+
 // IssueMoveEventFeature identifies support for moving issues between projects.
 const IssueMoveEventFeature = "issue_move_v1"
 
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + CronRunSessionsEventFeature + "," + IssueMoveEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -54,7 +57,82 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
 	}
-	return required, nil
+	sessions, err := runSessionFeature(kind, payload)
+	if err != nil {
+		return "", err
+	}
+	return MergeEventFeatures(required, sessions), nil
+}
+
+// RequireRelaySourceFeatures checks retained event bodies only when sessions
+// make the batch subject to receiver feature negotiation.
+func RequireRelaySourceFeatures(ctx context.Context, bodies [][]byte) error {
+	features, present := RelayReceiverFeatures(ctx)
+	if !present || RequireEventFeatures(features, SupportedEventFeatures) == nil {
+		return nil
+	}
+	required := ""
+	for _, body := range bodies {
+		event, err := DecodeRelaySourceEvent(body)
+		if err != nil {
+			return err
+		}
+		value, err := PayloadRequiredFeatures(event.Type, string(event.Payload))
+		if err != nil {
+			return err
+		}
+		required = MergeEventFeatures(required, value)
+	}
+	if RequireEventFeatures(required, CronRunSessionsEventFeature) == nil {
+		return RequireEventFeatures(features, required)
+	}
+	return nil
+}
+
+// RequireRelayEnvelopeFeatures checks event envelopes without inspecting other streams.
+func RequireRelayEnvelopeFeatures(ctx context.Context, stream string, envelopes []RelayEnvelope) error {
+	if stream != RelayStreamEvent {
+		return nil
+	}
+	bodies := make([][]byte, 0, len(envelopes))
+	for _, envelope := range envelopes {
+		bodies = append(bodies, envelope.Body)
+	}
+	return RequireRelaySourceFeatures(ctx, bodies)
+}
+
+func runSessionFeature(kind, payload string) (string, error) {
+	if !strings.HasPrefix(kind, "cron.run.") {
+		return "", nil
+	}
+	if payload == "" {
+		payload = "{}"
+	}
+	var body map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(payload), &body); err != nil {
+		return "", err
+	}
+	has, err := summaryHasSessionFields(body["summary"])
+	if err != nil {
+		return "", err
+	}
+	if has {
+		return CronRunSessionsEventFeature, nil
+	}
+	return "", nil
+}
+
+func summaryHasSessionFields(raw jsontext.Value) (bool, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false, nil
+	}
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return false, err
+	}
+	_, sessions := fields["sessions"]
+	_, incomplete := fields["sessions_incomplete"]
+	return sessions || incomplete, nil
 }
 
 // payloadHasNativeRecurringState identifies hub-owned state independently of
@@ -158,6 +236,28 @@ func EventRequiredFeatures(kind string) string {
 	return ""
 }
 
+// ProjectHasCronRunSessions scans retained run summaries for session evidence.
+// Production writers encode typed summaries with ordinary JSON keys.
+func ProjectHasCronRunSessions(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, projectUID string) (bool, error) {
+	rows, err := q.QueryContext(ctx, `SELECT r.summary_json FROM cron_runs r JOIN projects p ON p.id=r.project_id WHERE p.uid=$1 AND (r.summary_json LIKE '%"sessions%')`, projectUID)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return false, err
+		}
+		if has, err := summaryHasSessionFields(jsontext.Value(raw)); err != nil || has {
+			return has, err
+		}
+	}
+	return false, rows.Err()
+}
+
 // ProjectRequiredEventFeatures inspects current cron data and native issue state.
 func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
@@ -179,6 +279,13 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
 	}
 	if cronPresent {
+		hasSessions, err := ProjectHasCronRunSessions(ctx, q, projectUID)
+		if err != nil {
+			return "", err
+		}
+		if hasSessions {
+			required = MergeEventFeatures(required, CronRunSessionsEventFeature)
+		}
 		required = MergeEventFeatures(required, CronEventFeature)
 		if _, cached := nativeProjectFeatureCache.Load(projectUID); cached {
 			return MergeEventFeatures(required, CronEventFeature), nil

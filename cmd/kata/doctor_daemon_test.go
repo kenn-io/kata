@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/diagnostics"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/version"
@@ -562,4 +563,52 @@ func TestDoctorHookNamesPATHMismatch(t *testing.T) {
 	check := doctorFinding(t, collectDoctor(ctx), "daemon.hooks")
 	require.EqualValues(t, "fail", check.Status)
 	require.Contains(t, fmt.Sprint(check.Details), "PATH")
+}
+
+func TestDoctorAgentsViewState(t *testing.T) {
+	for _, tc := range []struct {
+		state       string
+		status      diagnostics.Status
+		fixContains []string
+	}{
+		{"off", diagnostics.StatusInfo, nil},
+		{"ok", diagnostics.StatusOK, nil},
+		{"unauthorized", diagnostics.StatusWarn, []string{"token"}},
+		{"unreachable", diagnostics.StatusWarn, []string{"url", "connect"}},
+		{"not_agentsview", diagnostics.StatusWarn, []string{"agentsview", "base", "0.47.0"}},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			got := doctorAgentsView(tc.state)
+			require.Equal(t, tc.status, got.Status)
+			require.Contains(t, got.Details, "Raw session IDs require AgentsView v0.47.0 or newer.")
+			if tc.fixContains == nil {
+				require.Empty(t, got.Fix)
+			} else {
+				require.Regexp(t, `(?i)\b(check|repair|correct|fix|verify|select|configure|update|use)\b`, got.Fix)
+				for _, part := range tc.fixContains {
+					require.Contains(t, strings.ToLower(got.Fix), part)
+				}
+			}
+		})
+	}
+}
+
+func TestDoctorAgentsViewSelectedDaemonResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, summary string
+		status              int
+	}{
+		{"enabled", `{"hooks":{"available":true,"hooks":[]},"agentsview":{"state":"ok"}}`, "AgentsView usage: ok", 0},
+		{"old daemon", `{"hooks":{"available":true,"hooks":[]}}`, "AgentsView usage: unavailable from selected daemon", 0},
+		{"unavailable", "", "AgentsView usage: unavailable from selected daemon", http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, workspace := doctorTestEnv(t)
+			flags = globalFlags{Workspace: workspace, Project: "example-project"}
+			ctx := doctorServerContext(t, map[string]string{"/api/v1/doctor": tc.body}, map[string]int{"/api/v1/doctor": tc.status})
+			checks := collectDoctor(ctx)
+			check := doctorFinding(t, checks, "daemon.agentsview")
+			require.Equal(t, tc.summary, check.Summary)
+		})
+	}
 }

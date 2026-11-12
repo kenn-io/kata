@@ -1046,9 +1046,12 @@ components:
           type: array
         project_uid:
           type: string
+        usage:
+          $ref: "#/components/schemas/CronUsageSource"
       required:
         - project_uid
         - event_features
+        - usage
       type: object
     CronDefinitionActionBody:
       additionalProperties: false
@@ -1278,6 +1281,16 @@ components:
           type: array
       required:
         - runs
+      type: object
+    CronUsageSource:
+      properties:
+        source:
+          enum:
+            - none
+            - agentsview
+          type: string
+      required:
+        - source
       type: object
     CronWorkflow:
       properties:
@@ -1622,12 +1635,28 @@ components:
       required:
         - credential
       type: object
+    DoctorAgentsView:
+      properties:
+        state:
+          enum:
+            - "off"
+            - ok
+            - unreachable
+            - unauthorized
+            - not_agentsview
+          type: string
+      required:
+        - state
+      type: object
     DoctorResponseBody:
       properties:
+        agentsview:
+          $ref: "#/components/schemas/DoctorAgentsView"
         hooks:
           $ref: "#/components/schemas/Hooks"
       required:
         - hooks
+        - agentsview
       type: object
     EditCommentRequestBody:
       additionalProperties: false
@@ -6440,6 +6469,89 @@ components:
         - status
         - import
       type: object
+    RunSession:
+      properties:
+        agent:
+          type: string
+        candidates:
+          items:
+            type: string
+          type: array
+        canonical_session_id:
+          type: string
+        cost_microdollars:
+          format: int64
+          type: integer
+        cost_source:
+          type: string
+        models:
+          items:
+            type: string
+          type: array
+        session_id:
+          type: string
+        state:
+          enum:
+            - priced
+            - unpriced
+            - no_usage
+            - not_found
+            - ambiguous
+            - unauthorized
+            - unavailable
+          type: string
+        step:
+          type: string
+        subagent_count:
+          format: int64
+          type: integer
+        total_output_tokens:
+          format: int64
+          type: integer
+        unpriced_models:
+          items:
+            type: string
+          type: array
+        url:
+          type: string
+      required:
+        - agent
+        - session_id
+        - state
+      type: object
+    RunUsage:
+      properties:
+        cost_microdollars:
+          format: int64
+          type: integer
+        estimated:
+          type: boolean
+        fetched_at:
+          format: date-time
+          type: string
+        run_uid:
+          type: string
+        sessions:
+          items:
+            $ref: "#/components/schemas/RunSession"
+          type: array
+        sessions_incomplete:
+          type: boolean
+        state:
+          enum:
+            - complete
+            - partial
+            - unknown
+            - no_sessions
+          type: string
+      required:
+        - run_uid
+        - sessions_incomplete
+        - fetched_at
+        - sessions
+        - state
+        - estimated
+      type: object
     SearchHit:
       properties:
         issue:
@@ -6488,6 +6600,31 @@ components:
         - results
         - complete
         - truncated
+      type: object
+    Session:
+      additionalProperties: false
+      properties:
+        agent:
+          type: string
+        session_id:
+          type: string
+        step:
+          type: string
+      required:
+        - agent
+        - session_id
+      type: object
+    SessionResponse:
+      properties:
+        agent:
+          type: string
+        session_id:
+          type: string
+        step:
+          type: string
+      required:
+        - agent
+        - session_id
       type: object
     SetFederationSpokeNameRequestBody:
       additionalProperties: false
@@ -6731,6 +6868,15 @@ components:
         output_tokens:
           format: int64
           type: integer
+        sessions:
+          items:
+            $ref: "#/components/schemas/Session"
+          maxItems: 64
+          minItems: 1
+          type: array
+        sessions_incomplete:
+          const: true
+          type: boolean
         version:
           format: int64
           type: integer
@@ -6747,6 +6893,15 @@ components:
         output_tokens:
           format: int64
           type: integer
+        sessions:
+          items:
+            $ref: "#/components/schemas/SessionResponse"
+          maxItems: 64
+          minItems: 1
+          type: array
+        sessions_incomplete:
+          const: true
+          type: boolean
         version:
           format: int64
           type: integer
@@ -7325,7 +7480,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.44.0
+  version: 0.46.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -9026,6 +9181,43 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/projects/{project_id}/cron/runs/{run_uid}/usage:
+    get:
+      operationId: getCronRunUsage
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: run_uid
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: refresh
+          schema:
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunUsage"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
   /api/v1/projects/{project_id}/cron/workflows:
     get:
       operationId: listCronWorkflows
@@ -9622,6 +9814,10 @@ paths:
           name: Authorization
           schema:
             type: string
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - explode: false
           in: query
           name: stream
@@ -9680,6 +9876,10 @@ paths:
             type: integer
         - in: header
           name: Authorization
+          schema:
+            type: string
+        - in: header
+          name: X-Kata-Event-Features
           schema:
             type: string
       responses:

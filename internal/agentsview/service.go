@@ -1,0 +1,269 @@
+package agentsview
+
+import (
+	"context"
+	"errors"
+	"math"
+	"sync"
+	"time"
+
+	lru "github.com/hashicorp/golang-lru/v2"
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/transcript"
+	"golang.org/x/sync/singleflight"
+)
+
+// ErrTotalOverflow indicates that the total cannot fit in an int64.
+var ErrTotalOverflow = errors.New("usage total cannot be represented")
+
+// ErrDisabled indicates that no usage source is enabled.
+var ErrDisabled = errors.New("usage source disabled")
+
+// Total describes the aggregate cost and completeness of a run.
+type Total struct {
+	State            string `json:"state" enum:"complete,partial,unknown,no_sessions"`
+	CostMicrodollars *int64 `json:"cost_microdollars,omitempty"`
+	Estimated        bool   `json:"estimated"`
+}
+
+// RunSession combines a recorded session with its live usage.
+type RunSession struct {
+	Agent     string  `json:"agent"`
+	SessionID string  `json:"session_id"`
+	Step      *string `json:"step,omitempty"`
+	URL       string  `json:"url,omitempty"`
+	SessionUsage
+}
+
+// RunUsage contains the live usage for a recorded run.
+type RunUsage struct {
+	RunUID string `json:"run_uid"`
+	Total
+	SessionsIncomplete bool         `json:"sessions_incomplete"`
+	FetchedAt          time.Time    `json:"fetched_at"`
+	Sessions           []RunSession `json:"sessions"`
+}
+
+func aggregate(sessions []SessionUsage, incomplete bool) (Total, error) {
+	result := Total{State: "unknown"}
+	var sum int64
+	seen := make(map[string]bool)
+	priced, partial := false, incomplete
+	for _, item := range sessions {
+		if item.State != "priced" {
+			partial = true
+			continue
+		}
+		priced = true
+		if seen[item.CanonicalSessionID] {
+			continue
+		}
+		seen[item.CanonicalSessionID] = true
+		if item.CostMicrodollars == nil || *item.CostMicrodollars > math.MaxInt64-sum {
+			return Total{}, ErrTotalOverflow
+		}
+		sum += *item.CostMicrodollars
+		if item.CostSource == "computed" || item.CostSource == "mixed" {
+			result.Estimated = true
+		}
+	}
+	if priced {
+		result.State = "complete"
+		if partial {
+			result.State = "partial"
+		}
+		result.CostMicrodollars = &sum
+	}
+	return result, nil
+}
+
+type cacheEntry struct {
+	fact   SessionUsage
+	at     time.Time
+	ttl    time.Duration
+	misses int
+}
+type generation struct {
+	client  *Client
+	cache   *lru.Cache[string, cacheEntry]
+	flights singleflight.Group
+	now     func() time.Time
+}
+
+func newGeneration(client *Client) *generation {
+	cache, _ := lru.New[string, cacheEntry](2048)
+	return &generation{client: client, cache: cache, now: time.Now}
+}
+
+// Service owns a single global four-slot limit even across credential reloads.
+type Service struct {
+	mu      sync.RWMutex
+	cfg     config.ResolvedAgentsView
+	current *generation
+	slots   chan struct{}
+}
+
+// NewService creates a usage service for the resolved configuration.
+func NewService(cfg config.ResolvedAgentsView, trustPrivate bool) (*Service, error) {
+	s := &Service{cfg: cfg, slots: make(chan struct{}, 4)}
+	if cfg.Enabled() {
+		client, err := NewClient(cfg, trustPrivate)
+		if err != nil {
+			return nil, err
+		}
+		s.current = newGeneration(client)
+	}
+	return s, nil
+}
+
+// Enabled reports whether a usage source is active.
+func (s *Service) Enabled() bool { s.mu.RLock(); defer s.mu.RUnlock(); return s.current != nil }
+
+// Reload swaps credentials and clears cached facts only for the same targets.
+// It returns false when a restart is required to change targets or enablement.
+func (s *Service) Reload(cfg config.ResolvedAgentsView, trustPrivate bool) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !sameTarget(s.cfg, cfg) {
+		return false, nil
+	}
+	if !cfg.Enabled() {
+		return true, nil
+	}
+	client, err := NewClient(cfg, trustPrivate)
+	if err != nil {
+		return false, err
+	}
+	s.cfg = cfg
+	s.current = newGeneration(client)
+	return true, nil
+}
+
+// Usage looks up and aggregates the recorded sessions for a run.
+func (s *Service) Usage(ctx context.Context, uid string, summary cron.Summary, refresh bool) (RunUsage, error) {
+	s.mu.RLock()
+	gen, cfg := s.current, s.cfg
+	s.mu.RUnlock()
+	if gen == nil {
+		return RunUsage{}, ErrDisabled
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result := RunUsage{RunUID: uid, FetchedAt: time.Now().UTC(), Sessions: []RunSession{}}
+	result.SessionsIncomplete = summary.SessionsIncomplete != nil && *summary.SessionsIncomplete
+	if summary.Sessions == nil || len(*summary.Sessions) == 0 {
+		result.State = "no_sessions"
+		return result, nil
+	}
+	entries := *summary.Sessions
+	result.Sessions = make([]RunSession, len(entries))
+	facts := make([]SessionUsage, len(entries))
+	times := make([]time.Time, len(entries))
+	var wg sync.WaitGroup
+	for i, entry := range entries {
+		wg.Add(1)
+		go func(i int, entry cron.Session) {
+			defer wg.Done()
+			link, _ := (transcript.Transcript{Agent: entry.Agent, SessionID: entry.SessionID}).Link(cfg.BrowserURL)
+			fact := gen.lookup(ctx, s.slots, entry.Agent, entry.SessionID, refresh)
+			facts[i], times[i] = fact.fact, fact.at
+			result.Sessions[i] = RunSession{Agent: entry.Agent, SessionID: entry.SessionID, Step: entry.Step, URL: link, SessionUsage: fact.fact}
+		}(i, entry)
+	}
+	wg.Wait()
+	total, err := aggregate(facts, result.SessionsIncomplete)
+	if err != nil {
+		return RunUsage{}, err
+	}
+	result.Total = total
+	result.FetchedAt = times[0]
+	for _, at := range times[1:] {
+		if at.Before(result.FetchedAt) {
+			result.FetchedAt = at
+		}
+	}
+	result.FetchedAt = result.FetchedAt.UTC()
+	return result, nil
+}
+
+func (g *generation) lookup(ctx context.Context, slots chan struct{}, agent, id string, refresh bool) cacheEntry {
+	unavailable := func() cacheEntry {
+		return cacheEntry{fact: SessionUsage{State: "unavailable"}, at: g.now()}
+	}
+	if ctx.Err() != nil {
+		return unavailable()
+	}
+	key := agent + "\x00" + id
+	if entry, ok := g.cache.Get(key); ok && g.now().Sub(entry.at) < entry.ttl && (!refresh || g.now().Sub(entry.at) <= 10*time.Second) {
+		return entry
+	}
+	deadline, _ := ctx.Deadline() // Usage always supplies its five-second budget.
+	ch := g.flights.DoChan(key, func() (any, error) {
+		// Shared work can outlive one canceled caller for other waiters, but the
+		// originating request deadline bounds queueing and the lookup together.
+		shared, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+		defer cancel()
+		select {
+		case slots <- struct{}{}:
+		case <-shared.Done():
+			return unavailable(), nil
+		}
+		defer func() { <-slots }()
+		lookup, stop := context.WithTimeout(shared, 2*time.Second)
+		defer stop()
+		fact, _ := g.client.lookup(lookup, id, &agent)
+		if shared.Err() != nil {
+			return unavailable(), nil
+		}
+		ttl, misses := 5*time.Minute, 0
+		switch fact.State {
+		case "not_found":
+			if old, found := g.cache.Peek(key); found && old.fact.State == "not_found" {
+				misses = old.misses + 1
+			}
+			ttl = min(time.Minute<<min(misses, 4), 15*time.Minute)
+		case "unauthorized", "unavailable":
+			ttl = 15 * time.Second
+		}
+		entry := cacheEntry{fact: fact, at: g.now(), ttl: ttl, misses: misses}
+		g.cache.Add(key, entry)
+		return entry, nil
+	})
+	select {
+	case <-ctx.Done():
+		return unavailable()
+	case value := <-ch:
+		return value.Val.(cacheEntry)
+	}
+}
+
+// Probe performs the operator's explicit on-demand diagnostic, not a startup probe.
+func (s *Service) Probe(ctx context.Context) string {
+	s.mu.RLock()
+	gen := s.current
+	s.mu.RUnlock()
+	if gen == nil {
+		return "off"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	select {
+	case s.slots <- struct{}{}:
+	case <-ctx.Done():
+		return "unreachable"
+	}
+	defer func() { <-s.slots }()
+	return gen.client.Probe(ctx)
+}
+
+// SameTarget compares only the configuration that cannot change on reload.
+func (s *Service) SameTarget(cfg config.ResolvedAgentsView) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return sameTarget(s.cfg, cfg)
+}
+
+func sameTarget(a, b config.ResolvedAgentsView) bool {
+	return a.URL == b.URL && a.BrowserURL == b.BrowserURL
+}

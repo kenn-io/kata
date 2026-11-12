@@ -13,6 +13,7 @@ import (
 
 func (s *doctorState) hookChecks(ctx context.Context, apiClient *kataapi.Client) {
 	var h generated.Hooks
+	var usageState string
 	s.add("daemon.hooks", "hooks", func() diagnostics.Check {
 		if apiClient == nil {
 			return skippedDoctorCheck("Daemon connection could not be verified")
@@ -21,6 +22,9 @@ func (s *doctorState) hookChecks(ctx context.Context, apiClient *kataapi.Client)
 		status := 0
 		if response != nil {
 			status = response.StatusCode
+		}
+		if err == nil && response != nil && status == http.StatusOK && response.JSON200 != nil {
+			usageState = string(response.JSON200.Agentsview.State)
 		}
 		if err != nil || response == nil || status != http.StatusOK || response.JSON200 == nil || !response.JSON200.Hooks.Available {
 			return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Live hook diagnostics are unsupported, unavailable or not visible to this principal", Details: doctorHTTPStatus(status), Fix: "Use operator credentials and a daemon with hook diagnostics support; custom hook sinks may not provide diagnostics."}
@@ -49,6 +53,7 @@ func (s *doctorState) hookChecks(ctx context.Context, apiClient *kataapi.Client)
 		}
 		return check
 	})
+	s.add("daemon.agentsview", "integration", func() diagnostics.Check { return doctorAgentsView(usageState) })
 	s.add("daemon.hook_queue", "hooks", func() diagnostics.Check {
 		if !h.Available {
 			return skippedDoctorCheck("Live hook diagnostics are unavailable")
@@ -77,4 +82,29 @@ func (s *doctorState) hookChecks(ctx context.Context, apiClient *kataapi.Client)
 		}
 		return check
 	})
+}
+
+func doctorAgentsView(state string) diagnostics.Check {
+	result := diagnostics.Check{Status: diagnostics.StatusWarn, Details: []string{"Raw session IDs require AgentsView v0.47.0 or newer."}}
+	switch state {
+	case "off":
+		result.Status = diagnostics.StatusInfo
+		result.Summary = "AgentsView usage: off"
+	case "ok":
+		result.Status = diagnostics.StatusOK
+		result.Summary = "AgentsView usage: ok"
+	case "unauthorized":
+		result.Summary = "AgentsView usage: unauthorized"
+		result.Fix = "Repair the configured AgentsView token on the daemon host."
+	case "unreachable":
+		result.Summary = "AgentsView usage: unreachable"
+		result.Fix = "Check the configured AgentsView URL and connectivity from the daemon host."
+	case "not_agentsview":
+		result.Summary = "AgentsView usage: not AgentsView"
+		result.Fix = "Select a valid AgentsView base URL running v0.47.0 or newer."
+	default:
+		result.Status = diagnostics.StatusInfo
+		result.Summary = "AgentsView usage: unavailable from selected daemon"
+	}
+	return result
 }

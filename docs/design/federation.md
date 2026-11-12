@@ -450,6 +450,14 @@ before it accepts any response cursor. An empty requirement from an unused old
 hub does not prove support: cron publication first fetches metadata and
 requires the server's positive support advertisement.
 
+`cron_run_sessions_v1` covers run summaries that record agent sessions. A
+project lists it as required only while a retained run summary carries
+sessions, so it does not latch, but each pushed event whose summary carries
+sessions also requires it. A peer without it receives the same 409. An
+adoption or push-enabled rejoin of a project with session-bearing history
+first checks the hub's advertised features, so an older hub refuses before the
+spoke changes any project state.
+
 Wire envelope compatibility is independent of database schema upgrades.
 `db.FederationEventWireVersion` explicitly maps the supported legacy publication
 events to envelope version 30 and cron events to version 31 plus

@@ -243,6 +243,10 @@ type ObserveCronRunResponse = ObserveCronRunResponseBody
 
 type ObserveCronRunErrorResponse = ErrorEnvelope
 
+type GetCronRunUsageResponse = RunUsage
+
+type GetCronRunUsageErrorResponse = ErrorEnvelope
+
 type ListCronWorkflowsResponse = ListCronWorkflowsResponseBody
 
 type ListCronWorkflowsErrorResponse = ErrorEnvelope
@@ -1099,6 +1103,19 @@ type ObserveCronRunResp struct {
 	StatusCode   int
 	JSON200      *ObserveCronRunResponse
 	JSONDefault  *ObserveCronRunErrorResponse
+}
+
+type GetCronRunUsageResp200Headers struct {
+	CacheControl string `header:"Cache-Control"`
+}
+
+type GetCronRunUsageResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetCronRunUsageResponse
+	Headers200   *GetCronRunUsageResp200Headers
+	JSONDefault  *GetCronRunUsageErrorResponse
 }
 
 type ListCronWorkflowsResp struct {

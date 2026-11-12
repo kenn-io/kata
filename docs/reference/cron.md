@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-12
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -584,8 +584,9 @@ daemon. `kata.load_recurrence` is a separate RRULE issue-template interface.
 `kata cron capabilities --json` reads the project's UID and advertised
 `event_features` without changing state. The corresponding GET is
 `/api/v1/projects/{project_id}/cron/capabilities`; the
-`X-Kata-Event-Features` header advertises only `cron_v1`, covering portable
-definitions, run observations, and native recurring child delivery. Missing,
+`X-Kata-Event-Features` header advertises `cron_v1` for portable definitions,
+run observations, and native recurring child delivery, and `cron_run_sessions_v1`
+for run sessions. Missing,
 unknown, or failed advertisements remain distinct outcomes. This is an ordinary project
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
@@ -668,6 +669,30 @@ instants; an end cannot precede a start. An occurrence key is at most 1024
 characters; actor and optional executor label are at most 256 bytes. Teammates
 use Kata's existing 1–64 character ASCII names.
 
+A summary may record `sessions`, a list of 1–64 `{agent, session_id, step}`
+objects. `step` is an optional portable step key. Agent names and session IDs
+follow the [closing-session transcript rules](configuration.md#closing-session-transcripts).
+Each exact agent and session ID pair must be unique. Set `sessions_incomplete`
+to `true` when the list may omit sessions; omit it otherwise. Observations replace
+the complete summary, so omitting sessions clears previously recorded sessions.
+Sessions are visible to project readers, federated peers,
+and in backups. The TUI shows the first eight characters of each session ID;
+`kata cron run show <run-uid> --json` returns the full ID. Sessions require the
+`cron_run_sessions_v1` event feature.
+`kata cron capabilities --json` includes `cli_features` so adapters can check
+that their installed CLI accepts these fields before sending them. Adapters must
+check for `cron_run_sessions_v1` in both `cli_features` and the hub's
+`event_features`. Older CLIs reject unknown summary fields. Upgrade the hub
+first, then spokes; older spokes stop syncing the entire project once any run
+records a session. Spokes with disabled, push-disabled, or relay bindings
+refuse observations containing sessions; they still accept observations without
+them. See [adopting an existing project](../operations/federation.md#adopting-an-existing-project)
+for session requirements.
+
+Older versions cannot read, list, or export runs that record sessions. Before
+rolling back, keep a backup from before the first session-bearing observation;
+restoring it discards later changes.
+
 A new observation uses expected revision 0. A changed observation requires its
 current revision. An identical retry of the same UID and canonical evidence
 returns `replayed: true`, emits no event, and changes no revision even when its
@@ -692,6 +717,25 @@ the code and filter on it client-side. Each adapter defines and documents its
 own codes; where two adapters mean the same thing they share the name, as
 `agent_quota`, `agent_login`, and `launch_unproven` do. The `reason: ` marker
 keeps short messages such as `admitted` from reading as codes.
+
+### Live run cost
+
+Configure [AgentsView usage](configuration.md#agentsview-usage) on the serving
+daemon, then run `kata cron run usage <run-uid>`. Add `--json` for the full
+response or `--agent` for agent output. Cost is read on demand and is not
+stored, federated, included in snapshots, or written to run evidence.
+
+A complete total prices every recorded session. A partial total ends in `+`
+and is a floor; the output names unpriced sessions and explains an incomplete
+session list. Unknown means no recorded session could be priced. A run with
+no sessions causes no AgentsView request. Zero cost is distinct from missing
+cost. Computed and mixed prices carry `~`.
+
+AgentsView may index a session after the run ends. A missing session is shown
+as “not in AgentsView yet”; `--refresh` bypasses cached results older than ten
+seconds. Kata includes descendant usage and deduplicates matching canonical
+session IDs. If one recorded session is a descendant of another, its cost can
+be counted twice; this is an accepted limitation.
 
 ## Native issue planning dates
 
@@ -829,6 +873,7 @@ entries follow `kata.`. CLI and MCP create definitions through stable-UID
 | `POST` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}/restore` | `restoreCronWorkflow` | `workflow restore` | `cron_workflow_restore` |
 | `GET` | `/api/v1/projects/{project_id}/cron/runs` | `listCronRuns` | `run list` | `cron_runs` |
 | `GET` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `showCronRun` | `run show` | `cron_run` |
+| `GET` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}/usage` | `getCronRunUsage` | `run usage` | — |
 | `PUT` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `observeCronRun` | `run observe` | `cron_run_observe` |
 
 `kata.cron_new_uid` generates a UID locally and has no HTTP route.

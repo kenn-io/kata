@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-10
+last_edited: 2026-11-12
 ---
 
 # Federation
@@ -1706,6 +1706,12 @@ The spoke and hub project names do not have to match. For that flow, run
 `--project` in the printed join command and the hub project with the hub
 selector.
 
+Before adopting a standalone project with retained cron run sessions, or
+rejoining it with `--push` when its local history contains sessions, upgrade
+the direct hub to support those sessions and the other retained event features.
+Adoption and push-enabled rejoin refuse an incompatible or unreachable hub;
+relay adoption with sessions is also refused. Retry after the hub upgrade.
+
 Adoption preserves the current state of local issues, including closed and
 soft-deleted issues, comments, labels, metadata, priority, owner, and
 links. It does not preserve the old local event history. Instead
@@ -2223,8 +2229,12 @@ keeps its own database.
 New features have their own requirements. In particular, **projects with cron
 definitions or recurring-child history have additional 0.19.0-to-0.20.0
 compatibility limits**. Read [Cron upgrade limits](../reference/cron.md#upgrade-limits)
-before upgrading those projects' peers or adapters. This cron restriction does
-not require coordinated upgrades for projects that only synchronize ordinary
+before upgrading those projects' peers or adapters. For `cron_run_sessions_v1`,
+upgrade the hub before spokes; see [run sessions](../reference/cron.md#independent-run-evidence).
+For relayed projects, upgrade each receiving peer along the route. If a relay
+offer or reset reports `unsupported_event_features`, the retained session
+history stays queued. Upgrade the receiving peer and retry synchronization.
+This cron restriction does not require coordinated upgrades for projects that only synchronize ordinary
 issues. A newer CLI feature may also need a newer daemon API; see the
 [API version history](../reference/http-api.md#version-history).
 

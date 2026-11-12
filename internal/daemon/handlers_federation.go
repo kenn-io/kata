@@ -324,7 +324,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			handshake.PendingArtifactOffers = len(pendingArtifacts) > 0
 			body.Relay = handshake
-			return &api.ProjectFederationResponse{Body: body}, nil
+			return &api.ProjectFederationResponse{Body: body, EventFeatures: db.SupportedEventFeatures}, nil
 		}
 		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, Metadata: true})
 		if err != nil {
@@ -589,6 +589,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			cfg.federationCredentialStore(),
 			cfg.FederationWake,
 			EnsureFederationReplicaParams{
+				HubClientFactory:     cfg.FederationHubClient,
 				HubURL:               in.Body.HubURL,
 				HubProjectID:         in.Body.HubProjectID,
 				HubProjectUID:        in.Body.HubProjectUID,
@@ -1180,8 +1181,14 @@ func abortFederationReplicaLeave(
 }
 
 func federationReplicaAPIError(err error) error {
+	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
+		return federationFeatureError(err)
+	}
 	if apiErr := relayCrossProjectLinksAPIError(err); apiErr != nil {
 		return apiErr
+	}
+	if errors.Is(err, db.ErrFederatedReadOnly) {
+		return federationReadOnlyError(err)
 	}
 	if errors.Is(err, db.ErrFederationProjectIdentityRequired) {
 		return api.NewError(http.StatusConflict, "federation_project_identity_required", db.ErrFederationProjectIdentityRequired.Error(),

@@ -247,6 +247,7 @@ type RelayHandshake struct {
 type RelayOfferRequest struct {
 	ProjectID       int64    `path:"project_id"`
 	Authorization   string   `header:"Authorization"`
+	EventFeatures   string   `header:"X-Kata-Event-Features"`
 	Stream          string   `query:"stream" enum:"events,receipts,artifacts"`
 	Limit           int      `query:"limit" default:"100" minimum:"1" maximum:"1024"`
 	ArtifactDigests []string `query:"artifact_digest,explode" maxItems:"32"`
@@ -257,6 +258,7 @@ type RelayOfferRequest struct {
 type RelayResetRequest struct {
 	ProjectID     int64  `path:"project_id"`
 	Authorization string `header:"Authorization"`
+	EventFeatures string `header:"X-Kata-Event-Features"`
 }
 
 // RelayResetResponse returns the retained signed checkpoint and its hop translation.

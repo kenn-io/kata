@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -56,6 +57,7 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 	for _, action := range []string{"list", "show", "observe"} {
 		runs.AddCommand(newCronOperationCmd("run", action))
 	}
+	runs.AddCommand(newCronUsageCmd())
 	capabilities := newCronOperationCmd("capabilities", "show")
 	capabilities.Use = "capabilities"
 	capabilities.Short = "discover local protocol support without creating cron state"
@@ -143,6 +145,7 @@ For the next page, pass the response's next_before_uid as --before-uid.`,
 or - for stdin). The adapter creates the run UID once and reuses it across
 retries; an identical retry returns replayed: true and changes nothing. A new
 run uses expected_revision 0; a changed one needs its current revision.
+Each observation replaces the summary; omitted sessions are cleared.
 An omitted JSON teammate inherits --teammate or KATA_TEAMMATE. Recording a run
 never changes an issue's owner, dates, lease, or status.`,
 			"  " + cmd + " <run-uid> --json-input observation.json --json"
@@ -257,10 +260,8 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	var project projectRef
 	if o.parent != "" {
 		project, body, err = o.applyParent(cmd, daemon, body)
-	} else if strings.TrimSpace(flags.Project) != "" {
-		project, err = resolveProjectSelectorIncludingArchived(daemon, flags.Project)
 	} else {
-		project, err = resolveProjectArgFlagOrWorkspace(daemon, nil)
+		project, err = resolveCronProject(daemon)
 	}
 	if err != nil {
 		return err
@@ -322,12 +323,7 @@ func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw [
 		return projectRef{}, nil, err
 	}
 	if strings.TrimSpace(flags.Project) != "" || workspaceProjectName(start) != "" {
-		var selected projectRef
-		if strings.TrimSpace(flags.Project) != "" {
-			selected, err = resolveProjectSelectorIncludingArchived(daemon, flags.Project)
-		} else {
-			selected, err = resolveProjectArgFlagOrWorkspace(daemon, nil)
-		}
+		selected, err := resolveCronProject(daemon)
 		if err != nil {
 			return projectRef{}, nil, err
 		}
@@ -374,6 +370,13 @@ func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw [
 	}
 	patched, err := json.Marshal(fields)
 	return project, patched, err
+}
+
+func resolveCronProject(daemon daemonAPI) (projectRef, error) {
+	if strings.TrimSpace(flags.Project) != "" {
+		return resolveProjectSelectorIncludingArchived(daemon, flags.Project)
+	}
+	return resolveProjectArgFlagOrWorkspace(daemon, nil)
 }
 
 // cronDefinitionRequestLimit bounds a job or workflow request read by the CLI.
@@ -678,6 +681,13 @@ func (o cronCLIOptions) callCapabilities(a daemonAPI, c *kataclient.Client, proj
 
 func (o cronCLIOptions) callWrite(a daemonAPI, c *kataclient.Client, projectID int64, raw []byte) ([]byte, error) {
 	if o.resource == "run" && o.action == "observe" {
+		var fields map[string]jsontext.Value
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return nil, cronCLIValidation("invalid cron request: " + err.Error())
+		}
+		if _, err := cron.ParseSummary(fields["summary"]); err != nil {
+			return nil, cronCLIValidation("invalid run summary: " + err.Error())
+		}
 		var body generated.ObserveCronRunBody
 		if err := decodeCronCLIRequest(raw, &body); err != nil {
 			return nil, err
@@ -771,5 +781,6 @@ func cronCapabilitiesCLIResponse(raw []byte, header string) ([]byte, error) {
 		return nil, err
 	}
 	body["event_features"] = encoded
+	body["cli_features"] = jsontext.Value(`["` + db.CronRunSessionsEventFeature + `"]`)
 	return json.Marshal(body)
 }

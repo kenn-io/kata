@@ -24,6 +24,10 @@ func registerDoctorHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 		out := &api.DoctorResponse{}
+		out.Body.AgentsView.State = "off"
+		if cfg.AgentsView != nil {
+			out.Body.AgentsView.State = cfg.AgentsView.Probe(ctx)
+		}
 		out.Body.Hooks.Hooks = []diagnostics.Hook{}
 		if source, ok := cfg.Hooks.(interface{ Diagnostics() diagnostics.Hooks }); ok {
 			out.Body.Hooks = source.Diagnostics()

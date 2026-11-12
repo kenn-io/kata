@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.kenn.io/kata/internal/agentsview"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 )
@@ -29,8 +30,38 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		}
 		out := &api.CronCapabilitiesResponse{EventFeatures: db.SupportedEventFeatures}
 		out.Body.ProjectUID = project.UID
-		out.Body.EventFeatures = []string{db.CronEventFeature}
+		out.Body.Usage.Source = "none"
+		if cfg.AgentsView != nil && cfg.AgentsView.Enabled() {
+			out.Body.Usage.Source = "agentsview"
+		}
+		out.Body.EventFeatures = []string{db.CronEventFeature, db.CronRunSessionsEventFeature}
 		return out, nil
+	})
+	huma.Register(h, huma.Operation{OperationID: "getCronRunUsage", Method: http.MethodGet, Path: base + "/runs/{run_uid}/usage", Middlewares: huma.Middlewares{func(ctx huma.Context, next func(huma.Context)) {
+		ctx.SetHeader("Cache-Control", api.CronUsageCacheControl)
+		next(ctx)
+	}}}, func(ctx context.Context, in *api.CronUsageRequest) (*api.CronUsageResponse, error) {
+		if insecureReadonlyRequest(ctx) {
+			return nil, api.NewError(403, "usage_forbidden", "anonymous clients cannot request usage", "", nil)
+		}
+		if cfg.AgentsView == nil || !cfg.AgentsView.Enabled() {
+			return nil, api.NewError(503, "usage_source_disabled", "usage source is disabled", "", nil)
+		}
+		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+			return nil, err
+		}
+		run, err := cfg.DB.CronRun(ctx, in.ProjectID, in.RunUID)
+		if err != nil {
+			return nil, cronRunAPIError(ctx, cfg, err, in.ProjectID, in.RunUID)
+		}
+		usage, err := cfg.AgentsView.Usage(ctx, run.UID, run.Summary, in.Refresh)
+		if errors.Is(err, agentsview.ErrTotalOverflow) {
+			return nil, api.NewError(502, "usage_total_overflow", "usage total cannot be represented", "", nil)
+		}
+		if err != nil {
+			return nil, api.NewError(503, "usage_source_disabled", "usage source is disabled", "", nil)
+		}
+		return &api.CronUsageResponse{CacheControl: api.CronUsageCacheControl, Body: usage}, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "observeCronRun", Method: http.MethodPut, Path: base + "/runs/{run_uid}", MaxBodyBytes: db.CronObservationLimit}, func(ctx context.Context, in *api.ObserveCronRunRequest) (*api.ObserveCronRunResponse, error) {
 		ctx, actor, err := cronWriteContext(ctx, in.Body.Actor)
@@ -39,6 +70,13 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		}
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
+		}
+		if in.Body.Summary.HasSessions() {
+			release, err := admitCronSessions(ctx, cfg, in.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			defer release()
 		}
 		result, err := cfg.DB.ObserveCronRun(ctx, in.Body.Native(in.ProjectID, in.RunUID, actor))
 		if err != nil {

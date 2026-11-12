@@ -2423,7 +2423,7 @@ to inject its value into the consuming process. Revoke the token during teardown
 ## Cron
 
 `kata cron` stores shared jobs, workflows and independent attributed run evidence.
-Commands return JSON; external adapters schedule and launch their own work.
+Most commands return JSON; run usage also has human and agent output. External adapters schedule and launch their own work.
 See [Cron](cron.md) for bounded documents and retry semantics.
 
 ```sh
@@ -2439,6 +2439,7 @@ kata cron capabilities --json
 kata cron run observe <run-uid> --json-input observation.json --json
 kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --json
 kata cron run show <run-uid> --json
+kata cron run usage <run-uid> [--refresh] [--json|--agent]
 kata show <issue-ref> --planning-dates --json
 ```
 

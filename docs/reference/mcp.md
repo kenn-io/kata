@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-10
+last_edited: 2026-11-12
 ---
 
 # Model Context Protocol server
@@ -510,7 +510,8 @@ the HTTP, CLI and TUI defaults. `kata.cron_run_observe` requires a caller-retain
 definition event UID, status, and a versioned summary. Identical retries return
 `replayed: true`; distinct run UIDs for one scheduled occurrence remain separate
 observations. Recording evidence does not launch execution, claim an issue, or
-change its status.
+change its status. The [run evidence contract](cron.md#independent-run-evidence)
+defines session fields, limits, and federation requirements.
 
 Enabled native `notify` jobs activate the existing daemon delivery. Execution
 jobs and workflows require an installed external adapter. Check

@@ -104,6 +104,10 @@ func (s *Store) AdoptProjectIntoFederation(
 		if err != nil {
 			return err
 		}
+		if err := db.RequireAdoptionEventFeatures(params.HubEventFeatures, cron); err != nil {
+			return err
+		}
+
 		pushFloor, err := federationAdoptionPushFloor(ctx, tx, project.ID, s.InstanceUID())
 		if err != nil {
 			return err

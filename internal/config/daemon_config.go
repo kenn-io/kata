@@ -54,6 +54,8 @@ type DaemonConfig struct {
 	Close CloseConfig `toml:"close"`
 	// Auth carries the daemon's bearer-auth token, if any.
 	Auth AuthConfig `toml:"auth"`
+	// AgentsView configures the optional daemon-owned usage source.
+	AgentsView AgentsViewConfig `toml:"agentsview"`
 	// MCP configures the optional daemon-mounted MCP listener.
 	MCP MCPConfig `toml:"mcp"`
 	// Web carries browser-listener and externally published origin settings.

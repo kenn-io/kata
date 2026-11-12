@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-11
+last_edited: 2026-11-12
 ---
 
 # Configuration
@@ -1106,6 +1106,36 @@ while the daemon keeps serving other requests. Malformed configuration prevents
 the daemon from starting. The diagnostic identifies the zero-based entry index and
 `origin` or `addresses` field, plus the address index when applicable, without
 logging supplied origins or addresses. No environment variable grants callback trust.
+
+## AgentsView usage
+
+The serving daemon can read live cost for recorded cron sessions from
+AgentsView v0.47.0 or newer:
+
+```toml
+[agentsview]
+url = "https://agentsview.example/archive"
+browser_url = "https://agentsview.example" # optional; defaults to url
+token_file = "/etc/kata/agentsview-token"   # optional
+token_env = "KATA_AGENTSVIEW_TOKEN"          # optional
+```
+
+Recorded agent names, including custom names, must match the names used by
+AgentsView for those sessions. A mismatch reports usage as unavailable.
+
+An empty `url` turns usage off, even when other keys are set; Kata does not
+resolve the token in that case. The URL may contain a base path, but no
+credentials, query, or fragment. Use HTTPS, loopback HTTP, or a literal
+private IP with `[auth].trust_private_network = true`. The browser URL follows
+[transcript link rules](#closing-session-transcripts). It does not change the
+separate closing-session transcript configuration.
+
+When both credential sources are set, `token_file` wins. A selected missing or
+unusable credential fails daemon startup. `kata daemon reload` rereads the
+credential and clears cached usage for the same API and browser URLs. Changing
+either URL or turning the source on or off requires a daemon restart; reload
+keeps the running source. Startup logs the source state and origin host, never
+the token. [Doctor](../operations/doctor.md) probes the selected daemon's source.
 
 ## Semantic search
 

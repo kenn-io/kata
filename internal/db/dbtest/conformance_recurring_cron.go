@@ -656,13 +656,18 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	parent, _, err := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Ongoing review", Author: "operator", Metadata: map[string]jsontext.Value{"note": []byte(`"future"`)}})
 	require.NoError(t, err)
 	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "operator", Message: "Review service"}, Issue: &cron.IssuePolicy{Kind: "existing", UID: parent.UID}, Overlap: "allow", Catchup: "latest"}
-	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Adapter review", Actor: "operator", Definition: definition})
+	adapter, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Adapter review", Actor: "operator", Definition: definition})
+	require.NoError(t, err)
+	runUID, err := uid.New()
+	require.NoError(t, err)
+	_, err = s.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: p.ID, UID: runUID, JobUID: &adapter.UID, DefinitionEventUID: &adapter.DefinitionEventUID, Actor: "operator", Status: "succeeded", Summary: cron.Summary{Version: 1}})
 	require.NoError(t, err)
 	probe := &recurringCountingProbe{recurringProbeQuerier: s.(recurringProbeQuerier)}
 	features, err := db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
 	require.Equal(t, db.CronEventFeature, features)
 	require.Equal(t, []int{0}, probe.candidates, "ordinary jobs must not reach JSON decoding")
+	require.Equal(t, []int{0}, probe.sessionCandidates, "session-free runs must not reach JSON decoding")
 	definition.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review service"}
 	job, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Native review", Actor: "operator", Definition: definition})
 	require.NoError(t, err)
@@ -689,7 +694,8 @@ type recurringProbeQuerier interface {
 
 type recurringCountingProbe struct {
 	recurringProbeQuerier
-	candidates []int
+	candidates        []int
+	sessionCandidates []int
 }
 
 func (p *recurringCountingProbe) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
@@ -709,7 +715,11 @@ func (p *recurringCountingProbe) QueryContext(ctx context.Context, query string,
 	if closeErr != nil {
 		return nil, closeErr
 	}
-	p.candidates = append(p.candidates, count)
+	if strings.Contains(query, "r.summary_json") {
+		p.sessionCandidates = append(p.sessionCandidates, count)
+	} else {
+		p.candidates = append(p.candidates, count)
+	}
 	return p.recurringProbeQuerier.QueryContext(ctx, query, args...)
 }
 

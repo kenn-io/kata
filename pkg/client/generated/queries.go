@@ -163,6 +163,10 @@ func (l ListCronRunsQuery) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(l))
 }
 
+type GetCronRunUsageQuery struct {
+	Refresh *bool `json:"refresh,omitempty"`
+}
+
 type ListCronWorkflowsQuery struct {
 	IncludeDeleted *bool `json:"include_deleted,omitempty"`
 }
