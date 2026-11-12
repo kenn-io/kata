@@ -1,7 +1,7 @@
 ---
 title: Diagnosing setup
 description: Read-only setup diagnostics with kata doctor.
-last_edited: 2026-11-08
+last_edited: 2026-11-12
 ---
 
 # Diagnosing setup
@@ -69,6 +69,10 @@ requests only. It does not resolve
 aliases, follow a renamed binding, or rewrite `.kata.toml`. A principal without
 catalog visibility gets an unverified-project warning. Archived projects do not
 count as usable.
+
+For federation signing and ingress configuration failures, `config.daemon`
+includes the validation reason in `details`. Parser errors, arbitrary key
+names and credentials remain omitted from reports.
 
 The daemon resolves active hook commands using its own PATH. Doctor compares
 that result with the shell only to identify a mismatch. Missing executables or

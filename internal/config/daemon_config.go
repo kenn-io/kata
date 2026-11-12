@@ -384,6 +384,16 @@ func (c CloseThrottleConfig) ThrottleWindow() (time.Duration, error) {
 	return d, nil
 }
 
+// SafeDiagnosticError marks a value-free configuration error suitable for
+// display in diagnostic reports. Only wrap errors that cannot expose secrets
+// or arbitrary configuration values.
+type SafeDiagnosticError struct {
+	err error
+}
+
+func (e *SafeDiagnosticError) Error() string { return e.err.Error() }
+func (e *SafeDiagnosticError) Unwrap() error { return e.err }
+
 // ReadDaemonConfig parses <KATA_HOME>/config.toml. Returns a zero-value
 // DaemonConfig and nil error when the file is absent — daemon startup
 // should not fail just because the file isn't there. Other I/O or parse
@@ -579,7 +589,7 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 		return nil, err
 	}
 	if err := normalizeFederationSigning(&cfg, filepath.Dir(path)); err != nil {
-		return nil, err
+		return nil, &SafeDiagnosticError{err: err}
 	}
 	if err := validateFederationConfig(&cfg); err != nil {
 		return nil, err

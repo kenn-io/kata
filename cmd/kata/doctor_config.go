@@ -34,7 +34,12 @@ func (s *doctorState) localChecks(ctx context.Context) {
 
 func doctorDaemonConfig() diagnostics.Check {
 	if _, err := config.ReadDaemonConfig(); err != nil {
-		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Local daemon configuration or environment overrides are invalid", Fix: "Correct <KATA_HOME>/config.toml using kata's configuration reference; check spelling, value types, URLs and environment overrides."}
+		check := diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Local daemon configuration or environment overrides are invalid", Fix: "Correct <KATA_HOME>/config.toml using kata's configuration reference; check spelling, value types, URLs and environment overrides."}
+		var safe *config.SafeDiagnosticError
+		if errors.As(err, &safe) {
+			check.Details = []string{safe.Error()}
+		}
+		return check
 	}
 	if _, err := config.ReadDisplayConfig(); err != nil {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Local display configuration is invalid", Fix: "Correct [display] in <KATA_HOME>/config.toml; markdown_renderer must begin with an executable."}
