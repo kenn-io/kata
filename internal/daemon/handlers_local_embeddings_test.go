@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,14 +16,19 @@ import (
 )
 
 type localEmbeddingsFixture struct {
-	calls      int
-	restarts   int
-	busy       bool
-	restartErr error
+	calls       int
+	restarts    int
+	busy        bool
+	restartable atomic.Bool
+	restartErr  error
 }
 
 func (f *localEmbeddingsFixture) Status(context.Context) (api.LocalEmbeddingsStatus, error) {
-	return api.LocalEmbeddingsStatus{Provider: "none", CanChange: !f.busy, CanRestart: true, DownloadBytes: 290_000_000, Job: &api.LocalEmbeddingsJob{State: "failed", Error: "setup provider detail"}}, nil
+	state := "failed"
+	if f.restartable.Load() {
+		state = "restart"
+	}
+	return api.LocalEmbeddingsStatus{Provider: "none", CanChange: !f.busy && !f.restartable.Load(), CanRestart: f.restartable.Load(), DownloadBytes: 290_000_000, Job: &api.LocalEmbeddingsJob{State: state, Error: "setup provider detail"}}, nil
 }
 func (f *localEmbeddingsFixture) TurnOn(context.Context) error {
 	if f.busy {
@@ -71,7 +77,7 @@ func TestLocalEmbeddingsAdministration(t *testing.T) {
 				var got api.LocalEmbeddingsStatus
 				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &got))
 				require.Equal(t, tc.allowed, got.CanChange)
-				require.Equal(t, tc.allowed, got.CanRestart)
+				require.False(t, got.CanRestart)
 				require.NotNil(t, got.Indexing)
 				if tc.allowed {
 					require.Equal(t, int64(2), got.Indexing.Total)
@@ -84,6 +90,14 @@ func TestLocalEmbeddingsAdministration(t *testing.T) {
 					require.Equal(t, 1, fixture.calls)
 				}
 			}
+			fixture.restartable.Store(true)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequestWithContext(WithPrincipal(t.Context(), Principal{Kind: tc.kind}), http.MethodGet, "/api/v1/embeddings/local", nil))
+			require.Equal(t, http.StatusOK, rec.Code)
+			var restartStatus api.LocalEmbeddingsStatus
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &restartStatus))
+			require.False(t, restartStatus.CanChange)
+			require.Equal(t, tc.allowed, restartStatus.CanRestart)
 			response := httptest.NewRecorder()
 			mux.ServeHTTP(response, httptest.NewRequestWithContext(WithPrincipal(t.Context(), Principal{Kind: tc.kind}), http.MethodPost, "/api/v1/embeddings/local/restart", nil))
 			if tc.allowed {

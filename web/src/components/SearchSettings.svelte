@@ -179,10 +179,11 @@
       if (next.job?.state === 'restarting') previousRestartError = undefined
       const previousError =
         posting && !!previousRestartError && next.job?.error === previousRestartError
-      if (!remoteHost && next.job?.state === 'restarting' && !restartPending)
+      if (next.job?.state === 'restarting' && (!restartPending || remoteHost))
         restartDeadline = Date.now() + restartWaitMs
       if (
         next.job?.error ||
+        (remoteHost && next.job?.state === 'restarting') ||
         next.job?.state !== status?.job?.state ||
         next.provider !== status?.provider ||
         next.indexing
@@ -197,7 +198,9 @@
         restartDeadline = 0
     }
     if (restartPending && Date.now() >= restartDeadline) {
-      if (next?.job?.state === 'restart') {
+      if (remoteHost) {
+        requestError = `Couldn't reconnect. Check the daemon on ${remoteHost}.`
+      } else if (next?.job?.state === 'restart') {
         restartDeadline = 0
         requestError = "Couldn't confirm restart. Try again or run kata daemon restart."
       } else {
