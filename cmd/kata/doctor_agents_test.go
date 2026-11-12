@@ -57,3 +57,17 @@ func TestDoctorClaudeHooksAndAbsentCodex(t *testing.T) {
 	require.Contains(t, check.Summary, "Kata hooks need updating")
 	require.Equal(t, "info", string(doctorAgent(t.Context(), "codex").Status))
 }
+
+func TestDoctorAgentContractOnly(t *testing.T) {
+	isolateAgentHookHomes(t)
+	installClaudeAgentFixture(t)
+	status, err := checkAgentSetup(t.Context(), "claude")
+	require.NoError(t, err)
+	require.Equal(t, "missing", string(status.State))
+	opts, err := agentSetupOptions("claude")
+	require.NoError(t, err)
+	_, err = runHookSetup(t, "install", "claude", "--executable", opts.Executable, "--contract-only")
+	require.NoError(t, err)
+	check := doctorAgent(t.Context(), "claude")
+	require.Equal(t, "ok", string(check.Status), check.Summary)
+}

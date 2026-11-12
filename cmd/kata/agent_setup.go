@@ -50,8 +50,7 @@ func checkAgentSetup(ctx context.Context, name string) (agentsetup.Status, error
 		return agentsetup.Status{}, err
 	}
 	plan, err := planNativeAgentHooks(opts, false)
-	// Muse without permission keeps attention off.
-	if errors.Is(err, errMuseAttentionPermission) {
+	if errors.Is(err, errMuseAttentionPermission) || (err == nil && plan.CurrentContract && !plan.CurrentAttentionStart && !plan.CurrentAttentionEnd) {
 		opts.Attention = false
 		plan, err = planNativeAgentHooks(opts, false)
 	}
