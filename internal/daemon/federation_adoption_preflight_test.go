@@ -20,8 +20,15 @@ import (
 
 func adoptionRun(t *testing.T, store db.Storage, project db.Project, sessions bool) db.ObserveCronRun {
 	t.Helper()
+	return adoptionRunAs(t, store, project, sessions, "worker")
+}
+
+// adoptionRunAs records the run's local events as actor, so a test that pushes
+// them to a hub can use the actor its enrollment is bound to.
+func adoptionRunAs(t *testing.T, store db.Storage, project db.Project, sessions bool, actor string) db.ObserveCronRun {
+	t.Helper()
 	definition := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
-	job, _, err := store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "worker", Definition: definition})
+	job, _, err := store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: actor, Definition: definition})
 	require.NoError(t, err)
 	runUID, err := uid.New()
 	require.NoError(t, err)
@@ -30,7 +37,7 @@ func adoptionRun(t *testing.T, store db.Storage, project db.Project, sessions bo
 		marker := true
 		summary.SessionsIncomplete = &marker
 	}
-	in := db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "worker", Status: "succeeded", Summary: summary}
+	in := db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: actor, Status: "succeeded", Summary: summary}
 	observed, err := store.ObserveCronRun(t.Context(), in)
 	require.NoError(t, err)
 	in.ExpectedRevision = observed.Run.Revision

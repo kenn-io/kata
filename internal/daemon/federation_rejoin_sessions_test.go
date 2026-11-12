@@ -225,7 +225,7 @@ func TestRejoinCompatibleHubPushesRetainedSessions(t *testing.T) {
 	f := newCronForwardFixture(t, nil)
 	_, err := f.spoke.DB.LeaveFederationReplica(t.Context(), f.sp.ID)
 	require.NoError(t, err)
-	adoptionRun(t, f.spoke.DB, f.sp, true)
+	adoptionRunAs(t, f.spoke.DB, f.sp, true, f.credential.Actor)
 	params := rejoinParams(f.sp, f.credential.HubURL)
 	params.HubProjectID = f.hp.ID
 	params.Credential = f.credential
