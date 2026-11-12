@@ -641,6 +641,8 @@ For example:
 
 The read scans at most 10,000 matching runs, newest first. `truncated` means older runs were omitted and `window.since` is the oldest scanned instant; equal timestamps at that boundary can include omitted runs. Results cover only retained runs held by this daemon. Pruning or a replica that has not pulled all events reduces the data available. The read returns no message, actor, label or issue reference. MCP accepts the same relative `since` shorthand as the CLI; HTTP accepts RFC 3339 timestamps only. The forms use the same filters, window, bucket and timezone; the HTTP operation is `getCronRunStats` and the MCP tool is `kata.cron_run_stats` under `kata.load_cron`. This read requires daemon API 0.47.0.
 
+`workflow_uid` matches the `workflow_uid` recorded on each observation. It scans the project index, so sparse matches can examine more than 10,000 index entries. Unknown well-formed job or workflow UIDs return empty statistics, as with the run list.
+
 ## Independent run evidence
 
 An adapter creates one independent run UID and retains it across retries:
