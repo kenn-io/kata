@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-10
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -589,6 +589,37 @@ definitions, run observations, and native recurring child delivery. Missing,
 unknown, or failed advertisements remain distinct outcomes. This is an ordinary project
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
+
+### Held legacy workflows
+
+Older databases can contain workflows with a reserved `argv` step or a null
+definition, steps array, step, or step kind. Owner backup and restore preserve
+historically decodable documents and their event evidence; JSON formatting may
+change. These workflows remain unavailable to adapters and cannot be shown or
+used in new jobs or fresh running observations. Terminal run evidence can still
+reference an exact held revision. Ordinary workflow lists omit held workflows and
+show supported siblings. Federation snapshots and adoption fail when a held
+workflow row or retained unsupported workflow event exists. Project merge also
+refuses retained unsupported workflow events. `kata cron workflow show` reports
+a validation failure for a held definition.
+
+Retained events whose definitions cannot be represented in storage, or whose
+future fields cannot be decoded, can block cron rematerialization for their
+project even when a later supported event exists. Preserve the backup for
+recovery with a compatible version.
+
+To recover, take an [owner backup](../operations/backup-restore.md#full-backup)
+and find the `cron_workflow` record and its UID and definition in the JSONL. If
+the definition cannot be represented in a workflow row, find its UID and raw
+definition in the retained `event` record instead. Create a supported workflow
+with a new UID, then update affected jobs to use it. For a full replacement of a
+held row, use its `cron_workflow.definition_event_uid` from the owner backup as
+`expected_event_uid` or `--expected-event-uid`. In a retained snapshot,
+`definition_event_uid` identifies the original revision, not the snapshot
+envelope's event UID. Retained unsupported events continue to block federation
+snapshots, adoption, and project merge after replacement. Preserve the backup and
+evidence for recovery with a compatible version. The remaining work for argv
+support is tracked in [issue 1072](https://github.com/kenn-io/kata/issues/1072).
 
 ### Upgrade limits
 

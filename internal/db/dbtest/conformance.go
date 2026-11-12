@@ -51,6 +51,14 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "argv retained feature probe", methods: []string{"CreateProject", "PutCronWorkflow", "PutCronJob", "CreateIssue", "EnableProjectFederation", "ReadFederation"}, run: checkArgvRetainedFeatureProbe},
+	{name: "argv compatibility stored reads", methods: []string{"CreateProject", "PutCronWorkflow", "CronWorkflow", "ListCronWorkflows", "PutCronJob", "ObserveCronRun"}, runWithBackend: checkArgvCompatStoredReads},
+	{name: "argv retained materialization", methods: []string{"CreateProject"}, runWithBackend: checkArgvCompatRetainedMaterialization},
+	{name: "argv compatibility remote rollback", methods: []string{"CreateProject", "EnableProjectFederation", "UpsertFederationBinding", "FederationBindingByProject", "EventsByUIDs", "MaxEventID", "InsertRemoteEvents", "IngestFederationEvents"}, run: checkArgvCompatRemoteRollback},
+	{name: "argv owner restore supported winner", runWithBackend: checkArgvOwnerRestoreSupportedWinner},
+	{name: "argv job workflow admission", runWithBackend: checkArgvJobWorkflowAdmission},
+	{name: "argv snapshot held revision", methods: []string{"CreateProject", "PutCronWorkflow", "PutCronJob", "ObserveCronRun", "EventsByUIDs", "CronWorkflow", "ListCronWorkflows"}, runWithBackend: checkArgvSnapshotHeldRevision},
+	{name: "argv projection repair", methods: []string{"CreateProject"}, runWithBackend: checkArgvProjectionRepair},
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
@@ -153,8 +161,8 @@ var storageScenarios = []scenario{
 		RunRelayOffersLegacyIngestedEvents(t, store)
 		return nil
 	}},
-	{name: "relay delivery", methods: []string{"PendingRelayDeliveries", "AckRelayDeliveries", "ExportRelayState"}, run: func(t *testing.T, store db.Storage) error {
-		RunRelayOutboxAtomicity(t, store)
+	{name: "relay delivery", methods: []string{"PendingRelayDeliveries", "AckRelayDeliveries", "ExportRelayState"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayOutboxAtomicity(t, store, backend)
 		seen := 0
 		for record, err := range store.ExportRelayState(t.Context()) {
 			require.NoError(t, err)
