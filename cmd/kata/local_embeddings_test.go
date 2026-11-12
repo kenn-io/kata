@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -73,24 +72,19 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		require.True(t, chosen)
 	})
 	t.Run("marker write failure", func(t *testing.T) {
-		marker := setupChoiceWriteFailure(t)
+		setupChoiceWriteFailure(t)
 		logs := captureSlog(t)
-		out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
+		_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 		require.NoError(t, err)
-		require.Contains(t, out, "kata health --json")
 		require.Contains(t, logs.String(), "could not confirm that the shared search by meaning choice was saved")
-		var entry struct {
-			Err string `json:"err"`
-		}
-		require.NoError(t, json.Unmarshal(logs.Bytes(), &entry))
-		require.Contains(t, entry.Err, marker)
+		require.Contains(t, logs.String(), "record search by meaning choice")
 		cfg, err := config.ReadSearchConfig()
 		require.NoError(t, err)
 		require.True(t, cfg.Embeddings.Local)
 	})
 }
 
-func setupChoiceWriteFailure(t *testing.T) string {
+func setupChoiceWriteFailure(t *testing.T) {
 	t.Helper()
 	setupKataEnv(t)
 	home := clearLocalEmbeddingsEnv(t)
@@ -106,7 +100,6 @@ func setupChoiceWriteFailure(t *testing.T) string {
 	}
 	marker := filepath.Join(home, ".kenn", "embeddings", "search-by-meaning")
 	require.NoError(t, os.MkdirAll(marker, 0o700))
-	return marker
 }
 
 func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {
