@@ -78,7 +78,7 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 		require.NoError(t, err)
 		require.Contains(t, out, "kata health --json")
-		require.Contains(t, logs.String(), "could not confirm shared search by meaning choice was saved")
+		require.Contains(t, logs.String(), "could not confirm that the shared search by meaning choice was saved")
 		var entry struct {
 			Err string `json:"err"`
 		}

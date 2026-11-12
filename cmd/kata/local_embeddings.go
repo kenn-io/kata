@@ -224,7 +224,7 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 	}
 	if next.Embeddings.UsesLocal() {
 		if err := embedlocal.RecordChoice(); err != nil {
-			slog.Warn("could not confirm shared search by meaning choice was saved", "err", err)
+			slog.Warn("could not confirm that the shared search by meaning choice was saved", "err", err)
 		}
 	}
 	return index, nil
