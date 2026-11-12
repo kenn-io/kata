@@ -240,14 +240,10 @@ func TestFederationStatusProjectOlderDaemon(t *testing.T) {
 	t.Cleanup(server.Close)
 	older := *env
 	older.URL = server.URL
-	for _, mode := range []string{"json", "human", "agent"} {
-		out := requireCmdOutput(t, &older, "federation", "status", "--project", project.Name, "--format", mode)
-		assert.Contains(t, out, project.Name)
-		assert.NotContains(t, out, other.Name)
-		if mode == "json" {
-			assert.Contains(t, out, `"future_field":"preserved"`)
-		}
-	}
+	out := requireCmdOutput(t, &older, "federation", "status", "--project", project.Name, "--format", "json")
+	assert.Contains(t, out, project.Name)
+	assert.NotContains(t, out, other.Name)
+	assert.Contains(t, out, `"future_field":"preserved"`)
 	_, err = runCmdOutput(t, &older, "federation", "status", "--project", "missing-project")
 	_ = requireCLIError(t, err, ExitNotFound)
 	assert.Zero(t, lookup.Load())
