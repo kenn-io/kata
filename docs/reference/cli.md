@@ -2586,6 +2586,9 @@ command can include `--adopt-existing` when the spoke project already exists.
 A required-signing hub prints its configured `external_url` in the join command
 with signing key ID and file path placeholders. Replace both placeholders, or
 use `--signing-key-env` instead of the file flag, before running it on the spoke.
+If the original enrollment predates required signing or these instructions,
+re-run the same `enroll` command with the same `--token` to print the signed
+join command for the same enrollment.
 Each `enroll` with a new token creates another grant and leaves earlier tokens
 valid. Replace a project-scoped token with the
 [rotation API](http-api.md#federation-enrollment-and-health-endpoints), which

@@ -25,7 +25,7 @@ is optional on the ordinary daemon listeners.
    [the native enrollment workflow](federation.md). Use CLI enrollment and join
    for required-signing hubs. The TUI wizard does not accept signing references
    and its metadata step cannot complete against a required-signing hub.
-   Record the enrollment ID.
+   Record the enrollment ID, join command, and token.
    Ingress rejects global enrollments, even when the signature is valid.
 2. Provision a separate secret with at least 64 bytes, independently of the
    enrollment bearer. For example, `openssl rand -hex 32` produces 64 ASCII
@@ -62,7 +62,10 @@ is optional on the ordinary daemon listeners.
 5. Start the hub normally. Signing initially returns `503` for at least
    96 seconds, and until wall time has passed the persisted maximum admitted
    signature expiry. This gate also applies after a restart.
-6. Enroll using the hub's main API as `--hub-url`. If the hub requires signing,
+6. Use the join command from step 1. If enrollment predates required signing
+   or the signed join instructions, re-run the same `enroll` command against
+   the hub's main API with the same `--token` to retrieve the same enrollment
+   and print its signed join command. If the hub requires signing,
    the printed join command uses `external_url` and includes placeholders for
    the signing key ID and absolute spoke key file path. Replace both before
    running it on the spoke, or replace `--signing-key-file` with
