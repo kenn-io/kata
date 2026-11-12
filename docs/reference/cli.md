@@ -1016,7 +1016,7 @@ If a request fails, confirmed results remain visible. Submitted items without a 
 | `already_in_target` | The issue is already in its requested target. |
 | `duplicate_item` | An earlier successful input names the same issue and target in this request. |
 | `duplicate_conflicting_target` | An earlier successful input names the same issue and another target in this request. |
-| `revision_conflict` | A selected issue changed after selection. Rerun to select its current revision. |
+| `revision_conflict` | A selected issue changed after selection. Reselect outstanding work to get its current revision. |
 | `issue_move_tree_changed` | Subtree membership changed after validation. Retry to validate every member. |
 
 Other refusals retain the single-move rule codes and explain how to resolve
@@ -1024,14 +1024,12 @@ them. One refusal leaves successful items committed. A denied descendant
 refuses its whole selected subtree. For batch moves, `--comment` adds the comment with teammate attribution to each issue in the move transaction. Unchanged issues receive no comment. For a single subtree move, the comment is posted to the selected issue after the move; a failure leaves the move committed and visible in the output.
 
 Inputs over 5,000 items or a 1 MiB request body are refused before any write.
-The combined text of noncomment refs-file rows is also
-limited to 1 MiB; an oversized line receives its own refusal. Split larger input
-into separate runs.
+An oversized refs-file line receives its own refusal. Split larger input into separate runs.
 The CLI sends up to 50 items per request; each request commits independently.
 A later item with a stale expected revision is refused. Exit 0 means every item succeeded
 or was unchanged; exit 5 means at least one refusal; exit 2 means invalid input
 before a move request. An interrupted request prints confirmed results, including committed chunks returned in an error response. A transport failure exits 7.
-Rerun the same input to finish any remaining items. Batch commands fail closed
+Inspect unknown outcomes, correct refused rows, and submit only outstanding rows with their intended destinations. Batch commands fail closed
 with `daemon_api_too_old` against older daemons.
 
 Federated moves require both projects to use the same active hub. Spokes require

@@ -44,7 +44,7 @@ func moveBatchUsage(message string) error {
 func parseRefsFrom(r io.Reader, defaultTarget string, maxItems int) ([]moveBatchItem, error) {
 	reader := bufio.NewReader(r)
 	var items []moveBatchItem
-	retained, invalidRetained := 0, 0
+	invalidRetained := 0
 	for line := 1; ; line++ {
 		value, oversized, err := readMoveBatchLine(reader)
 		if err != nil && err != io.EOF {
@@ -80,11 +80,6 @@ func parseRefsFrom(r io.Reader, defaultTarget string, maxItems int) ([]moveBatch
 						item.Ref = strings.Clone(item.Ref)
 					}
 					item.TargetProject = ""
-				} else {
-					retained += len(value)
-					if retained > 1<<20 {
-						return nil, moveBatchUsage("refs-file input exceeds 1 MiB; split the input into separate runs")
-					}
 				}
 				items = append(items, item)
 			}
@@ -117,6 +112,9 @@ func readMoveBatchLine(reader *bufio.Reader) (string, bool, error) {
 func moveBatchTarget(a daemonAPI, item moveBatchItem, targets map[string]string) (string, error) {
 	if item.ParseError != "" {
 		return "", &cliError{Message: item.ParseError, Code: "validation", Kind: kindUsage, ExitCode: ExitUsage}
+	}
+	if _, err := shortid.Parse(item.Ref); err != nil {
+		return "", &cliError{Message: "invalid issue ref", Code: "validation", Kind: kindUsage, ExitCode: ExitUsage}
 	}
 	uid := targets[item.TargetProject]
 	if uid == "" {

@@ -93,10 +93,6 @@ func TestParseRefsFrom(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 5001)
 	require.Greater(t, reader.Len(), 1<<20)
-	reader = strings.NewReader(strings.Repeat(strings.Repeat("a", 600000)+"#abc4\n", 4))
-	_, err = parseRefsFrom(reader, "dst", 5001)
-	require.ErrorContains(t, err, "1 MiB")
-	require.Greater(t, reader.Len(), 1<<20)
 	items, err = parseRefsFrom(strings.NewReader(strings.Repeat("x", 1<<20)+"\nabc4\n"), "dst", 5001)
 	require.NoError(t, err)
 	require.Len(t, items, 2)
@@ -242,6 +238,53 @@ func TestMoveBatchCLI_Quiet(t *testing.T) {
 }
 
 func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
+	for _, kind := range []string{"positional", "targets", "later-page"} {
+		t.Run(kind, func(t *testing.T) {
+			env, dir, _, dst, issue := setupMoveCLIProjects(t)
+			args := []string{"--workspace", dir, "move"}
+			input, prefixCount := "", 0
+			switch kind {
+			case "positional":
+				prefixCount = 9
+				for i := 0; i < prefixCount; i++ {
+					args = append(args, strings.Repeat("!", 120000))
+				}
+				args = append(args, issue.UID, dst.Name)
+			case "targets":
+				prefixCount = 2
+				input = strings.Repeat(issue.UID+"\t"+strings.Repeat("x", 600000)+"\n", prefixCount) + issue.UID + "\t" + dst.Name + "\n"
+				args = append(args, "--refs-from", "-")
+			case "later-page":
+				prefixCount = 50
+				input = strings.Repeat(issue.UID+"\n", 50) + strings.Repeat("<", 200000) + "\n"
+				args = append(args, dst.Name, "--refs-from", "-")
+			}
+			args = append(args, "--comment", "routed", "--json")
+			out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, args...)
+			require.Equal(t, ExitConflict, exitCodeForErr(err, true))
+			var reply api.MoveIssuesResponse
+			require.NoError(t, json.Unmarshal([]byte(out), &reply.Body))
+			require.Len(t, reply.Body.Results, prefixCount+1)
+			for i, result := range reply.Body.Results {
+				require.Equal(t, i, result.Index)
+				want := "refused"
+				if kind == "later-page" && i < 50 {
+					want = "unchanged"
+				}
+				if kind == "later-page" && i == 0 || kind != "later-page" && i == prefixCount {
+					want = "moved"
+				}
+				require.Equal(t, want, result.Result)
+			}
+			got, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, dst.ID, got.ProjectID)
+			comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
+			require.Equal(t, "routed", comments[0].Body)
+		})
+	}
 	for _, mode := range []outputMode{outputHuman, outputJSON, outputAgent} {
 		for _, allInvalid := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s all-invalid=%t", mode, allInvalid), func(t *testing.T) {
@@ -587,7 +630,7 @@ func TestMoveBatchCLI_SelectorStopsAtLimit(t *testing.T) {
 
 // Oversized invocations stop before any write.
 func TestMoveBatchCLI_Limits(t *testing.T) {
-	for _, mode := range []string{"count", "bytes", "bytes-escaped", "later-page"} {
+	for _, mode := range []string{"count", "bytes", "bytes-escaped"} {
 		t.Run(mode, func(t *testing.T) {
 			env, dir, _, dst, first := setupMoveCLIProjects(t)
 			count, comment := 5001, ""
@@ -596,13 +639,8 @@ func TestMoveBatchCLI_Limits(t *testing.T) {
 				count, comment = 1, strings.Repeat("x", 1<<20)
 			case "bytes-escaped":
 				count, comment = 1, strings.Repeat("<", 200000)
-			case "later-page":
-				count = 50
 			}
 			input := strings.Repeat(first.UID+"\n", count)
-			if mode == "later-page" {
-				input += strings.Repeat("<", 200000) + "\n"
-			}
 			args := []string{"--workspace", dir, "move", dst.Name, "--refs-from", "-", "--json"}
 			if mode == "count" {
 				args = []string{"--workspace", dir, "move", "--json"}

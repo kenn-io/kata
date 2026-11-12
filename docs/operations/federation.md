@@ -87,7 +87,7 @@ daemon API 0.45.0 or newer. Batch moves default to single issues; add
 hub, actor, push, and relay rules above. A refused item leaves other successful
 moves committed. Inputs over 5,000 items or a 1 MiB request body are refused
 before any write; split larger input into separate runs. Batch comments travel after their issue's existing
-`issue.moved` event; reruns do not add comments to unchanged issues. No new
+`issue.moved` event; issues confirmed unchanged receive no comment. No new
 federation event feature is required. See the
 [batch CLI contract](../reference/cli.md#move-many-issues) for input formats,
 selectors, request pages, result codes, and retry behavior.
