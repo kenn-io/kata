@@ -58,7 +58,7 @@ func newSigningBridgeFixture(t *testing.T) signingBridgeFixture {
 	verifier, err := federationsigning.NewVerifier(bridgeSigningHubBase, []signingpolicy.Key{{Source: source, EnrollmentID: 1}}, state)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = verifier.Close() })
-	hubServer := daemon.NewServer(daemon.ServerConfig{DB: hubStore, RootSigning: daemon.NewRootSigning(rootSigner), FederationSigning: verifier, FederationSigningRequired: true, FederationSigningExternalURL: bridgeSigningHubBase, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
+	hubServer := daemon.NewServer(daemon.ServerConfig{DB: hubStore, RootSigning: daemon.NewRootSigning(rootSigner), FederationSigning: verifier, FederationSigningRequired: true, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
 	t.Cleanup(func() { require.NoError(t, hubServer.Close()) })
 	hubHTTP := httptest.NewTestServer(t, hubServer.Handler())
 	previous := http.DefaultTransport
