@@ -693,6 +693,9 @@ construction. Requests without a lifetime get 24 hours within that cap.
 [MCP Events configuration](../reference/configuration.md#mcp-events) for the
 operator settings.
 
+Embedded Events accepts only public callback addresses. The daemon's
+`trusted_callbacks` setting does not apply to an embedded `Service`.
+
 A subscription's owner for a host-authenticated caller is the exact bytes of
 `Principal.Subject`. Delivery asks the host `AccessController` again with the
 persisted subject and actor, and a missing controller fails closed without

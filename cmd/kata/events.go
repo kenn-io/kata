@@ -188,7 +188,7 @@ func printEventsHuman(cmd *cobra.Command, bs []byte) error {
 	}
 	if b.ResetRequired {
 		_, err := fmt.Fprintf(cmd.OutOrStdout(),
-			"reset_required: refetch state and resume from %d\n", b.ResetAfterID)
+			"reset_required: reload your data, then resume with --after %d\n", b.ResetAfterID)
 		return err
 	}
 	for _, e := range b.Events {

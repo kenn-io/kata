@@ -58,7 +58,9 @@ api-check:
 # Fail when the committed OpenAPI contract introduces breaking changes for
 # existing clients relative to BASE_REF (default origin/main).
 api-breaking:
+	API_VERSION_BASE_REF="$(if $(BASE_REF),$(BASE_REF),origin/main)" go test ./internal/daemon -run '^TestAPIVersionBaseRecords$$' -count=1
 	bash scripts/openapi-breaking.sh $(BASE_REF)
+	SCHEMA_VERSION_BASE_REF=$(or $(BASE_REF),origin/main) go test ./internal/db/pgstore -run '^TestSchemaVersionContract$$'
 
 web-install:
 	cd web && bun install --frozen-lockfile

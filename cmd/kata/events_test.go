@@ -105,6 +105,15 @@ func TestEvents_OneShotAgentResetRequired(t *testing.T) {
 	assert.Regexp(t, `^OK events reset_required=true reset_after_id=\d+\n?$`, out)
 }
 
+func TestEvents_OneShotHumanResetRequired(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+	short := createIssueViaHTTP(t, env, dir, "doomed")
+	runCLI(t, env, dir, "purge", short, "--force", "--confirm", "PURGE kata#"+short)
+
+	out := runCLI(t, env, dir, "events", "--after", "0")
+	assert.Regexp(t, `^reset_required: reload your data, then resume with --after \d+\n?$`, out)
+}
+
 func TestEvents_OneShotAllProjectsHitsCrossProject(t *testing.T) {
 	env := testenv.New(t)
 	dirA := initBoundWorkspace(t, env.URL, "https://github.com/wesm/a.git")

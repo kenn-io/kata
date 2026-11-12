@@ -10,6 +10,19 @@ type Reference = UIIssueReference
 describe('Comments', () => {
   afterEach(cleanup)
 
+  it('explains the evidence limit for a confirmation reply', async () => {
+    renderComments({ initialReply: { replyTo: 'target-one', kind: 'confirm', force: false } })
+    await fireEvent.input(screen.getByLabelText('Reply evidence'), {
+      target: { value: 'Too short' },
+    })
+    expect(
+      screen.getByText('Confirm and refute replies need at least 40 characters of evidence.'),
+    ).toBeTruthy()
+    expect(
+      (screen.getByRole('button', { name: 'Add comment' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+  })
+
   it('submits comments and preserves an uncertain draft until accepted authority replaces it', async () => {
     const onAddComment = vi.fn(async () => false)
     const view = renderComments({ onAddComment, draftResetGeneration: 0 })
