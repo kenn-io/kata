@@ -27,14 +27,13 @@ func TestLookupSessionStates(t *testing.T) {
 		{"fractional", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1.5}}`, "unavailable"},
 		{"overflow", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":9223372036854775808}}`, "unavailable"},
 		{"server error", 500, `private upstream detail`, "unavailable"},
-		{"oversized", 200, strings.Repeat("x", (1<<20)+1), "unavailable"},
+		{"oversized", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"reported","padding":"` + strings.Repeat("x", 1<<20) + `"}`, "unavailable"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			requests := make(chan *http.Request, 1)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				require.Equal(t, "/prefix/api/v1/sessions/raw/usage", r.URL.Path)
-				require.Equal(t, "subagents=true", r.URL.RawQuery)
-				require.Equal(t, "Bearer fixture-token", r.Header.Get("Authorization"))
+				requests <- r.Clone(r.Context())
 				w.WriteHeader(tc.status)
 				_, _ = io.WriteString(w, tc.body)
 			}))
@@ -42,6 +41,10 @@ func TestLookupSessionStates(t *testing.T) {
 			client, err := NewClient(config.ResolvedAgentsView{URL: server.URL + "/prefix", Token: "fixture-token"}, false)
 			require.NoError(t, err)
 			got := client.Lookup(t.Context(), "raw")
+			request := <-requests
+			require.Equal(t, "/prefix/api/v1/sessions/raw/usage", request.URL.Path)
+			require.Equal(t, "subagents=true", request.URL.RawQuery)
+			require.Equal(t, "Bearer fixture-token", request.Header.Get("Authorization"))
 			require.Equal(t, tc.state, got.State)
 			if tc.name == "priced zero" {
 				require.NotNil(t, got.CostMicrodollars)
@@ -53,14 +56,28 @@ func TestLookupSessionStates(t *testing.T) {
 
 func TestLookupRejectsRedirectWithoutSendingToken(t *testing.T) {
 	var requests atomic.Int32
-	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests.Add(1) }))
-	t.Cleanup(target.Close)
-	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, http.StatusFound) }))
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirected" {
+			requests.Add(1)
+			return
+		}
+		http.Redirect(w, r, "/redirected", http.StatusFound)
+	}))
 	t.Cleanup(origin.Close)
 	client, err := NewClient(config.ResolvedAgentsView{URL: origin.URL, Token: "fixture-token"}, false)
 	require.NoError(t, err)
 	require.Equal(t, "unavailable", client.Lookup(t.Context(), "raw").State)
 	require.Zero(t, requests.Load())
+
+	// Preserve the cross-origin credential boundary independently of redirects.
+	var targetCalls atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { targetCalls.Add(1) }))
+	t.Cleanup(target.Close)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target.URL, nil)
+	require.NoError(t, err)
+	_, err = client.http.Do(request)
+	require.Error(t, err)
+	require.Zero(t, targetCalls.Load())
 }
 
 func TestDoctorProbeValidatesNotFoundEnvelope(t *testing.T) {

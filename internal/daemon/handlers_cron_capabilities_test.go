@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/agentsview"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
@@ -52,20 +54,32 @@ func TestCronCapabilitiesProjectScopedHostRead(t *testing.T) {
 	require.NoError(t, err)
 	other, err := env.DB.CreateProject(t.Context(), "other-project")
 	require.NoError(t, err)
-	host := &capabilitiesReadHost{projectID: project.ID}
-	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, HostAccess: host})
-	t.Cleanup(func() { require.NoError(t, server.Close()) })
-	for _, tc := range []struct {
-		id   int64
-		want int
-	}{{project.ID, 200}, {other.ID, 404}} {
-		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", tc.id), nil)
-		request = request.WithContext(daemon.WithPrincipal(request.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "reader", Actor: "reader"}))
-		recorder := httptest.NewRecorder()
-		server.Handler().ServeHTTP(recorder, request)
-		require.Equalf(t, tc.want, recorder.Code, "%s", recorder.Body.String())
+	service, err := agentsview.NewService(config.ResolvedAgentsView{}, false)
+	require.NoError(t, err)
+	for _, operation := range []struct {
+		id, path string
+		allowed  int
+	}{
+		{"getCronCapabilities", "/api/v1/projects/%d/cron/capabilities", http.StatusOK},
+		{"getCronRunUsage", fmt.Sprintf("/api/v1/projects/%%d/cron/runs/%s/usage", cronHTTPUID(t)), http.StatusServiceUnavailable},
+	} {
+		t.Run(operation.id, func(t *testing.T) {
+			host := &capabilitiesReadHost{projectID: project.ID}
+			server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, HostAccess: host, AgentsView: service})
+			t.Cleanup(func() { require.NoError(t, server.Close()) })
+			for _, tc := range []struct {
+				id   int64
+				want int
+			}{{project.ID, operation.allowed}, {other.ID, http.StatusNotFound}} {
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(operation.path, tc.id), nil)
+				request = request.WithContext(daemon.WithPrincipal(request.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "reader", Actor: "reader"}))
+				recorder := httptest.NewRecorder()
+				server.Handler().ServeHTTP(recorder, request)
+				require.Equalf(t, tc.want, recorder.Code, "%s", recorder.Body.String())
+			}
+			require.Len(t, host.calls, 2)
+			require.Equal(t, operation.id, host.calls[0].ID)
+			require.False(t, host.calls[0].Policy.Mutation)
+		})
 	}
-	require.Len(t, host.calls, 2)
-	require.Equal(t, "getCronCapabilities", host.calls[0].ID)
-	require.False(t, host.calls[0].Policy.Mutation)
 }

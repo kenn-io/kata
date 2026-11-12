@@ -24,6 +24,13 @@ func TestCronUsageOutputStatesAndSanitization(t *testing.T) {
 		{Agent: "example", SessionID: "six", SessionUsage: agentsview.SessionUsage{State: "unauthorized"}},
 		{Agent: "example", SessionID: "seven", SessionUsage: agentsview.SessionUsage{State: "unavailable"}},
 	}}
+	for _, tc := range []struct {
+		value     int64
+		estimated bool
+		want      string
+	}{{0, false, "$0.00"}, {0, true, "~$0.00"}, {1, false, "<$0.01"}, {4999, true, "~<$0.01"}, {5000, false, "$0.01"}} {
+		require.Equal(t, tc.want, usageAmount(tc.value, tc.estimated))
+	}
 	var out bytes.Buffer
 	require.NoError(t, writeCronUsage(&out, usage))
 	for _, text := range []string{"~$2.41+ (6 of 7 sessions not priced)", "session list is incomplete", "unpriced", "not in AgentsView yet", "ambiguous session", "no usage recorded", "AgentsView rejected Kata's token", "AgentsView unavailable"} {
