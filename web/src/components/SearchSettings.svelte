@@ -58,7 +58,6 @@
   // Fences reads across setup requests and settled restart responses.
   let posts = 0
   let timer: ReturnType<typeof setTimeout> | undefined
-  let recoveryTimer: ReturnType<typeof setTimeout> | undefined
 
   let job = $derived(status?.job)
   let restarting = $derived(job?.state === 'restart')
@@ -70,16 +69,15 @@
   let restartLabels = $derived({
     off: restartPending || status?.restart_in_progress ? 'Restarting...' : 'Turning on',
     turnOn: 'Restart daemon',
-    downloaded:
-      status?.restart_in_progress && !restartPending
-        ? ''
-        : remoteHost
-          ? `Restart the daemon on ${remoteHost} to finish.`
-          : (status?.can_restart && canAdministerDaemon) || restartPending
-            ? originStable
-              ? ''
-              : reopenGuidance
-            : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
+    downloaded: status?.restart_in_progress
+      ? ''
+      : remoteHost
+        ? `Restart the daemon on ${remoteHost} to finish.`
+        : (status?.can_restart && canAdministerDaemon) || restartPending
+          ? originStable
+            ? ''
+            : reopenGuidance
+          : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
   })
   let failure = $derived(
     requestError ??
@@ -105,7 +103,6 @@
     return () => {
       abort.abort()
       clearTimeout(timer)
-      clearTimeout(recoveryTimer)
     }
   })
 
@@ -149,11 +146,12 @@
     clearTimeout(timer)
     if (!page || page.signal.aborted || posting) return
     const signal = page.signal
+    const readSignal = AbortSignal.any([signal, AbortSignal.timeout(pollMs * 5)])
     const post = posts
     let next: LocalEmbeddingsStatus | undefined
     try {
-      const response = await getLocalEmbeddings({ signal })
-      if (response.status === 200) next = response.data
+      const response = await getLocalEmbeddings({ signal: readSignal })
+      if (!readSignal.aborted && response.status === 200) next = response.data
     } catch {
       // Keep polling while setup is under way.
     }
@@ -167,15 +165,23 @@
       )
         requestError = undefined
       status = next
+      if (next.restart_in_progress && !restartPending) restartDeadline = Date.now() + restartWaitMs
       if (
         restartPending &&
         (next.job?.error || next.job?.state !== 'restart' || next.can_restart)
       ) {
         restartDeadline = 0
-        clearTimeout(recoveryTimer)
+        posts++
         if (next.can_restart && !next.job?.error)
           requestError = "Couldn't confirm restart. Try again or run kata daemon restart."
       }
+    }
+    if (restartPending && Date.now() >= restartDeadline) {
+      requestError = remoteHost
+        ? `Couldn't reconnect. Run kata daemon status on ${remoteHost}.`
+        : originStable
+          ? `Couldn't reconnect. ${recoveryGuidance}`
+          : 'Run kata daemon status.'
     }
     loading = false
     poll()
@@ -197,33 +203,18 @@
     )
       return
     const signal = page.signal
-    posting = true
     restartDeadline = Date.now() + restartWaitMs
     requestError = undefined
     const post = ++posts
-    clearTimeout(timer)
-    recoveryTimer = setTimeout(() => {
-      posts++
-      posting = false
-      requestError = originStable
-        ? `Couldn't reconnect. ${recoveryGuidance}`
-        : 'Run kata daemon status.'
-      poll()
-    }, restartWaitMs)
+    poll()
     try {
       const response = await postFetch(getRestartLocalEmbeddingsUrl(), { method: 'POST', signal })
       if (post === posts && !response.ok) {
         restartDeadline = 0
-        clearTimeout(recoveryTimer)
         requestError = "Couldn't restart the daemon. Try again or run kata daemon restart."
       }
     } catch {
       // A lost response can mean the daemon is restarting.
-    } finally {
-      if (post === posts) {
-        posting = false
-        if (!signal.aborted) poll()
-      }
     }
   }
 

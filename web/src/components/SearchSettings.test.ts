@@ -36,6 +36,7 @@ describe('SearchSettings', () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
     vi.useRealTimers()
   })
 
@@ -96,50 +97,115 @@ describe('SearchSettings', () => {
     expect(screen.getByText('On', { exact: true })).not.toBeNull()
   })
 
-  test.each([
-    ['POST', true, "Couldn't reconnect. Run kata daemon status, then reopen kata ui."],
-    ['GET', false, 'Run kata daemon status.'],
-  ])('shows recovery when the restart %s hangs', async (hung, originStable, message) => {
+  test('recovers while the restart request is pending and ignores its late failure', async () => {
     vi.useFakeTimers()
     const waiting = status({
       can_change: false,
       can_restart: true,
       job: { state: 'restart', downloaded: 1, total: 1 },
     })
-    let resolveLate!: (response: Response) => void
-    const late = new Promise<Response>((resolve) => {
-      resolveLate = resolve
-    })
     setGeneratedFetch(
       vi
         .fn<typeof fetch>()
         .mockResolvedValueOnce(Response.json(waiting))
-        .mockImplementationOnce(() =>
-          hung === 'GET'
-            ? late
-            : Promise.resolve(Response.json(status({ provider: 'built_in', can_change: false }))),
-        )
         .mockResolvedValue(Response.json(status({ provider: 'built_in', can_change: false }))),
+    )
+    let resolvePost!: (response: Response) => void
+    const postFetch = vi.fn<typeof fetch>(
+      () =>
+        new Promise((resolve) => {
+          resolvePost = resolve
+        }),
     )
     vi.stubGlobal(
       'confirm',
       vi.fn(() => true),
     )
-    renderSettings({
-      postFetch: vi.fn<typeof fetch>(() =>
-        hung === 'POST' ? late : Promise.resolve(new Response(null, { status: 202 })),
-      ),
-      originStable,
-    })
+    renderSettings({ postFetch })
     await settle()
     await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
-    await vi.advanceTimersByTimeAsync(120_000)
-    expect(screen.getByRole('alert').textContent).toBe(message)
+    expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+    expect(postFetch).toHaveBeenCalledOnce()
     await vi.advanceTimersByTimeAsync(2000)
     expect(screen.getByText('On', { exact: true })).not.toBeNull()
-    resolveLate(hung === 'GET' ? Response.json(waiting) : new Response(null, { status: 500 }))
+    resolvePost(new Response(null, { status: 500 }))
     await settle()
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  test.each([
+    [true, undefined, true, "Couldn't reconnect. Run kata daemon status, then reopen kata ui."],
+    [false, undefined, false, 'Run kata daemon status.'],
+    [
+      false,
+      'daemon.example',
+      true,
+      "Couldn't reconnect. Run kata daemon status on daemon.example.",
+    ],
+  ])(
+    'gives observing admin=%s host=%s recovery guidance',
+    async (canAdministerDaemon, remoteHost, originStable, message) => {
+      vi.useFakeTimers()
+      let recovered = false
+      const read = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          Response.json(
+            status({
+              can_change: false,
+              job: { state: 'restart', downloaded: 1, total: 1 },
+              restart_in_progress: true,
+            }),
+          ),
+        )
+        .mockImplementation(async () =>
+          recovered
+            ? Response.json(status({ provider: 'built_in', can_change: false }))
+            : new Response(null, { status: 503 }),
+        )
+      setGeneratedFetch(read)
+      renderSettings({ canAdministerDaemon, remoteHost, originStable })
+      await settle()
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(screen.getByRole('alert').textContent).toBe(message)
+      const count = read.mock.calls.length
+      recovered = true
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(read.mock.calls.length).toBeGreaterThan(count)
+      expect(screen.getByText('On', { exact: true })).not.toBeNull()
+      expect(screen.queryByRole('alert')).toBeNull()
+    },
+  )
+
+  test('continues polling after a stalled status read times out', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(), ms)
+      return controller.signal
+    })
+    const waiting = status({
+      can_change: false,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+      restart_in_progress: true,
+    })
+    const read = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(waiting))
+      .mockImplementationOnce(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(new DOMException('Aborted', 'AbortError')),
+            )
+          }),
+      )
+      .mockResolvedValue(Response.json(status({ provider: 'built_in', can_change: false })))
+    setGeneratedFetch(read)
+    renderSettings()
+    await settle()
+    await vi.advanceTimersByTimeAsync(14_000)
+    expect(screen.getByText('On', { exact: true })).not.toBeNull()
   })
 
   test('reports a refused restart', async () => {
