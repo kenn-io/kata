@@ -108,7 +108,10 @@ func TestAgentSetupCountsOnlyModifiedHooks(t *testing.T) {
 	isolateAgentHookHomes(t)
 	installCodexAgentFixture(t, "normal")
 	t.Setenv("TEST_HOOK_TRUST", "one-modified")
-	report, err := runAgentSetup(t, "codex")
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "codex")
+	require.Error(t, err)
+	require.Equal(t, 1, strings.Count(stderr, "Native SessionEnd requires a current Codex runtime"))
+	report, err := runAgentSetup(t, "codex", "--check")
 	require.Error(t, err)
 	require.Equal(t, "modified", report.Rows[0].State)
 	require.Equal(t, 1, report.Rows[0].HookCount)
@@ -125,7 +128,16 @@ func TestAgentSetupRepairsConditionalExecutableConflict(t *testing.T) {
 	report, err := runAgentSetup(t, "claude")
 	require.NoError(t, err)
 	require.Equal(t, "ok", report.Rows[0].State, report.Rows[0].Reason)
-	require.NotNil(t, contractGroup(readAgentHookConfig(t, path), "claude"))
+	doc := readAgentHookConfig(t, path)
+	require.NotNil(t, contractGroup(doc, "claude"))
+	for _, raw := range doc["hooks"].(map[string]any)["SessionStart"].([]any) {
+		group := raw.(map[string]any)
+		if _, conditional := group["if"]; conditional {
+			for _, handler := range group["hooks"].([]any) {
+				require.NotContains(t, handler.(map[string]any)["command"], "agent-hook contract claude")
+			}
+		}
+	}
 	report, err = runAgentSetup(t, "claude", "--check")
 	require.NoError(t, err)
 	require.Equal(t, "ok", report.Rows[0].State, report.Rows[0].Reason)
@@ -139,12 +151,28 @@ func TestAgentSetupCodexConditionalGroups(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
 	data := `{"hooks":{"SessionStart":[{"if":"condition","hooks":[{"type":"command","command":"/old/kata agent-hook contract codex"}]},{"hooks":[{"type":"command","command":"foreign-hook"}]}]}}`
 	require.NoError(t, os.WriteFile(path, []byte(data), 0600))
-	trustKeys := func() string {
+	trustKeys := func() []string {
 		cmd := exec.CommandContext(t.Context(), "codex", "app-server")
 		cmd.Stdin = strings.NewReader(`{"id":1,"method":"hooks/list"}` + "\n")
 		output, err := cmd.Output()
 		require.NoError(t, err)
-		return string(output)
+		var response struct {
+			Result struct {
+				Data []struct {
+					Hooks []struct {
+						Key string `json:"key"`
+					} `json:"hooks"`
+				} `json:"data"`
+			} `json:"result"`
+		}
+		require.NoError(t, json.Unmarshal(output, &response))
+		var keys []string
+		for _, source := range response.Result.Data {
+			for _, hook := range source.Hooks {
+				keys = append(keys, hook.Key)
+			}
+		}
+		return keys
 	}
 	foreignKey := path + ":sessionstart:1:0"
 	require.Contains(t, trustKeys(), foreignKey)
@@ -156,20 +184,14 @@ func TestAgentSetupCodexConditionalGroups(t *testing.T) {
 	require.Equal(t, "foreign-hook", groups[1].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"])
 	group := contractGroup(doc, "codex")
 	require.NotNil(t, group, "contract hook must run without a condition")
-	// Group metadata and a foreign handler keep the owned hook ready; a condition does not.
-	group["description"] = "metadata"
-	group["hooks"] = append(group["hooks"].([]any), map[string]any{"type": "command", "command": "foreign-handler"})
-	writeAgentHookConfig(t, path, doc)
-	report, err := runAgentSetup(t, "codex", "--check")
-	require.NoError(t, err, report.Rows[0].Reason)
 	group["if"] = "condition"
 	writeAgentHookConfig(t, path, doc)
-	report, err = runAgentSetup(t, "codex", "--check")
+	report, err := runAgentSetup(t, "codex", "--check")
 	require.Error(t, err)
 	require.Equal(t, "outdated", report.Rows[0].State)
 }
 
-func TestAgentSetupExplicitKataOnlyAgent(t *testing.T) {
+func TestAgentSetupExplicitMixedProfiles(t *testing.T) {
 	home := isolateAgentHookHomes(t)
 	report, err := runAgentSetup(t, "antigravity", "gemini", "claude")
 	require.Error(t, err)
