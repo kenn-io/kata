@@ -58,6 +58,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   carries it there. Before, a merge skipped every such link. See
   [links between merged projects](operations/backup-restore.md#links-between-merged-projects).
 
+- Tell a hub that is still warming up from one that rejects your signature.
+  While replay protection warms up after start or restart, signed federation
+  requests get HTTP 503 `signing_warming` with `Retry-After: 5` instead of
+  `signature_invalid`, so spoke operators retry instead of checking keys and
+  clocks. See [federation request signing](operations/federation-signing.md).
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 - Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot confirm the shared choice was saved, setup succeeds and Kata logs the failure; other apps may miss the choice if it wasn't saved. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 
