@@ -58,6 +58,7 @@
   // Fences reads across setup requests and settled restart responses.
   let posts = 0
   let timer: ReturnType<typeof setTimeout> | undefined
+  let recoveryTimer: ReturnType<typeof setTimeout> | undefined
 
   let job = $derived(status?.job)
   let restarting = $derived(job?.state === 'restart')
@@ -101,6 +102,7 @@
     return () => {
       abort.abort()
       clearTimeout(timer)
+      clearTimeout(recoveryTimer)
     }
   })
 
@@ -162,12 +164,16 @@
       )
         requestError = undefined
       status = next
-      if (restartPending && (next.job?.error || next.job?.state !== 'restart')) restartDeadline = 0
+      if (
+        restartPending &&
+        (next.job?.error || next.job?.state !== 'restart' || next.can_restart)
+      ) {
+        restartDeadline = 0
+        clearTimeout(recoveryTimer)
+        if (next.can_restart && !next.job?.error)
+          requestError = "Couldn't confirm restart. Try again or run kata daemon restart."
+      }
     }
-    if (restartPending && Date.now() >= restartDeadline)
-      requestError = originStable
-        ? `Couldn't reconnect. ${recoveryGuidance}`
-        : 'Run kata daemon status.'
     loading = false
     poll()
   }
@@ -191,19 +197,30 @@
     posting = true
     restartDeadline = Date.now() + restartWaitMs
     requestError = undefined
-    posts++
+    const post = ++posts
     clearTimeout(timer)
+    recoveryTimer = setTimeout(() => {
+      posts++
+      posting = false
+      requestError = originStable
+        ? `Couldn't reconnect. ${recoveryGuidance}`
+        : 'Run kata daemon status.'
+      poll()
+    }, restartWaitMs)
     try {
       const response = await postFetch(getRestartLocalEmbeddingsUrl(), { method: 'POST', signal })
-      if (!response.ok) {
+      if (post === posts && !response.ok) {
         restartDeadline = 0
+        clearTimeout(recoveryTimer)
         requestError = "Couldn't restart the daemon. Try again or run kata daemon restart."
       }
     } catch {
       // A lost response can mean the daemon is restarting.
     } finally {
-      posting = false
-      if (!signal.aborted) poll()
+      if (post === posts) {
+        posting = false
+        if (!signal.aborted) poll()
+      }
     }
   }
 

@@ -94,6 +94,70 @@ describe('SearchSettings', () => {
     expect(screen.getByText('On', { exact: true })).not.toBeNull()
   })
 
+  test('permits retry when the request never reaches the daemon', async () => {
+    vi.useFakeTimers()
+    const waiting = status({
+      can_change: false,
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+    })
+    setGeneratedFetch(vi.fn(async () => Response.json(waiting)))
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    const postFetch = vi.fn<typeof fetch>().mockRejectedValue(new TypeError('disconnected'))
+    renderSettings({ postFetch, originStable: true })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(2000)
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    expect(postFetch).toHaveBeenCalledTimes(2)
+  })
+
+  test.each(['POST', 'GET'])('shows recovery when the restart %s hangs', async (hung) => {
+    vi.useFakeTimers()
+    const waiting = status({
+      can_change: false,
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+    })
+    let resolveLate!: (response: Response) => void
+    const late = new Promise<Response>((resolve) => {
+      resolveLate = resolve
+    })
+    setGeneratedFetch(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(waiting))
+        .mockImplementationOnce(() =>
+          hung === 'GET'
+            ? late
+            : Promise.resolve(Response.json(status({ provider: 'built_in', can_change: false }))),
+        )
+        .mockResolvedValue(Response.json(status({ provider: 'built_in', can_change: false }))),
+    )
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    renderSettings({
+      postFetch: vi.fn<typeof fetch>(() =>
+        hung === 'POST' ? late : Promise.resolve(new Response(null, { status: 202 })),
+      ),
+      originStable: true,
+    })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(screen.getByRole('alert').textContent).toContain('kata daemon status')
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(screen.getByText('On', { exact: true })).not.toBeNull()
+    resolveLate(new Response(null, { status: 500 }))
+    await settle()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   test('reports a refused restart', async () => {
     vi.useFakeTimers()
     setGeneratedFetch(
