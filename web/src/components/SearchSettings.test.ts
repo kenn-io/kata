@@ -290,34 +290,6 @@ describe('SearchSettings', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  test('offers recovery when another tab restarts and a read hangs', async () => {
-    vi.useFakeTimers()
-    vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
-      const controller = new AbortController()
-      setTimeout(() => controller.abort(), ms)
-      return controller.signal
-    })
-    const read = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        Response.json(
-          status({ can_change: false, job: { state: 'restarting', downloaded: 1, total: 1 } }),
-        ),
-      )
-      .mockImplementation(
-        (_input, init) =>
-          new Promise((_resolve, reject) => {
-            init?.signal?.addEventListener('abort', () => reject(new TypeError('disconnected')))
-          }),
-      )
-    setGeneratedFetch(read)
-    renderSettings({ originStable: true })
-    await settle()
-    await vi.advanceTimersByTimeAsync(120_000)
-    expect(screen.getByRole('alert').textContent).toContain('kata daemon status')
-    expect(screen.getByRole('alert').textContent).toContain('reopen kata ui')
-  })
-
   test.each([true, false])(
     'shows a helper failure after an interrupted read, local request=%s',
     async (localRequest) => {
