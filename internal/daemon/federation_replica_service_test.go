@@ -16,9 +16,28 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testfix"
 )
+
+// A distinct process gate reaches this backend lock even while sync holds it.
+type signaledProjectLockStore struct {
+	dbtest.TransactionalStore
+	lock    sync.RWMutex
+	entered chan struct{}
+}
+
+func (s *signaledProjectLockStore) AcquireFederationProjectSharedLock(context.Context, int64) (func(), error) {
+	s.lock.RLock()
+	return s.lock.RUnlock, nil
+}
+
+func (s *signaledProjectLockStore) AcquireFederationProjectExclusiveLock(context.Context, int64) (func(), error) {
+	close(s.entered)
+	s.lock.Lock()
+	return s.lock.Unlock, nil
+}
 
 const (
 	replicaHubProjectUID   = "01HZNQ7VFPK1XGD8R5MABCD4EX"

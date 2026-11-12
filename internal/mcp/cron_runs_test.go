@@ -2,7 +2,9 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,4 +145,76 @@ func TestCronRunProjectSelectionAndInvalidEvidence(t *testing.T) {
 		require.True(t, cronCall(t, f.session, "cron_run_observe", args).IsError)
 	}
 	require.Empty(t, cronOK(t, f.session, "cron_runs", map[string]any{})["runs"])
+}
+
+func TestCronRunSessionsPassThrough(t *testing.T) {
+	f := newCronFixture(t)
+	job := cronTestJob(t, f)
+	id := cronNewUID(t, f.session)
+	args := cronObservation(id, job)
+	args["summary"] = map[string]any{"version": 1, "sessions": []map[string]string{{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001", "step": "main"}}, "sessions_incomplete": true}
+	recorded := cronRecord(t, f.session, "cron_run_observe", args, "run")
+	shown := cronRecord(t, f.session, "cron_run", map[string]any{"uid": id}, "run")
+	require.Equal(t, recorded["summary"], shown["summary"])
+	summary := shown["summary"].(map[string]any)
+	require.Equal(t, true, summary["sessions_incomplete"])
+	require.Len(t, summary["sessions"], 1)
+
+	// The advertised tool must explain that a later summary replaces all evidence.
+	tools, err := f.session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	for _, tool := range tools.Tools {
+		if tool.Name != "kata.cron_run_observe" {
+			continue
+		}
+		help := strings.ToLower(tool.Description)
+		require.Contains(t, help, "replac")
+		require.Contains(t, help, "omit")
+		require.Contains(t, help, "clear")
+		return
+	}
+	t.Fatal("cron run observation tool was not advertised")
+}
+
+func TestCronRunObserveSessionInputSchema(t *testing.T) {
+	schema, err := inputSchemaFor[CronRunObserveInput]("kata.cron_run_observe").Resolve(nil)
+	require.NoError(t, err)
+
+	session := map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001"}
+	nullStep := maps.Clone(session)
+	nullStep["step"] = nil
+	emptyStep := maps.Clone(session)
+	emptyStep["step"] = ""
+	sixtyFour := make([]any, 64)
+	for i := range sixtyFour {
+		sixtyFour[i] = map[string]any{"agent": "codex", "session_id": fmt.Sprintf("00000000-0000-4000-8000-%012d", i)}
+	}
+	// One accepted control: the maximum count, a step and the incomplete marker together.
+	sixtyFour[0].(map[string]any)["step"] = "main"
+	tooMany := append(append([]any{}, sixtyFour...), map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000064"})
+	for _, tc := range []struct {
+		name    string
+		summary map[string]any
+		valid   bool
+	}{
+		{"omitted", map[string]any{"version": 1}, true},
+		{"bounded sessions, step and marker", map[string]any{"version": 1, "sessions": sixtyFour, "sessions_incomplete": true}, true},
+		{"null sessions", map[string]any{"version": 1, "sessions": nil}, false},
+		{"empty sessions", map[string]any{"version": 1, "sessions": []any{}}, false},
+		{"too many sessions", map[string]any{"version": 1, "sessions": tooMany}, false},
+		{"null step", map[string]any{"version": 1, "sessions": []any{nullStep}}, false},
+		{"empty step", map[string]any{"version": 1, "sessions": []any{emptyStep}}, false},
+		{"false incomplete", map[string]any{"version": 1, "sessions_incomplete": false}, false},
+		{"null incomplete", map[string]any{"version": 1, "sessions_incomplete": nil}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := map[string]any{"uid": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "expected_revision": 0, "status": "running", "summary": tc.summary}
+			err := schema.Validate(input)
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
 }

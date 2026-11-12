@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-12
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -584,8 +584,9 @@ daemon. `kata.load_recurrence` is a separate RRULE issue-template interface.
 `kata cron capabilities --json` reads the project's UID and advertised
 `event_features` without changing state. The corresponding GET is
 `/api/v1/projects/{project_id}/cron/capabilities`; the
-`X-Kata-Event-Features` header advertises only `cron_v1`, covering portable
-definitions, run observations, and native recurring child delivery. Missing,
+`X-Kata-Event-Features` header advertises `cron_v1` for portable definitions,
+run observations, and native recurring child delivery, and `cron_run_sessions_v1`
+for run sessions. Missing,
 unknown, or failed advertisements remain distinct outcomes. This is an ordinary project
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
@@ -667,6 +668,30 @@ its event are bounded to 96 KiB. Unknown fields are rejected. Times are RFC3339
 instants; an end cannot precede a start. An occurrence key is at most 1024
 characters; actor and optional executor label are at most 256 bytes. Teammates
 use Kata's existing 1–64 character ASCII names.
+
+A summary may record `sessions`, a list of 1–64 `{agent, session_id, step}`
+objects. `step` is an optional portable step key. Agent names and session IDs
+follow the [closing-session transcript rules](configuration.md#closing-session-transcripts).
+Each exact agent and session ID pair must be unique. Set `sessions_incomplete`
+to `true` when the list may omit sessions; omit it otherwise. Observations replace
+the complete summary, so omitting sessions clears previously recorded sessions.
+Sessions are visible to project readers, federated peers,
+and in backups. The TUI shows the first eight characters of each session ID;
+`kata cron run show <run-uid> --json` returns the full ID. Sessions require the
+`cron_run_sessions_v1` event feature.
+`kata cron capabilities --json` includes `cli_features` so adapters can check
+that their installed CLI accepts these fields before sending them. Adapters must
+check for `cron_run_sessions_v1` in both `cli_features` and the hub's
+`event_features`. Older CLIs reject unknown summary fields. Upgrade the hub
+first, then spokes; older spokes stop syncing the entire project once any run
+records a session. Spokes with disabled, push-disabled, or relay bindings
+refuse observations containing sessions; they still accept observations without
+them. See [adopting an existing project](../operations/federation.md#adopting-an-existing-project)
+for session requirements.
+
+Older versions cannot read, list, or export runs that record sessions. Before
+rolling back, keep a backup from before the first session-bearing observation;
+restoring it discards later changes.
 
 A new observation uses expected revision 0. A changed observation requires its
 current revision. An identical retry of the same UID and canonical evidence

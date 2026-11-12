@@ -168,7 +168,8 @@ func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 		expectedCredential := credential
 		credential.RelayEnrollmentPending = false
 		result, err := EnsureFederationReplica(ctx, cfg.DB, credentials, cfg.FederationWake, EnsureFederationReplicaParams{
-			HubURL: hubURL, HubProjectID: metadata.ProjectID, HubProjectUID: metadata.ProjectUID,
+			HubClientFactory: cfg.FederationHubClient,
+			HubURL:           hubURL, HubProjectID: metadata.ProjectID, HubProjectUID: metadata.ProjectUID,
 			ProjectName: in.Body.ProjectName, ReplayHorizonEventID: metadata.ReplayHorizonEventID,
 			Credential: credential, ExpectedCredential: &expectedCredential, PushEnabled: true,
 			Relay: grant.Relay, RelayLocalActor: actor, RelayServeDownstream: in.Body.ServeDownstream,

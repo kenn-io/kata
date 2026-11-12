@@ -99,7 +99,11 @@ func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int
 	if payloadCarriesCommentReply(kind, payload) {
 		version = max(version, commentReplyWireVersion)
 	}
-	return version, feature, nil
+	required, err := runSessionFeature(kind, string(payload))
+	if err != nil {
+		return 0, "", err
+	}
+	return version, MergeEventFeatures(feature, required), nil
 }
 
 func payloadCarriesCommentReply(kind string, payload jsontext.Value) bool {

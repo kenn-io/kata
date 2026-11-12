@@ -77,7 +77,8 @@ func reconcileProviderMapping(
 		return reconcileError(ErrBindingConflict, "federation metadata differs from the approved project")
 	}
 	params := daemon.EnsureFederationReplicaParams{
-		HubURL: credential.HubURL, HubProjectID: credential.HubProjectID, HubProjectUID: decision.HubProjectUID,
+		HubClientFactory: CredentialHTTPClient,
+		HubURL:           credential.HubURL, HubProjectID: credential.HubProjectID, HubProjectUID: decision.HubProjectUID,
 		ProjectName: mapping.SpokeProject, ReplayHorizonEventID: metadata.ReplayHorizonEventID,
 		Credential: credential, PushEnabled: slices.Contains(strings.Split(credential.Capabilities, ","), "push"),
 		AdoptExisting: decision.Intent == federationprovider.IntentMigrate, AttachEmpty: decision.Intent != federationprovider.IntentMigrate,

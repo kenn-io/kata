@@ -22,6 +22,7 @@ import (
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/testenv"
@@ -489,4 +490,119 @@ func TestCronSpokeForwardPreservesUIDPath(t *testing.T) {
 	current, err := f.hub.DB.CronJob(t.Context(), f.hp.ID, uid)
 	require.NoError(t, err)
 	require.Equal(t, initial.Body.Job.DefinitionEventUID, current.DefinitionEventUID)
+}
+
+// The unsupported-hub row lives in TestCronSessionProbeClassifiesHubFailures,
+// which owns the hub metadata classifications; these modes use the real hub.
+func TestCronSessionObservationRequiresHubFeature(t *testing.T) {
+	for _, mode := range []string{"supported", "unreachable", "push disabled"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newCronForwardFixture(t, func(_ *cronForwardFixture, cfg *daemon.ServerConfig) {
+				if mode == "unreachable" {
+					cfg.FederationHubClient = func(context.Context, config.FederationCredential) (*http.Client, error) {
+						return nil, errors.New("unreachable")
+					}
+				}
+			})
+			definition := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
+			job, _, err := f.spoke.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.sp.ID, Name: "Review", Actor: "tester", Definition: definition})
+			require.NoError(t, err)
+			if mode == "push disabled" {
+				binding, err := f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)
+				require.NoError(t, err)
+				binding.PushEnabled = false
+				_, err = f.spoke.DB.UpsertFederationBinding(t.Context(), binding)
+				require.NoError(t, err)
+			}
+			id := cronHTTPUID(t)
+			before, err := f.spoke.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			body := map[string]any{"actor": "tester", "job_uid": job.UID, "definition_event_uid": job.DefinitionEventUID, "status": "running", "expected_revision": 0, "summary": map[string]any{"version": 1, "sessions": []map[string]string{{"agent": "claude", "session_id": "00000000-0000-4000-8000-000000000001"}}}}
+			response, raw := envDoRaw(t, f.target, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", f.sp.ID, id), body, nil)
+			if mode == "supported" {
+				require.Equalf(t, http.StatusOK, response.StatusCode, "%s", raw)
+				_, err = f.spoke.DB.CronRun(t.Context(), f.sp.ID, id)
+				require.NoError(t, err)
+				return
+			}
+			if mode == "unreachable" {
+				require.Equalf(t, http.StatusServiceUnavailable, response.StatusCode, "%s", raw)
+			} else {
+				require.Equalf(t, http.StatusConflict, response.StatusCode, "%s", raw)
+				require.Contains(t, string(raw), "federated_read_only")
+				require.Contains(t, string(raw), "run sessions")
+				require.NotContains(t, string(raw), "native recurring")
+			}
+			_, err = f.spoke.DB.CronRun(t.Context(), f.sp.ID, id)
+			require.ErrorIs(t, err, db.ErrNotFound)
+			after, err := f.spoke.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+		})
+	}
+}
+
+// Pause the actual adoption transaction while it owns the project gate.
+type pausedCronAdoption struct {
+	dbtest.TransactionalStore
+	entered chan struct{}
+	resume  chan struct{}
+}
+
+func (s *pausedCronAdoption) AdoptProjectIntoFederation(ctx context.Context, p db.AdoptProjectIntoFederationParams) (db.AdoptProjectIntoFederationResult, error) {
+	close(s.entered)
+	select {
+	case <-s.resume:
+	case <-ctx.Done():
+		return db.AdoptProjectIntoFederationResult{}, ctx.Err()
+	}
+	return s.Storage.AdoptProjectIntoFederation(ctx, p)
+}
+
+func TestCronSessionObservationDuringAdoption(t *testing.T) {
+	f := newCronForwardFixture(t, nil)
+	project, err := f.spoke.DB.CreateProject(t.Context(), "standalone-project")
+	require.NoError(t, err)
+	definition := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
+	job, _, err := f.spoke.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "tester", Definition: definition})
+	require.NoError(t, err)
+	before, err := f.spoke.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	paused := &pausedCronAdoption{Storage: f.spoke.DB, entered: make(chan struct{}), resume: make(chan struct{})}
+	params := replicaServiceParams()
+	params.ProjectName = project.Name
+	params.AdoptExisting = true
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		_, err := daemon.EnsureFederationReplica(t.Context(), paused, newReplicaCredentialStore(), nil, params)
+		done <- err
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-paused.resume:
+		default:
+			close(paused.resume)
+		}
+		<-finished
+	})
+	select {
+	case <-paused.entered:
+	case err := <-done:
+		t.Fatalf("adoption ended early: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("adoption did not reach the transaction")
+	}
+	id := cronHTTPUID(t)
+	body := map[string]any{"actor": "tester", "job_uid": job.UID, "definition_event_uid": job.DefinitionEventUID, "status": "running", "expected_revision": 0, "summary": map[string]any{"version": 1, "sessions": []map[string]string{{"agent": "claude", "session_id": "00000000-0000-4000-8000-000000000001"}}}}
+	response, _ := envDoRaw(t, f.target, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, id), body, nil)
+	require.Equal(t, http.StatusServiceUnavailable, response.StatusCode)
+	_, err = f.spoke.DB.CronRun(t.Context(), project.ID, id)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	after, err := f.spoke.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	close(paused.resume)
+	require.NoError(t, <-done)
 }

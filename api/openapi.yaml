@@ -6682,6 +6682,32 @@ components:
         - complete
         - truncated
       type: object
+    Session:
+      additionalProperties: false
+      properties:
+        agent:
+          type: string
+        session_id:
+          type: string
+        step:
+          type: string
+      required:
+        - agent
+        - session_id
+      type: object
+    SessionResponse:
+      additionalProperties: true
+      properties:
+        agent:
+          type: string
+        session_id:
+          type: string
+        step:
+          type: string
+      required:
+        - agent
+        - session_id
+      type: object
     SetFederationSpokeNameRequestBody:
       additionalProperties: false
       properties:
@@ -6929,6 +6955,15 @@ components:
         output_tokens:
           format: int64
           type: integer
+        sessions:
+          items:
+            $ref: "#/components/schemas/Session"
+          maxItems: 64
+          minItems: 1
+          type: array
+        sessions_incomplete:
+          const: true
+          type: boolean
         version:
           format: int64
           type: integer
@@ -6946,6 +6981,15 @@ components:
         output_tokens:
           format: int64
           type: integer
+        sessions:
+          items:
+            $ref: "#/components/schemas/SessionResponse"
+          maxItems: 64
+          minItems: 1
+          type: array
+        sessions_incomplete:
+          const: true
+          type: boolean
         version:
           format: int64
           type: integer
@@ -7545,7 +7589,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.44.0
+  version: 0.45.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -9842,6 +9886,10 @@ paths:
           name: Authorization
           schema:
             type: string
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - explode: false
           in: query
           name: stream
@@ -9900,6 +9948,10 @@ paths:
             type: integer
         - in: header
           name: Authorization
+          schema:
+            type: string
+        - in: header
+          name: X-Kata-Event-Features
           schema:
             type: string
       responses:

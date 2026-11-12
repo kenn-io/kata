@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Record the agent sessions used by a cron run and view them in run details. Session data follows the run through federation and backups.
+
 - Use `kata daemon status` in scripts to check the selected daemon's readiness.
   It exits 0 only for a ready selected daemon. Stopped or unavailable
   selections and the `version_mismatch` state exit 7, an unknown named daemon

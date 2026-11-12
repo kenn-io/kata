@@ -6750,6 +6750,26 @@ func (s SearchResponseBody) Validate() error {
 	return errors
 }
 
+type Session struct {
+	Agent     string  `json:"agent" validate:"required"`
+	SessionID string  `json:"session_id" validate:"required"`
+	Step      *string `json:"step,omitempty"`
+}
+
+func (s Session) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+}
+
+type SessionResponse struct {
+	Agent     string  `json:"agent" validate:"required"`
+	SessionID string  `json:"session_id" validate:"required"`
+	Step      *string `json:"step,omitempty"`
+}
+
+func (s SessionResponse) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+}
+
 type SetFederationSpokeNameRequestBody struct {
 	// Name Lowercase spoke name: a letter, then up to 31 lowercase letters, digits or hyphens.
 	Name string `json:"name" validate:"required,min=1"`
@@ -7065,17 +7085,63 @@ func (s SkipFederationQuarantineRequestBody) Validate() error {
 }
 
 type Summary struct {
-	InputTokens  *int64  `json:"input_tokens,omitempty"`
-	Message      *string `json:"message,omitempty"`
-	OutputTokens *int64  `json:"output_tokens,omitempty"`
-	Version      int64   `json:"version"`
+	InputTokens        *int64    `json:"input_tokens,omitempty"`
+	Message            *string   `json:"message,omitempty"`
+	OutputTokens       *int64    `json:"output_tokens,omitempty"`
+	Sessions           []Session `json:"sessions,omitempty"`
+	SessionsIncomplete *bool     `json:"sessions_incomplete,omitempty"`
+	Version            int64     `json:"version"`
+}
+
+func (s Summary) Validate() error {
+	var errors runtime.ValidationErrors
+	if s.Sessions != nil && len(s.Sessions) < 1 {
+		errors = errors.Add("Sessions", fmt.Sprintf("must have at least 1 items, got %d", len(s.Sessions)))
+	}
+	if len(s.Sessions) > 64 {
+		errors = errors.Add("Sessions", fmt.Sprintf("must have at most 64 items, got %d", len(s.Sessions)))
+	}
+	for i, item := range s.Sessions {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Sessions[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type SummaryResponse struct {
-	InputTokens  *int64  `json:"input_tokens,omitempty"`
-	Message      *string `json:"message,omitempty"`
-	OutputTokens *int64  `json:"output_tokens,omitempty"`
-	Version      int64   `json:"version"`
+	InputTokens        *int64            `json:"input_tokens,omitempty"`
+	Message            *string           `json:"message,omitempty"`
+	OutputTokens       *int64            `json:"output_tokens,omitempty"`
+	Sessions           []SessionResponse `json:"sessions,omitempty"`
+	SessionsIncomplete *bool             `json:"sessions_incomplete,omitempty"`
+	Version            int64             `json:"version"`
+}
+
+func (s SummaryResponse) Validate() error {
+	var errors runtime.ValidationErrors
+	if s.Sessions != nil && len(s.Sessions) < 1 {
+		errors = errors.Add("Sessions", fmt.Sprintf("must have at least 1 items, got %d", len(s.Sessions)))
+	}
+	if len(s.Sessions) > 64 {
+		errors = errors.Add("Sessions", fmt.Sprintf("must have at most 64 items, got %d", len(s.Sessions)))
+	}
+	for i, item := range s.Sessions {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Sessions[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type Team struct {
