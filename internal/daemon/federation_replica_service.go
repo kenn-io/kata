@@ -1229,6 +1229,15 @@ func preflightFederationAdoption(ctx context.Context, store db.Storage, credenti
 // Mirror the signing selection after rekey without changing either credential.
 func adoptionEffectiveCredential(ctx context.Context, credentials config.FederationCredentialStore, p EnsureFederationReplicaParams, projectID int64, store db.Storage) (config.FederationCredential, error) {
 	credential := p.Credential
+	if credentials != nil && credential.Token == "" {
+		saved, found, err := credentials.FederationCredential(ctx, p.HubProjectUID)
+		if err != nil {
+			return credential, credentialIOError("read federation credential for adoption preflight")
+		}
+		if found {
+			return saved, nil
+		}
+	}
 	if credentials == nil || credential.Token == "" || credential.Signing != nil {
 		return credential, nil
 	}
