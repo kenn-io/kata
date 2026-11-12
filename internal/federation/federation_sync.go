@@ -1073,6 +1073,26 @@ type Runner struct {
 	// is nil when the pass has no parent activity lease.
 	OnPulledEventsFrom func(projectID int64, events []db.Event, fork activity.Admission)
 	DrainAdmission     activity.WaitableAdmission
+	// refusalClock reads the time that schedules relay refusal retries. Nil
+	// means time.Now.
+	refusalClock func() time.Time
+	// debounceTimer starts the wait between a wake and the pass it causes. Nil
+	// means a real timer.
+	debounceTimer func(time.Duration) Timer
+}
+
+func (r *Runner) newDebounceTimer(delay time.Duration) Timer {
+	if r.debounceTimer != nil {
+		return r.debounceTimer(delay)
+	}
+	return wallTimer{timer: time.NewTimer(delay)}
+}
+
+func (r *Runner) refusalNow() time.Time {
+	if r.refusalClock != nil {
+		return r.refusalClock()
+	}
+	return time.Now()
 }
 
 type runnerLeaseStore interface {
@@ -1160,7 +1180,7 @@ func (r *Runner) runOnce(
 	}
 	var errs []error
 	for _, spoke := range spokes {
-		if refusals.blocked(spoke.binding, time.Now()) || (len(only) > 0 && !only[spoke.binding.ProjectID]) {
+		if refusals.blocked(spoke.binding, r.refusalNow()) || (len(only) > 0 && !only[spoke.binding.ProjectID]) {
 			continue
 		}
 		var drain *activity.Lease
@@ -1177,7 +1197,7 @@ func (r *Runner) runOnce(
 			}
 			return r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
 		}()
-		refusals.record(spoke.binding, spokeErr, r.effectiveInterval(), time.Now())
+		refusals.record(spoke.binding, spokeErr, r.effectiveInterval(), r.refusalNow())
 		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
 			return nil, false, nil, spokeErr
 		}
@@ -1622,12 +1642,12 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 			return ctx.Err()
 		case <-ticker.C:
 		case <-r.Wake:
-			timer := time.NewTimer(debounce)
+			timer := r.newDebounceTimer(debounce)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
 				return ctx.Err()
-			case <-timer.C:
+			case <-timer.C():
 			}
 		}
 	}
