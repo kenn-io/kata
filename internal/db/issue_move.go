@@ -59,7 +59,7 @@ var ErrIssueMoveTreeChanged = errors.New("issue move tree changed during validat
 func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn) ([]IssueMoveTreeItem, error) {
 	if in.Single {
 		inputs := []IssueMoveTreeItem{{In: in}}
-		if err := validateIssueMoveMembership(in.ExpectedIssueIDs, inputs); err != nil {
+		if err := validateIssueMoveMembership(in, inputs); err != nil {
 			return nil, err
 		}
 		if in.AuthorizeProjects != nil {
@@ -96,9 +96,6 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 			items = append(items, IssueMoveTreeItem{In: in})
 			continue
 		}
-		if item.FromProjectID == in.ToProjectID {
-			continue
-		}
 		if projectArchived {
 			archived = append(archived, descendant)
 		}
@@ -110,7 +107,7 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 	if len(items) == 0 || items[0].In.IssueID != in.IssueID {
 		return nil, fmt.Errorf("issue %d not in project %d: %w", in.IssueID, in.FromProjectID, ErrNotFound)
 	}
-	if err := validateIssueMoveMembership(in.ExpectedIssueIDs, items); err != nil {
+	if err := validateIssueMoveMembership(in, items); err != nil {
 		return nil, err
 	}
 	if in.AuthorizeProjects != nil {
@@ -132,19 +129,24 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 	return items, nil
 }
 
-func validateIssueMoveMembership(expected []int64, inputs []IssueMoveTreeItem) error {
-	if expected == nil {
+// FenceIssueMove records logical membership and each member's source project.
+func FenceIssueMove(in *MoveIssueProjectIn, out MoveIssueProjectOut) {
+	in.ExpectedIssueIDs = out.TreeMembers
+}
+
+func validateIssueMoveMembership(in MoveIssueProjectIn, inputs []IssueMoveTreeItem) error {
+	if in.ExpectedIssueIDs == nil {
 		return nil
 	}
-	want := make(map[int64]struct{}, len(expected))
-	for _, id := range expected {
-		want[id] = struct{}{}
+	want := make(map[IssueMoveMember]struct{}, len(in.ExpectedIssueIDs))
+	for _, member := range in.ExpectedIssueIDs {
+		want[member] = struct{}{}
 	}
 	if len(want) != len(inputs) {
 		return ErrIssueMoveTreeChanged
 	}
 	for _, item := range inputs {
-		if _, ok := want[item.In.IssueID]; !ok {
+		if _, ok := want[IssueMoveMember{IssueID: item.In.IssueID, ProjectID: item.In.FromProjectID}]; !ok {
 			return ErrIssueMoveTreeChanged
 		}
 	}
@@ -157,8 +159,10 @@ func validateIssueMoveTreeMappings(ctx context.Context, tx *sql.Tx, items []Issu
 	predicates := []string{"project_id=$1"}
 	args := []any{targetID}
 	for _, item := range items {
-		predicates = append(predicates, fmt.Sprintf("(issue_id=$%d AND project_id=$%d)", len(args)+1, len(args)+2))
-		args = append(args, item.In.IssueID, item.In.FromProjectID)
+		if item.In.FromProjectID != targetID {
+			predicates = append(predicates, fmt.Sprintf("(issue_id=$%d AND project_id=$%d)", len(args)+1, len(args)+2))
+			args = append(args, item.In.IssueID, item.In.FromProjectID)
+		}
 	}
 	//nolint:gosec // Predicates contain generated placeholders; all project and issue IDs are bound parameters.
 	rows, err := tx.QueryContext(ctx, `SELECT source, external_id, object_type FROM import_mappings
@@ -210,6 +214,9 @@ func authorizeIssueMoveProjects(ctx context.Context, tx *sql.Tx, in MoveIssuePro
 		err = ApplyTransactionFence(ctx, tx)
 	}
 	if err != nil {
+		if in.Savepoint {
+			return err
+		}
 		return FinishTransactionRollback(ctx, err, tx.Rollback())
 	}
 	return nil

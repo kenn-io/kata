@@ -103,11 +103,13 @@ func TestMoveIssue_PreviewRequiresAuthentication(t *testing.T) {
 func TestMoveIssue_PreviewRejectsSameProject(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	src, _, iss := seedMovePair(t, env)
-	body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q,"dry_run":true}`, src.UID)
-	resp := doPostWithIfMatch(t, env, moveURL(env, src.ID, iss.ShortID), body, "")
-	raw := readClose(t, resp)
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
-	assert.Contains(t, string(raw), `"code":"same_project"`)
+	for _, single := range []bool{false, true} {
+		body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q,"dry_run":true,"single":%t}`, src.UID, single)
+		resp := doPostWithIfMatch(t, env, moveURL(env, src.ID, iss.ShortID), body, "")
+		raw := readClose(t, resp)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
+		assert.Contains(t, string(raw), `"code":"same_project"`)
+	}
 }
 
 func TestMoveIssue_PreviewDoesNotWidenScopedTokenAuthority(t *testing.T) {

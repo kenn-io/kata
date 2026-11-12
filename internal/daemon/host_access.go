@@ -51,6 +51,7 @@ type HostAccessController interface {
 }
 
 type hostAccessStateContextKey struct{}
+type deferBatchHostFenceKey struct{}
 
 type hostAccessState struct {
 	controller HostAccessController
@@ -178,11 +179,18 @@ func withHostAccessState(ctx huma.Context, state *hostAccessState) huma.Context 
 		fenceCtx context.Context,
 		transaction db.Transaction,
 	) error {
-		if !state.authorized || state.decision.TransactionFence == nil {
+		if deferred, _ := fenceCtx.Value(deferBatchHostFenceKey{}).(bool); deferred {
+			return nil
+		}
+		current, _ := fenceCtx.Value(hostAccessStateContextKey{}).(*hostAccessState)
+		if current == nil {
+			current = state
+		}
+		if !current.authorized || current.decision.TransactionFence == nil {
 			return api.NewError(http.StatusServiceUnavailable,
 				"access_unavailable", "transaction access decision unavailable", "", nil)
 		}
-		if err := state.decision.TransactionFence(fenceCtx, transaction); err != nil {
+		if err := current.decision.TransactionFence(fenceCtx, transaction); err != nil {
 			if errors.Is(err, ErrHostAccessDenied) {
 				return errors.Join(api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil), err)
 			}
@@ -192,6 +200,28 @@ func withHostAccessState(ctx huma.Context, state *hostAccessState) huma.Context 
 		return nil
 	})
 	return huma.WithContext(ctx, fenced)
+}
+
+// batchItemHostContext isolates admission decisions while retaining other fences.
+func batchItemHostContext(ctx context.Context) context.Context {
+	state, ok := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState)
+	if !ok || state == nil {
+		return ctx
+	}
+	item := *state
+	item.request.Operation.ProjectIDs = slices.Clone(state.request.Operation.ProjectIDs)
+	item.request.Operation.ProjectUIDs = slices.Clone(state.request.Operation.ProjectUIDs)
+	ctx = context.WithValue(ctx, hostAccessStateContextKey{}, &item)
+	return context.WithValue(ctx, deferBatchHostFenceKey{}, false)
+}
+
+func bindBatchItemHostContext(ctx, itemCtx context.Context) context.Context {
+	state, ok := itemCtx.Value(hostAccessStateContextKey{}).(*hostAccessState)
+	if !ok || state == nil {
+		return ctx
+	}
+	ctx = context.WithValue(ctx, hostAccessStateContextKey{}, state)
+	return context.WithValue(ctx, deferBatchHostFenceKey{}, false)
 }
 
 // hostAccessGoverns reports whether a host access controller authorized this
@@ -289,21 +319,17 @@ func authorizeHostProjectScope(
 	if state.authorized && state.request.Operation.AllProjects {
 		return ctx, nil
 	}
-	previousProjectIDs := len(state.request.Operation.ProjectIDs)
-	previousProjectUIDs := len(state.request.Operation.ProjectUIDs)
-	previousAllProjects := state.request.Operation.AllProjects
-	state.request.Operation.ProjectIDs = appendUniqueInt64(
-		state.request.Operation.ProjectIDs, projectIDs...)
-	state.request.Operation.ProjectUIDs = appendUniqueString(
-		state.request.Operation.ProjectUIDs, projectUIDs...)
-	state.request.Operation.AllProjects = state.request.Operation.AllProjects || allProjects
-	scopeChanged := previousProjectIDs != len(state.request.Operation.ProjectIDs) ||
-		previousProjectUIDs != len(state.request.Operation.ProjectUIDs) ||
-		previousAllProjects != state.request.Operation.AllProjects
+	candidate := state.request
+	candidate.Operation.ProjectIDs = appendUniqueInt64(slices.Clone(state.request.Operation.ProjectIDs), projectIDs...)
+	candidate.Operation.ProjectUIDs = appendUniqueString(slices.Clone(state.request.Operation.ProjectUIDs), projectUIDs...)
+	candidate.Operation.AllProjects = state.request.Operation.AllProjects || allProjects
+	scopeChanged := len(candidate.Operation.ProjectIDs) != len(state.request.Operation.ProjectIDs) ||
+		len(candidate.Operation.ProjectUIDs) != len(state.request.Operation.ProjectUIDs) ||
+		candidate.Operation.AllProjects != state.request.Operation.AllProjects
 	if state.authorized && !scopeChanged {
 		return ctx, nil
 	}
-	decision, err := state.controller.Authorize(ctx, state.request)
+	decision, err := state.controller.Authorize(ctx, candidate)
 	if errors.Is(err, ErrHostAccessDenied) {
 		return ctx, api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
 	}
@@ -311,6 +337,7 @@ func authorizeHostProjectScope(
 		return ctx, api.NewError(http.StatusServiceUnavailable,
 			"access_unavailable", "access decision unavailable", "", nil)
 	}
+	state.request = candidate
 	state.decision = decision
 	state.authorized = true
 	return ctx, nil

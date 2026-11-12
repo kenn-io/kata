@@ -1371,6 +1371,20 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (db
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	var events []db.Event
+	commentCtx := db.WithCommentMetadataHook(ctx, db.CommentMetadataPolicy(ctx), &events)
+	comment, event, err := d.createCommentTx(commentCtx, tx, p)
+	if err != nil {
+		return db.Comment{}, db.Event{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.Comment{}, db.Event{}, err
+	}
+	db.RetainCommentEvents(ctx, events...)
+	return comment, event, nil
+}
+
+func (d *Store) createCommentTx(ctx context.Context, tx *sql.Tx, p db.CreateCommentParams) (db.Comment, db.Event, error) {
 	projectUID, err := issueProjectUIDTx(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.Comment{}, db.Event{}, err
@@ -1485,9 +1499,6 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (db
 				committedEvents = append(committedEvents, result.Event)
 			}
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return db.Comment{}, db.Event{}, err
 	}
 	db.RetainCommentEvents(ctx, committedEvents...)
 	return comment, evt, nil

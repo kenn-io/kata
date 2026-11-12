@@ -4783,6 +4783,116 @@ components:
         - event_id
         - changed
       type: object
+    MoveIssuesBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        comment:
+          type: string
+        default_project_id:
+          format: int64
+          type: integer
+        items:
+          items:
+            $ref: "#/components/schemas/MoveIssuesItem"
+          maxItems: 50
+          minItems: 1
+          type: array
+        teammate:
+          type: string
+        to_project_uid:
+          type: string
+      required:
+        - items
+      type: object
+    MoveIssuesItem:
+      additionalProperties: false
+      properties:
+        expected_revision:
+          format: int64
+          type: integer
+        ref:
+          type: string
+        to_project_uid:
+          type: string
+      type: object
+    MoveIssuesResponseBody:
+      additionalProperties: true
+      properties:
+        results:
+          items:
+            $ref: "#/components/schemas/MoveIssuesResult"
+          type: array
+        summary:
+          $ref: "#/components/schemas/MoveIssuesSummary"
+      required:
+        - results
+        - summary
+      type: object
+    MoveIssuesResult:
+      additionalProperties: true
+      properties:
+        code:
+          type: string
+        event_id:
+          format: int64
+          type: integer
+        from:
+          type: string
+        from_project_uid:
+          type: string
+        hint:
+          type: string
+        index:
+          format: int64
+          type: integer
+        message:
+          type: string
+        new_short_id:
+          type: string
+        old_short_id:
+          type: string
+        ref:
+          type: string
+        result:
+          type: string
+        revision:
+          format: int64
+          type: integer
+        short_id_extended:
+          type: boolean
+        to:
+          type: string
+        to_project_name:
+          type: string
+        to_project_uid:
+          type: string
+        uid:
+          type: string
+      required:
+        - index
+        - ref
+        - result
+        - short_id_extended
+      type: object
+    MoveIssuesSummary:
+      additionalProperties: true
+      properties:
+        moved:
+          format: int64
+          type: integer
+        refused:
+          format: int64
+          type: integer
+        unchanged:
+          format: int64
+          type: integer
+      required:
+        - moved
+        - unchanged
+        - refused
+      type: object
     MutationResponseBody:
       additionalProperties: true
       properties:
@@ -7545,7 +7655,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.44.0
+  version: 0.45.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -8467,6 +8577,29 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/issues/actions/move:
+    post:
+      description: Move independent issues. On an execution error, error.data contains completed results.
+      operationId: moveIssues
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveIssuesBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoveIssuesResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
   /api/v1/issues/{uid}:
     get:
       operationId: showIssueByUID
@@ -8505,6 +8638,13 @@ paths:
           in: query
           name: include_deleted
           schema:
+            type: boolean
+        - description: Return cached claim status without refreshing it from the hub
+          explode: false
+          in: query
+          name: no_claim_refresh
+          schema:
+            description: Return cached claim status without refreshing it from the hub
             type: boolean
       responses:
         "200":

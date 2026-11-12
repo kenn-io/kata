@@ -183,6 +183,8 @@ import type {
   MoveIssuePathParameters,
   MoveIssueRequestBody,
   MoveIssueResponseBody,
+  MoveIssuesBody,
+  MoveIssuesResponseBody,
   MutationResponseBody,
   NotifyIssuePathParameters,
   NotifyIssueRequestBody,
@@ -1693,6 +1695,52 @@ export const listAllIssues = async (
   return orvalFetch<listAllIssuesResponse>(getListAllIssuesUrl(params), {
     ...options,
     method: 'GET',
+  })
+}
+
+export type moveIssuesResponse200 = {
+  data: MoveIssuesResponseBody
+  status: 200
+}
+
+export type moveIssuesResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type moveIssuesResponseSuccess = moveIssuesResponse200 & {
+  headers: Headers
+}
+export type moveIssuesResponseError = moveIssuesResponseDefault & {
+  headers: Headers
+}
+
+export type moveIssuesResponse = moveIssuesResponseSuccess | moveIssuesResponseError
+
+export const getMoveIssuesUrl = () => {
+  return `/api/v1/issues/actions/move`
+}
+
+/**
+ * Move independent issues. On an execution error, error.data contains completed results.
+ */
+export const moveIssues = async (
+  moveIssuesBody: MoveIssuesBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<moveIssuesResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<moveIssuesResponse>(getMoveIssuesUrl(), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(moveIssuesBody),
   })
 }
 

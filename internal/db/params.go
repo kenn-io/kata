@@ -546,12 +546,21 @@ type ProjectMergeResult struct {
 	Event             Event              `json:"-"`
 }
 
+// IssueMoveMember identifies an issue and its project at preview time.
+type IssueMoveMember struct {
+	IssueID, ProjectID int64
+}
+
 // MoveIssueProjectIn carries inputs for MoveIssueProject.
 type MoveIssueProjectIn struct {
+	// BindContext selects the item's authorization state inside a batch savepoint.
+	BindContext func(context.Context) context.Context
+	// Savepoint keeps authorization refusal inside the batch item transaction.
+	Savepoint bool
 	// AuthorizeProjects checks source project UIDs resolved inside the transaction.
 	AuthorizeProjects func([]string) error
 	// ExpectedIssueIDs fences externally validated subtree membership.
-	ExpectedIssueIDs []int64
+	ExpectedIssueIDs []IssueMoveMember
 	// DryRun validates inside the move transaction, then rolls back without moving.
 	DryRun bool
 	// Single moves only the selected issue; the default includes descendants.
@@ -565,6 +574,8 @@ type MoveIssueProjectIn struct {
 
 // MoveIssueProjectOut carries results from a successful MoveIssueProject call.
 type MoveIssueProjectOut struct {
+	// TreeMembers includes logical descendants already in the destination.
+	TreeMembers []IssueMoveMember `json:"-"`
 	Issues      []Issue
 	Events      []Event
 	Issue       Issue
@@ -573,6 +584,22 @@ type MoveIssueProjectOut struct {
 	NewShortID  string
 	NewRevision int64
 }
+
+// MoveIssuesBatchIn moves independent roots in one transaction.
+type MoveIssuesBatchIn struct {
+	Items             []MoveIssueProjectIn
+	Comment, Teammate string
+}
+
+// MoveIssueBatchResult retains one root move or its isolated refusal.
+type MoveIssueBatchResult struct {
+	Out     MoveIssueProjectOut
+	Err     error
+	Outcome string
+}
+
+// MoveIssuesBatchOut preserves input ordering after the chunk commits.
+type MoveIssuesBatchOut struct{ Results []MoveIssueBatchResult }
 
 // IfMatch wraps a revision for the optional IfMatchRev fields on the
 // metadata patch inputs (nil = unconditional last-write-wins).

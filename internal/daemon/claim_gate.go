@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -23,7 +24,7 @@ func requireFederatedIssueClaim(
 	issue db.Issue,
 	actor string,
 ) error {
-	return requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, true)
+	return requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, true, nil)
 }
 
 // Move previews check cached authority without remote refresh or cache writes.
@@ -33,6 +34,7 @@ func requireFederatedIssueClaimWithRefresh(
 	issue db.Issue,
 	actor string,
 	refresh bool,
+	cache *claimClientCache,
 ) error {
 	principal := db.ClaimPrincipal{
 		HolderInstanceUID: cfg.DB.InstanceUID(),
@@ -46,7 +48,7 @@ func requireFederatedIssueClaimWithRefresh(
 		}
 		principal = hostClaimPrincipal(cfg, api.ClaimActionBody{}, requestPrincipal.Subject).ClaimPrincipal
 	}
-	return requireFederatedIssueClaimForPrincipalWithRefresh(ctx, cfg, issue, principal, refresh)
+	return requireFederatedIssueClaimForPrincipalWithRefresh(ctx, cfg, issue, principal, refresh, cache)
 }
 
 func requireFederatedIssueClaimForPrincipal(
@@ -56,7 +58,7 @@ func requireFederatedIssueClaimForPrincipal(
 	issue db.Issue,
 	principal db.ClaimPrincipal,
 ) error {
-	return requireFederatedIssueClaimForPrincipalWithRefresh(ctx, cfg, issue, principal, true)
+	return requireFederatedIssueClaimForPrincipalWithRefresh(ctx, cfg, issue, principal, true, nil)
 }
 
 func requireFederatedIssueClaimForPrincipalWithRefresh(
@@ -65,6 +67,7 @@ func requireFederatedIssueClaimForPrincipalWithRefresh(
 	issue db.Issue,
 	principal db.ClaimPrincipal,
 	refresh bool,
+	cache *claimClientCache,
 ) error {
 	// Claims belong to the resolved issue in its current project.
 	projectID := issue.ProjectID
@@ -92,7 +95,7 @@ func requireFederatedIssueClaimForPrincipalWithRefresh(
 	principal = boundSpokeClaimPrincipal(binding, principal, cfg.DB.InstanceUID())
 
 	if refresh && binding.Role == db.FederationRoleSpoke {
-		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue); err != nil {
+		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue, cache); err != nil {
 			return err
 		}
 	}
@@ -136,10 +139,18 @@ func refreshSpokeClaimStatusForGate(
 	cfg ServerConfig,
 	binding db.FederationBinding,
 	issue db.Issue,
+	cache *claimClientCache,
 ) error {
 	remoteCtx, cancelRemote := context.WithTimeout(ctx, mutationClaimStatusRefreshTimeout)
 	defer cancelRemote()
-	remote, cred, err := claimForwardClient(remoteCtx, cfg, binding)
+	var remote *claimHubClient
+	var cred config.FederationCredential
+	var err error
+	if cache != nil {
+		remote, cred, err = cache.get(remoteCtx, cfg, binding)
+	} else {
+		remote, cred, err = claimForwardClient(remoteCtx, cfg, binding)
+	}
 	if err != nil {
 		if remoteCtx.Err() != nil || isOfflineClaimRefreshError(err) {
 			return nil

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.kenn.io/kata/internal/api"
 )
 
 func newAPISchemaRegistry() huma.Registry {
@@ -126,7 +127,7 @@ func rejectNullArrays(value any, target reflect.Type, path string) error {
 		return nil
 	}
 
-	if target.Kind() != reflect.Struct || value == nil {
+	if target.Kind() != reflect.Struct || value == nil || target == reflect.TypeFor[api.MoveIssuesItem]() {
 		return nil
 	}
 	object, ok := value.(map[string]any)

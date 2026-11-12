@@ -9,4 +9,8 @@ export type ShowIssueByUIDParams = {
   kind?: ShowIssueByUIDKind
   since?: string
   include_deleted?: boolean
+  /**
+   * Return cached claim status without refreshing it from the hub
+   */
+  no_claim_refresh?: boolean
 }

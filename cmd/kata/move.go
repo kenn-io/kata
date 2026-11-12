@@ -17,25 +17,58 @@ import (
 )
 
 func newMoveCmd() *cobra.Command {
-	var dryRun, single bool
+	var dryRun, single, subtree bool
+	var refsFrom string
+	var selector moveSelector
 	cmd := &cobra.Command{
-		Use:   "move <issue-ref> <project>",
-		Short: "move an issue subtree to another project",
+		Use:   "move <issue-ref>... <project>",
+		Short: "move issues to another project",
 		Long: `Move an issue and all its descendants to another project.
 Use --single to move only the selected issue.
+
+Multiple refs, --refs-from or --from-project select a batch. Batches move
+single issues by default; --subtree includes descendants for one input. Each result reports
+success, an unchanged issue, or a refusal without undoing other successful moves.
 
 The issue keeps its UID, comments, history, and all of its links
 (parent, blocks/blocked-by, related) — relationships are never severed
 by a move and may span projects afterward. A fresh short_id is
 assigned in the target project.`,
-		Example: `  kata move abc4 example-project --dry --agent`,
-		Args:    cobra.ExactArgs(2),
+		Example: `  kata move abc4 example-project --dry --agent
+  kata move source-project#abc4 source-project#def5 target-project --agent
+  kata move --refs-from routing.tsv --comment "routed"
+  kata move --from-project source-project --label triaged target-project`,
+		Args: cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMove(cmd, args[0], args[1], dryRun, single)
+			if selector.Project == "" {
+				for _, name := range []string{"label", "no-label", "meta", "status", "owner", "unowned", "query"} {
+					if cmd.Flags().Changed(name) {
+						return moveBatchUsage("--" + name + " requires --from-project")
+					}
+				}
+			}
+			if len(args) == 2 && refsFrom == "" && selector.Project == "" && !subtree {
+				return runMove(cmd, args[0], args[1], dryRun, single, 0)
+			}
+			if single && subtree {
+				return moveBatchUsage("--single and --subtree are mutually exclusive")
+			}
+			selector.StatusSet = cmd.Flags().Changed("status")
+			return runMoveBatchCommand(cmd, args, refsFrom, selector, moveBatchOptions{DryRun: dryRun, Subtree: subtree})
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry", false, "validate and preview without mutating")
 	cmd.Flags().BoolVar(&single, "single", false, "move only the selected issue")
+	cmd.Flags().BoolVar(&subtree, "subtree", false, "move one selected issue with its descendants")
+	cmd.Flags().StringVar(&refsFrom, "refs-from", "", "read ref or ref<TAB>project per line from file or -")
+	cmd.Flags().StringVar(&selector.Project, "from-project", "", "select issues from this project")
+	cmd.Flags().StringSliceVar(&selector.Labels, "label", nil, "select issues with label (repeatable)")
+	cmd.Flags().StringSliceVar(&selector.NoLabels, "no-label", nil, "exclude label (repeatable)")
+	cmd.Flags().StringArrayVar(&selector.Meta, "meta", nil, "select metadata key or key=value (repeatable)")
+	cmd.Flags().StringVar(&selector.Status, "status", "all", "select open, closed or all issues")
+	cmd.Flags().StringVar(&selector.Owner, "owner", "", "select owner's issues")
+	cmd.Flags().BoolVar(&selector.Unowned, "unowned", false, "select unowned issues")
+	cmd.Flags().StringVar(&selector.Query, "query", "", "select lexical search matches")
 	addCommentFlag(cmd)
 	return cmd
 }
@@ -58,7 +91,7 @@ type moveResponseWire struct {
 	Changed    bool            `json:"changed"`
 }
 
-func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bool) error {
+func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bool, expectedRevision int64) error {
 	comment, handle, err := prepareFollowupComment(cmd)
 	if err != nil {
 		return err
@@ -127,10 +160,8 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bo
 	}
 	if dryRun {
 		request.Body.DryRun = &dryRun
-	} else {
-		etag := fmt.Sprintf(`"rev-%d"`, sourceIssue.Revision)
-		request.Header = &generated.MoveIssueHeaders{IfMatch: &etag}
 	}
+	request.Header = moveRevisionHeader(dryRun, expectedRevision, sourceIssue.Revision)
 	if single && subtreeSupported {
 		request.Body.Single = &single
 	}
@@ -147,24 +178,38 @@ func runMove(cmd *cobra.Command, rawRef, targetProject string, dryRun, single bo
 		return err
 	}
 	if dryRun {
-		sourceProject, err = moveSourceProjectName(ctx, client, baseURL, pid, moved.Issue.ProjectID, sourceProject)
-		if err != nil {
-			return err
-		}
-		names := map[int64]string{}
-		if ref.ProjectName != "" {
-			names[pid] = ref.ProjectName
-		}
-		refs, err := moveIssueRefs(ctx, client, baseURL, names, moved.Issues)
-		if err != nil {
-			return err
-		}
-		return printMovePreview(cmd, sourceProject, moved.Issue.ShortID, target.Name, moved.Issues, refs)
+		return printMoveDryResponse(ctx, cmd, client, baseURL, pid, ref.ProjectName, target.Name, moved)
 	}
-	if err := postFollowupComment(ctx, client, baseURL, moved.Issue.ProjectID, moved.Issue.ShortID, actor, comment, handle); err != nil {
+	printErr := printMove(cmd, bs, sourceProject, sourceIssue.ShortID, target.Name)
+	commentErr := postFollowupComment(ctx, client, baseURL, moved.Issue.ProjectID, moved.Issue.ShortID, actor, comment, handle)
+	return errors.Join(printErr, commentErr)
+}
+
+func moveRevisionHeader(dry bool, selected, current int64) *generated.MoveIssueHeaders {
+	if selected == 0 {
+		if dry {
+			return nil
+		}
+		selected = current
+	}
+	etag := fmt.Sprintf(`"rev-%d"`, selected)
+	return &generated.MoveIssueHeaders{IfMatch: &etag}
+}
+
+func printMoveDryResponse(ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, pid int64, source, target string, moved moveResponseWire) error {
+	name, err := moveSourceProjectName(ctx, client, baseURL, pid, moved.Issue.ProjectID, source)
+	if err != nil {
 		return err
 	}
-	return printMove(cmd, bs, sourceProject, sourceIssue.ShortID, target.Name)
+	names := map[int64]string{}
+	if source != "" {
+		names[pid] = source
+	}
+	refs, err := moveIssueRefs(ctx, client, baseURL, names, moved.Issues)
+	if err != nil {
+		return err
+	}
+	return printMovePreview(cmd, name, moved.Issue.ShortID, target, moved.Issues, refs)
 }
 
 func moveSourceProjectName(ctx context.Context, client *http.Client, baseURL string, requestedProjectID, currentProjectID int64, requestedName string) (string, error) {

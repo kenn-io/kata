@@ -937,6 +937,9 @@ archived projects are rejected with a hint to unarchive the project first.
 
 Move between projects:
 
+One positional issue moves with its descendants by default. Multiple issues
+move individually by default.
+
 ```sh
 kata move <issue-ref> <project> [--single] [--dry] [--comment TEXT]
 ```
@@ -963,7 +966,9 @@ or issue-sync ownership conflicts just as a real move does. Any descendant that
 fails a rule rejects the whole move, and the error names that descendant. A
 descendant in an archived project also rejects the move with
 `issue_move_descendant_archived`; restore its project or remove its parent link
-first. A preview validates the current state; a later move checks it again.
+first. If subtree membership or a member's project changes during validation,
+the move returns `issue_move_tree_changed`; retry to validate every member.
+A preview validates the current state; a later move checks it again.
 The target short ID is assigned only during the real move. `--comment` is ignored
 by a preview. Subtree moves require daemon API 0.35.0 or newer. With older
 daemons, `--single` preserves the legacy move request; `--single --dry` requires
@@ -971,6 +976,62 @@ daemon API 0.23.0 or newer. The CLI checks compatibility before sending new
 request fields.
 A preview is a move request, so it needs the same write authority as a real
 move. Read-only tokens and `--insecure-readonly` clients cannot preview.
+
+### Move many issues
+
+With daemon API 0.45.0 or newer, route many issues in one command:
+
+```sh
+kata move source-project#abc4 source-project#def5 target-project --comment "routed"
+kata move --refs-from routing.tsv --agent
+kata move --refs-from - target-project < refs.txt
+kata move --from-project source-project --label triaged target-project
+```
+
+Batch mode starts with multiple refs, `--refs-from`, `--from-project`, or
+`--subtree`. Its default is to move only each selected issue. Add `--subtree`
+to include descendants when selecting one issue. More than one selected issue
+with `--subtree`, or combining `--single` and `--subtree`, is a usage error
+(exit 2). A single positional ref without a batch flag keeps the existing
+subtree default and output.
+
+A ref file contains one `ref` or `ref<TAB>project` per line. A line's target
+project overrides the positional target. Each line needs a target from one
+of those sources. Bare short IDs resolve in `--project` or the workspace's
+project; qualified refs and UIDs can span projects. Blank lines and lines
+starting with `# ` are skipped. UTF-8 BOMs, CRLF endings, and surrounding
+whitespace are accepted. Positional refs, file refs, and selector results
+are combined in that order.
+
+`--from-project` accepts `--label`, `--no-label`, `--status`, `--owner`,
+`--unowned`, and `--meta`, with the same filters as `kata list`. Status
+defaults to `all`, including closed history. `--query` adds lexical search;
+these selector flags require `--from-project`. Supply at least one filter. To move
+a whole project, use `kata projects merge`.
+
+Each batch input returns `moved`, `unchanged`, or `refused`. Results appear in input order in human, agent, and JSON output, along with a summary. A single-issue preview uses the single-move output.
+
+Within a request, an earlier successful input reserves its issue and target. A later input for that issue and another target is refused as `duplicate_conflicting_target`; the same target returns `duplicate_item`. Each request checks its own revisions, so a selected duplicate on a later page may be refused as `revision_conflict` after an earlier page moves it.
+
+If a request fails, confirmed results remain visible. Submitted items without a confirmed result are `unknown`, while later items that were not submitted are `unattempted`. Check unknown items before retrying.
+
+| Result code | Meaning |
+| --- | --- |
+| `already_in_target` | The issue is already in its requested target. |
+| `duplicate_item` | An earlier successful input names the same issue and target in this request. |
+| `duplicate_conflicting_target` | An earlier successful input names the same issue and another target in this request. |
+| `revision_conflict` | A selected issue changed after selection. Reselect outstanding work to get its current revision. |
+| `issue_move_tree_changed` | The issue's project changed during validation. Retry the item. |
+
+Other refusals retain the single-move rule codes and explain how to resolve
+them. One refusal leaves successful items committed. For batch moves, `--comment` adds the comment with teammate attribution to each issue in the move transaction. Unchanged issues receive no comment. For a single subtree move, the comment is posted to the selected issue after the move; a failure leaves the move committed and visible in the output.
+
+Inputs over 5,000 items are refused before any write. The CLI splits requests at 50 items or 1 MiB of encoded data; each request commits independently. An oversized refs-file line or an item that cannot fit in one request receives its own refusal.
+A later item with a stale expected revision is refused. Exit 0 means every item succeeded
+or was unchanged; exit 5 means at least one refusal; exit 2 means invalid input
+before a move request. An interrupted request prints confirmed results, including committed chunks returned in an error response. A transport failure exits 7.
+Inspect unknown outcomes, correct refused rows, and submit only outstanding rows with their intended destinations. Batch commands fail closed
+with `daemon_api_too_old` against older daemons.
 
 Federated moves require both projects to use the same active hub. Spokes require
 both projects to be joined, use the same federation actor, and have push enabled

@@ -14,6 +14,7 @@ import (
 
 // registerMoveHandlers installs POST /api/v1/projects/{project_id}/issues/{ref}/actions/move.
 func registerMoveHandlers(humaAPI huma.API, cfg ServerConfig) {
+	huma.Register(humaAPI, huma.Operation{OperationID: "moveIssues", Method: "POST", Path: "/api/v1/issues/actions/move", Description: "Move independent issues. On an execution error, error.data contains completed results.", SkipValidateBody: true}, moveIssuesHandler(cfg))
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "moveIssue",
 		Method:      "POST",
@@ -71,8 +72,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			return nil, err
 		}
 		if tgt.ID == iss.ProjectID {
-			return nil, api.NewError(400, "same_project",
-				"to_project_uid resolves to the issue's current project", "", nil)
+			return nil, api.NewError(400, "same_project", "to_project_uid resolves to the issue's current project", "", nil)
 		}
 
 		move := db.MoveIssueProjectIn{
@@ -91,21 +91,15 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		res, err := cfg.DB.MoveIssueProject(ctx, move)
 		if err == nil {
 			for _, issue := range res.Issues {
-				if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, !in.Body.DryRun); err != nil {
+				if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, !in.Body.DryRun, nil); err != nil {
 					return nil, err
 				}
 			}
 			if !in.Body.DryRun {
 				move.DryRun = false
-				move.ExpectedIssueIDs = make([]int64, len(res.Issues))
-				for i, issue := range res.Issues {
-					move.ExpectedIssueIDs[i] = issue.ID
-				}
+				db.FenceIssueMove(&move, res)
 				res, err = cfg.DB.MoveIssueProject(ctx, move)
 			}
-		}
-		if errors.Is(err, db.ErrIssueMoveTreeChanged) {
-			return nil, api.NewError(409, "issue_move_tree_changed", "issue subtree changed during claim validation", "retry the move to validate the current subtree", nil)
 		}
 		if err != nil {
 			return nil, moveIssueAPIError(err)
@@ -142,6 +136,9 @@ func moveIssueAPIError(err error) error {
 }
 
 func moveIssueRuleAPIError(err error) *api.APIError {
+	if errors.Is(err, db.ErrIssueMoveTreeChanged) {
+		return api.NewError(409, "issue_move_tree_changed", "issue subtree changed during claim validation", "retry the move to validate the current subtree", nil)
+	}
 	if errors.Is(err, db.ErrIssueMoveDescendantArchived) {
 		return api.NewError(409, "issue_move_descendant_archived",
 			"issue is in an archived project", "restore its project or remove its parent link before moving the subtree", nil)
