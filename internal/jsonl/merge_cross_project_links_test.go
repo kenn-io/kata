@@ -234,3 +234,54 @@ func TestMergeSkipsParentCycleSQLite(t *testing.T) {
 func TestMergeSkipsParentCyclePostgres(t *testing.T) {
 	checkMergeSkipsParentCycle(t, openPostgresImportTarget(t))
 }
+
+// The first project was exported while its task was a child of a task in the
+// same project. The task then moved under a task of the second project, and
+// the second project's snapshot carries that newer parent link. A task has one
+// parent, so the merge keeps the parent the target already holds and leaves
+// the other link out.
+func checkMergeKeepsExistingParent(t *testing.T, target db.Storage) {
+	ctx := t.Context()
+	source := openExportTestDB(t)
+	first, err := source.CreateProject(ctx, "first-project")
+	require.NoError(t, err)
+	second, err := source.CreateProject(ctx, "second-project")
+	require.NoError(t, err)
+	create := func(projectID int64, title string) db.Issue {
+		issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projectID, Title: title, Author: "author"})
+		require.NoError(t, err)
+		return issue
+	}
+	parent := func(child, of db.Issue) db.Link {
+		link, err := source.CreateLink(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: of.ID, Type: "parent", Author: "link-author"})
+		require.NoError(t, err)
+		return link
+	}
+	export := func(projectID int64) []byte {
+		var buffer bytes.Buffer
+		require.NoError(t, jsonl.Export(ctx, source, &buffer, jsonl.ExportOptions{IncludeDeleted: true, ProjectID: projectID}))
+		return buffer.Bytes()
+	}
+	child, oldParent, newParent := create(first.ID, "child"), create(first.ID, "old parent"), create(second.ID, "new parent")
+	earlier := parent(child, oldParent)
+	firstExport := export(first.ID)
+	require.NoError(t, source.DeleteLinkByID(ctx, earlier.ID))
+	parent(child, newParent)
+	secondExport := export(second.ID)
+
+	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(firstExport), target, jsonl.ImportOptions{MergeProject: true}))
+	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(secondExport), target, jsonl.ImportOptions{MergeProject: true}))
+	_, err = target.ProjectByName(ctx, "second-project")
+	require.NoError(t, err, "the project merges")
+	require.Equal(t, [][3]string{{child.UID, oldParent.UID, "parent"}},
+		crossProjectLinkEdges(t, target, child.UID, oldParent.UID, newParent.UID),
+		"the task keeps the parent the target already held")
+}
+
+func TestMergeKeepsExistingParentSQLite(t *testing.T) {
+	checkMergeKeepsExistingParent(t, openImportTargetDB(t))
+}
+
+func TestMergeKeepsExistingParentPostgres(t *testing.T) {
+	checkMergeKeepsExistingParent(t, openPostgresImportTarget(t))
+}

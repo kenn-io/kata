@@ -429,12 +429,16 @@ kata import --merge --input backups/second-project.jsonl \
 - The merge adds the link to an issue of a project that is already in the
   target. It changes nothing else in that project.
 
-A merge leaves out two kinds of link, prints a note with the count, and still
-merges the rest of the project:
+A merge leaves out three kinds of link, prints a note with the count, and
+still merges the rest of the project:
 
 - A link that would join a project that Kata relays between hubs. A relay
   cannot deliver a link between projects, so the ordinary link commands refuse
   it too.
+- A parent link for an issue that already has a parent in the target. This
+  can happen when the snapshots were taken before and after the issue moved to
+  another parent. The target keeps the parent it holds. Change it afterwards
+  with `kata edit --parent`.
 - A parent link that would close a cycle with the parent links already in the
   target. This can happen when the snapshots were taken at different times.
   Set the parent on the target afterwards with `kata edit --parent`.

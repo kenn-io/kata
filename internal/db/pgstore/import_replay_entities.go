@@ -243,6 +243,17 @@ SELECT 1 FROM links WHERE type=$1 AND (
 	// still merges. A full restore keeps the links it exported.
 	if mergeProject {
 		if link.Type == "parent" {
+			// A task has one parent. Snapshots taken before and after a
+			// reparent disagree, and the target keeps the parent it holds.
+			var hasParent bool
+			if err := tx.QueryRowContext(ctx,
+				`SELECT EXISTS(SELECT 1 FROM links WHERE type='parent' AND from_issue_id=$1)`,
+				link.FromIssueID).Scan(&hasParent); err != nil {
+				return replayLinkInserted, pgReplayError(db.ImportKindLink, err)
+			}
+			if hasParent {
+				return replayLinkSecondParent, nil
+			}
 			if err := assertNoParentCycleTx(ctx, tx, link.FromIssueID, link.ToIssueID); errors.Is(err, db.ErrParentCycle) {
 				return replayLinkParentCycle, nil
 			} else if err != nil {

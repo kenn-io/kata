@@ -121,7 +121,7 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		}
 	}
 
-	var skippedMissingPeer, skippedDup, skippedMappings, skippedUndeliverable, skippedCycles int
+	var skippedMissingPeer, skippedDup, skippedMappings, skippedUndeliverable, skippedCycles, skippedSecondParents int
 	skippedLinkIDs := make(map[int64]struct{})
 	for _, r := range db.OrderImportRecords(recs) {
 		skip, err := importRecord(ctx, tx, r, opts, skippedLinkIDs)
@@ -134,11 +134,14 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 			if link, ok := r.(*db.LinkExport); ok {
 				skippedLinkIDs[link.ID] = struct{}{}
 			}
-		case linkSkipUndeliverable, linkSkipParentCycle:
-			if skip == linkSkipUndeliverable {
+		case linkSkipUndeliverable, linkSkipParentCycle, linkSkipSecondParent:
+			switch skip {
+			case linkSkipUndeliverable:
 				skippedUndeliverable++
-			} else {
+			case linkSkipParentCycle:
 				skippedCycles++
+			default:
+				skippedSecondParents++
 			}
 			if link, ok := r.(*db.LinkExport); ok {
 				skippedLinkIDs[link.ID] = struct{}{}
@@ -158,6 +161,11 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		fmt.Fprintf(os.Stderr,
 			"note: skipped %d parent link record(s) that would close a cycle with links already in the target\n",
 			skippedCycles)
+	}
+	if skippedSecondParents > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d parent link record(s) for task(s) that already have a parent in the target\n",
+			skippedSecondParents)
 	}
 	if skippedMissingPeer > 0 {
 		fmt.Fprintf(os.Stderr,
@@ -470,6 +478,7 @@ const (
 	linkSkipMapping                       // import_mapping references a skipped link
 	linkSkipUndeliverable                 // merge link between projects that a relay cannot deliver
 	linkSkipParentCycle                   // merge parent link that would close a cycle in the target
+	linkSkipSecondParent                  // merge parent link for a task that already has a parent in the target
 )
 
 // importRecord applies one record. For link records importLink may signal a
@@ -821,6 +830,17 @@ func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport, mergeProject
 	// still merges. A full restore keeps the links it exported.
 	if mergeProject {
 		if lk.Type == "parent" {
+			// A task has one parent. Snapshots taken before and after a
+			// reparent disagree, and the target keeps the parent it holds.
+			var hasParent bool
+			if err := tx.QueryRowContext(ctx,
+				`SELECT EXISTS(SELECT 1 FROM links WHERE type = 'parent' AND from_issue_id = ?)`,
+				lk.FromIssueID).Scan(&hasParent); err != nil {
+				return linkSkipNone, wrapImportErr(db.ImportKindLink, err)
+			}
+			if hasParent {
+				return linkSkipSecondParent, nil
+			}
 			if err := assertNoParentCycleTx(ctx, tx, lk.FromIssueID, lk.ToIssueID); errors.Is(err, db.ErrParentCycle) {
 				return linkSkipParentCycle, nil
 			} else if err != nil {
