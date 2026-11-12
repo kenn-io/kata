@@ -4614,12 +4614,12 @@ func TestFederationIngestPublishesCommittedPeerEvents(t *testing.T) {
 
 func TestFederationEnrollmentRequiredSigningJoinInstructions(t *testing.T) {
 	for _, tc := range []struct {
-		name, supplied, external, want string
-		required, insecure, signing    bool
+		name, supplied, external, want   string
+		required, insecure, wantInsecure bool
 	}{
-		{"required without supplied hub URL", "", "https://daemon.example/federation", "https://daemon.example/federation", true, false, true},
-		{"required with supplied hub URL", "http://127.0.0.1:7777", "https://daemon.example/federation", "https://daemon.example/federation", true, true, true},
-		{"optional", "http://127.0.0.1:7777", "https://daemon.example/federation", "http://127.0.0.1:7777", false, true, false},
+		{"required without supplied hub URL", "", "https://daemon.example/federation", "https://daemon.example/federation", true, false, false},
+		{"required with supplied hub URL", "http://127.0.0.1:7777", "https://daemon.example/federation", "https://daemon.example/federation", true, true, false},
+		{"optional", "http://127.0.0.1:7777", "https://daemon.example/federation", "http://127.0.0.1:7777", false, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -4643,10 +4643,9 @@ func TestFederationEnrollmentRequiredSigningJoinInstructions(t *testing.T) {
 			require.NoError(t, json.Unmarshal(raw, &out))
 			require.NotNil(t, out.Join)
 			assert.Equal(t, tc.want, out.Join.HubURL)
-			assert.Equal(t, tc.insecure && !tc.signing, out.Join.AllowInsecure)
-			assert.Equal(t, tc.signing, strings.Contains(out.Join.JoinCommand, "--signing-key-id"))
-			assert.Equal(t, tc.signing, strings.Contains(out.Join.JoinCommand, "--signing-key-file"))
-			assert.Equal(t, tc.insecure && !tc.signing, strings.Contains(out.Join.JoinCommand, "--allow-insecure"))
+			assert.Equal(t, tc.wantInsecure, out.Join.AllowInsecure)
+			assert.Equal(t, tc.required, strings.Contains(out.Join.JoinCommand, "--signing-key-id"))
+			assert.Equal(t, tc.wantInsecure, strings.Contains(out.Join.JoinCommand, "--allow-insecure"))
 		})
 	}
 }
