@@ -182,8 +182,8 @@ can later verify the claim. The user-facing rules are in
 
 ## Hooks: local automation with a hard boundary
 
-Hooks run local commands in response to `issue.*` events. They are deliberately
-constrained:
+Hooks run local commands in response to subscribed issue, project, recurrence,
+and cron events. They are deliberately constrained:
 
 - They fire **after** the database commit, asynchronously, on a bounded worker
   pool. A hook can never block or roll back a state change.
