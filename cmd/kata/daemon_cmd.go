@@ -986,21 +986,21 @@ func daemonRestartCmd() *cobra.Command {
 }
 
 type daemonStartupPreflight struct {
-	Config           *config.DaemonConfig
-	Web              config.WebConfig
-	MCPToken         string
-	AgentsView       *agentsview.Service
-	AgentsViewConfig config.ResolvedAgentsView
-	Listen           string
-	Namespace        *daemonruntime.Namespace
-	Endpoint         kitdaemon.Endpoint
-	DBPath           string
-	StoreConfig      storeopen.Config
-	KataHome         string
-	HookConfigPath   string
-	HookConfig       hooks.LoadedConfig
-	Embedder         *embedding.Client
-	VectorsPath      string
+	Config         *config.DaemonConfig
+	Web            config.WebConfig
+	MCPToken       string
+	AgentsView     *agentsview.Service
+	UsageConfig    config.ResolvedAgentsView
+	Listen         string
+	Namespace      *daemonruntime.Namespace
+	Endpoint       kitdaemon.Endpoint
+	DBPath         string
+	StoreConfig    storeopen.Config
+	KataHome       string
+	HookConfigPath string
+	HookConfig     hooks.LoadedConfig
+	Embedder       *embedding.Client
+	VectorsPath    string
 }
 
 func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartupPreflight, error) {
@@ -1104,21 +1104,21 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		return daemonStartupPreflight{}, err
 	}
 	return daemonStartupPreflight{
-		Config:           dcfg,
-		Web:              dcfg.Web,
-		MCPToken:         mcpToken,
-		AgentsView:       usageService,
-		AgentsViewConfig: usageConfig,
-		Listen:           listen,
-		Namespace:        ns,
-		Endpoint:         endpoint,
-		DBPath:           dbPath,
-		StoreConfig:      storeConfig,
-		KataHome:         home,
-		HookConfigPath:   hookCfgPath,
-		HookConfig:       loadedHooks,
-		Embedder:         embedder,
-		VectorsPath:      vectorsPath,
+		Config:         dcfg,
+		Web:            dcfg.Web,
+		MCPToken:       mcpToken,
+		AgentsView:     usageService,
+		UsageConfig:    usageConfig,
+		Listen:         listen,
+		Namespace:      ns,
+		Endpoint:       endpoint,
+		DBPath:         dbPath,
+		StoreConfig:    storeConfig,
+		KataHome:       home,
+		HookConfigPath: hookCfgPath,
+		HookConfig:     loadedHooks,
+		Embedder:       embedder,
+		VectorsPath:    vectorsPath,
 	}, nil
 }
 
@@ -1290,8 +1290,6 @@ func runDaemonProcess(
 		return err
 	}
 	dcfg := startup.Config
-	usageService := startup.AgentsView
-	usageConfig := startup.AgentsViewConfig
 	listen = startup.Listen
 	ns := startup.Namespace
 	endpoint := startup.Endpoint
@@ -1436,8 +1434,8 @@ func runDaemonProcess(
 			_ = disp.Shutdown(fallbackCtx)
 		}
 	}()
-	if usageConfig.Enabled() {
-		origin, _ := url.Parse(usageConfig.URL)
+	if startup.UsageConfig.Enabled() {
+		origin, _ := url.Parse(startup.UsageConfig.URL)
 		daemonLog.Printf("AgentsView usage: on (%s)", origin.Host)
 	} else {
 		daemonLog.Printf("AgentsView usage: off")
@@ -1527,7 +1525,7 @@ func runDaemonProcess(
 	sigs, reloadCleanup := installReloadSource(ctx, ns.DBHash)
 	workers.Go(func() {
 		runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog, func() {
-			if swapped, err := reloadAgentsView(ctx, startup.KataHome, usageService, dcfg.Auth.TrustPrivateNetwork); err != nil {
+			if swapped, err := reloadAgentsView(ctx, startup.KataHome, startup.AgentsView, dcfg.Auth.TrustPrivateNetwork); err != nil {
 				daemonLog.Printf("AgentsView credential reload failed: %v", err)
 			} else if !swapped {
 				daemonLog.Printf("AgentsView target or enabled state changed; restart required")
@@ -1686,7 +1684,7 @@ func runDaemonProcess(
 	mcpEvents, mcpEventsReason := startDaemonMCPEvents(ctx, workers, dcfg, ns.DBHash, store, broadcaster, daemonLog)
 	srv := daemon.NewServer(daemon.ServerConfig{
 		LocalEmbeddings:           localSetup,
-		AgentsView:                usageService,
+		AgentsView:                startup.AgentsView,
 		MCPHandler:                mcpHandler,
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,

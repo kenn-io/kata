@@ -1112,9 +1112,6 @@ logging supplied origins or addresses. No environment variable grants callback t
 The serving daemon can read live cost for recorded cron sessions from
 AgentsView v0.47.0 or newer:
 
-Recorded agent names, including custom names, must match the names used by
-AgentsView for those sessions. A mismatch reports usage as unavailable.
-
 ```toml
 [agentsview]
 url = "https://agentsview.example/archive"
@@ -1122,6 +1119,9 @@ browser_url = "https://agentsview.example" # optional; defaults to url
 token_file = "/etc/kata/agentsview-token"   # optional
 token_env = "KATA_AGENTSVIEW_TOKEN"          # optional
 ```
+
+Recorded agent names, including custom names, must match the names used by
+AgentsView for those sessions. A mismatch reports usage as unavailable.
 
 An empty `url` turns usage off, even when other keys are set; Kata does not
 resolve the token in that case. The URL may contain a base path, but no
@@ -1272,7 +1272,7 @@ it, run this in PowerShell as the daemon user:
 File contents are trimmed, including a trailing newline.
 
 Kata resolves the selected credential once at startup and once per
-`kata daemon reload`. Reload also refreshes the AgentsView credential when its targets are unchanged. Reload wakes the embedding backlog; changes to provider
+`kata daemon reload`. Reload wakes the embedding backlog; changes to provider
 settings, including `base_url` or `model`, require a restart. An environment key
 must be present in the daemon's environment, not just the shell running a later
 CLI command.

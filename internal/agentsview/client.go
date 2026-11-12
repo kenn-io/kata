@@ -39,13 +39,6 @@ func NewClient(cfg config.ResolvedAgentsView, trustPrivate bool) (*Client, error
 	return &Client{base: strings.TrimRight(cfg.URL, "/"), http: h}, nil
 }
 
-// Lookup makes one bounded-body request. Deadlines and concurrency belong to
-// the caller, which can distinguish its request budget from the GET timeout.
-func (c *Client) Lookup(ctx context.Context, id string) SessionUsage {
-	result, _ := c.lookup(ctx, id, nil)
-	return result
-}
-
 func (c *Client) lookup(ctx context.Context, id string, expectedAgent *string) (SessionUsage, int) {
 	unavailable := SessionUsage{State: "unavailable"}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v1/sessions/"+url.PathEscape(id)+"/usage?subagents=true", nil)

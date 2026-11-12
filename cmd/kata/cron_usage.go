@@ -80,10 +80,10 @@ func newCronUsageCmd() *cobra.Command {
 		if flags.Quiet {
 			return nil
 		}
+		if err := validateCronUsage(*response.JSON200); err != nil {
+			return err
+		}
 		if currentOutputMode() == outputAgent {
-			if err := validateCronUsage(*response.JSON200); err != nil {
-				return err
-			}
 			if err := writeAgentOKLine(cmd.OutOrStdout(), "cron-run-usage", agentRowField("run_uid", response.JSON200.RunUID), agentRowField("state", string(response.JSON200.State))); err != nil {
 				return err
 			}
@@ -121,9 +121,6 @@ func validateCronUsage(usage generated.RunUsage) error {
 }
 
 func writeCronUsage(out io.Writer, usage generated.RunUsage) error {
-	if err := validateCronUsage(usage); err != nil {
-		return err
-	}
 	total := "no sessions"
 	switch usage.State {
 	case "unknown":
