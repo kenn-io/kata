@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"go.kenn.io/kata/internal/httpurl"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -17,13 +19,16 @@ type moveQuery interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-// CheckFederationMoveSourceLifecycle keeps a native source joined while a
-// destination still owes a locally authored move that needs its credential.
-func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
-	var sourceUID string
-	err := tx.QueryRowContext(ctx, `SELECT p.uid FROM projects p
+// CheckFederationMoveSourceLifecycle keeps the native replicas joined while
+// pending moves or updates in another stream still need their credentials.
+func CheckFederationMoveSourceLifecycle(
+	ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string,
+	referencedIssues func(RemoteEvent, map[string]jsontext.Value) ([]string, error),
+) error {
+	var sourceUID, hubURL string
+	err := tx.QueryRowContext(ctx, `SELECT p.uid,b.hub_url FROM projects p
  JOIN federation_bindings b ON b.project_id=p.id
- WHERE p.id=$1 AND b.role='spoke' AND b.relay_config IS NULL`, projectID).Scan(&sourceUID)
+ WHERE p.id=$1 AND b.role='spoke' AND b.relay_config IS NULL`, projectID).Scan(&sourceUID, &hubURL)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -64,6 +69,103 @@ func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, project
 	}
 	if pending {
 		return fmt.Errorf("%w: sync pending events for moved issues before source leave or archive", ErrFederationResetBlockedByPendingPush)
+	}
+	return checkFederationMoveDestinationLifecycle(ctx, tx, projectID, originInstanceUID, hubURL, referencedIssues)
+}
+
+// A source stream still needs the current owner's enrollment to push its
+// pending updates for issues it once held. Pausing sync or archiving the source
+// retains those updates. The source held an issue it created, moved, or gave up
+// in a recorded relocation; a refused snapshot is not ownership. Links to
+// issues the source never held are ordinary cross-project references and do
+// not block the leave.
+func checkFederationMoveDestinationLifecycle(
+	ctx context.Context, tx *sql.Tx, projectID int64, instanceUID, hubURL string,
+	referencedIssues func(RemoteEvent, map[string]jsontext.Value) ([]string, error),
+) error {
+	origin, err := httpurl.CanonicalHTTPOrigin(hubURL)
+	if err != nil {
+		return nil
+	}
+	//nolint:gosec // G202: the event types come from a fixed list; runtime values are bound.
+	rows, err := tx.QueryContext(ctx, `SELECT e.project_id,b.hub_url,e.type,e.issue_uid,e.related_issue_uid,e.payload
+ FROM events e
+ JOIN federation_bindings b ON b.project_id=e.project_id
+ WHERE e.project_id<>$1 AND e.origin_instance_uid=$2
+ AND b.role='spoke' AND b.relay_config IS NULL AND e.id>b.push_cursor_event_id
+ AND (e.type LIKE 'issue.%' OR e.type IN ('cron.run.observed','cron.run.snapshot'))
+ AND e.type IN (`+FederationPushEventTypesSQL()+`)`, projectID, instanceUID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	type sourceIssue struct {
+		project int64
+		uid     string
+	}
+	candidates := map[int64][]string{}
+	seen := map[sourceIssue]bool{}
+	for rows.Next() {
+		var sourceProject int64
+		var candidate, payload string
+		var event RemoteEvent
+		if err := rows.Scan(&sourceProject, &candidate, &event.Type, &event.IssueUID, &event.RelatedIssueUID, &payload); err != nil {
+			return err
+		}
+		sourceOrigin, err := httpurl.CanonicalHTTPOrigin(candidate)
+		if err != nil || sourceOrigin != origin {
+			continue
+		}
+		event.Payload = jsontext.Value(payload)
+		var refs []string
+		if strings.HasPrefix(event.Type, "issue.") {
+			refs, err = referencedIssues(event, PayloadMap(event.Payload))
+			if err != nil {
+				return err
+			}
+			refs = append(refs, FederationEventIssueUID(event.IssueUID, payload))
+		} else {
+			var run CronRunObservation
+			if err := json.Unmarshal(event.Payload, &run); err != nil {
+				return err
+			}
+			if run.IssueUID != nil {
+				refs = append(refs, *run.IssueUID)
+			}
+		}
+		for _, uid := range refs {
+			if key := (sourceIssue{sourceProject, uid}); uid != "" && !seen[key] {
+				seen[key] = true
+				candidates[sourceProject] = append(candidates[sourceProject], uid)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for sourceProject, uids := range candidates {
+		for chunk := range slices.Chunk(uids, 500) {
+			slots := make([]string, len(chunk))
+			args := make([]any, 2, len(chunk)+2)
+			args[0], args[1] = projectID, sourceProject
+			for i, uid := range chunk {
+				slots[i] = fmt.Sprintf("$%d", i+3)
+				args = append(args, uid)
+			}
+			var pending bool
+			//nolint:gosec // G202: only generated placeholders enter the SQL; the UIDs are bound.
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues i WHERE i.project_id=$1 AND i.uid IN (`+
+				strings.Join(slots, ",")+`) AND EXISTS(SELECT 1 FROM events h WHERE h.project_id=$2 AND h.issue_uid=i.uid
+ AND h.type IN ('issue.created','issue.moved','sync.reset_required')))`, args...).Scan(&pending); err != nil {
+				return err
+			}
+			if pending {
+				return fmt.Errorf("%w: %w: restore any archived former project and sync pending updates for moved issues, then retry destination leave or archive", ErrFederationResetBlockedByPendingPush, ErrFederationMovedIssuePendingPush)
+			}
+		}
 	}
 	return nil
 }
@@ -311,33 +413,88 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) ([]int64, error) {
+// projectID names the project being materialized.
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEvent, p FoldProjection, projectID int64, snapshotGroup []int64, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) ([]int64, error) {
 	moved := map[string]FoldEvent{}
+	retainedMoves := map[string]FoldEvent{}
 	for _, e := range events {
-		if e.Type == "issue.moved" {
+		if e.Type == "issue.moved" || e.Type == "issue.snapshot" {
+			e.IssueUID = FederationEventIssueUID(&e.IssueUID, string(e.Payload))
+			if e.Type == "issue.moved" {
+				if previous, known := retainedMoves[e.IssueUID]; !known || compareClock(clockOf(e), clockOf(previous)) > 0 {
+					retainedMoves[e.IssueUID] = e
+				}
+			}
 			if previous, known := moved[e.IssueUID]; !known || compareClock(clockOf(e), clockOf(previous)) > 0 {
 				moved[e.IssueUID] = e
 			}
 		}
 	}
+	// Snapshot winners include ordinary unchanged issues. Fetch their locations
+	// together; real move winners retain their existing per-issue lookup.
+	type issueLocation struct {
+		id, source    int64
+		recurrence    *int64
+		sourceProject Project
+		sourceShort   string
+	}
+	snapshotRows := map[string]issueLocation{}
+	var snapshotUIDs []string
+	for uid := range p.Issues {
+		if moved[uid].Type == "issue.snapshot" {
+			snapshotUIDs = append(snapshotUIDs, uid)
+		}
+	}
+	for chunk := range slices.Chunk(snapshotUIDs, 500) {
+		slots, args := make([]string, len(chunk)), make([]any, len(chunk))
+		for i, uid := range chunk {
+			slots[i], args[i] = fmt.Sprintf("$%d", i+1), uid
+		}
+		//nolint:gosec // G202: only generated placeholders enter SQL; all UIDs are bound.
+		rows, err := tx.QueryContext(ctx, `SELECT i.uid,i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid IN (`+strings.Join(slots, ",")+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var uid string
+			var location issueLocation
+			if err := rows.Scan(&uid, &location.id, &location.source, &location.recurrence, &location.sourceProject.UID, &location.sourceProject.Name, &location.sourceShort); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			snapshotRows[uid] = location
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
 	projects := map[int64]bool{}
+	type projectFacts struct {
+		id             int64
+		active, joined bool
+	}
+	projectCache := map[string]projectFacts{}
 	for _, issue := range p.SortedIssues() {
 		winner, known := moved[issue.UID]
 		if !known {
 			continue
 		}
-		var target int64
-		var active bool
-		if err := tx.QueryRowContext(ctx, `SELECT id,deleted_at IS NULL FROM projects WHERE uid=$1`, issue.ProjectUID).Scan(&target, &active); err != nil {
-			return nil, err
+		facts, cached := projectCache[issue.ProjectUID]
+		if !cached {
+			if err := tx.QueryRowContext(ctx, `SELECT id,deleted_at IS NULL FROM projects WHERE uid=$1`, issue.ProjectUID).Scan(&facts.id, &facts.active); err != nil {
+				return nil, err
+			}
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, facts.id).Scan(&facts.joined); err != nil {
+				return nil, err
+			}
+			projectCache[issue.ProjectUID] = facts
 		}
+		target, active := facts.id, facts.active
 		// A detached destination retains standalone data. Its former streams
 		// may keep syncing, but cannot reconcile that destination's projection.
-		var joined bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, target).Scan(&joined); err != nil {
-			return nil, err
-		}
-		if !joined {
+		if !facts.joined {
 			delete(p.Issues, issue.UID)
 			continue
 		}
@@ -345,12 +502,23 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 		var sourceProject Project
 		var recurrence *int64
 		var sourceShort string
-		err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, issue.UID).Scan(&id, &source, &recurrence, &sourceProject.UID, &sourceProject.Name, &sourceShort)
+		err := sql.ErrNoRows
+		if winner.Type == "issue.snapshot" {
+			if row, ok := snapshotRows[issue.UID]; ok {
+				id, source, recurrence, sourceProject, sourceShort = row.id, row.source, row.recurrence, row.sourceProject, row.sourceShort
+				err = nil
+			}
+		} else {
+			err = tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, issue.UID).Scan(&id, &source, &recurrence, &sourceProject.UID, &sourceProject.Name, &sourceShort)
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			if active {
 				projects[target] = true
 				// A cold replica can expose an empty projection at the append
 				// cursor before this fold creates the destination issue row.
+				if winner.Type != "issue.moved" {
+					continue
+				}
 				from, _ := StringValue(PayloadMap(winner.Payload)["from_project_uid"])
 				if err := tx.QueryRowContext(ctx, `SELECT id,uid,name FROM projects WHERE uid=$1`, from).Scan(&sourceProject.ID, &sourceProject.UID, &sourceProject.Name); err != nil {
 					return nil, err
@@ -372,18 +540,45 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 			}
 			continue
 		}
+		// A refused snapshot relocation stops the destination pull. The project
+		// still holding the row keeps the issue so its own sync can continue.
+		snapshotRelocation := winner.Type == "issue.snapshot"
+		refuse := func(err error) error {
+			if !snapshotRelocation || source != projectID {
+				return err
+			}
+			issue.ProjectUID = sourceProject.UID
+			p.Issues[issue.UID] = issue
+			return nil
+		}
+		if snapshotRelocation && (!slices.Contains(snapshotGroup, source) || !slices.Contains(snapshotGroup, target)) {
+			// A later baseline does not retire an already verified move to this
+			// destination. Its signed history still permits replay after leave.
+			move, known := retainedMoves[issue.UID]
+			to, _ := StringValue(PayloadMap(move.Payload)["to_project_uid"])
+			if !known || to != issue.ProjectUID {
+				if err := refuse(errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported)); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			winner, snapshotRelocation = move, false
+		}
 		if !active {
 			return nil, ErrNotFound
 		}
-		projects[target] = true
 		// Move ingress has already checked its authority and endpoints. Replaying
 		// trusted history must also work after a former source has left.
 		if recurrence != nil {
-			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
+			if err := refuse(fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		if err := validate(id, source, target); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
 		}
+		projects[target] = true
 
 		short, err := assign(target, issue)
 		if err != nil {
@@ -400,7 +595,7 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, events []FoldEv
 		fromProject, _ := StringValue(payload["from_project_uid"])
 		fromShort, _ := StringValue(payload["from_short_id"])
 		var reference *FederationMovedReference
-		if sourceProject.UID != fromProject || sourceShort != fromShort {
+		if winner.Type == "issue.snapshot" || sourceProject.UID != fromProject || sourceShort != fromShort {
 			reference = &FederationMovedReference{IssueUID: issue.UID, FromProjectUID: sourceProject.UID, FromShortID: sourceShort, MoveEventUID: winner.UID}
 		}
 		if err := recordFederationMoveDisplacement(ctx, tx, sourceProject, issue.ProjectUID, winner, acceptedEventUIDs, reference, insertResetControl); err != nil {

@@ -1,11 +1,13 @@
 package daemon_test
 
 import (
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
@@ -14,6 +16,57 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestDestinationLeaveAndArchiveExplainPendingSource(t *testing.T) {
+	ctx := t.Context()
+	env := testenv.New(t)
+	source, err := env.DB.CreateProject(ctx, "paused-source")
+	require.NoError(t, err)
+	target, err := env.DB.CreateProject(ctx, "destination")
+	require.NoError(t, err)
+	for _, project := range []db.Project{source, target} {
+		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
+		require.NoError(t, err)
+	}
+	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "pending comment", Author: "worker"})
+	require.NoError(t, err)
+	_, comment, err := env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "pending"})
+	require.NoError(t, err)
+	move, err := env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, env.DB.AdvanceFederationPushCursor(ctx, target.ID, move.EventID))
+	_, err = env.DB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{ProjectID: source.ID, Direction: db.FederationQuarantineDirectionPush, FirstEventID: comment.ID, LastEventID: comment.ID, EventUIDs: []string{comment.UID}, Error: "requires review", CreatedAt: time.Now().UTC()})
+	require.NoError(t, err)
+	binding, err := env.DB.FederationBindingByProject(ctx, source.ID)
+	require.NoError(t, err)
+	binding.Enabled, binding.PushEnabled = false, false
+	_, err = env.DB.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	for _, request := range []struct {
+		name, method, path string
+		body               any
+	}{
+		{"leave", http.MethodPost, fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", target.ID), map[string]any{"disposition": "detach", "actor": "worker"}},
+		{"archive", http.MethodDelete, fmt.Sprintf("/api/v1/projects/%d?actor=worker&force=true", target.ID), nil},
+	} {
+		t.Run(request.name, func(t *testing.T) {
+			response, raw := envDoRaw(t, env, request.method, request.path, request.body, nil)
+			require.Equal(t, http.StatusConflict, response.StatusCode, string(raw))
+			var envelope struct {
+				Error struct {
+					Code string `json:"code"`
+					Hint string `json:"hint"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &envelope))
+			require.Equal(t, "federation_lifecycle_blocked", envelope.Error.Code)
+			require.Contains(t, envelope.Error.Hint, "source")
+			require.Contains(t, envelope.Error.Hint, "resume")
+			require.Contains(t, envelope.Error.Hint, "kata federation quarantine list")
+			require.Contains(t, envelope.Error.Hint, "retry or skip")
+		})
+	}
+}
 
 func TestPrepareFederationLeaveRetainsPendingMoveSourceCredential(t *testing.T) {
 	ctx := t.Context()

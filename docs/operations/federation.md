@@ -94,6 +94,20 @@ reference, and the stable issue UID stays unchanged. If a spoke previously
 assigned a longer short ID to avoid a local collision, that former reference
 also remains reserved while its move history remains.
 
+When a direct spoke joins the destination after the hub moved an issue, a
+destination baseline can relocate the existing source row without retained
+move history. Both replicas must use the same hub origin. The local issue ID,
+discussion, and links survive, while the destination baseline sets the issue's
+current fields and labels. Pausing or leaving the source preserves its retained
+discussion. Leaving the destination makes the issue standalone, and the source
+can continue to sync. Kata does not author another move during this recovery.
+
+The destination pull refuses relocation and stops with a move error when the
+replicas use different hub origins, when the issue belongs to a recurrence, or
+when the spoke left the source before joining the destination. A source that is
+still joined keeps the issue and keeps syncing. A source the spoke already left
+is standalone, and Kata does not take its issue.
+
 Destination sync recovers retained source history even when its cursor has
 already passed those events. This preserves missed changes and comments without
 replacing newer edits. Once the move is received, leaving the source does not
@@ -1847,6 +1861,13 @@ contacting the hub. The enrollment token then **remains valid** until you run
 ```sh
 kata federation leave <project> --local-only
 ```
+
+Before leaving a destination that holds moved issues, sync any pending updates
+for those issues from their former projects on the same hub. Pending links from
+other projects to issues they never held do not block the leave. The hub needs the
+destination's enrollment to accept those updates. If a former project is
+archived, restore it with `kata projects restore`. Resume any paused sync and
+let the former project push before retrying the leave.
 
 Leaving is idempotent: running it on a project that is already standalone
 reports success and finishes any cleanup a failed earlier leave left behind

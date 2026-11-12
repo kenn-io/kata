@@ -1274,7 +1274,11 @@ func (d *Store) materializeFederatedProjectTxScoped(
 		}
 	}
 	projection := db.FoldEvents(events)
-	destinations, err := db.RehomeFederatedMovedIssues(ctx, tx, events, projection, func(pid int64, issue db.FoldIssue) (string, error) {
+	snapshotGroup, err := federationSnapshotGroupProjectIDs(ctx, tx, projectID)
+	if err != nil {
+		return err
+	}
+	destinations, err := db.RehomeFederatedMovedIssues(ctx, tx, events, projection, projectID, snapshotGroup, func(pid int64, issue db.FoldIssue) (string, error) {
 		return resolveFederatedIssueShortID(ctx, tx, pid, issue.UID, issue.ShortID, nil)
 	}, func(id, source, target int64) error {
 		if err := lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil {
@@ -1836,6 +1840,10 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
 	// payloads can reference an issue without becoming part of its history.
 	eventIssueUID := `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),json_extract(e.payload,'$.issue_uid'),json_extract(e.payload,'$.uid')) ELSE NULLIF(e.issue_uid,'') END`
 	historyIssueUID := `CASE WHEN h.type LIKE 'issue.%' THEN COALESCE(NULLIF(h.issue_uid,''),json_extract(h.payload,'$.issue_uid'),json_extract(h.payload,'$.uid')) ELSE NULLIF(h.issue_uid,'') END`
+	// Other projects' events join an issue's history after a retained move, from
+	// the two projects in a recorded snapshot relocation, or within a same-hub
+	// snapshot group. A refused snapshot from another hub stays out, so it cannot
+	// retry its relocation.
 	moveIssueUID := `COALESCE(NULLIF(m.issue_uid,''),json_extract(m.payload,'$.issue_uid'),json_extract(m.payload,'$.uid'))`
 	query := `
 		SELECT e.uid, e.origin_instance_uid, p.uid, e.issue_uid, e.related_issue_uid,
@@ -1844,9 +1852,30 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
  WHERE (e.project_id=$1 OR (` + eventIssueUID + ` IN (
    SELECT ` + historyIssueUID + ` FROM events h WHERE h.project_id=$1
    UNION SELECT uid FROM issues WHERE project_id=$1)
- AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND
-   ` + moveIssueUID + ` = ` + eventIssueUID + `)))`
+ AND (EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND
+   ` + moveIssueUID + ` = ` + eventIssueUID + `)
+ OR (` + eventIssueUID + `, e.project_id) IN (SELECT reset.issue_uid, p.id FROM events reset
+ JOIN events m ON m.uid = json_extract(reset.payload,'$.move_event_uid') AND m.type='issue.snapshot'
+ JOIN projects p ON p.id IN (reset.project_id, m.project_id)
+ WHERE reset.type='sync.reset_required' AND reset.issue_uid IS NOT NULL)`
 	args := []any{projectID}
+	group, err := federationSnapshotGroupProjectIDs(ctx, tx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if len(group) > 1 {
+		placeholders := make([]string, 0, len(group))
+		for _, id := range group {
+			args = append(args, id)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		}
+		groupSQL := strings.Join(placeholders, ",")
+		//nolint:gosec // Only generated placeholders enter SQL; project IDs are bound.
+		query += ` OR (e.project_id IN (` + groupSQL + `)
+ AND ` + eventIssueUID + ` IN (SELECT ` + moveIssueUID + ` FROM events m WHERE m.type='issue.snapshot'
+ AND m.project_id IN (` + groupSQL + `)))`
+	}
+	query += `)))`
 	if len(eventTypes) > 0 {
 		placeholders := make([]string, 0, len(eventTypes))
 		for _, eventType := range eventTypes {
@@ -2679,6 +2708,22 @@ func federationBindingGroupProjectIDs(
 	tx *sql.Tx,
 	current db.FederationBinding,
 ) ([]int64, error) {
+	return federationBindingGroupProjectIDsScoped(ctx, tx, current, false)
+}
+
+// Snapshot ownership is shared by native replicas of one hub, including paused replicas.
+func federationSnapshotGroupProjectIDs(ctx context.Context, tx *sql.Tx, projectID int64) ([]int64, error) {
+	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, projectID))
+	if err != nil {
+		return nil, err
+	}
+	if binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil {
+		return nil, nil
+	}
+	return federationBindingGroupProjectIDsScoped(ctx, tx, binding, true)
+}
+
+func federationBindingGroupProjectIDsScoped(ctx context.Context, tx *sql.Tx, current db.FederationBinding, nativeSnapshots bool) ([]int64, error) {
 	switch current.Role {
 	case db.FederationRoleHub:
 	case db.FederationRoleSpoke:
@@ -2693,9 +2738,12 @@ func federationBindingGroupProjectIDs(
 			return nil, err
 		}
 	}
-	rows, err := tx.QueryContext(ctx,
-		federationBindingSelect+` WHERE role = ? AND enabled = 1 ORDER BY project_id ASC`,
-		string(current.Role))
+	query := federationBindingSelect + ` WHERE role = ?`
+	if !nativeSnapshots {
+		query += ` AND enabled = 1`
+	}
+	query += ` ORDER BY project_id ASC`
+	rows, err := tx.QueryContext(ctx, query, string(current.Role))
 	if err != nil {
 		return nil, fmt.Errorf("list federation group bindings: %w", err)
 	}
@@ -2705,6 +2753,9 @@ func federationBindingGroupProjectIDs(
 		candidate, err := scanFederationBinding(rows)
 		if err != nil {
 			return nil, err
+		}
+		if nativeSnapshots && candidate.RelayConfig != nil {
+			continue
 		}
 		if current.Role == db.FederationRoleSpoke {
 			candidateOrigin, err := normalizedFederationHubOrigin(candidate.HubURL)

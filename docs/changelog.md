@@ -9,6 +9,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Keep moved issues and their discussion when a spoke joins the destination late,
+  pauses or leaves the source, or leaves the destination. A newer issue baseline
+  now replaces older label changes, as it already did for fields.
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 
 - Upgrade a large PostgreSQL database without the schema migration rolling

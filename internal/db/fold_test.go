@@ -418,6 +418,47 @@ func TestFold_CommentDuplicateKeepsFirstAndWarns(t *testing.T) {
 	require.Len(t, got.Warnings, 1)
 }
 
+func TestFoldSnapshotAppliesNewerCommentEdit(t *testing.T) {
+	const createdAt = "2026-05-23T12:00:01.123Z"
+	const snapshotEdit = "2026-05-23T12:00:02Z"
+	const localEdit = "2026-05-23T12:00:03Z"
+	conflictWarnings := []string{"conflicting duplicate comment comment-1"}
+	for _, tc := range []struct {
+		name, author, originalEdit, incomingEdit, wantBody, wantEdit string
+		incomingCreated                                              string
+		local                                                        bool
+		wantWarnings                                                 []string
+	}{
+		{name: "new snapshot edit", author: "agent", incomingEdit: snapshotEdit, wantBody: "snapshot edit", wantEdit: snapshotEdit},
+		{name: "equivalent creation timestamp", author: "agent", incomingCreated: "2026-05-23T12:00:01.123000000Z", incomingEdit: snapshotEdit, wantBody: "snapshot edit", wantEdit: snapshotEdit},
+		{name: "different creation timestamp", author: "agent", incomingCreated: "2026-05-23T12:00:01.124Z", incomingEdit: snapshotEdit, wantBody: "first", wantWarnings: conflictWarnings},
+		{name: "newer local edit", author: "agent", incomingEdit: snapshotEdit, wantBody: "local edit", wantEdit: localEdit, local: true, wantWarnings: conflictWarnings},
+		{name: "same edit time", author: "agent", originalEdit: snapshotEdit, incomingEdit: snapshotEdit, wantBody: "first", wantEdit: snapshotEdit, wantWarnings: conflictWarnings},
+		{name: "different author", author: "other", incomingEdit: snapshotEdit, wantBody: "first", wantWarnings: conflictWarnings},
+		{name: "invalid edit time", author: "agent", incomingEdit: "invalid", wantBody: "first", wantWarnings: conflictWarnings},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			creation := testEvent("issue.commented", 1, fmt.Sprintf(`{"comment_uid":"comment-1","author":"agent","body":"first","created_at":%q,"edited_at":%q}`, createdAt, tc.originalEdit))
+			incomingCreated := tc.incomingCreated
+			if incomingCreated == "" {
+				incomingCreated = createdAt
+			}
+			snapshot := testEvent("issue.snapshot", 4, fmt.Sprintf(`{"uid":"issue-1","comments":[{"comment_uid":"comment-1","author":%q,"body":"snapshot edit","created_at":%q,"edited_at":%q}]}`, tc.author, incomingCreated, tc.incomingEdit))
+			events := []FoldEvent{snapshot, creation}
+			if tc.local {
+				events = append(events, testEvent("issue.comment_edited", 3, fmt.Sprintf(`{"comment_uid":"comment-1","body":"local edit","edited_at":%q}`, localEdit)))
+			}
+			got := FoldEvents(events)
+			comment := got.Comments["comment-1"]
+			require.Equal(t, tc.wantBody, comment.Body)
+			require.Equal(t, tc.wantEdit, comment.EditedAt)
+			require.Equal(t, "agent", comment.Author)
+			require.Equal(t, createdAt, comment.CreatedAt)
+			require.Equal(t, tc.wantWarnings, got.Warnings)
+		})
+	}
+}
+
 func TestFold_CommentEditOverwritesBodyOnly(t *testing.T) {
 	events := []FoldEvent{
 		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`),
@@ -463,4 +504,54 @@ func TestFoldMovedHydratesPartialIssueBaseline(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A full snapshot replaces label membership even when an empty label list is
+// omitted by the producer. Later label deltas still apply.
+func TestFoldSnapshotReplacesOlderLabels(t *testing.T) {
+	for _, snapshot := range []struct {
+		name, payload string
+		retained      bool
+	}{
+		{"labeled snapshot", `{"uid":"issue-1","title":"snapshot","status":"open","labels":["current","retained"]}`, true},
+		{"omitted labels", `{"uid":"issue-1","title":"snapshot","status":"open"}`, false},
+	} {
+		t.Run(snapshot.name, func(t *testing.T) {
+			other := testEvent("issue.snapshot", 1, `{"uid":"issue-2","title":"other","status":"open","labels":["keep"]}`)
+			other.IssueUID, other.UID, other.HLCCounter = "issue-2", "event-other-001", 1
+			tombstone := testEvent("issue.unlabeled", 2, `{"label":"old-tombstone"}`)
+			tombstone.UID, tombstone.HLCCounter = "event-tombstone-002", 1
+			events := []FoldEvent{
+				other,
+				testEvent("issue.snapshot", 1, `{"uid":"issue-1","title":"source","status":"open","labels":["old"]}`),
+				testEvent("issue.labeled", 2, `{"label":"before"}`),
+				tombstone,
+				testEvent("issue.snapshot", 3, snapshot.payload),
+				testEvent("issue.labeled", 4, `{"label":"after"}`),
+				testEvent("issue.unlabeled", 5, `{"label":"current"}`),
+			}
+			want := map[FoldLabelKey]FoldElementState{
+				{IssueUID: "issue-2", Label: "keep"}:    {Present: true, Clock: clockOf(other)},
+				{IssueUID: "issue-1", Label: "after"}:   {Present: true, Clock: clockOf(events[5])},
+				{IssueUID: "issue-1", Label: "current"}: {Present: false, Clock: clockOf(events[6])},
+			}
+			if snapshot.retained {
+				want[FoldLabelKey{IssueUID: "issue-1", Label: "retained"}] = FoldElementState{Present: true, Clock: clockOf(events[4])}
+			}
+			require.Equal(t, want, FoldEvents(events).Labels)
+			for i, j := 0, len(events)-1; i < j; i, j = i+1, j-1 {
+				events[i], events[j] = events[j], events[i]
+			}
+			require.Equal(t, want, FoldEvents(events).Labels)
+		})
+	}
+	t.Run("seeded move baseline", func(t *testing.T) {
+		move := testEvent("issue.moved", 3, `{"to_project_uid":"destination","snapshot":{"uid":"issue-1","title":"baseline","status":"open","labels":["seed"]}}`)
+		label := testEvent("issue.labeled", 1, `{"label":"later"}`)
+		unlabel := testEvent("issue.unlabeled", 2, `{"label":"seed"}`)
+		require.Equal(t, map[FoldLabelKey]FoldElementState{
+			{IssueUID: "issue-1", Label: "seed"}:  {Present: false, Clock: clockOf(unlabel)},
+			{IssueUID: "issue-1", Label: "later"}: {Present: true, Clock: clockOf(label)},
+		}, FoldEvents([]FoldEvent{move, label, unlabel}).Labels)
+	})
 }

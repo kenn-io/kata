@@ -259,6 +259,9 @@ var (
 
 	ErrFederationResetBlockedByPendingPush = errors.New("federation reset blocked by pending push")
 
+	// ErrFederationMovedIssuePendingPush identifies former-source work blocking a destination.
+	ErrFederationMovedIssuePendingPush = errors.New("moved issues have pending source uploads")
+
 	// ErrFederationPushQuarantined reports that the federation push channel is
 	// quarantined.
 	ErrFederationPushQuarantined = errors.New("federation push quarantined")

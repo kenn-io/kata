@@ -149,6 +149,17 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		}
 	}
 	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
+	var projectedUIDs []string
+	for uid := range m.projection.Issues {
+		projectedUIDs = append(projectedUIDs, uid)
+	}
+	rehome, err := federationIssuesHeldElsewhere(ctx, tx, projectID, projectedUIDs)
+	if err != nil {
+		return federationMaterialization{}, err
+	}
+	if rehome {
+		return federationMaterialization{fullReplay: true}, nil
+	}
 	if deferRows && len(issueScope) == 0 {
 		m.fullHistory = true
 		m.moveIssueUIDs = map[string]struct{}{}
@@ -213,6 +224,27 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		}
 	}
 	return m, nil
+}
+
+// Prepared inserts cannot reuse identities held in another project. Full replay
+// owns relocation, its guards, and invalidation of both project views.
+func federationIssuesHeldElsewhere(ctx context.Context, tx *sql.Tx, projectID int64, uids []string) (bool, error) {
+	for start := 0; start < len(uids); start += federationIngestIssueScopeLimit {
+		batch := uids[start:min(start+federationIngestIssueScopeLimit, len(uids))]
+		args := []any{projectID}
+		for _, uid := range batch {
+			args = append(args, uid)
+		}
+		var held bool
+		//nolint:gosec // Only generated placeholders enter SQL; UIDs are bound.
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE project_id<>? AND uid IN (?`+strings.Repeat(",?", len(batch)-1)+`))`, args...).Scan(&held); err != nil {
+			return false, err
+		}
+		if held {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, fresh []db.FoldEvent, alreadyStored bool) error {

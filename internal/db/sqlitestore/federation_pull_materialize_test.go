@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // Pulls must repair only their touched issue and agree with a complete fold,
@@ -454,4 +456,71 @@ func TestFullPulledMaterializationLockedFallback(t *testing.T) {
 	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	require.Equal(t, "new", got.Title)
+}
+
+func TestPulledSnapshotRelocationFallsBackToFullReplay(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		full bool
+	}{{"held in source", false}, {"appears after preparation", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			full := tc.full
+			ctx := t.Context()
+			d, source, issue := incrementalTestStore(t)
+			target, err := d.CreateProject(ctx, "snapshot-target")
+			require.NoError(t, err)
+			for _, project := range []db.Project{source, target} {
+				_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
+				require.NoError(t, err)
+			}
+			var concurrentProject db.Project
+			if full {
+				concurrentProject, err = d.CreateProject(ctx, "concurrent-standalone")
+				require.NoError(t, err)
+				issue.UID, err = uid.New()
+				require.NoError(t, err)
+				issue.ShortID, err = shortid.Derive(issue.UID, shortid.MinLength)
+				require.NoError(t, err)
+				issue.ID = 0
+			}
+			snapshot := incrementalRemoteEvent(t, target, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"relocated snapshot","author":"tester","status":"open"}`, issue.UID, issue.ShortID), 9_000_000_000_000)
+			page := []db.RemoteEvent{snapshot}
+			if full {
+				page = append(page, incrementalRemoteEvent(t, target, "", "project.updated", `{"name":"snapshot-target"}`, 9_000_000_000_001))
+			}
+			_, err = d.InsertRemoteEvents(ctx, target.ID, page)
+			require.NoError(t, err)
+			if full {
+				d.federationIngestPrepared = func() {
+					if issue.ID != 0 {
+						return
+					}
+					created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: concurrentProject.ID, UID: issue.UID, Title: "concurrent standalone issue", Author: "tester"})
+					require.NoError(t, err)
+					issue.ID = created.ID
+				}
+			}
+			var uids []string
+			for _, event := range page {
+				uids = append(uids, event.EventUID)
+			}
+			err = d.MaterializeFederatedEvents(ctx, target.ID, uids)
+			if full {
+				require.ErrorIs(t, err, db.ErrFederatedMoveUnsupported)
+			} else {
+				require.NoError(t, err)
+			}
+			require.NotZero(t, issue.ID)
+			got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, issue.ID, got.ID)
+			if full {
+				require.Equal(t, concurrentProject.ID, got.ProjectID)
+				require.Equal(t, "concurrent standalone issue", got.Title)
+			} else {
+				require.Equal(t, target.ID, got.ProjectID)
+				require.Equal(t, "relocated snapshot", got.Title)
+			}
+		})
+	}
 }
