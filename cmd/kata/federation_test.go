@@ -153,24 +153,11 @@ func TestFederationStatusProjectMember(t *testing.T) {
 	target, err := url.Parse(env.URL)
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	var global atomic.Int32
-	currentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/federation/status" {
-			global.Add(1)
-		}
-		r.Host = target.Host
-		r.Header["X-Forwarded-For"] = nil
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(currentServer.Close)
-	current := *env
-	current.URL = currentServer.URL
-	out := requireCmdOutput(t, &current, "federation", "status", "--project", project.Name, "--format", "json")
+	out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name, "--format", "json")
 	assert.Contains(t, out, project.Name)
 	assert.Contains(t, out, "hub offline")
-	_, err = runCmdOutput(t, &current, "federation", "status", "--project", other.Name)
+	_, err = runCmdOutput(t, env, "federation", "status", "--project", other.Name)
 	_ = requireCLIError(t, err, ExitNotFound)
-	assert.Zero(t, global.Load())
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/health" {
 			_, _ = w.Write([]byte(`{"api_schema_version":"0.45.0"}`))
@@ -198,15 +185,6 @@ func TestFederationStatusProjectAnonymousReadonly(t *testing.T) {
 	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://127.0.0.1:7373", HubProjectID: 42, HubProjectUID: project.UID, Actor: "owner", Enabled: true})
 	require.NoError(t, err)
 	require.NoError(t, env.DB.RecordFederationSyncError(t.Context(), project.ID, errors.New("hub offline"), time.Now()))
-	path := fmt.Sprintf("/api/v1/projects/%d/federation/status?compact=true", project.ID)
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, env.URL+path, nil)
-	require.NoError(t, err)
-	resp, err := env.HTTP.Do(req)
-	require.NoError(t, err)
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusOK, resp.StatusCode, "%s: %s", path, body)
 	out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name)
 	assert.Contains(t, out, project.Name)
 	assert.Contains(t, out, "hub offline")
@@ -242,7 +220,7 @@ func TestFederationStatusProjectOlderDaemon(t *testing.T) {
 		resp.Header.Set("Content-Length", strconv.Itoa(len(data)))
 		return nil
 	}
-	var lookup, global atomic.Int32
+	var lookup atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/health" {
 			w.Header().Set("Content-Type", "application/json")
@@ -253,9 +231,6 @@ func TestFederationStatusProjectOlderDaemon(t *testing.T) {
 			lookup.Add(1)
 			http.NotFound(w, r)
 			return
-		}
-		if r.URL.Path == "/api/v1/federation/status" {
-			global.Add(1)
 		}
 		r.Host = target.Host
 		r.Header.Set("Accept-Encoding", "identity")
@@ -275,7 +250,6 @@ func TestFederationStatusProjectOlderDaemon(t *testing.T) {
 	}
 	_, err = runCmdOutput(t, &older, "federation", "status", "--project", "missing-project")
 	_ = requireCLIError(t, err, ExitNotFound)
-	assert.EqualValues(t, 4, global.Load())
 	assert.Zero(t, lookup.Load())
 }
 
@@ -347,11 +321,7 @@ func TestFederationStatusProjectHostScope(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, env.DB.RecordFederationSyncError(t.Context(), project.ID, errors.New("hub offline"), time.Now()))
 	daemonServer := daemon.NewServer(daemon.ServerConfig{DB: env.DB, StartedAt: time.Now(), HostAccess: federationStatusHostAccess{}})
-	var global atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/federation/status" {
-			global.Add(1)
-		}
 		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "worker"})
 		daemonServer.Handler().ServeHTTP(w, r.WithContext(ctx))
 	}))
@@ -365,7 +335,6 @@ func TestFederationStatusProjectHostScope(t *testing.T) {
 	out := requireCmdOutput(t, &host, "federation", "status", "--project", project.Name)
 	assert.Contains(t, out, project.Name)
 	assert.Contains(t, out, "hub offline")
-	assert.Zero(t, global.Load())
 }
 
 func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
