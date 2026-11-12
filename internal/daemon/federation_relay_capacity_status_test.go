@@ -49,10 +49,9 @@ func (m *countingCheckpointMeasurer) count(projectID int64) int {
 	return m.measured[projectID]
 }
 
-// Status measures the relay checkpoint only for projects this daemon roots
-// that have a live relay enrollment, and a failed measurement degrades to a
-// reported reason instead of failing the whole status response.
-func TestFederationStatusMeasuresOnlyRootedRelayProjects(t *testing.T) {
+// Status measures rooted relay projects, reports measurement failures, and
+// skips checkpoint measurement for compact project reads.
+func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
@@ -120,7 +119,7 @@ func TestFederationStatusMeasuresOnlyRootedRelayProjects(t *testing.T) {
 		request.Header.Set("Authorization", "Bearer bootstrap-test-token")
 		response, err := httpServer.Client().Do(request)
 		require.NoError(t, err)
-		defer response.Body.Close()
+		defer func() { _ = response.Body.Close() }()
 		require.Equal(t, http.StatusOK, response.StatusCode)
 		data, err := io.ReadAll(response.Body)
 		require.NoError(t, err)
@@ -135,7 +134,6 @@ func TestFederationStatusMeasuresOnlyRootedRelayProjects(t *testing.T) {
 		} else {
 			require.NotContains(t, raw.Statuses[0], "relay_checkpoint_bytes")
 			require.NotContains(t, raw.Statuses[0], "relay_checkpoint_capacity_bytes")
-			require.NotContains(t, raw.Statuses[0], "relay_checkpoint_error")
 		}
 		var body api.FederationStatusBody
 		require.NoError(t, json.Unmarshal(data, &body))

@@ -207,8 +207,8 @@ describe('AppShell', () => {
     })
 
     const summary = screen.getByRole('status', { name: 'Active connection' })
-    expect(summary.textContent).toContain('Snapshot may be out of date. Changes are paused.')
-    const reason = 'Changes are paused while the snapshot may be out of date.'
+    expect(summary.textContent).toContain('Workspace data may be out of date. Editing is paused.')
+    const reason = 'Editing is paused while workspace data may be out of date.'
     expect(
       screen
         .getByRole('button', { name: 'New task', description: reason })
@@ -1900,7 +1900,7 @@ describe('AppShell', () => {
       'Reconnecting…',
     )
     expect(screen.getByRole('status', { name: 'Active connection' }).textContent).toContain(
-      'Snapshot may be out of date. Changes are paused.',
+      'Workspace data may be out of date. Editing is paused.',
     )
   })
 
@@ -1943,7 +1943,7 @@ describe('AppShell', () => {
       within(screen.getByRole('region', { name: 'Issues' }))
         .getByRole('button', {
           name: 'New project',
-          description: 'Changes are paused while the snapshot may be out of date.',
+          description: 'Editing is paused while workspace data may be out of date.',
         })
         .getAttribute('aria-disabled'),
     ).toBe('true')

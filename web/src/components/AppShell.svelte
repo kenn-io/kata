@@ -365,7 +365,7 @@
     canMutate
       ? undefined
       : stale
-        ? 'Changes are paused while the snapshot may be out of date.'
+        ? 'Editing is paused while workspace data may be out of date.'
         : readOnly || !snapshot.capabilities.writable
           ? 'This credential is read-only.'
           : 'Changes are paused while Kata connects.',
@@ -709,7 +709,7 @@
       <span>Account: <strong>{connectionAccount}</strong></span>
       <span>Credential: <strong>{connectionStatus}</strong></span>
       {#if stale}
-        <span>Snapshot may be out of date. Changes are paused.</span>
+        <span>Workspace data may be out of date. Editing is paused.</span>
       {/if}
     </div>
   {/if}

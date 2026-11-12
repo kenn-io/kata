@@ -32,7 +32,7 @@ func cronProjectObservations(runs []generated.CronRun, ref cronRef) []generated.
 // time window. Sort a copy for the strip so navigation keeps its existing order.
 func cronObservationSummary(runs []generated.CronRun) string {
 	if len(runs) == 0 {
-		return "no matching loaded observations"
+		return "no matching runs in the latest project runs"
 	}
 	sample := "Sample: " + cronCount(len(runs), "observation")
 	ordered := slices.Clone(runs)

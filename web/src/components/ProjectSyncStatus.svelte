@@ -1,8 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { CopyButton } from '@kenn-io/kit-ui'
-  import type { FederationProjectStatus } from '../lib/api/generated'
-  import { readProjectSync } from '../lib/projectSyncRead'
+  import { getProjectFederationStatus, type FederationProjectStatus } from '../lib/api/generated'
 
   interface Props {
     projectID: number
@@ -14,9 +13,6 @@
   let loading = $state(true)
   let reading = $state(false)
   let error = $state(false)
-  let stale = $state(false)
-  let hasResult = false
-  let queued = false
   let refresh: ((manual?: boolean) => void) | undefined
   let identity = $derived(`${projectID}:${projectUID}`)
   let counts = $derived.by(() => {
@@ -32,16 +28,7 @@
     status = undefined
     loading = true
     error = false
-    stale = false
     reading = false
-    hasResult = false
-    queued = false
-  }
-
-  function runQueued(): void {
-    const next = queued
-    queued = false
-    if (next) refresh?.()
   }
 
   $effect(() => {
@@ -49,16 +36,22 @@
     const [id, uid] = untrack(() => [projectID, projectUID] as const)
     let current: AbortController | undefined
     let disposed = false
+    // Coalesce refreshes during a read into one follow-up.
+    let pending = false
     resetView()
 
     async function read(manual = false): Promise<void> {
       if (document.hidden) return
       if (current) {
-        queued = true
-        return
+        if (!manual) {
+          pending = true
+          return
+        }
+        current.abort()
+        current = undefined
       }
-      error = false
-      loading = manual || !hasResult
+      pending = false
+      loading = manual || (loading && !error)
       reading = true
       const abort = new AbortController()
       current = abort
@@ -69,31 +62,43 @@
         if (disposed) return
         loading = false
         reading = false
-        runQueued()
+        if (pending) {
+          pending = false
+          void read()
+        }
       }
       const timeout = setTimeout(() => {
         status = undefined
-        hasResult = false
         error = true
         abort.abort()
         finish()
       }, 120_000)
       abort.signal.addEventListener('abort', () => clearTimeout(timeout), { once: true })
       try {
-        const result = await readProjectSync(id, uid, abort.signal, status, () => {
-          if (!abort.signal.aborted && !disposed) {
-            status = undefined
-            hasResult = false
-            loading = true
-          }
-        })
+        const result = await getProjectFederationStatus(
+          { projectId: id },
+          { compact: true },
+          {
+            signal: abort.signal,
+            onResponse: (raw) => {
+              if (raw.status >= 400 && raw.status < 500 && !abort.signal.aborted && !disposed) {
+                status = undefined
+                loading = true
+              }
+            },
+          },
+        )
         if (abort.signal.aborted || disposed) return
-        ;({ status, stale } = result)
-        hasResult = true
+        if (result.status !== 200) throw new Error()
+        const found = result.data.statuses.find(
+          (entry) => entry.project_id === id && entry.project_uid === uid,
+        )
+        if (result.data.statuses.length && !found) throw new Error()
+        status = found
+        error = false
       } catch {
         if (!abort.signal.aborted && !disposed) {
           status = undefined
-          hasResult = false
           error = true
         }
       } finally {
@@ -126,7 +131,6 @@
     <span>Local project</span>
   {:else}
     <span>{status.enabled ? status.role : 'Sync disabled'}</span>
-    {#if stale}<span class="stale" role="status">Sync status may be out of date.</span>{/if}
     <span>Pending: {status.pending_push_count}</span>
     {#if status.last_successful_sync_at}
       <span
@@ -182,9 +186,7 @@
       >
     {/if}
   {/if}
-  <button type="button" disabled={loading || reading} onclick={() => refresh?.(true)}
-    >Refresh sync</button
-  >
+  <button type="button" disabled={loading} onclick={() => refresh?.(true)}>Refresh sync</button>
 </section>
 
 <style>
@@ -227,8 +229,7 @@
     overflow-wrap: anywhere;
     min-width: 0;
   }
-  .attention,
-  .stale {
+  .attention {
     border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--accent-amber) 14%, transparent);
     color: var(--accent-amber);
