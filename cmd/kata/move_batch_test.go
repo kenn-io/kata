@@ -349,7 +349,7 @@ func TestMoveBatchCLI_SelectionRestrictions(t *testing.T) {
 			case "single":
 				args = append(args, "--single", first.UID, target.Name)
 			case "selector":
-				for i := 0; i < 199; i++ {
+				for range 199 {
 					_, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "extra", Author: "tester"})
 					require.NoError(t, err)
 				}
