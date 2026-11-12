@@ -36,6 +36,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 	}
 	defer func() { _ = tx.Rollback() }()
 	result := preparedFederationRebuild{moved: map[string]db.FederatedMoveDecision{}}
+	moveOwners := map[string]string{}
 	prepare := func(id int64) ([]int64, error) {
 		events, err := federationFoldEvents(ctx, tx, id)
 		if err != nil {
@@ -55,6 +56,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		moveProjection := db.FoldProjection{Issues: make(map[string]db.FoldIssue, len(decisions))}
 		for _, decision := range decisions {
 			result.moved[decision.IssueUID] = decision
+			moveOwners[decision.IssueUID] = projection.Issues[decision.IssueUID].ProjectUID
 			moveProjection.Issues[decision.IssueUID] = projection.Issues[decision.IssueUID]
 		}
 		result.projects = append(result.projects, preparedFederationRebuildProject{id: id, events: events, moveEvents: moveEvents, projection: projection, moveProjection: moveProjection, decisions: decisions})
@@ -152,11 +154,6 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			if err != nil {
 				return preparedFederationRebuild{}, err
 			}
-			for _, decision := range result.moved {
-				if isFederationRehome(decision) {
-					delete(owners, decision.IssueUID)
-				}
-			}
 			for _, other := range result.projects {
 				for uid := range other.materialization.staleIssues {
 					delete(owners, uid)
@@ -170,6 +167,9 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 				for uid := range other.moved.Issues {
 					owners[uid] = other.uid
 				}
+			}
+			for uid, projectUID := range moveOwners {
+				owners[uid] = projectUID
 			}
 			events, err = filterRelayLinkEvents(events, m.relayOrigins, owners)
 			if err != nil {
