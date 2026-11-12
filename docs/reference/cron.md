@@ -643,6 +643,8 @@ The read scans at most 10,000 matching runs, newest first. `truncated` means old
 
 `workflow_uid` matches the `workflow_uid` recorded on each observation. It scans the project index, so sparse matches can examine more than 10,000 index entries. Unknown well-formed job or workflow UIDs return empty statistics, as with the run list.
 
+In `kata tui`, a job's detail on the Jobs tab shows this read for the default window on one line, for example `30d: 42 runs · 92% ok · median 3m12s · p95 8m40s · failing ×3`. The success rate rounds down to a whole percent; the median and p95 are omitted when no run has a duration, and `failing ×N` appears only during a failure streak. `N+ runs` means the read was truncated. The line loads when the detail opens and refreshes with `r` and with the run list. A failed read, or a daemon older than API 0.47.0, shows a notice on that line and leaves the rest of the detail unchanged. The run history strip below it still covers only the latest 100 project runs.
+
 ## Independent run evidence
 
 An adapter creates one independent run UID and retains it across retries:
