@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"testing"
 	"time"
@@ -157,4 +158,49 @@ func TestCronRunSessionsPassThrough(t *testing.T) {
 	summary := shown["summary"].(map[string]any)
 	require.Equal(t, true, summary["sessions_incomplete"])
 	require.Len(t, summary["sessions"], 1)
+}
+
+func TestCronRunObserveSessionInputSchema(t *testing.T) {
+	schema, err := inputSchemaFor[CronRunObserveInput]("kata.cron_run_observe").Resolve(nil)
+	require.NoError(t, err)
+
+	session := map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001"}
+	withStep := maps.Clone(session)
+	withStep["step"] = "main"
+	nullStep := maps.Clone(session)
+	nullStep["step"] = nil
+	emptyStep := maps.Clone(session)
+	emptyStep["step"] = ""
+	sixtyFour := make([]any, 64)
+	for i := range sixtyFour {
+		sixtyFour[i] = map[string]any{"agent": "codex", "session_id": fmt.Sprintf("00000000-0000-4000-8000-%012d", i)}
+	}
+	tooMany := append(append([]any{}, sixtyFour...), map[string]any{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000064"})
+	for _, tc := range []struct {
+		name    string
+		summary map[string]any
+		valid   bool
+	}{
+		{"omitted", map[string]any{"version": 1}, true},
+		{"one session", map[string]any{"version": 1, "sessions": []any{session}}, true},
+		{"bounded sessions and marker", map[string]any{"version": 1, "sessions": sixtyFour, "sessions_incomplete": true}, true},
+		{"step", map[string]any{"version": 1, "sessions": []any{withStep}}, true},
+		{"null sessions", map[string]any{"version": 1, "sessions": nil}, false},
+		{"empty sessions", map[string]any{"version": 1, "sessions": []any{}}, false},
+		{"too many sessions", map[string]any{"version": 1, "sessions": tooMany}, false},
+		{"null step", map[string]any{"version": 1, "sessions": []any{nullStep}}, false},
+		{"empty step", map[string]any{"version": 1, "sessions": []any{emptyStep}}, false},
+		{"false incomplete", map[string]any{"version": 1, "sessions_incomplete": false}, false},
+		{"null incomplete", map[string]any{"version": 1, "sessions_incomplete": nil}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := map[string]any{"uid": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "expected_revision": 0, "status": "running", "summary": tc.summary}
+			err := schema.Validate(input)
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
 }
