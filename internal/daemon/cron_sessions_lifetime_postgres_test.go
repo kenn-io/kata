@@ -69,10 +69,12 @@ func TestCronAdmissionOutlivesProbeDeadlineAcrossPostgresStores(t *testing.T) {
 	credentials.put(project.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "enrollment-token"})
 	probeDone := make(chan (<-chan struct{}), 1)
 	paused := &pausedSessionObservation{Storage: writer, store: writer, entered: make(chan struct{}), resume: make(chan struct{})}
-	srv := daemon.NewServer(forwardingTestConfig(daemon.ServerConfig{DB: paused, FederationCredentials: credentials, FederationHubClient: func(ctx context.Context, _ config.FederationCredential) (*http.Client, error) {
+	cfg := forwardingTestConfig(daemon.ServerConfig{DB: paused, FederationCredentials: credentials})
+	cfg.FederationHubClient = func(ctx context.Context, _ config.FederationCredential) (*http.Client, error) {
 		probeDone <- ctx.Done()
 		return hub.Client(), nil
-	}}))
+	}
+	srv := daemon.NewServer(cfg)
 	t.Cleanup(func() { require.NoError(t, srv.Close()) })
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
