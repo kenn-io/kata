@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationsigning"
@@ -63,6 +65,77 @@ func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
 			tc.handler.ServeHTTP(w, req)
 			require.Equal(t, tc.want, w.Code, "%s: %s", tc.name, w.Body.String())
 		}
+	})
+}
+
+// Contract: required signing distinguishes missing signatures from invalid ones
+// after authenticating the enrollment, on every federation listener.
+func TestRequiredSigningRejectsUnsignedEnrollment(t *testing.T) {
+	t.Setenv("TEST_REQUIRED_POLICY_KEY", strings.Repeat("k", 64))
+	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_REQUIRED_POLICY_KEY"}
+	env := testenv.New(t)
+	project, issue := createClaimHubIssueNamed(t, env, "hub-project")
+	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
+		Token: "enrollment", SpokeInstanceUID: federationTestSpokeUID,
+		ProjectID: &project.ID, Capabilities: "pull,claim", Actor: "example-actor",
+	})
+	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		state := filepath.Join(t.TempDir(), "replay.state")
+		require.NoError(t, federationsigning.InitializeReplayState(state))
+		v, err := federationsigning.NewVerifier("https://hub.example", []signingpolicy.Key{
+			{Source: source, EnrollmentID: enrollment.Enrollment.ID},
+		}, state)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, v.Close()) }()
+		time.Sleep(federationsigning.Quarantine)
+		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, Auth: config.AuthConfig{Token: "owner-bearer"}, FederationSigning: v, FederationSigningRequired: true})
+		main, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerSharedTCP, Origin: "https://hub.example"})
+		require.NoError(t, err)
+		ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
+		require.NoError(t, err)
+		for name, handler := range map[string]http.Handler{"main": main, "socket": srv.Handler(), "ingress": ingress} {
+			t.Run(name, func(t *testing.T) {
+				path := "https://hub.example" + projectPath(project.ID) + "/federation/metadata"
+				for _, tc := range []struct {
+					name, token, signature, code string
+				}{
+					{"unsigned", enrollment.Token, "", "hub_signing_required"},
+					{"tampered", enrollment.Token, "tampered", "signature_invalid"},
+					{"unauthorized", "", "", ""},
+				} {
+					t.Run(tc.name, func(t *testing.T) {
+						req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+						if tc.token != "" {
+							req.Header.Set("Authorization", "Bearer "+tc.token)
+						}
+						if tc.signature != "" {
+							require.NoError(t, federationsigning.Sign(req, source))
+							req.Header.Set("Signature", tc.signature)
+						}
+						w := httptest.NewRecorder()
+						handler.ServeHTTP(w, req)
+						require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+						var envelope api.ErrorEnvelope
+						require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
+						if tc.token == "" {
+							require.Contains(t, []string{"auth_required", "auth_invalid"}, envelope.Error.Code)
+						} else {
+							require.Equal(t, tc.code, envelope.Error.Code)
+						}
+						if tc.code == "hub_signing_required" {
+							require.Contains(t, envelope.Error.Message, "requires signed requests")
+						}
+					})
+				}
+			})
+		}
+		owner := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+			fmt.Sprintf("https://hub.example/api/v1/projects/%d/issues/%s/lease", project.ID, issue.ShortID), nil)
+		owner.Header.Set("Authorization", "Bearer owner-bearer")
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, owner)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	})
 }
 

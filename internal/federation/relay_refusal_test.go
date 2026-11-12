@@ -80,3 +80,19 @@ func TestRelayRefusalRetryLifecycle(t *testing.T) {
 		})
 	}
 }
+
+// A missing signature is a configuration failure, not a revoked relay grant.
+func TestHubSignatureRejection(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{
+		{`{"error":{"code":"hub_signing_required"}}`, true},
+		{`{"error":{"code":"signature_invalid"}}`, true},
+		{`{"error":{"code":"signing_unavailable"}}`, true},
+		{`{"error":{"code":"auth_invalid"}}`, false},
+		{`invalid`, false},
+	} {
+		require.Equal(t, tc.want, hubSignatureRejection(&HubStatusError{StatusCode: http.StatusUnauthorized, Body: tc.body}), tc.body)
+	}
+}
