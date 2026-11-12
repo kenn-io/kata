@@ -133,6 +133,9 @@ func (p RelayResetProtocol) InstallReset(ctx context.Context, bindingUID string,
 	if err != nil {
 		return err
 	}
+	if err := requireUsableResetEvents(install.events); err != nil {
+		return err
+	}
 	snapshotEvents, snapshotReceipts := len(install.events), len(install.provenance.Receipts)
 	install.events, err = p.RetainPostCheckpointEvents(ctx, install.projectID, install.projectUID, historical, install.events, &install.provenance)
 	if err != nil {
@@ -185,6 +188,9 @@ func (p RelayResetProtocol) InstallReset(ctx context.Context, bindingUID string,
 		return err
 	}
 	if err := p.Backend.ValidateRelayResetEvents(install.projectUID, install.events); err != nil {
+		return err
+	}
+	if err := p.Backend.RequireLocalProjectWorkflows(ctx, install.projectUID); err != nil {
 		return err
 	}
 	install.config = *binding.RelayConfig

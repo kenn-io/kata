@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"iter"
@@ -177,8 +178,15 @@ func ExportCronWorkflowsSQL(ctx context.Context, query CronQuery, filter ExportF
 		if err != nil {
 			return CronWorkflowExport{}, err
 		}
-		value, err := workflowFromRow(row)
-		return CronWorkflowExport(value), err
+		definition, err := cron.DecodeHistoricalWorkflow(row.document)
+		if err != nil {
+			return CronWorkflowExport{}, err
+		}
+		value := CronWorkflowExport{CronDefinition: row.CronDefinition, Definition: definition}
+		if _, err := cron.DecodeWorkflow(row.document); err != nil {
+			value.RawDefinition = append([]byte(nil), row.document...)
+		}
+		return value, nil
 	})
 }
 
@@ -191,13 +199,16 @@ func ReplayCronRecord(ctx context.Context, tx *sql.Tx, record ImportRecord, post
 	case *CronJobExport:
 		return replayCronDefinition(ctx, tx, value.CronDefinition, value.Definition, true, postgres)
 	case *CronWorkflowExport:
+		if len(value.RawDefinition) != 0 {
+			return replayCronDefinition(ctx, tx, value.CronDefinition, value.RawDefinition, false, postgres)
+		}
 		return replayCronDefinition(ctx, tx, value.CronDefinition, value.Definition, false, postgres)
 	default:
 		return fmt.Errorf("unsupported cron record %T", record)
 	}
 }
 func replayCronDefinition(ctx context.Context, tx *sql.Tx, value CronDefinition, definition any, job bool, postgres bool) error {
-	document, err := json.Marshal(definition)
+	document, err := cronDefinitionJSON(definition)
 	if err != nil {
 		return err
 	}
@@ -217,4 +228,11 @@ func replayCronDefinition(ctx context.Context, tx *sql.Tx, value CronDefinition,
 	}
 	_, err = tx.ExecContext(ctx, "INSERT INTO "+cronTable(job)+"("+columns+")"+override+" VALUES("+strings.Join(slots, ",")+")", args...) //nolint:gosec // Only fixed schema columns, Boolean-selected tables/identity syntax and generated placeholders enter SQL; row values are bound.
 	return err
+}
+
+func cronDefinitionJSON(definition any) ([]byte, error) {
+	if raw, ok := definition.(jsontext.Value); ok {
+		return raw, nil
+	}
+	return json.Marshal(definition)
 }

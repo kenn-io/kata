@@ -80,12 +80,21 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	if strings.Contains(query, "SELECT EXISTS") {
 		return &featureProbeRows{presence: true}, nil
 	}
+	if strings.Contains(query, "SELECT 'projection',w.definition_json") {
+		return &emptyFeatureProbeRows{}, nil
+	}
 	if strings.Contains(query, "'projection.job'") {
 		c.state.probeQueries++
 		return &featureProbeRows{}, nil
 	}
 	return nil, errors.New("unexpected feature probe query")
 }
+
+type emptyFeatureProbeRows struct{}
+
+func (*emptyFeatureProbeRows) Columns() []string         { return []string{"kind", "payload"} }
+func (*emptyFeatureProbeRows) Close() error              { return nil }
+func (*emptyFeatureProbeRows) Next([]driver.Value) error { return io.EOF }
 
 type featureProbeRows struct{ presence, seen bool }
 

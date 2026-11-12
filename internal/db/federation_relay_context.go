@@ -48,3 +48,23 @@ func RelayArtifactSourceUID(ctx context.Context) string {
 	sourceUID, _ := ctx.Value(relayArtifactSourceKey{}).(string)
 	return sourceUID
 }
+
+// WithRelayPeerFeatures binds a negotiated advertisement to one authenticated hop.
+func WithRelayPeerFeatures(ctx context.Context, bindingUID, features string) context.Context {
+	return context.WithValue(ctx, relayPeerFeaturesKey{}, relayPeerFeatures{bindingUID, features})
+}
+
+type relayPeerFeaturesKey struct{}
+type relayPeerFeatures struct{ bindingUID, features string }
+
+// RelayPeerFeatures returns only the advertisement for the exact authenticated hop.
+func RelayPeerFeatures(ctx context.Context, bindingUID string) (string, bool) {
+	peer, ok := ctx.Value(relayPeerFeaturesKey{}).(relayPeerFeatures)
+	return peer.features, ok && peer.bindingUID == bindingUID
+}
+
+// HasRelayPeerFeatures reports whether a hop advertisement was attached.
+func HasRelayPeerFeatures(ctx context.Context) bool {
+	_, ok := ctx.Value(relayPeerFeaturesKey{}).(relayPeerFeatures)
+	return ok
+}
