@@ -325,6 +325,7 @@ describe('ProjectSyncStatus', () => {
     await screen.findByText('Reused: 1')
     const url = new URL(String(fetcher.mock.calls[0]?.[0]), 'https://daemon.example')
     expect(url.pathname).toBe('/api/v1/projects/7/federation/status')
+    expect(url.searchParams.get('compact')).toBe('true')
     expect(screen.getByText('Retained window: 3/32 (limited)')).not.toBeNull()
     expect(screen.getByText('Retained without index: 1')).not.toBeNull()
     expect(screen.getByText('Recipe: example-model (2 dimensions)')).not.toBeNull()
