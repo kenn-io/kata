@@ -111,14 +111,18 @@ type CronRunStatsWindow struct {
 	Until time.Time `json:"until"`
 }
 
-// CronRunStatsResponse reports statistics over retained runs.
-type CronRunStatsResponse struct {
-	Body struct {
-		ProjectUID  string             `json:"project_uid"`
-		JobUID      string             `json:"job_uid,omitempty"`
-		WorkflowUID string             `json:"workflow_uid,omitempty"`
-		Window      CronRunStatsWindow `json:"window"`
-		Truncated   bool               `json:"truncated"`
-		cron.RunStatistics
-	}
+// CronRunStatsAPIVersion is the first daemon API supporting this read.
+const CronRunStatsAPIVersion = "0.47.0"
+
+// CronRunStatsResponseBody reports statistics over retained runs.
+type CronRunStatsResponseBody struct {
+	ProjectUID  string             `json:"project_uid"`
+	JobUID      string             `json:"job_uid,omitempty"`
+	WorkflowUID string             `json:"workflow_uid,omitempty"`
+	Window      CronRunStatsWindow `json:"window"`
+	Truncated   bool               `json:"truncated"`
+	cron.RunStatistics
 }
+
+// CronRunStatsResponse wraps the statistics body.
+type CronRunStatsResponse struct{ Body CronRunStatsResponseBody }

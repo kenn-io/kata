@@ -634,7 +634,7 @@ func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64,
 func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID int64) ([]byte, error) {
 	switch {
 	case o.resource == "run" && o.action == "stats":
-		if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, apiVersionCronRunStats, "cron run stats"); err != nil {
+		if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, api.CronRunStatsAPIVersion, "cron run stats"); err != nil {
 			return nil, err
 		}
 		since, until, err := timeparse.Window(o.since, o.until, time.Now())

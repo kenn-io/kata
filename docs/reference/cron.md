@@ -618,11 +618,28 @@ See [Cron triggers](#triggers) for the expression rules.
 
 ## Run statistics
 
-Use `kata cron run stats --since 30d --bucket day --timezone America/New_York --json` to summarize retained runs. Filter by `--job-uid` or `--workflow-uid`, but not both. `--since` accepts an RFC 3339 instant or a duration such as `30d` or `24h`; `--until` accepts an RFC 3339 instant. Relative `--since` durations count back from `--until`, or from now when omitted. The default window is the 30 days ending at `until` or now. The maximum span is 366 days, with an inclusive start and exclusive end. Window endpoints must be representable as UTC RFC 3339 timestamps. Timezones must be named IANA zones; `Local` is not accepted.
+Use `kata cron run stats --since 30d --bucket day --timezone America/New_York --json` to summarize retained runs. Filter by `--job-uid` or `--workflow-uid`, but not both. `--since` accepts an RFC 3339 instant or a duration such as `30d` or `24h`; a day suffix accepts one signed decimal quantity, not mixed units such as `1h1d`. `--until` accepts an RFC 3339 instant. Relative `--since` durations count back from `--until`, or from now when omitted. The default window is the 30 days ending at `until` or now. The maximum span is 366 days, with an inclusive start and exclusive end. Window endpoints must be representable as UTC RFC 3339 timestamps. Timezones must be named IANA zones; `Local` is not accepted.
 
 The response counts every status. Success rate is succeeded divided by succeeded plus failed, rounded to four decimal places, or null when neither exists. Durations cover succeeded and failed runs with start and end times; min, median, p95 and max use seconds and nearest-rank percentiles. A failure streak skips running, cancelled and unknown runs and stops at a success. Last success and failure are the maximum end instant, falling back to creation for each run. Running, cancelled and unknown runs do not enter the success rate or failure streak, so those figures alone do not show unfinished or unknown runs. Day buckets group creation instants in the requested IANA time zone, default UTC, and appear newest first; they omit empty days and zero status counts.
 
-The read scans at most 10,000 matching runs, newest first. `truncated` means older runs were omitted and the returned window start is the oldest scanned instant; equal timestamps at that boundary can include omitted runs. Results cover only retained runs held by this daemon. Pruning or a replica that has not pulled all events reduces the data available. The read returns no message, actor, label or issue reference. MCP accepts the same relative `since` shorthand as the CLI; HTTP accepts RFC 3339 timestamps only. The forms use the same filters, window, bucket and timezone; the HTTP operation is `getCronRunStats` and the MCP tool is `kata.cron_run_stats` under `kata.load_cron`. This read requires daemon API 0.47.0.
+The response contains `project_uid`, optional `job_uid` or `workflow_uid`, `window.since` and `window.until`, `scanned`, `truncated`, `by_status`, `success_rate`, `duration_seconds`, `last_succeeded_at`, `last_failed_at` and `consecutive_failures`. The duration object contains `count`, `min`, `median`, `p95` and `max`, or is null when no run qualifies. Last timestamps are null when no matching run exists. With `bucket=day`, `buckets` contains objects with `date`, `by_status` and nullable `median_duration_seconds`; an empty result has an empty array. Without day buckets, `buckets` is omitted.
+
+For example:
+
+```json
+{
+  "project_uid": "01J00000000000000000000001",
+  "window": {"since": "2026-11-10T00:00:00Z", "until": "2026-11-11T00:00:00Z"},
+  "scanned": 1, "truncated": false,
+  "by_status": {"running": 0, "succeeded": 1, "failed": 0, "cancelled": 0, "unknown": 0},
+  "success_rate": 1, "duration_seconds": null,
+  "last_succeeded_at": "2026-11-10T12:00:00Z", "last_failed_at": null,
+  "consecutive_failures": 0,
+  "buckets": [{"date": "2026-11-10", "by_status": {"succeeded": 1}, "median_duration_seconds": null}]
+}
+```
+
+The read scans at most 10,000 matching runs, newest first. `truncated` means older runs were omitted and `window.since` is the oldest scanned instant; equal timestamps at that boundary can include omitted runs. Results cover only retained runs held by this daemon. Pruning or a replica that has not pulled all events reduces the data available. The read returns no message, actor, label or issue reference. MCP accepts the same relative `since` shorthand as the CLI; HTTP accepts RFC 3339 timestamps only. The forms use the same filters, window, bucket and timezone; the HTTP operation is `getCronRunStats` and the MCP tool is `kata.cron_run_stats` under `kata.load_cron`. This read requires daemon API 0.47.0.
 
 ## Independent run evidence
 

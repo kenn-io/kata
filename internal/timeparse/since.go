@@ -4,9 +4,12 @@ package timeparse
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 )
+
+var dayQuantity = regexp.MustCompile(`^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$`)
 
 // Since resolves a duration relative to anchor, or parses an RFC3339 instant.
 func Since(s string, anchor time.Time) (time.Time, error) {
@@ -19,6 +22,9 @@ func Since(s string, anchor time.Time) (time.Time, error) {
 	expanded := s
 	days := false
 	if before, ok := strings.CutSuffix(s, "d"); ok {
+		if !dayQuantity.MatchString(before) {
+			return invalid()
+		}
 		expanded = before + "h"
 		days = true
 	}

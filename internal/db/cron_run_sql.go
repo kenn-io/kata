@@ -339,7 +339,7 @@ func (a CronSQL) RunStats(ctx context.Context, in CronRunStatsQuery) ([]cron.Run
 		args = append(args, value)
 		_, _ = fmt.Fprintf(&query, " AND %s=$%d", filter.column, len(args))
 	}
-	query.WriteString(" ORDER BY created_at DESC,uid DESC LIMIT 10001")
+	_, _ = fmt.Fprintf(&query, " ORDER BY created_at DESC,uid DESC LIMIT %d", cron.RunStatsScanLimit+1)
 	rows, err := a.Query.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, false, err
@@ -356,8 +356,8 @@ func (a CronSQL) RunStats(ctx context.Context, in CronRunStatsQuery) ([]cron.Run
 	if err := rows.Err(); err != nil {
 		return nil, false, err
 	}
-	if len(result) > 10000 {
-		return result[:10000], true, nil
+	if len(result) > cron.RunStatsScanLimit {
+		return result[:cron.RunStatsScanLimit], true, nil
 	}
 	return result, false, nil
 }

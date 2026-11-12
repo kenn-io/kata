@@ -80,7 +80,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 				return nil, invalid("invalid until")
 			}
 		}
-		since := until.Add(-30 * 24 * time.Hour)
+		since := until.Add(-cron.RunStatsDefaultWindow)
 		if in.Since != "" {
 			since, err = time.Parse(time.RFC3339, in.Since)
 			if err != nil {
@@ -90,7 +90,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		if since.UTC().Year() < 0 || since.UTC().Year() > 9999 || until.UTC().Year() < 0 || until.UTC().Year() > 9999 {
 			return nil, invalid("window endpoint outside RFC3339 UTC range")
 		}
-		if until.Sub(since) > 366*24*time.Hour {
+		if until.Sub(since) > cron.RunStatsMaxWindow {
 			return nil, invalid("window must be at most 366 days")
 		}
 		if in.Bucket != "" && in.Bucket != "none" && in.Bucket != "day" {

@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+const (
+	RunStatsDefaultWindow = 30 * 24 * time.Hour
+	RunStatsMaxWindow     = 366 * 24 * time.Hour
+	RunStatsScanLimit     = 10_000
+)
+
 // RunStatRow contains only the evidence needed for statistics, newest first.
 type RunStatRow struct {
 	Status             string

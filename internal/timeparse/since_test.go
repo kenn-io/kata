@@ -39,6 +39,10 @@ func TestSince(t *testing.T) {
 		bad   bool
 	}{
 		{"24h", now.Add(-24 * time.Hour), false}, {"7d", now.Add(-7 * 24 * time.Hour), false},
+		{"+1.5d", now.Add(-36 * time.Hour), false}, {"-0.5d", now.Add(12 * time.Hour), false},
+		{"1h30m", now.Add(-90 * time.Minute), false},
+		{".5d", now.Add(-12 * time.Hour), false}, {"1.d", now.Add(-24 * time.Hour), false},
+		{"1h1d", time.Time{}, true}, {"1d1d", time.Time{}, true},
 		{"2026-05-01T00:00:00Z", time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), false},
 		{"garbage", time.Time{}, true}, {"213504d", time.Time{}, true}, {"-213504d", time.Time{}, true},
 		{"106751992d", time.Time{}, true}, {"-106751992d", time.Time{}, true}, {"-2562047h47m16.854775808s", time.Time{}, true},

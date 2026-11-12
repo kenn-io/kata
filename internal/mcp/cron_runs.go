@@ -60,14 +60,7 @@ func registerCronRunTools(server *sdkmcp.Server, h toolHandlers) {
 }
 
 // CronRunStatsOutput preserves nullable numbers from the daemon response.
-type CronRunStatsOutput struct {
-	ProjectUID  string                 `json:"project_uid"`
-	JobUID      string                 `json:"job_uid,omitempty"`
-	WorkflowUID string                 `json:"workflow_uid,omitempty"`
-	Window      api.CronRunStatsWindow `json:"window"`
-	Truncated   bool                   `json:"truncated"`
-	cron.RunStatistics
-}
+type CronRunStatsOutput = api.CronRunStatsResponseBody
 
 func (h toolHandlers) cronRunStats(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronRunStatsInput) (*sdkmcp.CallToolResult, CronRunStatsOutput, error) {
 	var err error
@@ -83,12 +76,12 @@ func (h toolHandlers) cronRunStats(ctx context.Context, _ *sdkmcp.CallToolReques
 	if err != nil {
 		return nil, CronRunStatsOutput{}, err
 	}
-	supported, err := h.daemonSupportsAPIVersion(ctx, "0.47.0")
+	supported, err := h.daemonSupportsAPIVersion(ctx, api.CronRunStatsAPIVersion)
 	if err != nil {
 		return nil, CronRunStatsOutput{}, err
 	}
 	if !supported {
-		return nil, CronRunStatsOutput{}, errors.New("cron run stats requires daemon API 0.47.0 or newer; upgrade the daemon")
+		return nil, CronRunStatsOutput{}, errors.New("cron run stats requires daemon API " + api.CronRunStatsAPIVersion + " or newer; upgrade the daemon")
 	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {

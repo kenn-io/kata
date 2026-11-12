@@ -107,12 +107,13 @@ func checkCronRunStats(t *testing.T, store db.Storage) error {
 	require.Len(t, edge, len(ids)-1)
 	_, _, err = store.CronRunStats(t.Context(), db.CronRunStatsQuery{ProjectID: project.ID, JobUID: job.UID, WorkflowUID: job.UID, Since: since, Until: since.Add(time.Second)})
 	require.Error(t, err)
-	// 9,994 synthetic rows plus the seven fixture rows exercise the 10,001st-row cap.
+	// One more than the scan limit exercises truncation.
 	// Equal timestamps at the scan boundary still require truncation.
-	for offset := 0; offset < 9994; offset += 100 {
+	additional := cron.RunStatsScanLimit + 1 - len(ids)
+	for offset := 0; offset < additional; offset += 100 {
 		var selects []string
 		var args []any
-		for i := offset; i < offset+100 && i < 9994; i++ {
+		for i := offset; i < offset+100 && i < additional; i++ {
 			id, err := uid.New()
 			require.NoError(t, err)
 			args = append(args, id)
@@ -124,7 +125,7 @@ func checkCronRunStats(t *testing.T, store db.Storage) error {
 	rows, truncated, err = store.CronRunStats(t.Context(), db.CronRunStatsQuery{ProjectID: project.ID, Since: since, Until: since.Add(time.Second)})
 	require.NoError(t, err)
 	require.True(t, truncated)
-	require.Len(t, rows, 10000)
+	require.Len(t, rows, cron.RunStatsScanLimit)
 	require.True(t, rows[len(rows)-1].CreatedAt.Equal(since))
 	other, err := store.CreateProject(t.Context(), "other-project")
 	require.NoError(t, err)
