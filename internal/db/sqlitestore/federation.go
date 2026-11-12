@@ -3022,6 +3022,33 @@ func (d *Store) adoptProjectIntoFederation(
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
 
+	// Prepare the emitted baseline before changing the project or its history.
+	baseline := append([]db.CronEvent(nil), cron...)
+	issuePayloads := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue)
+		if err != nil {
+			return db.AdoptProjectIntoFederationResult{}, err
+		}
+		issuePayloads = append(issuePayloads, payload)
+		baseline = append(baseline, db.CronEvent{Type: "issue.snapshot", Payload: payload})
+	}
+	emitMetadataBaseline := len(project.Metadata) > 0 && string(project.Metadata) != "{}"
+	if !emitMetadataBaseline && len(issues) == 0 {
+		emitMetadataBaseline = true
+	}
+	metadataPayload := ""
+	if emitMetadataBaseline {
+		metadataPayload, err = db.ProjectMetadataAdoptionPayload(project.Metadata)
+		if err != nil {
+			return db.AdoptProjectIntoFederationResult{}, err
+		}
+		baseline = append(baseline, db.CronEvent{Type: "project.metadata_updated", Payload: metadataPayload})
+	}
+	if err := db.RequireAdoptionEventFeatures(p.HubEventFeatures, baseline); err != nil {
+		return db.AdoptProjectIntoFederationResult{}, err
+	}
+
 	pushFloor, err := federationAdoptionPushFloor(ctx, tx, project.ID, d.InstanceUID())
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
@@ -3073,22 +3100,14 @@ func (d *Store) adoptProjectIntoFederation(
 
 	var createdEvent *db.Event
 	var resetCursor int64
-	emitMetadataBaseline := len(project.Metadata) > 0 && string(project.Metadata) != "{}"
-	if !emitMetadataBaseline && len(issues) == 0 {
-		emitMetadataBaseline = true
-	}
 	if emitMetadataBaseline {
-		payload, err := db.ProjectMetadataAdoptionPayload(project.Metadata)
-		if err != nil {
-			return db.AdoptProjectIntoFederationResult{}, err
-		}
 		event, err := d.insertEventTx(ctx, tx, eventInsert{
 			ProjectID:   project.ID,
 			ProjectUID:  project.UID,
 			ProjectName: project.Name,
 			Type:        "project.metadata_updated",
 			Actor:       actor,
-			Payload:     payload,
+			Payload:     metadataPayload,
 			HLC:         &boundary,
 			CreatedAt:   baselineCreatedAt,
 		})
@@ -3108,11 +3127,8 @@ func (d *Store) adoptProjectIntoFederation(
 	}
 
 	var snapshotCount int64
-	for _, issue := range issues {
-		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue)
-		if err != nil {
-			return db.AdoptProjectIntoFederationResult{}, err
-		}
+	for i, issue := range issues {
+		payload := issuePayloads[i]
 		issueUID := issue.UID
 		event, err := d.insertEventTx(ctx, tx, eventInsert{
 			ProjectID:   project.ID,

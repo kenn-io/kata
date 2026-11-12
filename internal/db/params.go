@@ -816,6 +816,8 @@ type AdoptProjectIntoFederationParams struct {
 	ReplayHorizonEventID int64
 	Actor                string
 	AllowInsecure        bool
+	// HubEventFeatures is the destination advertisement for this adoption.
+	HubEventFeatures string
 	// RelayProtocolVersion records the authenticated negotiated adoption mode.
 	RelayProtocolVersion int
 	// EmptyOnly attaches an empty project without importing its local history.
