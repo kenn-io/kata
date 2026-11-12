@@ -332,9 +332,10 @@ func federationFoldEventsOfTypes(
 	// payloads can reference an issue without becoming part of its history.
 	eventIssueUID := `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),e.payload::jsonb->>'issue_uid',e.payload::jsonb->>'uid') ELSE NULLIF(e.issue_uid,'') END`
 	historyIssueUID := `CASE WHEN h.type LIKE 'issue.%' THEN COALESCE(NULLIF(h.issue_uid,''),h.payload::jsonb->>'issue_uid',h.payload::jsonb->>'uid') ELSE NULLIF(h.issue_uid,'') END`
-	// Other projects' events join an issue's history after a retained move, a
-	// recorded snapshot relocation, or within a same-hub snapshot group. A refused
-	// snapshot from another hub stays out, so it cannot retry its relocation.
+	// Other projects' events join an issue's history after a retained move, from
+	// the two projects in a recorded snapshot relocation, or within a same-hub
+	// snapshot group. A refused snapshot from another hub stays out, so it cannot
+	// retry its relocation.
 	moveIssueUID := `COALESCE(NULLIF(m.issue_uid,''),m.payload::jsonb->>'issue_uid',m.payload::jsonb->>'uid')`
 	query := `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
 e.related_issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at
@@ -343,8 +344,9 @@ FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (` 
    UNION SELECT uid FROM issues WHERE project_id=$1)
  AND (EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND
    ` + moveIssueUID + ` = ` + eventIssueUID + `)
- OR ` + eventIssueUID + ` IN (SELECT reset.issue_uid FROM events reset
+ OR (` + eventIssueUID + `, e.project_id) IN (SELECT reset.issue_uid, p.id FROM events reset
  JOIN events m ON m.uid = reset.payload::jsonb->>'move_event_uid' AND m.type='issue.snapshot'
+ JOIN projects p ON p.id IN (reset.project_id, m.project_id)
  WHERE reset.type='sync.reset_required' AND reset.issue_uid IS NOT NULL)`
 	args := []any{projectID}
 	group, err := federationSnapshotGroupProjectIDs(ctx, tx, projectID)

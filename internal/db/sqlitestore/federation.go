@@ -1840,9 +1840,10 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
 	// payloads can reference an issue without becoming part of its history.
 	eventIssueUID := `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),json_extract(e.payload,'$.issue_uid'),json_extract(e.payload,'$.uid')) ELSE NULLIF(e.issue_uid,'') END`
 	historyIssueUID := `CASE WHEN h.type LIKE 'issue.%' THEN COALESCE(NULLIF(h.issue_uid,''),json_extract(h.payload,'$.issue_uid'),json_extract(h.payload,'$.uid')) ELSE NULLIF(h.issue_uid,'') END`
-	// Other projects' events join an issue's history after a retained move, a
-	// recorded snapshot relocation, or within a same-hub snapshot group. A refused
-	// snapshot from another hub stays out, so it cannot retry its relocation.
+	// Other projects' events join an issue's history after a retained move, from
+	// the two projects in a recorded snapshot relocation, or within a same-hub
+	// snapshot group. A refused snapshot from another hub stays out, so it cannot
+	// retry its relocation.
 	moveIssueUID := `COALESCE(NULLIF(m.issue_uid,''),json_extract(m.payload,'$.issue_uid'),json_extract(m.payload,'$.uid'))`
 	query := `
 		SELECT e.uid, e.origin_instance_uid, p.uid, e.issue_uid, e.related_issue_uid,
@@ -1853,8 +1854,9 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
    UNION SELECT uid FROM issues WHERE project_id=$1)
  AND (EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND
    ` + moveIssueUID + ` = ` + eventIssueUID + `)
- OR ` + eventIssueUID + ` IN (SELECT reset.issue_uid FROM events reset
+ OR (` + eventIssueUID + `, e.project_id) IN (SELECT reset.issue_uid, p.id FROM events reset
  JOIN events m ON m.uid = json_extract(reset.payload,'$.move_event_uid') AND m.type='issue.snapshot'
+ JOIN projects p ON p.id IN (reset.project_id, m.project_id)
  WHERE reset.type='sync.reset_required' AND reset.issue_uid IS NOT NULL)`
 	args := []any{projectID}
 	group, err := federationSnapshotGroupProjectIDs(ctx, tx, projectID)

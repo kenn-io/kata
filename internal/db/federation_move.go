@@ -75,8 +75,10 @@ func CheckFederationMoveSourceLifecycle(
 
 // A source stream still needs the current owner's enrollment to push its
 // pending updates for issues it once held. Pausing sync or archiving the source
-// retains those updates. Links to issues the source never held are ordinary
-// cross-project references and do not block the leave.
+// retains those updates. The source held an issue it created, moved, or gave up
+// in a recorded relocation; a refused snapshot is not ownership. Links to
+// issues the source never held are ordinary cross-project references and do
+// not block the leave.
 func checkFederationMoveDestinationLifecycle(
 	ctx context.Context, tx *sql.Tx, projectID int64, instanceUID, hubURL string,
 	referencedIssues func(RemoteEvent, map[string]jsontext.Value) ([]string, error),
@@ -157,7 +159,7 @@ func checkFederationMoveDestinationLifecycle(
 			//nolint:gosec // G202: only generated placeholders enter the SQL; the UIDs are bound.
 			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues i WHERE i.project_id=$1 AND i.uid IN (`+
 				strings.Join(slots, ",")+`) AND EXISTS(SELECT 1 FROM events h WHERE h.project_id=$2 AND h.issue_uid=i.uid
- AND h.type IN ('issue.created','issue.snapshot','issue.moved')))`, args...).Scan(&pending); err != nil {
+ AND h.type IN ('issue.created','issue.moved','sync.reset_required')))`, args...).Scan(&pending); err != nil {
 				return err
 			}
 			if pending {
