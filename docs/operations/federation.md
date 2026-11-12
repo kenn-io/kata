@@ -2223,8 +2223,9 @@ keeps its own database.
 New features have their own requirements. In particular, **projects with cron
 definitions or recurring-child history have additional 0.19.0-to-0.20.0
 compatibility limits**. Read [Cron upgrade limits](../reference/cron.md#upgrade-limits)
-before upgrading those projects' peers or adapters. This cron restriction does
-not require coordinated upgrades for projects that only synchronize ordinary
+before upgrading those projects' peers or adapters. For `cron_run_sessions_v1`,
+upgrade the hub before spokes; see [run sessions](../reference/cron.md#independent-run-evidence).
+This cron restriction does not require coordinated upgrades for projects that only synchronize ordinary
 issues. A newer CLI feature may also need a newer daemon API; see the
 [API version history](../reference/http-api.md#version-history).
 

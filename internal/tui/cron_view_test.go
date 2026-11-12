@@ -684,7 +684,8 @@ func TestCronRunDetailSessions(t *testing.T) {
 		text.WriteString(line.text)
 	}
 	require.Contains(t, text.String(), "claude")
-	require.Contains(t, text.String(), "00000000-0000-4000-8000-000000000001")
+	require.Contains(t, text.String(), "00000000")
+	require.NotContains(t, text.String(), "00000000-0000-4000-8000-000000000001")
 	require.Contains(t, text.String(), "main")
 	require.Contains(t, text.String(), "incomplete")
 }

@@ -19,3 +19,22 @@ func TestCronSessionPayloadFeatures(t *testing.T) {
 		require.Equal(t, tc.want, got)
 	}
 }
+
+// Pushes from any writer, including restored data, must declare the sessions feature.
+func TestCronSessionPayloadWireVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, payload, want string
+		version                   int
+	}{
+		{"sessions", "cron.run.observed", `{"summary":{"version":1,"sessions_incomplete":true}}`, "cron_run_sessions_v1,cron_v1", 31},
+		{"no sessions", "cron.run.observed", `{"summary":{"version":1}}`, "cron_v1", 31},
+		{"issue native metadata", "issue.created", `{"metadata":{"cron.occurrence":{"version":1}}}`, "", 30},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			version, feature, err := db.FederationEventPayloadWireVersion(tc.kind, []byte(tc.payload))
+			require.NoError(t, err)
+			require.Equal(t, tc.version, version)
+			require.Equal(t, tc.want, feature)
+		})
+	}
+}

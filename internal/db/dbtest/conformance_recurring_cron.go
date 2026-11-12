@@ -692,7 +692,7 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	probe.sessionCandidates = nil
 	features, err = db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
-	require.Equal(t, db.CronEventFeature, features)
+	require.Equal(t, "cron_run_sessions_v1,cron_v1", features)
 	require.Equal(t, []int{1}, probe.candidates, "escaped native definition remains the only candidate")
 	return nil
 }

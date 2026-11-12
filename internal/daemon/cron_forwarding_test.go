@@ -546,6 +546,8 @@ func TestCronSessionObservationRequiresHubFeature(t *testing.T) {
 				} else {
 					require.Equalf(t, http.StatusConflict, response.StatusCode, "%s", raw)
 					require.Contains(t, string(raw), "federated_read_only")
+					require.Contains(t, string(raw), "run sessions")
+					require.NotContains(t, string(raw), "native recurring")
 				}
 				_, err = f.spoke.DB.CronRun(t.Context(), f.sp.ID, id)
 				require.ErrorIs(t, err, db.ErrNotFound)

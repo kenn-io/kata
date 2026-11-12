@@ -57,21 +57,32 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
 	}
-	if strings.HasPrefix(kind, "cron.run.") {
-		if payload == "" {
-			payload = "{}"
-		}
-		var body map[string]jsontext.Value
-		if err := json.Unmarshal([]byte(payload), &body); err != nil {
-			return "", err
-		}
-		if has, err := summaryHasSessionFields(body["summary"]); err != nil {
-			return "", err
-		} else if has {
-			required = MergeEventFeatures(required, CronRunSessionsEventFeature)
-		}
+	sessions, err := runSessionFeature(kind, payload)
+	if err != nil {
+		return "", err
 	}
-	return required, nil
+	return MergeEventFeatures(required, sessions), nil
+}
+
+func runSessionFeature(kind, payload string) (string, error) {
+	if !strings.HasPrefix(kind, "cron.run.") {
+		return "", nil
+	}
+	if payload == "" {
+		payload = "{}"
+	}
+	var body map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(payload), &body); err != nil {
+		return "", err
+	}
+	has, err := summaryHasSessionFields(body["summary"])
+	if err != nil {
+		return "", err
+	}
+	if has {
+		return CronRunSessionsEventFeature, nil
+	}
+	return "", nil
 }
 
 func summaryHasSessionFields(raw jsontext.Value) (bool, error) {

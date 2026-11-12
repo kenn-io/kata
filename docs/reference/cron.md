@@ -676,14 +676,17 @@ Each exact agent and session ID pair must be unique. Set `sessions_incomplete`
 to `true` when the list may omit sessions; omit it otherwise. Observations replace
 the complete summary, so omitting sessions clears previously recorded sessions.
 Sessions are visible to project readers, federated peers,
-and in backups. They require the `cron_run_sessions_v1` event feature.
+and in backups. The TUI shows the first eight characters of each session ID;
+`kata cron run show <run-uid> --json` returns the full ID. Sessions require the
+`cron_run_sessions_v1` event feature.
 `kata cron capabilities --json` includes `cli_features` so adapters can check
 that their installed CLI accepts these fields before sending them. Adapters must
 check for `cron_run_sessions_v1` in both `cli_features` and the hub's
 `event_features`. Older CLIs reject unknown summary fields. Upgrade the hub
 first, then spokes; older spokes stop syncing the entire project once any run
-records a session.
-
+records a session. Spokes with disabled, push-disabled, or relay bindings
+refuse observations containing sessions; they still accept observations without
+them.
 
 A new observation uses expected revision 0. A changed observation requires its
 current revision. An identical retry of the same UID and canonical evidence

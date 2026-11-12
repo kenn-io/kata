@@ -270,7 +270,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			}
 			if r.Summary.Sessions != nil {
 				for _, session := range r.Summary.Sessions {
-					label := session.Agent + " " + session.SessionID
+					label := session.Agent + " " + session.SessionID[:min(8, len(session.SessionID))]
 					if session.Step != nil && *session.Step != "" {
 						label += " · " + *session.Step
 					}

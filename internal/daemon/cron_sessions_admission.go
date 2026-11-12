@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
 )
@@ -29,7 +30,7 @@ func admitCronSessions(ctx context.Context, cfg ServerConfig, projectID int64) (
 		return fail(cronForwardUnavailable("federation binding is unavailable"))
 	}
 	if !binding.Enabled || !binding.PushEnabled || binding.RelayConfig != nil {
-		return fail(federationReadOnlyError(errors.Join(db.ErrFederatedReadOnly, db.ErrRecurringHubRequired)))
+		return fail(api.NewError(409, "federated_read_only", "run sessions cannot be recorded on this spoke: its federation binding is disabled, has push turned off, or uses a relay, so Kata cannot confirm the hub supports them", "Record the run without sessions, or run the command against the project's owning hub.", nil))
 	}
 	_, _, client, bindingOrigin, err := cronFederationTransport(ctx, cfg, projectID, binding)
 	if err != nil {
