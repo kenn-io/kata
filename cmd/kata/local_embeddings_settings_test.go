@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -219,6 +221,40 @@ func TestLocalEmbeddingsTurnOnPreservesProviderSavedAfterStartup(t *testing.T) {
 	got, err := os.ReadFile(path) // #nosec G304 -- configuration in the isolated test home
 	require.NoError(t, err)
 	require.Equal(t, original, got, "a page loaded while search was off cannot switch a provider saved later")
+}
+
+func TestLocalEmbeddingsTurnOnChoiceWriteFailure(t *testing.T) {
+	setupKataEnv(t)
+	home := clearLocalEmbeddingsEnv(t)
+	t.Setenv("KATA_SERVER", "")
+	stubLocalEmbeddingsInstall(t)
+	oldEndpoint := localEmbeddingsEndpoint
+	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+		if opts.Executable == "" {
+			return "", embedlocal.ErrNotFound
+		}
+		return "http://127.0.0.1:12345/v1", nil
+	}
+	marker := filepath.Join(home, ".kenn", "embeddings", "search-by-meaning")
+	require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0o700))
+	if err := os.Symlink("missing", marker); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	var logs bytes.Buffer
+	originalLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(originalLogger) })
+	var run func(context.Context)
+	setup := &localEmbeddingsSetup{start: func(work func(context.Context)) bool { run = work; return true }}
+	require.NoError(t, setup.TurnOn(t.Context()))
+	run(t.Context())
+	status, err := setup.Status(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, status.Job)
+	require.Equal(t, "restart", status.Job.State)
+	require.Contains(t, logs.String(), "other apps may not pick it up")
+	require.Contains(t, logs.String(), "symlink")
 }
 
 func TestSharedChoiceDaemonStartup(t *testing.T) {

@@ -1,7 +1,7 @@
 ---
 title: Semantic search
 description: Configure hybrid semantic search and understand embeddings, ranking, fallbacks, and operations.
-last_edited: 2026-11-11
+last_edited: 2026-11-12
 ---
 
 # Semantic search
@@ -45,7 +45,7 @@ Open `kata ui`, click the gear in the top bar, and choose **Turn on** under **Se
 
 The built-in server choice is shared with supported apps on this computer. When another supported app enables it, a SQLite daemon starts indexing on its next start unless Kata already has a configured provider. PostgreSQL requires explicit setup in Kata. A saved built-in setting also starts with installed files. If those files are missing, SQLite accepts a shared choice to download them. Otherwise, run `kata daemon local-embeddings` to approve the download.
 
-Kata records the shared choice after setup succeeds. If sharing cannot be confirmed, Kata keeps the saved setting and reports an error. Retry Turn on before restarting the daemon, or rerun the command to share the choice.
+Kata records the shared choice after setup succeeds. If recording it fails, setup still succeeds and Kata logs the failure. Other apps may miss the choice.
 
 PostgreSQL needs pgvector and Kata’s semantic-search tables before setup. Follow the [PostgreSQL setup guide](../operations/postgres.md) to prepare the database, then try Turn on again.
 
