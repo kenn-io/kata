@@ -126,6 +126,38 @@ func TestFederationStatusProjectFilter(t *testing.T) {
 	assert.Contains(t, err.Error(), "no federation status for project")
 }
 
+func TestFederationStatusProjectRenamedDuringLookup(t *testing.T) {
+	env, project := setupFederationStatusCLIState(t)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/federation/status", project.ID) {
+			if _, err := env.DB.RenameProject(r.Context(), project.ID, "renamed-project"); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		r.Host = target.Host
+		r.Header["X-Forwarded-For"] = nil
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	clientEnv := *env
+	clientEnv.URL = server.URL
+	out := requireCmdOutput(t, &clientEnv, "federation", "status", "--project", project.Name, "--format", "json")
+	var result struct {
+		Statuses []struct {
+			ProjectID   int64  `json:"project_id"`
+			ProjectName string `json:"project_name"`
+		} `json:"statuses"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Len(t, result.Statuses, 1)
+	assert.Equal(t, project.ID, result.Statuses[0].ProjectID)
+	assert.Equal(t, "renamed-project", result.Statuses[0].ProjectName)
+}
+
 func TestFederationStatusProjectMember(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("owner-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(t.Context(), "spoke-project")

@@ -1388,7 +1388,7 @@ func federationStatusCmd() *cobra.Command {
 				return err
 			}
 			if flags.Project != "" {
-				callResp.Body, err = filterFederationStatusProject(callResp.Body, flags.Project)
+				callResp.Body, err = filterFederationStatusProject(callResp.Body, flags.Project, versionErr != nil)
 				if err != nil {
 					return err
 				}
@@ -1410,7 +1410,7 @@ func federationStatusCmd() *cobra.Command {
 	}
 }
 
-func filterFederationStatusProject(body []byte, name string) ([]byte, error) {
+func filterFederationStatusProject(body []byte, name string, filterByName bool) ([]byte, error) {
 	response := make(map[string]jsontext.Value)
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, err
@@ -1427,7 +1427,7 @@ func filterFederationStatusProject(body []byte, name string) ([]byte, error) {
 		if err := json.Unmarshal(status, &project); err != nil {
 			return nil, err
 		}
-		if project.Name == name {
+		if !filterByName || project.Name == name {
 			filtered = append(filtered, status)
 		}
 	}
