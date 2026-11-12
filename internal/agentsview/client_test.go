@@ -43,23 +43,23 @@ func TestLookupSessionStates(t *testing.T) {
 		status      int
 		body, state string
 	}{
-		{"priced zero", 200, `{"session_id":"archive~id","has_cost":true,"has_token_data":true,"cost":{"microdollars":0},"cost_source":"reported","project":"private"}`, "priced"},
-		{"unpriced", 200, `{"session_id":"id","has_cost":false,"has_token_data":true,"unpriced_models":["model"]}`, "unpriced"},
-		{"no usage", 200, `{"session_id":"id","has_cost":false,"has_token_data":false}`, "no_usage"},
+		{"priced zero", 200, `{"agent":"claude","session_id":"archive~id","has_cost":true,"has_token_data":true,"cost":{"microdollars":0},"cost_source":"reported","project":"private"}`, "priced"},
+		{"unpriced", 200, `{"agent":"claude","session_id":"id","has_cost":false,"has_token_data":true,"unpriced_models":["model"]}`, "unpriced"},
+		{"no usage", 200, `{"agent":"claude","session_id":"id","has_cost":false,"has_token_data":false}`, "no_usage"},
 		{"not found", 404, `{"error":{"code":"session_not_found","message":"not found"}}`, "not_found"},
 		{"html 404", 404, `<html>not found</html>`, "unavailable"},
 		{"wrong endpoint 404", 404, `{}`, "unavailable"},
 		{"malformed envelope 404", 404, `{"error":{"code":"session_not_found"}}`, "unavailable"},
 		{"ambiguous", 409, `{"error":{"code":"ambiguous_session_id","candidates":["archive~id"]}}`, "ambiguous"},
-		{"negative cost", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":-1},"cost_source":"reported"}`, "unavailable"},
-		{"negative tokens", 200, `{"session_id":"id","has_cost":false,"has_token_data":true,"total_output_tokens":-1}`, "unavailable"},
-		{"negative subagents", 200, `{"session_id":"id","has_cost":false,"has_token_data":true,"subagent_count":-1}`, "unavailable"},
-		{"missing cost", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost_source":"reported"}`, "unavailable"},
-		{"invalid source", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"other"}`, "unavailable"},
-		{"fractional", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1.5},"cost_source":"reported"}`, "unavailable"},
-		{"overflow", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":9223372036854775808},"cost_source":"reported"}`, "unavailable"},
+		{"negative cost", 200, `{"agent":"claude","session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":-1},"cost_source":"reported"}`, "unavailable"},
+		{"negative tokens", 200, `{"agent":"claude","session_id":"id","has_cost":false,"has_token_data":true,"total_output_tokens":-1}`, "unavailable"},
+		{"negative subagents", 200, `{"agent":"claude","session_id":"id","has_cost":false,"has_token_data":true,"subagent_count":-1}`, "unavailable"},
+		{"missing cost", 200, `{"agent":"claude","session_id":"id","has_cost":true,"has_token_data":true,"cost_source":"reported"}`, "unavailable"},
+		{"invalid source", 200, `{"agent":"claude","session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"other"}`, "unavailable"},
+		{"fractional", 200, `{"agent":"claude","session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1.5},"cost_source":"reported"}`, "unavailable"},
+		{"overflow", 200, `{"agent":"claude","session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":9223372036854775808},"cost_source":"reported"}`, "unavailable"},
 		{"server error", 500, `private upstream detail`, "unavailable"},
-		{"oversized", 200, `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"reported","padding":"` + strings.Repeat("x", 1<<20) + `"}`, "unavailable"},
+		{"oversized", 200, `{"agent":"claude","session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"reported","padding":"` + strings.Repeat("x", 1<<20) + `"}`, "unavailable"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,10 +105,11 @@ func TestDoctorProbeValidatesNotFoundEnvelope(t *testing.T) {
 		{`{"error":{"code":"session_not_found","message":"not found"}}`, 404, "ok"},
 		{`{"error":{"code":"ambiguous_session_id","candidates":["archive~id"]}}`, 409, "ok"},
 		{`{"error":{"code":"foreign_conflict","message":"conflict"}}`, 409, "not_agentsview"},
-		{`{"session_id":"id","has_cost":false,"has_token_data":false}`, 200, "ok"},
+		{`{"agent":"claude","session_id":"id","has_cost":false,"has_token_data":false}`, 200, "ok"},
 		{`not found`, 404, "not_agentsview"},
 		{`{}`, 401, "unauthorized"},
 		{`{}`, 500, "unreachable"},
+		{`{}`, http.StatusTooManyRequests, "unreachable"},
 	} {
 		t.Run(tc.want+tc.body, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

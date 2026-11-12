@@ -135,9 +135,9 @@ func TestCacheLifetimes(t *testing.T) {
 		status     int
 		ttl        time.Duration
 	}{
-		{"priced", `{"session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"reported"}`, 200, 5 * time.Minute},
-		{"unpriced", `{"session_id":"id","has_cost":false,"has_token_data":true}`, 200, 5 * time.Minute},
-		{"no_usage", `{"session_id":"id","has_cost":false,"has_token_data":false}`, 200, 5 * time.Minute},
+		{"priced", `{"agent":"claude","session_id":"id","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"reported"}`, 200, 5 * time.Minute},
+		{"unpriced", `{"agent":"claude","session_id":"id","has_cost":false,"has_token_data":true}`, 200, 5 * time.Minute},
+		{"no_usage", `{"agent":"claude","session_id":"id","has_cost":false,"has_token_data":false}`, 200, 5 * time.Minute},
 		{"ambiguous", `{"error":{"code":"ambiguous_session_id","candidates":["archive~id"]}}`, 409, 5 * time.Minute},
 		{"unauthorized", `{}`, 401, 15 * time.Second},
 		{"unavailable", `{}`, 500, 15 * time.Second},
@@ -156,12 +156,12 @@ func TestCacheLifetimes(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			slots := make(chan struct{}, 4)
-			gen.lookup(ctx, slots, "example", "id", false)
+			gen.lookup(ctx, slots, "claude", "id", false)
 			now = now.Add(tc.ttl - time.Nanosecond)
-			gen.lookup(ctx, slots, "example", "id", false)
+			gen.lookup(ctx, slots, "claude", "id", false)
 			require.EqualValues(t, 1, calls.Load())
 			now = now.Add(time.Nanosecond)
-			gen.lookup(ctx, slots, "example", "id", false)
+			gen.lookup(ctx, slots, "claude", "id", false)
 			require.EqualValues(t, 2, calls.Load())
 		})
 	}
@@ -273,19 +273,57 @@ func TestRequestBudgetExpiryDoesNotPoisonCache(t *testing.T) {
 }
 
 func TestUsageAssemblesRecordedSession(t *testing.T) {
-	service, err := NewService(config.ResolvedAgentsView{URL: "https://api.example", BrowserURL: "https://browser.example/archive"}, false)
-	require.NoError(t, err)
-	service.current.client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"session_id":"archive~canonical","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"reported"}`)), Header: make(http.Header)}, nil
-	})
-	step := "inspect"
-	sessions := []cron.Session{{Agent: "example", SessionID: "raw-id", Step: &step}}
-	result, err := service.Usage(t.Context(), "run", cron.Summary{Sessions: &sessions}, false)
-	require.NoError(t, err)
-	require.Len(t, result.Sessions, 1)
-	require.Equal(t, "archive~canonical", result.Sessions[0].CanonicalSessionID)
-	require.Equal(t, &step, result.Sessions[0].Step)
-	require.Equal(t, "https://browser.example/archive/sessions/example/raw-id", result.Sessions[0].URL)
+	for _, tc := range []struct {
+		name, recorded, returned, state, total string
+	}{
+		{"claude", "claude", "claude", "priced", "complete"},
+		{"codex", "codex", "codex", "priced", "complete"},
+		{"pi", "pi", "pi", "priced", "complete"},
+		{"omp", "omp", "omp", "priced", "complete"},
+		{"opencode", "opencode", "opencode", "priced", "complete"},
+		{"overlapping raw ID", "opencode", "kilo", "unavailable", "unknown"},
+		{"empty returned agent", "opencode", "", "unavailable", "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, err := NewService(config.ResolvedAgentsView{URL: "https://api.example", BrowserURL: "https://browser.example/archive"}, false)
+			require.NoError(t, err)
+			id := "ses_example"
+			if tc.recorded == "claude" || tc.recorded == "codex" {
+				id = "00000000-0000-4000-8000-000000000001"
+			}
+			var path string
+			service.current.client.http.Transport = usageRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				path = r.URL.Path
+				body := fmt.Sprintf(`{"agent":%q,"session_id":"archive~canonical","has_cost":true,"has_token_data":true,"cost":{"microdollars":1},"cost_source":"reported"}`, tc.returned)
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+			})
+			step := "inspect"
+			sessions := []cron.Session{{Agent: tc.recorded, SessionID: id, Step: &step}}
+			result, err := service.Usage(t.Context(), "run", cron.Summary{Sessions: &sessions}, false)
+			require.NoError(t, err)
+			require.Equal(t, "run", result.RunUID)
+			require.Len(t, result.Sessions, 1)
+			session := result.Sessions[0]
+			require.Equal(t, tc.recorded, session.Agent)
+			require.Equal(t, id, session.SessionID)
+			require.Equal(t, "/api/v1/sessions/"+id+"/usage", path)
+			require.Equal(t, &step, session.Step)
+			if tc.recorded == "opencode" {
+				require.Equal(t, "https://browser.example/archive/sessions/opencode/ses_example", session.URL)
+			}
+			require.Equal(t, tc.state, session.State)
+			require.Equal(t, tc.total, result.State)
+			if tc.state == "priced" {
+				require.Equal(t, "archive~canonical", session.CanonicalSessionID)
+				require.NotNil(t, result.CostMicrodollars)
+				require.EqualValues(t, 1, *result.CostMicrodollars)
+			} else {
+				require.Empty(t, session.CanonicalSessionID)
+				require.Nil(t, session.CostMicrodollars)
+				require.Nil(t, result.CostMicrodollars)
+			}
+		})
+	}
 }
 
 func TestSharedLookupSurvivesFirstCallerCancellation(t *testing.T) {

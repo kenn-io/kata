@@ -28,12 +28,19 @@ func TestDoctorLocalConfiguration(t *testing.T) {
 		{"unknown daemon key", "config.toml", "litsen = '127.0.0.1:7777'", "config.daemon", "fail"},
 		{"untrusted web origin", "config.toml", untrustedWebConfig, "config.daemon", "fail"},
 		{"invalid display config", "config.toml", "[display]\nmarkdown_renderer=['']", "config.daemon", "fail"},
+		{"invalid AgentsView URL", "config.toml", "[agentsview]\nurl='not-a-url'", "config.daemon", "fail"},
+		{"invalid AgentsView browser URL", "config.toml", "[agentsview]\nurl='https://agentsview.example'\nbrowser_url='not-a-url'", "config.daemon", "fail"},
+		{"untrusted AgentsView HTTP", "config.toml", "[agentsview]\nurl='http://100.64.0.5'", "config.daemon", "fail"},
+		{"trusted AgentsView HTTP", "config.toml", "[auth]\ntrust_private_network=true\n[agentsview]\nurl='http://100.64.0.5'", "config.daemon", "ok"},
+		{"AgentsView missing token file", "config.toml", "[agentsview]\nurl='https://agentsview.example'\ntoken_file='/nonexistent/fixture-token'", "config.daemon", "ok"},
+		{"AgentsView missing service environment", "config.toml", "[agentsview]\nurl='https://agentsview.example'\ntoken_env='KATA_FIXTURE_MISSING_AV_TOKEN'", "config.daemon", "ok"},
 		{"invalid create config", "config.toml", "[create]\ndefault_priority=5", "config.daemon", "fail"},
 		{"unknown hook key", "hooks.toml", "[hooks]\npol_size=2", "config.hooks", "fail"},
 		{"missing hooks", "", "", "config.hooks", "info"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home, workspace := doctorTestEnv(t)
+			t.Setenv("KATA_FIXTURE_MISSING_AV_TOKEN", "")
 			if tc.file != "" {
 				require.NoError(t, os.WriteFile(filepath.Join(home, tc.file), []byte(tc.content), 0600))
 			}
