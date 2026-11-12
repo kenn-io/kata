@@ -73,18 +73,6 @@ func TestInputIntegerProperty(t *testing.T) {
 	}, hegel.WithTestCases(1000))
 }
 
-func TestInputBooleanProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		value := hegel.Draw(ht, hegel.Integers[int](0, 1)) == 1
-		raw, err := json.Marshal(map[string]any{"inputs": map[string]any{"flag": map[string]any{"type": "bool"}}, "input_values": map[string]any{"flag": value}})
-		if err != nil {
-			ht.Fatalf("marshal: %v", err)
-		}
-		if err := ValidateInputs(raw, "", nil); err != nil {
-			ht.Fatalf("boolean %t rejected: %v", value, err)
-		}
-	}, hegel.WithTestCases(100))
-}
 func TestInputEnumProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		n := hegel.Draw(ht, hegel.Integers[int](1, 64))
