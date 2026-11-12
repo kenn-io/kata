@@ -18,10 +18,9 @@ On the daemon host, save this example as an executable script, such as
 absolute `kata` path and named daemon with values for that daemon. Use an open
 issue in the configured project. Closing it hides existing requests and prevents
 new notifications; monitor the issue and reopen it or configure another open
-target. The example requires Python 3. Ensure the hook's CLI environment can
-resolve the named daemon; for a local home without a catalog entry, omit
-`--daemon` and select the same Kata home in the hook environment and
-verification commands.
+target. The example requires Python 3 and a named daemon catalog entry that
+selects the daemon running the hook. Configure a [local daemon profile](../operations/local-daemon-profiles.md)
+for a local home, and ensure the hook's CLI environment can resolve the entry.
 
 The hook inherits the daemon's environment, plus configured hook variables and
 Kata event variables. Set `KATA_AUTHOR` in the daemon environment for the
@@ -50,8 +49,6 @@ DAEMON = "example-daemon"
 event = json.load(sys.stdin)
 if type(event.get("kata_hook_version")) is not int or event["kata_hook_version"] != 1:
     raise SystemExit("unsupported hook envelope version")
-if event.get("payload_truncated"):
-    raise SystemExit("hook payload was truncated")
 if event.get("project", {}).get("name") != PROJECT:
     sys.exit(0)
 status = event.get("payload", {}).get("status")
@@ -87,9 +84,12 @@ Restart the daemon to load the configuration. Verify the exact project and open
 target on the selected daemon, then record a synthetic failed observation using
 a test job, issue, and recipient. Use the same daemon, project, and exact
 recipient as the hook configuration. Use a fresh valid run UID for every probe;
-the UID below is an example to replace:
+the UID below is an example to replace. Run the locate command in the hook's
+environment and working directory and confirm its address is the daemon running
+the hook. Use that same catalog configuration for the remaining commands:
 
 ```sh
+kata --daemon example-daemon daemon locate --json
 kata --daemon example-daemon projects show example-project
 kata --daemon example-daemon --project example-project show 01J00000000000000000000010
 kata --daemon example-daemon --project example-project cron run observe 01J00000000000000000000020 --json-input observation.json --json
@@ -112,8 +112,7 @@ has a separate inbox.
 Hooks run asynchronously after a committed observation; they cannot roll it
 back. The queue is bounded and can drop work, and a hook can fail or time out.
 Inspect hook logs and daemon logs; use an external durable delivery system if
-missing an alert is unacceptable. A truncated payload fails this example
-instead of treating an absent status as success.
+missing an alert is unacceptable.
 
 Each matching new or changed observation can trigger a notification; an
 identical observation retry emits no new event. `kata notify` keeps one request
@@ -130,4 +129,6 @@ accepted by a relay, and events delivered by federation or relay pulls. A spoke
 that pulls the project can therefore alert on another spoke's run. Configuring
 the recipe on multiple daemons can produce duplicate alerts; choose the daemon
 and route that fit your deployment. Federation and hook delivery are
-asynchronous, so a spoke observation does not imply immediate delivery.
+asynchronous, so a spoke observation does not imply immediate delivery. The
+transport-only `cron.run.snapshot` bootstrap does not trigger the observation
+hook, so bootstrapped history does not produce alerts.
