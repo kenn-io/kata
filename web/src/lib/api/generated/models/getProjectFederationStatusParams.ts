@@ -4,7 +4,7 @@
 
 export type GetProjectFederationStatusParams = {
   /**
-   * Omit relay checkpoint capacity measurement.
+   * Omit relay checkpoint capacity measurement and replace non-empty sync error text with a fixed marker. Full status retains the error details.
    */
   compact?: boolean
 }

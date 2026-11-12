@@ -249,7 +249,7 @@ func (o OfferRelayDeliveriesQuery) Validate() error {
 }
 
 type GetProjectFederationStatusQuery struct {
-	// Compact Omit relay checkpoint capacity measurement.
+	// Compact Omit relay checkpoint capacity measurement and replace non-empty sync error text with a fixed marker. Full status retains the error details.
 	Compact *bool `json:"compact,omitempty"`
 }
 

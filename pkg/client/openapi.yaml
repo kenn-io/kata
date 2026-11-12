@@ -9829,12 +9829,12 @@ paths:
           schema:
             format: int64
             type: integer
-        - description: Omit relay checkpoint capacity measurement.
+        - description: Omit relay checkpoint capacity measurement and replace non-empty sync error text with a fixed marker. Full status retains the error details.
           explode: false
           in: query
           name: compact
           schema:
-            description: Omit relay checkpoint capacity measurement.
+            description: Omit relay checkpoint capacity measurement and replace non-empty sync error text with a fixed marker. Full status retains the error details.
             type: boolean
       responses:
         "200":

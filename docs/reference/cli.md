@@ -2457,7 +2457,7 @@ kata federation join --project <existing-project> --hub-url <url> \
 kata federation rebind <spoke-project> --hub <catalog-name>
 kata federation rebind --all --hub <catalog-name>
 kata federation root-key repin --project <project> [--preflight] [--previous-key-file <path>] [--strand-relays]
-kata federation status
+kata federation status [--project <project>]
 kata federation enrollments list
 kata federation enrollments name <spoke-instance-uid> <name>
 kata federation enrollments name <spoke-instance-uid> --clear
@@ -2470,6 +2470,12 @@ kata federation quarantine show <id>
 kata federation quarantine retry <id> --confirm "RETRY FEDERATION BATCH <id>" --reason <text>
 kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --reason <text>
 ```
+
+`kata federation status --project <project>` shows detailed sync status for one
+project using the selected daemon. Project readers need a CLI with scoped
+status support and daemon API 0.46.0 or later. Owners can use this command
+with older daemons. Without `--project`, status covers all bound projects and
+requires daemon-owner authority.
 
 `kata federation embedding-recipe` exports JSON for the exact document recipe
 in the selected local Kata home's configuration. It makes no daemon or provider
