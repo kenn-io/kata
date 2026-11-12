@@ -752,9 +752,10 @@ func TestMoveBatchCLI_SelectorFlagsRequireSource(t *testing.T) {
 	}
 }
 
-// A healthy mutation may exceed the standard five-second read budget, while
+// A healthy mutation may exceed the configured read budget, while
 // cancellation of its invocation must still stop it.
 func TestMoveBatchCLI_LongMutationAndCancellation(t *testing.T) {
+	t.Setenv("KATA_HTTP_TIMEOUT", "250ms")
 	for _, cancelRequest := range []bool{false, true} {
 		t.Run(fmt.Sprint(cancelRequest), func(t *testing.T) {
 			env, dir, _, dst, first := setupMoveCLIProjects(t)
@@ -774,7 +775,7 @@ func TestMoveBatchCLI_LongMutationAndCancellation(t *testing.T) {
 					return
 				}
 				//nolint:kennlint // sleeptest: Exercise a healthy mutation beyond the normal HTTP client deadline.
-				timer := time.NewTimer(5200 * time.Millisecond)
+				timer := time.NewTimer(500 * time.Millisecond)
 				defer timer.Stop()
 				select {
 				case <-timer.C:
