@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -37,7 +38,11 @@ func attachmentEnv(t *testing.T) (*testenv.Env, *docbanktest.Fake) {
 }
 func attachmentUpload(t *testing.T, env *testenv.Env, endpoint, name string, data io.Reader, token ...string) (int, []byte) {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), "POST", env.URL+endpoint+"?name="+name+"&actor=operator", data)
+	return attachmentUploadWithQuery(t, env, endpoint, url.Values{"name": {name}, "actor": {"operator"}}, data, token...)
+}
+func attachmentUploadWithQuery(t *testing.T, env *testenv.Env, endpoint string, query url.Values, data io.Reader, token ...string) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), "POST", env.URL+endpoint+"?"+query.Encode(), data)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/octet-stream")
 	if len(token) > 0 {
@@ -450,9 +455,10 @@ func checkAttachmentUploadReuseConcurrent(t *testing.T, env *testenv.Env, store 
 		err    error
 	}
 	responses := make(chan response, 2)
+	query := url.Values{"name": {"report.txt"}, "actor": {"operator"}, "reuse_existing": {"true"}}
 	for range 2 {
 		go func() {
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, env.URL+endpoint+"?name=report.txt&actor=operator&reuse_existing=true", strings.NewReader("same bytes"))
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, env.URL+endpoint+"?"+query.Encode(), strings.NewReader("same bytes"))
 			if err != nil {
 				responses <- response{err: err}
 				return
@@ -494,7 +500,8 @@ func checkAttachmentUploadReuseConcurrent(t *testing.T, env *testenv.Env, store 
 	require.Len(t, values, 2)
 	f.BeforeResponse = nil
 	for _, input := range []struct{ name, data string }{{"report.txt", "different bytes"}, {"other.txt", "same bytes"}} {
-		code, raw := attachmentUpload(t, env, endpoint, input.name+"&reuse_existing=true", strings.NewReader(input.data))
+		query := url.Values{"name": {input.name}, "actor": {"operator"}, "reuse_existing": {"true"}}
+		code, raw := attachmentUploadWithQuery(t, env, endpoint, query, strings.NewReader(input.data))
 		require.Equal(t, 200, code, string(raw))
 		var out api.AddAttachmentResponseBody
 		require.NoError(t, json.Unmarshal(raw, &out))

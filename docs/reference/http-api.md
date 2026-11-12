@@ -979,7 +979,10 @@ federated event log.
 
 `POST /api/v1/projects/{project_id}/issues/{ref}/attachments?name=<file>`
 uploads the raw request body as `application/octet-stream` to Docbank and
-returns the new `attachment_id` with its stored reference. `GET
+returns the `attachment_id` with its stored reference. Since API 0.45.0,
+set the query parameter `reuse_existing=true` to return the smallest existing
+attachment ID for the resolved Docbank version, or create a reference if none
+exists. Omitting it or setting it to `false` creates a new reference. `GET
 /api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content`
 streams the file back. `POST /api/v1/projects/{project_id}/issues/{ref}/attachments/links` saves a reference to an existing Docbank file version. Its JSON body takes exactly one of `node_id` or `path`, an optional `version_id`, and `actor`. Set `reuse_existing` to `true` to return the smallest existing attachment ID for that version without adding another reference; if no reference exists, the route creates one. Omitting this field creates a new reference. All three routes return `docbank_not_configured` when the daemon has no Docbank, and `503 docbank_key_unavailable` without contacting Docbank when the daemon cannot resolve its Docbank key; the message gives the reason, and the health `docbank` block names the source. See [Issue attachments](../guide/attachments.md).
 

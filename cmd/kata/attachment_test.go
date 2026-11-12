@@ -129,18 +129,27 @@ func TestAttachmentCLIWorkflow(t *testing.T) {
 func TestAttachmentCLIRawUpload(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "shot.png")
 	require.NoError(t, os.WriteFile(file, []byte("image"), 0600))
-	c := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		require.Equal(t, "shot.png", r.URL.Query().Get("name"))
-		require.Equal(t, "operator", r.URL.Query().Get("actor"))
-		require.EqualValues(t, 5, r.ContentLength)
-		data, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
-		require.Equal(t, "image", string(data))
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"attachment_id":"saved"}`)), Header: http.Header{"Content-Type": {"application/json"}}}, nil
-	})}
-	id, err := uploadAttachmentCLI(t.Context(), c, "https://daemon.example", 7, "abc4", "operator", file, false)
-	require.NoError(t, err)
-	require.Equal(t, "saved", id)
+	for _, reuse := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reuse=%t", reuse), func(t *testing.T) {
+			c := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				require.Equal(t, "shot.png", r.URL.Query().Get("name"))
+				require.Equal(t, "operator", r.URL.Query().Get("actor"))
+				if reuse {
+					require.Equal(t, "true", r.URL.Query().Get("reuse_existing"))
+				} else {
+					require.False(t, r.URL.Query().Has("reuse_existing"))
+				}
+				require.EqualValues(t, 5, r.ContentLength)
+				data, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				require.Equal(t, "image", string(data))
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"attachment_id":"saved"}`)), Header: http.Header{"Content-Type": {"application/json"}}}, nil
+			})}
+			id, err := uploadAttachmentCLI(t.Context(), c, "https://daemon.example", 7, "abc4", "operator", file, reuse)
+			require.NoError(t, err)
+			require.Equal(t, "saved", id)
+		})
+	}
 }
 func TestAttachmentCLIDownloadSizeFailurePreservesDestination(t *testing.T) {
 	for _, body := range []string{"short", "too long"} {
@@ -166,21 +175,4 @@ func TestAttachmentCLIDownloadSizeFailurePreservesDestination(t *testing.T) {
 			})
 		}
 	}
-}
-
-func TestAttachmentAddCLIReuseExisting(t *testing.T) {
-	env, _, ref := attachmentCLIEnv(t)
-	file := filepath.Join(t.TempDir(), "report.txt")
-	require.NoError(t, os.WriteFile(file, []byte("sample bytes"), 0600))
-	out, err := executeAttachmentCLI(t, env.URL, "add", ref, file, file, "--reuse-existing", "--json")
-	require.NoError(t, err)
-	var result struct {
-		Results []struct {
-			ID string `json:"attachment_id"`
-		} `json:"results"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &result))
-	require.Len(t, result.Results, 2)
-	require.NotEmpty(t, result.Results[0].ID)
-	require.Equal(t, result.Results[0].ID, result.Results[1].ID)
 }
