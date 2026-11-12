@@ -3,6 +3,7 @@ package api
 import (
 	"time"
 
+	"go.kenn.io/kata/internal/agentsview"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
@@ -22,8 +23,9 @@ type CronProjectRequest struct {
 type CronCapabilitiesResponse struct {
 	EventFeatures string `header:"X-Kata-Event-Features"`
 	Body          struct {
-		ProjectUID    string   `json:"project_uid"`
-		EventFeatures []string `json:"event_features"`
+		ProjectUID    string          `json:"project_uid"`
+		EventFeatures []string        `json:"event_features"`
+		Usage         CronUsageSource `json:"usage"`
 	}
 }
 
@@ -92,4 +94,21 @@ type CronRunsResponse struct {
 		Runs          []CronRun `json:"runs"`
 		NextBeforeUID string    `json:"next_before_uid,omitempty"`
 	}
+}
+
+// CronUsageSource advertises whether live run cost is available.
+type CronUsageSource struct {
+	Source string `json:"source" enum:"none,agentsview"`
+}
+
+// CronUsageRequest requests a live, optionally refreshed run cost.
+type CronUsageRequest struct {
+	CronRunRequest
+	Refresh bool `query:"refresh"`
+}
+
+// CronUsageResponse is private because it spends an operator credential.
+type CronUsageResponse struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         agentsview.RunUsage
 }

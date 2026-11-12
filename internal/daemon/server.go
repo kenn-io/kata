@@ -19,6 +19,7 @@ import (
 	"github.com/klauspost/compress/gzhttp"
 	kitdaemon "go.kenn.io/kit/daemon"
 
+	"go.kenn.io/kata/internal/agentsview"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
@@ -47,6 +48,7 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
+	AgentsView                *agentsview.Service
 	FederationSigning         *federationsigning.Verifier
 	FederationSigningRequired bool
 	DB                        db.Storage

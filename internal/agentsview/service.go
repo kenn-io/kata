@@ -225,3 +225,16 @@ func (g *generation) lookup(ctx context.Context, slots chan struct{}, agent, id 
 		return value.Val.(SessionUsage)
 	}
 }
+
+// Probe performs the operator's explicit on-demand diagnostic, not a startup probe.
+func (s *Service) Probe(ctx context.Context) string {
+	s.mu.RLock()
+	gen := s.current
+	s.mu.RUnlock()
+	if gen == nil {
+		return "off"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return gen.client.Probe(ctx)
+}

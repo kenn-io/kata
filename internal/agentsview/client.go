@@ -64,6 +64,7 @@ func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int, bool
 	var envelope struct {
 		Error struct {
 			Code       string   `json:"code"`
+			Message    string   `json:"message"`
 			Candidates []string `json:"candidates"`
 		} `json:"error"`
 	}
@@ -72,7 +73,7 @@ func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int, bool
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return SessionUsage{State: "unauthorized"}, resp.StatusCode, validEnvelope
 	case http.StatusNotFound:
-		return SessionUsage{State: "not_found"}, resp.StatusCode, validEnvelope
+		return SessionUsage{State: "not_found"}, resp.StatusCode, validEnvelope && envelope.Error.Code == "session_not_found" && envelope.Error.Message != ""
 	case http.StatusConflict:
 		if validEnvelope && envelope.Error.Code == "ambiguous_session_id" && len(envelope.Error.Candidates) <= 5 {
 			return SessionUsage{State: "ambiguous", Candidates: envelope.Error.Candidates}, resp.StatusCode, true
@@ -113,4 +114,19 @@ func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int, bool
 		result.State = "no_usage"
 	}
 	return result, resp.StatusCode, true
+}
+
+// Probe checks one synthetic identity through the same credential-pinned client.
+func (c *Client) Probe(ctx context.Context) string {
+	_, status, valid := c.lookup(ctx, "00000000-0000-4000-8000-000000000000")
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return "unauthorized"
+	case (status == http.StatusNotFound || status == http.StatusOK || status == http.StatusConflict) && valid:
+		return "ok"
+	case status == 0 || status >= 500 || status >= 300 && status < 400:
+		return "unreachable"
+	default:
+		return "not_agentsview"
+	}
 }

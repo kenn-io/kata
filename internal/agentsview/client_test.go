@@ -62,3 +62,27 @@ func TestLookupRejectsRedirectWithoutSendingToken(t *testing.T) {
 	require.Equal(t, "unavailable", client.Lookup(t.Context(), "raw").State)
 	require.Zero(t, requests.Load())
 }
+
+func TestDoctorProbeValidatesNotFoundEnvelope(t *testing.T) {
+	for _, tc := range []struct {
+		body   string
+		status int
+		want   string
+	}{
+		{`{"error":{"code":"session_not_found","message":"not found"}}`, 404, "ok"},
+		{`not found`, 404, "not_agentsview"},
+		{`{}`, 401, "unauthorized"},
+		{`{}`, 500, "unreachable"},
+	} {
+		t.Run(tc.want+tc.body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			t.Cleanup(server.Close)
+			client, err := NewClient(config.ResolvedAgentsView{URL: server.URL}, false)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, client.Probe(t.Context()))
+		})
+	}
+}
