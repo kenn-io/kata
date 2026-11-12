@@ -162,7 +162,6 @@ func PrepareCronAdoption(ctx context.Context, tx *sql.Tx, project Project, targe
 // RequireAdoptionEventFeatures checks the emitted baseline when it contains
 // session evidence. Session-free adoption retains its existing compatibility.
 func RequireAdoptionEventFeatures(advertised string, events []CronEvent) error {
-	hasSessions := false
 	required := ""
 	for _, event := range events {
 		features, err := PayloadRequiredFeatures(event.Type, event.Payload)
@@ -170,9 +169,8 @@ func RequireAdoptionEventFeatures(advertised string, events []CronEvent) error {
 			return err
 		}
 		required = MergeEventFeatures(required, features)
-		hasSessions = hasSessions || RequireEventFeatures(features, CronRunSessionsEventFeature) == nil
 	}
-	if !hasSessions {
+	if RequireEventFeatures(required, CronRunSessionsEventFeature) != nil {
 		return nil
 	}
 	return RequireEventFeatures(advertised, required)

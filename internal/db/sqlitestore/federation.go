@@ -3022,10 +3022,6 @@ func (d *Store) adoptProjectIntoFederation(
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
 
-	emitMetadataBaseline := len(project.Metadata) > 0 && string(project.Metadata) != "{}"
-	if !emitMetadataBaseline && len(issues) == 0 {
-		emitMetadataBaseline = true
-	}
 	if err := db.RequireAdoptionEventFeatures(p.HubEventFeatures, cron); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
@@ -3081,8 +3077,12 @@ func (d *Store) adoptProjectIntoFederation(
 
 	var createdEvent *db.Event
 	var resetCursor int64
+	emitMetadataBaseline := len(project.Metadata) > 0 && string(project.Metadata) != "{}"
+	if !emitMetadataBaseline && len(issues) == 0 {
+		emitMetadataBaseline = true
+	}
 	if emitMetadataBaseline {
-		metadataPayload, err := db.ProjectMetadataAdoptionPayload(project.Metadata)
+		payload, err := db.ProjectMetadataAdoptionPayload(project.Metadata)
 		if err != nil {
 			return db.AdoptProjectIntoFederationResult{}, err
 		}
@@ -3092,7 +3092,7 @@ func (d *Store) adoptProjectIntoFederation(
 			ProjectName: project.Name,
 			Type:        "project.metadata_updated",
 			Actor:       actor,
-			Payload:     metadataPayload,
+			Payload:     payload,
 			HLC:         &boundary,
 			CreatedAt:   baselineCreatedAt,
 		})

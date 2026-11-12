@@ -104,10 +104,6 @@ func (s *Store) AdoptProjectIntoFederation(
 		if err != nil {
 			return err
 		}
-		emitMetadataBaseline := len(project.Metadata) > 0 && string(project.Metadata) != "{}"
-		if !emitMetadataBaseline && len(issues) == 0 {
-			emitMetadataBaseline = true
-		}
 		if err := db.RequireAdoptionEventFeatures(params.HubEventFeatures, cron); err != nil {
 			return err
 		}
@@ -162,14 +158,18 @@ push_cursor_event_id,bound_actor,allow_insecure,enabled
 			return fmt.Errorf("insert adoption federation binding: %w", mapSQLError(err, nil))
 		}
 
+		emitMetadataBaseline := len(project.Metadata) > 0 && string(project.Metadata) != "{}"
+		if !emitMetadataBaseline && len(issues) == 0 {
+			emitMetadataBaseline = true
+		}
 		if emitMetadataBaseline {
-			metadataPayload, err := db.ProjectMetadataAdoptionPayload(project.Metadata)
+			payload, err := db.ProjectMetadataAdoptionPayload(project.Metadata)
 			if err != nil {
 				return err
 			}
 			event, err := s.insertEventTx(ctx, tx, eventInsert{
 				ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
-				Type: "project.metadata_updated", Actor: actor, Payload: metadataPayload,
+				Type: "project.metadata_updated", Actor: actor, Payload: payload,
 				HLC: &boundary, CreatedAt: baselineCreatedAt,
 			})
 			if err != nil {
