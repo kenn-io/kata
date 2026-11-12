@@ -37,3 +37,29 @@ func Since(s string, anchor time.Time) (time.Time, error) {
 	}
 	return anchor.Add(-d).UTC(), nil
 }
+
+// Window resolves a relative start against its end, using one sampled instant
+// for both bounds when no end was supplied. Absolute starts retain the
+// daemon's default end behavior.
+func Window(since, until string, now time.Time) (string, string, error) {
+	if since == "" {
+		return since, until, nil
+	}
+	anchor := now
+	if until != "" {
+		var err error
+		anchor, err = time.Parse(time.RFC3339, until)
+		if err != nil {
+			return "", "", fmt.Errorf("invalid until")
+		}
+	}
+	_, absoluteErr := time.Parse(time.RFC3339, since)
+	instant, err := Since(since, anchor)
+	if err != nil {
+		return "", "", err
+	}
+	if absoluteErr != nil && until == "" {
+		until = anchor.UTC().Format(time.RFC3339Nano)
+	}
+	return instant.Format(time.RFC3339Nano), until, nil
+}

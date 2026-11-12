@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/timeparse"
 	"go.kenn.io/kata/internal/uid"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -633,26 +634,14 @@ func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64,
 func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID int64) ([]byte, error) {
 	switch {
 	case o.resource == "run" && o.action == "stats":
-		if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, "0.47.0", "cron run stats"); err != nil {
+		if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, apiVersionCronRunStats, "cron run stats"); err != nil {
 			return nil, err
 		}
-		since := o.since
-		if since != "" {
-			anchor := time.Now()
-			if o.until != "" {
-				var err error
-				anchor, err = time.Parse(time.RFC3339, o.until)
-				if err != nil {
-					return nil, cronCLIValidation("invalid until")
-				}
-			}
-			instant, err := parseSinceUntil(since, anchor)
-			if err != nil {
-				return nil, cronCLIValidation(err.Error())
-			}
-			since = instant.Format(time.RFC3339Nano)
+		since, until, err := timeparse.Window(o.since, o.until, time.Now())
+		if err != nil {
+			return nil, cronCLIValidation(err.Error())
 		}
-		response, err := c.GetCronRunStatsWithResponse(a.ctx, &generated.GetCronRunStatsRequestOptions{PathParams: &generated.GetCronRunStatsPath{ProjectID: projectID}, Query: &generated.GetCronRunStatsQuery{JobUID: &o.jobUID, WorkflowUID: &o.workflowUID, Since: &since, Until: &o.until, Bucket: &o.bucket, Timezone: &o.timezone}})
+		response, err := c.GetCronRunStatsWithResponse(a.ctx, &generated.GetCronRunStatsRequestOptions{PathParams: &generated.GetCronRunStatsPath{ProjectID: projectID}, Query: &generated.GetCronRunStatsQuery{JobUID: &o.jobUID, WorkflowUID: &o.workflowUID, Since: &since, Until: &until, Bucket: &o.bucket, Timezone: &o.timezone}})
 		if response == nil {
 			return nil, externalCLITransportError(response, err)
 		}

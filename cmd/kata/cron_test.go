@@ -822,6 +822,15 @@ func TestCronRunStatsCLI(t *testing.T) {
 	window := result["window"].(map[string]any)
 	require.Equal(t, "2026-10-30T00:00:00Z", window["since"])
 	require.Equal(t, "2026-11-01T00:00:00Z", window["until"])
+	raw, _, err = executeCronCLI(t, env.URL, nil, "run", "stats", "--since", "366d")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(raw), &result))
+	window = result["window"].(map[string]any)
+	start, err := time.Parse(time.RFC3339Nano, window["since"].(string))
+	require.NoError(t, err)
+	end, err := time.Parse(time.RFC3339Nano, window["until"].(string))
+	require.NoError(t, err)
+	require.Equal(t, 366*24*time.Hour, end.Sub(start))
 	for _, since := range []string{"213504d", "-213504d"} {
 		for _, until := range [][]string{nil, {"--until", "2026-11-01T00:00:00Z"}} {
 			args := append([]string{"run", "stats", "--since", since}, until...)

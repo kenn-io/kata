@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
-	"fmt"
 	"time"
 
-	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
@@ -81,19 +79,16 @@ func (h toolHandlers) cronRunStats(ctx context.Context, _ *sdkmcp.CallToolReques
 			}
 		}
 	}
-	if in.Since != "" {
-		anchor := time.Now()
-		if in.Until != "" {
-			anchor, err = time.Parse(time.RFC3339, in.Until)
-			if err != nil {
-				return nil, CronRunStatsOutput{}, errors.New("invalid until")
-			}
-		}
-		instant, parseErr := timeparse.Since(in.Since, anchor)
-		if parseErr != nil {
-			return nil, CronRunStatsOutput{}, parseErr
-		}
-		in.Since = instant.Format(time.RFC3339Nano)
+	in.Since, in.Until, err = timeparse.Window(in.Since, in.Until, time.Now())
+	if err != nil {
+		return nil, CronRunStatsOutput{}, err
+	}
+	supported, err := h.daemonSupportsAPIVersion(ctx, "0.47.0")
+	if err != nil {
+		return nil, CronRunStatsOutput{}, err
+	}
+	if !supported {
+		return nil, CronRunStatsOutput{}, errors.New("cron run stats requires daemon API 0.47.0 or newer; upgrade the daemon")
 	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
@@ -103,15 +98,7 @@ func (h toolHandlers) cronRunStats(ctx context.Context, _ *sdkmcp.CallToolReques
 	if err != nil {
 		return nil, CronRunStatsOutput{}, err
 	}
-	if response.StatusCode != 200 {
-		var envelope generated.GetCronRunStatsErrorResponse
-		if len(response.Body) > 0 {
-			if decodeErr := json.Unmarshal(response.Body, &envelope); decodeErr != nil {
-				return nil, CronRunStatsOutput{}, fmt.Errorf("cron run stats: HTTP %d: %s", response.StatusCode, response.Body)
-			}
-		}
-		return nil, CronRunStatsOutput{}, runtime.NewClientAPIError(envelope, runtime.WithStatusCode(response.StatusCode))
-	}
+
 	var out CronRunStatsOutput
 	if err := json.Unmarshal(response.Body, &out); err != nil {
 		return nil, CronRunStatsOutput{}, err
