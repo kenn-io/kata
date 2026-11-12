@@ -65,7 +65,8 @@ is optional on the ordinary daemon listeners.
 6. Use the join command from step 1. If enrollment predates required signing
    or the signed join instructions, re-run the same `enroll` command against
    the hub's main API with the same `--token` to retrieve the same enrollment
-   and print its signed join command. If the hub requires signing,
+   and print its signed join command. If the spoke has already joined, use
+   `kata federation signing configure` instead. If the hub requires signing,
    the printed join command uses `external_url` and includes placeholders for
    the signing key ID and absolute spoke key file path. Replace both before
    running it on the spoke, or replace `--signing-key-file` with
