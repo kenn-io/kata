@@ -38,8 +38,8 @@ func (s *pausedSessionObservation) ObserveCronRun(ctx context.Context, in db.Obs
 	return s.Storage.ObserveCronRun(ctx, in)
 }
 
-// The PostgreSQL admission must cover the observation commit after the probe deadline.
-func TestCronAdmissionOutlivesProbeDeadlineAcrossPostgresStores(t *testing.T) {
+// The PostgreSQL admission must cover the observation commit after the probe context ends.
+func TestCronAdmissionOutlivesProbeContextAcrossPostgresStores(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}

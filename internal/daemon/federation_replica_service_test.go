@@ -16,16 +16,36 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/testfix"
 )
 
+// A distinct process gate reaches this backend lock even while sync holds it.
+type signaledProjectLockStore struct {
+	dbtest.TransactionalStore
+	lock    sync.RWMutex
+	entered chan struct{}
+}
+
+func (s *signaledProjectLockStore) AcquireFederationProjectSharedLock(context.Context, int64) (func(), error) {
+	s.lock.RLock()
+	return s.lock.RUnlock, nil
+}
+
+func (s *signaledProjectLockStore) AcquireFederationProjectExclusiveLock(context.Context, int64) (func(), error) {
+	close(s.entered)
+	s.lock.Lock()
+	return s.lock.Unlock, nil
+}
+
 func TestAdoptionWaitsForProjectObservationAdmission(t *testing.T) {
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
-	release, err := federationcoord.BeginSync(t.Context(), federationcoord.Key(store.InstanceUID(), project.ID), store, project.ID)
+	wrapped := &signaledProjectLockStore{TransactionalStore: dbtest.TransactionalStore{Storage: store}, entered: make(chan struct{})}
+	release, err := federationcoord.BeginSync(t.Context(), "other-process-"+federationcoord.Key(store.InstanceUID(), project.ID), wrapped, project.ID)
 	require.NoError(t, err)
 	t.Cleanup(release)
 	params := replicaServiceParams()
@@ -33,13 +53,15 @@ func TestAdoptionWaitsForProjectObservationAdmission(t *testing.T) {
 	params.AdoptExisting = true
 	done := make(chan error, 1)
 	go func() {
-		_, err := daemon.EnsureFederationReplica(t.Context(), store, newReplicaCredentialStore(), nil, params)
+		_, err := daemon.EnsureFederationReplica(t.Context(), wrapped, newReplicaCredentialStore(), nil, params)
 		done <- err
 	}()
 	select {
 	case err := <-done:
 		t.Fatalf("adoption completed while observation held admission: %v", err)
-	case <-time.After(100 * time.Millisecond): //nolint:kennlint // deadlinetest: admission must exclude adoption
+	case <-wrapped.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("adoption did not reach the project lock")
 	}
 	release()
 	select {

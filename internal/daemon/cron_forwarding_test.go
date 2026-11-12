@@ -2,7 +2,6 @@ package daemon_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -23,6 +22,7 @@ import (
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/testenv"
@@ -564,15 +564,9 @@ func TestCronSessionObservationRequiresHubFeature(t *testing.T) {
 
 // Pause the actual adoption transaction while it owns the project gate.
 type pausedCronAdoption struct {
-	db.Storage
+	dbtest.TransactionalStore
 	entered chan struct{}
 	resume  chan struct{}
-}
-
-func (s *pausedCronAdoption) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
-	return s.Storage.(interface {
-		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
-	}).BeginTx(ctx, opts)
 }
 
 func (s *pausedCronAdoption) AdoptProjectIntoFederation(ctx context.Context, p db.AdoptProjectIntoFederationParams) (db.AdoptProjectIntoFederationResult, error) {
@@ -594,7 +588,7 @@ func TestCronSessionObservationDuringAdoption(t *testing.T) {
 	require.NoError(t, err)
 	before, err := f.spoke.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
-	paused := &pausedCronAdoption{Storage: f.spoke.DB, entered: make(chan struct{}), resume: make(chan struct{})}
+	paused := &pausedCronAdoption{TransactionalStore: dbtest.TransactionalStore{Storage: f.spoke.DB}, entered: make(chan struct{}), resume: make(chan struct{})}
 	params := replicaServiceParams()
 	params.ProjectName = project.Name
 	params.AdoptExisting = true

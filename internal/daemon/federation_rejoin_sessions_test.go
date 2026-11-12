@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/uid"
@@ -139,37 +139,26 @@ func TestRejoinWithoutDirectPushOrSessionsDoesNotProbeMetadata(t *testing.T) {
 	}
 }
 
-func TestRejoinObservationAdmissionOrdering(t *testing.T) {
+func TestRejoinWaitsForCommittedObservation(t *testing.T) {
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(t.Context(), "spoke-project", replicaHubProjectUID)
 	require.NoError(t, err)
-	release, err := federationcoord.BeginSync(t.Context(), federationcoord.Key(store.InstanceUID(), project.ID), store, project.ID)
+	wrapped := &signaledProjectLockStore{TransactionalStore: dbtest.TransactionalStore{Storage: store}, entered: make(chan struct{})}
+	release, err := federationcoord.BeginSync(t.Context(), "other-process-"+federationcoord.Key(store.InstanceUID(), project.ID), wrapped, project.ID)
 	require.NoError(t, err)
 	t.Cleanup(release)
 	params := rejoinParams(project, "http://hub.example")
 	done := make(chan error, 1)
 	go func() {
-		_, e := daemon.EnsureFederationReplica(t.Context(), store, newReplicaCredentialStore(), nil, params)
+		_, e := daemon.EnsureFederationReplica(t.Context(), wrapped, newReplicaCredentialStore(), nil, params)
 		done <- e
 	}()
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
-waitForRejoin:
-	for {
-		select {
-		case err := <-done:
-			t.Fatalf("rejoin completed while observation held admission: %v", err)
-		case <-deadline.C:
-			t.Fatal("rejoin did not begin waiting for admission")
-		default:
-		}
-		probeRelease, probeErr := federationcoord.TryBeginSync(t.Context(), federationcoord.Key(store.InstanceUID(), project.ID), store, project.ID)
-		if probeErr != nil {
-			require.ErrorIs(t, probeErr, federationcoord.ErrBusy)
-			break waitForRejoin
-		}
-		probeRelease()
-		runtime.Gosched()
+	select {
+	case err := <-done:
+		t.Fatalf("rejoin completed while observation held admission: %v", err)
+	case <-wrapped.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("rejoin did not reach the project lock")
 	}
 	adoptionRun(t, store, project, true)
 	release()
@@ -179,6 +168,13 @@ waitForRejoin:
 	case <-time.After(5 * time.Second):
 		t.Fatal("rejoin did not proceed after observation")
 	}
+}
+
+func TestRejoinHoldsAdmissionDuringProbe(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProjectWithUID(t.Context(), "spoke-project", replicaHubProjectUID)
+	require.NoError(t, err)
+	adoptionRun(t, store, project, true)
 	entered, resume := make(chan struct{}), make(chan struct{})
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		close(entered)
@@ -187,8 +183,9 @@ waitForRejoin:
 		_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, project.UID)
 	}))
 	t.Cleanup(hub.Close)
-	params = rejoinParams(project, hub.URL)
+	params := rejoinParams(project, hub.URL)
 	params.HubClientFactory = func(context.Context, config.FederationCredential) (*http.Client, error) { return hub.Client(), nil }
+	done := make(chan error, 1)
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)

@@ -3,7 +3,6 @@ package federation_test
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federation"
 )
@@ -253,7 +253,7 @@ func (s baseCredentialStore) DeleteFederationCredential(
 }
 
 type failAdoptionLookupAfterRekeyStore struct {
-	db.Storage
+	dbtest.TransactionalStore
 	mu          sync.Mutex
 	credentials *fakeCredentialStore
 	localUID    string
@@ -264,24 +264,12 @@ type failAdoptionLookupAfterRekeyStore struct {
 type replicaCallKindContextKey struct{}
 
 type orderedReplicaServiceStore struct {
-	db.Storage
+	dbtest.TransactionalStore
 	hubProjectUID string
 	mu            sync.Mutex
 	seen          map[string]bool
 	arrived       map[string]chan struct{}
 	release       map[string]chan struct{}
-}
-
-func (s *orderedReplicaServiceStore) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
-	return s.Storage.(interface {
-		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
-	}).BeginTx(ctx, opts)
-}
-
-func (s *failAdoptionLookupAfterRekeyStore) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
-	return s.Storage.(interface {
-		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
-	}).BeginTx(ctx, opts)
 }
 
 func newOrderedReplicaServiceStore(
@@ -294,7 +282,7 @@ func newOrderedReplicaServiceStore(
 		release[kind] = make(chan struct{})
 	}
 	return &orderedReplicaServiceStore{
-		Storage: store, hubProjectUID: hubUID,
+		TransactionalStore: dbtest.TransactionalStore{Storage: store}, hubProjectUID: hubUID,
 		seen: make(map[string]bool), arrived: arrived, release: release,
 	}
 }
@@ -1112,7 +1100,7 @@ func TestReconcileMappingAtomicRekeyCrashBeforeAdoptionReusesHubKeyOnRestart(t *
 	require.NoError(t, err)
 	credentials := newFakeCredentialStore()
 	store := &failAdoptionLookupAfterRekeyStore{
-		Storage: baseStore, credentials: credentials,
+		TransactionalStore: dbtest.TransactionalStore{Storage: baseStore}, credentials: credentials,
 		localUID: project.UID, hubUID: hubProjectUID,
 	}
 	manual := managedCredential()
