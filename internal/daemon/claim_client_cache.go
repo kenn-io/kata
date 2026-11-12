@@ -39,7 +39,7 @@ func (c *claimClientCache) get(ctx context.Context, cfg ServerConfig, binding db
 		return entry.client, entry.credential, nil
 	}
 	client, credential, err := claimForwardClient(ctx, cfg, binding)
-	if err != nil {
+	if err != nil || client.transportErr != nil {
 		return client, credential, err
 	}
 	c.entries[key] = claimClientEntry{client: client, credential: credential}

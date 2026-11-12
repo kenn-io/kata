@@ -2,14 +2,67 @@ package daemon
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
+
+func TestClaimClientCache_LocalHubRecovers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix sockets unsupported on windows")
+	}
+	store := openClaimGateHelperDB(t)
+	project, _ := createClaimGateHelperIssue(t, store)
+	home := os.Getenv("KATA_HOME")
+	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	binding := db.FederationBinding{ProjectID: project.ID, HubURL: "http://kata.invalid", HubProjectID: 42}
+	require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{HubURL: binding.HubURL, HubProjectID: 42, Token: "synthetic-token"}))
+	cache := &claimClientCache{}
+	cfg := ServerConfig{DB: store}
+	first, _, err := cache.get(t.Context(), cfg, binding)
+	require.NoError(t, err)
+	_, err = first.ClaimStatus(t.Context(), 42, "first")
+	require.Error(t, err)
+
+	sock := filepath.Join(ns.SocketDir, "daemon.sock")
+	ln, err := new(net.ListenConfig).Listen(t.Context(), "unix", sock)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ping":
+			_ = json.MarshalWrite(w, map[string]any{"ok": true, "service": "kata", "version": "test", "pid": os.Getpid()})
+		case "/api/v1/projects/42/issues/second/lease":
+			_ = json.MarshalWrite(w, api.ClaimStatusBody{})
+		default:
+			http.NotFound(w, r)
+		}
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Shutdown(context.WithoutCancel(t.Context())) })
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "unix", Address: sock, Metadata: map[string]string{"db_path": filepath.Join(home, "kata.db")}, StartedAt: time.Now().UTC()})
+	require.NoError(t, err)
+	second, _, err := cache.get(t.Context(), cfg, binding)
+	require.NoError(t, err)
+	_, err = second.ClaimStatus(t.Context(), 42, "second")
+	require.NoError(t, err)
+}
 
 type batchTargetFailureStore struct {
 	db.Storage

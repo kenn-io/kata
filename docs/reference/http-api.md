@@ -269,11 +269,13 @@ Batch moves accept up to 50 items per request. Use the single-issue move endpoin
 
 A single-issue move preview or write to the issue's current project returns `same_project`. A stale `If-Match` revision is refused.
 
+`GET /api/v1/issues/{uid}?no_claim_refresh=true` returns cached claim status without refreshing it from the hub.
+
 ### Version history
 
 | Version | Change |
 | --- | --- |
-| `0.45.0` | Adds `POST /api/v1/issues/actions/move` for independent batch moves with per-item outcomes. A fresh request with a stale `expected_revision` is refused even if an earlier move succeeded; refresh the revision before retrying. |
+| `0.45.0` | Adds `POST /api/v1/issues/actions/move` for independent batch moves with per-item outcomes, and `no_claim_refresh` for issue lookup by UID. A fresh request with a stale `expected_revision` is refused even if an earlier move succeeded; refresh the revision before retrying. |
 | `0.44.0` | Attachment routes return `503 docbank_key_unavailable` instead of `502 docbank_unauthorized` when the daemon cannot resolve its own Docbank key. Health diagnostics add a `docbank` block. |
 | `0.43.0` | Adds the daemon-owned MCP Events routes `POST /api/v1/mcp-events/list`, `POST /api/v1/mcp-events/subscribe`, `POST /api/v1/mcp-events/unsubscribe`, and `GET /api/v1/mcp-events/subscriptions` (status). Subscribe and unsubscribe arguments name either a non-empty `project_uids` list or `all_projects: true`. Failures return an `mcp_events` error whose `data` carries `mcp_code` and `mcp_data`. Older daemons do not serve these routes. Both issue list routes accept `compact=true`. |
 | `0.42.0` | Adds daemon-wide local embeddings setup and status at `GET` and `POST /embeddings/local`, and the `X-Kata-Embeddings-Configured` search response header. |
