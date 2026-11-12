@@ -98,7 +98,7 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 		require.NoError(t, err)
 		require.Contains(t, out, "kata health --json")
-		require.Contains(t, logs.String(), "record search by meaning choice")
+		require.Contains(t, logs.String(), "other apps may not pick it up")
 		require.Contains(t, logs.String(), "symlink")
 		cfg, err := config.ReadSearchConfig()
 		require.NoError(t, err)

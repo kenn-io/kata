@@ -224,7 +224,7 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 	}
 	if next.Embeddings.UsesLocal() {
 		if err := embedlocal.RecordChoice(); err != nil {
-			slog.Warn("record search by meaning choice", "err", err)
+			slog.Warn("could not share search by meaning choice; other apps may not pick it up", "err", err)
 		}
 	}
 	return index, nil
