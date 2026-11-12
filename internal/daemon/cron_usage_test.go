@@ -21,7 +21,7 @@ import (
 
 func TestCronUsageReadDoesNotChangeRunOrEvents(t *testing.T) {
 	env := testenv.New(t)
-	refresh := assertCronUsageReadDoesNotChangeRunOrEvents(t, t.Context(), env.DB)
+	refresh := assertCronUsageReadDoesNotChangeRunOrEvents(t.Context(), t, env.DB)
 	// The handler check uses the real service clock; service timing is tested separately.
 	timer := time.NewTimer(11 * time.Second)
 	defer timer.Stop()
@@ -33,7 +33,7 @@ func TestCronUsageReadDoesNotChangeRunOrEvents(t *testing.T) {
 	refresh()
 }
 
-func assertCronUsageReadDoesNotChangeRunOrEvents(t *testing.T, ctx context.Context, store db.Storage) func() {
+func assertCronUsageReadDoesNotChangeRunOrEvents(ctx context.Context, t *testing.T, store db.Storage) func() {
 	t.Helper()
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)

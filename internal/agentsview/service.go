@@ -14,15 +14,20 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// ErrTotalOverflow indicates that the total cannot fit in an int64.
 var ErrTotalOverflow = errors.New("usage total cannot be represented")
+
+// ErrDisabled indicates that no usage source is enabled.
 var ErrDisabled = errors.New("usage source disabled")
 
+// Total describes the aggregate cost and completeness of a run.
 type Total struct {
 	State            string `json:"state" enum:"complete,partial,unknown,no_sessions"`
 	CostMicrodollars *int64 `json:"cost_microdollars,omitempty"`
 	Estimated        bool   `json:"estimated"`
 }
 
+// RunSession combines a recorded session with its live usage.
 type RunSession struct {
 	Agent     string  `json:"agent"`
 	SessionID string  `json:"session_id"`
@@ -31,6 +36,7 @@ type RunSession struct {
 	SessionUsage
 }
 
+// RunUsage contains the live usage for a recorded run.
 type RunUsage struct {
 	RunUID string `json:"run_uid"`
 	Total
@@ -98,6 +104,7 @@ type Service struct {
 	slots   chan struct{}
 }
 
+// NewService creates a usage service for the resolved configuration.
 func NewService(cfg config.ResolvedAgentsView, trustPrivate bool) (*Service, error) {
 	s := &Service{cfg: cfg, slots: make(chan struct{}, 4)}
 	if cfg.Enabled() {
@@ -110,6 +117,7 @@ func NewService(cfg config.ResolvedAgentsView, trustPrivate bool) (*Service, err
 	return s, nil
 }
 
+// Enabled reports whether a usage source is active.
 func (s *Service) Enabled() bool { s.mu.RLock(); defer s.mu.RUnlock(); return s.current != nil }
 
 // Reload swaps credentials and clears cached facts only for the same targets.
@@ -132,6 +140,7 @@ func (s *Service) Reload(cfg config.ResolvedAgentsView, trustPrivate bool) (bool
 	return true, nil
 }
 
+// Usage looks up and aggregates the recorded sessions for a run.
 func (s *Service) Usage(ctx context.Context, uid string, summary cron.Summary, refresh bool) (RunUsage, error) {
 	s.mu.RLock()
 	gen, cfg := s.current, s.cfg
@@ -144,7 +153,7 @@ func (s *Service) Usage(ctx context.Context, uid string, summary cron.Summary, r
 	result := RunUsage{RunUID: uid, FetchedAt: time.Now().UTC(), Sessions: []RunSession{}}
 	result.SessionsIncomplete = summary.SessionsIncomplete != nil && *summary.SessionsIncomplete
 	if summary.Sessions == nil || len(*summary.Sessions) == 0 {
-		result.Total.State = "no_sessions"
+		result.State = "no_sessions"
 		return result, nil
 	}
 	entries := *summary.Sessions
@@ -213,10 +222,7 @@ func (g *generation) lookup(ctx context.Context, slots chan struct{}, agent, id 
 			if old, found := g.cache.Peek(key); found && old.fact.State == "not_found" {
 				misses = old.misses + 1
 			}
-			ttl = time.Minute << min(misses, 4)
-			if ttl > 15*time.Minute {
-				ttl = 15 * time.Minute
-			}
+			ttl = min(time.Minute<<min(misses, 4), 15*time.Minute)
 		case "unauthorized", "unavailable":
 			ttl = 15 * time.Second
 		}

@@ -68,7 +68,7 @@ func TestAgentsViewDaemonStartupAndReloadLogs(t *testing.T) {
 			configPath := filepath.Join(home, "config.toml")
 			require.NoError(t, os.WriteFile(configPath, []byte(tc.initial), 0o600))
 			logfile := filepath.Join(home, "fixture.log")
-			log, err := os.Create(logfile)
+			log, err := os.Create(logfile) //nolint:gosec // logfile is inside the test temporary home
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = log.Close() })
 			process := exec.CommandContext(context.WithoutCancel(t.Context()), binary, "daemon", "start", "--foreground", "--listen", "127.0.0.1:0") //nolint:gosec // isolated test-built daemon
@@ -85,7 +85,10 @@ func TestAgentsViewDaemonStartupAndReloadLogs(t *testing.T) {
 					t.Error("daemon did not exit")
 				}
 			})
-			readLog := func() string { data, _ := os.ReadFile(logfile); return string(data) }
+			readLog := func() string {
+				data, _ := os.ReadFile(logfile) //nolint:gosec // logfile is inside the test temporary home
+				return string(data)
+			}
 			require.Eventually(t, func() bool {
 				if !strings.Contains(readLog(), tc.startup) {
 					return false
@@ -93,7 +96,7 @@ func TestAgentsViewDaemonStartupAndReloadLogs(t *testing.T) {
 				status := exec.CommandContext(t.Context(), binary, "daemon", "status") //nolint:gosec // isolated test-built CLI
 				status.Env = env
 				return status.Run() == nil
-			}, 20*time.Second, 50*time.Millisecond) //nolint:kennlint // external daemon readiness and logs
+			}, 20*time.Second, 50*time.Millisecond) //nolint:kennlint // sleeptest: external daemon readiness cannot run in a synctest bubble
 			if tc.name == "off" {
 				return
 			}
@@ -105,7 +108,7 @@ func TestAgentsViewDaemonStartupAndReloadLogs(t *testing.T) {
 			require.NoError(t, err, "%s", output)
 			require.Eventually(t, func() bool {
 				return strings.Contains(readLog(), "AgentsView target or enabled state changed; restart required")
-			}, 10*time.Second, 50*time.Millisecond) //nolint:kennlint // asynchronous daemon reload log
+			}, 10*time.Second, 50*time.Millisecond) //nolint:kennlint // sleeptest: external daemon reload cannot run in a synctest bubble
 		})
 	}
 }

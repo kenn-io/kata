@@ -1436,7 +1436,11 @@ func runDaemonProcess(
 	}()
 	if startup.UsageConfig.Enabled() {
 		origin, _ := url.Parse(startup.UsageConfig.URL)
-		daemonLog.Printf("AgentsView usage: on (%s)", origin.Host)
+		host := ""
+		if origin != nil {
+			host = origin.Host
+		}
+		daemonLog.Printf("AgentsView usage: on (%s)", host)
 	} else {
 		daemonLog.Printf("AgentsView usage: off")
 	}

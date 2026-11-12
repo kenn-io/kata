@@ -21,6 +21,7 @@ type AgentsViewConfig struct {
 // ResolvedAgentsView contains validated targets and a startup-resolved secret.
 type ResolvedAgentsView struct{ URL, BrowserURL, Token string }
 
+// Enabled reports whether a usage source is configured.
 func (c ResolvedAgentsView) Enabled() bool { return c.URL != "" }
 
 // Resolve leaves a partially configured, disabled source untouched, including
@@ -53,8 +54,7 @@ func (c AgentsViewConfig) Resolve(ctx context.Context, trustPrivate bool) (Resol
 		source = "token_file"
 	}
 	if err != nil {
-		var credentialErr *CredentialSourceError
-		if errors.As(err, &credentialErr) {
+		if credentialErr, ok := errors.AsType[*CredentialSourceError](err); ok {
 			return ResolvedAgentsView{}, fmt.Errorf("[agentsview] %w", &CredentialSourceError{Source: source, Reason: credentialErr.Reason})
 		}
 		return ResolvedAgentsView{}, fmt.Errorf("[agentsview] %w", &CredentialSourceError{Source: source, Reason: "cannot resolve credential"})

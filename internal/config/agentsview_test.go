@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -17,9 +16,9 @@ func TestAgentsViewConfigDisabledDoesNotResolveSecret(t *testing.T) {
 func TestAgentsViewCredentialSelectorsAreNotDisclosed(t *testing.T) {
 	selector := "fixture-selector-secret"
 	// Neither fragment of the invalid value, nor its escaped form, may be echoed.
-	token := "leak-first\r\nleak-second"
+	token := "leak-first\r\nleak-second" //nolint:gosec // synthetic invalid header fixture
 	file := filepath.Join(t.TempDir(), selector)
-	require.NoError(t, os.WriteFile(file, []byte(token), 0o600))
+	writePrivateCredentialFixture(t, file, []byte(token))
 	t.Setenv(selector, token)
 	for _, tc := range []struct {
 		name         string
@@ -47,7 +46,7 @@ func TestAgentsViewCredentialSelectorsAreNotDisclosed(t *testing.T) {
 func TestAgentsViewConfigResolve(t *testing.T) {
 	t.Setenv("EXAMPLE_AGENTSVIEW_TOKEN", "fixture-token")
 	file := filepath.Join(t.TempDir(), "token")
-	require.NoError(t, os.WriteFile(file, []byte("fixture-token\n"), 0o600))
+	writePrivateCredentialFixture(t, file, []byte("fixture-token\n"))
 	for _, tc := range []struct {
 		name        string
 		cfg         AgentsViewConfig
@@ -57,9 +56,9 @@ func TestAgentsViewConfigResolve(t *testing.T) {
 		{"environment", AgentsViewConfig{URL: "https://agentsview.example/archive", BrowserURL: "https://browser.example", TokenEnv: "EXAMPLE_AGENTSVIEW_TOKEN"}, "https://browser.example", false},
 		{"file and default browser", AgentsViewConfig{URL: "https://agentsview.example/archive", TokenFile: file}, "https://agentsview.example/archive", false},
 		{"public HTTP", AgentsViewConfig{URL: "http://public.example"}, "", true},
-		{"userinfo", AgentsViewConfig{URL: "https://user:secret@agentsview.example"}, "", true},
+		{"userinfo", AgentsViewConfig{URL: "https://user:secret@agentsview.example"}, "", true}, //nolint:gosec // synthetic rejected URL
 		{"query", AgentsViewConfig{URL: "https://agentsview.example?token=secret"}, "", true},
-		{"browser userinfo", AgentsViewConfig{URL: "https://agentsview.example", BrowserURL: "https://user:secret@browser.example"}, "", true},
+		{"browser userinfo", AgentsViewConfig{URL: "https://agentsview.example", BrowserURL: "https://user:secret@browser.example"}, "", true}, //nolint:gosec // synthetic rejected URL
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := tc.cfg.Resolve(t.Context(), false)

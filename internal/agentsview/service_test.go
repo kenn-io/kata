@@ -19,7 +19,7 @@ import (
 )
 
 func TestAggregateCanonicalAndOverflow(t *testing.T) {
-	zero, amount, max := int64(0), int64(42), int64(math.MaxInt64)
+	zero, amount, maxValue := int64(0), int64(42), int64(math.MaxInt64)
 	cases := []struct {
 		name                string
 		sessions            []SessionUsage
@@ -31,9 +31,9 @@ func TestAggregateCanonicalAndOverflow(t *testing.T) {
 		{name: "unknown", sessions: []SessionUsage{{State: "not_found"}}, state: "unknown"},
 		{name: "zero", sessions: []SessionUsage{{State: "priced", CanonicalSessionID: "a", CostMicrodollars: &zero}}, state: "complete", total: &zero},
 		{name: "partial", sessions: []SessionUsage{{State: "priced", CanonicalSessionID: "a", CostMicrodollars: &amount, CostSource: "mixed"}, {State: "not_found"}}, state: "partial", total: &amount, estimated: true},
-		{name: "duplicate maximum", sessions: []SessionUsage{{State: "priced", CanonicalSessionID: "a", CostMicrodollars: &max}, {State: "priced", CanonicalSessionID: "a", CostMicrodollars: &max}}, state: "complete", total: &max},
+		{name: "duplicate maximum", sessions: []SessionUsage{{State: "priced", CanonicalSessionID: "a", CostMicrodollars: &maxValue}, {State: "priced", CanonicalSessionID: "a", CostMicrodollars: &maxValue}}, state: "complete", total: &maxValue},
 		{name: "incomplete", sessions: []SessionUsage{{State: "priced", CanonicalSessionID: "a", CostMicrodollars: &amount, CostSource: "computed"}}, incomplete: true, state: "partial", total: &amount, estimated: true},
-		{name: "overflow", sessions: []SessionUsage{{State: "priced", CanonicalSessionID: "a", CostMicrodollars: &max}, {State: "priced", CanonicalSessionID: "b", CostMicrodollars: &amount}}, overflow: true},
+		{name: "overflow", sessions: []SessionUsage{{State: "priced", CanonicalSessionID: "a", CostMicrodollars: &maxValue}, {State: "priced", CanonicalSessionID: "b", CostMicrodollars: &amount}}, overflow: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -197,7 +197,7 @@ func TestCacheBoundedEviction(t *testing.T) {
 	slots := make(chan struct{}, 4)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	for i := 0; i < 2049; i++ {
+	for i := range 2049 {
 		gen.lookup(ctx, slots, "example", fmt.Sprint(i), false)
 	}
 	require.Equal(t, 2048, gen.cache.Len())
@@ -403,7 +403,7 @@ func TestUsageRequestBudgetExpiresWhileQueued(t *testing.T) {
 			calls.Add(1)
 			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(notFoundBody)), Header: make(http.Header)}, nil
 		})
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			service.slots <- struct{}{}
 		}
 		sessions := []cron.Session{{Agent: "example", SessionID: "id"}}
@@ -415,7 +415,7 @@ func TestUsageRequestBudgetExpiresWhileQueued(t *testing.T) {
 		require.Zero(t, calls.Load())
 		// Finish the expired flight while the queue is still saturated.
 		synctest.Wait()
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			<-service.slots
 		}
 		result, err = service.Usage(t.Context(), "run", cron.Summary{Sessions: &sessions}, false)

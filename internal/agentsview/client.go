@@ -25,6 +25,7 @@ type SessionUsage struct {
 	Candidates         []string `json:"candidates,omitempty"`
 }
 
+// Client reads usage from a credential-pinned AgentsView endpoint.
 type Client struct {
 	base string
 	http *http.Client
