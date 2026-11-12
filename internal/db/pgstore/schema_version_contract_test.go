@@ -30,7 +30,7 @@ func schemaDigest(t *testing.T, catalog [][4]string, manifest []any, migrations 
 }
 
 func schemaManifest() []any {
-	return []any{canonicalTableColumns, optionalVectorTableColumns, canonicalIndexes, optionalVectorIndexes, canonicalTriggers, canonicalFunctions, []string{canonicalColumnFingerprint, canonicalConstraintFingerprint, canonicalIndexFingerprint, vectorColumnFingerprint, vectorConstraintFingerprint, vectorIndexFingerprint, canonicalTriggerFingerprint, canonicalFunctionFingerprint, canonicalTextSearchFingerprint}}
+	return []any{canonicalSchemaSQL, vectorSchemaSQL, canonicalTableColumns, optionalVectorTableColumns, canonicalIndexes, optionalVectorIndexes, canonicalTriggers, canonicalFunctions, []string{canonicalColumnFingerprint, canonicalConstraintFingerprint, canonicalIndexFingerprint, vectorColumnFingerprint, vectorConstraintFingerprint, vectorIndexFingerprint, canonicalTriggerFingerprint, canonicalFunctionFingerprint, canonicalTextSearchFingerprint}}
 }
 
 func sqliteCatalog(t *testing.T) [][4]string {
@@ -40,7 +40,7 @@ func sqliteCatalog(t *testing.T) [][4]string {
 	defer func() { require.NoError(t, store.Close()) }()
 	rows, err := store.QueryContext(t.Context(), `SELECT type, name, tbl_name, COALESCE(sql, '') FROM sqlite_master ORDER BY type, name, tbl_name, sql`)
 	require.NoError(t, err)
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var catalog [][4]string
 	for rows.Next() {
 		var row [4]string
@@ -72,7 +72,7 @@ func checkMarkers(dir string, version int, digest string, base []string) error {
 		if entry.IsDir() || m == nil {
 			return fmt.Errorf("invalid schema marker name %s", name)
 		}
-		data, err := os.ReadFile(filepath.Join(dir, name))
+		data, err := os.ReadFile(filepath.Join(dir, name)) //nolint:gosec // G304: names come from the marker directory.
 		if err != nil {
 			return err
 		}
@@ -121,7 +121,7 @@ func checkMarkers(dir string, version int, digest string, base []string) error {
 
 func baseSchemaMarkers(t *testing.T, dir, ref string, env []string) ([]string, error) {
 	t.Helper()
-	cmd := exec.CommandContext(t.Context(), "git", "ls-tree", "-r", "--name-only", ref, "internal/db/testdata/schema-contracts/")
+	cmd := exec.CommandContext(t.Context(), "git", "ls-tree", "-r", "--name-only", ref, "internal/db/testdata/schema-contracts/") //nolint:gosec // G204: the ref is supplied by the developer or CI.
 	cmd.Dir, cmd.Env = dir, env
 	out, err := cmd.Output()
 	if err != nil {
@@ -197,10 +197,13 @@ func TestSchemaVersionMarkers(t *testing.T) {
 }
 
 func TestSchemaVersionDigestInputs(t *testing.T) {
+	require.Contains(t, schemaManifest(), any(canonicalSchemaSQL))
+	require.Contains(t, schemaManifest(), any(vectorSchemaSQL))
 	catalog := [][4]string{{"table", "example", "example", "CREATE TABLE example (id TEXT)"}}
 	manifest := []any{map[string]string{"example": "id"}, []string{"fingerprint"}}
 	migrations := []Migration{{FromVersion: 49, ToVersion: 50, Name: "000050_example.up.sql", SQL: "CREATE TABLE example (id TEXT)"}}
 	original := schemaDigest(t, catalog, manifest, migrations)
+	require.NotEqual(t, schemaDigest(t, catalog, []any{"CREATE TABLE t (v INTEGER DEFAULT 1)"}, migrations), schemaDigest(t, catalog, []any{"CREATE TABLE t (v INTEGER DEFAULT 2)"}, migrations))
 	require.NotEqual(t, original, schemaDigest(t, [][4]string{{"table", "example", "example", "CREATE TABLE example (id INTEGER)"}}, manifest, migrations))
 	require.NotEqual(t, original, schemaDigest(t, catalog, []any{map[string]string{"example": "other"}, []string{"fingerprint"}}, migrations))
 	require.NotEqual(t, original, schemaDigest(t, catalog, manifest, []Migration{{FromVersion: 49, ToVersion: 50, Name: "000050_example.up.sql", SQL: "changed"}}))
@@ -211,7 +214,7 @@ func TestSchemaVersionGitBase(t *testing.T) {
 	env := append(gitenv.StripAll(os.Environ()), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+filepath.Join(t.TempDir(), "config"))
 	git := func(args ...string) string {
 		t.Helper()
-		cmd := exec.CommandContext(t.Context(), "git", args...)
+		cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // G204: arguments are fixed test fixture commands.
 		cmd.Dir, cmd.Env = repo, env
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, string(output))
