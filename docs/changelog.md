@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,7 +9,18 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Use `kata daemon status` in scripts to check the selected daemon's readiness.
+  It exits 0 only for a ready selected daemon. Stopped or unavailable
+  selections and the `version_mismatch` state exit 7, an unknown named daemon
+  exits 3, and other invalid routing configuration exits 1. Status still prints
+  its diagnostics; previously these cases exited 0.
+
+- Continue an incomplete lexical search by copying the command printed with its results.
+
+- Recover automatically when the web UI's first daemon roster, workspace, or teams read fails briefly. Retry and Refresh teams remain available after persistent failures or refusals.
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
+- Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. Kata shares its choice after setup succeeds and reports when sharing cannot be confirmed. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index

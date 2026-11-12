@@ -25,7 +25,7 @@ func (m *Model) activeCredentialExpiryCmd() tea.Cmd {
 		return nil
 	}
 	gen := m.connGen
-	return tea.Tick(delay, func(time.Time) tea.Msg { return activeCredentialExpiredMsg{connGen: gen, expiresAt: expiry} })
+	return tickAfter(delay, func(time.Time) tea.Msg { return activeCredentialExpiredMsg{connGen: gen, expiresAt: expiry} })
 }
 
 // actorlessConnectionLabel explains read-only access without an account.

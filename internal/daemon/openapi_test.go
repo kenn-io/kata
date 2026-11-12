@@ -521,9 +521,8 @@ func TestOpenAPIDocumentArrayQueryParamsExplode(t *testing.T) {
 }
 
 // TestResponseBodyAllowsAdditionalProperties pins the response side of the
-// documented compatibility policy (docs/reference/http-api.md): additive
-// optional response fields may appear without an api_schema_version bump, so a
-// response schema must not reject unknown fields. HealthResponseBody is a pure
+// documented compatibility policy (docs/reference/http-api.md): clients must
+// tolerate unknown fields. HealthResponseBody is a pure
 // response body, so it must permit additional properties.
 func TestResponseBodyAllowsAdditionalProperties(t *testing.T) {
 	doc := OpenAPIDocument()

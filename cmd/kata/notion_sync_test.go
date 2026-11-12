@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -203,6 +205,50 @@ type cliNotionTransport func(*http.Request) (*http.Response, error)
 
 func (f cliNotionTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+// cliSyncPacing is a sync client's clock. It moves only when the client paces
+// a request, so paced reads cost no wall time, except one real wait per held
+// command: that keeps a daemon response pending past the CLI's shortened
+// KATA_HTTP_TIMEOUT, which only the long-running client survives.
+type cliSyncPacing struct {
+	mu   sync.Mutex
+	now  time.Time
+	hold atomic.Bool
+}
+
+func newCLISyncPacing() *cliSyncPacing { return &cliSyncPacing{now: time.Now()} }
+
+func (p *cliSyncPacing) Now() time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.now
+}
+
+func (p *cliSyncPacing) Wait(ctx context.Context, delay time.Duration) error {
+	if p.hold.CompareAndSwap(true, false) {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	p.mu.Lock()
+	p.now = p.now.Add(delay)
+	p.mu.Unlock()
+	return ctx.Err()
+}
+
+// runHeldCLI runs a command whose daemon response waits out one real pacing
+// delay, and fails if the command finished without pacing a read.
+func (p *cliSyncPacing) runHeldCLI(t *testing.T, env *testenv.Env, dir string, args ...string) string {
+	t.Helper()
+	p.hold.Store(true)
+	out := runCLI(t, env, dir, args...)
+	require.False(t, p.hold.Load(), "%v must wait for a paced upstream read", args)
+	return out
+}
+
 // This acceptance flow exercises the real CLI, daemon, Notion HTTP client,
 // adapter, runner, and temporary SQLite store, with only upstream HTTP replaced.
 func TestNotionSyncReadOnlyAcceptance(t *testing.T) {
@@ -276,19 +322,20 @@ func TestNotionSyncReadOnlyAcceptance(t *testing.T) {
 		require.NoError(t, err)
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(string(raw))), Request: r}, nil
 	})
-	client := notionsync.NewClient(notionsync.ClientConfig{Transport: transport, LookupEnv: func(string) (string, bool) { return token, true }})
+	pacing := newCLISyncPacing()
+	client := notionsync.NewClient(notionsync.ClientConfig{Transport: transport, LookupEnv: func(string) (string, bool) { return token, true }, Now: pacing.Now, Wait: pacing.Wait})
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.NotionSyncFetcher = client })
 	dir, projectID := initLocalBoundWorkspace(t, env, "spoke-project")
 	// Enable must also wait for paced Notion reads beyond the ordinary CLI timeout.
 	t.Setenv("KATA_HTTP_TIMEOUT", "100ms")
-	enable := runCLI(t, env, dir, "sync", "notion", "enable", "--data-source", cliNotionSource, "--done-status", "Delivered")
+	enable := pacing.runHeldCLI(t, env, dir, "sync", "notion", "enable", "--data-source", cliNotionSource, "--done-status", "Delivered")
 	require.NotContains(t, enable, token)
 	binding, err := env.DB.IssueSyncBindingByProject(t.Context(), projectID)
 	require.NoError(t, err)
 	require.Equal(t, "Notion data source "+cliNotionSource, binding.DisplayName)
 	sourceTitle.Store([]any{map[string]any{"plain_text": "Tasks"}})
 	// Once also uses the long-running daemon client.
-	require.Contains(t, runCLI(t, env, dir, "sync", "notion", "once"), "created=1")
+	require.Contains(t, pacing.runHeldCLI(t, env, dir, "sync", "notion", "once"), "created=1")
 	issues, err := env.DB.ListIssues(t.Context(), db.ListIssuesParams{ProjectID: projectID})
 	require.NoError(t, err)
 	require.Len(t, issues, 1)

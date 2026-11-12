@@ -259,8 +259,12 @@ func TestApplyCodexHooks_KeepsTrackedNestedAndLinkedWorkspace(t *testing.T) {
 			changed, notes, err := applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			assert.True(t, changed)
-			want := expectedCodexSessionStartGroups()
-			assert.Equal(t, []any{want[1], want[0]}, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
+			// The fixture starts with only the contract hook, so it stays first.
+			want := []any{
+				map[string]any{"matcher": codexContractSessionStartMatcher, "hooks": []any{expectedCodexContractHandler()}},
+				map[string]any{"matcher": codexSessionStartMatcher, "hooks": []any{expectedCodexHandler()}},
+			}
+			assert.Equal(t, want, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
 			assert.Equal(t, []string{"kept workspace contract hook: .codex/hooks.json is tracked; " + userPath + " also injects it"}, notes)
 		})
 	}

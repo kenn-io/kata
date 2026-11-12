@@ -92,6 +92,7 @@ func TestSearchFTS_PageBudget(t *testing.T) {
 			_, err = tx.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
  INSERT INTO issues(uid,project_id,short_id,title,author) SELECT printf('%026d',x),?,printf('%08d',x),'ordinary task','tester' FROM n`, commentProject)
 			require.NoError(t, err)
+			insertComment := prepareSeed(t, tx, `INSERT INTO comments(uid,issue_id,author,body) VALUES(?,?,'tester',?)`)
 			for n := range tc.comments {
 				body := "login browser safari timeout"
 				id := issue.ID + 1 + int64(n%300)
@@ -104,7 +105,7 @@ func TestSearchFTS_PageBudget(t *testing.T) {
 				if tc.interleaved && (n == 0 || n == tc.comments-1) {
 					id = issue.ID
 				}
-				_, err = tx.ExecContext(ctx, `INSERT INTO comments(uid,issue_id,author,body) VALUES(?,?,'tester',?)`, fmt.Sprintf("%026d", n+1), id, body)
+				_, err = insertComment.ExecContext(ctx, fmt.Sprintf("%026d", n+1), id, body)
 				require.NoError(t, err)
 			}
 			require.NoError(t, tx.Commit())
