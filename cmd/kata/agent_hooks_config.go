@@ -499,7 +499,7 @@ func planOwnedAgentHookSnapshot(agent agenthook.Agent, path string, original []b
 			return plan, nil
 		}
 	}
-	staged, restore, err := protectAgentHookCommands(agent, original, current, desiredEntries, kind, marker)
+	staged, restore, err := protectAgentHookCommands(agent, original, current, desiredEntries, kind, marker, opts != nil)
 	if err != nil {
 		return plan, err
 	}
@@ -526,7 +526,7 @@ func planOwnedAgentHookSnapshot(agent agenthook.Agent, path string, original []b
 	return plan, nil
 }
 
-func protectAgentHookCommands(agent agenthook.Agent, data []byte, entries, desired []agentHookEntry, kind agentHookKind, marker string) ([]byte, func([]byte) ([]byte, error), error) {
+func protectAgentHookCommands(agent agenthook.Agent, data []byte, entries, desired []agentHookEntry, kind agentHookKind, marker string, installing bool) ([]byte, func([]byte) ([]byte, error), error) {
 	// Collision checks operate on decoded scalars: JSON/YAML escapes can conceal
 	// a token in the original bytes that would otherwise corrupt unrelated data.
 	token, err := agentHookProtectionToken(agent, data)
@@ -590,6 +590,17 @@ func protectAgentHookCommands(agent agenthook.Agent, data []byte, entries, desir
 			} else {
 				handler["command"] = marker
 			}
+		}
+	}
+	if installing {
+		for _, entry := range slices.Backward(entries) {
+			if entry.GroupIndex < 0 || classifyAgentHookHandlerFromEntry(entry) != kind || sameAgentHookGroupBehavior(entry.GroupFields, nil) {
+				continue
+			}
+			groups := hooks[entry.Event].([]any)
+			group := groups[entry.GroupIndex].(map[string]any)
+			handlers := group["hooks"].([]any)
+			group["hooks"] = append(handlers[:entry.HandlerIndex], handlers[entry.HandlerIndex+1:]...)
 		}
 	}
 	staged, err := marshalAgentHookJSON(document)

@@ -54,27 +54,37 @@ func agentSetupItem(name string, warn func(string), output io.Writer) agentsetup
 		cmd.SetArgs([]string{name})
 		return cmd.Execute()
 	}, Check: func(ctx context.Context) (agentsetup.Status, error) {
-		opts, _, err := agentSetupOptions(name)
-		if err != nil {
-			return agentsetup.Status{}, err
-		}
-		plan, err := planAgentSetup(&opts)
-		if err != nil {
-			return agentsetup.Status{}, err
-		}
-		for _, message := range plan.Warnings {
-			warn(message)
-		}
-		if capability, err := lookupAgentHookCapability(name); err == nil && capability.Note != "" {
-			warn(capability.Note)
-		}
-		return checkAgentSetup(ctx, opts, plan)
+		return inspectAgentSetup(ctx, name, warn, false)
 	}}
 }
 
+func inspectAgentSetup(ctx context.Context, name string, warn func(string), contractOnlyOK bool) (agentsetup.Status, error) {
+	opts, _, err := agentSetupOptions(name)
+	if err != nil {
+		return agentsetup.Status{}, err
+	}
+	plan, err := planAgentSetup(&opts)
+	if err != nil {
+		return agentsetup.Status{}, err
+	}
+	if contractOnlyOK && plan.CurrentContract && !plan.CurrentOwnedAttention {
+		opts.Attention = false
+		plan, err = planAgentSetup(&opts)
+		if err != nil {
+			return agentsetup.Status{}, err
+		}
+	}
+	for _, message := range plan.Warnings {
+		warn(message)
+	}
+	if capability, err := lookupAgentHookCapability(name); err == nil && capability.Note != "" {
+		warn(capability.Note)
+	}
+	return checkAgentSetup(ctx, opts, plan)
+}
+
 func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nativeAgentHookPlan) (agentsetup.Status, error) {
-	status := agentsetup.Status{State: agentsetup.StateOK, ConfigPath: opts.ConfigPath}
-	status.ConfigPath = plan.Path
+	status := agentsetup.Status{State: agentsetup.StateOK, ConfigPath: plan.Path}
 	if !agentSetupPlanCurrent(plan) {
 		status.State, status.Reason, status.NextStep = agentsetup.StateMissing, "Kata hooks are not installed", "kata agent setup "+opts.Agent
 		if plan.CurrentContract || plan.CurrentAttentionStart || plan.CurrentAttentionEnd {
@@ -90,7 +100,11 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nati
 	}
 	conflict := agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: opts.ConfigPath, Reason: "Hook inspection found conflicting commands", NextStep: "Inspect hooks in the agent"}
 	counts := map[agentsetup.State]int{}
-	for _, kind := range []agentHookKind{contractHook, attentionStartHook, attentionEndHook} {
+	kinds := []agentHookKind{contractHook}
+	if opts.Attention {
+		kinds = append(kinds, attentionStartHook, attentionEndHook)
+	}
+	for _, kind := range kinds {
 		registration := kitAgentHookRegistration(opts, kind)
 		command, err := agenthook.BuildCommand(registration.Executable, registration.Arguments...)
 		if err != nil {
@@ -115,7 +129,7 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nati
 			status.State, status.Reason, status.NextStep = state, result.Reason, result.NextStep
 			return status, nil
 		}
-		if state != agentsetup.StateOK && (status.State == agentsetup.StateOK || status.State == agentsetup.StateUntrusted || state == agentsetup.StateDisabled) {
+		if state != agentsetup.StateOK && (status.State == agentsetup.StateOK || status.State == agentsetup.StateUntrusted) {
 			status.State, status.Reason, status.NextStep = state, result.Reason, result.NextStep
 		}
 	}
@@ -158,7 +172,11 @@ func newAgentSetupCmd() *cobra.Command {
 			output = cmd.ErrOrStderr()
 		}
 		var warnings []string
-		warn := func(warning string) { warnings = append(warnings, warning) }
+		warn := func(warning string) {
+			if check {
+				warnings = append(warnings, warning)
+			}
+		}
 		items := func(name string) ([]agentsetup.Item, error) {
 			return []agentsetup.Item{agentSetupItem(name, warn, output)}, nil
 		}

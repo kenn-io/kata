@@ -176,11 +176,25 @@ func TestAgentSetupRepairsConditionalExecutableConflict(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(run("agent", "setup", "claude", "--json"), &report))
 	require.Len(t, report.Rows, 1)
-	if report.Rows[0].Reason == "kata hooks use different executables" {
-		repair := exec.CommandContext(t.Context(), "/bin/sh", "-c", report.Rows[0].NextStep) //nolint:gosec // Execute the reported recovery in an isolated home.
-		output, err := repair.CombinedOutput()
-		require.NoError(t, err, string(output))
+	require.Equal(t, "ok", report.Rows[0].State, report.Rows[0].Reason)
+	installed, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var config map[string]any
+	require.NoError(t, json.Unmarshal(installed, &config))
+	groups := config["hooks"].(map[string]any)["SessionStart"].([]any)
+	var contracts int
+	for _, raw := range groups {
+		group := raw.(map[string]any)
+		for _, item := range group["hooks"].([]any) {
+			command := item.(map[string]any)["command"].(string)
+			if strings.Contains(command, "agent-hook contract claude") {
+				_, conditional := group["if"]
+				require.False(t, conditional)
+				contracts++
+			}
+		}
 	}
+	require.Equal(t, 1, contracts)
 	report.Rows = nil
 	require.NoError(t, json.Unmarshal(run("agent", "setup", "claude", "--check", "--json"), &report))
 	require.Len(t, report.Rows, 1)
@@ -328,6 +342,19 @@ func TestAgentSetupPreservesCodexForeignGroupIndex(t *testing.T) {
 	groups := doc["hooks"].(map[string]any)["SessionStart"].([]any)
 	foreign := groups[1].(map[string]any)["hooks"].([]any)[0].(map[string]any)
 	require.Equal(t, "foreign-hook", foreign["command"])
+	var unconditional bool
+	for _, raw := range groups {
+		group := raw.(map[string]any)
+		if _, conditional := group["if"]; conditional {
+			continue
+		}
+		for _, rawHandler := range group["hooks"].([]any) {
+			if strings.Contains(rawHandler.(map[string]any)["command"].(string), "agent-hook contract codex") {
+				unconditional = true
+			}
+		}
+	}
+	require.True(t, unconditional, "contract hook must run without a condition")
 }
 
 func TestAgentSetupSlowCodexChecks(t *testing.T) {
@@ -338,4 +365,13 @@ func TestAgentSetupSlowCodexChecks(t *testing.T) {
 	require.NoError(t, err)
 	check := doctorAgent(t.Context(), "codex")
 	require.Equal(t, "ok", string(check.Status), check.Summary)
+}
+
+func TestAgentSetupEmitsCodexNoteOnce(t *testing.T) {
+	isolateAgentHookHomes(t)
+	installCodexAgentFixture(t, "normal")
+	t.Setenv("TEST_HOOK_TRUST", "trusted")
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "codex")
+	require.NoError(t, err)
+	require.Equal(t, 1, strings.Count(stderr, "Native SessionEnd requires a current Codex runtime"))
 }

@@ -16,6 +16,8 @@ func main() { os.Exit(run(os.Getenv("KATA_TEST_CODEX_AGENT"))) }
 func run(mode string) int {
 	if mode == "slow" {
 		time.Sleep(2 * time.Second)
+	} else if mode == "slower" {
+		time.Sleep(4 * time.Second)
 	}
 	scanner := bufio.NewScanner(os.Stdin)
 	if mode == "hang" {

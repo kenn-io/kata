@@ -117,7 +117,7 @@ kata agent setup
 
 Open Codex and run `/hooks` to trust its hooks. Run `kata agent setup --check` to check readiness.
 
-Name other agents with `kata agent setup gemini pi`, or run `kata agent-hook install` to set up every configured agent.
+Name other agents with `kata agent setup gemini pi`, or run `kata agent-hook install` to set up every configured agent. The `agent-hook install` command and `--contract-only` require Kata 0.19.0 or later.
 User scope is the default. Bare installation discovers configured agents and
 installs their contract plus every available attention direction. Dedicated agent
 configuration directories count as evidence; `.github/` and `.agents/` alone do

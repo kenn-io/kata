@@ -26,6 +26,7 @@ func planKitAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHoo
 	plan.CurrentContract, plan.CurrentAttentionStart, plan.CurrentAttentionEnd = kitAgentHookConfigured(agent, current)
 	for _, entry := range current {
 		plan.CurrentOwnedContract = plan.CurrentOwnedContract || entry.Kind == contractHook
+		plan.CurrentOwnedAttention = plan.CurrentOwnedAttention || entry.Kind == attentionStartHook || entry.Kind == attentionEndHook
 	}
 	data := bytes.Clone(original)
 	dataExists := exists
@@ -195,7 +196,7 @@ func planHermesLifecycleSnapshot(data []byte, kind agentHookKind, opts *agenthoo
 		}
 	}
 	marker := "kata-owned-lifecycle-placeholder"
-	protected, restore, err := protectAgentHookCommands(agenthook.AgentHermes, data, current, desired, kind, marker)
+	protected, restore, err := protectAgentHookCommands(agenthook.AgentHermes, data, current, desired, kind, marker, opts != nil)
 	if err != nil {
 		return nil, err
 	}
