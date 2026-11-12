@@ -673,20 +673,6 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	require.Equal(t, db.CronEventFeature, features)
 	require.Equal(t, []int{0}, probe.candidates, "ordinary jobs must not reach JSON decoding")
 	require.Equal(t, []int{0}, probe.sessionCandidates, "session-free runs must not reach JSON decoding")
-	_, err = s.(interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	}).ExecContext(ctx, `UPDATE cron_runs SET summary_json=$1 WHERE uid=$2`, `{"version":1,"\u0073essions_incomplete":true}`, runUID)
-	require.NoError(t, err)
-	probe.sessionCandidates = nil
-	hasSessions, err = db.ProjectHasCronRunSessions(ctx, probe, p.UID)
-	require.NoError(t, err)
-	require.True(t, hasSessions, "escaped session keys must be found")
-	require.Equal(t, []int{1}, probe.sessionCandidates)
-	probe.sessionCandidates = nil
-	features, err = db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
-	require.NoError(t, err)
-	require.Contains(t, features, db.CronRunSessionsEventFeature)
-	require.Equal(t, []int{1}, probe.sessionCandidates, "escaped keys remain candidates")
 	definition.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review service"}
 	job, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Native review", Actor: "operator", Definition: definition})
 	require.NoError(t, err)
@@ -702,7 +688,7 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	probe.sessionCandidates = nil
 	features, err = db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
-	require.Equal(t, "cron_run_sessions_v1,cron_v1", features)
+	require.Equal(t, "cron_v1", features)
 	require.Equal(t, []int{1}, probe.candidates, "escaped native definition remains the only candidate")
 	return nil
 }

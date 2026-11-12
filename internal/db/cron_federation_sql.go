@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // CronDefinitionSnapshots captures portable definitions and run history
@@ -163,19 +164,6 @@ func PrepareCronAdoption(ctx context.Context, tx *sql.Tx, project Project, targe
 // session evidence. Session-free adoption retains its existing compatibility.
 func RequireAdoptionEventFeatures(advertised string, events []CronEvent) error {
 	hasSessions := false
-	for _, event := range events {
-		features, err := runSessionFeature(event.Type, event.Payload)
-		if err != nil {
-			return err
-		}
-		if features != "" {
-			hasSessions = true
-			break
-		}
-	}
-	if !hasSessions {
-		return nil
-	}
 	required := ""
 	for _, event := range events {
 		features, err := PayloadRequiredFeatures(event.Type, event.Payload)
@@ -183,6 +171,10 @@ func RequireAdoptionEventFeatures(advertised string, events []CronEvent) error {
 			return err
 		}
 		required = MergeEventFeatures(required, features)
+		hasSessions = hasSessions || strings.Contains(","+features+",", ","+CronRunSessionsEventFeature+",")
+	}
+	if !hasSessions {
+		return nil
 	}
 	return RequireEventFeatures(advertised, required)
 }

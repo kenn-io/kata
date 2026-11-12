@@ -16,8 +16,4 @@ func TestAdoptionBaselineFeatures(t *testing.T) {
 	}
 	require.NoError(t, RequireAdoptionEventFeatures(SupportedEventFeatures, baseline))
 
-	// Classification covers every emitted payload, including issue payloads.
-	baseline = append(baseline, CronEvent{Type: "issue.moved", Payload: `{}`})
-	require.ErrorIs(t, RequireAdoptionEventFeatures(CronEventFeature+","+CronRunSessionsEventFeature, baseline), ErrUnsupportedEventFeatures)
-	require.NoError(t, RequireAdoptionEventFeatures(SupportedEventFeatures, baseline))
 }

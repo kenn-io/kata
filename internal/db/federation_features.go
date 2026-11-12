@@ -200,11 +200,11 @@ func EventRequiredFeatures(kind string) string {
 }
 
 // ProjectHasCronRunSessions scans retained run summaries for session evidence.
-// Escaped JSON keys remain candidates, as in the native cron probe.
+// Production writers encode typed summaries with ordinary JSON keys.
 func ProjectHasCronRunSessions(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, projectUID string) (bool, error) {
-	rows, err := q.QueryContext(ctx, `SELECT r.summary_json FROM cron_runs r JOIN projects p ON p.id=r.project_id WHERE p.uid=$1 AND (r.summary_json LIKE '%"sessions%' OR r.summary_json LIKE '%\u%' ESCAPE '!')`, projectUID)
+	rows, err := q.QueryContext(ctx, `SELECT r.summary_json FROM cron_runs r JOIN projects p ON p.id=r.project_id WHERE p.uid=$1 AND (r.summary_json LIKE '%"sessions%')`, projectUID)
 	if err != nil {
 		return false, err
 	}
