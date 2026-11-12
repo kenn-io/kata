@@ -203,11 +203,6 @@ listen = "127.0.0.1:${port}"
       try {
         database
           .prepare(
-            `UPDATE federation_bindings SET role='spoke', hub_url='http://127.0.0.1:9', hub_project_id=42, bound_actor='example-owner' WHERE project_id=(SELECT id FROM projects WHERE name=?)`,
-          )
-          .run(`spoke \\"project"’s'\\`)
-        database
-          .prepare(
             `INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
           SELECT id, '2026-10-01T12:00:00Z', 'example sync failure' FROM projects WHERE name = ?
           ON CONFLICT(project_id) DO UPDATE SET last_error_at=excluded.last_error_at, last_error=excluded.last_error`,

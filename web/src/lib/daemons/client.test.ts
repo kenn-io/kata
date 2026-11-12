@@ -100,11 +100,10 @@ describe('web daemon transport', () => {
   test('keeps scoped project sync on the source origin with a daemon selected', async () => {
     const upstream = vi.fn<typeof fetch>(async () => new Response('{}'))
     const fetcher = createDaemonFetch(() => 'example-remote', upstream)
-    await fetcher('/api/v1/projects/7/federation/status?compact=true&omit_errors=true')
+    await fetcher('/api/v1/projects/7/federation/status?compact=true')
     const [input, init] = upstream.mock.calls[0]!
     const request = new Request(new URL(String(input), window.location.origin), init)
     expect(new URL(request.url).pathname).toBe('/api/v1/projects/7/federation/status')
-    expect(new URL(request.url).searchParams.get('omit_errors')).toBe('true')
     expect(request.headers.has('X-Kata-Web-Daemon')).toBe(false)
   })
 

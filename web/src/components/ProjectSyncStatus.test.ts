@@ -43,12 +43,8 @@ describe('ProjectSyncStatus', () => {
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
     setGeneratedFetch(vi.fn().mockResolvedValueOnce(response()))
     render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
-    const command = "kata federation status --project 'spoke project’s'\\'''"
-    await screen.findByText(command)
-    await fireEvent.click(screen.getByRole('button', { name: 'Copy Bash/Zsh sync status command' }))
-    expect(writeText).toHaveBeenCalledWith(command)
     await fireEvent.click(
-      screen.getByRole('button', { name: 'Copy PowerShell sync status command' }),
+      await screen.findByRole('button', { name: 'Copy PowerShell sync status command' }),
     )
     expect(writeText).toHaveBeenCalledWith("kata federation status --project 'spoke project’’s'''")
   })

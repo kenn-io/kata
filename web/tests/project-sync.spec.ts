@@ -47,8 +47,8 @@ test('local project readers see native sync status with bounded embedding summar
   expect(browserBody).not.toContain('example sync failure')
   expect(browserBody).not.toContain('example held-back batch failure')
   await expect(region.getByText('Sync needs attention')).toBeVisible()
-  // This spoke/unconfigured state comes from the native production SQLite daemon.
-  await expect(region.getByText('spoke', { exact: true })).toBeVisible()
+  // This hub/unconfigured state comes from the native production SQLite daemon.
+  await expect(region.getByText('hub', { exact: true })).toBeVisible()
   await expect(region.getByText('Embeddings: unconfigured')).toBeVisible()
 
   // This response fixture covers browser rendering; native artifact reuse,

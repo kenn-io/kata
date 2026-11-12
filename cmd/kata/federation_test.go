@@ -207,7 +207,7 @@ func TestFederationStatusProjectOlderDaemon(t *testing.T) {
 			return
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/resolve" {
-			http.NotFound(w, r)
+			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
 		r.Host = target.Host
