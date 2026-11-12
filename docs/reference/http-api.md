@@ -687,9 +687,7 @@ These are the current intentions, not a contractual guarantee:
 
 When changing the contract, bump `APISchemaVersion`, regenerate the API artifacts,
 and add a version-history row. Run the API version record test and add the empty
-marker file named in its output. If two branches claim the same version, take the
-next version named by the test, update any new feature minimums, and recompute your
-marker for the combined contract. Marker history is permanent; keep every earlier marker.
+marker file named in its output. Marker history is permanent; keep every earlier marker.
 
 If you build against this schema and hit a gap, please open an issue. The
 contract is meant to be useful to external clients, and feedback shapes how far

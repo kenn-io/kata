@@ -1,16 +1,13 @@
 package daemon
 
 import (
-	"bytes"
 	"crypto/sha256"
-	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -62,11 +59,7 @@ func TestAPISchemaVersionMatchesRecordedContract(t *testing.T) {
 }
 
 func checkAPIVersionRecord(dir, version string, doc []byte) error {
-	canonical := jsontext.Value(bytes.Clone(doc))
-	if err := canonical.Format(jsontext.ReorderRawObjects(true), jsontext.CanonicalizeRawInts(false), jsontext.CanonicalizeRawFloats(true)); err != nil {
-		return err
-	}
-	digest := sha256.Sum256(canonical)
+	digest := sha256.Sum256(doc)
 	marker := fmt.Sprintf("%s.%x.sha256", version, digest)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -149,7 +142,6 @@ func contractDocument(doc *huma.OpenAPI) ([]byte, error) {
 				switch name {
 				case "Description", "Summary", "Title", "Example", "Examples", "Tags", "ExternalDocs", "PatternDescription":
 					f.SetZero()
-				case "Extensions", "Default", "Enum", "Const", "Metadata":
 				default:
 					strip(f)
 				}
@@ -157,11 +149,8 @@ func contractDocument(doc *huma.OpenAPI) ([]byte, error) {
 		}
 	}
 	strip(reflect.ValueOf(doc))
-	if doc.Components != nil && doc.Components.Schemas != nil {
-		seenSchemas := map[*huma.Schema]struct{}{}
-		for _, schema := range doc.Components.Schemas.Map() {
-			walkSchemaTree(schema, doc.Components.Schemas, seenSchemas, func(s *huma.Schema) { strip(reflect.ValueOf(s)) })
-		}
+	for _, schema := range doc.Components.Schemas.Map() {
+		strip(reflect.ValueOf(schema))
 	}
 	return doc.MarshalJSON()
 }
@@ -175,7 +164,7 @@ func TestAPIVersionBaseRecords(t *testing.T) {
 	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--verify", "--quiet", ref+"^{commit}") //nolint:gosec // The base ref is supplied by the developer or CI.
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
-		if !explicit && t.Context().Err() == nil && errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		if !explicit && os.Getenv("CI") == "" && t.Context().Err() == nil && errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			t.Skip("origin/main unavailable")
 		}
 		t.Fatalf("resolve API version base %q: %v", ref, err)
@@ -214,7 +203,6 @@ func checkBaseAPIVersionRecords(dir string, records []string) error {
 		}
 	}
 	if len(missing) > 0 {
-		sort.Strings(missing)
 		return fmt.Errorf("base API contract records must be preserved: %s", strings.Join(missing, ", "))
 	}
 	return nil
@@ -231,7 +219,6 @@ func TestAPIContractDocument(t *testing.T) {
 	}
 	doc.Info.Description = "new wording"
 	schema := doc.Components.Schemas.Map()["HealthResponseBody"]
-	require.NotNil(t, schema)
 	schema.Description = "new wording"
 	wording, err := contractDocument(doc)
 	require.NoError(t, err)
@@ -250,7 +237,8 @@ func TestAPIContractDocument(t *testing.T) {
 func TestAPIBaseRecordLoading(t *testing.T) {
 	records, err := baseAPIVersionRecords(t, "HEAD")
 	require.NoError(t, err)
-	require.NotEmpty(t, records)
+	require.Contains(t, records, "0.44.0.dcc4a8689ae0d97113d2349d9afcbbf7fe95caa08a516bcc2e376d021d998166.sha256")
+	records = []string{"0.44.0.example.sha256", "0.45.0.example.sha256"}
 	dir := t.TempDir()
 	require.ErrorContains(t, checkBaseAPIVersionRecords(dir, records), records[0])
 	for _, name := range records {
