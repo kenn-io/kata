@@ -12,6 +12,7 @@ import (
 	kataapi "go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
+	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -68,7 +69,7 @@ func (c *Client) ListCronWorkflows(ctx context.Context, projectID int64) ([]gene
 	}
 	wire, callErr := client.ListCronWorkflowsWithResponse(ctx, &generated.ListCronWorkflowsRequestOptions{
 		PathParams: &generated.ListCronWorkflowsPath{ProjectID: projectID},
-	})
+	}, kataclient.CronWorkflowArgvSupport)
 	if wire == nil {
 		return nil, callErr
 	}
@@ -226,7 +227,7 @@ func (c *Client) ShowCronWorkflow(ctx context.Context, projectID int64, uid stri
 	}
 	wire, callErr := client.ShowCronWorkflowWithResponse(ctx, &generated.ShowCronWorkflowRequestOptions{
 		PathParams: &generated.ShowCronWorkflowPath{ProjectID: projectID, CronUID: uid},
-	})
+	}, kataclient.CronWorkflowArgvSupport)
 	if wire == nil {
 		return db.CronWorkflow{}, callErr
 	}
@@ -260,7 +261,7 @@ func (c *Client) PutCronWorkflow(ctx context.Context, projectID int64, uid strin
 	wire, callErr := client.ReplaceCronWorkflowWithResponse(ctx, &generated.ReplaceCronWorkflowRequestOptions{
 		PathParams: &generated.ReplaceCronWorkflowPath{ProjectID: projectID, CronUID: uid},
 		Body:       &body,
-	})
+	}, kataclient.CronWorkflowArgvSupport)
 	if wire == nil {
 		return callErr
 	}

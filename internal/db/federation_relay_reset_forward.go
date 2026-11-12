@@ -130,8 +130,19 @@ func (p RelayResetProtocol) PrepareForwardedCheckpoint(ctx context.Context, gran
 	if err := ValidateRelayResetTranslation(authority, checkpoint.Manifest, checkpoint.Translation); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
-	if _, _, err := DecodeRootResetPayload(historical, checkpoint.Snapshot); err != nil {
+	events, _, err := DecodeRootResetPayload(historical, checkpoint.Snapshot)
+	if err != nil {
 		return RelayResetCheckpoint{}, err
+	}
+	if err := requireUsableResetEvents(events); err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	// A forward prepared during installation carries the upstream request's
+	// context, not an advertisement from this downstream grant.
+	if _, ok := RelayPeerFeatures(ctx, grant.RelayBindingUID); ok {
+		if err := requireResetPeerFeatures(ctx, grant.RelayBindingUID, events); err != nil {
+			return RelayResetCheckpoint{}, err
+		}
 	}
 	source := relayForwardSource{BindingUID: binding.RelayConfig.BindingUID, Grant: upstream, Baselines: checkpoint.Translation.HopBaselines}
 	checkpoint = RelayResetForwardTranslation(checkpoint, grant, pin, p.InstanceUID)
@@ -158,6 +169,20 @@ func (p RelayResetProtocol) PrepareForwardedCheckpoint(ctx context.Context, gran
 // authorization step of a checkpoint download; preparation never performs it.
 func (p RelayResetProtocol) AuthorizeCheckpointDownload(ctx context.Context, bindingUID string, checkpoint RelayResetCheckpoint) (RelayResetCheckpoint, error) {
 	if _, err := p.Backend.RelayGrant(ctx, bindingUID, "pull"); err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	pin, err := p.Backend.RootPin(ctx, checkpoint.Manifest.ProjectUID, checkpoint.Manifest.KeyID)
+	if err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	events, _, err := DecodeRootResetPayload(pin, checkpoint.Snapshot)
+	if err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	if err := requireUsableResetEvents(events); err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	if err := requireResetRecipientFeatures(ctx, bindingUID, events); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
 	return checkpoint, nil

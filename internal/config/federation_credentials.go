@@ -119,6 +119,20 @@ type FederationCredentialRekey struct {
 	Replacement    FederationCredential
 }
 
+// FederationCredentialRekeyUndo records the exact state around one rekey.
+type FederationCredentialRekeyUndo struct {
+	Rekey       FederationCredentialRekey
+	Source      FederationCredential
+	Target      FederationCredential
+	TargetFound bool
+}
+
+// FederationCredentialRekeyUndoer provides atomic rekey and conditional undo.
+type FederationCredentialRekeyUndoer interface {
+	RekeyFederationCredentialWithUndo(context.Context, FederationCredentialRekey) (*FederationCredentialRekeyUndo, error)
+	UndoFederationCredentialRekey(context.Context, FederationCredentialRekeyUndo) error
+}
+
 // FederationManagedCredentialReservation is one config-managed credential
 // reserved under its stable hub project UID.
 type FederationManagedCredentialReservation struct {
@@ -259,6 +273,25 @@ func (homeFederationCredentialStore) RekeyFederationCredential(
 	_ context.Context, rekey FederationCredentialRekey,
 ) error {
 	return RekeyFederationCredential(rekey)
+}
+
+func (homeFederationCredentialStore) RekeyFederationCredentialWithUndo(_ context.Context, rekey FederationCredentialRekey) (*FederationCredentialRekeyUndo, error) {
+	var undo *FederationCredentialRekeyUndo
+	err := updateFederationCredentials(func(creds *FederationCredentials) error {
+		var err error
+		undo, err = ApplyFederationCredentialRekey(creds.Projects, rekey)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return undo, nil
+}
+
+func (homeFederationCredentialStore) UndoFederationCredentialRekey(_ context.Context, undo FederationCredentialRekeyUndo) error {
+	return updateFederationCredentials(func(creds *FederationCredentials) error {
+		return UndoFederationCredentialRekey(creds.Projects, undo)
+	})
 }
 
 func (homeFederationCredentialStore) ReserveManagedFederationCredential(
@@ -602,30 +635,50 @@ func ReplaceManagedFederationCredential(
 // RekeyFederationCredential atomically replaces FromProjectUID with
 // ToProjectUID inside one serialized credentials-file read-modify-write.
 func RekeyFederationCredential(rekey FederationCredentialRekey) error {
-	if rekey.FromProjectUID == "" ||
-		rekey.ToProjectUID == "" ||
-		rekey.FromProjectUID == rekey.ToProjectUID {
-		return fmt.Errorf("%w: invalid rekey project UIDs", ErrFederationCredentialConflict)
-	}
 	return updateFederationCredentials(func(creds *FederationCredentials) error {
-		source, sourceFound := creds.Projects[rekey.FromProjectUID]
-		target, targetFound := creds.Projects[rekey.ToProjectUID]
-		if !sourceFound {
-			if targetFound && target.Equal(rekey.Replacement) {
-				return nil
-			}
-			return fmt.Errorf("%w: source credential is missing", ErrFederationCredentialConflict)
-		}
-		if !source.Equal(rekey.Expected) {
-			return fmt.Errorf("%w: source credential changed", ErrFederationCredentialConflict)
-		}
-		if targetFound && !target.Equal(rekey.Expected) && !target.Equal(rekey.Replacement) {
-			return fmt.Errorf("%w: target credential differs", ErrFederationCredentialConflict)
-		}
-		creds.Projects[rekey.ToProjectUID] = rekey.Replacement
-		delete(creds.Projects, rekey.FromProjectUID)
-		return nil
+		_, err := ApplyFederationCredentialRekey(creds.Projects, rekey)
+		return err
 	})
+}
+
+// ApplyFederationCredentialRekey applies the existing CAS while capturing both entries.
+// Callers must serialize access to projects and commit the update atomically.
+func ApplyFederationCredentialRekey(projects map[string]FederationCredential, rekey FederationCredentialRekey) (*FederationCredentialRekeyUndo, error) {
+	if rekey.FromProjectUID == "" || rekey.ToProjectUID == "" || rekey.FromProjectUID == rekey.ToProjectUID {
+		return nil, fmt.Errorf("%w: invalid rekey project UIDs", ErrFederationCredentialConflict)
+	}
+	source, sourceFound := projects[rekey.FromProjectUID]
+	target, targetFound := projects[rekey.ToProjectUID]
+	if !sourceFound {
+		if targetFound && target.Equal(rekey.Replacement) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%w: source credential is missing", ErrFederationCredentialConflict)
+	}
+	if !source.Equal(rekey.Expected) || (targetFound && !target.Equal(rekey.Expected) && !target.Equal(rekey.Replacement)) {
+		return nil, fmt.Errorf("%w: source or target credential changed", ErrFederationCredentialConflict)
+	}
+	undo := &FederationCredentialRekeyUndo{Rekey: rekey, Source: source, Target: target, TargetFound: targetFound}
+	projects[rekey.ToProjectUID] = rekey.Replacement
+	delete(projects, rekey.FromProjectUID)
+	return undo, nil
+}
+
+// UndoFederationCredentialRekey restores both entries only when the post-state matches.
+// Callers must serialize access to projects and commit the update atomically.
+func UndoFederationCredentialRekey(projects map[string]FederationCredential, undo FederationCredentialRekeyUndo) error {
+	_, sourceFound := projects[undo.Rekey.FromProjectUID]
+	target, targetFound := projects[undo.Rekey.ToProjectUID]
+	if sourceFound || !targetFound || !target.Equal(undo.Rekey.Replacement) {
+		return fmt.Errorf("%w: credential changed before undo", ErrFederationCredentialConflict)
+	}
+	projects[undo.Rekey.FromProjectUID] = undo.Source
+	if undo.TargetFound {
+		projects[undo.Rekey.ToProjectUID] = undo.Target
+	} else {
+		delete(projects, undo.Rekey.ToProjectUID)
+	}
+	return nil
 }
 
 // federationCredentialLeaveConflict rejects persisting a credential that names

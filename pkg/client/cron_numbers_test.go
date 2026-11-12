@@ -23,7 +23,7 @@ func TestCronTypedSDKPreservesNumbers(t *testing.T) {
 	id, err := client.NewCronUID()
 	require.NoError(t, err)
 	jobDefinition := `{"version":1,"kind":"job","enabled":false,"trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Inspect"},"overlap":"forbid","catchup":"all","options":` + opaque + `}`
-	workflowDefinition := `{"version":1,"options":` + opaque + `,"steps":[{"key":"inspect","kind":"command","command":"git status","options":` + opaque + `}]}`
+	workflowDefinition := `{"version":1,"options":` + opaque + `,"steps":[{"key":"inspect","kind":"argv","argv":["printf","","two words","two words","雪","line\nbreak"],"options":` + opaque + `}]}`
 	decode := func(t *testing.T, raw []byte) any {
 		t.Helper()
 		d := json.NewDecoder(bytes.NewReader(raw))
@@ -97,6 +97,7 @@ func TestCronTypedSDKPreservesNumbers(t *testing.T) {
 			}
 			exact(t, workflow.Options)
 			exact(t, workflow.Steps[0].Options)
+			require.Equal(t, []string{"printf", "", "two words", "two words", "雪", "line\nbreak"}, workflow.Steps[0].Argv)
 			_, e = c.ReplaceCronWorkflow(t.Context(), &generated.ReplaceCronWorkflowRequestOptions{PathParams: &generated.ReplaceCronWorkflowPath{ProjectID: 1, CronUID: id}, Body: &generated.ReplaceCronWorkflowBody{Name: "Inspect", Definition: workflow}})
 			require.NoError(t, e)
 			mu.Lock()
@@ -160,4 +161,30 @@ func copyCronSDKDefinition(t *testing.T, source, target any) {
 	raw, err := json.Marshal(source)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, target))
+}
+
+// A present empty vector is different from an omitted reserved member.
+func TestCronWorkflowArgvFieldPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"request absent", generated.CronWorkflowStep{}, ""},
+		{"request empty", generated.CronWorkflowStep{Argv: []string{}}, `[]`},
+		{"response absent", generated.CronWorkflowStepResponse{}, ""},
+		{"response empty", generated.CronWorkflowStepResponse{Argv: []string{}}, `[]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.value)
+			require.NoError(t, err)
+			var fields map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(raw, &fields))
+			if tc.want == "" {
+				require.NotContains(t, fields, "argv")
+			} else {
+				require.Equal(t, tc.want, string(fields["argv"]))
+			}
+		})
+	}
 }

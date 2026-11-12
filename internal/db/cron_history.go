@@ -1,6 +1,8 @@
 package db
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"time"
 
 	"go.kenn.io/kata/internal/cron"
@@ -49,6 +51,7 @@ type ObserveCronRun struct {
 	StartedAt                  *time.Time
 	EndedAt                    *time.Time
 	ExpectedRevision           int64
+	EventFeatures              string
 }
 
 // CronRunObservationResult retains the row and exact events of one write.
@@ -71,6 +74,43 @@ type CronJobExport CronJob
 
 // CronWorkflowExport is the portable backup representation of a workflow row.
 type CronWorkflowExport CronWorkflow
+
+// MarshalJSON preserves a held document in the existing definition member.
+func (v CronWorkflowExport) MarshalJSON() ([]byte, error) {
+	type wire struct {
+		CronDefinition
+		Definition jsontext.Value `json:"definition"`
+	}
+	raw := v.RawDefinition
+	if len(raw) == 0 {
+		var err error
+		raw, err = json.Marshal(v.Definition)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return json.Marshal(wire{CronDefinition: v.CronDefinition, Definition: raw})
+}
+
+// UnmarshalJSON keeps the original representation when strict reads refuse it.
+func (v *CronWorkflowExport) UnmarshalJSON(input []byte) error {
+	var wire struct {
+		CronDefinition
+		Definition jsontext.Value `json:"definition"`
+	}
+	if err := json.Unmarshal(input, &wire, json.RejectUnknownMembers(true)); err != nil {
+		return err
+	}
+	definition, err := cron.DecodeHistoricalWorkflow(wire.Definition)
+	if err != nil {
+		return err
+	}
+	*v = CronWorkflowExport{CronDefinition: wire.CronDefinition, Definition: definition}
+	if _, err := cron.DecodeWorkflow(wire.Definition); err != nil {
+		v.RawDefinition = append(jsontext.Value(nil), wire.Definition...)
+	}
+	return nil
+}
 
 // CronRunExport is the portable backup representation of a run observation.
 type CronRunExport CronRun

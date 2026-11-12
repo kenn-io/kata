@@ -19,7 +19,7 @@ const CronEventFeature = "cron_v1"
 const IssueMoveEventFeature = "issue_move_v1"
 
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + CronWorkflowArgvEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -44,9 +44,17 @@ func MergeEventFeatures(values ...string) string {
 	return strings.Join(parts, ",")
 }
 
-// PayloadRequiredFeatures supplements type classification with native delivery state.
+// PayloadRequiredFeatures supplements type classification with native delivery
+// state and reserved workflow formats. Required formats need not be supported.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	required := EventRequiredFeatures(kind)
+	argv, err := payloadHasArgvWorkflow(kind, payload)
+	if err != nil {
+		return "", err
+	}
+	if argv {
+		required = MergeEventFeatures(required, CronWorkflowArgvEventFeature)
+	}
 	native, err := payloadHasNativeRecurringState(kind, payload)
 	if err != nil {
 		return "", err
@@ -132,6 +140,16 @@ var ErrFederationNotEnabled = errors.New("project must be an enabled federation 
 // ErrUnsupportedEventFeatures prevents peers from consuming unknown event formats.
 var ErrUnsupportedEventFeatures = errors.New("unsupported event features; upgrade the federation peer")
 
+// ErrHeldWorkflowEvidence identifies retained data that upgrading a peer cannot release.
+var ErrHeldWorkflowEvidence error = heldWorkflowEvidenceError{}
+
+type heldWorkflowEvidenceError struct{}
+
+func (heldWorkflowEvidenceError) Error() string {
+	return "held workflow definition in retained history"
+}
+func (heldWorkflowEvidenceError) Is(target error) bool { return target == ErrUnsupportedEventFeatures }
+
 // RequireEventFeatures rejects any required format absent from the advertised set.
 func RequireEventFeatures(supported, required string) error {
 	available := map[string]bool{}
@@ -174,7 +192,13 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	if err != nil {
 		return "", err
 	}
-	required := ""
+	var required string
+	if cronPresent {
+		required, err = ProjectWorkflowRequiredFeatures(ctx, q, projectUID)
+		if err != nil {
+			return "", err
+		}
+	}
 	if issueMoved {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
 	}

@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-30
+last_edited: 2026-11-10
 ---
 
 # Dormant native cron storage
@@ -63,3 +63,32 @@ See [Cron](../reference/cron.md) for API/CLI documents,
 [Backup and restore](../operations/backup-restore.md) for replacement protections,
 and [PostgreSQL migrations](../development/postgres-migrations.md) for schema
 history and startup validation.
+
+## Argv workflow steps
+
+Workflow definitions support `argv` steps with a literal string vector. Clients
+advertise the exact `cron_workflow_argv_v1` event feature in
+`X-Kata-Event-Features` to read these workflows or start new runs that reference
+them. Federation peers negotiate the same feature before receiving argv workflow
+evidence. Adapters must preflight the workflow and report unsupported steps
+before starting a run, including when clients support the format. See
+[Capabilities](../reference/cron.md#capabilities) for the read and write rules.
+
+Malformed argv steps, including legacy kind-only steps, and definitions with a
+null document, steps array, step or step kind are invalid for execution and
+remote admission. Owner backup and restore retain
+historically decodable documents and their original event payloads. Folding
+retains the winning document and its definition clock, including tombstones.
+Any undecodable retained workflow event blocks materialization of its owning project's
+cron state instead of allowing an older version to reappear.
+
+An older daemon could store held shapes from an imported backup or federated
+history. SQLite schema 31 through 40 can upgrade with these held documents.
+Reads and snapshots remain unavailable for a held workflow. A full replacement
+with its current event UID is accepted; retained unsupported history still
+blocks snapshots and adoption.
+See the [recovery procedure](../reference/cron.md#held-legacy-workflows).
+
+Standalone projects with retained argv workflow history cannot yet be adopted
+into a federation, including when the workflow was deleted. See the
+[adoption limits](../reference/cron.md#adopting-standalone-projects).

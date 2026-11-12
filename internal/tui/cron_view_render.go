@@ -288,6 +288,10 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 				d.field("After", strings.Join(step.After, ", "))
 				d.field("Retries", fmt.Sprint(deref(step.Retries)))
 				d.text(deref(step.Command)+deref(step.Prompt), cronRef{})
+				if step.Argv != nil {
+					d.section("Argv")
+					d.json(step.Argv)
+				}
 				if len(step.Options) > 0 {
 					d.json(step.Options)
 				}

@@ -29,6 +29,7 @@ type CronWorkflowStep struct {
 	Key     string        `json:"key"`
 	Kind    string        `json:"kind"`
 	Command string        `json:"command,omitempty"`
+	Argv    []string      `json:"argv,omitzero"`
 	Prompt  string        `json:"prompt,omitempty"`
 	After   []string      `json:"after,omitempty"`
 	Retries int           `json:"retries,omitzero"`
@@ -58,7 +59,7 @@ func CronJobDefinitionFrom(value cron.JobDefinition) CronJobDefinition {
 func (value CronWorkflowDefinition) Native() cron.WorkflowDefinition {
 	steps := make([]cron.WorkflowStep, 0, len(value.Steps))
 	for _, step := range value.Steps {
-		steps = append(steps, cron.WorkflowStep{Key: step.Key, Kind: step.Kind, Command: step.Command, Prompt: step.Prompt, After: step.After, Retries: step.Retries, Options: jsontext.Value(step.Options)})
+		steps = append(steps, cron.WorkflowStep{Key: step.Key, Kind: step.Kind, Command: step.Command, Argv: step.Argv, Prompt: step.Prompt, After: step.After, Retries: step.Retries, Options: jsontext.Value(step.Options)})
 	}
 	return cron.WorkflowDefinition{Version: value.Version, About: value.About, Input: value.Input, Options: jsontext.Value(value.Options), Steps: steps}
 }
@@ -67,7 +68,7 @@ func (value CronWorkflowDefinition) Native() cron.WorkflowDefinition {
 func CronWorkflowDefinitionFrom(value cron.WorkflowDefinition) CronWorkflowDefinition {
 	steps := make([]CronWorkflowStep, 0, len(value.Steps))
 	for _, step := range value.Steps {
-		steps = append(steps, CronWorkflowStep{Key: step.Key, Kind: step.Kind, Command: step.Command, Prompt: step.Prompt, After: step.After, Retries: step.Retries, Options: JSONRawObject(step.Options)})
+		steps = append(steps, CronWorkflowStep{Key: step.Key, Kind: step.Kind, Command: step.Command, Argv: step.Argv, Prompt: step.Prompt, After: step.After, Retries: step.Retries, Options: JSONRawObject(step.Options)})
 	}
 	return CronWorkflowDefinition{Version: value.Version, About: value.About, Input: value.Input, Options: JSONRawObject(value.Options), Steps: steps}
 }
@@ -106,6 +107,18 @@ type ListCronDefinitionsRequest struct {
 	IncludeDeleted bool  `query:"include_deleted"`
 }
 
+// CronWorkflowReadRequest declares the caller's supported workflow formats.
+type CronWorkflowReadRequest struct {
+	CronDefinitionRequest
+	EventFeatures string `header:"X-Kata-Event-Features"`
+}
+
+// ListCronWorkflowsRequest declares formats supported by the catalog reader.
+type ListCronWorkflowsRequest struct {
+	ListCronDefinitionsRequest
+	EventFeatures string `header:"X-Kata-Event-Features"`
+}
+
 // CronDefinitionActionBody attributes a lifecycle change and supplies its expected revision.
 type CronDefinitionActionBody struct {
 	Actor            string `json:"actor,omitempty"`
@@ -116,6 +129,12 @@ type CronDefinitionActionBody struct {
 type CronDefinitionActionRequest struct {
 	CronDefinitionRequest
 	Body CronDefinitionActionBody
+}
+
+// CronWorkflowActionRequest declares the formats readable by a lifecycle caller.
+type CronWorkflowActionRequest struct {
+	CronDefinitionActionRequest
+	EventFeatures string `header:"X-Kata-Event-Features"`
 }
 
 // CronJobActionRequest addresses a job lifecycle change, which a push
@@ -156,8 +175,10 @@ type ReplaceCronJobRequest struct {
 
 // CreateCronWorkflowRequest creates a workflow in the selected project.
 type CreateCronWorkflowRequest struct {
-	ProjectID int64 `path:"project_id"`
-	Body      PutCronWorkflowBody
+	EventFeatures string `header:"X-Kata-Event-Features"`
+	ProjectID     int64  `path:"project_id"`
+	RawBody       []byte
+	Body          PutCronWorkflowBody
 }
 
 // ReplaceCronWorkflowRequest replaces one workflow at its expected definition event.

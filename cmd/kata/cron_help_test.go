@@ -166,7 +166,10 @@ func TestCronReferenceRequestExamples(t *testing.T) {
 		}
 		resource, identity := "job", cronCLIUID(t)
 		if request.Definition.Kind != "job" {
-			resource, identity = "workflow", "01J00000000000000000000010"
+			resource = "workflow"
+			if request.Name == "literal-arguments" {
+				identity = "01J00000000000000000000010" // Referenced by the adapter job example.
+			}
 		}
 		args := []string{resource, "create", "--uid", identity, "--file", "-"}
 		if request.Definition.Action.Kind == "notify" {
@@ -176,7 +179,7 @@ func TestCronReferenceRequestExamples(t *testing.T) {
 		require.NoError(t, err, "reference request %q", request.Name)
 		count++
 	}
-	require.Equal(t, 4, count, "exercise all job and workflow request examples")
+	require.Equal(t, 5, count, "exercise all job and workflow request examples")
 }
 
 func cronHelpRequests(t *testing.T, help string) []cronHelpRequest {

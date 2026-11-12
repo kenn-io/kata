@@ -2220,12 +2220,14 @@ keeps its own database.
    sync directions and no persistent error. Spokes retry after the hub becomes
    available.
 
-New features have their own requirements. In particular, **projects with cron
-definitions or recurring-child history have additional 0.19.0-to-0.20.0
-compatibility limits**. Read [Cron upgrade limits](../reference/cron.md#upgrade-limits)
-before upgrading those projects' peers or adapters. This cron restriction does
-not require coordinated upgrades for projects that only synchronize ordinary
-issues. A newer CLI feature may also need a newer daemon API; see the
+New features have their own requirements. Projects with cron definitions or
+recurring-child history have additional 0.19.0-to-0.20.0 compatibility limits.
+Before creating an argv workflow, all project peers must support its capability;
+retained argv history can block whole-project synchronization with an older peer.
+Read [Cron upgrade limits](../reference/cron.md#upgrade-limits) before upgrading
+those projects' peers or adapters. These cron restrictions do not require
+coordinated upgrades for projects that only synchronize ordinary issues. A newer
+CLI feature may also need a newer daemon API; see the
 [API version history](../reference/http-api.md#version-history).
 
 ### When a spoke is newer than its hub

@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
@@ -153,6 +154,22 @@ func (s *replicaCredentialStore) RekeyFederationCredential(
 	s.credentials[rekey.ToProjectUID] = rekey.Replacement
 	delete(s.credentials, rekey.FromProjectUID)
 	return nil
+}
+
+func (s *replicaCredentialStore) RekeyFederationCredentialWithUndo(_ context.Context, rekey config.FederationCredentialRekey) (*config.FederationCredentialRekeyUndo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rekeyCalls++
+	if s.rekeyErr != nil {
+		return nil, s.rekeyErr
+	}
+	return config.ApplyFederationCredentialRekey(s.credentials, rekey)
+}
+
+func (s *replicaCredentialStore) UndoFederationCredentialRekey(_ context.Context, undo config.FederationCredentialRekeyUndo) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return config.UndoFederationCredentialRekey(s.credentials, undo)
 }
 
 func (s *replicaCredentialStore) ReserveManagedFederationCredential(
@@ -2466,3 +2483,72 @@ var _ config.FederationCredentialStore = (*replicaCredentialStore)(nil)
 var _ config.FederationManagedCredentialStore = (*replicaCredentialStore)(nil)
 var _ config.FederationCredentialReplacer = (*replicaCredentialStore)(nil)
 var _ config.FederationCredentialStore = baseCredentialStore{}
+
+// Insert an argv workflow at the transaction boundary, after source resolution.
+type argvBeforeAdoptionStore struct{ db.Storage }
+
+func (s argvBeforeAdoptionStore) AdoptProjectIntoFederation(ctx context.Context, p db.AdoptProjectIntoFederationParams) (db.AdoptProjectIntoFederationResult, error) {
+	_, _, err := s.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: p.ProjectID, Name: "concurrent", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "argv", Argv: []string{"echo", "", "a b"}}}}})
+	if err != nil {
+		return db.AdoptProjectIntoFederationResult{}, err
+	}
+	return s.Storage.AdoptProjectIntoFederation(ctx, p)
+}
+
+func TestAdoptionRefusalAfterSourceResolutionPreservesCredential(t *testing.T) {
+	ctx := t.Context()
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
+	require.NoError(t, err)
+	credentials := newReplicaCredentialStore()
+	params := replicaServiceParams()
+	params.ProjectName, params.AdoptExisting = project.Name, true
+	params.Credential.Capabilities = "pull,push"
+	credentials.put(project.UID, params.Credential)
+	_, err = daemon.EnsureFederationReplica(ctx, argvBeforeAdoptionStore{store}, credentials, nil, params)
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	got, found, err := credentials.FederationCredential(ctx, project.UID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, params.Credential, got)
+	_, found, err = credentials.FederationCredential(ctx, replicaHubProjectUID)
+	require.NoError(t, err)
+	assert.False(t, found)
+	current, err := store.ProjectByID(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, project.UID, current.UID)
+	_, err = store.FederationBindingByProject(ctx, project.ID)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+}
+
+func TestAdoptionPreflightRefusesArgvBeforeCredentialMutation(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		ctx := t.Context()
+		store := openReplicaServiceStore(t)
+		project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
+		require.NoError(t, err)
+		workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "argv", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "argv", Argv: []string{"echo", "", "a b"}}}}})
+		require.NoError(t, err)
+		if deleted {
+			_, err = store.ExecContext(ctx, `UPDATE cron_workflows SET deleted_at=$1 WHERE uid=$2`, "2026-11-08T12:00:00Z", workflow.UID)
+			require.NoError(t, err)
+		}
+		credentials := newReplicaCredentialStore()
+		params := replicaServiceParams()
+		params.ProjectName, params.AdoptExisting = project.Name, true
+		params.Credential.Capabilities = "pull,push"
+		credentials.put(project.UID, params.Credential)
+		_, err = daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
+		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		assert.Zero(t, credentials.rekeyCalls, "deleted=%v", deleted)
+		got, found, err := credentials.FederationCredential(ctx, project.UID)
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, params.Credential, got)
+		current, err := store.ProjectByID(ctx, project.ID)
+		require.NoError(t, err)
+		assert.Equal(t, project.UID, current.UID)
+		_, err = store.FederationBindingByProject(ctx, project.ID)
+		assert.ErrorIs(t, err, db.ErrNotFound)
+	}
+}

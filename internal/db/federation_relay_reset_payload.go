@@ -1,10 +1,12 @@
 package db
 
 import (
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -150,6 +152,75 @@ func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]Remot
 		refs[identity] = true
 	}
 	return events, provenance, nil
+}
+
+// requireUsableResetEvents fences unsupported history at checkpoint use sites.
+// Integrity decoding remains independent so owner backups can retain evidence.
+func requireUsableResetEvents(events []RemoteEvent) error {
+	for _, event := range events {
+		if workflowDefinitionEvent(event.Type) {
+			body, _, err := parseCronDefinitionEvent(FoldEvent{UID: event.EventUID, ProjectUID: event.ProjectUID, OriginInstanceUID: event.OriginInstanceUID, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, Payload: event.Payload, Type: event.Type})
+			if err != nil {
+				return fmt.Errorf("%w: workflow payload: %v", ErrUnsupportedEventFeatures, err)
+			}
+			// Only classify shapes the historical decoder retained as held evidence,
+			// including an explicit null definition. Future versions, kinds, and
+			// other decode failures remain unsupported.
+			if historical, err := cron.DecodeHistoricalWorkflow(body.Definition); err == nil && (historical.Version == 1 || body.Definition.Kind() == 'n') {
+				known := true
+				for _, step := range historical.Steps {
+					if step.Kind != "" && step.Kind != "command" && step.Kind != "prompt" && step.Kind != "argv" {
+						known = false
+						break
+					}
+				}
+				if _, held := retainedWorkflowEvidence(event.Type, string(event.Payload)); known && held {
+					return ErrHeldWorkflowEvidence
+				}
+			}
+			if _, err := cron.DecodeWorkflow(body.Definition); err != nil {
+				return fmt.Errorf("%w: workflow definition: %v", ErrUnsupportedEventFeatures, err)
+			}
+			continue
+		}
+		required, err := PayloadRequiredFeatures(event.Type, string(event.Payload))
+		if err != nil {
+			return fmt.Errorf("%w: event payload: %v", ErrUnsupportedEventFeatures, err)
+		}
+		if err := RequireEventFeatures(SupportedEventFeatures, required); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// requireResetPeerFeatures checks the exact signed records for the requesting
+// hop. Protocol 1 predates cron negotiation, so only argv needs a new token.
+func requireResetPeerFeatures(ctx context.Context, bindingUID string, events []RemoteEvent) error {
+	if _, ok := RelayPeerFeatures(ctx, bindingUID); !ok && !HasRelayPeerFeatures(ctx) {
+		return nil
+	}
+	return requireResetRecipientFeatures(ctx, bindingUID, events)
+}
+
+// requireResetRecipientFeatures checks the exact checkpoint before disclosure or activation.
+func requireResetRecipientFeatures(ctx context.Context, bindingUID string, events []RemoteEvent) error {
+	features, ok := RelayPeerFeatures(ctx, bindingUID)
+	if !ok && HasRelayPeerFeatures(ctx) {
+		return ErrNotFound
+	}
+	for _, event := range events {
+		argv, err := payloadHasArgvWorkflow(event.Type, string(event.Payload))
+		if err != nil {
+			return err
+		}
+		if argv {
+			if err := RequireEventFeatures(features, CronWorkflowArgvEventFeature); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func remoteResetFoldEvents(events []RemoteEvent) []FoldEvent {

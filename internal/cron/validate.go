@@ -46,6 +46,9 @@ func ParseWorkflow(input []byte) (WorkflowDefinition, error) {
 	if err := decode(input, &workflow, DefinitionLimit); err != nil {
 		return workflow, err
 	}
+	if err := CheckWorkflowRawSteps(input); err != nil {
+		return workflow, err
+	}
 	return workflow, workflow.Validate()
 }
 
@@ -195,8 +198,8 @@ func validRecipient(value string) bool {
 
 // Validate checks step identities, ordering and bounded retry settings.
 func (f WorkflowDefinition) Validate() error {
-	if f.Version != 1 {
-		return invalid("unsupported workflow version")
+	if err := CheckWorkflowSupported(f); err != nil {
+		return err
 	}
 	if len(f.Steps) == 0 {
 		return invalid("workflow requires steps")
@@ -226,8 +229,6 @@ func (f WorkflowDefinition) Validate() error {
 			if strings.TrimSpace(step.Prompt) == "" || step.Command != "" {
 				return stepError("prompt step requires only prompt")
 			}
-		default:
-			return stepError("unknown step kind")
 		}
 		if err := validateOptions(step.Options); err != nil {
 			return fmt.Errorf("step %d %q: %w", i+1, step.Key, err)

@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
@@ -3032,6 +3033,28 @@ func TestFederationIngestInvalidBatchReturnsErrorAndDoesNotBroadcast(t *testing.
 	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "invalid ingest should not broadcast") //nolint:kennlint // deadlinetest: bounded absence checks that invalid ingest should not broadcast
 }
 
+func TestFederationIngestMalformedWorkflowReturnsValidation(t *testing.T) {
+	env := testenv.New(t)
+	project := createFederatedHubProject(t, env, "hub")
+	created, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: federationTestSpokeUID,
+		ProjectID:        &project.ID, Capabilities: "push", Actor: "tester",
+	})
+	require.NoError(t, err)
+	event := federationRemoteIssueCreatedEvent(t, project, federationTestSpokeUID)
+	event.Type = "cron.workflow.created"
+	event.Payload = jsontext.Value(`{"definition":{"steps":[{"kind":null}]}}`)
+	body := federationIngestBody(federationIngestEnvelope(t, 18, event))
+	before := countEvents(t, env.DB)
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		projectPath(project.ID)+"/federation/events:ingest", body, bearer(created.Token))
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, "response: %s", raw)
+	var envelope api.ErrorEnvelope
+	require.NoError(t, json.Unmarshal(raw, &envelope))
+	require.Equal(t, "validation", envelope.Error.Code)
+	require.Equal(t, before, countEvents(t, env.DB))
+}
+
 func TestFederationIngestRejectsInvalidSourceCursor(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()
@@ -4608,4 +4631,24 @@ func TestFederationIngestPublishesCommittedPeerEvents(t *testing.T) {
 	message := receiveMsg(t, sub.Ch, time.Second, "committed peer event")
 	require.Equal(t, peer.ID, message.ProjectID)
 	require.Equal(t, event.UID, message.Event.UID)
+}
+
+func TestFederationReplicaAdoptionRefusesArgv(t *testing.T) {
+	credentials := newReplicaCredentialStore()
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.FederationCredentials = credentials })
+	ctx := t.Context()
+	project, err := env.DB.CreateProjectWithUID(ctx, "spoke-project", federationTestSpokeUID)
+	require.NoError(t, err)
+	_, _, err = env.DB.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "argv", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "one", Kind: "argv", Argv: []string{"echo", "", "a b"}}}}})
+	require.NoError(t, err)
+	credential := config.FederationCredential{HubURL: "http://127.0.0.1:7373", HubProjectID: 42, Token: "push-token", Capabilities: "pull,push", Actor: "worker"}
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url": credential.HubURL, "hub_project_id": 42, "hub_project_uid": replicaHubProjectUID,
+		"project_name": project.Name, "replay_horizon_event_id": 9, "actor": "worker", "token": credential.Token,
+		"capabilities": "pull,push", "push_enabled": true, "adopt_existing": true,
+	}, nil)
+	require.Equal(t, http.StatusConflict, resp.StatusCode, "response: %s", raw)
+	var response api.ErrorEnvelope
+	require.NoError(t, json.Unmarshal(raw, &response))
+	require.Equal(t, "unsupported_event_features", response.Error.Code)
 }

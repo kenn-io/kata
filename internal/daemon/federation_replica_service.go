@@ -1166,7 +1166,8 @@ func ensureFederationReplicaState(
 	if err := ensureFederationReplicaCredentialTarget(ctx, store, credentials, p); err != nil {
 		return EnsureFederationReplicaResult{}, err
 	}
-	if err := ensureFederationReplicaCredentialRekey(ctx, store, credentials, p); err != nil {
+	rekey, err := ensureFederationReplicaCredentialRekey(ctx, store, credentials, p)
+	if err != nil {
 		return EnsureFederationReplicaResult{}, err
 	}
 	// Rejoin without new source references retains the explicit signing choice.
@@ -1182,6 +1183,13 @@ func ensureFederationReplicaState(
 	}
 
 	result, err := ensureReplicaBindingOrAdopt(ctx, store, p)
+	if err != nil && rekey != nil && (errors.Is(err, db.ErrUnsupportedEventFeatures) ||
+		errors.Is(err, db.ErrFederationIngestValidation)) {
+		// Workflow feature or validation refusal left the project unchanged.
+		if restoreErr := restoreFederationReplicaCredentialRekey(ctx, credentials, *rekey); restoreErr != nil {
+			return result, errors.Join(err, restoreErr)
+		}
+	}
 	if p.ProjectResetSink != nil {
 		for _, projectID := range result.ResetProjectIDs {
 			p.ProjectResetSink(projectID, result.ResetAfterEventID)
@@ -1660,32 +1668,34 @@ func federationReplicaCredentialTargetConflict(
 	)
 }
 
+// ensureFederationReplicaCredentialRekey moves an adopted project's credential
+// to the hub UID and returns the applied rekey, or nil when none was needed.
 func ensureFederationReplicaCredentialRekey(
 	ctx context.Context,
 	store db.Storage,
 	credentials config.FederationCredentialStore,
 	p EnsureFederationReplicaParams,
-) error {
+) (*config.FederationCredentialRekeyUndo, error) {
 	source := p.CredentialRekey
 	if source == nil && (p.AdoptExisting || p.AttachEmpty) {
 		project, err := store.ProjectByNameIncludingArchived(ctx, p.ProjectName)
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return fmt.Errorf("resolve federation credential adoption source: %w", err)
+			return nil, fmt.Errorf("resolve federation credential adoption source: %w", err)
 		}
 		if err == nil && project.UID != p.HubProjectUID {
 			if credentials == nil {
-				return credentialIOError("read federation credential adoption source")
+				return nil, credentialIOError("read federation credential adoption source")
 			}
 			existing, ok, readErr := credentials.FederationCredential(ctx, project.UID)
 			if readErr != nil {
 				if errors.Is(readErr, config.ErrFederationCredentialConflict) {
-					return readErr
+					return nil, readErr
 				}
-				return credentialIOError("read federation credential adoption source")
+				return nil, credentialIOError("read federation credential adoption source")
 			}
 			if ok {
 				if !existing.Equal(p.Credential) {
-					return federationReplicaError(
+					return nil, federationReplicaError(
 						ErrFederationReplicaCredentialConflict,
 						"standalone project credential differs from the requested credential",
 						"",
@@ -1699,41 +1709,95 @@ func ensureFederationReplicaCredentialRekey(
 		}
 	}
 	if source == nil {
-		return nil
+		return nil, nil
 	}
 	sourceProject, err := store.ProjectByUID(ctx, source.ProjectUID)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return fmt.Errorf("resolve federation credential rekey source: %w", err)
+		return nil, fmt.Errorf("resolve federation credential rekey source: %w", err)
 	}
 	if err == nil {
 		if _, bindingErr := store.FederationBindingByProject(ctx, sourceProject.ID); bindingErr == nil {
-			return federationReplicaError(
+			return nil, federationReplicaError(
 				ErrFederationReplicaBindingConflict,
 				"federation credential adoption source is already bound",
 				"",
 			)
 		} else if !errors.Is(bindingErr, db.ErrNotFound) {
-			return fmt.Errorf("read federation credential rekey source binding: %w", bindingErr)
+			return nil, fmt.Errorf("read federation credential rekey source binding: %w", bindingErr)
 		}
 	}
-	managed, err := managedCredentialStore(credentials)
-	if err != nil {
-		return err
+	if err := refuseArgvAdoptionBeforeRekey(ctx, store, p); err != nil {
+		return nil, err
 	}
-	if err := managed.RekeyFederationCredential(ctx, config.FederationCredentialRekey{
+	rekey := config.FederationCredentialRekey{
 		FromProjectUID: source.ProjectUID,
 		ToProjectUID:   p.HubProjectUID,
 		Expected:       source.Expected,
 		Replacement:    p.Credential,
-	}); err != nil {
+	}
+	managed, ok := credentials.(config.FederationCredentialRekeyUndoer)
+	if !ok {
+		return nil, credentialIOError("rekey federation replica credential")
+	}
+	undo, err := managed.RekeyFederationCredentialWithUndo(ctx, rekey)
+	if err != nil {
 		if errors.Is(err, config.ErrFederationCredentialConflict) {
-			return federationReplicaError(
+			return nil, federationReplicaError(
 				ErrFederationReplicaCredentialConflict,
 				"federation credential rekey lost a concurrent update",
 				"",
 			)
 		}
-		return credentialIOError("rekey federation replica credential")
+		return nil, credentialIOError("rekey federation replica credential")
+	}
+	return undo, nil
+}
+
+// refuseArgvAdoptionBeforeRekey fails closed before any credential moves.
+// The adoption transaction repeats this check and remains authoritative; a
+// store without the reader relies on that check and the restore after it.
+func refuseArgvAdoptionBeforeRekey(ctx context.Context, store db.Storage, p EnsureFederationReplicaParams) error {
+	if !p.AdoptExisting && !p.AttachEmpty {
+		return nil
+	}
+	project, err := store.ProjectByNameIncludingArchived(ctx, p.ProjectName)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("resolve adoption project features: %w", err)
+	}
+	if project.UID == p.HubProjectUID {
+		return nil
+	}
+	reader, ok := store.(db.RelayWorkflowFeatureReader)
+	if !ok {
+		return nil
+	}
+	required, err := reader.RelayWorkflowRequiredFeatures(ctx, project.UID)
+	if err != nil {
+		return err
+	}
+	return db.RequireEventFeatures("", required)
+}
+
+// restoreFederationReplicaCredentialRekey reverses an applied rekey with the
+// same exact compare-and-swap. Any concurrent change is left untouched.
+func restoreFederationReplicaCredentialRekey(
+	ctx context.Context, credentials config.FederationCredentialStore, applied config.FederationCredentialRekeyUndo,
+) error {
+	managed, ok := credentials.(config.FederationCredentialRekeyUndoer)
+	if !ok {
+		return credentialIOError("atomic federation credential undo unavailable")
+	}
+	// Cleanup must finish even if the adoption caller was canceled.
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := managed.UndoFederationCredentialRekey(cleanupCtx, applied); err != nil {
+		if errors.Is(err, config.ErrFederationCredentialConflict) {
+			return federationReplicaError(ErrFederationReplicaCredentialConflict, "refused adoption could not restore a concurrently changed credential", "")
+		}
+		return credentialIOError("restore federation credential after refused adoption")
 	}
 	return nil
 }

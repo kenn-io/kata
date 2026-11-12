@@ -1,0 +1,13 @@
+overlay: 1.0.0
+info:
+  title: Preserve cron workflow argv field presence
+  version: 1.0.0
+actions:
+  - target: '$.components.schemas.CronWorkflowStep.properties.argv'
+    update:
+      x-oapi-codegen-extra-tags:
+        json: argv,omitzero
+  - target: '$.components.schemas.CronWorkflowStepResponse.properties.argv'
+    update:
+      x-oapi-codegen-extra-tags:
+        json: argv,omitzero
