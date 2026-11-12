@@ -31,12 +31,14 @@ func TestReadProjectByNameHostScope(t *testing.T) {
 		server.Handler().ServeHTTP(w, r.WithContext(ctx))
 	}))
 	t.Cleanup(ts.Close)
+	var deniedBody []byte
 	for _, tc := range []struct {
 		path   string
 		status int
 	}{
 		{"/api/v1/projects/resolve?name=allowed-project", http.StatusOK},
 		{"/api/v1/projects/resolve?name=denied-project", http.StatusNotFound},
+		{"/api/v1/projects/resolve?name=missing-project", http.StatusNotFound},
 	} {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+tc.path, nil)
 		require.NoError(t, err)
@@ -48,6 +50,10 @@ func TestReadProjectByNameHostScope(t *testing.T) {
 		require.Equal(t, tc.status, resp.StatusCode, string(body))
 		if tc.status == http.StatusOK {
 			require.Contains(t, string(body), allowed.Name)
+		} else if deniedBody == nil {
+			deniedBody = body
+		} else {
+			require.JSONEq(t, string(deniedBody), string(body))
 		}
 	}
 }

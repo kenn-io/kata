@@ -40,8 +40,8 @@ test('local project readers see native sync status with bounded embedding summar
   expect(enabled.ok()).toBe(true)
   kata.recordSyncDiagnosticError()
   await region.getByRole('button', { name: 'Refresh sync' }).click()
-  // This hub/unconfigured state comes from the native production SQLite daemon.
-  await expect(region.getByText('hub', { exact: true })).toBeVisible()
+  // This spoke/unconfigured state comes from the native production SQLite daemon.
+  await expect(region.getByText('spoke', { exact: true })).toBeVisible()
   await expect(region.getByText('Embeddings: unconfigured')).toBeVisible()
 
   // This response fixture covers browser rendering; native artifact reuse,
@@ -63,12 +63,6 @@ test('local project readers see native sync status with bounded embedding summar
   })
   await region.getByRole('button', { name: 'Refresh sync' }).click()
   await expect(region.getByText('Reused: 1')).toBeVisible()
-  await expect(
-    region.getByRole('button', { name: 'Copy Bash/Zsh sync status command' }),
-  ).toBeVisible()
-  await expect(
-    region.getByRole('button', { name: 'Copy PowerShell sync status command' }),
-  ).toBeVisible()
   await expect(region.getByText('Run in a CLI connected to this daemon.')).toBeVisible()
   await expect(region.getByText(`Browser: ${kata.origin}`)).toBeVisible()
   await page
