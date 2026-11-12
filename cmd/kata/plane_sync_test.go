@@ -147,11 +147,13 @@ func TestPlaneReadOnlyAcceptance(t *testing.T) {
 		require.NoError(t, err)
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(string(raw))), Request: r}, nil
 	})
-	client := planesync.NewClient(planesync.ClientConfig{Transport: transport, LookupEnv: func(string) (string, bool) { return token, true }})
+	pacing := newCLISyncPacing()
+	client := planesync.NewClient(planesync.ClientConfig{Transport: transport, LookupEnv: func(string) (string, bool) { return token, true }, Now: pacing.Now, Wait: pacing.Wait})
 	env := testenv.New(t, func(c *daemon.ServerConfig) { c.PlaneSyncFetcher = client })
 	dir, id := initLocalBoundWorkspace(t, env, "spoke-project")
-	require.Contains(t, runCLI(t, env, dir, "sync", "plane", "enable", "--plane-workspace", "example-workspace", "--plane-project", cliPlaneProject), "Plane sync enabled")
-	require.Contains(t, runCLI(t, env, dir, "sync", "plane", "once"), "created=1")
+	// Enable and once both wait for paced Plane reads beyond the ordinary CLI timeout.
+	require.Contains(t, pacing.runHeldCLI(t, env, dir, "sync", "plane", "enable", "--plane-workspace", "example-workspace", "--plane-project", cliPlaneProject), "Plane sync enabled")
+	require.Contains(t, pacing.runHeldCLI(t, env, dir, "sync", "plane", "once"), "created=1")
 	items, err := env.DB.ListIssues(t.Context(), db.ListIssuesParams{ProjectID: id})
 	require.NoError(t, err)
 	require.Len(t, items, 1)

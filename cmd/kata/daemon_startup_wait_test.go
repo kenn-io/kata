@@ -26,8 +26,8 @@ import (
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
-// A parent-controlled gate keeps the current-schema timeout child alive until
-// launch returns. The other modes exercise a delayed schema-28 cutover.
+// A parent-controlled gate keeps the detached child alive until launch
+// returns. The cancel and foreign-runtime modes then run a schema-28 cutover.
 func TestDetachedStartSurvivesReadinessTimeout(t *testing.T) {
 	for _, mode := range []string{"readiness-timeout", "caller-cancel", "foreign-runtime"} {
 		t.Run(mode, func(t *testing.T) {
@@ -98,15 +98,13 @@ func TestDetachedStartSurvivesReadinessTimeout(t *testing.T) {
 			cmd.Env = os.Environ()
 			output, err := cmd.CombinedOutput()
 			require.NoError(t, err, "%s", output)
-			if mode == "readiness-timeout" {
-				select {
-				case <-childWaiting:
-				case <-ctx.Done():
-					t.Fatalf("child did not reach the release gate: %s", output)
-				}
-				_, err := os.Stat(filepath.Join(home, "cutover-complete"))
-				require.ErrorIs(t, err, os.ErrNotExist, "child must still be gated when launch times out")
+			select {
+			case <-childWaiting:
+			case <-ctx.Done():
+				t.Fatalf("child did not reach the release gate: %s", output)
 			}
+			_, err = os.Stat(filepath.Join(home, "cutover-complete"))
+			require.ErrorIs(t, err, os.ErrNotExist, "child must still be gated when launch returns")
 			releaseChild()
 			completionDeadline := time.NewTimer(30 * time.Second)
 			defer completionDeadline.Stop()
@@ -283,6 +281,7 @@ func TestDetachedStartFixture(t *testing.T) {
 	if mode == "readiness-timeout" {
 		// No owner holds the store, so only the ordinary readiness budget applies.
 		daemonOwnerLockWait = 0
+		daemonReadinessWait = time.Second
 	}
 	if mode == "caller-cancel" || mode == "foreign-runtime" {
 		var cancel context.CancelFunc
@@ -305,8 +304,10 @@ func TestDetachedStartFixture(t *testing.T) {
 		require.NoError(t, err)
 		release, err := daemonruntime.AcquireStoreOwnerLock(t.Context(), daemonruntime.StoreOwnerLockPaths(nsDir, dsn))
 		require.NoError(t, err)
-		// The contract is about wall time: ownership outlasts the 5s ordinary readiness budget.
-		timer := time.AfterFunc(6*time.Second, release)
+		// The contract is about wall time: ownership outlasts the ordinary
+		// readiness budget, shortened here to 1s.
+		daemonReadinessWait = time.Second
+		timer := time.AfterFunc(2*time.Second, release)
 		t.Cleanup(func() {
 			if timer.Stop() {
 				release()
@@ -325,7 +326,7 @@ func TestDetachedStartFixture(t *testing.T) {
 		require.Equal(t, kindDaemonUnavail, targetErr.Kind)
 		require.Equal(t, ExitDaemonUnavail, targetErr.ExitCode)
 		require.ErrorContains(t, err, client.ErrLocalDaemonUnreachable.Error())
-		require.ErrorContains(t, err, "daemon startup is still in progress after 5s")
+		require.ErrorContains(t, err, "daemon startup is still in progress after 1s")
 		require.Empty(t, result.Action)
 	}
 	if mode == "foreign-runtime" {
@@ -374,14 +375,10 @@ func runStartupFixture() {
 		}
 		os.Exit(0)
 	}
-	if os.Getenv("KATA_STARTUP_FIXTURE_MODE") == "readiness-timeout" {
-		if err := notifyStartupFixture(ctx, "release-child"); err != nil {
-			_, _ = os.Stderr.WriteString(err.Error())
-			os.Exit(1)
-		}
-	} else {
-		timer := time.NewTimer(6 * time.Second)
-		<-timer.C
+	// The parent test releases this gate only after its launcher has returned.
+	if err := notifyStartupFixture(ctx, "release-child"); err != nil {
+		_, _ = os.Stderr.WriteString(err.Error())
+		os.Exit(1)
 	}
 	err := jsonl.AutoCutover(ctx, dbPath)
 	if err != nil {
