@@ -349,12 +349,16 @@ func TestRelaySessionDirectConversionPublicationRetry(t *testing.T) {
 						require.Equal(t, collectRelayOutbox(t, peer.store), collectRelayOutbox(t, sender), "full replay retains pending relay rows")
 					}
 					before := relayRows(t, sender)
+					// SyncFederationOnce records push start and errors in this operational table.
+					delete(before, "federation_sync_status")
 					outbox := collectRelayOutbox(t, sender)
 					require.NotEmpty(t, outbox)
 					err = federation.SyncFederationOnce(t.Context(), sender, binding, peer.credential)
 					require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
 					require.Zero(t, posts, "no incompatible accept is sent")
-					require.Equal(t, before, relayRows(t, sender), "refusal retains un-emitted source rows and cursors")
+					after := relayRows(t, sender)
+					delete(after, "federation_sync_status")
+					require.Equal(t, before, after, "refusal retains un-emitted source rows and cursors")
 					upgraded = true
 					require.NoError(t, federation.SyncFederationOnce(t.Context(), sender, binding, peer.credential))
 					require.Positive(t, posts)
