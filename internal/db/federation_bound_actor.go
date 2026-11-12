@@ -60,6 +60,13 @@ func ValidateFederationBoundActorPayload(ctx context.Context, ev RemoteEvent, ch
 		return validateFederationIssueAuthors(ev, boundActor)
 	case "issue.created":
 		return validateFederationIssueAuthors(ev, boundActor)
+	case RepeatedImportEventType:
+		// A whole copy carries comments with their authors, as a snapshot
+		// does, and has no issue author or links of its own.
+		if check.AllowSnapshotAuthorPreservation {
+			return nil
+		}
+		return validateFederationPayloadCommentAuthors(ev, boundActor)
 	case "issue.commented":
 		return validateFederationPayloadAuthor(ev, boundActor)
 	default:

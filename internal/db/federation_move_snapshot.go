@@ -319,7 +319,7 @@ func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event Remot
 	history = FederationMoveBaselineEvents(history)
 	for _, retained := range history {
 		switch retained.Type {
-		case "issue.created", "issue.snapshot", "issue.commented", "issue.linked", "issue.links_changed":
+		case "issue.created", "issue.snapshot", RepeatedImportEventType, "issue.commented", "issue.linked", "issue.links_changed":
 		default:
 			continue // In particular, nested move snapshots never prove themselves.
 		}

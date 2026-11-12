@@ -27,7 +27,7 @@ func issueLifecycle(o Occurrence) bool {
 	switch o.Type {
 	case "issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored":
 		return true
-	case "issue.updated", "issue.restated":
+	case "issue.updated":
 		var payload map[string]any
 		if json.Unmarshal(o.Payload, &payload) != nil {
 			return false
@@ -72,12 +72,14 @@ func inboxEventReason(o Occurrence, args Arguments) string {
 				return "visibility"
 			}
 		}
-	case "issue.created", "issue.snapshot":
+	case "issue.created", "issue.snapshot", "issue.restated":
 		metadata, _ := payload["metadata"].(map[string]any)
 		if _, ok := notification.ParseValue(metadata[key]); ok {
 			return "notification"
 		}
-		if o.Type == "issue.snapshot" {
+		// A snapshot or a whole copy replaces the metadata, so it can remove
+		// a request without naming it.
+		if o.Type != "issue.created" {
 			return "visibility"
 		}
 	case "issue.metadata_updated":
@@ -98,7 +100,7 @@ func inboxEventReason(o Occurrence, args Arguments) string {
 		if from || to {
 			return "notification"
 		}
-	case "issue.updated", "issue.restated":
+	case "issue.updated":
 		for _, field := range []string{"status", "deleted_at", "closed_at"} {
 			if _, ok := payload[field]; ok {
 				return "visibility"

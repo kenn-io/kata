@@ -160,11 +160,16 @@ func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 		if err := tx.QueryRowContext(ctx, `SELECT uid, name FROM projects WHERE id=?`, projectID).Scan(&projectUID, &projectName); err != nil {
 			return fmt.Errorf("read project for federation push acknowledgement: %w", err)
 		}
-		_, err = d.insertEventTx(ctx, tx, eventInsert{
+		reset, err := d.insertEventTx(ctx, tx, eventInsert{
 			ProjectID: projectID, ProjectUID: projectUID, ProjectName: projectName,
 			Type: db.ProjectScopeResetEventType, Actor: "system", Payload: "{}", SkipRelay: true,
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		// Open stream clients learn of the reset from the caller after commit,
+		// and from the stored cursor on their next heartbeat.
+		return db.RecordFederationProjectUIReset(ctx, tx, db.Project{ID: projectID, UID: projectUID, Name: projectName}, reset.ID)
 	})
 }
 

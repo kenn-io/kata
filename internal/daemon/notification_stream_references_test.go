@@ -102,3 +102,38 @@ func FuzzNotificationStreamReferences(f *testing.F) {
 	f.Add(uint8(0), false, true)
 	f.Fuzz(checkNotificationStreamReferences)
 }
+
+// A whole-issue copy carries the issue's metadata, including notification
+// slots. A reader who cannot see a slot's target must not receive it.
+func TestNotificationStreamRechecksTargetsInARepeatedImportEvent(t *testing.T) {
+	fixture := newLateReplyTargetFixture(t)
+	result, err := fixture.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: fixture.source.ID, Actor: "worker",
+		Patch: map[string]jsontext.Value{"notify.worker": jsontext.Value(fmt.Sprintf(`{"re":%q,"message":"Target context"}`, fixture.targetUID))},
+	})
+	require.NoError(t, err)
+	event := result.Event
+	event.Type = db.RepeatedImportEventType
+	event.Payload = fmt.Sprintf(`{"title":"t","status":"open","updated_at":"2026-06-01T09:00:00.000Z","metadata":{"notify.worker":{"re":%q,"message":"Target context"}}}`, fixture.targetUID)
+	ctx := db.WithAuthorizedProjects(t.Context(), []string{fixture.project.UID})
+
+	ids, err := fixture.store.CommentIssueIDsByUIDs(t.Context(), []string{fixture.targetUID})
+	require.NoError(t, err)
+	target, err := fixture.store.IssueByID(t.Context(), ids[fixture.targetUID])
+	require.NoError(t, err)
+	hidden, err := fixture.store.CreateProject(t.Context(), "restricted-project")
+	require.NoError(t, err)
+	_, err = fixture.store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: target.ID,
+		FromProjectID: target.ProjectID, ToProjectID: hidden.ID, IfMatchRev: target.Revision, Actor: "admin"})
+	require.NoError(t, err)
+
+	projected, err := projectNotificationEventPayload(ctx, fixture.store, event)
+	require.NoError(t, err)
+	require.NotContains(t, string(projected), fixture.targetUID, "a page read leaves out the slot")
+	require.NotContains(t, string(projected), "Target context")
+
+	response := httptest.NewRecorder()
+	require.False(t, writeRevalidatedEventFrame(ctx, fixture.store, response, response, event))
+	require.Contains(t, response.Body.String(), "sync.reset_required")
+	require.NotContains(t, response.Body.String(), fixture.targetUID)
+}

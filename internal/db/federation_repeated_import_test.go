@@ -166,7 +166,7 @@ func TestRepeatedSnapshotDeltasOutlastADelayedOlderEdit(t *testing.T) {
 	for i, delta := range deltas {
 		events = append(events, testEvent(delta.Type, int64(10+i), string(delta.Payload)))
 	}
-	events = append(events, testEvent("issue.labeled", 30, `{"label":"later"}`))
+	events = append(events, testEvent("issue.labeled", 30, `{"label":"later","updated_at":"2026-06-02T09:00:00.000Z"}`))
 	got := FoldEvents(events)
 	issue := got.Issues["issue-1"]
 	assert.Equal(t, "agreed title", issue.Title)
@@ -268,24 +268,62 @@ func TestRepeatedSnapshotDeltasKeepALaterCommentEdit(t *testing.T) {
 	current := `{"uid":"issue-1","title":"t","status":"open","comments":[
  {"comment_uid":"comment-1","author":"alice","body":"first","created_at":"2026-05-01T10:00:00.000Z"}],
 "updated_at":"2026-05-01T10:00:00.000Z"}`
-	incoming := `{"uid":"issue-1","title":"t","status":"open","comments":[
+	incoming := `{"uid":"issue-1","title":"copy title","status":"open","comments":[
  {"comment_uid":"comment-1","author":"alice","body":"copy edit","created_at":"2026-05-01T10:00:00.000Z","edited_at":"2026-05-10T10:00:00.000Z"}],
-"updated_at":"2026-05-11T09:00:00.000Z"}`
+"updated_at":"2026-06-01T09:00:00.000Z"}`
 	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
 	require.NoError(t, err)
 	require.Len(t, deltas, 1)
 	later := `{"comment_uid":"comment-1","body":"later edit","edited_at":"2026-05-20T10:00:00.000Z"}`
 	for name, laterClock := range map[string]int64{"the later edit replays first": 5, "the later edit replays last": 20} {
 		t.Run(name, func(t *testing.T) {
-			comment := FoldEvents([]FoldEvent{
+			got := FoldEvents([]FoldEvent{
 				testEvent("issue.snapshot", 1, current),
 				testEvent("issue.comment_edited", laterClock, later),
 				testEvent(deltas[0].Type, 10, string(deltas[0].Payload)),
-			}).Comments["comment-1"]
+			})
+			assert.Equal(t, "copy title", got.Issues["issue-1"].Title, "the copy is newer than the issue and applies")
+			comment := got.Comments["comment-1"]
 			assert.Equal(t, "later edit", comment.Body)
 			assert.Equal(t, "2026-05-20T10:00:00.000Z", comment.EditedAt)
 		})
 	}
+}
+
+// Event clocks do not track the data's time. An older change whose event
+// replays after the hub's event for a winning copy must not undo the copy,
+// and a change made after the copy still applies.
+func TestRepeatedImportEventOutlastsAnOlderChangeThatReplaysLater(t *testing.T) {
+	current := `{"uid":"issue-1","title":"hub title","body":"hub body","status":"open","labels":["bug"],"comments":[
+ {"comment_uid":"comment-1","author":"alice","body":"first","created_at":"2026-05-01T10:00:00.000Z"}],
+"updated_at":"2026-05-01T09:00:00.000Z"}`
+	incoming := `{"uid":"issue-1","title":"copy title","body":"copy body","status":"open","metadata":{"team":"core"},"labels":["shipped"],"comments":[
+ {"comment_uid":"comment-1","author":"alice","body":"copy edit","created_at":"2026-05-01T10:00:00.000Z","edited_at":"2026-05-10T10:00:00.000Z"}],
+"updated_at":"2026-06-01T09:00:00.000Z"}`
+	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
+	require.NoError(t, err)
+	require.Len(t, deltas, 1)
+	older := "2026-05-15T09:00:00.000Z"
+	got := FoldEvents([]FoldEvent{
+		testEvent("issue.snapshot", 1, current),
+		testEvent(deltas[0].Type, 10, string(deltas[0].Payload)),
+		testEvent("issue.updated", 20, `{"title":"older title","updated_at":"`+older+`"}`),
+		testEvent("issue.closed", 21, `{"reason":"done","updated_at":"`+older+`"}`),
+		testEvent("issue.labeled", 22, `{"label":"stray","updated_at":"`+older+`"}`),
+		testEvent("issue.unlabeled", 23, `{"label":"shipped","updated_at":"`+older+`"}`),
+		testEvent("issue.metadata_updated", 24, `{"diff":{"stray":{"from":null,"to":"x"}},"updated_at":"`+older+`"}`),
+		testEvent("issue.comment_edited", 25, `{"comment_uid":"comment-1","body":"older edit","edited_at":"2026-05-05T10:00:00.000Z"}`),
+		testEvent("issue.commented", 26, `{"comment_uid":"comment-2","author":"bob","body":"older comment the copy lacks","created_at":"`+older+`"}`),
+		testEvent("issue.labeled", 27, `{"label":"newer","updated_at":"2026-06-02T09:00:00.000Z"}`),
+		testEvent("issue.comment_edited", 28, `{"comment_uid":"comment-2","body":"edit of the other comment","edited_at":"2026-05-16T10:00:00.000Z"}`),
+	})
+	issue := got.Issues["issue-1"]
+	assert.Equal(t, "copy title", issue.Title)
+	assert.Equal(t, "open", issue.Status)
+	assert.ElementsMatch(t, []string{"shipped", "newer"}, presentLabels(got, "issue-1"), "a label added after the copy stays")
+	assert.JSONEq(t, `{"team":"core"}`, string(got.IssueMetadata["issue-1"]))
+	assert.Equal(t, "copy edit", got.Comments["comment-1"].Body, "an older edit of a comment does not replace the copy's later edit")
+	assert.Equal(t, "edit of the other comment", got.Comments["comment-2"].Body, "comments merge, so one the copy lacks is added and can be edited")
 }
 
 // The hub decides by updated_at when the copy arrives, and replay must decide

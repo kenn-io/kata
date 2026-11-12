@@ -204,8 +204,21 @@ func TestSyncFederationRepeatedAdoptionKeepsItsSnapshotUntilTheHubHistoryArrives
 	require.NotNil(t, status.LastError, "federation status shows why the push has not finished")
 	require.Contains(t, *status.LastError, "waits for the hub's history")
 
-	home.sync(t)
+	// The rebuild changes rows without a pulled event, so open clients learn
+	// of it from a reset the sync publishes.
+	var published []db.Event
+	for range 2 {
+		binding, err := home.env.DB.FederationBindingByProject(ctx, home.projectID)
+		require.NoError(t, err)
+		require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, home.env.DB, binding, home.creds, clientOptsWithDefault(clientpkg.Opts{}), func(_ int64, events []db.Event) {
+			published = append(published, events...)
+		}))
+	}
 	require.Empty(t, home.ownSnapshots(t, seed.UID))
+	cursor, err := home.env.DB.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Contains(t, published, db.Event{ID: cursor, ProjectID: home.projectID, Type: db.ProjectScopeResetEventType},
+		"the sync publishes the reset that follows the rebuild")
 	title, comments := repeatedAdoptionState(t, home.env.DB, seed.UID)
 	require.Equal(t, "hub copy", title, "the home shows the hub's state as soon as it drops its snapshot")
 	require.Empty(t, comments)

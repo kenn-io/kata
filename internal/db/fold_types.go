@@ -36,7 +36,10 @@ type FoldProjection struct {
 	Labels        map[FoldLabelKey]FoldElementState
 	// labelsByIssue indexes Labels for a whole-set replacement. It is built on
 	// the first replacement and kept current by every later label write.
-	labelsByIssue   map[string]map[string]struct{}
+	labelsByIssue map[string]map[string]struct{}
+	// restatedAt holds, per issue, the updated_at of the latest whole copy
+	// that applied. Older changes that replay after it yield to the copy.
+	restatedAt      map[string]string
 	Links           map[FoldLinkKey]FoldElementState
 	IssueMetadata   map[string]jsontext.Value
 	ProjectMetadata map[string]jsontext.Value

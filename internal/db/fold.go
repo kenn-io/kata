@@ -69,8 +69,14 @@ func (p *FoldProjection) apply(e FoldEvent) {
 		return
 	}
 	payload := PayloadMap(e.Payload)
+	if p.yieldsToRestatedCopy(e, payload) {
+		return
+	}
 	switch e.Type {
 	case "issue.created", "issue.snapshot":
+		// A creation or snapshot is the whole issue again, so no earlier
+		// copy bounds what follows it.
+		delete(p.restatedAt, issueUID(e, nil))
 		p.applyIssueCreated(e)
 	case "issue.updated":
 		p.applyIssueUpdated(e, payload)
@@ -135,6 +141,27 @@ func (p *FoldProjection) apply(e FoldEvent) {
 		// its own connector state and must not project these onto native content.
 		return
 	}
+}
+
+// yieldsToRestatedCopy reports whether e changes values a whole copy already
+// set and is not newer than that copy. Event clocks do not track the data's
+// time, so such a change can replay after the copy's event. The copy held
+// every field, label, and metadata key as of its updated_at, so only a change
+// made after that time applies. Comments merge and are not bounded here.
+func (p *FoldProjection) yieldsToRestatedCopy(e FoldEvent, payload map[string]jsontext.Value) bool {
+	if len(p.restatedAt) == 0 {
+		return false
+	}
+	switch e.Type {
+	case "issue.updated", "issue.assigned", "issue.unassigned", "issue.assignment_renewed",
+		"issue.assignment_expired", "issue.priority_set", "issue.priority_cleared",
+		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",
+		"issue.labeled", "issue.unlabeled", "issue.metadata_updated":
+	default:
+		return false
+	}
+	copyUpdatedAt, restated := p.restatedAt[issueUID(e, payload)]
+	return restated && !repeatedCopyIsNewer(copyUpdatedAt, issueUpdatedAt(e, payload))
 }
 
 func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
@@ -316,6 +343,10 @@ func (p *FoldProjection) applyIssueRestated(e FoldEvent) {
 	issue.DeletedAt = cloneStringPtr(in.DeletedAt)
 	issue.UpdatedAt = in.UpdatedAt
 	p.Issues[uid] = issue
+	if p.restatedAt == nil {
+		p.restatedAt = map[string]string{}
+	}
+	p.restatedAt[uid] = in.UpdatedAt
 
 	p.replaceIssueLabels(uid, in.Labels, clockOf(e))
 	metadata, err := json.Marshal(in.Metadata, json.Deterministic(true))
@@ -539,6 +570,13 @@ func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]json
 	editedAt := e.CreatedAt
 	if v, ok := stringValue(payload["edited_at"]); ok && v != "" {
 		editedAt = v
+	}
+	// After a whole copy, a comment's text follows its edit time: an older
+	// edit that replays later does not replace the copy's text.
+	if _, restated := p.restatedAt[uid]; restated {
+		if existing, known := p.Comments[commentUID]; known && existing.EditedAt != "" && !timestampBefore(existing.EditedAt, editedAt) {
+			return
+		}
 	}
 	p.editCommentBody(commentUID, uid, body, editedAt, clockOf(e))
 	p.touchIssue(uid, editedAt)

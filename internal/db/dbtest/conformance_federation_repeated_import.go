@@ -569,11 +569,18 @@ func checkFederationAcknowledgePush(t *testing.T, store db.Storage) error {
 
 	shown, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
-	for range 2 {
-		require.NoError(t, store.AcknowledgeFederationPush(ctx, project.ID, edit.ID, []string{held.UID, edit.UID, foreignUID}))
+	for round := range 2 {
+		publishCtx, published := db.WithFederationMoveResetCapture(ctx)
+		require.NoError(t, store.AcknowledgeFederationPush(publishCtx, project.ID, edit.ID, []string{held.UID, edit.UID, foreignUID}))
 		cursor, err := store.MaxEventID(ctx)
 		require.NoError(t, err)
 		require.Greater(t, cursor, shown, "the rebuild changes visible rows, so it writes an event that moves a browser's cursor")
+		if round == 0 {
+			require.Equal(t, []db.FederationProjectReset{{ProjectID: project.ID, EventID: cursor}}, published.Resets,
+				"the caller gets the committed reset to publish to open clients")
+		} else {
+			require.Empty(t, published.Resets, "a repeat deletes nothing and publishes nothing")
+		}
 		binding, err := store.FederationBindingByProject(ctx, project.ID)
 		require.NoError(t, err)
 		require.Equal(t, edit.ID, binding.PushCursorEventID, "the push cursor advances with the deletion")
