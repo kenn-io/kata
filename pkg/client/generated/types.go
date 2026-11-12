@@ -2773,9 +2773,10 @@ func (f FederationIngestEventEnvelope) Validate() error {
 }
 
 type FederationIngestEventsBody struct {
-	Accepted          int64 `json:"accepted"`
-	Duplicates        int64 `json:"duplicates"`
-	PushCursorEventID int64 `json:"push_cursor_event_id"`
+	Accepted            int64    `json:"accepted"`
+	Duplicates          int64    `json:"duplicates"`
+	PushCursorEventID   int64    `json:"push_cursor_event_id"`
+	SupersededEventUids []string `json:"superseded_event_uids,omitempty"`
 }
 
 type FederationIngestEventsRequestBody struct {

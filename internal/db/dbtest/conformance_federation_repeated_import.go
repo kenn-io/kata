@@ -211,6 +211,15 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 	require.NoError(t, err)
 	require.Len(t, snapshots, 1)
 	require.Equal(t, h.firstUID, snapshots[0].OriginInstanceUID)
+	// The hub names the snapshots it did not store, so the pushing home can
+	// delete them and take the hub's state.
+	var held []string
+	for _, event := range newer {
+		if *event.IssueUID != newIssueUID {
+			held = append(held, event.EventUID)
+		}
+	}
+	require.ElementsMatch(t, held, result.SupersededEventUIDs)
 
 	issue, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
@@ -267,8 +276,9 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 			})
 		}
 	})
-	_, err = pushRepeatedImportBaseline(t, hub, h.target.ID, olderEnrollment, olderOrigin, older)
+	result, err = pushRepeatedImportBaseline(t, hub, h.target.ID, olderEnrollment, olderOrigin, older)
 	require.NoError(t, err, "an older copy is accepted and skipped")
+	require.Len(t, result.SupersededEventUIDs, len(older))
 	afterStale, err := hub.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, lastEvent, afterStale, "an older copy writes no event")
@@ -283,6 +293,80 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 	untouched, err = hub.IssueByUID(ctx, h.otherUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, "Untouched", untouched.Title)
+
+	// A large adoption arrives in chunks. A first chunk that holds only issues
+	// the hub already has stores nothing, and the next chunk must still be
+	// accepted.
+	splitOrigin, splitEnrollment, split := h.repeatedImportCopy(t, h.target, func(_ string, payload map[string]any) {
+		repeatedImportShiftUpdatedAt(t, payload, -2*time.Hour)
+	})
+	require.Greater(t, len(split), 1)
+	chunk := func(mode string, from, to int) (db.FederationIngestResult, error) {
+		batch := make([]db.FederationIngestEvent, 0, to-from)
+		for index := from; index < to; index++ {
+			batch = append(batch, db.FederationIngestEvent{SourceEventID: int64(index + 1), Event: split[index]})
+		}
+		return hub.IngestFederationEvents(ctx, db.FederationIngestParams{
+			EventFeatures: db.SupportedEventFeatures, ProjectID: h.target.ID, FederationEnrollmentID: splitEnrollment,
+			SpokeInstanceUID: splitOrigin, BoundActor: "operator", AllowSnapshotAuthorPreservation: true,
+			AdoptionBaseline: mode, AdoptionBaselineEndSourceEventID: int64(len(split)), Events: batch,
+		})
+	}
+	_, err = chunk(db.FederationAdoptionBaselineOpen, 0, 1)
+	require.NoError(t, err)
+	_, err = chunk(db.FederationAdoptionBaselineOpen, 0, 1)
+	require.NoError(t, err, "a retried chunk is accepted again")
+	_, err = chunk(db.FederationAdoptionBaselineComplete, 1, len(split))
+	require.NoError(t, err, "the adoption continues after a chunk that stored nothing")
+	_, err = chunk(db.FederationAdoptionBaselineComplete, 1, len(split))
+	require.NoError(t, err, "the finished adoption can be retried")
+	afterSplit, err := hub.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, lastEvent, afterSplit)
+
+	// A copy may carry a link to an issue of another hub project. The hub
+	// writes that link only with the pushing home's authority over the other
+	// project, as it does for a fresh snapshot.
+	elsewhere, err := hub.CreateProject(ctx, "other-hub-project")
+	require.NoError(t, err)
+	_, err = hub.EnableProjectFederation(ctx, elsewhere.ID, "operator")
+	require.NoError(t, err)
+	peer, _, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: elsewhere.ID, Title: "peer", Author: "alice"})
+	require.NoError(t, err)
+	linkedOrigin, linkedEnrollment, linked := h.repeatedImportCopy(t, h.target, func(issueUID string, payload map[string]any) {
+		repeatedImportShiftUpdatedAt(t, payload, 48*time.Hour)
+		if issueUID == h.issueUID {
+			payload["links"] = []any{map[string]any{"type": "blocks", "to_issue_uid": peer.UID, "author": "operator"}}
+		}
+	})
+	_, err = pushRepeatedImportBaseline(t, hub, h.target.ID, linkedEnrollment, linkedOrigin, linked)
+	require.Error(t, err, "a home enrolled in one project cannot link into another")
+	peerLinks, err := hub.LinksByIssue(ctx, peer.ID)
+	require.NoError(t, err)
+	require.Empty(t, peerLinks)
+
+	// Another holder has claimed the issue. A winning copy still applies, and
+	// the hub records the conflict as it does for any other pushed change.
+	holder, err := uid.New()
+	require.NoError(t, err)
+	_, err = hub.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: h.target.ID, IssueRef: issue.ShortID, ClaimKind: "hard", Now: time.Now().UTC(),
+		Principal: db.ClaimPrincipal{HolderInstanceUID: holder, Holder: "holder"},
+	})
+	require.NoError(t, err)
+	claimedOrigin, claimedEnrollment, claimed := h.repeatedImportCopy(t, h.target, func(issueUID string, payload map[string]any) {
+		repeatedImportShiftUpdatedAt(t, payload, 72*time.Hour)
+		if issueUID == h.issueUID {
+			payload["title"] = "Changed under a claim"
+		}
+	})
+	result, err = pushRepeatedImportBaseline(t, hub, h.target.ID, claimedEnrollment, claimedOrigin, claimed)
+	require.NoError(t, err)
+	var eventTypes []string
+	for _, event := range result.Events {
+		eventTypes = append(eventTypes, event.Type)
+	}
+	require.Contains(t, eventTypes, "claim.violated")
 
 	// Outside an adoption baseline the create-only guard still applies.
 	for _, eventType := range []string{"issue.snapshot", "issue.created"} {
@@ -343,6 +427,62 @@ func checkFederationImportIssueHeldElsewhere(t *testing.T, source db.Storage, ba
 		require.True(t, named, "the error names the conflicting issue: %v", err)
 		_, lookupErr := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedYes)
 		require.NoError(t, lookupErr, "the refused push leaves the held issue in place")
+	}
+	return nil
+}
+
+// A home deletes its own adoption snapshots that the hub acknowledged without
+// storing. Nothing else may go: not another event of this home, and not a
+// snapshot another home wrote.
+func checkFederationDropSupersededSnapshots(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "first", Author: "alice"})
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "second", Author: "alice"})
+	require.NoError(t, err)
+	_, err = store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+		ProjectID: project.ID, HubURL: "https://daemon.example", HubProjectID: 7, HubProjectUID: project.UID, Actor: "operator",
+	})
+	require.NoError(t, err)
+	edited := "first, edited"
+	first, err := store.ListIssues(ctx, db.ListIssuesParams{ProjectID: project.ID})
+	require.NoError(t, err)
+	require.Len(t, first, 2)
+	_, edit, _, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: first[0].ID, Title: &edited, Actor: "alice"})
+	require.NoError(t, err)
+	require.NotNil(t, edit)
+
+	listSnapshots := func() []db.Event {
+		events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Types: []string{"issue.snapshot"}, Limit: 10})
+		require.NoError(t, err)
+		return events
+	}
+	snapshots := listSnapshots()
+	require.Len(t, snapshots, 2)
+	foreign := snapshots[1]
+	otherHome, err := uid.New()
+	require.NoError(t, err)
+	foreignUID, err := uid.New()
+	require.NoError(t, err)
+	remote := portableNativeEvent(foreign)
+	remote.EventUID, remote.OriginInstanceUID = foreignUID, otherHome
+	resignNativeEvent(t, &remote)
+	_, err = store.InsertRemoteEvents(ctx, project.ID, []db.RemoteEvent{remote})
+	require.NoError(t, err)
+
+	for range 2 {
+		require.NoError(t, store.DropSupersededFederationSnapshots(ctx, project.ID, []string{snapshots[0].UID, edit.UID, foreignUID}))
+		left := listSnapshots()
+		var uids []string
+		for _, event := range left {
+			uids = append(uids, event.UID)
+		}
+		require.ElementsMatch(t, []string{snapshots[1].UID, foreignUID}, uids, "only this home's named snapshot is deleted")
+		kept, err := store.EventsByUIDs(ctx, project.ID, []string{edit.UID})
+		require.NoError(t, err)
+		require.Len(t, kept, 1, "an event that is not a snapshot stays")
 	}
 	return nil
 }

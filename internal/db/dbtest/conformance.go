@@ -232,6 +232,7 @@ var storageScenarios = []scenario{
 	{name: "native cron remote validation", methods: []string{}, runWithBackend: checkNativeCronValidation},
 	{name: "native cron adoption author", methods: []string{}, runWithBackend: checkNativeCronAdoptionAuthor},
 	{name: "federation repeated import", methods: []string{"IngestFederationEvents", "AdoptProjectIntoFederation", "CommentsByIssue", "LabelsByIssue"}, runWithBackend: checkFederationRepeatedImport},
+	{name: "federation drop superseded snapshots", methods: []string{"DropSupersededFederationSnapshots", "AdoptProjectIntoFederation", "InsertRemoteEvents", "EventsAfter"}, run: checkFederationDropSupersededSnapshots},
 	{name: "federation import issue held elsewhere", methods: []string{"IngestFederationEvents", "RemoveProject"}, runWithBackend: checkFederationImportIssueHeldElsewhere},
 	{name: "native cron federation", methods: []string{"ReadFederation"}, runWithBackend: checkNativeCronFederation},
 	{name: "native cron push", methods: []string{}, runWithBackend: checkNativeCronPush},

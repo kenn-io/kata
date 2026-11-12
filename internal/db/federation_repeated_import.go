@@ -3,8 +3,13 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
+	"time"
 )
 
 // AllowsRepeatedIssueSnapshot reports whether a fresh event may target an
@@ -20,27 +25,88 @@ func AllowsRepeatedIssueSnapshot(eventType string, adoptionBaseline bool, eventF
 }
 
 // RepeatedSnapshotSQLLookups answers RepeatedSnapshotDeltas' questions from
-// the hub's tables. batch holds the issue UIDs the same push creates.
-func RepeatedSnapshotSQLLookups(ctx context.Context, tx federationHistoryQuery, batch map[string]struct{}) RepeatedSnapshotLookups {
-	exists := func(query, uid string) (bool, error) {
+// the hub's tables and from the push itself. A fresh snapshot in the push
+// creates its issue and may give another issue a parent before the hub's rows
+// show either.
+func RepeatedSnapshotSQLLookups(ctx context.Context, tx federationHistoryQuery, events []FederationIngestEvent) *RepeatedSnapshotLookups {
+	batch := map[string]struct{}{}
+	lookups := &RepeatedSnapshotLookups{}
+	for _, input := range events {
+		if input.Event.Type != "issue.created" && input.Event.Type != "issue.snapshot" {
+			continue
+		}
+		var doc repeatedSnapshotDoc
+		if err := json.Unmarshal(input.Event.Payload, &doc); err != nil {
+			continue
+		}
+		if doc.UID == "" && input.Event.IssueUID != nil {
+			doc.UID = *input.Event.IssueUID
+		}
+		if doc.UID == "" {
+			continue
+		}
+		batch[doc.UID] = struct{}{}
+		for _, link := range doc.Links {
+			if key := snapshotLinkKey(doc.UID, link); key.Type == "parent" && link.ToIssueUID != "" {
+				lookups.SetParent(key.FromUID, key.ToUID)
+			}
+		}
+	}
+	lookups.IssueKnown = func(uid string) (bool, error) {
+		if _, ok := batch[uid]; ok {
+			return true, nil
+		}
 		var found int
-		err := tx.QueryRowContext(ctx, query, uid).Scan(&found)
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM issues WHERE uid=$1`, uid).Scan(&found)
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
 		}
 		return err == nil, err
 	}
-	return RepeatedSnapshotLookups{
-		IssueKnown: func(uid string) (bool, error) {
-			if _, ok := batch[uid]; ok {
-				return true, nil
-			}
-			return exists(`SELECT 1 FROM issues WHERE uid=$1`, uid)
-		},
-		HasParent: func(childUID string) (bool, error) {
-			return exists(`SELECT 1 FROM links WHERE from_issue_uid=$1 AND type='parent' LIMIT 1`, childUID)
-		},
+	// A stored parent wins over one the push only proposes.
+	proposed := lookups.parents
+	lookups.parents = nil
+	lookups.ParentOf = func(childUID string) (string, error) {
+		var parent string
+		err := tx.QueryRowContext(ctx, `SELECT to_issue_uid FROM links WHERE from_issue_uid=$1 AND type='parent' LIMIT 1`, childUID).Scan(&parent)
+		if errors.Is(err, sql.ErrNoRows) {
+			return proposed[childUID], nil
+		}
+		return parent, err
 	}
+	return lookups
+}
+
+// RepeatedSnapshotDeltaClock places the hub's events for a winning repeated
+// snapshot in the log. They take the data's updated_at as their time, so an
+// edit made after the snapshot replays after them whenever it reaches the
+// hub. They never sort before the issue's latest event on the hub, which is
+// the state the snapshot was compared with.
+func RepeatedSnapshotDeltaClock(ctx context.Context, tx federationHistoryQuery, issueUID string, incoming jsontext.Value) (EventHLCTimestamp, error) {
+	var doc struct {
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.Unmarshal(incoming, &doc); err != nil {
+		return EventHLCTimestamp{}, fmt.Errorf("%w: decode repeated issue snapshot: %w", ErrFederationIngestValidation, err)
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, doc.UpdatedAt)
+	if err != nil {
+		return EventHLCTimestamp{}, fmt.Errorf("%w: repeated issue snapshot updated_at: %w", ErrFederationIngestValidation, err)
+	}
+	clock := EventHLCTimestamp{PhysicalMS: updatedAt.UnixMilli()}
+	var latestMS, latestCounter int64
+	err = tx.QueryRowContext(ctx, `SELECT hlc_physical_ms, hlc_counter FROM events WHERE issue_uid=$1
+ ORDER BY hlc_physical_ms DESC, hlc_counter DESC LIMIT 1`, issueUID).Scan(&latestMS, &latestCounter)
+	if errors.Is(err, sql.ErrNoRows) {
+		return clock, nil
+	}
+	if err != nil {
+		return EventHLCTimestamp{}, err
+	}
+	if latestMS >= clock.PhysicalMS {
+		clock = EventHLCTimestamp{PhysicalMS: latestMS, Counter: latestCounter + 1}
+	}
+	return clock, nil
 }
 
 // CheckFederationFreshIssueHolder refuses a fresh issue.created or
@@ -71,19 +137,42 @@ func CheckFederationFreshIssueHolder(ctx context.Context, tx federationHistoryQu
 		ErrFederationIngestValidation, eventType, issueUID)
 }
 
-// FederationIngestBatchIssueUIDs lists the issues a push creates, so a link to
-// one of them counts as a link to a known issue.
-func FederationIngestBatchIssueUIDs(events []FederationIngestEvent) map[string]struct{} {
-	out := map[string]struct{}{}
+// ValidateAdoptionBaselineSingleClock checks that a continuation chunk is one
+// baseline when the hub stored no earlier snapshot to compare its clock with.
+func ValidateAdoptionBaselineSingleClock(events []FederationIngestEvent) error {
 	for _, input := range events {
-		if input.Event.Type != "issue.created" && input.Event.Type != "issue.snapshot" {
-			continue
-		}
-		if uid, ok := StringValue(PayloadMap(input.Event.Payload)["uid"]); ok && uid != "" {
-			out[uid] = struct{}{}
-		} else if input.Event.IssueUID != nil && *input.Event.IssueUID != "" {
-			out[*input.Event.IssueUID] = struct{}{}
+		first := events[0].Event
+		if input.Event.HLCPhysicalMS != first.HLCPhysicalMS || input.Event.HLCCounter != first.HLCCounter {
+			return fmt.Errorf("%w: adoption baseline event %s is outside the chunk's baseline boundary",
+				ErrFederationIngestValidation, input.Event.EventUID)
 		}
 	}
-	return out
+	return nil
+}
+
+// federationExec runs one write statement.
+type federationExec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+// DropSupersededFederationSnapshots deletes a spoke's own adoption snapshots
+// that the hub did not store because its project already held the issues.
+// The spoke then replays only what the hub holds, so the two agree; the next
+// pull brings the hub's history for those issues. Only this home's own
+// issue.snapshot events qualify, and deleting them again is a no-op.
+func DropSupersededFederationSnapshots(ctx context.Context, exec federationExec, projectID int64, originInstanceUID string, eventUIDs []string) error {
+	for chunk := range slices.Chunk(eventUIDs, 500) {
+		slots, args := make([]string, len(chunk)), []any{projectID, originInstanceUID}
+		for i, uid := range chunk {
+			slots[i] = fmt.Sprintf("$%d", i+3)
+			args = append(args, uid)
+		}
+		// Only generated placeholders enter the SQL; UIDs are bound parameters.
+		//nolint:gosec // G202: the concatenated SQL fragments contain no user data.
+		if _, err := exec.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1 AND origin_instance_uid=$2
+ AND type='issue.snapshot' AND uid IN (`+strings.Join(slots, ",")+`)`, args...); err != nil {
+			return fmt.Errorf("drop superseded federation snapshots: %w", err)
+		}
+	}
+	return nil
 }

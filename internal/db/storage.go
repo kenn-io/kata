@@ -475,6 +475,9 @@ type Storage interface {
 	PendingFederationPushEvents(ctx context.Context, projectID int64, originInstanceUID string, afterID int64, limit int) ([]Event, error)
 	PendingFederationPushStats(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, int64, error)
 	AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error
+	// DropSupersededFederationSnapshots deletes this home's own adoption
+	// snapshots that the hub acknowledged without storing.
+	DropSupersededFederationSnapshots(ctx context.Context, projectID int64, eventUIDs []string) error
 	EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (FederationBinding, error)
 	ResetFederatedProjectIfNoPendingPush(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64, originInstanceUID string, pushCursorEventID int64) error
 	IngestFederationEvents(ctx context.Context, p FederationIngestParams) (FederationIngestResult, error)

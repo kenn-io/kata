@@ -318,6 +318,14 @@ func pushDirectSpoke(
 				if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 					return err
 				}
+				// The hub already held these issues and stored no snapshot for
+				// them. Drop them before the cursor moves: a crash in between
+				// repeats the push, and the hub names them again.
+				if len(ack.SupersededEventUIDs) > 0 {
+					if err := store.DropSupersededFederationSnapshots(ctx, binding.ProjectID, ack.SupersededEventUIDs); err != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+					}
+				}
 				if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, ack.PushCursorEventID); err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}

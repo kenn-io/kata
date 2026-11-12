@@ -10,37 +10,94 @@ import (
 )
 
 // RepeatedSnapshotDelta is one ordinary event the hub writes in place of a
-// repeated issue.snapshot. Actor is the event actor.
+// repeated issue.snapshot. Actor is the event actor. RelatedIssueUID names the
+// other end of a link event, as ordinary link events do.
 type RepeatedSnapshotDelta struct {
-	Type    string
-	Actor   string
-	Payload jsontext.Value
+	Type            string
+	Actor           string
+	Payload         jsontext.Value
+	RelatedIssueUID string
 }
 
 // RepeatedSnapshotLookups answers the questions about other issues that one
-// snapshot cannot.
+// snapshot cannot. One value serves every repeated snapshot of a push, so a
+// link or parent added for one snapshot is seen by the next.
 type RepeatedSnapshotLookups struct {
 	// IssueKnown reports whether the hub holds the issue or the same push
 	// brings it.
 	IssueKnown func(uid string) (bool, error)
-	// HasParent reports whether the issue already has a parent on the hub.
-	HasParent func(childUID string) (bool, error)
+	// ParentOf returns the issue's parent on the hub, or "" when it has none.
+	ParentOf func(childUID string) (string, error)
+
+	parents map[string]string
+	links   map[FoldLinkKey]bool
+}
+
+// SetParent records a parent the same push establishes outside the repeated
+// snapshots, such as one a fresh snapshot carries.
+func (l *RepeatedSnapshotLookups) SetParent(childUID, parentUID string) {
+	if l.parents == nil {
+		l.parents = map[string]string{}
+	}
+	if _, exists := l.parents[childUID]; !exists {
+		l.parents[childUID] = parentUID
+	}
+}
+
+func (l *RepeatedSnapshotLookups) parentOf(childUID string) (string, error) {
+	if parent, ok := l.parents[childUID]; ok {
+		return parent, nil
+	}
+	if l.ParentOf == nil {
+		return "", nil
+	}
+	return l.ParentOf(childUID)
+}
+
+// acceptsParent reports whether childUID may take parentUID: the child has no
+// parent yet, and the new link closes no cycle.
+func (l *RepeatedSnapshotLookups) acceptsParent(childUID, parentUID string) (bool, error) {
+	current, err := l.parentOf(childUID)
+	if err != nil || current != "" {
+		return false, err
+	}
+	ancestor := parentUID
+	for range MaxParentDepth {
+		if ancestor == childUID {
+			return false, nil
+		}
+		if ancestor, err = l.parentOf(ancestor); err != nil {
+			return false, err
+		}
+		if ancestor == "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// repeatedSnapshotLink is one link entry of an issue.snapshot payload.
+type repeatedSnapshotLink struct {
+	Type       string `json:"type"`
+	ToIssueUID string `json:"to_issue_uid"`
+	Incoming   bool   `json:"incoming"`
+	Author     string `json:"author"`
 }
 
 type repeatedSnapshotDoc struct {
-	UID                 string             `json:"uid"`
-	Title               string             `json:"title"`
-	Body                string             `json:"body"`
-	Owner               *string            `json:"owner"`
-	AssignmentExpiresOn *string            `json:"assignment_expires_on"`
-	Priority            *int64             `json:"priority"`
-	Status              string             `json:"status"`
-	ClosedReason        *string            `json:"closed_reason"`
-	ClosedAt            *string            `json:"closed_at"`
-	DeletedAt           *string            `json:"deleted_at"`
-	Metadata            jsontext.Value     `json:"metadata"`
-	Labels              []string           `json:"labels"`
-	Links               []foldSnapshotLink `json:"links"`
+	UID                 string                 `json:"uid"`
+	Title               string                 `json:"title"`
+	Body                string                 `json:"body"`
+	Owner               *string                `json:"owner"`
+	AssignmentExpiresOn *string                `json:"assignment_expires_on"`
+	Priority            *int64                 `json:"priority"`
+	Status              string                 `json:"status"`
+	ClosedReason        *string                `json:"closed_reason"`
+	ClosedAt            *string                `json:"closed_at"`
+	DeletedAt           *string                `json:"deleted_at"`
+	Metadata            jsontext.Value         `json:"metadata"`
+	Labels              []string               `json:"labels"`
+	Links               []repeatedSnapshotLink `json:"links"`
 	Comments            []struct {
 		CommentUID string `json:"comment_uid"`
 		Author     string `json:"author"`
@@ -86,10 +143,13 @@ func RepeatedSnapshotWins(incoming jsontext.Value, hubUpdatedAt time.Time) bool 
 // Fields, labels and metadata end up equal to the incoming copy. A comment the
 // hub lacks is added with its author and created time; a known comment keeps
 // both and takes the incoming text only with a later edit time. Links are only
-// added, an import never replaces an issue's parent, and a link to an issue
-// the hub does not hold is left out. The first event always carries the
+// added. An import never replaces an issue's parent or closes a parent cycle,
+// and a link to an issue the hub does not hold is left out. The first event always carries the
 // incoming updated_at, so the same copy pushed again compares equal.
-func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, lookups RepeatedSnapshotLookups) ([]RepeatedSnapshotDelta, error) {
+func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, lookups *RepeatedSnapshotLookups) ([]RepeatedSnapshotDelta, error) {
+	if lookups == nil {
+		lookups = &RepeatedSnapshotLookups{}
+	}
 	var have, want repeatedSnapshotDoc
 	if err := json.Unmarshal(current, &have); err != nil {
 		return nil, fmt.Errorf("decode current issue snapshot: %w", err)
@@ -98,13 +158,18 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 		return nil, fmt.Errorf("%w: decode repeated issue snapshot: %w", ErrFederationIngestValidation, err)
 	}
 	var deltas []RepeatedSnapshotDelta
-	add := func(eventType, eventActor string, payload map[string]any) error {
+	addRelated := func(eventType, eventActor, relatedIssueUID string, payload map[string]any) error {
 		raw, err := json.Marshal(payload, json.Deterministic(true))
 		if err != nil {
 			return fmt.Errorf("encode %s for repeated issue snapshot: %w", eventType, err)
 		}
-		deltas = append(deltas, RepeatedSnapshotDelta{Type: eventType, Actor: eventActor, Payload: raw})
+		deltas = append(deltas, RepeatedSnapshotDelta{
+			Type: eventType, Actor: eventActor, Payload: raw, RelatedIssueUID: relatedIssueUID,
+		})
 		return nil
+	}
+	add := func(eventType, eventActor string, payload map[string]any) error {
+		return addRelated(eventType, eventActor, "", payload)
 	}
 
 	fields := map[string]any{"updated_at": want.UpdatedAt}
@@ -186,7 +251,7 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 			}
 			continue
 		}
-		if comment.EditedAt != "" && foldTimeBefore(editedAt, comment.EditedAt) {
+		if comment.EditedAt != "" && timestampBefore(editedAt, comment.EditedAt) {
 			if err := add("issue.comment_edited", actor, map[string]any{
 				"comment_uid": comment.CommentUID, "body": comment.Body, "edited_at": comment.EditedAt,
 			}); err != nil {
@@ -196,20 +261,23 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 	}
 
 	held := map[FoldLinkKey]bool{}
-	parentOf := ""
 	for _, link := range have.Links {
 		key := snapshotLinkKey(have.UID, link)
 		held[key] = true
-		if key.Type == "parent" && key.FromUID == have.UID {
-			parentOf = key.ToUID
+		if key.Type == "parent" {
+			lookups.SetParent(key.FromUID, key.ToUID)
 		}
+	}
+	if lookups.links == nil {
+		lookups.links = map[FoldLinkKey]bool{}
 	}
 	for _, link := range want.Links {
 		if link.ToIssueUID == "" {
 			continue
 		}
 		key := snapshotLinkKey(have.UID, link)
-		if held[key] || (key.Type == "related" && held[FoldLinkKey{FromUID: key.ToUID, ToUID: key.FromUID, Type: key.Type}]) {
+		reverse := FoldLinkKey{FromUID: key.ToUID, ToUID: key.FromUID, Type: key.Type}
+		if held[key] || lookups.links[key] || (key.Type == "related" && (held[reverse] || lookups.links[reverse])) {
 			continue
 		}
 		if lookups.IssueKnown != nil {
@@ -222,23 +290,21 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 			}
 		}
 		if key.Type == "parent" {
-			hasParent := parentOf != ""
-			if key.FromUID != have.UID && lookups.HasParent != nil {
-				var err error
-				if hasParent, err = lookups.HasParent(key.FromUID); err != nil {
-					return nil, err
-				}
+			accepts, err := lookups.acceptsParent(key.FromUID, key.ToUID)
+			if err != nil {
+				return nil, err
 			}
-			if hasParent {
+			if !accepts {
 				continue
 			}
+			lookups.SetParent(key.FromUID, key.ToUID)
 		}
 		linkActor := link.Author
 		if linkActor == "" {
 			linkActor = actor
 		}
-		held[key] = true
-		if err := add("issue.linked", linkActor, map[string]any{
+		lookups.links[key] = true
+		if err := addRelated("issue.linked", linkActor, link.ToIssueUID, map[string]any{
 			"type": key.Type, "from_uid": key.FromUID, "to_uid": key.ToUID, "updated_at": want.UpdatedAt,
 		}); err != nil {
 			return nil, err
@@ -248,7 +314,7 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 }
 
 // snapshotLinkKey resolves one snapshot link entry to its stored direction.
-func snapshotLinkKey(issueUID string, link foldSnapshotLink) FoldLinkKey {
+func snapshotLinkKey(issueUID string, link repeatedSnapshotLink) FoldLinkKey {
 	from, to := issueUID, link.ToIssueUID
 	if link.Incoming && link.Type != "related" {
 		from, to = to, from
@@ -260,11 +326,19 @@ func repeatedSnapshotMetadataDiff(have, want jsontext.Value) map[string]map[stri
 	current, target := parseRawObject(have), parseRawObject(want)
 	diff := map[string]map[string]jsontext.Value{}
 	for _, key := range slices.Sorted(maps.Keys(current)) {
+		// The hub owns the recurring-work keys. A copy from another home never
+		// carries them, so their absence is not a removal.
+		if recurringMetadataKey(key) {
+			continue
+		}
 		if _, kept := target[key]; !kept {
 			diff[key] = map[string]jsontext.Value{"from": current[key], "to": jsontext.Value("null")}
 		}
 	}
 	for _, key := range slices.Sorted(maps.Keys(target)) {
+		if recurringMetadataKey(key) {
+			continue
+		}
 		from, exists := current[key]
 		if exists && string(canonicalJSON(from)) == string(canonicalJSON(target[key])) {
 			continue
@@ -275,6 +349,23 @@ func repeatedSnapshotMetadataDiff(have, want jsontext.Value) map[string]map[stri
 		diff[key] = map[string]jsontext.Value{"from": from, "to": target[key]}
 	}
 	return diff
+}
+
+// timestampBefore reports whether timestamp a is earlier than b. An empty a is
+// earlier than any b, and nothing is earlier than an empty b.
+func timestampBefore(a, b string) bool {
+	if b == "" {
+		return false
+	}
+	if a == "" {
+		return true
+	}
+	left, leftErr := time.Parse(time.RFC3339Nano, a)
+	right, rightErr := time.Parse(time.RFC3339Nano, b)
+	if leftErr != nil || rightErr != nil {
+		return a < b
+	}
+	return left.Before(right)
 }
 
 func equalOptional[T comparable](a, b *T) bool {

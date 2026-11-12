@@ -54,6 +54,21 @@ func newRepeatedAdoptionCopy(t *testing.T, hub *testenv.Env, hubProject db.Proje
 	}
 }
 
+// ownSnapshots lists the adoption snapshots of the issue that this home still
+// holds in its own log.
+func (c repeatedAdoptionCopy) ownSnapshots(t *testing.T, issueUID string) []db.Event {
+	t.Helper()
+	events, err := c.env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: c.projectID, IssueUID: issueUID, Types: []string{"issue.snapshot"}, Limit: 10})
+	require.NoError(t, err)
+	var own []db.Event
+	for _, event := range events {
+		if event.OriginInstanceUID == c.env.DB.InstanceUID() {
+			own = append(own, event)
+		}
+	}
+	return own
+}
+
 func (c repeatedAdoptionCopy) sync(t *testing.T) {
 	t.Helper()
 	// Two cycles: the first pushes the adoption, the second pulls what the hub
@@ -86,30 +101,36 @@ func TestSyncFederationRepeatedAdoptionConvergesOnTheNewestCopy(t *testing.T) {
 	ctx := t.Context()
 	hub := testenv.New(t)
 	hubProject := createFederatedHubForPush(t, hub)
-	base := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Millisecond)
 
 	seed, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: hubProject.ID, Title: "hub copy", Author: "worker"})
 	require.NoError(t, err)
 	_, _, err = hub.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: seed.ID, Author: "worker", Body: "hub comment"})
 	require.NoError(t, err)
-	_, err = hub.DB.ExecContext(ctx, `UPDATE issues SET updated_at=? WHERE id=?`, base.Format(db.EventTimestampFormat), seed.ID)
+	seed, err = hub.DB.IssueByUID(ctx, seed.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
+	// The hub's own history gives the issue its time, so the copies are placed
+	// around it.
+	winning := seed.UpdatedAt.UTC().Truncate(time.Millisecond).Add(time.Hour)
 
-	newer := newRepeatedAdoptionCopy(t, hub, hubProject, seed.UID, "newer copy", "newer comment", base.Add(time.Hour))
+	newer := newRepeatedAdoptionCopy(t, hub, hubProject, seed.UID, "newer copy", "newer comment", winning)
 	newer.sync(t)
 	title, comments := repeatedAdoptionState(t, hub.DB, seed.UID)
 	require.Equal(t, "newer copy", title, "a newer copy updates the hub")
 	require.ElementsMatch(t, []string{"hub comment", "newer comment"}, comments, "comments merge by UID")
+	updated, err := hub.DB.IssueByUID(ctx, seed.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.True(t, winning.Equal(updated.UpdatedAt), "the hub issue takes the winning copy's time, got %s", updated.UpdatedAt)
 	title, comments = repeatedAdoptionState(t, newer.env.DB, seed.UID)
 	require.Equal(t, "newer copy", title)
 	require.ElementsMatch(t, []string{"hub comment", "newer comment"}, comments, "the pushing home receives the hub's comments")
+	require.Empty(t, newer.ownSnapshots(t, seed.UID), "the pushing home drops the snapshot the hub did not store")
 	snapshots, err := hub.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: hubProject.ID, IssueUID: seed.UID, Types: []string{"issue.snapshot"}, Limit: 10})
 	require.NoError(t, err)
 	require.Empty(t, snapshots, "the hub stores no snapshot for an issue it already holds")
 
 	lastEvent, err := hub.DB.MaxEventID(ctx)
 	require.NoError(t, err)
-	for name, updatedAt := range map[string]time.Time{"identical": base.Add(time.Hour), "older": base.Add(-time.Hour)} {
+	for name, updatedAt := range map[string]time.Time{"identical": winning, "older": winning.Add(-2 * time.Hour)} {
 		stale := newRepeatedAdoptionCopy(t, hub, hubProject, seed.UID, name+" copy", name+" comment", updatedAt)
 		stale.sync(t)
 		after, err := hub.DB.MaxEventID(ctx)
@@ -121,5 +142,32 @@ func TestSyncFederationRepeatedAdoptionConvergesOnTheNewestCopy(t *testing.T) {
 		title, comments = repeatedAdoptionState(t, stale.env.DB, seed.UID)
 		require.Equal(t, "newer copy", title, "the home that pushed an %s copy takes the hub's state", name)
 		require.ElementsMatch(t, []string{"hub comment", "newer comment"}, comments)
+		require.Empty(t, stale.ownSnapshots(t, seed.UID))
 	}
+}
+
+// A home adopts a newer copy and then edits the issue before its first sync.
+// The edit is later than the copy, so it must survive on the hub and on the
+// home, whatever order the hub writes its events in.
+func TestSyncFederationRepeatedAdoptionKeepsAnEditMadeAfterTheSnapshot(t *testing.T) {
+	ctx := t.Context()
+	hub := testenv.New(t)
+	hubProject := createFederatedHubForPush(t, hub)
+	seed, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: hubProject.ID, Title: "hub copy", Author: "worker"})
+	require.NoError(t, err)
+
+	// The copy is newer than the hub issue and older than the edit below.
+	copyTime := seed.UpdatedAt.UTC().Truncate(time.Millisecond).Add(time.Millisecond)
+	home := newRepeatedAdoptionCopy(t, hub, hubProject, seed.UID, "imported", "home comment", copyTime)
+	local, err := home.env.DB.IssueByUID(ctx, seed.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	edited := "edited afterward"
+	_, _, _, err = home.env.DB.EditIssue(ctx, db.EditIssueParams{IssueID: local.ID, Title: &edited, Actor: "worker"})
+	require.NoError(t, err)
+
+	home.sync(t)
+	title, _ := repeatedAdoptionState(t, hub.DB, seed.UID)
+	require.Equal(t, "edited afterward", title)
+	title, _ = repeatedAdoptionState(t, home.env.DB, seed.UID)
+	require.Equal(t, "edited afterward", title)
 }

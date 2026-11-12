@@ -29,11 +29,26 @@ const repeatedImportNewerCopy = `{"uid":"issue-1","short_id":"abcd","title":"cur
  {"comment_uid":"comment-2","author":"carol","body":"second","created_at":"2026-05-21T10:00:00.000Z"}],
 "created_at":"2026-05-01T09:00:00.000Z","updated_at":"2026-06-01T09:00:00.000Z"}`
 
-func repeatedImportLookups() RepeatedSnapshotLookups {
-	return RepeatedSnapshotLookups{
+func repeatedImportLookups() *RepeatedSnapshotLookups {
+	return &RepeatedSnapshotLookups{
 		IssueKnown: func(uid string) (bool, error) { return uid != "issue-unknown", nil },
-		HasParent:  func(childUID string) (bool, error) { return childUID == "child-1", nil },
+		ParentOf: func(childUID string) (string, error) {
+			if childUID == "child-1" {
+				return "other-parent", nil
+			}
+			return "", nil
+		},
 	}
+}
+
+func presentLabels(p FoldProjection, issueUID string) []string {
+	var labels []string
+	for key, state := range p.Labels {
+		if key.IssueUID == issueUID && state.Present {
+			labels = append(labels, key.Label)
+		}
+	}
+	return labels
 }
 
 // The hub turns a winning copy into its own ordinary events. Replaying them
@@ -126,4 +141,57 @@ func TestRepeatedSnapshotDeltasAlwaysAdvanceUpdatedAt(t *testing.T) {
 	require.Len(t, deltas, 1)
 	assert.Equal(t, "issue.updated", deltas[0].Type)
 	assert.JSONEq(t, `{"updated_at":"2026-06-01T09:00:00.000Z"}`, string(deltas[0].Payload))
+}
+
+// A link from a winning copy must not close a parent cycle, and two copies in
+// one push must not both add the same link.
+func TestRepeatedSnapshotDeltasRefuseParentCycleAndRepeatedLink(t *testing.T) {
+	lookups := &RepeatedSnapshotLookups{
+		IssueKnown: func(string) (bool, error) { return true, nil },
+		ParentOf: func(childUID string) (string, error) {
+			if childUID == "issue-y" {
+				return "issue-x", nil
+			}
+			return "", nil
+		},
+	}
+	types := func(deltas []RepeatedSnapshotDelta) []string {
+		var out []string
+		for _, delta := range deltas {
+			out = append(out, delta.Type)
+		}
+		return out
+	}
+	hubX := `{"uid":"issue-x","title":"x","status":"open","updated_at":"2026-05-01T09:00:00.000Z"}`
+	// On the hub Y is a child of X. The newer copy makes X a child of Y.
+	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(hubX), jsontext.Value(
+		`{"uid":"issue-x","title":"x","status":"open","links":[{"type":"parent","to_issue_uid":"issue-y"}],"updated_at":"2026-06-01T09:00:00.000Z"}`), lookups)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"issue.updated"}, types(deltas), "the cycle-closing parent link is left out")
+
+	child := `{"uid":"issue-c","title":"c","status":"open","links":[{"type":"parent","to_issue_uid":"issue-a"}],"updated_at":"2026-06-01T09:00:00.000Z"}`
+	parent := `{"uid":"issue-a","title":"a","status":"open","links":[{"type":"parent","to_issue_uid":"issue-c","incoming":true}],"updated_at":"2026-06-01T09:00:00.000Z"}`
+	first, err := RepeatedSnapshotDeltas("importer", jsontext.Value(`{"uid":"issue-c","title":"c","status":"open","updated_at":"2026-05-01T09:00:00.000Z"}`), jsontext.Value(child), lookups)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"issue.updated", "issue.linked"}, types(first))
+	assert.Equal(t, "issue-a", first[1].RelatedIssueUID, "a link event names the other issue")
+	second, err := RepeatedSnapshotDeltas("importer", jsontext.Value(`{"uid":"issue-a","title":"a","status":"open","updated_at":"2026-05-01T09:00:00.000Z"}`), jsontext.Value(parent), lookups)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"issue.updated"}, types(second), "the second copy does not write the same link again")
+}
+
+// The hub owns the recurring-work keys in issue metadata. A copy from another
+// home never carries them, and applying it must not remove them.
+func TestRepeatedSnapshotDeltasKeepHubOwnedRecurringMetadata(t *testing.T) {
+	current := `{"uid":"issue-1","title":"t","status":"open","metadata":{"cron.occurrence":{"n":3},"cron.progress.job-1":{"n":3},"team":"core"},"updated_at":"2026-05-01T09:00:00.000Z"}`
+	incoming := `{"uid":"issue-1","title":"t","status":"open","metadata":{"team":"platform"},"updated_at":"2026-06-01T09:00:00.000Z"}`
+	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
+	require.NoError(t, err)
+
+	events := []FoldEvent{testEvent("issue.snapshot", 1, current)}
+	for i, delta := range deltas {
+		events = append(events, testEvent(delta.Type, int64(10+i), string(delta.Payload)))
+	}
+	assert.JSONEq(t, `{"cron.occurrence":{"n":3},"cron.progress.job-1":{"n":3},"team":"platform"}`,
+		string(FoldEvents(events).IssueMetadata["issue-1"]))
 }

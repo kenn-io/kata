@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
@@ -98,7 +99,8 @@ func (s *Store) IngestFederationEvents(
 		freshSnapshotSeen := false
 		var repeatedWinners []repeatedAdoptionSnapshot
 		repeatedSkipped := 0
-		batchIssueUIDs := db.FederationIngestBatchIssueUIDs(params.Events)
+		repeatedLookups := db.RepeatedSnapshotSQLLookups(ctx, tx, params.Events)
+		repeatedSeen := map[string]bool{}
 		boundActor := strings.TrimSpace(params.BoundActor)
 		for _, input := range params.Events {
 			if input.SourceEventID <= 0 {
@@ -215,6 +217,14 @@ func (s *Store) IngestFederationEvents(
 			if err != nil {
 				return err
 			}
+			if repeated != nil {
+				if repeatedSeen[repeated.UID] {
+					return fmt.Errorf("%w: adoption baseline carries issue %s twice",
+						db.ErrFederationIngestValidation, repeated.UID)
+				}
+				repeatedSeen[repeated.UID] = true
+				result.SupersededEventUIDs = append(result.SupersededEventUIDs, event.EventUID)
+			}
 			if repeated != nil && !db.RepeatedSnapshotWins(event.Payload, repeated.UpdatedAt) {
 				result.Duplicates++
 				repeatedSkipped++
@@ -256,19 +266,20 @@ func (s *Store) IngestFederationEvents(
 				if err != nil {
 					return err
 				}
-				deltas, err := db.RepeatedSnapshotDeltas(event.Actor, jsontext.Value(current), event.Payload,
-					db.RepeatedSnapshotSQLLookups(ctx, tx, batchIssueUIDs))
+				deltas, err := db.RepeatedSnapshotDeltas(event.Actor, jsontext.Value(current), event.Payload, repeatedLookups)
 				if err != nil {
 					return err
 				}
-				repeatedWinners = append(repeatedWinners, repeatedAdoptionSnapshot{issue: *repeated, deltas: deltas})
+				clock, err := db.RepeatedSnapshotDeltaClock(ctx, tx, repeated.UID, event.Payload)
+				if err != nil {
+					return err
+				}
+				repeatedWinners = append(repeatedWinners, repeatedAdoptionSnapshot{issue: *repeated, event: event, deltas: deltas, clock: clock})
 				freshSnapshotSeen = true
 				seenBatch[event.EventUID] = event.ContentHash
 				continue
 			}
-			if err := rejectFreshCreateSnapshotForKnownIssue(ctx, tx, params.ProjectID, event, knownIssueUIDs,
-				db.AllowsRepeatedIssueSnapshot(event.Type, adoptionState.allowAuthorPreservation ||
-					adoptionState.overrideSnapshotAuthors, params.EventFeatures)); err != nil {
+			if err := rejectFreshCreateSnapshotForKnownIssue(ctx, tx, params.ProjectID, event, knownIssueUIDs); err != nil {
 				return err
 			}
 			if db.IsFederationSnapshotEvent(event.Type) {
@@ -300,7 +311,16 @@ func (s *Store) IngestFederationEvents(
 			return err
 		}
 
-		if err := s.authorizeFederationCurrentIssuesTx(ctx, tx, params, prepared, moveSnapshots); err != nil {
+		// A repeated snapshot is not stored, but the links it adds still need
+		// the pushing spoke's authority over every project they touch.
+		authorize := prepared
+		if len(repeatedWinners) > 0 {
+			authorize = slices.Clone(prepared)
+			for _, winner := range repeatedWinners {
+				authorize = append(authorize, preparedFederationIngestEvent{event: winner.event})
+			}
+		}
+		if err := s.authorizeFederationCurrentIssuesTx(ctx, tx, params, authorize, moveSnapshots); err != nil {
 			return db.FinishTransactionRollback(ctx, err, tx.Rollback())
 		}
 		linksAffected := false
@@ -338,12 +358,23 @@ func (s *Store) IngestFederationEvents(
 			}
 		}
 		for _, winner := range repeatedWinners {
-			for _, delta := range winner.deltas {
-				event, err := s.insertEventTx(ctx, tx, eventInsert{
+			for index, delta := range winner.deltas {
+				clock := db.EventHLCTimestamp{PhysicalMS: winner.clock.PhysicalMS, Counter: winner.clock.Counter + int64(index)}
+				insert := eventInsert{
 					ProjectID: params.ProjectID, ProjectUID: projectUID, ProjectName: projectName,
 					IssueID: &winner.issue.ID, IssueUID: &winner.issue.UID,
-					Type: delta.Type, Actor: delta.Actor, Payload: string(delta.Payload),
-				})
+					Type: delta.Type, Actor: delta.Actor, Payload: string(delta.Payload), HLC: &clock,
+				}
+				if delta.RelatedIssueUID != "" {
+					insert.RelatedIssueUID = &delta.RelatedIssueUID
+					// A peer the same push creates has no row yet; its UID is enough.
+					if peer, err := eventIssueByUID(ctx, tx, delta.RelatedIssueUID); err == nil {
+						insert.RelatedIssueID = &peer.ID
+					} else if !errors.Is(err, db.ErrNotFound) {
+						return err
+					}
+				}
+				event, err := s.insertEventTx(ctx, tx, insert)
 				if err != nil {
 					return err
 				}
@@ -352,6 +383,20 @@ func (s *Store) IngestFederationEvents(
 				}
 				result.Events = append(result.Events, event)
 				result.InsertedEventUIDs = append(result.InsertedEventUIDs, event.UID)
+				// The change comes from the pushing spoke, so a claim another
+				// holder has on the issue is audited as for any pushed event.
+				auditEvents, err := s.annotateFederationIngestClaimWorkTx(ctx, tx, params.ProjectID, db.RemoteEvent{
+					EventUID: event.UID, OriginInstanceUID: params.SpokeInstanceUID, ProjectUID: projectUID, ProjectName: projectName,
+					IssueUID: insert.IssueUID, RelatedIssueUID: insert.RelatedIssueUID,
+					Type: delta.Type, Actor: winner.event.Actor, Payload: delta.Payload,
+				}, db.ClaimPrincipal{HolderInstanceUID: params.SpokeInstanceUID, Holder: params.BoundActor})
+				if err != nil {
+					return err
+				}
+				result.Events = append(result.Events, auditEvents...)
+				for _, auditEvent := range auditEvents {
+					result.InsertedEventUIDs = append(result.InsertedEventUIDs, auditEvent.UID)
+				}
 			}
 			result.Accepted++
 		}
@@ -364,7 +409,8 @@ func (s *Store) IngestFederationEvents(
 			}
 		}
 		// A chunk whose snapshots were all skipped still advances the adoption.
-		if result.Accepted > 0 || repeatedSkipped > 0 {
+		// The retry of a consumed baseline has nothing left to advance.
+		if result.Accepted > 0 || (repeatedSkipped > 0 && !adoptionState.duplicateOnly) {
 			if !adoptionState.shouldDeferMarker {
 				err = consumeFederationAdoptionSnapshotAuthorMarker(ctx, tx, params.ProjectID, params.FederationEnrollmentID, params.SpokeInstanceUID)
 			} else {
@@ -585,7 +631,9 @@ func validateFederationProjectEvent(
 
 type repeatedAdoptionSnapshot struct {
 	issue  db.Issue
+	event  db.RemoteEvent
 	deltas []db.RepeatedSnapshotDelta
+	clock  db.EventHLCTimestamp
 }
 
 // repeatedAdoptionSnapshotIssueTx returns the issue an adoption snapshot
@@ -612,15 +660,15 @@ func repeatedAdoptionSnapshotIssueTx(ctx context.Context, tx *sql.Tx, projectID 
 	return &issue, nil
 }
 
-// rejectFreshCreateSnapshotForKnownIssue keeps creation create-only, except
-// for an adoption baseline snapshot of an issue this project already holds.
+// rejectFreshCreateSnapshotForKnownIssue keeps creation create-only. An
+// adoption snapshot of an issue this project already holds never reaches it;
+// see repeatedAdoptionSnapshotIssueTx.
 func rejectFreshCreateSnapshotForKnownIssue(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectID int64,
 	event db.RemoteEvent,
 	knownIssueUIDs map[string]struct{},
-	adoptionBaseline bool,
 ) error {
 	if event.Type != "issue.created" && event.Type != "issue.snapshot" {
 		return nil
@@ -631,9 +679,6 @@ func rejectFreshCreateSnapshotForKnownIssue(
 	}
 	if err := db.CheckFederationFreshIssueHolder(ctx, tx, projectID, event.Type, issueUID); err != nil {
 		return err
-	}
-	if adoptionBaseline {
-		return nil
 	}
 	if _, ok := knownIssueUIDs[issueUID]; ok {
 		return fmt.Errorf("%w: fresh %s targets existing issue %s",

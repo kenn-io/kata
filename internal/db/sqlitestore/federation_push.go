@@ -135,6 +135,14 @@ func federationPushEventTypeCondition(column string) string {
 
 // AdvanceFederationPushCursor records the highest local events.id accepted by
 // the hub for a spoke binding.
+// DropSupersededFederationSnapshots deletes this home's own adoption snapshots
+// that the hub acknowledged without storing.
+func (d *Store) DropSupersededFederationSnapshots(ctx context.Context, projectID int64, eventUIDs []string) error {
+	return d.RetryTransient(ctx, func() error {
+		return db.DropSupersededFederationSnapshots(ctx, d, projectID, d.instanceUID, eventUIDs)
+	})
+}
+
 func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return d.RetryTransient(ctx, func() error {
 		res, err := d.ExecContext(ctx, `

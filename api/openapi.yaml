@@ -2624,6 +2624,10 @@ components:
         push_cursor_event_id:
           format: int64
           type: integer
+        superseded_event_uids:
+          items:
+            type: string
+          type: array
       required:
         - accepted
         - duplicates

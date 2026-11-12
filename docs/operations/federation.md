@@ -1768,11 +1768,21 @@ writes its own ordinary events for the differences, such as `issue.updated`,
 Other spokes receive those events like any other change. An older or identical
 copy leaves no event, so pushing the same copy again changes nothing.
 
+Those events take the snapshot's `updated_at` as their place in the project's
+history, and never sit before the issue's latest event on the hub. An edit
+made after the snapshot therefore still applies, whether it reaches the hub
+before or after the copy.
+
+A link in the snapshot to an issue of another hub project needs the same
+authority as any other push that touches that project. Without it the hub
+refuses the push.
+
 Issues the hub does not hold are created as usual.
 
-The Kata home that pushed a copy then takes the hub's state on its next sync.
-If its copy was older, its own extra comments disappear from that home, and
-links only that home had stay on that home alone.
+The hub's answer names the snapshots it did not store. The Kata home that
+pushed them deletes those snapshots from its own history and takes the hub's
+state on its next pull. If its copy was older, the comments and links only
+that home had are gone from it afterwards.
 
 Both sides must support this. The hub accepts a repeated snapshot only from a
 spoke that advertises the `repeated_adoption_v1` event feature. An older spoke

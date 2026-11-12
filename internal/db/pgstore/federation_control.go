@@ -182,6 +182,12 @@ func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 }
 
 // AdvanceFederationPushCursor advances the acknowledged local event id monotonically.
+// DropSupersededFederationSnapshots deletes this home's own adoption snapshots
+// that the hub acknowledged without storing.
+func (s *Store) DropSupersededFederationSnapshots(ctx context.Context, projectID int64, eventUIDs []string) error {
+	return mapSQLError(db.DropSupersededFederationSnapshots(ctx, s, projectID, s.instanceUID, eventUIDs), nil)
+}
+
 func (s *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return s.updateFederationCursor(ctx, projectID, nextCursor, true)
 }
