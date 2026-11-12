@@ -95,34 +95,30 @@ func TestRequiredSigningRejectsUnsignedEnrollment(t *testing.T) {
 		ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
 		require.NoError(t, err)
 		for name, handler := range map[string]http.Handler{"main": main, "socket": srv.Handler(), "ingress": ingress} {
-			t.Run(name, func(t *testing.T) {
-				path := "https://hub.example" + projectPath(project.ID) + "/federation/metadata"
-				for _, tc := range []struct {
-					name, token, signature, code string
-					status                       int
-				}{
-					{"unsigned", enrollment.Token, "", "hub_signing_required", http.StatusPreconditionRequired},
-					{"tampered", enrollment.Token, "tampered", "signature_invalid", http.StatusUnauthorized},
-					{"unknown enrollment", "unknown-enrollment", "", "auth_invalid", http.StatusForbidden},
-				} {
-					t.Run(tc.name, func(t *testing.T) {
-						req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
-						if tc.token != "" {
-							req.Header.Set("Authorization", "Bearer "+tc.token)
-						}
-						if tc.signature != "" {
-							require.NoError(t, federationsigning.Sign(req, source))
-							req.Header.Set("Signature", tc.signature)
-						}
-						w := httptest.NewRecorder()
-						handler.ServeHTTP(w, req)
-						require.Equal(t, tc.status, w.Code, w.Body.String())
-						var envelope api.ErrorEnvelope
-						require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
-						require.Equal(t, tc.code, envelope.Error.Code)
-					})
+			path := "https://hub.example" + projectPath(project.ID) + "/federation/metadata"
+			for _, tc := range []struct {
+				name, token, signature, code string
+				status                       int
+			}{
+				{"unsigned", enrollment.Token, "", "hub_signing_required", http.StatusPreconditionRequired},
+				{"tampered", enrollment.Token, "tampered", "signature_invalid", http.StatusUnauthorized},
+				{"unknown enrollment", "unknown-enrollment", "", "auth_invalid", http.StatusForbidden},
+			} {
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+				if tc.token != "" {
+					req.Header.Set("Authorization", "Bearer "+tc.token)
 				}
-			})
+				if tc.signature != "" {
+					require.NoError(t, federationsigning.Sign(req, source), "%s/%s", name, tc.name)
+					req.Header.Set("Signature", tc.signature)
+				}
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, req)
+				require.Equal(t, tc.status, w.Code, "%s/%s: %s", name, tc.name, w.Body.String())
+				var envelope api.ErrorEnvelope
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope), "%s/%s: %s", name, tc.name, w.Body.String())
+				require.Equal(t, tc.code, envelope.Error.Code, "%s/%s: %s", name, tc.name, w.Body.String())
+			}
 		}
 	})
 }
