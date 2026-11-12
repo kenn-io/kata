@@ -131,6 +131,37 @@ describe('SearchSettings', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+  test('keeps a retry pending when a poll returns the previous failure', async () => {
+    vi.useFakeTimers()
+    const failed = status({
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1, error: 'Restart failed' },
+    })
+    setGeneratedFetch(vi.fn(async () => Response.json(failed)))
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    let rejectPost!: (response: Response) => void
+    const postFetch = vi.fn<typeof fetch>(
+      () =>
+        new Promise((resolve) => {
+          rejectPost = resolve
+        }),
+    )
+    renderSettings({ postFetch, originStable: true })
+    await settle()
+    expect(screen.getByRole('alert').textContent).toContain('Restart failed')
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByText('Restarting...')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+    rejectPost(new Response(null, { status: 500 }))
+    await settle()
+    expect(screen.getByRole('alert').textContent).toContain("Couldn't restart the daemon")
+  })
+
   test('ignores a late restart response after status confirms success', async () => {
     vi.useFakeTimers()
     const pending = status({

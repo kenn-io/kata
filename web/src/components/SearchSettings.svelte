@@ -58,6 +58,7 @@
   // Counts Turn on requests, so a read that started before the latest one
   // can't land an Off it answered before the daemon accepted.
   let posts = 0
+  let previousRestartError: string | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
 
   let job = $derived(status?.job)
@@ -175,6 +176,9 @@
     }
     if (signal.aborted || post !== posts) return
     if (next) {
+      if (next.job?.state === 'restarting') previousRestartError = undefined
+      const previousError =
+        posting && !!previousRestartError && next.job?.error === previousRestartError
       if (!remoteHost && next.job?.state === 'restarting' && !restartPending)
         restartDeadline = Date.now() + restartWaitMs
       if (
@@ -187,7 +191,8 @@
       status = next
       if (
         restartPending &&
-        (next.job?.error || (next.job?.state !== 'restart' && next.job?.state !== 'restarting'))
+        ((next.job?.error && !previousError) ||
+          (next.job?.state !== 'restart' && next.job?.state !== 'restarting'))
       )
         restartDeadline = 0
     }
@@ -223,6 +228,7 @@
     )
       return
     const signal = page.signal
+    previousRestartError = status?.job?.error
     posting = true
     restartDeadline = Date.now() + restartWaitMs
     requestError = undefined
