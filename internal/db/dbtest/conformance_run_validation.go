@@ -22,6 +22,11 @@ func checkRunObservationValidation(t *testing.T, store db.Storage) error {
 	ended := started.Add(-time.Second)
 	longKey := strings.Repeat("k", 1025)
 	longLabel := strings.Repeat("l", 257)
+	var nilSessions []cron.Session
+	emptySessions := []cron.Session{}
+	falseMarker := false
+	emptyStep := ""
+	emptyStepSessions := []cron.Session{{Agent: "claude", SessionID: "00000000-0000-4000-8000-000000000001", Step: &emptyStep}}
 	for _, tc := range []struct {
 		name   string
 		mutate func(*db.ObserveCronRun)
@@ -32,6 +37,10 @@ func checkRunObservationValidation(t *testing.T, store db.Storage) error {
 		{name: "teammate over 256 bytes", mutate: func(in *db.ObserveCronRun) { in.Teammate = &longLabel }},
 		{name: "unknown status", mutate: func(in *db.ObserveCronRun) { in.Status = "paused" }},
 		{name: "job without definition event", mutate: func(in *db.ObserveCronRun) { in.DefinitionEventUID = nil }},
+		{name: "nil session slice", mutate: func(in *db.ObserveCronRun) { in.Summary.Sessions = &nilSessions }},
+		{name: "empty session slice", mutate: func(in *db.ObserveCronRun) { in.Summary.Sessions = &emptySessions }},
+		{name: "false incomplete", mutate: func(in *db.ObserveCronRun) { in.Summary.SessionsIncomplete = &falseMarker }},
+		{name: "empty step", mutate: func(in *db.ObserveCronRun) { in.Summary.Sessions = &emptyStepSessions }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runUID, err := uid.New()

@@ -682,14 +682,14 @@ func (o cronCLIOptions) callWrite(a daemonAPI, c *kataclient.Client, projectID i
 	if o.resource == "run" && o.action == "observe" {
 		var fields map[string]jsontext.Value
 		if err := json.Unmarshal(raw, &fields); err != nil {
-			return nil, err
+			return nil, cronCLIValidation("invalid cron request: " + err.Error())
 		}
 		summary, ok := fields["summary"]
 		if !ok {
 			return nil, cronCLIValidation("summary required")
 		}
 		if _, err := cron.ParseSummary(summary); err != nil {
-			return nil, err
+			return nil, cronCLIValidation("invalid run summary: " + err.Error())
 		}
 		var body generated.ObserveCronRunBody
 		if err := decodeCronCLIRequest(raw, &body); err != nil {

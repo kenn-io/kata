@@ -825,7 +825,9 @@ func TestCronCLIObservationSessionsRoundTrip(t *testing.T) {
 	require.ErrorContains(t, err, "summary required")
 	nullStep := strings.Replace(string(mustCronJSON(t, body)), `"step":"main"`, `"step":null`, 1)
 	_, _, err = executeCronCLI(t, env.URL, strings.NewReader(nullStep), "run", "observe", id, "--json-input", "-")
-	require.Error(t, err)
+	var cliErr *cliError
+	require.ErrorAs(t, err, &cliErr)
+	require.Equal(t, ExitValidation, cliErr.ExitCode)
 	_, err = env.DB.CronRun(t.Context(), project.ID, id)
 	require.ErrorIs(t, err, db.ErrNotFound)
 	out, _, err := executeCronCLI(t, env.URL, strings.NewReader(string(mustCronJSON(t, body))), "run", "observe", id, "--json-input", "-")
