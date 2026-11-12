@@ -139,6 +139,8 @@ this project (cron_v1 covers all cron features). Reads only; creates no cron sta
 		return `List the project's recorded runs, newest first. --job-uid lists one job's runs.
 For the next page, pass the response's next_before_uid as --before-uid.`,
 			"  " + cmd + " --json\n  " + cmd + " --job-uid <job-uid> --before-uid <run-uid> --json"
+	case "job inputs":
+		return "Show a job’s declared inputs, resolved values, and errors.", "  " + cmd + " <job-uid> --json"
 	case "run show":
 		return "Show one recorded run.", "  " + cmd + " <run-uid> --json"
 	case "run observe":

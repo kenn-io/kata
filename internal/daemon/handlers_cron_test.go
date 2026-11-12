@@ -423,3 +423,22 @@ func TestCronNotifyInputWrites(t *testing.T) {
 		delete(body, "expected_event_uid")
 	}
 }
+
+// TestCronInputsArchivedWorkflowContract refuses resolution of a retained tombstone.
+func TestCronInputsArchivedWorkflowContract(t *testing.T) {
+	env := testenv.New(t)
+	project := seedProject(t, env, "example-project")
+	workflow, _, err := env.DB.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, Name: "Inspect", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "true"}}}})
+	require.NoError(t, err)
+	definition := cronHTTPDefinition(t)
+	definition.Action = cron.Action{Kind: "execute", WorkflowUID: workflow.UID}
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Inspect", Actor: "worker", Definition: definition})
+	require.NoError(t, err)
+	_, _, err = env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, UID: job.UID, Name: job.Name, Actor: "worker", Definition: definition, ExpectedEventUID: job.DefinitionEventUID, Deleted: true})
+	require.NoError(t, err)
+	_, _, err = env.DB.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, UID: workflow.UID, Name: workflow.Name, Actor: "worker", Definition: workflow.Definition, ExpectedEventUID: workflow.DefinitionEventUID, Deleted: true})
+	require.NoError(t, err)
+	status, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/inputs", project.ID, job.UID), nil)
+	require.Equalf(t, 200, status, "%s", raw)
+	require.Contains(t, string(raw), "declaration_invalid")
+}

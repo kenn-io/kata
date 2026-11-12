@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"unicode"
 
 	"go.kenn.io/kata/internal/jsonutil"
@@ -147,7 +148,7 @@ func parseInputDeclaration(name string, raw jsontext.Value) (inputDeclaration, e
 		}
 		seen := map[string]bool{}
 		for _, v := range d.Values {
-			if len(v) < 1 || len(v) > 128 || seen[v] {
+			if len(v) < 1 || len(v) > 128 || strings.ContainsRune(v, 0) || seen[v] {
 				return inputDeclaration{}, fmt.Errorf("%s: invalid enum values", name)
 			}
 			seen[v] = true
@@ -165,7 +166,7 @@ func validInputValue(d inputDeclaration, v any) bool {
 	switch d.Type {
 	case "string":
 		s, ok := v.(string)
-		if !ok {
+		if !ok || strings.ContainsRune(s, 0) {
 			return false
 		}
 		limit := int64(256)
@@ -188,7 +189,7 @@ func validInputValue(d inputDeclaration, v any) bool {
 		return ok
 	case "enum":
 		s, ok := v.(string)
-		return ok && slices.Contains(d.Values, s)
+		return ok && !strings.ContainsRune(s, 0) && slices.Contains(d.Values, s)
 	case "int":
 		var n int64
 		switch x := v.(type) {
@@ -344,7 +345,6 @@ func ResolveInputs(job JobDefinition, workflow *WorkflowDefinition) InputResolut
 		fields, err := inputObject(raw)
 		if err != nil || len(fields) > 32 {
 			r.Errors = append(r.Errors, InputError{Code: "declaration_invalid", Message: "inputs must be an object of at most 32 declarations"})
-			fields = nil
 		}
 		names := make([]string, 0, len(fields))
 		for name := range fields {

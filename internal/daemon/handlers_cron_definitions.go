@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -155,15 +154,14 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 			var options []byte
 			if definition.Action.WorkflowUID != "" && cron.HasFixedInputs(definition.Options) {
 				workflow, err := cfg.DB.CronWorkflow(ctx, projectID, definition.Action.WorkflowUID)
-				if errors.Is(err, db.ErrNotFound) {
-					return nil, cronAPIError(ctx, cfg, fmt.Errorf("%w: missing workflow dependency %s", cron.ErrInvalid, definition.Action.WorkflowUID), projectID, id, true)
-				}
-				if err != nil {
+				if err != nil && !errors.Is(err, db.ErrNotFound) {
 					return nil, cronAPIError(ctx, cfg, err, projectID, id, true)
 				}
-				options = workflow.Definition.Options
-				if options == nil {
-					options = []byte(`{}`)
+				if err == nil {
+					options = workflow.Definition.Options
+					if options == nil {
+						options = []byte(`{}`)
+					}
 				}
 			}
 			if err := cron.ValidateInputs(definition.Options, definition.Action.WorkflowUID, options); err != nil {
@@ -187,6 +185,11 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		in.Body.Actor = actor
+		if !enrollment {
+			if err := cron.ValidateJobInputEligibility(in.Body.Definition.Native()); err != nil {
+				return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", true)
+			}
+		}
 		if out, handled, err := forwardCronJob(ctx, cfg, in.ProjectID, "", http.MethodPost, "", &in.Body, nil, enrollment); handled {
 			return out, err
 		}
@@ -198,6 +201,11 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		in.Body.Actor = actor
+		if !enrollment {
+			if err := cron.ValidateJobInputEligibility(in.Body.Definition.Native()); err != nil {
+				return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", true)
+			}
+		}
 		if out, handled, err := forwardCronJob(ctx, cfg, in.ProjectID, in.UID, http.MethodPut, "", &in.Body, nil, enrollment); handled {
 			return out, err
 		}
@@ -234,8 +242,10 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 			}
 			out.Body.WorkflowUID = job.Definition.Action.WorkflowUID
 			if err == nil {
-				workflow = &w.Definition
 				out.Body.WorkflowDefinitionEventUID = w.DefinitionEventUID
+				if w.DeletedAt == nil {
+					workflow = &w.Definition
+				}
 			}
 		}
 		result := cron.ResolveInputs(job.Definition, workflow)

@@ -3,6 +3,7 @@ package cron
 import (
 	"encoding/json"
 	"encoding/json/jsontext"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -165,4 +166,40 @@ func TestInputDeclarationRules(t *testing.T) {
 		require.NoError(t, err)
 		require.Error(t, ValidateWorkflowInputs(raw))
 	}
+}
+
+// TestInputNULDeliveryContract keeps every accepted value representable in an environment.
+func TestInputNULDeliveryContract(t *testing.T) {
+	for _, options := range []string{
+		`{"inputs":{"text":{"type":"string","multiline":true,"default":"a\u0000b"}}}`,
+		`{"inputs":{"text":{"type":"string","multiline":true}},"input_values":{"text":"a\u0000b"}}`,
+		`{"inputs":{"choice":{"type":"enum","values":["a\u0000b"]}}}`,
+	} {
+		require.Error(t, ValidateInputs([]byte(options), "", nil), options)
+	}
+	valid := []byte(`{"inputs":{"text":{"type":"string","multiline":true}},"input_values":{"text":"\n\t\u0001"}}`)
+	require.NoError(t, ValidateInputs(valid, "", nil))
+	job := JobDefinition{Action: Action{Prompt: "hello"}, Options: jsontext.Value(`{"inputs":{"text":{"type":"string","multiline":true}},"input_values":{"text":"a\u0000b"}}`)}
+	r := ResolveInputs(job, nil)
+	require.Equal(t, "invalid_value", r.Errors[0].Code)
+	require.Equal(t, "job", r.Inputs[0].Source)
+	require.Nil(t, r.Inputs[0].Value)
+}
+
+// TestInputLegacyOverLimitDiagnostics retains each declared name and independent error.
+func TestInputLegacyOverLimitDiagnostics(t *testing.T) {
+	fields := map[string]any{}
+	for i := 0; i < 33; i++ {
+		fields[fmt.Sprintf("item_%02d", i)] = map[string]any{"type": "bool"}
+	}
+	fields["item_00"] = map[string]any{"type": "invalid"}
+	raw, err := json.Marshal(map[string]any{"inputs": fields, "input_values": map[string]any{"item_00": true, "item_01": true}})
+	require.NoError(t, err)
+	r := ResolveInputs(JobDefinition{Action: Action{Prompt: "hello"}, Options: raw}, nil)
+	require.Len(t, r.Inputs, 32)
+	require.Equal(t, "job", r.Inputs[0].Source)
+	require.Len(t, r.Errors, 2)
+	require.Equal(t, "declaration_invalid", r.Errors[0].Code)
+	require.Equal(t, "item_00", r.Errors[1].Name)
+	require.Equal(t, "declaration_invalid", r.Errors[1].Code)
 }

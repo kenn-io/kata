@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
 	"testing"
 	"time"
 
@@ -119,6 +120,34 @@ func RunRelayIngestValidatesCronReplay(t *testing.T, store db.Storage) {
 	legacyStored, err := store.CronJob(ctx, legacyReplica.ID, legacyUID)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"inputs":42}`, string(legacyStored.Definition.Options))
+
+	// Replicated declarations over the client limit retain names and independent diagnostics.
+	fields := map[string]any{}
+	for i := 0; i < 33; i++ {
+		fields[fmt.Sprintf("item_%02d", i)] = map[string]any{"type": "bool"}
+	}
+	fields["item_00"] = map[string]any{"type": "invalid"}
+	options, err := json.Marshal(map[string]any{"inputs": fields, "input_values": map[string]any{"item_00": true, "item_01": true}})
+	require.NoError(t, err)
+	definition := legacyStored.Definition
+	definition.Options = options
+	document, err := json.Marshal(definition)
+	require.NoError(t, err)
+	overLimitUID, err := uid.New()
+	require.NoError(t, err)
+	overLimitEvent := cronEventWithDefinition(legacyReplica, "cron.job.created", overLimitUID, "", document)
+	inserted, err = store.InsertRemoteEvent(ctx, legacyReplica.ID, overLimitEvent)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, legacyReplica.ID))
+	overLimit, err := store.CronJob(ctx, legacyReplica.ID, overLimitUID)
+	require.NoError(t, err)
+	resolution := cron.ResolveInputs(overLimit.Definition, nil)
+	require.Len(t, resolution.Inputs, 32)
+	require.Len(t, resolution.Errors, 2)
+	require.Equal(t, "declaration_invalid", resolution.Errors[0].Code)
+	require.Equal(t, "item_00", resolution.Errors[1].Name)
+	require.Equal(t, "declaration_invalid", resolution.Errors[1].Code)
 	relayUID, err := uid.New()
 	require.NoError(t, err)
 	relayInput := cronEventWithDefinition(project, "cron.job.created", relayUID, "", legacyDefinition)
