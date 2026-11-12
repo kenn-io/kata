@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -309,7 +310,17 @@ func TestAgentSetupPreservesCodexForeignGroupIndex(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
 	data := `{"hooks":{"SessionStart":[{"if":"condition","hooks":[{"type":"command","command":"/old/kata agent-hook contract codex"}]},{"hooks":[{"type":"command","command":"foreign-hook"}]}]}}`
 	require.NoError(t, os.WriteFile(path, []byte(data), 0600))
+	trustKeys := func() string {
+		cmd := exec.CommandContext(t.Context(), "codex", "app-server")
+		cmd.Stdin = strings.NewReader(`{"id":1,"method":"hooks/list"}` + "\n")
+		output, err := cmd.Output()
+		require.NoError(t, err)
+		return string(output)
+	}
+	foreignKey := path + ":sessionstart:1:0"
+	require.Contains(t, trustKeys(), foreignKey)
 	_, _, _ = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "codex")
+	require.Contains(t, trustKeys(), foreignKey)
 	dataBytes, err := os.ReadFile(path)
 	require.NoError(t, err)
 	var doc map[string]any
