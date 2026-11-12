@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -564,6 +565,12 @@ type pausedCronAdoption struct {
 	db.Storage
 	entered chan struct{}
 	resume  chan struct{}
+}
+
+func (s *pausedCronAdoption) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	return s.Storage.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	}).BeginTx(ctx, opts)
 }
 
 func (s *pausedCronAdoption) AdoptProjectIntoFederation(ctx context.Context, p db.AdoptProjectIntoFederationParams) (db.AdoptProjectIntoFederationResult, error) {

@@ -1,0 +1,310 @@
+package daemon_test
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kata/internal/uid"
+)
+
+func adoptionRun(t *testing.T, store *sqlitestore.Store, project db.Project, sessions bool) {
+	t.Helper()
+	definition := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
+	job, _, err := store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "worker", Definition: definition})
+	require.NoError(t, err)
+	runUID, err := uid.New()
+	require.NoError(t, err)
+	summary := cron.Summary{Version: 1}
+	if sessions {
+		marker := true
+		summary.SessionsIncomplete = &marker
+	}
+	_, err = store.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "worker", Status: "succeeded", Summary: summary})
+	require.NoError(t, err)
+}
+
+func TestAdoptionPreflightBeforeRekeyAndSessionFree(t *testing.T) {
+	for _, session := range []bool{false, true} {
+		t.Run(fmt.Sprint(session), func(t *testing.T) {
+			store := openReplicaServiceStore(t)
+			project, err := store.CreateProjectWithUID(t.Context(), "spoke-project", replicaLocalProjectUID)
+			require.NoError(t, err)
+			adoptionRun(t, store, project, session)
+			gets := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gets++
+				require.Equal(t, "Bearer enrollment-token", r.Header.Get("Authorization"))
+				w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
+				_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)
+			}))
+			t.Cleanup(server.Close)
+			params := replicaServiceParams()
+			params.ProjectName = project.Name
+			params.AdoptExisting = true
+			params.HubURL = server.URL
+			params.Credential.HubURL = server.URL
+			credentials := newReplicaCredentialStore()
+			source := params.Credential
+			source.Capabilities = "pull,push"
+			credentials.put(project.UID, source)
+			params.HubClientFactory = func(_ context.Context, c config.FederationCredential) (*http.Client, error) {
+				require.Equal(t, params.Credential.Token, c.Token)
+				client := *server.Client()
+				client.Transport = adoptionBearerTransport{base: client.Transport, token: c.Token}
+				return &client, nil
+			}
+			_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
+			if session {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "cron_run_sessions_v1")
+				require.Equal(t, 1, gets)
+				require.Zero(t, credentials.rekeyCalls)
+				current, e := store.ProjectByID(t.Context(), project.ID)
+				require.NoError(t, e)
+				require.Equal(t, project.UID, current.UID)
+				_, e = store.FederationBindingByProject(t.Context(), project.ID)
+				require.ErrorIs(t, e, db.ErrNotFound)
+			} else {
+				require.NoError(t, err)
+				require.Zero(t, gets)
+			}
+		})
+	}
+}
+
+type adoptionBearerTransport struct {
+	base  http.RoundTripper
+	token string
+}
+
+func (a adoptionBearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	clone := r.Clone(r.Context())
+	clone.Header = r.Header.Clone()
+	clone.Header.Set("Authorization", "Bearer "+a.token)
+	base := a.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(clone)
+}
+
+type lateSessionStore struct {
+	*sqlitestore.Store
+	before func()
+}
+
+func (s *lateSessionStore) AdoptProjectIntoFederation(ctx context.Context, p db.AdoptProjectIntoFederationParams) (db.AdoptProjectIntoFederationResult, error) {
+	if s.before != nil {
+		f := s.before
+		s.before = nil
+		f()
+	}
+	return s.Store.AdoptProjectIntoFederation(ctx, p)
+}
+
+func TestAdoptionLateSessionRefusesAndCompatibleRetry(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProjectWithUID(t.Context(), "spoke-project", replicaLocalProjectUID)
+	require.NoError(t, err)
+	params := replicaServiceParams()
+	params.ProjectName = project.Name
+	params.AdoptExisting = true
+	credentials := newReplicaCredentialStore()
+	source := params.Credential
+	source.Capabilities = "pull,push"
+	credentials.put(project.UID, source)
+	var beforeEvents []db.Event
+	var beforeCursor int64
+	wrapped := &lateSessionStore{Store: store, before: func() {
+		adoptionRun(t, store, project, true)
+		beforeEvents, err = store.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+		require.NoError(t, err)
+		beforeCursor, err = store.MaxEventID(t.Context())
+		require.NoError(t, err)
+	}}
+	_, err = daemon.EnsureFederationReplica(t.Context(), wrapped, credentials, nil, params)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported event features")
+	current, err := store.ProjectByID(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, project.UID, current.UID)
+	_, err = store.FederationBindingByProject(t.Context(), project.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	require.Equal(t, 1, credentials.rekeyCalls)
+	afterEvents, err := store.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+	require.NoError(t, err)
+	require.Equal(t, beforeEvents, afterEvents)
+	afterCursor, err := store.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, beforeCursor, afterCursor)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
+		_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)
+	}))
+	t.Cleanup(server.Close)
+	// Keep the replacement credential's origin stable across the retry.
+	params.HubClientFactory = func(_ context.Context, _ config.FederationCredential) (*http.Client, error) {
+		return &http.Client{Transport: adoptionRedirectTransport{target: server.URL, base: server.Client().Transport}}, nil
+	}
+	_, err = daemon.EnsureFederationReplica(t.Context(), wrapped, credentials, nil, params)
+	require.NoError(t, err)
+}
+
+type adoptionRedirectTransport struct {
+	target string
+	base   http.RoundTripper
+}
+
+func (a adoptionRedirectTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	clone := r.Clone(r.Context())
+	u := *r.URL
+	target, _ := http.NewRequest(http.MethodGet, a.target, nil)
+	u.Scheme = target.URL.Scheme
+	u.Host = target.URL.Host
+	clone.URL = &u
+	base := a.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(clone)
+}
+
+func TestAdoptionRelaySessionsRefusedWithoutHubProbe(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	adoptionRun(t, store, project, true)
+	params := relayReplicaParams(t, store)
+	params.ProjectName = project.Name
+	params.AdoptExisting = true
+	calls := 0
+	params.HubClientFactory = func(context.Context, config.FederationCredential) (*http.Client, error) { calls++; return nil, nil }
+	_, err = daemon.EnsureFederationReplica(t.Context(), store, newReplicaCredentialStore(), nil, params)
+	require.ErrorIs(t, err, db.ErrFederatedReadOnly)
+	require.Zero(t, calls)
+	_, err = store.FederationBindingByProject(t.Context(), project.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
+}
+
+func TestAdoptionPreflightUsesEffectiveSigningAndChecksIdentity(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	adoptionRun(t, store, project, true)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
+		_, _ = fmt.Fprint(w, `{"project_id":42,"project_uid":"wrong"}`)
+	}))
+	t.Cleanup(server.Close)
+	params := replicaServiceParams()
+	params.ProjectName = project.Name
+	params.AdoptExisting = true
+	params.HubURL = server.URL
+	params.Credential.HubURL = server.URL
+	existing := params.Credential
+	existing.Capabilities = "pull,push"
+	existing.Signing = &signingpolicy.Source{KeyID: "example", HubURL: server.URL}
+	credentials := newReplicaCredentialStore()
+	credentials.put(replicaHubProjectUID, existing)
+	calls := 0
+	params.HubClientFactory = func(_ context.Context, c config.FederationCredential) (*http.Client, error) {
+		calls++
+		require.Equal(t, existing.Signing, c.Signing)
+		require.Equal(t, existing.Token, c.Token)
+		return server.Client(), nil
+	}
+	_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
+	require.ErrorIs(t, err, daemon.ErrFederationReplicaBindingConflict)
+	require.Equal(t, 1, calls)
+	require.Zero(t, credentials.rekeyCalls)
+	require.Zero(t, credentials.storeCalls)
+}
+
+func TestAdoptionHubProbeDoesNotHoldReplicaMutex(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	adoptionRun(t, store, project, true)
+	entered, resume := make(chan struct{}), make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(entered)
+		<-resume
+		w.Header().Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
+		_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)
+	}))
+	t.Cleanup(server.Close)
+	params := replicaServiceParams()
+	params.ProjectName = project.Name
+	params.AdoptExisting = true
+	params.HubURL = server.URL
+	params.Credential.HubURL = server.URL
+	params.HubClientFactory = func(context.Context, config.FederationCredential) (*http.Client, error) { return server.Client(), nil }
+	done := make(chan error, 1)
+	go func() {
+		_, e := daemon.EnsureFederationReplica(t.Context(), store, newReplicaCredentialStore(), nil, params)
+		done <- e
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("hub probe did not start")
+	}
+	other := replicaServiceParams()
+	other.HubProjectUID = "00000000000000000000000009"
+	other.ProjectName = "other-project"
+	other.HubProjectID = 43
+	other.Credential.HubProjectID = 43
+	completed := make(chan error, 1)
+	go func() {
+		_, e := daemon.EnsureFederationReplica(t.Context(), store, newReplicaCredentialStore(), nil, other)
+		completed <- e
+	}()
+	select {
+	case err := <-completed:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		close(resume)
+		t.Fatal("unrelated replica blocked by hub probe")
+	}
+	close(resume)
+	require.NoError(t, <-done)
+}
+
+func TestAdoptionSameUIDSessionBaselineAndBoundRejoin(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProjectWithUID(t.Context(), "spoke-project", replicaHubProjectUID)
+	require.NoError(t, err)
+	adoptionRun(t, store, project, true)
+	gets := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		gets++
+		w.Header().Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
+		_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)
+	}))
+	t.Cleanup(server.Close)
+	params := replicaServiceParams()
+	params.ProjectName = project.Name
+	params.AdoptExisting = true
+	params.HubURL = server.URL
+	params.Credential.HubURL = server.URL
+	params.HubClientFactory = func(context.Context, config.FederationCredential) (*http.Client, error) { return server.Client(), nil }
+	credentials := newReplicaCredentialStore()
+	result, err := daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
+	require.NoError(t, err)
+	require.True(t, result.Adopted)
+	require.Equal(t, 1, gets)
+	_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
+	require.NoError(t, err)
+	require.Equal(t, 1, gets)
+}

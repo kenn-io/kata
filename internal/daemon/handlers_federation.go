@@ -1181,8 +1181,14 @@ func abortFederationReplicaLeave(
 }
 
 func federationReplicaAPIError(err error) error {
+	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
+		return federationFeatureError(err)
+	}
 	if apiErr := relayCrossProjectLinksAPIError(err); apiErr != nil {
 		return apiErr
+	}
+	if errors.Is(err, db.ErrFederatedReadOnly) {
+		return federationReadOnlyError(err)
 	}
 	if errors.Is(err, db.ErrFederationProjectIdentityRequired) {
 		return api.NewError(http.StatusConflict, "federation_project_identity_required", db.ErrFederationProjectIdentityRequired.Error(),

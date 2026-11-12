@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -107,6 +108,8 @@ type EnsureFederationReplicaParams struct {
 	ProjectEventSink           func(db.Event)
 	ProjectResetSink           func(projectID, cursor int64)
 	HubClientFactory           FederationHubClientFactory
+	hubEventFeatures           string
+	preflightCredential        *config.FederationCredential
 	PushEnabled, AdoptExisting bool
 	AttachEmpty                bool
 	Relay                      *api.RelayHandshake
@@ -1134,6 +1137,98 @@ func prevalidateFederationReplicaReservation(
 	return validateExistingReplicaCredentialCapabilities(binding, expected)
 }
 
+// preflightFederationAdoption runs under the project rebind gate, but never
+// holds the process-wide replica mutex across the hub request.
+func preflightFederationAdoption(ctx context.Context, store db.Storage, credentials config.FederationCredentialStore, p EnsureFederationReplicaParams, projectID int64) (string, *config.FederationCredential, error) {
+	project, err := store.ProjectByID(ctx, projectID)
+	if err != nil {
+		return "", nil, err
+	}
+	// A bound rejoin, archived project, or UID collision follows its existing path.
+	if project.DeletedAt != nil || project.Name != p.ProjectName {
+		return "", nil, nil
+	}
+	_, err = store.FederationBindingByProject(ctx, projectID)
+	if err == nil {
+		return "", nil, nil
+	}
+	if !errors.Is(err, db.ErrNotFound) {
+		return "", nil, err
+	}
+	beginner, ok := store.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	})
+	if !ok {
+		return "", nil, credentialIOError("read adoption baseline")
+	}
+	tx, err := beginner.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return "", nil, err
+	}
+	hasSessions, err := db.ProjectHasCronRunSessions(ctx, tx, project.UID)
+	var baseline []db.CronEvent
+	if err == nil && hasSessions {
+		baseline, err = db.PrepareCronAdoption(ctx, tx, project, p.HubProjectUID, p.AttachEmpty)
+	}
+	if err != nil {
+		return "", nil, db.FinishTransactionRollback(ctx, err, tx.Rollback())
+	}
+	if err = tx.Commit(); err != nil {
+		return "", nil, err
+	}
+	if !hasSessions {
+		return "", nil, nil
+	}
+	if p.Relay != nil {
+		return "", nil, db.ErrFederatedReadOnly
+	}
+	credential, err := adoptionEffectiveCredential(ctx, credentials, p, projectID, store)
+	if err != nil {
+		return "", nil, err
+	}
+	features, err := fetchFederationAdoptionMetadata(ctx, p.HubURL, p.HubProjectID, p.HubProjectUID, credential, p.HubClientFactory)
+	if err != nil {
+		return "", nil, err
+	}
+	if err = db.RequireAdoptionEventFeatures(features, baseline); err != nil {
+		return "", nil, err
+	}
+	return features, &credential, nil
+}
+
+// Mirror the signing selection after rekey without changing either credential.
+func adoptionEffectiveCredential(ctx context.Context, credentials config.FederationCredentialStore, p EnsureFederationReplicaParams, projectID int64, store db.Storage) (config.FederationCredential, error) {
+	credential := p.Credential
+	if credentials == nil || credential.Token == "" || credential.Signing != nil {
+		return credential, nil
+	}
+	project, err := store.ProjectByID(ctx, projectID)
+	if err != nil {
+		return credential, err
+	}
+	sourceUID := project.UID
+	if p.CredentialRekey != nil {
+		sourceUID = p.CredentialRekey.ProjectUID
+	}
+	if sourceUID != p.HubProjectUID {
+		_, found, err := credentials.FederationCredential(ctx, sourceUID)
+		if err != nil {
+			return credential, credentialIOError("read federation credential adoption source")
+		}
+		if found {
+			return credential, nil
+		}
+	}
+	existing, found, err := credentials.FederationCredential(ctx, p.HubProjectUID)
+	if err != nil {
+		return credential, credentialIOError("read federation signing selection")
+	}
+	if found {
+		credential.Signing = existing.Signing
+	}
+	return credential, nil
+}
+
 func ensureFederationReplicaState(
 	ctx context.Context,
 	store db.Storage,
@@ -1161,6 +1256,14 @@ func ensureFederationReplicaState(
 			defer releaseAdoption()
 		}
 	}
+	if adoptionProjectID != 0 {
+		features, credential, err := preflightFederationAdoption(ctx, store, credentials, p, adoptionProjectID)
+		if err != nil {
+			return EnsureFederationReplicaResult{}, err
+		}
+		p.hubEventFeatures = features
+		p.preflightCredential = credential
+	}
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
 	if p.AdoptExisting || p.AttachEmpty {
@@ -1176,6 +1279,15 @@ func ensureFederationReplicaState(
 		}
 	}
 
+	if p.preflightCredential != nil {
+		credential, err := adoptionEffectiveCredential(ctx, credentials, p, adoptionProjectID, store)
+		if err != nil {
+			return EnsureFederationReplicaResult{}, err
+		}
+		if !credential.Equal(*p.preflightCredential) {
+			return EnsureFederationReplicaResult{}, federationReplicaError(ErrFederationReplicaCredentialConflict, "federation credential changed while contacting the hub", "retry adoption")
+		}
+	}
 	if p.ExpectedCredential != nil {
 		if _, ok := credentials.(config.FederationCredentialReplacer); !ok {
 			return EnsureFederationReplicaResult{}, credentialIOError("exact enrollment candidate activation is unavailable")
@@ -1216,6 +1328,9 @@ func ensureFederationReplicaState(
 	}
 
 	result, err := ensureReplicaBindingOrAdopt(ctx, store, p)
+	if p.Relay != nil && errors.Is(err, db.ErrUnsupportedEventFeatures) {
+		err = db.ErrFederatedReadOnly
+	}
 	if releaseAdoption != nil {
 		releaseAdoption()
 	}
@@ -1861,6 +1976,7 @@ func adoptExistingReplica(
 					Actor:                p.Credential.Actor,
 					AllowInsecure:        p.Credential.AllowInsecure,
 					EmptyOnly:            p.AttachEmpty,
+					HubEventFeatures:     p.hubEventFeatures,
 				})
 				if err != nil {
 					if errors.Is(err, db.ErrIssueSyncFederationBinding) {
@@ -1948,6 +2064,7 @@ func adoptExistingReplica(
 		Actor:                p.Credential.Actor,
 		AllowInsecure:        p.Credential.AllowInsecure,
 		EmptyOnly:            p.AttachEmpty,
+		HubEventFeatures:     p.hubEventFeatures,
 	})
 	if err != nil {
 		if errors.Is(err, db.ErrIssueSyncFederationBinding) {

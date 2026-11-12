@@ -46,3 +46,18 @@ func TestRecurringFederationFeatureRecoveryHint(t *testing.T) {
 	require.Contains(t, response.Message, "cron_v1")
 	require.Contains(t, response.Hint, "required event features")
 }
+
+func TestAdoptionFeatureErrorMapping(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{fmt.Errorf("adoption: %w", db.ErrUnsupportedEventFeatures), "unsupported_event_features"},
+		{fmt.Errorf("adoption: %w", db.ErrFederatedReadOnly), "federated_read_only"},
+	} {
+		var response *api.APIError
+		require.ErrorAs(t, federationReplicaAPIError(tc.err), &response)
+		require.Equal(t, http.StatusConflict, response.Status)
+		require.Equal(t, tc.code, response.Code)
+	}
+}
