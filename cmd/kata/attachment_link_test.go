@@ -42,12 +42,14 @@ func TestAttachmentLinkCLIRequiresCurrentAPIVersion(t *testing.T) {
 	}{
 		{"link", "0.37.0", "0.38.0", []string{"link", "$ref", "42"}},
 		{"link reuse unsupported", "0.38.0", "0.39.0", []string{"link", "$ref", "42", "--reuse-existing"}},
-		{"link reuse supported", "0.40.0", "", []string{"link", "$ref", "42", "--reuse-existing"}},
+		{"link reuse supported", "0.39.0", "", []string{"link", "$ref", "42", "--reuse-existing"}},
 		{"add reuse unsupported", "0.44.0", "0.45.0", []string{"add", "$ref", "file.txt", "--reuse-existing"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env, f, ref := attachmentCLIEnv(t)
 			f.Seed("/reports/report.pdf", docbank.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: uuid.MustParse(cliLinkVersion)}, map[uuid.UUID][]byte{uuid.MustParse(cliLinkVersion): []byte("sample bytes")})
+			project, err := env.DB.ProjectByName(t.Context(), "spoke-project")
+			require.NoError(t, err)
 			target, err := url.Parse(env.URL)
 			require.NoError(t, err)
 			proxy := httputil.NewSingleHostReverseProxy(target)
@@ -58,10 +60,13 @@ func TestAttachmentLinkCLIRequiresCurrentAPIVersion(t *testing.T) {
 					_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"` + tc.version + `"}`))
 					return
 				}
-				base := "/api/v1/projects/1/issues/" + ref + "/attachments"
+				base := "/api/v1/projects/" + itoa(project.ID) + "/issues/" + ref + "/attachments"
 				if r.Method == http.MethodPost && (r.URL.Path == base || r.URL.Path == base+"/links") {
 					writes.Add(1)
 				}
+				// Keep the fixture request owner-local through the version proxy.
+				r.Host = target.Host
+				r.Header["X-Forwarded-For"] = nil
 				proxy.ServeHTTP(w, r)
 			}))
 			t.Cleanup(server.Close)
