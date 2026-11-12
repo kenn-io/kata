@@ -1351,6 +1351,13 @@ func federationStatusCmd() *cobra.Command {
 			var callResp *generated.GetFederationStatusResp
 			var callErr error
 			if flags.Project != "" {
+				if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, apiVersionFederationProjectLookup, "project federation status"); err != nil {
+					var cliErr *cliError
+					if errors.As(err, &cliErr) && cliErr.Code == "daemon_api_too_old" {
+						cliErr.Hint = "Update the selected daemon on its host to a release with the required API: use kata update for an official installation or its owning package manager. For service-managed installs, see https://katatracker.com/docs/get-started/install/#updating-kata"
+					}
+					return err
+				}
 				project, err := readFederationProjectByName(a, flags.Project)
 				if err != nil {
 					return err
@@ -1471,14 +1478,6 @@ func resolveFederationProject(
 }
 
 func resolveFederationProjectByName(a daemonAPI, name string) (projectRef, error) {
-	return federationProjectByName(a, name, false)
-}
-
-func readFederationProjectByName(a daemonAPI, name string) (projectRef, error) {
-	return federationProjectByName(a, name, true)
-}
-
-func federationProjectByName(a daemonAPI, name string, readOnly bool) (projectRef, error) {
 	var resp struct {
 		Project struct {
 			ID   int64  `json:"id"`
@@ -1489,27 +1488,38 @@ func federationProjectByName(a daemonAPI, name string, readOnly bool) (projectRe
 	if err != nil {
 		return projectRef{}, err
 	}
-	var body []byte
-	var status int
-	if readOnly {
-		callResp, callErr := apiClient.ReadProjectByNameWithResponse(a.ctx, &generated.ReadProjectByNameRequestOptions{Query: &generated.ReadProjectByNameQuery{Name: name}})
-		if callResp == nil {
-			return projectRef{}, externalCLITransportError(callResp, callErr)
-		}
-		body, status = callResp.Body, callResp.StatusCode
-		err = externalCLIResponseError(status, body, callErr)
-	} else {
-		callResp, callErr := apiClient.ResolveProjectWithResponse(a.ctx, &generated.ResolveProjectRequestOptions{Body: &generated.ResolveProjectBody{Name: &name}})
-		if callResp == nil {
-			return projectRef{}, externalCLITransportError(callResp, callErr)
-		}
-		body, status = callResp.Body, callResp.StatusCode
-		err = externalCLIResponseError(status, body, callErr)
+	callResp, callErr := apiClient.ResolveProjectWithResponse(a.ctx, &generated.ResolveProjectRequestOptions{Body: &generated.ResolveProjectBody{Name: &name}})
+	if callResp == nil {
+		return projectRef{}, externalCLITransportError(callResp, callErr)
 	}
+	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+		return projectRef{}, err
+	}
+	if err := json.Unmarshal(callResp.Body, &resp); err != nil {
+		return projectRef{}, err
+	}
+	return projectRef{ID: resp.Project.ID, Name: resp.Project.Name}, nil
+}
+
+func readFederationProjectByName(a daemonAPI, name string) (projectRef, error) {
+	apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 	if err != nil {
 		return projectRef{}, err
 	}
-	if err := json.Unmarshal(body, &resp); err != nil {
+	callResp, callErr := apiClient.ReadProjectByNameWithResponse(a.ctx, &generated.ReadProjectByNameRequestOptions{Query: &generated.ReadProjectByNameQuery{Name: name}})
+	if callResp == nil {
+		return projectRef{}, externalCLITransportError(callResp, callErr)
+	}
+	if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+		return projectRef{}, err
+	}
+	var resp struct {
+		Project struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"project"`
+	}
+	if err := json.Unmarshal(callResp.Body, &resp); err != nil {
 		return projectRef{}, err
 	}
 	return projectRef{ID: resp.Project.ID, Name: resp.Project.Name}, nil

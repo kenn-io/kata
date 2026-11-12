@@ -22,6 +22,7 @@ const (
 	apiVersionOtherAgentCloseTranscript = "0.34.0"
 	apiVersionDocbankAttachmentLink     = "0.38.0"
 	apiVersionDocbankKeyHealth          = "0.44.0"
+	apiVersionFederationProjectLookup   = "0.46.0"
 	apiVersionEffectiveCloseEventUID    = "0.40.0"
 	apiVersionCommentLinks              = "0.28.0"
 	apiVersionReadyAndSearchFilters     = "0.8.0"

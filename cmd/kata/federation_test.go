@@ -179,6 +179,74 @@ func TestFederationStatusProjectAnonymousReadonly(t *testing.T) {
 	assert.Contains(t, out, "hub offline")
 }
 
+func TestFederationStatusProjectOlderDaemon(t *testing.T) {
+	env := testenv.New(t)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var lookup atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.45.0"}`))
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/resolve" {
+			lookup.Store(true)
+			http.NotFound(w, r)
+			return
+		}
+		r.Host = target.Host
+		r.Header["X-Forwarded-For"] = nil
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	older := *env
+	older.URL = server.URL
+	_, err = runCmdOutput(t, &older, "federation", "status", "--project", "spoke-project")
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Equal(t, "daemon_api_too_old", ce.Code)
+	assert.Contains(t, ce.Message, "0.46.0")
+	assert.Contains(t, ce.Message, "0.45.0")
+	assert.Contains(t, ce.Hint, "kata update")
+	assert.Contains(t, ce.Hint, "package manager")
+	assert.Contains(t, ce.Hint, "https://")
+	assert.False(t, lookup.Load())
+}
+
+type federationStatusHostAccess struct{}
+
+func (federationStatusHostAccess) Authorize(_ context.Context, request daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
+	if request.Operation.AllProjects {
+		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
+	}
+	return daemon.HostAccessDecision{}, nil
+}
+
+func TestFederationStatusProjectHostScope(t *testing.T) {
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "owner")
+	require.NoError(t, err)
+	require.NoError(t, env.DB.RecordFederationSyncError(t.Context(), project.ID, errors.New("hub offline"), time.Now()))
+	daemonServer := daemon.NewServer(daemon.ServerConfig{DB: env.DB, StartedAt: time.Now(), HostAccess: federationStatusHostAccess{}})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "worker"})
+		daemonServer.Handler().ServeHTTP(w, r.WithContext(ctx))
+	}))
+	t.Cleanup(server.Close)
+	resp, err := server.Client().Get(server.URL + "/api/v1/projects")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	host := *env
+	host.URL = server.URL
+	out := requireCmdOutput(t, &host, "federation", "status", "--project", project.Name)
+	assert.Contains(t, out, project.Name)
+	assert.Contains(t, out, "hub offline")
+}
+
 func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
 	env, _ := setupFederationStatusCLIState(t)
 
@@ -467,7 +535,16 @@ func TestFederationEnableProjectAgainstOlderDaemon(t *testing.T) {
 	target, err := url.Parse(env.URL)
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	var postResolve atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.45.0"}`))
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/resolve" {
+			postResolve.Store(true)
+		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/resolve" {
 			http.NotFound(w, r)
 			return
@@ -481,6 +558,7 @@ func TestFederationEnableProjectAgainstOlderDaemon(t *testing.T) {
 	older.URL = server.URL
 	out := requireCmdOutput(t, &older, "federation", "enable", "--project", project.Name)
 	assert.Contains(t, out, "enabled federation for spoke-project")
+	assert.True(t, postResolve.Load())
 	binding, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, db.FederationRoleHub, binding.Role)
