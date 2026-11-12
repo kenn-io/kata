@@ -773,7 +773,8 @@ entry. Remote workspaces do not delegate federation reads through their target
 credentials. Retained-window counts describe stored artifacts, not provider
 requests or billing.
 
-When sync needs attention, copy the diagnostic command for Bash/Zsh or
+The browser status summary withholds diagnostic error text. When sync needs
+attention, copy the diagnostic command for Bash/Zsh or
 PowerShell. Connect the CLI to the same daemon with your own credential. A local
 install uses its existing home or registered daemon profile. For a remote daemon,
 select its configured API connection with `--daemon` or `KATA_SERVER`.

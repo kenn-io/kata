@@ -275,7 +275,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
-| `0.46.0` | `GET /api/v1/projects/resolve` resolves a project by name for readers. Compact project federation status replaces non-empty sync error text with a fixed marker. |
+| `0.46.0` | `GET /api/v1/projects/resolve` resolves a project by name for readers. Project federation status accepts `omit_errors=true` to withhold diagnostic error text. |
 | `0.45.0` | Project federation status accepts `compact=true` to omit relay checkpoint capacity measurement. |
 | `0.44.0` | Attachment routes return `503 docbank_key_unavailable` instead of `502 docbank_unauthorized` when the daemon cannot resolve its own Docbank key. Health diagnostics add a `docbank` block. |
 | `0.43.0` | Adds the daemon-owned MCP Events routes `POST /api/v1/mcp-events/list`, `POST /api/v1/mcp-events/subscribe`, `POST /api/v1/mcp-events/unsubscribe`, and `GET /api/v1/mcp-events/subscriptions` (status). Subscribe and unsubscribe arguments name either a non-empty `project_uids` list or `all_projects: true`. Failures return an `mcp_events` error whose `data` carries `mcp_code` and `mcp_data`. Older daemons do not serve these routes. Both issue list routes accept `compact=true`. |
@@ -368,10 +368,11 @@ When the measurement fails, the project carries `relay_checkpoint_error`
 instead of the size fields and the rest of the response is unaffected.
 
 `GET /api/v1/projects/{project_id}/federation/status?compact=true` skips relay
-checkpoint capacity measurement. Starting with API 0.46.0, it replaces a
-non-empty `last_error` with `details withheld; run kata federation status`.
-Omit `compact` to read the full sync error. API 0.45.0 skips the measurement
-but still returns the full error in compact responses.
+checkpoint capacity measurement while retaining diagnostic errors. Starting
+with API 0.46.0, add `omit_errors=true` to withhold sync, held-batch, embedding,
+and relay checkpoint error text. The response uses `has_sync_error` to indicate
+a non-empty sync error while retaining status facts. Omit `omit_errors` to read
+the full diagnostic.
 
 `POST /api/v1/federation/root-keys/{project_name}/repin` is owner-only. It pins
 that hub project to the daemon's loaded root signing key and creates the key

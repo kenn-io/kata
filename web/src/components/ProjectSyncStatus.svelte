@@ -77,7 +77,7 @@
       try {
         const result = await getProjectFederationStatus(
           { projectId: id },
-          { compact: true },
+          { compact: true, omit_errors: true },
           {
             signal: abort.signal,
             onResponse: (raw) => {
@@ -139,7 +139,7 @@
         ></span
       >
     {/if}
-    {#if status.last_error}
+    {#if status.has_sync_error}
       {@const bashCommand = `kata federation status --project '${status.project_name.replaceAll("'", "'\\''")}'`}
       {@const powershellName = status.project_name.replace(/['‘’‚‛]/g, '$&$&')}
       {@const legacyName = powershellName.replace(/(\\*)"/g, '$1$1\\"')}
