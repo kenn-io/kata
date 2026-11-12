@@ -12,6 +12,8 @@ type RunStatRow struct {
 	CreatedAt          time.Time
 	StartedAt, EndedAt *time.Time
 }
+
+// DurationStats summarizes qualifying run durations in seconds.
 type DurationStats struct {
 	_      struct{} `nullable:"true"`
 	Count  int      `json:"count"`
@@ -20,11 +22,15 @@ type DurationStats struct {
 	P95    float64  `json:"p95"`
 	Max    float64  `json:"max"`
 }
+
+// RunStatBucket summarizes runs created on one local date.
 type RunStatBucket struct {
 	Date                  string         `json:"date"`
 	ByStatus              map[string]int `json:"by_status"`
 	MedianDurationSeconds *float64       `json:"median_duration_seconds" nullable:"true"`
 }
+
+// RunStatistics summarizes retained runs in a requested window.
 type RunStatistics struct {
 	Scanned             int             `json:"scanned"`
 	ByStatus            map[string]int  `json:"by_status"`
@@ -55,9 +61,10 @@ func SummarizeRuns(rows []RunStatRow, day bool, loc *time.Location) RunStatistic
 	for _, r := range rows {
 		out.ByStatus[r.Status]++
 		if streak {
-			if r.Status == "failed" {
+			switch r.Status {
+			case "failed":
 				out.ConsecutiveFailures++
-			} else if r.Status == "succeeded" {
+			case "succeeded":
 				streak = false
 			}
 		}

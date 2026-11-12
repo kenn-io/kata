@@ -104,6 +104,8 @@ type CronRunStatsRequest struct {
 	Bucket      string `query:"bucket"`
 	Timezone    string `query:"timezone"`
 }
+
+// CronRunStatsWindow identifies the creation-time window summarized.
 type CronRunStatsWindow struct {
 	Since time.Time `json:"since"`
 	Until time.Time `json:"until"`

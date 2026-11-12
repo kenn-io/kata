@@ -325,7 +325,8 @@ func (a CronSQL) RunStats(ctx context.Context, in CronRunStatsQuery) ([]cron.Run
 	if !in.Since.Before(in.Until) {
 		return nil, false, fmt.Errorf("%w: invalid window", cron.ErrInvalid)
 	}
-	query := "SELECT status,created_at,started_at,ended_at FROM cron_runs WHERE project_id=$1 AND created_at >= $2 AND created_at < $3"
+	var query strings.Builder
+	query.WriteString("SELECT status,created_at,started_at,ended_at FROM cron_runs WHERE project_id=$1 AND created_at >= $2 AND created_at < $3")
 	args := []any{in.ProjectID, in.Since.UTC().Format(CronRunCreatedAtFormat), in.Until.UTC().Format(CronRunCreatedAtFormat)}
 	for _, filter := range []struct{ column, value string }{{"job_uid", in.JobUID}, {"workflow_uid", in.WorkflowUID}} {
 		if filter.value == "" {
@@ -336,10 +337,10 @@ func (a CronSQL) RunStats(ctx context.Context, in CronRunStatsQuery) ([]cron.Run
 			return nil, false, fmt.Errorf("%w: invalid %s", cron.ErrInvalid, filter.column)
 		}
 		args = append(args, value)
-		query += fmt.Sprintf(" AND %s=$%d", filter.column, len(args))
+		query.WriteString(fmt.Sprintf(" AND %s=$%d", filter.column, len(args)))
 	}
-	query += " ORDER BY created_at DESC,uid DESC LIMIT 10001"
-	rows, err := a.Query.QueryContext(ctx, query, args...)
+	query.WriteString(" ORDER BY created_at DESC,uid DESC LIMIT 10001")
+	rows, err := a.Query.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, false, err
 	}
