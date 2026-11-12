@@ -814,7 +814,7 @@ func TestCronCLIParentUpdateKeepsBindingProtections(t *testing.T) {
 
 func TestCronCLIObservationSessionsRoundTrip(t *testing.T) {
 	env := testenv.New(t)
-	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Definition: cronCLIJob(t).Definition.Native(), Actor: "worker"})
 	require.NoError(t, err)
