@@ -507,7 +507,8 @@ func TestCronSessionObservationRequiresHubFeature(t *testing.T) {
 				}
 				endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
-					_, _ = w.Write([]byte(`{}`))
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = fmt.Fprintf(w, `{"project_id":%d,"project_uid":%q}`, f.hp.ID, f.hp.UID)
 				}))
 				t.Cleanup(endpoint.Close)
 				b, err := f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)

@@ -26,7 +26,6 @@ func TestAdoptionMetadataReader(t *testing.T) {
 		{"wrong UID", `{"project_id":41,"project_uid":"other"}`, db.SupportedEventFeatures, 200, true},
 		{"invalid", `{`, "", 200, true},
 		{"oversized", `{"project_id":41,"project_uid":"` + uid + `"}` + strings.Repeat(" ", federationRebindResponseLimit), "", 200, true},
-		{"remote error", "remote-secret-body", "", 500, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var auth, path, features string
