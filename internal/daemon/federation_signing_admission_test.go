@@ -41,72 +41,23 @@ func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
 		}, state)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, v.Close()) }()
-		time.Sleep(federationsigning.Quarantine)
 		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: v})
 		ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
 		require.NoError(t, err)
 		path := "https://hub.example" + projectPath(project.ID) + "/federation/metadata"
-		for _, tc := range []struct {
-			name    string
-			handler http.Handler
-			signed  bool
-			want    int
-		}{
-			{"private unsigned", srv.Handler(), false, http.StatusOK},
-			{"ingress unsigned", ingress, false, http.StatusUnauthorized},
-			{"ingress signed", ingress, true, http.StatusOK},
-		} {
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
-			req.Header.Set("Authorization", "Bearer "+enrollment.Token)
-			if tc.signed {
-				require.NoError(t, federationsigning.Sign(req, source))
-			}
-			w := httptest.NewRecorder()
-			tc.handler.ServeHTTP(w, req)
-			require.Equal(t, tc.want, w.Code, "%s: %s", tc.name, w.Body.String())
-		}
-	})
-}
-
-// Contract (#1114): while replay protection warms up, a signed request is told
-// to retry instead of being reported as a bad signature. A bad signature after
-// warm-up keeps its own answer.
-func TestFederationSigningWarmupAnswersRetryableWarming(t *testing.T) {
-	t.Setenv("TEST_WARMUP_SIGNING_KEY", strings.Repeat("k", 64))
-	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_WARMUP_SIGNING_KEY"}
-	env := testenv.New(t)
-	project := createFederatedHubProject(t, env, "hub-project")
-	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
-		Token: "enrollment", SpokeInstanceUID: federationTestSpokeUID,
-		ProjectID: &project.ID, Capabilities: "pull", Actor: "example-actor",
-	})
-	require.NoError(t, err)
-	synctest.Test(t, func(t *testing.T) {
-		state := filepath.Join(t.TempDir(), "replay.state")
-		require.NoError(t, federationsigning.InitializeReplayState(state))
-		v, err := federationsigning.NewVerifier("https://hub.example", []signingpolicy.Key{
-			{Source: source, EnrollmentID: enrollment.Enrollment.ID},
-		}, state)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, v.Close()) }()
-		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: v})
-		ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
-		require.NoError(t, err)
-		signedMetadata := func() *http.Request {
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
-				"https://hub.example"+projectPath(project.ID)+"/federation/metadata", nil)
-			req.Header.Set("Authorization", "Bearer "+enrollment.Token)
-			require.NoError(t, federationsigning.Sign(req, source))
-			return req
-		}
 		decode := func(w *httptest.ResponseRecorder) api.ErrorEnvelope {
 			var envelope api.ErrorEnvelope
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope), w.Body.String())
 			return envelope
 		}
 
+		// Contract (#1114): during replay warm-up a signed request is told to
+		// retry instead of being reported as a bad signature.
+		warming := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		warming.Header.Set("Authorization", "Bearer "+enrollment.Token)
+		require.NoError(t, federationsigning.Sign(warming, source))
 		w := httptest.NewRecorder()
-		ingress.ServeHTTP(w, signedMetadata())
+		ingress.ServeHTTP(w, warming)
 		require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
 		envelope := decode(w)
 		require.Equal(t, "signing_warming", envelope.Error.Code)
@@ -117,17 +68,35 @@ func TestFederationSigningWarmupAnswersRetryableWarming(t *testing.T) {
 		require.Positive(t, retryAfter)
 
 		time.Sleep(federationsigning.Quarantine)
-		tampered := signedMetadata()
-		tampered.Header.Set("Content-Digest", "sha-256=:"+strings.Repeat("A", 43)+"=:")
-		w = httptest.NewRecorder()
-		ingress.ServeHTTP(w, tampered)
-		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
-		require.Equal(t, "signature_invalid", decode(w).Error.Code)
-		require.Empty(t, w.Header().Get("Retry-After"))
-
-		w = httptest.NewRecorder()
-		ingress.ServeHTTP(w, signedMetadata())
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		for _, tc := range []struct {
+			name     string
+			handler  http.Handler
+			signed   bool
+			tampered bool
+			want     int
+			code     string
+		}{
+			{"private unsigned", srv.Handler(), false, false, http.StatusOK, ""},
+			{"ingress unsigned", ingress, false, false, http.StatusUnauthorized, ""},
+			{"ingress signed", ingress, true, false, http.StatusOK, ""},
+			{"ingress tampered digest", ingress, true, true, http.StatusUnauthorized, "signature_invalid"},
+		} {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer "+enrollment.Token)
+			if tc.signed {
+				require.NoError(t, federationsigning.Sign(req, source))
+			}
+			if tc.tampered {
+				req.Header.Set("Content-Digest", "sha-256=:"+strings.Repeat("A", 43)+"=:")
+			}
+			w := httptest.NewRecorder()
+			tc.handler.ServeHTTP(w, req)
+			require.Equal(t, tc.want, w.Code, "%s: %s", tc.name, w.Body.String())
+			if tc.code != "" {
+				require.Equal(t, tc.code, decode(w).Error.Code, tc.name)
+				require.Empty(t, w.Header().Get("Retry-After"), tc.name)
+			}
+		}
 	})
 }
 
