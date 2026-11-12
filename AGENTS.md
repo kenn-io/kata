@@ -121,6 +121,9 @@ release, from a breaking change to `feat` to `fix`.
 
 ## Documentation
 
+- Follow the [API contract workflow](docs/development/contributing.md#api-contract-changes)
+  when changing the daemon HTTP API.
+
 - Follow the [page frontmatter policy](docs/development/contributing.md#page-frontmatter)
   when creating or editing guide, operations, and reference pages.
 - Apply the [documentation standards](docs/development/contributing.md#documentation-standards)

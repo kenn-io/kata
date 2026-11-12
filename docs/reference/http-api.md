@@ -267,7 +267,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 ### Version history
 
-This table highlights notable changes. Marker files retain every version's summary.
+This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
@@ -687,9 +687,7 @@ These are the current intentions, not a contractual guarantee:
   `api/openapi.yaml` drifts from the routes, so the published schema cannot
   silently fall out of date with the daemon it describes.
 
-When changing the contract, bump `APISchemaVersion` and regenerate the API artifacts.
-Run `TestAPISchemaVersionMatchesRecordedContract` and add the marker file named in its output with a one-line summary.
-Marker history is permanent; keep every earlier marker and its summary.
+See the [API contract workflow](../development/contributing.md#api-contract-changes) for version bumps and marker records.
 
 If you build against this schema and hit a gap, please open an issue. The
 contract is meant to be useful to external clients, and feedback shapes how far

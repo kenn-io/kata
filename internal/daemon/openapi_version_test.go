@@ -22,30 +22,46 @@ func TestCheckAPIVersionRecord(t *testing.T) {
 	const b = `{"info":{"version":""},"paths":{"/b":{}}}`
 	const hashA = "a796a0b24a661cae44ecfaf054e4e53ee32d80f219424fb40c319a1d036aba5f"
 	const hashB = "95abbaa7a1794b458dae61670a105f01339b2978a65310dc6575f987536650c9"
+	const suffixA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const suffixB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	marker := func(version, hash, suffix string) string { return version + "." + hash + "." + suffix + ".sha256" }
 	for _, tc := range []struct {
 		name, doc, version string
 		markers            []string
 		contains           []string
 		summary            string
 	}{
-		{"collision", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256"}, []string{"0.46.0", "0.45.0." + hashA + ".sha256", "0.45.0." + hashB + ".sha256", "feature minimum checks introduced by this change"}, ""},
-		{"stale", b, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, []string{"not yet on origin/main", "0.45.0." + hashB + ".sha256", "0.46.0"}, ""},
-		{"next recorded", b, "0.46.0", []string{"0.45.0." + hashA + ".sha256", "0.46.0." + hashB + ".sha256"}, nil, ""},
-		{"older matching", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256", "0.46.0." + hashB + ".sha256"}, []string{"0.47.0"}, ""},
-		{"older missing", a, "0.45.0", []string{"0.46.0." + hashB + ".sha256"}, []string{"0.47.0"}, ""},
-		{"missing", a, "0.45.0", nil, []string{"0.45.0." + hashA + ".sha256"}, ""},
-		{"summary", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, nil, "Add route"},
-		{"blank summary", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, []string{"0.45.0." + hashA + ".sha256"}, " \n"},
-		{"multiline summary", a, "0.45.0", []string{"0.45.0." + hashA + ".sha256"}, []string{"0.45.0." + hashA + ".sha256"}, "Add route\nAdd field\n"},
+		{"collision", a, "0.45.0", []string{marker("0.45.0", hashA, suffixA), marker("0.45.0", hashB, suffixB)}, []string{"0.46.0", marker("0.45.0", hashA, suffixA), marker("0.45.0", hashB, suffixB), "feature minimum"}, ""},
+		{"historical collision", b, "0.46.0", []string{marker("0.45.0", hashA, suffixA), marker("0.45.0", hashB, suffixB), marker("0.46.0", hashB, suffixA)}, []string{"0.45.0", "0.47.0"}, ""},
+		{"matching summaries", a, "0.45.0", []string{marker("0.45.0", hashA, suffixA), marker("0.45.0", hashA, suffixB)}, nil, ""},
+		{"stale", b, "0.45.0", []string{marker("0.45.0", hashA, suffixA)}, []string{"not yet on origin/main", hashB, "0.46.0"}, ""},
+		{"next recorded", b, "0.46.0", []string{marker("0.45.0", hashA, suffixA), marker("0.46.0", hashB, suffixB)}, nil, ""},
+		{"older matching", a, "0.45.0", []string{marker("0.45.0", hashA, suffixA), marker("0.46.0", hashB, suffixB)}, []string{"0.47.0"}, ""},
+		{"older missing", a, "0.45.0", []string{marker("0.46.0", hashB, suffixB)}, []string{"0.47.0"}, ""},
+		{"missing", a, "0.45.0", nil, []string{hashA, "sha256sum"}, ""},
+		{"summary", a, "0.45.0", []string{marker("0.45.0", hashA, suffixA)}, nil, "Add route"},
+		{"blank summary", a, "0.45.0", []string{marker("0.45.0", hashA, suffixA)}, []string{"one-line summary"}, " \n"},
+		{"multiline summary", a, "0.45.0", []string{marker("0.45.0", hashA, suffixA)}, []string{"one-line summary"}, "Add route\nAdd field\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			for _, name := range tc.markers {
 				require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(cmp.Or(tc.summary, "Add route\n")), 0600))
 			}
+			if tc.name == "matching summaries" {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, tc.markers[1]), []byte("Another complete summary\n"), 0600))
+			}
 			err := checkAPIVersionRecord(dir, tc.version, []byte(tc.doc))
 			if len(tc.contains) == 0 {
 				require.NoError(t, err)
+				if tc.name == "matching summaries" {
+					first, err := os.ReadFile(filepath.Join(dir, tc.markers[0]))
+					require.NoError(t, err)
+					second, err := os.ReadFile(filepath.Join(dir, tc.markers[1]))
+					require.NoError(t, err)
+					require.Equal(t, "Add route\n", string(first))
+					require.Equal(t, "Another complete summary\n", string(second))
+				}
 				return
 			}
 			require.Error(t, err)
@@ -63,19 +79,17 @@ func TestAPISchemaVersionMatchesRecordedContract(t *testing.T) {
 }
 
 func checkAPIVersionRecord(dir, version string, doc []byte) error {
-	digest := sha256.Sum256(doc)
-	marker := fmt.Sprintf("%s.%x.sha256", version, digest)
+	digest := fmt.Sprintf("%x", sha256.Sum256(doc))
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
 	}
-	count, match := 0, false
-	var records []string
+	records := map[string]map[string][]string{}
 	next := "v" + version
 	for _, entry := range entries {
 		name := entry.Name()
 		parts := strings.Split(name, ".")
-		if len(parts) != 5 || parts[4] != "sha256" || len(parts[3]) != 64 {
+		if len(parts) != 6 || parts[5] != "sha256" || len(parts[3]) != 64 || len(parts[4]) != 64 {
 			continue
 		}
 		recorded := "v" + strings.Join(parts[:3], ".")
@@ -85,20 +99,32 @@ func checkAPIVersionRecord(dir, version string, doc []byte) error {
 		if err := checkAPIVersionSummary(filepath.Join(dir, name)); err != nil {
 			return err
 		}
+		if records[recorded] == nil {
+			records[recorded] = map[string][]string{}
+		}
+		records[recorded][parts[3]] = append(records[recorded][parts[3]], filepath.Join(dir, name))
 		if semver.Compare(recorded, next) > 0 {
 			next = recorded
 		}
-		if strings.Join(parts[:3], ".") == version {
-			count++
-			records = append(records, filepath.Join(dir, name))
-			match = match || name == marker
+	}
+	pattern := filepath.Join(dir, fmt.Sprintf("%s.%s.<summary-sha256>.sha256", version, digest))
+	create := fmt.Sprintf("add %s with a one-line summary; hash the chosen summary including its newline with printf '%%s\\n' 'your summary' | sha256sum", pattern)
+	current := records["v"+version]
+	var collisions []string
+	for _, hashes := range records {
+		if len(hashes) > 1 {
+			for _, paths := range hashes {
+				collisions = append(collisions, paths...)
+			}
 		}
 	}
-	if semver.Compare("v"+version, next) == 0 && count == 1 && match {
-		return nil
-	}
-	if semver.Compare("v"+version, next) == 0 && count == 0 {
-		return fmt.Errorf("API contract has no record; add marker %s with a one-line summary", filepath.Join(dir, marker))
+	if len(collisions) == 0 && semver.Compare("v"+version, next) == 0 {
+		if len(current[digest]) > 0 {
+			return nil
+		}
+		if len(current) == 0 {
+			return fmt.Errorf("API contract has no record; %s", create)
+		}
 	}
 	minor, err := strconv.Atoi(strings.TrimPrefix(semver.MajorMinor(next), semver.Major(next)+"."))
 	if err != nil {
@@ -106,34 +132,28 @@ func checkAPIVersionRecord(dir, version string, doc []byte) error {
 	}
 	suggested := fmt.Sprintf("%s.%d.0", strings.TrimPrefix(semver.Major(next), "v"), minor+1)
 	hint := ""
-	if semver.Compare("v"+version, next) == 0 && count == 1 {
-		hint = fmt.Sprintf("if %s is not yet on origin/main, delete your old marker and add %s with a one-line summary; otherwise ", version, filepath.Join(dir, marker))
+	if len(collisions) == 0 && semver.Compare("v"+version, next) == 0 && len(current) == 1 {
+		hint = fmt.Sprintf("if %s is not yet on origin/main, replace your marker's contract digest with %s while retaining its summary suffix; otherwise ", version, digest)
 	}
-	return fmt.Errorf("API contract version %s has older, conflicting, or stale records (%s); %stake %s in APISchemaVersion and api/openapi.yaml, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), hint, suggested)
+	return fmt.Errorf("API contract version %s has older, conflicting, or stale records (%s); %stake %s in APISchemaVersion and api/openapi.yaml, and move feature minimum checks introduced by this change (search requireDaemonAPIVersion and requireAPIVersion in cmd/kata/api_compat.go, internal/mcp, internal/tui, and internal/recurrence); regenerate the combined contract and rename this branch's marker with its new version and contract digest %s, retaining the summary suffix", version, strings.Join(collisions, ", "), hint, suggested, digest)
 }
 
 func checkAPIVersionSummary(path string) error {
-	info, err := os.Lstat(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	if info.Mode().IsRegular() {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		summary := strings.TrimSuffix(string(content), "\n")
-		if strings.TrimSpace(summary) != "" && !strings.ContainsAny(summary, "\r\n") {
-			return nil
-		}
+	summary := strings.TrimSuffix(string(content), "\n")
+	if strings.TrimSpace(summary) == "" || strings.ContainsAny(summary, "\r\n") {
+		return fmt.Errorf("API contract record must have a one-line summary: %s", path)
 	}
-	return fmt.Errorf("API contract record must be a regular file with a one-line summary: %s", path)
+	return nil
 }
 
 // contractDocument removes documentation fields from Huma objects while leaving
 // schema property names, extension values, defaults, and validation intact.
 func contractDocument(doc *huma.OpenAPI) ([]byte, error) {
-	doc.Info.Version = ""
+	doc.Info = &huma.Info{}
 	seen := map[uintptr]bool{}
 	var strip func(reflect.Value)
 	strip = func(v reflect.Value) {
@@ -236,6 +256,9 @@ func TestAPIContractDocument(t *testing.T) {
 		op.Tags = []string{"changed"}
 	}
 	doc.Info.Description = "new wording"
+	doc.Info.TermsOfService = "https://example.com/terms"
+	doc.Info.Contact = &huma.Contact{Name: "Team"}
+	doc.Info.License = &huma.License{Name: "License"}
 	schema := doc.Components.Schemas.Map()["HealthResponseBody"]
 	schema.Description = "new wording"
 	wording, err := contractDocument(doc)
@@ -250,6 +273,26 @@ func TestAPIContractDocument(t *testing.T) {
 	route, err := contractDocument(doc)
 	require.NoError(t, err)
 	require.NotEqual(t, string(initial), string(route))
+
+	delete(doc.Paths, "/new-route")
+	op := &huma.Operation{OperationID: "contract-test", Responses: map[string]*huma.Response{"200": {Description: "ok"}}}
+	doc.Paths["/contract-test"] = &huma.PathItem{Post: op}
+	baseline, err := contractDocument(doc)
+	require.NoError(t, err)
+	op.Parameters = []*huma.Param{{Name: "filter", In: "query", Schema: &huma.Schema{Type: "string"}}}
+	parameter, err := contractDocument(doc)
+	require.NoError(t, err)
+	require.NotEqual(t, string(baseline), string(parameter))
+	op.Parameters = nil
+	op.RequestBody = &huma.RequestBody{Content: map[string]*huma.MediaType{"application/json": {Schema: &huma.Schema{Type: "object", Properties: map[string]*huma.Schema{"input": {Type: "string"}}}}}}
+	request, err := contractDocument(doc)
+	require.NoError(t, err)
+	require.NotEqual(t, string(baseline), string(request))
+	op.RequestBody = nil
+	op.Responses["200"].Content = map[string]*huma.MediaType{"application/json": {Schema: &huma.Schema{Type: "object", Properties: map[string]*huma.Schema{"output": {Type: "string"}}}}}
+	response, err := contractDocument(doc)
+	require.NoError(t, err)
+	require.NotEqual(t, string(baseline), string(response))
 }
 
 func TestAPIBaseRecordLoading(t *testing.T) {
@@ -264,6 +307,8 @@ func TestAPIBaseRecordLoading(t *testing.T) {
 	for _, name := range records {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("Add route\n"), 0600))
 	}
+	require.NoError(t, checkBaseAPIVersionRecords(dir, records))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, records[0]), []byte("Corrected summary\n"), 0600))
 	require.NoError(t, checkBaseAPIVersionRecords(dir, records))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, records[0]), nil, 0600))
 	require.ErrorContains(t, checkBaseAPIVersionRecords(dir, records), records[0])
