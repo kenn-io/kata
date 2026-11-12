@@ -14,7 +14,7 @@ import (
 
 // SessionUsage contains only the named facts Kata exposes from AgentsView.
 type SessionUsage struct {
-	State              string   `json:"state"`
+	State              string   `json:"state" enum:"priced,unpriced,no_usage,not_found,ambiguous,unauthorized,unavailable"`
 	CanonicalSessionID string   `json:"canonical_session_id,omitempty"`
 	CostMicrodollars   *int64   `json:"cost_microdollars,omitempty"`
 	CostSource         string   `json:"cost_source,omitempty"`

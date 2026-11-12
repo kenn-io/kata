@@ -18,7 +18,7 @@ var ErrTotalOverflow = errors.New("usage total cannot be represented")
 var ErrDisabled = errors.New("usage source disabled")
 
 type Total struct {
-	State            string `json:"state"`
+	State            string `json:"state" enum:"complete,partial,unknown,no_sessions"`
 	CostMicrodollars *int64 `json:"cost_microdollars,omitempty"`
 	Estimated        bool   `json:"estimated"`
 }
