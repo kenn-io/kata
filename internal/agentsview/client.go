@@ -42,27 +42,27 @@ func NewClient(cfg config.ResolvedAgentsView, trustPrivate bool) (*Client, error
 // Lookup makes one bounded-body request. Deadlines and concurrency belong to
 // the caller, which can distinguish its request budget from the GET timeout.
 func (c *Client) Lookup(ctx context.Context, id string) SessionUsage {
-	result, _, _ := c.lookup(ctx, id)
+	result, _ := c.lookup(ctx, id)
 	return result
 }
 
-func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int, bool) {
+func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int) {
 	unavailable := SessionUsage{State: "unavailable"}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v1/sessions/"+url.PathEscape(id)+"/usage?subagents=true", nil)
 	if err != nil {
-		return unavailable, 0, false
+		return unavailable, 0
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return unavailable, 0, false
+		return unavailable, 0
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return SessionUsage{State: "unauthorized"}, resp.StatusCode, false
+		return SessionUsage{State: "unauthorized"}, resp.StatusCode
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
 	if err != nil || len(body) > 1<<20 {
-		return unavailable, resp.StatusCode, false
+		return unavailable, resp.StatusCode
 	}
 	var envelope struct {
 		Error struct {
@@ -75,17 +75,17 @@ func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int, bool
 	switch resp.StatusCode {
 	case http.StatusNotFound:
 		if validEnvelope && envelope.Error.Code == "session_not_found" && envelope.Error.Message != "" {
-			return SessionUsage{State: "not_found"}, resp.StatusCode, true
+			return SessionUsage{State: "not_found"}, resp.StatusCode
 		}
-		return unavailable, resp.StatusCode, false
+		return unavailable, resp.StatusCode
 	case http.StatusConflict:
 		if validEnvelope && envelope.Error.Code == "ambiguous_session_id" && len(envelope.Error.Candidates) <= 5 {
-			return SessionUsage{State: "ambiguous", Candidates: envelope.Error.Candidates}, resp.StatusCode, true
+			return SessionUsage{State: "ambiguous", Candidates: envelope.Error.Candidates}, resp.StatusCode
 		}
-		return unavailable, resp.StatusCode, validEnvelope
+		return unavailable, resp.StatusCode
 	case http.StatusOK:
 	default:
-		return unavailable, resp.StatusCode, validEnvelope
+		return unavailable, resp.StatusCode
 	}
 	var v struct {
 		SessionID    string `json:"session_id"`
@@ -101,13 +101,13 @@ func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int, bool
 		SubagentCount     *int64   `json:"subagent_count"`
 	}
 	if json.Unmarshal(body, &v) != nil || v.SessionID == "" || v.HasCost == nil || v.HasTokenData == nil || (v.TotalOutputTokens != nil && *v.TotalOutputTokens < 0) || (v.SubagentCount != nil && *v.SubagentCount < 0) || (v.Cost != nil && v.Cost.Microdollars != nil && *v.Cost.Microdollars < 0) {
-		return unavailable, resp.StatusCode, false
+		return unavailable, resp.StatusCode
 	}
 	result := SessionUsage{CanonicalSessionID: v.SessionID, Models: v.Models, UnpricedModels: v.UnpricedModels, TotalOutputTokens: v.TotalOutputTokens, SubagentCount: v.SubagentCount}
 	switch {
 	case *v.HasCost:
 		if v.Cost == nil || v.Cost.Microdollars == nil || (v.CostSource != "reported" && v.CostSource != "computed" && v.CostSource != "mixed") {
-			return unavailable, resp.StatusCode, false
+			return unavailable, resp.StatusCode
 		}
 		result.State = "priced"
 		result.CostMicrodollars = v.Cost.Microdollars
@@ -117,16 +117,16 @@ func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int, bool
 	default:
 		result.State = "no_usage"
 	}
-	return result, resp.StatusCode, true
+	return result, resp.StatusCode
 }
 
 // Probe checks one synthetic identity through the same credential-pinned client.
 func (c *Client) Probe(ctx context.Context) string {
-	_, status, valid := c.lookup(ctx, "00000000-0000-4000-8000-000000000000")
+	result, status := c.lookup(ctx, "00000000-0000-4000-8000-000000000000")
 	switch {
-	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+	case result.State == "unauthorized":
 		return "unauthorized"
-	case (status == http.StatusNotFound || status == http.StatusOK || status == http.StatusConflict) && valid:
+	case result.State == "priced" || result.State == "unpriced" || result.State == "no_usage" || result.State == "not_found" || result.State == "ambiguous":
 		return "ok"
 	case status == 0 || status >= 500 || status >= 300 && status < 400:
 		return "unreachable"
