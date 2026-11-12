@@ -493,10 +493,10 @@ func TestCronSpokeForwardPreservesUIDPath(t *testing.T) {
 }
 
 func TestCronSessionObservationRequiresHubFeature(t *testing.T) {
-	for _, mode := range []string{"unsupported", "supported", "unreachable", "disabled"} {
+	for _, mode := range []string{"unsupported", "supported", "unreachable", "push disabled"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newCronForwardFixture(t, func(f *cronForwardFixture, cfg *daemon.ServerConfig) {
-				if mode == "supported" || mode == "disabled" {
+				if mode == "supported" || mode == "push disabled" {
 					return
 				}
 				if mode == "unreachable" {
@@ -523,7 +523,7 @@ func TestCronSessionObservationRequiresHubFeature(t *testing.T) {
 			definition := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
 			job, _, err := f.spoke.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.sp.ID, Name: "Review", Actor: "tester", Definition: definition})
 			require.NoError(t, err)
-			if mode == "disabled" {
+			if mode == "push disabled" {
 				binding, err := f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)
 				require.NoError(t, err)
 				binding.PushEnabled = false

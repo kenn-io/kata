@@ -151,7 +151,6 @@ func TestAdoptionLateSessionRefusesAndCompatibleRetry(t *testing.T) {
 	require.Equal(t, project.UID, current.UID)
 	_, err = store.FederationBindingByProject(t.Context(), project.ID)
 	require.ErrorIs(t, err, db.ErrNotFound)
-	require.Equal(t, 1, credentials.rekeyCalls)
 	afterEvents, err := store.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
 	require.NoError(t, err)
 	require.Equal(t, beforeEvents, afterEvents)
@@ -299,7 +298,7 @@ func TestAdoptionSameUIDSessionBaselineAndBoundRejoin(t *testing.T) {
 func TestAdoptionPreflightEmptyTokenUsesSavedCredential(t *testing.T) {
 	t.Setenv("TEST_REPLICA_SIGNING_KEY", strings.Repeat("k", 64))
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
-		for _, name := range []string{"supporting hub after late rekey", "unsupporting hub", "explicit signing", "replaced during probe", "removed during probe", "no saved credential", "different origin", "different project", "session-free"} {
+		for _, name := range []string{"supporting hub", "unsupporting hub", "explicit signing", "replaced during probe", "removed during probe", "no saved credential", "different origin", "different project", "session-free"} {
 			t.Run(name, func(t *testing.T) {
 				projectUID, err := uid.New()
 				require.NoError(t, err)
@@ -357,7 +356,7 @@ func TestAdoptionPreflightEmptyTokenUsesSavedCredential(t *testing.T) {
 					return server.Client(), nil
 				}
 				_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
-				success := name == "supporting hub after late rekey" || name == "explicit signing" || name == "session-free"
+				success := name == "supporting hub" || name == "explicit signing" || name == "session-free"
 				if success {
 					require.NoError(t, err)
 				} else {

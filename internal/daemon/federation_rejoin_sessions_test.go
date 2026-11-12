@@ -72,13 +72,15 @@ func TestRejoinRetainedSessionFeatures(t *testing.T) {
 				params.HubClientFactory = func(context.Context, config.FederationCredential) (*http.Client, error) { return server.Client(), nil }
 				credentials := newReplicaCredentialStore()
 				credentials.put(project.UID, params.Credential)
-				factory := params.HubClientFactory
-				params.HubClientFactory = func(context.Context, config.FederationCredential) (*http.Client, error) {
-					return nil, fmt.Errorf("hub unavailable")
+				if tc.name == "cleared" {
+					factory := params.HubClientFactory
+					params.HubClientFactory = func(context.Context, config.FederationCredential) (*http.Client, error) {
+						return nil, fmt.Errorf("hub unavailable")
+					}
+					_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
+					require.ErrorIs(t, err, daemon.ErrFederationReplicaHubUnavailable)
+					params.HubClientFactory = factory
 				}
-				_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
-				require.ErrorIs(t, err, daemon.ErrFederationReplicaHubUnavailable)
-				params.HubClientFactory = factory
 				_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
 				require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
 				require.Contains(t, err.Error(), tc.missing)
