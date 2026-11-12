@@ -159,25 +159,25 @@
     if (signal.aborted || post !== posts) return
     if (next) {
       if (
-        next.job?.error ||
+        (next.job?.error ?? next.restart_in_progress) ||
         next.job?.state !== status?.job?.state ||
         next.provider !== status?.provider ||
         next.indexing
       )
         requestError = undefined
-      const observedRestart = status?.restart_in_progress
-      status = next
-      if (next.restart_in_progress && !restartPending) restartDeadline = Date.now() + restartWaitMs
+      if (next.restart_in_progress) restartDeadline = Date.now() + restartWaitMs
       if (
         restartPending &&
         (next.job?.state !== 'restart' ||
-          ((next.job?.error || next.can_restart) && (!restartRequestPending || observedRestart)))
+          ((next.job?.error || next.can_restart) &&
+            (!restartRequestPending || status?.restart_in_progress)))
       ) {
         restartDeadline = 0
         posts++
         if (next.can_restart && !next.job?.error)
           requestError = "Couldn't confirm restart. Try again or run kata daemon restart."
       }
+      status = next
     }
     if (restartPending && !next?.can_restart && Date.now() >= restartDeadline) {
       requestError = remoteHost

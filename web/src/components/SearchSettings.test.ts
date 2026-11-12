@@ -109,7 +109,7 @@ describe('SearchSettings', () => {
       vi
         .fn<typeof fetch>()
         .mockResolvedValueOnce(Response.json(waiting))
-        .mockResolvedValue(Response.json(progress)),
+        .mockImplementation(async () => Response.json(progress)),
     )
     vi.stubGlobal(
       'confirm',
@@ -336,6 +336,32 @@ describe('SearchSettings', () => {
       expect(screen.queryByRole('alert')).toBeNull()
     },
   )
+
+  test('clears outage guidance when a restart in progress is reported again', async () => {
+    vi.useFakeTimers()
+    let reachable = false
+    const progress = status({
+      can_change: false,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+      restart_in_progress: true,
+    })
+    setGeneratedFetch(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(progress))
+        .mockImplementation(async () =>
+          reachable ? Response.json(progress) : new Response(null, { status: 503 }),
+        ),
+    )
+    renderSettings({ originStable: true })
+    await settle()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(screen.getByRole('alert').textContent).toContain("Couldn't reconnect")
+    reachable = true
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(screen.getByText('Restarting...')).not.toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
 
   test('continues polling after a stalled status read times out', async () => {
     vi.useFakeTimers()
