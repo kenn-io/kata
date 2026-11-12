@@ -66,7 +66,7 @@ func TestAdoptionPreflightBeforeRekeyRefusesUnsupportedHub(t *testing.T) {
 	require.NoError(t, err)
 	adoptionRun(t, store, project, true)
 	gets := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		gets++
 		w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
 		_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)

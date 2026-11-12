@@ -282,7 +282,7 @@ func newOrderedReplicaServiceStore(
 		release[kind] = make(chan struct{})
 	}
 	return &orderedReplicaServiceStore{
-		TransactionalStore: dbtest.TransactionalStore{Storage: store}, hubProjectUID: hubUID,
+		TransactionalStore: {Storage: store}, hubProjectUID: hubUID,
 		seen: make(map[string]bool), arrived: arrived, release: release,
 	}
 }
