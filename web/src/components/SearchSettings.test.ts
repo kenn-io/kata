@@ -41,6 +41,27 @@ describe('SearchSettings', () => {
     vi.useRealTimers()
   })
 
+  test.each([
+    [true, undefined],
+    [false, undefined],
+    [true, 'daemon.example'],
+    [false, 'daemon.example'],
+  ])(
+    'shows an ongoing restart for admin=%s and remote=%s',
+    async (canAdministerDaemon, remoteHost) => {
+      vi.useFakeTimers()
+      setGeneratedFetch(
+        vi.fn(async () =>
+          Response.json(status({ job: { state: 'restarting', downloaded: 1, total: 1 } })),
+        ),
+      )
+      const { container } = renderSettings({ canAdministerDaemon, remoteHost })
+      await settle()
+      expect(screen.getByText('Restarting...')).not.toBeNull()
+      expect(container.textContent).not.toContain('Restart the daemon')
+    },
+  )
+
   test('asks before sending a single restart request', async () => {
     vi.useFakeTimers()
     setGeneratedFetch(
@@ -219,7 +240,7 @@ describe('SearchSettings', () => {
     }
   })
 
-  test('keeps remote restart guidance during another client restart and outage', async () => {
+  test('keeps remote restart status during another client restart and outage', async () => {
     vi.useFakeTimers()
     setGeneratedFetch(
       vi
@@ -232,7 +253,7 @@ describe('SearchSettings', () => {
     renderSettings({ remoteHost: 'daemon.example', originStable: true })
     await settle()
     await vi.advanceTimersByTimeAsync(122_000)
-    expect(screen.getByText('Restart the daemon on daemon.example to finish.')).not.toBeNull()
+    expect(screen.getByText('Restarting...')).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
   })

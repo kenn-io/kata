@@ -75,13 +75,16 @@
           ? 'Restarting...'
           : 'Turning on',
     turnOn: 'Restart daemon',
-    downloaded: remoteHost
-      ? `Restart the daemon on ${remoteHost} to finish.`
-      : (status?.can_restart || job?.state === 'restarting') && canAdministerDaemon
-        ? originStable
-          ? ''
-          : reopenGuidance
-        : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
+    downloaded:
+      job?.state === 'restarting' && (remoteHost || !canAdministerDaemon)
+        ? ''
+        : remoteHost
+          ? `Restart the daemon on ${remoteHost} to finish.`
+          : (status?.can_restart || job?.state === 'restarting') && canAdministerDaemon
+            ? originStable
+              ? ''
+              : reopenGuidance
+            : 'Restart the daemon to finish: run kata daemon restart. If this daemon uses a custom home, set KATA_HOME to it first.',
   })
   let failure = $derived(
     requestError ??
