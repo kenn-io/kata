@@ -114,6 +114,8 @@ import type {
   ForceReleaseIssueLeasePathParameters,
   GetConnectorStatusPathParameters,
   GetCronCapabilitiesPathParameters,
+  GetCronRunUsageParams,
+  GetCronRunUsagePathParameters,
   GetExternalRootBridgeParams,
   GetExternalRootBridgePathParameters,
   GetFederationBridgeStatusPathParameters,
@@ -285,6 +287,7 @@ import type {
   RunIssueSyncOncePathParameters,
   RunIssueSyncOnceRequestBody,
   RunIssueSyncOnceResponseBody,
+  RunUsage,
   SearchIssuesParams,
   SearchIssuesPathParameters,
   SearchResponseBody,
@@ -2839,6 +2842,55 @@ export const observeCronRun = async (
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(observeCronRunBody),
+  })
+}
+
+export type getCronRunUsageResponse200 = {
+  data: RunUsage
+  status: 200
+}
+
+export type getCronRunUsageResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type getCronRunUsageResponseSuccess = getCronRunUsageResponse200 & {
+  headers: Headers
+}
+export type getCronRunUsageResponseError = getCronRunUsageResponseDefault & {
+  headers: Headers
+}
+
+export type getCronRunUsageResponse = getCronRunUsageResponseSuccess | getCronRunUsageResponseError
+
+export const getGetCronRunUsageUrl = (
+  { projectId, runUid }: GetCronRunUsagePathParameters,
+  params?: GetCronRunUsageParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/runs/${encodeURIComponent(String(runUid))}/usage?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/runs/${encodeURIComponent(String(runUid))}/usage`
+}
+
+export const getCronRunUsage = async (
+  { projectId, runUid }: GetCronRunUsagePathParameters,
+  params?: GetCronRunUsageParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getCronRunUsageResponse> => {
+  return orvalFetch<getCronRunUsageResponse>(getGetCronRunUsageUrl({ projectId, runUid }, params), {
+    ...options,
+    method: 'GET',
   })
 }
 

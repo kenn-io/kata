@@ -211,19 +211,56 @@ func (c CreateLinkRequestBodyType) Validate() error {
 	}
 }
 
+type CronUsageSourceSource string
+
+const (
+	Agentsview CronUsageSourceSource = "agentsview"
+	None       CronUsageSourceSource = "none"
+)
+
+// Validate checks if the CronUsageSourceSource value is valid
+func (c CronUsageSourceSource) Validate() error {
+	switch c {
+	case Agentsview, None:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid CronUsageSourceSource value, got: %v", c))
+	}
+}
+
+type DoctorAgentsViewState string
+
+const (
+	NotAgentsview DoctorAgentsViewState = "not_agentsview"
+	Off           DoctorAgentsViewState = "off"
+	Ok            DoctorAgentsViewState = "ok"
+	Unauthorized  DoctorAgentsViewState = "unauthorized"
+	Unreachable   DoctorAgentsViewState = "unreachable"
+)
+
+// Validate checks if the DoctorAgentsViewState value is valid
+func (d DoctorAgentsViewState) Validate() error {
+	switch d {
+	case NotAgentsview, Off, Ok, Unauthorized, Unreachable:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid DoctorAgentsViewState value, got: %v", d))
+	}
+}
+
 // EmbeddingsHealthCredential Embedding credential state; an advisory warning that does not change health.ok.
 type EmbeddingsHealthCredential string
 
 const (
-	Missing  EmbeddingsHealthCredential = "missing"
-	Ok       EmbeddingsHealthCredential = "ok"
-	Rejected EmbeddingsHealthCredential = "rejected"
+	EmbeddingsHealthCredentialOk EmbeddingsHealthCredential = "ok"
+	Missing                      EmbeddingsHealthCredential = "missing"
+	Rejected                     EmbeddingsHealthCredential = "rejected"
 )
 
 // Validate checks if the EmbeddingsHealthCredential value is valid
 func (e EmbeddingsHealthCredential) Validate() error {
 	switch e {
-	case Missing, Ok, Rejected:
+	case EmbeddingsHealthCredentialOk, Missing, Rejected:
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid EmbeddingsHealthCredential value, got: %v", e))
@@ -355,16 +392,16 @@ func (f FederationProjectStatusRootSigningKey) Validate() error {
 type FederationRootKeyRepinResultMethod string
 
 const (
-	None           FederationRootKeyRepinResultMethod = "none"
-	Pin            FederationRootKeyRepinResultMethod = "pin"
-	SignedRotation FederationRootKeyRepinResultMethod = "signed_rotation"
-	UnsignedRepin  FederationRootKeyRepinResultMethod = "unsigned_repin"
+	FederationRootKeyRepinResultMethodNone FederationRootKeyRepinResultMethod = "none"
+	Pin                                    FederationRootKeyRepinResultMethod = "pin"
+	SignedRotation                         FederationRootKeyRepinResultMethod = "signed_rotation"
+	UnsignedRepin                          FederationRootKeyRepinResultMethod = "unsigned_repin"
 )
 
 // Validate checks if the FederationRootKeyRepinResultMethod value is valid
 func (f FederationRootKeyRepinResultMethod) Validate() error {
 	switch f {
-	case None, Pin, SignedRotation, UnsignedRepin:
+	case FederationRootKeyRepinResultMethodNone, Pin, SignedRotation, UnsignedRepin:
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationRootKeyRepinResultMethod value, got: %v", f))

@@ -1299,12 +1299,28 @@ func (c CreateTokenResponseBody) Validate() error {
 }
 
 type CronCapabilitiesResponseBody struct {
-	EventFeatures []string `json:"event_features" validate:"required"`
-	ProjectUID    string   `json:"project_uid" validate:"required"`
+	EventFeatures []string        `json:"event_features" validate:"required"`
+	ProjectUID    string          `json:"project_uid" validate:"required"`
+	Usage         CronUsageSource `json:"usage"`
 }
 
 func (c CronCapabilitiesResponseBody) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.EventFeatures, "required"); err != nil {
+		errors = errors.Append("EventFeatures", err)
+	}
+	if err := typesValidator.Var(c.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if v, ok := any(c.Usage).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Usage", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type CronDefinitionActionBody struct {
@@ -1588,6 +1604,23 @@ func (c CronRunsResponseBody) Validate() error {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Runs[%d]", i), err)
 			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronUsageSource struct {
+	Source CronUsageSourceSource `json:"source" validate:"required"`
+}
+
+func (c CronUsageSource) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(c.Source).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Source", err)
 		}
 	}
 	if len(errors) == 0 {
@@ -1948,12 +1981,35 @@ func (d DocbankHealth) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(d))
 }
 
+type DoctorAgentsView struct {
+	State DoctorAgentsViewState `json:"state" validate:"required"`
+}
+
+func (d DoctorAgentsView) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(d.State).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("State", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type DoctorResponseBody struct {
-	Hooks Hooks `json:"hooks"`
+	Agentsview DoctorAgentsView `json:"agentsview"`
+	Hooks      Hooks            `json:"hooks"`
 }
 
 func (d DoctorResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if v, ok := any(d.Agentsview).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Agentsview", err)
+		}
+	}
 	if v, ok := any(d.Hooks).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Hooks", err)
@@ -6682,6 +6738,63 @@ func (r RunIssueSyncOnceResponseBody) Validate() error {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Status", err)
 		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type RunSession struct {
+	Agent              string   `json:"agent" validate:"required"`
+	Candidates         []string `json:"candidates,omitempty"`
+	CanonicalSessionID *string  `json:"canonical_session_id,omitempty"`
+	CostMicrodollars   *int64   `json:"cost_microdollars,omitempty"`
+	CostSource         *string  `json:"cost_source,omitempty"`
+	Models             []string `json:"models,omitempty"`
+	SessionID          string   `json:"session_id" validate:"required"`
+	State              string   `json:"state" validate:"required"`
+	Step               *string  `json:"step,omitempty"`
+	SubagentCount      *int64   `json:"subagent_count,omitempty"`
+	TotalOutputTokens  *int64   `json:"total_output_tokens,omitempty"`
+	UnpricedModels     []string `json:"unpriced_models,omitempty"`
+	URL                *string  `json:"url,omitempty"`
+}
+
+func (r RunSession) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type RunUsage struct {
+	CostMicrodollars   *int64       `json:"cost_microdollars,omitempty"`
+	Estimated          bool         `json:"estimated"`
+	FetchedAt          time.Time    `json:"fetched_at" validate:"required"`
+	RunUID             string       `json:"run_uid" validate:"required"`
+	Sessions           []RunSession `json:"sessions" validate:"required"`
+	SessionsIncomplete bool         `json:"sessions_incomplete"`
+	State              string       `json:"state" validate:"required"`
+}
+
+func (r RunUsage) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(r.FetchedAt, "required"); err != nil {
+		errors = errors.Append("FetchedAt", err)
+	}
+	if err := typesValidator.Var(r.RunUID, "required"); err != nil {
+		errors = errors.Append("RunUID", err)
+	}
+	if err := typesValidator.Var(r.Sessions, "required"); err != nil {
+		errors = errors.Append("Sessions", err)
+	}
+	for i, item := range r.Sessions {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Sessions[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(r.State, "required"); err != nil {
+		errors = errors.Append("State", err)
 	}
 	if len(errors) == 0 {
 		return nil
