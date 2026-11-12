@@ -51,9 +51,6 @@
   so put the `Co-authored-by:` trailer there too.
 - No Unrequested GitHub Comments: Do not comment on GitHub issues or pull
   requests unless the user explicitly instructs you to post a comment.
-- No Unrequested Pull Request State Changes: Do not close, reopen, convert to
-  draft, or mark ready a pull request unless the user asks for it in this
-  conversation. When a rule here conflicts with the user's request, ask them.
 - No Compiled-In Source Paths: Never locate files from a path returned by
   `runtime.Caller` or a stack trace; builds use `-trimpath`, so those paths are
   module-relative. Tests run from their package directory, so use paths
