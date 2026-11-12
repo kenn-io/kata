@@ -4,7 +4,7 @@ import { expect, test, type BrowserCredentials } from './fixtures'
 
 test('local project readers see native sync status with bounded embedding summaries at narrow widths', async ({
   page,
-  kata,
+  diagnosticKata: kata,
 }, testInfo) => {
   await kata.prepareSyncDiagnostic()
   const local = await kata.launch(page, `/kata?scope=${kata.projectUID}`)
@@ -110,4 +110,14 @@ test('local project readers see native sync status with bounded embedding summar
   await region.getByRole('button', { name: 'Refresh sync' }).click()
   await expect(region.getByText('Sync needs attention')).toHaveCount(0)
   await expect(region.getByRole('button', { name: /Copy .* sync status command/ })).toHaveCount(0)
+})
+
+test('other tests retain the fixture project name', async ({ page, kata }) => {
+  const credentials = await kata.launch(page)
+  const snapshot = (await kata.snapshot(page, credentials)) as {
+    catalog: Array<{ project: { id: number; name: string } }>
+  }
+  expect(snapshot.catalog.find(({ project }) => project.id === kata.projectID)?.project.name).toBe(
+    'example-project',
+  )
 })

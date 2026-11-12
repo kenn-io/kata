@@ -70,7 +70,7 @@ interface RunningFixture {
 
 const daemonStderr = new WeakMap<ChildProcess, string>()
 
-export const test = base.extend<{ kata: KataFixture }>({
+export const test = base.extend<{ kata: KataFixture; diagnosticKata: KataFixture }>({
   kata: [
     async ({ browserName }, use) => {
       void browserName
@@ -83,6 +83,15 @@ export const test = base.extend<{ kata: KataFixture }>({
     },
     { scope: 'worker', timeout: 120_000 },
   ],
+  diagnosticKata: async ({ browserName }, use) => {
+    void browserName
+    const running = await startProductionFixture()
+    try {
+      await use(running.fixture)
+    } finally {
+      await running.stop()
+    }
+  },
 })
 
 export { expect }
