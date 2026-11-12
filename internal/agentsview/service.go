@@ -243,7 +243,7 @@ func (s *Service) Probe(ctx context.Context) string {
 	if gen == nil {
 		return "off"
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	select {
 	case s.slots <- struct{}{}:
@@ -251,9 +251,7 @@ func (s *Service) Probe(ctx context.Context) string {
 		return "unreachable"
 	}
 	defer func() { <-s.slots }()
-	lookup, stop := context.WithTimeout(ctx, 2*time.Second)
-	defer stop()
-	return gen.client.Probe(lookup)
+	return gen.client.Probe(ctx)
 }
 
 // SameTarget compares only the configuration that cannot change on reload.

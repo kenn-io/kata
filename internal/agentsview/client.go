@@ -73,7 +73,10 @@ func (c *Client) lookup(ctx context.Context, id string) (SessionUsage, int, bool
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return SessionUsage{State: "unauthorized"}, resp.StatusCode, validEnvelope
 	case http.StatusNotFound:
-		return SessionUsage{State: "not_found"}, resp.StatusCode, validEnvelope && envelope.Error.Code == "session_not_found" && envelope.Error.Message != ""
+		if validEnvelope && envelope.Error.Code == "session_not_found" && envelope.Error.Message != "" {
+			return SessionUsage{State: "not_found"}, resp.StatusCode, true
+		}
+		return unavailable, resp.StatusCode, false
 	case http.StatusConflict:
 		if validEnvelope && envelope.Error.Code == "ambiguous_session_id" && len(envelope.Error.Candidates) <= 5 {
 			return SessionUsage{State: "ambiguous", Candidates: envelope.Error.Candidates}, resp.StatusCode, true
