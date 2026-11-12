@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"uuid"
@@ -34,27 +36,47 @@ func TestAttachmentLinkCLI(t *testing.T) {
 }
 
 func TestAttachmentLinkCLIRequiresCurrentAPIVersion(t *testing.T) {
-	env, _, ref := attachmentCLIEnv(t)
-	target, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	var linkCalls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/health" {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.37.0"}`))
-			return
-		}
-		if r.URL.Path == "/api/v1/projects/1/issues/"+ref+"/attachments/links" {
-			linkCalls.Add(1)
-		}
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
-
-	_, err = executeAttachmentCLI(t, server.URL, "link", ref, "/reports/report.pdf")
-	require.ErrorContains(t, err, "requires daemon API 0.38.0 or newer")
-	require.Zero(t, linkCalls.Load(), "old daemons must not receive the new link request")
+	for _, tc := range []struct {
+		name, version, floor string
+		args                 []string
+	}{
+		{"link", "0.37.0", "0.38.0", []string{"link", "$ref", "42"}},
+		{"link reuse unsupported", "0.38.0", "0.39.0", []string{"link", "$ref", "42", "--reuse-existing"}},
+		{"link reuse supported", "0.40.0", "", []string{"link", "$ref", "42", "--reuse-existing"}},
+		{"add reuse unsupported", "0.44.0", "0.45.0", []string{"add", "$ref", "file.txt", "--reuse-existing"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, f, ref := attachmentCLIEnv(t)
+			f.Seed("/reports/report.pdf", docbank.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: uuid.MustParse(cliLinkVersion)}, map[uuid.UUID][]byte{uuid.MustParse(cliLinkVersion): []byte("sample bytes")})
+			target, err := url.Parse(env.URL)
+			require.NoError(t, err)
+			proxy := httputil.NewSingleHostReverseProxy(target)
+			var writes atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/health" {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"` + tc.version + `"}`))
+					return
+				}
+				base := "/api/v1/projects/1/issues/" + ref + "/attachments"
+				if r.Method == http.MethodPost && (r.URL.Path == base || r.URL.Path == base+"/links") {
+					writes.Add(1)
+				}
+				proxy.ServeHTTP(w, r)
+			}))
+			t.Cleanup(server.Close)
+			args := append([]string(nil), tc.args...)
+			args[1] = ref
+			_, err = executeAttachmentCLI(t, server.URL, args...)
+			if tc.floor == "" {
+				require.NoError(t, err)
+				require.EqualValues(t, 1, writes.Load())
+			} else {
+				require.ErrorContains(t, err, "requires daemon API "+tc.floor+" or newer")
+				require.Zero(t, writes.Load())
+			}
+		})
+	}
 }
 
 func TestAttachmentLinkCLIInvalidSelector(t *testing.T) {
@@ -81,29 +103,22 @@ func TestAttachmentReuseCLI(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal([]byte(out), &second))
 	require.Equal(t, first.ID, second.ID)
-}
 
-func TestAttachmentReuseCLIRequiresCurrentAPIVersion(t *testing.T) {
-	env, _, ref := attachmentCLIEnv(t)
-	target, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	var writes atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/health" {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.44.0"}`))
-			return
+	file := filepath.Join(t.TempDir(), "upload.txt")
+	require.NoError(t, os.WriteFile(file, []byte("upload bytes"), 0600))
+	var ids []string
+	for range 2 {
+		out, err = executeAttachmentCLI(t, env.URL, "add", ref, file, "--reuse-existing", "--json")
+		require.NoError(t, err)
+		var added struct {
+			Results []struct {
+				ID string `json:"attachment_id"`
+			} `json:"results"`
 		}
-		if r.Method == http.MethodPost {
-			writes.Add(1)
-		}
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
-	for _, args := range [][]string{{"add", ref, "file.txt", "--reuse-existing"}, {"link", ref, "42", "--reuse-existing"}} {
-		_, err := executeAttachmentCLI(t, server.URL, args...)
-		require.ErrorContains(t, err, "requires daemon API 0.45.0 or newer")
+		require.NoError(t, json.Unmarshal([]byte(out), &added))
+		require.Len(t, added.Results, 1)
+		ids = append(ids, added.Results[0].ID)
 	}
-	require.Zero(t, writes.Load())
+	require.NotEmpty(t, ids[0])
+	require.Equal(t, ids[0], ids[1])
 }
