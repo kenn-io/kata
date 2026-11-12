@@ -46,7 +46,6 @@ type FederationStatusRequest struct {
 // federation project through the normal local/admin daemon auth surface.
 type ProjectFederationStatusRequest struct {
 	ProjectID int64 `path:"project_id"`
-	Compact   bool  `query:"compact,omitempty" doc:"Omit relay checkpoint capacity measurement."`
 }
 
 // SkipFederationQuarantineRequest skips one quarantined federation batch

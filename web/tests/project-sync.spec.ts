@@ -42,7 +42,7 @@ test('local project readers see native sync status with bounded embedding summar
 
   // This response fixture covers browser rendering; native artifact reuse,
   // paid-call counts and PG authorization are proved in their backend suites.
-  await page.route(`**${statusPath}*`, async (route) => {
+  await page.route(`**${statusPath}`, async (route) => {
     const response = await route.fetch()
     const data = await response.json()
     data.statuses[0].embedding = {

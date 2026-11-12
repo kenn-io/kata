@@ -126,7 +126,6 @@ import type {
   GetProjectAccessPathParameters,
   GetProjectFederationParams,
   GetProjectFederationPathParameters,
-  GetProjectFederationStatusParams,
   GetProjectFederationStatusPathParameters,
   GetRelayResetPathParameters,
   HealthResponseBody,
@@ -3859,32 +3858,18 @@ export type getProjectFederationStatusResponse =
   | getProjectFederationStatusResponseSuccess
   | getProjectFederationStatusResponseError
 
-export const getGetProjectFederationStatusUrl = (
-  { projectId }: GetProjectFederationStatusPathParameters,
-  params?: GetProjectFederationStatusParams,
-) => {
-  const normalizedParams = new URLSearchParams()
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  })
-
-  const stringifiedParams = normalizedParams.toString()
-
-  return stringifiedParams.length > 0
-    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/status?${stringifiedParams}`
-    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/status`
+export const getGetProjectFederationStatusUrl = ({
+  projectId,
+}: GetProjectFederationStatusPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/status`
 }
 
 export const getProjectFederationStatus = async (
   { projectId }: GetProjectFederationStatusPathParameters,
-  params?: GetProjectFederationStatusParams,
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<getProjectFederationStatusResponse> => {
   return orvalFetch<getProjectFederationStatusResponse>(
-    getGetProjectFederationStatusUrl({ projectId }, params),
+    getGetProjectFederationStatusUrl({ projectId }),
     {
       ...options,
       method: 'GET',

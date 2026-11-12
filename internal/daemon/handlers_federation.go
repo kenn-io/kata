@@ -221,10 +221,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := addFederationRootSigningStatus(ctx, cfg, &body); err != nil {
 			return nil, err
 		}
-		if !in.Compact {
-			if err := addFederationRelayCapacityStatus(ctx, cfg, &body); err != nil {
-				return nil, err
-			}
+		if err := addFederationRelayCapacityStatus(ctx, cfg, &body); err != nil {
+			return nil, err
 		}
 		return &api.FederationStatusResponse{Body: body}, nil
 	})

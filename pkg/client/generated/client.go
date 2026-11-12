@@ -5590,15 +5590,10 @@ func (c *Client) DisconnectRelayEnrollment(ctx context.Context, options *Disconn
 
 func (c *Client) GetProjectFederationStatus(ctx context.Context, options *GetProjectFederationStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectFederationStatusResponse, error) {
 	var err error
-
-	queryEncoding := map[string]runtime.QueryEncoding{
-		"compact": {Style: "form", Explode: &[]bool{false}[0]},
-	}
 	reqParams := runtime.RequestOptionsParameters{
-		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/status",
-		Method:        "GET",
-		Options:       options,
-		QueryEncoding: queryEncoding,
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/status",
+		Method:     "GET",
+		Options:    options,
 	}
 
 	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)

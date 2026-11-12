@@ -3505,7 +3505,6 @@ func (o *DisconnectRelayEnrollmentRequestOptions) GetHeader() (map[string]string
 // GetProjectFederationStatusRequestOptions is the options needed to make a request to GetProjectFederationStatus.
 type GetProjectFederationStatusRequestOptions struct {
 	PathParams *GetProjectFederationStatusPath
-	Query      *GetProjectFederationStatusQuery
 }
 
 // Validate validates all the fields in the options.
@@ -3517,14 +3516,6 @@ func (o *GetProjectFederationStatusRequestOptions) Validate() error {
 		if v, ok := any(o.PathParams).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("PathParams", err)
-			}
-		}
-	}
-
-	if o.Query != nil {
-		if v, ok := any(o.Query).(runtime.Validator); ok {
-			if err := v.Validate(); err != nil {
-				errors = errors.Append("Query", err)
 			}
 		}
 	}
@@ -3542,7 +3533,7 @@ func (o *GetProjectFederationStatusRequestOptions) GetPathParams() (map[string]a
 
 // GetQuery returns the query params as a map.
 func (o *GetProjectFederationStatusRequestOptions) GetQuery() (map[string]any, error) {
-	return runtime.AsMap[any](o.Query)
+	return nil, nil
 }
 
 // GetBody returns the payload in any type that can be marshalled to JSON by the client.
