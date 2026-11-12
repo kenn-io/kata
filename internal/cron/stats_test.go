@@ -3,7 +3,6 @@ package cron
 import (
 	"testing"
 	"time"
-	_ "time/tzdata"
 
 	"github.com/stretchr/testify/require"
 )
@@ -26,7 +25,9 @@ func TestSummarizeRuns(t *testing.T) {
 	require.Equal(t, 20.0, got.DurationSeconds.Median)
 	require.Len(t, got.Buckets, 3)
 	require.Equal(t, "2026-03-09", got.Buckets[0].Date)
+	require.Equal(t, 20.0, *got.Buckets[0].MedianDurationSeconds)
 	require.Equal(t, "2026-03-08", got.Buckets[1].Date)
+	require.Nil(t, got.Buckets[1].MedianDurationSeconds)
 	require.Equal(t, map[string]int{"running": 1, "failed": 1}, got.Buckets[1].ByStatus)
 	require.Equal(t, "2026-03-07", got.Buckets[2].Date)
 	empty := SummarizeRuns(nil, false, loc)
@@ -91,4 +92,12 @@ func TestSummarizeRunsLastCompletionWithOverlaps(t *testing.T) {
 	got := SummarizeRuns(rows, false, time.UTC)
 	require.Equal(t, later, *got.LastSucceededAt)
 	require.Equal(t, later, *got.LastFailedAt)
+}
+
+func TestSummarizeRunsLongDuration(t *testing.T) {
+	start := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2500, 1, 1, 0, 0, 0, 0, time.UTC)
+	got := SummarizeRuns([]RunStatRow{{Status: "succeeded", CreatedAt: start, StartedAt: &start, EndedAt: &end}}, true, time.UTC)
+	require.Equal(t, float64(end.Unix()-start.Unix()), got.DurationSeconds.Median)
+	require.Equal(t, got.DurationSeconds.Median, *got.Buckets[0].MedianDurationSeconds)
 }

@@ -769,4 +769,7 @@ func TestOpenAPICronStatisticsNulls(t *testing.T) {
 	duration := doc.Components.Schemas.Map()["DurationStats"]
 	require.NotNil(t, duration)
 	require.True(t, duration.Nullable)
+	bucket := doc.Components.Schemas.Map()["RunStatBucket"]
+	require.NotNil(t, bucket)
+	require.True(t, bucket.Properties["median_duration_seconds"].Nullable)
 }

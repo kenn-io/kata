@@ -68,6 +68,30 @@ func checkRunHistoryInstants(t *testing.T, store db.Storage) error {
 		}
 		require.Equal(t, want, got, "page size %d", size)
 	}
+	return nil
+}
+
+func checkCronRunStats(t *testing.T, store db.Storage) error {
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	definition, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
+	require.NoError(t, err)
+	job, _, err := store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "worker", Definition: definition})
+	require.NoError(t, err)
+	times := []string{"2026-10-06T09:00:00Z", "2026-10-06T09:00:00.001Z", "2026-10-06T09:00:00.001000001Z", "2026-10-06T09:00:00.01Z", "2026-10-06T09:00:00.1Z", "2026-10-06T09:00:00.100000000Z", "2026-10-06T09:00:00.100000001Z"}
+	ids := []string{"01ARZ3NDEKTSV4RRFFQ69G5FA0", "01ARZ3NDEKTSV4RRFFQ69G5FA1", "01ARZ3NDEKTSV4RRFFQ69G5FA2", "01ARZ3NDEKTSV4RRFFQ69G5FA3", "01ARZ3NDEKTSV4RRFFQ69G5FA4", "01ARZ3NDEKTSV4RRFFQ69G5FA5", "01ARZ3NDEKTSV4RRFFQ69G5FA6"}
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	for i, timestamp := range times {
+		_, err := store.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: project.ID, UID: ids[i], JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "worker", Status: "unknown", Summary: cron.Summary{Version: 1}})
+		require.NoError(t, err)
+		instant, err := time.Parse(time.RFC3339Nano, timestamp)
+		require.NoError(t, err)
+		fixed := instant.UTC().Format(db.CronRunCreatedAtFormat)
+		_, err = q.ExecContext(t.Context(), "UPDATE cron_runs SET created_at=$1 WHERE uid=$2", fixed, ids[i])
+		require.NoError(t, err)
+	}
 	_, err = q.ExecContext(t.Context(), "UPDATE cron_runs SET status=$1, started_at=$2, ended_at=$3 WHERE uid=$4", "succeeded", "2026-10-06T08:59:00Z", "2026-10-06T09:01:00Z", ids[6])
 	require.NoError(t, err)
 	since, err := time.Parse(time.RFC3339, "2026-10-06T09:00:00Z")
@@ -103,6 +127,23 @@ func checkRunHistoryInstants(t *testing.T, store db.Storage) error {
 	require.True(t, truncated)
 	require.Len(t, rows, 10000)
 	require.True(t, rows[len(rows)-1].CreatedAt.Equal(since))
+	other, err := store.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	workflow, _, err := store.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, Name: "Review workflow", Actor: "worker", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "review", Kind: "command", Command: "git status"}}}})
+	require.NoError(t, err)
+	workflowRunUID, err := uid.New()
+	require.NoError(t, err)
+	workflowRun, err := store.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: project.ID, UID: workflowRunUID, WorkflowUID: &workflow.UID, WorkflowDefinitionEventUID: &workflow.DefinitionEventUID, Actor: "worker", Status: "unknown", Summary: cron.Summary{Version: 1}})
+	require.NoError(t, err)
+	windowStart := workflowRun.Run.CreatedAt.Add(-time.Hour)
+	windowEnd := workflowRun.Run.CreatedAt.Add(time.Hour)
+	statsRows, _, err := store.CronRunStats(t.Context(), db.CronRunStatsQuery{ProjectID: project.ID, WorkflowUID: workflow.UID, Since: windowStart, Until: windowEnd})
+	require.NoError(t, err)
+	require.Len(t, statsRows, 1)
+	otherRows, _, err := store.CronRunStats(t.Context(), db.CronRunStatsQuery{ProjectID: other.ID, WorkflowUID: workflow.UID, Since: windowStart, Until: windowEnd})
+	require.NoError(t, err)
+	require.Empty(t, otherRows)
+
 	return nil
 }
 
@@ -209,14 +250,6 @@ func checkIndependentRunObservations(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	require.Nil(t, workflowRun.Run.JobUID)
 	require.Equal(t, &workflow.UID, workflowRun.Run.WorkflowUID)
-	windowStart := workflowRun.Run.CreatedAt.Add(-time.Hour)
-	windowEnd := workflowRun.Run.CreatedAt.Add(time.Hour)
-	statsRows, _, err := store.CronRunStats(ctx, db.CronRunStatsQuery{ProjectID: project.ID, WorkflowUID: workflow.UID, Since: windowStart, Until: windowEnd})
-	require.NoError(t, err)
-	require.Len(t, statsRows, 1)
-	otherRows, _, err := store.CronRunStats(ctx, db.CronRunStatsQuery{ProjectID: other.ID, WorkflowUID: workflow.UID, Since: windowStart, Until: windowEnd})
-	require.NoError(t, err)
-	require.Empty(t, otherRows)
 
 	return nil
 }

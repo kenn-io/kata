@@ -87,7 +87,7 @@ func SummarizeRuns(rows []RunStatRow, day bool, loc *time.Location) RunStatistic
 			out.Buckets[idx].ByStatus[r.Status]++
 		}
 		if (r.Status == "succeeded" || r.Status == "failed") && r.StartedAt != nil && r.EndedAt != nil {
-			d := r.EndedAt.Sub(*r.StartedAt).Seconds()
+			d := float64(r.EndedAt.Unix()-r.StartedAt.Unix()) + float64(r.EndedAt.Nanosecond()-r.StartedAt.Nanosecond())/1e9
 			durations = append(durations, d)
 			if day {
 				daily[idx] = append(daily[idx], d)

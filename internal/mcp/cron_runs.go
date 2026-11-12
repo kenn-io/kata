@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/teammate"
+	"go.kenn.io/kata/internal/timeparse"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -70,6 +72,29 @@ type CronRunStatsOutput struct {
 }
 
 func (h toolHandlers) cronRunStats(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronRunStatsInput) (*sdkmcp.CallToolResult, CronRunStatsOutput, error) {
+	var err error
+	for _, id := range []*string{&in.JobUID, &in.WorkflowUID} {
+		if *id != "" {
+			*id, err = cronUID(*id)
+			if err != nil {
+				return nil, CronRunStatsOutput{}, err
+			}
+		}
+	}
+	if in.Since != "" {
+		anchor := time.Now()
+		if in.Until != "" {
+			anchor, err = time.Parse(time.RFC3339, in.Until)
+			if err != nil {
+				return nil, CronRunStatsOutput{}, errors.New("invalid until")
+			}
+		}
+		instant, parseErr := timeparse.Since(in.Since, anchor)
+		if parseErr != nil {
+			return nil, CronRunStatsOutput{}, parseErr
+		}
+		in.Since = instant.Format(time.RFC3339Nano)
+	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
 		return nil, CronRunStatsOutput{}, err
@@ -79,7 +104,13 @@ func (h toolHandlers) cronRunStats(ctx context.Context, _ *sdkmcp.CallToolReques
 		return nil, CronRunStatsOutput{}, err
 	}
 	if response.StatusCode != 200 {
-		return nil, CronRunStatsOutput{}, fmt.Errorf("cron run stats: HTTP %d: %s", response.StatusCode, response.Body)
+		var envelope generated.GetCronRunStatsErrorResponse
+		if len(response.Body) > 0 {
+			if decodeErr := json.Unmarshal(response.Body, &envelope); decodeErr != nil {
+				return nil, CronRunStatsOutput{}, fmt.Errorf("cron run stats: HTTP %d: %s", response.StatusCode, response.Body)
+			}
+		}
+		return nil, CronRunStatsOutput{}, runtime.NewClientAPIError(envelope, runtime.WithStatusCode(response.StatusCode))
 	}
 	var out CronRunStatsOutput
 	if err := json.Unmarshal(response.Body, &out); err != nil {

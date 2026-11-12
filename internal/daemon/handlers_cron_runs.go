@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.kenn.io/kata/internal/cron"
@@ -86,6 +87,9 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 				return nil, invalid("invalid since")
 			}
 		}
+		if since.UTC().Year() < 0 || since.UTC().Year() > 9999 || until.UTC().Year() < 0 || until.UTC().Year() > 9999 {
+			return nil, invalid("window endpoint outside RFC3339 UTC range")
+		}
 		if until.Sub(since) > 366*24*time.Hour {
 			return nil, invalid("window must be at most 366 days")
 		}
@@ -97,7 +101,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 			zone = "UTC"
 		}
 		loc, err := time.LoadLocation(zone)
-		if err != nil {
+		if err != nil || zone == "Local" {
 			return nil, invalid("invalid timezone")
 		}
 		rows, truncated, err := cfg.DB.CronRunStats(ctx, db.CronRunStatsQuery{ProjectID: in.ProjectID, JobUID: in.JobUID, WorkflowUID: in.WorkflowUID, Since: since, Until: until})
@@ -108,7 +112,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 			since = rows[len(rows)-1].CreatedAt
 		}
 		out := &api.CronRunStatsResponse{}
-		out.Body.ProjectUID, out.Body.JobUID, out.Body.WorkflowUID = project.UID, in.JobUID, in.WorkflowUID
+		out.Body.ProjectUID, out.Body.JobUID, out.Body.WorkflowUID = project.UID, strings.ToUpper(in.JobUID), strings.ToUpper(in.WorkflowUID)
 		out.Body.Window = api.CronRunStatsWindow{Since: since.UTC(), Until: until.UTC()}
 		out.Body.Truncated = truncated
 		out.Body.RunStatistics = cron.SummarizeRuns(rows, in.Bucket == "day", loc)

@@ -129,3 +129,10 @@ func TestDigest_ParseSinceUntil(t *testing.T) {
 	_, err = parseSinceUntil("garbage", now)
 	require.Error(t, err)
 }
+
+func TestParseSinceUntilRejectsOverflowDays(t *testing.T) {
+	for _, value := range []string{"213504d", "-213504d", "106751992d", "-106751992d"} {
+		_, err := parseSinceUntil(value, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+		require.Error(t, err, value)
+	}
+}

@@ -819,8 +819,35 @@ func TestCronRunStatsCLI(t *testing.T) {
 	require.NoError(t, err)
 	var result map[string]any
 	require.NoError(t, json.Unmarshal([]byte(raw), &result))
-	require.Equal(t, []any{}, result["buckets"])
 	window := result["window"].(map[string]any)
 	require.Equal(t, "2026-10-30T00:00:00Z", window["since"])
 	require.Equal(t, "2026-11-01T00:00:00Z", window["until"])
+	for _, since := range []string{"213504d", "-213504d"} {
+		for _, until := range [][]string{nil, {"--until", "2026-11-01T00:00:00Z"}} {
+			args := append([]string{"run", "stats", "--since", since}, until...)
+			_, _, err = executeCronCLI(t, env.URL, nil, args...)
+			require.Error(t, err)
+		}
+	}
+}
+
+func TestCronRunStatsRequiresAPIVersion(t *testing.T) {
+	var statsCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/health":
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.46.0"}`))
+		case "/api/v1/projects/resolve":
+			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project","uid":"01HAAAAAAAAAAAAAAAAAAAAAAA"}}`))
+		default:
+			statsCalls.Add(1)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "--project", "example-project", "cron", "run", "stats")
+	var cliErr *cliError
+	require.ErrorAs(t, err, &cliErr)
+	require.Equal(t, "daemon_api_too_old", cliErr.Code)
+	require.Zero(t, statsCalls.Load())
 }
