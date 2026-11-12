@@ -162,19 +162,21 @@ func TestSchemaVersionMarkers(t *testing.T) {
 		files map[string]string
 		base  []string
 		want  string
+		exact bool
 	}{
-		{"match", map[string]string{replacement: "Summary.\n"}, nil, ""},
-		{"missing", nil, nil, replacement},
-		{"draft", map[string]string{current: "Summary.\n"}, []string{}, fmt.Sprintf("replace draft marker %s with %s and keep version 50", current, replacement)},
-		{"base", map[string]string{current: "Summary.\n"}, []string{current}, fmt.Sprintf("preserve base marker %s and move to version 51: %s", current, markerName(51, b))},
-		{"deleted base", map[string]string{replacement: "Summary.\n"}, []string{current}, "restore base schema marker"},
-		{"unknown base", map[string]string{current: "Summary.\n"}, nil, fmt.Sprintf("replace draft marker %s with %s and keep version 50; if it is on the base, preserve it and move to version 51: %s", current, replacement, markerName(51, b))},
-		{"duplicate", map[string]string{current: "One\n", replacement: "Two\n"}, []string{current}, fmt.Sprintf("schema version 50 has multiple markers %s and %s; preserve base marker %s and move to version 51: %s", current, replacement, current, markerName(51, b))},
-		{"duplicate drafts", map[string]string{current: "One\n", replacement: "Two\n"}, []string{}, "keep one marker for version 50"},
-		{"future", map[string]string{markerName(51, a): "Future\n"}, nil, fmt.Sprintf("marker exceeds current version 50; move to version 52: %s", markerName(52, b))},
-		{"bad name", map[string]string{"bad.txt": "Summary\n"}, nil, "invalid schema marker"},
-		{"empty", map[string]string{replacement: "\n"}, nil, "one-line summary"},
-		{"multiline", map[string]string{replacement: "one\ntwo\n"}, nil, "one-line summary"},
+		{"match", map[string]string{replacement: "Summary.\n"}, nil, "", false},
+		{"missing", nil, nil, fmt.Sprintf("missing schema marker; add %s with a one-line summary", replacement), true},
+		{"draft", map[string]string{current: "Summary.\n"}, []string{}, fmt.Sprintf("replace draft marker %s with %s and keep version 50", current, replacement), true},
+		{"base", map[string]string{current: "Summary.\n"}, []string{current}, fmt.Sprintf("preserve base marker %s and move to version 51: %s", current, markerName(51, b)), false},
+		{"deleted base", map[string]string{replacement: "Summary.\n"}, []string{current}, "restore base schema marker", false},
+		{"unknown base", map[string]string{current: "Summary.\n"}, nil, fmt.Sprintf("replace draft marker %s with %s and keep version 50; if it is on the base, preserve it and move to version 51: %s", current, replacement, markerName(51, b)), false},
+		{"duplicate", map[string]string{current: "One\n", replacement: "Two\n"}, []string{current}, fmt.Sprintf("schema version 50 has multiple markers %s and %s; preserve base marker %s and move to version 51: %s", current, replacement, current, markerName(51, b)), false},
+		{"duplicate base second", map[string]string{current: "One\n", replacement: "Two\n"}, []string{replacement}, fmt.Sprintf("schema version 50 has multiple markers %s and %s; preserve base marker %s and move to version 51: %s", current, replacement, replacement, markerName(51, b)), false},
+		{"duplicate drafts", map[string]string{current: "One\n", replacement: "Two\n"}, []string{}, "keep one marker for version 50", false},
+		{"future", map[string]string{markerName(51, a): "Future\n"}, nil, fmt.Sprintf("marker exceeds current version 50; move to version 52: %s", markerName(52, b)), false},
+		{"bad name", map[string]string{"bad.txt": "Summary\n"}, nil, "invalid schema marker", false},
+		{"empty", map[string]string{replacement: "\n"}, nil, "one-line summary", false},
+		{"multiline", map[string]string{replacement: "one\ntwo\n"}, nil, "one-line summary", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -185,11 +187,10 @@ func TestSchemaVersionMarkers(t *testing.T) {
 			err := checkMarkers(dir, 50, b, tc.base)
 			if tc.want == "" {
 				require.NoError(t, err)
+			} else if tc.exact {
+				require.EqualError(t, err, tc.want)
 			} else {
 				require.ErrorContains(t, err, tc.want)
-				if tc.name == "duplicate drafts" {
-					require.NotContains(t, err.Error(), "base")
-				}
 			}
 		})
 	}
