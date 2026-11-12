@@ -140,7 +140,68 @@ func TestRepeatedSnapshotDeltasAlwaysAdvanceUpdatedAt(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, deltas, 1)
 	assert.Equal(t, "issue.updated", deltas[0].Type)
-	assert.JSONEq(t, `{"updated_at":"2026-06-01T09:00:00.000Z"}`, string(deltas[0].Payload))
+	got := FoldEvents([]FoldEvent{testEvent("issue.snapshot", 1, current), testEvent(deltas[0].Type, 10, string(deltas[0].Payload))})
+	assert.Equal(t, "2026-06-01T09:00:00.000Z", got.Issues["issue-1"].UpdatedAt)
+}
+
+// An edit older than the winning copy can reach the hub after the import. It
+// replays before the hub's events for the copy, so those events must restate
+// the values the copy shares with the hub, not only the ones that differed.
+func TestRepeatedSnapshotDeltasOutlastADelayedOlderEdit(t *testing.T) {
+	current := `{"uid":"issue-1","title":"agreed title","body":"agreed body","owner":"bob","priority":2,"status":"open",
+"metadata":{"team":"core"},"labels":["bug"],"updated_at":"2026-05-01T09:00:00.000Z"}`
+	incoming := `{"uid":"issue-1","title":"agreed title","body":"agreed body","owner":"bob","priority":2,"status":"open",
+"metadata":{"team":"core"},"labels":["bug"],"updated_at":"2026-06-01T09:00:00.000Z"}`
+	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
+	require.NoError(t, err)
+
+	events := []FoldEvent{
+		testEvent("issue.snapshot", 1, current),
+		testEvent("issue.updated", 5, `{"title":"delayed title","body":"delayed body","owner":null,"priority":null,"status":"closed","closed_reason":"done","updated_at":"2026-05-10T09:00:00.000Z"}`),
+		testEvent("issue.unlabeled", 6, `{"label":"bug"}`),
+		testEvent("issue.metadata_updated", 7, `{"diff":{"team":{"from":"core","to":"delayed"}}}`),
+	}
+	for i, delta := range deltas {
+		events = append(events, testEvent(delta.Type, int64(10+i), string(delta.Payload)))
+	}
+	got := FoldEvents(events)
+	issue := got.Issues["issue-1"]
+	assert.Equal(t, "agreed title", issue.Title)
+	assert.Equal(t, "agreed body", issue.Body)
+	require.NotNil(t, issue.Owner)
+	assert.Equal(t, "bob", *issue.Owner)
+	require.NotNil(t, issue.Priority)
+	assert.Equal(t, int64(2), *issue.Priority)
+	assert.Equal(t, "open", issue.Status)
+	assert.Nil(t, issue.ClosedReason)
+	assert.Nil(t, issue.ClosedAt)
+	assert.Equal(t, []string{"bug"}, presentLabels(got, "issue-1"))
+	assert.JSONEq(t, `{"team":"core"}`, string(got.IssueMetadata["issue-1"]))
+}
+
+// A comment the hub lacks can arrive again later as its original creation and
+// earlier edits from another home. The copy's newer text must still win.
+func TestRepeatedSnapshotDeltasKeepAnImportedCommentEdit(t *testing.T) {
+	current := `{"uid":"issue-1","title":"t","status":"open","updated_at":"2026-05-01T09:00:00.000Z"}`
+	incoming := `{"uid":"issue-1","title":"t","status":"open","comments":[
+ {"comment_uid":"comment-2","author":"carol","body":"latest text","created_at":"2026-05-05T10:00:00.000Z","edited_at":"2026-05-20T10:00:00.000Z"}],
+"updated_at":"2026-06-01T09:00:00.000Z"}`
+	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
+	require.NoError(t, err)
+
+	events := []FoldEvent{
+		testEvent("issue.snapshot", 1, current),
+		testEvent("issue.commented", 5, `{"comment_uid":"comment-2","author":"carol","body":"original text","created_at":"2026-05-05T10:00:00.000Z"}`),
+		testEvent("issue.comment_edited", 6, `{"comment_uid":"comment-2","body":"earlier edit","edited_at":"2026-05-10T10:00:00.000Z"}`),
+	}
+	for i, delta := range deltas {
+		events = append(events, testEvent(delta.Type, int64(10+i), string(delta.Payload)))
+	}
+	comment := FoldEvents(events).Comments["comment-2"]
+	assert.Equal(t, "latest text", comment.Body)
+	assert.Equal(t, "2026-05-20T10:00:00.000Z", comment.EditedAt)
+	assert.Equal(t, "carol", comment.Author)
+	assert.Equal(t, "2026-05-05T10:00:00.000Z", comment.CreatedAt)
 }
 
 // A link from a winning copy must not close a parent cycle, and two copies in

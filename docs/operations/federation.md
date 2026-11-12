@@ -1763,15 +1763,17 @@ When a newer snapshot wins:
 - The issue keeps its author.
 
 The hub does not store the pushed snapshot for an issue it already holds. It
-writes its own ordinary events for the differences, such as `issue.updated`,
+writes its own ordinary events that restate the copy, such as `issue.updated`,
 `issue.labeled`, and `issue.commented`, with the pushing actor as their actor.
-Other spokes receive those events like any other change. An older or identical
-copy leaves no event, so pushing the same copy again changes nothing.
+The events carry the copy's values even where the hub already agreed, so an
+older edit that reaches the hub later cannot replace them. Other spokes receive
+those events like any other change. An older or identical copy leaves no event,
+so pushing the same copy again changes nothing.
 
 Those events take the snapshot's `updated_at` as their place in the project's
-history, and never sit before the issue's latest event on the hub. An edit
-made after the snapshot therefore still applies, whether it reaches the hub
-before or after the copy.
+history, and never sit before the latest event that changed the issue on the
+hub. Claim records do not count as changes. An edit made after the snapshot
+therefore still applies, whether it reaches the hub before or after the copy.
 
 A link in the snapshot to an issue of another hub project needs the same
 authority as any other push that touches that project. Without it the hub

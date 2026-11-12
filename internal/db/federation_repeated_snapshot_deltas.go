@@ -140,7 +140,8 @@ func RepeatedSnapshotWins(incoming jsontext.Value, hubUpdatedAt time.Time) bool 
 // merge by UID and links are only added. Ordinary events keep every snapshot
 // in a hub's log complete.
 //
-// Fields, labels and metadata end up equal to the incoming copy. A comment the
+// Fields, labels and metadata end up equal to the incoming copy, and the
+// events restate the values the two copies share. A comment the
 // hub lacks is added with its author and created time; a known comment keeps
 // both and takes the incoming text only with a later edit time. Links are only
 // added. An import never replaces an issue's parent or closes a parent cycle,
@@ -172,33 +173,19 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 		return addRelated(eventType, eventActor, "", payload)
 	}
 
-	fields := map[string]any{"updated_at": want.UpdatedAt}
-	if want.Title != have.Title {
-		fields["title"] = want.Title
+	// The events restate the whole copy, including the values it shares with
+	// the hub. An older edit can reach the hub after the import and replays
+	// before these events, so a value they left out would fall back to it.
+	fields := map[string]any{
+		"updated_at": want.UpdatedAt, "title": want.Title, "body": want.Body,
+		// The fold clears the assignment expiry whenever it sets the owner, so
+		// the two travel together.
+		"owner": want.Owner, "assignment_expires_on": want.AssignmentExpiresOn,
+		"priority": want.Priority, "closed_reason": want.ClosedReason,
+		"closed_at": want.ClosedAt, "deleted_at": want.DeletedAt,
 	}
-	if want.Body != have.Body {
-		fields["body"] = want.Body
-	}
-	// The fold clears the assignment expiry whenever it sets the owner, so the
-	// two travel together.
-	if !equalOptional(want.Owner, have.Owner) || !sameOptionalTimestamp(want.AssignmentExpiresOn, have.AssignmentExpiresOn) {
-		fields["owner"] = want.Owner
-		fields["assignment_expires_on"] = want.AssignmentExpiresOn
-	}
-	if !equalOptional(want.Priority, have.Priority) {
-		fields["priority"] = want.Priority
-	}
-	if want.Status != "" && want.Status != have.Status {
+	if want.Status != "" {
 		fields["status"] = want.Status
-	}
-	if !equalOptional(want.ClosedReason, have.ClosedReason) {
-		fields["closed_reason"] = want.ClosedReason
-	}
-	if !sameOptionalTimestamp(want.ClosedAt, have.ClosedAt) {
-		fields["closed_at"] = want.ClosedAt
-	}
-	if !sameOptionalTimestamp(want.DeletedAt, have.DeletedAt) {
-		fields["deleted_at"] = want.DeletedAt
 	}
 	if err := add("issue.updated", actor, fields); err != nil {
 		return nil, err
@@ -212,10 +199,8 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 		}
 	}
 	for _, label := range slices.Sorted(slices.Values(want.Labels)) {
-		if !slices.Contains(have.Labels, label) {
-			if err := add("issue.labeled", actor, map[string]any{"label": label, "updated_at": want.UpdatedAt}); err != nil {
-				return nil, err
-			}
+		if err := add("issue.labeled", actor, map[string]any{"label": label, "updated_at": want.UpdatedAt}); err != nil {
+			return nil, err
 		}
 	}
 
@@ -248,6 +233,16 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 			}
 			if err := add("issue.commented", actor, payload); err != nil {
 				return nil, err
+			}
+			// The comment's creation can arrive again later from another
+			// home, with earlier edits. The fold keeps the first creation it
+			// replays, so a separate edit event carries the copy's text.
+			if comment.EditedAt != "" {
+				if err := add("issue.comment_edited", actor, map[string]any{
+					"comment_uid": comment.CommentUID, "body": comment.Body, "edited_at": comment.EditedAt,
+				}); err != nil {
+					return nil, err
+				}
 			}
 			continue
 		}
@@ -339,10 +334,9 @@ func repeatedSnapshotMetadataDiff(have, want jsontext.Value) map[string]map[stri
 		if recurringMetadataKey(key) {
 			continue
 		}
+		// A key the copy shares with the hub is restated too, for the same
+		// reason as an unchanged field.
 		from, exists := current[key]
-		if exists && string(canonicalJSON(from)) == string(canonicalJSON(target[key])) {
-			continue
-		}
 		if !exists {
 			from = jsontext.Value("null")
 		}
@@ -366,25 +360,4 @@ func timestampBefore(a, b string) bool {
 		return a < b
 	}
 	return left.Before(right)
-}
-
-func equalOptional[T comparable](a, b *T) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
-}
-
-// sameOptionalTimestamp compares two optional timestamps as times, because the two
-// stores and their snapshots write the same instant in different formats.
-func sameOptionalTimestamp(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	left, leftErr := time.Parse(time.RFC3339Nano, *a)
-	right, rightErr := time.Parse(time.RFC3339Nano, *b)
-	if leftErr != nil || rightErr != nil {
-		return *a == *b
-	}
-	return left.Equal(right)
 }

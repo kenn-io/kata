@@ -133,40 +133,59 @@ func federationPushEventTypeCondition(column string) string {
 	return column + " IN (" + db.FederationPushEventTypesSQL() + ")"
 }
 
-// AdvanceFederationPushCursor records the highest local events.id accepted by
-// the hub for a spoke binding.
-// DropSupersededFederationSnapshots deletes this home's own adoption snapshots
-// that the hub acknowledged without storing.
-func (d *Store) DropSupersededFederationSnapshots(ctx context.Context, projectID int64, eventUIDs []string) error {
+// AcknowledgeFederationPush advances the push cursor and deletes this home's
+// own adoption snapshots that the hub acknowledged without storing. One
+// transaction holds both, so an interrupted acknowledgement leaves either the
+// whole batch to push again or the finished progress.
+func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
 	return d.RetryTransient(ctx, func() error {
-		return db.DropSupersededFederationSnapshots(ctx, d, projectID, d.instanceUID, eventUIDs)
+		tx, err := d.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin acknowledge federation push: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := db.DropSupersededFederationSnapshots(ctx, tx, projectID, d.instanceUID, supersededEventUIDs); err != nil {
+			return err
+		}
+		if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
+			return err
+		}
+		return tx.Commit()
 	})
 }
 
+// AdvanceFederationPushCursor records the highest local events.id accepted by
+// the hub for a spoke binding.
 func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return d.RetryTransient(ctx, func() error {
-		res, err := d.ExecContext(ctx, `
-			UPDATE federation_bindings
-			   SET push_cursor_event_id = CASE
-			         WHEN push_cursor_event_id < ? THEN ?
-			         ELSE push_cursor_event_id
-			       END,
-			       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			 WHERE project_id = ?`,
-			nextCursor, nextCursor, projectID)
-		if err != nil {
-			return fmt.Errorf("advance federation push cursor: %w", err)
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("advance federation push cursor rows affected: %w", err)
-		}
-		if n == 0 {
-			return db.ErrNotFound
-		}
-		return nil
+		return advanceFederationPushCursor(ctx, d, projectID, nextCursor)
 	})
+}
+
+func advanceFederationPushCursor(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, projectID, nextCursor int64) error {
+	res, err := exec.ExecContext(ctx, `
+		UPDATE federation_bindings
+		   SET push_cursor_event_id = CASE
+		         WHEN push_cursor_event_id < ? THEN ?
+		         ELSE push_cursor_event_id
+		       END,
+		       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE project_id = ?`,
+		nextCursor, nextCursor, projectID)
+	if err != nil {
+		return fmt.Errorf("advance federation push cursor: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("advance federation push cursor rows affected: %w", err)
+	}
+	if n == 0 {
+		return db.ErrNotFound
+	}
+	return nil
 }
 
 // EnableFederationPush marks an existing spoke binding push-enabled and keeps

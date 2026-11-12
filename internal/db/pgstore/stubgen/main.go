@@ -129,7 +129,7 @@ var alreadyImplemented = map[string]bool{
 	"AdoptProjectIntoFederation":           true, // federation_adoption.go
 	"AdvanceFederationPullCursor":          true, // federation_control.go
 	"AdvanceFederationPushCursor":          true, // federation_control.go
-	"DropSupersededFederationSnapshots":    true, // federation_control.go
+	"AcknowledgeFederationPush":            true, // federation_control.go
 	"AuthorizeFederationToken":             true, // federation_control.go
 	"ClearFederationSyncError":             true, // federation_control.go
 	"CountActiveFederationEnrollments":     true, // federation_control.go

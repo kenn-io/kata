@@ -181,18 +181,31 @@ func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 	return s.updateFederationCursor(ctx, projectID, nextCursor, false)
 }
 
-// AdvanceFederationPushCursor advances the acknowledged local event id monotonically.
-// DropSupersededFederationSnapshots deletes this home's own adoption snapshots
-// that the hub acknowledged without storing.
-func (s *Store) DropSupersededFederationSnapshots(ctx context.Context, projectID int64, eventUIDs []string) error {
-	return mapSQLError(db.DropSupersededFederationSnapshots(ctx, s, projectID, s.instanceUID, eventUIDs), nil)
+// AcknowledgeFederationPush advances the push cursor and deletes this home's
+// own adoption snapshots that the hub acknowledged without storing. One
+// transaction holds both, so an interrupted acknowledgement leaves either the
+// whole batch to push again or the finished progress.
+func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
+	return s.withTx(ctx, sql.LevelReadCommitted, func(tx *sql.Tx) error {
+		if err := db.DropSupersededFederationSnapshots(ctx, tx, projectID, s.instanceUID, supersededEventUIDs); err != nil {
+			return err
+		}
+		return updateFederationCursor(ctx, tx, projectID, nextCursor, true)
+	})
 }
 
+// AdvanceFederationPushCursor advances the acknowledged local event id monotonically.
 func (s *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return s.updateFederationCursor(ctx, projectID, nextCursor, true)
 }
 
 func (s *Store) updateFederationCursor(ctx context.Context, projectID, nextCursor int64, push bool) error {
+	return mapSQLError(updateFederationCursor(ctx, s, projectID, nextCursor, push), nil)
+}
+
+func updateFederationCursor(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, projectID, nextCursor int64, push bool) error {
 	column := "pull_cursor_event_id"
 	if push {
 		column = "push_cursor_event_id"
@@ -203,9 +216,9 @@ func (s *Store) updateFederationCursor(ctx context.Context, projectID, nextCurso
 last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 WHERE project_id=$2`
-	result, err := s.ExecContext(ctx, query, nextCursor, projectID)
+	result, err := exec.ExecContext(ctx, query, nextCursor, projectID)
 	if err != nil {
-		return mapSQLError(err, nil)
+		return err
 	}
 	count, err := result.RowsAffected()
 	if err != nil {

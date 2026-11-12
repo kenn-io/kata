@@ -398,6 +398,68 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 	return nil
 }
 
+// The hub's events for a winning copy sit at the data's time, and a copy can
+// give a parent to an issue that has none.
+func checkFederationRepeatedImportPlacement(t *testing.T, source db.Storage, backend Backend) error {
+	ctx := t.Context()
+	h := newRepeatedImportHub(t, source, backend)
+	hub := h.hub
+	issue, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+
+	// A claim is an audit record, not issue state. Its later clock must not
+	// pull the import's events forward, or an edit made between the copy and
+	// the claim would replay before them and be lost.
+	holder, err := uid.New()
+	require.NoError(t, err)
+	_, err = hub.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: h.target.ID, IssueRef: issue.ShortID, ClaimKind: "hard", Now: time.Now().UTC(),
+		Principal: db.ClaimPrincipal{HolderInstanceUID: holder, Holder: "holder"},
+	})
+	require.NoError(t, err)
+	origin, enrollment, copied := h.repeatedImportCopy(t, h.target, func(issueUID string, payload map[string]any) {
+		if issueUID == h.issueUID {
+			repeatedImportShiftUpdatedAt(t, payload, time.Millisecond)
+			payload["title"] = "Edited before the claim"
+		}
+	})
+	_, err = pushRepeatedImportBaseline(t, hub, h.target.ID, enrollment, origin, copied)
+	require.NoError(t, err)
+	history, err := hub.EventsAfter(ctx, db.EventsAfterParams{
+		ProjectID: h.target.ID, IssueUID: h.issueUID, Types: []string{"issue.updated", "claim.acquired"}, Limit: 10,
+	})
+	require.NoError(t, err)
+	clocks := map[string][2]int64{}
+	for _, event := range history {
+		clocks[event.Type] = [2]int64{event.HLCPhysicalMS, event.HLCCounter}
+	}
+	require.Contains(t, clocks, "issue.updated")
+	require.Contains(t, clocks, "claim.acquired")
+	imported, claimed := clocks["issue.updated"], clocks["claim.acquired"]
+	require.False(t, imported[0] > claimed[0] || (imported[0] == claimed[0] && imported[1] > claimed[1]),
+		"the later claim does not pull the import's events after it: import %v, claim %v", imported, claimed)
+
+	// Neither issue has a parent on the hub. The newer copy makes one the
+	// child of the other, and both of its snapshots list the link.
+	origin, enrollment, copied = h.repeatedImportCopy(t, h.target, func(issueUID string, payload map[string]any) {
+		repeatedImportShiftUpdatedAt(t, payload, 24*time.Hour)
+		if issueUID == h.issueUID {
+			payload["links"] = []any{map[string]any{"type": "parent", "to_issue_uid": h.otherUID, "author": "operator"}}
+		} else {
+			payload["links"] = []any{map[string]any{"type": "parent", "to_issue_uid": h.issueUID, "incoming": true, "author": "operator"}}
+		}
+	})
+	_, err = pushRepeatedImportBaseline(t, hub, h.target.ID, enrollment, origin, copied)
+	require.NoError(t, err)
+	links, err := hub.LinksByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Len(t, links, 1, "the copy's parent link is added once")
+	require.Equal(t, "parent", links[0].Type)
+	require.Equal(t, h.issueUID, links[0].FromIssueUID)
+	require.Equal(t, h.otherUID, links[0].ToIssueUID)
+	return nil
+}
+
 // An issue UID is unique across the hub. A snapshot for a UID that another
 // project holds is refused with a validation error that names the conflict,
 // including when that project is archived.
@@ -431,10 +493,10 @@ func checkFederationImportIssueHeldElsewhere(t *testing.T, source db.Storage, ba
 	return nil
 }
 
-// A home deletes its own adoption snapshots that the hub acknowledged without
-// storing. Nothing else may go: not another event of this home, and not a
-// snapshot another home wrote.
-func checkFederationDropSupersededSnapshots(t *testing.T, store db.Storage) error {
+// A home acknowledges a push by deleting its own adoption snapshots that the
+// hub did not store and advancing its push cursor together. Nothing else may
+// go: not another event of this home, and not a snapshot another home wrote.
+func checkFederationAcknowledgePush(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -473,7 +535,10 @@ func checkFederationDropSupersededSnapshots(t *testing.T, store db.Storage) erro
 	require.NoError(t, err)
 
 	for range 2 {
-		require.NoError(t, store.DropSupersededFederationSnapshots(ctx, project.ID, []string{snapshots[0].UID, edit.UID, foreignUID}))
+		require.NoError(t, store.AcknowledgeFederationPush(ctx, project.ID, edit.ID, []string{snapshots[0].UID, edit.UID, foreignUID}))
+		binding, err := store.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		require.Equal(t, edit.ID, binding.PushCursorEventID, "the push cursor advances with the deletion")
 		left := listSnapshots()
 		var uids []string
 		for _, event := range left {

@@ -31,6 +31,10 @@ func AllowsRepeatedIssueSnapshot(eventType string, adoptionBaseline bool, eventF
 func RepeatedSnapshotSQLLookups(ctx context.Context, tx federationHistoryQuery, events []FederationIngestEvent) *RepeatedSnapshotLookups {
 	batch := map[string]struct{}{}
 	lookups := &RepeatedSnapshotLookups{}
+	held := func(uid string) bool {
+		var found int
+		return tx.QueryRowContext(ctx, `SELECT 1 FROM issues WHERE uid=$1`, uid).Scan(&found) == nil
+	}
 	for _, input := range events {
 		if input.Event.Type != "issue.created" && input.Event.Type != "issue.snapshot" {
 			continue
@@ -46,8 +50,19 @@ func RepeatedSnapshotSQLLookups(ctx context.Context, tx federationHistoryQuery, 
 			continue
 		}
 		batch[doc.UID] = struct{}{}
+		// Only a fresh snapshot establishes its parent links by being stored.
+		// A repeated snapshot's parent is a request, which
+		// RepeatedSnapshotDeltas accepts or refuses and then reserves.
+		fresh, checked := false, false
 		for _, link := range doc.Links {
-			if key := snapshotLinkKey(doc.UID, link); key.Type == "parent" && link.ToIssueUID != "" {
+			key := snapshotLinkKey(doc.UID, link)
+			if key.Type != "parent" || link.ToIssueUID == "" {
+				continue
+			}
+			if !checked {
+				fresh, checked = !held(doc.UID), true
+			}
+			if fresh {
 				lookups.SetParent(key.FromUID, key.ToUID)
 			}
 		}
@@ -77,11 +92,18 @@ func RepeatedSnapshotSQLLookups(ctx context.Context, tx federationHistoryQuery, 
 	return lookups
 }
 
+// repeatedSnapshotAuditEventTypesSQL lists the events that name an issue
+// without changing what the fold builds for it.
+var repeatedSnapshotAuditEventTypesSQL = sqlStringList([]string{
+	"claim.acquired", "claim.released", "claim.expired", "claim.force_released", "claim.violated",
+	"close.throttled", "issue.scheduled_reached",
+})
+
 // RepeatedSnapshotDeltaClock places the hub's events for a winning repeated
 // snapshot in the log. They take the data's updated_at as their time, so an
 // edit made after the snapshot replays after them whenever it reaches the
-// hub. They never sort before the issue's latest event on the hub, which is
-// the state the snapshot was compared with.
+// hub. They never sort before the latest event that changed the issue on the
+// hub, which is the state the snapshot was compared with.
 func RepeatedSnapshotDeltaClock(ctx context.Context, tx federationHistoryQuery, issueUID string, incoming jsontext.Value) (EventHLCTimestamp, error) {
 	var doc struct {
 		UpdatedAt string `json:"updated_at"`
@@ -95,7 +117,11 @@ func RepeatedSnapshotDeltaClock(ctx context.Context, tx federationHistoryQuery, 
 	}
 	clock := EventHLCTimestamp{PhysicalMS: updatedAt.UnixMilli()}
 	var latestMS, latestCounter int64
+	// Claim and throttle records carry the issue but change none of its state,
+	// so they are not part of what the snapshot was compared with.
+	//nolint:gosec // G202: the concatenated list holds fixed event type names.
 	err = tx.QueryRowContext(ctx, `SELECT hlc_physical_ms, hlc_counter FROM events WHERE issue_uid=$1
+ AND type NOT IN (`+repeatedSnapshotAuditEventTypesSQL+`)
  ORDER BY hlc_physical_ms DESC, hlc_counter DESC LIMIT 1`, issueUID).Scan(&latestMS, &latestCounter)
 	if errors.Is(err, sql.ErrNoRows) {
 		return clock, nil
