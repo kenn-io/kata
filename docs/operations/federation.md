@@ -1159,6 +1159,8 @@ the agent the hub's administration token.
 3. On the spoke, run the generated `kata federation join` command. Keep its
    hub URL, project ID, actor, and capability values intact. Join reads the
    current project UID and replay/baseline cursors from the hub when it runs.
+   For a hub that requires signing, replace the signing key placeholders as
+   described in [Federation signing](federation-signing.md#prepare-the-hub-and-spoke).
    A manual command has this shape:
 
    ```sh
