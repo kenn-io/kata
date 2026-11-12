@@ -62,13 +62,14 @@ is optional on the ordinary daemon listeners.
 5. Start the hub normally. Signing initially returns `503` for at least
    96 seconds, and until wall time has passed the persisted maximum admitted
    signature expiry. This gate also applies after a restart.
-6. For enrollment in step 1, use the hub's main API as `--hub-url`. On a
-   hub that already requires signing, the printed join command uses `external_url` and includes placeholders
-   for the signing key ID and absolute spoke key file path. Replace both before
+6. Enroll using the hub's main API as `--hub-url`. If the hub requires signing,
+   the printed join command uses `external_url` and includes placeholders for
+   the signing key ID and absolute spoke key file path. Replace both before
    running it on the spoke, or replace `--signing-key-file` with
    `--signing-key-env KATA_SPOKE_SIGNING_KEY`. The same source must exist in
-   the spoke CLI and daemon environments because the CLI fetches metadata before
-   saving the enrollment.
+   the spoke CLI and daemon environments because the CLI fetches metadata
+   before saving the enrollment. Optional-signing hubs keep the main API URL in
+   the printed join command.
 
 For an existing spoke, select the key without replacing its bearer. This
 command uses the selected daemon, including `KATA_SERVER` or a daemon catalog

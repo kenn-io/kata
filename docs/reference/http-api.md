@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-11
+last_edited: 2026-11-12
 ---
 
 # HTTP API schema
@@ -858,14 +858,19 @@ API reverse-proxy prefix. The server does not infer a federation address
 from its browser origin; dedicated browser listeners and authentication proxies
 may not serve federation transport. Non-loopback HTTP URLs, including private
 IP addresses, require `allow_insecure: true`. Without it, enrollment returns
-`400` before issuing a token. The returned join command carries
-`--allow-insecure`; HTTPS still verifies certificates.
+`400` before issuing a token. For an ordinary join, the returned command
+carries `--allow-insecure` when needed; HTTPS still verifies certificates.
+On a hub that requires signing, `join.hub_url` uses the hub's signing
+`external_url`. A supplied `hub_url` is still validated, but is not used for
+the join. The command includes signing key placeholders and does not include
+`--allow-insecure`.
 
 The returned command includes `--project` and the hub project ID, plus any
 push/adoption options. Join fetches the current UID and cursors from the hub
 when it runs, so a purge after enrollment does not leave it using an old baseline.
-Treat the response and command as secrets. Wildcard grants have no project join object; grants without `pull`, or servers without a
-supplied hub URL, have no runnable join command. Legacy API callers
+Treat the response and command as secrets. Wildcard grants have no project join
+object. Grants without `pull`, or without a supplied hub URL or a required-signing
+external URL, have no runnable join command. Legacy API callers
 omitting `hub_url` may issue a grant before enabling federation; those responses
 omit `join` until hub metadata exists. Listing grants
 never returns plaintext tokens or join commands.
