@@ -63,16 +63,16 @@ files; remote process findings come from the selected daemon.
 | `daemon.docbank` | The daemon can resolve its `[docbank]` API key; Docbank itself is not contacted, and `local = true` has no key source to check | Fix the key source the check names on the daemon host; see the [key file rules](../reference/configuration.md#credentials-and-batching). |
 | `daemon.federation` | Declarative mapping convergence | Resolve pending/conflicting mappings and credential origin problems. |
 
+For federation signing and ingress validation failures, `config.daemon` includes
+the reason in `details`. Other configuration errors, parser text, unknown key
+names and credentials remain omitted from reports.
+
 Doctor checks the same project name as ordinary commands: `--project`, then
 `[project].name` in `.kata.toml`. Project lookup uses an exact name and GET
 requests only. It does not resolve
 aliases, follow a renamed binding, or rewrite `.kata.toml`. A principal without
 catalog visibility gets an unverified-project warning. Archived projects do not
 count as usable.
-
-For federation signing and ingress configuration failures, `config.daemon`
-includes the validation reason in `details`. Parser errors, arbitrary key
-names and credentials remain omitted from reports.
 
 The daemon resolves active hook commands using its own PATH. Doctor compares
 that result with the shell only to identify a mismatch. Missing executables or

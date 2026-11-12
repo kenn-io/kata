@@ -384,9 +384,9 @@ func (c CloseThrottleConfig) ThrottleWindow() (time.Duration, error) {
 	return d, nil
 }
 
-// SafeDiagnosticError marks a value-free configuration error suitable for
-// display in diagnostic reports. Only wrap errors that cannot expose secrets
-// or arbitrary configuration values.
+// SafeDiagnosticError marks a configuration error whose text contains no
+// credentials, file contents, or parser output. It may name a validated
+// address or field and is suitable for display in diagnostic reports.
 type SafeDiagnosticError struct {
 	err error
 }
