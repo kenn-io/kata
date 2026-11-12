@@ -22,46 +22,40 @@ func TestCheckAPIVersionRecord(t *testing.T) {
 	const b = `{"info":{"version":""},"paths":{"/b":{}}}`
 	const hashA = "a796a0b24a661cae44ecfaf054e4e53ee32d80f219424fb40c319a1d036aba5f"
 	const hashB = "95abbaa7a1794b458dae61670a105f01339b2978a65310dc6575f987536650c9"
-	const suffixA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	const suffixB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	marker := func(version, hash, suffix string) string { return version + "." + hash + "." + suffix + ".sha256" }
+	const summaryA = "Add route\n"
+	const summaryB = "Another complete summary\n"
+	marker := func(version, hash, summary string) string {
+		return fmt.Sprintf("%s.%s.%x.sha256", version, hash, sha256.Sum256([]byte(summary)))
+	}
 	for _, tc := range []struct {
 		name, doc, version string
 		markers            []string
 		contains           []string
 		summary            string
 	}{
-		{"collision", a, "0.45.0", []string{marker("0.45.0", hashA, suffixA), marker("0.45.0", hashB, suffixB)}, []string{"0.46.0", marker("0.45.0", hashA, suffixA), marker("0.45.0", hashB, suffixB), "feature minimum"}, ""},
-		{"historical collision", b, "0.46.0", []string{marker("0.45.0", hashA, suffixA), marker("0.45.0", hashB, suffixB), marker("0.46.0", hashB, suffixA)}, []string{"0.45.0", "0.47.0"}, ""},
-		{"matching summaries", a, "0.45.0", []string{marker("0.45.0", hashA, suffixA), marker("0.45.0", hashA, suffixB)}, nil, ""},
-		{"stale", b, "0.45.0", []string{marker("0.45.0", hashA, suffixA)}, []string{"not yet on origin/main", hashB, "0.46.0"}, ""},
-		{"next recorded", b, "0.46.0", []string{marker("0.45.0", hashA, suffixA), marker("0.46.0", hashB, suffixB)}, nil, ""},
-		{"older matching", a, "0.45.0", []string{marker("0.45.0", hashA, suffixA), marker("0.46.0", hashB, suffixB)}, []string{"0.47.0"}, ""},
-		{"older missing", a, "0.45.0", []string{marker("0.46.0", hashB, suffixB)}, []string{"0.47.0"}, ""},
+		{"collision", a, "0.45.0", []string{marker("0.45.0", hashA, summaryA), marker("0.45.0", hashB, summaryB)}, []string{"0.46.0", marker("0.45.0", hashA, summaryA), marker("0.45.0", hashB, summaryB), "feature minimum"}, ""},
+		{"historical collision", b, "0.46.0", []string{marker("0.45.0", hashA, summaryA), marker("0.45.0", hashB, summaryB), marker("0.46.0", hashB, summaryA)}, []string{"0.45.0", "0.47.0"}, ""},
+		{"matching summaries", a, "0.45.0", []string{marker("0.45.0", hashA, summaryA), marker("0.45.0", hashA, summaryB)}, nil, ""},
+		{"stale", b, "0.45.0", []string{marker("0.45.0", hashA, summaryA)}, []string{"not yet on origin/main", hashB, "0.46.0"}, ""},
+		{"next recorded", b, "0.46.0", []string{marker("0.45.0", hashA, summaryA), marker("0.46.0", hashB, summaryB)}, nil, ""},
+		{"older matching", a, "0.45.0", []string{marker("0.45.0", hashA, summaryA), marker("0.46.0", hashB, summaryB)}, []string{"0.47.0"}, ""},
 		{"missing", a, "0.45.0", nil, []string{hashA, "sha256sum"}, ""},
-		{"summary", a, "0.45.0", []string{marker("0.45.0", hashA, suffixA)}, nil, "Add route"},
-		{"blank summary", a, "0.45.0", []string{marker("0.45.0", hashA, suffixA)}, []string{"one-line summary"}, " \n"},
-		{"multiline summary", a, "0.45.0", []string{marker("0.45.0", hashA, suffixA)}, []string{"one-line summary"}, "Add route\nAdd field\n"},
+		{"summary", a, "0.45.0", []string{marker("0.45.0", hashA, summaryA)}, nil, "Add route"},
+		{"blank summary", a, "0.45.0", []string{marker("0.45.0", hashA, summaryA)}, []string{"one-line summary"}, " \n"},
+		{"multiline summary", a, "0.45.0", []string{marker("0.45.0", hashA, summaryA)}, []string{"one-line summary"}, "Add route\nAdd field\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			for _, name := range tc.markers {
-				require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(cmp.Or(tc.summary, "Add route\n")), 0600))
-			}
-			if tc.name == "matching summaries" {
-				require.NoError(t, os.WriteFile(filepath.Join(dir, tc.markers[1]), []byte("Another complete summary\n"), 0600))
+				summary := summaryA
+				if strings.Contains(name, fmt.Sprintf("%x", sha256.Sum256([]byte(summaryB)))) {
+					summary = summaryB
+				}
+				require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(cmp.Or(tc.summary, summary)), 0600))
 			}
 			err := checkAPIVersionRecord(dir, tc.version, []byte(tc.doc))
 			if len(tc.contains) == 0 {
 				require.NoError(t, err)
-				if tc.name == "matching summaries" {
-					first, err := os.ReadFile(filepath.Join(dir, tc.markers[0]))
-					require.NoError(t, err)
-					second, err := os.ReadFile(filepath.Join(dir, tc.markers[1]))
-					require.NoError(t, err)
-					require.Equal(t, "Add route\n", string(first))
-					require.Equal(t, "Another complete summary\n", string(second))
-				}
 				return
 			}
 			require.Error(t, err)
@@ -297,8 +291,8 @@ func TestAPIContractDocument(t *testing.T) {
 
 func TestAPIBaseRecordLoading(t *testing.T) {
 	records := []string{
-		"0.44.0.dcc4a8689ae0d97113d2349d9afcbbf7fe95caa08a516bcc2e376d021d998166.sha256",
-		"0.45.0.95abbaa7a1794b458dae61670a105f01339b2978a65310dc6575f987536650c9.sha256",
+		"0.44.0.dcc4a8689ae0d97113d2349d9afcbbf7fe95caa08a516bcc2e376d021d998166.4407edaf1f9883542c1d09535bcebdaf3e5944c232d1cd67e6a01a0c5e575e1b.sha256",
+		"0.45.0.95abbaa7a1794b458dae61670a105f01339b2978a65310dc6575f987536650c9.4407edaf1f9883542c1d09535bcebdaf3e5944c232d1cd67e6a01a0c5e575e1b.sha256",
 	}
 	dir := t.TempDir()
 	err := checkBaseAPIVersionRecords(dir, records)
