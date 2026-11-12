@@ -21,7 +21,7 @@ function renderSettings(
     canAdministerDaemon?: boolean
     postFetch?: typeof fetch
     originStable?: boolean
-    remoteHost?: string
+    remoteHost?: string | undefined
   } = {},
 ) {
   return render(SearchSettings, {
