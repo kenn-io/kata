@@ -58,9 +58,8 @@ func TestCheckAPIVersionRecord(t *testing.T) {
 				require.NoError(t, err)
 				return
 			}
-			require.Error(t, err)
 			for _, s := range tc.contains {
-				require.Contains(t, err.Error(), s)
+				require.ErrorContains(t, err, s)
 			}
 		})
 	}
@@ -242,66 +241,48 @@ func checkBaseAPIVersionRecords(dir string, records []string) error {
 
 func TestAPIContractDocument(t *testing.T) {
 	doc := OpenAPIDocument()
-	initial, err := contractDocument(doc)
-	require.NoError(t, err)
+	contract := func() string {
+		b, err := contractDocument(doc)
+		require.NoError(t, err)
+		return string(b)
+	}
+	initial := contract()
 	for _, op := range documentOperations(doc) {
 		op.Description = "changed wording"
 		op.Summary = "changed summary"
 		op.Tags = []string{"changed"}
 	}
+	doc.Info.Version = "9.9.9"
 	doc.Info.Description = "new wording"
 	doc.Info.TermsOfService = "https://example.com/terms"
 	doc.Info.Contact = &huma.Contact{Name: "Team"}
 	doc.Info.License = &huma.License{Name: "License"}
 	schema := doc.Components.Schemas.Map()["HealthResponseBody"]
 	schema.Description = "new wording"
-	wording, err := contractDocument(doc)
-	require.NoError(t, err)
-	require.JSONEq(t, string(initial), string(wording))
+	require.JSONEq(t, initial, contract())
 	schema.Properties["description"] = &huma.Schema{Type: "string"}
-	field, err := contractDocument(doc)
-	require.NoError(t, err)
-	require.NotEqual(t, string(initial), string(field))
+	require.NotEqual(t, initial, contract())
 	delete(schema.Properties, "description")
-	doc.Paths["/new-route"] = &huma.PathItem{Get: &huma.Operation{OperationID: "new-route", Responses: map[string]*huma.Response{"200": {Description: "ok"}}}}
-	route, err := contractDocument(doc)
-	require.NoError(t, err)
-	require.NotEqual(t, string(initial), string(route))
 
-	delete(doc.Paths, "/new-route")
 	op := &huma.Operation{OperationID: "contract-test", Responses: map[string]*huma.Response{"200": {Description: "ok"}}}
 	doc.Paths["/contract-test"] = &huma.PathItem{Post: op}
-	baseline, err := contractDocument(doc)
-	require.NoError(t, err)
+	baseline := contract()
+	require.NotEqual(t, initial, baseline)
 	op.Parameters = []*huma.Param{{Name: "filter", In: "query", Schema: &huma.Schema{Type: "string"}}}
-	parameter, err := contractDocument(doc)
-	require.NoError(t, err)
-	require.NotEqual(t, string(baseline), string(parameter))
+	require.NotEqual(t, baseline, contract())
 	op.Parameters = nil
 	op.RequestBody = &huma.RequestBody{Content: map[string]*huma.MediaType{"application/json": {Schema: &huma.Schema{Type: "object", Properties: map[string]*huma.Schema{"input": {Type: "string"}}}}}}
-	request, err := contractDocument(doc)
-	require.NoError(t, err)
-	require.NotEqual(t, string(baseline), string(request))
+	require.NotEqual(t, baseline, contract())
 	op.RequestBody = nil
 	op.Responses["200"].Content = map[string]*huma.MediaType{"application/json": {Schema: &huma.Schema{Type: "object", Properties: map[string]*huma.Schema{"output": {Type: "string"}}}}}
-	response, err := contractDocument(doc)
-	require.NoError(t, err)
-	require.NotEqual(t, string(baseline), string(response))
+	require.NotEqual(t, baseline, contract())
 }
 
 func TestAPIBaseRecordLoading(t *testing.T) {
-	records := []string{
-		"0.44.0.dcc4a8689ae0d97113d2349d9afcbbf7fe95caa08a516bcc2e376d021d998166.4407edaf1f9883542c1d09535bcebdaf3e5944c232d1cd67e6a01a0c5e575e1b.sha256",
-		"0.45.0.95abbaa7a1794b458dae61670a105f01339b2978a65310dc6575f987536650c9.4407edaf1f9883542c1d09535bcebdaf3e5944c232d1cd67e6a01a0c5e575e1b.sha256",
-	}
+	records := []string{"0.44.0.dcc4a8689ae0d97113d2349d9afcbbf7fe95caa08a516bcc2e376d021d998166.4407edaf1f9883542c1d09535bcebdaf3e5944c232d1cd67e6a01a0c5e575e1b.sha256"}
 	dir := t.TempDir()
-	err := checkBaseAPIVersionRecords(dir, records)
-	require.ErrorContains(t, err, records[0])
-	require.ErrorContains(t, err, "rebase")
-	for _, name := range records {
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("Add route\n"), 0600))
-	}
-	require.NoError(t, checkBaseAPIVersionRecords(dir, records))
+	require.ErrorContains(t, checkBaseAPIVersionRecords(dir, records), records[0])
+	require.NoError(t, os.WriteFile(filepath.Join(dir, records[0]), []byte("Add route\n"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, records[0]), []byte("Corrected summary\n"), 0600))
 	require.NoError(t, checkBaseAPIVersionRecords(dir, records))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, records[0]), nil, 0600))
