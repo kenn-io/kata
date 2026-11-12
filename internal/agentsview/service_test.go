@@ -386,11 +386,11 @@ func TestUsageRequestBudgetExpiresWhileQueued(t *testing.T) {
 		require.Equal(t, 5*time.Second, time.Since(start))
 		require.Equal(t, "unavailable", result.Sessions[0].State)
 		require.Zero(t, calls.Load())
+		// Finish the expired flight while the queue is still saturated.
+		synctest.Wait()
 		for i := 0; i < 4; i++ {
 			<-service.slots
 		}
-		// Let the expired flight finish before starting a new request.
-		synctest.Wait()
 		result, err = service.Usage(t.Context(), "run", cron.Summary{Sessions: &sessions}, false)
 		require.NoError(t, err)
 		require.Equal(t, "not_found", result.Sessions[0].State)
