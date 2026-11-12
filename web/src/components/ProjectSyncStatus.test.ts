@@ -16,7 +16,7 @@ function response(projectID = 7, uid = projectUID, pending = 2): Response {
         pending_push_count: pending,
         last_successful_sync_at: '2026-10-01T12:00:00Z',
         credential_status: 'live',
-        last_error: 'private-token-never-display',
+        last_error: 'details withheld; run kata federation status',
         embedding: {
           state: 'reused',
           artifact_limit: 32,
@@ -180,7 +180,6 @@ describe('ProjectSyncStatus', () => {
             {
               project_id: 7,
               project_uid: projectUID,
-              project_name: "spoke project’s'",
               role: 'replica',
               enabled: true,
               pending_push_count: 0,
@@ -348,7 +347,7 @@ describe('ProjectSyncStatus', () => {
     expect(screen.getByText('Retained without index: 1')).not.toBeNull()
     expect(screen.getByText('Recipe: example-model (2 dimensions)')).not.toBeNull()
     expect(screen.getByText('Sync needs attention')).not.toBeNull()
-    expect(screen.queryByText('private-token-never-display')).toBeNull()
+    expect(screen.queryByText('details withheld; run kata federation status')).toBeNull()
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 

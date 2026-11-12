@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -38,6 +41,45 @@ func TestIssueScopedProjectLookupHidesMetadata(t *testing.T) {
 	require.NoError(t, json.Unmarshal(showBody, &show))
 	require.NoError(t, json.Unmarshal(lookupBody, &lookup))
 	require.Equal(t, show.Project, lookup.Project)
+}
+
+func TestReadProjectByNameHostScope(t *testing.T) {
+	dbh := openTestDB(t)
+	allowed, err := dbh.db.CreateProject(t.Context(), "allowed-project")
+	require.NoError(t, err)
+	denied, err := dbh.db.CreateProject(t.Context(), "denied-project")
+	require.NoError(t, err)
+	server := daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now, HostAccess: historicalUIReferenceHostAccess{deniedProjectID: denied.ID}})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "worker"})
+		server.Handler().ServeHTTP(w, r.WithContext(ctx))
+	}))
+	t.Cleanup(ts.Close)
+	var deniedBody []byte
+	for _, tc := range []struct {
+		path   string
+		status int
+	}{
+		{"/api/v1/projects/resolve?name=allowed-project", http.StatusOK},
+		{"/api/v1/projects/resolve?name=denied-project", http.StatusNotFound},
+		{"/api/v1/projects/resolve?name=missing-project", http.StatusNotFound},
+	} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+tc.path, nil)
+		require.NoError(t, err)
+		resp, err := ts.Client().Do(req)
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, tc.status, resp.StatusCode, string(body))
+		if tc.status == http.StatusOK {
+			require.Contains(t, string(body), allowed.Name)
+		} else if deniedBody == nil {
+			deniedBody = body
+		} else {
+			require.JSONEq(t, string(deniedBody), string(body))
+		}
+	}
 }
 
 func TestReviewScopedLookupDoesNotRevealOtherProjectNames(t *testing.T) {

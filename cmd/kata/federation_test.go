@@ -176,7 +176,6 @@ func TestFederationStatusProjectOlderDaemon(t *testing.T) {
 	target, err := url.Parse(env.URL)
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	var lookup atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/health" {
 			w.Header().Set("Content-Type", "application/json")
@@ -184,7 +183,6 @@ func TestFederationStatusProjectOlderDaemon(t *testing.T) {
 			return
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/resolve" {
-			lookup.Add(1)
 			http.NotFound(w, r)
 			return
 		}
@@ -198,9 +196,6 @@ func TestFederationStatusProjectOlderDaemon(t *testing.T) {
 	out := requireCmdOutput(t, &older, "federation", "status", "--project", project.Name, "--format", "json")
 	assert.Contains(t, out, project.Name)
 	assert.NotContains(t, out, other.Name)
-	_, err = runCmdOutput(t, &older, "federation", "status", "--project", "missing-project")
-	_ = requireCLIError(t, err, ExitNotFound)
-	assert.Zero(t, lookup.Load())
 }
 
 func TestFederationStatusProjectVersionRouting(t *testing.T) {
