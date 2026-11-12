@@ -567,15 +567,28 @@ func TestDoctorHookNamesPATHMismatch(t *testing.T) {
 
 func TestDoctorAgentsViewState(t *testing.T) {
 	for _, tc := range []struct {
-		state  string
-		status diagnostics.Status
+		state       string
+		status      diagnostics.Status
+		fixContains []string
 	}{
-		{"off", diagnostics.StatusInfo}, {"ok", diagnostics.StatusOK}, {"unauthorized", diagnostics.StatusWarn}, {"unreachable", diagnostics.StatusWarn}, {"not_agentsview", diagnostics.StatusWarn},
+		{"off", diagnostics.StatusInfo, nil},
+		{"ok", diagnostics.StatusOK, nil},
+		{"unauthorized", diagnostics.StatusWarn, []string{"token"}},
+		{"unreachable", diagnostics.StatusWarn, []string{"url", "connect"}},
+		{"not_agentsview", diagnostics.StatusWarn, []string{"agentsview", "base", "0.47.0"}},
 	} {
 		t.Run(tc.state, func(t *testing.T) {
 			got := doctorAgentsView(tc.state)
 			require.Equal(t, tc.status, got.Status)
 			require.Contains(t, got.Details, "Raw session IDs require AgentsView v0.47.0 or newer.")
+			if tc.fixContains == nil {
+				require.Empty(t, got.Fix)
+			} else {
+				require.Regexp(t, `(?i)\b(check|repair|correct|fix|verify|select|configure|update|use)\b`, got.Fix)
+				for _, part := range tc.fixContains {
+					require.Contains(t, strings.ToLower(got.Fix), part)
+				}
+			}
 		})
 	}
 }
