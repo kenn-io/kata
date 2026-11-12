@@ -10,7 +10,6 @@
   let { projectID, projectUID, refreshGeneration = 0 }: Props = $props()
   let status = $state<FederationProjectStatus>()
   let loading = $state(true)
-  let reading = $state(false)
   let error = $state(false)
   let refresh: ((manual?: boolean) => void) | undefined
   let identity = $derived(`${projectID}:${projectUID}`)
@@ -23,21 +22,15 @@
     return result
   })
 
-  function resetView(): void {
-    status = undefined
-    loading = true
-    error = false
-    reading = false
-  }
-
   $effect(() => {
     void identity
     const [id, uid] = untrack(() => [projectID, projectUID] as const)
     let current: AbortController | undefined
-    let disposed = false
     // Coalesce refreshes during a read into one follow-up.
     let pending = false
-    resetView()
+    status = undefined
+    loading = true
+    error = false
 
     async function read(manual = false): Promise<void> {
       if (document.hidden) return
@@ -50,17 +43,14 @@
         current = undefined
       }
       pending = false
-      loading = manual || (loading && !error)
-      reading = true
+      if (manual) loading = true
       const abort = new AbortController()
       current = abort
       const finish = () => {
         clearTimeout(timeout)
         if (current !== abort) return
         current = undefined
-        if (disposed) return
         loading = false
-        reading = false
         if (pending) {
           pending = false
           void read()
@@ -72,22 +62,20 @@
         abort.abort()
         finish()
       }, 120_000)
-      abort.signal.addEventListener('abort', () => clearTimeout(timeout), { once: true })
       try {
         const result = await getProjectFederationStatus(
           { projectId: id },
-          { compact: true },
           {
             signal: abort.signal,
             onResponse: (raw) => {
-              if (raw.status >= 400 && raw.status < 500 && !abort.signal.aborted && !disposed) {
+              if (raw.status >= 400 && raw.status < 500 && !abort.signal.aborted) {
                 status = undefined
                 loading = true
               }
             },
           },
         )
-        if (abort.signal.aborted || disposed) return
+        if (abort.signal.aborted) return
         if (result.status !== 200) throw new Error()
         const found = result.data.statuses.find(
           (entry) => entry.project_id === id && entry.project_uid === uid,
@@ -96,7 +84,7 @@
         status = found
         error = false
       } catch {
-        if (!abort.signal.aborted && !disposed) {
+        if (!abort.signal.aborted) {
           status = undefined
           error = true
         }
@@ -106,8 +94,8 @@
     }
     refresh = (manual) => void read(manual)
     return () => {
-      disposed = true
       current?.abort()
+      current = undefined
       refresh = undefined
     }
   })
@@ -120,7 +108,7 @@
   })
 </script>
 
-<section class="project-sync" aria-label="Project sync" aria-busy={reading}>
+<section class="project-sync" aria-label="Project sync" aria-busy={loading}>
   <strong>Project sync</strong>
   {#if loading}
     <span role="status">Reading sync status…</span>
