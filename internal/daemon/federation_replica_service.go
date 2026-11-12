@@ -1155,10 +1155,11 @@ func preflightFederationAdoption(ctx context.Context, store db.Storage, credenti
 	if !errors.Is(err, db.ErrNotFound) {
 		return "", nil, err
 	}
+	var required string
+	var baseline []db.CronEvent
 	if !p.AdoptExisting && !p.AttachEmpty {
 		// A direct rejoin re-offers local-origin history from cursor zero.
 		// Fold every page: a later event may need a different feature.
-		var required string
 		var cursor int64
 		for {
 			events, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), cursor, 1000)
@@ -1180,45 +1181,33 @@ func preflightFederationAdoption(ctx context.Context, store db.Storage, credenti
 		if db.RequireEventFeatures(required, db.CronRunSessionsEventFeature) != nil {
 			return "", nil, nil
 		}
-		credential, err := adoptionEffectiveCredential(ctx, credentials, p, projectID, store)
+	} else {
+		beginner, ok := store.(interface {
+			BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+		})
+		if !ok {
+			return "", nil, credentialIOError("read adoption baseline")
+		}
+		tx, err := beginner.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 		if err != nil {
 			return "", nil, err
 		}
-		features, err := fetchFederationAdoptionMetadata(ctx, p.HubURL, p.HubProjectID, p.HubProjectUID, credential, p.HubClientFactory)
+		hasSessions, err := db.ProjectHasCronRunSessions(ctx, tx, project.UID)
+		if err == nil && hasSessions {
+			baseline, err = db.PrepareCronAdoption(ctx, tx, project, p.HubProjectUID, p.AttachEmpty)
+		}
 		if err != nil {
+			return "", nil, db.FinishTransactionRollback(ctx, err, tx.Rollback())
+		}
+		if err = tx.Commit(); err != nil {
 			return "", nil, err
 		}
-		if err = db.RequireEventFeatures(features, required); err != nil {
-			return "", nil, err
+		if !hasSessions {
+			return "", nil, nil
 		}
-		return features, &credential, nil
-	}
-	beginner, ok := store.(interface {
-		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
-	})
-	if !ok {
-		return "", nil, credentialIOError("read adoption baseline")
-	}
-	tx, err := beginner.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return "", nil, err
-	}
-	hasSessions, err := db.ProjectHasCronRunSessions(ctx, tx, project.UID)
-	var baseline []db.CronEvent
-	if err == nil && hasSessions {
-		baseline, err = db.PrepareCronAdoption(ctx, tx, project, p.HubProjectUID, p.AttachEmpty)
-	}
-	if err != nil {
-		return "", nil, db.FinishTransactionRollback(ctx, err, tx.Rollback())
-	}
-	if err = tx.Commit(); err != nil {
-		return "", nil, err
-	}
-	if !hasSessions {
-		return "", nil, nil
-	}
-	if p.Relay != nil {
-		return "", nil, db.ErrFederatedReadOnly
+		if p.Relay != nil {
+			return "", nil, db.ErrFederatedReadOnly
+		}
 	}
 	credential, err := adoptionEffectiveCredential(ctx, credentials, p, projectID, store)
 	if err != nil {
@@ -1229,6 +1218,9 @@ func preflightFederationAdoption(ctx context.Context, store db.Storage, credenti
 		return "", nil, err
 	}
 	if err = db.RequireAdoptionEventFeatures(features, baseline); err != nil {
+		return "", nil, err
+	}
+	if err = db.RequireEventFeatures(features, required); err != nil {
 		return "", nil, err
 	}
 	return features, &credential, nil
