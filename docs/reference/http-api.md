@@ -15,6 +15,17 @@ transport for those requests with the same selection rules as the CLI. Go
 programs can use the generated [Go client](go-client.md), which includes
 discovery. [Cron](cron.md) documents job and workflow resources.
 
+## Cron run usage
+
+`GET /api/v1/projects/{project_id}/cron/runs/{run_uid}/usage` reads live
+AgentsView session cost. Ordinary project read authority is required; anonymous
+read-only callers receive `403`. When the source is off, the daemon returns
+`503` with `usage_source_disabled`. A total that cannot fit in a signed 64-bit
+integer returns `502` with `usage_total_overflow`. Responses are private and
+non-cacheable. Read cron capabilities first: `usage.source` is `agentsview` or
+`none`. Pass `refresh=true` to bypass entries older than ten seconds. See
+[Live run cost](cron.md#live-run-cost) for states and limitations.
+
 ## Search configuration header
 
 Search responses include `X-Kata-Embeddings-Configured: true` when the answering daemon has an embeddings provider, even while its index is empty or read-only mode forces lexical search. The value is `false` when no provider is configured. The response body is unchanged.

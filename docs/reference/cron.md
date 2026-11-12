@@ -714,6 +714,25 @@ own codes; where two adapters mean the same thing they share the name, as
 `agent_quota`, `agent_login`, and `launch_unproven` do. The `reason: ` marker
 keeps short messages such as `admitted` from reading as codes.
 
+### Live run cost
+
+Configure [AgentsView usage](configuration.md#agentsview-usage) on the serving
+daemon, then run `kata cron run usage <run-uid>`. Add `--json` for the full
+response or `--agent` for agent output. Cost is read on demand and is not
+stored, federated, included in snapshots, or written to run evidence.
+
+A complete total prices every recorded session. A partial total ends in `+`
+and is a floor; the output names unpriced sessions and explains an incomplete
+session list. Unknown means no recorded session could be priced. A run with
+no sessions causes no AgentsView request. Zero cost is distinct from missing
+cost. Computed and mixed prices carry `~`.
+
+AgentsView may index a session after the run ends. A missing session is shown
+as “not in AgentsView yet”; `--refresh` bypasses cached results older than ten
+seconds. Kata includes descendant usage and deduplicates matching canonical
+session IDs. If one recorded session is a descendant of another, its cost can
+be counted twice; this is an accepted limitation.
+
 ## Native issue planning dates
 
 `kata show <issue-ref> --planning-dates --json` and GET
