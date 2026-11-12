@@ -80,6 +80,9 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	if strings.Contains(query, "SELECT EXISTS") {
 		return &featureProbeRows{presence: true}, nil
 	}
+	if strings.Contains(query, "SELECT r.summary_json FROM cron_runs") {
+		return &featureProbeRows{empty: true}, nil
+	}
 	if strings.Contains(query, "'projection.job'") {
 		c.state.probeQueries++
 		return &featureProbeRows{}, nil
@@ -87,9 +90,12 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	return nil, errors.New("unexpected feature probe query")
 }
 
-type featureProbeRows struct{ presence, seen bool }
+type featureProbeRows struct{ presence, seen, empty bool }
 
 func (r *featureProbeRows) Columns() []string {
+	if r.empty {
+		return []string{"summary_json"}
+	}
 	if r.presence {
 		return []string{"cron_present", "issue_moved"}
 	}
@@ -97,6 +103,9 @@ func (r *featureProbeRows) Columns() []string {
 }
 func (*featureProbeRows) Close() error { return nil }
 func (r *featureProbeRows) Next(values []driver.Value) error {
+	if r.empty {
+		return io.EOF
+	}
 	if r.seen {
 		if r.presence {
 			return io.EOF

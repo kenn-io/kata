@@ -89,7 +89,11 @@ func checkAdoptionSessionFeatures(t *testing.T, store db.Storage) error {
 			for _, event := range baseline {
 				expected = append(expected, db.CronEvent{Type: event.Type, Payload: event.Payload})
 			}
-			require.Equal(t, expected, emitted)
+			require.Len(t, emitted, len(expected))
+			for i := range expected {
+				require.Equal(t, expected[i].Type, emitted[i].Type)
+				require.JSONEq(t, expected[i].Payload, emitted[i].Payload)
+			}
 			required := ""
 			for _, event := range events {
 				features, err := db.PayloadRequiredFeatures(event.Type, event.Payload)

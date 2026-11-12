@@ -64,7 +64,7 @@ func TestCronAdmissionOutlivesProbeDeadlineAcrossPostgresStores(t *testing.T) {
 	t.Cleanup(server.Close)
 	runUID, err := uid.New()
 	require.NoError(t, err)
-	body := fmt.Sprintf(`{"job_uid":%q,"definition_event_uid":%q,"actor":"worker","status":"succeeded","summary":{"version":1,"sessions":[{"agent":"claude","session_id":"00000000-0000-4000-8000-000000000001"}]}}`, job.UID, job.DefinitionEventUID)
+	body := fmt.Sprintf(`{"job_uid":%q,"definition_event_uid":%q,"actor":"worker","status":"succeeded","expected_revision":0,"summary":{"version":1,"sessions":[{"agent":"claude","session_id":"00000000-0000-4000-8000-000000000001"}]}}`, job.UID, job.DefinitionEventUID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, fmt.Sprintf("%s/api/v1/projects/%d/cron/runs/%s", server.URL, project.ID, runUID), bytes.NewBufferString(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
