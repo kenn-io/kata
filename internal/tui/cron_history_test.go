@@ -44,7 +44,7 @@ func TestCronHistoryObservationCounts(t *testing.T) {
 		}
 		text, _ := historyDocument(p, cronRef{cronJobs, "job"}, 1000)
 		if len(statuses) == 0 {
-			if strings.Contains(text, "Sample:") || !strings.Contains(text, "no matching loaded observations") {
+			if strings.Contains(text, "Sample:") || !strings.Contains(text, "no matching runs in the latest project runs") {
 				ht.Fatalf("wrong empty sample in %q", text)
 			}
 			return
@@ -99,7 +99,7 @@ func TestCronHistoryRecordedIdentityAndCreationOrder(t *testing.T) {
 			}
 			before := slices.Clone(p.runs)
 			text, links := historyDocument(p, ref, 200)
-			require.Contains(t, text, "Loaded project observations (incomplete)")
+			require.Contains(t, text, "Run history from the latest 100 project runs")
 			require.Contains(t, text, "Sample: 5 observations")
 			require.Contains(t, text, "Loaded run links · newest 100")
 			require.NotContains(t, text, "Loaded runs (", "the observation sample already states its size")
@@ -113,7 +113,7 @@ func TestCronHistoryRecordedIdentityAndCreationOrder(t *testing.T) {
 			}
 			if kind == cronWorkflows {
 				text, _ = historyDocument(p, cronRef{kind, "new-workflow"}, 200)
-				require.Contains(t, text, "no matching loaded observations")
+				require.Contains(t, text, "no matching runs in the latest project runs")
 			}
 		})
 	}
@@ -123,13 +123,13 @@ func TestCronHistoryUnavailableAndEmpty(t *testing.T) {
 	p := cronData{runs: []generated.CronRun{{UID: "retained", JobUID: new("job"), Status: "succeeded"}}, runsErr: errors.New("read failed")}
 	text, links := historyDocument(p, cronRef{cronJobs, "job"}, 200)
 	require.Contains(t, text, "Loaded runs · unavailable")
-	require.Contains(t, text, "Loaded project observations (incomplete)")
+	require.Contains(t, text, "Run history from the latest 100 project runs")
 	require.NotContains(t, text, "Sample:")
 	require.NotContains(t, text, "no matching")
 	require.Empty(t, links)
 	text, _ = historyDocument(cronData{}, cronRef{cronJobs, "job"}, 200)
 	require.NotContains(t, text, "Sample:")
-	require.Contains(t, text, "no matching loaded observations")
+	require.Contains(t, text, "no matching runs in the latest project runs")
 }
 
 func TestCronHistoryNativeJobHasNoInferredObservations(t *testing.T) {
@@ -141,7 +141,7 @@ func TestCronHistoryNativeJobHasNoInferredObservations(t *testing.T) {
 	_, _, lines := cronScreen(m)
 	text := cronHistoryLinesText(lines)
 	require.NotContains(t, text, "Sample:")
-	require.Contains(t, text, "no matching loaded observations")
+	require.Contains(t, text, "no matching runs in the latest project runs")
 	require.NotContains(t, text, "succeeded 1")
 }
 
@@ -178,7 +178,7 @@ func TestCronHistoryFullLoadedWindowNarrowLayout(t *testing.T) {
 			text, links := historyDocument(p, ref, width)
 			// Strip wrapping to check provenance and exact sample text at any width.
 			compact := strings.Join(strings.Fields(text), "")
-			require.Contains(t, compact, "Loadedprojectobservations(incomplete)")
+			require.Contains(t, compact, "Runhistoryfromthelatest100projectruns")
 			require.Contains(t, compact, "Sample:100observations")
 			require.Equal(t, wantLinks, links)
 			for line := range strings.SplitSeq(text, "\n") {
@@ -229,7 +229,7 @@ func TestCronHistoryRefreshAndSelection(t *testing.T) {
 			ref := m.cron.stack[0].ref
 			ref.uid = "different"
 			text, links := historyDocument(*m.cron.data, ref, 200)
-			require.Contains(t, text, "no matching loaded observations")
+			require.Contains(t, text, "no matching runs in the latest project runs")
 			require.Empty(t, links)
 		})
 	}

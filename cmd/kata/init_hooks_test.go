@@ -51,12 +51,9 @@ func TestApplyClaudeHooks_MigratesExactLegacyHandlers(t *testing.T) {
 				map[string]any{
 					"matcher": "startup|resume|clear",
 					"hooks": []any{
+						expectedHookHandler("start"),
 						map[string]any{"type": "command", "command": "notify-session"},
 					},
-				},
-				map[string]any{
-					"matcher": "startup|resume|clear",
-					"hooks":   []any{expectedHookHandler("start")},
 				},
 			},
 			"SessionEnd": []any{map[string]any{

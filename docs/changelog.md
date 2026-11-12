@@ -15,6 +15,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   exits 3, and other invalid routing configuration exits 1. Status still prints
   its diagnostics; previously these cases exited 0.
 
+- Recover automatically when the web UI's first daemon roster, workspace, or teams read fails briefly. Retry and Refresh teams remain available after persistent failures or refusals.
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 
 - Upgrade a large PostgreSQL database without the schema migration rolling

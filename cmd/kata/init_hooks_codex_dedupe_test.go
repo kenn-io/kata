@@ -259,7 +259,8 @@ func TestApplyCodexHooks_KeepsTrackedNestedAndLinkedWorkspace(t *testing.T) {
 			changed, notes, err := applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			assert.True(t, changed)
-			assert.Equal(t, expectedCodexSessionStartGroups(), readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
+			want := expectedCodexSessionStartGroups()
+			assert.Equal(t, []any{want[1], want[0]}, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
 			assert.Equal(t, []string{"kept workspace contract hook: .codex/hooks.json is tracked; " + userPath + " also injects it"}, notes)
 		})
 	}

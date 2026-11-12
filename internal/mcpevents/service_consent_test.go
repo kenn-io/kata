@@ -2,9 +2,12 @@ package mcpevents_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/netip"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -130,6 +133,71 @@ func TestEndpointConsent(t *testing.T) {
 				assert.NotNil(t, row.VerifiedAt)
 			}
 		})
+		t.Run("durable consent rechecks current destinations", func(t *testing.T) {
+			h := newHarness(t, open(t))
+			var private atomic.Bool
+			h.recv.client.SetResolverForTest(func(context.Context, string, string) ([]netip.Addr, error) {
+				if private.Load() {
+					return []netip.Addr{netip.MustParseAddr("100.64.0.1")}, nil
+				}
+				return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+			})
+			h.mustSubscribe(h.request("example-user/leader"))
+			private.Store(true)
+			_, err := h.subscribe(principalA, h.request("example-user/other"))
+			_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "destination_not_allowed")
+			assert.EqualValues(t, 1, h.recv.challenges.Load())
+		})
+
+		t.Run("refresh rechecks current destinations", func(t *testing.T) {
+			h := newHarness(t, open(t))
+			req := h.request("example-user")
+			req.TTLMS = mcpevents.TTLNull()
+			result := h.mustSubscribe(req)
+			before := h.row(result.ID)
+			h.recv.client.SetResolverForTest(func(context.Context, string, string) ([]netip.Addr, error) {
+				return []netip.Addr{netip.MustParseAddr("100.64.0.1")}, nil
+			})
+			_, err := h.subscribe(principalA, req)
+			_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "destination_not_allowed")
+			assert.Equal(t, before, h.row(result.ID))
+		})
+		t.Run("refresh permits a DNS outage", func(t *testing.T) {
+			h := newHarness(t, open(t))
+			req := h.request("example-user")
+			req.TTLMS = mcpevents.TTLNull()
+			h.mustSubscribe(req)
+			h.recv.client.SetResolverForTest(func(context.Context, string, string) ([]netip.Addr, error) {
+				return nil, errors.New("private resolver details")
+			})
+			_, err := h.subscribe(principalA, req)
+			require.NoError(t, err)
+		})
+
+		t.Run("recent consent after a failed commit rechecks destinations", func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			wrapped := &activationRefreshStore{Storage: open(t), beforeActivation: cancel}
+			h := newHarness(t, wrapped)
+			var private atomic.Bool
+			h.recv.client.SetResolverForTest(func(context.Context, string, string) ([]netip.Addr, error) {
+				if private.Load() {
+					return []netip.Addr{netip.MustParseAddr("100.64.0.1")}, nil
+				}
+				return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+			})
+			req := h.request("example-user")
+			_, err := h.svc.Subscribe(ctx, principalA, allScope, req)
+			_ = requireWire(t, err, mcpevents.CodeUnavailable, "store_unavailable")
+			rows, err := h.store.ListMCPEventSubscriptions(t.Context(), principalA.Key())
+			require.NoError(t, err)
+			require.Empty(t, rows)
+			private.Store(true)
+			_, err = h.subscribe(principalA, req)
+			_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "destination_not_allowed")
+			assert.EqualValues(t, 1, h.recv.challenges.Load())
+		})
+
 		t.Run("a failed challenge activates nothing and reports a category", func(t *testing.T) {
 			h := newHarness(t, open(t))
 			h.recv.status.Store(500)
@@ -139,6 +207,31 @@ func TestEndpointConsent(t *testing.T) {
 			rows, listErr := h.store.ListMCPEventSubscriptions(t.Context(), principalA.Key())
 			require.NoError(t, listErr)
 			assert.Empty(t, rows)
+		})
+		t.Run("policy refusals do not exhaust challenge budgets", func(t *testing.T) {
+			h := newHarness(t, open(t))
+			var allowed atomic.Bool
+			var lookups atomic.Int64
+			h.recv.client.SetResolverForTest(func(context.Context, string, string) ([]netip.Addr, error) {
+				lookups.Add(1)
+				if allowed.Load() {
+					return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+				}
+				return []netip.Addr{netip.MustParseAddr("10.0.0.1")}, nil
+			})
+			for i := range 10 {
+				req := h.request("example-user")
+				req.Delivery.URL = fmt.Sprintf("https://example.com/events?route=%d", i)
+				_, err := h.subscribe(principalA, req)
+				_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "destination_not_allowed")
+			}
+			assert.Zero(t, h.recv.challenges.Load())
+			allowed.Store(true)
+			before := lookups.Load()
+			_, err := h.subscribe(principalA, h.request("example-user"))
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, h.recv.challenges.Load())
+			assert.EqualValues(t, before+1, lookups.Load(), "fresh verification resolves once, after admission")
 		})
 		t.Run("a failed challenge leaves existing rows untouched", func(t *testing.T) {
 			h := newHarness(t, open(t))
@@ -194,6 +287,11 @@ func TestEndpointConsent(t *testing.T) {
 		})
 		t.Run("failed challenges are also limited per principal", func(t *testing.T) {
 			h := newHarness(t, open(t))
+			var lookups atomic.Int64
+			h.recv.client.SetResolverForTest(func(context.Context, string, string) ([]netip.Addr, error) {
+				lookups.Add(1)
+				return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+			})
 			for i := range 10 {
 				req := h.request("example-user")
 				// The test certificate does not name example.net, so each of these fails TLS.
@@ -206,6 +304,7 @@ func TestEndpointConsent(t *testing.T) {
 			req.Delivery.URL = "https://fresh.example.net/events"
 			_, err := h.subscribe(principalA, req)
 			_ = requireWire(t, err, mcpevents.CodeResourceExhausted, "callback_verification_failures")
+			assert.EqualValues(t, 10, lookups.Load(), "exhausted budget refuses before DNS")
 			// Another principal has its own budget.
 			_, err = h.subscribe(mcpevents.Principal{Authority: mcpevents.AuthorityDBToken, Subject: "8"}, req)
 			_ = requireWire(t, err, mcpevents.CodeCallbackEndpoint, "tls_error")

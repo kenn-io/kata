@@ -2,6 +2,7 @@ package mcpevents
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"strings"
 	"sync"
@@ -62,23 +63,14 @@ func newChallengeCoordinator(now func() time.Time) *challengeCoordinator {
 
 func consentKey(principalKey, callbackURL string) string { return principalKey + "\x00" + callbackURL }
 
-// destinationHost is the lowercase host name used for rate limiting.
-func destinationHost(callbackURL string) string {
-	u, err := url.Parse(callbackURL)
-	if err != nil {
-		return ""
-	}
-	return strings.ToLower(u.Hostname())
-}
-
 // verify runs challenge at most once for the consent key among concurrent
 // callers. The leader checks the failure budgets before any network
 // activity; followers wait for its result and share it. A successful result
 // is remembered briefly so a caller that arrives before the leader's
 // activation commits does not challenge again.
-func (c *challengeCoordinator) verify(ctx context.Context, principalKey, callbackURL string, challenge func(context.Context) error) error {
+func (c *challengeCoordinator) verify(ctx context.Context, principalKey, callbackURL string, parsed *url.URL, challenge func(context.Context) error) error {
 	key := consentKey(principalKey, callbackURL)
-	host := destinationHost(callbackURL)
+	host := strings.ToLower(parsed.Hostname())
 	c.mu.Lock()
 	now := c.now()
 	if at, ok := c.recent[key]; ok {
@@ -117,8 +109,8 @@ func (c *challengeCoordinator) verify(ctx context.Context, principalKey, callbac
 	if err == nil {
 		c.recent[key] = now
 		c.refundLocked(host, principalKey)
-	} else if ctx.Err() != nil {
-		// A caller cancellation is not the receiver's failure.
+	} else if wire, ok := errors.AsType[*Error](err); ctx.Err() != nil || (ok && wire.Code == CodeCallbackEndpoint && wire.Reason == "destination_not_allowed") {
+		// Cancellation and policy refusals are not receiver failures.
 		c.refundLocked(host, principalKey)
 	}
 	c.pruneLocked(now)
@@ -190,6 +182,8 @@ func (c *challengeCoordinator) pruneLocked(now time.Time) {
 func endpointCategory(err error) string {
 	we := safeWebhookError(err)
 	switch we.Reason {
+	case "destination_not_allowed":
+		return "destination_not_allowed"
 	case "timeout":
 		return "timeout"
 	case "tls_error":
