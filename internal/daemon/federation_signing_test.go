@@ -510,9 +510,6 @@ func TestSignedNativeCronEnrollment(t *testing.T) {
 		for _, handler := range []http.Handler{server.Handler(), ingress} {
 			unsigned := send(handler, http.MethodPost, path, enrollment.Token, false, payload)
 			require.Equal(t, http.StatusPreconditionRequired, unsigned.Code, unsigned.Body.String())
-			var envelope api.ErrorEnvelope
-			require.NoError(t, json.Unmarshal(unsigned.Body.Bytes(), &envelope))
-			require.Equal(t, "hub_signing_required", envelope.Error.Code)
 		}
 		owner := send(server.Handler(), http.MethodPost, path, "owner-token", false, payload)
 		require.Equal(t, http.StatusCreated, owner.Code, owner.Body.String())

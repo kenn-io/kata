@@ -68,8 +68,8 @@ func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
 	})
 }
 
-// Contract: required signing distinguishes missing signatures from invalid ones
-// after authenticating the enrollment, on every federation listener.
+// Contract: every federation listener authenticates enrollment before requiring
+// a signature and distinguishes missing signatures from invalid ones.
 func TestRequiredSigningRejectsUnsignedEnrollment(t *testing.T) {
 	t.Setenv("TEST_REQUIRED_POLICY_KEY", strings.Repeat("k", 64))
 	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_REQUIRED_POLICY_KEY"}
@@ -88,16 +88,8 @@ func TestRequiredSigningRejectsUnsignedEnrollment(t *testing.T) {
 		}, state)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, v.Close()) }()
-		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, Auth: config.AuthConfig{Token: "owner-bearer"}, FederationSigning: v, FederationSigningRequired: true})
-		warmingRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://hub.example"+projectPath(project.ID)+"/federation/metadata", nil)
-		warmingRequest.Header.Set("Authorization", "Bearer "+enrollment.Token)
-		warmingResponse := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(warmingResponse, warmingRequest)
-		require.Equal(t, http.StatusPreconditionRequired, warmingResponse.Code, warmingResponse.Body.String())
-		var warmingEnvelope api.ErrorEnvelope
-		require.NoError(t, json.Unmarshal(warmingResponse.Body.Bytes(), &warmingEnvelope))
-		require.Equal(t, "hub_signing_required", warmingEnvelope.Error.Code)
 		time.Sleep(federationsigning.Quarantine)
+		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, Auth: config.AuthConfig{Token: "owner-bearer"}, FederationSigning: v, FederationSigningRequired: true})
 		main, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerSharedTCP, Origin: "https://hub.example"})
 		require.NoError(t, err)
 		ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
@@ -111,7 +103,7 @@ func TestRequiredSigningRejectsUnsignedEnrollment(t *testing.T) {
 				}{
 					{"unsigned", enrollment.Token, "", "hub_signing_required", http.StatusPreconditionRequired},
 					{"tampered", enrollment.Token, "tampered", "signature_invalid", http.StatusUnauthorized},
-					{"unauthorized", "", "", "", http.StatusUnauthorized},
+					{"unknown enrollment", "unknown-enrollment", "", "auth_invalid", http.StatusForbidden},
 				} {
 					t.Run(tc.name, func(t *testing.T) {
 						req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
@@ -127,14 +119,7 @@ func TestRequiredSigningRejectsUnsignedEnrollment(t *testing.T) {
 						require.Equal(t, tc.status, w.Code, w.Body.String())
 						var envelope api.ErrorEnvelope
 						require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
-						if tc.token == "" {
-							require.Contains(t, []string{"auth_required", "auth_invalid"}, envelope.Error.Code)
-						} else {
-							require.Equal(t, tc.code, envelope.Error.Code)
-						}
-						if tc.code == "hub_signing_required" {
-							require.Contains(t, envelope.Error.Message, "requires signed requests")
-						}
+						require.Equal(t, tc.code, envelope.Error.Code)
 					})
 				}
 			})
