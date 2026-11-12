@@ -326,7 +326,9 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 	case "kata.skills":
 		setStringBounds("name", 0, 64)
 		property("name").Description = "Guide name: " + strings.Join(SkillGuides(), ", ") + "; omit to list the guides"
-	case "kata.connectors", "kata.connector_fields":
+	case "kata.connectors":
+		setStringBounds("instance", 1, 128)
+	case "kata.connector_fields":
 		setStringBounds("instance", 1, 128)
 	case "kata.cron_run_observe":
 		restrictCronSessionSchema(schema)

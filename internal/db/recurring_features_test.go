@@ -80,6 +80,9 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	if strings.Contains(query, "SELECT EXISTS") {
 		return &featureProbeRows{presence: true}, nil
 	}
+	if strings.Contains(query, "SELECT r.summary_json FROM cron_runs") {
+		return &featureProbeRows{presence: true, seen: true}, nil
+	}
 	if strings.Contains(query, "'projection.job'") {
 		c.state.probeQueries++
 		return &featureProbeRows{}, nil

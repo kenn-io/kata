@@ -25,7 +25,7 @@ func TestAdoptionMetadataReader(t *testing.T) {
 		{"wrong ID", `{"project_id":42,"project_uid":"` + uid + `"}`, db.SupportedEventFeatures, 200, true},
 		{"wrong UID", `{"project_id":41,"project_uid":"other"}`, db.SupportedEventFeatures, 200, true},
 		{"invalid", `{`, "", 200, true},
-		{"oversized", `{"project_id":41,"project_uid":"` + strings.Repeat("x", federationRebindResponseLimit) + `"}`, "", 200, true},
+		{"oversized", strings.Repeat(" ", federationRebindResponseLimit) + `{"project_id":41,"project_uid":"` + uid + `"}`, db.SupportedEventFeatures, 200, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var auth, path, features string
@@ -65,7 +65,13 @@ func TestAdoptionMetadataReaderPinsOriginAndRejectsRedirect(t *testing.T) {
 	target := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
 	t.Cleanup(target.Close)
 	source := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+		if r.URL.Path == "/destination" {
+			reached = true
+			w.Header().Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
+			_, _ = fmt.Fprint(w, `{"project_id":41,"project_uid":"uid"}`)
+			return
+		}
+		http.Redirect(w, r, "/destination", http.StatusTemporaryRedirect)
 	}))
 	t.Cleanup(source.Close)
 	credential := config.FederationCredential{HubURL: source.URL, HubProjectID: 41, Token: "enrollment-secret"}

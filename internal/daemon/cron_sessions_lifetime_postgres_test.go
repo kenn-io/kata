@@ -64,7 +64,7 @@ func TestCronAdmissionOutlivesProbeDeadlineAcrossPostgresStores(t *testing.T) {
 	t.Cleanup(server.Close)
 	runUID, err := uid.New()
 	require.NoError(t, err)
-	body := fmt.Sprintf(`{"job_uid":%q,"definition_event_uid":%q,"actor":"worker","status":"succeeded","summary":{"version":1,"sessions":[{"agent":"claude","session_id":"00000000-0000-4000-8000-000000000001"}]}}`, job.UID, job.DefinitionEventUID)
+	body := fmt.Sprintf(`{"job_uid":%q,"definition_event_uid":%q,"actor":"worker","status":"succeeded","expected_revision":0,"summary":{"version":1,"sessions":[{"agent":"claude","session_id":"00000000-0000-4000-8000-000000000001"}]}}`, job.UID, job.DefinitionEventUID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, fmt.Sprintf("%s/api/v1/projects/%d/cron/runs/%s", server.URL, project.ID, runUID), bytes.NewBufferString(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -101,19 +101,19 @@ func TestCronAdmissionOutlivesProbeDeadlineAcrossPostgresStores(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	lockCtx, lockCancel := context.WithTimeout(ctx, 300*time.Millisecond)
-	defer lockCancel()
-	exclusive, err := other.AcquireFederationProjectExclusiveLock(lockCtx, project.ID)
-	if err == nil {
-		exclusive()
-		t.Fatal("exclusive lock acquired before observation commit")
-	}
-	require.ErrorIs(t, err, context.DeadlineExceeded)
+	// Try the same project-scoped exclusive advisory lock from the other store.
+	// The statement transaction releases it immediately if it was acquired.
+	var acquired bool
+	err = other.QueryRowContext(ctx, `SELECT pg_catalog.pg_try_advisory_xact_lock(
+		pg_catalog.hashtextextended(pg_catalog.current_database() || ':kata:federation:project:' ||
+		pg_catalog.current_schema() || ':' || $1::bigint::text, 0))`, project.ID).Scan(&acquired)
+	require.NoError(t, err)
+	require.False(t, acquired, "exclusive lock acquired before observation commit")
 	close(paused.resume)
 	require.NoError(t, <-done)
 	_, err = writer.CronRun(ctx, project.ID, runUID)
 	require.NoError(t, err)
-	exclusive, err = other.AcquireFederationProjectExclusiveLock(ctx, project.ID)
+	exclusive, err := other.AcquireFederationProjectExclusiveLock(ctx, project.ID)
 	require.NoError(t, err)
 	exclusive()
 }

@@ -3,6 +3,7 @@ package federation_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -269,6 +270,18 @@ type orderedReplicaServiceStore struct {
 	seen          map[string]bool
 	arrived       map[string]chan struct{}
 	release       map[string]chan struct{}
+}
+
+func (s *orderedReplicaServiceStore) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	return s.Storage.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	}).BeginTx(ctx, opts)
+}
+
+func (s *failAdoptionLookupAfterRekeyStore) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	return s.Storage.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	}).BeginTx(ctx, opts)
 }
 
 func newOrderedReplicaServiceStore(

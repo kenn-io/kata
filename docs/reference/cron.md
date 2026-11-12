@@ -689,6 +689,10 @@ refuse observations containing sessions; they still accept observations without
 them. See [adopting an existing project](../operations/federation.md#adopting-an-existing-project)
 for session requirements.
 
+Older versions cannot read, list, or export runs that record sessions. Before
+rolling back, keep a backup from before the first session-bearing observation;
+restoring it discards later changes.
+
 A new observation uses expected revision 0. A changed observation requires its
 current revision. An identical retry of the same UID and canonical evidence
 returns `replayed: true`, emits no event, and changes no revision even when its

@@ -43,9 +43,22 @@ type CronRunObserveInput struct {
 // contract cron.ParseSummary enforces: 1-64 sessions, a non-empty step, and a
 // true-only incomplete marker, none of them null.
 func restrictCronSessionSchema(schema *jsonschema.Schema) {
-	summary := schema.Properties["summary"].Properties
+	if schema == nil {
+		panic("cron run observe schema is nil")
+	}
+	summarySchema := schema.Properties["summary"]
+	if summarySchema == nil {
+		panic("cron run observe schema missing summary")
+	}
+	summary := summarySchema.Properties
 	sessions, incomplete := summary["sessions"], summary["sessions_incomplete"]
+	if sessions == nil || sessions.Items == nil || incomplete == nil {
+		panic("cron run observe schema missing session fields")
+	}
 	step := sessions.Items.Properties["step"]
+	if step == nil {
+		panic("cron run observe schema missing session step")
+	}
 	one, most, marker := 1, 64, any(true)
 	sessions.Type, sessions.Types, sessions.MinItems, sessions.MaxItems = "array", nil, &one, &most
 	step.Type, step.Types, step.MinLength = "string", nil, &one

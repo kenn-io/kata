@@ -18,7 +18,7 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-func adoptionRun(t *testing.T, store *sqlitestore.Store, project db.Project, sessions bool) {
+func adoptionRun(t *testing.T, store db.Storage, project db.Project, sessions bool) db.ObserveCronRun {
 	t.Helper()
 	definition := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
 	job, _, err := store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "worker", Definition: definition})
@@ -30,8 +30,11 @@ func adoptionRun(t *testing.T, store *sqlitestore.Store, project db.Project, ses
 		marker := true
 		summary.SessionsIncomplete = &marker
 	}
-	_, err = store.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "worker", Status: "succeeded", Summary: summary})
+	in := db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "worker", Status: "succeeded", Summary: summary}
+	observed, err := store.ObserveCronRun(t.Context(), in)
 	require.NoError(t, err)
+	in.ExpectedRevision = observed.Run.Revision
+	return in
 }
 
 func adoptionParams(project db.Project, hubURL string) daemon.EnsureFederationReplicaParams {
@@ -156,7 +159,7 @@ func TestAdoptionLateSessionRefusesAndCompatibleRetry(t *testing.T) {
 		return &http.Client{Transport: adoptionTransport(func(r *http.Request) (*http.Response, error) {
 			clone := r.Clone(r.Context())
 			u := *r.URL
-			target, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+			target, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, server.URL, nil)
 			u.Scheme, u.Host = target.URL.Scheme, target.URL.Host
 			clone.URL = &u
 			return server.Client().Transport.RoundTrip(clone)
