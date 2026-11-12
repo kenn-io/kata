@@ -61,7 +61,7 @@ func TestJoinCommandSigningPlaceholders(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("shell argument parsing requires a POSIX shell")
 	}
-	in := api.FederationJoinInstructions{ProjectName: "spoke-project", HubURL: "https://daemon.example/federation", HubProjectID: 42, Token: "join-token", Capabilities: "pull", Actor: "tester", AllowInsecure: true}
+	in := api.FederationJoinInstructions{ProjectName: "spoke-project", HubURL: "https://daemon.example/federation", HubProjectID: 42, Token: "join-token", Capabilities: "pull", Actor: "tester"}
 	script := `kata() { printf '%s\0' "$@"; }; ` + joincommand.Build(in, joincommand.SigningTemplate())
 	out, err := exec.CommandContext(t.Context(), "sh", "-c", script).CombinedOutput() //nolint:gosec // Capture shell arguments without running kata.
 	require.NoError(t, err, "%s", out)
