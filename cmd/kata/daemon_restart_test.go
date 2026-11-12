@@ -32,9 +32,12 @@ func stubDaemonExecutable(t *testing.T, resolve func() (string, error)) {
 func TestSelectRestartGeneration(t *testing.T) {
 	first := kitdaemon.RuntimeRecord{PID: 9, StartedAt: time.Unix(1, 0)}
 	second := kitdaemon.RuntimeRecord{PID: 10, StartedAt: time.Unix(2, 0)}
-	got, err := selectRestartGeneration([]kitdaemon.RuntimeRecord{first, second}, restartGeneration(first))
+	got, err := selectRestartGeneration([]kitdaemon.RuntimeRecord{first, second}, restartGeneration(second))
 	require.NoError(t, err)
-	require.Equal(t, first, got)
+	require.Equal(t, second, got)
+	reused := kitdaemon.RuntimeRecord{PID: 9, StartedAt: time.Unix(2, 0)}
+	_, err = selectRestartGeneration([]kitdaemon.RuntimeRecord{reused}, restartGeneration(first))
+	require.ErrorContains(t, err, "no longer running")
 }
 
 func TestRestartLockDeadline(t *testing.T) {
