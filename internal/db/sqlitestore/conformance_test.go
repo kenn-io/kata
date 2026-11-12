@@ -14,6 +14,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testfix"
 )
 
 func TestStorageConformance(t *testing.T) {
@@ -23,7 +24,7 @@ func TestStorageConformance(t *testing.T) {
 		SearchIndexesEmoji: true,
 		Open: func(t *testing.T) db.Storage {
 			t.Helper()
-			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+			store, err := testfix.OpenSQLite(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 			require.NoError(t, err)
 			return store
 		},

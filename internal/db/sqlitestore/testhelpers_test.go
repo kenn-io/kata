@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testfix"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -28,7 +29,7 @@ func openTestDB(t *testing.T) *sqlitestore.Store {
 func openTestDBWithPath(t *testing.T) (*sqlitestore.Store, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kata.db")
-	d, err := sqlitestore.Open(t.Context(), path)
+	d, err := testfix.OpenSQLite(t.Context(), path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return d, path
