@@ -58,7 +58,7 @@ func relayRows(t *testing.T, store db.Storage) map[string][]string {
 	return result
 }
 
-func relaySessionHistory(t *testing.T, root *relayMatrixNode, clear, incomplete bool) {
+func relaySessionHistory(t *testing.T, root *relayMatrixNode, clearSummary, incomplete bool) {
 	t.Helper()
 	def := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
 	job, _, err := root.store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: root.project.ID, Name: "Review", Actor: root.account, Definition: def})
@@ -76,7 +76,7 @@ func relaySessionHistory(t *testing.T, root *relayMatrixNode, clear, incomplete 
 	in := db.ObserveCronRun{ProjectID: root.project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: root.account, Status: "succeeded", Summary: summary}
 	observed, err := root.store.ObserveCronRun(t.Context(), in)
 	require.NoError(t, err)
-	if clear {
+	if clearSummary {
 		in.ExpectedRevision = observed.Run.Revision
 		in.Summary = cron.Summary{Version: 1}
 		_, err = root.store.ObserveCronRun(t.Context(), in)

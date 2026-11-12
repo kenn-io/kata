@@ -497,7 +497,7 @@ func TestCronSpokeForwardPreservesUIDPath(t *testing.T) {
 func TestCronSessionObservationRequiresHubFeature(t *testing.T) {
 	for _, mode := range []string{"supported", "unreachable", "push disabled"} {
 		t.Run(mode, func(t *testing.T) {
-			f := newCronForwardFixture(t, func(f *cronForwardFixture, cfg *daemon.ServerConfig) {
+			f := newCronForwardFixture(t, func(_ *cronForwardFixture, cfg *daemon.ServerConfig) {
 				if mode == "unreachable" {
 					cfg.FederationHubClient = func(context.Context, config.FederationCredential) (*http.Client, error) {
 						return nil, errors.New("unreachable")
@@ -568,7 +568,7 @@ func TestCronSessionObservationDuringAdoption(t *testing.T) {
 	require.NoError(t, err)
 	before, err := f.spoke.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
-	paused := &pausedCronAdoption{TransactionalStore: dbtest.TransactionalStore{Storage: f.spoke.DB}, entered: make(chan struct{}), resume: make(chan struct{})}
+	paused := &pausedCronAdoption{TransactionalStore: {Storage: f.spoke.DB}, entered: make(chan struct{}), resume: make(chan struct{})}
 	params := replicaServiceParams()
 	params.ProjectName = project.Name
 	params.AdoptExisting = true

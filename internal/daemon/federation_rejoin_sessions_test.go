@@ -14,7 +14,6 @@ import (
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/uid"
@@ -160,7 +159,7 @@ func TestFederationReplicaWaitsForCommittedObservation(t *testing.T) {
 				require.NoError(t, err)
 				params = rejoinParams(project, "http://hub.example")
 			}
-			wrapped := &signaledProjectLockStore{TransactionalStore: dbtest.TransactionalStore{Storage: store}, entered: make(chan struct{})}
+			wrapped := &signaledProjectLockStore{TransactionalStore: {Storage: store}, entered: make(chan struct{})}
 			release, err := federationcoord.BeginSync(t.Context(), "other-process-"+federationcoord.Key(store.InstanceUID(), project.ID), wrapped, project.ID)
 			require.NoError(t, err)
 			t.Cleanup(release)
