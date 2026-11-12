@@ -175,3 +175,18 @@ func TestCronObservationRechecksRevokedActorToken(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, runs)
 }
+
+func TestCronRunStatsWindow(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "example-project")
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/runs/stats", project.ID)
+	status, raw := cronHTTP(t, env, http.MethodGet, path+"?until=2026-11-01T00:00:00Z&bucket=day", nil)
+	require.Equalf(t, http.StatusOK, status, "%s", raw)
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(raw, &result))
+	require.Nil(t, result["success_rate"])
+	require.Nil(t, result["duration_seconds"])
+	require.Equal(t, "2026-10-02T00:00:00Z", result["window"].(map[string]any)["since"])
+	status, _ = cronHTTP(t, env, http.MethodGet, path+"?job_uid=01J00000000000000000000010&workflow_uid=01J00000000000000000000020", nil)
+	require.Equal(t, http.StatusBadRequest, status)
+}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
@@ -53,7 +54,7 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 		command.AddCommand(group)
 	}
 	runs := &cobra.Command{Use: "run", Short: "list, show and record independent run observations"}
-	for _, action := range []string{"list", "show", "observe"} {
+	for _, action := range []string{"list", "show", "observe", "stats"} {
 		runs.AddCommand(newCronOperationCmd("run", action))
 	}
 	capabilities := newCronOperationCmd("capabilities", "show")
@@ -64,21 +65,22 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 }
 
 type cronCLIOptions struct {
-	resource, action                 string
-	file, identity, expectedEventUID string
-	parent                           string
-	includeDeleted                   bool
-	limit                            int64
-	beforeUID, jobUID                string
+	resource, action                            string
+	file, identity, expectedEventUID            string
+	parent                                      string
+	includeDeleted                              bool
+	limit                                       int64
+	beforeUID, jobUID                           string
+	workflowUID, since, until, bucket, timezone string
 }
 
 func (o cronCLIOptions) mutation() bool {
-	return o.action != "list" && o.action != "show" && o.action != "edit"
+	return o.action != "list" && o.action != "show" && o.action != "edit" && o.action != "stats"
 }
 func (o cronCLIOptions) definition() bool { return o.resource == "job" || o.resource == "workflow" }
 func newCronOperationCmd(resource, action string) *cobra.Command {
 	options := cronCLIOptions{resource: resource, action: action, limit: 100}
-	takesUID := (resource == "job" || resource == "workflow" || resource == "run") && action != "list" && action != "create"
+	takesUID := (resource == "job" || resource == "workflow" || resource == "run") && action != "list" && action != "create" && action != "stats"
 	command := &cobra.Command{Use: action, Short: action + " " + resource, Args: cobra.NoArgs}
 	command.Long, command.Example = cronOperationHelp(resource, action)
 	if resource == "job" {
@@ -122,6 +124,14 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 		command.Flags().StringVar(&options.beforeUID, "before-uid", "", "run UID cursor from next_before_uid")
 		command.Flags().StringVar(&options.jobUID, "job-uid", "", "list only runs of this job")
 	}
+	if resource == "run" && action == "stats" {
+		command.Flags().StringVar(&options.jobUID, "job-uid", "", "filter by job UID")
+		command.Flags().StringVar(&options.workflowUID, "workflow-uid", "", "filter by workflow UID")
+		command.Flags().StringVar(&options.since, "since", "", "RFC3339 instant or duration such as 30d or 24h")
+		command.Flags().StringVar(&options.until, "until", "", "RFC3339 exclusive end instant")
+		command.Flags().StringVar(&options.bucket, "bucket", "", "none or day")
+		command.Flags().StringVar(&options.timezone, "timezone", "", "IANA time zone for day buckets")
+	}
 	return command
 }
 
@@ -132,6 +142,8 @@ func cronOperationHelp(resource, action string) (string, string) {
 	case "capabilities show":
 		return `Show whether the daemon supports shared cron and recurring child issues for
 this project (cron_v1 covers all cron features). Reads only; creates no cron state.`, "  kata cron capabilities --json"
+	case "run stats":
+		return "Summarize retained runs over a bounded time window.", "  " + cmd + " --since 30d --bucket day --json"
 	case "run list":
 		return `List the project's recorded runs, newest first. --job-uid lists one job's runs.
 For the next page, pass the response's next_before_uid as --before-uid.`,
@@ -219,7 +231,7 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if cmd.Flags().Changed("parent") && strings.TrimSpace(o.parent) == "" {
 		return cronCLIValidation("--parent must not be empty")
 	}
-	for _, value := range []*string{&o.identity, &o.beforeUID, &o.jobUID} {
+	for _, value := range []*string{&o.identity, &o.beforeUID, &o.jobUID, &o.workflowUID} {
 		if *value != "" {
 			normalized, err := normalizedCronCLIUID(*value)
 			if err != nil {
@@ -609,7 +621,7 @@ func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64,
 	switch {
 	case o.resource == "capabilities":
 		return o.callCapabilities(a, c, projectID)
-	case o.action == "list" || o.action == "show":
+	case o.action == "list" || o.action == "show" || o.action == "stats":
 		return o.callRead(a, c, projectID)
 	case o.action == "delete" || o.action == "restore":
 		return o.callLifecycle(a, c, projectID, raw)
@@ -620,6 +632,20 @@ func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64,
 
 func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID int64) ([]byte, error) {
 	switch {
+	case o.resource == "run" && o.action == "stats":
+		since := o.since
+		if since != "" {
+			instant, err := parseSinceUntil(since, time.Now())
+			if err != nil {
+				return nil, cronCLIValidation(err.Error())
+			}
+			since = instant.Format(time.RFC3339Nano)
+		}
+		response, err := c.GetCronRunStatsWithResponse(a.ctx, &generated.GetCronRunStatsRequestOptions{PathParams: &generated.GetCronRunStatsPath{ProjectID: projectID}, Query: &generated.GetCronRunStatsQuery{JobUID: &o.jobUID, WorkflowUID: &o.workflowUID, Since: &since, Until: &o.until, Bucket: &o.bucket, Timezone: &o.timezone}})
+		if response == nil {
+			return nil, externalCLITransportError(response, err)
+		}
+		return cronCLIResponse(response.StatusCode, response.Body, err)
 	case o.resource == "job" && o.action == "list":
 		response, err := c.ListCronJobsWithResponse(a.ctx, &generated.ListCronJobsRequestOptions{PathParams: &generated.ListCronJobsPath{ProjectID: projectID}, Query: &generated.ListCronJobsQuery{IncludeDeleted: &o.includeDeleted}})
 		if response == nil {

@@ -221,7 +221,7 @@ var storageScenarios = []scenario{
 	{name: "cron definition export deleted filter", methods: []string{"CreateProject", "PutCronJob", "PutCronWorkflow", "ObserveCronRun", "ExportCronJobs", "ExportCronWorkflows", "ExportCronRuns"}, run: checkCronDefinitionExportDeletedFilter},
 	{name: "cron data blocks orphan cleanup", methods: []string{"CreateProject", "HardDeleteProject", "PutCronJob", "ObserveCronRun", "CronJob", "CronRun", "ProjectByID"}, run: checkCronDataBlocksOrphanCleanup},
 	{name: "cron run revision after remote winner", methods: []string{"CreateProject", "PutCronJob", "ObserveCronRun", "EnableProjectFederation", "InsertRemoteEvent", "MaterializeFederatedProject", "CronRun"}, run: checkCronRunRevisionAfterRemoteWinner},
-	{name: "run history instants", methods: []string{"ObserveCronRun", "ListCronRuns"}, run: checkRunHistoryInstants},
+	{name: "run history instants", methods: []string{"ObserveCronRun", "ListCronRuns", "CronRunStats"}, run: checkRunHistoryInstants},
 	{name: "cron backup tombstone round trip", methods: []string{"CreateProject", "PutCronJob", "PutCronWorkflow", "ObserveCronRun", "ImportReplay", "CronJob", "CronWorkflow", "CronRun", "ListCronJobs", "ListCronWorkflows"}, runWithBackend: checkCronBackupTombstoneRoundTrip},
 	{name: "cron project purge", methods: []string{"CreateProject", "PutCronJob", "PutCronWorkflow", "ObserveCronRun", "RemoveProject", "PurgeProject", "CronJob", "CronWorkflow", "CronRun"}, run: checkCronProjectPurge},
 	{name: "run observation validation", methods: []string{"CreateProject", "PutCronJob", "PutCronWorkflow", "ObserveCronRun", "CronRun"}, run: checkRunObservationValidation},

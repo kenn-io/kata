@@ -810,3 +810,14 @@ func TestCronCLIParentUpdateKeepsBindingProtections(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, parents[0].UID, stored.Definition.Issue.ParentUID)
 }
+
+func TestCronRunStatsCLI(t *testing.T) {
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	raw, _, err := executeCronCLI(t, env.URL, nil, "run", "stats", "--since", "2d", "--bucket", "day")
+	require.NoError(t, err)
+	var result map[string]any
+	require.NoError(t, json.Unmarshal([]byte(raw), &result))
+	require.Nil(t, result["success_rate"])
+}

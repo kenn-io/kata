@@ -144,3 +144,11 @@ func TestCronRunProjectSelectionAndInvalidEvidence(t *testing.T) {
 	}
 	require.Empty(t, cronOK(t, f.session, "cron_runs", map[string]any{})["runs"])
 }
+
+func TestCronRunStats(t *testing.T) {
+	f := newCronFixture(t)
+	result := cronOK(t, f.session, "cron_run_stats", map[string]any{"bucket": "day", "until": "2026-11-01T00:00:00Z"})
+	require.Nil(t, result["success_rate"])
+	require.Nil(t, result["duration_seconds"])
+	require.True(t, cronCall(t, f.session, "cron_run_stats", map[string]any{"job_uid": "01J00000000000000000000010", "workflow_uid": "01J00000000000000000000020"}).IsError)
+}

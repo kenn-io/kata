@@ -616,6 +616,14 @@ Stored definitions and events stay unchanged. Deleting a cron job does not
 remove its retained history or the project's cron capability requirement.
 See [Cron triggers](#triggers) for the expression rules.
 
+## Run statistics
+
+Use `kata cron run stats --since 30d --bucket day --timezone America/New_York --json` to summarize retained runs. Filter by `--job-uid` or `--workflow-uid`, but not both. `--since` accepts an RFC 3339 instant or a duration such as `30d` or `24h`; `--until` accepts an RFC 3339 instant. The default window is the 30 days ending at `until` or now. The maximum span is 366 days, with an inclusive start and exclusive end.
+
+The response counts every status. Success rate is succeeded divided by succeeded plus failed, rounded to four decimal places, or null when neither exists. Durations cover succeeded and failed runs with start and end times; min, median, p95 and max use seconds and nearest-rank percentiles. A failure streak skips running, cancelled and unknown runs and stops at a success. Last success and failure use the end instant, falling back to creation. Day buckets group creation instants in the requested IANA time zone, default UTC, and omit empty days and zero status counts.
+
+The read scans at most 10,000 matching runs, newest first. `truncated` means older runs were omitted and the returned window start is the oldest scanned instant; equal timestamps at that boundary can include omitted runs. Results cover only retained runs held by this daemon. Pruning or a replica that has not pulled all events reduces the data available. The read returns no message, actor, label or issue reference. The HTTP and MCP forms use the same filters, window, bucket and timezone; the HTTP operation is `getCronRunStats` and the MCP tool is `kata.cron_run_stats` under `kata.load_cron`. This read requires daemon API 0.47.0.
+
 ## Independent run evidence
 
 An adapter creates one independent run UID and retains it across retries:
@@ -828,6 +836,7 @@ entries follow `kata.`. CLI and MCP create definitions through stable-UID
 | `DELETE` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}` | `archiveCronWorkflow` | `workflow delete` | `cron_workflow_delete` |
 | `POST` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}/restore` | `restoreCronWorkflow` | `workflow restore` | `cron_workflow_restore` |
 | `GET` | `/api/v1/projects/{project_id}/cron/runs` | `listCronRuns` | `run list` | `cron_runs` |
+| `GET` | `/api/v1/projects/{project_id}/cron/runs/stats` | `getCronRunStats` | `run stats` | `cron_run_stats` |
 | `GET` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `showCronRun` | `run show` | `cron_run` |
 | `PUT` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `observeCronRun` | `run observe` | `cron_run_observe` |
 

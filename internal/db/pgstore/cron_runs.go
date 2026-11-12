@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -19,4 +20,9 @@ func (s *Store) CronRun(ctx context.Context, p int64, id string) (db.CronRun, er
 // ListCronRuns returns a bounded ordinary history page.
 func (s *Store) ListCronRuns(ctx context.Context, in db.CronRunList) ([]db.CronRun, error) {
 	return s.cronSQL().Runs(ctx, in)
+}
+
+// CronRunStats reads bounded evidence for statistics.
+func (s *Store) CronRunStats(ctx context.Context, in db.CronRunStatsQuery) ([]cron.RunStatRow, bool, error) {
+	return s.cronSQL().RunStats(ctx, in)
 }

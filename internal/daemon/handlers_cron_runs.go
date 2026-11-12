@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
+
+	"go.kenn.io/kata/internal/cron"
 
 	"github.com/danielgtaylor/huma/v2"
 	"go.kenn.io/kata/internal/api"
@@ -61,6 +64,57 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		}
 		out := &api.CronRunResponse{}
 		out.Body.Run = api.CronRunFrom(run)
+		return out, nil
+	})
+	huma.Register(h, huma.Operation{OperationID: "getCronRunStats", Method: http.MethodGet, Path: base + "/runs/stats"}, func(ctx context.Context, in *api.CronRunStatsRequest) (*api.CronRunStatsResponse, error) {
+		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		invalid := func(message string) error { return api.NewError(400, "validation", message, "", nil) }
+		if in.JobUID != "" && in.WorkflowUID != "" {
+			return nil, invalid("job_uid and workflow_uid are mutually exclusive")
+		}
+		until := time.Now().UTC()
+		if in.Until != "" {
+			until, err = time.Parse(time.RFC3339, in.Until)
+			if err != nil {
+				return nil, invalid("invalid until")
+			}
+		}
+		since := until.Add(-30 * 24 * time.Hour)
+		if in.Since != "" {
+			since, err = time.Parse(time.RFC3339, in.Since)
+			if err != nil {
+				return nil, invalid("invalid since")
+			}
+		}
+		if !since.Before(until) || until.Sub(since) > 366*24*time.Hour {
+			return nil, invalid("window must be positive and at most 366 days")
+		}
+		if in.Bucket != "" && in.Bucket != "none" && in.Bucket != "day" {
+			return nil, invalid("invalid bucket")
+		}
+		zone := in.Timezone
+		if zone == "" {
+			zone = "UTC"
+		}
+		loc, err := time.LoadLocation(zone)
+		if err != nil {
+			return nil, invalid("invalid timezone")
+		}
+		rows, truncated, err := cfg.DB.CronRunStats(ctx, db.CronRunStatsQuery{ProjectID: in.ProjectID, JobUID: in.JobUID, WorkflowUID: in.WorkflowUID, Since: since, Until: until})
+		if err != nil {
+			return nil, cronRunAPIError(ctx, cfg, err, in.ProjectID, "")
+		}
+		if truncated {
+			since = rows[len(rows)-1].CreatedAt
+		}
+		out := &api.CronRunStatsResponse{}
+		out.Body.ProjectUID, out.Body.JobUID, out.Body.WorkflowUID = project.UID, in.JobUID, in.WorkflowUID
+		out.Body.Window = api.CronRunStatsWindow{Since: since.UTC(), Until: until.UTC()}
+		out.Body.Truncated = truncated
+		out.Body.RunStatistics = cron.SummarizeRuns(rows, in.Bucket == "day", loc)
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "listCronRuns", Method: http.MethodGet, Path: base + "/runs"}, func(ctx context.Context, in *api.CronRunsRequest) (*api.CronRunsResponse, error) {
