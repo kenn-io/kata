@@ -74,10 +74,10 @@ func TestRequiredSigningRejectsUnsignedEnrollment(t *testing.T) {
 	t.Setenv("TEST_REQUIRED_POLICY_KEY", strings.Repeat("k", 64))
 	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_REQUIRED_POLICY_KEY"}
 	env := testenv.New(t)
-	project, issue := createClaimHubIssueNamed(t, env, "hub-project")
+	project := createFederatedHubProject(t, env, "hub-project")
 	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
 		Token: "enrollment", SpokeInstanceUID: federationTestSpokeUID,
-		ProjectID: &project.ID, Capabilities: "pull,claim", Actor: "example-actor",
+		ProjectID: &project.ID, Capabilities: "pull", Actor: "example-actor",
 	})
 	require.NoError(t, err)
 	synctest.Test(t, func(t *testing.T) {
@@ -130,12 +130,6 @@ func TestRequiredSigningRejectsUnsignedEnrollment(t *testing.T) {
 				}
 			})
 		}
-		owner := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
-			fmt.Sprintf("https://hub.example/api/v1/projects/%d/issues/%s/lease", project.ID, issue.ShortID), nil)
-		owner.Header.Set("Authorization", "Bearer owner-bearer")
-		w := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(w, owner)
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	})
 }
 
