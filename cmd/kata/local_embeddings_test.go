@@ -74,27 +74,7 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		require.True(t, chosen)
 	})
 	t.Run("marker write failure", func(t *testing.T) {
-		var logs bytes.Buffer
-		originalLogger := slog.Default()
-		slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-		t.Cleanup(func() { slog.SetDefault(originalLogger) })
-		setupKataEnv(t)
-		home := clearLocalEmbeddingsEnv(t)
-		stubLocalEmbeddingsInstall(t)
-		oldEndpoint := localEmbeddingsEndpoint
-		t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-		localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
-			if opts.Executable == "" {
-				return "", embedlocal.ErrNotFound
-			}
-			return "http://127.0.0.1:12345/v1", nil
-		}
-		marker := filepath.Join(home, ".kenn", "embeddings", "search-by-meaning")
-		require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0700))
-		if err := os.Symlink("missing", marker); err != nil {
-			t.Skipf("symlink unavailable: %v", err)
-		}
-		t.Setenv("KATA_SERVER", "")
+		logs := setupChoiceWriteFailure(t)
 		out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 		require.NoError(t, err)
 		require.Contains(t, out, "kata health --json")
@@ -104,6 +84,32 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, cfg.Embeddings.Local)
 	})
+}
+
+func setupChoiceWriteFailure(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	setupKataEnv(t)
+	home := clearLocalEmbeddingsEnv(t)
+	t.Setenv("KATA_SERVER", "")
+	stubLocalEmbeddingsInstall(t)
+	oldEndpoint := localEmbeddingsEndpoint
+	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+		if opts.Executable == "" {
+			return "", embedlocal.ErrNotFound
+		}
+		return "http://127.0.0.1:12345/v1", nil
+	}
+	marker := filepath.Join(home, ".kenn", "embeddings", "search-by-meaning")
+	require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0o700))
+	if err := os.Symlink("missing", marker); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	logs := new(bytes.Buffer)
+	originalLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(originalLogger) })
+	return logs
 }
 
 func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {
