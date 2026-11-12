@@ -86,8 +86,8 @@
   after a maintainer has reviewed the one below, even if you were asked to
   open the whole plan. Review usually reshapes a PR, and everything built on
   it then has to be rebuilt.
-- Keep at most five PRs open from your fork. Each one waits for a maintainer,
-  and the ones nobody gets to go stale. At five, hold the next PR and tell the
+- Keep at most 10 PRs open from your fork. Each one waits for a maintainer,
+  and the ones nobody gets to go stale. At 10, hold the next PR and tell the
   user. Leave open PRs as they are.
 - Before each push, check that your schema, API, and protocol version numbers
   are still the next ones free on `main`.
