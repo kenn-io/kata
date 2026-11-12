@@ -4615,10 +4615,9 @@ func TestFederationEnrollmentRequiredSigningJoinInstructions(t *testing.T) {
 		name, supplied, external, want string
 		required, insecure, signing    bool
 	}{
-		{"required without supplied hub URL", "", "https://DAEMON.example:443/federation", "https://daemon.example/federation", true, false, true},
-		{"required with supplied hub URL", "http://127.0.0.1:7777", "https://DAEMON.example:443/federation", "https://daemon.example/federation", true, true, true},
-		{"optional", "http://127.0.0.1:7777", "https://DAEMON.example:443/federation", "http://127.0.0.1:7777", false, true, false},
-		{"required without external URL", "http://127.0.0.1:7777", "", "http://127.0.0.1:7777", true, true, false},
+		{"required without supplied hub URL", "", "https://daemon.example/federation", "https://daemon.example/federation", true, false, true},
+		{"required with supplied hub URL", "http://127.0.0.1:7777", "https://daemon.example/federation", "https://daemon.example/federation", true, true, true},
+		{"optional", "http://127.0.0.1:7777", "https://daemon.example/federation", "http://127.0.0.1:7777", false, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := testenv.New(t, func(cfg *daemon.ServerConfig) {
