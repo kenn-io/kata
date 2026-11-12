@@ -133,6 +133,9 @@ func TestFederationRebindPreflightBoundsRemoteErrors(t *testing.T) {
 	require.ErrorIs(t, err, ErrFederationReplicaHubUnavailable)
 	assert.NotContains(t, err.Error(), "remote-secret-body")
 	assert.Less(t, len(err.Error()), 256)
+	var replicaErr *FederationReplicaError
+	require.ErrorAs(t, err, &replicaErr)
+	assert.Contains(t, replicaErr.Hint(), "HTTPS catalog endpoint")
 }
 
 func TestFederationRebindPreflightClassifiesEnrollmentRejection(t *testing.T) {
@@ -155,6 +158,9 @@ func TestFederationRebindPreflightClassifiesEnrollmentRejection(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrFederationReplicaCredentialConflict)
 	assert.False(t, errors.Is(err, ErrFederationReplicaHubUnavailable))
+	var replicaErr *FederationReplicaError
+	require.ErrorAs(t, err, &replicaErr)
+	assert.Contains(t, replicaErr.Hint(), "same hub")
 }
 
 func TestFederationRebindPreflightClassifiesPinnedSigningBaseMismatch(t *testing.T) {
