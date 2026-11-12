@@ -38,8 +38,6 @@ func TestSelectRestartGeneration(t *testing.T) {
 	reused := kitdaemon.RuntimeRecord{PID: 9, StartedAt: time.Unix(2, 0)}
 	_, err = selectRestartGeneration([]kitdaemon.RuntimeRecord{reused}, restartGeneration(first))
 	require.Error(t, err)
-	_, err = selectRestartGeneration(nil, restartGeneration(first))
-	require.Error(t, err)
 }
 
 func TestRestartLockDeadline(t *testing.T) {

@@ -11,7 +11,6 @@ function status(patch: Partial<LocalEmbeddingsStatus> = {}): LocalEmbeddingsStat
     download_bytes: 290_000_000,
     ollama_available: false,
     can_change: true,
-    can_restart: false,
     ...patch,
   }
 }
@@ -36,7 +35,6 @@ async function settle(): Promise<void> {
 describe('SearchSettings', () => {
   afterEach(() => {
     cleanup()
-    vi.restoreAllMocks()
     vi.unstubAllGlobals()
     vi.useRealTimers()
   })
@@ -119,7 +117,10 @@ describe('SearchSettings', () => {
     expect(postFetch).toHaveBeenCalledTimes(2)
   })
 
-  test.each(['POST', 'GET'])('shows recovery when the restart %s hangs', async (hung) => {
+  test.each([
+    ['POST', true, "Couldn't reconnect. Run kata daemon status, then reopen kata ui."],
+    ['GET', false, 'Run kata daemon status.'],
+  ])('shows recovery when the restart %s hangs', async (hung, originStable, message) => {
     vi.useFakeTimers()
     const waiting = status({
       can_change: false,
@@ -149,12 +150,12 @@ describe('SearchSettings', () => {
       postFetch: vi.fn<typeof fetch>(() =>
         hung === 'POST' ? late : Promise.resolve(new Response(null, { status: 202 })),
       ),
-      originStable: true,
+      originStable,
     })
     await settle()
     await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
     await vi.advanceTimersByTimeAsync(120_000)
-    expect(screen.getByRole('alert').textContent).toContain('kata daemon status')
+    expect(screen.getByRole('alert').textContent).toBe(message)
     await vi.advanceTimersByTimeAsync(2000)
     expect(screen.getByText('On', { exact: true })).not.toBeNull()
     resolveLate(new Response(null, { status: 500 }))
@@ -211,39 +212,6 @@ describe('SearchSettings', () => {
     await vi.advanceTimersByTimeAsync(2000)
     expect(screen.getByRole('alert').textContent).toContain('Restart failed')
     expect(screen.getByRole('button', { name: 'Restart daemon' })).not.toBeNull()
-  })
-
-  test.each([
-    [true, "Couldn't reconnect. Run kata daemon status, then reopen kata ui."],
-    [false, 'Run kata daemon status.'],
-  ])('offers recovery when originStable=%s does not return', async (originStable, message) => {
-    vi.useFakeTimers()
-    setGeneratedFetch(
-      vi
-        .fn<typeof fetch>()
-        .mockResolvedValueOnce(
-          Response.json(
-            status({
-              can_change: false,
-              can_restart: true,
-              job: { state: 'restart', downloaded: 1, total: 1 },
-            }),
-          ),
-        )
-        .mockRejectedValue(new TypeError('disconnected')),
-    )
-    vi.stubGlobal(
-      'confirm',
-      vi.fn(() => true),
-    )
-    renderSettings({
-      postFetch: vi.fn(async () => new Response(null, { status: 202 })),
-      originStable,
-    })
-    await settle()
-    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
-    await vi.advanceTimersByTimeAsync(120_000)
-    expect(screen.getByRole('alert').textContent).toBe(message)
   })
 
   test.each([
