@@ -79,6 +79,16 @@ describe('SnapshotController', () => {
     expect(accepted.at(-1)).toBe(17)
   })
 
+  it('requests retries only before the first snapshot is accepted', async () => {
+    const request = vi
+      .fn<SnapshotRequest<TestIntent, TestSnapshot>>()
+      .mockResolvedValue({ status: 200, etag: '"ok"', snapshot: snapshot('safe', 4) })
+    const controller = new SnapshotController(request, (intent) => intent.key)
+    await controller.load({ key: 'same-route' })
+    await controller.load({ key: 'same-route' })
+    expect(request.mock.calls.map(([, options]) => options.retry)).toEqual([true, false])
+  })
+
   it('retains but stale-marks authority after a safe generic failure', async () => {
     const request = vi
       .fn<SnapshotRequest<TestIntent, TestSnapshot>>()

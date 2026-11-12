@@ -16,6 +16,7 @@ export interface SnapshotRequestOptions {
   signal: AbortSignal
   etag?: string
   full: boolean
+  retry?: boolean
 }
 
 export type SnapshotResponse<TSnapshot> =
@@ -102,6 +103,7 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
       const requestOptions: SnapshotRequestOptions = {
         signal: abort.signal,
         full: options.full === true,
+        retry: this.state.snapshot === undefined,
       }
       if (sameAuthority && this.state.etag && !requestOptions.full) {
         requestOptions.etag = this.state.etag
@@ -329,6 +331,7 @@ export function createUISnapshotRequest(
     if (intent.timeZone) params.time_zone = intent.timeZone
     const response = await request(params, {
       signal: options.signal,
+      ...(options.retry ? { retry: true } : {}),
       ...(options.etag ? { headers: { 'If-None-Match': options.etag } } : {}),
     })
     const status: number = response.status
