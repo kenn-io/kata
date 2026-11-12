@@ -44,11 +44,17 @@ func (a batchExclusiveTargets) Authorize(_ context.Context, request HostAccessRe
 }
 
 func TestMoveBatchRefusalDoesNotAccumulateHostScope(t *testing.T) {
-	for _, mode := range []string{"invalid ref", "stale", "claim", "transaction", "valid"} {
+	for _, mode := range []string{"invalid ref", "stale", "claim", "transaction", "valid", "denied source"} {
 		t.Run(mode, func(t *testing.T) {
 			store := openClaimGateHelperDB(t)
 			source, firstIssue := createClaimGateHelperIssue(t, store)
-			secondIssue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "independent", Author: "agent"})
+			secondSource := source
+			if mode == "denied source" {
+				var err error
+				secondSource, err = store.CreateProject(t.Context(), "allowed-source")
+				require.NoError(t, err)
+			}
+			secondIssue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: secondSource.ID, Title: "independent", Author: "agent"})
 			require.NoError(t, err)
 			first, err := store.CreateProject(t.Context(), "first-target")
 			require.NoError(t, err)
@@ -67,7 +73,11 @@ func TestMoveBatchRefusalDoesNotAccumulateHostScope(t *testing.T) {
 				_, err = store.AcquireClaim(t.Context(), db.AcquireClaimParams{ProjectID: source.ID, IssueRef: firstIssue.UID, Principal: db.ClaimPrincipal{HolderInstanceUID: store.InstanceUID(), Holder: "other"}, ClaimKind: "hard", Now: time.Now().UTC()})
 				require.NoError(t, err)
 			}
-			srv := NewServer(ServerConfig{DB: store, HostAccess: batchExclusiveTargets{first: first.UID, second: target.UID, rejectFence: mode == "transaction"}})
+			var access HostAccessController = batchExclusiveTargets{first: first.UID, second: target.UID, rejectFence: mode == "transaction"}
+			if mode == "denied source" {
+				access = batchDenyProject{denied: source.ID}
+			}
+			srv := NewServer(ServerConfig{DB: store, HostAccess: access})
 			defer func() { _ = srv.Close() }()
 			httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				ctx := WithPrincipal(r.Context(), Principal{Kind: PrincipalHost, Subject: "worker", Actor: "agent"})
@@ -145,43 +155,4 @@ func TestMoveBatchPreservesInheritedTransactionFence(t *testing.T) {
 	got, err := store.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, source.ID, got.ProjectID)
-}
-
-func TestMoveBatchHostDenialIsolationHTTP(t *testing.T) {
-	store := openClaimGateHelperDB(t)
-	denied, first := createClaimGateHelperIssue(t, store)
-	target, err := store.CreateProject(t.Context(), "routing-target")
-	require.NoError(t, err)
-	req := &api.MoveIssuesRequest{}
-	// A denied issue must not poison the allowed neighbor's scope.
-	req.Body.Items = []api.MoveIssuesItem{{Ref: first.UID, ToProjectUID: target.UID}}
-	allowed, err := store.CreateProject(t.Context(), "allowed-source")
-	require.NoError(t, err)
-	permitted, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: allowed.ID, Title: "permitted", Author: "agent"})
-	require.NoError(t, err)
-	req.Body.Items = append(req.Body.Items, api.MoveIssuesItem{Ref: permitted.UID, ToProjectUID: target.UID})
-	srv := NewServer(ServerConfig{DB: store, HostAccess: batchDenyProject{denied: denied.ID}})
-	defer func() { _ = srv.Close() }()
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := WithPrincipal(r.Context(), Principal{Kind: PrincipalHost, Subject: "worker", Actor: "agent"})
-		srv.Handler().ServeHTTP(w, r.WithContext(ctx))
-	}))
-	defer httpServer.Close()
-	raw, err := json.Marshal(req.Body)
-	require.NoError(t, err)
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, httpServer.URL+"/api/v1/issues/actions/move", bytes.NewReader(raw))
-	require.NoError(t, err)
-	request.Header.Set("Content-Type", "application/json")
-	response, err := httpServer.Client().Do(request)
-	require.NoError(t, err)
-	defer func() { _ = response.Body.Close() }()
-	require.Equal(t, 200, response.StatusCode)
-	var reply api.MoveIssuesResponse
-	require.NoError(t, json.NewDecoder(response.Body).Decode(&reply.Body))
-	require.Equal(t, 1, reply.Body.Summary.Moved, "only the independent allowed issue moves: %+v", reply.Body.Results)
-	require.Equal(t, "refused", reply.Body.Results[0].Result)
-	require.Equal(t, "moved", reply.Body.Results[1].Result)
-	got, e := store.IssueByID(t.Context(), first.ID)
-	require.NoError(t, e)
-	require.Equal(t, denied.ID, got.ProjectID)
 }

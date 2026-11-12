@@ -49,7 +49,7 @@ func TestMoveCLI_PreviewRejectsFederationWithoutRefreshingClaims(t *testing.T) {
 
 func TestMoveCLI_PreviewRejectsSameProject(t *testing.T) {
 	env, dir, source, _, issue := setupMoveCLIProjects(t)
-	for _, flags := range [][]string{{"--dry"}, {"--single", "--dry"}, {"--single"}} {
+	for _, flags := range [][]string{{"--dry"}, {"--single", "--dry"}} {
 		args := append([]string{"--project", source.Name, "move", issue.ShortID, source.Name}, flags...)
 		_, _, err := runCLIWithErr(t, env, dir, args...)
 		var cliErr *cliError

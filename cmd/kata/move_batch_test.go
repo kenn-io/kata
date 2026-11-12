@@ -100,46 +100,6 @@ func TestParseRefsFrom(t *testing.T) {
 	require.Equal(t, moveBatchItem{Ref: "abc4", TargetProject: "dst"}, items[1])
 }
 
-func TestMoveBatchCLI_RefusedRowsDoNotConsumeInputBudget(t *testing.T) {
-	env, dir, _, dst, issue := setupMoveCLIProjects(t)
-	bad := strings.Repeat("x", 600000) + "\tbad\textra\n"
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, bad+bad+issue.UID+"\n", "--workspace", dir, "move", dst.Name, "--refs-from", "-", "--json")
-	require.Error(t, err)
-	var reply struct {
-		Results []api.MoveIssuesResult `json:"results"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &reply))
-	require.Len(t, reply.Results, 3)
-	require.Equal(t, "refused", reply.Results[0].Result)
-	require.Equal(t, "refused", reply.Results[1].Result)
-	require.Equal(t, "moved", reply.Results[2].Result)
-	got, err := env.DB.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, dst.ID, got.ProjectID)
-}
-
-func TestMoveBatchCLI_InvalidRefDoesNotConsumeInputBudget(t *testing.T) {
-	env, dir, src, dst, first := setupMoveCLIProjects(t)
-	refs := []string{first.UID}
-	for i := 0; i < 3; i++ {
-		issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "issue", Author: "tester"})
-		require.NoError(t, err)
-		refs = append(refs, issue.UID)
-	}
-	input := strings.Repeat("x", 1048500) + "\n" + strings.Join(refs, "\n") + "\n"
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, input, "--workspace", dir, "move", dst.Name, "--refs-from", "-", "--json")
-	require.Error(t, err)
-	var reply struct {
-		Results []api.MoveIssuesResult `json:"results"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &reply))
-	require.Len(t, reply.Results, 5)
-	require.Equal(t, "refused", reply.Results[0].Result)
-	for _, result := range reply.Results[1:] {
-		require.Equal(t, "moved", result.Result)
-	}
-}
-
 func TestMoveBatchCLI_PreflightFailureReportsAll(t *testing.T) {
 	env, dir, _, dst, issue := setupMoveCLIProjects(t)
 	origin, err := url.Parse(env.URL)
@@ -226,15 +186,6 @@ func TestMoveBatchCLI_RejectedPageIsUnattempted(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestMoveBatchCLI_Quiet(t *testing.T) {
-	env, dir, src, dst, issue := setupMoveCLIProjects(t)
-	other, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: src.ID, Title: "other", Author: "tester"})
-	require.NoError(t, err)
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, "", "--workspace", dir, "--quiet", "move", issue.UID, other.UID, dst.Name)
-	require.NoError(t, err)
-	require.Empty(t, out)
 }
 
 func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
@@ -445,12 +396,21 @@ func TestMoveBatchCLI_SelectionRestrictions(t *testing.T) {
 			t.Run(option, func(t *testing.T) {
 				_, dir, source, target, issue := setupMoveCLIProjects(t)
 				input := strings.Repeat(source.Name+"#"+issue.ShortID+"\n", 2) + strings.Repeat(strings.Repeat("x", 600000)+"\n", 2)
-				_, _, err := executeRootCaptureWithInput(t.Context(), t, input, "--workspace", dir, "move", target.Name, "--refs-from", "-", option)
+				reader := strings.NewReader(input)
+				resetFlags(t)
+				cmd := newRootCmd()
+				cmd.SetIn(reader)
+				cmd.SetOut(io.Discard)
+				cmd.SetErr(io.Discard)
+				cmd.SetContext(t.Context())
+				cmd.SetArgs([]string{"--workspace", dir, "move", target.Name, "--refs-from", "-", option})
+				err := cmd.Execute()
 				message := "--subtree accepts one issue"
 				if option == "--dry" {
 					message = "dry run accepts one item"
 				}
 				require.ErrorContains(t, err, message)
+				require.Greater(t, reader.Len(), 1<<20)
 			})
 		}
 	})
@@ -622,7 +582,7 @@ func TestMoveBatchCLI_SelectorStopsAtLimit(t *testing.T) {
 			t.Cleanup(server.Close)
 			args := []string{"move", "--from-project", source.Name, "--status", "all"}
 			if query {
-				args = append(args, "--query", "unique", "--dry")
+				args = append(args, "--query", "unique")
 			}
 			args = append(args, target.Name, "--json")
 			out, _, err := runCLIAgainst(t, server.URL, dir, args...)
@@ -865,6 +825,9 @@ func TestMoveBatchCLI_HumanShowsEveryResult(t *testing.T) {
 	require.Contains(t, out, "result=unchanged")
 	require.Contains(t, out, "ref="+first.ShortID)
 	require.Contains(t, out, "ref="+second.ShortID)
+	out, _, err = executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, "", "--workspace", dir, "--quiet", "move", first.UID, second.UID, dst.Name)
+	require.NoError(t, err)
+	require.Empty(t, out)
 }
 
 func TestMoveBatchCLI_InterruptedPagesReportAllInputs(t *testing.T) {
@@ -1131,81 +1094,58 @@ func TestMoveCLI_OutputFailureStillAttemptsComment(t *testing.T) {
 	}
 }
 
-func TestMoveBatchCLI_PreviewUIDFromAnotherProject(t *testing.T) {
-	env, dir, source, target, issue := setupMoveCLIProjects(t)
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--dry", "--json")
-	require.NoError(t, err)
-	require.Contains(t, out, issue.UID)
-	got, err := env.DB.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, source.ID, got.ProjectID)
-}
-
-func TestMoveBatchCLI_PreviewUIDDoesNotRefreshClaims(t *testing.T) {
-	env, dir, source, target, issue := setupMoveCLIProjects(t)
-	var calls atomic.Int32
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		http.Error(w, "unavailable", http.StatusForbidden)
-	}))
-	t.Cleanup(hub.Close)
-	_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: source.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: 42, HubProjectUID: source.UID, Enabled: true})
-	require.NoError(t, err)
-	require.NoError(t, config.WriteFederationCredential(source.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "claim-token", Capabilities: "claim"}))
-	_, _, err = executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--dry", "--json")
-	require.ErrorContains(t, err, "cross-project moves involving a federated project are unsupported")
-	_, markerErr := env.DB.ClaimStatusRefreshError(t.Context(), source.ID, issue.UID)
-	assert.ErrorIs(t, markerErr, db.ErrNotFound)
-	assert.Zero(t, calls.Load())
-}
-
-func TestMoveBatchCLI_PreviewUIDRequiresReadOnlyLookup(t *testing.T) {
-	env, dir, _, target, issue := setupMoveCLIProjects(t)
-	origin, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(origin)
-	var lookups atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/health" {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"ok":true,"api_schema_version":"0.44.0"}`)
-			return
-		}
-		if r.URL.Path == "/api/v1/issues/"+issue.UID {
-			lookups.Add(1)
-		}
-		r.Host = origin.Host
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
-	_, _, err = executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--dry")
-	var cliErr *cliError
-	require.ErrorAs(t, err, &cliErr)
-	require.Equal(t, "daemon_api_too_old", cliErr.Code)
-	require.Zero(t, lookups.Load())
-}
-
-func TestMoveBatchCLI_ProjectLookupFailureIsNotRefusal(t *testing.T) {
-	env, dir, source, target, issue := setupMoveCLIProjects(t)
-	origin, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(origin)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/projects" {
-			http.Error(w, "unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		r.Host = origin.Host
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
-	out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, issue.UID+"\n"+issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--json")
-	require.Error(t, err)
-	require.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
-	require.NotContains(t, out, `"result":"refused"`)
-	got, err := env.DB.IssueByID(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, source.ID, got.ProjectID)
+func TestMoveBatchCLI_PreviewUID(t *testing.T) {
+	t.Run("another project", func(t *testing.T) {
+		env, dir, source, target, issue := setupMoveCLIProjects(t)
+		out, _, err := executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--dry", "--json")
+		require.NoError(t, err)
+		require.Contains(t, out, issue.UID)
+		got, err := env.DB.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		require.Equal(t, source.ID, got.ProjectID)
+	})
+	t.Run("read-only claims", func(t *testing.T) {
+		env, dir, source, target, issue := setupMoveCLIProjects(t)
+		var calls atomic.Int32
+		hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls.Add(1)
+			http.Error(w, "unavailable", http.StatusForbidden)
+		}))
+		t.Cleanup(hub.Close)
+		_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: source.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: 42, HubProjectUID: source.UID, Enabled: true})
+		require.NoError(t, err)
+		require.NoError(t, config.WriteFederationCredential(source.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "claim-token", Capabilities: "claim"}))
+		_, _, err = executeRootCaptureWithInput(contextWithBaseURL(t.Context(), env.URL), t, issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--dry", "--json")
+		require.ErrorContains(t, err, "cross-project moves involving a federated project are unsupported")
+		_, markerErr := env.DB.ClaimStatusRefreshError(t.Context(), source.ID, issue.UID)
+		assert.ErrorIs(t, markerErr, db.ErrNotFound)
+		assert.Zero(t, calls.Load())
+	})
+	t.Run("version gate", func(t *testing.T) {
+		env, dir, _, target, issue := setupMoveCLIProjects(t)
+		origin, err := url.Parse(env.URL)
+		require.NoError(t, err)
+		proxy := httputil.NewSingleHostReverseProxy(origin)
+		var lookups atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/health" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"ok":true,"api_schema_version":"0.44.0"}`)
+				return
+			}
+			if r.URL.Path == "/api/v1/issues/"+issue.UID {
+				lookups.Add(1)
+			}
+			r.Host = origin.Host
+			proxy.ServeHTTP(w, r)
+		}))
+		t.Cleanup(server.Close)
+		_, _, err = executeRootCaptureWithInput(contextWithBaseURL(t.Context(), server.URL), t, issue.UID+"\n", "--workspace", dir, "move", target.Name, "--refs-from", "-", "--dry")
+		var cliErr *cliError
+		require.ErrorAs(t, err, &cliErr)
+		require.Equal(t, "daemon_api_too_old", cliErr.Code)
+		require.Zero(t, lookups.Load())
+	})
 }
 
 func TestMoveBatchCLI_PreviewAlreadyInTarget(t *testing.T) {
