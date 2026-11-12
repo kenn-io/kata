@@ -865,7 +865,9 @@ exclusive and force a strategy:
 For an exhaustive lexical scan, use `--lexical --json`, then pass each
 `next_cursor` back with `--cursor` and the same query and filters until
 `complete` is true. Agent output also includes completeness and continuation;
-human output prints an incomplete-results hint to stderr. Other modes keep
+human output prints a command to continue the search to stderr. The command
+retains the query and filters and uses POSIX syntax on Unix or PowerShell
+syntax on Windows. Other modes keep
 ranked, bounded results without continuation. Their `complete` field is false
 when retrieval is truncated, degraded, or cannot establish exhaustion.
 
