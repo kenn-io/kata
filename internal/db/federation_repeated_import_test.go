@@ -435,6 +435,31 @@ func TestRepeatedImportEventAppliesAfterABaselineDatedAhead(t *testing.T) {
 	assert.Equal(t, "2026-07-01T09:00:00.000Z", issue.UpdatedAt)
 }
 
+// A home whose clock runs ahead dates both its snapshot and the snapshot's
+// event in the future. The hub accepted the later copy against the time a hub
+// edit gave the issue, so replay applies it as well. A snapshot that replays
+// after the copy still replaces it.
+func TestRepeatedImportEventAppliesAfterABaselineFromAClockAhead(t *testing.T) {
+	baseline := testEvent("issue.snapshot", 1, `{"uid":"issue-1","title":"first copy","status":"open","updated_at":"2026-12-01T09:00:00.000Z"}`)
+	baseline.CreatedAt = "2026-12-01T09:00:00.000Z"
+	edit := testEvent("issue.updated", 20, `{"body":"june edit","updated_at":"2026-06-02T09:00:00.000Z"}`)
+	edit.CreatedAt = "2026-06-02T09:00:00.000Z"
+	accepted := testEvent(RepeatedImportEventType, 30, `{"title":"july copy","body":"july body","status":"open","comments":[
+ {"comment_uid":"comment-1","author":"alice","body":"july comment","created_at":"2026-06-20T10:00:00.000Z"}],"updated_at":"2026-07-01T09:00:00.000Z"}`)
+	accepted.CreatedAt = "2026-07-01T10:00:00.000Z"
+	got := FoldEvents([]FoldEvent{baseline, edit, accepted})
+	issue := got.Issues["issue-1"]
+	assert.Equal(t, "july copy", issue.Title)
+	assert.Equal(t, "july body", issue.Body)
+	assert.Equal(t, "july comment", got.Comments["comment-1"].Body)
+	assert.Equal(t, "2026-07-01T09:00:00.000Z", issue.UpdatedAt)
+
+	later := testEvent("issue.snapshot", 40, `{"uid":"issue-1","title":"moved back","status":"open","updated_at":"2026-06-15T09:00:00.000Z"}`)
+	later.CreatedAt = "2026-07-02T09:00:00.000Z"
+	got = FoldEvents([]FoldEvent{baseline, edit, accepted, later})
+	assert.Equal(t, "moved back", got.Issues["issue-1"].Title)
+}
+
 // A later copy replaces an earlier one, including its time. The issue's
 // updated_at comes from the winning copy and the changes that survive it, so a
 // copy dated ahead that was since replaced does not hold back newer copies.

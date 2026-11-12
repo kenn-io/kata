@@ -48,13 +48,13 @@ type FoldProjection struct {
 	// commentTouchedAt is the latest comment time of each such issue. A copy
 	// replaces an earlier copy's updated_at, and comments still count.
 	commentTouchedAt map[string]string
-	// baselineUpdatedAt is the updated_at of each such issue's baseline.
-	baselineUpdatedAt map[string]string
-	Links             map[FoldLinkKey]FoldElementState
-	IssueMetadata     map[string]jsontext.Value
-	ProjectMetadata   map[string]jsontext.Value
-	Warnings          []string
-	cronAuthors       map[string]foldCronAuthorCandidate
+	// hasBaseline marks each such issue whose creation or snapshot replayed.
+	hasBaseline     map[string]bool
+	Links           map[FoldLinkKey]FoldElementState
+	IssueMetadata   map[string]jsontext.Value
+	ProjectMetadata map[string]jsontext.Value
+	Warnings        []string
+	cronAuthors     map[string]foldCronAuthorCandidate
 }
 
 // FoldCronJob retains project identity alongside the winning job document.

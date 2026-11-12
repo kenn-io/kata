@@ -71,7 +71,7 @@ func (p *FoldProjection) noteRestatedIssues(events []FoldEvent) {
 			if p.restatedIssues == nil {
 				p.restatedIssues = map[string]struct{}{}
 				p.sinceBaseline = map[string][]FoldEvent{}
-				p.baselineUpdatedAt = map[string]string{}
+				p.hasBaseline = map[string]bool{}
 				p.commentTouchedAt = map[string]string{}
 			}
 			p.restatedIssues[uid] = struct{}{}
@@ -114,13 +114,7 @@ func (p *FoldProjection) applyEvent(e FoldEvent, payload map[string]jsontext.Val
 		if uid := issueUID(e, payload); uid != "" {
 			if _, restated := p.restatedIssues[uid]; restated {
 				p.sinceBaseline[uid] = nil
-				// A baseline can be dated ahead of the clock that wrote it. It
-				// stands for the issue no later than the moment it was written.
-				baselineAt := p.Issues[uid].UpdatedAt
-				if e.CreatedAt != "" && timestampBefore(e.CreatedAt, baselineAt) {
-					baselineAt = e.CreatedAt
-				}
-				p.baselineUpdatedAt[uid] = baselineAt
+				p.hasBaseline[uid] = true
 			}
 		}
 	case "issue.updated":
@@ -380,11 +374,11 @@ func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsont
 }
 
 // applyIssueRestated applies the whole copy a hub recorded for a winning
-// repeated adoption snapshot. It applies only when the copy is newer than the
-// issue at this point of the replay, by updated_at to the millisecond, which
-// is the comparison the hub made when the copy arrived. An edit made after the
-// copy can reach the hub later and replay before this event; the copy then
-// yields to it, as it would have had the edit arrived first.
+// repeated adoption snapshot. The hub compared the copy with the issue it held
+// when the copy arrived, so replay applies it over the issue's baseline. An
+// edit made after the copy can reach the hub later and replay before this
+// event; the copy then yields to it, as it would have had the edit arrived
+// first.
 func (p *FoldProjection) applyIssueRestated(e FoldEvent) {
 	uid := issueUID(e, nil)
 	var in repeatedImportPayload
@@ -392,12 +386,14 @@ func (p *FoldProjection) applyIssueRestated(e FoldEvent) {
 		return
 	}
 	// The hub wrote this event because the copy was newer than the issue it
-	// held. A baseline that is not older than the copy replaces it instead.
-	if baseline, known := p.baselineUpdatedAt[uid]; known && baseline != "" && !repeatedCopyIsNewer(baseline, in.UpdatedAt) {
-		return
-	}
+	// held, so the copy applies over a baseline that replays before it. That
+	// baseline's own date is not compared again: a home whose clock runs ahead
+	// dates its snapshot in the future, and a hub edit since then gave the
+	// issue the earlier time the hub compared. A hub refuses a fresh creation
+	// or snapshot of an issue it holds, and a snapshot it writes for a move
+	// takes a later clock, so no newer baseline replays before the copy.
 	issue := p.ensureIssue(uid)
-	if len(p.sinceBaseline[uid]) == 0 && p.baselineUpdatedAt[uid] == "" && !repeatedCopyIsNewer(issue.UpdatedAt, in.UpdatedAt) {
+	if len(p.sinceBaseline[uid]) == 0 && !p.hasBaseline[uid] && !repeatedCopyIsNewer(issue.UpdatedAt, in.UpdatedAt) {
 		// No history of this issue is held to apply the copy underneath.
 		return
 	}

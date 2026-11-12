@@ -15,11 +15,12 @@ import (
 // field, the label set, the metadata and the comments, with the copy's
 // updated_at.
 //
-// The fold applies it only when that updated_at is later than the issue's at
-// that point of the replay, which is the comparison the hub made when the copy
-// arrived. The event therefore gives the same result wherever it sits among
-// the other events, and it takes the hub's ordinary clock. A reader needs
-// RepeatedAdoptionEventFeature to replay it.
+// The hub writes it only for a copy newer than the issue it held. The fold
+// applies it as the issue's state at that updated_at: changes not newer than
+// the copy yield to it and newer ones apply on top. The event therefore gives
+// the same result wherever it sits among those changes, and it takes the
+// hub's ordinary clock. A reader needs RepeatedAdoptionEventFeature to replay
+// it.
 const RepeatedImportEventType = "issue.restated"
 
 // RepeatedSnapshotDelta is one event the hub writes in place of a repeated
