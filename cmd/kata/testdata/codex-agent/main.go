@@ -8,11 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func main() { os.Exit(run(os.Getenv("KATA_TEST_CODEX_AGENT"))) }
 
 func run(mode string) int {
+	if mode == "slow" {
+		time.Sleep(2 * time.Second)
+	}
 	scanner := bufio.NewScanner(os.Stdin)
 	if mode == "hang" {
 		if scanner.Scan() {

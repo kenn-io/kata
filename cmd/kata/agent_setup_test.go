@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -118,8 +119,10 @@ func TestAgentSetupWarnsForUnstableExecutable(t *testing.T) {
 	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude", "--json")
 	require.NoError(t, err)
 	require.True(t, json.Valid([]byte(out)))
+	require.Empty(t, stderr)
+	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude")
+	require.NoError(t, err)
 	require.Contains(t, stderr, "may not survive an upgrade")
-	require.Contains(t, stderr, "PATH")
 	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude", "--check")
 	require.NoError(t, err)
 	require.NotContains(t, stderr, "may not survive an upgrade")
@@ -273,7 +276,7 @@ func TestAgentSetupFallbackCancellation(t *testing.T) {
 	home := isolateAgentHookHomes(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := agentSetupFallback(ctx, "antigravity", false, agentSetupItem("antigravity", func(string) {}))
+	_, err := agentSetupFallback(ctx, "antigravity", false, agentSetupItem("antigravity", func(string) {}, io.Discard))
 	require.ErrorIs(t, err, context.Canceled)
 	require.NoFileExists(t, filepath.Join(home, ".gemini", "config", "hooks.json"))
 }
@@ -296,4 +299,32 @@ func buildAgentSetupRecovery(t *testing.T) string {
 	output, err := build.CombinedOutput()
 	require.NoError(t, err, string(output))
 	return bin
+}
+
+func TestAgentSetupPreservesCodexForeignGroupIndex(t *testing.T) {
+	home := isolateAgentHookHomes(t)
+	installCodexAgentFixture(t, "normal")
+	t.Setenv("TEST_HOOK_TRUST", "trusted")
+	path := filepath.Join(home, "codex", "hooks.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
+	data := `{"hooks":{"SessionStart":[{"if":"condition","hooks":[{"type":"command","command":"/old/kata agent-hook contract codex"}]},{"hooks":[{"type":"command","command":"foreign-hook"}]}]}}`
+	require.NoError(t, os.WriteFile(path, []byte(data), 0600))
+	_, _, _ = executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "codex")
+	dataBytes, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(dataBytes, &doc))
+	groups := doc["hooks"].(map[string]any)["SessionStart"].([]any)
+	foreign := groups[1].(map[string]any)["hooks"].([]any)[0].(map[string]any)
+	require.Equal(t, "foreign-hook", foreign["command"])
+}
+
+func TestAgentSetupSlowCodexChecks(t *testing.T) {
+	isolateAgentHookHomes(t)
+	installCodexAgentFixture(t, "slow")
+	t.Setenv("TEST_HOOK_TRUST", "trusted")
+	_, _, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "codex")
+	require.NoError(t, err)
+	check := doctorAgent(t.Context(), "codex")
+	require.Equal(t, "ok", string(check.Status), check.Summary)
 }

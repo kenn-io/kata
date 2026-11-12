@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kit/agenthook"
@@ -42,26 +44,15 @@ func agentSetupPlanCurrent(plan nativeAgentHookPlan) bool {
 	return true
 }
 
-func agentSetupItem(name string, warn func(string)) agentsetup.Item {
+func agentSetupItem(name string, warn func(string), output io.Writer) agentsetup.Item {
 	return agentsetup.Item{Name: "hooks", Install: func(ctx context.Context) error {
-		opts, warning, err := agentSetupOptions(name)
-		if err != nil {
-			return err
-		}
-		plan, err := planAgentSetup(&opts)
-		if err == nil && opts.Agent == "opencode" {
-			if opts.API, _, err = resolveOpenCodeRuntimeAPI(ctx, plan.CurrentAPI); err == nil {
-				plan, err = planNativeAgentHooks(opts, false)
-			}
-		}
-		if err != nil {
-			return err
-		}
-		changed, err := publishNativeAgentHookPlan(plan)
-		if err == nil && changed && warning != "" {
-			warn(strings.Replace(warning, " (use --executable for a stable path)", ". Install Kata on PATH and rerun kata agent setup "+name, 1))
-		}
-		return err
+		cmd := newNativeAgentHooksMutationCmd(false)
+		cmd.SetContext(ctx)
+		cmd.SetOut(output)
+		cmd.SetErr(output)
+		cmd.SetIn(strings.NewReader(""))
+		cmd.SetArgs([]string{name})
+		return cmd.Execute()
 	}, Check: func(ctx context.Context) (agentsetup.Status, error) {
 		opts, _, err := agentSetupOptions(name)
 		if err != nil {
@@ -109,7 +100,9 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nati
 		if runtime.GOOS == "windows" && opts.Agent == "claude" {
 			registration.Marker = strings.Join(append([]string{registration.Executable}, registration.Arguments...), " ")
 		}
-		result, err := agenthook.Check(ctx, agenthook.Agent(opts.Agent), registration)
+		probe, cancel := context.WithTimeout(ctx, 5*time.Second)
+		result, err := agenthook.Check(probe, agenthook.Agent(opts.Agent), registration)
+		cancel()
 		if err != nil {
 			return status, err
 		}
@@ -117,6 +110,10 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nati
 		counts[state] += result.HookCount
 		if state == agentsetup.StateMissing || state == agentsetup.StateOutdated {
 			return conflict, nil
+		}
+		if state == agentsetup.StateUnknown || state == agentsetup.StateDisabled {
+			status.State, status.Reason, status.NextStep = state, result.Reason, result.NextStep
+			return status, nil
 		}
 		if state != agentsetup.StateOK && (status.State == agentsetup.StateOK || status.State == agentsetup.StateUntrusted || state == agentsetup.StateDisabled) {
 			status.State, status.Reason, status.NextStep = state, result.Reason, result.NextStep
@@ -156,10 +153,14 @@ func agentSetupFallback(ctx context.Context, name string, checkOnly bool, item a
 func newAgentSetupCmd() *cobra.Command {
 	var check bool
 	cmd := &cobra.Command{Use: "setup [<harness>...]", Short: "Install and check agent hooks", RunE: func(cmd *cobra.Command, args []string) error {
+		output := io.Writer(io.Discard)
+		if currentOutputMode() == outputHuman {
+			output = cmd.ErrOrStderr()
+		}
 		var warnings []string
 		warn := func(warning string) { warnings = append(warnings, warning) }
 		items := func(name string) ([]agentsetup.Item, error) {
-			return []agentsetup.Item{agentSetupItem(name, warn)}, nil
+			return []agentsetup.Item{agentSetupItem(name, warn, output)}, nil
 		}
 		var names []string
 		for _, name := range args {
@@ -184,7 +185,7 @@ func newAgentSetupCmd() *cobra.Command {
 				report.Rows = append(report.Rows, result.Rows...)
 			} else {
 				var row agentsetup.Row
-				row, err = agentSetupFallback(cmd.Context(), name, check, agentSetupItem(name, warn))
+				row, err = agentSetupFallback(cmd.Context(), name, check, agentSetupItem(name, warn, output))
 				report.Rows = append(report.Rows, row)
 			}
 			if err != nil {
