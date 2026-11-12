@@ -4,6 +4,7 @@ package timeparse
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"regexp"
 	"strings"
 	"time"
@@ -19,24 +20,28 @@ func Since(s string, anchor time.Time) (time.Time, error) {
 	invalid := func() (time.Time, error) {
 		return time.Time{}, fmt.Errorf("invalid time spec %q: must be a duration (24h, 7d) or RFC3339 timestamp", s)
 	}
-	expanded := s
-	days := false
+	var d time.Duration
 	if before, ok := strings.CutSuffix(s, "d"); ok {
 		if !dayQuantity.MatchString(before) {
 			return invalid()
 		}
-		expanded = before + "h"
-		days = true
-	}
-	d, err := time.ParseDuration(expanded)
-	if err != nil {
-		return invalid()
-	}
-	if days {
-		if d > time.Duration(math.MaxInt64/24) || d < time.Duration(math.MinInt64/24) {
+		quantity, ok := new(big.Rat).SetString(before)
+		if !ok {
 			return invalid()
 		}
-		d *= 24
+		// Scale before truncating so fractional days retain nanosecond precision.
+		quantity.Mul(quantity, big.NewRat(int64(24*time.Hour), 1))
+		nanoseconds := new(big.Int).Quo(quantity.Num(), quantity.Denom())
+		if !nanoseconds.IsInt64() {
+			return invalid()
+		}
+		d = time.Duration(nanoseconds.Int64())
+	} else {
+		var err error
+		d, err = time.ParseDuration(s)
+		if err != nil {
+			return invalid()
+		}
 	}
 	if d == time.Duration(math.MinInt64) {
 		return invalid()

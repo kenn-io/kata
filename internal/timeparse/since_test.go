@@ -55,3 +55,23 @@ func TestSince(t *testing.T) {
 		})
 	}
 }
+
+func TestSinceFractionalDayNanosecondPrecision(t *testing.T) {
+	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		input string
+		want  time.Time
+	}{
+		{"0.0000000000001d", now.Add(-8 * time.Nanosecond)},
+		{"-0.0000000000001d", now.Add(8 * time.Nanosecond)},
+		{"1.0000000000001d", now.Add(-24*time.Hour - 8*time.Nanosecond)},
+		{"0.00000000000025d", now.Add(-21 * time.Nanosecond)},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			got, err := Since(tc.input, now)
+			if err != nil || !got.Equal(tc.want) {
+				t.Fatalf("Since(%q) = %v, %v; want %v", tc.input, got, err, tc.want)
+			}
+		})
+	}
+}
