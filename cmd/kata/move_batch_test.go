@@ -81,7 +81,7 @@ func TestParseRefsFromDoesNotRetainPadding(t *testing.T) {
 	runtime.GC()
 	runtime.ReadMemStats(&after)
 	runtime.KeepAlive(items)
-	require.Less(t, int64(after.HeapAlloc)-int64(before.HeapAlloc), int64(8<<20))
+	require.Less(t, after.HeapAlloc-min(after.HeapAlloc, before.HeapAlloc), uint64(8<<20))
 }
 
 func TestMoveBatchCLI_PreflightFailureReportsAll(t *testing.T) {
