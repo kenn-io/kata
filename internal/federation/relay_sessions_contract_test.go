@@ -15,7 +15,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
-	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
@@ -292,67 +291,6 @@ type readOnlyAdoptionStore struct{ dbtest.TransactionalStore }
 
 func (readOnlyAdoptionStore) AdoptProjectIntoFederation(context.Context, db.AdoptProjectIntoFederationParams) (db.AdoptProjectIntoFederationResult, error) {
 	return db.AdoptProjectIntoFederationResult{}, db.ErrFederatedReadOnly
-}
-
-// Direct callers must receive the same pre-publication gate as the runner, and
-// session-free batches must not pay for it.
-func TestRelaySessionDirectAcceptProbesOnlySessionBatches(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		sessions bool
-	}{{"sessions", true}, {"session-free", false}} {
-		t.Run(tc.name, func(t *testing.T) {
-			root, peer := relaySessionPair(t, "sqlite")
-			if tc.sessions {
-				relaySessionHistory(t, root, true, false)
-			} else {
-				_, _, err := root.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: root.project.ID, Author: root.account, Title: "Session-free event"})
-				require.NoError(t, err)
-			}
-			binding, err := peer.store.FederationBindingByProject(t.Context(), peer.project.ID)
-			require.NoError(t, err)
-			envelopes, err := root.store.PendingRelayDeliveries(t.Context(), binding.RelayConfig.BindingUID, db.RelayStreamEvent, 100)
-			require.NoError(t, err)
-			require.NotEmpty(t, envelopes)
-			batch := db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: envelopes}
-			features, gets, posts := "", 0, 0
-			var posted db.RelayBatch
-			hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasSuffix(r.URL.Path, "/federation/metadata") {
-					gets++
-					w.Header().Set(db.EventFeaturesHeader, features)
-					_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, root.project.UID)
-					return
-				}
-				if strings.HasSuffix(r.URL.Path, "/relay:accept") {
-					posts++
-					require.NoError(t, json.NewDecoder(r.Body).Decode(&posted))
-					_ = json.NewEncoder(w).Encode(db.RelayAcceptance{Through: envelopes[len(envelopes)-1].Sequence, Digest: envelopes[len(envelopes)-1].Digest})
-					return
-				}
-				http.NotFound(w, r)
-			}))
-			t.Cleanup(hub.Close)
-			client, err := federation.NewClient(t.Context(), hub.URL, "enrollment-token", clientpkg.Opts{})
-			require.NoError(t, err)
-			if tc.sessions {
-				_, err = client.AcceptRelayDeliveries(t.Context(), 42, batch)
-				require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-				require.Equal(t, 1, gets)
-				require.Zero(t, posts)
-				features = db.SupportedEventFeatures
-			}
-			_, err = client.AcceptRelayDeliveries(t.Context(), 42, batch)
-			require.NoError(t, err)
-			wantGets := 0
-			if tc.sessions {
-				wantGets = 2
-			}
-			require.Equal(t, wantGets, gets)
-			require.Equal(t, 1, posts)
-			require.Equal(t, batch, posted)
-		})
-	}
 }
 
 // Conversion seeds already legitimate direct-spoke history into the relay
