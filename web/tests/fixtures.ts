@@ -59,6 +59,7 @@ interface KataFixture {
   restartIdentity(enabled?: boolean): Promise<void>
   prepareSyncDiagnostic(): Promise<void>
   recordSyncDiagnosticError(): void
+  clearSyncDiagnosticError(): void
   runSyncDiagnostic(
     shell: 'bash' | 'pwsh',
     command: string,
@@ -223,9 +224,25 @@ listen = "127.0.0.1:${port}"
             ON CONFLICT(project_id) DO UPDATE SET last_error_at=excluded.last_error_at, last_error=excluded.last_error`,
             )
             .run(message, `spoke \\"project"’s'\\`)
+          database
+            .prepare(
+              `INSERT INTO federation_quarantine(project_id, direction, first_event_id, last_event_id, event_uids, error)
+            SELECT id, 'push', 1, 1, '["example-event"]', 'example held-back batch failure' FROM projects WHERE name = ?`,
+            )
+            .run(`spoke \\"project"’s'\\`)
         } finally {
           database.close()
         }
+      }
+    },
+    clearSyncDiagnosticError() {
+      const database = new DatabaseSync(join(home, 'kata.db'))
+      try {
+        database
+          .prepare('UPDATE federation_sync_status SET last_error = NULL, last_error_at = NULL')
+          .run()
+      } finally {
+        database.close()
       }
     },
     runSyncDiagnostic(shell, command, remote, legacy = false) {

@@ -393,6 +393,10 @@ func TestEmbeddingProducerStatusReportsProducerFailure(t *testing.T) {
 		require.Equal(t, http.StatusOK, code, string(response))
 		require.Contains(t, string(response), `"reason":"producer_unavailable"`)
 		require.Contains(t, string(response), `"last_error":"`+message+`"`)
+		code, _, omitted := f.request(t, http.MethodGet, path+"?compact=true&omit_errors=true", "member", nil, nil)
+		require.Equal(t, http.StatusOK, code, string(omitted))
+		require.Contains(t, string(omitted), `"reason":"producer_unavailable"`)
+		require.NotContains(t, string(omitted), message)
 
 		selectProducer(db.ProjectEmbeddingProducer{ProducerInstanceUID: "00000000000000000000000002", Recipe: recipe})
 		code, _, response = f.request(t, http.MethodGet, path, "member", nil, nil)

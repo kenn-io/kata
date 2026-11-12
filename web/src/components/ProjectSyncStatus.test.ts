@@ -16,7 +16,7 @@ function response(projectID = 7, uid = projectUID, pending = 2): Response {
         pending_push_count: pending,
         last_successful_sync_at: '2026-10-01T12:00:00Z',
         credential_status: 'live',
-        last_error: 'details withheld; run kata federation status',
+        has_sync_error: true,
         embedding: {
           state: 'reused',
           artifact_limit: 32,
@@ -198,6 +198,8 @@ describe('ProjectSyncStatus', () => {
     expect(button.disabled).toBe(false)
     await fireEvent.click(button)
     await screen.findByText('Pending: 0')
+    expect(screen.queryByText('Sync needs attention')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Copy .* sync status command/ })).toBeNull()
     expect(oldSignal?.aborted).toBe(true)
     resolveOld(response())
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -343,11 +345,11 @@ describe('ProjectSyncStatus', () => {
     const url = new URL(String(fetcher.mock.calls[0]?.[0]), 'https://daemon.example')
     expect(url.pathname).toBe('/api/v1/projects/7/federation/status')
     expect(url.searchParams.get('compact')).toBe('true')
+    expect(url.searchParams.get('omit_errors')).toBe('true')
     expect(screen.getByText('Retained window: 3/32 (limited)')).not.toBeNull()
     expect(screen.getByText('Retained without index: 1')).not.toBeNull()
     expect(screen.getByText('Recipe: example-model (2 dimensions)')).not.toBeNull()
     expect(screen.getByText('Sync needs attention')).not.toBeNull()
-    expect(screen.queryByText('details withheld; run kata federation status')).toBeNull()
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 

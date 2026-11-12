@@ -39,10 +39,16 @@ test('local project readers see native sync status with bounded embedding summar
   )
   expect(enabled.ok()).toBe(true)
   kata.recordSyncDiagnosticError()
-  const browserStatus = await kata.request(page, local, 'GET', `${statusPath}?compact=true`)
-  expect(browserStatus.ok()).toBe(true)
-  expect(await browserStatus.text()).not.toContain('example sync failure')
+  const statusRead = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === statusPath,
+  )
   await region.getByRole('button', { name: 'Refresh sync' }).click()
+  const browserStatus = await statusRead
+  expect(browserStatus.ok()).toBe(true)
+  expect(new URL(browserStatus.url()).searchParams.get('omit_errors')).toBe('true')
+  const browserBody = await browserStatus.text()
+  expect(browserBody).not.toContain('example sync failure')
+  expect(browserBody).not.toContain('example held-back batch failure')
   await expect(region.getByText('Sync needs attention')).toBeVisible()
   // This spoke/unconfigured state comes from the native production SQLite daemon.
   await expect(region.getByText('spoke', { exact: true })).toBeVisible()
@@ -84,7 +90,9 @@ test('local project readers see native sync status with bounded embedding summar
       }
       await region.getByRole('button', { name: `Copy ${label} sync status command` }).click()
       const command = await page.evaluate(() => navigator.clipboard.readText())
-      expect(kata.runSyncDiagnostic(shell, command, false)).toContain('example sync failure')
+      const localDiagnostic = kata.runSyncDiagnostic(shell, command, false)
+      expect(localDiagnostic).toContain('example sync failure')
+      expect(localDiagnostic).toContain('example held-back batch failure')
       expect(kata.runSyncDiagnostic(shell, command, true)).toContain('remote sync failure')
       if (shell === 'pwsh') {
         expect(kata.runSyncDiagnostic(shell, command, false, true)).toContain(
@@ -104,4 +112,8 @@ test('local project readers see native sync status with bounded embedding summar
       fullPage: true,
     })
   }
+  kata.clearSyncDiagnosticError()
+  await region.getByRole('button', { name: 'Refresh sync' }).click()
+  await expect(region.getByText('Sync needs attention')).toHaveCount(0)
+  await expect(region.getByRole('button', { name: /Copy .* sync status command/ })).toHaveCount(0)
 })
