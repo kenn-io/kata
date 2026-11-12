@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Use `kata daemon status` in scripts to check the selected daemon's readiness.
+  It exits 0 only for a ready selected daemon. Stopped or unavailable
+  selections and the `version_mismatch` state exit 7, an unknown named daemon
+  exits 3, and other invalid routing configuration exits 1. Status still prints
+  its diagnostics; previously these cases exited 0.
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 
 - Upgrade a large PostgreSQL database without the schema migration rolling

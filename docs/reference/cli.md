@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # CLI reference
@@ -2004,9 +2004,11 @@ resolved web UI URL on its own line after the daemon transport address.
 `daemon status` reports current-home processes and a separate selected-daemon
 diagnosis. It exits 0 only when the selected daemon is ready. Stopped or
 unavailable selections and the `version_mismatch` state exit 7; an unknown
-named daemon exits 3. Diagnostics are printed in every output mode.
+named daemon exits 3; other invalid routing configuration, such as a malformed
+`KATA_SERVER` URL, exits 1. Diagnostics are printed in every output mode.
 In agent mode, the `OK daemon` report on stdout indicates that the report was
-produced; a non-ready selection also emits an `ERR status` line on stderr.
+produced; a non-ready selection also emits an `ERR status` line on stderr. See
+the [agent output contract](agent-output.md#stability-contract).
 `daemon diagnose` inspects selection, home,
 database/project identity, schema, process, and federation origin without
 starting or changing anything.
