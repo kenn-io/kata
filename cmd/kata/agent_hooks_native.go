@@ -122,6 +122,12 @@ func verifyNativeAgentHookChange(change nativeAgentHookChange) error {
 	return nil
 }
 
+func nativeAgentHookPlanChanged(plan nativeAgentHookPlan) bool {
+	return slices.ContainsFunc(plan.Changes, func(change nativeAgentHookChange) bool {
+		return (change.Remove && change.OriginalExists) || (!change.Remove && (!change.OriginalExists || !bytes.Equal(change.Original, change.Content)))
+	})
+}
+
 func publishNativeAgentHookPlan(plan nativeAgentHookPlan) (bool, error) {
 	return publishNativeAgentHookPlanWithRename(plan, atomicfile.Replace)
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,35 +15,22 @@ import (
 	"go.kenn.io/kit/agentsetup"
 )
 
-func agentSetupOptions(name string) (nativeAgentHookOptions, string, error) {
+func agentSetupOptions(name string) (nativeAgentHookOptions, error) {
 	dir, err := agentHookWorkspacePath()
 	if err != nil {
-		return nativeAgentHookOptions{}, "", err
+		return nativeAgentHookOptions{}, err
 	}
 	targets, err := selectNativeAgentHookTargets([]string{name}, false, "user", "", dir)
 	if err != nil {
-		return nativeAgentHookOptions{}, "", err
-	}
-	if len(targets) == 0 {
-		return nativeAgentHookOptions{}, "", agentHookUsage(fmt.Sprintf("unknown agent %q", name))
+		return nativeAgentHookOptions{}, err
 	}
 	opts := targets[0].options
 	opts.Contract, opts.Attention = targets[0].capability.Contract, true
-	exe, warning, err := resolveAgentHookExecutable("", defaultAgentHookExecutableEnv())
-	opts.Executable = exe
-	return opts, warning, err
+	opts.Executable, _, err = resolveAgentHookExecutable("", defaultAgentHookExecutableEnv())
+	return opts, err
 }
 
-func agentSetupPlanCurrent(plan nativeAgentHookPlan) bool {
-	for _, change := range plan.Changes {
-		if change.OriginalExists == change.Remove || (!change.Remove && !bytes.Equal(change.Original, change.Content)) {
-			return false
-		}
-	}
-	return true
-}
-
-func agentSetupItem(name string, warn func(string), output io.Writer) agentsetup.Item {
+func agentSetupItem(name string, output io.Writer) agentsetup.Item {
 	return agentsetup.Item{Name: "hooks", Install: func(ctx context.Context) error {
 		cmd := newNativeAgentHooksMutationCmd(false)
 		cmd.SetContext(ctx)
@@ -54,51 +40,40 @@ func agentSetupItem(name string, warn func(string), output io.Writer) agentsetup
 		cmd.SetArgs([]string{name})
 		return cmd.Execute()
 	}, Check: func(ctx context.Context) (agentsetup.Status, error) {
-		return inspectAgentSetup(ctx, name, warn, false)
+		return checkAgentSetup(ctx, name)
 	}}
 }
 
-func inspectAgentSetup(ctx context.Context, name string, warn func(string), contractOnlyOK bool) (agentsetup.Status, error) {
-	opts, _, err := agentSetupOptions(name)
+func checkAgentSetup(ctx context.Context, name string) (agentsetup.Status, error) {
+	opts, err := agentSetupOptions(name)
 	if err != nil {
 		return agentsetup.Status{}, err
 	}
-	plan, err := planAgentSetup(&opts)
-	if err != nil {
-		return agentsetup.Status{}, err
-	}
-	if contractOnlyOK && plan.CurrentContract && !plan.CurrentOwnedAttention {
+	plan, err := planNativeAgentHooks(opts, false)
+	// Muse without permission and a Claude or Codex contract-only install keep attention off.
+	contractOnly := err == nil && (name == "claude" || name == "codex") && plan.CurrentContract && !plan.CurrentOwnedAttention
+	if contractOnly || errors.Is(err, errMuseAttentionPermission) {
 		opts.Attention = false
-		plan, err = planAgentSetup(&opts)
-		if err != nil {
-			return agentsetup.Status{}, err
-		}
+		plan, err = planNativeAgentHooks(opts, false)
 	}
-	for _, message := range plan.Warnings {
-		warn(message)
+	if err != nil {
+		return agentsetup.Status{}, err
 	}
-	if capability, err := lookupAgentHookCapability(name); err == nil && capability.Note != "" {
-		warn(capability.Note)
-	}
-	return checkAgentSetup(ctx, opts, plan)
-}
-
-func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nativeAgentHookPlan) (agentsetup.Status, error) {
 	status := agentsetup.Status{State: agentsetup.StateOK, ConfigPath: plan.Path}
-	if !agentSetupPlanCurrent(plan) {
-		status.State, status.Reason, status.NextStep = agentsetup.StateMissing, "Kata hooks are not installed", "kata agent setup "+opts.Agent
+	if nativeAgentHookPlanChanged(plan) {
+		status.State, status.Reason, status.NextStep = agentsetup.StateMissing, "Kata hooks are not installed", "kata agent setup "+name
 		if plan.CurrentContract || plan.CurrentAttentionStart || plan.CurrentAttentionEnd {
 			status.State, status.Reason = agentsetup.StateOutdated, "Kata hooks need updating"
 		}
 		return status, nil
 	}
-	if opts.Agent != "claude" && opts.Agent != "codex" {
-		if opts.Agent == "muse" && !opts.Attention {
+	if name != "claude" && name != "codex" {
+		if name == "muse" && !opts.Attention {
 			return agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: plan.Path, Reason: "Muse attention hooks need permission", NextStep: "kata agent-hook install muse --managed-attention"}, nil
 		}
-		return agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: plan.Path, Reason: "Hook inspection is unavailable for this agent", NextStep: "Inspect hooks in the agent"}, nil
+		status.State, status.Reason, status.NextStep = agentsetup.StateUnknown, "Hook inspection is unavailable for this agent", "Inspect hooks in the agent"
+		return status, nil
 	}
-	conflict := agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: opts.ConfigPath, Reason: "Hook inspection found conflicting commands", NextStep: "Inspect hooks in the agent"}
 	counts := map[agentsetup.State]int{}
 	kinds := []agentHookKind{contractHook}
 	if opts.Attention {
@@ -111,11 +86,12 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nati
 			return status, err
 		}
 		registration.Marker = command.Native
-		if runtime.GOOS == "windows" && opts.Agent == "claude" {
+		if runtime.GOOS == "windows" && name == "claude" {
 			registration.Marker = strings.Join(append([]string{registration.Executable}, registration.Arguments...), " ")
 		}
+		// Each registration starts its own native check, so each gets its own bound.
 		probe, cancel := context.WithTimeout(ctx, 5*time.Second)
-		result, err := agenthook.Check(probe, agenthook.Agent(opts.Agent), registration)
+		result, err := agenthook.Check(probe, agenthook.Agent(name), registration)
 		cancel()
 		if err != nil {
 			return status, err
@@ -123,7 +99,7 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nati
 		state := agentsetup.State(result.State)
 		counts[state] += result.HookCount
 		if state == agentsetup.StateMissing || state == agentsetup.StateOutdated {
-			return conflict, nil
+			return agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: plan.Path, Reason: "Hook inspection found conflicting commands", NextStep: "Inspect hooks in the agent"}, nil
 		}
 		if state == agentsetup.StateUnknown || state == agentsetup.StateDisabled {
 			status.State, status.Reason, status.NextStep = state, result.Reason, result.NextStep
@@ -137,15 +113,7 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nati
 	return status, nil
 }
 
-func planAgentSetup(opts *nativeAgentHookOptions) (nativeAgentHookPlan, error) {
-	plan, err := planNativeAgentHooks(*opts, false)
-	if errors.Is(err, errMuseAttentionPermission) {
-		opts.Attention = false
-		return planNativeAgentHooks(*opts, false)
-	}
-	return plan, err
-}
-
+// agentSetupFallback runs the item for Kata-only profiles, which Kit's runner cannot parse.
 func agentSetupFallback(ctx context.Context, name string, checkOnly bool, item agentsetup.Item) (agentsetup.Row, error) {
 	row := agentsetup.Row{Agent: name, AgentName: name, Piece: item.Name}
 	if err := ctx.Err(); err != nil {
@@ -171,14 +139,8 @@ func newAgentSetupCmd() *cobra.Command {
 		if currentOutputMode() == outputHuman {
 			output = cmd.ErrOrStderr()
 		}
-		var warnings []string
-		warn := func(warning string) {
-			if check {
-				warnings = append(warnings, warning)
-			}
-		}
 		items := func(name string) ([]agentsetup.Item, error) {
-			return []agentsetup.Item{agentSetupItem(name, warn, output)}, nil
+			return []agentsetup.Item{agentSetupItem(name, output)}, nil
 		}
 		var names []string
 		for _, name := range args {
@@ -195,7 +157,6 @@ func newAgentSetupCmd() *cobra.Command {
 		if len(names) == 0 {
 			report, err = agentsetup.Run(cmd.Context(), agentsetup.Options{CheckOnly: check, SetupCommand: "kata agent setup", Items: items})
 		}
-		// Kit runs its profiles; other selected profiles use Kata's installer.
 		for _, name := range names {
 			if _, parseErr := agenthook.ParseAgent(name); parseErr == nil {
 				var result agentsetup.Report
@@ -203,7 +164,7 @@ func newAgentSetupCmd() *cobra.Command {
 				report.Rows = append(report.Rows, result.Rows...)
 			} else {
 				var row agentsetup.Row
-				row, err = agentSetupFallback(cmd.Context(), name, check, agentSetupItem(name, warn, output))
+				row, err = agentSetupFallback(cmd.Context(), name, check, agentSetupItem(name, output))
 				report.Rows = append(report.Rows, row)
 			}
 			if err != nil {
@@ -213,11 +174,7 @@ func newAgentSetupCmd() *cobra.Command {
 		if err != nil {
 			return fmt.Errorf("%s", strings.ReplaceAll(err.Error(), "or pass --agent", "or name an agent"))
 		}
-		for _, warning := range warnings {
-			if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "warning:", warning); err != nil {
-				return err
-			}
-		}
+		// Kata's global --agent selects output mode, so setup takes positional names.
 		for i := range report.Rows {
 			report.Rows[i].NextStep = strings.Replace(report.Rows[i].NextStep, "kata agent setup --agent ", "kata agent setup ", 1)
 		}

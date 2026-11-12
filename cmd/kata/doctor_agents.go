@@ -14,7 +14,7 @@ func doctorAgent(ctx context.Context, name string) diagnostics.Check {
 	display := map[string]string{"claude": "Claude Code", "codex": "Codex"}[name]
 	probe, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	status, err := inspectAgentSetup(probe, name, func(string) {}, true)
+	status, err := checkAgentSetup(probe, name)
 	if err != nil {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: display + ": " + err.Error()}
 	}
@@ -23,8 +23,6 @@ func doctorAgent(ctx context.Context, name string) diagnostics.Check {
 	case agentsetup.StateOK:
 		result.Status = diagnostics.StatusOK
 		result.Summary = display + ": Kata hooks are ready"
-	case agentsetup.StateFailed:
-		result.Status = diagnostics.StatusFail
 	case agentsetup.StateUntrusted:
 		result.Summary = fmt.Sprintf("%s: %d Kata hooks wait for review", display, status.HookCount)
 	case agentsetup.StateMissing:
