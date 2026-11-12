@@ -100,6 +100,8 @@ async function startProductionFixture(): Promise<RunningFixture> {
     }),
     KATA_AUTH_TOKEN: 'example-local-token',
     KATA_SERVER: '',
+    HOME: home,
+    USERPROFILE: home,
   }
   const remoteEnvironment = {
     ...createDevChildEnvironment(process.env, {
@@ -109,6 +111,8 @@ async function startProductionFixture(): Promise<RunningFixture> {
     }),
     KATA_AUTH_TOKEN: 'example-remote-token',
     KATA_SERVER: '',
+    HOME: remoteHome,
+    USERPROFILE: remoteHome,
   }
 
   const remote = await retryPortBind(freePort, async (remotePort) => {

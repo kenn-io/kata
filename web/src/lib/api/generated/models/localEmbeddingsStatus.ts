@@ -7,10 +7,12 @@ import type { LocalEmbeddingsStatusProvider } from './localEmbeddingsStatusProvi
 
 export interface LocalEmbeddingsStatus {
   can_change: boolean
+  can_restart?: boolean
   download_bytes: number
   indexing?: LocalEmbeddingsIndexing
   job?: LocalEmbeddingsJob
   ollama_available: boolean
   provider: LocalEmbeddingsStatusProvider
+  restart_in_progress?: boolean
   [key: string]: unknown
 }

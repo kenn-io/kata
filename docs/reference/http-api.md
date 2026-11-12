@@ -21,9 +21,9 @@ Search responses include `X-Kata-Embeddings-Configured: true` when the answering
 
 ## Local embeddings setup
 
-`GET /api/v1/embeddings/local` reports the configured provider, missing download bytes, Ollama availability, setup job, indexing progress, and `can_change`. `indexing.failed` reports an indexing error while the daemon keeps retrying. Aggregate indexing counts, time estimates, and detailed setup errors are visible only to daemon owners. Other viewers receive progress and failure state without those details. Issue-scoped credentials can read the status.
+`GET /api/v1/embeddings/local` reports the configured provider, missing download bytes, Ollama availability, setup job, indexing progress, `can_change`, and `can_restart`. `indexing.failed` reports an indexing error while the daemon keeps retrying. Aggregate indexing counts, time estimates, and detailed setup errors are visible only to daemon owners. Other viewers receive progress and failure state without those details. Issue-scoped credentials can read the status.
 
-`POST /api/v1/embeddings/local` starts setup and returns `202` with the same status. It shares the CLI's download and config checks, saves the setting, and reports the `restart` job state until the daemon restarts. Run `kata daemon restart` locally, or restart the daemon on its host. Reopen `kata ui` or sign in again afterward to see indexing progress.
+`POST /api/v1/embeddings/local` starts setup and returns `202` with the same status. It shares the CLI's download and config checks, saves the setting, and reports the `restart` job state until the daemon restarts. A daemon administrator can use `POST /api/v1/embeddings/local/restart` when `can_restart` is true. It returns `202` with no response body, keeps the job state at `restart`, sets `restart_in_progress`, and disables `can_restart`, and briefly disconnects all projects and clients. It returns `404` if setup is unavailable, `403` if the caller lacks daemon administration, and `409` if restart is unavailable or setup is not ready. This action is unavailable through the daemon switcher. For other daemons, run `kata daemon restart` on the host or use the service manager. Reopen `kata ui` if its address changes, or sign in again afterward to see indexing progress.
 
 Setup is available only when no embeddings provider is configured and no setup job is active. It requires a local owner browser session, a bootstrap token, or a static daemon token, with a writable browser session manager when present. It returns `403` for other viewers and through the daemon switcher proxy, `404` when setup is unavailable, and `409` while setup is already running. The switcher proxy permits status reads.
 
@@ -271,6 +271,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.45.0` | Adds `POST /api/v1/embeddings/local/restart` to restart the daemon after local embeddings setup. Older daemons do not serve this route. |
 | `0.44.0` | Attachment routes return `503 docbank_key_unavailable` instead of `502 docbank_unauthorized` when the daemon cannot resolve its own Docbank key. Health diagnostics add a `docbank` block. |
 | `0.43.0` | Adds the daemon-owned MCP Events routes `POST /api/v1/mcp-events/list`, `POST /api/v1/mcp-events/subscribe`, `POST /api/v1/mcp-events/unsubscribe`, and `GET /api/v1/mcp-events/subscriptions` (status). Subscribe and unsubscribe arguments name either a non-empty `project_uids` list or `all_projects: true`. Failures return an `mcp_events` error whose `data` carries `mcp_code` and `mcp_data`. Older daemons do not serve these routes. Both issue list routes accept `compact=true`. |
 | `0.42.0` | Adds daemon-wide local embeddings setup and status at `GET` and `POST /embeddings/local`, and the `X-Kata-Embeddings-Configured` search response header. |

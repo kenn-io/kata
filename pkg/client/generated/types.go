@@ -4510,12 +4510,14 @@ func (l LocalEmbeddingsJob) Validate() error {
 }
 
 type LocalEmbeddingsStatus struct {
-	CanChange       bool                          `json:"can_change"`
-	DownloadBytes   int64                         `json:"download_bytes"`
-	Indexing        *LocalEmbeddingsIndexing      `json:"indexing,omitempty"`
-	Job             *LocalEmbeddingsJob           `json:"job,omitempty"`
-	OllamaAvailable bool                          `json:"ollama_available"`
-	Provider        LocalEmbeddingsStatusProvider `json:"provider" validate:"required"`
+	CanChange         bool                          `json:"can_change"`
+	CanRestart        *bool                         `json:"can_restart,omitempty"`
+	DownloadBytes     int64                         `json:"download_bytes"`
+	Indexing          *LocalEmbeddingsIndexing      `json:"indexing,omitempty"`
+	Job               *LocalEmbeddingsJob           `json:"job,omitempty"`
+	OllamaAvailable   bool                          `json:"ollama_available"`
+	Provider          LocalEmbeddingsStatusProvider `json:"provider" validate:"required"`
+	RestartInProgress *bool                         `json:"restart_in_progress,omitempty"`
 }
 
 func (l LocalEmbeddingsStatus) Validate() error {
