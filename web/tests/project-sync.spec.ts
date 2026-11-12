@@ -39,7 +39,11 @@ test('local project readers see native sync status with bounded embedding summar
   )
   expect(enabled.ok()).toBe(true)
   kata.recordSyncDiagnosticError()
+  const browserStatus = await kata.request(page, local, 'GET', `${statusPath}?compact=true`)
+  expect(browserStatus.ok()).toBe(true)
+  expect(await browserStatus.text()).not.toContain('example sync failure')
   await region.getByRole('button', { name: 'Refresh sync' }).click()
+  await expect(region.getByText('Sync needs attention')).toBeVisible()
   // This spoke/unconfigured state comes from the native production SQLite daemon.
   await expect(region.getByText('spoke', { exact: true })).toBeVisible()
   await expect(region.getByText('Embeddings: unconfigured')).toBeVisible()
