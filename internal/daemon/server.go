@@ -47,10 +47,9 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
-	FederationSigning            *federationsigning.Verifier
-	FederationSigningRequired    bool
-	FederationSigningExternalURL string
-	DB                           db.Storage
+	FederationSigning         *federationsigning.Verifier
+	FederationSigningRequired bool
+	DB                        db.Storage
 	// RootSigning holds private local signing material. Nil leaves an embedded
 	// server without a signing authority; daemon startup loads its owner-only
 	// key. The key is never exposed through API configuration or status.

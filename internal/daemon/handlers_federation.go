@@ -393,9 +393,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			hubURL = baseURL
 			allowInsecure, _ = httpurl.EffectiveHTTPAllowInsecure(hubURL, allowInsecure)
 		}
-		signingTemplate := cfg.FederationSigningRequired
+		signingTemplate := cfg.FederationSigningRequired && cfg.FederationSigning != nil
 		if signingTemplate {
-			hubURL = cfg.FederationSigningExternalURL
+			hubURL = cfg.FederationSigning.Base()
 			allowInsecure = false
 		}
 		// Resolve all response metadata before issuing a durable credential.

@@ -35,7 +35,6 @@ import (
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federationsigning"
-	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
@@ -1659,12 +1658,9 @@ func runDaemonProcess(
 	startExternalRootEventWake(ctx, workers, store, broadcaster, externalRootWake)
 
 	var signingVerifier *federationsigning.Verifier
-	var signingExternalURL string
 	if dcfg.Federation.Signing.ExternalURL != "" {
-		base, _ := signingpolicy.ExternalBase(dcfg.Federation.Signing.ExternalURL) // Validated during config loading.
-		signingExternalURL = base.String()
 		var err error
-		signingVerifier, err = federationsigning.NewVerifier(signingExternalURL, dcfg.Federation.Signing.Keys, dcfg.Federation.Signing.ReplayStateFile)
+		signingVerifier, err = federationsigning.NewVerifier(dcfg.Federation.Signing.ExternalURL, dcfg.Federation.Signing.Keys, dcfg.Federation.Signing.ReplayStateFile)
 		if err != nil {
 			return fmt.Errorf("initialize federation signing: %w", err)
 		}
@@ -1721,21 +1717,20 @@ func runDaemonProcess(
 	// earlier failure cannot leave it running past the store closing.
 	mcpEvents, mcpEventsReason := startDaemonMCPEvents(ctx, workers, dcfg, ns.DBHash, store, broadcaster, daemonLog)
 	srv := daemon.NewServer(daemon.ServerConfig{
-		LocalEmbeddings:              localSetup,
-		MCPHandler:                   mcpHandler,
-		FederationSigning:            signingVerifier,
-		FederationSigningRequired:    dcfg.Federation.Signing.Required,
-		FederationSigningExternalURL: signingExternalURL,
-		DB:                           store,
-		RootSigning:                  rootSigning,
-		DefaultTimezone:              dcfg.Timezone,
-		StartedAt:                    time.Now().UTC(),
-		Endpoint:                     &endpoint,
-		Hooks:                        disp,
-		Broadcaster:                  broadcaster,
-		MCPEvents:                    mcpEvents,
-		MCPEventsDisabledReason:      mcpEventsReason,
-		FederationWake:               federationWake,
+		LocalEmbeddings:           localSetup,
+		MCPHandler:                mcpHandler,
+		FederationSigning:         signingVerifier,
+		FederationSigningRequired: dcfg.Federation.Signing.Required,
+		DB:                        store,
+		RootSigning:               rootSigning,
+		DefaultTimezone:           dcfg.Timezone,
+		StartedAt:                 time.Now().UTC(),
+		Endpoint:                  &endpoint,
+		Hooks:                     disp,
+		Broadcaster:               broadcaster,
+		MCPEvents:                 mcpEvents,
+		MCPEventsDisabledReason:   mcpEventsReason,
+		FederationWake:            federationWake,
 		FederationPullOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
 			return federation.SyncFederationPullOnlyOnceWithPulledEvents(ctx, store, binding, credential, client.Opts{}, publisher.Events)
 		},

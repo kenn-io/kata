@@ -25,6 +25,8 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federation"
+	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -4620,9 +4622,21 @@ func TestFederationEnrollmentRequiredSigningJoinInstructions(t *testing.T) {
 		{"optional", "http://127.0.0.1:7777", "https://daemon.example/federation", "http://127.0.0.1:7777", false, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			var verifier *federationsigning.Verifier
+			if tc.required {
+				dir := t.TempDir()
+				keyFile := filepath.Join(dir, "signing.key")
+				require.NoError(t, os.WriteFile(keyFile, []byte(strings.Repeat("k", 64)), 0600))
+				state := filepath.Join(dir, "replay.state")
+				require.NoError(t, federationsigning.InitializeReplayState(state))
+				var err error
+				verifier, err = federationsigning.NewVerifier(tc.external, []signingpolicy.Key{{Source: signingpolicy.Source{KeyID: "key-a", KeyFile: keyFile}, EnrollmentID: 1}}, state)
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, verifier.Close()) })
+			}
 			env := testenv.New(t, func(cfg *daemon.ServerConfig) {
 				cfg.FederationSigningRequired = tc.required
-				cfg.FederationSigningExternalURL = tc.external
+				cfg.FederationSigning = verifier
 			})
 			project := createFederatedHubProject(t, env, "hub-project")
 			resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{

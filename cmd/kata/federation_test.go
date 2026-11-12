@@ -28,6 +28,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/testenv"
 	katauid "go.kenn.io/kata/internal/uid"
@@ -3293,9 +3294,17 @@ func TestFederationEnrollCLIRequiredSigningInstructions(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("shell argument parsing requires a POSIX shell")
 	}
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "signing.key")
+	require.NoError(t, os.WriteFile(keyFile, []byte(strings.Repeat("k", 64)), 0600))
+	state := filepath.Join(dir, "replay.state")
+	require.NoError(t, federationsigning.InitializeReplayState(state))
+	verifier, err := federationsigning.NewVerifier("https://daemon.example/federation", []signingpolicy.Key{{Source: signingpolicy.Source{KeyID: "key-a", KeyFile: keyFile}, EnrollmentID: 1}}, state)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, verifier.Close()) })
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
 		cfg.FederationSigningRequired = true
-		cfg.FederationSigningExternalURL = "https://daemon.example/federation"
+		cfg.FederationSigning = verifier
 	})
 	savedArgs := os.Args
 	os.Args = []string{"/opt/kata_custom"}

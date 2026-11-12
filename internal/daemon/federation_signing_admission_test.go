@@ -89,7 +89,7 @@ func TestFederationSigningUploadAdmissionPreservesControlRequests(t *testing.T) 
 		require.NoError(t, err)
 		defer func() { require.NoError(t, v.Close()) }()
 		time.Sleep(federationsigning.Quarantine)
-		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: v, FederationSigningRequired: true, FederationSigningExternalURL: "https://hub.example"})
+		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: v, FederationSigningRequired: true})
 		ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
 		require.NoError(t, err)
 		request := func(method, path string, body []byte) *http.Request {
