@@ -137,6 +137,21 @@ func TestInputResolutionDiagnosticsContract(t *testing.T) {
 	require.Equal(t, "declaration_invalid", r.Errors[0].Code)
 }
 
+func TestInputResolutionLegacyNotifyIndependentDiagnostics(t *testing.T) {
+	job := JobDefinition{Action: Action{Kind: "notify"}, Options: jsontext.Value(`{"inputs":{"bad":{"type":"bad"}},"input_values":42}`)}
+	r := ResolveInputs(job, nil)
+	require.Len(t, r.Errors, 3)
+	var eligibility, declaration, values bool
+	for _, problem := range r.Errors {
+		eligibility = eligibility || problem.Code == "declaration_invalid" && strings.Contains(problem.Message, "notify jobs cannot use inputs or input_values")
+		declaration = declaration || problem.Code == "declaration_invalid" && problem.Name == "bad" && strings.Contains(problem.Message, "invalid type")
+		values = values || problem.Code == "invalid_value" && strings.Contains(problem.Message, "input_values must be an object")
+	}
+	require.True(t, eligibility, "missing eligibility diagnostic")
+	require.True(t, declaration, "missing malformed declaration diagnostic")
+	require.True(t, values, "missing invalid values object diagnostic")
+}
+
 func TestInputMissingWorkflowAndUnfixedJob(t *testing.T) {
 	job := JobDefinition{Action: Action{WorkflowUID: "01J00000000000000000000020"}, Options: jsontext.Value(`{}`)}
 	require.NoError(t, ValidateInputs(job.Options, job.Action.WorkflowUID, []byte(`{"inputs":42}`)))

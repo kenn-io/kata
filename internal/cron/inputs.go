@@ -330,7 +330,6 @@ func ResolveInputs(job JobDefinition, workflow *WorkflowDefinition) InputResolut
 	}
 	if err := ValidateJobInputEligibility(job); err != nil {
 		r.Errors = append(r.Errors, InputError{Code: "declaration_invalid", Message: err.Error()})
-		return r
 	}
 	var workflowOptions []byte
 	if workflow != nil {
