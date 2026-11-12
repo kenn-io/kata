@@ -52,7 +52,9 @@ describe('SearchSettings', () => {
       vi.useFakeTimers()
       setGeneratedFetch(
         vi.fn(async () =>
-          Response.json(status({ job: { state: 'restarting', downloaded: 1, total: 1 } })),
+          Response.json(
+            status({ can_change: false, job: { state: 'restarting', downloaded: 1, total: 1 } }),
+          ),
         ),
       )
       const { container } = renderSettings({ canAdministerDaemon, remoteHost })
@@ -62,12 +64,16 @@ describe('SearchSettings', () => {
     },
   )
 
-  test('asks before sending a single restart request', async () => {
+  test('asks before restarting', async () => {
     vi.useFakeTimers()
     setGeneratedFetch(
       vi.fn(async () =>
         Response.json(
-          status({ can_restart: true, job: { state: 'restart', downloaded: 1, total: 1 } }),
+          status({
+            can_change: false,
+            can_restart: true,
+            job: { state: 'restart', downloaded: 1, total: 1 },
+          }),
         ),
       ),
     )
@@ -92,10 +98,12 @@ describe('SearchSettings', () => {
   test('allows retry when a status read reports failure while the restart response hangs', async () => {
     vi.useFakeTimers()
     const pending = status({
+      can_change: false,
       can_restart: true,
       job: { state: 'restart', downloaded: 1, total: 1 },
     })
     const failed = status({
+      can_change: false,
       can_restart: true,
       job: { state: 'restart', downloaded: 1, total: 1, error: 'Restart failed' },
     })
@@ -133,6 +141,7 @@ describe('SearchSettings', () => {
   test('keeps a retry pending when a poll returns the previous failure', async () => {
     vi.useFakeTimers()
     const failed = status({
+      can_change: false,
       can_restart: true,
       job: { state: 'restart', downloaded: 1, total: 1, error: 'Restart failed' },
     })
@@ -164,6 +173,7 @@ describe('SearchSettings', () => {
   test('ignores an old failure read that arrives after the retry is accepted', async () => {
     vi.useFakeTimers()
     const failed = status({
+      can_change: false,
       can_restart: true,
       job: { state: 'restart', downloaded: 1, total: 1, error: 'Restart failed' },
     })
@@ -209,6 +219,7 @@ describe('SearchSettings', () => {
   test('ignores a late restart response after status confirms success', async () => {
     vi.useFakeTimers()
     const pending = status({
+      can_change: false,
       can_restart: true,
       job: { state: 'restart', downloaded: 1, total: 1 },
     })
@@ -244,6 +255,7 @@ describe('SearchSettings', () => {
   test('allows retry after a restart request is lost while the daemon stays up', async () => {
     vi.useFakeTimers()
     const pending = status({
+      can_change: false,
       can_restart: true,
       job: { state: 'restart', downloaded: 1, total: 1 },
     })
@@ -272,7 +284,11 @@ describe('SearchSettings', () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
         Response.json(
-          status({ can_restart: true, job: { state: 'restart', downloaded: 1, total: 1 } }),
+          status({
+            can_change: false,
+            can_restart: true,
+            job: { state: 'restart', downloaded: 1, total: 1 },
+          }),
         ),
       )
       .mockImplementation(async () => {
@@ -310,7 +326,7 @@ describe('SearchSettings', () => {
         return Response.json(
           phase === 'ready'
             ? status({ provider: 'built_in', can_change: false })
-            : status({ job: { state: 'restarting', downloaded: 1, total: 1 } }),
+            : status({ can_change: false, job: { state: 'restarting', downloaded: 1, total: 1 } }),
         )
       }),
     )
@@ -346,7 +362,9 @@ describe('SearchSettings', () => {
     const read = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
-        Response.json(status({ job: { state: 'restarting', downloaded: 1, total: 1 } })),
+        Response.json(
+          status({ can_change: false, job: { state: 'restarting', downloaded: 1, total: 1 } }),
+        ),
       )
       .mockImplementation(
         (_input, init) =>
@@ -372,10 +390,12 @@ describe('SearchSettings', () => {
         return controller.signal
       })
       const pending = status({
+        can_change: false,
         can_restart: localRequest,
         job: { state: localRequest ? 'restart' : 'restarting', downloaded: 1, total: 1 },
       })
       const failed = status({
+        can_change: false,
         can_restart: true,
         job: { state: 'restart', downloaded: 1, total: 1, error: 'Restart failed' },
       })
@@ -410,6 +430,7 @@ describe('SearchSettings', () => {
   test('observes another client restarting after a rejected request', async () => {
     vi.useFakeTimers()
     const pending = status({
+      can_change: false,
       can_restart: true,
       job: { state: 'restart', downloaded: 1, total: 1 },
     })

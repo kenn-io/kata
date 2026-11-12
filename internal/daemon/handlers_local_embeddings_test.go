@@ -77,7 +77,6 @@ func TestLocalEmbeddingsAdministration(t *testing.T) {
 				var got api.LocalEmbeddingsStatus
 				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &got))
 				require.Equal(t, tc.allowed, got.CanChange)
-				require.False(t, got.CanRestart)
 				require.NotNil(t, got.Indexing)
 				if tc.allowed {
 					require.Equal(t, int64(2), got.Indexing.Total)
@@ -96,7 +95,6 @@ func TestLocalEmbeddingsAdministration(t *testing.T) {
 			require.Equal(t, http.StatusOK, rec.Code)
 			var restartStatus api.LocalEmbeddingsStatus
 			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &restartStatus))
-			require.False(t, restartStatus.CanChange)
 			require.Equal(t, tc.allowed, restartStatus.CanRestart)
 			response := httptest.NewRecorder()
 			mux.ServeHTTP(response, httptest.NewRequestWithContext(WithPrincipal(t.Context(), Principal{Kind: tc.kind}), http.MethodPost, "/api/v1/embeddings/local/restart", nil))

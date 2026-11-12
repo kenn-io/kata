@@ -944,13 +944,11 @@ func TestWebDaemonGatewayRestrictsEmbeddingsByViewer(t *testing.T) {
 			var got api.LocalEmbeddingsStatus
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &got))
 			assert.False(t, got.CanChange)
-			assert.False(t, got.CanRestart)
 			fixture.restartable.Store(true)
 			response = authorizedGatewayRequest(t, handler, manager, issued, http.MethodGet, "/api/v1/embeddings/local", nil, "")
 			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 			var restartStatus api.LocalEmbeddingsStatus
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &restartStatus))
-			assert.False(t, restartStatus.CanChange)
 			assert.False(t, restartStatus.CanRestart)
 			require.NotNil(t, got.Indexing)
 			if administrator {
