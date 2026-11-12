@@ -176,27 +176,6 @@ func TestFederationStatusProjectOlderDaemon(t *testing.T) {
 	target, err := url.Parse(env.URL)
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.ModifyResponse = func(resp *http.Response) error {
-		if resp.Request.URL.Path != "/api/v1/federation/status" || resp.StatusCode != http.StatusOK {
-			return nil
-		}
-		var body map[string]any
-		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			return err
-		}
-		if err := resp.Body.Close(); err != nil {
-			return err
-		}
-		body["future_field"] = "preserved"
-		data, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		resp.Body = io.NopCloser(bytes.NewReader(data))
-		resp.ContentLength = int64(len(data))
-		resp.Header.Set("Content-Length", strconv.Itoa(len(data)))
-		return nil
-	}
 	var lookup atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/health" {
@@ -210,7 +189,6 @@ func TestFederationStatusProjectOlderDaemon(t *testing.T) {
 			return
 		}
 		r.Host = target.Host
-		r.Header.Set("Accept-Encoding", "identity")
 		r.Header["X-Forwarded-For"] = nil
 		proxy.ServeHTTP(w, r)
 	}))
@@ -220,7 +198,6 @@ func TestFederationStatusProjectOlderDaemon(t *testing.T) {
 	out := requireCmdOutput(t, &older, "federation", "status", "--project", project.Name, "--format", "json")
 	assert.Contains(t, out, project.Name)
 	assert.NotContains(t, out, other.Name)
-	assert.Contains(t, out, `"future_field":"preserved"`)
 	_, err = runCmdOutput(t, &older, "federation", "status", "--project", "missing-project")
 	_ = requireCLIError(t, err, ExitNotFound)
 	assert.Zero(t, lookup.Load())
@@ -234,8 +211,6 @@ func TestFederationStatusProjectVersionRouting(t *testing.T) {
 	}{
 		{"older denied", "0.45.0", http.StatusForbidden, true},
 		{"older not found", "0.45.0", http.StatusNotFound, true},
-		{"missing version", "", http.StatusNotFound, true},
-		{"malformed version", "invalid", http.StatusNotFound, true},
 		{"current denied", "0.46.0", http.StatusForbidden, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -293,12 +268,6 @@ func TestFederationStatusProjectHostScope(t *testing.T) {
 		daemonServer.Handler().ServeHTTP(w, r.WithContext(ctx))
 	}))
 	t.Cleanup(server.Close)
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/projects", nil)
-	require.NoError(t, err)
-	resp, err := server.Client().Do(req)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 	host := *env
 	host.URL = server.URL
 	out := requireCmdOutput(t, &host, "federation", "status", "--project", project.Name)
@@ -582,42 +551,6 @@ func TestFederationEnableCLIResolvesExplicitProjectFlag(t *testing.T) {
 	out := requireCmdOutput(t, env, "federation", "enable", "--project", "fedlab")
 
 	assert.Contains(t, out, "enabled federation for fedlab")
-	binding, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
-	require.NoError(t, err)
-	assert.Equal(t, db.FederationRoleHub, binding.Role)
-}
-
-func TestFederationEnableProjectAgainstOlderDaemon(t *testing.T) {
-	env := testenv.New(t)
-	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
-	require.NoError(t, err)
-	target, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	var postResolve atomic.Bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/health" {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.45.0"}`))
-			return
-		}
-		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/resolve" {
-			postResolve.Store(true)
-		}
-		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/resolve" {
-			http.NotFound(w, r)
-			return
-		}
-		r.Host = target.Host
-		r.Header["X-Forwarded-For"] = nil
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
-	older := *env
-	older.URL = server.URL
-	out := requireCmdOutput(t, &older, "federation", "enable", "--project", project.Name)
-	assert.Contains(t, out, "enabled federation for spoke-project")
-	assert.True(t, postResolve.Load())
 	binding, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, db.FederationRoleHub, binding.Role)

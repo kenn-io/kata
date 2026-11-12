@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -80,6 +81,7 @@ func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 		require.NoError(t, err)
 	}
 	wrapped.failFor = broken.ID
+	require.NoError(t, store.RecordFederationSyncError(ctx, relayed.ID, errors.New("example sync failure"), time.Now().UTC()))
 
 	server := daemon.NewServer(daemon.ServerConfig{DB: wrapped, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
@@ -148,5 +150,9 @@ func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 	require.Equal(t, 2, wrapped.count(relayed.ID), "compact status must skip checkpoint measurement")
 	full.RelayCheckpointBytes = 0
 	full.RelayCheckpointCapacity = 0
+	require.Equal(t, "example sync failure", *full.LastError)
+	require.NotEmpty(t, *compact.LastError)
+	require.NotContains(t, *compact.LastError, "example sync failure", "the browser's compact status withholds sync error text")
+	full.LastError = compact.LastError
 	require.Equal(t, full, compact)
 }
