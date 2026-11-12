@@ -11,7 +11,7 @@ import (
 type Session struct {
 	Agent     string  `json:"agent"`
 	SessionID string  `json:"session_id"`
-	Step      *string `json:"step,omitempty"`
+	Step      *string `json:"step,omitzero" nullable:"false"`
 }
 
 // UnmarshalJSON distinguishes an omitted step from an explicitly null step.

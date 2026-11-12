@@ -22,8 +22,8 @@ type Summary struct {
 	Message            string     `json:"message,omitempty"`
 	InputTokens        int64      `json:"input_tokens,omitzero"`
 	OutputTokens       int64      `json:"output_tokens,omitzero"`
-	Sessions           *[]Session `json:"sessions,omitempty" minItems:"1" maxItems:"64"`
-	SessionsIncomplete *bool      `json:"sessions_incomplete,omitempty"`
+	Sessions           *[]Session `json:"sessions,omitzero" nullable:"false" minItems:"1" maxItems:"64"`
+	SessionsIncomplete *bool      `json:"sessions_incomplete,omitzero" nullable:"false"`
 }
 
 // ParseSummary decodes and validates one bounded observation summary.
