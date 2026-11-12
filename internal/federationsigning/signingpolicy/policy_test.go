@@ -45,8 +45,8 @@ func TestSourceRejectsKeyFileReadableByOthersOnUnix(t *testing.T) {
 func TestValidatePolicyRejectsSharedSecrets(t *testing.T) {
 	t.Setenv("TEST_SHARED_SIGNING_KEY", strings.Repeat("k", 64))
 	keys := []Key{
-		{Source: Source{KeyID: "key-a", KeyEnv: "TEST_SHARED_SIGNING_KEY"}, EnrollmentID: 1},
-		{Source: Source{KeyID: "key-b", KeyEnv: "TEST_SHARED_SIGNING_KEY"}, EnrollmentID: 2},
+		{Source: {KeyID: "key-a", KeyEnv: "TEST_SHARED_SIGNING_KEY"}, EnrollmentID: 1},
+		{Source: {KeyID: "key-b", KeyEnv: "TEST_SHARED_SIGNING_KEY"}, EnrollmentID: 2},
 	}
 	require.ErrorIs(t, ValidatePolicy("https://hub.example", keys), ErrSharedSecret)
 }
@@ -66,8 +66,8 @@ func TestCheckDistinctSecrets(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("TEST_SHARED_SIGNING_KEY", secret)
 			keys := []Key{
-				{Source: Source{KeyID: "key-a", KeyEnv: "TEST_SHARED_SIGNING_KEY"}},
-				{Source: Source{KeyID: "key-b", KeyEnv: "TEST_SHARED_SIGNING_KEY"}},
+				{Source: {KeyID: "key-a", KeyEnv: "TEST_SHARED_SIGNING_KEY"}},
+				{Source: {KeyID: "key-b", KeyEnv: "TEST_SHARED_SIGNING_KEY"}},
 			}
 			var paths []string
 			if tc.files {
