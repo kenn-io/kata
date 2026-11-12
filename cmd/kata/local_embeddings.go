@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net"
 	"net/url"
@@ -223,7 +224,7 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 	}
 	if next.Embeddings.UsesLocal() {
 		if err := embedlocal.RecordChoice(); err != nil {
-			return "", fmt.Errorf("built-in embeddings are configured, but sharing could not be confirmed; retry setup: %w", err)
+			slog.Warn("could not confirm that the shared search by meaning choice was saved", "err", err)
 		}
 	}
 	return index, nil
