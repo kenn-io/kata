@@ -1481,6 +1481,53 @@ func (c CronJobDefinitionResponse) Validate() error {
 	return errors
 }
 
+type CronJobInputsResponseBody struct {
+	DeclaredBy                 string              `json:"declared_by" validate:"required"`
+	DefinitionEventUID         string              `json:"definition_event_uid" validate:"required"`
+	Errors                     []InputError        `json:"errors" validate:"required"`
+	Inputs                     []CronResolvedInput `json:"inputs" validate:"required"`
+	JobUID                     string              `json:"job_uid" validate:"required"`
+	WorkflowDefinitionEventUID *string             `json:"workflow_definition_event_uid,omitempty"`
+	WorkflowUID                *string             `json:"workflow_uid,omitempty"`
+}
+
+func (c CronJobInputsResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.DeclaredBy, "required"); err != nil {
+		errors = errors.Append("DeclaredBy", err)
+	}
+	if err := typesValidator.Var(c.DefinitionEventUID, "required"); err != nil {
+		errors = errors.Append("DefinitionEventUID", err)
+	}
+	if err := typesValidator.Var(c.Errors, "required"); err != nil {
+		errors = errors.Append("Errors", err)
+	}
+	for i, item := range c.Errors {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Errors[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(c.Inputs, "required"); err != nil {
+		errors = errors.Append("Inputs", err)
+	}
+	for i, item := range c.Inputs {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Inputs[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(c.JobUID, "required"); err != nil {
+		errors = errors.Append("JobUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type CronJobResponseBody struct {
 	Events []Event `json:"events,omitempty"`
 	Job    CronJob `json:"job"`
@@ -1504,6 +1551,98 @@ func (c CronJobResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type CronResolvedInput struct {
+	Description *string                  `json:"description,omitempty"`
+	Max         *int64                   `json:"max,omitempty"`
+	MaxLength   *int64                   `json:"max_length,omitempty"`
+	Min         *int64                   `json:"min,omitempty"`
+	Multiline   *bool                    `json:"multiline,omitempty"`
+	Name        string                   `json:"name" validate:"required"`
+	Required    *bool                    `json:"required,omitempty"`
+	Source      string                   `json:"source" validate:"required"`
+	Title       *string                  `json:"title,omitempty"`
+	Type        string                   `json:"type" validate:"required"`
+	Value       *CronResolvedInput_Value `json:"value,omitempty"`
+	Values      []string                 `json:"values,omitempty"`
+}
+
+func (c CronResolvedInput) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Name, "required"); err != nil {
+		errors = errors.Append("Name", err)
+	}
+	if err := typesValidator.Var(c.Source, "required"); err != nil {
+		errors = errors.Append("Source", err)
+	}
+	if err := typesValidator.Var(c.Type, "required"); err != nil {
+		errors = errors.Append("Type", err)
+	}
+	if c.Value != nil {
+		if v, ok := any(c.Value).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Value", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronResolvedInput_Value struct {
+	CronResolvedInput_Value_OneOf *CronResolvedInput_Value_OneOf `json:"-"`
+}
+
+func (c CronResolvedInput_Value) Validate() error {
+	var errors runtime.ValidationErrors
+	if c.CronResolvedInput_Value_OneOf != nil {
+		if v, ok := any(c.CronResolvedInput_Value_OneOf).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("CronResolvedInput_Value_OneOf", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+func (c CronResolvedInput_Value) MarshalJSON() ([]byte, error) {
+	var parts []json.RawMessage
+
+	{
+		b, err := runtime.MarshalJSON(c.CronResolvedInput_Value_OneOf)
+		if err != nil {
+			return nil, fmt.Errorf("CronResolvedInput_Value_OneOf marshal: %w", err)
+		}
+		parts = append(parts, b)
+	}
+
+	return runtime.CoalesceOrMerge(parts...)
+}
+
+func (c *CronResolvedInput_Value) UnmarshalJSON(data []byte) error {
+	trim := bytes.TrimSpace(data)
+	if bytes.Equal(trim, []byte("null")) {
+		return nil
+	}
+	if len(trim) == 0 {
+		return fmt.Errorf("empty JSON input")
+	}
+
+	if c.CronResolvedInput_Value_OneOf == nil {
+		c.CronResolvedInput_Value_OneOf = &CronResolvedInput_Value_OneOf{}
+	}
+
+	if err := runtime.UnmarshalJSON(data, c.CronResolvedInput_Value_OneOf); err != nil {
+		return fmt.Errorf("CronResolvedInput_Value_OneOf unmarshal: %w", err)
+	}
+
+	return nil
 }
 
 type CronRun struct {
@@ -3431,6 +3570,16 @@ func (i InitProjectResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type InputError struct {
+	Code    string  `json:"code" validate:"required"`
+	Message string  `json:"message" validate:"required"`
+	Name    *string `json:"name,omitempty"`
+}
+
+func (i InputError) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(i))
 }
 
 type InstanceResponseBody struct {

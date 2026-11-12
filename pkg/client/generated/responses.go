@@ -227,6 +227,10 @@ type ReplaceCronJobResponse = CronJobResponseBody
 
 type ReplaceCronJobErrorResponse = ErrorEnvelope
 
+type GetCronJobInputsResponse = CronJobInputsResponseBody
+
+type GetCronJobInputsErrorResponse = ErrorEnvelope
+
 type RestoreCronJobResponse = CronJobResponseBody
 
 type RestoreCronJobErrorResponse = ErrorEnvelope
@@ -1067,6 +1071,14 @@ type ReplaceCronJobResp struct {
 	StatusCode   int
 	JSON200      *ReplaceCronJobResponse
 	JSONDefault  *ReplaceCronJobErrorResponse
+}
+
+type GetCronJobInputsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetCronJobInputsResponse
+	JSONDefault  *GetCronJobInputsErrorResponse
 }
 
 type RestoreCronJobResp struct {
