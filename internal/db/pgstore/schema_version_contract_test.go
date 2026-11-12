@@ -82,7 +82,14 @@ func checkMarkers(dir string, version int, digest string, base []string) error {
 		}
 		n, _ := strconv.Atoi(m[1])
 		if previous := seen[n]; previous != "" {
-			return fmt.Errorf("schema version %d has multiple markers %s and %s; preserve the base marker and move to version %d: %s", n, previous, name, max(highest, n)+1, markerName(max(highest, n)+1, digest))
+			baseMarker := previous
+			if baseSet[name] {
+				baseMarker = name
+			}
+			if baseSet[baseMarker] {
+				return fmt.Errorf("schema version %d has multiple markers %s and %s; preserve base marker %s and move to version %d: %s", n, previous, name, baseMarker, max(highest, n)+1, markerName(max(highest, n)+1, digest))
+			}
+			return fmt.Errorf("schema version %d has multiple markers %s and %s; keep one marker for version %d", n, previous, name, n)
 		}
 		seen[n] = name
 		highest = max(highest, n)
@@ -162,7 +169,8 @@ func TestSchemaVersionMarkers(t *testing.T) {
 		{"base", map[string]string{current: "Summary.\n"}, []string{current}, fmt.Sprintf("preserve base marker %s and move to version 51: %s", current, markerName(51, b))},
 		{"deleted base", map[string]string{replacement: "Summary.\n"}, []string{current}, "restore base schema marker"},
 		{"unknown base", map[string]string{current: "Summary.\n"}, nil, fmt.Sprintf("replace draft marker %s with %s and keep version 50; if it is on the base, preserve it and move to version 51: %s", current, replacement, markerName(51, b))},
-		{"duplicate", map[string]string{current: "One\n", replacement: "Two\n"}, []string{current}, fmt.Sprintf("schema version 50 has multiple markers %s and %s; preserve the base marker and move to version 51: %s", current, replacement, markerName(51, b))},
+		{"duplicate", map[string]string{current: "One\n", replacement: "Two\n"}, []string{current}, fmt.Sprintf("schema version 50 has multiple markers %s and %s; preserve base marker %s and move to version 51: %s", current, replacement, current, markerName(51, b))},
+		{"duplicate drafts", map[string]string{current: "One\n", replacement: "Two\n"}, []string{}, "keep one marker for version 50"},
 		{"future", map[string]string{markerName(51, a): "Future\n"}, nil, fmt.Sprintf("marker exceeds current version 50; move to version 52: %s", markerName(52, b))},
 		{"bad name", map[string]string{"bad.txt": "Summary\n"}, nil, "invalid schema marker"},
 		{"empty", map[string]string{replacement: "\n"}, nil, "one-line summary"},
@@ -179,6 +187,9 @@ func TestSchemaVersionMarkers(t *testing.T) {
 				require.NoError(t, err)
 			} else {
 				require.ErrorContains(t, err, tc.want)
+				if tc.name == "duplicate drafts" {
+					require.NotContains(t, err.Error(), "base")
+				}
 			}
 		})
 	}

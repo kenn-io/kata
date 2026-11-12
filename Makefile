@@ -59,7 +59,7 @@ api-check:
 # existing clients relative to BASE_REF (default origin/main).
 api-breaking:
 	bash scripts/openapi-breaking.sh $(BASE_REF)
-	SCHEMA_VERSION_BASE_REF=$(or $(BASE_REF),origin/main) go test ./internal/db/pgstore -run '^TestSchemaVersion(Contract|Markers|DigestInputs|GitBase)$$'
+	SCHEMA_VERSION_BASE_REF=$(or $(BASE_REF),origin/main) go test ./internal/db/pgstore -run '^TestSchemaVersionContract$$'
 	KATA_MIGRATION_BASE_REF=$(BASE_REF) go run ./tools/migrationhistorycheck
 
 web-install:
