@@ -345,7 +345,7 @@ func cronDefinitionLink(d *cronDoc, p cronData, uid, revision string, workflow b
 	d.text(label, cronRef{kind, uid})
 }
 func cronHistory(d *cronDoc, p cronData, ref cronRef) {
-	d.section("Loaded project observations (incomplete)")
+	d.section("Run history from the latest 100 project runs")
 	if p.runsErr != nil {
 		d.section("Loaded runs · unavailable")
 		return
@@ -495,7 +495,7 @@ func cronHelp(m Model) string {
 	intro := []string{
 		"A job is a schedule plus an action.",
 		"A workflow is a named list of steps jobs can run.",
-		"A run is what an executor recorded; runs remember the definition revision they used.",
+		"A run records what the executor reports and which version of the job or workflow it used.",
 		"kata cron --help shows creation examples.",
 	}
 	for i, s := range intro {

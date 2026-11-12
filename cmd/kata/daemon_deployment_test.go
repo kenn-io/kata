@@ -37,13 +37,13 @@ func TestDeploymentStatusReportsConfigSources(t *testing.T) {
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777", Metadata: map[string]string{"config_listen_source": "KATA_LISTEN", "config_auth_source": "persisted_file", "db_path": "database", "unrelated": "ignored"}})
 	require.NoError(t, err)
-	out := executeRoot(t, newRootCmd(), "--json", "daemon", "status")
+	out, _, _ := executeRootCapture(t, t.Context(), "--json", "daemon", "status")
 	var response struct {
 		Daemons []struct {
 			ConfigSources map[string]string `json:"config_sources"`
 		} `json:"daemons"`
 	}
-	require.NoError(t, json.Unmarshal(out, &response))
+	require.NoError(t, json.Unmarshal([]byte(out), &response))
 	require.Len(t, response.Daemons, 1)
 	require.Equal(t, map[string]string{"listen": "KATA_LISTEN", "auth": "persisted_file"}, response.Daemons[0].ConfigSources)
 }
