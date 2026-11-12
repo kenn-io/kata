@@ -599,8 +599,9 @@ it. For ordinary issue synchronization, use the normal
 spokes can upgrade later.
 
 Kata 0.19.0 advertised both `cron_v1` and `cron_notify_children_v1`.
-Kata 0.20.0 advertises only `cron_v1` for all cron support, with no alias for
-the removed name. Fully compatible mixed-version cron operation is not
+Kata 0.20.0 advertised only `cron_v1` for all cron support, with no alias for
+the removed name. Later releases add `cron_run_sessions_v1` for run sessions;
+it does not replace `cron_v1`. Fully compatible mixed-version cron operation is not
 supported across this change:
 
 - A 0.20.0 spoke cannot read a 0.19.0 hub project that requires the removed
