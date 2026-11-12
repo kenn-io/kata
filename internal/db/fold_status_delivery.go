@@ -15,10 +15,16 @@ func ReconcileFoldStatusIntent(previous, current FoldIssue, pendingUID string, a
 	if previous.Status == "" {
 		previous.Status = "open"
 	}
+	// The bound a whole copy set carries over, so a change the fold ignored
+	// is ignored here too.
+	if previous.RestatedAt == "" {
+		previous.RestatedAt = current.RestatedAt
+	}
 	projection := FoldEvents(nil)
 	projection.Issues[current.UID] = previous
 	ordered := append([]FoldEvent(nil), accepted...)
 	sort.SliceStable(ordered, func(i, j int) bool { return compareClock(clockOf(ordered[i]), clockOf(ordered[j])) < 0 })
+	projection.noteRestatedIssues(ordered)
 	for _, event := range ordered {
 		if compareClock(clockOf(event), previous.StatusClock) <= 0 || issueUID(event, PayloadMap(event.Payload)) != current.UID {
 			continue

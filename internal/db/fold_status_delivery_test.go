@@ -39,6 +39,19 @@ func TestReconcileFoldStatusIntent(t *testing.T) {
 	}
 }
 
+// A whole copy closed the issue. A reopen older than that copy can arrive
+// later in event order; the fold ignores it, so it must not cancel a close
+// that is still queued for an external service.
+func TestReconcileFoldStatusIntentKeepsAPendingCloseAfterAWholeCopy(t *testing.T) {
+	copyEvent := db.FoldEvent{UID: "copy", IssueUID: "task", Type: db.RepeatedImportEventType, HLCPhysicalMS: 100, CreatedAt: "2026-06-01T09:00:00.000Z",
+		Payload: jsontext.Value(`{"title":"t","status":"closed","updated_at":"2026-06-01T09:00:00.000Z"}`)}
+	olderReopen := db.FoldEvent{UID: "older-reopen", IssueUID: "task", Type: "issue.reopened", HLCPhysicalMS: 150, CreatedAt: "2026-05-01T09:00:00.000Z", Payload: jsontext.Value(`{}`)}
+	previous := db.FoldEvents([]db.FoldEvent{copyEvent}).Issues["task"]
+	current := db.FoldEvents([]db.FoldEvent{copyEvent, olderReopen}).Issues["task"]
+	require.Equal(t, "closed", current.Status, "the fold ignores the older reopen")
+	require.Equal(t, "local-close", db.ReconcileFoldStatusIntent(previous, current, "local-close", []db.FoldEvent{olderReopen}))
+}
+
 // The independent oracle is lexicographic writer order. Generation deliberately
 // includes tied prefixes, so all four clock components and equality are reached.
 func TestReconcileFoldStatusIntentWriterFence(t *testing.T) {

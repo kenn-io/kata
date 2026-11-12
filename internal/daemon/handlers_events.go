@@ -319,6 +319,10 @@ func hiddenEventRequiresScopedReset(
 			return true, nil
 		}
 		return hiddenIssueTouchesScope(ctx, store, event.IssueID, allowed)
+	case db.RepeatedImportEventType:
+		// A whole copy can close, reopen, or delete a hidden issue, which
+		// changes the readiness of a related issue in scope.
+		return hiddenIssueTouchesScope(ctx, store, event.IssueID, allowed)
 	case "issue.snapshot":
 		// Federation snapshots establish an issue baseline. Later relationship
 		// changes arrive as link events, so only a currently related hidden

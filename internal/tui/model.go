@@ -2920,7 +2920,7 @@ func (m *Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 	if msg.projectID != m.detail.scopePID && !commentMatch && !relationLifecycleMatch {
 		return nil
 	}
-	projectCommentArrival := msg.eventType == "issue.snapshot" || (m.issueScoped && msg.eventType == "issue.commented")
+	projectCommentArrival := msg.eventType == "issue.snapshot" || msg.eventType == "issue.restated" || (m.issueScoped && msg.eventType == "issue.commented")
 	// Refresh events for this recurrence, retrying when its read failed.
 	recurrenceChange := m.detail.issue.RecurrenceID != nil && strings.HasPrefix(msg.eventType, "recurrence.") &&
 		(m.detail.recurrenceErr != nil || (m.detail.recurrence != nil && msg.recurrenceUID == m.detail.recurrence.UID))
@@ -2969,7 +2969,7 @@ func (msg eventReceivedMsg) matchesIssue(ref, uid string) bool {
 
 func (msg eventReceivedMsg) matchesCommentInDetail(comments []CommentEntry) bool {
 	switch msg.eventType {
-	case "issue.commented", "issue.comment_edited", "issue.created", "issue.snapshot":
+	case "issue.commented", "issue.comment_edited", "issue.created", "issue.snapshot", "issue.restated":
 	default:
 		return false
 	}

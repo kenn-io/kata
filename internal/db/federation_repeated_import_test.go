@@ -326,37 +326,69 @@ func TestRepeatedImportEventOutlastsAnOlderChangeThatReplaysLater(t *testing.T) 
 	assert.Equal(t, "edit of the other comment", got.Comments["comment-2"].Body, "comments merge, so one the copy lacks is added and can be edited")
 }
 
-// The hub decides by updated_at when the copy arrives, and replay must decide
-// the same way whatever arrives afterwards. An edit made after the copy can
-// reach the hub later and sort before the hub's event for the copy. The issue
-// is then newer than the copy at that point of the replay, so the copy does
-// not apply: this is the result the hub would have reached had the edit
-// arrived first.
-func TestRepeatedImportEventYieldsToANewerIssue(t *testing.T) {
-	current := `{"uid":"issue-1","title":"hub title","status":"open","labels":["bug"],"updated_at":"2026-05-01T09:00:00.000Z"}`
-	incoming := `{"uid":"issue-1","title":"copy title","status":"open","labels":["shipped"],"updated_at":"2026-06-01T09:00:00.000Z"}`
+// The hub accepted the copy because it was newer than the issue it held. An
+// edit made after the copy can reach the hub later and sort before the hub's
+// event for the copy. The copy still applies, and the edit applies on top of
+// it: what the edit names is the edit's, and the rest is the copy's.
+func TestRepeatedImportEventAppliesUnderALaterEdit(t *testing.T) {
+	current := `{"uid":"issue-1","title":"hub title","body":"hub body","status":"open","labels":["bug"],"updated_at":"2026-05-01T09:00:00.000Z"}`
+	incoming := `{"uid":"issue-1","title":"copy title","body":"copy body","status":"open","labels":["shipped"],"comments":[
+ {"comment_uid":"comment-1","author":"alice","body":"copy comment","created_at":"2026-05-20T10:00:00.000Z"}],
+"updated_at":"2026-06-01T09:00:00.000Z"}`
 	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
 	require.NoError(t, err)
 	require.Len(t, deltas, 1)
 
 	got := FoldEvents([]FoldEvent{
 		testEvent("issue.snapshot", 1, current),
+		testEvent("issue.updated", 40, `{"title":"older hub edit","updated_at":"2026-05-10T09:00:00.000Z"}`),
 		testEvent("issue.updated", 50, `{"title":"edited after the copy","updated_at":"2026-06-15T09:00:00.000Z"}`),
+		testEvent("issue.labeled", 51, `{"label":"added after the copy","updated_at":"2026-06-16T09:00:00.000Z"}`),
 		testEvent(deltas[0].Type, 100, string(deltas[0].Payload)),
 	})
-	assert.Equal(t, "edited after the copy", got.Issues["issue-1"].Title)
-	assert.Equal(t, "2026-06-15T09:00:00.000Z", got.Issues["issue-1"].UpdatedAt)
-	assert.Equal(t, []string{"bug"}, presentLabels(got, "issue-1"), "a copy that does not apply changes nothing")
+	issue := got.Issues["issue-1"]
+	assert.Equal(t, "edited after the copy", issue.Title)
+	assert.Equal(t, "copy body", issue.Body, "the edit named only the title")
+	assert.Equal(t, "2026-06-16T09:00:00.000Z", issue.UpdatedAt)
+	assert.ElementsMatch(t, []string{"shipped", "added after the copy"}, presentLabels(got, "issue-1"))
+	assert.Equal(t, "copy comment", got.Comments["comment-1"].Body)
+}
 
-	// An older edit whose event clock is later than the copy's data time
-	// replays before the hub's event, which sits at the hub's own clock.
-	got = FoldEvents([]FoldEvent{
+// A copy can carry a time ahead of the hub's clock. An edit made after the
+// hub accepted that copy has an earlier time and must still apply.
+func TestRepeatedImportEventDatedAheadDoesNotBlockLaterEdits(t *testing.T) {
+	current := `{"uid":"issue-1","title":"hub title","status":"open","updated_at":"2026-05-01T09:00:00.000Z"}`
+	incoming := `{"uid":"issue-1","title":"copy title","status":"open","updated_at":"2026-12-01T09:00:00.000Z"}`
+	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
+	require.NoError(t, err)
+	accepted := testEvent(deltas[0].Type, 10, string(deltas[0].Payload))
+	accepted.CreatedAt = "2026-06-01T09:00:00.000Z"
+	got := FoldEvents([]FoldEvent{
 		testEvent("issue.snapshot", 1, current),
-		testEvent("issue.updated", 50, `{"title":"older hub edit","updated_at":"2026-05-10T09:00:00.000Z"}`),
-		testEvent(deltas[0].Type, 100, string(deltas[0].Payload)),
+		accepted,
+		testEvent("issue.updated", 20, `{"title":"edited after accepting","updated_at":"2026-06-02T09:00:00.000Z"}`),
+		testEvent("issue.updated", 21, `{"body":"older body","updated_at":"2026-05-15T09:00:00.000Z"}`),
 	})
+	assert.Equal(t, "edited after accepting", got.Issues["issue-1"].Title)
+	assert.Empty(t, got.Issues["issue-1"].Body, "a change older than the acceptance still yields")
+}
+
+// An import repair moves an issue's creation time earlier and carries the
+// issue's unchanged update time. It must survive a whole copy.
+func TestRepeatedImportEventKeepsACreationTimeRepair(t *testing.T) {
+	current := `{"uid":"issue-1","title":"hub title","status":"open","created_at":"2026-04-01T09:00:00.000Z","updated_at":"2026-05-01T09:00:00.000Z"}`
+	incoming := `{"uid":"issue-1","title":"copy title","status":"open","updated_at":"2026-06-01T09:00:00.000Z"}`
+	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
+	require.NoError(t, err)
+	accepted := testEvent(deltas[0].Type, 10, string(deltas[0].Payload))
+	accepted.CreatedAt = "2026-06-01T10:00:00.000Z"
+	got := FoldEvents([]FoldEvent{
+		testEvent("issue.snapshot", 1, current),
+		accepted,
+		testEvent("issue.updated", 20, `{"title":"stale title","created_at":"2026-03-01T09:00:00.000Z","updated_at":"2026-06-01T09:00:00.000Z"}`),
+	})
+	assert.Equal(t, "2026-03-01T09:00:00.000Z", got.Issues["issue-1"].CreatedAt)
 	assert.Equal(t, "copy title", got.Issues["issue-1"].Title)
-	assert.Equal(t, []string{"shipped"}, presentLabels(got, "issue-1"))
 }
 
 // A reader that predates repeated imports does not know the hub's event for a

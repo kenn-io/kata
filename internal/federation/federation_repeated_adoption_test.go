@@ -167,10 +167,15 @@ func TestSyncFederationRepeatedAdoptionKeepsAnEditMadeAfterTheSnapshot(t *testin
 	require.NoError(t, err)
 
 	home.sync(t)
-	title, _ := repeatedAdoptionState(t, hub.DB, seed.UID)
+	// The edit names only the title. Everything else the copy brought stays,
+	// on the hub and on the home after it drops its own snapshot.
+	title, comments := repeatedAdoptionState(t, hub.DB, seed.UID)
 	require.Equal(t, "edited afterward", title)
-	title, _ = repeatedAdoptionState(t, home.env.DB, seed.UID)
+	require.Equal(t, []string{"home comment"}, comments)
+	title, comments = repeatedAdoptionState(t, home.env.DB, seed.UID)
 	require.Equal(t, "edited afterward", title)
+	require.Equal(t, []string{"home comment"}, comments)
+	require.Empty(t, home.ownSnapshots(t, seed.UID))
 }
 
 // The hub names the snapshots it did not store, and the pushing home deletes

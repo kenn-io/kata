@@ -1182,6 +1182,10 @@ func RunEmbeddingArtifactPruning(t *testing.T, store db.Storage) {
 			updatedAt := time.Now().Add(time.Duration(sequence) * time.Hour).UTC().Format("2006-01-02T15:04:05.000Z")
 			restated := newRemoteEvent(t, project, &issue.UID, db.RepeatedImportEventType, "member", enrollment.SpokeInstanceUID, time.Now().UnixMilli()+sequence*1000,
 				jsontext.Value(`{"title":"Copy reverted vectors","body":"`+body+`","status":"open","updated_at":"`+updatedAt+`"}`))
+			// A hub writes this event when it accepts the copy, so it carries
+			// that moment and not an earlier one.
+			restated.CreatedAt = time.Now().UTC()
+			restated.ContentHash = remoteEventHash(t, restated)
 			encoded, err := db.EncodeRelaySourceEvent(restated)
 			require.NoError(t, err)
 			envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{

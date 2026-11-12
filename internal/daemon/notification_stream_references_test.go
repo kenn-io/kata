@@ -132,8 +132,33 @@ func TestNotificationStreamRechecksTargetsInARepeatedImportEvent(t *testing.T) {
 	require.NotContains(t, string(projected), fixture.targetUID, "a page read leaves out the slot")
 	require.NotContains(t, string(projected), "Target context")
 
-	response := httptest.NewRecorder()
-	require.False(t, writeRevalidatedEventFrame(ctx, fixture.store, response, response, event))
-	require.Contains(t, response.Body.String(), "sync.reset_required")
-	require.NotContains(t, response.Body.String(), fixture.targetUID)
+	visible, err := notificationEventStillVisible(ctx, fixture.store, event)
+	require.NoError(t, err)
+	require.False(t, visible, "the stream recheck sees the slot's target in the whole copy")
+}
+
+// A whole copy can close, reopen, or delete an issue. When that issue is
+// hidden from a scoped reader and linked to one the reader can see, the
+// reader's view of readiness changes, so the reader must reload.
+func TestHiddenRepeatedImportEventResetsAScopedReader(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	visible := createScopedAuthIssue(t, store, project.ID, "Visible", nil)
+	blocker := createScopedAuthIssue(t, store, project.ID, "Hidden blocker", nil)
+	unrelated := createScopedAuthIssue(t, store, project.ID, "Hidden and unrelated", nil)
+	_, err = store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: blocker.ID, ToIssueID: visible.ID, Type: "blocks", Author: "coordinator"})
+	require.NoError(t, err)
+	allowed := map[int64]struct{}{visible.ID: {}}
+	allowedUIDs := map[string]struct{}{visible.UID: {}}
+	payload := `{"title":"t","status":"closed","updated_at":"2026-06-01T09:00:00.000Z"}`
+
+	reset, err := hiddenEventRequiresScopedReset(t.Context(), store, db.Event{Type: db.RepeatedImportEventType, IssueID: &blocker.ID, Payload: payload}, allowed, allowedUIDs, project.UID)
+	require.NoError(t, err)
+	require.True(t, reset)
+	reset, err = hiddenEventRequiresScopedReset(t.Context(), store, db.Event{Type: db.RepeatedImportEventType, IssueID: &unrelated.ID, Payload: payload}, allowed, allowedUIDs, project.UID)
+	require.NoError(t, err)
+	require.False(t, reset, "a hidden issue with no link into the scope changes nothing the reader sees")
 }

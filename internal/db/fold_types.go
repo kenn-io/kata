@@ -37,14 +37,21 @@ type FoldProjection struct {
 	// labelsByIssue indexes Labels for a whole-set replacement. It is built on
 	// the first replacement and kept current by every later label write.
 	labelsByIssue map[string]map[string]struct{}
-	// restatedAt holds, per issue, the updated_at of the latest whole copy
-	// that applied. Older changes that replay after it yield to the copy.
-	restatedAt      map[string]string
-	Links           map[FoldLinkKey]FoldElementState
-	IssueMetadata   map[string]jsontext.Value
-	ProjectMetadata map[string]jsontext.Value
-	Warnings        []string
-	cronAuthors     map[string]foldCronAuthorCandidate
+	// restatedIssues names the issues that have a whole-copy event in the
+	// events being folded. Only their changes are kept in sinceBaseline.
+	restatedIssues map[string]struct{}
+	// sinceBaseline holds, per such issue, the changes applied since its
+	// baseline that a whole copy would replace. A copy that replays after a
+	// newer change applies underneath it: the copy is applied and the newer
+	// changes are applied again on top.
+	sinceBaseline map[string][]FoldEvent
+	// baselineUpdatedAt is the updated_at of each such issue's baseline.
+	baselineUpdatedAt map[string]string
+	Links             map[FoldLinkKey]FoldElementState
+	IssueMetadata     map[string]jsontext.Value
+	ProjectMetadata   map[string]jsontext.Value
+	Warnings          []string
+	cronAuthors       map[string]foldCronAuthorCandidate
 }
 
 // FoldCronJob retains project identity alongside the winning job document.
@@ -85,6 +92,9 @@ type FoldIssue struct {
 	// restatements. Newly accepted intent must outrank the previous projection's
 	// writer; an older delayed event cannot manufacture a pending pointer.
 	StatusClock FoldClock `json:"-"`
+	// RestatedAt is the time up to which a whole copy set this issue. A
+	// change that is not newer yields to the copy, wherever it replays.
+	RestatedAt string `json:"-"`
 }
 
 // FoldComment is the replayed comment state keyed by stable comment UID.
