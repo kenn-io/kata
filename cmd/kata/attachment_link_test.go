@@ -44,6 +44,7 @@ func TestAttachmentLinkCLIRequiresCurrentAPIVersion(t *testing.T) {
 		{"link reuse unsupported", "0.38.0", "0.39.0", []string{"link", "$ref", "42", "--reuse-existing"}},
 		{"link reuse supported", "0.39.0", "", []string{"link", "$ref", "42", "--reuse-existing"}},
 		{"add reuse unsupported", "0.44.0", "0.45.0", []string{"add", "$ref", "file.txt", "--reuse-existing"}},
+		{"add reuse supported", "0.45.0", "", []string{"add", "$ref", "$file", "--reuse-existing"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env, f, ref := attachmentCLIEnv(t)
@@ -72,6 +73,10 @@ func TestAttachmentLinkCLIRequiresCurrentAPIVersion(t *testing.T) {
 			t.Cleanup(server.Close)
 			args := append([]string(nil), tc.args...)
 			args[1] = ref
+			if args[2] == "$file" {
+				args[2] = filepath.Join(t.TempDir(), "upload.txt")
+				require.NoError(t, os.WriteFile(args[2], []byte("upload bytes"), 0600))
+			}
 			_, err = executeAttachmentCLI(t, server.URL, args...)
 			if tc.floor == "" {
 				require.NoError(t, err)
@@ -112,8 +117,8 @@ func TestAttachmentReuseCLI(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "upload.txt")
 	require.NoError(t, os.WriteFile(file, []byte("upload bytes"), 0600))
 	var ids []string
-	for range 2 {
-		out, err = executeAttachmentCLI(t, env.URL, "add", ref, file, "--reuse-existing", "--json")
+	for _, args := range [][]string{{"add", ref, file, "--json"}, {"add", ref, file, "--reuse-existing", "--json"}} {
+		out, err = executeAttachmentCLI(t, env.URL, args...)
 		require.NoError(t, err)
 		var added struct {
 			Results []struct {

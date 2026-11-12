@@ -5,7 +5,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"strings"
-	"uuid"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -67,11 +66,10 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 		return nil, attachmentError(400, "attachment_invalid")
 	}
 	attachment := metadata.Attachment{Name: node.Name, Size: version.Size, DocbankVersion: version.ID}
-	var reuseVersion *uuid.UUID
 	if input.ReuseExisting {
-		reuseVersion = &version.ID
+		return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, attachment, &version.ID)
 	}
-	return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, attachment, reuseVersion)
+	return saveAttachment(ctx, cfg, in.ProjectID, iss, actor, attachment, nil)
 }
 
 func attachmentForVersion(iss db.Issue, version docbank.Version) (string, metadata.Attachment, error) {

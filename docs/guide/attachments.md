@@ -78,7 +78,7 @@ kata docbank attachments get abc4 <attachment-id-or-suffix> -o screenshot.png
 kata docbank attachments rm abc4 <attachment-id-or-suffix>
 ```
 
-Each upload gets a new ID by default. After a lost response, use `add --reuse-existing` to return an existing reference if the upload resolves to the same immutable Docbank version. Identical file names and bytes in the same project resolve to the same version while the underlying live Docbank file remains unchanged. Moving, trashing, or replacing that file between attempts can make a retry resolve another version and create another reference. Different names or bytes produce different versions. Failed uploads add no reference. Downloads check the bytes against Docbank's `X-Docbank-Blob-Hash` header and the byte count against the reference before publishing the destination. Replacing an existing file requires `--force`.
+Each upload gets a new ID by default. After a lost response, use `add --reuse-existing` to return an existing reference if the upload resolves to the same immutable Docbank version. The reused reference keeps its original metadata, including name and size. Identical file names and bytes in the same project resolve to the same version while the underlying live Docbank file remains unchanged. Moving, trashing, or replacing that file between attempts can make a retry resolve another version and create another reference. Failed uploads add no reference. Downloads check the bytes against Docbank's `X-Docbank-Blob-Hash` header and the byte count against the reference before publishing the destination. Replacing an existing file requires `--force`.
 
 Removal drops the reference. Docbank retains the bytes under its own retention rules.
 

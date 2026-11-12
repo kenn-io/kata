@@ -2674,7 +2674,9 @@ kata docbank attachments get <issue> <attachment> [-o PATH] [--force]
 kata docbank attachments rm <issue> <attachment>
 ```
 
-`--reuse-existing` returns an existing reference to the resolved version, or creates one if absent; `add` requires daemon API 0.45.0 or newer with this flag, and `link` requires 0.39.0 or newer. Without it, each add or link creates a reference. `<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
+`--reuse-existing` returns an existing reference to the resolved version, or creates one if absent. With this flag, `add` requires daemon API 0.45.0 or newer, and `link` requires 0.39.0 or newer. Without it, each add or link creates a reference.
+
+`<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
 
 Point the current `KATA_HOME`'s daemon at a Docbank:
 
