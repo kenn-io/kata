@@ -1,6 +1,8 @@
 package db
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -130,6 +132,41 @@ func RepeatedSnapshotWins(incoming jsontext.Value, hubUpdatedAt time.Time) bool 
 		return false
 	}
 	return updatedAt.Truncate(time.Millisecond).After(hubUpdatedAt.Truncate(time.Millisecond))
+}
+
+// RepeatedSnapshotAlreadyAccepted reports whether the hub already recorded a
+// whole copy of this issue with the snapshot's updated_at. The issue row's
+// updated_at cannot answer that: a hub edit after a copy dated ahead of the
+// hub's clock gives the row an earlier time, and a retry of the same push
+// would then look newer again.
+func RepeatedSnapshotAlreadyAccepted(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, issueUID string, incoming jsontext.Value) (bool, error) {
+	var doc struct {
+		UpdatedAt string `json:"updated_at"`
+	}
+	if err := json.Unmarshal(incoming, &doc); err != nil || doc.UpdatedAt == "" {
+		return false, nil
+	}
+	rows, err := q.QueryContext(ctx, `SELECT payload FROM events WHERE issue_uid=$1 AND type=$2`, issueUID, RepeatedImportEventType)
+	if err != nil {
+		return false, fmt.Errorf("read accepted repeated imports: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return false, err
+		}
+		var accepted repeatedImportPayload
+		if json.Unmarshal([]byte(payload), &accepted) != nil {
+			continue
+		}
+		if !repeatedCopyIsNewer(accepted.UpdatedAt, doc.UpdatedAt) && !repeatedCopyIsNewer(doc.UpdatedAt, accepted.UpdatedAt) {
+			return true, rows.Err()
+		}
+	}
+	return false, rows.Err()
 }
 
 // repeatedImportComment is one comment of a RepeatedImportEventType payload.

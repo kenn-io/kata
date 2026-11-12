@@ -648,10 +648,13 @@ func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]json
 	if v, ok := stringValue(payload["edited_at"]); ok && v != "" {
 		editedAt = v
 	}
-	// After a whole copy, a comment's text follows its edit time: an older
-	// edit that replays later does not replace the copy's text.
-	if p.Issues[uid].RestatedAt != "" {
-		if existing, known := p.Comments[commentUID]; known && existing.EditedAt != "" && !timestampBefore(existing.EditedAt, editedAt) {
+	// For an issue that has a whole copy, a comment's text follows its edit
+	// time through the whole replay: an older edit that replays later does
+	// not replace a newer one, before or after the copy's event. Edits with
+	// the same time keep event order.
+	_, restated := p.restatedIssues[uid]
+	if restated || p.Issues[uid].RestatedAt != "" {
+		if existing, known := p.Comments[commentUID]; known && existing.EditedAt != "" && timestampBefore(editedAt, existing.EditedAt) {
 			return
 		}
 	}

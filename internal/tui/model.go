@@ -3001,7 +3001,9 @@ func (msg eventReceivedMsg) matchesCommentUID(uid string) bool {
 
 func (msg eventReceivedMsg) matchesRelationLifecycleInDetail(comments []CommentEntry, detailProjectID int64) bool {
 	switch msg.eventType {
-	case "issue.restored", "project.restored":
+	case "issue.restored", "issue.restated", "project.restored":
+		// A whole copy can delete or restore its issue without carrying the
+		// comment this detail refers to.
 		// The restore may make an endpoint visible again after a prior detail
 		// refresh removed its backlink or stripped IssueUID from a removed
 		// reply projection, so no current endpoint can identify what was restored.

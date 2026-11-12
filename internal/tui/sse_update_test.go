@@ -869,6 +869,15 @@ func TestIssueLifecycleRefreshesDisplayedCommentEndpoints(t *testing.T) {
 			}}}},
 		},
 		{
+			// A whole copy can delete or restore an issue, and it need not
+			// carry the comment the open detail refers to.
+			name:      "whole copy of a reply target's issue",
+			eventType: "issue.restated", issueUID: "restored-target-issue",
+			comments: []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+				UID: "target-comment", IssueUID: "restored-target-issue", Kind: "confirm",
+			}}},
+		},
+		{
 			name:      "restored reply target",
 			eventType: "issue.restored", issueUID: "restored-target-issue",
 			comments: []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
@@ -1080,7 +1089,9 @@ func TestFederatedSnapshotIncomingReplyRefreshesDisplayedTarget(t *testing.T) {
 		{name: "reply to displayed comment", eventType: "issue.snapshot", replyToUID: "displayed-comment", wantRefresh: true},
 		{name: "reply to other comment", eventType: "issue.snapshot", replyToUID: "other-comment"},
 		{name: "whole copy reply to displayed comment", eventType: "issue.restated", replyToUID: "displayed-comment", wantRefresh: true},
-		{name: "whole copy reply to other comment", eventType: "issue.restated", replyToUID: "other-comment"},
+		// A whole copy can also delete or restore its issue, so it always
+		// refreshes an open detail, as a restore does.
+		{name: "whole copy reply to other comment", eventType: "issue.restated", replyToUID: "other-comment", wantRefresh: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

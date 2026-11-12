@@ -260,6 +260,28 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 	afterRetry, err := hub.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, lastEvent, afterRetry, "an identical copy writes no event")
+
+	// The accepted copy is dated ahead of the hub's clock, so a hub edit
+	// gives the issue an earlier updated_at. A retry of the same push must
+	// still be recognized as the copy the hub already accepted.
+	accepted, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.True(t, accepted.UpdatedAt.After(time.Now()), "the fixture's copy is dated ahead")
+	hubBody := "edited on the hub"
+	_, _, _, err = hub.EditIssue(ctx, db.EditIssueParams{IssueID: accepted.ID, Actor: "worker", Body: &hubBody})
+	require.NoError(t, err)
+	lastEvent, err = hub.MaxEventID(ctx)
+	require.NoError(t, err)
+	result, err = pushRepeatedImportBaseline(t, hub, h.target.ID, newerEnrollment, newerOrigin, newer)
+	require.NoError(t, err, "a retry after a hub edit is still the copy the hub accepted")
+	require.Zero(t, result.Accepted)
+	require.ElementsMatch(t, held, result.SupersededEventUIDs)
+	afterRetry, err = hub.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, lastEvent, afterRetry)
+	edited, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, hubBody, edited.Body)
 	again, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, issue.Revision, again.Revision)

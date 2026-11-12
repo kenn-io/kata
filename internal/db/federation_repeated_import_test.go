@@ -326,6 +326,47 @@ func TestRepeatedImportEventOutlastsAnOlderChangeThatReplaysLater(t *testing.T) 
 	assert.Equal(t, "edit of the other comment", got.Comments["comment-2"].Body, "comments merge, so one the copy lacks is added and can be edited")
 }
 
+// For an issue that has a whole copy, a comment's text follows its edit time
+// through the whole replay, including edits that replay before the copy. An
+// older edit with a later event clock must not hide a newer edit from the
+// copy's comparison.
+func TestRepeatedImportEventComparesWithTheLatestCommentEdit(t *testing.T) {
+	current := `{"uid":"issue-1","title":"t","status":"open","comments":[
+ {"comment_uid":"comment-1","author":"alice","body":"first","created_at":"2026-05-01T10:00:00.000Z"}],
+"updated_at":"2026-05-01T10:00:00.000Z"}`
+	incoming := `{"uid":"issue-1","title":"copy title","status":"open","comments":[
+ {"comment_uid":"comment-1","author":"alice","body":"copy edit","created_at":"2026-05-01T10:00:00.000Z","edited_at":"2026-05-10T10:00:00.000Z"}],
+"updated_at":"2026-06-01T09:00:00.000Z"}`
+	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
+	require.NoError(t, err)
+	got := FoldEvents([]FoldEvent{
+		testEvent("issue.snapshot", 1, current),
+		testEvent("issue.comment_edited", 5, `{"comment_uid":"comment-1","body":"latest edit","edited_at":"2026-05-20T10:00:00.000Z"}`),
+		testEvent("issue.comment_edited", 6, `{"comment_uid":"comment-1","body":"older edit","edited_at":"2026-05-05T10:00:00.000Z"}`),
+		testEvent(deltas[0].Type, 10, string(deltas[0].Payload)),
+	})
+	assert.Equal(t, "latest edit", got.Comments["comment-1"].Body)
+}
+
+// Two edits of one comment in the same millisecond keep event order.
+func TestRepeatedImportEventKeepsEventOrderForEqualCommentEditTimes(t *testing.T) {
+	current := `{"uid":"issue-1","title":"t","status":"open","comments":[
+ {"comment_uid":"comment-1","author":"alice","body":"first","created_at":"2026-05-01T10:00:00.000Z"}],
+"updated_at":"2026-05-01T10:00:00.000Z"}`
+	incoming := `{"uid":"issue-1","title":"copy title","status":"open","comments":[
+ {"comment_uid":"comment-1","author":"alice","body":"first","created_at":"2026-05-01T10:00:00.000Z"}],
+"updated_at":"2026-06-01T09:00:00.000Z"}`
+	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
+	require.NoError(t, err)
+	got := FoldEvents([]FoldEvent{
+		testEvent("issue.snapshot", 1, current),
+		testEvent(deltas[0].Type, 10, string(deltas[0].Payload)),
+		testEvent("issue.comment_edited", 20, `{"comment_uid":"comment-1","body":"edit one","edited_at":"2026-06-02T10:00:00.000Z"}`),
+		testEvent("issue.comment_edited", 21, `{"comment_uid":"comment-1","body":"edit two","edited_at":"2026-06-02T10:00:00.000Z"}`),
+	})
+	assert.Equal(t, "edit two", got.Comments["comment-1"].Body)
+}
+
 // The hub accepted the copy because it was newer than the issue it held. An
 // edit made after the copy can reach the hub later and sort before the hub's
 // event for the copy. The copy still applies, and the edit applies on top of

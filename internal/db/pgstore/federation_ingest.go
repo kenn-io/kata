@@ -225,7 +225,15 @@ func (s *Store) IngestFederationEvents(
 				repeatedSeen[repeated.UID] = true
 				result.SupersededEventUIDs = append(result.SupersededEventUIDs, event.EventUID)
 			}
-			if repeated != nil && !db.RepeatedSnapshotWins(event.Payload, repeated.UpdatedAt) {
+			wins := repeated != nil && db.RepeatedSnapshotWins(event.Payload, repeated.UpdatedAt)
+			if wins {
+				accepted, err := db.RepeatedSnapshotAlreadyAccepted(ctx, tx, repeated.UID, event.Payload)
+				if err != nil {
+					return err
+				}
+				wins = !accepted
+			}
+			if repeated != nil && !wins {
 				result.Duplicates++
 				repeatedSkipped++
 				freshSnapshotSeen = true
