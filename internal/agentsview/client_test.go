@@ -1,16 +1,41 @@
 package agentsview
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 )
+
+func TestCronUsageUnauthorizedStatusIgnoresBodyFailure(t *testing.T) {
+	// The usage status contract maps both 401 and 403 to unauthorized,
+	// regardless of whether their response bodies can be read.
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		for _, tc := range []struct {
+			name string
+			body func() io.Reader
+		}{
+			{"oversized", func() io.Reader { return strings.NewReader(strings.Repeat("x", (1<<20)+1)) }},
+			{"unreadable", func() io.Reader { return iotest.ErrReader(errors.New("fixture read failure")) }},
+		} {
+			t.Run(http.StatusText(status)+"/"+tc.name, func(t *testing.T) {
+				client, err := NewClient(config.ResolvedAgentsView{URL: "https://agentsview.example"}, false)
+				require.NoError(t, err)
+				client.http.Transport = usageRoundTripFunc(func(*http.Request) (*http.Response, error) {
+					return &http.Response{StatusCode: status, Body: io.NopCloser(tc.body()), Header: make(http.Header)}, nil
+				})
+				require.Equal(t, "unauthorized", client.Lookup(t.Context(), "fixture").State)
+			})
+		}
+	}
+}
 
 func TestLookupSessionStates(t *testing.T) {
 	cases := []struct {

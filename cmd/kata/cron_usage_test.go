@@ -13,6 +13,22 @@ import (
 	"go.kenn.io/kata/internal/agentsview"
 )
 
+func TestCronUsageRejectsUnsupportedHumanStates(t *testing.T) {
+	// Human output must refuse unknown states instead of guessing their meaning.
+	for _, tc := range []struct {
+		name  string
+		usage agentsview.RunUsage
+	}{
+		{"run", agentsview.RunUsage{Total: agentsview.Total{State: "future_run_state"}}},
+		{"session", agentsview.RunUsage{Total: agentsview.Total{State: "unknown"}, Sessions: []agentsview.RunSession{{Agent: "example", SessionID: "fixture", SessionUsage: agentsview.SessionUsage{State: "future_session_state"}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			require.Error(t, writeCronUsage(&out, tc.usage))
+		})
+	}
+}
+
 func TestCronUsageOutputStatesAndSanitization(t *testing.T) {
 	amount := int64(2410000)
 	step := "main"
