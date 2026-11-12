@@ -14,6 +14,24 @@ type Session struct {
 	Step      *string `json:"step,omitempty"`
 }
 
+// UnmarshalJSON distinguishes an omitted step from an explicitly null step.
+func (s *Session) UnmarshalJSON(input []byte) error {
+	type wireSession Session
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal(input, &fields); err != nil {
+		return err
+	}
+	if raw, ok := fields["step"]; ok && string(raw) == "null" {
+		return invalid("invalid session step")
+	}
+	var value wireSession
+	if err := json.Unmarshal(input, &value, json.RejectUnknownMembers(true)); err != nil {
+		return err
+	}
+	*s = Session(value)
+	return nil
+}
+
 // UnmarshalJSON preserves field presence so explicit null session values are rejected.
 func (s *Summary) UnmarshalJSON(input []byte) error {
 	type wireSummary Summary

@@ -17,8 +17,38 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/testfix"
 )
+
+func TestAdoptionWaitsForProjectObservationAdmission(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	release, err := federationcoord.BeginSync(t.Context(), federationcoord.Key(store.InstanceUID(), project.ID), store, project.ID)
+	require.NoError(t, err)
+	t.Cleanup(release)
+	params := replicaServiceParams()
+	params.ProjectName = project.Name
+	params.AdoptExisting = true
+	done := make(chan error, 1)
+	go func() {
+		_, err := daemon.EnsureFederationReplica(t.Context(), store, newReplicaCredentialStore(), nil, params)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("adoption completed while observation held admission: %v", err)
+	case <-time.After(100 * time.Millisecond): //nolint:kennlint // deadlinetest: admission must exclude adoption
+	}
+	release()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("adoption did not proceed after admission released")
+	}
+}
 
 const (
 	replicaHubProjectUID   = "01HZNQ7VFPK1XGD8R5MABCD4EX"

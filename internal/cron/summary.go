@@ -35,8 +35,5 @@ func ParseSummary(input []byte) (Summary, error) {
 	if value.Version != 1 || value.InputTokens < 0 || value.OutputTokens < 0 {
 		return value, invalid("invalid run summary")
 	}
-	if err := value.validateSessions(input); err != nil {
-		return value, err
-	}
 	return value, nil
 }

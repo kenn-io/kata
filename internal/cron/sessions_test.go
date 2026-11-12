@@ -24,6 +24,7 @@ func TestSummarySessionsContract(t *testing.T) {
 		{"invalid id", `{"version":1,"sessions":[{"agent":"claude","session_id":"bad"}]}`, false},
 		{"invalid agent", `{"version":1,"sessions":[{"agent":"CLAUDE","session_id":"bad"}]}`, false},
 		{"empty step", `{"version":1,"sessions":[{"agent":"codex","session_id":"00000000-0000-4000-8000-000000000001","step":""}]}`, false},
+		{"null step", `{"version":1,"sessions":[{"agent":"codex","session_id":"00000000-0000-4000-8000-000000000001","step":null}]}`, false},
 		{"invalid step", `{"version":1,"sessions":[{"agent":"codex","session_id":"00000000-0000-4000-8000-000000000001","step":"a/b"}]}`, false},
 		{"duplicate", `{"version":1,"sessions":[` + session + `,` + session + `]}`, false},
 		{"too many", `{"version":1,"sessions":[` + strings.Repeat(session+",", 64) + session + `]}`, false},
@@ -43,4 +44,11 @@ func TestLegacySummaryEncodingUnchanged(t *testing.T) {
 	raw, err := json.Marshal(Summary{Version: 1})
 	require.NoError(t, err)
 	require.Equal(t, `{"version":1}`, string(raw))
+}
+
+func TestSummaryDecodeRejectsNullStep(t *testing.T) {
+	// Imports and federation decode the shared summary directly.
+	var summary Summary
+	err := json.Unmarshal([]byte(`{"version":1,"sessions":[{"agent":"claude","session_id":"00000000-0000-4000-8000-000000000001","step":null}]}`), &summary)
+	require.Error(t, err)
 }

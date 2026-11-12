@@ -584,8 +584,9 @@ daemon. `kata.load_recurrence` is a separate RRULE issue-template interface.
 `kata cron capabilities --json` reads the project's UID and advertised
 `event_features` without changing state. The corresponding GET is
 `/api/v1/projects/{project_id}/cron/capabilities`; the
-`X-Kata-Event-Features` header advertises only `cron_v1`, covering portable
-definitions, run observations, and native recurring child delivery. Missing,
+`X-Kata-Event-Features` header advertises `cron_v1` for portable definitions,
+run observations, and native recurring child delivery, and `cron_run_sessions_v1`
+for run sessions. Missing,
 unknown, or failed advertisements remain distinct outcomes. This is an ordinary project
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
@@ -673,11 +674,15 @@ objects. `step` is an optional portable step key. Agent names and session IDs
 follow the [closing-session transcript rules](configuration.md#closing-session-transcripts).
 Each exact agent and session ID pair must be unique. Set `sessions_incomplete`
 to `true` when the list may omit sessions; omit it otherwise. Observations replace
-the complete summary. Sessions are visible to project readers, federated peers,
+the complete summary, so omitting sessions clears previously recorded sessions.
+Sessions are visible to project readers, federated peers,
 and in backups. They require the `cron_run_sessions_v1` event feature.
 `kata cron capabilities --json` includes `cli_features` so adapters can check
-that their installed CLI accepts these fields before sending them. Older CLIs
-reject unknown summary fields.
+that their installed CLI accepts these fields before sending them. Adapters must
+check for `cron_run_sessions_v1` in both `cli_features` and the hub's
+`event_features`. Older CLIs reject unknown summary fields. Upgrade the hub
+first, then spokes; older spokes stop syncing the entire project once any run
+records a session.
 
 
 A new observation uses expected revision 0. A changed observation requires its

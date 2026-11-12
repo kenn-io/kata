@@ -2915,6 +2915,27 @@ func TestFederationIngestPersistsBroadcastsAndReturnsAck(t *testing.T) {
 	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "duplicate ingest should not rebroadcast") //nolint:kennlint // deadlinetest: bounded absence checks that duplicate ingest should not rebroadcast
 }
 
+func TestFederationIngestRejectsSessionEventWithoutFeature(t *testing.T) {
+	env := testenv.New(t)
+	project := createFederatedHubProject(t, env, "hub-project")
+	created, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
+		Token: "ingest-token", SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "push", Actor: "tester",
+	})
+	require.NoError(t, err)
+	ev := federationRemoteIssueCreatedEvent(t, project, federationTestSpokeUID)
+	ev.Type = "cron.run.observed"
+	ev.IssueUID = nil
+	ev.Payload = jsontext.Value(`{"summary":{"version":1,"sessions":[{"agent":"claude","session_id":"00000000-0000-4000-8000-000000000001"}]}}`)
+	body := federationIngestBody(federationIngestEnvelope(t, 17, ev))
+	headers := bearer(created.Token)
+	headers[db.EventFeaturesHeader] = db.CronEventFeature
+	before := countEvents(t, env.DB)
+	resp, raw := envDoRaw(t, env, http.MethodPost, projectPath(project.ID)+"/federation/events:ingest", body, headers)
+	require.Equalf(t, http.StatusConflict, resp.StatusCode, "%s", raw)
+	require.Contains(t, string(raw), "unsupported_event_features")
+	require.Equal(t, before, countEvents(t, env.DB))
+}
+
 func TestFederationIngestRejectsFutureSchemaVersion(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()

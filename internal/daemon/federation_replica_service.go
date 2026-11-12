@@ -1139,8 +1139,41 @@ func ensureFederationReplicaState(
 	credentials config.FederationCredentialStore,
 	p EnsureFederationReplicaParams,
 ) (EnsureFederationReplicaResult, error) {
+	// Adoption can turn a standalone project into a spoke. Drain observations
+	// before taking the replica mutex, matching the rebind lock order.
+	var adoptionProjectID int64
+	var releaseAdoption func()
+	if p.AdoptExisting || p.AttachEmpty {
+		project, err := store.ProjectByUID(ctx, p.HubProjectUID)
+		if errors.Is(err, db.ErrNotFound) {
+			project, err = store.ProjectByNameIncludingArchived(ctx, p.ProjectName)
+		}
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return EnsureFederationReplicaResult{}, err
+		}
+		if err == nil {
+			adoptionProjectID = project.ID
+			releaseAdoption, err = federationcoord.BeginRebind(ctx, federationcoord.Key(store.InstanceUID(), project.ID), store, project.ID)
+			if err != nil {
+				return EnsureFederationReplicaResult{}, err
+			}
+			defer releaseAdoption()
+		}
+	}
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
+	if p.AdoptExisting || p.AttachEmpty {
+		project, err := store.ProjectByUID(ctx, p.HubProjectUID)
+		if errors.Is(err, db.ErrNotFound) {
+			project, err = store.ProjectByNameIncludingArchived(ctx, p.ProjectName)
+		}
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return EnsureFederationReplicaResult{}, err
+		}
+		if (err == nil && project.ID != adoptionProjectID) || (errors.Is(err, db.ErrNotFound) && adoptionProjectID != 0) {
+			return EnsureFederationReplicaResult{}, ErrFederationReplicaBindingConflict
+		}
+	}
 
 	if p.ExpectedCredential != nil {
 		if _, ok := credentials.(config.FederationCredentialReplacer); !ok {
@@ -1182,6 +1215,9 @@ func ensureFederationReplicaState(
 	}
 
 	result, err := ensureReplicaBindingOrAdopt(ctx, store, p)
+	if releaseAdoption != nil {
+		releaseAdoption()
+	}
 	if p.ProjectResetSink != nil {
 		for _, projectID := range result.ResetProjectIDs {
 			p.ProjectResetSink(projectID, result.ResetAfterEventID)

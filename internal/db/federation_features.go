@@ -57,7 +57,7 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
 	}
-	if kind == "projection.run" || strings.HasPrefix(kind, "cron.run.") {
+	if strings.HasPrefix(kind, "cron.run.") {
 		if payload == "" {
 			payload = "{}"
 		}
@@ -209,7 +209,8 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
 	}
 	if cronPresent {
-		rows, err := q.QueryContext(ctx, `SELECT r.summary_json FROM cron_runs r JOIN projects p ON p.id=r.project_id WHERE p.uid=$1`, projectUID)
+		// Escaped JSON keys remain candidates, as in the native cron probe.
+		rows, err := q.QueryContext(ctx, `SELECT r.summary_json FROM cron_runs r JOIN projects p ON p.id=r.project_id WHERE p.uid=$1 AND (r.summary_json LIKE '%"sessions%' OR r.summary_json LIKE '%\u%' ESCAPE '!')`, projectUID)
 		if err != nil {
 			return "", err
 		}

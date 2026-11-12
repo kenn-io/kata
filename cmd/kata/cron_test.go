@@ -813,13 +813,6 @@ func TestCronCLIParentUpdateKeepsBindingProtections(t *testing.T) {
 	require.Equal(t, parents[0].UID, stored.Definition.Issue.ParentUID)
 }
 
-// TestCronCLIRejectsUnknownSummaryField documents older CLI negotiation.
-func TestCronCLIRejectsUnknownSummaryField(t *testing.T) {
-	var body generated.ObserveCronRunBody
-	err := decodeCronCLIRequest([]byte(`{"status":"running","summary":{"version":1,"future_field":true}}`), &body)
-	require.Error(t, err)
-}
-
 func TestCronCLIObservationSessionsRoundTrip(t *testing.T) {
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(t.Context(), "example-project")
@@ -828,6 +821,13 @@ func TestCronCLIObservationSessionsRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	id := cronCLIUID(t)
 	body := map[string]any{"job_uid": job.UID, "definition_event_uid": job.DefinitionEventUID, "status": "running", "summary": map[string]any{"version": 1, "sessions": []map[string]string{{"agent": "claude", "session_id": "00000000-0000-4000-8000-000000000001", "step": "main"}}, "sessions_incomplete": true}}
+	_, _, err = executeCronCLI(t, env.URL, strings.NewReader(`{"status":"running"}`), "run", "observe", id, "--json-input", "-")
+	require.ErrorContains(t, err, "summary required")
+	nullStep := strings.Replace(string(mustCronJSON(t, body)), `"step":"main"`, `"step":null`, 1)
+	_, _, err = executeCronCLI(t, env.URL, strings.NewReader(nullStep), "run", "observe", id, "--json-input", "-")
+	require.Error(t, err)
+	_, err = env.DB.CronRun(t.Context(), project.ID, id)
+	require.ErrorIs(t, err, db.ErrNotFound)
 	out, _, err := executeCronCLI(t, env.URL, strings.NewReader(string(mustCronJSON(t, body))), "run", "observe", id, "--json-input", "-")
 	require.NoError(t, err)
 	require.Contains(t, out, `"session_id":"00000000-0000-4000-8000-000000000001"`)

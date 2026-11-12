@@ -42,10 +42,12 @@ func buildNativeCronJSONLFixture(t *testing.T) nativeJSONLFixture {
 	issue, _, err := source.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Review", Author: "worker"})
 	require.NoError(t, err)
 	runRecords := []db.ImportRecord{}
+	sessions := []cron.Session{{Agent: "claude", SessionID: "00000000-0000-4000-8000-000000000001", Step: new("main")}}
+	incomplete := true
 	for range 2 {
 		runUID, err := uid.New()
 		require.NoError(t, err)
-		result, err := source.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, OccurrenceKey: &occurrence, IssueUID: &issue.UID, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1, Message: "Review started", InputTokens: 123}})
+		result, err := source.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, OccurrenceKey: &occurrence, IssueUID: &issue.UID, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1, Message: "Review started", InputTokens: 123, Sessions: &sessions, SessionsIncomplete: &incomplete}})
 		require.NoError(t, err)
 		run := db.CronRunExport(result.Run)
 		runRecords = append(runRecords, &run)
