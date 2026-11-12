@@ -233,7 +233,8 @@ func TestDaemonStatusKeepsCurrentHomeListWhenSelectionIsInvalid(t *testing.T) {
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777"})
 	require.NoError(t, err)
-	out, _, _ := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	assert.Equal(t, kindValidation, requireCLIError(t, err, ExitValidation).Kind)
 	var body struct {
 		Daemons  []any          `json:"daemons"`
 		Selected map[string]any `json:"selected"`
