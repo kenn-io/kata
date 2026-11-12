@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	kataapi "go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -115,7 +116,7 @@ func cronStatsField(d *cronDoc, s cronStats, uid string) {
 	case s.body != nil:
 		label, value = cronStatsText(*s.body)
 	case errors.As(s.err, &tooOld):
-		value = "needs daemon API " + cronStatsAPIVersion + " or newer"
+		value = "needs daemon API " + kataapi.CronRunStatsAPIVersion + " or newer"
 	case s.err != nil:
 		value = "unavailable: " + sanitizeForLine(s.err.Error())
 	}

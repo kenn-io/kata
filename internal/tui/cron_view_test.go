@@ -603,6 +603,32 @@ func TestSnapshot_Cron(t *testing.T) {
 	}
 }
 
+func TestSnapshot_CronJobStatsWidths(t *testing.T) {
+	defer snapshotInit(t)()
+	truncated := cronStatsFixture(10000)
+	truncated.Truncated, truncated.Window.Since = true, snapshotFixedNow.AddDate(0, 0, -7)
+	for _, tc := range []struct {
+		name string
+		body *generated.CronRunStatsResponseBody
+		err  error
+	}{
+		{"loaded", cronStatsFixture(42), nil},
+		{"truncated", truncated, nil},
+		{"unavailable", nil, errors.New("Get http://daemon.example:7777/api/v1/projects/7/cron/runs/stats: connection refused")},
+		{"unsupported", nil, apiVersionError{"run statistics require daemon API 0.47.0 or newer"}},
+	} {
+		for _, width := range []int{12, 24, 40, 80, 120} {
+			t.Run(fmt.Sprintf("%s-%d", tc.name, width), func(t *testing.T) {
+				m := cronFixture(t)
+				m.width, m.height = width+2, 40
+				m = sendKey(m, tea.KeyEnter)
+				m, _ = updateModel(m, cronStatsMsg{conn: m.connGen, scope: m.scopeGen, seq: m.cron.stats.seq, body: tc.body, err: tc.err})
+				assertGolden(t, fmt.Sprintf("cron-job-stats-%s-%d", tc.name, width), m.viewBody())
+			})
+		}
+	}
+}
+
 func TestCronRefreshKeepsSelectedRecord(t *testing.T) {
 	for _, tab := range []rune{'2', '3', '4'} {
 		t.Run(string(tab), func(t *testing.T) {

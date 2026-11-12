@@ -99,9 +99,6 @@ func (c *Client) ListCronRuns(ctx context.Context, projectID int64) ([]generated
 	return wire.JSON200.Runs, nil
 }
 
-// cronStatsAPIVersion is the first daemon API that serves run statistics.
-const cronStatsAPIVersion = "0.47.0"
-
 // CronRunStats reads one job's run statistics over the daemon's default
 // window, the 30 days ending now.
 func (c *Client) CronRunStats(ctx context.Context, projectID int64, jobUID string) (*generated.CronRunStatsResponseBody, error) {
@@ -111,7 +108,7 @@ func (c *Client) CronRunStats(ctx context.Context, projectID int64, jobUID strin
 	}
 	// Only a pass is kept: an older daemon may be upgraded while connected.
 	if !c.cronStatsSupported.Load() {
-		if err := requireAPIVersion(ctx, client, cronStatsAPIVersion, "run statistics require daemon API "+cronStatsAPIVersion+" or newer"); err != nil {
+		if err := requireAPIVersion(ctx, client, kataapi.CronRunStatsAPIVersion, "run statistics require daemon API "+kataapi.CronRunStatsAPIVersion+" or newer"); err != nil {
 			// A failed health check says nothing about the daemon's version.
 			if _, ok := errors.AsType[apiVersionError](err); !ok {
 				err = fmt.Errorf("check daemon API version: %w", errors.Unwrap(err))
