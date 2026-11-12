@@ -221,10 +221,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := addFederationRootSigningStatus(ctx, cfg, &body); err != nil {
 			return nil, err
 		}
-		if !in.Compact {
-			if err := addFederationRelayCapacityStatus(ctx, cfg, &body); err != nil {
-				return nil, err
-			}
+		if err := finishFederationProjectStatus(ctx, cfg, &body, in.Compact); err != nil {
+			return nil, err
 		}
 		return &api.FederationStatusResponse{Body: body}, nil
 	})
@@ -1459,6 +1457,25 @@ func federationStatusBindings(ctx context.Context, store db.Storage, projectID *
 		return nil, internalAPIError(err)
 	}
 	return []db.FederationBinding{binding}, nil
+}
+
+// compactSyncErrorMarker stands in for a sync error's text in compact status,
+// which the browser reads; the full text stays in the CLI's status.
+const compactSyncErrorMarker = "details withheld; run kata federation status"
+
+// finishFederationProjectStatus completes a project status. Compact reads skip
+// relay checkpoint measurement and report a sync error without its text.
+func finishFederationProjectStatus(ctx context.Context, cfg ServerConfig, body *api.FederationStatusBody, compact bool) error {
+	if !compact {
+		return addFederationRelayCapacityStatus(ctx, cfg, body)
+	}
+	for i := range body.Statuses {
+		if e := body.Statuses[i].LastError; e != nil && *e != "" {
+			marker := compactSyncErrorMarker
+			body.Statuses[i].LastError = &marker
+		}
+	}
+	return nil
 }
 
 func federationProjectStatus(
