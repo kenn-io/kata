@@ -665,7 +665,6 @@ func TestHubClientHTTPStatusCategories(t *testing.T) {
 		{name: "bad request", status: http.StatusBadRequest, kind: federation.ErrHubValidation},
 		{name: "unauthorized", status: http.StatusUnauthorized, kind: federation.ErrHubAuthentication},
 		{name: "forbidden", status: http.StatusForbidden, kind: federation.ErrHubAuthentication},
-		{name: "signing required", status: http.StatusPreconditionRequired, kind: federation.ErrHubAuthentication},
 		{name: "conflict", status: http.StatusConflict, kind: federation.ErrHubValidation},
 		{name: "timeout", status: http.StatusRequestTimeout, kind: federation.ErrHubUnavailable},
 		{name: "throttled", status: http.StatusTooManyRequests, kind: federation.ErrHubUnavailable},

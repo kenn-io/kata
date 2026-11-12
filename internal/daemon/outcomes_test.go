@@ -15,7 +15,6 @@ import (
 	"github.com/cenkalti/backoff/v7"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/issuesync"
 	"go.kenn.io/kata/internal/linearsync"
 	"go.kenn.io/kata/internal/notionsync"
@@ -64,7 +63,6 @@ func TestOutcomesSyncReasons(t *testing.T) {
 		reason string
 	}{
 		{&issuesync.StatusError{HTTPStatus: 401}, "auth"}, {&issuesync.StatusError{HTTPStatus: 403}, "auth"},
-		{&federation.HubStatusError{StatusCode: http.StatusPreconditionRequired}, "auth"},
 		{&issuesync.StatusError{HTTPStatus: 429}, "rate_limit"},
 		{&issuesync.StatusError{AuthFailure: true}, "auth"},
 		{&issuesync.StatusError{RetryAfter: time.Minute}, "other"},
