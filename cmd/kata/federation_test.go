@@ -150,11 +150,45 @@ func TestFederationStatusProjectMember(t *testing.T) {
 	t.Setenv("KATA_AUTH_TOKEN", "member-token")
 	_, err = runCmdOutput(t, env, "federation", "status")
 	_ = requireCLIError(t, err, ExitNotFound)
-	out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name, "--format", "json")
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var global atomic.Int32
+	currentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/federation/status" {
+			global.Add(1)
+		}
+		r.Host = target.Host
+		r.Header["X-Forwarded-For"] = nil
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(currentServer.Close)
+	current := *env
+	current.URL = currentServer.URL
+	out := requireCmdOutput(t, &current, "federation", "status", "--project", project.Name, "--format", "json")
 	assert.Contains(t, out, project.Name)
 	assert.Contains(t, out, "hub offline")
-	_, err = runCmdOutput(t, env, "federation", "status", "--project", other.Name)
+	_, err = runCmdOutput(t, &current, "federation", "status", "--project", other.Name)
 	_ = requireCLIError(t, err, ExitNotFound)
+	assert.Zero(t, global.Load())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			_, _ = w.Write([]byte(`{"api_schema_version":"0.45.0"}`))
+			return
+		}
+		r.Host = target.Host
+		r.Header["X-Forwarded-For"] = nil
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	older := *env
+	older.URL = server.URL
+	out, err = runCmdOutput(t, &older, "federation", "status", "--project", project.Name)
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Equal(t, "daemon_api_too_old", ce.Code)
+	assert.Contains(t, ce.Message, "0.45.0")
+	assert.Contains(t, ce.Hint, "kata update")
+	assert.Empty(t, out)
 }
 
 func TestFederationStatusProjectAnonymousReadonly(t *testing.T) {
@@ -179,11 +213,36 @@ func TestFederationStatusProjectAnonymousReadonly(t *testing.T) {
 }
 
 func TestFederationStatusProjectOlderDaemon(t *testing.T) {
-	env := testenv.New(t)
+	env, project := setupFederationStatusCLIState(t)
+	other, err := env.DB.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: other.ID, Role: db.FederationRoleHub, HubProjectUID: other.UID, Enabled: true})
+	require.NoError(t, err)
 	target, err := url.Parse(env.URL)
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	var lookup atomic.Bool
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if resp.Request.URL.Path != "/api/v1/federation/status" || resp.StatusCode != http.StatusOK {
+			return nil
+		}
+		var body map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			return err
+		}
+		if err := resp.Body.Close(); err != nil {
+			return err
+		}
+		body["future_field"] = "preserved"
+		data, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(data))
+		resp.ContentLength = int64(len(data))
+		resp.Header.Set("Content-Length", strconv.Itoa(len(data)))
+		return nil
+	}
+	var lookup, global atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/health" {
 			w.Header().Set("Content-Type", "application/json")
@@ -191,26 +250,84 @@ func TestFederationStatusProjectOlderDaemon(t *testing.T) {
 			return
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/resolve" {
-			lookup.Store(true)
+			lookup.Add(1)
 			http.NotFound(w, r)
 			return
 		}
+		if r.URL.Path == "/api/v1/federation/status" {
+			global.Add(1)
+		}
 		r.Host = target.Host
+		r.Header.Set("Accept-Encoding", "identity")
 		r.Header["X-Forwarded-For"] = nil
 		proxy.ServeHTTP(w, r)
 	}))
 	t.Cleanup(server.Close)
 	older := *env
 	older.URL = server.URL
-	_, err = runCmdOutput(t, &older, "federation", "status", "--project", "spoke-project")
-	ce := requireCLIError(t, err, ExitValidation)
-	assert.Equal(t, "daemon_api_too_old", ce.Code)
-	assert.Contains(t, ce.Message, "0.46.0")
-	assert.Contains(t, ce.Message, "0.45.0")
-	assert.Contains(t, ce.Hint, "kata update")
-	assert.Contains(t, ce.Hint, "package manager")
-	assert.Contains(t, ce.Hint, "https://")
-	assert.False(t, lookup.Load())
+	for _, mode := range []string{"json", "human", "agent"} {
+		out := requireCmdOutput(t, &older, "federation", "status", "--project", project.Name, "--format", mode)
+		assert.Contains(t, out, project.Name)
+		assert.NotContains(t, out, other.Name)
+		if mode == "json" {
+			assert.Contains(t, out, `"future_field":"preserved"`)
+		}
+	}
+	_, err = runCmdOutput(t, &older, "federation", "status", "--project", "missing-project")
+	_ = requireCLIError(t, err, ExitNotFound)
+	assert.EqualValues(t, 4, global.Load())
+	assert.Zero(t, lookup.Load())
+}
+
+func TestFederationStatusProjectVersionRouting(t *testing.T) {
+	for _, tc := range []struct {
+		name, version string
+		status        int
+		global        bool
+	}{
+		{"older denied", "0.45.0", http.StatusForbidden, true},
+		{"older not found", "0.45.0", http.StatusNotFound, true},
+		{"missing version", "", 0, false},
+		{"malformed version", "invalid", 0, false},
+		{"current denied", "0.46.0", http.StatusForbidden, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var global, lookup atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/health":
+					_ = json.NewEncoder(w).Encode(map[string]string{"api_schema_version": tc.version})
+				case "/api/v1/federation/status":
+					global.Add(1)
+					w.WriteHeader(tc.status)
+				case "/api/v1/projects/resolve":
+					lookup.Add(1)
+					w.WriteHeader(tc.status)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "federation", "status", "--project", "spoke-project")
+			if tc.version == "0.46.0" {
+				require.Error(t, err)
+				assert.NotContains(t, err.Error(), "requires daemon API")
+				assert.EqualValues(t, 1, lookup.Load())
+			} else {
+				ce := requireCLIError(t, err, ExitValidation)
+				assert.Equal(t, "daemon_api_too_old", ce.Code)
+				assert.Contains(t, ce.Message, "0.46.0")
+				if tc.version != "" {
+					assert.Contains(t, ce.Message, tc.version)
+				}
+				assert.Contains(t, ce.Hint, "kata update")
+				assert.Contains(t, ce.Hint, "package manager")
+				assert.Contains(t, ce.Hint, "https://")
+				assert.Zero(t, lookup.Load())
+			}
+			assert.Equal(t, tc.global, global.Load() == 1)
+		})
+	}
 }
 
 type federationStatusHostAccess struct{}
@@ -230,7 +347,11 @@ func TestFederationStatusProjectHostScope(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, env.DB.RecordFederationSyncError(t.Context(), project.ID, errors.New("hub offline"), time.Now()))
 	daemonServer := daemon.NewServer(daemon.ServerConfig{DB: env.DB, StartedAt: time.Now(), HostAccess: federationStatusHostAccess{}})
+	var global atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/federation/status" {
+			global.Add(1)
+		}
 		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "worker"})
 		daemonServer.Handler().ServeHTTP(w, r.WithContext(ctx))
 	}))
@@ -244,6 +365,7 @@ func TestFederationStatusProjectHostScope(t *testing.T) {
 	out := requireCmdOutput(t, &host, "federation", "status", "--project", project.Name)
 	assert.Contains(t, out, project.Name)
 	assert.Contains(t, out, "hub offline")
+	assert.Zero(t, global.Load())
 }
 
 func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {

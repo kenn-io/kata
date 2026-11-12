@@ -1350,39 +1350,53 @@ func federationStatusCmd() *cobra.Command {
 			}
 			var callResp *generated.GetFederationStatusResp
 			var callErr error
+			var versionErr error
 			if flags.Project != "" {
-				if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, apiVersionFederationProjectLookup, "project federation status"); err != nil {
+				health, err := requireDaemonAPIVersionHealth(a.ctx, a.client, a.baseURL, apiVersionFederationProjectLookup, "project federation status")
+				if err != nil {
 					var cliErr *cliError
 					if errors.As(err, &cliErr) && cliErr.Code == "daemon_api_too_old" {
 						cliErr.Hint = "Update the selected daemon on its host to a release with the required API: use kata update for an official installation or its owning package manager. For service-managed installs, see https://katatracker.com/docs/get-started/install/#updating-kata"
+						_, valid := apiVersionAtLeast(health.APISchemaVersion, apiVersionFederationProjectLookup)
+						if valid {
+							versionErr = err
+						} else {
+							return err
+						}
+					} else {
+						return err
 					}
-					return err
 				}
-				project, err := readFederationProjectByName(a, flags.Project)
-				if err != nil {
-					return err
+				if versionErr == nil {
+					project, err := readFederationProjectByName(a, flags.Project)
+					if err != nil {
+						return err
+					}
+					resp, err := apiClient.GetProjectFederationStatusWithResponse(a.ctx, &generated.GetProjectFederationStatusRequestOptions{PathParams: &generated.GetProjectFederationStatusPath{ProjectID: project.ID}})
+					callErr = err
+					if resp != nil {
+						callResp = &generated.GetFederationStatusResp{HTTPResponse: resp.HTTPResponse, StatusCode: resp.StatusCode, Body: resp.Body}
+					}
 				}
-				resp, err := apiClient.GetProjectFederationStatusWithResponse(a.ctx, &generated.GetProjectFederationStatusRequestOptions{PathParams: &generated.GetProjectFederationStatusPath{ProjectID: project.ID}})
-				callErr = err
-				if resp != nil {
-					callResp = &generated.GetFederationStatusResp{HTTPResponse: resp.HTTPResponse, StatusCode: resp.StatusCode, Body: resp.Body}
-				}
-			} else {
+			}
+			// Remove the old-daemon branch and its dedicated tests when the CLI's
+			// documented minimum daemon API reaches 0.46.0.
+			if flags.Project == "" || versionErr != nil {
 				callResp, callErr = apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{})
 			}
 			if err := externalCLITransportError(callResp, callErr); err != nil {
 				return err
 			}
 			if err := externalCLIResponseError(callResp.StatusCode, callResp.Body, callErr); err != nil {
+				if versionErr != nil && (callResp.StatusCode == http.StatusForbidden || callResp.StatusCode == http.StatusNotFound) {
+					return versionErr
+				}
 				return err
 			}
 			if flags.Project != "" {
-				var response api.FederationStatusBody
-				if err := json.Unmarshal(callResp.Body, &response); err != nil {
+				callResp.Body, err = filterFederationStatusProject(callResp.Body, flags.Project)
+				if err != nil {
 					return err
-				}
-				if len(response.Statuses) == 0 {
-					return &cliError{Message: fmt.Sprintf("no federation status for project %q", flags.Project), Kind: kindNotFound, ExitCode: ExitNotFound}
 				}
 			}
 			bs, emitted, err := emitPassthrough(cmd, callResp.Body)
@@ -1400,6 +1414,38 @@ func federationStatusCmd() *cobra.Command {
 			return printFederationStatus(cmd, body)
 		},
 	}
+}
+
+func filterFederationStatusProject(body []byte, name string) ([]byte, error) {
+	var response map[string]jsontext.Value
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+	var statuses []jsontext.Value
+	if err := json.Unmarshal(response["statuses"], &statuses); err != nil {
+		return nil, err
+	}
+	filtered := make([]jsontext.Value, 0, 1)
+	for _, status := range statuses {
+		var project struct {
+			Name string `json:"project_name"`
+		}
+		if err := json.Unmarshal(status, &project); err != nil {
+			return nil, err
+		}
+		if project.Name == name {
+			filtered = append(filtered, status)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil, &cliError{Message: fmt.Sprintf("no federation status for project %q", name), Kind: kindNotFound, ExitCode: ExitNotFound}
+	}
+	var err error
+	response["statuses"], err = json.Marshal(filtered)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(response)
 }
 
 type federationJoinBundle struct {
