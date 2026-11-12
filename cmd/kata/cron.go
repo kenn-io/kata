@@ -257,6 +257,11 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	if o.resource == "job" && o.action == "inputs" {
+		if err := requireDaemonAPIVersion(cmd.Context(), daemon.client, daemon.baseURL, "0.48.0", "cron job inputs"); err != nil {
+			return err
+		}
+	}
 	var project projectRef
 	if o.parent != "" {
 		project, body, err = o.applyParent(cmd, daemon, body)

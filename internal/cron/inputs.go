@@ -35,7 +35,7 @@ type ResolvedInput struct {
 	Multiline   bool     `json:"multiline,omitempty"`
 	Min         *int64   `json:"min,omitempty"`
 	Max         *int64   `json:"max,omitempty"`
-	Value       any      `json:"value,omitempty"`
+	Value       any      `json:"value,omitzero"`
 	Source      string   `json:"source"`
 }
 type InputError struct {
@@ -212,6 +212,31 @@ func inputValues(raw json.RawMessage) (map[string]any, error) {
 	return m, nil
 }
 
+// HasFixedInputs reports whether a job needs its workflow declaration to validate values.
+func HasFixedInputs(options []byte) bool {
+	o, err := inputObject(options)
+	if err != nil {
+		return false
+	}
+	values, err := inputValues(o["input_values"])
+	return err == nil && len(values) > 0
+}
+
+// ValidateJobInputEligibility rejects conventions that native notifications cannot use.
+func ValidateJobInputEligibility(job JobDefinition) error {
+	if job.Action.Kind != "notify" {
+		return nil
+	}
+	o, err := inputObject(job.Options)
+	if err != nil {
+		return invalid(err.Error())
+	}
+	if o["inputs"] != nil || o["input_values"] != nil {
+		return invalid("notify jobs cannot use inputs or input_values")
+	}
+	return nil
+}
+
 // ValidateWorkflowInputs validates only declarations on workflow client writes.
 func ValidateWorkflowInputs(options []byte) error {
 	o, err := inputObject(options)
@@ -292,6 +317,10 @@ func ResolveInputs(job JobDefinition, workflow *WorkflowDefinition) InputResolut
 	r := InputResolution{DeclaredBy: "none", Inputs: []ResolvedInput{}, Errors: []InputError{}}
 	o, err := inputObject(job.Options)
 	if err != nil {
+		r.Errors = append(r.Errors, InputError{Code: "declaration_invalid", Message: err.Error()})
+		return r
+	}
+	if err := ValidateJobInputEligibility(job); err != nil {
 		r.Errors = append(r.Errors, InputError{Code: "declaration_invalid", Message: err.Error()})
 		return r
 	}

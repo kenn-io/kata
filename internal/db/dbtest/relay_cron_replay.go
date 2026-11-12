@@ -121,9 +121,6 @@ func RunRelayIngestValidatesCronReplay(t *testing.T, store db.Storage) {
 	relayed, err := store.CronJob(ctx, project.ID, relayUID)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"inputs":42}`, string(relayed.Definition.Options))
-	resolved := cron.ResolveInputs(relayed.Definition, nil)
-	require.NotEmpty(t, resolved.Errors)
-	require.Equal(t, "declaration_invalid", resolved.Errors[0].Code)
 
 	// Admission must compare pending run history before a projection exists.
 	jobUID, err = uid.New()

@@ -149,8 +149,11 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		}
 		if validate {
 			definition := body.Definition.Native()
+			if err := cron.ValidateJobInputEligibility(definition); err != nil {
+				return nil, cronAPIError(ctx, cfg, err, projectID, id, true)
+			}
 			var options []byte
-			if definition.Action.WorkflowUID != "" {
+			if definition.Action.WorkflowUID != "" && cron.HasFixedInputs(definition.Options) {
 				workflow, err := cfg.DB.CronWorkflow(ctx, projectID, definition.Action.WorkflowUID)
 				if errors.Is(err, db.ErrNotFound) {
 					return nil, cronAPIError(ctx, cfg, fmt.Errorf("%w: missing workflow dependency %s", cron.ErrInvalid, definition.Action.WorkflowUID), projectID, id, true)

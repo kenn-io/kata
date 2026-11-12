@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	jsonv1 "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -139,7 +140,13 @@ func addCronTool[In, Out any](server *sdkmcp.Server, name, title, description st
 		if err != nil {
 			return failure(err)
 		}
-		encoded, err := json.Marshal(output)
+		var encoded []byte
+		if name == "kata.cron_job_inputs" {
+			// Generated optional scalar wrappers must retain an explicitly set empty string.
+			encoded, err = jsonv1.Marshal(output)
+		} else {
+			encoded, err = json.Marshal(output)
+		}
 		if err != nil {
 			return failure(err)
 		}

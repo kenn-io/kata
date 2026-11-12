@@ -171,7 +171,7 @@ digits, `-`, `_`, and `.`, and is neither `.` nor `..`.
 | `checkout_key` | Optional portable name. Not allowed with `notify`. |
 | `grace_seconds`, `timeout_seconds` | Optional; zero or greater. |
 | `secret_refs` | Optional object mapping portable names to portable names. |
-| `options` | Optional JSON object for the adapter. `options.adapter` can name the adapter that runs the job; see [adapter responsibilities](#adapter-responsibilities). |
+| `options` | Optional JSON object for the adapter. `options.adapter` can name the adapter that runs the job; see [adapter responsibilities](#adapter-responsibilities). Prompt jobs can declare inputs and execute jobs can fix values; see [declared inputs](#declared-inputs). |
 
 `options` objects, at any depth, cannot contain these keys (compared without
 case): `token`, `api_token`, `api_key`, `password`, `secret`, `credentials`,
@@ -403,7 +403,7 @@ options). Each step has these fields:
 | `kind` | `command` (requires `command`, no `prompt`) or `prompt` (requires `prompt`, no `command`). |
 | `after` | Optional keys of earlier steps this step depends on. |
 | `retries` | Optional; 0–100. |
-| `options` | Optional JSON object for the adapter. |
+| `options` | Optional JSON object for the adapter. Workflows can declare values under `inputs`; see [declared inputs](#declared-inputs). |
 
 ```json
 {

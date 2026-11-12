@@ -288,31 +288,42 @@ func TestCronDefinitionWritePolicy(t *testing.T) {
 	}
 }
 
-func TestCronInputWritesAndResolution(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	project := seedProject(t, env, "example-project")
-	path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID)
-	definition := cronHTTPDefinition(t)
-	definition.Options = []byte(`{"inputs":{"batch":{"type":"int","min":1,"max":5}},"input_values":{"batch":8}}`)
-	body := map[string]any{"actor": "worker", "name": "Inspect", "definition": definition}
-	status, raw := cronHTTP(t, env, http.MethodPost, path, body)
-	require.Equalf(t, 400, status, "%s", raw)
-	definition.Options = []byte(`{"inputs":{"batch":{"type":"int","min":1,"max":5}},"input_values":{"batch":3}}`)
-	body["definition"] = definition
-	status, raw = cronHTTP(t, env, http.MethodPost, path, body)
-	require.Equalf(t, 201, status, "%s", raw)
-	var response struct {
-		Job db.CronJob `json:"job"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &response))
-	status, raw = cronHTTP(t, env, http.MethodGet, path+"/"+response.Job.UID+"/inputs", nil)
-	require.Equalf(t, 200, status, "%s", raw)
-	require.Contains(t, string(raw), `"source":"job"`)
-}
-
 func TestCronInputWorkflowChangeAndProjectScope(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	project := seedProject(t, env, "example-project")
+	{
+		path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID)
+		definition := cronHTTPDefinition(t)
+		definition.Options = []byte(`{"inputs":{"batch":{"type":"int","min":1,"max":5}},"input_values":{"batch":8}}`)
+		body := map[string]any{"actor": "worker", "name": "Inspect", "definition": definition}
+		status, raw := cronHTTP(t, env, http.MethodPost, path, body)
+		require.Equalf(t, 400, status, "%s", raw)
+		definition.Options = []byte(`{"inputs":{"batch":{"type":"int","min":1,"max":5},"empty_default":{"type":"string","default":""},"empty_fixed":{"type":"string"},"flag":{"type":"bool","default":true},"unset":{"type":"string"}},"input_values":{"batch":3,"empty_fixed":""}}`)
+		body["definition"] = definition
+		status, raw = cronHTTP(t, env, http.MethodPost, path, body)
+		require.Equalf(t, 201, status, "%s", raw)
+		var response struct {
+			Job db.CronJob `json:"job"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &response))
+		status, raw = cronHTTP(t, env, http.MethodGet, path+"/"+response.Job.UID+"/inputs", nil)
+		require.Equalf(t, 200, status, "%s", raw)
+		var resolved struct {
+			DeclaredBy string           `json:"declared_by"`
+			Inputs     []map[string]any `json:"inputs"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &resolved))
+		require.Equal(t, "job", resolved.DeclaredBy)
+		require.Len(t, resolved.Inputs, 5)
+		require.Equal(t, float64(3), resolved.Inputs[0]["value"])
+		require.Equal(t, "job", resolved.Inputs[0]["source"])
+		require.Equal(t, "", resolved.Inputs[1]["value"])
+		require.Equal(t, "default", resolved.Inputs[1]["source"])
+		require.Equal(t, "", resolved.Inputs[2]["value"])
+		require.Equal(t, "job", resolved.Inputs[2]["source"])
+		require.Equal(t, true, resolved.Inputs[3]["value"])
+		require.NotContains(t, resolved.Inputs[4], "value")
+	}
 	other := seedProject(t, env, "other-project")
 	workflows := fmt.Sprintf("/api/v1/projects/%d/cron/workflows", project.ID)
 	definition := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "true"}}, Options: []byte(`{"inputs":{"target":{"type":"enum","values":["staging","production"]}}}`)}
@@ -347,6 +358,16 @@ func TestCronInputWorkflowChangeAndProjectScope(t *testing.T) {
 	job.Enabled = false
 	status, _ = cronHTTP(t, env, http.MethodPut, jobs+"/"+result.Job.UID, map[string]any{"actor": "worker", "name": "Inspect", "definition": job, "expected_event_uid": result.Job.DefinitionEventUID})
 	require.Equal(t, 400, status)
+	action := map[string]any{"actor": "worker", "expected_event_uid": result.Job.DefinitionEventUID}
+	status, raw = cronHTTP(t, env, http.MethodDelete, jobs+"/"+result.Job.UID, action)
+	require.Equalf(t, 200, status, "%s", raw)
+	require.NoError(t, json.Unmarshal(raw, &result))
+	action["expected_event_uid"] = result.Job.DefinitionEventUID
+	status, raw = cronHTTP(t, env, http.MethodPost, jobs+"/"+result.Job.UID+"/restore", action)
+	require.Equalf(t, 200, status, "%s", raw)
+	status, raw = cronHTTP(t, env, http.MethodGet, jobs+"/"+result.Job.UID+"/inputs", nil)
+	require.Equalf(t, 200, status, "%s", raw)
+	require.Contains(t, string(raw), "invalid_value")
 
 	status, _ = cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/inputs", other.ID, result.Job.UID), nil)
 	require.Equal(t, 404, status)
@@ -356,7 +377,7 @@ func TestCronInputWorkflowWriteValidation(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	project := seedProject(t, env, "example-project")
 	path := fmt.Sprintf("/api/v1/projects/%d/cron/workflows", project.ID)
-	definition := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "true"}}, Options: []byte(`{"inputs":{"x":{"type":"int","Default":"bad"}}}`)}
+	definition := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "true"}}, Options: []byte(`{"inputs":42}`)}
 	body := map[string]any{"actor": "worker", "name": "Inspect", "definition": definition}
 	status, _ := cronHTTP(t, env, http.MethodPost, path, body)
 	require.Equal(t, 400, status)
@@ -375,12 +396,30 @@ func TestCronInputWorkflowWriteValidation(t *testing.T) {
 	require.Equal(t, 400, status)
 }
 
-func TestCronInputMissingWorkflowWrite(t *testing.T) {
+func TestCronNotifyInputWrites(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	project := seedProject(t, env, "example-project")
-	definition := cronHTTPDefinition(t)
-	definition.Action = cron.Action{Kind: "execute", WorkflowUID: "01J00000000000000000000020"}
 	path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID)
-	status, _ := cronHTTP(t, env, http.MethodPost, path, map[string]any{"actor": "worker", "name": "Inspect", "definition": definition})
-	require.Equal(t, 400, status)
+	definition := cronHTTPDefinition(t)
+	definition.Action = cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Target", Author: "worker"})
+	require.NoError(t, err)
+	definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: issue.UID}
+	body := map[string]any{"actor": "worker", "name": "Notify", "definition": definition}
+	status, raw := cronHTTP(t, env, http.MethodPost, path, body)
+	require.Equalf(t, 201, status, "%s", raw)
+	var created struct {
+		Job db.CronJob `json:"job"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &created))
+	for _, options := range []string{`{"inputs":{"x":{"type":"bool"}}}`, `{"input_values":{"x":true}}`} {
+		definition.Options = []byte(options)
+		body["definition"] = definition
+		status, _ = cronHTTP(t, env, http.MethodPost, path, body)
+		require.Equal(t, 400, status)
+		body["expected_event_uid"] = created.Job.DefinitionEventUID
+		status, _ = cronHTTP(t, env, http.MethodPut, path+"/"+created.Job.UID, body)
+		require.Equal(t, 400, status)
+		delete(body, "expected_event_uid")
+	}
 }

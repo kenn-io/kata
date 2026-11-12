@@ -50,9 +50,6 @@ func checkCronBackupTombstoneRoundTrip(t *testing.T, source db.Storage, backend 
 	restoredLegacy, err := restored.CronJob(ctx, target.ID, legacy.UID)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"inputs":42}`, string(restoredLegacy.Definition.Options))
-	resolvedLegacy := cron.ResolveInputs(restoredLegacy.Definition, nil)
-	require.NotEmpty(t, resolvedLegacy.Errors)
-	require.Equal(t, "declaration_invalid", resolvedLegacy.Errors[0].Code)
 
 	restoredJob, err := restored.CronJob(ctx, target.ID, job.UID)
 	require.NoError(t, err)

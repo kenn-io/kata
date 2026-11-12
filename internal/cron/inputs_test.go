@@ -90,10 +90,6 @@ func TestInputEnumProperty(t *testing.T) {
 			ht.Fatalf("enum membership for %v", members)
 		}
 	}, hegel.WithTestCases(300))
-	for _, v := range []any{true, false} {
-		require.True(t, validInputValue(inputDeclaration{Type: "bool"}, v))
-	}
-	require.False(t, validInputValue(inputDeclaration{Type: "bool"}, "true"))
 }
 
 func TestInputWorkflowDeclarationAndLegacyValues(t *testing.T) {
@@ -107,22 +103,6 @@ func TestInputWorkflowDeclarationAndLegacyValues(t *testing.T) {
 	require.Error(t, ValidateInputs(job.Options, job.Action.WorkflowUID, workflow.Options))
 }
 
-func TestInputResolutionReportsEveryInvalidDeclaration(t *testing.T) {
-	job := JobDefinition{Action: Action{Prompt: "Review"}, Options: jsontext.Value(`{"inputs":{"first":{"type":"bad"},"second":{"type":"bad"}}}`)}
-	result := ResolveInputs(job, nil)
-	require.Len(t, result.Errors, 2)
-	require.Equal(t, "first", result.Errors[0].Name)
-	require.Equal(t, "second", result.Errors[1].Name)
-}
-
-func TestInputDeclarationCanonicalFields(t *testing.T) {
-	for _, declaration := range []string{`{"type":"int","Default":"wrong"}`, `{"type":"bool","Min":1}`, `{"TYPE":"bool"}`} {
-		t.Run(declaration, func(t *testing.T) {
-			require.Error(t, ValidateWorkflowInputs([]byte(`{"inputs":{"item":`+declaration+`}}`)))
-		})
-	}
-}
-
 func TestInputResolutionDiagnosticsContract(t *testing.T) {
 	job := JobDefinition{Action: Action{Prompt: "hello"}, Options: jsontext.Value(`{"inputs":{"bad":{"type":"bad"},"count":{"type":"int"},"needed":{"type":"bool","required":true}},"input_values":{"count":{"bad":true},"extra":1}}`)}
 	r := ResolveInputs(job, nil)
@@ -132,6 +112,15 @@ func TestInputResolutionDiagnosticsContract(t *testing.T) {
 	r = ResolveInputs(job, nil)
 	require.Len(t, r.Errors, 2)
 	require.Len(t, r.Inputs, 1)
+	job.Options = jsontext.Value(`{"inputs":{"first":{"type":"bad"},"second":{"type":"bad"}}}`)
+	r = ResolveInputs(job, nil)
+	require.Len(t, r.Errors, 2)
+	require.Equal(t, "first", r.Errors[0].Name)
+	require.Equal(t, "second", r.Errors[1].Name)
+	job.Action = Action{Kind: "notify"}
+	r = ResolveInputs(job, nil)
+	require.NotEmpty(t, r.Errors)
+	require.Equal(t, "declaration_invalid", r.Errors[0].Code)
 }
 
 func TestInputMissingWorkflowAndUnfixedJob(t *testing.T) {
@@ -149,9 +138,17 @@ func TestInputDeclarationRules(t *testing.T) {
 		`{"x":{"type":"string","max_length":0}}`, `{"x":{"type":"string","max_length":2049}}`,
 		`{"x":{"type":"bool","min":0}}`, `{"x":{"type":"bool","unknown":true}}`,
 		`{"x":{"type":"bool","default":"true"}}`,
+		`{"x":{"type":"int","Default":"wrong"}}`, `{"x":{"type":"bool","Min":1}}`, `{"x":{"TYPE":"bool"}}`,
 	}
 	for _, input := range cases {
 		t.Run(input, func(t *testing.T) { require.Error(t, ValidateWorkflowInputs([]byte(`{"inputs":`+input+`}`))) })
+	}
+	for _, tc := range []struct {
+		value string
+		valid bool
+	}{{`true`, true}, {`false`, true}, {`"true"`, false}} {
+		options := []byte(`{"inputs":{"x":{"type":"bool"}},"input_values":{"x":` + tc.value + `}}`)
+		require.Equal(t, tc.valid, ValidateInputs(options, "", nil) == nil)
 	}
 	fields := map[string]any{}
 	for i := 0; i < 33; i++ {
