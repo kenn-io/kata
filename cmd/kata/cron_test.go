@@ -21,7 +21,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
-	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func cronCLIUID(t *testing.T) string {
