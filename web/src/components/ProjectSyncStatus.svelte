@@ -150,6 +150,7 @@
       <div class="sync-attention">
         <span class="attention">Sync needs attention</span>
         <span>Run in a CLI connected to this daemon.</span>
+        <span>Project readers: if the command fails, update your Kata CLI.</span>
         <div class="command">
           <span class="shell">Bash/Zsh</span>
           <code>{bashCommand}</code>

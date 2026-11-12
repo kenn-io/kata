@@ -43,6 +43,7 @@ describe('ProjectSyncStatus', () => {
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
     setGeneratedFetch(vi.fn().mockResolvedValueOnce(response()))
     render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
+    await screen.findByText('Project readers: if the command fails, update your Kata CLI.')
     await fireEvent.click(
       await screen.findByRole('button', { name: 'Copy PowerShell sync status command' }),
     )

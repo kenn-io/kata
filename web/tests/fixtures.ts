@@ -213,16 +213,16 @@ listen = "127.0.0.1:${port}"
         database
           .prepare(
             `INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
-          SELECT id, '2026-10-01T12:00:00Z', 'example sync failure' FROM projects WHERE name = ?
+          SELECT id, '2026-10-01T12:00:00Z', 'example sync failure' FROM projects WHERE id = ?
           ON CONFLICT(project_id) DO UPDATE SET last_error_at=excluded.last_error_at, last_error=excluded.last_error`,
           )
-          .run(`spoke \\"project"’s'\\`)
+          .run(project.id)
         database
           .prepare(
             `INSERT INTO federation_quarantine(project_id, direction, first_event_id, last_event_id, event_uids, error)
-          SELECT id, 'push', 1, 1, '["example-event"]', 'example held-back batch failure' FROM projects WHERE name = ?`,
+          SELECT id, 'push', 1, 1, '["example-event"]', 'example held-back batch failure' FROM projects WHERE id = ?`,
           )
-          .run(`spoke \\"project"’s'\\`)
+          .run(project.id)
       } finally {
         database.close()
       }

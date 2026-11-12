@@ -47,7 +47,6 @@ test('local project readers see native sync status with bounded embedding summar
   expect(browserBody).not.toContain('example sync failure')
   expect(browserBody).not.toContain('example held-back batch failure')
   await expect(region.getByText('Sync needs attention')).toBeVisible()
-  // This hub/unconfigured state comes from the native production SQLite daemon.
   await expect(region.getByText('hub', { exact: true })).toBeVisible()
   await expect(region.getByText('Embeddings: unconfigured')).toBeVisible()
 
@@ -110,4 +109,14 @@ test('local project readers see native sync status with bounded embedding summar
   await region.getByRole('button', { name: 'Refresh sync' }).click()
   await expect(region.getByText('Sync needs attention')).toHaveCount(0)
   await expect(region.getByRole('button', { name: /Copy .* sync status command/ })).toHaveCount(0)
+})
+
+test('other tests retain the fixture project name', async ({ page, kata }) => {
+  const credentials = await kata.launch(page)
+  const snapshot = (await kata.snapshot(page, credentials)) as {
+    catalog: Array<{ project: { id: number; name: string } }>
+  }
+  expect(snapshot.catalog.find(({ project }) => project.id === kata.projectID)?.project.name).toBe(
+    'example-project',
+  )
 })
