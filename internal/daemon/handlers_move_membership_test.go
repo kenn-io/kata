@@ -26,7 +26,7 @@ func (s *moveMembershipChangeStore) MoveIssueProject(ctx context.Context, input 
 	return s.Storage.MoveIssueProject(ctx, input)
 }
 
-func TestMoveIssueRejectsDescendantAttachedAfterValidation(t *testing.T) {
+func TestMoveIssueRejectsClaimedDescendantAttachedAfterValidation(t *testing.T) {
 	var wrapped *moveMembershipChangeStore
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
 		wrapped = &moveMembershipChangeStore{Storage: cfg.DB}
@@ -34,8 +34,9 @@ func TestMoveIssueRejectsDescendantAttachedAfterValidation(t *testing.T) {
 	})
 	source, root := createClaimHubIssueNamed(t, env, "source-project")
 	target, _ := createClaimHubIssueNamed(t, env, "target-project")
-	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "child", Author: "worker"})
+	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "independently claimed child", Author: "worker"})
 	require.NoError(t, err)
+	acquireClaimGateIssue(t, env, source, child, "other")
 	before, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
 	attached := false

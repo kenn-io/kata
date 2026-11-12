@@ -189,7 +189,7 @@ func TestMoveBatchCLI_RejectedPageIsUnattempted(t *testing.T) {
 }
 
 func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
-	for _, kind := range []string{"positional", "targets", "later-page"} {
+	for _, kind := range []string{"positional", "targets", "later-page", "qualified"} {
 		t.Run(kind, func(t *testing.T) {
 			env, dir, _, dst, issue := setupMoveCLIProjects(t)
 			args := []string{"--workspace", dir, "move"}
@@ -205,6 +205,9 @@ func TestMoveBatchCLI_InvalidRowsDoNotBlockValid(t *testing.T) {
 				prefixCount = 2
 				input = strings.Repeat(issue.UID+"\t"+strings.Repeat("x", 600000)+"\n", prefixCount) + issue.UID + "\t" + dst.Name + "\n"
 				args = append(args, "--refs-from", "-")
+			case "qualified":
+				prefixCount = 1
+				args = append(args, strings.Repeat("<", 180000)+"#abcd", issue.UID, dst.Name)
 			case "later-page":
 				prefixCount = 50
 				input = strings.Repeat(issue.UID+"\n", 50) + strings.Repeat("<", 200000) + "\n"

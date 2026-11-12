@@ -380,6 +380,67 @@ func resolveMoveSelector(ctx context.Context, a daemonAPI, sel moveSelector, max
 	return out, nil
 }
 
+func packMoveBatchPages(request *api.MoveIssuesBody, indexes []int, results []api.MoveIssuesResult) ([]generated.MoveIssuesBody, []int, error) {
+	base := *request
+	base.Items = nil
+	raw, err := json.Marshal(base)
+	if err != nil {
+		return nil, nil, err
+	}
+	var page generated.MoveIssuesBody
+	if err := json.Unmarshal(raw, &page); err != nil {
+		return nil, nil, err
+	}
+	page.Items = []generated.MoveIssuesItem{}
+	raw, err = json.Marshal(page, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+	if err != nil {
+		return nil, nil, err
+	}
+	baseSize := len(raw)
+	if baseSize > 1<<20 {
+		return nil, nil, moveBatchUsage("batch move exceeds the 1 MiB request limit; split the input into separate runs")
+	}
+	var pages []generated.MoveIssuesBody
+	keptIndexes := indexes[:0]
+	keptItems := request.Items[:0]
+	size := baseSize
+	for i, item := range request.Items {
+		raw, err = json.Marshal(item)
+		if err != nil {
+			return nil, nil, err
+		}
+		var wire generated.MoveIssuesItem
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			return nil, nil, err
+		}
+		raw, err = json.Marshal(wire, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
+		if err != nil {
+			return nil, nil, err
+		}
+		if baseSize+len(raw) > 1<<20 {
+			results[indexes[i]].Result, results[indexes[i]].Code, results[indexes[i]].Message = "refused", "validation", "item exceeds the 1 MiB request limit"
+			continue
+		}
+		if len(page.Items) == api.MoveBatchMaxItems || size+len(raw)+1 > 1<<20 && len(page.Items) > 0 {
+			pages = append(pages, page)
+			page.Items = []generated.MoveIssuesItem{}
+			size = baseSize
+		}
+		if len(page.Items) > 0 {
+			size++
+		}
+		page.Items = append(page.Items, wire)
+		size += len(raw)
+		keptIndexes = append(keptIndexes, indexes[i])
+		keptItems = append(keptItems, item)
+	}
+	if len(page.Items) > 0 {
+		pages = append(pages, page)
+	}
+	request.Items = keptItems
+	return pages, keptIndexes, nil
+}
+
 func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptions) (resultErr error) {
 	results := make([]api.MoveIssuesResult, len(items))
 	for i, item := range items {
@@ -463,33 +524,16 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 		return nil
 	}
 	// Encode every page before sending any mutation.
-	var pages []generated.MoveIssuesBody
-	for start := 0; start < len(request.Body.Items); start += api.MoveBatchMaxItems {
-		page := request.Body
-		page.Items = request.Body.Items[start:min(start+api.MoveBatchMaxItems, len(request.Body.Items))]
-		raw, err := json.Marshal(page)
-		if err != nil {
-			return err
-		}
-		var body generated.MoveIssuesBody
-		if err := json.Unmarshal(raw, &body); err != nil {
-			return err
-		}
-		raw, err = json.Marshal(body, jsontext.EscapeForHTML(true), jsontext.EscapeForJS(true))
-		if err != nil {
-			return err
-		}
-		if len(raw) > 1<<20 {
-			return moveBatchUsage("batch move exceeds the 1 MiB request limit; split the input into separate runs")
-		}
-		pages = append(pages, body)
+	pages, indexes, err := packMoveBatchPages(&request.Body, indexes, results)
+	if err != nil {
+		return err
 	}
 	printResults := func() error {
 		return printMoveBatch(cmd, results, len(items))
 	}
 	preflight = false
-	for pageIndex, body := range pages {
-		start := pageIndex * api.MoveBatchMaxItems
+	start := 0
+	for _, body := range pages {
 		classify := func() {
 			for i := range results {
 				if results[i].Result == "" {
@@ -571,6 +615,7 @@ func runMoveBatch(cmd *cobra.Command, items []moveBatchItem, opts moveBatchOptio
 			r.Index = indexes[start+r.Index]
 			results[r.Index] = r
 		}
+		start += len(body.Items)
 	}
 	if err := printResults(); err != nil {
 		return err
