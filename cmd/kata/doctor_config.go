@@ -64,7 +64,7 @@ func doctorFederationSigningConfig() diagnostics.Check {
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Federation signing is not configured"}
 	}
 	if err := signingpolicy.CheckDistinctSecrets(cfg.Federation.Signing.Keys, time.Now()); err != nil {
-		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Two federation signing keys share one secret", Details: []string{err.Error()}, Fix: "Give each [[federation.signing.key]] its own key_file or key_env secret, then rotate the shared secret"}
+		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Two federation signing keys share one secret", Details: []string{err.Error()}, Fix: "Rotate the shared secret so that each key has its own"}
 	}
 	return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "No two available federation signing keys share a secret"}
 }
