@@ -66,6 +66,15 @@ func scopedProjectOut(p db.Project) api.ProjectOut {
 	}
 }
 
+// projectOutForCaller gives an issue-scoped credential the restricted project
+// projection that the project read returns, and everyone else the full one.
+func projectOutForCaller(ctx context.Context, p db.Project) api.ProjectOut {
+	if issueScopeFromContext(ctx) != nil {
+		return scopedProjectOut(p)
+	}
+	return dbProjectToOut(p)
+}
+
 // includeContains reports whether the comma-separated ?include= value
 // names the given token. Whitespace is trimmed; matching is case-
 // insensitive on the token side. Spec §7.1.
@@ -759,7 +768,7 @@ func resolveByName(ctx context.Context, store db.Storage, name string) (*api.Pro
 	if err := authorizeIssueScopedProject(ctx, project); err != nil {
 		return nil, err
 	}
-	return &api.ProjectResolveBody{Project: dbProjectToOut(project)}, nil
+	return &api.ProjectResolveBody{Project: projectOutForCaller(ctx, project)}, nil
 }
 
 // resolveByKataToml returns (body, true, nil) when a .kata.toml binding
