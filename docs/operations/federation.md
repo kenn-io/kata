@@ -1535,10 +1535,11 @@ For a new empty spoke replica, do the same runbook but skip `--adopt-existing`
 in Step 3. The printed `--project <hub-project>` can be used unchanged unless
 you intentionally want a different spoke project name.
 
-For a plaintext private-network hostname, `--hub-url` is both the hub API URL
-used for enrollment and the URL the spoke stores for later pull, push, and
-lease requests. Use this only on trusted private networks; use HTTPS for public
-networks.
+For a plaintext private-network hostname, `--hub-url` is the hub API URL used
+for enrollment and, unless the hub requires signing, the URL the spoke stores
+for later pull, push, and lease requests. A hub that requires signing uses its
+`external_url` instead; see [federation signing](federation-signing.md). Use
+plaintext only on trusted private networks; use HTTPS for public networks.
 
 ```sh
 export HUB_ADMIN_TOKEN="<hub-admin-token>"
@@ -1613,8 +1614,9 @@ kata federation enroll --project fedlab \
 The hub binds the direct-spoke enrollment to the requested actor. Treat the
 actor and capabilities in the returned join command as the enrollment contract.
 
-The `--hub-url` value is the URL the spoke will store and use later for pull,
-push, and lease transport.
+The spoke stores the `--hub-url` value for later pull, push, and lease
+transport unless the hub requires signing, in which case it stores the hub's
+`external_url`; see [federation signing](federation-signing.md).
 
 Manual `--hub-url` values may include a reverse-proxy path prefix, such as
 `https://hub.example/kata`; the prefix is retained for later federation
