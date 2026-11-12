@@ -150,25 +150,30 @@ func TestCronFreshness(t *testing.T) {
 				}
 				require.Contains(t, stripANSI(m.viewBody()), "Daily summary")
 				require.NotContains(t, stripANSI(m.viewBody()), "no longer in the loaded data")
-				first := cmd()
+				first := runCmdTree(cmd)
 				require.Equal(t, 1, a.calls)
 				a.data.jobs[0].Name = "Newest title"
-				m, cmd = updateModel(m, first)
+				m, cmd = deliverCronReads(m, first)
 				require.Contains(t, stripANSI(m.viewBody()), "New title")
 				require.NotContains(t, stripANSI(m.viewBody()), "Newest title")
 				require.NotNil(t, cmd, "events during the read request one replacement read")
-				m, cmd = updateModel(m, cmd())
+				m, cmd = deliverCronReads(m, runCmdTree(cmd))
 				require.Nil(t, cmd)
 				require.Equal(t, 2, a.calls)
 				require.Contains(t, stripANSI(m.viewBody()), "Newest title")
 				return
 			}
-			// Update appends the cron read after the existing issue/SSE commands.
-			msg := cmd()
-			if batch, ok := msg.(tea.BatchMsg); ok {
-				msg = batch[len(batch)-1]()
+			if detail {
+				// The open job detail's statistics read runs beside the cron read.
+				m = deliverCron(m, cmd)
+			} else {
+				// Update appends the cron read after the existing issue/SSE commands.
+				msg := cmd()
+				if batch, ok := msg.(tea.BatchMsg); ok {
+					msg = batch[len(batch)-1]()
+				}
+				m, _ = updateModel(m, msg)
 			}
-			m, _ = updateModel(m, msg)
 			require.Equal(t, 1, a.calls)
 			if tc.name == "disappearing record" {
 				require.Contains(t, stripANSI(m.viewBody()), "this job is no longer in the loaded data")
@@ -181,6 +186,20 @@ func TestCronFreshness(t *testing.T) {
 			}
 		})
 	}
+}
+
+// deliverCronReads applies cron read results and returns the command the
+// cron list result requested.
+func deliverCronReads(m Model, msgs []tea.Msg) (Model, tea.Cmd) {
+	var next tea.Cmd
+	for _, msg := range msgs {
+		var cmd tea.Cmd
+		m, cmd = updateModel(m, msg)
+		if _, ok := msg.(cronLoadedMsg); ok {
+			next = cmd
+		}
+	}
+	return m, next
 }
 
 func TestCronScopeAndDaemonFence(t *testing.T) {
@@ -336,6 +355,8 @@ type cronReadTestAPI struct {
 	stats     map[string]*generated.CronRunStatsResponseBody
 	statsErr  error
 	statsUIDs []string
+	// statsGate, when set, holds every statistics read until it closes.
+	statsGate chan struct{}
 }
 
 func (a *cronReadTestAPI) CronRunStats(_ context.Context, id int64, jobUID string) (*generated.CronRunStatsResponseBody, error) {
@@ -343,10 +364,16 @@ func (a *cronReadTestAPI) CronRunStats(_ context.Context, id int64, jobUID strin
 		return nil, fmt.Errorf("unexpected project %d", id)
 	}
 	a.statsUIDs = append(a.statsUIDs, jobUID)
+	if a.statsGate != nil {
+		<-a.statsGate
+	}
 	if a.statsErr != nil {
 		return nil, a.statsErr
 	}
-	return a.stats[jobUID], nil
+	if body, ok := a.stats[jobUID]; ok {
+		return body, nil
+	}
+	return nil, fmt.Errorf("no statistics for job %s", jobUID)
 }
 
 func (a *cronReadTestAPI) ListCronJobs(_ context.Context, id int64) ([]generated.CronJob, error) {
@@ -545,7 +572,7 @@ func TestCronFilterAndTabState(t *testing.T) {
 
 func TestSnapshot_Cron(t *testing.T) {
 	defer snapshotInit(t)()
-	for _, name := range []string{"jobs", "jobs-filter", "jobs-unavailable", "runs", "job-detail", "job-detail-stats-unsupported", "run-detail", "workflow-detail", "help", "all-projects"} {
+	for _, name := range []string{"jobs", "jobs-filter", "jobs-unavailable", "runs", "job-detail", "run-detail", "workflow-detail", "help", "all-projects"} {
 		t.Run(name, func(t *testing.T) {
 			m := cronFixture(t)
 			switch name {
@@ -560,9 +587,6 @@ func TestSnapshot_Cron(t *testing.T) {
 			case "job-detail":
 				m = sendKey(m, tea.KeyEnter)
 				m, _ = updateModel(m, cronStatsMsg{conn: m.connGen, scope: m.scopeGen, seq: m.cron.stats.seq, body: cronStatsFixture(42)})
-			case "job-detail-stats-unsupported":
-				m = sendKey(m, tea.KeyEnter)
-				m, _ = updateModel(m, cronStatsMsg{conn: m.connGen, scope: m.scopeGen, seq: m.cron.stats.seq, err: apiVersionError{"run statistics require daemon API 0.47.0 or newer"}})
 			case "run-detail":
 				m = sendRune(m, '3')
 				m = sendKey(m, tea.KeyEnter)

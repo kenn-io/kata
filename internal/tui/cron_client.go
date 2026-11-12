@@ -109,8 +109,12 @@ func (c *Client) CronRunStats(ctx context.Context, projectID int64, jobUID strin
 	if err != nil {
 		return nil, err
 	}
-	if err := requireAPIVersion(ctx, client, cronStatsAPIVersion, "run statistics require daemon API "+cronStatsAPIVersion+" or newer"); err != nil {
-		return nil, err
+	// Only a pass is kept: an older daemon may be upgraded while connected.
+	if !c.cronStatsSupported.Load() {
+		if err := requireAPIVersion(ctx, client, cronStatsAPIVersion, "run statistics require daemon API "+cronStatsAPIVersion+" or newer"); err != nil {
+			return nil, err
+		}
+		c.cronStatsSupported.Store(true)
 	}
 	wire, callErr := client.GetCronRunStatsWithResponse(ctx, &generated.GetCronRunStatsRequestOptions{
 		PathParams: &generated.GetCronRunStatsPath{ProjectID: projectID},

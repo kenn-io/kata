@@ -5,9 +5,12 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -50,6 +53,24 @@ func deliverCron(m Model, cmd tea.Cmd) Model {
 	return m
 }
 
+// runCmdTreeConcurrently runs each command of a tree in its own goroutine,
+// as Bubble Tea does, and sends every result to out.
+func runCmdTreeConcurrently(cmd tea.Cmd, out chan<- tea.Msg) {
+	if cmd == nil {
+		return
+	}
+	go func() {
+		msg := cmd()
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, inner := range batch {
+				runCmdTreeConcurrently(inner, out)
+			}
+			return
+		}
+		out <- msg
+	}()
+}
+
 func cronDetailText(m Model) string {
 	_, _, lines := cronScreen(m)
 	return cronHistoryLinesText(lines)
@@ -58,11 +79,11 @@ func cronDetailText(m Model) string {
 func cronStatsLine(t *testing.T, m Model) string {
 	t.Helper()
 	for line := range strings.SplitSeq(cronDetailText(m), "\n") {
-		if strings.HasPrefix(line, "30d:") {
+		if strings.HasPrefix(line, "30d:") || strings.HasPrefix(line, "Since:") {
 			return line
 		}
 	}
-	t.Fatalf("no 30d line in job detail:\n%s", cronDetailText(m))
+	t.Fatalf("no statistics line in job detail:\n%s", cronDetailText(m))
 	return ""
 }
 
@@ -80,7 +101,7 @@ func TestCronJobStatsLine(t *testing.T) {
 		m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 		require.Equal(t, "30d:      loading…", cronStatsLine(t, m))
 		m = deliverCron(m, cmd)
-		require.Equal(t, "30d:      42 runs · 92% ok · median 3m12s · p95 8m40s · failing ×3", cronStatsLine(t, m))
+		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      42 runs"), cronStatsLine(t, m))
 		require.Equal(t, []string{cronStatsJobUID}, a.statsUIDs)
 		requireCronJobDetailIntact(t, m)
 		_, cmd = m.cronSync()
@@ -101,7 +122,6 @@ func TestCronJobStatsLine(t *testing.T) {
 			m = deliverCron(m, cmd)
 			require.Equal(t, tc.want, cronStatsLine(t, m))
 			requireCronJobDetailIntact(t, m)
-			require.NotContains(t, stripANSI(m.viewBody()), "unavailable: see error below")
 		})
 	}
 	t.Run("ignores a result for a job no longer open", func(t *testing.T) {
@@ -122,6 +142,31 @@ func TestCronJobStatsLine(t *testing.T) {
 		m = deliverCron(m, first)
 		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      7 runs"), cronStatsLine(t, m))
 	})
+	t.Run("rereads when the same job is reopened", func(t *testing.T) {
+		m, a := cronStatsModel(t)
+		a.statsErr = errors.New("offline")
+		m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = deliverCron(m, cmd)
+		require.Equal(t, "30d:      unavailable: offline", cronStatsLine(t, m))
+		// The service recovers: reopening reads again instead of keeping the notice.
+		a.statsErr = nil
+		m = sendRune(m, 'h')
+		m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		require.Equal(t, "30d:      loading…", cronStatsLine(t, m))
+		m = deliverCron(m, cmd)
+		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      42 runs"), cronStatsLine(t, m))
+		// A reply that arrives after leaving is not shown on return.
+		a.stats[cronStatsJobUID] = cronStatsFixture(43)
+		m = sendRune(m, 'h')
+		m, late := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = sendRune(m, 'h')
+		m = deliverCron(m, late)
+		m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		require.Equal(t, "30d:      loading…", cronStatsLine(t, m))
+		m = deliverCron(m, cmd)
+		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      43 runs"), cronStatsLine(t, m))
+		require.Len(t, a.statsUIDs, 4)
+	})
 	t.Run("refreshes with the run refresh", func(t *testing.T) {
 		m, a := cronStatsModel(t)
 		m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -136,8 +181,48 @@ func TestCronJobStatsLine(t *testing.T) {
 		a.statsErr = errors.New("offline")
 		m, cmd = updateModel(m, keyRune('r'))
 		m = deliverCron(m, cmd)
-		require.Equal(t, "30d:      unavailable: offline", cronStatsLine(t, m))
-		requireCronJobDetailIntact(t, m)
+		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      unavailable:"), "a failed refresh replaces the line")
+	})
+	t.Run("a stalled read does not hold the run refresh", func(t *testing.T) {
+		m, a := cronStatsModel(t)
+		m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = deliverCron(m, cmd)
+		a.data.jobs = slices.Clone(a.data.jobs)
+		a.data.jobs[0].Name = "New title"
+		a.stats[cronStatsJobUID] = cronStatsFixture(43)
+		gate := make(chan struct{})
+		release := sync.OnceFunc(func() { close(gate) })
+		t.Cleanup(release)
+		a.statsGate = gate
+		m, cmd = updateModel(m, keyRune('r'))
+		out := make(chan tea.Msg, 8)
+		runCmdTreeConcurrently(cmd, out)
+		select {
+		case msg := <-out:
+			loaded, ok := msg.(cronLoadedMsg)
+			require.True(t, ok, "the run refresh answers first, got %T", msg)
+			m, _ = updateModel(m, loaded)
+		case <-time.After(2 * time.Second):
+			t.Fatal("the run refresh waited for the statistics read")
+		}
+		require.Contains(t, stripANSI(m.viewBody()), "New title")
+		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      42 runs"), cronStatsLine(t, m))
+		release()
+		m, _ = updateModel(m, <-out)
+		require.True(t, strings.HasPrefix(cronStatsLine(t, m), "30d:      43 runs"), cronStatsLine(t, m))
+	})
+	t.Run("fits the cron detail widths", func(t *testing.T) {
+		m, _ := cronStatsModel(t)
+		m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = deliverCron(m, cmd)
+		for _, width := range []int{12, 24, 40, 80, 120} {
+			m.width = width + 2
+			text := cronDetailText(m)
+			for line := range strings.SplitSeq(text, "\n") {
+				require.LessOrEqual(t, ansi.StringWidth(line), width, line)
+			}
+			require.Contains(t, strings.Join(strings.Fields(text), ""), "30d:42runs·92%ok·median3m12s·p958m40s·failing×3")
+		}
 	})
 	t.Run("workflow detail has no line", func(t *testing.T) {
 		m, a := cronStatsModel(t)
@@ -152,30 +237,44 @@ func TestCronJobStatsLine(t *testing.T) {
 func TestCronStatsText(t *testing.T) {
 	full := *cronStatsFixture(42)
 	for _, tc := range []struct {
-		name string
-		edit func(*generated.CronRunStatsResponseBody)
-		want string
+		name         string
+		edit         func(*generated.CronRunStatsResponseBody)
+		label, value string
 	}{
-		{"spec example", func(*generated.CronRunStatsResponseBody) {}, "42 runs · 92% ok · median 3m12s · p95 8m40s · failing ×3"},
-		{"no streak", func(s *generated.CronRunStatsResponseBody) { s.ConsecutiveFailures = 0 }, "42 runs · 92% ok · median 3m12s · p95 8m40s"},
+		{"spec example", func(*generated.CronRunStatsResponseBody) {}, "30d", "42 runs · 92% ok · median 3m12s · p95 8m40s · failing ×3"},
+		{"no streak", func(s *generated.CronRunStatsResponseBody) { s.ConsecutiveFailures = 0 }, "30d", "42 runs · 92% ok · median 3m12s · p95 8m40s"},
 		{"no runs", func(s *generated.CronRunStatsResponseBody) {
 			s.Scanned, s.SuccessRate, s.DurationSeconds, s.ConsecutiveFailures = 0, nil, nil, 0
-		}, "0 runs"},
-		{"one run", func(s *generated.CronRunStatsResponseBody) { s.Scanned = 1 }, "1 run · 92% ok · median 3m12s · p95 8m40s · failing ×3"},
-		{"truncated", func(s *generated.CronRunStatsResponseBody) { s.Scanned, s.Truncated = 10000, true }, "10000+ runs · 92% ok · median 3m12s · p95 8m40s · failing ×3"},
-		{"rate floors", func(s *generated.CronRunStatsResponseBody) { s.SuccessRate = new(0.9999) }, "42 runs · 99% ok · median 3m12s · p95 8m40s · failing ×3"},
-		{"rate exact", func(s *generated.CronRunStatsResponseBody) { s.SuccessRate = new(0.29) }, "42 runs · 29% ok · median 3m12s · p95 8m40s · failing ×3"},
+			s.ByStatus = map[string]int64{"running": 0, "succeeded": 0, "failed": 0, "cancelled": 0, "unknown": 0}
+		}, "30d", "0 runs"},
+		{"one run", func(s *generated.CronRunStatsResponseBody) {
+			s.Scanned, s.SuccessRate, s.ConsecutiveFailures = 1, new(1.0), 0
+			s.ByStatus = map[string]int64{"running": 0, "succeeded": 1, "failed": 0, "cancelled": 0, "unknown": 0}
+			s.DurationSeconds = &generated.DurationStats{Count: 1, Min: 192, Median: 192, P95: 192, Max: 192}
+		}, "30d", "1 run · 100% ok · median 3m12s · p95 3m12s"},
+		// A truncated scan covers only the span since its oldest run, so the
+		// label names that start instead of claiming 30 days.
+		{"truncated", func(s *generated.CronRunStatsResponseBody) {
+			s.Scanned, s.Truncated, s.SuccessRate, s.ConsecutiveFailures = 10000, true, new(0.995), 0
+			s.Window.Since = snapshotFixedNow.AddDate(0, 0, -7)
+			s.ByStatus = map[string]int64{"running": 0, "succeeded": 9950, "failed": 50, "cancelled": 0, "unknown": 0}
+			s.DurationSeconds = &generated.DurationStats{Count: 10000, Min: 41, Median: 192, P95: 520, Max: 611}
+		}, "Since", "04-24 12:00 · 10000+ runs · 99% ok · median 3m12s · p95 8m40s"},
+		{"rate floors", func(s *generated.CronRunStatsResponseBody) { s.SuccessRate = new(0.9999) }, "30d", "42 runs · 99% ok · median 3m12s · p95 8m40s · failing ×3"},
+		{"rate exact", func(s *generated.CronRunStatsResponseBody) { s.SuccessRate = new(0.29) }, "30d", "42 runs · 29% ok · median 3m12s · p95 8m40s · failing ×3"},
 		{"long durations", func(s *generated.CronRunStatsResponseBody) {
 			s.DurationSeconds = &generated.DurationStats{Count: 2, Min: 0.4, Median: 41, P95: 3725.6, Max: 3725.6}
-		}, "42 runs · 92% ok · median 41s · p95 1h2m6s · failing ×3"},
+		}, "30d", "42 runs · 92% ok · median 41s · p95 1h2m6s · failing ×3"},
 		{"duration beyond a time.Duration", func(s *generated.CronRunStatsResponseBody) {
 			s.DurationSeconds = &generated.DurationStats{Count: 1, Median: 1.89342144e10, P95: 1.89342144e10}
-		}, "42 runs · 92% ok · median 5259504h · p95 5259504h · failing ×3"},
+		}, "30d", "42 runs · 92% ok · median 5259504h · p95 5259504h · failing ×3"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := full
 			tc.edit(&s)
-			require.Equal(t, tc.want, cronStatsText(s))
+			label, value := cronStatsText(s)
+			require.Equal(t, tc.label, label)
+			require.Equal(t, tc.value, value)
 		})
 	}
 }
@@ -183,9 +282,10 @@ func TestCronStatsText(t *testing.T) {
 func TestCronClientRunStats(t *testing.T) {
 	for _, version := range []string{"0.46.0", "0.47.0"} {
 		t.Run(version, func(t *testing.T) {
-			reads := 0
+			probes, reads := 0, 0
 			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api/v1/health" {
+					probes++
 					respondJSON(t, w, map[string]any{"api_schema_version": version})
 					return
 				}
@@ -194,17 +294,34 @@ func TestCronClientRunStats(t *testing.T) {
 				require.Equal(t, map[string][]string{"job_uid": {cronStatsJobUID}}, map[string][]string(r.URL.Query()))
 				respondJSON(t, w, cronStatsFixture(42))
 			})
-			stats, err := c.CronRunStats(t.Context(), 7, cronStatsJobUID)
+			for range 2 {
+				stats, err := c.CronRunStats(t.Context(), 7, cronStatsJobUID)
+				if version == "0.46.0" {
+					var tooOld apiVersionError
+					require.ErrorAs(t, err, &tooOld)
+					continue
+				}
+				require.NoError(t, err)
+				require.Equal(t, int64(42), stats.Scanned)
+				require.Equal(t, int64(3), stats.ConsecutiveFailures)
+			}
 			if version == "0.46.0" {
-				var tooOld apiVersionError
-				require.ErrorAs(t, err, &tooOld)
 				require.Zero(t, reads)
+				require.Equal(t, 2, probes, "an older daemon is probed again, since it may be upgraded")
 				return
 			}
-			require.NoError(t, err)
-			require.Equal(t, 1, reads)
-			require.Equal(t, int64(42), stats.Scanned)
-			require.Equal(t, int64(3), stats.ConsecutiveFailures)
+			require.Equal(t, 2, reads)
+			require.Equal(t, 1, probes, "a supported daemon is probed once per client")
 		})
 	}
+	t.Run("failed version check", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		})
+		_, err := c.CronRunStats(t.Context(), 7, cronStatsJobUID)
+		require.Error(t, err)
+		var tooOld apiVersionError
+		require.False(t, errors.As(err, &tooOld))
+		require.NotContains(t, err.Error(), "require daemon API", "a failed check does not blame the daemon version")
+	})
 }

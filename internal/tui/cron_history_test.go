@@ -209,7 +209,7 @@ func TestCronHistoryRefreshAndSelection(t *testing.T) {
 			// Failed refresh keeps rows internally but cannot advertise counts.
 			a.data.runsErr = errors.New("offline")
 			a.data.runs = nil
-			m, _ = updateModel(m, cmd())
+			m = deliverCron(m, cmd)
 			_, _, lines = cronScreen(m)
 			text := cronHistoryLinesText(lines)
 			require.Contains(t, text, "Loaded runs · unavailable")
@@ -219,7 +219,7 @@ func TestCronHistoryRefreshAndSelection(t *testing.T) {
 			a.data.runs = []generated.CronRun{{UID: "new", JobUID: new(m.cron.data.jobs[0].UID),
 				WorkflowUID: new(m.cron.data.workflows[0].UID), Status: "failed"}}
 			m, cmd = updateModel(m, keyRune('r'))
-			m, _ = updateModel(m, cmd())
+			m = deliverCron(m, cmd)
 			_, _, lines = cronScreen(m)
 			text = cronHistoryLinesText(lines)
 			require.Contains(t, text, "failed 1")

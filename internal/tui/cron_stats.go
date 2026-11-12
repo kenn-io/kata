@@ -28,9 +28,9 @@ type cronStatsMsg struct {
 	err              error
 }
 
-// cronStatsJob is the job whose detail is on top of the stack, if any.
+// cronStatsJob is the job whose detail is shown, if any.
 func (m Model) cronStatsJob() string {
-	if n := len(m.cron.stack); n > 0 && m.cron.stack[n-1].ref.kind == cronJobs {
+	if n := len(m.cron.stack); m.view == viewCron && n > 0 && m.cron.stack[n-1].ref.kind == cronJobs {
 		return m.cron.stack[n-1].ref.uid
 	}
 	return ""
@@ -41,6 +41,15 @@ func (m Model) cronStatsJob() string {
 func (m Model) cronStatsDue() bool {
 	uid := m.cronStatsJob()
 	return uid != "" && (m.cron.stats.uid != uid || m.cron.stats.events != m.cron.events)
+}
+
+// cronStatsLeave drops the line once its job detail is no longer shown, and
+// fences off its pending read, so returning to the job reads afresh.
+func (m Model) cronStatsLeave() Model {
+	if m.cron.stats.uid != "" && m.cron.stats.uid != m.cronStatsJob() {
+		m.cron.stats = cronStats{seq: m.cron.stats.seq + 1}
+	}
+	return m
 }
 
 // cronStatsBegin starts a read for the open job detail. A different job drops
@@ -78,28 +87,29 @@ func (m Model) cronStatsLoaded(msg cronStatsMsg) Model {
 // cronStatsField adds the job detail line. Loading, failure, and an older
 // daemon each show a notice in place of the numbers.
 func cronStatsField(d *cronDoc, s cronStats, uid string) {
-	value := "loading…"
+	label, value := "30d", "loading…"
 	var tooOld apiVersionError
 	switch {
 	case s.uid != uid:
 	case s.body != nil:
-		value = cronStatsText(*s.body)
+		label, value = cronStatsText(*s.body)
 	case errors.As(s.err, &tooOld):
 		value = "needs daemon API " + cronStatsAPIVersion + " or newer"
 	case s.err != nil:
 		value = "unavailable: " + sanitizeForLine(s.err.Error())
 	}
-	d.field("30d", value)
+	d.field(label, value)
 }
 
 // cronStatsText renders counts, success rate, duration percentiles, and the
-// failing streak, omitting whatever the window has no data for.
-func cronStatsText(s generated.CronRunStatsResponseBody) string {
-	runs := cronCount(int(s.Scanned), "run")
+// failing streak, omitting whatever the window has no data for. A truncated
+// scan covers only the span since its oldest run, so its label names that
+// start instead of 30 days.
+func cronStatsText(s generated.CronRunStatsResponseBody) (label, value string) {
+	label, parts := "30d", []string{cronCount(int(s.Scanned), "run")}
 	if s.Truncated {
-		runs = fmt.Sprintf("%d+ runs", s.Scanned)
+		label, parts = "Since", []string{cronTime(&s.Window.Since), fmt.Sprintf("%d+ runs", s.Scanned)}
 	}
-	parts := []string{runs}
 	if s.SuccessRate != nil {
 		// The rate has four places; whole percent rounds down so a failure never reads 100%.
 		parts = append(parts, fmt.Sprintf("%d%% ok", int64(math.Round(*s.SuccessRate*10000))/100))
@@ -110,7 +120,7 @@ func cronStatsText(s generated.CronRunStatsResponseBody) string {
 	if s.ConsecutiveFailures > 0 {
 		parts = append(parts, fmt.Sprintf("failing ×%d", s.ConsecutiveFailures))
 	}
-	return strings.Join(parts, " · ")
+	return label, strings.Join(parts, " · ")
 }
 
 // cronStatsDuration uses the cron views' Duration form, in whole seconds,
