@@ -10,16 +10,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+	"go.kenn.io/kata/pkg/client/generated"
+
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/httpurl"
 
-	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/federationsigning"
-	"go.kenn.io/kata/pkg/client/generated"
 )
 
 const (
@@ -550,7 +551,7 @@ func fetchFederationRebindMetadata(
 // readFederationHubMetadata bounds and decodes metadata without exposing hub
 // response bodies in errors. The caller configures the credential and redirects.
 func readFederationHubMetadata(ctx context.Context, client *http.Client, hubURL string, hubProjectID int64) (api.ProjectFederationBody, string, error) {
-	apiClient, err := generated.NewDefaultClient(hubURL, runtime.WithHTTPClient(boundedProbeDoer{client: client, limit: federationRebindResponseLimit + 1}))
+	apiClient, err := generated.NewDefaultClient(hubURL, runtime.WithHTTPClient(boundedProbeDoer{client: client, limit: federationRebindResponseLimit}))
 	if err != nil {
 		return api.ProjectFederationBody{}, "", federationReplicaError(ErrFederationReplicaInvalidInput, "build hub metadata request", "")
 	}
@@ -580,9 +581,6 @@ func readFederationHubMetadata(ctx context.Context, client *http.Client, hubURL 
 			"hub metadata request returned an error",
 			"check the hub endpoint and retry",
 		)
-	}
-	if len(result.Body) > federationRebindResponseLimit {
-		return api.ProjectFederationBody{}, "", federationReplicaError(ErrFederationReplicaHubUnavailable, "hub metadata response is too large", "check the hub endpoint and retry")
 	}
 	var metadata api.ProjectFederationBody
 	if err := json.Unmarshal(result.Body, &metadata); err != nil {

@@ -1239,11 +1239,15 @@ func ensureFederationReplicaState(
 	// before taking the replica mutex, matching the rebind lock order.
 	var adoptionProjectID int64
 	var releaseAdoption func()
-	if p.AdoptExisting || p.AttachEmpty {
+	lookupProject := func() (db.Project, error) {
 		project, err := store.ProjectByUID(ctx, p.HubProjectUID)
 		if errors.Is(err, db.ErrNotFound) {
-			project, err = store.ProjectByNameIncludingArchived(ctx, p.ProjectName)
+			return store.ProjectByNameIncludingArchived(ctx, p.ProjectName)
 		}
+		return project, err
+	}
+	if p.AdoptExisting || p.AttachEmpty {
+		project, err := lookupProject()
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
 			return EnsureFederationReplicaResult{}, err
 		}
@@ -1267,10 +1271,7 @@ func ensureFederationReplicaState(
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
 	if p.AdoptExisting || p.AttachEmpty {
-		project, err := store.ProjectByUID(ctx, p.HubProjectUID)
-		if errors.Is(err, db.ErrNotFound) {
-			project, err = store.ProjectByNameIncludingArchived(ctx, p.ProjectName)
-		}
+		project, err := lookupProject()
 		if err != nil && !errors.Is(err, db.ErrNotFound) {
 			return EnsureFederationReplicaResult{}, err
 		}

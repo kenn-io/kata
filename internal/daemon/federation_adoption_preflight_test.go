@@ -34,6 +34,19 @@ func adoptionRun(t *testing.T, store *sqlitestore.Store, project db.Project, ses
 	require.NoError(t, err)
 }
 
+func adoptionParams(project db.Project, hubURL string) daemon.EnsureFederationReplicaParams {
+	params := replicaServiceParams()
+	params.ProjectName = project.Name
+	params.AdoptExisting = true
+	params.HubURL = hubURL
+	params.Credential.HubURL = hubURL
+	return params
+}
+
+type adoptionTransport func(*http.Request) (*http.Response, error)
+
+func (a adoptionTransport) RoundTrip(r *http.Request) (*http.Response, error) { return a(r) }
+
 func TestAdoptionPreflightBeforeRekeyAndSessionFree(t *testing.T) {
 	for _, session := range []bool{false, true} {
 		t.Run(fmt.Sprint(session), func(t *testing.T) {
@@ -49,11 +62,7 @@ func TestAdoptionPreflightBeforeRekeyAndSessionFree(t *testing.T) {
 				_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)
 			}))
 			t.Cleanup(server.Close)
-			params := replicaServiceParams()
-			params.ProjectName = project.Name
-			params.AdoptExisting = true
-			params.HubURL = server.URL
-			params.Credential.HubURL = server.URL
+			params := adoptionParams(project, server.URL)
 			credentials := newReplicaCredentialStore()
 			source := params.Credential
 			source.Capabilities = "pull,push"
@@ -61,7 +70,12 @@ func TestAdoptionPreflightBeforeRekeyAndSessionFree(t *testing.T) {
 			params.HubClientFactory = func(_ context.Context, c config.FederationCredential) (*http.Client, error) {
 				require.Equal(t, params.Credential.Token, c.Token)
 				client := *server.Client()
-				client.Transport = adoptionBearerTransport{base: client.Transport, token: c.Token}
+				client.Transport = adoptionTransport(func(r *http.Request) (*http.Response, error) {
+					clone := r.Clone(r.Context())
+					clone.Header = r.Header.Clone()
+					clone.Header.Set("Authorization", "Bearer "+c.Token)
+					return server.Client().Transport.RoundTrip(clone)
+				})
 				return &client, nil
 			}
 			_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
@@ -81,22 +95,6 @@ func TestAdoptionPreflightBeforeRekeyAndSessionFree(t *testing.T) {
 			}
 		})
 	}
-}
-
-type adoptionBearerTransport struct {
-	base  http.RoundTripper
-	token string
-}
-
-func (a adoptionBearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	clone := r.Clone(r.Context())
-	clone.Header = r.Header.Clone()
-	clone.Header.Set("Authorization", "Bearer "+a.token)
-	base := a.base
-	if base == nil {
-		base = http.DefaultTransport
-	}
-	return base.RoundTrip(clone)
 }
 
 type lateSessionStore struct {
@@ -155,29 +153,17 @@ func TestAdoptionLateSessionRefusesAndCompatibleRetry(t *testing.T) {
 	t.Cleanup(server.Close)
 	// Keep the replacement credential's origin stable across the retry.
 	params.HubClientFactory = func(_ context.Context, _ config.FederationCredential) (*http.Client, error) {
-		return &http.Client{Transport: adoptionRedirectTransport{target: server.URL, base: server.Client().Transport}}, nil
+		return &http.Client{Transport: adoptionTransport(func(r *http.Request) (*http.Response, error) {
+			clone := r.Clone(r.Context())
+			u := *r.URL
+			target, _ := http.NewRequest(http.MethodGet, server.URL, nil)
+			u.Scheme, u.Host = target.URL.Scheme, target.URL.Host
+			clone.URL = &u
+			return server.Client().Transport.RoundTrip(clone)
+		})}, nil
 	}
 	_, err = daemon.EnsureFederationReplica(t.Context(), wrapped, credentials, nil, params)
 	require.NoError(t, err)
-}
-
-type adoptionRedirectTransport struct {
-	target string
-	base   http.RoundTripper
-}
-
-func (a adoptionRedirectTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	clone := r.Clone(r.Context())
-	u := *r.URL
-	target, _ := http.NewRequest(http.MethodGet, a.target, nil)
-	u.Scheme = target.URL.Scheme
-	u.Host = target.URL.Host
-	clone.URL = &u
-	base := a.base
-	if base == nil {
-		base = http.DefaultTransport
-	}
-	return base.RoundTrip(clone)
 }
 
 func TestAdoptionRelaySessionsRefusedWithoutHubProbe(t *testing.T) {
@@ -207,11 +193,7 @@ func TestAdoptionPreflightUsesEffectiveSigningAndChecksIdentity(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"project_id":42,"project_uid":"wrong"}`)
 	}))
 	t.Cleanup(server.Close)
-	params := replicaServiceParams()
-	params.ProjectName = project.Name
-	params.AdoptExisting = true
-	params.HubURL = server.URL
-	params.Credential.HubURL = server.URL
+	params := adoptionParams(project, server.URL)
 	existing := params.Credential
 	existing.Capabilities = "pull,push"
 	existing.Signing = &signingpolicy.Source{KeyID: "example", HubURL: server.URL}
@@ -244,11 +226,7 @@ func TestAdoptionHubProbeDoesNotHoldReplicaMutex(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)
 	}))
 	t.Cleanup(server.Close)
-	params := replicaServiceParams()
-	params.ProjectName = project.Name
-	params.AdoptExisting = true
-	params.HubURL = server.URL
-	params.Credential.HubURL = server.URL
+	params := adoptionParams(project, server.URL)
 	params.HubClientFactory = func(context.Context, config.FederationCredential) (*http.Client, error) { return server.Client(), nil }
 	done := make(chan error, 1)
 	go func() {
@@ -293,11 +271,7 @@ func TestAdoptionSameUIDSessionBaselineAndBoundRejoin(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"project_id":42,"project_uid":%q}`, replicaHubProjectUID)
 	}))
 	t.Cleanup(server.Close)
-	params := replicaServiceParams()
-	params.ProjectName = project.Name
-	params.AdoptExisting = true
-	params.HubURL = server.URL
-	params.Credential.HubURL = server.URL
+	params := adoptionParams(project, server.URL)
 	params.HubClientFactory = func(context.Context, config.FederationCredential) (*http.Client, error) { return server.Client(), nil }
 	credentials := newReplicaCredentialStore()
 	result, err := daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)

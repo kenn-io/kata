@@ -15,5 +15,4 @@ func TestAdoptionBaselineFeatures(t *testing.T) {
 		require.ErrorIs(t, RequireAdoptionEventFeatures(features, baseline), ErrUnsupportedEventFeatures)
 	}
 	require.NoError(t, RequireAdoptionEventFeatures(SupportedEventFeatures, baseline))
-
 }

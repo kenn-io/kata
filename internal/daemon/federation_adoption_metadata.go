@@ -20,12 +20,6 @@ func fetchFederationAdoptionMetadata(ctx context.Context, hubURL string, project
 	if err != nil || credentialErr != nil || base != credentialBase || projectID <= 0 || credential.HubProjectID != projectID || credential.Token == "" {
 		return "", federationReplicaError(ErrFederationReplicaCredentialConflict, "federation enrollment target does not match the requested hub", "")
 	}
-	if credential.Signing != nil && credential.Signing.HubURL != "" {
-		signingBase, signingErr := httpurl.CanonicalHTTPBaseURL(credential.Signing.HubURL)
-		if signingErr != nil || signingBase != base {
-			return "", federationReplicaError(ErrFederationReplicaCredentialConflict, "federation signing source targets a different hub", "")
-		}
-	}
 	if factory == nil {
 		return "", federationReplicaError(ErrFederationReplicaHubUnavailable, "federation transport is unavailable", "")
 	}

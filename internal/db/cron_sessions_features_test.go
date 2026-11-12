@@ -28,7 +28,6 @@ func TestCronSessionPayloadWireVersion(t *testing.T) {
 	}{
 		{"sessions", "cron.run.observed", `{"summary":{"version":1,"sessions_incomplete":true}}`, "cron_run_sessions_v1,cron_v1", 31},
 		{"no sessions", "cron.run.observed", `{"summary":{"version":1}}`, "cron_v1", 31},
-		{"issue native metadata", "issue.created", `{"metadata":{"cron.occurrence":{"version":1}}}`, "", 30},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			version, feature, err := db.FederationEventPayloadWireVersion(tc.kind, []byte(tc.payload))

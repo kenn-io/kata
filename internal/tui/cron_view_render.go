@@ -268,14 +268,12 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			if r.Summary.InputTokens != nil || r.Summary.OutputTokens != nil {
 				d.field("Tokens", fmt.Sprintf("%d input, %d output", deref(r.Summary.InputTokens), deref(r.Summary.OutputTokens)))
 			}
-			if r.Summary.Sessions != nil {
-				for _, session := range r.Summary.Sessions {
-					label := session.Agent + " " + session.SessionID[:min(8, len(session.SessionID))]
-					if session.Step != nil && *session.Step != "" {
-						label += " · " + *session.Step
-					}
-					d.field("Sessions", label)
+			for _, session := range r.Summary.Sessions {
+				label := session.Agent + " " + session.SessionID[:min(8, len(session.SessionID))]
+				if session.Step != nil && *session.Step != "" {
+					label += " · " + *session.Step
 				}
+				d.field("Sessions", label)
 			}
 			if r.Summary.SessionsIncomplete != nil && *r.Summary.SessionsIncomplete {
 				d.field("Sessions", "incomplete")

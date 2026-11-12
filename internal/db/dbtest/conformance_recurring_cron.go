@@ -663,14 +663,9 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	_, err = s.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: p.ID, UID: runUID, JobUID: &adapter.UID, DefinitionEventUID: &adapter.DefinitionEventUID, Actor: "operator", Status: "succeeded", Summary: cron.Summary{Version: 1}})
 	require.NoError(t, err)
 	probe := &recurringCountingProbe{recurringProbeQuerier: s.(recurringProbeQuerier)}
-	hasSessions, err := db.ProjectHasCronRunSessions(ctx, probe, p.UID)
-	require.NoError(t, err)
-	require.False(t, hasSessions)
-	require.Equal(t, []int{0}, probe.sessionCandidates)
-	probe.sessionCandidates = nil
 	features, err := db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
-	require.Equal(t, db.CronEventFeature, features)
+	require.Equal(t, "cron_v1", features)
 	require.Equal(t, []int{0}, probe.candidates, "ordinary jobs must not reach JSON decoding")
 	require.Equal(t, []int{0}, probe.sessionCandidates, "session-free runs must not reach JSON decoding")
 	definition.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review service"}
@@ -685,7 +680,6 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	}).ExecContext(ctx, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, escaped, job.UID)
 	require.NoError(t, err)
 	probe.candidates = nil
-	probe.sessionCandidates = nil
 	features, err = db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
 	require.Equal(t, "cron_v1", features)

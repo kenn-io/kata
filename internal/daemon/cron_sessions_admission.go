@@ -16,11 +16,10 @@ func admitCronSessions(ctx context.Context, cfg ServerConfig, projectID int64) (
 	if err != nil {
 		return nil, cronForwardUnavailable("federation endpoint is busy; retry shortly")
 	}
-	done := release
-	fail := func(err error) (func(), error) { done(); return nil, err }
+	fail := func(err error) (func(), error) { release(); return nil, err }
 	binding, err := cfg.DB.FederationBindingByProject(ctx, projectID)
 	if errors.Is(err, db.ErrNotFound) || (err == nil && binding.Role != db.FederationRoleSpoke) {
-		return done, nil
+		return release, nil
 	}
 	if err != nil {
 		return fail(cronForwardUnavailable("federation binding is unavailable"))
@@ -45,5 +44,5 @@ func admitCronSessions(ctx context.Context, cfg ServerConfig, projectID int64) (
 	if err != nil || !current.Enabled || !current.PushEnabled || current.Role != binding.Role || current.RelayConfig != nil || current.HubURL != binding.HubURL || current.HubProjectID != binding.HubProjectID || current.HubProjectUID != binding.HubProjectUID || current.AllowInsecure != binding.AllowInsecure {
 		return fail(cronForwardUnavailable("federation binding changed; retry with fresh credentials"))
 	}
-	return done, nil
+	return release, nil
 }

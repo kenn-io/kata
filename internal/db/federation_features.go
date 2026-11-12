@@ -208,36 +208,17 @@ func ProjectHasCronRunSessions(ctx context.Context, q interface {
 	if err != nil {
 		return false, err
 	}
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var raw string
 		if err := rows.Scan(&raw); err != nil {
-			_ = rows.Close()
 			return false, err
 		}
-		has, err := summaryHasSessionFields(jsontext.Value(raw))
-		if err != nil {
-			_ = rows.Close()
-			return false, err
-		}
-		if has {
-			if err := rows.Err(); err != nil {
-				_ = rows.Close()
-				return false, err
-			}
-			if err := rows.Close(); err != nil {
-				return false, err
-			}
-			return true, nil
+		if has, err := summaryHasSessionFields(jsontext.Value(raw)); err != nil || has {
+			return has, err
 		}
 	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return false, err
-	}
-	if err := rows.Close(); err != nil {
-		return false, err
-	}
-	return false, nil
+	return false, rows.Err()
 }
 
 // ProjectRequiredEventFeatures inspects current cron data and native issue state.

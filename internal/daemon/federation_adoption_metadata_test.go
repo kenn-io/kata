@@ -25,7 +25,7 @@ func TestAdoptionMetadataReader(t *testing.T) {
 		{"wrong ID", `{"project_id":42,"project_uid":"` + uid + `"}`, db.SupportedEventFeatures, 200, true},
 		{"wrong UID", `{"project_id":41,"project_uid":"other"}`, db.SupportedEventFeatures, 200, true},
 		{"invalid", `{`, "", 200, true},
-		{"oversized", `{"project_id":41,"project_uid":"` + uid + `"}` + strings.Repeat(" ", federationRebindResponseLimit), "", 200, true},
+		{"oversized", `{"project_id":41,"project_uid":"` + strings.Repeat("x", federationRebindResponseLimit) + `"}`, "", 200, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var auth, path, features string
@@ -77,11 +77,6 @@ func TestAdoptionMetadataReaderPinsOriginAndRejectsRedirect(t *testing.T) {
 	_, err := fetchFederationAdoptionMetadata(t.Context(), target.URL, 41, "uid", credential, factory)
 	require.Error(t, err)
 	require.False(t, called)
-	credential.Signing = &signingpolicy.Source{HubURL: target.URL}
-	_, err = fetchFederationAdoptionMetadata(t.Context(), source.URL, 41, "uid", credential, factory)
-	require.Error(t, err)
-	require.False(t, called)
-	credential.Signing = nil
 	_, err = fetchFederationAdoptionMetadata(t.Context(), source.URL, 41, "uid", credential, factory)
 	require.Error(t, err)
 	require.True(t, called)

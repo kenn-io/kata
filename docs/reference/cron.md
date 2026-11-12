@@ -686,9 +686,8 @@ check for `cron_run_sessions_v1` in both `cli_features` and the hub's
 first, then spokes; older spokes stop syncing the entire project once any run
 records a session. Spokes with disabled, push-disabled, or relay bindings
 refuse observations containing sessions; they still accept observations without
-them. Adopting a standalone project with retained sessions requires a direct
-hub that advertises both cron and session support; upgrade the hub first and
-retry adoption. Relay adoption of session-bearing projects is refused.
+them. See [adopting an existing project](../operations/federation.md#adopting-an-existing-project)
+for session requirements.
 
 A new observation uses expected revision 0. A changed observation requires its
 current revision. An identical retry of the same UID and canonical evidence
