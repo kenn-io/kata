@@ -3,12 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -17,9 +13,6 @@ import (
 	"go.kenn.io/kit/agenthook"
 	"go.kenn.io/kit/agentsetup"
 )
-
-var errAgentSetupExecutables = errors.New("kata hooks use different executables")
-var errAgentSetupMissingExecutable = errors.New("hook executable is missing or unusable")
 
 func agentSetupOptions(name string) (nativeAgentHookOptions, string, error) {
 	dir, err := agentHookWorkspacePath()
@@ -35,84 +28,9 @@ func agentSetupOptions(name string) (nativeAgentHookOptions, string, error) {
 	}
 	opts := targets[0].options
 	opts.Contract, opts.Attention = targets[0].capability.Contract, true
-	var exe, warning string
-	if agentHookUsesKit(name) {
-		status, err := readAgentHookStatus(agenthook.Agent(name), opts.ConfigPath, dir)
-		if err != nil {
-			return opts, "", err
-		}
-		for _, entry := range status.Entries {
-			if entry.Executable == "" || (exe != "" && exe != entry.Executable) {
-				return opts, "", errAgentSetupExecutables
-			}
-			exe = entry.Executable
-		}
-	} else {
-		opts.Executable = "kata"
-		plan, err := planAgentSetup(&opts)
-		if err != nil {
-			return opts, "", err
-		}
-		for _, change := range plan.Changes {
-			if !change.OriginalExists {
-				continue
-			}
-			var executable string
-			switch name {
-			case "pi":
-				if meta, err := parsePiAgentHookMetadata(change.Original); err == nil {
-					executable = meta.Executable
-				}
-			case "opencode", "amp":
-				parse := parsePluginAgentHookMetadata
-				if name == "opencode" && filepath.Base(change.Path) == "package.json" {
-					parse = parsePluginAgentHookPackage
-				}
-				if meta, err := parse(change.Original); err == nil {
-					executable = meta.Executable
-				}
-			case "openclaw":
-				line, _, _ := bytes.Cut(change.Original, []byte("\n"))
-				if metadata, ok := bytes.CutPrefix(line, []byte(openClawManagedPrefix)); ok {
-					var meta openClawManaged
-					if json.Unmarshal(metadata, &meta) == nil {
-						executable = meta.Executable
-					}
-				}
-			default:
-				values, err := agentSetupExtraExecutables(name, change.Path, change.Original)
-				if err != nil {
-					return opts, "", err
-				}
-				for _, value := range values {
-					if executable != "" && executable != value {
-						return opts, "", errAgentSetupExecutables
-					}
-					executable = value
-				}
-			}
-			if executable != "" && exe != "" && executable != exe {
-				return opts, "", errAgentSetupExecutables
-			}
-			if executable != "" {
-				exe = executable
-			}
-		}
-	}
-	if exe == "" {
-		exe, warning, err = resolveAgentHookExecutable("", defaultAgentHookExecutableEnv())
-		if err != nil {
-			return nativeAgentHookOptions{}, "", err
-		}
-	}
-	if filepath.IsAbs(exe) {
-		info, statErr := os.Stat(exe)
-		if statErr != nil || !info.Mode().IsRegular() {
-			return opts, "", fmt.Errorf("%w: %s", errAgentSetupMissingExecutable, exe)
-		}
-	}
+	exe, warning, err := resolveAgentHookExecutable("", defaultAgentHookExecutableEnv())
 	opts.Executable = exe
-	return opts, warning, nil
+	return opts, warning, err
 }
 
 func agentSetupPlanCurrent(plan nativeAgentHookPlan) bool {
@@ -124,94 +42,9 @@ func agentSetupPlanCurrent(plan nativeAgentHookPlan) bool {
 	return true
 }
 
-func agentSetupExtraExecutables(name, path string, data []byte) ([]string, error) {
-	var handlers []map[string]any
-	if name == "kimi" || name == "kimi-code" {
-		blocks, err := parseExtraTOMLHooks(data)
-		if err != nil {
-			return nil, err
-		}
-		for _, block := range blocks {
-			handlers = append(handlers, block.fields)
-		}
-	} else {
-		root, err := parseExtraJSON(data, true)
-		if err != nil {
-			return nil, err
-		}
-		sections := map[string]map[string]any{}
-		if name == "antigravity" {
-			for key, value := range root {
-				if section, ok := value.(map[string]any); ok {
-					sections[key] = section
-				}
-			}
-		} else {
-			section := root
-			if name != "droid" || filepath.Base(path) == "settings.json" {
-				section, err = extraJSONObject(root, "hooks")
-				if err != nil {
-					return nil, err
-				}
-			}
-			if name == "zcode" {
-				section, err = extraJSONObject(section, "events")
-				if err != nil {
-					return nil, err
-				}
-			}
-			sections[""] = section
-		}
-		registrations, err := extraJSONRegistrations(name, sections)
-		if err != nil {
-			return nil, err
-		}
-		for _, registration := range registrations {
-			handlers = append(handlers, registration.handler)
-		}
-	}
-	var values []string
-	for _, handler := range handlers {
-		if extraHookKind(name, handler) == "" {
-			continue
-		}
-		command, _ := handler["command"].(string)
-		if runtime.GOOS == "windows" {
-			for _, key := range []string{"commandWindows", "command_windows"} {
-				if alternate, ok := handler[key].(string); ok && alternate != "" {
-					command = alternate
-					break
-				}
-			}
-		}
-		if name == "zcode" {
-			values = append(values, command)
-			continue
-		}
-		value, err := agentHookCommandExecutable(command, runtime.GOOS, false)
-		if err != nil {
-			return nil, errAgentSetupExecutables
-		}
-		values = append(values, value)
-	}
-	return values, nil
-}
-
-func agentSetupRecovery(name string) string {
-	exe, _, err := resolveAgentHookExecutable("", defaultAgentHookExecutableEnv())
-	if err != nil {
-		return "Install Kata on PATH, then run kata agent-hook install " + name + " --executable kata"
-	}
-	command, _ := agenthook.BuildCommand(exe, "agent-hook", "install", name, "--executable", exe)
-	return command.Native
-}
-
 func agentSetupItem(name string, warn func(string)) agentsetup.Item {
 	return agentsetup.Item{Name: "hooks", Install: func(ctx context.Context) error {
 		opts, warning, err := agentSetupOptions(name)
-		if errors.Is(err, errAgentSetupExecutables) || errors.Is(err, errAgentSetupMissingExecutable) {
-			return nil
-		}
 		if err != nil {
 			return err
 		}
@@ -224,11 +57,6 @@ func agentSetupItem(name string, warn func(string)) agentsetup.Item {
 		if err != nil {
 			return err
 		}
-		if _, err := agenthook.ParseAgent(name); err != nil {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-		}
 		changed, err := publishNativeAgentHookPlan(plan)
 		if err == nil && changed && warning != "" {
 			warn(strings.Replace(warning, " (use --executable for a stable path)", ". Install Kata on PATH and rerun kata agent setup "+name, 1))
@@ -236,9 +64,6 @@ func agentSetupItem(name string, warn func(string)) agentsetup.Item {
 		return err
 	}, Check: func(ctx context.Context) (agentsetup.Status, error) {
 		opts, _, err := agentSetupOptions(name)
-		if errors.Is(err, errAgentSetupExecutables) || errors.Is(err, errAgentSetupMissingExecutable) {
-			return agentsetup.Status{State: agentsetup.StateUnknown, Reason: err.Error(), NextStep: agentSetupRecovery(name)}, nil
-		}
 		if err != nil {
 			return agentsetup.Status{}, err
 		}
@@ -258,31 +83,11 @@ func agentSetupItem(name string, warn func(string)) agentsetup.Item {
 
 func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nativeAgentHookPlan) (agentsetup.Status, error) {
 	status := agentsetup.Status{State: agentsetup.StateOK, ConfigPath: opts.ConfigPath}
-	if opts.Agent == "claude" || opts.Agent == "codex" {
-		if _, err := exec.LookPath(opts.Agent); err != nil {
-			configured, err := readAgentHookStatus(agenthook.Agent(opts.Agent), opts.ConfigPath, opts.Dir)
-			if err != nil {
-				return status, err
-			}
-			if len(configured.Entries) > 0 {
-				return agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: opts.ConfigPath, Reason: "Agent executable is missing, so hook state is unknown", NextStep: "Install " + opts.Agent + " or add it to PATH"}, nil
-			}
-		}
-	}
 	status.ConfigPath = plan.Path
 	if !agentSetupPlanCurrent(plan) {
 		status.State, status.Reason, status.NextStep = agentsetup.StateMissing, "Kata hooks are not installed", "kata agent setup "+opts.Agent
 		if plan.CurrentContract || plan.CurrentAttentionStart || plan.CurrentAttentionEnd {
 			status.State, status.Reason = agentsetup.StateOutdated, "Kata hooks need updating"
-		}
-		if agentHookUsesKit(opts.Agent) {
-			entries, err := inspectAgentHookEntries(agenthook.Agent(opts.Agent), opts.ConfigPath)
-			if err != nil {
-				return status, err
-			}
-			if slices.ContainsFunc(entries, func(entry agentHookEntry) bool { return classifyAgentHookHandlerFromEntry(entry) != "" }) {
-				status.State, status.Reason = agentsetup.StateOutdated, "Kata hooks need updating"
-			}
 		}
 		return status, nil
 	}
@@ -292,54 +97,23 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nati
 		}
 		return agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: plan.Path, Reason: "Hook inspection is unavailable for this agent", NextStep: "Inspect hooks in the agent"}, nil
 	}
-	entries, err := inspectAgentHookEntries(agenthook.Agent(opts.Agent), opts.ConfigPath)
-	if err != nil {
-		return status, err
-	}
 	conflict := agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: opts.ConfigPath, Reason: "Hook inspection found conflicting commands", NextStep: "Inspect hooks in the agent"}
 	counts := map[agentsetup.State]int{}
 	for _, kind := range []agentHookKind{contractHook, attentionStartHook, attentionEndHook} {
 		registration := kitAgentHookRegistration(opts, kind)
-		// Kit matches substrings; use the full owned command and refuse an
-		// ambiguous match before asking it for native trust or policy state.
-		registration.Marker = ""
-		for _, entry := range entries {
-			if classifyAgentHookHandlerFromEntry(entry) == kind && sameAgentHookGroupBehavior(entry.GroupFields, nil) {
-				registration.Marker = agentSetupCheckCommand(entry)
-				break
-			}
+		command, err := agenthook.BuildCommand(registration.Executable, registration.Arguments...)
+		if err != nil {
+			return status, err
 		}
-		if registration.Marker == "" || slices.ContainsFunc(entries, func(entry agentHookEntry) bool {
-			return classifyAgentHookHandlerFromEntry(entry) != kind && strings.Contains(agentSetupCheckCommand(entry), registration.Marker)
-		}) {
-			return conflict, nil
+		registration.Marker = command.Native
+		if runtime.GOOS == "windows" && opts.Agent == "claude" {
+			registration.Marker = strings.Join(append([]string{registration.Executable}, registration.Arguments...), " ")
 		}
 		result, err := agenthook.Check(ctx, agenthook.Agent(opts.Agent), registration)
 		if err != nil {
 			return status, err
 		}
 		state := agentsetup.State(result.State)
-		if opts.Agent == "claude" && state == agentsetup.StateOutdated {
-			conditional := false
-			valid := true
-			for _, entry := range entries {
-				command := agentSetupCheckCommand(entry)
-				if !strings.Contains(command, registration.Marker) {
-					continue
-				}
-				if classifyAgentHookHandlerFromEntry(entry) != kind || command != registration.Marker {
-					valid = false
-				} else if !sameAgentHookGroupBehavior(entry.GroupFields, nil) {
-					conditional = true
-				}
-			}
-			if valid && conditional {
-				if _, err := exec.LookPath(opts.Executable); err != nil {
-					return agentsetup.Status{State: agentsetup.StateUnknown, ConfigPath: opts.ConfigPath, Reason: fmt.Sprintf("Hook executable %q cannot be resolved", opts.Executable), NextStep: "Install the executable or add its directory to PATH"}, nil
-				}
-				state, result.HookCount = agentsetup.StateOK, 1
-			}
-		}
 		counts[state] += result.HookCount
 		if state == agentsetup.StateMissing || state == agentsetup.StateOutdated {
 			return conflict, nil
@@ -350,18 +124,6 @@ func checkAgentSetup(ctx context.Context, opts nativeAgentHookOptions, plan nati
 	}
 	status.HookCount = counts[status.State]
 	return status, nil
-}
-
-func agentSetupCheckCommand(entry agentHookEntry) string {
-	command, _ := entry.Fields["command"].(string)
-	if args, ok := entry.Fields["args"].([]any); ok {
-		for _, arg := range args {
-			if s, ok := arg.(string); ok {
-				command += " " + s
-			}
-		}
-	}
-	return command
 }
 
 func planAgentSetup(opts *nativeAgentHookOptions) (nativeAgentHookPlan, error) {
@@ -384,9 +146,6 @@ func agentSetupFallback(ctx context.Context, name string, checkOnly bool, item a
 	}
 	if err == nil {
 		row.Status, err = item.Check(ctx)
-		if err == nil && row.State != agentsetup.StateUnknown {
-			row.State = agentsetup.StateUnknown
-		}
 	}
 	if err != nil {
 		row.Status = agentsetup.Status{State: agentsetup.StateFailed, Reason: err.Error(), NextStep: "kata agent setup " + name}

@@ -153,13 +153,14 @@ and both authentication options.
 
 ## Load the contract in every session
 
-In unreleased builds, load Kata's contract in every coding-agent session that starts inside a kata
-workspace on this machine. Sessions in other directories stay silent:
+In unreleased builds, load Kata's contract in Claude Code and Codex sessions that start inside a kata
+workspace on this machine. Setup selects whichever are installed. Sessions in other directories stay silent:
 
 ```sh
 kata agent setup
 ```
 
+Name other agents with `kata agent setup gemini pi`, or run `kata agent-hook install` to set up every configured agent.
 For Codex, open Codex and run `/hooks` to trust the hooks. Run `kata agent setup --check` to check readiness in unreleased builds. See
 [Contract in every session](../workflows/agents.md#contract-in-every-session)
 for harness selection, Hermes's first-turn behavior, and additional Codex

@@ -108,8 +108,8 @@ does not enroll an agent, initialize a project, or configure embeddings.
 
 ## Contract in every session
 
-In unreleased builds, load Kata's contract in every coding-agent session that starts inside a kata
-workspace on this machine:
+In unreleased builds, load Kata's contract in Claude Code and Codex sessions that start inside a kata
+workspace on this machine. Setup selects whichever are installed:
 
 ```sh
 kata agent setup
@@ -117,7 +117,8 @@ kata agent setup
 
 Open Codex and run `/hooks` to trust its hooks. Run `kata agent setup --check` to check readiness.
 
-Use `kata agent-hook install` for advanced options. User scope is the default. Bare installation discovers configured agents and
+Name other agents with `kata agent setup gemini pi`, or run `kata agent-hook install` to set up every configured agent.
+User scope is the default. Bare installation discovers configured agents and
 installs their contract plus every available attention direction. Dedicated agent
 configuration directories count as evidence; `.github/` and `.agents/` alone do
 not. `--all` uses the same discovery. Name agents to select them explicitly, even

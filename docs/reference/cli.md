@@ -251,7 +251,7 @@ In unreleased builds, `kata agent setup [<harness>...]` installs user hooks for 
 
 ## Agent hook
 
-Availability varies by release; run `kata agent-hook --help` to see the commands your version supports.
+These commands require Kata 0.19.0 or later.
 
 The command group has been renamed from `kata agent-hooks` to
 `kata agent-hook`. This is a breaking change: the plural spelling fails as an

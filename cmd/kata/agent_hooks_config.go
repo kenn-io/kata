@@ -317,8 +317,10 @@ func effectiveAgentHookDefault(agent agenthook.Agent, entry agentHookEntry) bool
 			return false
 		}
 	}
-	if !sameAgentHookGroupBehavior(entry.GroupFields, nil) {
-		return false
+	for key := range entry.GroupFields {
+		if key != "matcher" && key != "hooks" {
+			return false
+		}
 	}
 	if agent == agenthook.AgentCodex {
 		if timeout, exists := entry.Fields["timeout"]; exists && !sufficientCodexContractTimeout(timeout) {
@@ -348,7 +350,7 @@ func ownedAgentHookEntriesMatch(current, desired []agentHookEntry, kind agentHoo
 	owned := func(entries []agentHookEntry) []agentHookEntry {
 		var result []agentHookEntry
 		for _, entry := range entries {
-			if classifyAgentHookHandlerFromEntry(entry) == kind && sameAgentHookGroupBehavior(entry.GroupFields, nil) {
+			if classifyAgentHookHandlerFromEntry(entry) == kind {
 				result = append(result, entry)
 			}
 		}
@@ -359,13 +361,15 @@ func ownedAgentHookEntriesMatch(current, desired []agentHookEntry, kind agentHoo
 		return false
 	}
 	for i := range before {
-		if before[i].Event != after[i].Event || before[i].Matcher != after[i].Matcher || !reflect.DeepEqual(before[i].Fields, after[i].Fields) {
+		if before[i].Event != after[i].Event || !reflect.DeepEqual(before[i].Fields, after[i].Fields) || !sameAgentHookGroupBehavior(before[i].GroupFields, after[i].GroupFields) {
 			return false
 		}
 	}
 	return true
 }
 
+// Non-execution group metadata stays in place when a built-in handler already
+// matches. Conditional behavior still requires repair to the requested default.
 func sameAgentHookGroupBehavior(before, after map[string]any) bool {
 	for _, key := range []string{"if", "condition", "enabled", "disabled", "async", "once"} {
 		if !reflect.DeepEqual(before[key], after[key]) {
@@ -580,12 +584,29 @@ func protectAgentHookCommands(agent agenthook.Agent, data []byte, entries, desir
 				}
 			}
 		}
-		if classifyAgentHookHandlerFromEntry(entry) == kind && (desired == nil || sameAgentHookGroupBehavior(entry.GroupFields, nil)) {
+		if classifyAgentHookHandlerFromEntry(entry) == kind {
 			if agent == agenthook.AgentCopilot {
 				handler["bash"] = marker
 			} else {
 				handler["command"] = marker
 			}
+		}
+	}
+	// Kit retains group fields during reinstall. Move owned handlers out of
+	// conditional groups so the requested default registration can run.
+	for _, entry := range slices.Backward(entries) {
+		if entry.GroupIndex < 0 || classifyAgentHookHandlerFromEntry(entry) != kind || sameAgentHookGroupBehavior(entry.GroupFields, nil) {
+			continue
+		}
+		groups := hooks[entry.Event].([]any)
+		group := groups[entry.GroupIndex].(map[string]any)
+		handlers := group["hooks"].([]any)
+		handlers = append(handlers[:entry.HandlerIndex], handlers[entry.HandlerIndex+1:]...)
+		if len(handlers) == 0 {
+			groups = append(groups[:entry.GroupIndex], groups[entry.GroupIndex+1:]...)
+			hooks[entry.Event] = groups
+		} else {
+			group["hooks"] = handlers
 		}
 	}
 	staged, err := marshalAgentHookJSON(document)

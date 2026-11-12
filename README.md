@@ -254,8 +254,8 @@ verified. Close each verified issue promptly with valid evidence and a
 substantive message. [Agent workflows](docs/workflows/agents.md) is the same
 contract in long form.
 
-On `main`, install the contract in every coding-agent session that starts
-inside a kata workspace on this machine.
+On `main`, install the contract for Claude Code and Codex sessions that start
+inside a kata workspace on this machine. Setup selects whichever are installed.
 
 Not in the latest release yet.
 
@@ -263,11 +263,10 @@ Not in the latest release yet.
 kata agent setup
 ```
 
-Not in the latest release yet.
-
 For Codex, open Codex and run `/hooks` to trust the hooks. Run `kata agent setup --check` to check readiness.
 
-Use `kata agent-hook install` for advanced options. See
+Name other agents with `kata agent setup gemini pi`, or run `kata agent-hook install`
+to set up every configured agent. `kata agent-hook` requires Kata 0.19.0 or later. See
 [Contract in every session](docs/workflows/agents.md#contract-in-every-session)
 for all 18 targets, runtime requirements, attention capabilities and additional
 Codex homes. Contract and available attention hooks are enabled by default;

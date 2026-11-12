@@ -349,39 +349,3 @@ func TestAgentHooksCLIStatusRejectsUnsupportedConfigFlag(t *testing.T) {
 		require.Error(t, err)
 	}
 }
-
-func TestCodexConditionalOwnedGroupKeepsForeignGroup(t *testing.T) {
-	home := isolateAgentHookHomes(t)
-	path := filepath.Join(home, "codex", "hooks.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
-	data := `{"hooks":{"SessionStart":[{"if":"condition","hooks":[{"type":"command","command":"kata agent-hook contract codex","commandWindows":"kata agent-hook contract codex"}]},{"hooks":[{"type":"command","command":"foreign-hook"}]}]}}`
-	require.NoError(t, os.WriteFile(path, []byte(data), 0600))
-	_, err := runHookSetup(t, "install", "codex", "--executable", os.Args[0])
-	require.NoError(t, err)
-	entries, err := inspectAgentHookEntries("codex", path)
-	require.NoError(t, err)
-	var foreignFound, conditionalFound bool
-	for _, entry := range entries {
-		if entry.Kind == contractHook && entry.GroupFields["if"] == "condition" {
-			conditionalFound = true
-			require.Equal(t, 0, entry.GroupIndex)
-		}
-		if entry.Command == "foreign-hook" {
-			foreignFound = true
-			require.Equal(t, 1, entry.GroupIndex)
-		}
-	}
-	require.True(t, foreignFound)
-	require.True(t, conditionalFound)
-	contract, start, end := kitAgentHookConfigured("codex", entries)
-	require.True(t, contract)
-	require.True(t, start)
-	require.True(t, end)
-	before, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
-	require.NoError(t, err)
-	_, err = runHookSetup(t, "install", "codex", "--executable", os.Args[0])
-	require.NoError(t, err)
-	after, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
-	require.NoError(t, err)
-	require.Equal(t, before, after)
-}

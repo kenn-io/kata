@@ -54,15 +54,3 @@ func TestDoctorClaudeDisabledHooks(t *testing.T) {
 	codex := doctorAgent(t.Context(), "codex")
 	require.Equal(t, "info", string(codex.Status))
 }
-
-func TestDoctorAgentMissingWithHooks(t *testing.T) {
-	home := isolateAgentHookHomes(t)
-	t.Setenv("PATH", t.TempDir())
-	path := filepath.Join(home, "claude", "settings.json")
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
-	require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata agent-hook contract claude"}]}]}}`), 0600))
-	check := doctorAgent(t.Context(), "claude")
-	require.Equal(t, "warn", string(check.Status))
-	require.Contains(t, check.Summary, "unknown")
-	require.Contains(t, check.Fix, "PATH")
-}
