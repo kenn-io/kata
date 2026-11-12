@@ -1100,7 +1100,7 @@ func TestReconcileMappingAtomicRekeyCrashBeforeAdoptionReusesHubKeyOnRestart(t *
 	require.NoError(t, err)
 	credentials := newFakeCredentialStore()
 	store := &failAdoptionLookupAfterRekeyStore{
-		TransactionalStore: dbtest.TransactionalStore{Storage: baseStore}, credentials: credentials,
+		Storage: baseStore, credentials: credentials,
 		localUID: project.UID, hubUID: hubProjectUID,
 	}
 	manual := managedCredential()
