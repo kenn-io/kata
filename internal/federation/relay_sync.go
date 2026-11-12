@@ -55,7 +55,7 @@ func syncRelayBinding(ctx context.Context, store db.Storage, binding db.Federati
 	if err != nil {
 		return err
 	}
-	meta, err := client.ProjectFederation(ctx, remoteProjectID)
+	meta, features, err := client.projectFederationFeatures(ctx, remoteProjectID)
 	if err != nil {
 		return err
 	}
@@ -110,13 +110,13 @@ func syncRelayBinding(ctx context.Context, store db.Storage, binding db.Federati
 	// reaches the upstream. Resume that namespace instead of fetching another
 	// snapshot; native upstream admission requires its retained checkpoint.
 	if handshake.ResetRequired && handshake.ResetEpoch+1 == c.ResetEpoch {
-		return syncRelayStreams(ctx, store, binding, remoteProjectID, client, onPulledEvents, validateLease, turn)
+		return syncRelayStreams(ctx, store, binding, remoteProjectID, client, onPulledEvents, validateLease, turn, features)
 	}
 	if handshake.ResetRequired && handshake.ResetEpoch == c.ResetEpoch {
 		// A fresh signed baseline can contain state needed to apply queued root
 		// mutations. Drain only this replica's outbound intent before requesting
 		// it; incoming event and artifact deliveries resume after installation.
-		if err := syncRelayPushBeforeReset(ctx, store, binding, remoteProjectID, client, validateLease, turn); err != nil {
+		if err := syncRelayPushBeforeReset(ctx, store, binding, remoteProjectID, client, validateLease, turn, features); err != nil {
 			return err
 		}
 		if turn.remaining {
@@ -155,12 +155,12 @@ func syncRelayBinding(ctx context.Context, store db.Storage, binding db.Federati
 		}
 		binding = current
 	}
-	return syncRelayStreams(ctx, store, binding, remoteProjectID, client, onPulledEvents, validateLease, turn)
+	return syncRelayStreams(ctx, store, binding, remoteProjectID, client, onPulledEvents, validateLease, turn, features)
 }
 
 // Exchange pending deliveries in both directions with native acceptance and
 // emitted-prefix ACK checks, at most the turn budget per stream and direction.
-func syncRelayStreams(ctx context.Context, store db.Storage, binding db.FederationBinding, remoteProjectID int64, client *Client, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error, turn *relaySyncTurn) error {
+func syncRelayStreams(ctx context.Context, store db.Storage, binding db.FederationBinding, remoteProjectID int64, client *Client, onPulledEvents func(int64, []db.Event), validateLease func(context.Context) error, turn *relaySyncTurn, features string) error {
 	c := binding.RelayConfig
 	quarantines, err := store.ActiveFederationQuarantinesByProject(ctx, binding.ProjectID)
 	if err != nil {
@@ -172,7 +172,7 @@ func syncRelayStreams(ctx context.Context, store db.Storage, binding db.Federati
 		}
 		return db.ErrFederationPushQuarantined
 	}
-	if err := syncRelayPushEvents(ctx, store, binding, remoteProjectID, client, validateLease, turn); err != nil {
+	if err := syncRelayPushEvents(db.WithRelayReceiverFeatures(ctx, features), store, binding, remoteProjectID, client, validateLease, turn); err != nil {
 		return err
 	}
 	if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
@@ -223,7 +223,7 @@ func syncRelayStreams(ctx context.Context, store db.Storage, binding db.Federati
 // syncRelayPushBeforeReset retains local event and artifact intent without
 // applying upstream deliveries against a projection that the signed baseline
 // has not installed yet.
-func syncRelayPushBeforeReset(ctx context.Context, store db.Storage, binding db.FederationBinding, remoteProjectID int64, client *Client, validateLease func(context.Context) error, turn *relaySyncTurn) error {
+func syncRelayPushBeforeReset(ctx context.Context, store db.Storage, binding db.FederationBinding, remoteProjectID int64, client *Client, validateLease func(context.Context) error, turn *relaySyncTurn, features string) error {
 	quarantines, err := store.ActiveFederationQuarantinesByProject(ctx, binding.ProjectID)
 	if err != nil {
 		return err
@@ -234,7 +234,7 @@ func syncRelayPushBeforeReset(ctx context.Context, store db.Storage, binding db.
 		}
 		return db.ErrFederationPushQuarantined
 	}
-	if err := syncRelayPushEvents(ctx, store, binding, remoteProjectID, client, validateLease, turn); err != nil {
+	if err := syncRelayPushEvents(db.WithRelayReceiverFeatures(ctx, features), store, binding, remoteProjectID, client, validateLease, turn); err != nil {
 		return err
 	}
 	if err := syncRelayPushArtifacts(ctx, store, binding, remoteProjectID, client, validateLease, turn); err != nil {

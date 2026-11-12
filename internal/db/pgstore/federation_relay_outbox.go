@@ -90,6 +90,9 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 		if err != nil {
 			return err
 		}
+		if err := db.RequireRelayEnvelopeFeatures(ctx, stream, output); err != nil {
+			return err
+		}
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx, `UPDATE federation_relay_outbox SET emitted=1 WHERE id=$1`, id); err != nil {
 				return err

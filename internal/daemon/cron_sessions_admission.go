@@ -34,8 +34,14 @@ func admitCronSessions(ctx context.Context, cfg ServerConfig, projectID int64) (
 		return fail(err)
 	}
 	metadata, features, err := readFederationHubMetadata(probeCtx, client, bindingOrigin, binding.HubProjectID)
-	if err != nil || metadata.ProjectID != binding.HubProjectID || metadata.ProjectUID != binding.HubProjectUID {
+	if errors.Is(err, ErrFederationReplicaHubUnavailable) {
 		return fail(cronForwardUnavailable("hub metadata is unavailable"))
+	}
+	if err != nil {
+		return fail(federationReplicaAPIError(err))
+	}
+	if metadata.ProjectID != binding.HubProjectID || metadata.ProjectUID != binding.HubProjectUID {
+		return fail(federationReplicaAPIError(federationReplicaError(ErrFederationReplicaBindingConflict, "hub metadata identifies a different federation project", "use federation leave and join to repair the project binding")))
 	}
 	if err := db.RequireEventFeatures(features, db.CronRunSessionsEventFeature); err != nil {
 		return fail(federationFeatureError(err))

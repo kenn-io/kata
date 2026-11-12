@@ -64,6 +64,43 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	return MergeEventFeatures(required, sessions), nil
 }
 
+// RequireRelaySourceFeatures checks retained event bodies only when sessions
+// make the batch subject to receiver feature negotiation.
+func RequireRelaySourceFeatures(ctx context.Context, bodies [][]byte) error {
+	features, present := RelayReceiverFeatures(ctx)
+	if !present || RequireEventFeatures(features, SupportedEventFeatures) == nil {
+		return nil
+	}
+	required := ""
+	for _, body := range bodies {
+		event, err := DecodeRelaySourceEvent(body)
+		if err != nil {
+			return err
+		}
+		value, err := PayloadRequiredFeatures(event.Type, string(event.Payload))
+		if err != nil {
+			return err
+		}
+		required = MergeEventFeatures(required, value)
+	}
+	if RequireEventFeatures(required, CronRunSessionsEventFeature) == nil {
+		return RequireEventFeatures(features, required)
+	}
+	return nil
+}
+
+// RequireRelayEnvelopeFeatures checks event envelopes without inspecting other streams.
+func RequireRelayEnvelopeFeatures(ctx context.Context, stream string, envelopes []RelayEnvelope) error {
+	if stream != RelayStreamEvent {
+		return nil
+	}
+	bodies := make([][]byte, 0, len(envelopes))
+	for _, envelope := range envelopes {
+		bodies = append(bodies, envelope.Body)
+	}
+	return RequireRelaySourceFeatures(ctx, bodies)
+}
+
 func runSessionFeature(kind, payload string) (string, error) {
 	if !strings.HasPrefix(kind, "cron.run.") {
 		return "", nil

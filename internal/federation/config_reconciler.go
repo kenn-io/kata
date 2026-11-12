@@ -1187,11 +1187,15 @@ func convergeLocalMapping(
 			)
 		case errors.Is(err, daemon.ErrFederationReplicaCredentialIO):
 			return false, reconcileError(ErrCredentialIO, "update local federation credential")
+		case errors.Is(err, db.ErrUnsupportedEventFeatures), errors.Is(err, daemon.ErrFederationReplicaHubUnavailable):
+			return false, reconcileError(ErrHubUnavailable, "hub does not support session history or is unavailable; upgrade the hub or retry")
+		case errors.Is(err, db.ErrFederatedReadOnly):
+			return false, reconcileError(ErrConfigurationConflict, "adopt against the owning hub or record runs without sessions")
 		case errors.Is(err, daemon.ErrFederationReplicaCredentialConflict),
 			errors.Is(err, config.ErrFederationCredentialConflict):
 			return false, reconcileError(
 				ErrConfigurationConflict,
-				"federation credential changed during local convergence",
+				"check the enrollment and saved federation credential",
 			)
 		case errors.Is(err, daemon.ErrFederationReplicaBindingConflict):
 			return false, reconcileError(ErrBindingConflict, "existing federation binding is incompatible")

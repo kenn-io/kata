@@ -5,6 +5,19 @@ import (
 	"slices"
 )
 
+type relayReceiverFeaturesKey struct{}
+
+// WithRelayReceiverFeatures records the remote receiver's advertised features.
+func WithRelayReceiverFeatures(ctx context.Context, features string) context.Context {
+	return context.WithValue(ctx, relayReceiverFeaturesKey{}, features)
+}
+
+// RelayReceiverFeatures distinguishes an absent option from an empty advertisement.
+func RelayReceiverFeatures(ctx context.Context) (string, bool) {
+	features, ok := ctx.Value(relayReceiverFeaturesKey{}).(string)
+	return features, ok
+}
+
 type relayForwardPathKey struct{}
 
 // WithRelayForwardPath carries an already validated ingress path only within
