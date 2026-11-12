@@ -131,7 +131,7 @@ func checkAPIVersionRecord(dir, version string, doc []byte) error {
 }
 
 func checkAPIVersionSummary(path string) error {
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(path) //nolint:gosec // Paths come from repository markers or test fixtures.
 	if err != nil {
 		return err
 	}
