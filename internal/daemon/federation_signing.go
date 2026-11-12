@@ -160,6 +160,10 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 				api.WriteEnvelope(w, http.StatusServiceUnavailable, "signing_unavailable", "federation signing unavailable")
 				return
 			}
+			if !supplied {
+				api.WriteEnvelope(w, http.StatusUnauthorized, "hub_signing_required", "hub requires signed requests")
+				return
+			}
 			r = r.WithContext(ctx)
 			err = s.cfg.FederationSigning.Verify(r, authorization.principal.EnrollmentID)
 			if err != nil {

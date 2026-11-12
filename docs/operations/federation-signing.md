@@ -1,7 +1,7 @@
 ---
 title: Federation request signing
 description: Configure native signed federation and a restricted HTTPS ingress.
-last_edited: 2026-10-17
+last_edited: 2026-11-12
 ---
 
 # Federation request signing
@@ -14,8 +14,9 @@ later on the hub and its spokes.
 
 Existing private deployments stay unsigned unless the hub enables required
 signing. Optional mode rejects invalid supplied signatures. Required mode
-rejects unsigned enrollment requests on every daemon listener; a spoke cannot
-negotiate it away. Owner-local administration keeps its existing authority.
+rejects unsigned enrollment requests on every daemon listener, including the
+Unix socket, with `401 hub_signing_required`; a spoke cannot negotiate it away.
+Owner-local administration keeps its existing authority.
 The restricted ingress listener always requires signatures, even when signing
 is optional on the ordinary daemon listeners.
 
@@ -68,7 +69,10 @@ is optional on the ordinary daemon listeners.
    The same source must exist in the spoke CLI and daemon environments because
    the CLI fetches metadata before saving the enrollment.
 
-For an existing spoke, select the key without replacing its bearer. This
+When enabling required signing on an existing hub, add a
+`[[federation.signing.key]]` entry for each unsigned spoke enrollment and
+restart the hub. Provision the same secret on the spoke, then select the key
+without replacing its bearer. The spoke is refused until it signs requests. This
 command uses the selected daemon, including `KATA_SERVER` or a daemon catalog
 selection, and requires daemon-owner authority:
 

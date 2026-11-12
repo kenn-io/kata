@@ -364,5 +364,5 @@ func hubSignatureRejection(status *HubStatusError) bool {
 	if json.Unmarshal([]byte(status.Body), &envelope) != nil {
 		return false
 	}
-	return envelope.Error.Code == "signature_invalid" || envelope.Error.Code == "signing_unavailable"
+	return envelope.Error.Code == "signature_invalid" || envelope.Error.Code == "signing_unavailable" || envelope.Error.Code == "hub_signing_required"
 }
