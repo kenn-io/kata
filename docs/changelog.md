@@ -20,7 +20,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Recover automatically when the web UI's first daemon roster, workspace, or teams read fails briefly. Retry and Refresh teams remain available after persistent failures or refusals.
 
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
-- Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot record the shared choice, setup succeeds and Kata logs the failure; other apps may miss the choice. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
+- Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot confirm the shared choice was saved, setup succeeds and Kata logs the failure; other apps may miss the choice if it wasn't saved. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index
