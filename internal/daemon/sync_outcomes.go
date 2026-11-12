@@ -49,7 +49,7 @@ func syncFailureReason(err error) string {
 		return "server"
 	case limited || status == 429:
 		return "rate_limit"
-	case auth || status == 401 || status == 403:
+	case auth || status == 401 || status == 403 || status == 428:
 		return "auth"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "timeout"
