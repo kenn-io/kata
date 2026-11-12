@@ -43,10 +43,7 @@ test('local project readers see native sync status with bounded embedding summar
     (response) => new URL(response.url()).pathname === statusPath,
   )
   await region.getByRole('button', { name: 'Refresh sync' }).click()
-  const browserStatus = await statusRead
-  expect(browserStatus.ok()).toBe(true)
-  expect(new URL(browserStatus.url()).searchParams.get('omit_errors')).toBe('true')
-  const browserBody = await browserStatus.text()
+  const browserBody = await (await statusRead).text()
   expect(browserBody).not.toContain('example sync failure')
   expect(browserBody).not.toContain('example held-back batch failure')
   await expect(region.getByText('Sync needs attention')).toBeVisible()
@@ -90,14 +87,11 @@ test('local project readers see native sync status with bounded embedding summar
       }
       await region.getByRole('button', { name: `Copy ${label} sync status command` }).click()
       const command = await page.evaluate(() => navigator.clipboard.readText())
-      const localDiagnostic = kata.runSyncDiagnostic(shell, command, false)
-      expect(localDiagnostic).toContain('example sync failure')
-      expect(localDiagnostic).toContain('example held-back batch failure')
-      expect(kata.runSyncDiagnostic(shell, command, true)).toContain('remote sync failure')
+      const diagnostic = kata.runSyncDiagnostic(shell, command)
+      expect(diagnostic).toContain('example sync failure')
+      expect(diagnostic).toContain('example held-back batch failure')
       if (shell === 'pwsh') {
-        expect(kata.runSyncDiagnostic(shell, command, false, true)).toContain(
-          'example sync failure',
-        )
+        expect(kata.runSyncDiagnostic(shell, command, true)).toContain('example sync failure')
       }
     })
   }

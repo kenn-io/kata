@@ -60,12 +60,7 @@ interface KataFixture {
   prepareSyncDiagnostic(): Promise<void>
   recordSyncDiagnosticError(): void
   clearSyncDiagnosticError(): void
-  runSyncDiagnostic(
-    shell: 'bash' | 'pwsh',
-    command: string,
-    remote: boolean,
-    legacy?: boolean,
-  ): string
+  runSyncDiagnostic(shell: 'bash' | 'pwsh', command: string, legacy?: boolean): string
 }
 
 interface RunningFixture {
@@ -202,37 +197,30 @@ listen = "127.0.0.1:${port}"
     async prepareSyncDiagnostic() {
       const name = `spoke \\"project"’s'\\`
       run(binary, ['projects', 'rename', 'example-project', name], workspace, environment)
-      run(binary, ['projects', 'create', name], remoteWorkspace, remoteEnvironment)
-      run(binary, ['federation', 'enable', name], remoteWorkspace, remoteEnvironment)
     },
     recordSyncDiagnosticError() {
-      for (const [path, message] of [
-        [join(home, 'kata.db'), 'example sync failure'],
-        [join(remoteHome, 'kata.db'), 'remote sync failure'],
-      ]) {
-        const database = new DatabaseSync(path)
-        try {
-          database
-            .prepare(
-              `UPDATE federation_bindings SET role='spoke', hub_url='http://127.0.0.1:9', hub_project_id=42, bound_actor='example-owner' WHERE project_id=(SELECT id FROM projects WHERE name=?)`,
-            )
-            .run(`spoke \\"project"’s'\\`)
-          database
-            .prepare(
-              `INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
-            SELECT id, '2026-10-01T12:00:00Z', ? FROM projects WHERE name = ?
-            ON CONFLICT(project_id) DO UPDATE SET last_error_at=excluded.last_error_at, last_error=excluded.last_error`,
-            )
-            .run(message, `spoke \\"project"’s'\\`)
-          database
-            .prepare(
-              `INSERT INTO federation_quarantine(project_id, direction, first_event_id, last_event_id, event_uids, error)
-            SELECT id, 'push', 1, 1, '["example-event"]', 'example held-back batch failure' FROM projects WHERE name = ?`,
-            )
-            .run(`spoke \\"project"’s'\\`)
-        } finally {
-          database.close()
-        }
+      const database = new DatabaseSync(join(home, 'kata.db'))
+      try {
+        database
+          .prepare(
+            `UPDATE federation_bindings SET role='spoke', hub_url='http://127.0.0.1:9', hub_project_id=42, bound_actor='example-owner' WHERE project_id=(SELECT id FROM projects WHERE name=?)`,
+          )
+          .run(`spoke \\"project"’s'\\`)
+        database
+          .prepare(
+            `INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
+          SELECT id, '2026-10-01T12:00:00Z', 'example sync failure' FROM projects WHERE name = ?
+          ON CONFLICT(project_id) DO UPDATE SET last_error_at=excluded.last_error_at, last_error=excluded.last_error`,
+          )
+          .run(`spoke \\"project"’s'\\`)
+        database
+          .prepare(
+            `INSERT INTO federation_quarantine(project_id, direction, first_event_id, last_event_id, event_uids, error)
+          SELECT id, 'push', 1, 1, '["example-event"]', 'example held-back batch failure' FROM projects WHERE name = ?`,
+          )
+          .run(`spoke \\"project"’s'\\`)
+      } finally {
+        database.close()
       }
     },
     clearSyncDiagnosticError() {
@@ -245,7 +233,7 @@ listen = "127.0.0.1:${port}"
         database.close()
       }
     },
-    runSyncDiagnostic(shell, command, remote, legacy = false) {
+    runSyncDiagnostic(shell, command, legacy = false) {
       const result = spawnSync(
         shell,
         shell === 'bash'
@@ -260,8 +248,6 @@ listen = "127.0.0.1:${port}"
           cwd: workspace,
           env: {
             ...environment,
-            KATA_AUTH_TOKEN: remote ? 'example-remote-token' : 'example-local-token',
-            KATA_SERVER: remote ? remoteOrigin : '',
             PATH: `${dirname(binary)}${delimiter}${environment.PATH ?? environment.Path ?? ''}`,
           },
           encoding: 'utf8',

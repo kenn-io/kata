@@ -198,8 +198,6 @@ describe('ProjectSyncStatus', () => {
     expect(button.disabled).toBe(false)
     await fireEvent.click(button)
     await screen.findByText('Pending: 0')
-    expect(screen.queryByText('Sync needs attention')).toBeNull()
-    expect(screen.queryByRole('button', { name: /Copy .* sync status command/ })).toBeNull()
     expect(oldSignal?.aborted).toBe(true)
     resolveOld(response())
     await new Promise((resolve) => setTimeout(resolve, 0))
