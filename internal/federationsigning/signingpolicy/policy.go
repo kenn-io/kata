@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/credentialfile"
 	"go.kenn.io/kata/internal/httpurl"
 )
 
@@ -59,7 +60,7 @@ func (s Source) Load() ([]byte, error) {
 		}
 		b = []byte(value)
 	} else {
-		f, err := os.Open(s.KeyFile) //nolint:gosec // G304: operator-configured secret source.
+		f, err := credentialfile.Open(s.KeyFile)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return nil, ErrKeyRejected
