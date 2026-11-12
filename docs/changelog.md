@@ -11,6 +11,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Continue an incomplete lexical search by copying the command printed with its results.
 
+- Recover automatically when the web UI's first daemon roster, workspace, or teams read fails briefly. Retry and Refresh teams remain available after persistent failures or refusals.
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 
 - Upgrade a large PostgreSQL database without the schema migration rolling

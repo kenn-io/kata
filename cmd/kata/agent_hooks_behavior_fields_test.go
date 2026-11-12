@@ -49,9 +49,9 @@ func TestAgentHooksInstallReplacesOwnedBehaviorFields(t *testing.T) {
 			require.Contains(t, out, "re-trust")
 			document = nativeHookDocument(t, agenthook.AgentClaude, path)
 			groups = document["hooks"].(map[string]any)["SessionStart"].([]any)
-			require.Len(t, groups, 2)
+			require.Len(t, groups, 1)
 			require.Equal(t, foreign, groups[0].(map[string]any)["hooks"].([]any)[0])
-			owned := groups[1].(map[string]any)["hooks"].([]any)[0].(map[string]any)
+			owned := groups[0].(map[string]any)["hooks"].([]any)[1].(map[string]any)
 			require.Equal(t, canonical, owned)
 		})
 	}

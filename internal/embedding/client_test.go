@@ -1,11 +1,15 @@
 package embedding
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -286,3 +290,104 @@ func TestEmbedRejectsCrossOriginRedirectWithoutAPIKey(t *testing.T) {
 		t.Fatalf("error = %v, want origin context", err)
 	}
 }
+
+func TestEmbedTimeoutSplitsBatch(t *testing.T) {
+	var sizes []int
+	c, err := New(Config{BaseURL: "http://127.0.0.1:1234/v1", Model: "m", Dims: 2, BatchSize: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		var req struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			return nil, err
+		}
+		sizes = append(sizes, len(req.Input))
+		if len(req.Input) > 2 {
+			return nil, &timeoutError{}
+		}
+		data := make([]map[string]any, len(req.Input))
+		for i := range data {
+			data[i] = map[string]any{"embedding": []float32{1, 0}}
+		}
+		body, err := json.Marshal(map[string]any{"data": data})
+		if err != nil {
+			return nil, err
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body))}, nil
+	})
+	vectors, err := c.Embed(t.Context(), []string{"a", "b", "c", "d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vectors) != 4 || !slices.Equal(sizes, []int{4, 2, 2}) {
+		t.Fatalf("vectors %v, request sizes %v", vectors, sizes)
+	}
+}
+
+func TestRemoteTimeoutDefault(t *testing.T) {
+	c, err := New(Config{BaseURL: "http://127.0.0.1:1234/v1", Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.http.Timeout != 30*time.Second {
+		t.Fatalf("timeout = %s, want 30s", c.http.Timeout)
+	}
+}
+
+func TestEmbedTimeoutMessage(t *testing.T) {
+	c, err := New(Config{BaseURL: "http://127.0.0.1:1234/v1", Model: "m", Dims: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.http.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, &timeoutError{}
+	})
+	_, err = c.Embed(t.Context(), []string{"a"})
+	if err == nil || !strings.Contains(err.Error(), "embed request timed out") {
+		t.Fatalf("expected timeout message, got %v", err)
+	}
+}
+
+func TestEmbedRetryUsesSmallerBatchAfterTimeout(t *testing.T) {
+	testEmbedRetryAfterTimeout(t, Config{Endpoint: func(context.Context) (string, error) { return "http://127.0.0.1:1234/v1", nil }, Model: "m", Dims: 2, BatchSize: 4}, []int{4, 2, 1, 1})
+}
+
+func TestConfiguredEmbedRetryKeepsBatchAfterTimeout(t *testing.T) {
+	testEmbedRetryAfterTimeout(t, Config{BaseURL: "http://127.0.0.1:1234/v1", Model: "m", Dims: 2, BatchSize: 4}, []int{4, 2, 1, 4, 2, 1})
+}
+
+func testEmbedRetryAfterTimeout(t *testing.T, cfg Config, want []int) {
+	t.Helper()
+	var sizes []int
+	c, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		var req struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			return nil, err
+		}
+		sizes = append(sizes, len(req.Input))
+		return nil, &timeoutError{}
+	})
+	for range 2 {
+		_, err := c.Embed(t.Context(), []string{"a", "b", "c", "d"})
+		if err == nil {
+			t.Fatal("expected timeout")
+		}
+	}
+	if !slices.Equal(sizes, want) {
+		t.Fatalf("request sizes = %v, want %v", sizes, want)
+	}
+}
+
+type timeoutError struct{}
+
+func (*timeoutError) Error() string { return "timeout" }
+func (*timeoutError) Timeout() bool { return true }
