@@ -118,10 +118,11 @@ func TestRejoinWithoutDirectPushOrSessionsDoesNotProbeMetadata(t *testing.T) {
 			require.NoError(t, err)
 			adoptionRun(t, store, project, mode != "session-free")
 			params := rejoinParams(project, "http://hub.example")
-			if mode == "relay" {
+			switch mode {
+			case "relay":
 				params = relayReplicaParams(t, store)
 				params.ProjectName = project.Name
-			} else if mode == "pull-only" {
+			case "pull-only":
 				params.PushEnabled = false
 			}
 			var calls atomic.Int32
