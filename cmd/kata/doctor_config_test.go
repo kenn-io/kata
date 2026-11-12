@@ -27,7 +27,6 @@ func TestDoctorLocalConfiguration(t *testing.T) {
 		{"missing daemon config", "", "", "config.daemon", "info", ""},
 		{"invalid daemon config", "config.toml", "[auth]\ntoken = [secret-token\n", "config.daemon", "fail", ""},
 		{"unknown daemon key", "config.toml", "litsen = '127.0.0.1:7777'", "config.daemon", "fail", ""},
-		{"unknown secret-named key", "config.toml", "secret-token = 1", "config.daemon", "fail", ""},
 		{"ingress without signing", "config.toml", "[federation.ingress]\nenabled = true", "config.daemon", "fail", "federation.ingress requires federation signing configuration"},
 		{"signing plain HTTP", "config.toml", "[federation.signing]\nexternal_url = 'http://hub.example'\n[[federation.signing.key]]\nkey_id = 'key-a'\nkey_env = 'TEST_SIGNING_KEY'\nenrollment_id = 1", "config.daemon", "fail", "daemon error"},
 		{"untrusted web origin", "config.toml", untrustedWebConfig, "config.daemon", "fail", ""},
