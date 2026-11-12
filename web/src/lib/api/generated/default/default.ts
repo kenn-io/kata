@@ -61,6 +61,7 @@ import type {
   CreateTokenResponseBody,
   CronCapabilitiesResponseBody,
   CronDefinitionActionBody,
+  CronJobInputsResponseBody,
   CronJobResponseBody,
   CronRunResponseBody,
   CronRunsResponseBody,
@@ -114,6 +115,7 @@ import type {
   ForceReleaseIssueLeasePathParameters,
   GetConnectorStatusPathParameters,
   GetCronCapabilitiesPathParameters,
+  GetCronJobInputsPathParameters,
   GetExternalRootBridgeParams,
   GetExternalRootBridgePathParameters,
   GetFederationBridgeStatusPathParameters,
@@ -2669,6 +2671,41 @@ export const replaceCronJob = async (
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(putCronJobBody),
+  })
+}
+
+export type getCronJobInputsResponse200 = {
+  data: CronJobInputsResponseBody
+  status: 200
+}
+
+export type getCronJobInputsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type getCronJobInputsResponseSuccess = getCronJobInputsResponse200 & {
+  headers: Headers
+}
+export type getCronJobInputsResponseError = getCronJobInputsResponseDefault & {
+  headers: Headers
+}
+
+export type getCronJobInputsResponse =
+  | getCronJobInputsResponseSuccess
+  | getCronJobInputsResponseError
+
+export const getGetCronJobInputsUrl = ({ projectId, cronUid }: GetCronJobInputsPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/${encodeURIComponent(String(cronUid))}/inputs`
+}
+
+export const getCronJobInputs = async (
+  { projectId, cronUid }: GetCronJobInputsPathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getCronJobInputsResponse> => {
+  return orvalFetch<getCronJobInputsResponse>(getGetCronJobInputsUrl({ projectId, cronUid }), {
+    ...options,
+    method: 'GET',
   })
 }
 

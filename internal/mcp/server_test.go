@@ -308,6 +308,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.cron_job",
 		"kata.cron_job_create",
 		"kata.cron_job_delete",
+		"kata.cron_job_inputs",
 		"kata.cron_job_restore",
 		"kata.cron_job_update",
 		"kata.cron_jobs",
@@ -394,7 +395,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 	gotNames := make([]string, 0, len(result.Tools))
 	projectSelectors := map[string]bool{
 		"kata.cron_workflows": true, "kata.cron_workflow": true, "kata.cron_workflow_create": true, "kata.cron_workflow_update": true, "kata.cron_workflow_delete": true, "kata.cron_workflow_restore": true, "kata.cron_runs": true, "kata.cron_run": true, "kata.cron_run_observe": true,
-		"kata.cron_new_uid": true, "kata.cron_capabilities": true, "kata.cron_jobs": true, "kata.cron_job": true, "kata.cron_job_create": true, "kata.cron_job_update": true, "kata.cron_job_delete": true, "kata.cron_job_restore": true,
+		"kata.cron_new_uid": true, "kata.cron_capabilities": true, "kata.cron_jobs": true, "kata.cron_job": true, "kata.cron_job_inputs": true, "kata.cron_job_create": true, "kata.cron_job_update": true, "kata.cron_job_delete": true, "kata.cron_job_restore": true,
 		"kata.federation_bridge_connect": true, "kata.federation_bridge_disconnect": true, "kata.federation_bridge_status": true,
 		"kata.project_access_set": true, "kata.project_access_show": true,
 		"kata.audit_closes": true,
@@ -464,7 +465,7 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 
 	readOnly := map[string]bool{
 		"kata.cron_workflows": true, "kata.cron_workflow": true, "kata.cron_runs": true, "kata.cron_run": true,
-		"kata.cron_capabilities": true, "kata.cron_jobs": true, "kata.cron_job": true, "kata.cron_new_uid": true,
+		"kata.cron_capabilities": true, "kata.cron_jobs": true, "kata.cron_job": true, "kata.cron_job_inputs": true, "kata.cron_new_uid": true,
 		"kata.skills":                   true,
 		"kata.search_tools":             true,
 		"kata.federation_bridge_status": true,

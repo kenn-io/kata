@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -50,6 +51,9 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 		for _, action := range []string{"list", "show", "create", "update", "edit", "delete", "restore"} {
 			group.AddCommand(newCronOperationCmd(resource, action))
 		}
+		if resource == "job" {
+			group.AddCommand(newCronOperationCmd("job", "inputs"))
+		}
 		command.AddCommand(group)
 	}
 	runs := &cobra.Command{Use: "run", Short: "list, show and record independent run observations"}
@@ -73,7 +77,7 @@ type cronCLIOptions struct {
 }
 
 func (o cronCLIOptions) mutation() bool {
-	return o.action != "list" && o.action != "show" && o.action != "edit"
+	return o.action != "list" && o.action != "show" && o.action != "inputs" && o.action != "edit"
 }
 func (o cronCLIOptions) definition() bool { return o.resource == "job" || o.resource == "workflow" }
 func newCronOperationCmd(resource, action string) *cobra.Command {
@@ -136,6 +140,8 @@ this project (cron_v1 covers all cron features). Reads only; creates no cron sta
 		return `List the project's recorded runs, newest first. --job-uid lists one job's runs.
 For the next page, pass the response's next_before_uid as --before-uid.`,
 			"  " + cmd + " --json\n  " + cmd + " --job-uid <job-uid> --before-uid <run-uid> --json"
+	case "job inputs":
+		return "Show a job’s declared inputs, resolved values, and errors.", "  " + cmd + " <job-uid> --json"
 	case "run show":
 		return "Show one recorded run.", "  " + cmd + " <run-uid> --json"
 	case "run observe":
@@ -253,6 +259,11 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	daemon, err := dialDaemon(cmd.Context())
 	if err != nil {
 		return err
+	}
+	if o.resource == "job" && o.action == "inputs" {
+		if err := requireDaemonAPIVersion(cmd.Context(), daemon.client, daemon.baseURL, cron.APIVersionJobInputs, "cron job inputs"); err != nil {
+			return err
+		}
 	}
 	var project projectRef
 	if o.parent != "" {
@@ -609,7 +620,7 @@ func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64,
 	switch {
 	case o.resource == "capabilities":
 		return o.callCapabilities(a, c, projectID)
-	case o.action == "list" || o.action == "show":
+	case o.action == "list" || o.action == "show" || o.action == "inputs":
 		return o.callRead(a, c, projectID)
 	case o.action == "delete" || o.action == "restore":
 		return o.callLifecycle(a, c, projectID, raw)
@@ -622,6 +633,12 @@ func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID in
 	switch {
 	case o.resource == "job" && o.action == "list":
 		response, err := c.ListCronJobsWithResponse(a.ctx, &generated.ListCronJobsRequestOptions{PathParams: &generated.ListCronJobsPath{ProjectID: projectID}, Query: &generated.ListCronJobsQuery{IncludeDeleted: &o.includeDeleted}})
+		if response == nil {
+			return nil, externalCLITransportError(response, err)
+		}
+		return cronCLIResponse(response.StatusCode, response.Body, err)
+	case o.resource == "job" && o.action == "inputs":
+		response, err := c.GetCronJobInputsWithResponse(a.ctx, &generated.GetCronJobInputsRequestOptions{PathParams: &generated.GetCronJobInputsPath{ProjectID: projectID, CronUID: o.identity}})
 		if response == nil {
 			return nil, externalCLITransportError(response, err)
 		}

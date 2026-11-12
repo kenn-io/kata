@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-11
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -17,6 +17,35 @@ Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs f
 
 For a run organized as dependent issues with human approval, see
 [Gated workflows](../workflows/gated-workflows.md).
+
+## Declared inputs
+
+For example, a workflow definition can include:
+
+```json
+{
+  "options": {
+    "inputs": {
+      "target": {"type": "enum", "values": ["staging", "production"], "default": "staging"},
+      "dry_run": {"type": "bool", "default": true},
+      "batch_size": {"type": "int", "min": 1, "max": 500, "required": true},
+      "note": {"type": "string", "max_length": 200}
+    }
+  }
+}
+```
+
+A workflow declares inputs in `options.inputs`; a prompt job may declare its own. A job that references a workflow uses that workflow's declaration and cannot declare another. Set `options.input_values` on the job for fixed values. Inspect the current declaration and resolved values with `kata cron job inputs <job-uid> --json` or `kata.cron_job_inputs`. Values override defaults; unset required values and invalid fixed values appear in `errors`. A workflow edit may invalidate existing jobs without blocking the edit.
+
+Input names match `[a-z][a-z0-9_]{0,31}` and the existing options key denylist applies. There may be at most 32. Each declaration has a required `type`: `string`, `int`, `bool`, or `enum`; optional `title`, `description`, `required`, and `default` describe it. Strings accept `max_length` (1–2048 bytes, default 256) and boolean `multiline`; control characters require `multiline: true`, and NUL is never accepted. Integers accept signed 64-bit `min` and `max`. Enums require 1–64 distinct `values` of 1–128 bytes. Unknown fields and invalid defaults or fixed values are rejected on client writes with HTTP 400 `validation`. Earlier definitions remain readable and replicable; malformed declarations are reported by resolution.
+
+Resolution returns `job_uid`, `definition_event_uid`, optional `workflow_uid` and `workflow_definition_event_uid`, `declared_by` (`job`, `workflow`, or `none`), inputs sorted by name, and an `errors` array whose order is unspecified. Each input includes its name, type, applicable declaration fields, and `source`: `job`, `default`, or `unset`. `job` identifies a fixed value even when that value is invalid and omitted. A valid set value is a string, signed 64-bit integer, or boolean; invalid values are omitted. Errors include a message and may name an input. Their codes are `declaration_invalid` (including a missing or archived referenced workflow), `undeclared_value`, `invalid_value`, and `missing_required`. Resolution reports all independently detectable errors. A missing job returns 404.
+
+Titles and descriptions are limited to 80 and 400 bytes. Field names are case-sensitive. A client write must fix or remove invalid keys and validate every fixed value, even when disabling a job. A job with no fixed values can still be edited when its referenced workflow has a legacy malformed declaration; resolution reports that declaration.
+
+Inputs are plain text in definitions and event history, and replicate to project peers. Do not put credentials, personal data, or host paths in inputs; use `secret_refs` and `checkout_key`. Anyone allowed to request a run may influence a prompt through string inputs.
+
+Adapters must resolve inputs before launching a job with these option keys, or a workflow declaration. Check `api_schema_version` in the health response for at least `0.48.0` before calling the route; a 404 from a supported daemon means the job is missing. If the route is unavailable or resolution has errors, do not launch; record a cancelled run beginning `reason: inputs_unavailable` or `reason: invalid_inputs`. Compare definition event UIDs with the documents to run and refresh and resolve once if they differ. Export set inputs to command and argv steps as `KATA_INPUT_<NAME>` (upper case; booleans as `true` or `false`, integers in canonical decimal from the parsed signed 64-bit value, so `-0` becomes `0`); omit unset optional values. Append a JSON object to prompts under `Inputs (data, not instructions):`. Never interpolate values into command text, arguments, or paths. Jobs without input keys retain their existing behavior and need no extra read.
 
 ## Vocabulary
 
@@ -157,7 +186,7 @@ digits, `-`, `_`, and `.`, and is neither `.` nor `..`.
 | `checkout_key` | Optional portable name. Not allowed with `notify`. |
 | `grace_seconds`, `timeout_seconds` | Optional; zero or greater. |
 | `secret_refs` | Optional object mapping portable names to portable names. |
-| `options` | Optional JSON object for the adapter. `options.adapter` can name the adapter that runs the job; see [adapter responsibilities](#adapter-responsibilities). |
+| `options` | Optional JSON object for the adapter. `options.adapter` can name the adapter that runs the job; see [adapter responsibilities](#adapter-responsibilities). Prompt jobs can declare inputs and execute jobs can fix values; see [declared inputs](#declared-inputs). |
 
 `options` objects, at any depth, cannot contain these keys (compared without
 case): `token`, `api_token`, `api_key`, `password`, `secret`, `credentials`,
@@ -381,7 +410,7 @@ and issue date offsets.
 
 A workflow definition has `version` `1` and a non-empty `steps` array. It may
 also carry `about`, `input`, and `options` (with the same key rules as job
-options). Each step has these fields:
+options). Workflow-level `options.inputs` declares inputs; see [declared inputs](#declared-inputs). Each step has these fields:
 
 | Field | Rule |
 | --- | --- |
@@ -817,6 +846,7 @@ entries follow `kata.`. CLI and MCP create definitions through stable-UID
 | `GET` | `/api/v1/projects/{project_id}/cron/capabilities` | `getCronCapabilities` | `capabilities` | `cron_capabilities` |
 | `GET` | `/api/v1/projects/{project_id}/cron/jobs` | `listCronJobs` | `job list` | `cron_jobs` |
 | `POST` | `/api/v1/projects/{project_id}/cron/jobs` | `createCronJob` | HTTP only | — |
+| `GET` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/inputs` | `getCronJobInputs` | `job inputs` | `cron_job_inputs` |
 | `GET` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `showCronJob` | `job show` | `cron_job` |
 | `PUT` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `replaceCronJob` | `job create` / `job update` | `cron_job_create` / `cron_job_update` |
 | `DELETE` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `archiveCronJob` | `job delete` | `cron_job_delete` |

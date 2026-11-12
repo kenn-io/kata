@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json/jsontext"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
@@ -171,6 +173,28 @@ type CronJobResponse struct {
 	Body struct {
 		Job    CronJob    `json:"job"`
 		Events []db.Event `json:"events,omitempty"`
+	}
+}
+
+// CronResolvedInput describes a resolved scalar input on the wire.
+type CronResolvedInput cron.ResolvedInput
+
+// TransformSchema preserves scalar types for OpenAPI consumers.
+func (CronResolvedInput) TransformSchema(_ huma.Registry, schema *huma.Schema) *huma.Schema {
+	schema.Properties["value"] = &huma.Schema{OneOf: []*huma.Schema{{Type: huma.TypeString}, {Type: huma.TypeInteger, Format: "int64"}, {Type: huma.TypeBoolean}}}
+	return schema
+}
+
+// CronJobInputsResponse resolves the current job and workflow definitions.
+type CronJobInputsResponse struct {
+	Body struct {
+		JobUID                     string              `json:"job_uid"`
+		DefinitionEventUID         string              `json:"definition_event_uid"`
+		WorkflowUID                string              `json:"workflow_uid,omitempty"`
+		WorkflowDefinitionEventUID string              `json:"workflow_definition_event_uid,omitempty"`
+		DeclaredBy                 string              `json:"declared_by"`
+		Inputs                     []CronResolvedInput `json:"inputs"`
+		Errors                     []cron.InputError   `json:"errors"`
 	}
 }
 

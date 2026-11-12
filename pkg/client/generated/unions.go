@@ -3,6 +3,8 @@
 package generated
 
 import (
+	"encoding/json"
+
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 )
 
@@ -35,6 +37,148 @@ func (m MetadataPatchGuard_OneOf_1) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type CronResolvedInput_Value_OneOf struct {
+	union json.RawMessage
+}
+
+func (c *CronResolvedInput_Value_OneOf) Validate() error {
+	// NOTE: Validation is not supported for unions with more than 2 elements.
+	// Validating would require unmarshaling against each possible type, which is inefficient.
+	// Use AsValidated<Type>() methods to validate after retrieving the specific type.
+	return nil
+}
+
+// Raw returns the union data inside the CronResolvedInput_Value_OneOf as bytes
+func (c *CronResolvedInput_Value_OneOf) Raw() json.RawMessage {
+	return c.union
+}
+
+// AsString returns the union data inside the CronResolvedInput_Value_OneOf as a string
+func (c *CronResolvedInput_Value_OneOf) AsString() (string, error) {
+	return runtime.UnmarshalAs[string](c.union)
+}
+
+// AsValidatedString returns the union data inside the CronResolvedInput_Value_OneOf as a validated string
+func (c *CronResolvedInput_Value_OneOf) AsValidatedString() (string, error) {
+	val, err := c.AsString()
+	if err != nil {
+		var zero string
+		return zero, err
+	}
+	if err := c.validateString(val); err != nil {
+		var zero string
+		return zero, err
+	}
+	return val, nil
+}
+
+// FromString overwrites any union data inside the CronResolvedInput_Value_OneOf as the provided string
+func (c *CronResolvedInput_Value_OneOf) FromString(val string) error {
+	// Validate before storing
+	if err := c.validateString(val); err != nil {
+		return err
+	}
+	bts, err := json.Marshal(val)
+	c.union = bts
+	return err
+}
+
+// AsInt64 returns the union data inside the CronResolvedInput_Value_OneOf as a int64
+func (c *CronResolvedInput_Value_OneOf) AsInt64() (int64, error) {
+	return runtime.UnmarshalAs[int64](c.union)
+}
+
+// AsValidatedInt64 returns the union data inside the CronResolvedInput_Value_OneOf as a validated int64
+func (c *CronResolvedInput_Value_OneOf) AsValidatedInt64() (int64, error) {
+	val, err := c.AsInt64()
+	if err != nil {
+		var zero int64
+		return zero, err
+	}
+	if err := c.validateInt64(val); err != nil {
+		var zero int64
+		return zero, err
+	}
+	return val, nil
+}
+
+// FromInt64 overwrites any union data inside the CronResolvedInput_Value_OneOf as the provided int64
+func (c *CronResolvedInput_Value_OneOf) FromInt64(val int64) error {
+	// Validate before storing
+	if err := c.validateInt64(val); err != nil {
+		return err
+	}
+	bts, err := json.Marshal(val)
+	c.union = bts
+	return err
+}
+
+// AsBool returns the union data inside the CronResolvedInput_Value_OneOf as a bool
+func (c *CronResolvedInput_Value_OneOf) AsBool() (bool, error) {
+	return runtime.UnmarshalAs[bool](c.union)
+}
+
+// AsValidatedBool returns the union data inside the CronResolvedInput_Value_OneOf as a validated bool
+func (c *CronResolvedInput_Value_OneOf) AsValidatedBool() (bool, error) {
+	val, err := c.AsBool()
+	if err != nil {
+		var zero bool
+		return zero, err
+	}
+	if err := c.validateBool(val); err != nil {
+		var zero bool
+		return zero, err
+	}
+	return val, nil
+}
+
+// FromBool overwrites any union data inside the CronResolvedInput_Value_OneOf as the provided bool
+func (c *CronResolvedInput_Value_OneOf) FromBool(val bool) error {
+	// Validate before storing
+	if err := c.validateBool(val); err != nil {
+		return err
+	}
+	bts, err := json.Marshal(val)
+	c.union = bts
+	return err
+}
+
+// validateString validates a string value
+func (c *CronResolvedInput_Value_OneOf) validateString(val string) error {
+	if v, ok := any(val).(runtime.Validator); ok {
+		return v.Validate()
+	}
+	return nil
+}
+
+// validateInt64 validates a int64 value
+func (c *CronResolvedInput_Value_OneOf) validateInt64(val int64) error {
+	if v, ok := any(val).(runtime.Validator); ok {
+		return v.Validate()
+	}
+	return nil
+}
+
+// validateBool validates a bool value
+func (c *CronResolvedInput_Value_OneOf) validateBool(val bool) error {
+	if v, ok := any(val).(runtime.Validator); ok {
+		return v.Validate()
+	}
+	return nil
+}
+
+func (c CronResolvedInput_Value_OneOf) MarshalJSON() ([]byte, error) {
+	bts, err := c.union.MarshalJSON()
+
+	return bts, err
+}
+
+func (c *CronResolvedInput_Value_OneOf) UnmarshalJSON(bts []byte) error {
+	err := c.union.UnmarshalJSON(bts)
+
+	return err
 }
 
 type MetadataPatchGuard_OneOf struct {

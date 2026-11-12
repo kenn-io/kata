@@ -1224,6 +1224,34 @@ components:
         - overlap
         - catchup
       type: object
+    CronJobInputsResponseBody:
+      additionalProperties: true
+      properties:
+        declared_by:
+          type: string
+        definition_event_uid:
+          type: string
+        errors:
+          items:
+            $ref: "#/components/schemas/InputError"
+          type: array
+        inputs:
+          items:
+            $ref: "#/components/schemas/CronResolvedInput"
+          type: array
+        job_uid:
+          type: string
+        workflow_definition_event_uid:
+          type: string
+        workflow_uid:
+          type: string
+      required:
+        - job_uid
+        - definition_event_uid
+        - declared_by
+        - inputs
+        - errors
+      type: object
     CronJobResponseBody:
       additionalProperties: true
       properties:
@@ -1235,6 +1263,47 @@ components:
           $ref: "#/components/schemas/CronJob"
       required:
         - job
+      type: object
+    CronResolvedInput:
+      additionalProperties: true
+      properties:
+        description:
+          type: string
+        max:
+          format: int64
+          type: integer
+        max_length:
+          format: int64
+          type: integer
+        min:
+          format: int64
+          type: integer
+        multiline:
+          type: boolean
+        name:
+          type: string
+        required:
+          type: boolean
+        source:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+        value:
+          oneOf:
+            - type: string
+            - format: int64
+              type: integer
+            - type: boolean
+        values:
+          items:
+            type: string
+          type: array
+      required:
+        - name
+        - type
+        - source
       type: object
     CronRun:
       additionalProperties: true
@@ -3344,6 +3413,19 @@ components:
         - created
         - project
         - alias
+      type: object
+    InputError:
+      additionalProperties: true
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        name:
+          type: string
+      required:
+        - code
+        - message
       type: object
     InstanceResponseBody:
       additionalProperties: true
@@ -7545,7 +7627,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.44.0
+  version: 0.48.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -9099,6 +9181,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CronJobResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/cron/jobs/{cron_uid}/inputs:
+    get:
+      operationId: getCronJobInputs
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: cron_uid
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronJobInputsResponseBody"
           description: OK
         default:
           content:

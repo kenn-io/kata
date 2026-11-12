@@ -18,6 +18,14 @@ func checkCronBackupTombstoneRoundTrip(t *testing.T, source db.Storage, backend 
 	require.NoError(t, err)
 	job, workflow := nativeFederationDefinitions(t, source, project)
 	run := observeCompleteRun(t, source, project, job, workflow)
+	legacyDefinition := job.Definition
+	legacyDefinition.Action = cron.Action{Kind: "execute", Prompt: "Review"}
+	legacyDefinition.Options = []byte(`{"inputs":42}`)
+	legacyUID, err := uid.New()
+	require.NoError(t, err)
+	legacy, _, err := source.PutCronJob(ctx, db.PutCronJob{UID: legacyUID, ProjectID: project.ID, Name: "Legacy", Definition: legacyDefinition, Actor: "worker"})
+	require.NoError(t, err)
+
 	deletedJob, _, err := source.PutCronJob(ctx, db.PutCronJob{
 		UID: job.UID, ProjectID: project.ID, Name: job.Name, Definition: job.Definition,
 		ExpectedEventUID: job.DefinitionEventUID, Actor: "worker", Deleted: true,
@@ -39,6 +47,10 @@ func checkCronBackupTombstoneRoundTrip(t *testing.T, source db.Storage, backend 
 	target, err := restored.ProjectByUID(ctx, project.UID)
 	require.NoError(t, err)
 
+	restoredLegacy, err := restored.CronJob(ctx, target.ID, legacy.UID)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"inputs":42}`, string(restoredLegacy.Definition.Options))
+
 	restoredJob, err := restored.CronJob(ctx, target.ID, job.UID)
 	require.NoError(t, err)
 	require.NotNil(t, restoredJob.DeletedAt, "a deleted job stays deleted after restore")
@@ -52,11 +64,11 @@ func checkCronBackupTombstoneRoundTrip(t *testing.T, source db.Storage, backend 
 
 	liveJobs, err := restored.ListCronJobs(ctx, db.CronList{ProjectID: target.ID})
 	require.NoError(t, err)
-	require.Empty(t, liveJobs)
+	require.Len(t, liveJobs, 1)
+	require.Equal(t, legacy.UID, liveJobs[0].UID)
 	allJobs, err := restored.ListCronJobs(ctx, db.CronList{ProjectID: target.ID, IncludeDeleted: true})
 	require.NoError(t, err)
-	require.Len(t, allJobs, 1)
-	require.Equal(t, job.UID, allJobs[0].UID)
+	require.Len(t, allJobs, 2)
 	liveWorkflows, err := restored.ListCronWorkflows(ctx, db.CronList{ProjectID: target.ID})
 	require.NoError(t, err)
 	require.Empty(t, liveWorkflows)
