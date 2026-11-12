@@ -51,6 +51,11 @@
   so put the `Co-authored-by:` trailer there too.
 - No Unrequested GitHub Comments: Do not comment on GitHub issues or pull
   requests unless the user explicitly instructs you to post a comment.
+- No Unrequested Pull Request State Changes: Do not close, reopen, convert to
+  draft, or mark ready a pull request unless the user explicitly asks for that
+  action in the current conversation; these change published work that other
+  people are tracking. When a rule here seems to conflict with the user's
+  request, stop and ask the user instead of reverting published work to comply.
 - No Compiled-In Source Paths: Never locate files from a path returned by
   `runtime.Caller` or a stack trace; builds use `-trimpath`, so those paths are
   module-relative. Tests run from their package directory, so use paths
@@ -82,13 +87,15 @@
   anything without a caller.
 - When review findings keep landing in the same code, rethink the design there
   instead of patching each one.
-- Keep one unreviewed PR per stack. Open the next only after a maintainer has
-  reviewed the one below, even if you were asked to open the whole plan.
-  Review usually reshapes a PR, and everything built on it then has to be
-  rebuilt.
-- Keep at most five PRs open per person in this repo, counting every agent
-  working for you. Each one waits for a maintainer, and the ones nobody gets
-  to go stale.
+- For PRs opened from a fork, keep one unreviewed PR per stack. Open the next
+  only after a maintainer has reviewed the one below, even if you were asked
+  to open the whole plan. Review usually reshapes a PR, and everything built
+  on it then has to be rebuilt. PRs from branches pushed directly to this
+  repository are not limited by this rule.
+- For PRs opened from a fork, keep at most five open per person in this repo,
+  counting every agent working for you. Each one waits for a maintainer, and
+  the ones nobody gets to go stale. PRs from branches pushed directly to this
+  repository are not counted and are not limited by this rule.
 - Before each push, check that your schema, API, and protocol version numbers
   are still the next ones free on `main`.
 
