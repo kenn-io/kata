@@ -56,6 +56,7 @@ var (
 		"go.yaml.in/yaml/v4",
 		"golang.org/x/crypto",
 		"golang.org/x/mod",
+		"golang.org/x/net",
 		"golang.org/x/sync",
 		"golang.org/x/sys",
 		"golang.org/x/text",
