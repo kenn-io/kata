@@ -133,6 +133,86 @@ describe('SearchSettings', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+  test.each([undefined, 'Earlier failure'])(
+    'keeps waiting with previous error %s while restart is in transit',
+    async (error) => {
+      vi.useFakeTimers()
+      const waiting = status({
+        can_change: false,
+        can_restart: true,
+        job: { state: 'restart', downloaded: 1, total: 1, ...(error ? { error } : {}) },
+      })
+      let current = waiting
+      setGeneratedFetch(vi.fn(async () => Response.json(current)))
+      let resolvePost!: (response: Response) => void
+      const postFetch = vi.fn<typeof fetch>(
+        () =>
+          new Promise((resolve) => {
+            resolvePost = resolve
+          }),
+      )
+      vi.stubGlobal(
+        'confirm',
+        vi.fn(() => true),
+      )
+      renderSettings({ postFetch })
+      await settle()
+      await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+      expect(postFetch).toHaveBeenCalledOnce()
+      current = status({ provider: 'built_in', can_change: false })
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(screen.getByText('On', { exact: true })).not.toBeNull()
+      resolvePost(new Response(null, { status: 500 }))
+      await settle()
+      expect(screen.queryByRole('alert')).toBeNull()
+    },
+  )
+
+  test('ignores an earlier status read after the restart request is accepted', async () => {
+    vi.useFakeTimers()
+    const waiting = status({
+      can_change: false,
+      can_restart: true,
+      job: { state: 'restart', downloaded: 1, total: 1 },
+    })
+    let resolveRead!: (response: Response) => void
+    setGeneratedFetch(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json(waiting))
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveRead = resolve
+            }),
+        ),
+    )
+    let resolvePost!: (response: Response) => void
+    const postFetch = vi.fn<typeof fetch>(
+      () =>
+        new Promise((resolve) => {
+          resolvePost = resolve
+        }),
+    )
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    )
+    renderSettings({ postFetch })
+    await settle()
+    await fireEvent.click(screen.getByRole('button', { name: 'Restart daemon' }))
+    await vi.advanceTimersByTimeAsync(2000)
+    resolvePost(new Response(null, { status: 202 }))
+    await settle()
+    resolveRead(Response.json(waiting))
+    await settle()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Restart daemon' })).toBeNull()
+  })
+
   test.each([
     [true, undefined, true, "Couldn't reconnect. Run kata daemon status, then reopen kata ui."],
     [false, undefined, false, 'Run kata daemon status.'],

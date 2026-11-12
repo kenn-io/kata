@@ -49,6 +49,7 @@
   let status = $state<LocalEmbeddingsStatus>()
   let loading = $state(true)
   let posting = $state(false)
+  let restartRequestPending = false
   let restartDeadline = $state(0)
   let restartPending = $derived(restartDeadline > 0)
   // Set when a Turn on request fails; a read showing a job clears it.
@@ -164,11 +165,13 @@
         next.indexing
       )
         requestError = undefined
+      const observedRestart = status?.restart_in_progress
       status = next
       if (next.restart_in_progress && !restartPending) restartDeadline = Date.now() + restartWaitMs
       if (
         restartPending &&
-        (next.job?.error || next.job?.state !== 'restart' || next.can_restart)
+        (next.job?.state !== 'restart' ||
+          ((next.job?.error || next.can_restart) && (!restartRequestPending || observedRestart)))
       ) {
         restartDeadline = 0
         posts++
@@ -206,6 +209,7 @@
     restartDeadline = Date.now() + restartWaitMs
     requestError = undefined
     const post = ++posts
+    restartRequestPending = true
     poll()
     try {
       const response = await postFetch(getRestartLocalEmbeddingsUrl(), { method: 'POST', signal })
@@ -215,6 +219,12 @@
       }
     } catch {
       // A lost response can mean the daemon is restarting.
+    } finally {
+      if (post === posts) {
+        restartRequestPending = false
+        posts++
+        if (!signal.aborted) poll()
+      }
     }
   }
 
