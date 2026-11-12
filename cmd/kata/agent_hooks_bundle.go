@@ -195,7 +195,7 @@ func planHermesLifecycleSnapshot(data []byte, kind agentHookKind, opts *agenthoo
 		}
 	}
 	marker := "kata-owned-lifecycle-placeholder"
-	protected, restore, err := protectAgentHookCommands(agenthook.AgentHermes, data, current, desired, kind, marker, opts != nil)
+	protected, restore, err := protectAgentHookCommands(agenthook.AgentHermes, data, current, desired, kind, marker)
 	if err != nil {
 		return nil, err
 	}

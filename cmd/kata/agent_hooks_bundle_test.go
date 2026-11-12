@@ -165,6 +165,17 @@ func TestKitAgentHookConfiguredRejectsConditionalHandlers(t *testing.T) {
 	require.NoError(t, json.Unmarshal(plan.Changes[0].Content, &document))
 	groups := document["hooks"].(map[string]any)["SessionStart"].([]any)
 	require.Equal(t, map[string]any{"enabled": false, "hooks": []any{map[string]any{"command": "foreign hook"}}}, groups[1])
+
+	t.Run("codex keeps foreign group index", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "hooks.json")
+		require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"if":"condition","hooks":[{"type":"command","command":"/old/kata agent-hook contract codex"}]},{"hooks":[{"type":"command","command":"foreign-hook"}]}]}}`), 0600))
+		plan, err := planKitAgentHooks(nativeAgentHookOptions{Agent: "codex", ConfigPath: path, Executable: "kata", Contract: true, Attention: true}, false)
+		require.NoError(t, err)
+		var document map[string]any
+		require.NoError(t, json.Unmarshal(plan.Changes[0].Content, &document))
+		groups := document["hooks"].(map[string]any)["SessionStart"].([]any)
+		require.Equal(t, "foreign-hook", groups[1].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"])
+	})
 }
 
 func TestKitAgentHookConfiguredRejectsRestrictiveMatchers(t *testing.T) {

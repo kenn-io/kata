@@ -134,27 +134,22 @@ func newAgentSetupCmd() *cobra.Command {
 		items := func(name string) ([]agentsetup.Item, error) {
 			return []agentsetup.Item{agentSetupItem(name, output)}, nil
 		}
-		var names []string
+		var kitNames, otherNames []string
 		for _, name := range args {
 			capability, err := lookupAgentHookCapability(name)
 			if err != nil {
 				return err
 			}
-			if !slices.Contains(names, capability.Name) {
-				names = append(names, capability.Name)
-			}
-		}
-		var kitNames, otherNames []string
-		for _, name := range names {
+			name = capability.Name
 			if _, err := agenthook.ParseAgent(name); err == nil {
 				kitNames = append(kitNames, name)
-			} else {
+			} else if !slices.Contains(otherNames, name) {
 				otherNames = append(otherNames, name)
 			}
 		}
 		var report agentsetup.Report
 		var err error
-		if len(kitNames) > 0 || len(names) == 0 {
+		if len(kitNames) > 0 || len(args) == 0 {
 			report, err = agentsetup.Run(cmd.Context(), agentsetup.Options{Agents: kitNames, CheckOnly: check, SetupCommand: "kata agent setup", Items: items})
 		}
 		for _, name := range otherNames {

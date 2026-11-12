@@ -2,32 +2,21 @@ package main
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestDoctorAgentCodexTrustAndDeadlines(t *testing.T) {
+func TestDoctorAgentCodexTrust(t *testing.T) {
 	isolateAgentHookHomes(t)
-	// Each of the three checks starts Codex in two seconds; together they fit the row bound.
-	installCodexAgentFixture(t, "slow")
+	installCodexAgentFixture(t, "normal")
 	t.Setenv("TEST_HOOK_TRUST", "untrusted")
-	_, _ = runAgentSetup(t, "codex")
+	_, err := runAgentSetup(t, "codex")
+	require.Error(t, err)
 	check := doctorAgent(t.Context(), "codex")
 	require.Equal(t, "warn", string(check.Status))
 	require.Contains(t, check.Summary, "3 Kata hooks wait for review")
 	require.Contains(t, check.Fix, "/hooks")
-	t.Setenv("TEST_HOOK_TRUST", "trusted")
-	check = doctorAgent(t.Context(), "codex")
-	require.Equal(t, "ok", string(check.Status), check.Summary)
-	// A hung start exceeds its five-second bound.
-	t.Setenv("KATA_TEST_CODEX_AGENT", "hang")
-	start := time.Now()
-	check = doctorAgent(t.Context(), "codex")
-	require.Less(t, time.Since(start), 8*time.Second)
-	require.Contains(t, check.Summary, "deadline exceeded")
 }
 
 func TestDoctorClaudeHooksAndAbsentCodex(t *testing.T) {
@@ -36,26 +25,27 @@ func TestDoctorClaudeHooksAndAbsentCodex(t *testing.T) {
 	_, err := runAgentSetup(t, "claude")
 	require.NoError(t, err)
 	path := filepath.Join(home, "claude", "settings.json")
-	doc := readAgentHookConfig(t, path)
-	doc["disableAllHooks"] = true
-	writeAgentHookConfig(t, path, doc)
-	check := doctorAgent(t.Context(), "claude")
-	require.Equal(t, "warn", string(check.Status))
-	require.Contains(t, check.Fix, "disableAllHooks")
-	delete(doc, "disableAllHooks")
-	for _, groups := range doc["hooks"].(map[string]any) {
-		for _, raw := range groups.([]any) {
-			group := raw.(map[string]any)
-			if strings.Contains(group["hooks"].([]any)[0].(map[string]any)["command"].(string), "attention-native") {
-				group["if"] = "condition"
-			}
-		}
-	}
-	writeAgentHookConfig(t, path, doc)
-	check = doctorAgent(t.Context(), "claude")
-	require.Equal(t, "warn", string(check.Status), check.Summary)
-	require.Contains(t, check.Summary, "Kata hooks need updating")
-	require.Equal(t, "info", string(doctorAgent(t.Context(), "codex").Status))
+	t.Run("disabled", func(t *testing.T) {
+		doc := readAgentHookConfig(t, path)
+		doc["disableAllHooks"] = true
+		writeAgentHookConfig(t, path, doc)
+		check := doctorAgent(t.Context(), "claude")
+		require.Equal(t, "warn", string(check.Status))
+		require.Contains(t, check.Fix, "disableAllHooks")
+		delete(doc, "disableAllHooks")
+		writeAgentHookConfig(t, path, doc)
+	})
+	t.Run("outdated", func(t *testing.T) {
+		doc := readAgentHookConfig(t, path)
+		delete(doc["hooks"].(map[string]any), "SessionEnd")
+		writeAgentHookConfig(t, path, doc)
+		check := doctorAgent(t.Context(), "claude")
+		require.Equal(t, "warn", string(check.Status), check.Summary)
+		require.Contains(t, check.Summary, "Kata hooks need updating")
+	})
+	t.Run("absent codex", func(t *testing.T) {
+		require.Equal(t, "info", string(doctorAgent(t.Context(), "codex").Status))
+	})
 }
 
 func TestDoctorAgentContractOnly(t *testing.T) {
