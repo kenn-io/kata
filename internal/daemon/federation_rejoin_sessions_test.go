@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -225,10 +226,24 @@ func TestRejoinWaitsForObservationAdmission(t *testing.T) {
 		_, e := daemon.EnsureFederationReplica(t.Context(), store, newReplicaCredentialStore(), nil, params)
 		done <- e
 	}()
-	select {
-	case err := <-done:
-		t.Fatalf("rejoin completed while observation held admission: %v", err)
-	case <-time.After(100 * time.Millisecond): //nolint:kennlint // deadlinetest: admission must exclude rejoin
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+waitForRejoin:
+	for {
+		select {
+		case err := <-done:
+			t.Fatalf("rejoin completed while observation held admission: %v", err)
+		case <-deadline.C:
+			t.Fatal("rejoin did not begin waiting for admission")
+		default:
+		}
+		probeRelease, probeErr := federationcoord.TryBeginSync(t.Context(), federationcoord.Key(store.InstanceUID(), project.ID), store, project.ID)
+		if probeErr != nil {
+			require.ErrorIs(t, probeErr, federationcoord.ErrBusy)
+			break waitForRejoin
+		}
+		probeRelease()
+		runtime.Gosched()
 	}
 	rejoinSessionRun(t, store, project, true)
 	release()
