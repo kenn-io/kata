@@ -14,7 +14,9 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -68,7 +70,7 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 				defer cancel()
-				_, err := waitForSupervisedDaemon(ctx, "/example/config.toml", scan)
+				_, err := waitForSupervisedDaemon(ctx, "/example/config.toml", func(context.Context) bool { return false }, scan)
 				require.ErrorIs(t, err, ErrDaemonManagedExternally)
 				if clear {
 					require.NotErrorIs(t, err, cause)
@@ -210,4 +212,67 @@ func TestSupervisedProfileCatalogCredentialAuthenticatesLiveDaemon(t *testing.T)
 	publish(other)
 	_, err = ensureLocalProfile(t.Context(), selection)
 	require.ErrorIs(t, err, ErrProfileIdentityMismatch)
+}
+
+// A read-only StartWith request is still an implicit start: with autostart
+// disabled it waits for the supervisor and never runs the executable.
+func TestReadOnlyStartWithRespectsDisabledAutostart(t *testing.T) {
+	for _, profile := range []bool{false, true} {
+		t.Run(fmt.Sprintf("profile=%t", profile), func(t *testing.T) {
+			root := ""
+			if profile {
+				var fixture config.LocalProfileConfig
+				fixture, root = localProfileFixture(t)
+				require.NoError(t, os.WriteFile(filepath.Join(fixture.Home, "config.toml"), []byte("autostart = false\n"), 0600))
+			} else {
+				home := setupKataEnv(t)
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+			}
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+				defer cancel()
+				_, _, err := DiscoverSelected(ctx, DiscoverRequest{
+					WorkspaceStart: root, ReadOnly: true,
+					StartWith: filepath.Join(t.TempDir(), "kata-must-not-run"),
+				})
+				require.ErrorIs(t, err, ErrDaemonManagedExternally)
+				require.NotErrorIs(t, err, ErrDaemonStartFailed)
+			})
+		})
+	}
+}
+
+// A supervisor-restarted daemon that is still migrating SQLite storage must not
+// be reported as needing a restart, which could interrupt the migration.
+func TestManagedExternallyReportsMigrationInProgress(t *testing.T) {
+	for _, profile := range []bool{false, true} {
+		t.Run(fmt.Sprintf("profile=%t", profile), func(t *testing.T) {
+			var wait func(context.Context) error
+			var storeHome string
+			if profile {
+				fixture, root := localProfileFixture(t)
+				require.NoError(t, os.WriteFile(filepath.Join(fixture.Home, "config.toml"), []byte("autostart = false\n"), 0600))
+				selection, err := InspectSelection(t.Context(), root, "")
+				require.NoError(t, err)
+				storeHome = fixture.Home
+				wait = func(ctx context.Context) error { _, err := ensureLocalProfile(ctx, selection); return err }
+			} else {
+				storeHome = setupKataEnv(t)
+				t.Setenv("KATA_DSN", "")
+				require.NoError(t, os.WriteFile(filepath.Join(storeHome, "config.toml"), []byte("autostart = false\n"), 0600))
+				wait = func(ctx context.Context) error { _, err := ensureLocalRunningTarget(ctx); return err }
+			}
+			lock := flock.New(filepath.Join(storeHome, "kata.db.import.lock"))
+			require.NoError(t, lock.Lock())
+			t.Cleanup(func() { require.NoError(t, lock.Close()) })
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+				defer cancel()
+				err := wait(ctx)
+				require.ErrorIs(t, err, ErrDaemonManagedExternally)
+				require.ErrorContains(t, err, "migration is in progress")
+				require.NotContains(t, err.Error(), "restart it")
+			})
+		})
+	}
 }

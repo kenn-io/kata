@@ -147,8 +147,9 @@ type executableStart struct {
 }
 
 func (s executableStart) profile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
-	if !s.request.ReadOnly && !selection.Profile.Config.AutostartEnabled() {
-		return supervisedDiscovery(ctx, filepath.Join(selection.Profile.Home, "config.toml"), selection, s.discover.profile)
+	if !selection.Profile.Config.AutostartEnabled() {
+		return supervisedDiscovery(ctx, filepath.Join(selection.Profile.Home, "config.toml"),
+			profileCutoverLocked(*selection.Profile), selection, s.discover.profile)
 	}
 	args := []string{"daemon", "recover"}
 	switch {
@@ -161,12 +162,10 @@ func (s executableStart) profile(ctx context.Context, selection DaemonSelection)
 }
 
 func (s executableStart) local(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
-	if !s.request.ReadOnly {
-		if enabled, configPath, err := config.ReadAutostartEnabled(); err != nil {
-			return ResolvedDaemon{}, false, err
-		} else if !enabled {
-			return supervisedDiscovery(ctx, configPath, selection, s.discover.local)
-		}
+	if enabled, configPath, err := config.ReadAutostartEnabled(); err != nil {
+		return ResolvedDaemon{}, false, err
+	} else if !enabled {
+		return supervisedDiscovery(ctx, configPath, sqliteCutoverLocked, selection, s.discover.local)
 	}
 	return s.startIfStopped(ctx, selection, s.discover.local, []string{"daemon", "start"})
 }
@@ -174,10 +173,10 @@ func (s executableStart) local(ctx context.Context, selection DaemonSelection) (
 // supervisedDiscovery polls the selection's own discovery, which accepts any
 // daemon version, through the supervised waiter's bound and error handling.
 func supervisedDiscovery(
-	ctx context.Context, configPath string, selection DaemonSelection,
+	ctx context.Context, configPath string, migrating func(context.Context) bool, selection DaemonSelection,
 	discover func(context.Context, DaemonSelection) (ResolvedDaemon, bool, error),
 ) (resolved ResolvedDaemon, ok bool, err error) {
-	_, err = waitForSupervisedDaemon(ctx, configPath, func(ctx context.Context) (ensureDiscovery, error) {
+	_, err = waitForSupervisedDaemon(ctx, configPath, migrating, func(ctx context.Context) (ensureDiscovery, error) {
 		if resolved, ok, err = discover(ctx, selection); ok {
 			return ensureDiscovery{Outcome: daemonScanCompatible}, nil
 		}

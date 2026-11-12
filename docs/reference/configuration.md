@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # Configuration
@@ -578,7 +578,7 @@ Local startup policy is configured at the top level of `<KATA_HOME>/config.toml`
 
 | Key | Default | Behavior |
 | --- | --- | --- |
-| `autostart` | `true` | `false` prevents implicit daemon starts and replacement. Commands wait up to 30 seconds (or their shorter deadline) for the service manager's daemon, then fail. Recovery retains its storage and project checks before waiting. Restart an incompatible daemon through its service manager. Explicit `kata daemon start` remains available. |
+| `autostart` | `true` | `false` prevents implicit daemon starts and replacement. Commands wait up to 30 seconds (or their shorter deadline) for the service manager's daemon, then fail; if a SQLite migration is still running, the error says so, and you should let it finish rather than restart the daemon. Recovery retains its storage and project checks before waiting. Restart an incompatible daemon through its service manager. Explicit `kata daemon start` remains available. |
 
 Idle shutdown is intended for the default owner-local daemon rather than the
 shared-daemon configuration above. Its minimal configuration is:

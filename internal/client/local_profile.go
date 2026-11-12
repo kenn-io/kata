@@ -267,6 +267,10 @@ func waitForSupervisedProfile(ctx context.Context, resolved ResolvedDaemon, prof
 		}
 		return found, nil
 	}
-	_, err := waitForSupervisedDaemon(ctx, filepath.Join(profile.Home, "config.toml"), scan)
+	_, err := waitForSupervisedDaemon(ctx, filepath.Join(profile.Home, "config.toml"), profileCutoverLocked(profile), scan)
 	return resolved, err
+}
+
+func profileCutoverLocked(profile config.LocalProfileConfig) func(context.Context) bool {
+	return func(context.Context) bool { return sqliteCutoverLockedForDSN(profile.DSN) }
 }

@@ -82,7 +82,7 @@ const (
 )
 
 // ErrDaemonManagedExternally means the home's supervisor owns implicit startup.
-var ErrDaemonManagedExternally = errors.New("kata daemon is not running; it is managed externally (autostart = false)")
+var ErrDaemonManagedExternally = errors.New("kata daemon is not ready; it is managed externally (autostart = false)")
 
 // ErrDaemonNotReplaceable means this binary left a live daemon of another
 // version running because it cannot open that daemon's storage or is an older
@@ -189,7 +189,7 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 		return RunningDaemon{}, err
 	}
 	if !enabled {
-		return waitForSupervisedDaemon(ctx, configPath, func(ctx context.Context) (ensureDiscovery, error) {
+		return waitForSupervisedDaemon(ctx, configPath, sqliteCutoverLocked, func(ctx context.Context) (ensureDiscovery, error) {
 			return discoverForEnsure(ctx, ns.DataDir)
 		})
 	}
@@ -222,7 +222,13 @@ func externallyManagedVersionError(info PingInfo) error {
 	return fmt.Errorf("%w: running kata daemon %s differs from this kata binary %s; restart it with your service manager (autostart = false)", ErrDaemonNotReplaceable, daemonVersionLabel(info), currentVersionForEnsure())
 }
 
-func waitForSupervisedDaemon(ctx context.Context, configPath string, scan func(context.Context) (ensureDiscovery, error)) (RunningDaemon, error) {
+// waitForSupervisedDaemon polls scan for the supervisor's daemon within the
+// startup limit. migrating reports a SQLite cutover on the selected storage, so
+// a timeout during migration does not advise restarting the daemon.
+func waitForSupervisedDaemon(
+	ctx context.Context, configPath string, migrating func(context.Context) bool,
+	scan func(context.Context) (ensureDiscovery, error),
+) (RunningDaemon, error) {
 	ctx, cancel := context.WithTimeout(ctx, daemonStartupWait)
 	defer cancel()
 	var running RunningDaemon
@@ -249,6 +255,9 @@ func waitForSupervisedDaemon(ctx context.Context, configPath string, scan func(c
 		return RunningDaemon{}, err
 	}
 	message := fmt.Errorf("%w; did not become ready (limit %s or the caller's deadline); start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
+	if migrating(ctx) {
+		message = fmt.Errorf("%w; a SQLite migration is in progress; retry when it finishes and do not interrupt the daemon (%s)", ErrDaemonManagedExternally, configPath)
+	}
 	if unreachable != nil {
 		message = fmt.Errorf("%w: %w", message, unreachable)
 	}
