@@ -29,7 +29,7 @@ is optional on the ordinary daemon listeners.
    [the native enrollment workflow](federation.md). Use CLI enrollment and join
    for required-signing hubs. The TUI wizard does not accept signing references
    and its metadata step cannot complete against a required-signing hub.
-   Record the enrollment ID, join command, and token.
+   Pass an explicit `--token` and record it along with the enrollment ID.
    Ingress rejects global enrollments, even when the signature is valid.
 2. Provision a separate secret with at least 64 bytes, independently of the
    enrollment bearer. For example, `openssl rand -hex 32` produces 64 ASCII
@@ -69,18 +69,17 @@ is optional on the ordinary daemon listeners.
    admitted signature expiry. This gate also applies after a restart. A
    `signing_warming` answer means wait and retry, not check keys or clocks.
    Unsigned requests receive `428` immediately.
-6. Use the join command from step 1. If enrollment predates required signing
-   or the signed join instructions, re-run the same `enroll` command against
-   the hub's main API with the same `--token` to retrieve the same enrollment
-   and print its signed join command. If the spoke has already joined, use
-   `kata federation signing configure` instead. If the hub requires signing,
-   the printed join command uses `external_url` and includes placeholders for
-   the signing key ID and absolute spoke key file path. Replace both before
-   running it on the spoke, or replace `--signing-key-file` with
+6. Re-run the same `enroll` command against the hub's main API with the same
+   `--token`. An exact retry returns the same enrollment and prints its signed
+   join command. The command uses `external_url` and includes placeholders for
+   the signing key ID and absolute spoke key file path. Replace the text inside
+   the angle brackets, keeping the surrounding quotes, before running it on the
+   spoke. Alternatively, replace `--signing-key-file` with
    `--signing-key-env KATA_SPOKE_SIGNING_KEY`. The same source must exist in
    the spoke CLI and daemon environments because the CLI fetches metadata
-   before saving the enrollment. Optional-signing hubs keep the main API URL in
-   the printed join command.
+   before saving the enrollment. A spoke that has already joined follows the
+   next paragraph. Optional-signing hubs keep the main API URL in the printed
+   join command.
 
 When enabling required signing on an existing hub, add a
 `[[federation.signing.key]]` entry for each unsigned spoke enrollment and
