@@ -129,9 +129,9 @@ func RunRelayIngestValidatesCronReplay(t *testing.T, store db.Storage) {
 	fields["item_00"] = map[string]any{"type": "invalid"}
 	options, err := json.Marshal(map[string]any{"inputs": fields, "input_values": map[string]any{"item_00": true, "item_01": true}})
 	require.NoError(t, err)
-	definition := legacyStored.Definition
-	definition.Options = options
-	document, err := json.Marshal(definition)
+	updatedDefinition := legacyStored.Definition
+	updatedDefinition.Options = options
+	document, err := json.Marshal(updatedDefinition)
 	require.NoError(t, err)
 	overLimitUID, err := uid.New()
 	require.NoError(t, err)
