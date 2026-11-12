@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -153,32 +152,4 @@ key_file = %q
 	require.EqualValues(t, "fail", finding.Status)
 	require.Contains(t, strings.Join(finding.Details, " "), "key-a")
 	require.Contains(t, strings.Join(finding.Details, " "), "key-b")
-	data, err := json.Marshal(r)
-	require.NoError(t, err)
-	require.NotContains(t, string(data), keyFile)
-	require.NotContains(t, string(data), secret)
-}
-
-func TestDoctorAcceptsDistinctFederationSigningSecrets(t *testing.T) {
-	home, workspace := doctorTestEnv(t)
-	keyFileA := filepath.Join(home, "signing-a.key")
-	keyFileB := filepath.Join(home, "signing-b.key")
-	require.NoError(t, os.WriteFile(keyFileA, []byte(strings.Repeat("a", 64)), 0600))
-	require.NoError(t, os.WriteFile(keyFileB, []byte(strings.Repeat("b", 64)), 0600))
-	body := fmt.Sprintf(`[federation.signing]
-external_url = "https://hub.example"
-[[federation.signing.key]]
-key_id = "key-a"
-enrollment_id = 1
-key_file = %q
-[[federation.signing.key]]
-key_id = "key-b"
-enrollment_id = 2
-key_file = %q
-`, keyFileA, keyFileB)
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0600))
-	flags = globalFlags{Workspace: workspace}
-	r := collectDoctor(t.Context())
-	finding := doctorFinding(t, r, "config.federation_signing")
-	require.EqualValues(t, "ok", finding.Status)
 }

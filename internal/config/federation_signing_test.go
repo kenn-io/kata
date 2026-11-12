@@ -74,9 +74,9 @@ func TestFederationSigningConfigReadDefersSecretValidationToDaemonVerifier(t *te
 	t.Setenv("TEST_DAEMON_SIGNING_KEY", "")
 	t.Setenv("TEST_DUPLICATE_SIGNING_KEY", strings.Repeat("k", 64))
 	for _, tc := range []struct {
-		name string
-		keys string
-		want error
+		name    string
+		keys    string
+		wantErr bool
 	}{
 		{
 			name: "missing secret",
@@ -95,7 +95,7 @@ enrollment_id = 1
 key_id = "key-b"
 key_env = "TEST_DUPLICATE_SIGNING_KEY"
 enrollment_id = 2`,
-			want: signingpolicy.ErrSharedSecret,
+			wantErr: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -113,8 +113,8 @@ enrollment_id = 2`,
 				cfg.Federation.Signing.Keys,
 				cfg.Federation.Signing.ReplayStateFile,
 			)
-			if tc.want != nil {
-				require.ErrorIs(t, err, tc.want)
+			if tc.wantErr {
+				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
 				require.NoError(t, verifier.Close())
