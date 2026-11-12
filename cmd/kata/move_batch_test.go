@@ -154,8 +154,13 @@ func TestMoveBatchCLI_ProjectResolutionFailureIsIsolated(t *testing.T) {
 }
 
 func TestMoveBatchCLI_Pages(t *testing.T) {
-	for _, status := range []int{http.StatusOK, http.StatusBadRequest, http.StatusNotFound, http.StatusInternalServerError} {
-		t.Run(http.StatusText(status), func(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      int
+		afterCommit bool
+	}{{"OK", http.StatusOK, false}, {"bad request before commit", http.StatusBadRequest, false}, {"not found after commit", http.StatusNotFound, true}, {"bad request after commit", http.StatusBadRequest, true}, {"unauthorized after commit", http.StatusUnauthorized, true}, {"server error", http.StatusInternalServerError, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			status := tc.status
 			env, dir, _ := setupCLIWorkspaceOptions(t, testenv.WithAuthToken("synthetic-rejected-page-token"))
 			src, err := env.DB.CreateProject(t.Context(), "source")
 			require.NoError(t, err)
@@ -170,10 +175,10 @@ func TestMoveBatchCLI_Pages(t *testing.T) {
 			proxy := httputil.NewSingleHostReverseProxy(origin)
 			calls := 0
 			proxy.ModifyResponse = func(response *http.Response) error {
-				if calls == 2 && status == http.StatusNotFound {
+				if calls == 2 && tc.afterCommit {
 					_ = response.Body.Close()
 					response.StatusCode = status
-					response.Status = "404 Not Found"
+					response.Status = fmt.Sprintf("%d %s", status, http.StatusText(status))
 					response.Body = io.NopCloser(strings.NewReader("withheld"))
 					response.ContentLength = -1
 					response.Header.Del("Content-Length")
@@ -183,7 +188,7 @@ func TestMoveBatchCLI_Pages(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api/v1/issues/actions/move" {
 					calls++
-					if calls == 2 && (status == http.StatusBadRequest || status == http.StatusInternalServerError) {
+					if calls == 2 && !tc.afterCommit && (status == http.StatusBadRequest || status == http.StatusInternalServerError) {
 						http.Error(w, "rejected", status)
 						return
 					}
@@ -206,14 +211,11 @@ func TestMoveBatchCLI_Pages(t *testing.T) {
 			require.Equal(t, "moved", reply.Results[0].Result)
 			got, err := env.DB.IssueByID(t.Context(), last.ID)
 			require.NoError(t, err)
-			switch status {
-			case http.StatusBadRequest:
-				require.Equal(t, "unattempted", reply.Results[50].Result)
-				require.Equal(t, src.ID, got.ProjectID)
-			case http.StatusNotFound:
+			switch {
+			case tc.afterCommit:
 				require.Equal(t, "unknown", reply.Results[50].Result)
 				require.Equal(t, dst.ID, got.ProjectID)
-			case http.StatusInternalServerError:
+			case status != http.StatusOK:
 				require.Equal(t, "unknown", reply.Results[50].Result)
 				require.Equal(t, src.ID, got.ProjectID)
 			default:
