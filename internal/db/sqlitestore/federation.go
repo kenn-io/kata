@@ -2883,10 +2883,6 @@ func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64, stam
 		return nil, fmt.Errorf("list federated links: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	return scanFederatedLinkRows(rows, stamp)
-}
-
-func scanFederatedLinkRows(rows *sql.Rows, stamp *federationRowHasher) (map[db.FoldLinkKey]federatedLinkRow, error) {
 	out := map[db.FoldLinkKey]federatedLinkRow{}
 	for rows.Next() {
 		var row federatedLinkRow

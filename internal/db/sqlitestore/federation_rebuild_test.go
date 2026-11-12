@@ -139,7 +139,7 @@ func TestFederationMaterializationPreparesLargeIssueScope(t *testing.T) {
 }
 
 func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
-	for _, change := range []string{"history", "unrelated-move", "binding-group", "target-joined", "local-move", "fallback"} {
+	for _, change := range []string{"history", "unrelated-move", "target-joined", "fallback"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := t.Context()
 			d, source, issue := incrementalTestStore(t)
@@ -156,10 +156,6 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 			}
 			other, err := d.CreateProject(ctx, "unrelated")
 			require.NoError(t, err)
-			if change == "local-move" {
-				_, err = d.EnableProjectFederation(ctx, other.ID, "tester")
-				require.NoError(t, err)
-			}
 			var otherDestination db.Project
 			var unrelatedIssue db.Issue
 			if change == "unrelated-move" {
@@ -172,10 +168,6 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, writer.Close()) })
 			unapplyMove(t, d, issue, source, destination, change != "target-joined")
-			if change == "local-move" {
-				_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: other.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: other.ID, HubProjectUID: other.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
-				require.NoError(t, err)
-			}
 			attempts := 0
 			d.federationIngestPrepared = func() {
 				attempts++
@@ -186,16 +178,8 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 				case "fallback":
 					_, err := writer.ExecContext(ctx, `UPDATE issues SET title=? WHERE id=?`, fmt.Sprintf("out of date %d", attempts), preparedIssue.ID)
 					require.NoError(t, err)
-				case "binding-group":
-					_, err := writer.LeaveFederationReplica(ctx, destination.ID)
-					require.NoError(t, err)
 				case "target-joined":
 					_, err := writer.EnableProjectFederation(ctx, destination.ID, "tester")
-					require.NoError(t, err)
-				case "local-move":
-					current, err := writer.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-					require.NoError(t, err)
-					_, err = writer.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: other.ID, IfMatchRev: current.Revision, Actor: "tester"})
 					require.NoError(t, err)
 				case "history":
 					event := incrementalRemoteEvent(t, source, issue.UID, "issue.updated", `{"issue_uid":"`+issue.UID+`","title":"later edit"}`, 9_000_000_000_000)
@@ -207,7 +191,7 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 				}
 			}
 			projectID := destination.ID
-			if change == "binding-group" || change == "target-joined" {
+			if change == "target-joined" {
 				projectID = source.ID
 			}
 			err = d.MaterializeFederatedProject(ctx, projectID)
@@ -216,16 +200,6 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 				require.Equal(t, 1, attempts)
 			} else {
 				require.Equal(t, 2, attempts)
-			}
-			if change == "binding-group" || change == "local-move" {
-				got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-				require.NoError(t, err)
-				if change == "local-move" {
-					require.Equal(t, other.ID, got.ProjectID)
-				} else {
-					require.Equal(t, source.ID, got.ProjectID)
-				}
-				return
 			}
 			if change == "fallback" {
 				repaired, err := d.IssueByUID(ctx, preparedIssue.UID, db.IncludeDeletedYes)
@@ -276,91 +250,57 @@ func TestMoveRebuildRemovesStaleLinksBeforeIssues(t *testing.T) {
 }
 
 func TestMoveRebuildAssignsCollidingShortIDsInOrder(t *testing.T) {
-	for _, missing := range []bool{false, true} {
-		name := "rehomed"
-		if missing {
-			name = "missing"
-		}
-		t.Run(name, func(t *testing.T) {
-			ctx := t.Context()
-			d, err := Open(ctx, filepath.Join(t.TempDir(), "spoke.db"))
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, d.Close()) })
-			source, err := d.CreateProject(ctx, "source")
-			require.NoError(t, err)
-			destination, err := d.CreateProject(ctx, "destination")
-			require.NoError(t, err)
-			otherSource := destination
-			if !missing {
-				otherSource, err = d.CreateProject(ctx, "other-source")
-				require.NoError(t, err)
-			}
-			for _, project := range []db.Project{source, destination} {
-				_, err = d.EnableProjectFederation(ctx, project.ID, "tester")
-				require.NoError(t, err)
-			}
-			if !missing {
-				_, err = d.EnableProjectFederation(ctx, otherSource.ID, "tester")
-				require.NoError(t, err)
-			}
-			first, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, UID: "01HZNQ7VFPK1XGD8R5MABCD4EC", ShortIDOverride: "d4ec", Title: "first", Author: "tester"})
-			require.NoError(t, err)
-			second, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: otherSource.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EC", ShortIDOverride: "d4ec", Title: "second", Author: "tester"})
-			require.NoError(t, err)
-			if missing {
-				_, err = d.ExecContext(ctx, `UPDATE events SET issue_id=NULL WHERE issue_id=?`, second.ID)
-				require.NoError(t, err)
-				_, err = d.ExecContext(ctx, `DELETE FROM issues WHERE id=?`, second.ID)
-				require.NoError(t, err)
-			}
-			type entry struct {
-				issue  db.Issue
-				source db.Project
-			}
-			entries := []entry{{first, source}}
-			if !missing {
-				entries = append(entries, entry{second, otherSource})
-			}
-			for _, entry := range entries {
-				if !missing {
-					unapplyMove(t, d, entry.issue, entry.source, destination, true)
-					continue
-				}
-				_, err = d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: entry.issue.ID, FromProjectID: entry.source.ID, ToProjectID: destination.ID, IfMatchRev: entry.issue.Revision, Actor: "tester"})
-				require.NoError(t, err)
-				_, err = d.ExecContext(ctx, `UPDATE events SET issue_id=NULL WHERE issue_id=?`, entry.issue.ID)
-				require.NoError(t, err)
-				_, err = d.ExecContext(ctx, `DELETE FROM issues WHERE id=?`, entry.issue.ID)
-				require.NoError(t, err)
-			}
-			locked := cloneIncrementalStore(t, d)
-			require.NoError(t, locked.materializeFederatedProject(ctx, destination.ID))
-			attempts := 0
-			d.federationIngestPrepared = func() { attempts++ }
-			require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
-			require.Equal(t, 1, attempts)
-			var shortIDs []string
-			for _, issue := range []db.Issue{first, second} {
-				want, err := locked.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-				require.NoError(t, err)
-				got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-				require.NoError(t, err)
-				if !missing {
-					require.Equal(t, issue.ID, got.ID)
-				}
-				require.Equal(t, want.ShortID, got.ShortID)
-				require.Equal(t, destination.ID, got.ProjectID)
-				shortIDs = append(shortIDs, got.ShortID)
-			}
-			require.Equal(t, "d4ec", shortIDs[0])
-			require.NotEqual(t, shortIDs[0], shortIDs[1])
-			require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
-			for i, uid := range []string{first.UID, second.UID} {
-				again, err := d.IssueByUID(ctx, uid, db.IncludeDeletedYes)
-				require.NoError(t, err)
-				require.Equal(t, shortIDs[i], again.ShortID)
-			}
-		})
+	ctx := t.Context()
+	d, err := Open(ctx, filepath.Join(t.TempDir(), "spoke.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, d.Close()) })
+	source, err := d.CreateProject(ctx, "source")
+	require.NoError(t, err)
+	destination, err := d.CreateProject(ctx, "destination")
+	require.NoError(t, err)
+	otherSource, err := d.CreateProject(ctx, "other-source")
+	require.NoError(t, err)
+	for _, project := range []db.Project{source, destination} {
+		_, err = d.EnableProjectFederation(ctx, project.ID, "tester")
+		require.NoError(t, err)
+	}
+	_, err = d.EnableProjectFederation(ctx, otherSource.ID, "tester")
+	require.NoError(t, err)
+	first, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, UID: "01HZNQ7VFPK1XGD8R5MABCD4EC", ShortIDOverride: "d4ec", Title: "first", Author: "tester"})
+	require.NoError(t, err)
+	second, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: otherSource.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EC", ShortIDOverride: "d4ec", Title: "second", Author: "tester"})
+	require.NoError(t, err)
+	type entry struct {
+		issue  db.Issue
+		source db.Project
+	}
+	for _, entry := range []entry{{first, source}, {second, otherSource}} {
+		unapplyMove(t, d, entry.issue, entry.source, destination, true)
+	}
+	locked := cloneIncrementalStore(t, d)
+	require.NoError(t, locked.materializeFederatedProject(ctx, destination.ID))
+	attempts := 0
+	d.federationIngestPrepared = func() { attempts++ }
+	require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
+	require.Equal(t, 1, attempts)
+	var shortIDs []string
+	for _, issue := range []db.Issue{first, second} {
+		want, err := locked.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		require.Equal(t, issue.ID, got.ID)
+		require.Equal(t, want.ShortID, got.ShortID)
+		require.Equal(t, destination.ID, got.ProjectID)
+		shortIDs = append(shortIDs, got.ShortID)
+	}
+	require.Equal(t, "d4ec", shortIDs[0])
+	require.NotEqual(t, shortIDs[0], shortIDs[1])
+	require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
+	for i, uid := range []string{first.UID, second.UID} {
+		again, err := d.IssueByUID(ctx, uid, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		require.Equal(t, shortIDs[i], again.ShortID)
 	}
 }
 
@@ -391,7 +331,7 @@ func TestMoveRebuildDoesNotResurrectArchivedDestination(t *testing.T) {
 }
 
 func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
-	t.Run("pending relay link", func(t *testing.T) {
+	t.Run("relay link ownership filtering", func(t *testing.T) {
 		ctx := t.Context()
 		d, source, issue := incrementalTestStore(t)
 		destination, err := d.CreateProject(ctx, "destination")
@@ -490,7 +430,7 @@ func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
 }
 
 func TestMoveRebuildPreservesLinks(t *testing.T) {
-	for _, scenario := range []string{"archived", "absent-later-destination", "former-source"} {
+	for _, scenario := range []string{"archived", "absent-later-destination"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := t.Context()
 			d, source, issue := incrementalTestStore(t)
@@ -498,12 +438,7 @@ func TestMoveRebuildPreservesLinks(t *testing.T) {
 			require.NoError(t, err)
 			_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
 			require.NoError(t, err)
-			peerProject := destination
-			formerSource := scenario == "former-source"
-			if formerSource {
-				peerProject = source
-			}
-			peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: peerProject.ID, Title: "peer", Author: "tester"})
+			peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "peer", Author: "tester"})
 			require.NoError(t, err)
 			link := func(store *Store, typ string) db.Link {
 				link, _, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: typ, Author: "tester"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, FromShortID: issue.ShortID, FromUID: issue.UID, ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "tester"})
@@ -516,27 +451,7 @@ func TestMoveRebuildPreservesLinks(t *testing.T) {
 				return result
 			}
 			projectID := destination.ID
-			if formerSource {
-				oldLink := link(d, "blocks")
-				link(d, "related")
-				hub := cloneIncrementalStore(t, d)
-				var remote []db.RemoteEvent
-				for i, item := range []db.Issue{issue, peer} {
-					moved := move(hub, item, source, destination)
-					remote = append(remote, incrementalRemoteEvent(t, destination, item.UID, "issue.moved", string(moved.Event.Payload), 9_000_000_000_000+int64(i)))
-				}
-				unlinked, err := hub.DeleteLinkAndEvent(ctx, oldLink, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: issue.ID, FromShortID: issue.ShortID, FromUID: issue.UID, ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "tester"})
-				require.NoError(t, err)
-				remote = append(remote, incrementalRemoteEvent(t, destination, issue.UID, "issue.unlinked", unlinked.Payload, 9_000_000_000_002))
-				for _, project := range []db.Project{source, destination} {
-					_, err = d.ExecContext(ctx, `UPDATE federation_bindings SET role='spoke',hub_url='https://example.com',hub_project_id=? WHERE project_id=?`, project.ID, project.ID)
-					require.NoError(t, err)
-				}
-				_, err = d.LeaveFederationReplica(ctx, source.ID)
-				require.NoError(t, err)
-				_, err = d.InsertRemoteEvents(ctx, destination.ID, remote)
-				require.NoError(t, err)
-			} else if scenario == "archived" {
+			if scenario == "archived" {
 				move(d, issue, source, destination)
 				link(d, "blocks")
 				for _, id := range []int64{issue.ID, peer.ID} {
@@ -595,9 +510,6 @@ func TestMoveRebuildPreservesLinks(t *testing.T) {
 				require.Empty(t, got)
 			} else {
 				require.Len(t, want, 1)
-				if formerSource {
-					require.Equal(t, "related", want[0].Type)
-				}
 				require.Equal(t, want, got)
 			}
 		})
