@@ -98,6 +98,19 @@ func RunRelayIngestValidatesCronReplay(t *testing.T, store db.Storage) {
 	require.Equal(t, "Nightly review", job.Name)
 	require.Equal(t, created.EventUID, job.DefinitionEventUID)
 
+	// An older peer may have used options.inputs for a different shape.
+	definition, err = json.Marshal(cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip", Options: jsontext.Value(`{"inputs":42}`)})
+	require.NoError(t, err)
+	legacyUID, err := uid.New()
+	require.NoError(t, err)
+	legacyInput := cronEvent(legacy, "cron.job.created", legacyUID, "")
+	_, err = store.InsertRemoteEvent(ctx, legacy.ID, legacyInput)
+	require.NoError(t, err)
+	legacyStored, err := store.CronJob(ctx, legacy.ID, legacyUID)
+	require.NoError(t, err)
+	resolved := cron.ResolveInputs(legacyStored.Definition, nil)
+	require.Equal(t, "declaration_invalid", resolved.Errors[0].Code)
+
 	// Admission must compare pending run history before a projection exists.
 	jobUID, err = uid.New()
 	require.NoError(t, err)

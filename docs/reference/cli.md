@@ -2430,6 +2430,7 @@ See [Cron](cron.md) for bounded documents and retry semantics.
 kata cron job create --uid <job-uid> --file job.json --json
 kata cron job list [--include-deleted] --json
 kata cron job show <job-uid> --json
+kata cron job inputs <job-uid> --json
 kata cron job edit <job-uid>
 kata cron workflow edit <workflow-uid>
 kata cron job update <job-uid> --expected-event-uid <event-uid> --file replacement.json --json

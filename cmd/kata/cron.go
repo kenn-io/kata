@@ -50,6 +50,9 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 		for _, action := range []string{"list", "show", "create", "update", "edit", "delete", "restore"} {
 			group.AddCommand(newCronOperationCmd(resource, action))
 		}
+		if resource == "job" {
+			group.AddCommand(newCronOperationCmd("job", "inputs"))
+		}
 		command.AddCommand(group)
 	}
 	runs := &cobra.Command{Use: "run", Short: "list, show and record independent run observations"}
@@ -73,7 +76,7 @@ type cronCLIOptions struct {
 }
 
 func (o cronCLIOptions) mutation() bool {
-	return o.action != "list" && o.action != "show" && o.action != "edit"
+	return o.action != "list" && o.action != "show" && o.action != "inputs" && o.action != "edit"
 }
 func (o cronCLIOptions) definition() bool { return o.resource == "job" || o.resource == "workflow" }
 func newCronOperationCmd(resource, action string) *cobra.Command {
@@ -609,7 +612,7 @@ func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64,
 	switch {
 	case o.resource == "capabilities":
 		return o.callCapabilities(a, c, projectID)
-	case o.action == "list" || o.action == "show":
+	case o.action == "list" || o.action == "show" || o.action == "inputs":
 		return o.callRead(a, c, projectID)
 	case o.action == "delete" || o.action == "restore":
 		return o.callLifecycle(a, c, projectID, raw)
@@ -622,6 +625,12 @@ func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID in
 	switch {
 	case o.resource == "job" && o.action == "list":
 		response, err := c.ListCronJobsWithResponse(a.ctx, &generated.ListCronJobsRequestOptions{PathParams: &generated.ListCronJobsPath{ProjectID: projectID}, Query: &generated.ListCronJobsQuery{IncludeDeleted: &o.includeDeleted}})
+		if response == nil {
+			return nil, externalCLITransportError(response, err)
+		}
+		return cronCLIResponse(response.StatusCode, response.Body, err)
+	case o.resource == "job" && o.action == "inputs":
+		response, err := c.GetCronJobInputsWithResponse(a.ctx, &generated.GetCronJobInputsRequestOptions{PathParams: &generated.GetCronJobInputsPath{ProjectID: projectID, CronUID: o.identity}})
 		if response == nil {
 			return nil, externalCLITransportError(response, err)
 		}

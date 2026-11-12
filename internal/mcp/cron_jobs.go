@@ -45,6 +45,17 @@ func (h toolHandlers) cronJob(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 	}
 	return cronResult(h.options.Client.ShowCronJob(ctx, &generated.ShowCronJobRequestOptions{PathParams: &generated.ShowCronJobPath{ProjectID: p.ID, CronUID: id}}))
 }
+func (h toolHandlers) cronJobInputs(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronIdentityInput) (*sdkmcp.CallToolResult, generated.GetCronJobInputsResponse, error) {
+	id, err := cronUID(in.UID)
+	if err != nil {
+		return nil, generated.GetCronJobInputsResponse{}, err
+	}
+	p, err := h.createTarget(ctx, in.Project)
+	if err != nil {
+		return nil, generated.GetCronJobInputsResponse{}, err
+	}
+	return cronResult(h.options.Client.GetCronJobInputs(ctx, &generated.GetCronJobInputsRequestOptions{PathParams: &generated.GetCronJobInputsPath{ProjectID: p.ID, CronUID: id}}))
+}
 func (h toolHandlers) cronJobCreate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronJobCreateInput) (*sdkmcp.CallToolResult, generated.ReplaceCronJobResponse, error) {
 	return h.cronPutJob(ctx, in, nil)
 }

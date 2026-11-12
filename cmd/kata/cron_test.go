@@ -810,3 +810,18 @@ func TestCronCLIParentUpdateKeepsBindingProtections(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, parents[0].UID, stored.Definition.Issue.ParentUID)
 }
+
+func TestCronCLIJobInputs(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "worker")
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	jobUID := cronCLIUID(t)
+	input := cronCLIJob(t)
+	input.Definition.Options = api.JSONRawObject(`{"inputs":{"dry_run":{"type":"bool","default":true}}}`)
+	_, _, err = executeCronCLI(t, env.URL, nil, "job", "create", "--uid", jobUID, "--file", cronCLIFile(t, input))
+	require.NoError(t, err)
+	out, _, err := executeCronCLI(t, env.URL, nil, "job", "inputs", jobUID)
+	require.NoError(t, err)
+	require.Contains(t, out, `"source": "default"`)
+}

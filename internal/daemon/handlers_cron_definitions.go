@@ -157,6 +157,20 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		out.Body.Events = events
 		return out, nil
 	}
+	validateJob := func(ctx context.Context, projectID int64, definition cron.JobDefinition) error {
+		var options []byte
+		if definition.Action.WorkflowUID != "" {
+			workflow, err := cfg.DB.CronWorkflow(ctx, projectID, definition.Action.WorkflowUID)
+			if err != nil {
+				return cronAPIError(ctx, cfg, err, projectID, definition.Action.WorkflowUID, false)
+			}
+			options = workflow.Definition.Options
+		}
+		if err := cron.ValidateInputs(definition.Options, definition.Action.WorkflowUID, options); err != nil {
+			return cronAPIError(ctx, cfg, err, projectID, "", true)
+		}
+		return nil
+	}
 	huma.Register(h, huma.Operation{OperationID: "createCronJob", Method: http.MethodPost, Path: path, DefaultStatus: 201}, func(ctx context.Context, in *api.CreateCronJobRequest) (*api.CronJobResponse, error) {
 		ctx, actor, enrollment, err := cronJobWriteContext(ctx, cfg, in.ProjectID, in.Authorization, in.Body.Actor, "createCronJob")
 		if err != nil {
@@ -165,6 +179,9 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		in.Body.Actor = actor
 		if out, handled, err := forwardCronJob(ctx, cfg, in.ProjectID, "", http.MethodPost, "", &in.Body, nil, enrollment); handled {
 			return out, err
+		}
+		if err := validateJob(ctx, in.ProjectID, in.Body.Definition.Native()); err != nil {
+			return nil, err
 		}
 		return put(ctx, in.ProjectID, "", in.Body, false, enrollment)
 	})
@@ -176,6 +193,9 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		in.Body.Actor = actor
 		if out, handled, err := forwardCronJob(ctx, cfg, in.ProjectID, in.UID, http.MethodPut, "", &in.Body, nil, enrollment); handled {
 			return out, err
+		}
+		if err := validateJob(ctx, in.ProjectID, in.Body.Definition.Native()); err != nil {
+			return nil, err
 		}
 		return put(ctx, in.ProjectID, in.UID, in.Body, false, enrollment)
 	})
@@ -189,6 +209,36 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		}
 		out := &api.CronJobResponse{}
 		out.Body.Job = api.CronJobFrom(value)
+		return out, nil
+	})
+	huma.Register(h, huma.Operation{OperationID: "getCronJobInputs", Method: http.MethodGet, Path: path + "/{cron_uid}/inputs"}, func(ctx context.Context, in *api.CronDefinitionRequest) (*api.CronJobInputsResponse, error) {
+		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+			return nil, err
+		}
+		job, err := cfg.DB.CronJob(ctx, in.ProjectID, in.UID)
+		if err != nil {
+			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, true)
+		}
+		var workflow *cron.WorkflowDefinition
+		out := &api.CronJobInputsResponse{}
+		out.Body.JobUID = job.UID
+		out.Body.DefinitionEventUID = job.DefinitionEventUID
+		if job.Definition.Action.WorkflowUID != "" {
+			w, err := cfg.DB.CronWorkflow(ctx, in.ProjectID, job.Definition.Action.WorkflowUID)
+			if err != nil {
+				return nil, cronAPIError(ctx, cfg, err, in.ProjectID, job.Definition.Action.WorkflowUID, false)
+			}
+			workflow = &w.Definition
+			out.Body.WorkflowUID = w.UID
+			out.Body.WorkflowDefinitionEventUID = w.DefinitionEventUID
+		}
+		result := cron.ResolveInputs(job.Definition, workflow)
+		out.Body.DeclaredBy = result.DeclaredBy
+		out.Body.Inputs = make([]api.CronResolvedInput, 0, len(result.Inputs))
+		for _, input := range result.Inputs {
+			out.Body.Inputs = append(out.Body.Inputs, api.CronResolvedInput(input))
+		}
+		out.Body.Errors = result.Errors
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "listCronJobs", Method: http.MethodGet, Path: path}, func(ctx context.Context, in *api.ListCronDefinitionsRequest) (*api.ListCronJobsResponse, error) {
@@ -258,9 +308,15 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 		return out, nil
 	}
 	huma.Register(h, huma.Operation{OperationID: "createCronWorkflow", Method: http.MethodPost, Path: path, DefaultStatus: 201}, func(ctx context.Context, in *api.CreateCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
+		if err := cron.ValidateWorkflowInputs(in.Body.Definition.Native().Options); err != nil {
+			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", false)
+		}
 		return put(ctx, in.ProjectID, "", in.Body, false)
 	})
 	huma.Register(h, huma.Operation{OperationID: "replaceCronWorkflow", Method: http.MethodPut, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.ReplaceCronWorkflowRequest) (*api.CronWorkflowResponse, error) {
+		if err := cron.ValidateWorkflowInputs(in.Body.Definition.Native().Options); err != nil {
+			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", false)
+		}
 		return put(ctx, in.ProjectID, in.UID, in.Body, false)
 	})
 	huma.Register(h, huma.Operation{OperationID: "showCronWorkflow", Method: http.MethodGet, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.CronDefinitionRequest) (*api.CronWorkflowResponse, error) {

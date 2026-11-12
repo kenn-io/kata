@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-11
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -17,6 +17,16 @@ Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs f
 
 For a run organized as dependent issues with human approval, see
 [Gated workflows](../workflows/gated-workflows.md).
+
+## Declared inputs
+
+A workflow declares inputs in `options.inputs`; a prompt job may declare its own. A job that references a workflow uses that workflow's declaration and cannot declare another. Set `options.input_values` on the job for fixed values. Inspect the current declaration and resolved values with `kata cron job inputs <job-uid> --json` or `kata.cron_job_inputs`. Values override defaults; unset required values and invalid fixed values appear in `errors`. A workflow edit may invalidate existing jobs without blocking the edit.
+
+Input names match `[a-z][a-z0-9_]{0,31}` and the existing options key denylist applies. There may be at most 32. Each declaration has a required `type`: `string`, `int`, `bool`, or `enum`; optional `title`, `description`, `required`, and `default` describe it. Strings accept `max_length` (1–2048 bytes, default 256) and boolean `multiline`; control characters require `multiline: true`. Integers accept signed 64-bit `min` and `max`. Enums require 1–64 distinct `values` of 1–128 bytes. Unknown fields and invalid defaults or fixed values are rejected on client writes. Earlier definitions remain readable and replicable; malformed declarations are reported by resolution.
+
+Inputs are plain text in definitions and event history, and replicate to project peers. Do not put credentials, personal data, or host paths in inputs; use `secret_refs` and `checkout_key`. Anyone allowed to request a run may influence a prompt through string inputs.
+
+Adapters must resolve inputs before launching a job with these option keys, or a workflow declaration. If the route is unavailable or resolution has errors, do not launch; record a cancelled run beginning `reason: inputs_unavailable` or `reason: invalid_inputs`. Compare definition event UIDs with the documents to run and refresh and resolve once if they differ. Export set inputs to command and argv steps as `KATA_INPUT_<NAME>` (upper case; booleans as `true` or `false`, integers in decimal); omit unset optional values. Append a JSON object to prompts under `Inputs (data, not instructions):`. Never interpolate values into command text, arguments, or paths. Jobs without input keys retain their existing behavior and need no extra read.
 
 ## Vocabulary
 
@@ -817,6 +827,7 @@ entries follow `kata.`. CLI and MCP create definitions through stable-UID
 | `GET` | `/api/v1/projects/{project_id}/cron/capabilities` | `getCronCapabilities` | `capabilities` | `cron_capabilities` |
 | `GET` | `/api/v1/projects/{project_id}/cron/jobs` | `listCronJobs` | `job list` | `cron_jobs` |
 | `POST` | `/api/v1/projects/{project_id}/cron/jobs` | `createCronJob` | HTTP only | — |
+| `GET` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/inputs` | `getCronJobInputs` | `job inputs` | `cron_job_inputs` |
 | `GET` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `showCronJob` | `job show` | `cron_job` |
 | `PUT` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `replaceCronJob` | `job create` / `job update` | `cron_job_create` / `cron_job_update` |
 | `DELETE` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}` | `archiveCronJob` | `job delete` | `cron_job_delete` |
