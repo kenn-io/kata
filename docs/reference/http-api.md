@@ -267,7 +267,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 ### Version history
 
-This table highlights notable changes.
+This table highlights notable changes. Marker files retain every version's summary.
 
 | Version | Change |
 | --- | --- |
@@ -688,7 +688,7 @@ These are the current intentions, not a contractual guarantee:
   silently fall out of date with the daemon it describes.
 
 When changing the contract, bump `APISchemaVersion` and regenerate the API artifacts.
-Run the API version record test and add the marker file named in its output with a one-line summary.
+Run `TestAPISchemaVersionMatchesRecordedContract` and add the marker file named in its output with a one-line summary.
 Marker history is permanent; keep every earlier marker and its summary.
 
 If you build against this schema and hit a gap, please open an issue. The

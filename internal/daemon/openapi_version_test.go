@@ -126,10 +126,11 @@ func checkAPIVersionRecord(dir, version string, doc []byte) error {
 		return err
 	}
 	suggested := fmt.Sprintf("%s.%d.0", strings.TrimPrefix(semver.Major(next), "v"), minor+1)
+	hint := ""
 	if semver.Compare("v"+version, next) == 0 && count == 1 {
-		return fmt.Errorf("API contract version %s has a stale record (%s); if %s is not yet on origin/main, delete your old marker and add %s with a one-line summary; otherwise take %s in APISchemaVersion and api/openapi.yaml, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), version, filepath.Join(dir, marker), suggested)
+		hint = fmt.Sprintf("if %s is not yet on origin/main, delete your old marker and add %s with a one-line summary; otherwise ", version, filepath.Join(dir, marker))
 	}
-	return fmt.Errorf("API contract version %s has older, conflicting, or stale records (%s); take %s in APISchemaVersion and api/openapi.yaml, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), suggested)
+	return fmt.Errorf("API contract version %s has older, conflicting, or stale records (%s); %stake %s in APISchemaVersion and api/openapi.yaml, and find and move feature minimum checks introduced by this change; move this branch's marker and recompute it for the combined document", version, strings.Join(records, ", "), hint, suggested)
 }
 
 func checkAPIVersionSummary(path string) error {
@@ -258,7 +259,7 @@ func checkBaseAPIVersionRecords(dir string, records []string) error {
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("base API contract records must be preserved: %s", strings.Join(missing, ", "))
+		return fmt.Errorf("base API contract records must be preserved: %s; if your branch is behind the base, rebase and rerun the test", strings.Join(missing, ", "))
 	}
 	return nil
 }
@@ -295,7 +296,9 @@ func TestAPIBaseRecordLoading(t *testing.T) {
 		"0.45.0.95abbaa7a1794b458dae61670a105f01339b2978a65310dc6575f987536650c9.sha256",
 	}
 	dir := t.TempDir()
-	require.ErrorContains(t, checkBaseAPIVersionRecords(dir, records), records[0])
+	err := checkBaseAPIVersionRecords(dir, records)
+	require.ErrorContains(t, err, records[0])
+	require.ErrorContains(t, err, "rebase")
 	for _, name := range records {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("Add route\n"), 0600))
 	}
