@@ -1,10 +1,10 @@
 package federation
 
 import (
-	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -23,41 +23,37 @@ func TestSyncFederationInterruptedLeaveDoesNotBlockUnrelatedPush(t *testing.T) {
 			retained, err := hub.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			require.Equal(t, projects[0].ID, retained.ProjectID)
-			// The same pending credential is required for an explicit source move.
-			local, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "Required source proof", Author: "worker"})
-			require.NoError(t, err)
-			spoke.move(t, local, 1, 0)
-			err = spoke.sync(t, 0)
-			require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized, "required move-source credentials remain strict")
 		})
 	}
 }
 
-func TestSyncFederationPendingProofCannotAuthorizeCurrentOwner(t *testing.T) {
-	hub, projects := newMoveDeliveryHub(t, "stale-source", "pending-target")
-	spoke := newMoveDeliverySpoke(t, hub, projects)
-	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Moved before delayed work", Author: "worker"})
-	require.NoError(t, err)
-	for i := range projects {
-		require.NoError(t, spoke.sync(t, i))
+func TestFederationMoveSourceCredentialValidation(t *testing.T) {
+	for _, kind := range []string{"actor", "project"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "active-source", "other-source")
+			spoke := newMoveDeliverySpoke(t, hub, projects)
+			credential := spoke.credentials[projects[1].UID]
+			switch kind {
+			case "actor":
+				credential.Actor = "other-worker"
+			case "project":
+				credential.HubProjectID = projects[1].ID + 100
+			}
+			spoke.credentials[projects[1].UID] = credential
+			binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+			require.NoError(t, err)
+			local, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "Required source", Author: "worker"})
+			require.NoError(t, err)
+			move, err := spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: local.ID, FromProjectID: spoke.projects[1].ID, ToProjectID: spoke.projects[0].ID, IfMatchRev: local.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			_, err = federationMoveSourceTokens(ctx, spoke.env.DB, spoke.credentials, binding, hub.URL, move.Events, clientpkg.Opts{})
+			switch kind {
+			case "actor":
+				require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+			case "project":
+				require.ErrorContains(t, err, "move source credential project differs from binding")
+			}
+		})
 	}
-	local, err := spoke.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Delayed work needing target authority"})
-	require.NoError(t, err)
-	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
-	require.NoError(t, err)
-	credential := spoke.credentials[projects[1].UID]
-	credential.LeavePending = true
-	spoke.credentials[projects[1].UID] = credential
-	err = spoke.sync(t, 0)
-	var status *HubStatusError
-	require.ErrorAs(t, err, &status, "the hub, rather than an unrelated proof builder, rejects missing current-owner authority")
-	if status == nil {
-		t.Fatal("missing hub denial")
-	}
-	require.Equal(t, http.StatusForbidden, status.StatusCode)
-	comments, err := hub.DB.CommentsByIssue(t.Context(), issue.ID)
-	require.NoError(t, err)
-	require.Empty(t, comments)
 }

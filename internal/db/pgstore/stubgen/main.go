@@ -152,6 +152,9 @@ var alreadyImplemented = map[string]bool{
 	"ListProjectFederationEnrollments":     true, // federation_control.go
 	"LeaveFederationReplica":               true, // federation_projection.go
 	"MaterializeFederatedProject":          true, // federation_projection.go
+	"FederationPushAccepted":               true, // federation_control.go
+	"FederationPushAcceptedThrough":        true, // federation_events.go
+	"RecordFederationPushAccepted":         true, // federation_control.go
 	"RecordFederationQuarantine":           true, // federation_quarantine.go
 	"RecordFederationSyncError":            true, // federation_control.go
 	"RecordFederationSyncPullStarted":      true, // federation_control.go

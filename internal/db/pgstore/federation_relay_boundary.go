@@ -120,7 +120,7 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 			return crossing, err
 		}
 	}
-	refs, err := payloadReferencedIssueUIDs(event, payload)
+	refs, err := db.FederationPayloadReferencedIssueUIDs(event, payload)
 	if err != nil {
 		return false, err
 	}

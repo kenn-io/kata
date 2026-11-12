@@ -118,8 +118,8 @@ func (d *Store) seedRelayLocalEventsTx(ctx context.Context, tx *sql.Tx, grant db
 	projectID := *grant.ProjectID
 	after := afterID
 	for {
-		//nolint:gosec // Only the fixed event-type predicate is concatenated; values use placeholders.
-		rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.project_id=? AND e.origin_instance_uid=? AND e.id>? AND `+federationPushEventTypeCondition("e.type")+` ORDER BY e.id LIMIT 100`, projectID, d.instanceUID, after)
+		//nolint:gosec // Only fixed predicates are concatenated; values use placeholders.
+		rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.project_id=? AND e.origin_instance_uid=? AND e.id>? AND `+federationPushNotAccepted+` AND `+federationPushEventTypeCondition("e.type")+` ORDER BY e.id LIMIT 100`, projectID, d.instanceUID, after)
 		if err != nil {
 			return err
 		}

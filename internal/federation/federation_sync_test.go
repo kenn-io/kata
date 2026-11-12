@@ -1819,7 +1819,6 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing
 			require.NotEmpty(t, body.Events)
 			require.NoError(t, json.NewEncoder(w).Encode(api.FederationIngestEventsBody{
 				Accepted:          len(body.Events),
-				Duplicates:        len(body.Events),
 				PushCursorEventID: body.Events[len(body.Events)-1].EventID,
 			}))
 		case "/api/v1/projects/42/federation/events":
@@ -1925,7 +1924,6 @@ func testResetRetryLocalProjectEvent(t *testing.T, acknowledged bool) {
 			require.NotEmpty(t, body.Events)
 			require.NoError(t, json.NewEncoder(w).Encode(api.FederationIngestEventsBody{
 				Accepted:          len(body.Events),
-				Duplicates:        len(body.Events),
 				PushCursorEventID: body.Events[len(body.Events)-1].EventID,
 			}))
 		case "/api/v1/projects/42/federation/events":

@@ -126,11 +126,7 @@ func (s *Store) SkipFederationQuarantine(
 		if quarantine.Direction != db.FederationQuarantineDirectionPush {
 			return fmt.Errorf("skip federation quarantine: unsupported direction %q", quarantine.Direction)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET
-push_cursor_event_id=GREATEST(push_cursor_event_id,$1),
-last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-WHERE project_id=$2`, quarantine.LastEventID, quarantine.ProjectID); err != nil {
+		if err := skipFederationPushBatch(ctx, tx, quarantine, s.InstanceUID()); err != nil {
 			return mapSQLError(err, nil)
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE federation_quarantine SET skipped_at=$1,
@@ -144,6 +140,31 @@ skipped_by=$2,skip_reason=$3 WHERE id=$4 AND project_id=$5 AND skipped_at IS NUL
 		return err
 	})
 	return output, err
+}
+
+// skipFederationPushBatch acknowledges the skipped events and advances the push
+// cursor to the quarantine's last event, stopping before earlier pending work.
+func skipFederationPushBatch(ctx context.Context, tx *sql.Tx, q db.FederationQuarantine, origin string) error {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO federation_push_accepted(project_id,event_id)
+SELECT e.project_id,e.id FROM events e JOIN federation_bindings b ON b.project_id=e.project_id
+WHERE e.project_id=$1 AND e.id>b.push_cursor_event_id
+AND e.uid IN (SELECT jsonb_array_elements_text(event_uids::jsonb) FROM federation_quarantine WHERE id=$2)
+ON CONFLICT(project_id,event_id) DO NOTHING`, q.ProjectID, q.ID); err != nil {
+		return err
+	}
+	// #nosec G202 -- Predicates are fixed SQL; project and cursor values are bound.
+	if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET
+push_cursor_event_id=GREATEST(push_cursor_event_id,LEAST($1::bigint,COALESCE((
+  SELECT MIN(e.id)-1 FROM events e
+  WHERE e.project_id=federation_bindings.project_id AND e.origin_instance_uid=$2
+  AND e.id>federation_bindings.push_cursor_event_id AND e.id<=$1
+  AND `+pgFederationPushNotAccepted+` AND `+pgFederationPushEventTypeCondition("e.type")+`),$1))),
+last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+WHERE project_id=$3`, q.LastEventID, origin, q.ProjectID); err != nil {
+		return err
+	}
+	return pruneFederationPushAccepted(ctx, tx, q.ProjectID)
 }
 
 // RetryFederationQuarantine resolves a legacy push or negotiated relay quarantine

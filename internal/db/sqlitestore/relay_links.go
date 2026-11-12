@@ -19,11 +19,11 @@ func validateRelayLinkEndpointsInProject(
 		return nil
 	}
 	payload := db.PayloadMap(event.Payload)
-	primaryUID, err := payloadIssueUID(event, payload)
+	primaryUID, err := db.FederationPayloadIssueUID(event, payload)
 	if err != nil {
 		return err
 	}
-	refs, err := payloadReferencedIssueUIDs(event, payload)
+	refs, err := db.FederationPayloadReferencedIssueUIDs(event, payload)
 	if err != nil {
 		return err
 	}

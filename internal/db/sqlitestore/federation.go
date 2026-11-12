@@ -366,16 +366,7 @@ func (d *Store) skipFederationQuarantine(ctx context.Context, p db.SkipFederatio
 	}
 	switch q.Direction {
 	case db.FederationQuarantineDirectionPush:
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE federation_bindings
-			   SET push_cursor_event_id = CASE
-			         WHEN push_cursor_event_id < ? THEN ?
-			         ELSE push_cursor_event_id
-			       END,
-			       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			 WHERE project_id = ?`,
-			q.LastEventID, q.LastEventID, q.ProjectID); err != nil {
+		if err := skipFederationPushBatch(ctx, tx, q, d.InstanceUID()); err != nil {
 			return db.FederationQuarantine{}, fmt.Errorf("advance quarantine push cursor: %w", err)
 		}
 	default:
@@ -400,6 +391,35 @@ func (d *Store) skipFederationQuarantine(ctx context.Context, p db.SkipFederatio
 		return db.FederationQuarantine{}, fmt.Errorf("commit skip federation quarantine: %w", err)
 	}
 	return updated, nil
+}
+
+// skipFederationPushBatch acknowledges the skipped events and advances the push
+// cursor to the quarantine's last event, stopping before earlier pending work.
+func skipFederationPushBatch(ctx context.Context, tx *sql.Tx, q db.FederationQuarantine, origin string) error {
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO federation_push_accepted(project_id, event_id)
+		SELECT e.project_id, e.id
+		  FROM events e JOIN federation_bindings b ON b.project_id = e.project_id
+		 WHERE e.project_id = ? AND e.id > b.push_cursor_event_id
+		   AND e.uid IN (SELECT value FROM json_each((SELECT event_uids FROM federation_quarantine WHERE id = ?)))
+		ON CONFLICT(project_id, event_id) DO NOTHING`, q.ProjectID, q.ID); err != nil {
+		return err
+	}
+	// #nosec G202 -- Predicates are fixed SQL; project and cursor values are bound.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE federation_bindings
+		   SET push_cursor_event_id = MAX(push_cursor_event_id, MIN(?, COALESCE((
+		         SELECT MIN(e.id) - 1 FROM events e
+		          WHERE e.project_id = federation_bindings.project_id AND e.origin_instance_uid = ?
+		            AND e.id > federation_bindings.push_cursor_event_id AND e.id <= ?
+		            AND `+federationPushNotAccepted+` AND `+federationPushEventTypeCondition("e.type")+`), ?))),
+		       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE project_id = ?`,
+		q.LastEventID, origin, q.LastEventID, q.LastEventID, q.ProjectID); err != nil {
+		return err
+	}
+	return pruneFederationPushAccepted(ctx, tx, q.ProjectID)
 }
 
 // RetryFederationQuarantine marks a legacy push or negotiated relay quarantine
@@ -558,6 +578,9 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 		actor, allowInsecure, enabled)
 	if err != nil {
 		return db.FederationBinding{}, fmt.Errorf("upsert federation binding: %w", err)
+	}
+	if err := pruneFederationPushAccepted(ctx, tx, b.ProjectID); err != nil {
+		return db.FederationBinding{}, err
 	}
 	binding, err := federationBindingByProject(ctx, tx, b.ProjectID)
 	if err != nil {

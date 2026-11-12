@@ -166,6 +166,9 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 		if err != nil {
 			return mapSQLError(err, nil)
 		}
+		if err := pruneFederationPushAccepted(ctx, tx, input.ProjectID); err != nil {
+			return err
+		}
 		output, err = scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1`, input.ProjectID))
 		if err != nil {
@@ -178,15 +181,47 @@ updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
 
 // AdvanceFederationPullCursor records the highest consumed hub event id.
 func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error {
-	return s.updateFederationCursor(ctx, projectID, nextCursor, false)
+	return updateFederationCursor(ctx, s, projectID, nextCursor, false)
 }
 
 // AdvanceFederationPushCursor advances the acknowledged local event id monotonically.
 func (s *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
-	return s.updateFederationCursor(ctx, projectID, nextCursor, true)
+	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
+			return err
+		}
+		return pruneFederationPushAccepted(ctx, tx, projectID)
+	})
 }
 
-func (s *Store) updateFederationCursor(ctx context.Context, projectID, nextCursor int64, push bool) error {
+func pruneFederationPushAccepted(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM federation_push_accepted WHERE project_id=$1 AND event_id <= (SELECT push_cursor_event_id FROM federation_bindings WHERE project_id=$1)`, projectID)
+	return mapSQLError(err, nil)
+}
+
+// RecordFederationPushAccepted retains acknowledgements above the binding cursor.
+func (s *Store) RecordFederationPushAccepted(ctx context.Context, projectID int64, eventIDs []int64) error {
+	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		var cursor int64
+		if err := tx.QueryRowContext(ctx, `SELECT push_cursor_event_id FROM federation_bindings WHERE project_id=$1 FOR UPDATE`, projectID).Scan(&cursor); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return db.ErrNotFound
+			}
+			return mapSQLError(err, nil)
+		}
+		for _, id := range eventIDs {
+			if id <= cursor {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO federation_push_accepted(project_id,event_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, projectID, id); err != nil {
+				return mapSQLError(err, nil)
+			}
+		}
+		return nil
+	})
+}
+
+func updateFederationCursor(ctx context.Context, execer contextExecer, projectID, nextCursor int64, push bool) error {
 	column := "pull_cursor_event_id"
 	if push {
 		column = "push_cursor_event_id"
@@ -197,7 +232,7 @@ func (s *Store) updateFederationCursor(ctx context.Context, projectID, nextCurso
 last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 WHERE project_id=$2`
-	result, err := s.ExecContext(ctx, query, nextCursor, projectID)
+	result, err := execer.ExecContext(ctx, query, nextCursor, projectID)
 	if err != nil {
 		return mapSQLError(err, nil)
 	}
@@ -234,6 +269,9 @@ push_cursor_event_id=GREATEST(push_cursor_event_id,$1),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 WHERE project_id=$2`, cursor, projectID); err != nil {
 			return mapSQLError(err, nil)
+		}
+		if err := pruneFederationPushAccepted(ctx, tx, projectID); err != nil {
+			return err
 		}
 		output, err = scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1`, projectID))
@@ -762,4 +800,11 @@ func encodeStringList(values []string) (string, error) {
 		return "", err
 	}
 	return string(encoded), nil
+}
+
+// FederationPushAccepted reports whether the hub acknowledged an event.
+func (s *Store) FederationPushAccepted(ctx context.Context, projectID, eventID int64) (bool, error) {
+	var accepted bool
+	err := s.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_push_accepted WHERE project_id=$1 AND event_id=$2)`, projectID, eventID).Scan(&accepted)
+	return accepted, err
 }

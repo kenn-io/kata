@@ -463,3 +463,7 @@ place, with an atomic schema-version update.
 Start the matching schema 50 binary after migration. Older binaries cannot open
 schema 50. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 51: federation push acknowledgments
+
+The 50 to 51 migration creates `federation_push_accepted` for events acknowledged above a binding's push cursor. SQLite creates the same table in place. Stop the daemon, back up the database, and run `kata storage postgres migrate` with schema-owner credentials before starting the new binary. Grant the runtime role access to the new table using the normal PostgreSQL role setup. Older binaries cannot reopen schema 51; rollback requires the backup and matching older binary.

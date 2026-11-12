@@ -1,6 +1,7 @@
 package dbtest
 
 import (
+	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"fmt"
 	"testing"
@@ -8,6 +9,82 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
+
+func checkFederationAcceptedPushEvents(t *testing.T, store db.Storage, backend Backend) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "accepted-push")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, PushEnabled: true, Actor: "tester", Enabled: true})
+	require.NoError(t, err)
+	_, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "work", Author: "tester"})
+	require.NoError(t, err)
+	accepted, err := store.FederationPushAccepted(ctx, project.ID, event.ID)
+	require.NoError(t, err)
+	require.False(t, accepted)
+	require.NoError(t, store.RecordFederationPushAccepted(ctx, project.ID, []int64{event.ID}))
+	reopened := backend.OpenSame(t, store)
+	accepted, err = reopened.FederationPushAccepted(ctx, project.ID, event.ID)
+	require.NoError(t, err)
+	require.True(t, accepted)
+	_, pending, err := reopened.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "pending", Author: "tester"})
+	require.NoError(t, err)
+	_, later, err := reopened.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "later accepted", Author: "tester"})
+	require.NoError(t, err)
+	require.NoError(t, reopened.RecordFederationPushAccepted(ctx, project.ID, []int64{later.ID}))
+	through, err := reopened.FederationPushAcceptedThrough(ctx, project.ID, reopened.InstanceUID(), 0)
+	require.NoError(t, err)
+	require.Equal(t, event.ID, through)
+	through, err = reopened.FederationPushAcceptedThrough(ctx, project.ID, reopened.InstanceUID(), pending.ID)
+	require.NoError(t, err)
+	require.Equal(t, later.ID, through)
+	t.Run("pending stats", func(t *testing.T) {
+		count, high, err := reopened.PendingFederationPushStats(ctx, project.ID, reopened.InstanceUID(), 0)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), count)
+		require.Equal(t, pending.ID, high)
+		events, err := reopened.PendingFederationPushEvents(ctx, project.ID, reopened.InstanceUID(), 0, 10)
+		require.NoError(t, err)
+		require.Len(t, events, 1)
+		require.Equal(t, pending.UID, events[0].UID)
+	})
+	t.Run("advance prunes covered acknowledgments", func(t *testing.T) {
+		require.NoError(t, reopened.AdvanceFederationPushCursor(ctx, project.ID, event.ID))
+		covered, err := reopened.FederationPushAccepted(ctx, project.ID, event.ID)
+		require.NoError(t, err)
+		require.False(t, covered)
+		uncovered, err := reopened.FederationPushAccepted(ctx, project.ID, later.ID)
+		require.NoError(t, err)
+		require.True(t, uncovered)
+	})
+	t.Run("skip later poisoned event preserves pending work", func(t *testing.T) {
+		_, poison, err := reopened.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "poison", Author: "tester"})
+		require.NoError(t, err)
+		q, err := reopened.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{ProjectID: project.ID, Direction: db.FederationQuarantineDirectionPush, FirstEventID: poison.ID, LastEventID: poison.ID, EventUIDs: []string{poison.UID}, Error: "poisoned event"})
+		require.NoError(t, err)
+		_, err = reopened.SkipFederationQuarantine(ctx, db.SkipFederationQuarantineParams{ID: q.ID, ProjectID: project.ID, Actor: "tester"})
+		require.NoError(t, err)
+		binding, err := reopened.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		require.Less(t, binding.PushCursorEventID, pending.ID)
+		events, err := reopened.PendingFederationPushEvents(ctx, project.ID, reopened.InstanceUID(), binding.PushCursorEventID, 10)
+		require.NoError(t, err)
+		require.Len(t, events, 1)
+		require.Equal(t, pending.UID, events[0].UID)
+		const rootUID = "00000000000000000000000002"
+		public, _, err := ed25519.GenerateKey(nil)
+		require.NoError(t, err)
+		require.NoError(t, reopened.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: rootUID, KeyID: db.RootPublicKeyID(public), PublicKey: public}))
+		config := db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: project.UID, AuthorityUID: rootUID, UpstreamInstanceUID: rootUID, HubPath: []string{rootUID, reopened.InstanceUID()}, LocalActor: "tester", ResetEpoch: 1}
+		_, err = reopened.SetRelayBindingConfig(ctx, project.ID, config)
+		require.NoError(t, err)
+		offered, err := reopened.PendingRelayDeliveries(ctx, config.BindingUID, db.RelayStreamEvent, 10)
+		require.NoError(t, err)
+		require.Len(t, offered, 1)
+		require.Equal(t, pending.UID, offered[0].SourceUID)
+	})
+
+	return nil
+}
 
 // A push page must finish its first snapshot run and stop before the next
 // supported non-snapshot event, even when the run extends beyond the limit.
@@ -72,5 +149,23 @@ func checkFederationPushSnapshotRuns(t *testing.T, store db.Storage) error {
 			require.Equal(t, []string{uids[8], uids[9], uids[10]}, []string{continued[0].UID, continued[1].UID, continued[2].UID})
 		}
 	}
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, PushEnabled: true, Actor: "tester", Enabled: true})
+	require.NoError(t, err)
+	before, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	metadata := newRemoteEvent(t, project, nil, "project.metadata_updated", "tester", store.InstanceUID(), 300, []byte(`{"metadata":{}}`))
+	_, err = store.InsertRemoteEvent(ctx, project.ID, metadata)
+	require.NoError(t, err)
+	stored, err := store.EventsByUIDs(ctx, project.ID, []string{metadata.EventUID})
+	require.NoError(t, err)
+	require.NoError(t, store.RecordFederationPushAccepted(ctx, project.ID, []int64{stored[0].ID}))
+	for i := range 3 {
+		event := newRemoteEvent(t, project, &issue.UID, "issue.snapshot", "tester", store.InstanceUID(), int64(301+i), []byte(`{"uid":"`+issue.UID+`","title":"work","author":"tester","status":"open"}`))
+		_, err = store.InsertRemoteEvent(ctx, project.ID, event)
+		require.NoError(t, err)
+	}
+	snapshots, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), before, 2)
+	require.NoError(t, err)
+	require.Len(t, snapshots, 3, "accepted metadata must not truncate a snapshot run")
 	return nil
 }

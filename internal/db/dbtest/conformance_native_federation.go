@@ -261,6 +261,23 @@ func checkNativeCronAdoptionAuthor(t *testing.T, spoke db.Storage, backend Backe
 	params.Events = batch[1:]
 	_, err = hub.IngestFederationEvents(ctx, params)
 	require.NoError(t, err)
+	foundSnapshot := false
+	for _, original := range batch {
+		if original.Event.Type != "cron.job.snapshot" {
+			continue
+		}
+		foundSnapshot = true
+		canonical, err := hub.EventsByUIDs(ctx, target.ID, []string{original.Event.EventUID})
+		require.NoError(t, err)
+		retry := params
+		retry.AdoptionBaselineEndSourceEventID = 2
+		retry.Events = []db.FederationIngestEvent{{SourceEventID: 1, Event: portableNativeEvent(canonical[0])}, {SourceEventID: 2, Event: original.Event}}
+		result, err := hub.IngestFederationEvents(ctx, retry)
+		require.NoError(t, err)
+		require.Equal(t, 2, result.Duplicates)
+		break
+	}
+	require.True(t, foundSnapshot)
 	for _, run := range runs {
 		actual, err := hub.CronRun(ctx, target.ID, run.UID)
 		require.NoError(t, err)

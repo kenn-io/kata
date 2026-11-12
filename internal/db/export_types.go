@@ -487,23 +487,24 @@ func (*ProjectPurgeLogExport) ImportKind() string { return ImportKindProjectPurg
 // peer issue lives in an omitted project, or on live-only export when an
 // issue.links_changed peer is soft-deleted.
 type EventExport struct {
-	ID                int64          `json:"id"`
-	UID               string         `json:"uid"`
-	OriginInstanceUID string         `json:"origin_instance_uid"`
-	ProjectID         int64          `json:"project_id"`
-	ProjectUID        string         `json:"-"`
-	ProjectName       string         `json:"project_name"`
-	IssueID           *int64         `json:"issue_id"`
-	IssueUID          *string        `json:"issue_uid"`
-	RelatedIssueID    *int64         `json:"related_issue_id"`
-	RelatedIssueUID   *string        `json:"related_issue_uid"`
-	Type              string         `json:"type"`
-	Actor             string         `json:"actor"`
-	Payload           jsontext.Value `json:"payload"`
-	HLCPhysicalMS     int64          `json:"hlc_physical_ms"`
-	HLCCounter        int64          `json:"hlc_counter"`
-	ContentHash       string         `json:"content_hash"`
-	CreatedAt         string         `json:"created_at"`
+	ID                 int64          `json:"id"`
+	UID                string         `json:"uid"`
+	OriginInstanceUID  string         `json:"origin_instance_uid"`
+	ProjectID          int64          `json:"project_id"`
+	ProjectUID         string         `json:"-"`
+	ProjectName        string         `json:"project_name"`
+	IssueID            *int64         `json:"issue_id"`
+	IssueUID           *string        `json:"issue_uid"`
+	RelatedIssueID     *int64         `json:"related_issue_id"`
+	RelatedIssueUID    *string        `json:"related_issue_uid"`
+	Type               string         `json:"type"`
+	Actor              string         `json:"actor"`
+	Payload            jsontext.Value `json:"payload"`
+	HLCPhysicalMS      int64          `json:"hlc_physical_ms"`
+	HLCCounter         int64          `json:"hlc_counter"`
+	ContentHash        string         `json:"content_hash"`
+	CreatedAt          string         `json:"created_at"`
+	AcceptedProjectIDs []int64        `json:"accepted_project_ids,omitempty"`
 }
 
 // ImportKind reports the NDJSON kind this payload replays as.

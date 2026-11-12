@@ -67,6 +67,10 @@ var ErrFederationAdoptionBaselineTooLarge = errors.New("federation adoption snap
 
 var errFederationRunnerLeaseInvalid = errors.New("federation runner lease invalid")
 
+type federationPartialPushError struct{ message string }
+
+func (e *federationPartialPushError) Error() string { return e.message }
+
 // SyncFederationOnce pulls one spoke binding from its configured hub.
 func SyncFederationOnce(
 	ctx context.Context,
@@ -247,6 +251,12 @@ func pushDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	if binding.PushEnabled {
+		scanCursor := binding.PushCursorEventID
+		acknowledged := 0
+		rejectedCount := 0
+		var rejections []db.FederationEventRejection
+		var firstRejected int64
+		retained := db.FederationRejectedCreations{}
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
 				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
@@ -272,25 +282,42 @@ func pushDirectSpoke(
 			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
-			pending, err := store.PendingFederationPushEvents(
-				ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID, federationPollLimit)
+			pending, err := pendingFederationPushPage(ctx, store, binding, scanCursor, validateLease)
 			if err != nil {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
 			if len(pending) == 0 {
 				break
 			}
+			scanCursor = pending[len(pending)-1].ID
 			for len(pending) > 0 {
 				batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(pending)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
+				pending = pending[len(batch):]
+				var send []db.Event
+				for _, event := range batch {
+					remote := db.RemoteEventFromStored(event)
+					rejection, dependent, parseErr := retained.Dependent(remote)
+					if parseErr == nil && dependent {
+						retained.Remember(remote, rejection)
+						rejectedCount++
+					} else {
+						send = append(send, event)
+					}
+				}
+				if len(send) == 0 {
+					continue
+				}
+				batch = send
 				sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, batch, opts)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
 				ack, err := client.IngestProjectEventsWithOptions(ctx, hubProjectID,
 					federationIngestEnvelopes(batch), IngestProjectEventsOptions{
+						AllowEventRejections:       true,
 						MoveSourceTokens:           sourceTokens,
 						AdoptionBaseline:           adoptionBaseline,
 						AdoptionBaselineEndEventID: adoptionBaselineEndEventID,
@@ -303,33 +330,141 @@ func pushDirectSpoke(
 					}
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
-				if ack.PushCursorEventID <= binding.PushCursorEventID {
-					return recordFederationSyncError(ctx, store, binding.ProjectID,
-						errors.New("federation push cursor did not advance"))
-				}
-				lastSubmittedEventID := batch[len(batch)-1].ID
-				if ack.PushCursorEventID > lastSubmittedEventID {
-					return recordFederationSyncError(ctx, store, binding.ProjectID,
-						errors.New("federation push cursor advanced beyond submitted batch"))
-				}
-				if err := federationFailpoint("before_spoke_push_cursor_advance"); err != nil {
+				rejected, err := validateFederationPushAcknowledgment(batch, ack)
+				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				rejectedIDs := make(map[int64]bool, len(rejected))
+				for _, item := range rejected {
+					rejectedIDs[item.event.ID] = true
+					if firstRejected == 0 || item.event.ID < firstRejected {
+						firstRejected = item.event.ID
+					}
+					retained.Remember(db.RemoteEventFromStored(item.event), item.rejection)
+					rejectedCount++
+				}
+				var acceptedIDs []int64
+				for _, event := range batch {
+					if event.ID <= ack.PushCursorEventID && !rejectedIDs[event.ID] {
+						acceptedIDs = append(acceptedIDs, event.ID)
+					}
+				}
+				acknowledged += ack.Accepted + ack.Duplicates
+				rejections = append(rejections, ack.RejectedEvents...)
+				durableCursor := ack.PushCursorEventID
+				if firstRejected > 0 {
+					durableCursor = min(durableCursor, firstRejected-1)
 				}
 				if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 					return err
 				}
-				if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, ack.PushCursorEventID); err != nil {
+				if err := store.RecordFederationPushAccepted(ctx, binding.ProjectID, acceptedIDs); err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
-				binding.PushCursorEventID = ack.PushCursorEventID
-				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
+				if err := federationFailpoint("before_spoke_push_cursor_advance"); err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				if durableCursor > binding.PushCursorEventID {
+					if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, durableCursor); err != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+					}
+					binding.PushCursorEventID = durableCursor
+				}
+				pending = append(pendingFederationEventsAfterCursor(batch, ack.PushCursorEventID), pending...)
 			}
+		}
+		if len(rejections) > 0 {
+			err := &federationPartialPushError{message: "pending federation events remain: " + federationEventRejectionMessage(rejections, rejectedCount, acknowledged)}
+			return errors.Join(err, store.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
 		}
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// pendingFederationPushPage reads the next pending page. When none remains, it
+// moves the cursor over acknowledged events that no pending event precedes.
+func pendingFederationPushPage(
+	ctx context.Context,
+	store db.Storage,
+	binding *db.FederationBinding,
+	scanCursor int64,
+	validateLease func(context.Context) error,
+) ([]db.Event, error) {
+	pending, err := store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), scanCursor, federationPollLimit)
+	if err != nil || len(pending) > 0 {
+		return pending, err
+	}
+	through, err := store.FederationPushAcceptedThrough(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID)
+	if err != nil || through <= binding.PushCursorEventID {
+		return nil, err
+	}
+	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+		return nil, err
+	}
+	if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, through); err != nil {
+		return nil, err
+	}
+	binding.PushCursorEventID = through
+	return nil, nil
+}
+
+type rejectedFederationEvent struct {
+	event     db.Event
+	rejection db.FederationEventRejection
+}
+
+// Match rejected local identities before holding the durable cursor behind them.
+func validateFederationPushAcknowledgment(batch []db.Event, ack api.FederationIngestEventsBody) ([]rejectedFederationEvent, error) {
+	if ack.PushCursorEventID < batch[0].ID {
+		return nil, errors.New("federation push cursor did not advance")
+	}
+	if ack.PushCursorEventID > batch[len(batch)-1].ID {
+		return nil, errors.New("federation push cursor advanced beyond submitted batch")
+	}
+	submitted := make(map[string]int64, len(batch))
+	for _, event := range batch {
+		if event.ID <= ack.PushCursorEventID {
+			submitted[event.UID] = event.ID
+		}
+	}
+	byUID := make(map[string]db.FederationEventRejection, len(ack.RejectedEvents))
+	for _, rejection := range ack.RejectedEvents {
+		id, ok := submitted[rejection.EventUID]
+		if !ok || id != rejection.SourceEventID {
+			return nil, errors.New("hub returned invalid rejection details")
+		}
+		if rejection.Code != db.FederationProjectNotEnrolledCode {
+			return nil, fmt.Errorf("unknown rejection reason %.256s: %.1024s", rejection.Code, rejection.Message)
+		}
+		byUID[rejection.EventUID] = rejection
+	}
+	var rejected []rejectedFederationEvent
+	for _, event := range batch {
+		if rejection, ok := byUID[event.UID]; ok {
+			rejected = append(rejected, rejectedFederationEvent{event: event, rejection: rejection})
+		}
+	}
+	return rejected, nil
+}
+
+func federationEventRejectionMessage(rejected []db.FederationEventRejection, pending, acknowledged int) string {
+	messages := make([]string, 0, 5)
+	seen := map[[2]string]bool{}
+	for _, rejection := range rejected {
+		key := [2]string{rejection.IssueUID, rejection.CurrentProjectUID}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		messages = append(messages, fmt.Sprintf("%.1024s", rejection.Message))
+		if len(messages) == 5 {
+			break
+		}
+	}
+	return fmt.Sprintf("%d events need project access (showing up to five issues): %s; hub acknowledged %d other events", pending, strings.Join(messages, "; "), acknowledged)
 }
 
 // PushDirectSpoke drains pending direct-spoke events without requiring pull authority.
@@ -371,13 +506,27 @@ func syncDirectSpoke(
 	validateLease func(context.Context) error,
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
-) error {
+) (resultErr error) {
 	runStartBinding := binding
+	var pushErr error
 	if pushThisTurn {
 		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts); err != nil {
-			return err
+			if _, ok := errors.AsType[*federationPartialPushError](err); !ok {
+				return err
+			}
+			pushErr = err
 		}
 	}
+	defer func() {
+		if pushErr != nil {
+			if resultErr == nil {
+				resultErr = pushErr
+				return
+			}
+			resultErr = errors.Join(pushErr, resultErr)
+			resultErr = errors.Join(resultErr, store.RecordFederationSyncError(ctx, binding.ProjectID, resultErr, time.Now().UTC()))
+		}
+	}()
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
 	if err != nil {
 		return err
@@ -689,7 +838,8 @@ func shouldDeliverDuplicateLocalEcho(
 		binding, runStartBinding = actualBinding, actualBinding
 	}
 	if event.ID > binding.PushCursorEventID {
-		return true, nil
+		accepted, err := store.FederationPushAccepted(ctx, projectID, event.ID)
+		return !accepted, err
 	}
 	if event.IssueID == nil && event.IssueUID != nil {
 		return true, nil
@@ -1639,7 +1789,6 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentials config.FederationCredentialStore, destination db.FederationBinding, hubURL string, events []db.Event, opts clientpkg.Opts) (map[string]string, error) {
 	var tokens map[string]string
 	var projectUIDs []string
-	requiredSources := map[string]bool{}
 	issueWork := false
 	for _, event := range events {
 		if event.Type != "issue.moved" {
@@ -1656,7 +1805,6 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 			return nil, db.ErrFederationIngestValidation
 		}
 		projectUIDs = append(projectUIDs, fromUID)
-		requiredSources[fromUID] = true
 	}
 	if issueWork {
 		bindings, err := store.ListFederationBindings(ctx)
@@ -1696,7 +1844,10 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		if err != nil {
 			return nil, err
 		}
-		if project.DeletedAt != nil || source.Role != db.FederationRoleSpoke || !source.Enabled || !source.PushEnabled || source.HubProjectUID != fromUID || source.Actor != destination.Actor {
+		if !source.Enabled || !source.PushEnabled || source.Actor != destination.Actor {
+			continue
+		}
+		if project.DeletedAt != nil || source.Role != db.FederationRoleSpoke || source.HubProjectUID != fromUID {
 			return nil, db.ErrFederationMoveSourceUnauthorized
 		}
 		destinationOrigin, err := httpurl.CanonicalHTTPOrigin(hubURL)
@@ -1715,13 +1866,7 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		if err != nil {
 			return nil, err
 		}
-		if !found || credential.Token == "" {
-			continue
-		}
-		if credential.LeavePending || credential.RelayEnrollmentPending {
-			if requiredSources[fromUID] {
-				return nil, db.ErrFederationMoveSourceUnauthorized
-			}
+		if !found || credential.Token == "" || credential.LeavePending || credential.RelayEnrollmentPending {
 			continue
 		}
 		if credential.HubProjectID != 0 && credential.HubProjectID != source.HubProjectID {
@@ -1745,7 +1890,7 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		// Validate the source's own plaintext policy before including its token.
 		// The destination credential's opt-in does not authorize source transport.
 		sourceCredential := config.FederationTransportCredential(source.HubURL, source.HubProjectID, source.AllowInsecure, credential)
-		if _, err := NewClient(ctx, sourceCredential.HubURL, sourceCredential.Token, clientOptsForCredential(opts, sourceCredential)); err != nil {
+		if _, err := clientpkg.NewHTTPClientWithBearer(ctx, sourceCredential.HubURL, sourceCredential.Token, clientOptsForCredential(opts, sourceCredential)); err != nil {
 			return nil, err
 		}
 		if tokens == nil {

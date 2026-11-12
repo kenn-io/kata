@@ -81,9 +81,9 @@ checks the whole tree without changing issues, claims, or cursors. Use `--single
 to move only the selected issue. The [CLI reference](../reference/cli.md) owns
 the per-issue restrictions.
 
-Spokes must join both projects before applying a move. Sync refuses the batch
-without partial writes when a project is missing; join it and retry sync. Upgrade
-both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
+Spokes must join both projects before applying a move. If a pull encounters a
+move whose project is missing, join that project and retry sync. Upgrade both hub and
+spokes for the `issue_move_v1` event feature. Older peers refuse
 move history instead of applying a payload they cannot understand. Moves preserve
 stable UIDs, nesting, state, comments, and links. Established author and
 teammate attribution must match trusted history, and a spoke cannot change
@@ -2263,6 +2263,25 @@ the push cursor.
 
 A spoke records active quarantine when it sees a permanently poisoned push
 batch. Quarantine blocks further push and can block reset.
+
+A direct spoke continues independent pushes when an
+issue has moved into a project it has not joined. Both peers must support
+per-event rejections. Upgrade the hub first so it understands partial acknowledgments.
+The status error names the issue and its current project and asks for matching
+push access and actor. Independent events reach the hub across later pages,
+while events that depend on a rejected creation or move wait for enrollment. Push rejection
+does not stop the pull phase, but a source-only spoke's pull remains blocked
+when it receives the move until the destination is available.
+
+Join the named project or update its binding to allow push with the same actor as the source. The next sync retries the push.
+The event keeps its original UID and content hash. Until recovery, the durable
+push cursor stays before the earliest rejected event. The spoke records later accepted events to suppress duplicate local notifications.
+The status diagnostic counts the other events the hub acknowledged.
+
+Missing enrollment alone does not create a quarantine or offer a skip action. A later poisoned batch enters blocking quarantine. Skipping it abandons only that batch's events. Older peers keep atomic batch
+failure. Adoption snapshot
+baselines remain atomic: a missing enrollment keeps the whole baseline pending
+until joining allows its original snapshots to retry.
 
 Inspect the retained event range and error before choosing any disposition:
 
