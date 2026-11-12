@@ -168,9 +168,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 					owners[uid] = other.uid
 				}
 			}
-			for uid, projectUID := range moveOwners {
-				owners[uid] = projectUID
-			}
+			maps.Copy(owners, moveOwners)
 			events, err = filterRelayLinkEvents(events, m.relayOrigins, owners)
 			if err != nil {
 				return preparedFederationRebuild{}, err
