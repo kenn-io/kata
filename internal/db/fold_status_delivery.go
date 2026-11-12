@@ -26,7 +26,14 @@ func ReconcileFoldStatusIntent(previous, current FoldIssue, pendingUID string, a
 	sort.SliceStable(ordered, func(i, j int) bool { return compareClock(clockOf(ordered[i]), clockOf(ordered[j])) < 0 })
 	projection.noteRestatedIssues(ordered)
 	for _, event := range ordered {
-		if compareClock(clockOf(event), previous.StatusClock) <= 0 || issueUID(event, PayloadMap(event.Payload)) != current.UID {
+		if issueUID(event, PayloadMap(event.Payload)) != current.UID {
+			continue
+		}
+		if compareClock(clockOf(event), previous.StatusClock) <= 0 {
+			// The skipped history still decides which copies bound the rest.
+			if event.Type == "issue.created" || event.Type == "issue.snapshot" {
+				projection.enterBaselineStretch(current.UID, clockOf(event))
+			}
 			continue
 		}
 		switch event.Type {

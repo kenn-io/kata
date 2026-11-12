@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"time"
 )
@@ -44,6 +45,11 @@ func FederationMoveBaselineEvents(events []FoldEvent) []FoldEvent {
 			switch event.Type {
 			case "issue.created", "issue.snapshot":
 				continue
+			case RepeatedImportEventType:
+				// The baseline holds every comment the hub had when it was
+				// written, with later edits. A copy before it keeps only the
+				// comments the baseline does not cover.
+				event = withoutCoveredRestatedComments(event, comments)
 			case "issue.commented", "issue.comment_edited":
 				uid, body, version := federationCommentEditVersion(event)
 				comment, covered := comments[federationBaselineCommentKey{event.IssueUID, uid}]
@@ -58,6 +64,34 @@ func FederationMoveBaselineEvents(events []FoldEvent) []FoldEvent {
 }
 
 type federationBaselineCommentKey struct{ issue, comment string }
+
+func withoutCoveredRestatedComments(event FoldEvent, covered map[federationBaselineCommentKey]federationBaselineComment) FoldEvent {
+	payload := PayloadMap(event.Payload)
+	var comments []jsontext.Value
+	if json.Unmarshal(payload["comments"], &comments) != nil || len(comments) == 0 {
+		return event
+	}
+	kept := make([]jsontext.Value, 0, len(comments))
+	for _, comment := range comments {
+		uid, _ := StringValue(PayloadMap(comment)["comment_uid"])
+		if _, ok := covered[federationBaselineCommentKey{event.IssueUID, uid}]; !ok {
+			kept = append(kept, comment)
+		}
+	}
+	if len(kept) == len(comments) {
+		return event
+	}
+	rewritten, err := json.Marshal(kept)
+	if err != nil {
+		return event
+	}
+	payload["comments"] = rewritten
+	if rewritten, err = json.Marshal(payload, json.Deterministic(true)); err != nil {
+		return event
+	}
+	event.Payload = rewritten
+	return event
+}
 
 type federationBaselineComment struct {
 	body         string

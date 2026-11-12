@@ -525,3 +525,31 @@ func TestRepeatedImportEventRequiresTheFeature(t *testing.T) {
 	assert.Equal(t, RepeatedAdoptionEventFeature, wire)
 	assert.Empty(t, EventRequiredFeatures("issue.updated"))
 }
+
+// A hub can refresh an issue's snapshot after a copy won. A replica that
+// starts from that snapshot never sees the copy's event, so the hub's replay
+// of its full history must treat later events as that replica does: an older
+// edit that arrives after the snapshot applies in event order.
+func TestRepeatedImportEventRulesEndAtALaterSnapshot(t *testing.T) {
+	accepted := testEvent(RepeatedImportEventType, 10, `{"title":"copy title","status":"open","comments":[
+ {"comment_uid":"comment-1","author":"alice","body":"copy text","created_at":"2026-05-01T10:00:00.000Z","edited_at":"2026-05-30T10:00:00.000Z"}],"updated_at":"2026-06-01T09:00:00.000Z"}`)
+	accepted.CreatedAt = "2026-06-02T09:00:00.000Z"
+	refreshed := testEvent("issue.snapshot", 20, `{"uid":"issue-1","title":"copy title","status":"open","comments":[
+ {"comment_uid":"comment-1","author":"alice","body":"copy text","created_at":"2026-05-01T10:00:00.000Z","edited_at":"2026-05-30T10:00:00.000Z"}],"updated_at":"2026-06-01T09:00:00.000Z"}`)
+	refreshed.CreatedAt = "2026-06-03T09:00:00.000Z"
+	delayedTitle := testEvent("issue.updated", 30, `{"title":"delayed title","updated_at":"2026-05-20T09:00:00.000Z"}`)
+	delayedComment := testEvent("issue.comment_edited", 31, `{"comment_uid":"comment-1","body":"delayed text","edited_at":"2026-05-10T10:00:00.000Z"}`)
+	sinceSnapshot := []FoldEvent{refreshed, delayedTitle, delayedComment}
+	full := append([]FoldEvent{
+		testEvent("issue.snapshot", 1, `{"uid":"issue-1","title":"t","status":"open","comments":[
+ {"comment_uid":"comment-1","author":"alice","body":"first","created_at":"2026-05-01T10:00:00.000Z"}],"updated_at":"2026-05-01T10:00:00.000Z"}`),
+		accepted,
+	}, sinceSnapshot...)
+
+	replica, hub := FoldEvents(sinceSnapshot), FoldEvents(full)
+	assert.Equal(t, "delayed title", replica.Issues["issue-1"].Title)
+	assert.Equal(t, replica.Issues["issue-1"].Title, hub.Issues["issue-1"].Title)
+	assert.Equal(t, "delayed text", replica.Comments["comment-1"].Body)
+	assert.Equal(t, replica.Comments["comment-1"].Body, hub.Comments["comment-1"].Body)
+	assert.Equal(t, replica.Issues["issue-1"].UpdatedAt, hub.Issues["issue-1"].UpdatedAt)
+}

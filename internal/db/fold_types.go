@@ -40,6 +40,9 @@ type FoldProjection struct {
 	// restatedIssues names the issues that have a whole-copy event in the
 	// events being folded. Only their changes are kept in sinceBaseline.
 	restatedIssues map[string]struct{}
+	// restatedAfter marks each creation or snapshot that a whole-copy event
+	// follows before the issue's next creation or snapshot.
+	restatedAfter map[foldBaselineKey]bool
 	// sinceBaseline holds, per such issue, the changes applied since its
 	// baseline that a whole copy would replace. A copy that replays after a
 	// newer change applies underneath it: the copy is applied and the newer

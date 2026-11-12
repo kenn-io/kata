@@ -60,22 +60,57 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 	return p
 }
 
+// foldBaselineKey names one creation or snapshot of an issue in a replay.
+type foldBaselineKey struct {
+	issueUID string
+	clock    FoldClock
+}
+
 // noteRestatedIssues records which issues have a whole-copy event, so that
-// only their changes are kept for a copy that replays after them.
+// only their changes are kept for a copy that replays after them. A creation
+// or snapshot starts the issue again, and a replica that begins at that
+// snapshot never sees a copy before it. The record is therefore kept for each
+// stretch between baselines: a copy affects only the events that share its
+// stretch.
 func (p *FoldProjection) noteRestatedIssues(events []FoldEvent) {
+	stretch := map[string]foldBaselineKey{}
 	for _, e := range events {
-		if e.Type != RepeatedImportEventType {
-			continue
-		}
-		if uid := issueUID(e, nil); uid != "" {
+		switch e.Type {
+		case "issue.created", "issue.snapshot":
+			if uid := issueUID(e, PayloadMap(e.Payload)); uid != "" {
+				stretch[uid] = foldBaselineKey{uid, clockOf(e)}
+			}
+		case RepeatedImportEventType:
+			uid := issueUID(e, nil)
+			if uid == "" {
+				continue
+			}
 			if p.restatedIssues == nil {
 				p.restatedIssues = map[string]struct{}{}
+				p.restatedAfter = map[foldBaselineKey]bool{}
 				p.sinceBaseline = map[string][]FoldEvent{}
 				p.hasBaseline = map[string]bool{}
 				p.keptTouchedAt = map[string]string{}
 			}
-			p.restatedIssues[uid] = struct{}{}
+			if baseline, started := stretch[uid]; started {
+				p.restatedAfter[baseline] = true
+			} else {
+				p.restatedIssues[uid] = struct{}{}
+			}
 		}
+	}
+}
+
+// enterBaselineStretch records whether a copy follows this creation or
+// snapshot before the issue's next one.
+func (p *FoldProjection) enterBaselineStretch(uid string, clock FoldClock) {
+	if p.restatedIssues == nil {
+		return
+	}
+	if p.restatedAfter[foldBaselineKey{uid, clock}] {
+		p.restatedIssues[uid] = struct{}{}
+	} else {
+		delete(p.restatedIssues, uid)
 	}
 }
 
@@ -110,11 +145,18 @@ func (p *FoldProjection) applyEvent(e FoldEvent, payload map[string]jsontext.Val
 	case "issue.created", "issue.snapshot":
 		p.applyIssueCreated(e)
 		// A creation or snapshot is the whole issue again, so no earlier
-		// copy or change bounds what follows it.
+		// copy or change bounds what follows it. A replica that starts here
+		// replays the later events without the copy, and so does this one.
 		if uid := issueUID(e, payload); uid != "" {
+			if issue, held := p.Issues[uid]; held && issue.RestatedAt != "" {
+				issue.RestatedAt = ""
+				p.Issues[uid] = issue
+			}
+			p.enterBaselineStretch(uid, clockOf(e))
 			if _, restated := p.restatedIssues[uid]; restated {
 				p.sinceBaseline[uid] = nil
 				p.hasBaseline[uid] = true
+				delete(p.keptTouchedAt, uid)
 			}
 		}
 	case "issue.updated":
