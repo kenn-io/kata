@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -74,6 +76,7 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 	t.Run("marker write failure", func(t *testing.T) {
 		setupKataEnv(t)
 		home := clearLocalEmbeddingsEnv(t)
+		t.Setenv("KATA_SERVER", "")
 		stubLocalEmbeddingsInstall(t)
 		oldEndpoint := localEmbeddingsEndpoint
 		t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
@@ -84,14 +87,15 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 			return "http://127.0.0.1:12345/v1", nil
 		}
 		marker := filepath.Join(home, ".kenn", "embeddings", "search-by-meaning")
-		require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0700))
-		if err := os.Symlink("missing", marker); err != nil {
-			t.Skipf("symlink unavailable: %v", err)
-		}
-		t.Setenv("KATA_SERVER", "")
+		require.NoError(t, os.MkdirAll(marker, 0o700))
+		var logs bytes.Buffer
+		original := slog.Default()
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+		t.Cleanup(func() { slog.SetDefault(original) })
 		_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-		require.ErrorContains(t, err, "sharing could not be confirmed")
-		require.ErrorContains(t, err, "record search by meaning choice")
+		require.NoError(t, err)
+		require.Contains(t, logs.String(), "could not confirm that the shared search by meaning choice was saved")
+		require.Contains(t, logs.String(), "record search by meaning choice")
 		cfg, err := config.ReadSearchConfig()
 		require.NoError(t, err)
 		require.True(t, cfg.Embeddings.Local)

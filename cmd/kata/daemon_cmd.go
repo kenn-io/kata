@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/v2"
 	"errors"
@@ -74,6 +75,10 @@ const (
 // daemonOwnerLockWait lets a replaced daemon finish its drain, which outlasts
 // its runtime record, before startup refuses its store. A var for tests.
 var daemonOwnerLockWait = daemonRestartProcessWaitTimeout
+
+// daemonReadinessWait is the ordinary budget for a detached daemon that can
+// open its store to publish readiness. A var for tests.
+var daemonReadinessWait = 5 * time.Second
 
 var newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
 	return telemetry.NewReporterOrDisabled(opts)
@@ -505,7 +510,7 @@ func defaultLaunchDetachedDaemon(
 	var record kitdaemon.RuntimeRecord
 	adoptedConcurrentDaemon := false
 	// The child may first wait for a replaced daemon to release the store.
-	err = client.WaitForDaemonStartup(ctx, ownerLocks, daemonOwnerLockWait+5*time.Second, exited, func(context.Context) (bool, error) {
+	err = client.WaitForDaemonStartup(ctx, ownerLocks, daemonOwnerLockWait+daemonReadinessWait, exited, func(context.Context) (bool, error) {
 		var ok bool
 		record, ok = liveDaemonRecord(dataDir, pid)
 		if ok || !childExited.Load() {
@@ -900,6 +905,7 @@ func daemonRestartCmd() *cobra.Command {
 		listen           string
 		insecureReadonly bool
 		noAutoToken      bool
+		generation       string
 	)
 	cmd := &cobra.Command{
 		Use:   "restart",
@@ -912,11 +918,20 @@ func daemonRestartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			running, release, err := lockLiveDaemons(cmd.Context(), ns, cmd.ErrOrStderr())
+			lockCtx, cancel := restartLockContext(cmd.Context(), generation)
+			defer cancel()
+			running, release, err := lockLiveDaemons(lockCtx, ns, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
 			defer release()
+			if generation != "" {
+				record, err := selectRestartGeneration(running, generation)
+				if err != nil {
+					return err
+				}
+				running = []kitdaemon.RuntimeRecord{record}
+			}
 			if err := requireRestartable(running); err != nil {
 				return err
 			}
@@ -980,6 +995,8 @@ func daemonRestartCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noAutoToken, "no-auto-token", false, "disable creating a persisted daemon token; eligible existing tokens are still reused")
 	cmd.Flags().BoolVar(&insecureReadonly, "insecure-readonly", false,
 		"permit unauthenticated GETs on non-loopback TCP when no token is configured (DEV ONLY)")
+	cmd.Flags().StringVar(&generation, "generation", "", "restart only this daemon generation")
+	_ = cmd.Flags().MarkHidden("generation")
 	return cmd
 }
 
@@ -1275,6 +1292,7 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 // re-executes itself only after every listener and the runtime record have
 // been released.
 func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) error {
+	reapRestartHelper()
 	diagnostics, errorFile, closeLog := startDaemonLogging(ctx)
 	// Keep crash output alive during panic unwinding; close only on normal return.
 	restart := newDaemonRestart(diagnostics)
@@ -1674,6 +1692,25 @@ func runDaemonProcess(
 	localSetup := &localEmbeddingsSetup{
 		embeddings: dcfg.Search.Embeddings, idle: idleAdmission,
 		start: func(work func(context.Context)) bool { return workers.Go(func() { work(ctx) }) },
+	}
+	if restart != nil {
+		localSetup.restart = func() error {
+			var output bytes.Buffer
+			// The helper acquires the start lock before replacing this daemon.
+			return kitdaemon.StartDetached(context.WithoutCancel(ctx), kitdaemon.StartDetachedOptions{
+				Executable: restart.executable,
+				Args:       []string{"daemon", "restart", "--generation", restartGeneration(rec)},
+				Env:        os.Environ(), Stdout: &output, Stderr: &output,
+				AfterStart: func(cmd *exec.Cmd) { restart.helperPID.Store(int64(cmd.Process.Pid)) },
+				Exited: func(err error) {
+					restart.helperPID.Store(0)
+					if err == nil {
+						return
+					}
+					localSetup.restartExited(fmt.Errorf("restart failed: %w: %s", err, strings.TrimSpace(output.String())))
+				},
+			})
+		}
 	}
 	if pg, ok := store.(*pgstore.Store); ok {
 		localSetup.vectorReady = func(ctx context.Context) error {

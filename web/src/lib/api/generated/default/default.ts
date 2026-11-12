@@ -833,6 +833,60 @@ export const turnOnLocalEmbeddings = async (
   })
 }
 
+export type restartLocalEmbeddingsResponse202 = {
+  data: void
+  status: 202
+}
+
+export type restartLocalEmbeddingsResponse403 = {
+  data: ErrorEnvelope
+  status: 403
+}
+
+export type restartLocalEmbeddingsResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type restartLocalEmbeddingsResponse409 = {
+  data: ErrorEnvelope
+  status: 409
+}
+
+export type restartLocalEmbeddingsResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type restartLocalEmbeddingsResponseSuccess = restartLocalEmbeddingsResponse202 & {
+  headers: Headers
+}
+export type restartLocalEmbeddingsResponseError = (
+  | restartLocalEmbeddingsResponse403
+  | restartLocalEmbeddingsResponse404
+  | restartLocalEmbeddingsResponse409
+  | restartLocalEmbeddingsResponse500
+) & {
+  headers: Headers
+}
+
+export type restartLocalEmbeddingsResponse =
+  | restartLocalEmbeddingsResponseSuccess
+  | restartLocalEmbeddingsResponseError
+
+export const getRestartLocalEmbeddingsUrl = () => {
+  return `/api/v1/embeddings/local/restart`
+}
+
+export const restartLocalEmbeddings = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<restartLocalEmbeddingsResponse> => {
+  return orvalFetch<restartLocalEmbeddingsResponse>(getRestartLocalEmbeddingsUrl(), {
+    ...options,
+    method: 'POST',
+  })
+}
+
 export type pollEventsResponse200 = {
   data: PollEventsBody
   status: 200

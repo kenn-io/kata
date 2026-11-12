@@ -1,13 +1,15 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-11
+last_edited: 2026-11-12
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Restart a local daemon from Settings after turning on search by meaning. Confirm the interruption for every project and client, then reopen `kata ui` if the browser address changes. The API reports the `restart` job state and `restart_in_progress` during the handoff.
 
 - Use `kata daemon status` in scripts to check the selected daemon's readiness.
   It exits 0 only for a ready selected daemon. Stopped or unavailable
@@ -20,7 +22,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Recover automatically when the web UI's first daemon roster, workspace, or teams read fails briefly. Retry and Refresh teams remain available after persistent failures or refusals.
 
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
-- Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. Kata shares its choice after setup succeeds and reports when sharing cannot be confirmed. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
+- Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot confirm the shared choice was saved, setup succeeds and Kata logs the failure; other apps may miss the choice if it wasn't saved. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index
@@ -35,6 +37,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Keep search focus and text when keyboard selection opens task detail.
 - Keep local writes responsive while a federation pull updates projects with long histories.
+- Keep local writes responsive while moved issues and claim changes trigger a federation rebuild.
 - See why Docbank attachments fail when the daemon cannot read its own key.
   With daemon API 0.44.0 or newer, uploads, reads, and links return HTTP 503
   `docbank_key_unavailable` with the reason, such as

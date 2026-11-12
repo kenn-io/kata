@@ -1821,12 +1821,14 @@ const (
 
 // LocalEmbeddingsStatus reports daemon-wide search setup and its current work.
 type LocalEmbeddingsStatus struct {
-	Provider        string                   `json:"provider" enum:"none,ollama,built_in,other"`
-	DownloadBytes   int64                    `json:"download_bytes"`
-	OllamaAvailable bool                     `json:"ollama_available"`
-	CanChange       bool                     `json:"can_change"`
-	Job             *LocalEmbeddingsJob      `json:"job,omitempty"`
-	Indexing        *LocalEmbeddingsIndexing `json:"indexing,omitempty"`
+	Provider          string                   `json:"provider" enum:"none,ollama,built_in,other"`
+	DownloadBytes     int64                    `json:"download_bytes"`
+	OllamaAvailable   bool                     `json:"ollama_available"`
+	CanChange         bool                     `json:"can_change"`
+	CanRestart        bool                     `json:"can_restart,omitempty"`
+	RestartInProgress bool                     `json:"restart_in_progress,omitempty"`
+	Job               *LocalEmbeddingsJob      `json:"job,omitempty"`
+	Indexing          *LocalEmbeddingsIndexing `json:"indexing,omitempty"`
 }
 
 // LocalEmbeddingsJob reports the current installation or restart.
