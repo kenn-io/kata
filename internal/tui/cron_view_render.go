@@ -235,6 +235,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			if uid := deref(j.Definition.Action.WorkflowUID); uid != "" {
 				cronDefinitionLink(&d, p, uid, "", true)
 			}
+			cronStatsField(&d, m.cron.stats, ref.uid)
 			def := j.Definition
 			if deref(def.Action.Prompt) != "" {
 				d.section("Prompt")

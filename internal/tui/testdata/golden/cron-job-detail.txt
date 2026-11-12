@@ -9,6 +9,7 @@ kata カタ [jobs] runs workflows
             2026-05-04 07:00 UTC
   Action:   workflow Summary flow
   Workflow: Summary flow
+  30d:      42 runs · 92% ok · median 3m12s · p95 8m40s · failing ×3
 
   Definition
   {
@@ -18,7 +19,6 @@ kata カタ [jobs] runs workflows
     },
     "catchup": "skip",
     "enabled": true,
-    "issue": {
 
  j/k move▕ ↵/l follow▕ h/esc back▕ n/e new/edit▕ r refresh▕ 1-4 tabs▕ ? help
  q quit

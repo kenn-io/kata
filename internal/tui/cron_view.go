@@ -41,6 +41,8 @@ type cronData struct {
 	jobsErr             error
 	workflowsErr        error
 	runsErr             error
+	// stats answers the open job detail's read made with this refresh.
+	stats *cronStatsMsg
 }
 type cronLoadedMsg cronData
 
@@ -67,6 +69,7 @@ type cronState struct {
 	conn, scope     uint64
 	form            *cronForm
 	editSeq         uint64
+	stats           cronStats
 }
 
 // Synchronize after every update and retain visible records during refresh.
@@ -81,10 +84,29 @@ func (m Model) cronSync() (Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.cron.data != nil && m.cron.data.events == m.cron.events {
-		return m, nil
+		if !m.cronStatsDue() {
+			return m, nil
+		}
+		var stats func() cronStatsMsg
+		m, stats = m.cronStatsBegin()
+		return m, func() tea.Msg { return stats() }
 	}
 	m.cron.out = true
-	return m, m.fetchCron()
+	// An open job detail's statistics refresh with the runs, in the same read.
+	fetch := m.fetchCron()
+	var stats func() cronStatsMsg
+	m, stats = m.cronStatsBegin()
+	if stats == nil {
+		return m, fetch
+	}
+	return m, func() tea.Msg {
+		loaded, ok := fetch().(cronLoadedMsg)
+		if ok {
+			answer := stats()
+			loaded.stats = &answer
+		}
+		return loaded
+	}
 }
 func (m Model) fetchCron() tea.Cmd {
 	reader, id := m.api, m.scope.projectID
@@ -133,6 +155,10 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 		return m
 	}
 	data := cronData(msg)
+	if data.stats != nil {
+		m = m.cronStatsLoaded(*data.stats)
+		data.stats = nil
+	}
 	if previous := m.cron.data; previous != nil {
 		if data.jobsErr != nil {
 			data.jobs = previous.jobs

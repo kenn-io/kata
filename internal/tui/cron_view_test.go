@@ -331,8 +331,22 @@ func TestCronDocumentContentAndCursor(t *testing.T) {
 // Only the read boundary is doubled; assertions exercise Update and rendering.
 type cronReadTestAPI struct {
 	KataAPI
-	data  cronData
-	calls int
+	data      cronData
+	calls     int
+	stats     map[string]*generated.CronRunStatsResponseBody
+	statsErr  error
+	statsUIDs []string
+}
+
+func (a *cronReadTestAPI) CronRunStats(_ context.Context, id int64, jobUID string) (*generated.CronRunStatsResponseBody, error) {
+	if id != 7 {
+		return nil, fmt.Errorf("unexpected project %d", id)
+	}
+	a.statsUIDs = append(a.statsUIDs, jobUID)
+	if a.statsErr != nil {
+		return nil, a.statsErr
+	}
+	return a.stats[jobUID], nil
 }
 
 func (a *cronReadTestAPI) ListCronJobs(_ context.Context, id int64) ([]generated.CronJob, error) {
@@ -531,7 +545,7 @@ func TestCronFilterAndTabState(t *testing.T) {
 
 func TestSnapshot_Cron(t *testing.T) {
 	defer snapshotInit(t)()
-	for _, name := range []string{"jobs", "jobs-filter", "jobs-unavailable", "runs", "job-detail", "run-detail", "workflow-detail", "help", "all-projects"} {
+	for _, name := range []string{"jobs", "jobs-filter", "jobs-unavailable", "runs", "job-detail", "job-detail-stats-unsupported", "run-detail", "workflow-detail", "help", "all-projects"} {
 		t.Run(name, func(t *testing.T) {
 			m := cronFixture(t)
 			switch name {
@@ -545,6 +559,10 @@ func TestSnapshot_Cron(t *testing.T) {
 				m = sendRune(m, '3')
 			case "job-detail":
 				m = sendKey(m, tea.KeyEnter)
+				m, _ = updateModel(m, cronStatsMsg{conn: m.connGen, scope: m.scopeGen, seq: m.cron.stats.seq, body: cronStatsFixture(42)})
+			case "job-detail-stats-unsupported":
+				m = sendKey(m, tea.KeyEnter)
+				m, _ = updateModel(m, cronStatsMsg{conn: m.connGen, scope: m.scopeGen, seq: m.cron.stats.seq, err: apiVersionError{"run statistics require daemon API 0.47.0 or newer"}})
 			case "run-detail":
 				m = sendRune(m, '3')
 				m = sendKey(m, tea.KeyEnter)

@@ -23,6 +23,7 @@ type cronAPI interface {
 	ShowCronWorkflow(ctx context.Context, projectID int64, uid string) (db.CronWorkflow, error)
 	PutCronWorkflow(ctx context.Context, projectID int64, uid string, write kataapi.PutCronWorkflowBody) error
 	ListCronRuns(context.Context, int64) ([]generated.CronRun, error)
+	CronRunStats(ctx context.Context, projectID int64, jobUID string) (*generated.CronRunStatsResponseBody, error)
 	readCronParent(ctx context.Context, projectID int64, parentUID string) (cronParent, error)
 }
 
@@ -96,6 +97,32 @@ func (c *Client) ListCronRuns(ctx context.Context, projectID int64) ([]generated
 		return nil, err
 	}
 	return wire.JSON200.Runs, nil
+}
+
+// cronStatsAPIVersion is the first daemon API that serves run statistics.
+const cronStatsAPIVersion = "0.47.0"
+
+// CronRunStats reads one job's run statistics over the daemon's default
+// window, the 30 days ending now.
+func (c *Client) CronRunStats(ctx context.Context, projectID int64, jobUID string) (*generated.CronRunStatsResponseBody, error) {
+	client, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	if err := requireAPIVersion(ctx, client, cronStatsAPIVersion, "run statistics require daemon API "+cronStatsAPIVersion+" or newer"); err != nil {
+		return nil, err
+	}
+	wire, callErr := client.GetCronRunStatsWithResponse(ctx, &generated.GetCronRunStatsRequestOptions{
+		PathParams: &generated.GetCronRunStatsPath{ProjectID: projectID},
+		Query:      &generated.GetCronRunStatsQuery{JobUID: &jobUID},
+	})
+	if wire == nil {
+		return nil, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
+		return nil, err
+	}
+	return wire.JSON200, nil
 }
 
 // cronParent is what a native job's parent issue tells the Jobs tab: whether
