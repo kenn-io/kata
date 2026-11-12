@@ -161,7 +161,8 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 				return
 			}
 			if !supplied {
-				api.WriteEnvelope(w, http.StatusUnauthorized, "hub_signing_required", "hub requires signed requests")
+				// Older bridges treat other 401, 403, and 404 responses as revoked grants.
+				api.WriteEnvelope(w, http.StatusPreconditionRequired, "hub_signing_required", "hub requires signed requests")
 				return
 			}
 			r = r.WithContext(ctx)
