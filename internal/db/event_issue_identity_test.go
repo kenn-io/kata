@@ -44,7 +44,7 @@ func TestRemoteEventIssueUIDReadsOnlyTheHeader(t *testing.T) {
 		payload string
 		message string
 	}{
-		{name: "creation names its issue only in the payload", kind: "issue.created", payload: `{"uid":"` + issue + `"}`},
+		{name: "creation names its issue only in the payload", kind: "issue.created", payload: document, message: "issue.created has no issue_uid in its header"},
 		{name: "label change names its issue only in the payload", kind: "issue.labeled", payload: `{"issue_uid":"` + issue + `"}`},
 		{name: "issue event names no issue", kind: "issue.updated", payload: `{"body":"text"}`},
 		{name: "issue event has an empty header", kind: "issue.updated", header: header(""), payload: `{"body":"text"}`},

@@ -170,6 +170,30 @@ func TestRepeatedSnapshotDeltasKeepAnImportedCommentEdit(t *testing.T) {
 	assert.Equal(t, "2026-05-05T10:00:00.000Z", comment.CreatedAt)
 }
 
+// Event content hashes cover the payload bytes, so the field order of the
+// hub's event for a winning copy is wire format. This pins it with every field
+// set.
+func TestRepeatedSnapshotDeltasRestateInWireOrder(t *testing.T) {
+	current := `{"uid":"issue-1","title":"t","status":"open","updated_at":"2026-05-01T09:00:00.000Z"}`
+	incoming := `{"uid":"issue-1","short_id":"abcd","title":"copy title","body":"copy body","author":"alice",
+"owner":"bob","assignment_expires_on":"2026-06-30","priority":2,"status":"closed","closed_reason":"done",
+"closed_at":"2026-06-01T08:00:00.000Z","deleted_at":"2026-06-01T08:30:00.000Z","metadata":{"team":"core","area":"sync"},
+"labels":["stale","bug"],
+"comments":[{"comment_uid":"comment-1","author":"alice","teammate":"helper","body":"first","created_at":"2026-05-01T10:00:00.000Z",
+ "edited_at":"2026-05-02T10:00:00.000Z","reply_to_uid":"comment-0","reply_kind":"answer"}],
+"created_at":"2026-05-01T09:00:00.000Z","updated_at":"2026-06-01T09:00:00.000Z"}`
+	deltas, err := RepeatedSnapshotDeltas("importer", jsontext.Value(current), jsontext.Value(incoming), repeatedImportLookups())
+	require.NoError(t, err)
+	require.Len(t, deltas, 1)
+	assert.Equal(t, RepeatedImportEventType, deltas[0].Type)
+	assert.Equal(t, `{"title":"copy title","body":"copy body","owner":"bob","assignment_expires_on":"2026-06-30","priority":2,`+
+		`"status":"closed","closed_reason":"done","closed_at":"2026-06-01T08:00:00.000Z","deleted_at":"2026-06-01T08:30:00.000Z",`+
+		`"metadata":{"area":"sync","team":"core"},"labels":["bug","stale"],`+
+		`"comments":[{"comment_uid":"comment-1","author":"alice","teammate":"helper","body":"first","created_at":"2026-05-01T10:00:00.000Z",`+
+		`"edited_at":"2026-05-02T10:00:00.000Z","reply_to_uid":"comment-0","reply_kind":"answer"}],`+
+		`"updated_at":"2026-06-01T09:00:00.000Z"}`, string(deltas[0].Payload))
+}
+
 // A link from a winning copy must not close a parent cycle, and two copies in
 // one push must not both add the same link.
 func TestRepeatedSnapshotDeltasRefuseParentCycleAndRepeatedLink(t *testing.T) {
