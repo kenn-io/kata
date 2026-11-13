@@ -83,32 +83,6 @@ func (l *RepeatedSnapshotLookups) acceptsParent(childUID, parentUID string) (boo
 	return false, nil
 }
 
-// repeatedSnapshotLink is one link entry of an issue.snapshot payload.
-type repeatedSnapshotLink struct {
-	Type       string `json:"type"`
-	ToIssueUID string `json:"to_issue_uid"`
-	Incoming   bool   `json:"incoming"`
-	Author     string `json:"author"`
-}
-
-type repeatedSnapshotDoc struct {
-	UID                 string                  `json:"uid"`
-	Title               string                  `json:"title"`
-	Body                string                  `json:"body"`
-	Owner               *string                 `json:"owner"`
-	AssignmentExpiresOn *string                 `json:"assignment_expires_on"`
-	Priority            *int64                  `json:"priority"`
-	Status              string                  `json:"status"`
-	ClosedReason        *string                 `json:"closed_reason"`
-	ClosedAt            *string                 `json:"closed_at"`
-	DeletedAt           *string                 `json:"deleted_at"`
-	Metadata            jsontext.Value          `json:"metadata"`
-	Labels              []string                `json:"labels"`
-	Links               []repeatedSnapshotLink  `json:"links"`
-	Comments            []repeatedImportComment `json:"comments"`
-	UpdatedAt           string                  `json:"updated_at"`
-}
-
 // RepeatedSnapshotWins reports whether an adoption snapshot of an issue the
 // hub project already holds is strictly newer than the hub's copy. The data's
 // updated_at decides, compared as a time at the millisecond precision both
@@ -177,7 +151,7 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 	if lookups == nil {
 		lookups = &RepeatedSnapshotLookups{}
 	}
-	var have, want repeatedSnapshotDoc
+	var have, want IssueDocumentPayload
 	if err := json.Unmarshal(current, &have); err != nil {
 		return nil, fmt.Errorf("decode current issue snapshot: %w", err)
 	}
@@ -211,7 +185,11 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 	}
 	for _, comment := range want.Comments {
 		if comment.CommentUID != "" {
-			restated.Comments = append(restated.Comments, comment)
+			restated.Comments = append(restated.Comments, repeatedImportComment{
+				CommentUID: comment.CommentUID, Author: comment.Author, Teammate: comment.Teammate,
+				Body: comment.Body, CreatedAt: comment.CreatedAt, EditedAt: comment.EditedAt,
+				ReplyToUID: comment.ReplyToUID, ReplyKind: comment.ReplyKind,
+			})
 		}
 	}
 	if err := emit(RepeatedSnapshotDelta{Type: RepeatedImportEventType, Actor: actor}, restated); err != nil {
@@ -272,7 +250,7 @@ func RepeatedSnapshotDeltas(actor string, current, incoming jsontext.Value, look
 }
 
 // snapshotLinkKey resolves one snapshot link entry to its stored direction.
-func snapshotLinkKey(issueUID string, link repeatedSnapshotLink) FoldLinkKey {
+func snapshotLinkKey(issueUID string, link IssueDocumentLink) FoldLinkKey {
 	from, to := issueUID, link.ToIssueUID
 	if link.Incoming && link.Type != "related" {
 		from, to = to, from

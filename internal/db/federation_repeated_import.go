@@ -37,28 +37,26 @@ func RepeatedSnapshotSQLLookups(ctx context.Context, tx federationHistoryQuery, 
 		if input.Event.Type != "issue.created" && input.Event.Type != "issue.snapshot" {
 			continue
 		}
-		var doc repeatedSnapshotDoc
+		issueUID := EventIssueUID(input.Event.IssueUID)
+		if issueUID == "" {
+			continue
+		}
+		var doc IssueDocumentPayload
 		if err := json.Unmarshal(input.Event.Payload, &doc); err != nil {
 			continue
 		}
-		if doc.UID == "" && input.Event.IssueUID != nil {
-			doc.UID = *input.Event.IssueUID
-		}
-		if doc.UID == "" {
-			continue
-		}
-		batch[doc.UID] = struct{}{}
+		batch[issueUID] = struct{}{}
 		// Only a fresh snapshot establishes its parent links by being stored.
 		// A repeated snapshot's parent is a request, which
 		// RepeatedSnapshotDeltas accepts or refuses and then reserves.
 		fresh, checked := false, false
 		for _, link := range doc.Links {
-			key := snapshotLinkKey(doc.UID, link)
+			key := snapshotLinkKey(issueUID, link)
 			if key.Type != "parent" || link.ToIssueUID == "" {
 				continue
 			}
 			if !checked {
-				fresh, checked = !held(doc.UID), true
+				fresh, checked = !held(issueUID), true
 			}
 			if fresh {
 				lookups.SetParent(key.FromUID, key.ToUID)

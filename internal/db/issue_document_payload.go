@@ -71,8 +71,8 @@ var issueDocumentRequiredFields = []string{
 
 // validateIssueDocumentPayload rejects an incoming issue.created or
 // issue.snapshot payload that lacks a required field, leaves one empty other
-// than the body, does not decode as an IssueDocumentPayload, or names a
-// different issue than the event header.
+// than the body, or does not decode as an IssueDocumentPayload. Its caller,
+// RemoteEventIssueUID, has already required uid to equal the event header.
 func validateIssueDocumentPayload(event RemoteEvent) error {
 	invalid := func(format string, args ...any) error {
 		return fmt.Errorf("%w: %s payload %s",
@@ -89,7 +89,7 @@ func validateIssueDocumentPayload(event RemoteEvent) error {
 		return invalid("is not an issue document: %v", err)
 	}
 	for field, value := range map[string]string{
-		"uid": document.UID, "short_id": document.ShortID, "title": document.Title,
+		"short_id": document.ShortID, "title": document.Title,
 		"author": document.Author, "status": document.Status, "created_at": document.CreatedAt,
 	} {
 		if value == "" {
@@ -98,9 +98,6 @@ func validateIssueDocumentPayload(event RemoteEvent) error {
 	}
 	if document.Metadata.Kind() != '{' {
 		return invalid("metadata is not an object")
-	}
-	if document.UID != EventIssueUID(event.IssueUID) {
-		return invalid("uid differs from its header issue_uid")
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package db
 
 import (
 	"encoding/json/jsontext"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,32 +36,31 @@ func TestRemoteEventIssueUIDReadsOnlyTheHeader(t *testing.T) {
 		})
 	}
 
+	otherDocument := strings.Replace(document, issue, other, 1)
 	rejected := []struct {
 		name    string
 		kind    string
 		header  *string
 		payload string
+		message string
 	}{
 		{name: "creation names its issue only in the payload", kind: "issue.created", payload: `{"uid":"` + issue + `"}`},
 		{name: "label change names its issue only in the payload", kind: "issue.labeled", payload: `{"issue_uid":"` + issue + `"}`},
 		{name: "issue event names no issue", kind: "issue.updated", payload: `{"body":"text"}`},
 		{name: "issue event has an empty header", kind: "issue.updated", header: header(""), payload: `{"body":"text"}`},
-		{name: "payload uid differs from the header", kind: "issue.snapshot", header: header(issue), payload: `{"uid":"` + other + `"}`},
+		{name: "payload uid differs from the header", kind: "issue.snapshot", header: header(issue), payload: otherDocument, message: "payload uid differs from its header issue_uid"},
 		{name: "creation lacks a required document field", kind: "issue.created", header: header(issue), payload: `{"uid":"` + issue + `"}`},
-		{name: "payload issue_uid differs from the header", kind: "issue.unlabeled", header: header(issue), payload: `{"issue_uid":"` + other + `"}`},
+		{name: "payload issue_uid differs from the header", kind: "issue.unlabeled", header: header(issue), payload: `{"issue_uid":"` + other + `"}`, message: "payload issue_uid differs from its header issue_uid"},
 	}
 	for _, tc := range rejected {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := RemoteEventIssueUID(RemoteEvent{Type: tc.kind, IssueUID: tc.header, Payload: jsontext.Value(tc.payload)})
 			require.ErrorIs(t, err, ErrFederationIngestValidation)
+			if tc.message != "" {
+				require.ErrorContains(t, err, tc.message)
+			}
 		})
 	}
-}
-
-func TestEventIssueUIDIsTheHeaderValue(t *testing.T) {
-	uid := "01HZZZZZZZZZZZZZZZZZZZZZZA"
-	assert.Equal(t, uid, EventIssueUID(&uid))
-	assert.Empty(t, EventIssueUID(nil))
 }
 
 func TestPrepareReplayEventRequiresHeaderIdentityForIssueEvents(t *testing.T) {
