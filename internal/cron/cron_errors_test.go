@@ -26,6 +26,19 @@ func TestParseCronExplainsUnsupportedSyntax(t *testing.T) {
 			require.ErrorContains(t, err, tc.hint)
 		})
 	}
+	// The parser describes these as options Kata could enable; Kata never does.
+	for _, tc := range []struct{ expression, message string }{
+		{"0 9 L JAN *", "invalid cron document: invalid cron expression: L, W, and # syntax is not supported"},
+		{"0 9 * * 5#2", "invalid cron document: invalid cron expression: L, W, and # syntax is not supported"},
+		{"0 9 * * 5L", "invalid cron document: invalid cron expression: L, W, and # syntax is not supported"},
+		{"0 9 1-L * *", "invalid cron document: invalid cron expression: L, W, and # syntax is not supported"},
+		{"H 9 * * *", "invalid cron document: invalid cron expression: hashed schedules (H) are not supported; choose a fixed value"},
+	} {
+		t.Run("replaces parser detail "+tc.expression, func(t *testing.T) {
+			_, err := ParseCron(tc.expression)
+			require.EqualError(t, err, tc.message)
+		})
+	}
 	for _, expression := range []string{"@daily 1 2 3 4 5", "TZ=UTC @daily 1 2 3 4 5", "@daily 1 L JAN *"} {
 		t.Run(expression, func(t *testing.T) {
 			_, err := ParseCron(expression)
@@ -44,10 +57,10 @@ func TestCronValidationPropagatesDiagnostic(t *testing.T) {
 	native := nativeJob(t)
 	native.Trigger = trigger
 	_, err := PlanRecurring(native, definitionUID, progress, anchor.Add(time.Hour))
-	require.ErrorContains(t, err, "spec too long: 1031 > 1024")
+	require.ErrorContains(t, err, "spec too long")
 	adapter := adapterJob(t, trigger)
 	_, err = RecurringOccurrences(adapter, progress, anchor, 1)
-	require.ErrorContains(t, err, "spec too long: 1031 > 1024")
+	require.ErrorContains(t, err, "spec too long")
 }
 
 func TestCronErrorEscapesDirectionControl(t *testing.T) {

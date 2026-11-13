@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-10
+last_edited: 2026-11-13
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -196,9 +196,11 @@ of week. It may instead be a descriptor such as `@hourly`, `@daily`, `@weekly`,
 - A step that starts at one weekday continues through 7, which is Sunday.
   `0 9 * * 5/2` runs on Fridays and Sundays.
 
-Rejected expressions include the parser's error. For common unsupported syntax,
-the error also describes Kata's five-field format or the unsupported feature.
-Use an interval trigger for native recurring jobs; adapter jobs accept `@every`.
+A rejected expression's error says why. For `L`, `W`, `#`, or `H` syntax, it
+names the unsupported feature. Otherwise it shows the parser's message, with a
+note on the five-field format, `@reboot`, or `@every` when one applies.
+Adapter jobs accept `@every`; native jobs use an interval trigger, as described
+in [Recurring child issues](#recurring-child-issues).
 
 Schedules follow the trigger timezone's daylight-saving transitions:
 

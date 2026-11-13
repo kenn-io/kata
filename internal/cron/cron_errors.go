@@ -1,7 +1,6 @@
 package cron
 
 import (
-	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
@@ -10,32 +9,29 @@ import (
 	"go.kenn.io/kata/internal/textsafe"
 )
 
-var (
-	dayOfMonthExtension = regexp.MustCompile(`(?i)(^|,)(L(-[0-9]+)?|LW|[0-9]+W)($|,)`)
-	dayOfWeekExtension  = regexp.MustCompile(`(?i)(^|,)(L|([0-9]+|SUN|MON|TUE|WED|THU|FRI|SAT)(L|#(L|[0-9]*)))($|,)`)
-	hashExtension       = regexp.MustCompile(`(?i)(^|,)H($|[(/,])`)
-)
+var hashExtension = regexp.MustCompile(`(?i)(^|,)H($|[(/,])`)
 
 // explainCron adds hints to parser errors without interpreting its error text.
+// For L, W, #, and H the parser says which option would enable the syntax;
+// Kata never enables them, so the hint replaces that text.
 func explainCron(expression string, err error) error {
 	_, spec, _, _ := splitCronDirective(expression)
 	fields := strings.Fields(spec)
-	var hint string
+	fiveFields := len(fields) == 5 && !strings.HasPrefix(spec, "@")
+	detail := safeCronDetail(err.Error())
 	switch {
 	case (len(fields) == 6 || len(fields) == 7) && !strings.HasPrefix(spec, "@"):
-		hint = "Kata uses five fields: minute, hour, day of month, month, and day of week"
+		detail += "; Kata uses five fields: minute, hour, day of month, month, and day of week"
 	case spec == "@reboot":
-		hint = "@reboot is not supported; use a schedule or interval trigger"
+		detail += "; @reboot is not supported; use a schedule or interval trigger"
 	case spec == "@every" || strings.HasPrefix(spec, "@every "):
-		hint = "adapter jobs can use @every 1s or longer; native recurring jobs use an interval trigger"
-	case len(fields) == 5 && !strings.HasPrefix(spec, "@") && (dayOfMonthExtension.MatchString(fields[2]) || dayOfWeekExtension.MatchString(fields[4])):
-		hint = "L, W, and # syntax is not supported"
-	case len(fields) == 5 && !strings.HasPrefix(spec, "@") && slices.ContainsFunc(fields, hashExtension.MatchString):
-		hint = "hashed schedules (H) are not supported; choose a fixed value"
-	}
-	detail := safeCronDetail(err.Error())
-	if hint != "" {
-		detail = fmt.Sprintf("%s; %s", detail, hint)
+		detail += "; adapter jobs can use @every 1s or longer; native recurring jobs use an interval trigger"
+	// No valid day of month contains L or W, and no valid day of week contains
+	// L or #; day names (SUN through SAT) have neither.
+	case fiveFields && (strings.ContainsAny(strings.ToUpper(fields[2]), "LW") || strings.ContainsAny(strings.ToUpper(fields[4]), "L#")):
+		detail = "L, W, and # syntax is not supported"
+	case fiveFields && slices.ContainsFunc(fields, hashExtension.MatchString):
+		detail = "hashed schedules (H) are not supported; choose a fixed value"
 	}
 	return invalid("invalid cron expression: " + detail)
 }

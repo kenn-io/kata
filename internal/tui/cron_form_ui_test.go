@@ -566,6 +566,7 @@ func TestCronValidationMessagesRemainVisible(t *testing.T) {
 		{"short", "invalid", 60, 24, false},
 		{"descriptor", "@" + strings.Repeat("x", 900), 80, 18, true},
 		{"every", "@every " + strings.Repeat("x", 900), 80, 24, true},
+		{"every short screen", "@every " + strings.Repeat("x", 900), 80, 9, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := executeRecord(`{}`)
