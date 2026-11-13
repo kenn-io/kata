@@ -523,7 +523,7 @@ func syncDirectSpoke(
 			}
 			inserted, err := store.InsertRemoteEvents(ctx, binding.ProjectID, batch)
 			if err != nil {
-				return fmt.Errorf("append pull page for project %s: %w", binding.HubProjectUID, err)
+				return err
 			}
 			for j, i := range pending {
 				deliver[i] = inserted[j]
@@ -626,10 +626,7 @@ func syncDirectSpoke(
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
 		}
-		if err := store.AdvanceFederationPullCursor(ctx, binding.ProjectID, body.NextAfterID); err != nil {
-			return fmt.Errorf("advance pull project %s cursor %d: %w", binding.HubProjectUID, body.NextAfterID, err)
-		}
-		return nil
+		return store.AdvanceFederationPullCursor(ctx, binding.ProjectID, body.NextAfterID)
 	}); err != nil {
 		return recordPullError(err)
 	}
