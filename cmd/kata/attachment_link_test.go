@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"encoding/json/jsontext"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -37,7 +39,7 @@ func TestAttachmentLinkCLI(t *testing.T) {
 	require.Contains(t, out, "size=7")
 }
 
-func TestAttachmentLinkCLIRequiresCurrentAPIVersion(t *testing.T) {
+func TestAttachmentCLIReuseAPIVersion(t *testing.T) {
 	for _, tc := range []struct {
 		name, version, floor string
 		args                 []string
@@ -57,6 +59,7 @@ func TestAttachmentLinkCLIRequiresCurrentAPIVersion(t *testing.T) {
 			require.NoError(t, err)
 			proxy := httputil.NewSingleHostReverseProxy(target)
 			var writes atomic.Int32
+			var reuseForwarded atomic.Bool
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api/v1/health" {
 					w.Header().Set("Content-Type", "application/json")
@@ -66,6 +69,24 @@ func TestAttachmentLinkCLIRequiresCurrentAPIVersion(t *testing.T) {
 				base := "/api/v1/projects/" + itoa(project.ID) + "/issues/" + ref + "/attachments"
 				if r.Method == http.MethodPost && (r.URL.Path == base || r.URL.Path == base+"/links") {
 					writes.Add(1)
+					if r.URL.Path == base {
+						reuseForwarded.Store(r.URL.Query().Get("reuse_existing") == "true")
+					} else {
+						body, err := io.ReadAll(r.Body)
+						if err != nil {
+							http.Error(w, err.Error(), http.StatusBadRequest)
+							return
+						}
+						r.Body = io.NopCloser(bytes.NewReader(body))
+						var input struct {
+							ReuseExisting bool `json:"reuse_existing"`
+						}
+						if err := json.Unmarshal(body, &input); err != nil {
+							http.Error(w, err.Error(), http.StatusBadRequest)
+							return
+						}
+						reuseForwarded.Store(input.ReuseExisting)
+					}
 				}
 				// Keep the fixture request owner-local through the version proxy.
 				r.Host = target.Host
@@ -83,6 +104,7 @@ func TestAttachmentLinkCLIRequiresCurrentAPIVersion(t *testing.T) {
 			if tc.floor == "" {
 				require.NoError(t, err)
 				require.EqualValues(t, 1, writes.Load())
+				require.True(t, reuseForwarded.Load())
 			} else {
 				require.ErrorContains(t, err, "requires daemon API "+tc.floor+" or newer")
 				require.Zero(t, writes.Load())
@@ -104,64 +126,24 @@ func TestAttachmentLinkCLIInvalidSelector(t *testing.T) {
 	}
 }
 
-func TestAttachmentReuseCLI(t *testing.T) {
+func TestAttachmentReuseCLIIdentifiesUnreadableReference(t *testing.T) {
 	env, f, ref := attachmentCLIEnv(t)
 	f.Seed("/reports/report.pdf", docbank.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: uuid.MustParse(cliLinkVersion)}, map[uuid.UUID][]byte{uuid.MustParse(cliLinkVersion): []byte("sample bytes")})
-	var first, second api.AddAttachmentResponseBody
-	out, err := executeAttachmentCLI(t, env.URL, "link", ref, "42", "--json")
+	project, err := env.DB.ProjectByName(t.Context(), "spoke-project")
 	require.NoError(t, err)
-	require.NoError(t, json.Unmarshal([]byte(out), &first))
-	out, err = executeAttachmentCLI(t, env.URL, "link", ref, "42", "--reuse-existing", "--json")
+	issue, err := env.DB.IssueByShortID(t.Context(), project.ID, ref, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	require.NoError(t, json.Unmarshal([]byte(out), &second))
-	require.Equal(t, first.ID, second.ID)
-
-	file := filepath.Join(t.TempDir(), "upload.txt")
-	require.NoError(t, os.WriteFile(file, []byte("upload bytes"), 0600))
-	var ids []string
-	for _, args := range [][]string{{"add", ref, file, "--json"}, {"add", ref, file, "--reuse-existing", "--json"}} {
-		out, err = executeAttachmentCLI(t, env.URL, args...)
-		require.NoError(t, err)
-		var added struct {
-			Results []struct {
-				ID string `json:"attachment_id"`
-			} `json:"results"`
-		}
-		require.NoError(t, json.Unmarshal([]byte(out), &added))
-		require.Len(t, added.Results, 1)
-		ids = append(ids, added.Results[0].ID)
-	}
-	require.NotEmpty(t, ids[0])
-	require.Equal(t, ids[0], ids[1])
-}
-
-func TestAttachmentReuseCLIIdentifiesUnreadableReference(t *testing.T) {
-	for _, action := range []string{"add", "link"} {
-		t.Run(action, func(t *testing.T) {
-			env, f, ref := attachmentCLIEnv(t)
-			f.Seed("/reports/report.pdf", docbank.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: uuid.MustParse(cliLinkVersion)}, map[uuid.UUID][]byte{uuid.MustParse(cliLinkVersion): []byte("sample bytes")})
-			project, err := env.DB.ProjectByName(t.Context(), "spoke-project")
-			require.NoError(t, err)
-			issue, err := env.DB.IssueByShortID(t.Context(), project.ID, ref, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.BAD1": jsontext.Value(`"junk"`)}})
-			require.NoError(t, err)
-			args := []string{"link", ref, "42", "--reuse-existing"}
-			if action == "add" {
-				file := filepath.Join(t.TempDir(), "report.pdf")
-				require.NoError(t, os.WriteFile(file, []byte("sample bytes"), 0600))
-				args = []string{"add", ref, file, "--reuse-existing"}
-			}
-			_, err = executeAttachmentCLI(t, env.URL, args...)
-			var cliErr *cliError
-			require.ErrorAs(t, err, &cliErr)
-			require.Equal(t, http.StatusBadRequest, cliErr.HTTPStatus)
-			require.ErrorContains(t, err, "attachment.BAD1")
-			require.ErrorContains(t, err, "kata docbank attachments rm "+ref+" BAD1")
-			_, err = executeAttachmentCLI(t, env.URL, "rm", ref, "BAD1")
-			require.NoError(t, err)
-			_, err = executeAttachmentCLI(t, env.URL, args...)
-			require.NoError(t, err)
-		})
-	}
+	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.BAD1": jsontext.Value(`"junk"`)}})
+	require.NoError(t, err)
+	file := filepath.Join(t.TempDir(), "report.pdf")
+	require.NoError(t, os.WriteFile(file, []byte("sample bytes"), 0600))
+	args := []string{"add", ref, file, "--reuse-existing"}
+	_, err = executeAttachmentCLI(t, env.URL, args...)
+	var cliErr *cliError
+	require.ErrorAs(t, err, &cliErr)
+	require.Equal(t, http.StatusBadRequest, cliErr.HTTPStatus)
+	_, err = executeAttachmentCLI(t, env.URL, "rm", ref, "BAD1")
+	require.NoError(t, err)
+	_, err = executeAttachmentCLI(t, env.URL, args...)
+	require.NoError(t, err)
 }

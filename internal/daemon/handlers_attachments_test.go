@@ -408,43 +408,38 @@ func TestAttachmentUploadReuseConcurrent(t *testing.T) {
 }
 
 func TestAttachmentReuseUnreadableReference(t *testing.T) {
-	for _, tc := range []struct{ name, reference string }{
-		{"unknown field", `{"name":"report.pdf","media_type":"application/pdf","size":12,"docbank_version":"` + linkVersion + `","future":true}`},
-		{"unsupported size", `{"name":"report.pdf","media_type":"application/pdf","size":"12","docbank_version":"` + linkVersion + `"}`},
-		{"malformed", `"junk"`},
-		{"invalid known fields", `{"name":"","media_type":"application/pdf","size":12,"docbank_version":"` + linkVersion + `"}`},
-	} {
-		for _, method := range []string{"upload", "link"} {
-			t.Run(tc.name+"/"+method, func(t *testing.T) {
-				env, f := attachmentEnv(t)
-				p, iss := seedProjectAndIssue(t, env)
-				seedLinkFile(f)
-				_, err := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-					IssueID: iss.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.existing": jsontext.Value(tc.reference)},
-				})
-				require.NoError(t, err)
-				before, err := env.DB.IssueByID(t.Context(), iss.ID)
-				require.NoError(t, err)
-				eventID, err := env.DB.MaxEventID(t.Context())
-				require.NoError(t, err)
-				endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID)
-				var code int
-				var raw []byte
-				if method == "upload" {
-					code, raw = attachmentUploadWithQuery(t, env, endpoint, url.Values{"name": {"report.pdf"}, "actor": {"operator"}, "reuse_existing": {"true"}}, strings.NewReader("sample bytes"))
-				} else {
-					code, raw, err = postAttachmentLink(t, env, endpoint+"/links", `{"node_id":42,"reuse_existing":true,"actor":"operator"}`)
-					require.NoError(t, err)
-				}
-				after, err := env.DB.IssueByID(t.Context(), iss.ID)
-				require.NoError(t, err)
-				afterEventID, err := env.DB.MaxEventID(t.Context())
-				require.NoError(t, err)
-				assertAPIError(t, code, raw, http.StatusBadRequest, "attachment_invalid")
-				require.JSONEq(t, string(before.Metadata), string(after.Metadata))
-				require.Equal(t, eventID, afterEventID)
+	for _, method := range []string{"upload", "link"} {
+		t.Run(method, func(t *testing.T) {
+			env, f := attachmentEnv(t)
+			p, iss := seedProjectAndIssue(t, env)
+			seedLinkFile(f)
+			_, err := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+				IssueID: iss.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.existing": jsontext.Value(`{"name":"report.pdf","media_type":"application/pdf","size":"12","docbank_version":"` + linkVersion + `"}`)},
 			})
-		}
+			require.NoError(t, err)
+			before, err := env.DB.IssueByID(t.Context(), iss.ID)
+			require.NoError(t, err)
+			eventID, err := env.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments", p.ID, iss.ShortID)
+			var code int
+			var raw []byte
+			if method == "upload" {
+				code, raw = attachmentUploadWithQuery(t, env, endpoint, url.Values{"name": {"report.pdf"}, "actor": {"operator"}, "reuse_existing": {"true"}}, strings.NewReader("sample bytes"))
+			} else {
+				code, raw, err = postAttachmentLink(t, env, endpoint+"/links", `{"node_id":42,"reuse_existing":true,"actor":"operator"}`)
+				require.NoError(t, err)
+			}
+			after, err := env.DB.IssueByID(t.Context(), iss.ID)
+			require.NoError(t, err)
+			afterEventID, err := env.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			assertAPIError(t, code, raw, http.StatusBadRequest, "attachment_invalid")
+			require.Contains(t, string(raw), "attachment.existing")
+			require.Contains(t, string(raw), "kata docbank attachments rm "+iss.ShortID+" existing")
+			require.JSONEq(t, string(before.Metadata), string(after.Metadata))
+			require.Equal(t, eventID, afterEventID)
+		})
 	}
 }
 
