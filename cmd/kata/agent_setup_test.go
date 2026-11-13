@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kit/agenthook"
 )
 
 type agentSetupReport struct {
@@ -148,6 +149,56 @@ func TestAgentSetupKeepsTrustedForeignCodexHook(t *testing.T) {
 	afterDoc := readAgentHookConfig(t, path)
 	afterGroups := afterDoc["hooks"].(map[string]any)["SessionStart"].([]any)
 	require.Equal(t, foreign, afterGroups[len(afterGroups)-1])
+}
+
+func TestAgentSetupPreservesCustomHookContainingSetupMarker(t *testing.T) {
+	home := isolateAgentHookHomes(t)
+	installClaudeAgentFixture(t)
+	path := filepath.Join(home, "claude", "settings.json")
+	foreign := map[string]any{"type": "command", "command": "kata agent-hook contract claude --source prompt.txt"}
+	writeAgentHookConfig(t, path, map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{"hooks": []any{foreign}}}}})
+
+	report, err := runAgentSetup(t, "claude")
+	require.NoError(t, err, report.Rows)
+	require.Equal(t, "ok", report.Rows[0].State)
+	doc := readAgentHookConfig(t, path)
+	groups := doc["hooks"].(map[string]any)["SessionStart"].([]any)
+	var commands []any
+	for _, raw := range groups {
+		group := raw.(map[string]any)
+		commands = append(commands, group["hooks"].([]any)...)
+	}
+	require.Contains(t, commands, foreign)
+}
+
+func TestAgentSetupWarnsWhenCodexHookPositionsShift(t *testing.T) {
+	home := isolateAgentHookHomes(t)
+	installCodexAgentFixture(t, "trusted")
+	t.Setenv("TEST_HOOK_TRUST", "trusted")
+	report, err := runAgentSetup(t, "codex")
+	require.NoError(t, err, report.Rows)
+
+	path := filepath.Join(home, "codex", "hooks.json")
+	data, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
+	require.NoError(t, err)
+	entries, err := parseAgentHookEntries(agenthook.AgentCodex, data)
+	require.NoError(t, err)
+	doc := readAgentHookConfig(t, path)
+	hooks := doc["hooks"].(map[string]any)
+	groups := hooks["SessionStart"].([]any)
+	for _, entry := range entries {
+		if entry.Kind == contractHook && entry.GroupIndex >= 0 {
+			groups[entry.GroupIndex].(map[string]any)["if"] = "condition"
+			break
+		}
+	}
+	groups = append(groups, map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "foreign-hook"}}})
+	hooks["SessionStart"] = groups
+	writeAgentHookConfig(t, path, doc)
+
+	_, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "codex")
+	require.NoError(t, err)
+	require.Contains(t, stderr, "Codex will ask to re-trust shifted hooks; open Codex and run /hooks.")
 }
 
 func TestAgentSetupExplicitMixedProfiles(t *testing.T) {

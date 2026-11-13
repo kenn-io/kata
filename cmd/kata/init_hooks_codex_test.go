@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kit/agenthook"
 )
 
 func readCodexHooks(t *testing.T, dir string) map[string]any {
@@ -26,20 +27,28 @@ func expectedCodexHandler() map[string]any {
 	return map[string]any{
 		"type":           "command",
 		"command":        "kata attention-hook start",
-		"commandWindows": "kata attention-hook start",
+		"commandWindows": expectedCodexWindowsCommand("attention-hook", "start"),
 		"timeout":        json.Number("10"),
 	}
 }
 
+func expectedCodexWindowsCommand(args ...string) string {
+	commands, err := agenthook.BuildCommand("kata", args...)
+	if err != nil {
+		panic(err)
+	}
+	return commands.PowerShell
+}
+
 func expectedCodexSessionEndGroups() []any {
-	return []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "kata attention-hook end", "commandWindows": "kata attention-hook end", "timeout": json.Number("10")}}}}
+	return []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "kata attention-hook end", "commandWindows": expectedCodexWindowsCommand("attention-hook", "end"), "timeout": json.Number("10")}}}}
 }
 
 func expectedCodexContractHandler() map[string]any {
 	return map[string]any{
 		"type":           "command",
 		"command":        "kata agent-contract-hook",
-		"commandWindows": "kata agent-contract-hook",
+		"commandWindows": expectedCodexWindowsCommand("agent-contract-hook"),
 		"timeout":        json.Number("10"),
 	}
 }

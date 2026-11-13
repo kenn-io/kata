@@ -30,20 +30,22 @@ func agentSetupOptionsInWorkspace(name, workspace string) (nativeAgentHookOption
 	}
 	opts := targets[0].options
 	opts.Executable, _, err = resolveAgentHookExecutable("", defaultAgentHookExecutableEnv())
+	opts.Contract, opts.Attention = true, true
+	opts.RequireOwnershipMarker = true
 	return opts, err
 }
 
 func setupHookRegistration(opts nativeAgentHookOptions, kind agentHookKind, workspace string) agenthook.InstallOptions {
 	registration := kitAgentHookRegistration(opts, kind)
 	registration.WorkspaceDir = workspace
-	registration.Marker = "agent-hook contract " + opts.Agent
-	if kind != contractHook {
-		registration.Marker = "agent-hook attention-native " + opts.Agent + " " + string(kind)
-	}
 	return registration
 }
 
 func agentSetupItems(name, workspace string) ([]agentsetup.Item, error) {
+	return agentSetupItemsWithWarnings(name, workspace, nil)
+}
+
+func agentSetupItemsWithWarnings(name, workspace string, warn func(string)) ([]agentsetup.Item, error) {
 	item := agentsetup.Item{Name: "hooks"}
 	if name != "claude" && name != "codex" {
 		item.Check = func(context.Context) (agentsetup.Status, error) {
@@ -60,22 +62,19 @@ func agentSetupItems(name, workspace string) ([]agentsetup.Item, error) {
 	}
 	kinds := []agentHookKind{contractHook, attentionStartHook, attentionEndHook}
 	item.Install = func(ctx context.Context) error {
-		for _, kind := range kinds {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			registration := setupHookRegistration(opts, kind, workspace)
-			conditional, err := agentSetupHasConditionalHook(agenthook.Agent(name), opts.ConfigPath, kind)
-			if err != nil {
-				return err
-			}
-			if conditional {
-				if _, err := agenthook.Uninstall(agenthook.Agent(name), opts.ConfigPath, registration.Marker); err != nil {
-					return err
-				}
-			}
-			if _, err := agenthook.Install(agenthook.Agent(name), registration); err != nil {
-				return err
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		plan, err := planKitAgentHooks(opts, false)
+		if err != nil {
+			return err
+		}
+		if _, err := publishNativeAgentHookPlan(plan); err != nil {
+			return err
+		}
+		if warn != nil {
+			for _, warning := range plan.Warnings {
+				warn(warning)
 			}
 		}
 		return nil
@@ -168,19 +167,6 @@ func checkAgentSetupWithOptions(ctx context.Context, name, workspace string, opt
 	return status, nil
 }
 
-func agentSetupHasConditionalHook(agent agenthook.Agent, path string, kind agentHookKind) (bool, error) {
-	entries, err := inspectAgentHookEntries(agent, path)
-	if err != nil {
-		return false, err
-	}
-	for _, entry := range entries {
-		if classifyAgentHookHandlerFromEntry(entry) == kind && !sameAgentHookGroupBehavior(entry.GroupFields, nil) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 func newAgentSetupCmd() *cobra.Command {
 	var check bool
 	cmd := &cobra.Command{Use: "setup [<harness>...]", Short: "Install and check agent hooks", RunE: func(cmd *cobra.Command, args []string) error {
@@ -188,14 +174,20 @@ func newAgentSetupCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		var warnings []string
 		report, err := agentsetup.Run(cmd.Context(), agentsetup.Options{
 			Agents: args, CheckOnly: check, SetupCommand: "kata agent setup", RepairCommand: "kata agent setup",
 			Items: func(name string) ([]agentsetup.Item, error) {
-				return agentSetupItems(name, workspace)
+				return agentSetupItemsWithWarnings(name, workspace, func(warning string) {
+					warnings = append(warnings, warning)
+				})
 			},
 		})
 		if err != nil {
 			return fmt.Errorf("%s", strings.ReplaceAll(err.Error(), "or pass --agent", "or name an agent"))
+		}
+		for _, warning := range warnings {
+			cmd.PrintErrln(warning)
 		}
 		for i, row := range report.Rows {
 			if names, ok := strings.CutPrefix(row.NextStep, "kata agent setup --agent "); ok {

@@ -334,6 +334,20 @@ func TestAgentHooksInspectionGeneratedQuoting(t *testing.T) {
 	}
 }
 
+func TestClassifyAgentHookCommandWindowsForms(t *testing.T) {
+	for _, tc := range []struct {
+		name, field, command string
+	}{
+		{"legacy Windows command", "commandWindows", `C:\O'Brien\kata.exe agent-hook contract codex`},
+		{"PowerShell commandWindows", "commandWindows", `& 'C:\Program Files\O''Brien\kata.exe' agent-hook contract codex`},
+		{"PowerShell field", "powershell", `& 'C:\Program Files\O''Brien\kata.exe' agent-hook contract codex`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, contractHook, classifyAgentHookCommand(agenthook.AgentCodex, tc.command, tc.field))
+		})
+	}
+}
+
 func TestAgentHooksHermesMaterializesReferencesToRemovedOwnedAnchor(t *testing.T) {
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())

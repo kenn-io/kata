@@ -113,13 +113,14 @@ func agentHookExecForm(agent agenthook.Agent, handler map[string]any) (executabl
 }
 
 func classifyAgentHookCommand(agent agenthook.Agent, command, field string) agentHookKind {
-	powershell := field == "powershell" || field == "commandWindows"
 	command = strings.TrimSpace(command)
+	powershell := field == "powershell" || (field == "commandWindows" && strings.HasPrefix(command, "& "))
 	if powershell && strings.HasPrefix(command, "& ") {
 		command = strings.TrimSpace(command[1:])
 	}
 	// Parse only literal argv. No substitutions, shell operators or assignments.
-	argv, ok := literalAgentHookWords(command, powershell, field == "command" && runtime.GOOS == "windows")
+	windows := (field == "commandWindows" && !powershell) || (field == "command" && runtime.GOOS == "windows")
+	argv, ok := literalAgentHookWords(command, powershell, windows)
 	if !ok {
 		return ""
 	}

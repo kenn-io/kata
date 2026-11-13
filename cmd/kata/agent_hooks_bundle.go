@@ -112,10 +112,18 @@ func kitAgentHookRegistration(opts nativeAgentHookOptions, kind agentHookKind) a
 		}
 	}
 	marker := "contract"
+	source := legacyAgentContractHookSource
 	if kind != contractHook {
 		marker = "attention-native " + opts.Agent + " " + string(kind)
+		source = legacyAttentionHookSource + string(kind)
 	}
 	args = agentHookOwnershipArgs(opts.Executable, args, kind)
+	if opts.RequireOwnershipMarker {
+		if len(args) < 2 || !slices.Equal(args[len(args)-2:], []string{"--source", source}) {
+			args = append(args, "--source", source)
+		}
+		marker = "--source " + source
+	}
 	return agenthook.InstallOptions{ConfigPath: opts.ConfigPath, Executable: opts.Executable, Arguments: args, Marker: marker, Hooks: []agenthook.Hook{hook}}
 }
 

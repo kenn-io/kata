@@ -198,7 +198,7 @@ func TestKitAgentHookConfiguredRejectsConditionalHandlers(t *testing.T) {
 	t.Run("codex keeps foreign group index", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "hooks.json")
 		require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"if":"condition","hooks":[{"type":"command","command":"/old/kata agent-hook contract codex"},{"type":"command","command":"foreign-hook"}]}]}}`), 0600))
-		out, err := runHookSetup(t, "install", "codex", "--config", path, "--executable", "kata")
+		out, err := runHookSetup(t, "install", "codex", "--config", path, "--executable", os.Args[0])
 		require.NoError(t, err)
 		require.Contains(t, out, "Codex will ask to re-trust shifted hooks; open Codex and run /hooks.")
 		data, err := os.ReadFile(path) //nolint:gosec // Path is a config fixture under TempDir.
