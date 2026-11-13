@@ -18,21 +18,23 @@ func TestDoctorSelectedWorkspace(t *testing.T) {
 	_, workspace := doctorTestEnv(t)
 	t.Setenv("KATA_SERVER", "http://127.0.0.1:1")
 	binary := filepath.Join(t.TempDir(), executableName("kata"))
-	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, ".")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, ".") //nolint:gosec // Builds this isolated package's test binary.
 	out, err := build.CombinedOutput()
 	require.NoError(t, err, string(out))
 	installCodexAgentFixture(t, "normal")
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, executableName("claude")), []byte("fixture"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, executableName("claude")), []byte("fixture"), 0700)) //nolint:gosec // Executable fixture in a temporary directory.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	_, err = runHookSetup(t, "install", "claude", "--executable", binary)
+	claudeOutput, err := runHookSetup(t, "install", "claude", "--executable", binary)
 	require.NoError(t, err)
-	_, err = runHookSetup(t, "install", "codex", "--executable", binary)
+	require.Contains(t, claudeOutput, "installed")
+	codexOutput, err := runHookSetup(t, "install", "codex", "--executable", binary)
 	require.NoError(t, err)
+	require.Contains(t, codexOutput, "installed")
 	t.Setenv("TEST_HOOK_TRUST", "trusted")
 	t.Setenv("KATA_TEST_EXPECT_WORKSPACE", workspace)
 	writeAgentHookConfig(t, filepath.Join(workspace, ".claude", "settings.local.json"), map[string]any{"disableAllHooks": true})
-	cmd := exec.CommandContext(t.Context(), binary, "doctor", "--workspace", workspace, "--json")
+	cmd := exec.CommandContext(t.Context(), binary, "doctor", "--workspace", workspace, "--json") //nolint:gosec // Runs the test binary against isolated fixture state.
 	output, _ := cmd.Output()
 	var report diagnostics.Report
 	require.NoError(t, json.Unmarshal(output, &report), string(output))
@@ -55,18 +57,18 @@ func TestDoctorBareCodexExecutable(t *testing.T) {
 	home := isolateAgentHookHomes(t)
 	installCodexAgentFixture(t, "normal")
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, executableName("kata")), []byte("fixture"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, executableName("kata")), []byte("fixture"), 0700)) //nolint:gosec // Executable fixture in a temporary directory.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	_, err := runHookSetup(t, "install", "codex", "--executable", "kata")
 	require.NoError(t, err)
 	path := filepath.Join(home, "codex", "hooks.json")
-	before, err := os.ReadFile(path)
+	before, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
 	require.NoError(t, err)
 	t.Setenv("TEST_HOOK_TRUST", "untrusted")
 	check := doctorAgent(t.Context(), "codex")
 	require.Equal(t, "warn", string(check.Status), check.Summary)
-	require.Contains(t, check.Fix, "/hooks")
-	after, err := os.ReadFile(path)
+	require.Equal(t, "kata agent setup", check.Fix)
+	after, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
 	require.NoError(t, err)
 	require.Equal(t, before, after)
 }
@@ -123,7 +125,8 @@ func TestDoctorAgentContractOnly(t *testing.T) {
 	_, err = runHookSetup(t, "install", "claude", "--executable", opts.Executable, "--contract-only")
 	require.NoError(t, err)
 	check := doctorAgent(t.Context(), "claude")
-	require.Equal(t, "ok", string(check.Status), check.Summary)
+	require.Equal(t, "warn", string(check.Status), check.Summary)
+	require.Equal(t, "kata agent setup", check.Fix)
 }
 
 func TestDoctorAgentRepairsIneffectiveAttention(t *testing.T) {
@@ -136,14 +139,14 @@ func TestDoctorAgentRepairsIneffectiveAttention(t *testing.T) {
 	for _, event := range []string{"SessionStart", "SessionEnd"} {
 		for _, group := range doc["hooks"].(map[string]any)[event].([]any) {
 			if strings.Contains(fmt.Sprint(group), "attention-native") {
-				group.(map[string]any)["matcher"] = "never-matches"
+				group.(map[string]any)["if"] = "never-matches"
 			}
 		}
 	}
 	writeAgentHookConfig(t, path, doc)
 	check := doctorAgent(t.Context(), "claude")
 	require.Equal(t, "warn", string(check.Status), check.Summary)
-	require.Equal(t, "kata agent setup claude", check.Fix)
+	require.Equal(t, "kata agent setup", check.Fix)
 	_, err = runAgentSetup(t, "claude")
 	require.NoError(t, err)
 	check = doctorAgent(t.Context(), "claude")

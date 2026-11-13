@@ -168,13 +168,18 @@ func TestKitAgentHookConfiguredRejectsConditionalHandlers(t *testing.T) {
 
 	t.Run("codex keeps foreign group index", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "hooks.json")
-		require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"if":"condition","hooks":[{"type":"command","command":"/old/kata agent-hook contract codex"}]},{"hooks":[{"type":"command","command":"foreign-hook"}]}]}}`), 0600))
-		plan, err := planKitAgentHooks(nativeAgentHookOptions{Agent: "codex", ConfigPath: path, Executable: "kata", Contract: true, Attention: true}, false)
+		require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"if":"condition","hooks":[{"type":"command","command":"/old/kata agent-hook contract codex"},{"type":"command","command":"foreign-hook"}]}]}}`), 0600))
+		out, err := runHookSetup(t, "install", "codex", "--config", path, "--executable", "kata")
+		require.NoError(t, err)
+		require.Contains(t, out, "Codex will ask to re-trust shifted hooks; open Codex and run /hooks.")
+		data, err := os.ReadFile(path) //nolint:gosec // Path is a config fixture under TempDir.
 		require.NoError(t, err)
 		var document map[string]any
-		require.NoError(t, json.Unmarshal(plan.Changes[0].Content, &document))
+		require.NoError(t, json.Unmarshal(data, &document))
 		groups := document["hooks"].(map[string]any)["SessionStart"].([]any)
-		require.Equal(t, "foreign-hook", groups[1].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"])
+		conditional := groups[0].(map[string]any)
+		require.Equal(t, "condition", conditional["if"])
+		require.Equal(t, "foreign-hook", conditional["hooks"].([]any)[0].(map[string]any)["command"])
 	})
 }
 

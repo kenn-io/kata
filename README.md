@@ -263,7 +263,7 @@ Not in the latest release yet.
 kata agent setup
 ```
 
-For Codex, open Codex and run `/hooks` to trust the hooks. Run `kata agent setup --check` to check readiness.
+For Codex, open Codex and run `/hooks` to trust the hooks.
 
 `kata agent-hook` requires Kata 0.19.0 or later. See
 [Contract in every session](docs/workflows/agents.md#contract-in-every-session)

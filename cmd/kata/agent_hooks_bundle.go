@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/jsonutil"
 	"go.kenn.io/kit/agenthook"
 	"gopkg.in/yaml.v3"
 )
@@ -64,6 +67,26 @@ func planKitAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHoo
 	plan.Contract, plan.AttentionStart, plan.AttentionEnd = kitAgentHookConfigured(agent, desired)
 	// Include unchanged configs as preimages in the shared transaction.
 	plan.Changes = []nativeAgentHookChange{{Path: opts.ConfigPath, Original: original, OriginalExists: exists, Content: data, Remove: !dataExists}}
+	if agent == agenthook.AgentCodex && dataExists && nativeAgentHookPlanChanged(plan) {
+		before := map[string]any{}
+		if len(bytes.TrimSpace(original)) > 0 {
+			if err := json.Unmarshal(original, &before, jsonutil.PreserveNumberLiterals()); err != nil {
+				return plan, err
+			}
+		}
+		var after map[string]any
+		if err := json.Unmarshal(data, &after, jsonutil.PreserveNumberLiterals()); err != nil {
+			return plan, err
+		}
+		shifted, err := codexHookIndexesShifted(before, after)
+		if err != nil {
+			return plan, err
+		}
+		warning := "Codex will ask to re-trust shifted hooks; open Codex and run /hooks."
+		if shifted && !slices.Contains(plan.Warnings, warning) {
+			plan.Warnings = append(plan.Warnings, warning)
+		}
+	}
 	return plan, nil
 }
 
