@@ -79,7 +79,11 @@ func daemonRecoverCmd() *cobra.Command {
 		if selection.Profile == nil {
 			return &cliError{Message: "daemon recover requires a registered local profile with home and instance_uid; explicit URLs stay pinned", Kind: kindValidation, ExitCode: ExitValidation}
 		}
-		if result.State != "ready" && result.State != "stopped_local_profile" && result.State != "version_mismatch" {
+		// local_unreachable comes only from the live probe, after storage and
+		// project checks. A supervised profile can be mid-restart, so its wait
+		// retries that gap and still rejects credential or identity failures.
+		restartGap := result.State == "local_unreachable" && !selection.Profile.Config.AutostartEnabled()
+		if result.State != "ready" && result.State != "stopped_local_profile" && result.State != "version_mismatch" && !restartGap {
 			return diagnosisError(result)
 		}
 		if result.SchemaVersion != db.CurrentSchemaVersion() {
