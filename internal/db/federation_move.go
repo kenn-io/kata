@@ -210,7 +210,7 @@ func CheckFederatedIssueMove(ctx context.Context, q moveQuery, from, to int64) e
 }
 
 // FederationMoveProjects checks the normal move envelope and its existing
-// snapshot format. Authoring and hub ingress require both replicas to be joined.
+// snapshot format. Both local replicas must be joined before accepting a move.
 func FederationMoveProjects(ctx context.Context, tx *sql.Tx, routeID int64, e RemoteEvent) (int64, int64, error) {
 	return federationMoveProjects(ctx, tx, routeID, e, false)
 }
@@ -296,11 +296,6 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 			return 0, errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported)
 		}
 	}
-	if missing || project != route {
-		if EventIssueUID(e.IssueUID) == "" {
-			return 0, fmt.Errorf("%w: project event outside requested stream", ErrFederationIngestValidation)
-		}
-	}
 	dependencies := []string{e.ProjectUID}
 	if e.Type == "issue.moved" {
 		_, destination, err := federationMoveProjects(ctx, tx, route, e, true)
@@ -311,6 +306,11 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 		payload := PayloadMap(e.Payload)
 		from, _ := StringValue(payload["from_project_uid"])
 		dependencies = append(dependencies, from)
+	}
+	if missing || project != route {
+		if EventIssueUID(e.IssueUID) == "" {
+			return 0, fmt.Errorf("%w: project event outside requested stream", ErrFederationIngestValidation)
+		}
 	}
 	if missing || project != route || e.Type == "issue.moved" {
 		var routeUID string
