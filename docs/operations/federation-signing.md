@@ -89,14 +89,14 @@ removing a source revokes that key without waiting for a reload. Unavailable
 keys reject their requests without preventing daemon startup or other keys
 from working. Restoring a file source takes effect on the next request;
 environment sources must be available in the running daemon's environment.
+Expired keys do not require a source at startup. Key IDs are public selectors,
+not credentials.
+
 Each unexpired signing key needs its own secret. A shared key file, equal
 contents in separate files, or equal environment values stop daemon startup with
 an error naming both key IDs. `kata doctor` checks the sources available in
 its own environment and reports the same problem. Rotate the shared secret
 and give each key a distinct source value.
-
-Expired keys do not require a source at startup. Key IDs are public selectors,
-not credentials.
 
 ## Bridges
 
