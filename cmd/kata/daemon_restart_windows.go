@@ -10,6 +10,10 @@ import (
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
+var _ = takeEnv(daemonRestartHelperEnv)
+
+func reapRestartHelper() {}
+
 // reexecDaemon starts a detached replacement with this process's arguments,
 // environment, and standard streams. Windows cannot replace a process image,
 // so started receives the replacement's PID before this process exits.

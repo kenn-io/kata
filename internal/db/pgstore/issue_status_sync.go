@@ -179,7 +179,7 @@ func reconcileFederatedStatusIntentTx(ctx context.Context, tx *sql.Tx, projectID
 			continue
 		}
 		switch event.Type {
-		case "issue.closed", "issue.reopened", "issue.updated", "issue.created", "issue.snapshot":
+		case "issue.closed", "issue.reopened", "issue.updated", db.RepeatedImportEventType, "issue.created", "issue.snapshot":
 			issueUID := db.FederationEventIssueUID(&event.IssueUID, string(event.Payload))
 			if issueUID != "" {
 				accepted[issueUID] = append(accepted[issueUID], event)

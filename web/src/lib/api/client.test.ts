@@ -7,7 +7,7 @@ import {
   orvalFetch,
   responseTriggeredAuthenticationTransition,
 } from './client'
-import { attachmentContent, getReadUISnapshotUrl } from './generated'
+import { attachmentContent, getReadUISnapshotUrl, listTeams } from './generated'
 
 describe('Kata browser API credentials', () => {
   it('serializes exploded array query parameters as repeated keys', () => {
@@ -142,6 +142,84 @@ it('keeps JSON errors from the generated attachment client', async () => {
     expect(result.status).toBe(502)
     expect(result.data).toEqual({ error: { code: 'docbank_unreachable' } })
   } finally {
+    setGeneratedFetch(createCredentialedFetch())
+  }
+})
+
+it('honors a server delay before retrying a generated teams read', async () => {
+  vi.useFakeTimers()
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': '10' } }))
+    .mockResolvedValueOnce(Response.json({ teams: [] }))
+  setGeneratedFetch(fetcher)
+  try {
+    const result = listTeams({ signal: new AbortController().signal, retry: true })
+    await vi.advanceTimersByTimeAsync(9999)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect((await result).status).toBe(200)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  } finally {
+    vi.useRealTimers()
+    setGeneratedFetch(createCredentialedFetch())
+  }
+})
+
+it.each([
+  { status: 403, body: '{', result: 'error', reads: 1 },
+  { status: 503, body: '{', result: 'success', reads: 2 },
+  { status: 200, body: '{', result: 'error', reads: 1 },
+])('classifies HTTP $status before parsing JSON', async ({ status, body, result, reads }) => {
+  vi.useFakeTimers()
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response(body, { status, headers: { 'Content-Type': 'application/json' } }),
+    )
+    .mockResolvedValueOnce(Response.json({ teams: [] }))
+  setGeneratedFetch(fetcher)
+  try {
+    const pending = listTeams({ signal: new AbortController().signal, retry: true })
+    if (result === 'error') {
+      const failure = expect(pending).rejects.toThrow()
+      await vi.advanceTimersByTimeAsync(0)
+      await failure
+    } else {
+      await vi.advanceTimersByTimeAsync(1000)
+      expect((await pending).status).toBe(200)
+    }
+    expect(fetcher).toHaveBeenCalledTimes(reads)
+  } finally {
+    vi.useRealTimers()
+    setGeneratedFetch(createCredentialedFetch())
+  }
+})
+
+it('retries a generated read when the response body connection drops', async () => {
+  vi.useFakeTimers()
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new TypeError('connection reset'))
+          },
+        }),
+        { headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    .mockResolvedValueOnce(Response.json({ teams: [] }))
+  setGeneratedFetch(fetcher)
+  try {
+    const result = listTeams({ signal: new AbortController().signal, retry: true })
+    const outcome = expect(result).resolves.toMatchObject({ status: 200 })
+    await vi.advanceTimersByTimeAsync(1000)
+    await outcome
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  } finally {
+    vi.useRealTimers()
     setGeneratedFetch(createCredentialedFetch())
   }
 })

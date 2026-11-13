@@ -276,7 +276,7 @@ func walkNotificationSlots(slots map[string]jsontext.Value, keep func(jsontext.V
 }
 
 func walkNotificationEventPayload(raw jsontext.Value, eventType string, keep func(jsontext.Value) (bool, error)) (jsontext.Value, error) {
-	if eventType != "issue.metadata_updated" && eventType != "issue.created" && eventType != "issue.snapshot" {
+	if eventType != "issue.metadata_updated" && eventType != "issue.created" && eventType != "issue.snapshot" && eventType != db.RepeatedImportEventType {
 		return raw, nil
 	}
 	raw = bytes.TrimSpace(raw)

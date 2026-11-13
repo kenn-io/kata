@@ -50,10 +50,11 @@ type WebhookReceipt struct {
 // A dialer must connect only to the supplied numeric destination. RootCAs is
 // optional; system roots and normal hostname verification are the default.
 type WebhookOptions struct {
-	Resolve     func(context.Context, string, string) ([]netip.Addr, error)
-	DialContext func(context.Context, string, string) (net.Conn, error)
-	RootCAs     *x509.CertPool
-	Now         func() time.Time
+	Resolve          func(context.Context, string, string) ([]netip.Addr, error)
+	DialContext      func(context.Context, string, string) (net.Conn, error)
+	RootCAs          *x509.CertPool
+	TrustedCallbacks *TrustedCallbackPolicy
+	Now              func() time.Time
 }
 
 // WebhookClient is independent of daemon clients, bearer tokens and environment
@@ -63,6 +64,7 @@ type WebhookClient struct {
 	resolve func(context.Context, string, string) ([]netip.Addr, error)
 	dial    func(context.Context, string, string) (net.Conn, error)
 	now     func() time.Time
+	policy  *TrustedCallbackPolicy
 }
 
 // NewWebhookClient creates a credential-free, SSRF-checked webhook transport.
@@ -70,6 +72,9 @@ func NewWebhookClient(options ...WebhookOptions) *WebhookClient {
 	w := &WebhookClient{resolve: net.DefaultResolver.LookupNetIP, dial: (&net.Dialer{Timeout: webhookTimeout}).DialContext, now: time.Now}
 	var roots *x509.CertPool
 	for _, option := range options {
+		if option.TrustedCallbacks != nil {
+			w.policy = option.TrustedCallbacks
+		}
 		if option.Resolve != nil {
 			w.resolve = option.Resolve
 		}
@@ -101,30 +106,93 @@ func NewWebhookClient(options ...WebhookOptions) *WebhookClient {
 	return w
 }
 
-// ValidateWebhookCallback validates syntax and literal destinations without DNS
-// or other network activity. Resolved addresses are always checked again at dial.
-func ValidateWebhookCallback(raw string) error {
+func parseWebhookCallback(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || strings.Contains(raw, "#") || u.Opaque != "" {
-		return &WebhookError{Reason: "invalid_callback"}
+		return nil, &WebhookError{Reason: "invalid_callback"}
 	}
 	if strings.HasSuffix(u.Host, ":") {
-		return &WebhookError{Reason: "invalid_callback"}
+		return nil, &WebhookError{Reason: "invalid_callback"}
 	}
 	if port := u.Port(); port != "" {
 		n, err := strconv.Atoi(port)
 		if err != nil || n < 1 || n > 65535 {
-			return &WebhookError{Reason: "invalid_callback"}
+			return nil, &WebhookError{Reason: "invalid_callback"}
 		}
 	}
 	if ip, err := netip.ParseAddr(u.Hostname()); err == nil {
-		if !publicWebhookIP(ip) {
-			return &WebhookError{Reason: "invalid_callback"}
+		if ip.Zone() != "" {
+			return nil, &WebhookError{Reason: "invalid_callback"}
 		}
 	} else if !validWebhookHostname(u.Hostname()) {
-		return &WebhookError{Reason: "invalid_callback"}
+		return nil, &WebhookError{Reason: "invalid_callback"}
+	}
+	return u, nil
+}
+
+// validateStaticCallback refuses prohibited literals and private namespaces
+// without DNS or spending failed-challenge tokens. The same selector honors exact operator pins.
+func (w *WebhookClient) validateStaticCallback(ctx context.Context, u *url.URL) error {
+	if _, err := netip.ParseAddr(u.Hostname()); err == nil || privateWebhookHostname(u.Hostname()) {
+		_, err := w.destinationAddresses(ctx, u)
+		return err
 	}
 	return nil
+}
+
+// validateCallback authorizes a subscription destination before any write.
+// Lookup failures remain reachability errors; cached consent can be refreshed
+// during a DNS outage. Dialing independently validates every actual DNS answer.
+func (w *WebhookClient) validateCallback(ctx context.Context, u *url.URL) error {
+	ctx, cancel := context.WithTimeout(ctx, webhookTimeout)
+	defer cancel()
+	_, err := w.destinationAddresses(ctx, u)
+	if err != nil && safeWebhookError(err).Reason == "destination_not_allowed" {
+		return err
+	}
+	return nil
+}
+
+func (w *WebhookClient) destinationAddresses(ctx context.Context, u *url.URL) ([]netip.Addr, error) {
+	if w.policy != nil {
+		if pins, ok := w.policy.origins[webhookOrigin(u)]; ok {
+			return pins, nil
+		}
+	}
+	// These private DNS namespaces require an exact static grant; never resolve
+	// them on the public-only path. Lexical hostname checks are shared above.
+	if privateWebhookHostname(u.Hostname()) {
+		return nil, &WebhookError{Reason: "destination_not_allowed"}
+	}
+	var addresses []netip.Addr
+	if ip, err := netip.ParseAddr(u.Hostname()); err == nil {
+		addresses = []netip.Addr{ip}
+	} else {
+		var err error
+		addresses, err = w.resolve(ctx, "ip", u.Hostname())
+		if err != nil {
+			return nil, safeWebhookError(err)
+		}
+	}
+	if len(addresses) == 0 {
+		return nil, &WebhookError{Reason: "dns_error"}
+	}
+	for _, ip := range addresses {
+		if !publicWebhookIP(ip) {
+			return nil, &WebhookError{Reason: "destination_not_allowed"}
+		}
+	}
+	return addresses, nil
+}
+
+func privateWebhookHostname(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	for _, suffix := range []string{"internal", "home.arpa", "local"} {
+		if host == suffix || strings.HasSuffix(host, "."+suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func validWebhookHostname(host string) bool {
@@ -136,7 +204,7 @@ func validWebhookHostname(host string) bool {
 	if len(labels) < 2 {
 		return false
 	}
-	for _, suffix := range []string{"localhost", "local", "internal", "home.arpa"} {
+	for _, suffix := range []string{"localhost"} {
 		if host == suffix || strings.HasSuffix(host, "."+suffix) {
 			return false
 		}
@@ -212,27 +280,10 @@ func (w *WebhookClient) dialPublic(ctx context.Context, network, address string)
 	if err != nil {
 		return nil, &WebhookError{Reason: "invalid_callback"}
 	}
-	var addresses []netip.Addr
-	if ip, err := netip.ParseAddr(host); err == nil {
-		addresses = []netip.Addr{ip}
-	} else {
-		if !validWebhookHostname(host) {
-			return nil, &WebhookError{Reason: "invalid_callback"}
-		}
-		addresses, err = w.resolve(ctx, "ip", host)
-		if err != nil {
-			return nil, safeWebhookError(err)
-		}
-	}
-	if len(addresses) == 0 {
-		return nil, &WebhookError{Reason: "dns_error"}
-	}
-	// Validate the entire answer before trying any address: a mixed answer fails
-	// closed even if its public address could successfully connect.
-	for _, ip := range addresses {
-		if !publicWebhookIP(ip) {
-			return nil, &WebhookError{Reason: "invalid_callback"}
-		}
+	u := &url.URL{Scheme: "https", Host: net.JoinHostPort(host, port)}
+	addresses, err := w.destinationAddresses(ctx, u)
+	if err != nil {
+		return nil, err
 	}
 	// Each address gets an equal share of the time that remains, as
 	// net.Dialer does, so an unresponsive address cannot starve a later one.
@@ -308,10 +359,7 @@ func validWebhookHeader(value string) bool {
 	return true
 }
 
-func (w *WebhookClient) request(ctx context.Context, callback, eventID, subscriptionID string, body []byte, keys []string) (*http.Response, error) {
-	if err := ValidateWebhookCallback(callback); err != nil {
-		return nil, err
-	}
+func (w *WebhookClient) request(ctx context.Context, callback *url.URL, eventID, subscriptionID string, body []byte, keys []string) (*http.Response, error) {
 	if len(body) > webhookEnvelopeLimit {
 		return nil, &WebhookError{Reason: "payload_too_large"}
 	}
@@ -329,10 +377,11 @@ func (w *WebhookClient) request(ctx context.Context, callback, eventID, subscrip
 		}
 		decoded = append(decoded, value)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, callback, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "", bytes.NewReader(body))
 	if err != nil {
 		return nil, &WebhookError{Reason: "invalid_callback"}
 	}
+	req.URL = callback
 	timestamp := strconv.FormatInt(w.now().Unix(), 10)
 	signatures := make([]string, 0, len(decoded))
 	for _, key := range decoded {
@@ -355,10 +404,7 @@ func (w *WebhookClient) request(ctx context.Context, callback, eventID, subscrip
 
 // Verify authenticates the receiver using one fresh signed challenge. Activation,
 // verification caching and durable key rotation are the caller's responsibility.
-func (w *WebhookClient) Verify(ctx context.Context, callback, subscriptionID, secret string) error {
-	if err := ValidateWebhookCallback(callback); err != nil {
-		return err
-	}
+func (w *WebhookClient) Verify(ctx context.Context, callback *url.URL, subscriptionID, secret string) error {
 	if err := ValidateWebhookSecret(secret); err != nil {
 		return err
 	}
@@ -398,7 +444,11 @@ func (w *WebhookClient) Verify(ctx context.Context, callback, subscriptionID, se
 // Send signs the exact persisted body. Retries retain body and eventID, while
 // each call creates a fresh signing timestamp and signatures for supplied keys.
 func (w *WebhookClient) Send(ctx context.Context, callback, eventID, subscriptionID string, body []byte, keys []string) (WebhookReceipt, error) {
-	resp, err := w.request(ctx, callback, eventID, subscriptionID, body, keys)
+	u, err := parseWebhookCallback(callback)
+	if err != nil {
+		return WebhookReceipt{}, err
+	}
+	resp, err := w.request(ctx, u, eventID, subscriptionID, body, keys)
 	if err != nil {
 		return WebhookReceipt{}, err
 	}

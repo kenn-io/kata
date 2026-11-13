@@ -95,7 +95,8 @@ func TestSubscribeValidation(t *testing.T) {
 		{"bad secret", func(r *mcpevents.SubscribeRequest) { r.Delivery.Secret = "whsec_short" }, mcpevents.CodeInvalidParams, "invalid_secret"},
 		{"missing secret", func(r *mcpevents.SubscribeRequest) { r.Delivery.Secret = "" }, mcpevents.CodeInvalidParams, "invalid_secret"},
 		{"http callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "http://example.com/x" }, mcpevents.CodeInvalidParams, "invalid_callback"},
-		{"private callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "https://10.0.0.1/x" }, mcpevents.CodeInvalidParams, "invalid_callback"},
+		{"private callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "https://10.0.0.1/x" }, mcpevents.CodeCallbackEndpoint, "destination_not_allowed"},
+		{"local callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "https://receiver.local/x" }, mcpevents.CodeCallbackEndpoint, "destination_not_allowed"},
 		{"blank recipient", func(r *mcpevents.SubscribeRequest) { r.Arguments.For = " " }, mcpevents.CodeInvalidParams, "invalid_arguments"},
 		{"empty project list", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{} }, mcpevents.CodeInvalidParams, "invalid_project_uids"},
 		{"unsorted project list", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{testProjectB, testProjectA} }, mcpevents.CodeInvalidParams, "project_uids_not_sorted_unique"},
@@ -108,7 +109,8 @@ func TestSubscribeValidation(t *testing.T) {
 			tc.mutate(&req)
 			_, err := h.subscribe(principalA, req)
 			_ = requireWire(t, err, tc.code, tc.reason)
-			assert.Zero(t, h.recv.challenges.Load(), "validation fails before any network activity")
+			assert.Zero(t, h.recv.challenges.Load(), "validation sends no challenge")
+			assert.Zero(t, h.svc.ChallengeStateCount(), "destination refusal spends no challenge budget")
 		})
 	}
 	t.Run("invalid principal", func(t *testing.T) {
@@ -152,35 +154,49 @@ func TestSelectionVisibility(t *testing.T) {
 			result = h.mustSubscribe(h.request("example-user/dynamic")) // refresh
 			assert.Equal(t, db.MCPEventStateActive, h.row(result.ID).State)
 		})
-		t.Run("an explicit selection with nothing visible ends scope_removed", func(t *testing.T) {
-			h := newHarness(t, open(t))
-			req := h.request("example-user/explicit")
-			req.Arguments.ProjectUIDs = []string{testProjectA}
-			result := h.mustSubscribe(req)
-			h.fake.setProjects()
+		for _, privateCallback := range []bool{false, true} {
+			t.Run(fmt.Sprintf("removed project access, private callback=%t", privateCallback), func(t *testing.T) {
+				h := newHarness(t, open(t))
+				req := h.request("example-user/explicit")
+				req.Arguments.ProjectUIDs = []string{testProjectA}
+				result := h.mustSubscribe(req)
+				if privateCallback {
+					row := h.row(result.ID)
+					req.Delivery.URL = "https://100.64.0.1/events"
+					row.CallbackURL = req.Delivery.URL
+					row.ID = mcpevents.SubscriptionID(principalA.Key(), req.Name, mcpevents.CanonicalArguments(req.Arguments), req.Delivery.URL)
+					require.NoError(t, h.store.ImportMCPEventSubscription(t.Context(), row))
+					result.ID = row.ID
+				}
+				h.fake.setProjects()
 
-			_, err := h.subscribe(principalA, req)
-			_ = requireWire(t, err, mcpevents.CodeForbidden, "scope_removed")
-			row := h.row(result.ID)
-			assert.Equal(t, db.MCPEventStateEnded, row.State)
-			assert.Equal(t, "scope_removed", row.EndReason)
-			assert.Equal(t, db.MCPEventPendingTerminated, row.PendingKind)
-			assert.JSONEq(t, `{"type":"terminated","error":{"code":-32024,"message":"Forbidden","data":{"reason":"scope_removed"}}}`, string(row.PendingBody))
-			assert.True(t, strings.HasPrefix(row.PendingMessageID, "msg_terminated_"))
+				_, err := h.subscribe(principalA, req)
+				_ = requireWire(t, err, mcpevents.CodeForbidden, "scope_removed")
+				row := h.row(result.ID)
+				assert.Equal(t, db.MCPEventStateEnded, row.State)
+				assert.Equal(t, "scope_removed", row.EndReason)
+				assert.Equal(t, db.MCPEventPendingTerminated, row.PendingKind)
+				assert.JSONEq(t, `{"type":"terminated","error":{"code":-32024,"message":"Forbidden","data":{"reason":"scope_removed"}}}`, string(row.PendingBody))
+				assert.True(t, strings.HasPrefix(row.PendingMessageID, "msg_terminated_"))
 
-			// The cause still holds, so a later subscribe is refused.
-			_, err = h.subscribe(principalA, req)
-			_ = requireWire(t, err, mcpevents.CodeForbidden, "scope_removed")
-			assert.Equal(t, db.MCPEventStateEnded, h.row(result.ID).State)
+				if privateCallback {
+					return
+				}
 
-			// Once the project is visible again the subscription reactivates.
-			h.fake.setProjects(mcpevents.Project{UID: testProjectA, ID: 1})
-			_, err = h.subscribe(principalA, req)
-			require.NoError(t, err)
-			reactivated := h.row(result.ID)
-			assert.Equal(t, db.MCPEventStateActive, reactivated.State)
-			assert.Empty(t, reactivated.PendingKind)
-		})
+				// The cause still holds, so a later subscribe is refused.
+				_, err = h.subscribe(principalA, req)
+				_ = requireWire(t, err, mcpevents.CodeForbidden, "scope_removed")
+				assert.Equal(t, db.MCPEventStateEnded, h.row(result.ID).State)
+
+				// Once the project is visible again the subscription reactivates.
+				h.fake.setProjects(mcpevents.Project{UID: testProjectA, ID: 1})
+				_, err = h.subscribe(principalA, req)
+				require.NoError(t, err)
+				reactivated := h.row(result.ID)
+				assert.Equal(t, db.MCPEventStateActive, reactivated.State)
+				assert.Empty(t, reactivated.PendingKind)
+			})
+		}
 		t.Run("a new explicit selection with nothing visible is refused", func(t *testing.T) {
 			h := newHarness(t, open(t))
 			h.fake.setProjects()

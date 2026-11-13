@@ -1,7 +1,7 @@
 ---
 title: Daemon discovery
 description: Discover and select the same Kata daemon endpoint and transport precedence used by the CLI.
-last_edited: 2026-10-24
+last_edited: 2026-11-11
 ---
 
 # Daemon discovery
@@ -132,9 +132,10 @@ expected and observed instance UID, storage identity, schema/binary/runtime
 versions, PID/endpoint, bound project UID, federation role/hub origin, and
 `next_action`. Failure details appear in `message`. An absent bound project is
 reported as `project_state=missing_project`; it blocks recovery only when
-`--expect-project-uid` is supplied. Missing values are omitted. `state` can be non-ready without the
-command failing. `daemon status --json` retains `daemons` for the current home
-and adds this diagnosis as `selected`; `health --json` includes selected
+`--expect-project-uid` is supplied. Missing values are omitted. Diagnose can
+report a non-ready `state` without failing. `daemon status --json` retains
+`daemons` for the current home and adds this diagnosis as `selected`. See
+the [CLI reference](cli.md) for exit codes. `health --json` includes selected
 provenance after a successful health request.
 
 For a stopped profile, `kata daemon recover --expect-project-uid <uid>` verifies

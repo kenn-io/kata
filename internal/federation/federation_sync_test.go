@@ -3272,10 +3272,16 @@ func TestFederationRunnerUsesClientTimeout(t *testing.T) {
 	t.Setenv("KATA_HOME", spoke.Home)
 	project, err := spoke.DB.CreateProject(ctx, "spoke")
 	require.NoError(t, err)
+	gaveUp := make(chan struct{})
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/projects/42/federation/events":
-			time.Sleep(500 * time.Millisecond)
+			// Answer only after the runner has given up; a runner that never
+			// gives up gets a successful response instead of its error.
+			select {
+			case <-gaveUp:
+			case <-time.After(10 * time.Second):
+			}
 			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
 				Events:      []api.EventEnvelope{},
 				NextAfterID: 1,
@@ -3304,9 +3310,11 @@ func TestFederationRunnerUsesClientTimeout(t *testing.T) {
 
 	start := time.Now()
 	err = runner.RunOnce(ctx)
+	elapsed := time.Since(start)
+	close(gaveUp)
 
 	require.Error(t, err)
-	assert.Less(t, time.Since(start), 300*time.Millisecond)
+	assert.Less(t, elapsed, 300*time.Millisecond)
 }
 
 func TestFederationRunnerSkipsArchivedSpokeBindings(t *testing.T) {

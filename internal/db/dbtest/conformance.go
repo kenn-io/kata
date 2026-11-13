@@ -231,6 +231,12 @@ var storageScenarios = []scenario{
 	{name: "issue planning dates", methods: []string{"IssuePlanningDates"}, run: checkIssuePlanningDates},
 	{name: "native cron remote validation", methods: []string{}, runWithBackend: checkNativeCronValidation},
 	{name: "native cron adoption author", methods: []string{}, runWithBackend: checkNativeCronAdoptionAuthor},
+	{name: "federation repeated import", methods: []string{"IngestFederationEvents", "AdoptProjectIntoFederation", "CommentsByIssue", "LabelsByIssue"}, runWithBackend: checkFederationRepeatedImport},
+	{name: "federation repeated import placement", methods: []string{"IngestFederationEvents", "AdoptProjectIntoFederation", "ReadFederation", "LinksByIssue"}, runWithBackend: checkFederationRepeatedImportPlacement},
+	{name: "federation acknowledge push", methods: []string{"AcknowledgeFederationPush", "AdoptProjectIntoFederation", "InsertRemoteEvents", "EventsAfter", "FederationBindingByProject", "MaxEventID"}, run: checkFederationAcknowledgePush},
+	{name: "federation import issue held elsewhere", methods: []string{"IngestFederationEvents", "RemoveProject"}, runWithBackend: checkFederationImportIssueHeldElsewhere},
+	{name: "project purge retires hub binding", methods: []string{"PurgeProject", "RemoveProject", "EnableProjectFederation", "ListFederationEnrollments"}, run: checkProjectPurgeRetiresHubBinding},
+	{name: "project purge keeps spoke refusal", methods: []string{"PurgeProject", "AdoptProjectIntoFederation"}, run: checkProjectPurgeKeepsSpokeRefusal},
 	{name: "native cron federation", methods: []string{"ReadFederation"}, runWithBackend: checkNativeCronFederation},
 	{name: "native cron push", methods: []string{}, runWithBackend: checkNativeCronPush},
 	{name: "native cron definitions", methods: []string{"PutCronJob", "PutCronWorkflow", "CronJob", "CronWorkflow", "ListCronJobs", "ListCronWorkflows"}, run: checkNativeCronDefinitions},
@@ -330,6 +336,7 @@ var storageScenarios = []scenario{
 		return nil
 	}},
 	{name: "federated move payload-only history identity", methods: []string{"AdvanceFederationPushCursor", "CreateProject", "CreateIssue", "EditIssue", "EventsByUIDs", "MoveIssueProject", "InsertRemoteEvents", "MaterializeFederatedProject", "ResetFederatedProject", "UpsertFederationBinding", "IssueByUID", "ReadFederation"}, runWithBackend: checkFederatedMovePayloadOnlyHistory},
+	{name: "federated move snapshot comment from repeated import", methods: []string{"CreateComment", "EditComment", "CreateFederationEnrollment", "CreateIssue", "CreateProject", "EnableProjectFederation", "IngestFederationEvents", "IssueByUID", "CommentsByIssue"}, run: checkFederatedMoveSnapshotCommentFromRepeatedImport},
 	{name: "federated move snapshot payload-only comment edit", methods: []string{"CreateComment", "CreateFederationEnrollment", "CreateIssue", "CreateProject", "EnableProjectFederation", "IngestFederationEvents", "IssueByUID", "CommentsByIssue"}, run: checkFederatedMoveSnapshotPayloadOnlyCommentEdit},
 	{name: "federated move authoring gates", methods: []string{"MoveIssueProject", "SetRelayBindingConfig", "CreateRelayEnrollment", "InsertRemoteEvents"}, runWithBackend: checkFederatedMoveAuthoringGates},
 	{name: "federated issue move", methods: []string{"MoveIssueProject", "IngestFederationEvents", "InsertRemoteEvents", "ReadFederation", "MaterializeFederatedProject"}, runWithBackend: checkFederatedIssueMove},
@@ -1311,50 +1318,4 @@ func RunStorageConformance(t *testing.T, backend Backend) {
 			require.NoError(t, err)
 		})
 	}
-}
-
-// RunExternalRootConformance exercises only the external-root durable-state
-// scenario. It keeps the focused backend command fast while using the exact
-// same checks as the complete storage conformance suite.
-func RunExternalRootConformance(t *testing.T, backend Backend) {
-	t.Helper()
-	require.NotEmpty(t, backend.Name)
-	require.NotNil(t, backend.Open)
-
-	checks := []struct {
-		name string
-		run  func(*testing.T, db.Storage) error
-	}{
-		{name: "durable state", run: func(t *testing.T, store db.Storage) error {
-			return checkExternalRootBindings(t, store, backend)
-		}},
-		{name: "safety invariants", run: func(t *testing.T, store db.Storage) error {
-			return checkExternalRootSafetyInvariants(t, store, backend)
-		}},
-		{name: "content ownership", run: func(t *testing.T, store db.Storage) error {
-			return checkExternalRootContentOwnership(t, store, backend)
-		}},
-	}
-	for _, check := range checks {
-		t.Run(check.name, func(t *testing.T) {
-			store := backend.Open(t)
-			require.NotNil(t, store)
-			t.Cleanup(func() {
-				require.NoError(t, store.Close())
-			})
-			require.NoError(t, check.run(t, store))
-		})
-	}
-}
-
-// RunExternalRootContentOwnershipConformance exercises the native mutation
-// boundaries that must preserve externally owned title/body content.
-func RunExternalRootContentOwnershipConformance(t *testing.T, backend Backend) {
-	t.Helper()
-	require.NotEmpty(t, backend.Name)
-	require.NotNil(t, backend.Open)
-	store := backend.Open(t)
-	require.NotNil(t, store)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	require.NoError(t, checkExternalRootContentOwnership(t, store, backend))
 }

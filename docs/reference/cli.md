@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-09
+last_edited: 2026-11-12
 ---
 
 # CLI reference
@@ -869,7 +869,9 @@ exclusive and force a strategy:
 For an exhaustive lexical scan, use `--lexical --json`, then pass each
 `next_cursor` back with `--cursor` and the same query and filters until
 `complete` is true. Agent output also includes completeness and continuation;
-human output prints an incomplete-results hint to stderr. Other modes keep
+human output prints a command to continue the search to stderr. The command
+retains the query and filters and uses POSIX syntax on Unix or PowerShell
+syntax on Windows. Other modes keep
 ranked, bounded results without continuation. Their `complete` field is false
 when retrieval is truncated, degraded, or cannot establish exhaustion.
 
@@ -2007,8 +2009,24 @@ resolved web UI URL on its own line after the daemon transport address.
 `daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
 `KATA_HOME` and reject `--daemon`. Set the home explicitly for those operations.
 `daemon status` reports current-home processes and a separate selected-daemon
-diagnosis. `daemon diagnose` inspects selection, home, database/project identity,
-schema, process, and federation origin without starting or changing anything.
+diagnosis. For a process automatically started by a Kata command, human output
+shows `started: automatically by a kata command` and JSON includes
+`auto_started: true`. This includes a registered local profile started by
+`daemon recover` or by a command that routes to it. An omitted JSON field means
+the startup origin is unknown.
+Agent output includes `auto_started=true` when there is exactly one process and
+it was automatically started; it omits the field when multiple processes are
+listed. An existing process's startup marker survives an in-place restart or
+re-exec. The command exits 0 only when the selected daemon is ready. Stopped or
+unavailable selections and the `version_mismatch` state exit 7; an unknown
+named daemon exits 3; other invalid routing configuration, such as a malformed
+`KATA_SERVER` URL, exits 1. Diagnostics are printed in every output mode.
+In agent mode, the `OK daemon` report on stdout indicates that the report was
+produced; a non-ready selection also emits an `ERR status` line on stderr. See
+the [agent output contract](agent-output.md#stability-contract).
+`daemon diagnose` inspects selection, home,
+database/project identity, schema, process, and federation origin without
+starting or changing anything.
 `daemon recover` starts only a registered existing local profile, verifies its
 pinned database UID, and optionally checks `--expect-project-uid` before and
 after startup. It never initializes storage or projects or changes routing. See
@@ -2327,7 +2345,9 @@ for the exact retained and omitted data and an isolated-home example.
 
 `--merge` instead adds exactly one non-system project snapshot to an existing
 SQLite or Postgres target. It remaps numeric database IDs while preserving
-portable identities and leaves unrelated projects unchanged. A multi-project
+portable identities. It also creates the snapshot's links to issues of other
+projects that are already in the target, and changes nothing else in those
+projects. A multi-project
 snapshot or any imported UID that already exists in the target causes the
 transaction to be refused. Stop every daemon using the target first. See
 [Backup and restore](../operations/backup-restore.md) for name collisions,

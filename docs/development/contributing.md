@@ -68,6 +68,16 @@ make nilaway
 
 Pull requests select checks based on the changed files. See the filters and job conditions in [test.yml](https://github.com/kenn-io/kata/blob/main/.github/workflows/test.yml) for the selection rules. Pushes to `main` run every check.
 
+### API contract changes
+
+Every HTTP wire-contract change, including an optional response field, needs a new `APISchemaVersion`.
+
+1. Bump `APISchemaVersion` and run `make api-generate`.
+2. Run `go test ./internal/daemon -run '^TestAPISchemaVersionMatchesRecordedContract$'`.
+3. Add the suggested marker with a one-line summary. Keep all base markers and their summaries; you may correct a summary in its existing file.
+
+If another change takes your version, move your marker and any feature minimum checks introduced by your change to the next minor version. Regenerate the combined contract and use its digest in the marker name, retaining the summary suffix.
+
 ### Native agent plugins
 
 The `native-agent-plugins` job in
