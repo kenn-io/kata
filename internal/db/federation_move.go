@@ -318,6 +318,9 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 			return 0, err
 		}
 		for _, uid := range dependencies {
+			if uid == routeUID {
+				continue
+			}
 			var bound bool
 			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b JOIN projects p ON p.id=b.project_id WHERE p.uid=$1)`, uid).Scan(&bound); err != nil {
 				return 0, err
@@ -371,7 +374,7 @@ type FederatedMoveDecision struct {
 	IssueUID, SourceUID, SourceName, SourceShortID string
 	IssueID, SourceID, TargetID                    int64
 	RecurrenceID                                   sql.NullInt64
-	Active, Joined, Exists                         bool
+	Active, Joined, Exists, SourceJoined           bool
 }
 
 // IndexFederatedMoveEvents selects the latest move for each issue.
@@ -402,13 +405,18 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, decision.TargetID).Scan(&decision.Joined); err != nil {
 			return nil, nil, err
 		}
-		if decision.Joined {
+		if decision.Joined || !decision.Active {
 			err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, issue.UID).Scan(&decision.IssueID, &decision.SourceID, &decision.RecurrenceID, &decision.SourceUID, &decision.SourceName, &decision.SourceShortID)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return nil, nil, err
 			}
 			decision.Exists = err == nil
-			if decision.Active {
+			if !decision.Joined && decision.Exists {
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, decision.SourceID).Scan(&decision.SourceJoined); err != nil {
+					return nil, nil, err
+				}
+			}
+			if decision.Joined && decision.Active {
 				projects[decision.TargetID] = true
 			}
 		}
@@ -419,16 +427,25 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) error {
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) (resultErr error) {
+	var applying *FoldEvent
+	defer func() {
+		if resultErr != nil && applying != nil {
+			resultErr = fmt.Errorf("apply move project %s event %s: %w", applying.ProjectUID, applying.UID, resultErr)
+		}
+	}()
 	for _, decision := range decisions {
 		issue := p.Issues[decision.IssueUID]
 		winner := moved[issue.UID]
+		applying = &winner
 		target, active := decision.TargetID, decision.Active
 		// A detached destination retains standalone data. Its former streams
 		// may keep syncing, but cannot reconcile that destination's projection.
 		if !decision.Joined {
 			delete(p.Issues, issue.UID)
-			continue
+			if active || !decision.Exists || !decision.SourceJoined {
+				continue
+			}
 		}
 		id, source := decision.IssueID, decision.SourceID
 		sourceProject := Project{UID: decision.SourceUID, Name: decision.SourceName}
@@ -452,7 +469,7 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 		if source == target {
 			continue
 		}
-		if !active {
+		if decision.Joined && !active {
 			return ErrNotFound
 		}
 		// Move ingress has already checked its authority and endpoints. Replaying
