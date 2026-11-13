@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/jsonutil"
 	"go.kenn.io/kit/agenthook"
 	"gopkg.in/yaml.v3"
 )
@@ -23,9 +26,11 @@ func planKitAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHoo
 	if err != nil {
 		return plan, err
 	}
+	opts.OwnershipMarkers = agentHookOwnershipMarkers(agent, opts.ConfigPath, opts.Executable, current)
 	plan.CurrentContract, plan.CurrentAttentionStart, plan.CurrentAttentionEnd = kitAgentHookConfigured(agent, current)
 	for _, entry := range current {
 		plan.CurrentOwnedContract = plan.CurrentOwnedContract || entry.Kind == contractHook
+		plan.CurrentOwnedAttention = plan.CurrentOwnedAttention || entry.Kind == attentionStartHook || entry.Kind == attentionEndHook
 	}
 	data := bytes.Clone(original)
 	dataExists := exists
@@ -39,31 +44,8 @@ func planKitAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHoo
 		}
 		var install *agenthook.InstallOptions
 		if !remove {
-			args := []string{"agent-hook", "contract", opts.Agent}
-			hook := contractRegistrationHook(agent)
-			if kind != contractHook {
-				args = []string{"agent-hook", "attention-native", opts.Agent, string(kind)}
-				hook = agenthook.Hook{Event: agenthook.EventSessionStart, Timeout: 10 * time.Second}
-				if kind == attentionEndHook {
-					hook.Event = agenthook.EventSessionEnd
-				}
-				if agent == agenthook.AgentClaude {
-					for _, spec := range claudeHookSpecs() {
-						if spec.event == hook.Event {
-							hook.Matcher = spec.matcher
-							break
-						}
-					}
-				} else if agent == agenthook.AgentCodex && kind == attentionStartHook {
-					hook.Matcher = "startup|resume|clear"
-				}
-			}
-			marker := "contract"
-			if kind != contractHook {
-				marker = "attention-native " + opts.Agent + " " + string(kind)
-			}
-			args = agentHookOwnershipArgs(opts.Executable, args, kind)
-			install = &agenthook.InstallOptions{ConfigPath: opts.ConfigPath, Executable: opts.Executable, Arguments: args, Marker: marker, Hooks: []agenthook.Hook{hook}}
+			options := kitAgentHookRegistration(opts, kind)
+			install = &options
 		}
 		if agent == agenthook.AgentHermes && kind != contractHook {
 			data, err = planHermesLifecycleSnapshot(data, kind, install)
@@ -86,7 +68,62 @@ func planKitAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHoo
 	plan.Contract, plan.AttentionStart, plan.AttentionEnd = kitAgentHookConfigured(agent, desired)
 	// Include unchanged configs as preimages in the shared transaction.
 	plan.Changes = []nativeAgentHookChange{{Path: opts.ConfigPath, Original: original, OriginalExists: exists, Content: data, Remove: !dataExists}}
+	if agent == agenthook.AgentCodex && dataExists && nativeAgentHookPlanChanged(plan) {
+		before := map[string]any{}
+		if len(bytes.TrimSpace(original)) > 0 {
+			if err := json.Unmarshal(original, &before, jsonutil.PreserveNumberLiterals()); err != nil {
+				return plan, err
+			}
+		}
+		var after map[string]any
+		if err := json.Unmarshal(data, &after, jsonutil.PreserveNumberLiterals()); err != nil {
+			return plan, err
+		}
+		shifted, err := codexHookIndexesShifted(before, after)
+		if err != nil {
+			return plan, err
+		}
+		warning := "Codex will ask to re-trust shifted hooks; open Codex and run /hooks."
+		if shifted && !slices.Contains(plan.Warnings, warning) {
+			plan.Warnings = append(plan.Warnings, warning)
+		}
+	}
 	return plan, nil
+}
+
+func kitAgentHookRegistration(opts nativeAgentHookOptions, kind agentHookKind) agenthook.InstallOptions {
+	agent := agenthook.Agent(opts.Agent)
+	args := []string{"agent-hook", "contract", opts.Agent}
+	hook := contractRegistrationHook(agent)
+	if kind != contractHook {
+		args = []string{"agent-hook", "attention-native", opts.Agent, string(kind)}
+		hook = agenthook.Hook{Event: agenthook.EventSessionStart, Timeout: 10 * time.Second}
+		if kind == attentionEndHook {
+			hook.Event = agenthook.EventSessionEnd
+		}
+		if agent == agenthook.AgentClaude {
+			for _, spec := range claudeHookSpecs() {
+				if spec.event == hook.Event {
+					hook.Matcher = spec.matcher
+					break
+				}
+			}
+		} else if agent == agenthook.AgentCodex && kind == attentionStartHook {
+			hook.Matcher = "startup|resume|clear"
+		}
+	}
+	marker := "contract"
+	if kind != contractHook {
+		marker = "attention-native " + opts.Agent + " " + string(kind)
+	}
+	ownership := opts.OwnershipMarkers[kind]
+	args = agentHookOwnershipArgs(opts.Executable, args, kind, ownership)
+	if ownership.Token != "" {
+		marker = "--ownership-marker " + agentSetupHookOwnershipMarker(kind, ownership.Token)
+	} else if len(args) >= 2 && slices.Equal(args[len(args)-2:], []string{"--source", agentHookDefaultSource(kind)}) {
+		marker = "--source " + agentHookDefaultSource(kind)
+	}
+	return agenthook.InstallOptions{ConfigPath: opts.ConfigPath, Executable: opts.Executable, Arguments: args, Marker: marker, Hooks: []agenthook.Hook{hook}}
 }
 
 func kitAgentHookConfigured(agent agenthook.Agent, entries []agentHookEntry) (contract, start, end bool) {
