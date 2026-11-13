@@ -491,9 +491,7 @@ func syncDirectSpoke(
 				if err != nil && !errors.Is(err, db.ErrNotFound) {
 					return fmt.Errorf("resolve echo project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 				}
-				if err == nil {
-					projectID = project.ID
-				}
+				projectID = project.ID
 				projectsByUID[ev.ProjectUID] = projectID
 			}
 			eventProjects[i] = projectID
@@ -533,20 +531,6 @@ func syncDirectSpoke(
 				insertedThisPull[body.Events[i].EventUID] = insertedThisPull[body.Events[i].EventUID] || inserted[j]
 			}
 		}
-		for i, ev := range body.Events {
-			if eventProjects[i] == 0 {
-				projectID := projectsByUID[ev.ProjectUID]
-				if projectID == 0 {
-					project, err := store.ProjectByUID(ctx, ev.ProjectUID)
-					if err != nil {
-						return fmt.Errorf("resolve persisted project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
-					}
-					projectID = project.ID
-					projectsByUID[ev.ProjectUID] = projectID
-				}
-				eventProjects[i] = projectID
-			}
-		}
 		deliverUIDs := map[int64][]string{}
 		var deliverProjects []int64
 		materializeUIDs := make([]string, 0, len(body.Events))
@@ -575,6 +559,17 @@ func syncDirectSpoke(
 			}
 			if deliver[i] {
 				project := eventProjects[i]
+				if project == 0 {
+					project = projectsByUID[ev.ProjectUID]
+					if project == 0 {
+						persisted, err := store.ProjectByUID(ctx, ev.ProjectUID)
+						if err != nil {
+							return fmt.Errorf("resolve persisted project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+						}
+						project = persisted.ID
+						projectsByUID[ev.ProjectUID] = project
+					}
+				}
 				if _, ok := deliverUIDs[project]; !ok {
 					deliverProjects = append(deliverProjects, project)
 				}

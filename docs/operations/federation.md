@@ -91,9 +91,7 @@ To subscribe later, run `kata projects restore` with that local name, optionally
 rename it, then explicitly join using `--project <current-local-name>`. A
 counterpart that was unbound when admitted cannot be purged or merged until
 the dependent route leaves, even if it is later joined or its history is purged.
-
-Upgrade both hub and spokes for the
-`issue_move_v1` event feature. Older peers refuse
+Upgrade both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
 move history instead of applying a payload they cannot understand. Moves preserve
 stable UIDs, nesting, state, comments, and links. Established author and
 teammate attribution must match trusted history, and a spoke cannot change

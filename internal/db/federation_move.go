@@ -279,6 +279,9 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 	}
 	missing := errors.Is(err, sql.ErrNoRows)
 	if missing || e.Type == "issue.moved" || project != route {
+		// Native pull trusts the joined hub with this stream's issue history.
+		// A retained historical project identity needs no live credential or
+		// binding after leave. Local authoring and hub push remain strict.
 		var role string
 		var enabled int
 		var relay bool
@@ -338,7 +341,6 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 		}
 		return retainFederationProject(ctx, tx, e.ProjectUID)
 	}
-
 	return project, nil
 }
 
