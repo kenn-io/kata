@@ -235,6 +235,8 @@ var storageScenarios = []scenario{
 	{name: "federation repeated import placement", methods: []string{"IngestFederationEvents", "AdoptProjectIntoFederation", "ReadFederation", "LinksByIssue"}, runWithBackend: checkFederationRepeatedImportPlacement},
 	{name: "federation acknowledge push", methods: []string{"AcknowledgeFederationPush", "AdoptProjectIntoFederation", "InsertRemoteEvents", "EventsAfter", "FederationBindingByProject", "MaxEventID"}, run: checkFederationAcknowledgePush},
 	{name: "federation import issue held elsewhere", methods: []string{"IngestFederationEvents", "RemoveProject"}, runWithBackend: checkFederationImportIssueHeldElsewhere},
+	{name: "project purge retires hub binding", methods: []string{"PurgeProject", "RemoveProject", "EnableProjectFederation", "ListFederationEnrollments"}, run: checkProjectPurgeRetiresHubBinding},
+	{name: "project purge keeps spoke refusal", methods: []string{"PurgeProject", "AdoptProjectIntoFederation"}, run: checkProjectPurgeKeepsSpokeRefusal},
 	{name: "native cron federation", methods: []string{"ReadFederation"}, runWithBackend: checkNativeCronFederation},
 	{name: "native cron push", methods: []string{}, runWithBackend: checkNativeCronPush},
 	{name: "native cron definitions", methods: []string{"PutCronJob", "PutCronWorkflow", "CronJob", "CronWorkflow", "ListCronJobs", "ListCronWorkflows"}, run: checkNativeCronDefinitions},
