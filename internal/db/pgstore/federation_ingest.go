@@ -357,6 +357,10 @@ func (s *Store) IngestFederationEvents(
 			}
 		}
 		for _, winner := range repeatedWinners {
+			clock, err := db.RepeatedImportClock(ctx, tx, winner.issue.UID, db.EventHLCTimestamp{PhysicalMS: winner.event.HLCPhysicalMS, Counter: winner.event.HLCCounter})
+			if err != nil {
+				return err
+			}
 			for _, delta := range winner.deltas {
 				insert := eventInsert{
 					ProjectID: params.ProjectID, ProjectUID: projectUID, ProjectName: projectName,
@@ -364,7 +368,7 @@ func (s *Store) IngestFederationEvents(
 					Type: delta.Type, Actor: delta.Actor, Payload: string(delta.Payload),
 					// The copy takes the place of the snapshot it replaces, so changes
 					// the home made after that snapshot replay after the copy.
-					HLC: &db.EventHLCTimestamp{PhysicalMS: winner.event.HLCPhysicalMS, Counter: winner.event.HLCCounter},
+					HLC: &clock,
 				}
 				if delta.RelatedIssueUID != "" {
 					insert.RelatedIssueUID = &delta.RelatedIssueUID

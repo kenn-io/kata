@@ -131,6 +131,28 @@ func ValidateAdoptionBaselineSingleClock(events []FederationIngestEvent) error {
 	return nil
 }
 
+// RepeatedImportClock returns the clock for the hub's events of a winning
+// copy. The copy takes the place of the snapshot it replaces, so changes the
+// home made after that snapshot replay after it. It also replays after any
+// earlier creation, snapshot, or copy of the issue, because the hub found the
+// copy newer than all of them.
+func RepeatedImportClock(ctx context.Context, q federationHistoryQuery, issueUID string, snapshot EventHLCTimestamp) (EventHLCTimestamp, error) {
+	var latest EventHLCTimestamp
+	err := q.QueryRowContext(ctx, `SELECT hlc_physical_ms, hlc_counter FROM events
+ WHERE issue_uid=$1 AND type IN ('issue.created','issue.snapshot',$2)
+ ORDER BY hlc_physical_ms DESC, hlc_counter DESC LIMIT 1`, issueUID, RepeatedImportEventType).Scan(&latest.PhysicalMS, &latest.Counter)
+	if errors.Is(err, sql.ErrNoRows) {
+		return snapshot, nil
+	}
+	if err != nil {
+		return EventHLCTimestamp{}, fmt.Errorf("read latest copy clock: %w", err)
+	}
+	if latest.PhysicalMS > snapshot.PhysicalMS || (latest.PhysicalMS == snapshot.PhysicalMS && latest.Counter >= snapshot.Counter) {
+		return EventHLCTimestamp{PhysicalMS: latest.PhysicalMS, Counter: latest.Counter + 1}, nil
+	}
+	return snapshot, nil
+}
+
 // ErrFederationPushAwaitsPull reports a push the hub accepted that this home
 // cannot acknowledge yet. The hub did not store some of the home's adoption
 // snapshots, and the home has no other history of those issues until a pull

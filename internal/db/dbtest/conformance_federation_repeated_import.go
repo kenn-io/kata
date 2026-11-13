@@ -462,7 +462,7 @@ func checkFederationRepeatedImportPlacement(t *testing.T, source db.Storage, bac
 	// Neither issue has a parent on the hub. The newer copy makes one the
 	// child of the other, and both of its snapshots list the link.
 	origin, enrollment, copied = h.repeatedImportCopy(t, h.target, func(issueUID string, payload map[string]any) {
-		repeatedImportShiftUpdatedAt(t, payload, 24*time.Hour)
+		repeatedImportShiftUpdatedAt(t, payload, 20*time.Millisecond)
 		if issueUID == h.issueUID {
 			payload["links"] = []any{map[string]any{"type": "parent", "to_issue_uid": h.otherUID, "author": "operator"}}
 		} else {
@@ -477,6 +477,36 @@ func checkFederationRepeatedImportPlacement(t *testing.T, source db.Storage, bac
 	require.Equal(t, "parent", links[0].Type)
 	require.Equal(t, h.issueUID, links[0].FromIssueUID)
 	require.Equal(t, h.otherUID, links[0].ToIssueUID)
+
+	// Two homes adopt newer copies. The home with the newest data adopted
+	// first but pushes second. Its copy still wins on the hub and after a
+	// rebuild from history.
+	copyAt := func(title string, updated, adoptedAfter time.Duration) (string, int64, []db.RemoteEvent) {
+		origin, enrollment, copied := h.repeatedImportCopy(t, h.target, func(issueUID string, payload map[string]any) {
+			repeatedImportShiftUpdatedAt(t, payload, updated)
+			if issueUID == h.issueUID {
+				payload["title"] = title
+			}
+		})
+		for i := range copied {
+			copied[i].HLCPhysicalMS += adoptedAfter.Milliseconds()
+			resignNativeEvent(t, &copied[i])
+		}
+		return origin, enrollment, copied
+	}
+	newestOrigin, newestEnrollment, newest := copyAt("Newest copy", 40*time.Millisecond, 30*time.Second)
+	laterOrigin, laterEnrollment, later := copyAt("Adopted later", 30*time.Millisecond, time.Minute)
+	_, err = pushRepeatedImportBaseline(t, hub, h.target.ID, laterEnrollment, laterOrigin, later)
+	require.NoError(t, err)
+	_, err = pushRepeatedImportBaseline(t, hub, h.target.ID, newestEnrollment, newestOrigin, newest)
+	require.NoError(t, err)
+	current, err := hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Newest copy", current.Title, "the newest copy wins whichever home adopted first")
+	require.NoError(t, hub.MaterializeFederatedProject(ctx, h.target.ID))
+	current, err = hub.IssueByUID(ctx, h.issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Newest copy", current.Title, "a rebuild from history keeps the newest copy")
 	return nil
 }
 
