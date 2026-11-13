@@ -29,37 +29,14 @@ var rejectNull = json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext
 	return errors.ErrUnsupported
 }))
 
-// Inspect member names without letting an unreadable value hide a later name.
-var inspectMembers = json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext.Decoder, value any) error {
-	if _, ok := value.(*Attachment); ok {
-		return errors.ErrUnsupported
-	}
-	return dec.SkipValue()
-}))
-
 // Valid decodes supported references at use time. Storage remains opaque.
 // A missing size keeps the -1 sentinel and fails the size check.
 func Valid(raw jsontext.Value) (Attachment, bool) {
-	e, err := Decode(raw)
-	return e, err == nil
-}
-
-// Decode reads a supported attachment reference.
-func Decode(raw jsontext.Value) (Attachment, error) {
 	e := Attachment{Size: -1}
-	if err := json.Unmarshal(raw, &e, json.RejectUnknownMembers(true), rejectNull); err != nil {
-		if !errors.Is(err, json.ErrUnknownName) {
-			var probe Attachment
-			if probeErr := json.Unmarshal(raw, &probe, json.RejectUnknownMembers(true), inspectMembers); errors.Is(probeErr, json.ErrUnknownName) {
-				return e, probeErr
-			}
-		}
-		return e, err
+	if json.Unmarshal(raw, &e, json.RejectUnknownMembers(true), rejectNull) != nil {
+		return e, false
 	}
-	if !ValidAttachmentName(e.Name) || e.MediaType == "" || e.Size < 0 || e.DocbankVersion == uuid.Nil() {
-		return e, errors.New("invalid attachment reference")
-	}
-	return e, nil
+	return e, ValidAttachmentName(e.Name) && e.MediaType != "" && e.Size >= 0 && e.DocbankVersion != uuid.Nil()
 }
 
 // ValidAttachmentName checks the basename shared by uploads and stored references.

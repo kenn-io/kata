@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"errors"
 	"strings"
 
 	"go.kenn.io/kata/internal/api"
@@ -85,11 +84,11 @@ func attachmentForVersion(iss db.Issue, version docbank.Version) (string, metada
 		if !ok || id == "" {
 			continue
 		}
-		attachment, err := metadata.Decode(raw)
-		if errors.Is(err, json.ErrUnknownName) {
-			return "", metadata.Attachment{}, api.NewError(400, "attachment_invalid", "An attachment reference uses a newer format; upgrade the daemon", "", nil)
+		attachment, valid := metadata.Valid(raw)
+		if !valid {
+			return "", metadata.Attachment{}, attachmentError(400, "attachment_invalid")
 		}
-		if err != nil || attachment.DocbankVersion != version.ID {
+		if attachment.DocbankVersion != version.ID {
 			continue
 		}
 		if bestID == "" || id < bestID {

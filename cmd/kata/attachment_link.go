@@ -39,7 +39,7 @@ func newAttachmentLinkCmd() *cobra.Command {
 		}
 		versionFloor, feature := apiVersionDocbankAttachmentLink, "Docbank attachment linking"
 		if reuseExisting {
-			versionFloor, feature = apiVersionDocbankLinkReuse, "Docbank attachment reuse"
+			versionFloor, feature = apiVersionAttachmentEvidence, "Docbank attachment reuse"
 			input.ReuseExisting = &reuseExisting
 		}
 		if err := requireDaemonAPIVersion(ctx, hc, base, versionFloor, feature); err != nil {

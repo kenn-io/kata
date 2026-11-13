@@ -408,15 +408,11 @@ func TestAttachmentUploadReuseConcurrent(t *testing.T) {
 }
 
 func TestAttachmentReuseUnreadableReference(t *testing.T) {
-	for _, tc := range []struct {
-		name, reference string
-		reject          bool
-	}{
-		{"unknown before version", `{"future":true,"name":"report.pdf","media_type":"application/pdf","size":12,"docbank_version":"` + linkVersion + `"}`, true},
-		{"unknown after version", `{"name":"report.pdf","media_type":"application/pdf","size":12,"docbank_version":"` + linkVersion + `","future":true}`, true},
-		{"unknown after invalid size", `{"name":"report.pdf","media_type":"application/pdf","size":"12","future":true,"docbank_version":"` + linkVersion + `"}`, true},
-		{"malformed", `"junk"`, false},
-		{"invalid known fields", `{"name":"","media_type":"application/pdf","size":12,"docbank_version":"` + linkVersion + `"}`, false},
+	for _, tc := range []struct{ name, reference string }{
+		{"unknown field", `{"name":"report.pdf","media_type":"application/pdf","size":12,"docbank_version":"` + linkVersion + `","future":true}`},
+		{"unsupported size", `{"name":"report.pdf","media_type":"application/pdf","size":"12","docbank_version":"` + linkVersion + `"}`},
+		{"malformed", `"junk"`},
+		{"invalid known fields", `{"name":"","media_type":"application/pdf","size":12,"docbank_version":"` + linkVersion + `"}`},
 	} {
 		for _, method := range []string{"upload", "link"} {
 			t.Run(tc.name+"/"+method, func(t *testing.T) {
@@ -444,15 +440,9 @@ func TestAttachmentReuseUnreadableReference(t *testing.T) {
 				require.NoError(t, err)
 				afterEventID, err := env.DB.MaxEventID(t.Context())
 				require.NoError(t, err)
-				if tc.reject {
-					assertAPIError(t, code, raw, http.StatusBadRequest, "attachment_invalid")
-					require.Contains(t, string(raw), "newer format")
-					require.JSONEq(t, string(before.Metadata), string(after.Metadata))
-					require.Equal(t, eventID, afterEventID)
-				} else {
-					require.Equal(t, http.StatusOK, code, string(raw))
-					require.Equal(t, eventID+1, afterEventID)
-				}
+				assertAPIError(t, code, raw, http.StatusBadRequest, "attachment_invalid")
+				require.JSONEq(t, string(before.Metadata), string(after.Metadata))
+				require.Equal(t, eventID, afterEventID)
 			})
 		}
 	}
