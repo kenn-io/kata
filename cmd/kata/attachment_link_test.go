@@ -43,8 +43,8 @@ func TestAttachmentLinkCLIRequiresCurrentAPIVersion(t *testing.T) {
 		{"link", "0.37.0", "0.38.0", []string{"link", "$ref", "42"}},
 		{"link reuse unsupported", "0.38.0", "0.39.0", []string{"link", "$ref", "42", "--reuse-existing"}},
 		{"link reuse supported", "0.39.0", "", []string{"link", "$ref", "42", "--reuse-existing"}},
-		{"add reuse unsupported", "0.44.0", "0.45.0", []string{"add", "$ref", "file.txt", "--reuse-existing"}},
-		{"add reuse supported", "0.45.0", "", []string{"add", "$ref", "$file", "--reuse-existing"}},
+		{"add reuse unsupported", "0.46.0", "0.47.0", []string{"add", "$ref", "$file", "--reuse-existing"}},
+		{"add reuse supported", "0.47.0", "", []string{"add", "$ref", "$file", "--reuse-existing"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env, f, ref := attachmentCLIEnv(t)

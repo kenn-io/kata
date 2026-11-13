@@ -271,6 +271,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.47.0` | Attachment uploads accept `reuse_existing`. Reuse on uploads and links returns `attachment_invalid` when an existing reference uses a newer format. |
 | `0.46.0` | Federation ingest responses add optional `superseded_event_uids`, the adoption snapshots the hub did not store. |
 | `0.45.0` | Adds `POST /api/v1/embeddings/local/restart` to restart the daemon after local embeddings setup. Older daemons do not serve this route. |
 | `0.44.0` | Attachment routes return `503 docbank_key_unavailable` instead of `502 docbank_unauthorized` when the daemon cannot resolve its own Docbank key. Health diagnostics add a `docbank` block. |
@@ -979,7 +980,7 @@ federated event log.
 
 `POST /api/v1/projects/{project_id}/issues/{ref}/attachments?name=<file>`
 uploads the raw request body as `application/octet-stream` to Docbank and
-returns the `attachment_id` with its stored reference. Since API 0.45.0,
+returns the `attachment_id` with its stored reference. Since API 0.47.0,
 set the query parameter `reuse_existing=true` to return the smallest existing
 attachment ID for the resolved Docbank version, or create a reference if none
 exists. Omitting it or setting it to `false` creates a new reference. `GET
