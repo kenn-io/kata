@@ -50,6 +50,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   and issues. `kata tui` names runs this way.
 
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
+- Keep moved issues and their discussion when a spoke joins the destination late,
+  pauses or leaves the source, or leaves the destination. A newer issue baseline
+  now replaces older label changes, as it already did for fields.
 
 - Copy a project sync diagnostic for Bash/Zsh or PowerShell from the web summary.
 

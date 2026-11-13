@@ -1315,8 +1315,12 @@ func (d *Store) materializeFederatedProjectTxScoped(
 		}
 	}
 	projection := db.FoldEvents(events)
+	snapshotGroup, err := federationSnapshotGroupProjectIDs(ctx, tx, projectID)
+	if err != nil {
+		return err
+	}
 	moved := db.IndexFederatedMoveEvents(events)
-	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection)
+	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID, snapshotGroup)
 	if err != nil {
 		return err
 	}
@@ -1375,7 +1379,7 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	return updateFederatedProjectMetadataTx(ctx, tx, projectID, projection.ProjectMetadata[binding.HubProjectUID])
 }
 
-func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]db.FoldEvent, projection db.FoldProjection, decisions []db.FederatedMoveDecision, acceptedEventUIDs []string) error {
+func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved db.FederatedMoveIndex, projection db.FoldProjection, decisions []db.FederatedMoveDecision, acceptedEventUIDs []string) error {
 	return db.RehomeFederatedMovedIssues(ctx, tx, moved, projection, decisions, func(pid int64, issue db.FoldIssue) (string, error) {
 		return resolveFederatedIssueShortID(ctx, tx, pid, issue.UID, issue.ShortID, nil)
 	}, func(id, source, target int64) error {
@@ -1883,7 +1887,11 @@ func federationFoldEventsForIssues(ctx context.Context, tx *sql.Tx, projectID in
 }
 
 func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes, issueScope []string) ([]db.FoldEvent, error) {
-	query, args := federationFoldEventsQuery(projectID, eventTypes, issueScope)
+	group, err := federationSnapshotGroupProjectIDs(ctx, tx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	query, args := federationFoldEventsQuery(projectID, group, eventTypes, issueScope)
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated events: %w", err)
@@ -1891,15 +1899,38 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
 	return scanFederationFoldEvents(rows)
 }
 
-func federationFoldEventsQuery(projectID int64, eventTypes, issueScope []string) (string, []any) {
+// federationFoldEventsQuery builds the fold query. Other projects' events join
+// an issue's history after a retained move, from the two projects in a
+// recorded snapshot relocation, or within a same-hub snapshot group. A refused
+// snapshot from another hub stays out, so it cannot retry its relocation.
+func federationFoldEventsQuery(projectID int64, snapshotGroup []int64, eventTypes, issueScope []string) (string, []any) {
 	// Issues whose events the project holds, or that now live in it.
 	const history = `SELECT h.issue_uid FROM events h WHERE h.project_id=?1
    UNION SELECT uid FROM issues WHERE project_id=?1`
 	args := []any{projectID}
+	// Snapshot relocations carry an issue's history without a retained move:
+	// the two projects of a recorded relocation, and same-hub snapshot groups.
+	relocated := `(e.issue_uid, e.project_id) IN (SELECT reset.issue_uid, rp.id FROM events reset
+     JOIN events m ON m.uid = json_extract(reset.payload,'$.move_event_uid') AND m.type='issue.snapshot'
+     JOIN projects rp ON rp.id IN (reset.project_id, m.project_id)
+     WHERE reset.type='sync.reset_required' AND +reset.issue_uid IS NOT NULL)`
+	if len(snapshotGroup) > 1 {
+		placeholders := make([]string, 0, len(snapshotGroup))
+		for _, id := range snapshotGroup {
+			placeholders = append(placeholders, fmt.Sprintf("?%d", len(args)+1))
+			args = append(args, id)
+		}
+		groupSQL := strings.Join(placeholders, ",")
+		//nolint:gosec // G202: generated placeholders only; project IDs are bound separately.
+		relocated += `
+   OR (e.project_id IN (` + groupSQL + `)
+     AND e.issue_uid IN (SELECT m.issue_uid FROM events m WHERE m.type='issue.snapshot' AND m.project_id IN (` + groupSQL + `)))`
+	}
 	// Scan events once and collect moved subjects once. The unary + keeps
 	// SQLite from seeking every issue's history through its UID index.
 	selector := `(e.project_id=?1 OR +e.issue_uid IN (
-   SELECT m.issue_uid FROM events m WHERE m.type='issue.moved' AND m.issue_uid IN (` + history + `)))`
+   SELECT m.issue_uid FROM events m WHERE m.type='issue.moved' AND m.issue_uid IN (` + history + `))
+   OR (+e.issue_uid IN (` + history + `) AND (` + relocated + `)))`
 	if len(issueScope) > 0 {
 		// Scoped pushes narrow to project events and the touched issues first,
 		// then check moves only for those.
@@ -1911,7 +1942,7 @@ func federationFoldEventsQuery(projectID int64, eventTypes, issueScope []string)
 		//nolint:gosec // G202: generated placeholders only; issue UIDs are bound separately.
 		selector = `CASE WHEN e.type LIKE 'project.%' OR e.issue_uid IN (` + strings.Join(placeholders, ",") + `)
    THEN e.project_id=?1 OR (e.issue_uid IN (` + history + `)
-     AND e.issue_uid IN (SELECT m.issue_uid FROM events m WHERE m.type='issue.moved'))
+     AND (e.issue_uid IN (SELECT m.issue_uid FROM events m WHERE m.type='issue.moved') OR ` + relocated + `))
    ELSE 0 END`
 	}
 	query := `
@@ -2773,6 +2804,22 @@ func federationBindingGroupProjectIDs(
 	tx *sql.Tx,
 	current db.FederationBinding,
 ) ([]int64, error) {
+	return federationBindingGroupProjectIDsScoped(ctx, tx, current, false)
+}
+
+// Snapshot ownership is shared by native replicas of one hub, including paused replicas.
+func federationSnapshotGroupProjectIDs(ctx context.Context, tx *sql.Tx, projectID int64) ([]int64, error) {
+	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, projectID))
+	if err != nil {
+		return nil, err
+	}
+	if binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil {
+		return nil, nil
+	}
+	return federationBindingGroupProjectIDsScoped(ctx, tx, binding, true)
+}
+
+func federationBindingGroupProjectIDsScoped(ctx context.Context, tx *sql.Tx, current db.FederationBinding, nativeSnapshots bool) ([]int64, error) {
 	switch current.Role {
 	case db.FederationRoleHub:
 	case db.FederationRoleSpoke:
@@ -2787,9 +2834,12 @@ func federationBindingGroupProjectIDs(
 			return nil, err
 		}
 	}
-	rows, err := tx.QueryContext(ctx,
-		federationBindingSelect+` WHERE role = ? AND enabled = 1 ORDER BY project_id ASC`,
-		string(current.Role))
+	query := federationBindingSelect + ` WHERE role = ?`
+	if !nativeSnapshots {
+		query += ` AND enabled = 1`
+	}
+	query += ` ORDER BY project_id ASC`
+	rows, err := tx.QueryContext(ctx, query, string(current.Role))
 	if err != nil {
 		return nil, fmt.Errorf("list federation group bindings: %w", err)
 	}
@@ -2799,6 +2849,9 @@ func federationBindingGroupProjectIDs(
 		candidate, err := scanFederationBinding(rows)
 		if err != nil {
 			return nil, err
+		}
+		if nativeSnapshots && candidate.RelayConfig != nil {
+			continue
 		}
 		if current.Role == db.FederationRoleSpoke {
 			candidateOrigin, err := normalizedFederationHubOrigin(candidate.HubURL)

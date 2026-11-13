@@ -539,8 +539,12 @@ func (s *Store) materializeFederatedProjectTxScoped(
 		}
 	}
 	projection := db.FoldEvents(events)
+	snapshotGroup, err := federationSnapshotGroupProjectIDs(ctx, tx, projectID)
+	if err != nil {
+		return err
+	}
 	moved := db.IndexFederatedMoveEvents(events)
-	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection)
+	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID, snapshotGroup)
 	if err != nil {
 		return err
 	}

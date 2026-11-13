@@ -160,7 +160,7 @@ func TestFederationFoldEventsBudget(t *testing.T) {
 		}
 		for _, types := range [][]string{nil, db.FederationLinkAffectingEventTypes()} {
 			t.Run(fmt.Sprintf("analyzed=%t/types=%d", analyzed, len(types)), func(t *testing.T) {
-				query, args := pgstore.FederationFoldEventsQueryForTest(hub.ID, types)
+				query, args := pgstore.FederationFoldEventsQueryForTest(hub.ID, []int64{hub.ID, others[0].ID}, types)
 				var raw []byte
 				require.NoError(t, store.QueryRowContext(ctx, `EXPLAIN (ANALYZE, FORMAT JSON) `+query, args...).Scan(&raw))
 				var plans []struct{ Plan federationPagePlan }

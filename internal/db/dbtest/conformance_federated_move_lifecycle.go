@@ -55,6 +55,8 @@ func checkFederatedMoveDetachedDestination(t *testing.T, store db.Storage) error
 	ctx := t.Context()
 	source, target, issue, move := federatedRehomeFixture(t, store, "detached-destination")
 	prepareRehomePull(t, store, source, target, "pull")
+	// The hub has the source issue before it can move it.
+	acknowledgeFederatedRehomeSourceEvents(t, store, source)
 	replayFederatedRehome(t, store, target, move, "pull")
 	_, err := store.LeaveFederationReplica(ctx, target.ID)
 	require.NoError(t, err)

@@ -13,7 +13,7 @@ type preparedFederationRebuildProject struct {
 	id              int64
 	uid             string
 	events          []db.FoldEvent
-	moveEvents      map[string]db.FoldEvent
+	moveEvents      db.FederatedMoveIndex
 	projection      db.FoldProjection
 	moveProjection  db.FoldProjection
 	moved           db.FoldProjection
@@ -48,19 +48,27 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			}
 		}
 		projection := db.FoldEvents(events)
-		moveEvents := db.IndexFederatedMoveEvents(events)
-		decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moveEvents, projection)
+		snapshotGroup, err := federationSnapshotGroupProjectIDs(ctx, tx, id)
 		if err != nil {
 			return nil, err
 		}
+		moveEvents := db.IndexFederatedMoveEvents(events)
+		decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moveEvents, projection, id, snapshotGroup)
+		if err != nil {
+			return nil, err
+		}
+		// The apply step plans again from the projection as folded.
 		moveProjection := projection
 		moveProjection.Issues = make(map[string]db.FoldIssue, len(decisions))
 		moveProjection.Comments = maps.Clone(projection.Comments)
 		moveProjection.Labels = maps.Clone(projection.Labels)
 		for _, decision := range decisions {
+			moveProjection.Issues[decision.IssueUID] = projection.Issues[decision.IssueUID]
+		}
+		db.KeepRefusedFederatedRelocations(projection, decisions)
+		for _, decision := range decisions {
 			result.moved[decision.IssueUID] = decision
 			moveOwners[decision.IssueUID] = projection.Issues[decision.IssueUID].ProjectUID
-			moveProjection.Issues[decision.IssueUID] = projection.Issues[decision.IssueUID]
 		}
 		result.projects = append(result.projects, preparedFederationRebuildProject{id: id, events: events, moveEvents: moveEvents, projection: projection, moveProjection: moveProjection, decisions: decisions})
 		return destinations, nil
@@ -207,7 +215,11 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 		// Earlier rehomes can change the source of a later decision.
 		changed := map[string]bool{}
 		for _, p := range prepared.projects {
-			decisions, _, err := db.PlanFederatedMovedIssues(ctx, tx, p.moveEvents, p.moveProjection)
+			snapshotGroup, err := federationSnapshotGroupProjectIDs(ctx, tx, p.id)
+			if err != nil {
+				return err
+			}
+			decisions, _, err := db.PlanFederatedMovedIssues(ctx, tx, p.moveEvents, p.moveProjection, p.id, snapshotGroup)
 			if err != nil {
 				return err
 			}
