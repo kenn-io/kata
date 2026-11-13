@@ -87,7 +87,7 @@ func federationIngestClaimAuditIssueUIDs(
 	}
 	if (claimWorkMutationRequiresClaim(event.Type) && !attentionOnlyMetadataEvent(event.Type, event.Payload)) ||
 		event.Type == "issue.snapshot" {
-		issueUID, err := payloadIssueUID(event, payload)
+		issueUID, err := db.RemoteEventIssueUID(event)
 		if err != nil {
 			return nil, err
 		}

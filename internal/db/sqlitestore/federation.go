@@ -787,6 +787,9 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 		if err != nil {
 			return nil, err
 		}
+		if _, err := db.RemoteEventIssueUID(ev); err != nil {
+			return nil, err
+		}
 		if err := db.ValidateFederationEntries(ev.Type, ev.EventUID, payload); err != nil {
 			return nil, err
 		}
@@ -1923,7 +1926,7 @@ func scanFederationFoldEvents(rows *sql.Rows, issueScope []string) ([]db.FoldEve
 		}
 		e.Payload = jsontext.Value(payload)
 		e.CreatedAt = createdAt.UTC().Format(sqliteTimeFormat)
-		if len(issueScope) > 0 && !strings.HasPrefix(e.Type, "project.") && !slices.Contains(issueScope, db.FederationEventIssueUID(&e.IssueUID, payload)) {
+		if len(issueScope) > 0 && !strings.HasPrefix(e.Type, "project.") && !slices.Contains(issueScope, e.IssueUID) {
 			continue
 		}
 		out = append(out, e)

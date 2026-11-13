@@ -1250,30 +1250,16 @@ func federationIngestClaimAuditIssueUIDs(ev db.RemoteEvent) ([]federationIngestC
 		out = append(out, issue)
 	}
 	if claimWorkMutationRequiresClaim(ev.Type) && !attentionOnlyMetadataEvent(ev.Type, ev.Payload) {
-		issueUID := ""
-		if ev.IssueUID != nil {
-			issueUID = *ev.IssueUID
-		}
-		if issueUID == "" {
-			uid, err := payloadIssueUID(ev, payload)
-			if err != nil {
-				return nil, err
-			}
-			issueUID = uid
+		issueUID, err := db.RemoteEventIssueUID(ev)
+		if err != nil {
+			return nil, err
 		}
 		add(federationIngestClaimAuditIssue{UID: issueUID, RequireClaim: true})
 	}
 	if ev.Type == "issue.snapshot" {
-		issueUID := ""
-		if ev.IssueUID != nil {
-			issueUID = *ev.IssueUID
-		}
-		if issueUID == "" {
-			uid, err := payloadIssueUID(ev, payload)
-			if err != nil {
-				return nil, err
-			}
-			issueUID = uid
+		issueUID, err := db.RemoteEventIssueUID(ev)
+		if err != nil {
+			return nil, err
 		}
 		add(federationIngestClaimAuditIssue{UID: issueUID, RequireClaim: true})
 	}

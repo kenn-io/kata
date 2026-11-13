@@ -11,8 +11,8 @@ import (
 	"go.kenn.io/kata/internal/db/pgstore"
 )
 
-// Sparse issue history must seek by resolved identity, including payload-only
-// federation identities, rather than scan unrelated events.
+// Sparse issue history must seek by issue identity through the index rather
+// than scan unrelated events.
 func TestIssueHistoryResolvedIdentityUsesIndex(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		f := newProjectAccessFixture(t, store)

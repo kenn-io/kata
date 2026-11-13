@@ -31,14 +31,14 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 	baselines := map[string]bool{}
 	for _, e := range ordered {
 		if e.Type == "issue.created" || e.Type == "issue.snapshot" {
-			if uid := issueUID(e, PayloadMap(e.Payload)); uid != "" {
-				baselines[uid] = true
+			if e.IssueUID != "" {
+				baselines[e.IssueUID] = true
 			}
 		}
 	}
 	for _, e := range ordered {
 		payload := PayloadMap(e.Payload)
-		uid := issueUID(e, payload)
+		uid := e.IssueUID
 		if uid == "" || baselines[uid] {
 			continue
 		}
@@ -107,7 +107,7 @@ func (p *FoldProjection) apply(e FoldEvent) {
 	case "issue.moved":
 		p.applyMoved(e, payload)
 	case "issue.metadata_updated":
-		uid := issueUID(e, payload)
+		uid := e.IssueUID
 		if uid != "" {
 			p.IssueMetadata[uid] = applyMetadataDiff(p.IssueMetadata[uid], payload["diff"])
 			p.touchIssue(uid, issueUpdatedAt(e, payload))
@@ -137,7 +137,6 @@ func (p *FoldProjection) apply(e FoldEvent) {
 
 func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	var in struct {
-		UID                 string         `json:"uid"`
 		ShortID             string         `json:"short_id"`
 		Title               string         `json:"title"`
 		Body                string         `json:"body"`
@@ -172,10 +171,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		UpdatedAt string `json:"updated_at"`
 	}
 	_ = json.Unmarshal(e.Payload, &in)
-	uid := in.UID
-	if uid == "" {
-		uid = e.IssueUID
-	}
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -237,7 +233,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 }
 
 func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -286,7 +282,7 @@ func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsont
 }
 
 func (p *FoldProjection) applyOwner(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -308,7 +304,7 @@ func (p *FoldProjection) applyOwner(e FoldEvent, payload map[string]jsontext.Val
 }
 
 func (p *FoldProjection) applyAssignmentRenewed(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -329,7 +325,7 @@ func (p *FoldProjection) applyAssignmentRenewed(e FoldEvent, payload map[string]
 }
 
 func (p *FoldProjection) applyAssignmentExpired(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -366,7 +362,7 @@ func foldStringPtrEqual(got *string, want string) bool {
 }
 
 func (p *FoldProjection) applyPriority(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -381,7 +377,7 @@ func (p *FoldProjection) applyPriority(e FoldEvent, payload map[string]jsontext.
 }
 
 func (p *FoldProjection) applyClosed(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -401,7 +397,7 @@ func (p *FoldProjection) applyClosed(e FoldEvent, payload map[string]jsontext.Va
 }
 
 func (p *FoldProjection) applyReopened(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -414,7 +410,7 @@ func (p *FoldProjection) applyReopened(e FoldEvent, payload map[string]jsontext.
 }
 
 func (p *FoldProjection) applyDeleted(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -442,7 +438,7 @@ func setFoldStatus(issue *FoldIssue, state string, event FoldEvent, explicit boo
 }
 
 func (p *FoldProjection) applyRestored(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -461,7 +457,7 @@ func (p *FoldProjection) applyComment(e FoldEvent, payload map[string]jsontext.V
 	teammate, _ := stringValue(payload["teammate"])
 	body, _ := stringValue(payload["body"])
 	createdAt, _ := stringValue(payload["created_at"])
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	replyTo, _ := stringValue(payload["reply_to_uid"])
 	replyKind, _ := stringValue(payload["reply_kind"])
 	editedAt, _ := stringValue(payload["edited_at"])
@@ -481,7 +477,7 @@ func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]json
 	if !ok {
 		return
 	}
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	editedAt := e.CreatedAt
 	if v, ok := stringValue(payload["edited_at"]); ok && v != "" {
 		editedAt = v
@@ -533,7 +529,7 @@ func (p *FoldProjection) editCommentBody(commentUID, issueUID, body, editedAt st
 }
 
 func (p *FoldProjection) applyLabel(e FoldEvent, payload map[string]jsontext.Value, present bool) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	label, ok := stringValue(payload["label"])
 	if !ok || uid == "" {
 		return
@@ -560,11 +556,11 @@ func (p *FoldProjection) applyLinkEvent(e FoldEvent, payload map[string]jsontext
 		}
 	}
 	p.setLink(from, to, typ, present, clockOf(e), e.Actor, "")
-	p.touchIssue(issueUID(e, payload), issueUpdatedAt(e, payload))
+	p.touchIssue(e.IssueUID, issueUpdatedAt(e, payload))
 }
 
 func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]jsontext.Value) {
-	base := issueUID(e, payload)
+	base := e.IssueUID
 	if base == "" {
 		return
 	}
@@ -592,7 +588,7 @@ func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]jsont
 }
 
 func (p *FoldProjection) applyMoved(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -719,42 +715,16 @@ func advanceIssueUpdatedAt(issue *FoldIssue, updatedAt string) {
 	}
 }
 
-func issueUID(e FoldEvent, payload map[string]jsontext.Value) string {
-	return resolveIssueUID(e.IssueUID, payload)
-}
-
-// FederationEventIssueUID resolves the issue identity carried by a federated
-// event, using the same envelope and payload fields as the fold engine.
-func FederationEventIssueUID(issueUID *string, payload string) string {
-	envelope := ""
-	if issueUID != nil {
-		envelope = *issueUID
-	}
-	return resolveIssueUID(envelope, PayloadMap(jsontext.Value(payload)))
-}
-
-// FederationReadIssueUIDExpr returns the SQL expression that matches
-// FederationEventIssueUID for the federation-read event alias e. Payload
-// identity is used only for issue events; unrelated event payloads may mention
-// issue UIDs without becoming part of that issue's history.
+// FederationReadIssueUIDExpr returns the SQL expression that the
+// idx_events_resolved_issue_uid index is built on, for the federation-read
+// event alias e. Every issue event carries issue_uid in its header (see
+// RemoteEventIssueUID), so the expression always equals e.issue_uid; it stays
+// only because queries must repeat the indexed expression to use that index.
 func FederationReadIssueUIDExpr(postgres bool) string {
 	if postgres {
 		return `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),e.payload::jsonb->>'issue_uid',e.payload::jsonb->>'uid') ELSE NULLIF(e.issue_uid,'') END`
 	}
 	return `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),json_extract(e.payload,'$.issue_uid'),json_extract(e.payload,'$.uid')) ELSE NULLIF(e.issue_uid,'') END`
-}
-
-func resolveIssueUID(envelope string, payload map[string]jsontext.Value) string {
-	if envelope != "" {
-		return envelope
-	}
-	if v, ok := stringValue(payload["issue_uid"]); ok {
-		return v
-	}
-	if v, ok := stringValue(payload["uid"]); ok {
-		return v
-	}
-	return ""
 }
 
 func issueUpdatedAt(e FoldEvent, payload map[string]jsontext.Value) string {

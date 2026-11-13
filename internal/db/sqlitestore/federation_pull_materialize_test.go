@@ -12,14 +12,14 @@ import (
 )
 
 // Pulls must repair only their touched issue and agree with a complete fold,
-// including older incoming clocks and payload-only issue identity. Go's built-in
+// including older incoming clocks. Go's built-in
 // fuzzing keeps this contract independent of a third-party test dependency.
 func FuzzPulledMaterializationMatchesFullFold(f *testing.F) {
-	f.Add(uint16(0), false)
-	f.Add(uint16(1), false)
-	f.Add(uint16(100), true)
-	f.Add(uint16(101), true)
-	f.Fuzz(func(t *testing.T, value uint16, payloadOnly bool) {
+	f.Add(uint16(0))
+	f.Add(uint16(1))
+	f.Add(uint16(100))
+	f.Add(uint16(101))
+	f.Fuzz(func(t *testing.T, value uint16) {
 		ctx := t.Context()
 		d, p, issue := incrementalTestStore(t)
 		other, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "untouched", Author: "tester", Labels: []string{"retained"}})
@@ -34,11 +34,7 @@ func FuzzPulledMaterializationMatchesFullFold(f *testing.F) {
 		if value%2 == 0 {
 			clock = 1
 		}
-		uid := issue.UID
-		if payloadOnly {
-			uid = ""
-		}
-		event := incrementalRemoteEvent(t, p, uid, "issue.updated", fmt.Sprintf(`{"issue_uid":%q,"title":%q}`, issue.UID, fmt.Sprintf("incoming %d", value)), clock)
+		event := incrementalRemoteEvent(t, p, issue.UID, "issue.updated", fmt.Sprintf(`{"title":%q}`, fmt.Sprintf("incoming %d", value)), clock)
 		_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{event})
 		require.NoError(t, err)
 		// The fallback makes the same behavioral test runnable before the optional
@@ -329,7 +325,7 @@ func TestFullPulledMaterializationRetriesChanges(t *testing.T) {
 			require.NoError(t, err)
 			projectEvent := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
 			pageLink := incrementalRemoteEvent(t, p, issue.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, issue.UID, peer.UID), 9_000_000_000_001)
-			history := incrementalRemoteEvent(t, sibling, "", "issue.linked", fmt.Sprintf(`{"issue_uid":%q,"from_uid":%q,"to_uid":%q,"type":"related"}`, peer.UID, peer.UID, issue.UID), 9_000_000_000_002)
+			history := incrementalRemoteEvent(t, sibling, peer.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, peer.UID, issue.UID), 9_000_000_000_002)
 			_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{projectEvent, pageLink})
 			require.NoError(t, err)
 			_, err = d.InsertRemoteEvents(ctx, sibling.ID, []db.RemoteEvent{history})

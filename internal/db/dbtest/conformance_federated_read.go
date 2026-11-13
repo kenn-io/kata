@@ -48,9 +48,9 @@ func checkFederatedReadPages(t *testing.T, store db.Storage, backend Backend) {
 	incoming, history, _, err := store.EditIssue(ctx, db.EditIssueParams{IssueID: incoming.ID, Title: &title, Actor: "tester"})
 	require.NoError(t, err)
 	want := []int64{history.ID}
-	for _, field := range []string{"issue_uid", "uid"} {
+	for range 2 {
 		gap()
-		event := newRemoteEvent(t, busy, nil, "issue.updated", "tester", store.InstanceUID(), time.Now().UnixMilli(), jsontext.Value(`{"`+field+`":"`+incoming.UID+`","title":"Payload history"}`))
+		event := newRemoteEvent(t, busy, &incoming.UID, "issue.updated", "tester", store.InstanceUID(), time.Now().UnixMilli(), jsontext.Value(`{"title":"Remote history"}`))
 		_, err = store.InsertRemoteEvents(ctx, busy.ID, []db.RemoteEvent{event})
 		require.NoError(t, err)
 		stored, err := store.EventsByUIDs(ctx, busy.ID, []string{event.EventUID})

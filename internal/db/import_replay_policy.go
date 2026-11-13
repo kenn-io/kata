@@ -154,7 +154,7 @@ func validateReplayStatusIntent(records []ImportRecord) error {
 		event := events[*normalized.PendingEventUID]
 		if issue == nil || event == nil || issue.ProjectID != mapping.ProjectID || event.ProjectID != mapping.ProjectID ||
 			(event.IssueID != nil && *event.IssueID != issue.ID) ||
-			FederationEventIssueUID(event.IssueUID, string(event.Payload)) != issue.UID ||
+			EventIssueUID(event.IssueUID) != issue.UID ||
 			(event.Type != "issue.closed" && event.Type != "issue.reopened") {
 			return invalidIssueStatusState()
 		}
@@ -502,6 +502,11 @@ func PrepareReplayEvent(
 	}
 	if event.HLCCounter < 0 {
 		return fmt.Errorf("event %d has negative hlc_counter", event.ID)
+	}
+	// Both backends fill a missing header from the event's local issue row
+	// before this check, so only an issue event that names no issue fails.
+	if strings.HasPrefix(event.Type, "issue.") && EventIssueUID(event.IssueUID) == "" {
+		return fmt.Errorf("event %d (%s) has no issue_uid", event.ID, event.Type)
 	}
 	if !recomputeHash && !ValidReplayContentHash(event.ContentHash) {
 		return fmt.Errorf("event %d invalid content_hash %q", event.ID, event.ContentHash)

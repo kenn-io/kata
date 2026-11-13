@@ -201,7 +201,7 @@ func TestCronPullMatchesFullFold(t *testing.T) {
 				pages = [][]db.RemoteEvent{{workflow, a}, {later, b}}
 			}
 			if scenario == "mixed" {
-				pages[0] = append(pages[0], incrementalRemoteEvent(t, p, "", "issue.updated", fmt.Sprintf(`{"issue_uid":%q,"title":"mixed update"}`, issue.UID), 9_000_001_000_001))
+				pages[0] = append(pages[0], incrementalRemoteEvent(t, p, issue.UID, "issue.updated", `{"title":"mixed update"}`, 9_000_001_000_001))
 			}
 			if scenario == "reset-cron-first" {
 				snapshot := incrementalRemoteEvent(t, p, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"reset baseline","author":"tester","status":"open","created_at":"2026-05-23T12:00:00.000Z"}`, issue.UID, issue.ShortID), 9_000_001_000_001)

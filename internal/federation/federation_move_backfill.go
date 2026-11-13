@@ -66,7 +66,7 @@ func (c *Client) issueHistoryThrough(ctx context.Context, projectID int64, uid s
 			return nil, ErrFederationResetRequired
 		}
 		for _, event := range page.Events {
-			if db.FederationEventIssueUID(event.IssueUID, string(event.Payload)) != uid {
+			if db.EventIssueUID(event.IssueUID) != uid {
 				return nil, errors.New("hub did not honor issue history filter")
 			}
 			if event.EventID <= through {

@@ -63,7 +63,7 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 		if db.EventRequiredFeatures(ev.Type) == db.CronEventFeature {
 			continue
 		}
-		uid := db.FederationEventIssueUID(ev.IssueUID, string(ev.Payload))
+		uid := db.EventIssueUID(ev.IssueUID)
 		// Project events, moves and unidentified events can affect the entire
 		// projection. Ordinary issue batches use the same scope as pulled pages.
 		if uid == "" || strings.HasPrefix(ev.Type, "project.") || ev.Type == "issue.moved" {
@@ -258,12 +258,8 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 
 func (m *federationMaterialization) recordMoveIssueUIDs(events []db.FoldEvent) {
 	for _, event := range events {
-		uid := event.IssueUID
-		if uid == "" && strings.HasPrefix(event.Type, "issue.") {
-			uid = db.FederationEventIssueUID(nil, string(event.Payload))
-		}
-		if uid != "" {
-			m.moveIssueUIDs[uid] = struct{}{}
+		if event.IssueUID != "" {
+			m.moveIssueUIDs[event.IssueUID] = struct{}{}
 		}
 	}
 }

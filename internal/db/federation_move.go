@@ -296,14 +296,7 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 		}
 	}
 	if project != route {
-		issueUID := ""
-		if e.IssueUID != nil {
-			issueUID = *e.IssueUID
-		}
-		if strings.HasPrefix(e.Type, "issue.") {
-			issueUID = FederationEventIssueUID(e.IssueUID, string(e.Payload))
-		}
-		if issueUID == "" {
+		if EventIssueUID(e.IssueUID) == "" {
 			return 0, fmt.Errorf("%w: project event outside requested stream", ErrFederationIngestValidation)
 		}
 	}

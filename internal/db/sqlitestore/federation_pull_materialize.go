@@ -97,7 +97,7 @@ func preparePulledFederationMaterialization(ctx context.Context, tx *sql.Tx, pro
 	var scope []string
 	full := false
 	for _, ev := range events {
-		uid := db.FederationEventIssueUID(ev.IssueUID, ev.Payload)
+		uid := db.EventIssueUID(ev.IssueUID)
 		switch {
 		case db.EventRequiredFeatures(ev.Type) == db.CronEventFeature:
 			// Common preparation folds complete cron history separately.

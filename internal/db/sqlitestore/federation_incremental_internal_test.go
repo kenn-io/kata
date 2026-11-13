@@ -136,15 +136,7 @@ func TestFederationPreparationExcludesUntouchedRows(t *testing.T) {
 	require.Empty(t, m.projection.Labels, "apply must not visit untouched labels")
 }
 
-func TestFederationStatusIntentUsesPayloadIssueUIDWhenEnvelopeOmitsIt(t *testing.T) {
-	testFederationStatusIntentUsesPayloadIdentityWhenEnvelopeOmitsIt(t, "issue_uid")
-}
-
-func TestFederationStatusIntentUsesPayloadUIDWhenEnvelopeOmitsIt(t *testing.T) {
-	testFederationStatusIntentUsesPayloadIdentityWhenEnvelopeOmitsIt(t, "uid")
-}
-
-func testFederationStatusIntentUsesPayloadIdentityWhenEnvelopeOmitsIt(t *testing.T, payloadKey string) {
+func TestFederationStatusIntentFollowsAcceptedCloseEvent(t *testing.T) {
 	t.Parallel()
 	d, p, issue := incrementalTestStore(t)
 	ctx := t.Context()
@@ -157,8 +149,8 @@ VALUES('example:remote','remote-issue','issue',?,?)`, p.ID, issue.ID)
 	mappingID, err := res.LastInsertId()
 	require.NoError(t, err)
 
-	ev := incrementalRemoteEvent(t, p, "", "issue.closed",
-		`{"`+payloadKey+`":"`+issue.UID+`","reason":"done","closed_at":"2026-05-23T12:00:00.000Z"}`, 9_000_000_000_000)
+	ev := incrementalRemoteEvent(t, p, issue.UID, "issue.closed",
+		`{"reason":"done","closed_at":"2026-05-23T12:00:00.000Z"}`, 9_000_000_000_000)
 	result, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
 		ProjectID: p.ID, SpokeInstanceUID: ev.OriginInstanceUID,
 		Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}},
@@ -167,11 +159,11 @@ VALUES('example:remote','remote-issue','issue',?,?)`, p.ID, issue.ID)
 	require.Equal(t, 1, result.Accepted)
 	var status string
 	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT status FROM issues WHERE id=?`, issue.ID).Scan(&status))
-	require.Equal(t, "closed", status, "the payload UID must identify the issue being materialized")
+	require.Equal(t, "closed", status)
 
 	var pending string
 	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT COALESCE(pending_event_uid,'') FROM import_mappings WHERE id=?`, mappingID).Scan(&pending))
-	require.Equal(t, ev.EventUID, pending, "accepted status event should enqueue intent for its payload issue")
+	require.Equal(t, ev.EventUID, pending, "accepted status event should enqueue intent for its issue")
 
 	tx, err := d.BeginTx(ctx, nil)
 	require.NoError(t, err)
@@ -179,7 +171,7 @@ VALUES('example:remote','remote-issue','issue',?,?)`, p.ID, issue.ID)
 	binding, err := issueSyncBindingByProject(ctx, tx, p.ID)
 	require.NoError(t, err)
 	loaded, err := loadIssueStatusMappingTx(ctx, tx, binding, mappingID)
-	require.NoError(t, err, "payload issue UID should validate a pending event with no envelope UID")
+	require.NoError(t, err)
 	require.NotNil(t, loaded.PendingEvent)
 	require.Equal(t, ev.EventUID, loaded.PendingEvent.UID)
 }
@@ -381,7 +373,7 @@ func checkFederationSequence(t *testing.T, data []byte) {
 		peer := uids[(int(data[pos+1])+1)%len(uids)]
 		typ, payload := incrementalFuzzPayload(data[pos], uid, peer, int(data[pos+2]))
 		envelope := uid
-		if typ == "project.metadata_updated" || data[pos+3]&8 != 0 {
+		if typ == "project.metadata_updated" {
 			envelope = ""
 		}
 		ev := incrementalRemoteEvent(t, p, envelope, typ, payload, 9_000_000_000_100+int64(data[pos+2]%40))
@@ -499,58 +491,52 @@ func TestFederationIncrementalNewEndpointsAndShortIDCollisions(t *testing.T) {
 }
 
 // Ordinary pushes have the same touched-issue boundary as ordinary pull pages.
-// Older HLCs and payload-only identities must still agree with a complete fold.
+// Older HLCs must still agree with a complete fold.
 func TestFederationIngestOnlyMaterializesTouchedIssues(t *testing.T) {
-	for _, payloadOnly := range []bool{false, true} {
-		for _, older := range []bool{false, true} {
-			t.Run(fmt.Sprintf("payload-only=%t/older=%t", payloadOnly, older), func(t *testing.T) {
-				d, p, issue := incrementalTestStore(t)
-				ctx := t.Context()
-				other, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "untouched", Author: "tester", Labels: []string{"retained"}})
-				require.NoError(t, err)
-				_, _, err = d.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "tester", Body: "retained note"})
-				require.NoError(t, err)
-				_, err = d.ExecContext(ctx, `UPDATE issues SET title='local projection' WHERE id=?`, other.ID)
-				require.NoError(t, err)
-				_, err = d.ExecContext(ctx, `UPDATE projects SET metadata='{"retained":true}' WHERE id=?`, p.ID)
-				require.NoError(t, err)
-				reference := cloneIncrementalStore(t, d)
-				uid := issue.UID
-				if payloadOnly {
-					uid = ""
-				}
-				clock := int64(9_000_000_000_000)
-				if older {
-					clock = 1
-				}
-				ev := incrementalRemoteEvent(t, p, uid, "issue.updated", fmt.Sprintf(`{"issue_uid":%q,"title":"incoming"}`, issue.UID), clock)
-				params := db.FederationIngestParams{ProjectID: p.ID, SpokeInstanceUID: ev.OriginInstanceUID, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}}}
-				result, err := d.IngestFederationEvents(ctx, params)
-				require.NoError(t, err)
-				require.Equal(t, 1, result.Accepted)
-				_, err = ingestFullRebuildReference(ctx, reference, params)
-				require.NoError(t, err)
-				actual, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-				require.NoError(t, err)
-				want, err := reference.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-				require.NoError(t, err)
-				require.Equal(t, want, actual)
-				sibling, err := d.IssueByUID(ctx, other.UID, db.IncludeDeletedYes)
-				require.NoError(t, err)
-				require.Equal(t, "local projection", sibling.Title)
-				labels, err := d.LabelsByIssue(ctx, other.ID)
-				require.NoError(t, err)
-				require.Len(t, labels, 1)
-				require.Equal(t, "retained", labels[0].Label)
-				comments, err := d.CommentsByIssue(ctx, other.ID)
-				require.NoError(t, err)
-				require.Len(t, comments, 1)
-				require.Equal(t, "retained note", comments[0].Body)
-				project, err := d.ProjectByID(ctx, p.ID)
-				require.NoError(t, err)
-				require.JSONEq(t, `{"retained":true}`, string(project.Metadata))
-			})
-		}
+	for _, older := range []bool{false, true} {
+		t.Run(fmt.Sprintf("older=%t", older), func(t *testing.T) {
+			d, p, issue := incrementalTestStore(t)
+			ctx := t.Context()
+			other, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "untouched", Author: "tester", Labels: []string{"retained"}})
+			require.NoError(t, err)
+			_, _, err = d.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "tester", Body: "retained note"})
+			require.NoError(t, err)
+			_, err = d.ExecContext(ctx, `UPDATE issues SET title='local projection' WHERE id=?`, other.ID)
+			require.NoError(t, err)
+			_, err = d.ExecContext(ctx, `UPDATE projects SET metadata='{"retained":true}' WHERE id=?`, p.ID)
+			require.NoError(t, err)
+			reference := cloneIncrementalStore(t, d)
+			clock := int64(9_000_000_000_000)
+			if older {
+				clock = 1
+			}
+			ev := incrementalRemoteEvent(t, p, issue.UID, "issue.updated", `{"title":"incoming"}`, clock)
+			params := db.FederationIngestParams{ProjectID: p.ID, SpokeInstanceUID: ev.OriginInstanceUID, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}}}
+			result, err := d.IngestFederationEvents(ctx, params)
+			require.NoError(t, err)
+			require.Equal(t, 1, result.Accepted)
+			_, err = ingestFullRebuildReference(ctx, reference, params)
+			require.NoError(t, err)
+			actual, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			want, err := reference.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			require.Equal(t, want, actual)
+			sibling, err := d.IssueByUID(ctx, other.UID, db.IncludeDeletedYes)
+			require.NoError(t, err)
+			require.Equal(t, "local projection", sibling.Title)
+			labels, err := d.LabelsByIssue(ctx, other.ID)
+			require.NoError(t, err)
+			require.Len(t, labels, 1)
+			require.Equal(t, "retained", labels[0].Label)
+			comments, err := d.CommentsByIssue(ctx, other.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
+			require.Equal(t, "retained note", comments[0].Body)
+			project, err := d.ProjectByID(ctx, p.ID)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"retained":true}`, string(project.Metadata))
+		})
 	}
 }
 
