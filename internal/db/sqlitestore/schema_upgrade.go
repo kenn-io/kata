@@ -77,6 +77,9 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 		if err != nil {
 			return err
 		}
+		// retired holds every index any remaining step drops, regardless of
+		// order. This assumes no step re-adds a name an earlier step dropped;
+		// such a step would be skipped here and the index never created.
 		retired := map[string]bool{}
 		for _, step := range inPlaceUpgrades {
 			if step.From >= version {

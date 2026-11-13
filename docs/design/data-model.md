@@ -218,7 +218,7 @@ partial import writes or replaces the destination's key check. See
 
 ## Schema evolution
 
-SQLite upgrades that only add indexes, or add a table that starts empty, register
+SQLite upgrades that only add or drop indexes, or add a table that starts empty, register
 a complete version chain in `inPlaceUpgrades` in
 `internal/db/sqlitestore/schema_upgrade.go`. Startup applies the canonical
 tables and indexes, drops retired indexes, and stamps the schema version in one

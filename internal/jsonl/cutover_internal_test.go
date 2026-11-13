@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -156,7 +157,7 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 // Index-only upgrades, and the one that adds the MCP Events table, must
 // match the fresh-store catalog without exporting.
 func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
-	for _, version := range []int{41, 42, 44, 48, 50} {
+	for _, version := range []int{41, 42, 43, 44, 45, 46, 47, 48, 49, 50} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			path := indexOnlySource(t, version)
@@ -238,11 +239,14 @@ func indexOnlySource(t *testing.T, version int) string {
 	t.Cleanup(func() { _ = source.DB.Close() })
 	if version < 51 {
 		// Schema 51 replaced the released schema 43 index with a header-UID index.
-		_, err = source.ExecContext(t.Context(), `DROP INDEX idx_events_issue_uid_id;
-CREATE INDEX idx_events_resolved_issue_uid ON events (
-    (CASE WHEN type LIKE 'issue.%' THEN COALESCE(NULLIF(issue_uid,''),json_extract(payload,'$.issue_uid'),json_extract(payload,'$.uid')) ELSE NULLIF(issue_uid,'') END),
-    id
-)`)
+		var raw []byte
+		raw, err = os.ReadFile(filepath.Join("testdata", "schema_v49.sql"))
+		require.NoError(t, err)
+		_, ddl, found := strings.Cut(string(raw), "CREATE INDEX idx_events_resolved_issue_uid ")
+		require.True(t, found)
+		ddl, _, found = strings.Cut(ddl, ";")
+		require.True(t, found)
+		_, err = source.ExecContext(t.Context(), "DROP INDEX idx_events_issue_uid_id; CREATE INDEX idx_events_resolved_issue_uid "+ddl)
 		require.NoError(t, err)
 	}
 	for _, step := range []struct {
