@@ -116,7 +116,7 @@ func TestAgentHooksInstallAndUninstallProtectForeignVariants(t *testing.T) {
 		delete(handlers[i], "matcher")
 		require.Equal(t, expected, handlers[i])
 	}
-	require.Contains(t, handlers[len(foreign)]["command"], "--source kata-agent-contract-hook")
+	require.Regexp(t, `--ownership-marker kata-agent-setup-hook-[0-9a-f]{16}-contract`, handlers[len(foreign)]["command"])
 	_, stderr, err = executeAgentHook(t, unreadableHookInput{}, "agent-hook", "uninstall", "codex", "--config", path)
 	require.NoError(t, err, stderr)
 	handlers = nativeContractHandlers(t, agenthook.AgentCodex, path)
@@ -409,7 +409,7 @@ func TestAgentHooksInstallKeepsCanonicalContractInMixedGroup(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{
 		"matcher": "startup|resume|clear|compact", "note": "keep registration metadata",
-		"hooks": []any{map[string]any{"command": "echo foreign"}, map[string]any{"type": "command", "command": commands.Native, "commandWindows": commands.Windows, "timeout": 10}},
+		"hooks": []any{map[string]any{"command": "echo foreign"}, map[string]any{"type": "command", "command": commands.POSIX, "commandWindows": commands.PowerShell, "timeout": 10}},
 	}}}})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, raw, 0o600))
@@ -419,6 +419,17 @@ func TestAgentHooksInstallKeepsCanonicalContractInMixedGroup(t *testing.T) {
 	after, err := os.ReadFile(path) //nolint:gosec // G304: isolated installer fixture under TempDir.
 	require.NoError(t, err)
 	require.Equal(t, raw, after)
+}
+
+func TestAgentHooksClassifyKitCodexPowerShellRegistrationOnWindows(t *testing.T) {
+	commands, err := agenthook.BuildCommand(`C:\Program Files\O'Brien\kata.exe`, "agent-hook", "contract", "codex")
+	require.NoError(t, err)
+	_, ok := literalAgentHookWords(commands.POSIX, false, false)
+	require.True(t, ok)
+	handler := map[string]any{"type": "command", "command": commands.POSIX, "commandWindows": commands.PowerShell}
+	require.Equal(t, contractHook, classifyAgentHookCommandWithSyntax(agenthook.AgentCodex, commands.POSIX, false, false))
+	require.Equal(t, contractHook, classifyAgentHookCommandForGOOS(agenthook.AgentCodex, commands.PowerShell, "commandWindows", "windows"))
+	require.Equal(t, contractHook, classifyAgentHookHandlerForGOOS(agenthook.AgentCodex, handler, "windows"))
 }
 
 func TestAgentHooksHermesMergedEventsPreserveForeignCommands(t *testing.T) {

@@ -21,7 +21,8 @@ type nativeAgentHookOptions struct {
 	Agent, Scope, Home, Dir, ConfigPath, Executable, Source string
 	API                                                     string
 	ManagedAttention                                        bool
-	SourceSet, Contract, Attention, RequireOwnershipMarker  bool
+	SourceSet, Contract, Attention                          bool
+	OwnershipMarkers                                        map[agentHookKind]agentHookOwnership
 	ConfigPathExplicit                                      bool
 	ShareInbox, ShareInboxSet                               bool
 }

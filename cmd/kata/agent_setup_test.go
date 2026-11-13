@@ -67,6 +67,84 @@ func TestAgentSetupInstallsClaudeHooks(t *testing.T) {
 	require.Equal(t, before, after)
 }
 
+func TestAgentSetupKeepsLegacyOwnershipMarkers(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		marked map[agentHookKind]bool
+	}{
+		{"all hooks marked", map[agentHookKind]bool{contractHook: true, attentionStartHook: true, attentionEndHook: true}},
+		{"contract only marked", map[agentHookKind]bool{contractHook: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := isolateAgentHookHomes(t)
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, executableName("claude")), []byte("fixture"), 0700)) //nolint:gosec // Executable fixture in a temporary directory.
+			running, err := filepath.Abs(os.Args[0])
+			require.NoError(t, err)
+			if err := os.Symlink(running, filepath.Join(dir, executableName("kata"))); err != nil {
+				t.Skipf("stable executable alias is unavailable: %v", err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			path := filepath.Join(home, "claude", "settings.json")
+			sourceArg := func(kind agentHookKind) string {
+				if tc.marked[kind] {
+					return " --source " + agentHookDefaultSource(kind)
+				}
+				return ""
+			}
+			writeAgentHookConfig(t, path, map[string]any{"hooks": map[string]any{
+				"SessionStart": []any{
+					map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "kata agent-hook contract claude" + sourceArg(contractHook), "timeout": 10}}},
+					map[string]any{"matcher": "startup|resume|clear", "hooks": []any{map[string]any{"type": "command", "command": "kata agent-hook attention-native claude start" + sourceArg(attentionStartHook), "timeout": 10}}},
+				},
+				"SessionEnd": []any{map[string]any{"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other", "hooks": []any{
+					map[string]any{"type": "command", "command": "kata agent-hook attention-native claude end" + sourceArg(attentionEndHook), "timeout": 10},
+				}}},
+			}})
+			before, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
+			require.NoError(t, err)
+
+			out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent", "setup", "claude", "--check")
+			require.NoError(t, err, stderr, out)
+			afterCheck, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
+			require.NoError(t, err)
+			require.Equal(t, before, afterCheck)
+
+			_, err = runAgentSetup(t, "claude")
+			require.NoError(t, err)
+			afterSetup, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
+			require.NoError(t, err)
+			require.Equal(t, before, afterSetup)
+		})
+	}
+}
+
+func TestAgentSetupAndAgentHookInstallKeepCodexHooks(t *testing.T) {
+	home := isolateAgentHookHomes(t)
+	installCodexAgentFixture(t, "trusted")
+	dir := t.TempDir()
+	running, err := filepath.Abs(os.Args[0])
+	require.NoError(t, err)
+	if err := os.Symlink(running, filepath.Join(dir, executableName("kata"))); err != nil {
+		t.Skipf("stable executable alias is unavailable: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TEST_HOOK_TRUST", "trusted")
+
+	report, err := runAgentSetup(t, "codex")
+	require.NoError(t, err, report.Rows)
+	path := filepath.Join(home, "codex", "hooks.json")
+	before, err := os.ReadFile(path) //nolint:gosec // G304: isolated hook fixture under TempDir.
+	require.NoError(t, err)
+
+	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "codex")
+	require.NoError(t, err, stderr)
+	after, err := os.ReadFile(path) //nolint:gosec // G304: isolated hook fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	require.Contains(t, out, "unchanged")
+}
+
 func TestAgentSetupCheckDoesNotInstall(t *testing.T) {
 	home := isolateAgentHookHomes(t)
 	path := filepath.Join(home, "claude", "settings.json")
@@ -169,6 +247,150 @@ func TestAgentSetupPreservesCustomHookContainingSetupMarker(t *testing.T) {
 		commands = append(commands, group["hooks"].([]any)...)
 	}
 	require.Contains(t, commands, foreign)
+}
+
+func TestAgentSetupWithBareExecutableKeepsCustomClaudeHook(t *testing.T) {
+	home := isolateAgentHookHomes(t)
+	installClaudeAgentFixture(t)
+	dir := t.TempDir()
+	running, err := filepath.Abs(os.Args[0])
+	require.NoError(t, err)
+	if err := os.Symlink(running, filepath.Join(dir, executableName("kata"))); err != nil {
+		t.Skipf("stable executable alias is unavailable: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	path := filepath.Join(home, "claude", "settings.json")
+	foreign := map[string]any{"type": "command", "command": "kata agent-hook contract claude --source prompt.txt"}
+	writeAgentHookConfig(t, path, map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{"hooks": []any{foreign}}}}})
+
+	report, err := runAgentSetup(t, "claude")
+	require.NoError(t, err, report.Rows)
+	require.Equal(t, "ok", report.Rows[0].State)
+	entries, err := inspectAgentHookEntries(agenthook.AgentClaude, path)
+	require.NoError(t, err)
+	require.Len(t, entries, 4)
+	var preserved bool
+	for _, entry := range entries {
+		if entry.Fields["command"] == foreign["command"] {
+			preserved = true
+		}
+	}
+	require.True(t, preserved)
+
+	before, err := os.ReadFile(path) //nolint:gosec // G304: isolated hook fixture under TempDir.
+	require.NoError(t, err)
+	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "claude")
+	require.NoError(t, err, stderr)
+	require.Contains(t, out, "unchanged")
+	after, err := os.ReadFile(path) //nolint:gosec // G304: isolated hook fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+}
+
+func TestAgentSetupPreservesClaudeExecArgsContainingContractMarker(t *testing.T) {
+	home := isolateAgentHookHomes(t)
+	installClaudeAgentFixture(t)
+	dir := t.TempDir()
+	running, err := filepath.Abs(os.Args[0])
+	require.NoError(t, err)
+	if err := os.Symlink(running, filepath.Join(dir, executableName("kata"))); err != nil {
+		t.Skipf("stable executable alias is unavailable: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	path := filepath.Join(home, "claude", "settings.json")
+	foreign := map[string]any{"type": "command", "command": "example-tool", "args": []any{"contract"}}
+	writeAgentHookConfig(t, path, map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{"hooks": []any{foreign}}}}})
+
+	report, err := runAgentSetup(t, "claude")
+	require.NoError(t, err, report.Rows)
+	require.Equal(t, "ok", report.Rows[0].State)
+	entries, err := inspectAgentHookEntries(agenthook.AgentClaude, path)
+	require.NoError(t, err)
+	var preserved bool
+	for _, entry := range entries {
+		if entry.Fields["command"] == foreign["command"] {
+			require.Equal(t, foreign["args"], entry.Fields["args"])
+			preserved = true
+		}
+	}
+	require.True(t, preserved)
+	before, err := os.ReadFile(path) //nolint:gosec // G304: isolated hook fixture under TempDir.
+	require.NoError(t, err)
+	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "claude")
+	require.NoError(t, err, stderr)
+	require.Contains(t, out, "unchanged")
+	after, err := os.ReadFile(path) //nolint:gosec // G304: isolated hook fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+}
+
+func TestAgentSetupPreservesCustomHookMatchingSourceMarker(t *testing.T) {
+	home := isolateAgentHookHomes(t)
+	installClaudeAgentFixture(t)
+	dir := t.TempDir()
+	running, err := filepath.Abs(os.Args[0])
+	require.NoError(t, err)
+	if err := os.Symlink(running, filepath.Join(dir, executableName("kata"))); err != nil {
+		t.Skipf("stable executable alias is unavailable: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	path := filepath.Join(home, "claude", "settings.json")
+	foreign := map[string]any{"type": "command", "command": "env FOO=bar kata agent-hook contract claude --source kata-agent-contract-hook"}
+	writeAgentHookConfig(t, path, map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{"hooks": []any{foreign}}}}})
+
+	report, err := runAgentSetup(t, "claude")
+	require.NoError(t, err, report.Rows)
+	require.Equal(t, "ok", report.Rows[0].State)
+	entries, err := inspectAgentHookEntries(agenthook.AgentClaude, path)
+	require.NoError(t, err)
+	var preserved bool
+	for _, entry := range entries {
+		if entry.Fields["command"] == foreign["command"] {
+			preserved = true
+		}
+	}
+	require.True(t, preserved)
+	before, err := os.ReadFile(path) //nolint:gosec // G304: isolated hook fixture under TempDir.
+	require.NoError(t, err)
+	out, stderr, err := executeAgentHook(t, unreadableHookInput{}, "agent-hook", "install", "claude")
+	require.NoError(t, err, stderr)
+	require.Contains(t, out, "unchanged")
+	after, err := os.ReadFile(path) //nolint:gosec // G304: isolated hook fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+}
+
+func TestAgentSetupUsesSourceMarkerWhenExecutablePathContainsContract(t *testing.T) {
+	home := isolateAgentHookHomes(t)
+	path := filepath.Join(home, "claude", "settings.json")
+	dir := filepath.Join(t.TempDir(), "contracts")
+	require.NoError(t, os.MkdirAll(dir, 0700))
+	executable := filepath.Join(dir, executableName("kata"))
+	require.NoError(t, os.WriteFile(executable, []byte("fixture"), 0700)) //nolint:gosec // Executable fixture lives under TempDir.
+	workspace := t.TempDir()
+	opts := nativeAgentHookOptions{Agent: "claude", ConfigPath: path, Executable: executable, Contract: true, Attention: true}
+	opts.OwnershipMarkers = agentHookConfigOwnershipMarkers(agenthook.AgentClaude, path, executable)
+	plan, err := planKitAgentHooks(opts, false)
+	require.NoError(t, err)
+	_, err = publishNativeAgentHookPlan(plan)
+	require.NoError(t, err)
+	status, err := checkAgentSetupWithOptions(t.Context(), "claude", workspace, opts, []agentHookKind{contractHook, attentionStartHook, attentionEndHook})
+	require.NoError(t, err)
+	require.Equal(t, "ok", string(status.State), status.Reason)
+	require.Equal(t, 3, status.HookCount)
+	before, err := os.ReadFile(path) //nolint:gosec // G304: isolated hook fixture under TempDir.
+	require.NoError(t, err)
+	plan, err = planKitAgentHooks(opts, false)
+	require.NoError(t, err)
+	changed, err := publishNativeAgentHookPlan(plan)
+	require.NoError(t, err)
+	require.False(t, changed)
+	status, err = checkAgentSetupWithOptions(t.Context(), "claude", workspace, opts, []agentHookKind{contractHook, attentionStartHook, attentionEndHook})
+	require.NoError(t, err)
+	require.Equal(t, "ok", string(status.State), status.Reason)
+	after, err := os.ReadFile(path) //nolint:gosec // G304: isolated hook fixture under TempDir.
+	require.NoError(t, err)
+	require.Equal(t, before, after)
 }
 
 func TestAgentSetupWarnsWhenCodexHookPositionsShift(t *testing.T) {

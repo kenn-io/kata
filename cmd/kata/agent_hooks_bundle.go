@@ -26,6 +26,7 @@ func planKitAgentHooks(opts nativeAgentHookOptions, remove bool) (nativeAgentHoo
 	if err != nil {
 		return plan, err
 	}
+	opts.OwnershipMarkers = agentHookOwnershipMarkers(agent, opts.ConfigPath, opts.Executable, current)
 	plan.CurrentContract, plan.CurrentAttentionStart, plan.CurrentAttentionEnd = kitAgentHookConfigured(agent, current)
 	for _, entry := range current {
 		plan.CurrentOwnedContract = plan.CurrentOwnedContract || entry.Kind == contractHook
@@ -112,17 +113,15 @@ func kitAgentHookRegistration(opts nativeAgentHookOptions, kind agentHookKind) a
 		}
 	}
 	marker := "contract"
-	source := legacyAgentContractHookSource
 	if kind != contractHook {
 		marker = "attention-native " + opts.Agent + " " + string(kind)
-		source = legacyAttentionHookSource + string(kind)
 	}
-	args = agentHookOwnershipArgs(opts.Executable, args, kind)
-	if opts.RequireOwnershipMarker {
-		if len(args) < 2 || !slices.Equal(args[len(args)-2:], []string{"--source", source}) {
-			args = append(args, "--source", source)
-		}
-		marker = "--source " + source
+	ownership := opts.OwnershipMarkers[kind]
+	args = agentHookOwnershipArgs(opts.Executable, args, kind, ownership)
+	if ownership.Token != "" {
+		marker = "--ownership-marker " + agentSetupHookOwnershipMarker(kind, ownership.Token)
+	} else if len(args) >= 2 && slices.Equal(args[len(args)-2:], []string{"--source", agentHookDefaultSource(kind)}) {
+		marker = "--source " + agentHookDefaultSource(kind)
 	}
 	return agenthook.InstallOptions{ConfigPath: opts.ConfigPath, Executable: opts.Executable, Arguments: args, Marker: marker, Hooks: []agenthook.Hook{hook}}
 }

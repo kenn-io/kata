@@ -9,7 +9,47 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kit/agenthook"
 )
+
+func TestE2E_InitWithCodexHooksRunsOwnershipMarkedCommands(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	t.Setenv("CODEX_HOME", t.TempDir())
+	configPath := filepath.Join(dir, ".codex", "hooks.json")
+	foreign := map[string]any{"type": "command", "command": "example-tool contract"}
+	data, err := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{
+		map[string]any{"hooks": []any{foreign}},
+	}}})
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o700))
+	require.NoError(t, os.WriteFile(configPath, data, 0o600)) //nolint:gosec // Test config lives under the isolated workspace.
+
+	_, _, err = applyCodexHooks(t.Context(), dir)
+	require.NoError(t, err)
+	ownership := agentHookConfigOwnershipMarkers(agenthook.AgentCodex, configPath, "kata")
+	contractOwnership := ownership[contractHook]
+	require.True(t, contractOwnership.Required)
+	require.NotEmpty(t, contractOwnership.Token)
+
+	ref := createIssue(t, env, pid, "session hook ownership")
+	t.Setenv("KATA_REF", ref)
+	contract := runCLI(t, env, dir, "agent-contract-hook", "--ownership-marker", agentSetupHookOwnershipMarker(contractHook, contractOwnership.Token))
+	var response struct {
+		HookSpecificOutput struct {
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contract), &response))
+	assert.Equal(t, agentContractText, response.HookSpecificOutput.AdditionalContext)
+	require.NoError(t, runAttnHook(t, env, dir, "attention-hook", "start"))
+	value, exists := attnMetaValue(t, env, pid, ref, attentionKey)
+	require.True(t, exists)
+	assert.Equal(t, attnValueOK, value)
+	require.NoError(t, runAttnHook(t, env, dir, "attention-hook", "end"))
+	value, exists = attnMetaValue(t, env, pid, ref, attentionKey)
+	require.True(t, exists)
+	assert.Equal(t, attnValueNeedsHuman, value)
+}
 
 func TestE2E_InitWithCodexHooks_DedupeAndRestore(t *testing.T) {
 	env := testenv.New(t)

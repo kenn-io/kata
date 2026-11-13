@@ -31,7 +31,7 @@ func agentSetupOptionsInWorkspace(name, workspace string) (nativeAgentHookOption
 	opts := targets[0].options
 	opts.Executable, _, err = resolveAgentHookExecutable("", defaultAgentHookExecutableEnv())
 	opts.Contract, opts.Attention = true, true
-	opts.RequireOwnershipMarker = true
+	opts.OwnershipMarkers = agentHookConfigOwnershipMarkers(agenthook.Agent(opts.Agent), opts.ConfigPath, opts.Executable)
 	return opts, err
 }
 
@@ -64,6 +64,13 @@ func agentSetupItemsWithWarnings(name, workspace string, warn func(string)) ([]a
 	item.Install = func(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		status, err := checkAgentSetupWithOptions(ctx, name, workspace, opts, kinds)
+		if err != nil {
+			return err
+		}
+		if status.State == agentsetup.StateOK || status.State == agentsetup.StateUntrusted {
+			return nil
 		}
 		plan, err := planKitAgentHooks(opts, false)
 		if err != nil {
