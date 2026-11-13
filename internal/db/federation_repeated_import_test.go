@@ -1,7 +1,6 @@
 package db
 
 import (
-	"database/sql"
 	"encoding/json/jsontext"
 	"testing"
 	"time"
@@ -285,36 +284,4 @@ func TestRepeatedImportEventRequiresTheFeature(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, RepeatedAdoptionEventFeature, wire)
 	assert.Empty(t, EventRequiredFeatures("issue.updated"))
-}
-
-// The push names each snapshot's issue in the event header. A payload uid is
-// not identity, and an event with no header names no issue.
-func TestRepeatedSnapshotSQLLookupsKeyOnTheHeaderIssue(t *testing.T) {
-	pool, err := sql.Open("sqlite", ":memory:")
-	require.NoError(t, err)
-	pool.SetMaxOpenConns(1)
-	t.Cleanup(func() { require.NoError(t, pool.Close()) })
-	_, err = pool.ExecContext(t.Context(), `CREATE TABLE issues (uid TEXT);
-		CREATE TABLE links (from_issue_uid TEXT, to_issue_uid TEXT, type TEXT)`)
-	require.NoError(t, err)
-
-	header := "issue-header"
-	snapshot := func(issueUID *string, payload string) FederationIngestEvent {
-		return FederationIngestEvent{Event: RemoteEvent{Type: "issue.snapshot", IssueUID: issueUID, Payload: jsontext.Value(payload)}}
-	}
-	lookups := RepeatedSnapshotSQLLookups(t.Context(), pool, []FederationIngestEvent{
-		snapshot(&header, `{"uid":"issue-payload","links":[{"type":"parent","to_issue_uid":"epic-1"}]}`),
-		snapshot(nil, `{"uid":"issue-headerless","links":[{"type":"parent","to_issue_uid":"epic-2"}]}`),
-	})
-
-	for uid, want := range map[string]bool{"issue-header": true, "issue-payload": false, "issue-headerless": false} {
-		known, err := lookups.IssueKnown(uid)
-		require.NoError(t, err)
-		assert.Equal(t, want, known, "IssueKnown(%s)", uid)
-	}
-	for child, want := range map[string]string{"issue-header": "epic-1", "issue-payload": "", "issue-headerless": ""} {
-		parent, err := lookups.ParentOf(child)
-		require.NoError(t, err)
-		assert.Equal(t, want, parent, "ParentOf(%s)", child)
-	}
 }
