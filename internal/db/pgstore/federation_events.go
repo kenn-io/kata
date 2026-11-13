@@ -167,13 +167,14 @@ func (s *Store) InsertRemoteEvents(ctx context.Context, projectID int64, events 
 func (s *Store) insertRemoteEventTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	routeID int64,
+	projectID int64,
 	remote db.RemoteEvent,
 	payload jsontext.Value,
 	createdAt string,
 	validator *db.CronReplayValidator,
 ) (bool, error) {
-	projectID, err := db.RemoteIssueEventProject(ctx, tx, routeID, remote)
+	var err error
+	projectID, err = db.RemoteIssueEventProject(ctx, tx, projectID, remote)
 	if err != nil {
 		return false, err
 	}

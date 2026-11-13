@@ -665,7 +665,6 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 	}
 	t.Run("pull apply error envelope", func(t *testing.T) {
 		ctx := t.Context()
-		// A move that cannot rehome a claimed external root reports its own envelope.
 		from, to, pinned, blocked := federatedRehomeFixture(t, store, "apply-error")
 		prepareRehomePull(t, store, from, to, "pull")
 		root, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{ProjectID: from.ID, IssueID: pinned.ID, ConnectorInstance: "apply-error-notes", ExternalRootKey: "root", ExternalAccountKey: "account", Actor: "worker", ReceiveCommentsAfter: time.Now().UTC()})
@@ -676,6 +675,7 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		err = store.MaterializeFederatedProject(ctx, to.ID)
 		require.ErrorIs(t, err, db.ErrExternalRootClaimActive)
+		require.ErrorContains(t, err, "apply move")
 		require.ErrorContains(t, err, blocked.EventUID)
 		require.ErrorContains(t, err, blocked.ProjectUID)
 	})
