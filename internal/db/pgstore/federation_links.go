@@ -303,23 +303,7 @@ func federationFoldEventsOfTypes(
 	projectID int64,
 	eventTypes []string,
 ) ([]db.FoldEvent, error) {
-	query := `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
-e.related_issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at
-FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (e.issue_uid IN (
-   SELECT h.issue_uid FROM events h WHERE h.project_id=$1
-   UNION SELECT uid FROM issues WHERE project_id=$1)
- AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND m.issue_uid = e.issue_uid)))`
-	args := []any{projectID}
-	if len(eventTypes) > 0 {
-		placeholders := make([]string, 0, len(eventTypes))
-		for i, eventType := range eventTypes {
-			placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
-			args = append(args, eventType)
-		}
-		//nolint:gosec // G202: generated $N placeholders only; values are bound separately.
-		query += " AND e.type IN (" + strings.Join(placeholders, ",") + ")"
-	}
-	query += " ORDER BY e.id ASC"
+	query, args := federationFoldEventsQuery(projectID, eventTypes)
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
@@ -346,6 +330,29 @@ FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (e.
 		output = append(output, event)
 	}
 	return db.FederationMoveBaselineEvents(output), mapSQLError(rows.Err(), nil)
+}
+
+// federationFoldEventsQuery builds the fold query. PostgreSQL scans events once
+// and checks both subqueries as hashed subplans, with or without statistics;
+// TestFederationFoldEventsBudget guards that plan.
+func federationFoldEventsQuery(projectID int64, eventTypes []string) (string, []any) {
+	query := `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
+e.related_issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at
+FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (e.issue_uid IN (
+   SELECT h.issue_uid FROM events h WHERE h.project_id=$1
+   UNION SELECT uid FROM issues WHERE project_id=$1)
+ AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND m.issue_uid = e.issue_uid)))`
+	args := []any{projectID}
+	if len(eventTypes) > 0 {
+		placeholders := make([]string, 0, len(eventTypes))
+		for i, eventType := range eventTypes {
+			placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
+			args = append(args, eventType)
+		}
+		//nolint:gosec // G202: generated $N placeholders only; values are bound separately.
+		query += " AND e.type IN (" + strings.Join(placeholders, ",") + ")"
+	}
+	return query + " ORDER BY e.id ASC", args
 }
 
 func federationGroupIssueIDs(
