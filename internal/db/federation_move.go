@@ -306,8 +306,7 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 			return 0, err
 		}
 		project, missing = destination, false
-		payload := PayloadMap(e.Payload)
-		from, _ := StringValue(payload["from_project_uid"])
+		from, _ := StringValue(PayloadMap(e.Payload)["from_project_uid"])
 		dependencies = append(dependencies, from)
 	}
 	if missing || project != route {
