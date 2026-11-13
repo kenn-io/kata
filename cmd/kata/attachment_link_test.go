@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
 )
 
@@ -131,4 +133,35 @@ func TestAttachmentReuseCLI(t *testing.T) {
 	}
 	require.NotEmpty(t, ids[0])
 	require.Equal(t, ids[0], ids[1])
+}
+
+func TestAttachmentReuseCLIIdentifiesUnreadableReference(t *testing.T) {
+	for _, action := range []string{"add", "link"} {
+		t.Run(action, func(t *testing.T) {
+			env, f, ref := attachmentCLIEnv(t)
+			f.Seed("/reports/report.pdf", docbank.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: uuid.MustParse(cliLinkVersion)}, map[uuid.UUID][]byte{uuid.MustParse(cliLinkVersion): []byte("sample bytes")})
+			project, err := env.DB.ProjectByName(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			issue, err := env.DB.IssueByShortID(t.Context(), project.ID, ref, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.BAD1": jsontext.Value(`"junk"`)}})
+			require.NoError(t, err)
+			args := []string{"link", ref, "42", "--reuse-existing"}
+			if action == "add" {
+				file := filepath.Join(t.TempDir(), "report.pdf")
+				require.NoError(t, os.WriteFile(file, []byte("sample bytes"), 0600))
+				args = []string{"add", ref, file, "--reuse-existing"}
+			}
+			_, err = executeAttachmentCLI(t, env.URL, args...)
+			var cliErr *cliError
+			require.ErrorAs(t, err, &cliErr)
+			require.Equal(t, http.StatusBadRequest, cliErr.HTTPStatus)
+			require.ErrorContains(t, err, "attachment.BAD1")
+			require.ErrorContains(t, err, "kata docbank attachments rm "+ref+" BAD1")
+			_, err = executeAttachmentCLI(t, env.URL, "rm", ref, "BAD1")
+			require.NoError(t, err)
+			_, err = executeAttachmentCLI(t, env.URL, args...)
+			require.NoError(t, err)
+		})
+	}
 }
