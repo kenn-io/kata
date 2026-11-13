@@ -382,8 +382,7 @@ func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64, even
 		if err != nil {
 			return [32]byte{}, err
 		}
-		//nolint:gosec // The identity expression is fixed and UIDs are bound.
-		query = `SELECT id,content_hash FROM events e WHERE ` + db.FederationReadIssueUIDExpr(false) + ` IN (SELECT value FROM json_each(?))`
+		query = `SELECT id,content_hash FROM events e WHERE e.issue_uid IN (SELECT value FROM json_each(?))`
 		args = []any{string(encoded)}
 	} else if len(eventTypes) > 0 {
 		//nolint:gosec // Only generated placeholders enter the query; event types are bound.

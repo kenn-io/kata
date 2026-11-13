@@ -50,8 +50,7 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 			return db.ErrFederationResetBlockedByPendingPush
 		}
 
-		issueUIDExpr := db.FederationReadIssueUIDExpr(true)
-		eventsWhere := `(e.issue_id = $1 OR ` + issueUIDExpr + ` = $2 OR ((e.related_issue_id = $1 OR e.related_issue_uid = $2) AND e.type NOT IN ('issue.links_changed', 'issue.commented')))`
+		eventsWhere := `(e.issue_id = $1 OR e.issue_uid = $2 OR ((e.related_issue_id = $1 OR e.related_issue_uid = $2) AND e.type NOT IN ('issue.links_changed', 'issue.commented')))`
 		var minEventID, maxEventID sql.NullInt64
 		if err := tx.QueryRowContext(ctx, `SELECT MIN(e.id), MAX(e.id) FROM events e WHERE `+eventsWhere, issue.ID, issue.UID).Scan(&minEventID, &maxEventID); err != nil {
 			return mapSQLError(err, nil)
@@ -72,7 +71,7 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 				return mapSQLError(err, nil)
 			}
 		}
-		affectedProjects, err := db.PurgeResetProjects(ctx, tx, issue, true)
+		affectedProjects, err := db.PurgeResetProjects(ctx, tx, issue)
 		if err != nil {
 			return err
 		}

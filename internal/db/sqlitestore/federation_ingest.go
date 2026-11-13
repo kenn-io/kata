@@ -124,7 +124,7 @@ func (d *Store) ingestFederationEventsOnce(
 	// Projection writes happen after validation; later moves can depend on
 	// fully validated creations earlier in this batch.
 	batchIssueProjects := map[string]int64{}
-	moveSnapshots := db.NewFederationMoveSnapshotValidator(tx, false)
+	moveSnapshots := db.NewFederationMoveSnapshotValidator(tx)
 	freshSnapshotSeen := false
 	boundActor := strings.TrimSpace(p.BoundActor)
 	var repeatedWinners []repeatedAdoptionSnapshot

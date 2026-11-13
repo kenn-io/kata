@@ -1,0 +1,1 @@
+Replace the payload-derived event issue index with idx_events_issue_uid_id on (issue_uid, id).

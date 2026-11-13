@@ -1637,7 +1637,7 @@ func (d *Store) UnresolvedClaimViolationsForProject(
 }
 
 const claimViolationSelect = `
-	SELECT e.id, e.uid, COALESCE(e.issue_uid, json_extract(e.payload, '$.issue_uid'), ''),
+	SELECT e.id, e.uid, COALESCE(e.issue_uid, ''),
 	       COALESCE(i.short_id, ''),
 	       COALESCE(json_extract(e.payload, '$.offending_event_uid'),
 	                json_extract(e.payload, '$.event_uid'), ''),

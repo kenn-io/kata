@@ -760,18 +760,6 @@ func advanceIssueUpdatedAt(issue *FoldIssue, updatedAt string) {
 	}
 }
 
-// FederationReadIssueUIDExpr returns the SQL expression that the
-// idx_events_resolved_issue_uid index is built on, for the federation-read
-// event alias e. Every issue event carries issue_uid in its header (see
-// RemoteEventIssueUID), so the expression always equals e.issue_uid; it stays
-// only because queries must repeat the indexed expression to use that index.
-func FederationReadIssueUIDExpr(postgres bool) string {
-	if postgres {
-		return `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),e.payload::jsonb->>'issue_uid',e.payload::jsonb->>'uid') ELSE NULLIF(e.issue_uid,'') END`
-	}
-	return `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),json_extract(e.payload,'$.issue_uid'),json_extract(e.payload,'$.uid')) ELSE NULLIF(e.issue_uid,'') END`
-}
-
 func issueUpdatedAt(e FoldEvent, payload map[string]jsontext.Value) string {
 	if updatedAt, ok := stringValue(payload["updated_at"]); ok && updatedAt != "" {
 		return updatedAt

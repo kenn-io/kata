@@ -1,13 +1,19 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-12
+last_edited: 2026-11-13
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Upgrade to schema 51, which reads issue history through an index on each
+  event's header issue UID instead of one built from event payloads. PostgreSQL
+  needs `kata storage postgres migrate` with the daemon stopped while the index
+  builds; SQLite replaces the index in place at startup. See the
+  [schema 51 migration requirements](development/postgres-migrations.md#schema-51-issue-history-index-on-the-event-header).
 
 - Restart a local daemon from Settings after turning on search by meaning. Confirm the interruption for every project and client, then reopen `kata ui` if the browser address changes. The API reports the `restart` job state and `restart_in_progress` during the handoff.
 

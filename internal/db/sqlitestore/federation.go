@@ -1446,10 +1446,10 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, false); err != nil {
+	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID); err != nil {
 		return fmt.Errorf("clear federated events: %w", err)
 	}
 	if err := clearFederatedProjection(ctx, tx, projectID); err != nil {
@@ -1878,20 +1878,17 @@ func federationFoldEventsForIssues(ctx context.Context, tx *sql.Tx, projectID in
 }
 
 func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes, issueScope []string) ([]db.FoldEvent, error) {
-	// Only issue events use payload fields as issue identity. Other event
-	// payloads can reference an issue without becoming part of its history.
-	eventIssueUID := `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),json_extract(e.payload,'$.issue_uid'),json_extract(e.payload,'$.uid')) ELSE NULLIF(e.issue_uid,'') END`
-	historyIssueUID := `CASE WHEN h.type LIKE 'issue.%' THEN COALESCE(NULLIF(h.issue_uid,''),json_extract(h.payload,'$.issue_uid'),json_extract(h.payload,'$.uid')) ELSE NULLIF(h.issue_uid,'') END`
-	moveIssueUID := `COALESCE(NULLIF(m.issue_uid,''),json_extract(m.payload,'$.issue_uid'),json_extract(m.payload,'$.uid'))`
+	// The unary + keeps the issue_uid indexes out of this plan: scanning events
+	// in ID order and checking moves through the issue.moved partial index
+	// costs less than seeking every issue's events and their moves.
 	query := `
 		SELECT e.uid, e.origin_instance_uid, p.uid, e.issue_uid, e.related_issue_uid,
 		       e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.created_at
 		  FROM events e JOIN projects p ON p.id=e.project_id
- WHERE (e.project_id=$1 OR (` + eventIssueUID + ` IN (
-   SELECT ` + historyIssueUID + ` FROM events h WHERE h.project_id=$1
+ WHERE (e.project_id=$1 OR (+e.issue_uid IN (
+   SELECT h.issue_uid FROM events h WHERE h.project_id=$1
    UNION SELECT uid FROM issues WHERE project_id=$1)
- AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND
-   ` + moveIssueUID + ` = ` + eventIssueUID + `)))`
+ AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND +m.issue_uid = e.issue_uid)))`
 	args := []any{projectID}
 	if len(eventTypes) > 0 {
 		placeholders := make([]string, 0, len(eventTypes))

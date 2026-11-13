@@ -156,7 +156,7 @@ func TestAutoCutoverPreservesArtifactsWhenRestoreFails(t *testing.T) {
 // Index-only upgrades, and the one that adds the MCP Events table, must
 // match the fresh-store catalog without exporting.
 func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
-	for _, version := range []int{41, 44, 48} {
+	for _, version := range []int{41, 42, 44, 48, 50} {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			path := indexOnlySource(t, version)
@@ -193,6 +193,11 @@ func TestAutoCutoverAddsIndexOnlyVersionsInPlace(t *testing.T) {
 				return entries
 			}
 			require.Equal(t, catalog(fresh), catalog(upgraded))
+			var resolved, issueUID int
+			require.NoError(t, upgraded.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_events_resolved_issue_uid'`).Scan(&resolved))
+			require.NoError(t, upgraded.QueryRowContext(t.Context(), `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_events_issue_uid_id'`).Scan(&issueUID))
+			require.Zero(t, resolved, "schema 51 drops the payload-derived issue index")
+			require.Equal(t, 1, issueUID)
 		})
 	}
 }
@@ -231,6 +236,15 @@ func indexOnlySource(t *testing.T, version int) string {
 	source, err := sqlitestore.Open(t.Context(), path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = source.DB.Close() })
+	if version < 51 {
+		// Schema 51 replaced the released schema 43 index with a header-UID index.
+		_, err = source.ExecContext(t.Context(), `DROP INDEX idx_events_issue_uid_id;
+CREATE INDEX idx_events_resolved_issue_uid ON events (
+    (CASE WHEN type LIKE 'issue.%' THEN COALESCE(NULLIF(issue_uid,''),json_extract(payload,'$.issue_uid'),json_extract(payload,'$.uid')) ELSE NULLIF(issue_uid,'') END),
+    id
+)`)
+		require.NoError(t, err)
+	}
 	for _, step := range []struct {
 		to      int
 		indexes []string

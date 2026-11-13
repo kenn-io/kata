@@ -167,8 +167,7 @@ func checkFullPullPreparation(ctx context.Context, tx *sql.Tx, projectID int64, 
 		return errStaleFederationPreparation
 	}
 	// A move can add history for an issue included in the prepared fold.
-	//nolint:gosec // The UID expression is fixed SQL; the event ID is bound.
-	rows, err := tx.QueryContext(ctx, `SELECT COALESCE(`+db.FederationReadIssueUIDExpr(false)+`, '') FROM events e WHERE e.id>? AND e.type='issue.moved'`, m.maxEventID)
+	rows, err := tx.QueryContext(ctx, `SELECT COALESCE(e.issue_uid, '') FROM events e WHERE e.id>? AND e.type='issue.moved'`, m.maxEventID)
 	if err != nil {
 		return err
 	}
