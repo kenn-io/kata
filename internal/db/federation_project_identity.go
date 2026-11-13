@@ -131,9 +131,6 @@ func PreserveFederationProjectIdentityDependencies(ctx context.Context, tx *sql.
 	if !role.Valid || role.String != string(FederationRoleSpoke) {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE meta SET value='1' WHERE substr(key,1,length($1))=$1 AND value='pull'`, FederationProjectIdentityDependencyPrefix); err != nil {
-		return err
-	}
 	rows, err := tx.QueryContext(ctx, `SELECT e.payload FROM events e
  WHERE e.type='issue.moved' AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
 	if err != nil {
