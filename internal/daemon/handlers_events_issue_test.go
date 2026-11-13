@@ -237,7 +237,7 @@ func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 		insertRemoteIssueHistoryEvent(t, env, project, issue, "00000000000000000000000002", origin, "issue.updated",
 			baseHLC+1, 0, `{"status":"open"}`, createdAt)
 		insertRemoteIssueHistoryEvent(t, env, project, issue, "00000000000000000000000003", origin, "issue.snapshot",
-			baseHLC+2, 0, `{"uid":"`+issue.UID+`","short_id":"`+issue.ShortID+`","title":"Provider status","status":"closed"}`, createdAt)
+			baseHLC+2, 0, `{"uid":"`+issue.UID+`","short_id":"`+issue.ShortID+`","title":"Provider status","body":"","author":"`+issue.Author+`","status":"closed","metadata":{},"created_at":"`+issue.CreatedAt.UTC().Format(db.EventTimestampFormat)+`"}`, createdAt)
 
 		path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(project.ID, "events"), url.QueryEscape(issue.UID))
 		resp, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer worker-token"})

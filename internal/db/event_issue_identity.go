@@ -15,10 +15,14 @@ func EventIssueUID(header *string) string {
 }
 
 // RemoteEventIssueUID returns the issue an incoming event names and rejects an
-// event whose shape names it anywhere but the header. Every issue event must
-// carry issue_uid in its header. Creations and snapshots repeat it as payload
-// uid, and label changes as payload issue_uid; a repeated value must equal the
-// header. Events of other types return their header value unchanged.
+// issue event whose shape no writer produces. Every issue event must carry
+// issue_uid in its header. Creations and snapshots must carry a whole issue
+// document (see validateIssueDocumentPayload) whose uid equals the header, and a
+// label change that repeats issue_uid in its payload must repeat the header.
+// Events of other types return their header value unchanged.
+//
+// Call it only where events enter over federation. Stored events and imports
+// are not checked again.
 func RemoteEventIssueUID(event RemoteEvent) (string, error) {
 	header := EventIssueUID(event.IssueUID)
 	if !strings.HasPrefix(event.Type, "issue.") {
@@ -31,6 +35,11 @@ func RemoteEventIssueUID(event RemoteEvent) (string, error) {
 	for _, field := range []string{"uid", "issue_uid"} {
 		if repeated, ok := StringValue(payload[field]); ok && repeated != header {
 			return "", fmt.Errorf("%w: %s payload %s differs from its header issue_uid", ErrFederationIngestValidation, event.Type, field)
+		}
+	}
+	if event.Type == "issue.created" || event.Type == "issue.snapshot" {
+		if err := validateIssueDocumentPayload(event); err != nil {
+			return "", err
 		}
 	}
 	return header, nil

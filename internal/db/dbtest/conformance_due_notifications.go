@@ -89,8 +89,8 @@ func checkDueNotificationFederatedClear(t *testing.T, store db.Storage) error {
 	key := notification.MetadataKey("worker-a")
 	value := `{"from":"system","message":"Scheduled date reached: 2026-09-16"}`
 	created := newRemoteEvent(t, hub, &issueUID, "issue.created", "worker-a", spokeUID, 300,
-		jsontext.Value(`{"uid":"`+issueUID+`","title":"Scheduled work","author":"worker-a","status":"open",`+
-			`"metadata":{"scheduled_on":"2026-09-16","`+key+`":`+value+`},"created_at":"2026-09-16T00:00:00Z"}`))
+		IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"Scheduled work","author":"worker-a","status":"open",`+
+			`"metadata":{"scheduled_on":"2026-09-16","`+key+`":`+value+`},"created_at":"2026-09-16T00:00:00Z"}`)))
 	cleared := newRemoteEvent(t, hub, &issueUID, "issue.metadata_updated", "worker-a", spokeUID, 301,
 		jsontext.Value(`{"diff":{"`+key+`":{"from":`+value+`,"to":null}},"revision_new":2,"updated_at":"2026-09-16T01:00:00Z"}`))
 	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{

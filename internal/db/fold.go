@@ -138,40 +138,7 @@ func (p *FoldProjection) apply(e FoldEvent) {
 }
 
 func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
-	var in struct {
-		ShortID             string         `json:"short_id"`
-		Title               string         `json:"title"`
-		Body                string         `json:"body"`
-		Author              string         `json:"author"`
-		Owner               *string        `json:"owner"`
-		AssignmentExpiresOn *string        `json:"assignment_expires_on"`
-		Priority            *int64         `json:"priority"`
-		Status              string         `json:"status"`
-		ClosedReason        *string        `json:"closed_reason"`
-		ClosedAt            *string        `json:"closed_at"`
-		DeletedAt           *string        `json:"deleted_at"`
-		Metadata            jsontext.Value `json:"metadata"`
-		Labels              []string       `json:"labels"`
-		Links               []struct {
-			Type       string `json:"type"`
-			ToIssueUID string `json:"to_issue_uid"`
-			Incoming   bool   `json:"incoming"`
-			Author     string `json:"author"`
-			CreatedAt  string `json:"created_at"`
-		} `json:"links"`
-		Comments []struct {
-			ReplyToUID string `json:"reply_to_uid"`
-			ReplyKind  string `json:"reply_kind"`
-			EditedAt   string `json:"edited_at"`
-			CommentUID string `json:"comment_uid"`
-			Author     string `json:"author"`
-			Teammate   string `json:"teammate,omitempty"`
-			Body       string `json:"body"`
-			CreatedAt  string `json:"created_at"`
-		} `json:"comments"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
-	}
+	var in IssueDocumentPayload
 	_ = json.Unmarshal(e.Payload, &in)
 	uid := e.IssueUID
 	if uid == "" {

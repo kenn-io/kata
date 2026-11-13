@@ -361,7 +361,7 @@ func checkFederationSequence(t *testing.T, data []byte) {
 	uids := []string{initial.UID, "01HZNQ7VFPK1XGD8R5MABC0001", "01HZNQ7VFPK1XGD8R5MABC0002", "01HZNQ7VFPK1XGD8R5MABC0003"}
 	var baseline []db.FederationIngestEvent
 	for i, uid := range uids[1:] {
-		payload := fmt.Sprintf(`{"uid":%q,"title":"snapshot","author":"tester","status":"open","created_at":"2026-05-23T12:00:00.000Z","metadata":{},"comments":[{"comment_uid":%q,"author":"tester","body":"baseline","created_at":"2026-05-23T12:00:00.000Z"}],"labels":["baseline"]}`, uid, "01HZNQ7VFPK1XGD8R5MABD000"+strconv.Itoa(i+1))
+		payload := fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"snapshot","body":"","author":"tester","status":"open","created_at":"2026-05-23T12:00:00.000Z","metadata":{},"comments":[{"comment_uid":%q,"author":"tester","body":"baseline","created_at":"2026-05-23T12:00:00.000Z"}],"labels":["baseline"]}`, uid, strings.ToLower(uid[len(uid)-4:]), "01HZNQ7VFPK1XGD8R5MABD000"+strconv.Itoa(i+1))
 		baseline = append(baseline, db.FederationIngestEvent{SourceEventID: int64(i + 1), Event: incrementalRemoteEvent(t, p, uid, "issue.snapshot", payload, 9_000_000_000_000)})
 	}
 	params := db.FederationIngestParams{ProjectID: p.ID, SpokeInstanceUID: baseline[0].Event.OriginInstanceUID, Events: baseline}
@@ -464,7 +464,7 @@ func TestFederationIncrementalNewEndpointsAndShortIDCollisions(t *testing.T) {
 		if target != "" {
 			links = fmt.Sprintf(`[{"type":"related","to_issue_uid":%q,"author":"tester","created_at":"2020-01-01T00:00:00.000Z"}]`, target)
 		}
-		payload := fmt.Sprintf(`{"uid":%q,"short_id":"0001","title":"snapshot","author":"tester","status":"open","created_at":"2026-05-23T12:00:00.000Z","links":%s}`, uid, links)
+		payload := fmt.Sprintf(`{"uid":%q,"short_id":"0001","title":"snapshot","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":%s}`, uid, links)
 		return incrementalRemoteEvent(t, project, uid, "issue.snapshot", payload, 9_000_000_000_000)
 	}
 	events := []db.FederationIngestEvent{{SourceEventID: 1, Event: makeSnapshot(p, first, second)}, {SourceEventID: 2, Event: makeSnapshot(p, second, third)}}

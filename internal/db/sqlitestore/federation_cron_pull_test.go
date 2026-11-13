@@ -204,7 +204,7 @@ func TestCronPullMatchesFullFold(t *testing.T) {
 				pages[0] = append(pages[0], incrementalRemoteEvent(t, p, issue.UID, "issue.updated", `{"title":"mixed update"}`, 9_000_001_000_001))
 			}
 			if scenario == "reset-cron-first" {
-				snapshot := incrementalRemoteEvent(t, p, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"reset baseline","author":"tester","status":"open","created_at":"2026-05-23T12:00:00.000Z"}`, issue.UID, issue.ShortID), 9_000_001_000_001)
+				snapshot := incrementalRemoteEvent(t, p, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"reset baseline","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`, issue.UID, issue.ShortID), 9_000_001_000_001)
 				pages = append(pages, []db.RemoteEvent{snapshot})
 			}
 			for _, page := range pages {

@@ -222,6 +222,11 @@ var storageScenarios = []scenario{
 		RunRelayRejectsHeaderlessIssueEvents(t, store)
 		return nil
 	}},
+	{name: "issue documents require every field", methods: []string{"CreateProject", "EnableProjectFederation", "EventsByUIDs", "IngestFederationEvents", "InsertRemoteEvents"}, run: checkIssueDocumentsRequireEveryField},
+	{name: "relay rejects incomplete issue documents", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "EventsByUIDs", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayRejectsIncompleteIssueDocuments(t, store)
+		return nil
+	}},
 	{name: "independent run observations", methods: []string{"ObserveCronRun", "CronRun", "ListCronRuns", "ExportCronJobs", "ExportCronWorkflows", "ExportCronRuns"}, run: checkIndependentRunObservations},
 	{name: "cron definition export deleted filter", methods: []string{"CreateProject", "PutCronJob", "PutCronWorkflow", "ObserveCronRun", "ExportCronJobs", "ExportCronWorkflows", "ExportCronRuns"}, run: checkCronDefinitionExportDeletedFilter},
 	{name: "cron data blocks orphan cleanup", methods: []string{"CreateProject", "HardDeleteProject", "PutCronJob", "ObserveCronRun", "CronJob", "CronRun", "ProjectByID"}, run: checkCronDataBlocksOrphanCleanup},

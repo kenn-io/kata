@@ -12,6 +12,7 @@ func TestRemoteEventIssueUIDReadsOnlyTheHeader(t *testing.T) {
 	const issue = "01HZZZZZZZZZZZZZZZZZZZZZZA"
 	const other = "01HZZZZZZZZZZZZZZZZZZZZZZB"
 	header := func(uid string) *string { return &uid }
+	document := `{"uid":"` + issue + `","short_id":"zzza","title":"Example issue","body":"","author":"worker","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`
 
 	accepted := []struct {
 		name    string
@@ -20,8 +21,8 @@ func TestRemoteEventIssueUIDReadsOnlyTheHeader(t *testing.T) {
 		payload string
 		want    string
 	}{
-		{name: "creation repeats the header as uid", kind: "issue.created", header: header(issue), payload: `{"uid":"` + issue + `"}`, want: issue},
-		{name: "snapshot repeats the header as uid", kind: "issue.snapshot", header: header(issue), payload: `{"uid":"` + issue + `"}`, want: issue},
+		{name: "creation repeats the header as uid", kind: "issue.created", header: header(issue), payload: document, want: issue},
+		{name: "snapshot repeats the header as uid", kind: "issue.snapshot", header: header(issue), payload: document, want: issue},
 		{name: "label change repeats the header as issue_uid", kind: "issue.labeled", header: header(issue), payload: `{"issue_uid":"` + issue + `","label":"bug"}`, want: issue},
 		{name: "comment carries no payload identity", kind: "issue.commented", header: header(issue), payload: `{"comment_uid":"` + other + `"}`, want: issue},
 		{name: "project event names no issue", kind: "project.metadata_updated", payload: `{"diff":{}}`, want: ""},
@@ -45,6 +46,7 @@ func TestRemoteEventIssueUIDReadsOnlyTheHeader(t *testing.T) {
 		{name: "issue event names no issue", kind: "issue.updated", payload: `{"body":"text"}`},
 		{name: "issue event has an empty header", kind: "issue.updated", header: header(""), payload: `{"body":"text"}`},
 		{name: "payload uid differs from the header", kind: "issue.snapshot", header: header(issue), payload: `{"uid":"` + other + `"}`},
+		{name: "creation lacks a required document field", kind: "issue.created", header: header(issue), payload: `{"uid":"` + issue + `"}`},
 		{name: "payload issue_uid differs from the header", kind: "issue.unlabeled", header: header(issue), payload: `{"issue_uid":"` + other + `"}`},
 	}
 	for _, tc := range rejected {

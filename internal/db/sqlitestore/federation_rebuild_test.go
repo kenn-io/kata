@@ -41,7 +41,7 @@ func resetToRemoteIssue(t *testing.T, d *Store, project db.Project, issue db.Iss
 	require.NoError(t, d.ResetFederatedProject(ctx, project.ID, 1, 0))
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
 	require.NoError(t, err)
-	payload := fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":%q,"author":"tester","status":"open"}`, issue.UID, issue.ShortID, issue.Title)
+	payload := fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":%q,"body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`, issue.UID, issue.ShortID, issue.Title)
 	event := incrementalRemoteEvent(t, project, issue.UID, "issue.created", payload, 1_000_000_000_000)
 	_, err = d.InsertRemoteEvents(ctx, project.ID, []db.RemoteEvent{event})
 	require.NoError(t, err)
@@ -388,8 +388,8 @@ func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
 		require.NoError(t, err)
 		peerUID := "01HZNQ7VFPK1XGD8R5MABC0001"
 		sameUID := "01HZNQ7VFPK1XGD8R5MABC0002"
-		peer := incrementalRemoteEvent(t, destination, peerUID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":"0001","title":"peer","author":"tester","status":"open","links":[{"type":"related","to_issue_uid":%q,"author":"tester"}]}`, peerUID, sameUID), 9_000_000_000_000)
-		same := incrementalRemoteEvent(t, destination, sameUID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":"0002","title":"same","author":"tester","status":"open"}`, sameUID), 9_000_000_000_001)
+		peer := incrementalRemoteEvent(t, destination, peerUID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":"0001","title":"peer","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"related","to_issue_uid":%q,"author":"tester"}]}`, peerUID, sameUID), 9_000_000_000_000)
+		same := incrementalRemoteEvent(t, destination, sameUID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":"0002","title":"same","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`, sameUID), 9_000_000_000_001)
 		link := incrementalRemoteEvent(t, source, issue.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, issue.UID, peerUID), 9_000_000_000_002)
 		_, err = d.InsertRemoteEvents(ctx, destination.ID, []db.RemoteEvent{peer, same})
 		require.NoError(t, err)

@@ -3,6 +3,7 @@ package dbtest
 import (
 	"crypto/ed25519"
 	"encoding/json/jsontext"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,7 +12,7 @@ import (
 )
 
 func issueCreationPayload(issueUID, actor string) jsontext.Value {
-	return jsontext.Value(`{"uid":"` + issueUID + `","title":"Creation","body":"","author":"` + actor + `","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+	return jsontext.Value(`{"uid":"` + issueUID + `","short_id":"` + strings.ToLower(issueUID[len(issueUID)-4:]) + `","title":"Creation","body":"","author":"` + actor + `","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 }
 
 // headerlessIssueEvents returns issue events that name their issue only in
@@ -65,11 +66,12 @@ func checkIssueEventsRequireHeaderIdentity(t *testing.T, store db.Storage) error
 	return nil
 }
 
-// RunRelayRejectsHeaderlessIssueEvents proves relay acceptance applies the
-// same header identity rule as direct federation ingest.
-func RunRelayRejectsHeaderlessIssueEvents(t *testing.T, store db.Storage) {
+// relayOffers enrolls a relay peer on a fresh root hub project. The returned
+// function offers one event to the hub at the given relay sequence.
+func relayOffers(t *testing.T, store db.Storage, name string) (db.Project, string, func(sequence int64, event db.RemoteEvent) error) {
+	t.Helper()
 	ctx := t.Context()
-	project, err := store.CreateProject(ctx, "relay-header-project")
+	project, err := store.CreateProject(ctx, name)
 	require.NoError(t, err)
 	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
 	require.NoError(t, err)
@@ -77,14 +79,12 @@ func RunRelayRejectsHeaderlessIssueEvents(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
 	//nolint:gosec // This is a deterministic fixture credential, never an operational secret.
-	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: "relay-header-parent-test-token", Actor: "relay-member", AdminActor: "admin"})
+	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: name + "-parent-test-token", Actor: "relay-member", AdminActor: "admin"})
 	require.NoError(t, err)
 	peer, err := uid.New()
 	require.NoError(t, err)
 	//nolint:gosec // This is a deterministic fixture credential, never an operational secret.
-	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: peer, ProtocolVersion: db.RelayProtocolVersion, Token: "relay-header-relay-test-token"})
-	require.NoError(t, err)
-	issueUID, err := uid.New()
+	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: peer, ProtocolVersion: db.RelayProtocolVersion, Token: name + "-relay-test-token"})
 	require.NoError(t, err)
 	writeCtx := db.WithRootAttribution(ctx, db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}, "relay-member")
 	offer := func(sequence int64, event db.RemoteEvent) error {
@@ -95,6 +95,16 @@ func RunRelayRejectsHeaderlessIssueEvents(t *testing.T, store db.Storage) {
 		_, err = store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, db.RelayBatch{Stream: db.RelayStreamEvent, After: sequence - 1, Envelopes: []db.RelayEnvelope{envelope}})
 		return err
 	}
+	return project, peer, offer
+}
+
+// RunRelayRejectsHeaderlessIssueEvents proves relay acceptance applies the
+// same header identity rule as direct federation ingest.
+func RunRelayRejectsHeaderlessIssueEvents(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	project, peer, offer := relayOffers(t, store, "relay-header-project")
+	issueUID, err := uid.New()
+	require.NoError(t, err)
 
 	created := newRemoteEvent(t, project, &issueUID, "issue.created", "relay-member", peer, 500, issueCreationPayload(issueUID, "relay-member"))
 	require.NoError(t, offer(1, created), "a creation with its issue UID in the header is accepted")

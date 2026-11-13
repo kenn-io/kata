@@ -1734,7 +1734,7 @@ func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, 
 	if issue.OccurrenceKey != nil {
 		occurrenceKey = *issue.OccurrenceKey
 	}
-	return buildIssueCreatedPayload(issueCreatedPayload{
+	return buildIssueCreatedPayload(db.IssueDocumentPayload{
 		UID:                 issue.UID,
 		ShortID:             issue.ShortID,
 		Title:               issue.Title,
@@ -1777,7 +1777,7 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 	return out, rows.Err()
 }
 
-func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]createdLinkOut, error) {
+func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueDocumentLink, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT l.type, peer.short_id, peer.uid, 0 AS incoming, l.author, l.created_at
 		  FROM links l
@@ -1796,9 +1796,9 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]cre
 		return nil, fmt.Errorf("list federation snapshot links: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []createdLinkOut
+	var out []db.IssueDocumentLink
 	for rows.Next() {
-		var link createdLinkOut
+		var link db.IssueDocumentLink
 		var createdAt time.Time
 		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Incoming, &link.Author, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan federation snapshot link: %w", err)
@@ -1809,7 +1809,7 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]cre
 	return out, rows.Err()
 }
 
-func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]issueSnapshotComment, error) {
+func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueDocumentComment, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT uid, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at
 		  FROM comments
@@ -1819,10 +1819,10 @@ func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]
 		return nil, fmt.Errorf("list federation snapshot comments: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []issueSnapshotComment
+	var out []db.IssueDocumentComment
 	for rows.Next() {
 		var (
-			comment            issueSnapshotComment
+			comment            db.IssueDocumentComment
 			createdAt          sql.NullTime
 			teammate           sql.NullString
 			replyTo, replyKind sql.NullString

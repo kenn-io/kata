@@ -48,7 +48,7 @@ func (f *rootResetFixture) created(title string, physicalMS, sequence int64) roo
 	f.t.Helper()
 	issueUID, err := uid.New()
 	require.NoError(f.t, err)
-	event := newRemoteEvent(f.t, f.project, &issueUID, "issue.created", "source-agent", f.rootUID, physicalMS, jsontext.Value(`{"uid":"`+issueUID+`","title":"`+title+`","author":"source-agent","metadata":{}}`))
+	event := newRemoteEvent(f.t, f.project, &issueUID, "issue.created", "source-agent", f.rootUID, physicalMS, IssueDocument(f.t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"`+title+`","author":"source-agent","metadata":{}}`)))
 	receipt := f.receipt(event, sequence)
 	return rootFixtureIssue{event: event, receipt: receipt, entity: db.EntityProvenance{ProjectUID: f.project.UID, Kind: "issue", EntityUID: issueUID, EventUID: event.EventUID}}
 }
@@ -284,7 +284,7 @@ func RunRelayResetForwardsToActiveDownstream(t *testing.T, store db.Storage) {
 	siblingBinding := sibling.Enrollment.RelayBindingUID
 	siblingIssueUID, err := uid.New()
 	require.NoError(t, err)
-	siblingEvent := newRemoteEvent(t, project, &siblingIssueUID, "issue.created", "sibling-agent", siblingUID, 303, jsontext.Value(`{"uid":"`+siblingIssueUID+`","title":"Sibling ingress","author":"sibling-agent","metadata":{}}`))
+	siblingEvent := newRemoteEvent(t, project, &siblingIssueUID, "issue.created", "sibling-agent", siblingUID, 303, IssueDocument(t, siblingIssueUID, jsontext.Value(`{"uid":"`+siblingIssueUID+`","title":"Sibling ingress","author":"sibling-agent","metadata":{}}`)))
 	siblingBody, err := db.EncodeRelaySourceEvent(siblingEvent)
 	require.NoError(t, err)
 	pushed, err := db.SealRelayEnvelope(db.RelayEnvelope{Version: db.RelayProtocolVersion, BindingUID: siblingBinding, ProjectUID: project.UID, AuthorityUID: rootUID, SenderInstanceUID: siblingUID, ReceiverInstanceUID: store.InstanceUID(), Epoch: sibling.Enrollment.RelayResetEpoch, Sequence: 1, Stream: db.RelayStreamEvent, Path: []string{siblingUID}, SourceUID: siblingEvent.EventUID, SourceHash: siblingEvent.ContentHash, Body: siblingBody})

@@ -241,7 +241,7 @@ func TestFullPulledMaterializationRetriesChanges(t *testing.T) {
 			_, err = d.EnableProjectFederation(ctx, sibling.ID, "tester")
 			require.NoError(t, err)
 			peerUID := "01HZNQ7VFPK1XGD8R5MABC0001"
-			peerEvent := incrementalRemoteEvent(t, sibling, peerUID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":"0001","title":"peer","author":"tester","status":"open","created_at":"2026-05-23T12:00:00Z"}`, peerUID), 9_000_000_000_000)
+			peerEvent := incrementalRemoteEvent(t, sibling, peerUID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":"0001","title":"peer","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00Z"}`, peerUID), 9_000_000_000_000)
 			_, err = d.InsertRemoteEvents(ctx, sibling.ID, []db.RemoteEvent{peerEvent})
 			require.NoError(t, err)
 			projectEvent := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
@@ -283,7 +283,7 @@ func TestFullPulledMaterializationRetriesChanges(t *testing.T) {
 			require.NoError(t, err)
 			projectEvent := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
 			pageLink := incrementalRemoteEvent(t, p, issue.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, issue.UID, first.UID), 9_000_000_000_001)
-			siblingLink := incrementalRemoteEvent(t, sibling, first.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"first","author":"untrusted","created_at":"2026-05-23T12:00:00Z","links":[{"to_issue_uid":%q,"type":"related","author":"untrusted"}]}`, first.UID, first.ShortID, second.UID), 9_000_000_000_002)
+			siblingLink := incrementalRemoteEvent(t, sibling, first.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"first","body":"","author":"untrusted","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00Z","links":[{"to_issue_uid":%q,"type":"related","author":"untrusted"}]}`, first.UID, first.ShortID, second.UID), 9_000_000_000_002)
 			siblingLink.OriginInstanceUID = d.InstanceUID()
 			siblingLink.ContentHash, err = db.EventContentHash(db.EventHashInput{UID: siblingLink.EventUID, OriginInstanceUID: siblingLink.OriginInstanceUID, ProjectUID: sibling.UID, ProjectName: sibling.Name, IssueUID: siblingLink.IssueUID, Type: siblingLink.Type, Actor: siblingLink.Actor, Payload: siblingLink.Payload, HLCPhysicalMS: siblingLink.HLCPhysicalMS, HLCCounter: siblingLink.HLCCounter, CreatedAt: siblingLink.CreatedAt.Format(sqliteTimeFormat)})
 			require.NoError(t, err)
@@ -348,7 +348,7 @@ func TestFullPulledMaterializationRetriesChanges(t *testing.T) {
 		{name: "event-rewrite", run: func(t *testing.T, d *Store, p db.Project, issue db.Issue) {
 			ctx := t.Context()
 			projectEvent := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
-			issueEvent := incrementalRemoteEvent(t, p, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"first","author":"untrusted","created_at":"2026-05-23T12:00:00Z"}`, issue.UID, issue.ShortID), 9_000_000_000_001)
+			issueEvent := incrementalRemoteEvent(t, p, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"first","body":"","author":"untrusted","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00Z"}`, issue.UID, issue.ShortID), 9_000_000_000_001)
 			issueEvent.OriginInstanceUID = d.InstanceUID()
 			var err error
 			issueEvent.ContentHash, err = db.EventContentHash(db.EventHashInput{UID: issueEvent.EventUID, OriginInstanceUID: issueEvent.OriginInstanceUID, ProjectUID: p.UID, ProjectName: p.Name, IssueUID: issueEvent.IssueUID, Type: issueEvent.Type, Actor: issueEvent.Actor, Payload: issueEvent.Payload, HLCPhysicalMS: issueEvent.HLCPhysicalMS, HLCCounter: issueEvent.HLCCounter, CreatedAt: issueEvent.CreatedAt.Format(sqliteTimeFormat)})

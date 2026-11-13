@@ -205,7 +205,7 @@ func checkFederatedMovePurgeFormerStreams(t *testing.T, store db.Storage) error 
 		unrelatedUID, err := uid.New()
 		require.NoError(t, err)
 		unrelated := newRemoteEvent(t, source, &unrelatedUID, "issue.created", "worker", origin,
-			time.Now().Add(2*time.Hour).UnixMilli(), jsontext.Value(`{"uid":"`+unrelatedUID+`","title":"unrelated issue","author":"worker","status":"open","metadata":{}}`))
+			time.Now().Add(2*time.Hour).UnixMilli(), IssueDocument(t, unrelatedUID, jsontext.Value(`{"uid":"`+unrelatedUID+`","title":"unrelated issue","author":"worker","status":"open","metadata":{}}`)))
 		_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
 			ProjectID: source.ID, SpokeInstanceUID: origin, BoundActor: "worker",
 			FederationEnrollmentID: grant.Enrollment.ID, EventFeatures: db.SupportedEventFeatures,

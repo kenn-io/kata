@@ -133,7 +133,7 @@ func TestCronMixedMaterializationMatchesFullFold(t *testing.T) {
 				}
 				issueEvent := incrementalRemoteEvent(t, p, issue.UID, "issue.updated", `{"title":"mixed changed"}`, 9_000_001_000_400)
 				if scenario == "reset" {
-					issueEvent = incrementalRemoteEvent(t, p, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"mixed changed","author":"tester","status":"open","created_at":"2026-05-23T12:00:00.000Z"}`, issue.UID, issue.ShortID), 9_000_001_000_400)
+					issueEvent = incrementalRemoteEvent(t, p, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"mixed changed","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`, issue.UID, issue.ShortID), 9_000_001_000_400)
 				}
 				page := []db.RemoteEvent{issueEvent, cronEvent}
 				if scenario == "reset" {

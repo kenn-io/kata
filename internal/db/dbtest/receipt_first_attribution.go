@@ -35,7 +35,7 @@ func RunAttributionReceiptBeforeEvent(t *testing.T, store db.Storage) {
 	pin := db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: "00000000000000000000000001", KeyID: db.RootPublicKeyID(public), PublicKey: public}
 	require.NoError(t, store.PinRootAuthority(ctx, pin))
 	now := time.Now().UTC()
-	source := db.RemoteEvent{EventUID: "00000000000000000000000003", OriginInstanceUID: pin.AuthorityUID, ProjectUID: project.UID, ProjectName: project.Name, IssueUID: &issue.UID, Type: "issue.created", Actor: "assistant", HLCPhysicalMS: now.UnixMilli(), CreatedAt: now, Payload: jsontext.Value(`{"title":"Original source","metadata":{}}`)}
+	source := db.RemoteEvent{EventUID: "00000000000000000000000003", OriginInstanceUID: pin.AuthorityUID, ProjectUID: project.UID, ProjectName: project.Name, IssueUID: &issue.UID, Type: "issue.created", Actor: "assistant", HLCPhysicalMS: now.UnixMilli(), CreatedAt: now, Payload: IssueDocument(t, issue.UID, jsontext.Value(`{"title":"Original source","metadata":{}}`))}
 	hash := func(event db.RemoteEvent) string {
 		h, e := db.EventContentHash(db.EventHashInput{UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: event.ProjectUID, ProjectName: event.ProjectName, IssueUID: event.IssueUID, RelatedIssueUID: event.RelatedIssueUID, Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, CreatedAt: event.CreatedAt.Format(db.EventTimestampFormat), Payload: event.Payload})
 		require.NoError(t, e)
@@ -63,7 +63,7 @@ func RunAttributionReceiptBeforeEvent(t *testing.T, store db.Storage) {
 	_, err = store.UpsertFederationBinding(ctx, binding)
 	require.NoError(t, err)
 	conflicting := source
-	conflicting.Payload = jsontext.Value(`{"title":"Conflicting source","metadata":{}}`)
+	conflicting.Payload = IssueDocument(t, issue.UID, jsontext.Value(`{"title":"Conflicting source","metadata":{}}`))
 	conflicting.ContentHash = hash(conflicting)
 	_, _, err = db.ValidateRemoteEventContentHash(conflicting)
 	require.NoError(t, err, "conflicting source is independently self-consistent")
@@ -90,6 +90,7 @@ func RunAttributionReceiptBeforeEvent(t *testing.T, store db.Storage) {
 		next.EventUID, err = uid.New()
 		require.NoError(t, err)
 		next.IssueUID = &raceIssue.UID
+		next.Payload = IssueDocument(t, raceIssue.UID, jsontext.Value(`{"title":"Original source","metadata":{}}`))
 		next.ContentHash = hash(next)
 		nextReceipt := receipt
 		nextReceipt.EventUID, nextReceipt.ContentHash, nextReceipt.Sequence = next.EventUID, next.ContentHash, int64(index+2)
@@ -116,6 +117,7 @@ func RunAttributionReceiptBeforeEvent(t *testing.T, store db.Storage) {
 	held.EventUID, err = uid.New()
 	require.NoError(t, err)
 	held.IssueUID = &heldIssue.UID
+	held.Payload = IssueDocument(t, heldIssue.UID, jsontext.Value(`{"title":"Original source","metadata":{}}`))
 	held.ContentHash = hash(held)
 	heldReceipt := receipt
 	heldReceipt.EventUID, heldReceipt.ContentHash, heldReceipt.Sequence = held.EventUID, held.ContentHash, 12
