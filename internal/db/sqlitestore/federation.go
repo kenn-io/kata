@@ -787,6 +787,9 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 		if err != nil {
 			return nil, err
 		}
+		if _, err := db.RemoteEventIssueUID(ev); err != nil {
+			return nil, err
+		}
 		if err := db.ValidateFederationEntries(ev.Type, ev.EventUID, payload); err != nil {
 			return nil, err
 		}
@@ -1443,10 +1446,10 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, false); err != nil {
+	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID); err != nil {
 		return fmt.Errorf("clear federated events: %w", err)
 	}
 	if err := clearFederatedProjection(ctx, tx, projectID); err != nil {
@@ -1731,7 +1734,7 @@ func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, 
 	if issue.OccurrenceKey != nil {
 		occurrenceKey = *issue.OccurrenceKey
 	}
-	return buildIssueCreatedPayload(issueCreatedPayload{
+	return buildIssueCreatedPayload(db.IssueDocumentPayload{
 		UID:                 issue.UID,
 		ShortID:             issue.ShortID,
 		Title:               issue.Title,
@@ -1774,7 +1777,7 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 	return out, rows.Err()
 }
 
-func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]createdLinkOut, error) {
+func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueDocumentLink, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT l.type, peer.short_id, peer.uid, 0 AS incoming, l.author, l.created_at
 		  FROM links l
@@ -1793,9 +1796,9 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]cre
 		return nil, fmt.Errorf("list federation snapshot links: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []createdLinkOut
+	var out []db.IssueDocumentLink
 	for rows.Next() {
-		var link createdLinkOut
+		var link db.IssueDocumentLink
 		var createdAt time.Time
 		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Incoming, &link.Author, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan federation snapshot link: %w", err)
@@ -1806,7 +1809,7 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]cre
 	return out, rows.Err()
 }
 
-func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]issueSnapshotComment, error) {
+func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueDocumentComment, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT uid, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at
 		  FROM comments
@@ -1816,10 +1819,10 @@ func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]
 		return nil, fmt.Errorf("list federation snapshot comments: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []issueSnapshotComment
+	var out []db.IssueDocumentComment
 	for rows.Next() {
 		var (
-			comment            issueSnapshotComment
+			comment            db.IssueDocumentComment
 			createdAt          sql.NullTime
 			teammate           sql.NullString
 			replyTo, replyKind sql.NullString
@@ -1875,20 +1878,17 @@ func federationFoldEventsForIssues(ctx context.Context, tx *sql.Tx, projectID in
 }
 
 func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes, issueScope []string) ([]db.FoldEvent, error) {
-	// Only issue events use payload fields as issue identity. Other event
-	// payloads can reference an issue without becoming part of its history.
-	eventIssueUID := `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),json_extract(e.payload,'$.issue_uid'),json_extract(e.payload,'$.uid')) ELSE NULLIF(e.issue_uid,'') END`
-	historyIssueUID := `CASE WHEN h.type LIKE 'issue.%' THEN COALESCE(NULLIF(h.issue_uid,''),json_extract(h.payload,'$.issue_uid'),json_extract(h.payload,'$.uid')) ELSE NULLIF(h.issue_uid,'') END`
-	moveIssueUID := `COALESCE(NULLIF(m.issue_uid,''),json_extract(m.payload,'$.issue_uid'),json_extract(m.payload,'$.uid'))`
+	// The unary + keeps the issue_uid indexes out of this plan: scanning events
+	// in ID order and checking moves through the issue.moved partial index
+	// costs less than seeking every issue's events and their moves.
 	query := `
 		SELECT e.uid, e.origin_instance_uid, p.uid, e.issue_uid, e.related_issue_uid,
 		       e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.created_at
 		  FROM events e JOIN projects p ON p.id=e.project_id
- WHERE (e.project_id=$1 OR (` + eventIssueUID + ` IN (
-   SELECT ` + historyIssueUID + ` FROM events h WHERE h.project_id=$1
+ WHERE (e.project_id=$1 OR (+e.issue_uid IN (
+   SELECT h.issue_uid FROM events h WHERE h.project_id=$1
    UNION SELECT uid FROM issues WHERE project_id=$1)
- AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND
-   ` + moveIssueUID + ` = ` + eventIssueUID + `)))`
+ AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND +m.issue_uid = e.issue_uid)))`
 	args := []any{projectID}
 	if len(eventTypes) > 0 {
 		placeholders := make([]string, 0, len(eventTypes))
@@ -1942,7 +1942,7 @@ func scanFederationFoldEvents(rows *sql.Rows, issueScope []string) ([]db.FoldEve
 		}
 		e.Payload = jsontext.Value(payload)
 		e.CreatedAt = createdAt.UTC().Format(sqliteTimeFormat)
-		if len(issueScope) > 0 && !strings.HasPrefix(e.Type, "project.") && !slices.Contains(issueScope, db.FederationEventIssueUID(&e.IssueUID, payload)) {
+		if len(issueScope) > 0 && !strings.HasPrefix(e.Type, "project.") && !slices.Contains(issueScope, e.IssueUID) {
 			continue
 		}
 		out = append(out, e)

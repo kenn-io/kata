@@ -1250,32 +1250,10 @@ func federationIngestClaimAuditIssueUIDs(ev db.RemoteEvent) ([]federationIngestC
 		out = append(out, issue)
 	}
 	if claimWorkMutationRequiresClaim(ev.Type) && !attentionOnlyMetadataEvent(ev.Type, ev.Payload) {
-		issueUID := ""
-		if ev.IssueUID != nil {
-			issueUID = *ev.IssueUID
-		}
-		if issueUID == "" {
-			uid, err := payloadIssueUID(ev, payload)
-			if err != nil {
-				return nil, err
-			}
-			issueUID = uid
-		}
-		add(federationIngestClaimAuditIssue{UID: issueUID, RequireClaim: true})
+		add(federationIngestClaimAuditIssue{UID: db.EventIssueUID(ev.IssueUID), RequireClaim: true})
 	}
 	if ev.Type == "issue.snapshot" {
-		issueUID := ""
-		if ev.IssueUID != nil {
-			issueUID = *ev.IssueUID
-		}
-		if issueUID == "" {
-			uid, err := payloadIssueUID(ev, payload)
-			if err != nil {
-				return nil, err
-			}
-			issueUID = uid
-		}
-		add(federationIngestClaimAuditIssue{UID: issueUID, RequireClaim: true})
+		add(federationIngestClaimAuditIssue{UID: db.EventIssueUID(ev.IssueUID), RequireClaim: true})
 	}
 	if ev.Type == "issue.created" || ev.Type == "issue.snapshot" || claimWorkMutationRequiresPeerClaim(ev.Type) {
 		refs, err := payloadReferencedIssueUIDs(ev, payload)
@@ -1659,7 +1637,7 @@ func (d *Store) UnresolvedClaimViolationsForProject(
 }
 
 const claimViolationSelect = `
-	SELECT e.id, e.uid, COALESCE(e.issue_uid, json_extract(e.payload, '$.issue_uid'), ''),
+	SELECT e.id, e.uid, COALESCE(e.issue_uid, ''),
 	       COALESCE(i.short_id, ''),
 	       COALESCE(json_extract(e.payload, '$.offending_event_uid'),
 	                json_extract(e.payload, '$.event_uid'), ''),

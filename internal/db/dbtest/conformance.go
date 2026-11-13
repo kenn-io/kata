@@ -217,6 +217,16 @@ var storageScenarios = []scenario{
 	{name: "cron rejects impossible schedules", methods: []string{"PutCronJob", "CronJob", "ListCronJobs", "DispatchRecurringCron"}, run: checkCronRejectsImpossibleSchedules},
 	{name: "federation metadata requires enabled hub", methods: []string{"CreateProject", "AdoptProjectIntoFederation", "ReadFederation"}, run: checkFederationMetadataRequiresEnabledHub},
 	{name: "peer ingest committed events", methods: []string{"IngestFederationEvents"}, run: checkPeerIngestCommittedEvents},
+	{name: "issue events require header identity", methods: []string{"CreateProject", "EnableProjectFederation", "EventsByUIDs", "IngestFederationEvents", "InsertRemoteEvents"}, run: checkIssueEventsRequireHeaderIdentity},
+	{name: "relay rejects header-less issue events", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "EventsByUIDs", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayRejectsHeaderlessIssueEvents(t, store)
+		return nil
+	}},
+	{name: "issue documents require every field", methods: []string{"CreateProject", "EnableProjectFederation", "EventsByUIDs", "IngestFederationEvents", "InsertRemoteEvents"}, run: checkIssueDocumentsRequireEveryField},
+	{name: "relay rejects incomplete issue documents", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "EventsByUIDs", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayRejectsIncompleteIssueDocuments(t, store)
+		return nil
+	}},
 	{name: "independent run observations", methods: []string{"ObserveCronRun", "CronRun", "ListCronRuns", "ExportCronJobs", "ExportCronWorkflows", "ExportCronRuns"}, run: checkIndependentRunObservations},
 	{name: "cron definition export deleted filter", methods: []string{"CreateProject", "PutCronJob", "PutCronWorkflow", "ObserveCronRun", "ExportCronJobs", "ExportCronWorkflows", "ExportCronRuns"}, run: checkCronDefinitionExportDeletedFilter},
 	{name: "cron data blocks orphan cleanup", methods: []string{"CreateProject", "HardDeleteProject", "PutCronJob", "ObserveCronRun", "CronJob", "CronRun", "ProjectByID"}, run: checkCronDataBlocksOrphanCleanup},
@@ -335,9 +345,9 @@ var storageScenarios = []scenario{
 		checkFederatedReadPages(t, store, backend)
 		return nil
 	}},
-	{name: "federated move payload-only history identity", methods: []string{"AdvanceFederationPushCursor", "CreateProject", "CreateIssue", "EditIssue", "EventsByUIDs", "MoveIssueProject", "InsertRemoteEvents", "MaterializeFederatedProject", "ResetFederatedProject", "UpsertFederationBinding", "IssueByUID", "ReadFederation"}, runWithBackend: checkFederatedMovePayloadOnlyHistory},
+	{name: "federated move remote edit history", methods: []string{"AdvanceFederationPushCursor", "CreateProject", "CreateIssue", "EditIssue", "EventsByUIDs", "MoveIssueProject", "InsertRemoteEvents", "MaterializeFederatedProject", "ResetFederatedProject", "UpsertFederationBinding", "IssueByUID", "ReadFederation"}, runWithBackend: checkFederatedMoveRemoteEditHistory},
+	{name: "federated move snapshot retained comment edit", methods: []string{"CreateComment", "CreateFederationEnrollment", "CreateIssue", "CreateProject", "EnableProjectFederation", "IngestFederationEvents", "IssueByUID", "CommentsByIssue"}, run: checkFederatedMoveSnapshotRetainedCommentEdit},
 	{name: "federated move snapshot comment from repeated import", methods: []string{"CreateComment", "EditComment", "CreateFederationEnrollment", "CreateIssue", "CreateProject", "EnableProjectFederation", "IngestFederationEvents", "IssueByUID", "CommentsByIssue"}, run: checkFederatedMoveSnapshotCommentFromRepeatedImport},
-	{name: "federated move snapshot payload-only comment edit", methods: []string{"CreateComment", "CreateFederationEnrollment", "CreateIssue", "CreateProject", "EnableProjectFederation", "IngestFederationEvents", "IssueByUID", "CommentsByIssue"}, run: checkFederatedMoveSnapshotPayloadOnlyCommentEdit},
 	{name: "federated move authoring gates", methods: []string{"MoveIssueProject", "SetRelayBindingConfig", "CreateRelayEnrollment", "InsertRemoteEvents"}, runWithBackend: checkFederatedMoveAuthoringGates},
 	{name: "federated issue move", methods: []string{"MoveIssueProject", "IngestFederationEvents", "InsertRemoteEvents", "ReadFederation", "MaterializeFederatedProject"}, runWithBackend: checkFederatedIssueMove},
 	{name: "same hub move gates", methods: []string{"MoveIssueProject"}, run: checkSameHubMoveGates},

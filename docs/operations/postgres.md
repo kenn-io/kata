@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-11-10
+last_edited: 2026-11-13
 ---
 
 # PostgreSQL operations
@@ -178,6 +178,12 @@ Schema 50 adds the `mcp_event_subscriptions` table for daemon-owned MCP Events
 subscriptions. Re-run the `GRANT ... ON ALL TABLES` statement below after the
 migration so the runtime role can use it. The table has no sequences. See the
 [schema 50 migration requirements](../development/postgres-migrations.md#schema-50-mcp-events-subscriptions).
+
+The schema 50→51 migration replaces the schema 43 issue history index with one
+on the event header's issue UID and event ID. Stop daemons and imports while it
+reads `events` and builds the index. See the
+[schema 51 migration requirements](../development/postgres-migrations.md#schema-51-issue-history-index-on-the-event-header)
+for the offline window, grants, and rollback. SQLite replaces the index in place.
 
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:

@@ -294,7 +294,7 @@ func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Is
 	if issue.OccurrenceKey != nil {
 		occurrenceKey = *issue.OccurrenceKey
 	}
-	payload, err := json.Marshal(issueCreatedPayload{
+	payload, err := json.Marshal(db.IssueDocumentPayload{
 		UID: issue.UID, ShortID: issue.ShortID, Title: issue.Title, Body: issue.Body,
 		Author: issue.Author, Owner: issue.Owner, AssignmentExpiresOn: optionalStoredTime(issue.AssignmentExpiresOn), Priority: issue.Priority, Status: issue.Status,
 		ClosedReason: issue.ClosedReason, ClosedAt: optionalStoredTime(issue.ClosedAt),
@@ -335,7 +335,7 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 	return output, mapSQLError(rows.Err(), nil)
 }
 
-func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]createdLink, error) {
+func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueDocumentLink, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT l.type,peer.short_id,peer.uid,FALSE,l.author,l.created_at
 FROM links l JOIN issues peer ON peer.id=l.to_issue_id WHERE l.from_issue_id=$1
 UNION ALL
@@ -347,9 +347,9 @@ ORDER BY 1 ASC,3 ASC,4 ASC`, issueID)
 		return nil, mapSQLError(err, nil)
 	}
 	defer func() { _ = rows.Close() }()
-	var output []createdLink
+	var output []db.IssueDocumentLink
 	for rows.Next() {
-		var link createdLink
+		var link db.IssueDocumentLink
 		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Incoming, &link.Author, &link.CreatedAt); err != nil {
 			return nil, mapSQLError(err, nil)
 		}
@@ -362,16 +362,16 @@ func federationIssueComments(
 	ctx context.Context,
 	tx *sql.Tx,
 	issueID int64,
-) ([]issueSnapshotComment, error) {
+) ([]db.IssueDocumentComment, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT uid,author,body,created_at,teammate,reply_to_uid,reply_kind,edited_at FROM comments WHERE issue_id=$1 ORDER BY id ASC`, issueID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
 	defer func() { _ = rows.Close() }()
-	var output []issueSnapshotComment
+	var output []db.IssueDocumentComment
 	for rows.Next() {
-		var comment issueSnapshotComment
+		var comment db.IssueDocumentComment
 		var teammate, replyTo, replyKind, editedAt sql.NullString
 		if err := rows.Scan(&comment.CommentUID, &comment.Author, &comment.Body, &comment.CreatedAt, &teammate, &replyTo, &replyKind, &editedAt); err != nil {
 			return nil, mapSQLError(err, nil)

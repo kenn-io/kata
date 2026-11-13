@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"encoding/json/jsontext"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,9 +41,9 @@ func TestMaterializeFederatedProjectPrunesLinkedIssueMissingFromProjection(t *te
 	secondUID, err := uid.New()
 	require.NoError(t, err)
 	second := projectionSnapshotEvent(t, project, secondUID, origin, 1,
-		jsontext.Value(`{"uid":"`+secondUID+`","title":"second","body":"","author":"remote","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+		jsontext.Value(`{"uid":"`+secondUID+`","short_id":"`+strings.ToLower(secondUID[len(secondUID)-4:])+`","title":"second","body":"","author":"remote","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
 	first := projectionSnapshotEvent(t, project, firstUID, origin, 2,
-		jsontext.Value(`{"uid":"`+firstUID+`","title":"first","body":"","author":"remote","status":"open","metadata":{},"links":[{"type":"blocks","to_issue_uid":"`+secondUID+`","author":"remote"}],"created_at":"2026-05-23T12:00:00.000Z"}`))
+		jsontext.Value(`{"uid":"`+firstUID+`","short_id":"`+strings.ToLower(firstUID[len(firstUID)-4:])+`","title":"first","body":"","author":"remote","status":"open","metadata":{},"links":[{"type":"blocks","to_issue_uid":"`+secondUID+`","author":"remote"}],"created_at":"2026-05-23T12:00:00.000Z"}`))
 	inserted, err := store.InsertRemoteEvent(ctx, project.ID, second)
 	require.NoError(t, err)
 	assert.True(t, inserted)
@@ -97,7 +98,7 @@ func TestMaterializeFederatedProjectLeavesUnchangedCommentsUnwritten(t *testing.
 	commentUID, err := uid.New()
 	require.NoError(t, err)
 	snapshot := projectionSnapshotEvent(t, project, issueUID, origin, 1,
-		jsontext.Value(`{"uid":"`+issueUID+`","title":"original issue","author":"remote","status":"open","comments":[{"comment_uid":"`+commentUID+`","author":"reviewer","body":"original comment","created_at":"2026-05-20T10:00:00.000Z"}],"created_at":"2026-05-20T09:00:00.000Z"}`))
+		jsontext.Value(`{"uid":"`+issueUID+`","short_id":"`+strings.ToLower(issueUID[len(issueUID)-4:])+`","title":"original issue","body":"","author":"remote","status":"open","metadata":{},"comments":[{"comment_uid":"`+commentUID+`","author":"reviewer","body":"original comment","created_at":"2026-05-20T10:00:00.000Z"}],"created_at":"2026-05-20T09:00:00.000Z"}`))
 	_, err = store.InsertRemoteEvent(ctx, project.ID, snapshot)
 	require.NoError(t, err)
 	if err := store.MaterializeFederatedProject(ctx, project.ID); err != nil {

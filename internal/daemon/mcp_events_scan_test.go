@@ -514,27 +514,27 @@ func TestMCPEventsMovingAParentAloneWakesAScopedFilteredSubscription(t *testing.
 	})
 }
 
-// insertPayloadIdentityEvent records a pulled issue.metadata_updated whose
-// issue identity is only in its payload, as some federated events carry it.
+// insertPulledIssueEvent records a pulled issue.metadata_updated the way a
+// spoke stores it: the issue UID in the event header and no local issue row.
 // The diff gives example-user a request.
-func insertPayloadIdentityEvent(t *testing.T, store db.Storage, project db.Project, eventUID, issueUID string) {
+func insertPulledIssueEvent(t *testing.T, store db.Storage, project db.Project, eventUID, issueUID string) {
 	t.Helper()
 	execer, ok := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
 	require.True(t, ok)
-	payload := `{"issue_uid":"` + issueUID + `","diff":{"` + notification.MetadataKey("example-user") + `":{"to":{"from":"coordinator","message":"review"}}}}`
-	_, err := execer.ExecContext(t.Context(), `INSERT INTO events(uid, origin_instance_uid, project_id, project_name,
+	payload := `{"diff":{"` + notification.MetadataKey("example-user") + `":{"to":{"from":"coordinator","message":"review"}}}}`
+	_, err := execer.ExecContext(t.Context(), `INSERT INTO events(uid, origin_instance_uid, project_id, project_name, issue_uid,
 		type, actor, payload, hlc_physical_ms, hlc_counter, content_hash)
-		VALUES($1, '01ARZ3NDEKTSV4RRFFQ69G5FAW', $2, $3, 'issue.metadata_updated', 'coordinator', $4, 1, 0, $5)`,
-		eventUID, project.ID, project.Name, payload, strings.Repeat("a", 64))
+		VALUES($1, '01ARZ3NDEKTSV4RRFFQ69G5FAW', $2, $3, $4, 'issue.metadata_updated', 'coordinator', $5, 1, 0, $6)`,
+		eventUID, project.ID, project.Name, issueUID, payload, strings.Repeat("a", 64))
 	require.NoError(t, err)
 }
 
-// A federated event that names its issue only in the payload is matched and
-// authorized against that issue: an issue filter hears it, and a scoped token
-// does not hear one about an issue outside its subtree.
-func TestMCPEventsPayloadIssueIdentityIsMatchedAndAuthorized(t *testing.T) {
+// A pulled event, stored with its issue UID in the header and no local issue
+// row, is matched and authorized against that issue: an issue filter hears
+// it, and a scoped token does not hear one about an issue outside its subtree.
+func TestMCPEventsPulledIssueIdentityIsMatchedAndAuthorized(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		f := newEventsFixture(t, store)
 		ctx := t.Context()
@@ -546,7 +546,7 @@ func TestMCPEventsPayloadIssueIdentityIsMatchedAndAuthorized(t *testing.T) {
 		subscribeEvents(t, service, f.scoped, mcpevents.Arguments{For: "scoped-recipient"})
 		require.NoError(t, service.Drain(ctx))
 
-		insertPayloadIdentityEvent(t, store, f.public, "01ARZ3NDEKTSV4RRFFQ69G5FD1", f.publicIssue.UID)
+		insertPulledIssueEvent(t, store, f.public, "01ARZ3NDEKTSV4RRFFQ69G5FD1", f.publicIssue.UID)
 		require.NoError(t, service.Drain(ctx))
 		assert.Equal(t, []string{"example-user"}, got.recipients(), "the issue filter hears its issue")
 
@@ -554,11 +554,11 @@ func TestMCPEventsPayloadIssueIdentityIsMatchedAndAuthorized(t *testing.T) {
 		execer := store.(interface {
 			ExecContext(context.Context, string, ...any) (sql.Result, error)
 		})
-		payload := `{"issue_uid":"` + outside.UID + `","diff":{"` + notification.MetadataKey("scoped-recipient") + `":{"to":{"from":"coordinator","message":"review"}}}}`
-		_, err = execer.ExecContext(ctx, `INSERT INTO events(uid, origin_instance_uid, project_id, project_name,
+		payload := `{"diff":{"` + notification.MetadataKey("scoped-recipient") + `":{"to":{"from":"coordinator","message":"review"}}}}`
+		_, err = execer.ExecContext(ctx, `INSERT INTO events(uid, origin_instance_uid, project_id, project_name, issue_uid,
 			type, actor, payload, hlc_physical_ms, hlc_counter, content_hash)
-			VALUES('01ARZ3NDEKTSV4RRFFQ69G5FD2', '01ARZ3NDEKTSV4RRFFQ69G5FAW', $1, $2, 'issue.metadata_updated', 'coordinator', $3, 1, 0, $4)`,
-			f.public.ID, f.public.Name, payload, strings.Repeat("a", 64))
+			VALUES('01ARZ3NDEKTSV4RRFFQ69G5FD2', '01ARZ3NDEKTSV4RRFFQ69G5FAW', $1, $2, $3, 'issue.metadata_updated', 'coordinator', $4, 1, 0, $5)`,
+			f.public.ID, f.public.Name, outside.UID, payload, strings.Repeat("a", 64))
 		require.NoError(t, err)
 		require.NoError(t, service.Drain(ctx))
 		assert.Equal(t, []string{"example-user"}, got.recipients(), "the scoped token is not pinged for an issue it cannot see")
@@ -694,7 +694,7 @@ func TestMCPEventsAppliedPullPingsAgainOnAnyDaemon(t *testing.T) {
 		require.NoError(t, scanning.Drain(ctx))
 
 		const eventUID = "01ARZ3NDEKTSV4RRFFQ69G5FE1"
-		insertPayloadIdentityEvent(t, store, f.public, eventUID, f.publicIssue.UID)
+		insertPulledIssueEvent(t, store, f.public, eventUID, f.publicIssue.UID)
 		require.NoError(t, scanning.Drain(ctx))
 		require.Equal(t, int64(1), early.pings.Load(), "pinged before the pull was applied")
 

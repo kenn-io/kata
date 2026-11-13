@@ -1,13 +1,19 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-12
+last_edited: 2026-11-13
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Upgrade to schema 51, which reads issue history through an index on each
+  event's header issue UID instead of one built from event payloads. PostgreSQL
+  needs `kata storage postgres migrate` with the daemon stopped while the index
+  builds; SQLite replaces the index in place at startup. See the
+  [schema 51 migration requirements](development/postgres-migrations.md#schema-51-issue-history-index-on-the-event-header).
 
 - Install user hooks for Claude Code and Codex with `kata agent setup`, and use `kata doctor` to find hooks that need review. Open Codex and run `/hooks` when prompted. See [agent setup](workflows/agents.md#contract-in-every-session).
 

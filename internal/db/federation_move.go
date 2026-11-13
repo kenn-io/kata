@@ -296,14 +296,7 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 		}
 	}
 	if project != route {
-		issueUID := ""
-		if e.IssueUID != nil {
-			issueUID = *e.IssueUID
-		}
-		if strings.HasPrefix(e.Type, "issue.") {
-			issueUID = FederationEventIssueUID(e.IssueUID, string(e.Payload))
-		}
-		if issueUID == "" {
+		if EventIssueUID(e.IssueUID) == "" {
 			return 0, fmt.Errorf("%w: project event outside requested stream", ErrFederationIngestValidation)
 		}
 	}
@@ -483,15 +476,13 @@ func RestrictFoldProjectWhere(p *FoldProjection, projectUID string, keep func(st
 
 // ClearFederatedMovedIssueHistory removes every contributing stream for issues
 // being reset. Keeping a former source baseline would recreate a purged issue.
-func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, postgres bool) error {
-	issueUIDExpr := FederationReadIssueUIDExpr(postgres)
+func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
 	// Only quarantines covering subject events being removed block this reset;
 	// unrelated quarantined work in a contributing stream remains independent.
-	//nolint:gosec // G202: issueUIDExpr is a fixed dialect expression; values are bound.
 	rows, err := tx.QueryContext(ctx, `SELECT q.event_uids FROM federation_quarantine q
  WHERE q.project_id<>$1 AND q.direction='push' AND q.skipped_at IS NULL
  AND EXISTS(SELECT 1 FROM events e WHERE e.project_id=q.project_id
- AND `+issueUIDExpr+` IN (SELECT uid FROM issues WHERE project_id=$1))`, projectID)
+ AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1))`, projectID)
 	if err != nil {
 		return err
 	}
@@ -526,7 +517,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 		var quarantined bool
 		//nolint:gosec // Only generated placeholders are joined; all UIDs are bound.
 		query := `SELECT EXISTS(SELECT 1 FROM events e WHERE e.project_id<>$1
-  AND ` + issueUIDExpr + ` IN (SELECT uid FROM issues WHERE project_id=$1)
+  AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
   AND e.uid IN (` + strings.Join(placeholders, ",") + `))`
 		if err := tx.QueryRowContext(ctx, query, args...).Scan(&quarantined); err != nil {
 			return err
@@ -543,7 +534,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e
  JOIN federation_bindings b ON b.project_id=e.project_id
  WHERE e.project_id<>$1 AND e.origin_instance_uid=$2
- AND `+issueUIDExpr+` IN (SELECT uid FROM issues WHERE project_id=$1)
+ AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
  AND e.id>b.push_cursor_event_id
  AND e.type IN (`+FederationPushEventTypesSQL()+`))`, projectID, originInstanceUID).Scan(&pending); err != nil {
 		return err
@@ -551,21 +542,18 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	if pending {
 		return ErrFederationResetBlockedByPendingPush
 	}
-	if err := PreserveFederationProjectIdentityDependencies(ctx, tx, projectID, postgres); err != nil {
+	if err := PreserveFederationProjectIdentityDependencies(ctx, tx, projectID); err != nil {
 		return fmt.Errorf("preserve former project identity dependencies: %w", err)
 	}
-	//nolint:gosec // G202: issueUIDExpr is a fixed dialect expression; values are bound.
-	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE `+issueUIDExpr+` IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
+	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
 	return err
 }
 
 // ClearFederatedProjectEvents retains source envelopes still contributing to
 // issues now owned elsewhere. A source reset cannot rewind those destinations.
-func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64, postgres bool) error {
-	issueUIDExpr := FederationReadIssueUIDExpr(postgres)
-	//nolint:gosec // G202: issueUIDExpr is a fixed dialect expression; values are bound.
+func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.project_id=$1
- AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.uid=`+issueUIDExpr+` AND i.project_id<>$1)`, projectID); err != nil {
+ AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.uid=e.issue_uid AND i.project_id<>$1)`, projectID); err != nil {
 		return err
 	}
 	// Retained envelopes may still refer numerically to a peer being reset.

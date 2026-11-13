@@ -559,7 +559,7 @@ func RunArtifactResetInstallation(t *testing.T, store db.Storage) {
 	missing := makeArtifact(missingUID, "Manifest only")
 	entities := [][]byte{}
 	for _, item := range []struct{ uid, title string }{{targetUID, "Reset target"}, {missingUID, "Manifest only"}} {
-		source := newRemoteEvent(t, project, &item.uid, "issue.snapshot", "source-assistant", rootUID, 400, jsontext.Value(`{"uid":"`+item.uid+`","title":"`+item.title+`","author":"source-assistant","metadata":{},"comments":[],"labels":[],"links":[]}`))
+		source := newRemoteEvent(t, project, &item.uid, "issue.snapshot", "source-assistant", rootUID, 400, IssueDocument(t, item.uid, jsontext.Value(`{"uid":"`+item.uid+`","title":"`+item.title+`","author":"source-assistant","metadata":{},"comments":[],"labels":[],"links":[]}`)))
 		raw, err := db.EncodeRelaySourceEvent(source)
 		require.NoError(t, err)
 		entities = append(entities, raw)

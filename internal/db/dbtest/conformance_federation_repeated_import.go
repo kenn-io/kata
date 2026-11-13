@@ -193,8 +193,8 @@ func checkFederationRepeatedImport(t *testing.T, source db.Storage, backend Back
 	require.NoError(t, err)
 	extra.IssueUID = &newIssueUID
 	extra.Payload = mustNativeJSON(t, map[string]any{
-		"uid": newIssueUID, "title": "Only in the current copy", "body": "", "author": "carol",
-		"status": "open", "created_at": laterComment, "updated_at": laterComment,
+		"uid": newIssueUID, "short_id": strings.ToLower(newIssueUID[len(newIssueUID)-4:]), "title": "Only in the current copy", "body": "", "author": "carol",
+		"status": "open", "metadata": map[string]any{}, "created_at": laterComment, "updated_at": laterComment,
 	})
 	resignNativeEvent(t, &extra)
 	newer = append(newer, extra)
