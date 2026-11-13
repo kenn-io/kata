@@ -1250,18 +1250,10 @@ func federationIngestClaimAuditIssueUIDs(ev db.RemoteEvent) ([]federationIngestC
 		out = append(out, issue)
 	}
 	if claimWorkMutationRequiresClaim(ev.Type) && !attentionOnlyMetadataEvent(ev.Type, ev.Payload) {
-		issueUID, err := db.RemoteEventIssueUID(ev)
-		if err != nil {
-			return nil, err
-		}
-		add(federationIngestClaimAuditIssue{UID: issueUID, RequireClaim: true})
+		add(federationIngestClaimAuditIssue{UID: db.EventIssueUID(ev.IssueUID), RequireClaim: true})
 	}
 	if ev.Type == "issue.snapshot" {
-		issueUID, err := db.RemoteEventIssueUID(ev)
-		if err != nil {
-			return nil, err
-		}
-		add(federationIngestClaimAuditIssue{UID: issueUID, RequireClaim: true})
+		add(federationIngestClaimAuditIssue{UID: db.EventIssueUID(ev.IssueUID), RequireClaim: true})
 	}
 	if ev.Type == "issue.created" || ev.Type == "issue.snapshot" || claimWorkMutationRequiresPeerClaim(ev.Type) {
 		refs, err := payloadReferencedIssueUIDs(ev, payload)
@@ -1345,7 +1337,7 @@ func (d *Store) annotateClaimWorkMutationTx(
 
 func claimWorkMutationRequiresClaim(eventType string) bool {
 	switch eventType {
-	case "issue.moved", "issue.updated", "issue.assigned", "issue.unassigned", "issue.assignment_renewed",
+	case "issue.moved", "issue.updated", db.RepeatedImportEventType, "issue.assigned", "issue.unassigned", "issue.assignment_renewed",
 		"issue.assignment_expired",
 		"issue.priority_set", "issue.priority_cleared",
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",

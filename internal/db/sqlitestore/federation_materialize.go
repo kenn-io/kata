@@ -506,7 +506,8 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 		}
 		issueID, exists := m.issueIDs[comment.IssueUID]
 		if exists && row.issueID == issueID && row.author == nonEmptyAuthor(comment.Author) && row.body == comment.Body &&
-			row.teammate == comment.Teammate && row.createdAt == nonEmptyTime(comment.CreatedAt) {
+			row.teammate == comment.Teammate && row.createdAt == nonEmptyTime(comment.CreatedAt) &&
+			row.sameEditTime(comment.EditedAt) {
 			delete(m.projection.Comments, uid)
 			delete(comments, uid)
 		}

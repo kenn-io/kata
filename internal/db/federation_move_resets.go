@@ -129,6 +129,12 @@ func recordFederationMoveDisplacement(ctx context.Context, tx *sql.Tx, source Pr
 	return nil
 }
 
+// RecordFederationProjectUIReset records a committed reset of one project for
+// open stream clients and hands it to the caller's capture for publication.
+func RecordFederationProjectUIReset(ctx context.Context, tx *sql.Tx, project Project, cursor int64) error {
+	return recordFederationMoveUIReset(ctx, tx, project, cursor)
+}
+
 func recordFederationMoveUIReset(ctx context.Context, tx *sql.Tx, project Project, cursor int64) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)
  ON CONFLICT(key) DO UPDATE SET value=excluded.value

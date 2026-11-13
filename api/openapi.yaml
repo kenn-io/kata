@@ -2624,6 +2624,10 @@ components:
         push_cursor_event_id:
           format: int64
           type: integer
+        superseded_event_uids:
+          items:
+            type: string
+          type: array
       required:
         - accepted
         - duplicates
@@ -7549,7 +7553,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.45.0
+  version: 0.46.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:

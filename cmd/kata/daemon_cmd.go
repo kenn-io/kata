@@ -1952,7 +1952,7 @@ func startExternalRootEventWake(
 		return
 	}
 	wakeTypes := map[string]bool{
-		"issue.commented": true, "issue.comment_edited": true, "issue.updated": true,
+		"issue.commented": true, "issue.comment_edited": true, "issue.updated": true, db.RepeatedImportEventType: true,
 		"issue.metadata_updated": true, "issue.closed": true, "issue.reopened": true,
 	}
 	sub := bcast.Subscribe(daemon.SubFilter{})

@@ -1174,6 +1174,13 @@ func (d *Store) insertFederationBaselineEventsTx(
 // MaterializeFederatedProject rebuilds the local read model for a spoke project
 // from its stored remote events. Event rows are retained.
 func (d *Store) MaterializeFederatedProject(ctx context.Context, projectID int64) error {
+	return d.materializeFederatedProjectAfter(ctx, projectID, nil)
+}
+
+// materializeFederatedProjectAfter runs before in the transaction that then
+// rebuilds the project, so a change to the event log and the rows built from
+// it commit together.
+func (d *Store) materializeFederatedProjectAfter(ctx context.Context, projectID int64, before func(context.Context, *sql.Tx) error) error {
 	// Ownership can change while retained history is folded. Take the policy
 	// writer lock before request fences or project rows to avoid lock upgrades.
 	original := ctx
@@ -1183,6 +1190,18 @@ func (d *Store) MaterializeFederatedProject(ctx context.Context, projectID int64
 		}
 		return db.ApplyTransactionFence(original, tx)
 	})
+	if before != nil {
+		// before changes the event log in the rebuild's transaction, so the
+		// fold cannot be prepared ahead of the writer.
+		return d.RetryTransient(ctx, func() error {
+			return d.withFederationMaterialization(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				if err := before(ctx, tx); err != nil {
+					return err
+				}
+				return d.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil)
+			})
+		})
+	}
 	return d.retryFederationPreparation(ctx, func(locked bool) error {
 		if locked {
 			return d.materializeFederatedProject(ctx, projectID)
@@ -2240,7 +2259,7 @@ func reconcileFederatedCommentsFromRows(ctx context.Context, tx *sql.Tx, issueID
 		if row, ok := existing[uid]; ok {
 			if row.issueID == issueID && row.author == nonEmptyAuthor(comment.Author) &&
 				row.body == comment.Body && row.teammate == comment.Teammate &&
-				row.createdAt == nonEmptyTime(comment.CreatedAt) {
+				row.createdAt == nonEmptyTime(comment.CreatedAt) && row.sameEditTime(comment.EditedAt) {
 				continue
 			}
 			owned, err := federatedExternalCommentOwnedTx(ctx, tx, row.id)
@@ -2276,6 +2295,20 @@ type federatedCommentRow struct {
 	createdAt string
 	body      string
 	teammate  string
+	editedAt  string
+}
+
+// sameEditTime reports whether the stored edit time is the folded one. An
+// edit can change only this time, when a comment is saved again with the same
+// text, so the save paths must not treat equal text as an unchanged row.
+// Local writes and federation store the time in different text formats.
+func (r federatedCommentRow) sameEditTime(folded string) bool {
+	if r.editedAt == folded {
+		return true
+	}
+	stored, storedErr := time.Parse(time.RFC3339Nano, r.editedAt)
+	want, wantErr := time.Parse(time.RFC3339Nano, folded)
+	return storedErr == nil && wantErr == nil && stored.Equal(want)
 }
 
 func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID int64) (bool, error) {
@@ -2297,7 +2330,7 @@ func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID 
 
 func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, stamp *federationRowHasher, issueScope ...string) (map[string]federatedCommentRow, error) {
 	query := `
-		SELECT c.uid, c.id, c.issue_id, c.author, CAST(c.created_at AS TEXT), c.body, c.teammate
+		SELECT c.uid, c.id, c.issue_id, c.author, CAST(c.created_at AS TEXT), c.body, c.teammate, CAST(c.edited_at AS TEXT)
 		  FROM comments c
 		  JOIN issues i ON i.id = c.issue_id
 		 WHERE i.project_id = ?`
@@ -2314,13 +2347,13 @@ func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64,
 	for rows.Next() {
 		var uid string
 		var row federatedCommentRow
-		var teammate sql.NullString
-		if err := rows.Scan(&uid, &row.id, &row.issueID, &row.author, &row.createdAt, &row.body, &teammate); err != nil {
+		var teammate, editedAt sql.NullString
+		if err := rows.Scan(&uid, &row.id, &row.issueID, &row.author, &row.createdAt, &row.body, &teammate, &editedAt); err != nil {
 			return nil, fmt.Errorf("scan federated comment: %w", err)
 		}
-		row.teammate = teammate.String
+		row.teammate, row.editedAt = teammate.String, editedAt.String
 		if stamp != nil {
-			stamp.write(2, uid, row.id, row.issueID, row.author, row.createdAt, row.body, teammate)
+			stamp.write(2, uid, row.id, row.issueID, row.author, row.createdAt, row.body, teammate, editedAt)
 		}
 		if stamp == nil || !stamp.only {
 			out[uid] = row

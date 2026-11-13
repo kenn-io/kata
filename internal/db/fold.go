@@ -74,6 +74,8 @@ func (p *FoldProjection) apply(e FoldEvent) {
 		p.applyIssueCreated(e)
 	case "issue.updated":
 		p.applyIssueUpdated(e, payload)
+	case RepeatedImportEventType:
+		p.applyIssueRestated(e)
 	case "issue.assigned", "issue.unassigned":
 		p.applyOwner(e, payload)
 	case "issue.assignment_renewed":
@@ -279,6 +281,82 @@ func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsont
 	}
 	advanceIssueUpdatedAt(&issue, updatedAt)
 	p.Issues[uid] = issue
+}
+
+// applyIssueRestated applies the whole copy a hub recorded for a winning
+// repeated adoption snapshot. The hub decided the copy was newer than the
+// issue it held when the copy arrived, so replay applies it in event order
+// like any other change: the copy's fields, labels, and metadata replace the
+// issue's, and its comments merge by UID.
+func (p *FoldProjection) applyIssueRestated(e FoldEvent) {
+	uid := e.IssueUID
+	var in repeatedImportPayload
+	if uid == "" || json.Unmarshal(e.Payload, &in) != nil {
+		return
+	}
+	issue := p.ensureIssue(uid)
+	issue.Title, issue.Body = in.Title, in.Body
+	issue.Owner = cloneStringPtr(in.Owner)
+	clearFoldAssignmentExpiry(&issue)
+	setFoldAssignmentExpiry(&issue, in.AssignmentExpiresOn)
+	issue.Priority = cloneInt64Ptr(in.Priority)
+	if in.Status != "" {
+		setFoldStatus(&issue, in.Status, e, false)
+	}
+	issue.ClosedReason = cloneStringPtr(in.ClosedReason)
+	issue.ClosedAt = cloneStringPtr(in.ClosedAt)
+	issue.DeletedAt = cloneStringPtr(in.DeletedAt)
+	advanceIssueUpdatedAt(&issue, in.UpdatedAt)
+	p.Issues[uid] = issue
+
+	clock := clockOf(e)
+	for key := range p.Labels {
+		if key.IssueUID == uid {
+			p.Labels[key] = FoldElementState{Present: false, Clock: clock}
+		}
+	}
+	for _, label := range in.Labels {
+		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clock}
+	}
+	if metadata, err := json.Marshal(in.Metadata, json.Deterministic(true)); err == nil {
+		p.IssueMetadata[uid] = replaceOrdinaryMetadata(p.IssueMetadata[uid], metadata)
+	}
+	for _, comment := range in.Comments {
+		if comment.CommentUID == "" {
+			continue
+		}
+		existing, known := p.Comments[comment.CommentUID]
+		if !known || existing.CreatedAt == "" {
+			p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt,
+				comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clock)
+			continue
+		}
+		// A comment both sides hold keeps the text with the later edit.
+		if comment.EditedAt != "" && timestampBefore(existing.EditedAt, comment.EditedAt) {
+			p.editCommentBody(comment.CommentUID, uid, comment.Body, comment.EditedAt, clock)
+		}
+	}
+}
+
+// replaceOrdinaryMetadata returns replacement as the issue's whole metadata,
+// keeping only the recurrence keys of current, which the hub's scheduler owns.
+func replaceOrdinaryMetadata(current, replacement jsontext.Value) jsontext.Value {
+	out := map[string]jsontext.Value{}
+	for key, value := range parseRawObject(replacement) {
+		if !recurringMetadataKey(key) {
+			out[key] = canonicalJSON(value)
+		}
+	}
+	for key, value := range parseRawObject(current) {
+		if recurringMetadataKey(key) {
+			out[key] = value
+		}
+	}
+	raw, err := json.Marshal(out, json.Deterministic(true))
+	if err != nil {
+		return current
+	}
+	return raw
 }
 
 func (p *FoldProjection) applyOwner(e FoldEvent, payload map[string]jsontext.Value) {

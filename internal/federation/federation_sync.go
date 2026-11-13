@@ -242,6 +242,7 @@ func pushDirectSpoke(
 	binding *db.FederationBinding,
 	hubProjectID int64,
 	client *Client,
+	onPulledEvents func(projectID int64, events []db.Event),
 	validateLease func(context.Context) error,
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
@@ -318,8 +319,23 @@ func pushDirectSpoke(
 				if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 					return err
 				}
-				if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, ack.PushCursorEventID); err != nil {
+				// The hub already held some of these issues and stored no
+				// snapshot for them. Those snapshots go, and the project is
+				// rebuilt, in the same transaction that moves the cursor.
+				ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
+				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, ack.PushCursorEventID, ack.SupersededEventUIDs); err != nil {
+					// A push that waits for the hub's history is finished by the
+					// next pull and the push after it. The reason is recorded
+					// like any other, so a wait that does not end is visible in
+					// the federation status.
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				// The rebuild changed rows without a pulled event. Open clients
+				// reload on the committed reset.
+				if onPulledEvents != nil {
+					for _, reset := range resets.Resets {
+						onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
+					}
 				}
 				binding.PushCursorEventID = ack.PushCursorEventID
 				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
@@ -335,7 +351,7 @@ func pushDirectSpoke(
 // PushDirectSpoke drains pending direct-spoke events without requiring pull authority.
 // The caller holds shared federation coordination for the complete operation.
 func PushDirectSpoke(ctx context.Context, store db.Storage, binding db.FederationBinding, hubProjectID int64, client *Client) error {
-	return pushDirectSpoke(ctx, store, &binding, hubProjectID, client, nil, config.DefaultFederationCredentialStore(), clientpkg.Opts{})
+	return pushDirectSpoke(ctx, store, &binding, hubProjectID, client, nil, nil, config.DefaultFederationCredentialStore(), clientpkg.Opts{})
 }
 
 // CredentialHTTPClient builds a bearer-pinned, signing-aware HTTP client for
@@ -374,7 +390,10 @@ func syncDirectSpoke(
 ) error {
 	runStartBinding := binding
 	if pushThisTurn {
-		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts); err != nil {
+		// A push that waits for the hub's history is finished by the pull
+		// below and the next cycle's push.
+		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts); err != nil &&
+			!errors.Is(err, db.ErrFederationPushAwaitsPull) {
 			return err
 		}
 	}

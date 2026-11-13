@@ -21,6 +21,35 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Recover automatically when the web UI's first daemon roster, workspace, or teams read fails briefly. Retry and Refresh teams remain available after persistent failures or refusals.
 
+- Repeat or resume an adoption push into a hub project that already holds
+  some of the issues, or bring it up to date from a newer copy of the project.
+  A snapshot with a newer `updated_at` updates the issue and merges its
+  comments by UID with their original author and time. An older or identical
+  one is acknowledged and writes nothing. Links are added and never removed.
+  The hub records a winning copy as one `issue.restated` event, not as a
+  second snapshot, and the Kata home that pushed it then takes the hub's state. A
+  push for an issue that another project on the hub holds, including an
+  archived one, now returns `400 validation` naming the issue and is
+  quarantined on the spoke; before, it returned 404 and the spoke retried
+  without showing an error. The hub and the pushing spoke must both run this
+  version. After a newer copy wins, every other spoke of the project must run
+  it too before it can pull again. See
+  [repeating an adoption](operations/federation.md#repeating-an-adoption).
+
+- Purge an archived project from an embedding host with
+  `Service.PurgeArchivedProject`, including a project that is a federation hub.
+  The purge retires the hub binding, deletes the project's enrollments, and
+  writes the usual purge log, so the old project's task UIDs are free for a
+  replacement project. See
+  [embedding](development/embedding.md#host-managed-projects).
+
+- Keep links between projects when you move them one at a time.
+  `kata import --merge` now creates a snapshot's links to issues of other
+  projects that are already in the target. A link appears once both projects
+  are merged, in either order, and adopting the projects into a hub then
+  carries it there. Before, a merge skipped every such link. See
+  [links between merged projects](operations/backup-restore.md#links-between-merged-projects).
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 - Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot confirm the shared choice was saved, setup succeeds and Kata logs the failure; other apps may miss the choice if it wasn't saved. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 

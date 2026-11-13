@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-11-07
+last_edited: 2026-11-11
 ---
 
 # Backup and restore
@@ -372,13 +372,16 @@ to rows outside the export are removed, while issue UIDs retain the historical
 identity. Use a full backup when you need history from every project.
 
 Links may span projects, and a scoped export only contains the named project's
-issues. A fresh restore or project merge skips links whose peer is outside the
-snapshot, along with import-mapping records that reference those links, and
-prints an aggregate `note: skipped N link record(s)…` to stderr. A merge does
-not connect an imported issue to an existing project's issue, even when that
-peer is already in the target. This keeps the scoped import from changing
-another project's dependency graph. A full-database snapshot preserves links
-when it contains both endpoints.
+issues. A scoped export still contains every link that touches one of those
+issues, including links to issues in other projects.
+
+A fresh restore skips links whose peer is outside the snapshot, along with
+import-mapping records that reference those links, and prints an aggregate
+`note: skipped N link record(s)…` to stderr. A full-database snapshot preserves
+links when it contains both endpoints.
+
+A project merge creates such a link when the peer issue is already in the
+target; see [links between merged projects](#links-between-merged-projects).
 
 ## Merge a single-project snapshot
 
@@ -405,8 +408,45 @@ available suffix, such as `example-project-2`.
 The import is refused without mutation if an imported project or object UID
 already exists. As a result, re-importing the same snapshot is not an
 incremental refresh. Run one merge per scoped snapshot when restoring several
-projects; use a full-database export when cross-project links must also be
-restored.
+projects.
+
+### Links between merged projects
+
+Each scoped snapshot carries the links between its project and other projects.
+A merge creates such a link when its peer issue is already in the target,
+matched by issue UID:
+
+```sh
+kata import --merge --input backups/second-project.jsonl \
+  --target ~/.kata/kata.db
+```
+
+- The link keeps its original type, author, and created time.
+- A link whose peer is not in the target yet is skipped, and the merge prints
+  `note: skipped N link record(s)…`. The peer project's own snapshot carries
+  the same link, so merging that project creates it. The order of the merges
+  does not matter.
+- The merge adds the link to an issue of a project that is already in the
+  target. It changes nothing else in that project.
+
+A merge leaves out three kinds of link, prints a note with the count, and
+still merges the rest of the project:
+
+- A link that would join a project that Kata relays between hubs. A relay
+  cannot deliver a link between projects, so the ordinary link commands refuse
+  it too.
+- A parent link for an issue that already has a parent in the target. This
+  can happen when the snapshots were taken before and after the issue moved to
+  another parent. The target keeps the parent it holds. Change it afterwards
+  with `kata edit --parent`.
+- A parent link that would close a cycle with the parent links already in the
+  target. This can happen when the snapshots were taken at different times.
+  Set the parent on the target afterwards with `kata edit --parent`.
+
+To move linked projects to another hub one at a time, merge each project and
+then adopt it with `kata federation join --adopt-existing`. Adoption sends each
+issue's links in its snapshot, and the hub creates a link once both projects
+have arrived.
 
 Merge refuses snapshots containing hub-local teams, memberships or visibility
 policies. It also refuses root pins and verified provenance: a project merge
