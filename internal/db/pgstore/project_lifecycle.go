@@ -269,10 +269,11 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 		}
 		var role string
 		err = tx.QueryRowContext(ctx, `SELECT role FROM federation_bindings WHERE project_id = $1`, project.ID).Scan(&role)
-		if err == nil {
+		retireHub := err == nil && params.RetireHubBinding && role == string(db.FederationRoleHub)
+		if err == nil && !retireHub {
 			return &db.ProjectFederatedError{Role: db.FederationRole(role)}
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return mapSQLError(err, nil)
 		}
 		if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, project); err != nil {
@@ -280,6 +281,13 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 		}
 		if err := rejectActiveExternalRootProjectPurge(ctx, tx, project.ID); err != nil {
 			return err
+		}
+		if retireHub {
+			// The project is archived, so no spoke can sync it. Its enrollments
+			// go with the project rows below.
+			if _, err := tx.ExecContext(ctx, `DELETE FROM federation_bindings WHERE project_id = $1`, project.ID); err != nil {
+				return mapSQLError(err, nil)
+			}
 		}
 
 		counts, err := countProjectPurgeTx(ctx, tx, project.ID)

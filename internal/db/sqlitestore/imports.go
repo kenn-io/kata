@@ -411,7 +411,7 @@ func (d *Store) insertImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("last issue id: %w", err)
 	}
-	payload, err := buildIssueCreatedPayload(issueCreatedPayload{
+	payload, err := buildIssueCreatedPayload(db.IssueDocumentPayload{
 		UID:          issueUID,
 		ShortID:      shortID,
 		Title:        item.Title,

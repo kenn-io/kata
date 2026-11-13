@@ -102,3 +102,63 @@ func FuzzNotificationStreamReferences(f *testing.F) {
 	f.Add(uint8(0), false, true)
 	f.Fuzz(checkNotificationStreamReferences)
 }
+
+// A whole-issue copy carries the issue's metadata, including notification
+// slots. A reader who cannot see a slot's target must not receive it.
+func TestNotificationStreamRechecksTargetsInARepeatedImportEvent(t *testing.T) {
+	fixture := newLateReplyTargetFixture(t)
+	result, err := fixture.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: fixture.source.ID, Actor: "worker",
+		Patch: map[string]jsontext.Value{"notify.worker": jsontext.Value(fmt.Sprintf(`{"re":%q,"message":"Target context"}`, fixture.targetUID))},
+	})
+	require.NoError(t, err)
+	event := result.Event
+	event.Type = db.RepeatedImportEventType
+	event.Payload = fmt.Sprintf(`{"title":"t","status":"open","updated_at":"2026-06-01T09:00:00.000Z","metadata":{"notify.worker":{"re":%q,"message":"Target context"}}}`, fixture.targetUID)
+	ctx := db.WithAuthorizedProjects(t.Context(), []string{fixture.project.UID})
+
+	ids, err := fixture.store.CommentIssueIDsByUIDs(t.Context(), []string{fixture.targetUID})
+	require.NoError(t, err)
+	target, err := fixture.store.IssueByID(t.Context(), ids[fixture.targetUID])
+	require.NoError(t, err)
+	hidden, err := fixture.store.CreateProject(t.Context(), "restricted-project")
+	require.NoError(t, err)
+	_, err = fixture.store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: target.ID,
+		FromProjectID: target.ProjectID, ToProjectID: hidden.ID, IfMatchRev: target.Revision, Actor: "admin"})
+	require.NoError(t, err)
+
+	projected, err := projectNotificationEventPayload(ctx, fixture.store, event)
+	require.NoError(t, err)
+	require.NotContains(t, string(projected), fixture.targetUID, "a page read leaves out the slot")
+	require.NotContains(t, string(projected), "Target context")
+
+	visible, err := notificationEventStillVisible(ctx, fixture.store, event)
+	require.NoError(t, err)
+	require.False(t, visible, "the stream recheck sees the slot's target in the whole copy")
+}
+
+// A whole copy can close, reopen, or delete an issue. When that issue is
+// hidden from a scoped reader and linked to one the reader can see, the
+// reader's view of readiness changes, so the reader must reload.
+func TestHiddenRepeatedImportEventResetsAScopedReader(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	visible := createScopedAuthIssue(t, store, project.ID, "Visible", nil)
+	blocker := createScopedAuthIssue(t, store, project.ID, "Hidden blocker", nil)
+	unrelated := createScopedAuthIssue(t, store, project.ID, "Hidden and unrelated", nil)
+	_, err = store.CreateLink(t.Context(), db.CreateLinkParams{FromIssueID: blocker.ID, ToIssueID: visible.ID, Type: "blocks", Author: "coordinator"})
+	require.NoError(t, err)
+	allowed := map[int64]struct{}{visible.ID: {}}
+	allowedUIDs := map[string]struct{}{visible.UID: {}}
+	payload := `{"title":"t","status":"closed","updated_at":"2026-06-01T09:00:00.000Z"}`
+
+	reset, err := hiddenEventRequiresScopedReset(t.Context(), store, db.Event{Type: db.RepeatedImportEventType, IssueID: &blocker.ID, Payload: payload}, allowed, allowedUIDs, project.UID)
+	require.NoError(t, err)
+	require.True(t, reset)
+	reset, err = hiddenEventRequiresScopedReset(t.Context(), store, db.Event{Type: db.RepeatedImportEventType, IssueID: &unrelated.ID, Payload: payload}, allowed, allowedUIDs, project.UID)
+	require.NoError(t, err)
+	require.False(t, reset, "a hidden issue with no link into the scope changes nothing the reader sees")
+}

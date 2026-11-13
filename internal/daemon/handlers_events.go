@@ -319,6 +319,10 @@ func hiddenEventRequiresScopedReset(
 			return true, nil
 		}
 		return hiddenIssueTouchesScope(ctx, store, event.IssueID, allowed)
+	case db.RepeatedImportEventType:
+		// A whole copy can close, reopen, or delete a hidden issue, which
+		// changes the readiness of a related issue in scope.
+		return hiddenIssueTouchesScope(ctx, store, event.IssueID, allowed)
 	case "issue.snapshot":
 		// Federation snapshots establish an issue baseline. Later relationship
 		// changes arrive as link events, so only a currently related hidden
@@ -484,12 +488,13 @@ func issueScopedEventInScope(event db.Event, allowed map[int64]struct{}, project
 
 func scopedEventPayload(event db.Event) (string, bool) {
 	allowedKeys := map[string]map[string]struct{}{
-		"issue.created":        keySet("title", "body", "owner", "priority", "labels", "metadata", "created_at"),
-		"issue.updated":        keySet("title", "body", "owner", "changes", "updated_at"),
-		"issue.commented":      keySet("comment_uid", "author", "teammate", "body", "created_at"),
-		"issue.comment_edited": keySet("comment_uid", "body", "edited_at"),
-		"issue.assigned":       keySet("owner", "assignment_expires_on", "updated_at"),
-		"issue.unassigned":     keySet("owner"),
+		"issue.created":            keySet("title", "body", "owner", "priority", "labels", "metadata", "created_at"),
+		"issue.updated":            keySet("title", "body", "owner", "changes", "updated_at"),
+		db.RepeatedImportEventType: keySet("title", "body", "owner", "updated_at"),
+		"issue.commented":          keySet("comment_uid", "author", "teammate", "body", "created_at"),
+		"issue.comment_edited":     keySet("comment_uid", "body", "edited_at"),
+		"issue.assigned":           keySet("owner", "assignment_expires_on", "updated_at"),
+		"issue.unassigned":         keySet("owner"),
 		"issue.assignment_renewed": keySet(
 			"owner", "old_assignment_expires_on", "assignment_expires_on", "updated_at",
 		),

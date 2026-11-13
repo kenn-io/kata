@@ -16,6 +16,7 @@ import (
 
 func dropMCPEventSubscriptionsSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
+	restoreSchema50EventIndex(ctx, t, admin, schema)
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP TABLE IF EXISTS %s.mcp_event_subscriptions`, schema)) // #nosec G201 -- schema is a fixed test identifier.
 	require.NoError(t, err)
 }
@@ -62,7 +63,6 @@ func TestMCPEventSubscriptionsMigrationMatchesFreshSchema(t *testing.T) {
 	t.Cleanup(func() { _ = upgraded.Close() })
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 50, version)
 	assert.Equal(t, db.CurrentSchemaVersion(), version)
 
 	fresh, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "mcp_events_fresh", SchemaMode: pgstore.SchemaModeBootstrap})

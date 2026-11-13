@@ -88,9 +88,9 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 
 	hiddenSnapshot := newRemoteEvent(t, visibleProject, &createdWithHiddenLink.UID,
 		"issue.snapshot", "member", store.InstanceUID(), 700,
-		jsontext.Value(`{"uid":"`+createdWithHiddenLink.UID+`","short_id":"`+
+		IssueDocument(t, createdWithHiddenLink.UID, jsontext.Value(`{"uid":"`+createdWithHiddenLink.UID+`","short_id":"`+
 			createdWithHiddenLink.ShortID+`","title":"Linked task","links":[{"type":"related","to_issue_uid":"`+
-			hiddenPeer.UID+`","to_short_id":"`+hiddenPeer.ShortID+`"}]}`))
+			hiddenPeer.UID+`","to_short_id":"`+hiddenPeer.ShortID+`"}]}`)))
 	_, err = store.InsertRemoteEvent(ctx, visibleProject.ID, hiddenSnapshot)
 	require.NoError(t, err)
 	hiddenSnapshotRows, err := store.EventsByUIDs(ctx, visibleProject.ID, []string{hiddenSnapshot.EventUID})
@@ -98,9 +98,9 @@ func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 	require.Len(t, hiddenSnapshotRows, 1)
 	visibleSnapshot := newRemoteEvent(t, visibleProject, &createdWithVisibleLink.UID,
 		"issue.snapshot", "member", store.InstanceUID(), 701,
-		jsontext.Value(`{"uid":"`+createdWithVisibleLink.UID+`","short_id":"`+
+		IssueDocument(t, createdWithVisibleLink.UID, jsontext.Value(`{"uid":"`+createdWithVisibleLink.UID+`","short_id":"`+
 			createdWithVisibleLink.ShortID+`","title":"Visible linked task","links":[{"type":"related","to_issue_uid":"`+
-			visiblePeer.UID+`","to_short_id":"`+visiblePeer.ShortID+`"}]}`))
+			visiblePeer.UID+`","to_short_id":"`+visiblePeer.ShortID+`"}]}`)))
 	_, err = store.InsertRemoteEvent(ctx, visibleProject.ID, visibleSnapshot)
 	require.NoError(t, err)
 
@@ -332,8 +332,8 @@ func RunEventReleaseExposure(t *testing.T, store db.Storage) {
 	})
 	require.NoError(t, err)
 	snapshot := newRemoteEvent(t, visibleProject, &relayed.UID, "issue.snapshot", "member",
-		store.InstanceUID(), 801, jsontext.Value(`{"uid":"`+relayed.UID+`","short_id":"`+
-			relayed.ShortID+`","title":"Relayed subject"}`))
+		store.InstanceUID(), 801, IssueDocument(t, relayed.UID, jsontext.Value(`{"uid":"`+relayed.UID+`","short_id":"`+
+			relayed.ShortID+`","title":"Relayed subject"}`)))
 	_, err = store.InsertRemoteEvent(ctx, visibleProject.ID, snapshot)
 	require.NoError(t, err)
 	departed, _, err := store.CreateIssue(ctx, db.CreateIssueParams{

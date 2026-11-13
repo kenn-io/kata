@@ -176,7 +176,7 @@ func EventRequiresProjectScopeReset(
 			return checkSnapshotReferences(snapshotPayload)
 		}
 		return false, nil
-	case "issue.created", "issue.snapshot":
+	case "issue.created", "issue.snapshot", RepeatedImportEventType:
 		var payload map[string]jsontext.Value
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
 			return true, nil

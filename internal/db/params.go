@@ -501,6 +501,11 @@ type PurgeProjectParams struct {
 	ProjectID int64
 	Actor     string
 	Reason    *string
+	// RetireHubBinding lets the purge remove an archived project that is a
+	// federation hub. The purge deletes the hub binding and every enrollment
+	// scoped to the project in the same transaction. A spoke replica is still
+	// refused: it must leave its hub first.
+	RetireHubBinding bool
 }
 
 // DetachAliasParams identifies a single alias to drop. ProjectID scopes the
@@ -890,6 +895,10 @@ type FederationIngestResult struct {
 	Duplicates            int
 	PushCursorEventID     int64
 	InsertedEventUIDs     []string
+	// SupersededEventUIDs lists pushed adoption snapshots the hub did not
+	// store because its project already holds the issue. The pushing spoke
+	// deletes them and takes the hub's state.
+	SupersededEventUIDs []string
 }
 
 // CreateFederationEnrollmentParams carries the plaintext token at creation

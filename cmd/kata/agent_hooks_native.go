@@ -22,6 +22,7 @@ type nativeAgentHookOptions struct {
 	API                                                     string
 	ManagedAttention                                        bool
 	SourceSet, Contract, Attention                          bool
+	OwnershipMarkers                                        map[agentHookKind]agentHookOwnership
 	ConfigPathExplicit                                      bool
 	ShareInbox, ShareInboxSet                               bool
 }
@@ -36,7 +37,7 @@ type nativeAgentHookPlan struct {
 	Changes                                                     []nativeAgentHookChange
 	Contract, AttentionStart, AttentionEnd                      bool
 	CurrentContract, CurrentAttentionStart, CurrentAttentionEnd bool
-	CurrentOwnedContract                                        bool
+	CurrentOwnedContract, CurrentOwnedAttention                 bool
 	CurrentAPI                                                  string
 	Warnings                                                    []string
 }
@@ -120,6 +121,12 @@ func verifyNativeAgentHookChange(change nativeAgentHookChange) error {
 		return fmt.Errorf("native hook file %q changed after planning; rerun the command", change.Path)
 	}
 	return nil
+}
+
+func nativeAgentHookPlanChanged(plan nativeAgentHookPlan) bool {
+	return slices.ContainsFunc(plan.Changes, func(change nativeAgentHookChange) bool {
+		return (change.Remove && change.OriginalExists) || (!change.Remove && (!change.OriginalExists || !bytes.Equal(change.Original, change.Content)))
+	})
 }
 
 func publishNativeAgentHookPlan(plan nativeAgentHookPlan) (bool, error) {

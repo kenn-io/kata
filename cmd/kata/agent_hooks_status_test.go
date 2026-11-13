@@ -101,7 +101,7 @@ func agentHookStatusKeys(m map[string]any) []string {
 }
 
 func TestAgentHookCommandForPlatformSelectsNativeVariant(t *testing.T) {
-	windowsCommand := `"C:\Program Files\Kata\kata.exe" agent-hook contract codex --source kata-agent-contract-hook`
+	windowsCommand := `& 'C:\Program Files\Kata\kata.exe' agent-hook contract codex --source kata-agent-contract-hook`
 	for _, tc := range []struct {
 		name   string
 		agent  agenthook.Agent
@@ -111,11 +111,12 @@ func TestAgentHookCommandForPlatformSelectsNativeVariant(t *testing.T) {
 		wantPS bool
 	}{
 		{
-			name:  "Codex on Windows",
-			agent: agenthook.AgentCodex,
-			entry: agentHookEntry{Command: `"/usr/local/bin/kata" agent-hook contract codex --source kata-agent-contract-hook`, Fields: map[string]any{"commandWindows": windowsCommand}},
-			goos:  "windows",
-			want:  windowsCommand,
+			name:   "Codex on Windows",
+			agent:  agenthook.AgentCodex,
+			entry:  agentHookEntry{Command: `"/usr/local/bin/kata" agent-hook contract codex --source kata-agent-contract-hook`, Fields: map[string]any{"commandWindows": windowsCommand}},
+			goos:   "windows",
+			want:   windowsCommand,
+			wantPS: true,
 		},
 		{
 			name:   "Copilot on Windows",
@@ -139,6 +140,17 @@ func TestAgentHookCommandForPlatformSelectsNativeVariant(t *testing.T) {
 			require.Equal(t, tc.wantPS, powershell)
 		})
 	}
+}
+
+func TestAgentHookStatusReadsKitCodexPowerShellExecutable(t *testing.T) {
+	command := `& 'C:\Program Files\stable path''s kata.exe' agent-hook contract codex`
+	entry := agentHookEntry{Fields: map[string]any{"commandWindows": command}}
+	gotCommand, powershell := agentHookCommandForPlatform(agenthook.AgentCodex, entry, "windows")
+	require.Equal(t, command, gotCommand)
+	require.True(t, powershell)
+	executable, err := agentHookCommandExecutable(gotCommand, "windows", powershell)
+	require.NoError(t, err)
+	require.Equal(t, `C:\Program Files\stable path's kata.exe`, executable)
 }
 
 func TestAgentHooksStatusCommittedOverlap(t *testing.T) {

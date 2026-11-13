@@ -181,12 +181,58 @@ func (s *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 	return s.updateFederationCursor(ctx, projectID, nextCursor, false)
 }
 
+// AcknowledgeFederationPush advances the push cursor. When the hub named
+// adoption snapshots it did not store, the same transaction deletes them and
+// rebuilds the project, so an interruption leaves either the whole batch to
+// push again or the finished progress, and the home never shows rows built
+// from a snapshot it no longer holds.
+func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
+	if len(supersededEventUIDs) == 0 {
+		return s.AdvanceFederationPushCursor(ctx, projectID, nextCursor)
+	}
+	return s.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
+		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, s.instanceUID, supersededEventUIDs)
+		if err != nil {
+			return err
+		}
+		if err := updateFederationCursor(ctx, tx, projectID, nextCursor, true); err != nil {
+			return err
+		}
+		if deleted == 0 {
+			return nil
+		}
+		// The rebuild that follows changes visible rows without a new event of
+		// its own. A reset event moves every reader's cursor past the state
+		// built from the deleted snapshots.
+		var projectUID, projectName string
+		if err := tx.QueryRowContext(ctx, `SELECT uid, name FROM projects WHERE id=$1`, projectID).Scan(&projectUID, &projectName); err != nil {
+			return fmt.Errorf("read project for federation push acknowledgement: %w", err)
+		}
+		reset, err := s.insertEventTx(ctx, tx, eventInsert{
+			ProjectID: projectID, ProjectUID: projectUID, ProjectName: projectName,
+			Type: db.ProjectScopeResetEventType, Actor: "system", Payload: "{}", SkipRelay: true,
+		})
+		if err != nil {
+			return err
+		}
+		// Open stream clients learn of the reset from the caller after commit,
+		// and from the stored cursor on their next heartbeat.
+		return db.RecordFederationProjectUIReset(ctx, tx, db.Project{ID: projectID, UID: projectUID, Name: projectName}, reset.ID)
+	})
+}
+
 // AdvanceFederationPushCursor advances the acknowledged local event id monotonically.
 func (s *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return s.updateFederationCursor(ctx, projectID, nextCursor, true)
 }
 
 func (s *Store) updateFederationCursor(ctx context.Context, projectID, nextCursor int64, push bool) error {
+	return mapSQLError(updateFederationCursor(ctx, s, projectID, nextCursor, push), nil)
+}
+
+func updateFederationCursor(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, projectID, nextCursor int64, push bool) error {
 	column := "pull_cursor_event_id"
 	if push {
 		column = "push_cursor_event_id"
@@ -197,9 +243,9 @@ func (s *Store) updateFederationCursor(ctx context.Context, projectID, nextCurso
 last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 WHERE project_id=$2`
-	result, err := s.ExecContext(ctx, query, nextCursor, projectID)
+	result, err := exec.ExecContext(ctx, query, nextCursor, projectID)
 	if err != nil {
-		return mapSQLError(err, nil)
+		return err
 	}
 	count, err := result.RowsAffected()
 	if err != nil {

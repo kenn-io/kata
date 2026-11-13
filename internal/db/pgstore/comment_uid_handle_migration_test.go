@@ -23,9 +23,10 @@ func dropLaterMigrationIndexes(ctx context.Context, t *testing.T, admin *sql.DB,
 
 func dropIssueCreatedAndEventIndexes(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
+	// Later versions first: schema 51 replaces the index schema 43 adds.
+	dropLaterReadyAndEventIndexes(ctx, t, admin, schema)
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_issues_project_created; DROP INDEX IF EXISTS %s.idx_issues_created; DROP INDEX IF EXISTS %s.idx_events_resolved_issue_uid; DROP INDEX IF EXISTS %s.idx_events_reset_from; DROP INDEX IF EXISTS %s.idx_issues_uid_prefix; DROP INDEX IF EXISTS %s.idx_issues_project_uid_prefix`, schema, schema, schema, schema, schema, schema)) // #nosec G201 -- Fixed test schema.
 	require.NoError(t, err)
-	dropLaterReadyAndEventIndexes(ctx, t, admin, schema)
 }
 
 func TestCommentUIDHandleIndexMigrationUpgradesVersion38(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 )
 
 const claimViolationSelect = `SELECT e.id,e.uid,
-COALESCE(e.issue_uid,e.payload::jsonb->>'issue_uid',''),COALESCE(i.short_id,''),
+COALESCE(e.issue_uid,''),COALESCE(i.short_id,''),
 COALESCE(e.payload::jsonb->>'offending_event_uid',e.payload::jsonb->>'event_uid',''),
 COALESCE(e.payload::jsonb->>'offending_event_type',e.payload::jsonb->>'event_type',''),
 COALESCE(e.payload::jsonb->>'offending_origin_instance_uid',e.payload::jsonb->>'origin_instance_uid',''),

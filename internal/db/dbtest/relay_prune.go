@@ -48,7 +48,7 @@ func RunRelayRevocationPrunesBindingState(t *testing.T, store db.Storage, compac
 	require.NoError(t, err)
 	pushedUID, err := uid.New()
 	require.NoError(t, err)
-	pushed := newRemoteEvent(t, project, &pushedUID, "issue.created", "source-assistant", revokedPeer, 300, jsontext.Value(`{"uid":"`+pushedUID+`","title":"Pushed by the revoked peer","author":"source-assistant","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+	pushed := newRemoteEvent(t, project, &pushedUID, "issue.created", "source-assistant", revokedPeer, 300, IssueDocument(t, pushedUID, jsontext.Value(`{"uid":"`+pushedUID+`","title":"Pushed by the revoked peer","author":"source-assistant","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)))
 	body, err := db.EncodeRelaySourceEvent(pushed)
 	require.NoError(t, err)
 	envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{Version: db.RelayProtocolVersion, BindingUID: revokedBinding, ProjectUID: project.UID, AuthorityUID: store.InstanceUID(), SenderInstanceUID: revokedPeer, ReceiverInstanceUID: store.InstanceUID(), Epoch: 1, Sequence: 1, Stream: db.RelayStreamEvent, Path: []string{revokedPeer}, SourceUID: pushed.EventUID, SourceHash: pushed.ContentHash, Body: body})

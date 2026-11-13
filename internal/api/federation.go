@@ -525,6 +525,10 @@ type FederationIngestEventsBody struct {
 	Accepted          int   `json:"accepted"`
 	Duplicates        int   `json:"duplicates"`
 	PushCursorEventID int64 `json:"push_cursor_event_id"`
+	// SupersededEventUIDs lists pushed adoption snapshots the hub did not
+	// store because its project already holds the issue. The spoke deletes
+	// them and takes the hub's state on its next pull.
+	SupersededEventUIDs []string `json:"superseded_event_uids,omitempty"`
 }
 
 // FederationIngestEventsResponse wraps FederationIngestEventsBody.

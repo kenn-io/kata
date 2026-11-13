@@ -8,22 +8,26 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// inPlaceUpgrades add canonical tables, then canonical indexes. A table is
-// added only when it starts empty, so no existing row needs converting.
+// inPlaceUpgrades drop retired indexes, then add canonical tables and canonical
+// indexes. A table is added only when it starts empty, so no existing row
+// needs converting. An index that a later step drops is no longer canonical,
+// so an upgrade that runs both steps never creates it.
 var inPlaceUpgrades = []struct {
-	From, To int
-	Tables   []string
-	Indexes  []string
+	From, To    int
+	Tables      []string
+	Indexes     []string
+	DropIndexes []string
 }{
-	{41, 42, nil, []string{"idx_issues_project_created", "idx_issues_created"}},
-	{42, 43, nil, []string{"idx_events_resolved_issue_uid"}},
-	{43, 44, nil, []string{"idx_events_reset_from"}},
-	{44, 45, nil, []string{"idx_issues_uid_prefix", "idx_issues_project_uid_prefix"}},
-	{45, 46, nil, []string{"idx_issues_project_ready_priority", "idx_issues_ready_priority"}},
-	{46, 47, nil, []string{"idx_issues_ready_updated"}},
-	{47, 48, nil, []string{"idx_events_moved_from_id"}},
-	{48, 49, nil, []string{"idx_events_cron_run_uid"}},
-	{49, 50, []string{"mcp_event_subscriptions"}, []string{"idx_mcp_event_subscriptions_due", "idx_mcp_event_subscriptions_principal_callback", "idx_mcp_event_subscriptions_ended"}},
+	{41, 42, nil, []string{"idx_issues_project_created", "idx_issues_created"}, nil},
+	{42, 43, nil, []string{"idx_events_resolved_issue_uid"}, nil},
+	{43, 44, nil, []string{"idx_events_reset_from"}, nil},
+	{44, 45, nil, []string{"idx_issues_uid_prefix", "idx_issues_project_uid_prefix"}, nil},
+	{45, 46, nil, []string{"idx_issues_project_ready_priority", "idx_issues_ready_priority"}, nil},
+	{46, 47, nil, []string{"idx_issues_ready_updated"}, nil},
+	{47, 48, nil, []string{"idx_events_moved_from_id"}, nil},
+	{48, 49, nil, []string{"idx_events_cron_run_uid"}, nil},
+	{49, 50, []string{"mcp_event_subscriptions"}, []string{"idx_mcp_event_subscriptions_due", "idx_mcp_event_subscriptions_principal_callback", "idx_mcp_event_subscriptions_ended"}, nil},
+	{50, 51, nil, []string{"idx_events_issue_uid_id"}, []string{"idx_events_resolved_issue_uid"}},
 }
 
 // UpgradesInPlace reports whether in-place steps reach the current schema.
@@ -73,9 +77,29 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 		if err != nil {
 			return err
 		}
+		// retired holds every index any remaining step drops, regardless of
+		// order. This assumes no step re-adds a name an earlier step dropped;
+		// such a step would be skipped here and the index never created.
+		retired := map[string]bool{}
+		for _, step := range inPlaceUpgrades {
+			if step.From >= version {
+				for _, name := range step.DropIndexes {
+					retired[name] = true
+				}
+			}
+		}
+		skipped := map[string]bool{}
 		for _, step := range inPlaceUpgrades {
 			if step.From < version {
 				continue
+			}
+			for _, name := range step.DropIndexes {
+				if skipped[name] {
+					continue
+				}
+				if _, err := tx.ExecContext(ctx, `DROP INDEX `+name); err != nil {
+					return fmt.Errorf("drop index %s: %w", name, err)
+				}
 			}
 			for _, name := range step.Tables {
 				ddl, ok := tables[name]
@@ -87,6 +111,10 @@ func UpgradeInPlace(ctx context.Context, path string) error {
 				}
 			}
 			for _, name := range step.Indexes {
+				if retired[name] {
+					skipped[name] = true
+					continue
+				}
 				ddl, ok := indexes[name]
 				if !ok {
 					return fmt.Errorf("canonical index %s is missing", name)

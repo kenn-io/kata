@@ -63,6 +63,7 @@ var kataCommandGroups = map[string]string{
 	"agent-hook":          "coord",
 	"agent-contract-hook": "coord",
 	"cron":                "admin",
+	"agent":               "setup",
 	"init":                "setup",
 	"doctor":              "setup",
 	"health":              "setup",
@@ -114,6 +115,7 @@ KATA_SERVER selects a remote one) and act on the project bound to the
 current directory.
 
 Agent workflow (add --agent to each command):
+  kata agent setup                                      # connect Claude Code or Codex
   kata search "<one or two distinctive words>" --agent  # 1. reuse an existing issue first
   kata create "<title>" --body "<context>" --idempotency-key <stable-key> --agent
   kata claim <ref> --agent                              # 2. take ownership
