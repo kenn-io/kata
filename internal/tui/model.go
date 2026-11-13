@@ -2920,7 +2920,7 @@ func (m *Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 	if msg.projectID != m.detail.scopePID && !commentMatch && !relationLifecycleMatch {
 		return nil
 	}
-	projectCommentArrival := msg.eventType == "issue.snapshot" || (m.issueScoped && msg.eventType == "issue.commented")
+	projectCommentArrival := msg.eventType == "issue.snapshot" || msg.eventType == "issue.restated" || (m.issueScoped && msg.eventType == "issue.commented")
 	// Refresh events for this recurrence, retrying when its read failed.
 	recurrenceChange := m.detail.issue.RecurrenceID != nil && strings.HasPrefix(msg.eventType, "recurrence.") &&
 		(m.detail.recurrenceErr != nil || (m.detail.recurrence != nil && msg.recurrenceUID == m.detail.recurrence.UID))
@@ -2969,7 +2969,7 @@ func (msg eventReceivedMsg) matchesIssue(ref, uid string) bool {
 
 func (msg eventReceivedMsg) matchesCommentInDetail(comments []CommentEntry) bool {
 	switch msg.eventType {
-	case "issue.commented", "issue.comment_edited", "issue.created", "issue.snapshot":
+	case "issue.commented", "issue.comment_edited", "issue.created", "issue.snapshot", "issue.restated":
 	default:
 		return false
 	}
@@ -3001,7 +3001,9 @@ func (msg eventReceivedMsg) matchesCommentUID(uid string) bool {
 
 func (msg eventReceivedMsg) matchesRelationLifecycleInDetail(comments []CommentEntry, detailProjectID int64) bool {
 	switch msg.eventType {
-	case "issue.restored", "project.restored":
+	case "issue.restored", "issue.restated", "project.restored":
+		// A whole copy can delete or restore its issue without carrying the
+		// comment this detail refers to.
 		// The restore may make an endpoint visible again after a prior detail
 		// refresh removed its backlink or stripped IssueUID from a removed
 		// reply projection, so no current endpoint can identify what was restored.

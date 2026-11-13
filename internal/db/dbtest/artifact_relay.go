@@ -1166,6 +1166,63 @@ func RunEmbeddingArtifactPruning(t *testing.T, store db.Storage) {
 		require.NotEqual(t, first.Digest, pending[0].SourceUID)
 	})
 
+	t.Run("whole_copy_revert", func(t *testing.T) {
+		// A winning repeated import replaces an issue's content in one event.
+		// Two copies in a row take the content to B and back to A with no
+		// ordinary edit between them. The returned content still needs its own
+		// offer, because the peer pruned A when it retained B.
+		project, enrollment, private := enrolledProject(t, "copy-revert-artifact-project")
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Copy reverted vectors", Author: "member"})
+		require.NoError(t, err)
+		first := editAndRetain(project, issue, "Content A")
+		ackAll(t, ctx, enrollment, db.RelayStreamArtifact)
+		writeCtx := db.WithRootAttribution(ctx, db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}, "member")
+		restateAndRetain := func(sequence int64, body string) embedding.EmbeddingArtifact {
+			t.Helper()
+			updatedAt := time.Now().Add(time.Duration(sequence) * time.Hour).UTC().Format("2006-01-02T15:04:05.000Z")
+			restated := newRemoteEvent(t, project, &issue.UID, db.RepeatedImportEventType, "member", enrollment.SpokeInstanceUID, time.Now().UnixMilli()+sequence*1000,
+				jsontext.Value(`{"title":"Copy reverted vectors","body":"`+body+`","status":"open","updated_at":"`+updatedAt+`"}`))
+			// A hub writes this event when it accepts the copy, so it carries
+			// that moment and not an earlier one.
+			restated.CreatedAt = time.Now().UTC()
+			restated.ContentHash = remoteEventHash(t, restated)
+			encoded, err := db.EncodeRelaySourceEvent(restated)
+			require.NoError(t, err)
+			envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{
+				Version: db.RelayProtocolVersion, BindingUID: enrollment.RelayBindingUID,
+				ProjectUID: project.UID, AuthorityUID: store.InstanceUID(),
+				SenderInstanceUID: enrollment.SpokeInstanceUID, ReceiverInstanceUID: store.InstanceUID(),
+				Epoch: enrollment.RelayResetEpoch, Sequence: sequence, Stream: db.RelayStreamEvent,
+				Path: []string{enrollment.SpokeInstanceUID}, SourceUID: restated.EventUID,
+				SourceHash: restated.ContentHash, Body: encoded,
+			})
+			require.NoError(t, err)
+			accepted, err := store.AcceptRelayDeliveries(writeCtx, enrollment.RelayBindingUID, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}})
+			require.NoError(t, err)
+			require.Len(t, accepted.InsertedEvents, 1, "the whole copy is accepted as content")
+			current, err := store.IssueByID(ctx, issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, body, current.Body)
+			restatedIdentity := identity
+			restatedIdentity.ProjectUID, restatedIdentity.IssueUID = project.UID, issue.UID
+			artifact, err := embedding.NewArtifact(restatedIdentity, embedding.EmbedText(current.Title, current.Body), [][]float32{{1, 0}})
+			require.NoError(t, err)
+			durable, err := artifacts.RetainEmbeddingArtifact(ctx, artifact)
+			require.NoError(t, err)
+			require.True(t, durable)
+			return artifact
+		}
+		restateAndRetain(1, "Content B")
+		ackAll(t, ctx, enrollment, db.RelayStreamArtifact)
+		reverted := restateAndRetain(2, "Content A")
+		require.Equal(t, first.Digest, reverted.Digest)
+		pending, err := store.PendingRelayDeliveries(ctx, enrollment.RelayBindingUID, db.RelayStreamArtifact, 32)
+		require.NoError(t, err)
+		require.Len(t, pending, 1, "a peer that pruned the artifact is offered it again after a whole copy")
+		require.Equal(t, first.Digest, pending[0].SourceHash)
+		require.NotEqual(t, first.Digest, pending[0].SourceUID)
+	})
+
 	t.Run("inflight_revert", func(t *testing.T) {
 		// The peer received A and B in one batch, pruned A while retaining B,
 		// and has not acknowledged yet when the content reverts to A. The

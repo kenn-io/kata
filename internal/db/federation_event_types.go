@@ -24,6 +24,7 @@ var federationEventTypes = []federationEventType{
 	{name: "issue.moved", version: 30, feature: IssueMoveEventFeature},
 	{name: "issue.snapshot", version: 30, snapshot: true},
 	{name: "issue.updated", version: 30},
+	{name: RepeatedImportEventType, version: 30, feature: RepeatedAdoptionEventFeature},
 	{name: "issue.closed", version: 30},
 	{name: "issue.reopened", version: 30},
 	{name: "issue.soft_deleted", version: 30},

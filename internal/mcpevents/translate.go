@@ -16,7 +16,7 @@ var inboxVisibilityTypes = map[string]bool{
 // inboxRequestTypes wake a subscription only when their payload touches the
 // recipient's request or an issue's parent.
 var inboxRequestTypes = map[string]bool{
-	"issue.created": true, "issue.snapshot": true, "issue.metadata_updated": true, "issue.updated": true,
+	"issue.created": true, "issue.snapshot": true, "issue.metadata_updated": true, "issue.updated": true, "issue.restated": true,
 	"issue.linked": true, "issue.unlinked": true, "issue.links_changed": true,
 }
 
@@ -72,12 +72,14 @@ func inboxEventReason(o Occurrence, args Arguments) string {
 				return "visibility"
 			}
 		}
-	case "issue.created", "issue.snapshot":
+	case "issue.created", "issue.snapshot", "issue.restated":
 		metadata, _ := payload["metadata"].(map[string]any)
 		if _, ok := notification.ParseValue(metadata[key]); ok {
 			return "notification"
 		}
-		if o.Type == "issue.snapshot" {
+		// A snapshot or a whole copy replaces the metadata, so it can remove
+		// a request without naming it.
+		if o.Type != "issue.created" {
 			return "visibility"
 		}
 	case "issue.metadata_updated":

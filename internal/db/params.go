@@ -890,6 +890,10 @@ type FederationIngestResult struct {
 	Duplicates            int
 	PushCursorEventID     int64
 	InsertedEventUIDs     []string
+	// SupersededEventUIDs lists pushed adoption snapshots the hub did not
+	// store because its project already holds the issue. The pushing spoke
+	// deletes them and takes the hub's state.
+	SupersededEventUIDs []string
 }
 
 // CreateFederationEnrollmentParams carries the plaintext token at creation

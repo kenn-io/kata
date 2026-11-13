@@ -51,6 +51,7 @@ var eventDescribers = map[string]eventDescriber{
 	"issue.priority_set":       prioritySetDesc,
 	"issue.priority_cleared":   priorityClearedDesc,
 	"issue.updated":            staticDesc("updated"),
+	"issue.restated":           staticDesc("updated from an imported copy"),
 	"issue.soft_deleted":       staticDesc("deleted"),
 	"issue.restored":           staticDesc("restored"),
 }

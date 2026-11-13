@@ -533,7 +533,7 @@ func (s *Service) scanAuthority(ctx context.Context, row db.MCPEventSubscription
 // own issue holds no request.
 func scopeChange(o Occurrence) bool {
 	switch o.Type {
-	case "issue.linked", "issue.unlinked", "issue.links_changed", "issue.snapshot", "issue.moved":
+	case "issue.linked", "issue.unlinked", "issue.links_changed", "issue.snapshot", "issue.restated", "issue.moved":
 		return true
 	}
 	return issueLifecycle(o)

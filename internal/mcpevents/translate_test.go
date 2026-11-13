@@ -32,6 +32,8 @@ func TestTranslateOnlyExactInboxChanges(t *testing.T) {
 		{"create", "issue.created", `{"metadata":{"` + key + `":` + valid + `}}`, "notification"},
 		{"snapshot", "issue.snapshot", `{"metadata":{"` + key + `":` + valid + `}}`, "notification"},
 		{"snapshot removes", "issue.snapshot", `{"metadata":{}}`, "visibility"},
+		{"whole copy", "issue.restated", `{"status":"open","metadata":{"` + key + `":` + valid + `}}`, "notification"},
+		{"whole copy removes", "issue.restated", `{"status":"open","metadata":{}}`, "visibility"},
 		{"wrong recipient", "issue.metadata_updated", `{"diff":{"` + notification.MetadataKey("example-user") + `":{"to":` + valid + `}}}`, ""},
 		{"attention", "issue.metadata_updated", `{"diff":{"work.attention":{"to":"needs-human"}}}`, ""},
 		{"comment", "issue.commented", `{"body":"notify example-user/worker"}`, ""},

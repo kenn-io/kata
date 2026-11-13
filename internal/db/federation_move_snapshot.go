@@ -338,6 +338,40 @@ func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event Remot
 			}
 		}
 	}
+	// A whole copy merges into the comments the issue holds. A comment it
+	// brought new is proven as written. For a comment the issue already had,
+	// the copy proves its text and edit time under the author and creation
+	// time that were kept, never under the ones the copy carried.
+	for _, retained := range history {
+		if retained.Type != RepeatedImportEventType || retained.IssueUID != uid {
+			continue
+		}
+		var copied struct {
+			Comments []moveSnapshotComment `json:"comments"`
+		}
+		if json.Unmarshal(retained.Payload, &copied) != nil {
+			continue
+		}
+		for _, comment := range copied.Comments {
+			comment = comment.normalized()
+			if comment.UID == "" || comment.Author == "" {
+				continue
+			}
+			if !proof.commentUIDs[comment.UID] {
+				proof.addComment(comment)
+				continue
+			}
+			if comment.EditedAt == "" {
+				continue
+			}
+			for identity := range proof.identities {
+				if identity.UID == comment.UID {
+					identity.Body, identity.EditedAt = comment.Body, comment.EditedAt
+					proof.comments[identity] = true
+				}
+			}
+		}
+	}
 	for _, retained := range append(history, v.edits[uid]...) {
 		if retained.Type != "issue.comment_edited" || retained.IssueUID != uid {
 			continue
