@@ -6,6 +6,7 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,17 +21,20 @@ func TestStorageConformance(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	dsns := map[db.Storage]string{}
+	var dsns sync.Map // db.Storage to its DSN; scenarios run in parallel.
 	dbtest.RunStorageConformance(t, dbtest.Backend{
-		Name: "postgres",
+		Name:     "postgres",
+		Parallel: 4,
 		Open: func(t *testing.T) db.Storage {
 			t.Helper()
 			store, dsn := openConformanceStore(t)
-			dsns[store] = dsn
+			dsns.Store(store, dsn)
 			return store
 		},
 		OpenSame: func(t *testing.T, existing db.Storage) db.Storage {
-			other, err := pgstore.OpenWithConfig(t.Context(), dsns[existing], conformanceConfig())
+			dsn, ok := dsns.Load(existing)
+			require.True(t, ok, "OpenSame needs a store from Open")
+			other, err := pgstore.OpenWithConfig(t.Context(), dsn.(string), conformanceConfig())
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = other.Close() })
 			return other
