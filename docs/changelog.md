@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Install user hooks for Claude Code and Codex with `kata agent setup`, and use `kata doctor` to find hooks that need review. Open Codex and run `/hooks` when prompted. See [agent setup](workflows/agents.md#contract-in-every-session).
+
 - Restart a local daemon from Settings after turning on search by meaning. Confirm the interruption for every project and client, then reopen `kata ui` if the browser address changes. The API reports the `restart` job state and `restart_in_progress` during the handoff.
 
 - Use `kata daemon status` in scripts to check the selected daemon's readiness.

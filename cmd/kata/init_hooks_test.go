@@ -52,10 +52,19 @@ func TestApplyClaudeHooks_MigratesExactLegacyHandlers(t *testing.T) {
 		assert.Equal(t, "startup|resume|clear", group["matcher"])
 		starts = append(starts, group["hooks"].([]any)...)
 	}
-	assert.Equal(t, []any{expectedHookHandler("start"), map[string]any{"type": "command", "command": "notify-session"}}, starts)
+	start := expectedHookHandler("start")
+	end := expectedHookHandler("end")
+	if runtime.GOOS == "windows" {
+		start["args"] = []any{"attention-hook", "start", "--source", "kata-agent-hook-start"}
+		end["args"] = []any{"attention-hook", "end", "--source", "kata-agent-hook-end"}
+	} else {
+		start["command"] = "kata attention-hook start --source kata-agent-hook-start"
+		end["command"] = "kata attention-hook end --source kata-agent-hook-end"
+	}
+	assert.Equal(t, []any{start, map[string]any{"type": "command", "command": "notify-session"}}, starts)
 	assert.Equal(t, []any{map[string]any{
 		"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other",
-		"hooks":   []any{expectedHookHandler("end")},
+		"hooks":   []any{end},
 	}}, hooks["SessionEnd"])
 }
 
