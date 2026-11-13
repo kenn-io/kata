@@ -316,7 +316,7 @@ func agentHookOwnershipMarkers(agent agenthook.Agent, configPath, executable str
 			if source, ok := agentHookEntryOwnershipSource(entry); ok {
 				if token, dynamic := agentSetupHookOwnershipToken(source, entry.Kind); dynamic {
 					existingTokens[entry.Kind] = token
-				} else if agentHookEntryUsesAgentHookCommand(entry) {
+				} else if agentHookEntryUsesAgentHookCommand(agent, entry, runtime.GOOS) {
 					existingLegacyMarkers[entry.Kind] = true
 				}
 			}
@@ -408,27 +408,8 @@ func agentHookEntryOwnershipSource(entry agentHookEntry) (string, bool) {
 	return "", false
 }
 
-func agentHookEntryUsesAgentHookCommand(entry agentHookEntry) bool {
-	if args, ok := entry.Fields["args"].([]any); ok && len(args) > 0 {
-		first, _ := args[0].(string)
-		if first == "agent-hook" || first == "agent-hooks" {
-			return true
-		}
-	}
-	for _, field := range agentHookCommandFields {
-		command, _ := entry.Fields[field].(string)
-		powershell := field == "powershell" || (field == "commandWindows" && strings.HasPrefix(strings.TrimSpace(command), "& "))
-		windows := (field == "commandWindows" && !powershell) || (field == "command" && runtime.GOOS == "windows")
-		argv, ok := literalAgentHookWords(command, powershell, windows)
-		if !ok || len(argv) < 2 {
-			continue
-		}
-		args := canonicalAgentHookArgs(argv[1:])
-		if args[0] == "agent-hook" {
-			return true
-		}
-	}
-	return false
+func agentHookEntryUsesAgentHookCommand(agent agenthook.Agent, entry agentHookEntry, goos string) bool {
+	return classifyAgentHookHandlerForGOOS(agent, entry.Fields, goos) == entry.Kind
 }
 
 func agentHookSetupTokenCollides(kind agentHookKind, token, executable string, entries []agentHookEntry) bool {

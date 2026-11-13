@@ -86,21 +86,18 @@ func TestAgentSetupKeepsLegacyOwnershipMarkers(t *testing.T) {
 			}
 			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 			path := filepath.Join(home, "claude", "settings.json")
-			sourceArg := func(kind agentHookKind) string {
+			executable, _, err := resolveAgentHookExecutable("", defaultAgentHookExecutableEnv())
+			require.NoError(t, err)
+			opts := nativeAgentHookOptions{Agent: "claude", ConfigPath: path, Executable: executable}
+			for _, kind := range []agentHookKind{contractHook, attentionStartHook, attentionEndHook} {
 				if tc.marked[kind] {
-					return " --source " + agentHookDefaultSource(kind)
+					opts.OwnershipMarkers = map[agentHookKind]agentHookOwnership{kind: {Required: true}}
+				} else {
+					opts.OwnershipMarkers = nil
 				}
-				return ""
+				_, err := agenthook.Install(agenthook.AgentClaude, kitAgentHookRegistration(opts, kind))
+				require.NoError(t, err)
 			}
-			writeAgentHookConfig(t, path, map[string]any{"hooks": map[string]any{
-				"SessionStart": []any{
-					map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "kata agent-hook contract claude" + sourceArg(contractHook), "timeout": 10}}},
-					map[string]any{"matcher": "startup|resume|clear", "hooks": []any{map[string]any{"type": "command", "command": "kata agent-hook attention-native claude start" + sourceArg(attentionStartHook), "timeout": 10}}},
-				},
-				"SessionEnd": []any{map[string]any{"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other", "hooks": []any{
-					map[string]any{"type": "command", "command": "kata agent-hook attention-native claude end" + sourceArg(attentionEndHook), "timeout": 10},
-				}}},
-			}})
 			before, err := os.ReadFile(path) //nolint:gosec // Path is under the isolated test home.
 			require.NoError(t, err)
 

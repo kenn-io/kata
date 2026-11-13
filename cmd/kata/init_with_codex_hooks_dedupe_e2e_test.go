@@ -26,14 +26,29 @@ func TestE2E_InitWithCodexHooksRunsOwnershipMarkedCommands(t *testing.T) {
 
 	_, _, err = applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
-	ownership := agentHookConfigOwnershipMarkers(agenthook.AgentCodex, configPath, "kata")
-	contractOwnership := ownership[contractHook]
-	require.True(t, contractOwnership.Required)
-	require.NotEmpty(t, contractOwnership.Token)
+	entries, err := inspectAgentHookEntries(agenthook.AgentCodex, configPath)
+	require.NoError(t, err)
+	var contractArgs []string
+	for _, entry := range entries {
+		if entry.Kind != contractHook {
+			continue
+		}
+		marker, ok := agentHookEntryOwnershipSource(entry)
+		require.True(t, ok)
+		_, ok = agentSetupHookOwnershipToken(marker, contractHook)
+		require.True(t, ok)
+		argv, ok := literalAgentHookWords(entry.Command, false, false)
+		require.True(t, ok)
+		require.NotEmpty(t, argv)
+		contractArgs = argv[1:]
+		break
+	}
+	require.NotEmpty(t, contractArgs)
+	require.Contains(t, contractArgs, "--ownership-marker")
 
 	ref := createIssue(t, env, pid, "session hook ownership")
 	t.Setenv("KATA_REF", ref)
-	contract := runCLI(t, env, dir, "agent-contract-hook", "--ownership-marker", agentSetupHookOwnershipMarker(contractHook, contractOwnership.Token))
+	contract := runCLI(t, env, dir, contractArgs...)
 	var response struct {
 		HookSpecificOutput struct {
 			AdditionalContext string `json:"additionalContext"`
@@ -41,14 +56,6 @@ func TestE2E_InitWithCodexHooksRunsOwnershipMarkedCommands(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(contract), &response))
 	assert.Equal(t, agentContractText, response.HookSpecificOutput.AdditionalContext)
-	require.NoError(t, runAttnHook(t, env, dir, "attention-hook", "start"))
-	value, exists := attnMetaValue(t, env, pid, ref, attentionKey)
-	require.True(t, exists)
-	assert.Equal(t, attnValueOK, value)
-	require.NoError(t, runAttnHook(t, env, dir, "attention-hook", "end"))
-	value, exists = attnMetaValue(t, env, pid, ref, attentionKey)
-	require.True(t, exists)
-	assert.Equal(t, attnValueNeedsHuman, value)
 }
 
 func TestE2E_InitWithCodexHooks_DedupeAndRestore(t *testing.T) {

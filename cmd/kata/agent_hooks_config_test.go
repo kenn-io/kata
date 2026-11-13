@@ -432,6 +432,18 @@ func TestAgentHooksClassifyKitCodexPowerShellRegistrationOnWindows(t *testing.T)
 	require.Equal(t, contractHook, classifyAgentHookHandlerForGOOS(agenthook.AgentCodex, handler, "windows"))
 }
 
+func TestAgentHookEntryRecognizesPairedPowerShellOwnershipOnWindows(t *testing.T) {
+	commands, err := agenthook.BuildCommand(`C:\Program Files\O'Brien\kata.exe`, "agent-hook", "contract", "claude", "--source", legacyAgentContractHookSource)
+	require.NoError(t, err)
+	entry := agentHookEntry{
+		Kind: contractHook,
+		Fields: map[string]any{
+			"type": "command", "command": commands.POSIX, "commandWindows": commands.PowerShell,
+		},
+	}
+	require.True(t, agentHookEntryUsesAgentHookCommand(agenthook.AgentClaude, entry, "windows"))
+}
+
 func TestAgentHooksHermesMergedEventsPreserveForeignCommands(t *testing.T) {
 	isolateAgentHookHomes(t)
 	t.Chdir(t.TempDir())
