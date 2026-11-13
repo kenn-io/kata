@@ -1814,6 +1814,10 @@ Limits:
 - Links are compared only when a copy wins and are not part of the
   `updated_at` rule. An unlink that reaches the hub later still removes a link
   that a winning copy added.
+- Repeat imports into a project from one home at a time, and let each home
+  finish a sync before the next one pushes. When two homes push repeated
+  imports of the same issues at once, an edit one of them made after adopting
+  can be lost.
 
 The create-only rule still applies outside an adoption push. A fresh
 `issue.created`, or an `issue.snapshot` in an ordinary push, for an issue the
