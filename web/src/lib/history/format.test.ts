@@ -26,6 +26,7 @@ describe('describeKataEvent', () => {
     ['issue.unassigned', 'unassigned', 'neutral'],
     ['issue.priority_cleared', 'cleared priority', 'neutral'],
     ['issue.updated', 'updated the task', 'neutral'],
+    ['issue.restated', 'updated the task from an imported copy', 'neutral'],
     ['issue.linked', 'linked', 'neutral'],
     ['issue.unlinked', 'unlinked', 'neutral'],
     ['issue.soft_deleted', 'deleted', 'negative'],

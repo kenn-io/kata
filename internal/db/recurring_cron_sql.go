@@ -387,7 +387,7 @@ func checkRecurringMoveSnapshot(ctx context.Context, tx *sql.Tx, event RemoteEve
 			return fmt.Errorf("%w: invalid move snapshot metadata", ErrFederationIngestValidation)
 		}
 	}
-	uid := FederationEventIssueUID(event.IssueUID, string(event.Payload))
+	uid := EventIssueUID(event.IssueUID)
 	trustedRaw := "{}"
 	if err := tx.QueryRowContext(ctx, `SELECT metadata FROM issues WHERE uid=$1`, uid).Scan(&trustedRaw); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err

@@ -88,7 +88,7 @@ func checkFederatedMoveDelivery(t *testing.T, store db.Storage) error {
 		physical := time.Now().UnixMilli()
 		payload, err := json.Marshal(map[string]string{"uid": issueUID, "short_id": issue.ShortID, "title": issue.Title, "author": "worker", "status": "open"})
 		require.NoError(t, err)
-		creation := newRemoteEvent(t, projects[0], &issueUID, "issue.created", "worker", origin, physical, jsontext.Value(payload))
+		creation := newRemoteEvent(t, projects[0], &issueUID, "issue.created", "worker", origin, physical, IssueDocument(t, issueUID, payload))
 		returned := moveEvent(issue, 1, 0, physical+2)
 		result, err := store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: projects[0].ID, SpokeInstanceUID: origin, BoundActor: "worker", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: creation}, {SourceEventID: 3, Event: returned}}})
 		require.NoError(t, err)

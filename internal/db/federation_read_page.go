@@ -11,9 +11,8 @@ import (
 // query appends a suffix to the backend event projection and decodes its rows.
 // ReadFederationTransaction validates issue ownership before reading pages.
 func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, issueUID string, afterID int64, limit int, postgres bool, query func(string, ...any) ([]Event, error)) ([]Event, error) {
-	identity := FederationReadIssueUIDExpr(postgres)
 	if issueUID != "" {
-		return query(` WHERE `+identity+`=$1 AND e.type<>'sync.reset_required' AND e.id>$2 ORDER BY e.id LIMIT $3`, issueUID, afterID, limit)
+		return query(` WHERE e.issue_uid=$1 AND e.type<>'sync.reset_required' AND e.id>$2 ORDER BY e.id LIMIT $3`, issueUID, afterID, limit)
 	}
 	var hasEvents bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE id>$1)`, afterID).Scan(&hasEvents); err != nil {
@@ -28,7 +27,7 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
 		movedFrom = `e.payload::jsonb->>'from_project_uid'`
 	} else {
 		// ANALYZE can otherwise favor an ID walk through unrelated history.
-		projectIndex, movedIndex, identityIndex = " INDEXED BY idx_events_project", " INDEXED BY idx_events_moved_from_id", " INDEXED BY idx_events_resolved_issue_uid"
+		projectIndex, movedIndex, identityIndex = " INDEXED BY idx_events_project", " INDEXED BY idx_events_moved_from_id", " INDEXED BY idx_events_issue_uid_id"
 		subjectUID = "+subject.uid"
 	}
 	var issueCount int64
@@ -36,12 +35,12 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
 		return nil, fmt.Errorf("federation issue count: %w", err)
 	}
 	width := max(int64(limit), issueCount)
-	visible := `(e.project_id=$1 OR ` + identity + ` IN (SELECT uid FROM issues WHERE project_id=$1)
+	visible := `(e.project_id=$1 OR e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
  OR (e.type='issue.moved' AND ` + movedFrom + `=(SELECT uid FROM projects WHERE id=$1))) AND e.type<>'sync.reset_required'`
 	next := ` WHERE e.id=(SELECT MIN(id) FROM (
  SELECT (SELECT e.id FROM events e` + projectIndex + ` WHERE e.project_id=$1 AND e.id>$2 AND e.type<>'sync.reset_required' ORDER BY e.id LIMIT 1) AS id
  UNION ALL SELECT (SELECT e.id FROM events e` + movedIndex + ` WHERE e.type='issue.moved' AND ` + movedFrom + `=$3 AND e.id>$2 ORDER BY e.id LIMIT 1)
- UNION ALL SELECT (SELECT e.id FROM events e` + identityIndex + ` WHERE ` + identity + `=` + subjectUID + ` AND e.id>$2 AND e.type<>'sync.reset_required' ORDER BY e.id LIMIT 1)
+ UNION ALL SELECT (SELECT e.id FROM events e` + identityIndex + ` WHERE e.issue_uid=` + subjectUID + ` AND e.id>$2 AND e.type<>'sync.reset_required' ORDER BY e.id LIMIT 1)
  FROM issues subject WHERE subject.project_id=$1
  ) candidates)`
 	events := []Event{}

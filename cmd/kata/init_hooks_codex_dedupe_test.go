@@ -73,12 +73,12 @@ func TestApplyCodexHooks_UserContractWithShortTimeoutKeepsWorkspaceDefault(t *te
 
 func TestApplyCodexHooks_KeepsTrackedWorkspace(t *testing.T) {
 	for _, tc := range []struct {
-		name, data string
-		foreign    bool
+		name, data            string
+		foreign, legacyMarker bool
 	}{
-		{"legacy attention and contract", `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata attention-hook start","timeout":10}]},{"hooks":[{"command":"kata agent-contract-hook --source kata-agent-contract-hook","commandWindows":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, false},
-		{"attention only", `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata attention-hook start","timeout":10}]}]}}`, false},
-		{"foreign only", ` { "hooks": { "SessionStart": [{"hooks":[{"command":"echo example"}]}] } } `, true},
+		{"legacy attention and contract", `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata attention-hook start","timeout":10}]},{"hooks":[{"command":"kata agent-contract-hook --source kata-agent-contract-hook","commandWindows":"kata agent-contract-hook --source kata-agent-contract-hook"}]}]}}`, false, true},
+		{"attention only", `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata attention-hook start","timeout":10}]}]}}`, false, false},
+		{"foreign only", ` { "hooks": { "SessionStart": [{"hooks":[{"command":"echo example"}]}] } } `, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -93,6 +93,9 @@ func TestApplyCodexHooks_KeepsTrackedWorkspace(t *testing.T) {
 			want := expectedCodexSessionStartGroups()
 			if tc.foreign {
 				want = append([]any{map[string]any{"hooks": []any{map[string]any{"command": "echo example"}}}}, want...)
+			}
+			if tc.legacyMarker {
+				want[1].(map[string]any)["hooks"] = []any{expectedCodexContractHandlerWithLegacyMarker()}
 			}
 			assert.Equal(t, want, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
 			assert.Equal(t, []string{"kept workspace contract hook: .codex/hooks.json is tracked; " + userPath + " also injects it"}, notes)
@@ -261,7 +264,7 @@ func TestApplyCodexHooks_KeepsTrackedNestedAndLinkedWorkspace(t *testing.T) {
 			assert.True(t, changed)
 			// The fixture starts with only the contract hook, so it stays first.
 			want := []any{
-				map[string]any{"matcher": codexContractSessionStartMatcher, "hooks": []any{expectedCodexContractHandler()}},
+				map[string]any{"matcher": codexContractSessionStartMatcher, "hooks": []any{expectedCodexContractHandlerWithLegacyMarker()}},
 				map[string]any{"matcher": codexSessionStartMatcher, "hooks": []any{expectedCodexHandler()}},
 			}
 			assert.Equal(t, want, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])

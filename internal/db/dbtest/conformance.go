@@ -41,6 +41,10 @@ type Backend struct {
 	// acknowledgement UPDATE matches from installation until remove runs.
 	InstallRelayAckRowCounter func(ctx context.Context, store db.Storage) (count func(context.Context) (int64, error), remove func() error, err error)
 	ExpectedFailures          map[string]error
+	// Parallel is how many scenarios may hold a store at once. Zero or one
+	// runs them one at a time. Each scenario uses its own database, so the
+	// limit protects shared resources such as a server's connection slots.
+	Parallel int
 }
 
 type scenario struct {
@@ -217,6 +221,16 @@ var storageScenarios = []scenario{
 	{name: "cron rejects impossible schedules", methods: []string{"PutCronJob", "CronJob", "ListCronJobs", "DispatchRecurringCron"}, run: checkCronRejectsImpossibleSchedules},
 	{name: "federation metadata requires enabled hub", methods: []string{"CreateProject", "AdoptProjectIntoFederation", "ReadFederation"}, run: checkFederationMetadataRequiresEnabledHub},
 	{name: "peer ingest committed events", methods: []string{"IngestFederationEvents"}, run: checkPeerIngestCommittedEvents},
+	{name: "issue events require header identity", methods: []string{"CreateProject", "EnableProjectFederation", "EventsByUIDs", "IngestFederationEvents", "InsertRemoteEvents"}, run: checkIssueEventsRequireHeaderIdentity},
+	{name: "relay rejects header-less issue events", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "EventsByUIDs", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayRejectsHeaderlessIssueEvents(t, store)
+		return nil
+	}},
+	{name: "issue documents require every field", methods: []string{"CreateProject", "EnableProjectFederation", "EventsByUIDs", "IngestFederationEvents", "InsertRemoteEvents"}, run: checkIssueDocumentsRequireEveryField},
+	{name: "relay rejects incomplete issue documents", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "EventsByUIDs", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayRejectsIncompleteIssueDocuments(t, store)
+		return nil
+	}},
 	{name: "independent run observations", methods: []string{"ObserveCronRun", "CronRun", "ListCronRuns", "ExportCronJobs", "ExportCronWorkflows", "ExportCronRuns"}, run: checkIndependentRunObservations},
 	{name: "cron definition export deleted filter", methods: []string{"CreateProject", "PutCronJob", "PutCronWorkflow", "ObserveCronRun", "ExportCronJobs", "ExportCronWorkflows", "ExportCronRuns"}, run: checkCronDefinitionExportDeletedFilter},
 	{name: "cron data blocks orphan cleanup", methods: []string{"CreateProject", "HardDeleteProject", "PutCronJob", "ObserveCronRun", "CronJob", "CronRun", "ProjectByID"}, run: checkCronDataBlocksOrphanCleanup},
@@ -231,6 +245,12 @@ var storageScenarios = []scenario{
 	{name: "issue planning dates", methods: []string{"IssuePlanningDates"}, run: checkIssuePlanningDates},
 	{name: "native cron remote validation", methods: []string{}, runWithBackend: checkNativeCronValidation},
 	{name: "native cron adoption author", methods: []string{}, runWithBackend: checkNativeCronAdoptionAuthor},
+	{name: "federation repeated import", methods: []string{"IngestFederationEvents", "AdoptProjectIntoFederation", "CommentsByIssue", "LabelsByIssue"}, runWithBackend: checkFederationRepeatedImport},
+	{name: "federation repeated import placement", methods: []string{"IngestFederationEvents", "AdoptProjectIntoFederation", "ReadFederation", "LinksByIssue"}, runWithBackend: checkFederationRepeatedImportPlacement},
+	{name: "federation acknowledge push", methods: []string{"AcknowledgeFederationPush", "AdoptProjectIntoFederation", "InsertRemoteEvents", "EventsAfter", "FederationBindingByProject", "MaxEventID"}, run: checkFederationAcknowledgePush},
+	{name: "federation import issue held elsewhere", methods: []string{"IngestFederationEvents", "RemoveProject"}, runWithBackend: checkFederationImportIssueHeldElsewhere},
+	{name: "project purge retires hub binding", methods: []string{"PurgeProject", "RemoveProject", "EnableProjectFederation", "ListFederationEnrollments"}, run: checkProjectPurgeRetiresHubBinding},
+	{name: "project purge keeps spoke refusal", methods: []string{"PurgeProject", "AdoptProjectIntoFederation"}, run: checkProjectPurgeKeepsSpokeRefusal},
 	{name: "native cron federation", methods: []string{"ReadFederation"}, runWithBackend: checkNativeCronFederation},
 	{name: "native cron push", methods: []string{}, runWithBackend: checkNativeCronPush},
 	{name: "native cron definitions", methods: []string{"PutCronJob", "PutCronWorkflow", "CronJob", "CronWorkflow", "ListCronJobs", "ListCronWorkflows"}, run: checkNativeCronDefinitions},
@@ -329,8 +349,9 @@ var storageScenarios = []scenario{
 		checkFederatedReadPages(t, store, backend)
 		return nil
 	}},
-	{name: "federated move payload-only history identity", methods: []string{"AdvanceFederationPushCursor", "CreateProject", "CreateIssue", "EditIssue", "EventsByUIDs", "MoveIssueProject", "InsertRemoteEvents", "MaterializeFederatedProject", "ResetFederatedProject", "UpsertFederationBinding", "IssueByUID", "ReadFederation"}, runWithBackend: checkFederatedMovePayloadOnlyHistory},
-	{name: "federated move snapshot payload-only comment edit", methods: []string{"CreateComment", "CreateFederationEnrollment", "CreateIssue", "CreateProject", "EnableProjectFederation", "IngestFederationEvents", "IssueByUID", "CommentsByIssue"}, run: checkFederatedMoveSnapshotPayloadOnlyCommentEdit},
+	{name: "federated move remote edit history", methods: []string{"AdvanceFederationPushCursor", "CreateProject", "CreateIssue", "EditIssue", "EventsByUIDs", "MoveIssueProject", "InsertRemoteEvents", "MaterializeFederatedProject", "ResetFederatedProject", "UpsertFederationBinding", "IssueByUID", "ReadFederation"}, runWithBackend: checkFederatedMoveRemoteEditHistory},
+	{name: "federated move snapshot retained comment edit", methods: []string{"CreateComment", "CreateFederationEnrollment", "CreateIssue", "CreateProject", "EnableProjectFederation", "IngestFederationEvents", "IssueByUID", "CommentsByIssue"}, run: checkFederatedMoveSnapshotRetainedCommentEdit},
+	{name: "federated move snapshot comment from repeated import", methods: []string{"CreateComment", "EditComment", "CreateFederationEnrollment", "CreateIssue", "CreateProject", "EnableProjectFederation", "IngestFederationEvents", "IssueByUID", "CommentsByIssue"}, run: checkFederatedMoveSnapshotCommentFromRepeatedImport},
 	{name: "federated move authoring gates", methods: []string{"MoveIssueProject", "SetRelayBindingConfig", "CreateRelayEnrollment", "InsertRemoteEvents"}, runWithBackend: checkFederatedMoveAuthoringGates},
 	{name: "federated issue move", methods: []string{"MoveIssueProject", "IngestFederationEvents", "InsertRemoteEvents", "ReadFederation", "MaterializeFederatedProject"}, runWithBackend: checkFederatedIssueMove},
 	{name: "same hub move gates", methods: []string{"MoveIssueProject"}, run: checkSameHubMoveGates},
@@ -1288,8 +1309,18 @@ func RunStorageConformance(t *testing.T, backend Backend) {
 		assert.Error(t, want, "expected failure %q must name an error", name)
 	}
 
+	var slots chan struct{}
+	if backend.Parallel > 1 {
+		slots = make(chan struct{}, backend.Parallel)
+	}
 	for _, test := range storageScenarios {
 		t.Run(test.name, func(t *testing.T) {
+			if slots != nil {
+				t.Parallel()
+				slots <- struct{}{}
+				// Registered first, so it runs after the store's own cleanups.
+				t.Cleanup(func() { <-slots })
+			}
 			store := backend.Open(t)
 			require.NotNil(t, store)
 			t.Cleanup(func() {

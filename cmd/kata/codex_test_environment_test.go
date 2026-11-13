@@ -16,7 +16,7 @@ import (
 )
 
 // Existing workspace-hook tests assume no user hook. Isolate the test process
-// from the developer's real Codex config; user-hook tests select their own homes
+// from the developer's real agent configs; user-hook tests select their own homes
 // with t.Setenv. No production behavior or real user config is changed.
 func TestMain(m *testing.M) {
 	if os.Getenv("KATA_TEST_CLI_PANIC") != "" {
@@ -54,6 +54,11 @@ func TestMain(m *testing.M) {
 	}
 	if err := os.Setenv("CODEX_HOME", home); err != nil {
 		fmt.Fprintf(os.Stderr, "set test Codex home: %v\n", err)
+		_ = os.RemoveAll(home)
+		os.Exit(1)
+	}
+	if err := os.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, "claude")); err != nil {
+		fmt.Fprintf(os.Stderr, "set test Claude config: %v\n", err)
 		_ = os.RemoveAll(home)
 		os.Exit(1)
 	}

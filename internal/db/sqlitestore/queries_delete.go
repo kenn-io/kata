@@ -372,7 +372,7 @@ func purgeCascade(
 		return 0, fmt.Errorf("count events: %w", err)
 	}
 
-	affectedProjects, err := db.PurgeResetProjects(ctx, c, issue, false)
+	affectedProjects, err := db.PurgeResetProjects(ctx, c, issue)
 	if err != nil {
 		return 0, fmt.Errorf("collect affected federation streams: %w", err)
 	}
@@ -626,7 +626,7 @@ func lookupIssueIncludingDeleted(ctx context.Context, r sqlReader, issueID int64
 // (issue.created with an initial-link to this issue, issue.links_changed
 // with this issue in a *_uids slice) are likewise PRESERVED.
 func purgeEventsCleanupWhere(issue db.Issue) (string, []any) {
-	clause := `(e.issue_id = ? OR ` + db.FederationReadIssueUIDExpr(false) + ` = ? OR ((e.related_issue_id = ? OR e.related_issue_uid = ?) AND e.type NOT IN ('issue.links_changed', 'issue.commented')))`
+	clause := `(e.issue_id = ? OR e.issue_uid = ? OR ((e.related_issue_id = ? OR e.related_issue_uid = ?) AND e.type NOT IN ('issue.links_changed', 'issue.commented')))`
 	args := []any{issue.ID, issue.UID, issue.ID, issue.UID}
 	return clause, args
 }

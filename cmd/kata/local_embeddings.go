@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net"
 	"net/url"
@@ -29,6 +30,7 @@ import (
 
 var localEmbeddingsEndpoint = embedlocal.Endpoint
 var localEmbeddingsInstall = embedlocal.Install
+var localEmbeddingsInspect = embedlocal.Inspect
 
 func resolveLocalEmbeddings(ctx context.Context, confirm func(context.Context, int64) (bool, error)) (string, error) {
 	endpoint, err := localEmbeddingsEndpoint(ctx, embedlocal.Options{SkipOllama: true})
@@ -223,7 +225,7 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 	}
 	if next.Embeddings.UsesLocal() {
 		if err := embedlocal.RecordChoice(); err != nil {
-			return "", fmt.Errorf("built-in embeddings are configured, but sharing could not be confirmed; retry setup: %w", err)
+			slog.Warn("could not confirm that the shared search by meaning choice was saved", "err", err)
 		}
 	}
 	return index, nil
@@ -506,8 +508,10 @@ type localEmbeddingsSetup struct {
 	idle        daemon.IdleForegroundAdmission
 	start       func(func(context.Context)) bool
 	vectorReady func(context.Context) error
+	restart     func() error
 	mu          sync.Mutex
 	job         *api.LocalEmbeddingsJob
+	restarting  bool
 }
 
 func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsStatus, error) {
@@ -524,7 +528,7 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 	}
 	// Only an unconfigured daemon depends on the shared installation files.
 	if status.Provider == "none" {
-		inspected, err := embedlocal.Inspect(ctx, embedlocal.Options{})
+		inspected, err := localEmbeddingsInspect(ctx, embedlocal.Options{})
 		if err != nil {
 			return status, err
 		}
@@ -535,9 +539,42 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 		job := *s.job
 		status.Job = &job
 	}
+	status.CanRestart, status.RestartInProgress = s.restart != nil && s.job != nil && s.job.State == "restart" && !s.restarting, s.restarting
 	s.mu.Unlock()
 	status.CanChange = status.Provider == "none" && (status.Job == nil || status.Job.State == "failed")
 	return status, nil
+}
+
+func (s *localEmbeddingsSetup) Restart(_ context.Context) error {
+	s.mu.Lock()
+	if s.restarting {
+		s.mu.Unlock()
+		return nil
+	}
+	if s.restart == nil || s.job == nil || s.job.State != "restart" {
+		s.mu.Unlock()
+		return daemon.ErrLocalEmbeddingsBusy
+	}
+	s.restarting, s.job.Error = true, ""
+	s.mu.Unlock()
+	if err := s.restart(); err != nil {
+		s.mu.Lock()
+		s.restarting, s.job.Error = false, err.Error()
+		s.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+func (s *localEmbeddingsSetup) restartExited(err error) {
+	if err == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.job != nil && s.restarting {
+		s.restarting, s.job.Error = false, err.Error()
+	}
 }
 
 func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {

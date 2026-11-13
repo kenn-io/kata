@@ -46,7 +46,7 @@ func RunRelayUpstreamLocalAuthority(t *testing.T, store db.Storage) {
 			issueUID, err := uid.New()
 			require.NoError(t, err)
 			leafUID := "00000000000000000000000007"
-			source := newRemoteEvent(t, project, &issueUID, "issue.created", "source-assistant", leafUID, 300, jsontext.Value(`{"uid":"`+issueUID+`","title":"Shared source task","author":"source-assistant","metadata":{}}`))
+			source := newRemoteEvent(t, project, &issueUID, "issue.created", "source-assistant", leafUID, 300, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"Shared source task","author":"source-assistant","metadata":{}}`)))
 			receipt, err := db.SignRootReceipt(db.AttributionReceipt{Version: 1, ProjectUID: project.UID, EventUID: source.EventUID, ContentHash: source.ContentHash, AuthorityUID: rootUID, AccountableActor: "company-member", SourceActor: source.Actor, IngressInstanceUID: leafUID, AcceptedAt: time.Now().UTC(), ResetEpoch: 1, Sequence: 1, KeyID: pin.KeyID}, private)
 			require.NoError(t, err)
 			sourceBody, err := db.EncodeRelaySourceEvent(source)
