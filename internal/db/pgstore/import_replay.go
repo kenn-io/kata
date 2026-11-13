@@ -48,6 +48,9 @@ const (
 	replayLinkMissingPeer
 	replayLinkDuplicate
 	replayLinkMapping
+	replayLinkUndeliverable
+	replayLinkParentCycle
+	replayLinkSecondParent
 )
 
 func (s *Store) importReplayTx(
@@ -71,7 +74,7 @@ func (s *Store) importReplayTx(
 		}
 	}
 
-	var missingPeers, duplicates, skippedMappings int
+	var missingPeers, duplicates, skippedMappings, skippedUndeliverable, skippedCycles, skippedSecondParents int
 	skippedLinkIDs := make(map[int64]struct{})
 	sequenceFloors := make(map[string]int64)
 	for _, record := range records {
@@ -85,11 +88,38 @@ func (s *Store) importReplayTx(
 			if link, ok := record.(*db.LinkExport); ok {
 				skippedLinkIDs[link.ID] = struct{}{}
 			}
+		case replayLinkUndeliverable, replayLinkParentCycle, replayLinkSecondParent:
+			switch skip {
+			case replayLinkUndeliverable:
+				skippedUndeliverable++
+			case replayLinkParentCycle:
+				skippedCycles++
+			default:
+				skippedSecondParents++
+			}
+			if link, ok := record.(*db.LinkExport); ok {
+				skippedLinkIDs[link.ID] = struct{}{}
+			}
 		case replayLinkDuplicate:
 			duplicates++
 		case replayLinkMapping:
 			skippedMappings++
 		}
+	}
+	if skippedUndeliverable > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d link record(s) between projects that a relay between hubs cannot deliver\n",
+			skippedUndeliverable)
+	}
+	if skippedSecondParents > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d parent link record(s) for task(s) that already have a parent in the target\n",
+			skippedSecondParents)
+	}
+	if skippedCycles > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d parent link record(s) that would close a cycle with links already in the target\n",
+			skippedCycles)
 	}
 	if missingPeers > 0 {
 		fmt.Fprintf(os.Stderr,
@@ -283,7 +313,7 @@ func (s *Store) importReplayRecord(
 	case *db.IssueLabelExport:
 		return replayLinkInserted, pgReplayLabel(ctx, tx, rec)
 	case *db.LinkExport:
-		return pgReplayLink(ctx, tx, rec)
+		return pgReplayLink(ctx, tx, rec, opts.MergeProject)
 	case *db.ImportMappingExport:
 		return pgReplayImportMapping(ctx, tx, rec, skippedLinkIDs, opts.PreserveIssueSyncBindingEnabled && !opts.MergeProject)
 	case *db.ExternalFieldMappingExport:

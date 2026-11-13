@@ -2340,7 +2340,9 @@ for the exact retained and omitted data and an isolated-home example.
 
 `--merge` instead adds exactly one non-system project snapshot to an existing
 SQLite or Postgres target. It remaps numeric database IDs while preserving
-portable identities and leaves unrelated projects unchanged. A multi-project
+portable identities. It also creates the snapshot's links to issues of other
+projects that are already in the target, and changes nothing else in those
+projects. A multi-project
 snapshot or any imported UID that already exists in the target causes the
 transaction to be refused. Stop every daemon using the target first. See
 [Backup and restore](../operations/backup-restore.md) for name collisions,
