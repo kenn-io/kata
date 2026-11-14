@@ -456,6 +456,29 @@ type federatedShortIDCheck struct {
 	row                      federatedIssueRow
 }
 
+func applyUnjoinedMovedIssue(ctx context.Context, tx *sql.Tx, projectID int64, issue db.FoldIssue, projection db.FoldProjection) error {
+	view := db.FoldMovedIssue(projection, issue)
+	labels := make(map[string]bool, len(view.Labels))
+	for key := range view.Labels {
+		labels[key.Label] = true
+	}
+	m := federationMaterialization{projection: view}
+	if err := m.prepareRows(ctx, tx, projectID, []string{issue.UID}); err != nil {
+		return err
+	}
+	for uid := range m.commentRows {
+		if _, ok := m.projection.Comments[uid]; !ok {
+			delete(m.commentRows, uid)
+		}
+	}
+	for key := range m.labelRows {
+		if !labels[key.label] {
+			delete(m.labelRows, key)
+		}
+	}
+	return m.apply(ctx, tx, projectID, nil)
+}
+
 // prepareRows compares against persisted values, rather than a previous fold:
 // local writes and imports can leave values that a full rebuild would repair.
 func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string) error {

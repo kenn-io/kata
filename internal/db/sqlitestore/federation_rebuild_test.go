@@ -218,7 +218,7 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 	}
 }
 
-func TestMoveRebuildRemovesStaleLinksBeforeIssues(t *testing.T) {
+func TestMoveRebuildRetainsUnjoinedIssuesAndPrunesStaleLinks(t *testing.T) {
 	ctx := t.Context()
 	d, source, issue := incrementalTestStore(t)
 	destination, err := d.CreateProject(ctx, "destination")
@@ -242,11 +242,72 @@ func TestMoveRebuildRemovesStaleLinksBeforeIssues(t *testing.T) {
 	d.federationIngestPrepared = func() { attempts++ }
 	require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
 	require.Equal(t, 1, attempts)
-	_, err = d.IssueByUID(ctx, orphan.UID, db.IncludeDeletedYes)
-	require.ErrorIs(t, err, db.ErrNotFound)
+	retained, err := d.IssueByUID(ctx, orphan.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, orphan.ID, retained.ID)
+	require.Equal(t, third.ID, retained.ProjectID)
 	links, err := d.LinksByIssue(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Empty(t, links)
+}
+
+func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
+	ctx := t.Context()
+	d, source, issue := incrementalTestStore(t)
+	issue = resetToRemoteIssue(t, d, source, issue)
+	destination, err := d.CreateProject(ctx, "destination")
+	require.NoError(t, err)
+	unrelated, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "untouched", Author: "tester"})
+	require.NoError(t, err)
+	_, _, err = d.CreateComment(ctx, db.CreateCommentParams{IssueID: unrelated.ID, Author: "tester", Body: "unrelated"})
+	require.NoError(t, err)
+	_, err = d.AddLabel(ctx, unrelated.ID, "local", "tester")
+	require.NoError(t, err)
+	unrelated, err = d.IssueByUID(ctx, unrelated.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	_, _, err = d.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "local comment"})
+	require.NoError(t, err)
+	unapplyMove(t, d, issue, source, destination, false)
+	var events []db.RemoteEvent
+	for i, kind := range []byte{0, 5, 7, 13} {
+		typ, payload := incrementalFuzzPayload(kind, issue.UID, "", 42)
+		events = append(events, incrementalRemoteEvent(t, source, issue.UID, typ, payload, 8_000_000_000_000+int64(i)))
+	}
+	_, err = d.InsertRemoteEvents(ctx, source.ID, events)
+	require.NoError(t, err)
+	locked := cloneIncrementalStore(t, d)
+	attempts := 0
+	d.federationIngestPrepared = func() { attempts++ }
+	require.NoError(t, d.MaterializeFederatedProject(ctx, source.ID))
+	require.Equal(t, 1, attempts)
+	require.NoError(t, locked.materializeFederatedProject(ctx, source.ID))
+	for _, store := range []*Store{d, locked} {
+		got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		require.Equal(t, issue.ID, got.ID)
+		require.Equal(t, destination.ID, got.ProjectID)
+		require.Equal(t, "work 42", got.Title)
+		require.JSONEq(t, `{"area":"value-42"}`, string(got.Metadata))
+		comments, err := store.CommentsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 2)
+		require.ElementsMatch(t, []string{"local comment", "comment"}, []string{comments[0].Body, comments[1].Body})
+		labels, err := store.LabelsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, labels, 1)
+		require.Equal(t, "area:db", labels[0].Label)
+		other, err := store.IssueByUID(ctx, unrelated.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		require.Equal(t, unrelated, other)
+		otherComments, err := store.CommentsByIssue(ctx, unrelated.ID)
+		require.NoError(t, err)
+		require.Len(t, otherComments, 1)
+		require.Equal(t, "unrelated", otherComments[0].Body)
+		otherLabels, err := store.LabelsByIssue(ctx, unrelated.ID)
+		require.NoError(t, err)
+		require.Len(t, otherLabels, 1)
+		require.Equal(t, "local", otherLabels[0].Label)
+	}
 }
 
 func TestMoveRebuildAssignsCollidingShortIDsInOrder(t *testing.T) {

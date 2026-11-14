@@ -435,6 +435,9 @@ the [federation procedure](operations/federation.md#compatibility-and-rolling-up
   replicas must use the same actor and allow pushes in both projects. Projects
   connected through a relay cannot move issues yet. See
   [Moving issues between projects](operations/federation.md#moving-issues-between-projects).
+- Keep pulling move history on a spoke that joined only one project. Outbound
+  issues retain folded hub content and local state in the retained counterpart;
+  restore it and join with its local project name to subscribe later.
 - Start, change, or stop a recurrence with
   `kata schedule <ref> <date> --repeat '<rrule>'`. `--repeat -` stops future
   occurrences and keeps existing ones. `kata show` prints the rule, time zone,

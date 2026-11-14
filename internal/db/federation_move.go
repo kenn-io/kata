@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -423,7 +424,7 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) (resultErr error) {
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, applyUnjoined func(int64, FoldIssue, FoldProjection) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) (resultErr error) {
 	var applying *FoldEvent
 	defer func() {
 		if resultErr != nil && applying != nil {
@@ -506,11 +507,37 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 				return err
 			}
 		}
+		if !decision.Joined {
+			if err := applyUnjoined(target, issue, p); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
 type movedProjectPassKey struct{}
+
+// FoldMovedIssue limits reconciliation to the rehomed issue and its history.
+func FoldMovedIssue(p FoldProjection, issue FoldIssue) FoldProjection {
+	result := FoldProjection{
+		Issues:        map[string]FoldIssue{issue.UID: issue},
+		IssueMetadata: map[string]jsontext.Value{issue.UID: p.IssueMetadata[issue.UID]},
+		Comments:      make(map[string]FoldComment),
+		Labels:        make(map[FoldLabelKey]FoldElementState),
+	}
+	for uid, comment := range p.Comments {
+		if comment.IssueUID == issue.UID {
+			result.Comments[uid] = comment
+		}
+	}
+	for key, state := range p.Labels {
+		if key.IssueUID == issue.UID {
+			result.Labels[key] = state
+		}
+	}
+	return result
+}
 
 // FollowingMovedProjects reports whether a destination reconciliation pass is running.
 func FollowingMovedProjects(ctx context.Context) bool {

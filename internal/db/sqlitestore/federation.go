@@ -1399,6 +1399,8 @@ func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, move
 			return err
 		}
 		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
+	}, func(projectID int64, issue db.FoldIssue, projection db.FoldProjection) error {
+		return applyUnjoinedMovedIssue(ctx, tx, projectID, issue, projection)
 	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
 		payload := "{}"
 		var issueUID *string

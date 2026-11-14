@@ -53,7 +53,10 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		if err != nil {
 			return nil, err
 		}
-		moveProjection := db.FoldProjection{Issues: make(map[string]db.FoldIssue, len(decisions))}
+		moveProjection := projection
+		moveProjection.Issues = make(map[string]db.FoldIssue, len(decisions))
+		moveProjection.Comments = maps.Clone(projection.Comments)
+		moveProjection.Labels = maps.Clone(projection.Labels)
 		for _, decision := range decisions {
 			result.moved[decision.IssueUID] = decision
 			moveOwners[decision.IssueUID] = projection.Issues[decision.IssueUID].ProjectUID
@@ -201,6 +204,14 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 				return err
 			}
 		}
+		// Capture links while both endpoints still belong to the joined group.
+		linkRows := make([]map[db.FoldLinkKey]federatedLinkRow, len(prepared.projects))
+		for i, p := range prepared.projects {
+			linkRows[i], err = federatedLinkRows(ctx, tx, p.materialization.linkProjects, nil)
+			if err != nil {
+				return err
+			}
+		}
 		// Earlier rehomes can change the source of a later decision.
 		changed := map[string]bool{}
 		for _, p := range prepared.projects {
@@ -244,7 +255,7 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 			}
 		}
 		var groups [][]int64
-		for _, p := range prepared.projects {
+		for i, p := range prepared.projects {
 			m := p.materialization
 			if slices.ContainsFunc(groups, func(group []int64) bool { return slices.Equal(group, m.linkProjects) }) {
 				continue
@@ -263,6 +274,7 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 			if err != nil {
 				return err
 			}
+			maps.Copy(rows, linkRows[i])
 			if err := reconcileFederatedLinkRows(ctx, tx, m.links, ids, rows); err != nil {
 				return err
 			}

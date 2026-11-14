@@ -410,7 +410,7 @@ func syncDirectSpoke(
 	}
 	body, err := client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
 	if err != nil {
-		return recordPullError(fmt.Errorf("poll project %s: %w", binding.HubProjectUID, err))
+		return recordPullError(err)
 	}
 	if body.ResetRequired {
 		// A pull-only turn may still carry a writable binding. Reset safety
@@ -449,7 +449,7 @@ func syncDirectSpoke(
 		binding.PullCursorEventID = cursor
 		body, err = client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
 		if err != nil {
-			return recordPullError(fmt.Errorf("poll project %s after reset: %w", binding.HubProjectUID, err))
+			return recordPullError(err)
 		}
 		if body.ResetRequired {
 			return recordPullError(ErrFederationResetRequired)
@@ -506,7 +506,7 @@ func syncDirectSpoke(
 				}
 				exists, err := store.ReconcileLocalFederationEcho(ctx, id, remoteEventFromEnvelope(ev))
 				if err != nil {
-					return fmt.Errorf("reconcile echo project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+					return err
 				}
 				if exists {
 					duplicate[i] = true
@@ -559,7 +559,7 @@ func syncDirectSpoke(
 					deliver[i], invalidate, err = recovery.recover(ctx, ev)
 				}
 				if err != nil {
-					return fmt.Errorf("recover pull project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+					return err
 				}
 			}
 			if deliver[i] || invalidate {
