@@ -46,7 +46,7 @@ func (s *doctorState) resolveDoctorDaemon(ctx context.Context) (client.ResolvedD
 
 // doctorDiscoveryCheck maps a discovery error to its finding. A stopped local
 // daemon and a default runtime directory with loose permissions are normal
-// states that the next ordinary command resolves, so neither is a failure. A
+// states, so neither is a failure. A
 // local profile directory with loose permissions is a failure because ordinary
 // commands reject it without repair.
 func doctorDiscoveryCheck(err error) diagnostics.Check {
@@ -54,7 +54,7 @@ func doctorDiscoveryCheck(err error) diagnostics.Check {
 		return skippedDoctorCheck("Workspace resolution failed")
 	}
 	if errors.Is(err, errDoctorNoRunningDaemon) {
-		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "No local daemon is running; the next kata command starts it", Fix: "Run kata daemon start, then rerun kata doctor to check the daemon."}
+		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "No local daemon is running", Fix: "Run kata daemon start, or when autostart is disabled start it through its service manager; then rerun kata doctor."}
 	}
 	if _, ok := errors.AsType[*client.LocalProfileDirError](err); ok {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Selected local profile's runtime directory is not private", Fix: "Restrict the profile's directory under <profile home>/runtime to its owner, for example with chmod 700 on Unix. Kata does not repair local profile directories."}

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -801,4 +802,59 @@ func TestDaemonRunningProfileDoesNotRequireProject(t *testing.T) {
 	_, _, err = executeRootCapture(t, t.Context(), "daemon", "recover", "--expect-project-uid", "01HZZZZZZZZZZZZZZZZZZZZZ01")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing_project")
+}
+
+// A supervised profile's runtime record can outlive its listener while the
+// service manager restarts it. Recover must wait through that gap once the
+// storage, schema, and project checks pass.
+func TestDaemonRecoverWaitsThroughSupervisedRestartGap(t *testing.T) {
+	home, _, uid, _ := stoppedProfileCLI(t)
+	var pings atomic.Int32
+	supervisedProfileDaemon(t, home, uid, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			if pings.Add(1) == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+	})
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "recover", "--json")
+	require.NoError(t, err)
+	assert.Contains(t, out, `"ready"`)
+	assert.GreaterOrEqual(t, pings.Load(), int32(2))
+}
+
+// Waiting through a restart gap must not hide a credential failure.
+func TestDaemonRecoverRejectsSupervisedAuthFailureWithoutWaiting(t *testing.T) {
+	home, _, uid, _ := stoppedProfileCLI(t)
+	supervisedProfileDaemon(t, home, uid, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, _, err := executeRootCapture(t, ctx, "daemon", "recover")
+	require.ErrorContains(t, err, "authentication failed")
+}
+
+// supervisedProfileDaemon publishes handler as the runtime of a profile home
+// whose service manager owns startup.
+func supervisedProfileDaemon(t *testing.T, home, uid string, handler http.HandlerFunc) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: uid})
+	require.NoError(t, err)
+	ns, err := daemonruntime.NewNamespaceForHome(home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(server.URL, "http://")})
+	require.NoError(t, err)
 }

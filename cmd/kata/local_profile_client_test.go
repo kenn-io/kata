@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -180,4 +181,13 @@ func TestLocalProfileTargetErrorsAreStructured(t *testing.T) {
 			assert.Contains(t, target.Message, "daemon diagnose")
 		})
 	}
+}
+
+func TestManagedExternallyTargetErrorIsStructured(t *testing.T) {
+	cause := fmt.Errorf("%w; did not become ready: %w", client.ErrDaemonManagedExternally, context.DeadlineExceeded)
+	err := cliDaemonTargetError(cause)
+	var target *cliError
+	require.ErrorAs(t, err, &target)
+	assert.Equal(t, ExitDaemonUnavail, target.ExitCode)
+	assert.Equal(t, cause.Error(), target.Message)
 }

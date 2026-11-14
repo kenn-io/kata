@@ -696,8 +696,19 @@ func TestLocalProfileWithoutInstalledStorageDiscoversButCannotStart(t *testing.T
 	assert.Zero(t, calls)
 }
 
-func TestLocalProfileReplacesCapableDaemonInPlace(t *testing.T) {
+func TestLocalProfileStaleCapableDaemonByAutostart(t *testing.T) {
+	for _, autostart := range []bool{true, false} {
+		t.Run(fmt.Sprintf("autostart=%t", autostart), func(t *testing.T) {
+			testLocalProfileStaleCapableDaemon(t, autostart)
+		})
+	}
+}
+
+func testLocalProfileStaleCapableDaemon(t *testing.T, autostart bool) {
 	profile, root := localProfileFixture(t)
+	if !autostart {
+		require.NoError(t, os.WriteFile(filepath.Join(profile.Home, "config.toml"), []byte("autostart = false\n"), 0600))
+	}
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
 	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/ping" {
@@ -744,6 +755,13 @@ func TestLocalProfileReplacesCapableDaemonInPlace(t *testing.T) {
 
 	resolved, err := EnsureResolvedInWorkspace(t.Context(), root)
 
+	if !autostart {
+		require.ErrorIs(t, err, ErrDaemonNotReplaceable)
+		assert.Zero(t, requests)
+		assert.Zero(t, state.stopCalls)
+		assert.Zero(t, state.startCalls)
+		return
+	}
 	require.NoError(t, err)
 	assert.Equal(t, 1, requests, "older profile daemon must receive an in-place request")
 	assert.Zero(t, state.stopCalls)

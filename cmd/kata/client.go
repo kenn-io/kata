@@ -184,7 +184,8 @@ func cliDaemonTargetError(err error) error {
 		}
 	}
 	if errors.Is(err, client.ErrRemoteUnavailable) ||
-		errors.Is(err, client.ErrLocalDaemonUnreachable) {
+		errors.Is(err, client.ErrLocalDaemonUnreachable) ||
+		errors.Is(err, client.ErrDaemonManagedExternally) {
 		return &cliError{
 			Message:  err.Error(),
 			Kind:     kindDaemonUnavail,

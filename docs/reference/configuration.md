@@ -202,6 +202,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `DO_NOT_TRACK` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
 | `CI` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
 | `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget, including in autostarted local-profile daemons. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
+| `KATA_AUTOSTART` | Internal process marker for an automatically started daemon; it does not override the client `autostart` policy. |
 | `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
 | `KATA_LINEAR_TOKEN` | Default daemon-owned Linear credential; `[linear_sync].token_env` selects another variable. |
 | `KATA_TWENTY_TOKEN` | Default daemon-side Twenty API key; `[twenty_sync].token_env` can select another environment variable. |
@@ -572,6 +573,12 @@ for authentication and session behavior. Kata 0.21.0 and 0.22.0 require
 `kata mcp serve --http` with a user token in this mode.
 Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires `kata mcp serve --http` when the daemon's REST self-calls use a listener in `trusted_proxy_listeners`, because those calls carry no proxy actor header. The sidecar must reach the daemon through a REST listener outside `trusted_proxy_listeners` or through the proxy that sets the actor header.
 See [MCP transport](mcp.md#transport) for gateway setup and scope.
+
+Local startup policy is configured at the top level of `<KATA_HOME>/config.toml`:
+
+| Key | Default | Behavior |
+| --- | --- | --- |
+| `autostart` | `true` | `false` prevents implicit daemon starts and replacement. Commands wait up to 30 seconds (or their shorter deadline) for the service manager's daemon, then fail; if a SQLite migration is still running, the error says so, and you should let it finish rather than restart the daemon. Recovery retains its storage and project checks before waiting. Restart an incompatible daemon through its service manager. Explicit `kata daemon start` remains available. |
 
 Idle shutdown is intended for the default owner-local daemon rather than the
 shared-daemon configuration above. Its minimal configuration is:

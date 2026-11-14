@@ -181,7 +181,13 @@ func sqliteMigrationPendingForPath(ctx context.Context, path string, inspector S
 
 func sqliteCutoverLocked(ctx context.Context) bool {
 	dsn, err := config.KataDSN(ctx)
-	if err != nil || strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+	return err == nil && sqliteCutoverLockedForDSN(dsn)
+}
+
+// sqliteCutoverLockedForDSN reports whether a SQLite cutover holds dsn's
+// import lock. PostgreSQL storage has no such lock.
+func sqliteCutoverLockedForDSN(dsn string) bool {
+	if dsn == "" || strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		return false
 	}
 	lock := flock.New(strings.TrimPrefix(dsn, "sqlite://")+".import.lock", flock.SetFlag(os.O_RDONLY))

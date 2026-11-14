@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 )
 
@@ -28,7 +30,8 @@ type DiscoverRequest struct {
 	ReadOnly bool
 	// StartWith is a kata executable. When the selected local daemon has no
 	// live runtime, it runs `daemon start`, or `daemon recover` for a pinned
-	// local profile, and discovery looks again. A remote is never started.
+	// local profile, and discovery looks again. With autostart disabled, it waits
+	// for the supervisor instead. A remote is never started.
 	StartWith string
 }
 
@@ -144,6 +147,10 @@ type executableStart struct {
 }
 
 func (s executableStart) profile(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
+	if !selection.Profile.Config.AutostartEnabled() {
+		return supervisedDiscovery(ctx, filepath.Join(selection.Profile.Home, "config.toml"),
+			profileCutoverLocked(*selection.Profile), selection, s.discover.profile)
+	}
 	args := []string{"daemon", "recover"}
 	switch {
 	case s.request.Name != "":
@@ -155,7 +162,27 @@ func (s executableStart) profile(ctx context.Context, selection DaemonSelection)
 }
 
 func (s executableStart) local(ctx context.Context, selection DaemonSelection) (ResolvedDaemon, bool, error) {
+	if enabled, configPath, err := config.ReadAutostartEnabled(); err != nil {
+		return ResolvedDaemon{}, false, err
+	} else if !enabled {
+		return supervisedDiscovery(ctx, configPath, sqliteCutoverLocked, selection, s.discover.local)
+	}
 	return s.startIfStopped(ctx, selection, s.discover.local, []string{"daemon", "start"})
+}
+
+// supervisedDiscovery polls the selection's own discovery, which accepts any
+// daemon version, through the supervised waiter's bound and error handling.
+func supervisedDiscovery(
+	ctx context.Context, configPath string, migrating func(context.Context) bool, selection DaemonSelection,
+	discover func(context.Context, DaemonSelection) (ResolvedDaemon, bool, error),
+) (resolved ResolvedDaemon, ok bool, err error) {
+	_, err = waitForSupervisedDaemon(ctx, configPath, migrating, func(ctx context.Context) (ensureDiscovery, error) {
+		if resolved, ok, err = discover(ctx, selection); ok {
+			return ensureDiscovery{Outcome: daemonScanCompatible}, nil
+		}
+		return ensureDiscovery{}, err
+	})
+	return resolved, ok, err
 }
 
 func (s executableStart) startIfStopped(
