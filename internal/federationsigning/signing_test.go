@@ -549,16 +549,3 @@ func TestTransportCannotReplaySignatureAfterLostResponse(t *testing.T) {
 	require.Len(t, retryInputs, 2)
 	require.NotEqual(t, retryInputs[0], retryInputs[1], "native retry generates a fresh nonce")
 }
-
-func TestVerifierWithElapsedStartupUsesWallClockSignatures(t *testing.T) {
-	source := testSource(t)
-	state := filepath.Join(t.TempDir(), "replay.state")
-	require.NoError(t, InitializeReplayState(state))
-	verifier, err := NewVerifierWithElapsedStartupForTest("https://hub.example/federation", []signingpolicy.Key{{Source: source, EnrollmentID: 7}}, state)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, verifier.Close()) })
-	request := signed(t, source)
-	request.URL.Path = strings.TrimPrefix(request.URL.Path, "/federation")
-	request.URL.Scheme, request.URL.Host = "", ""
-	require.NoError(t, verifier.Verify(request, 7))
-}

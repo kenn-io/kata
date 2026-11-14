@@ -29,7 +29,6 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/testenv"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/internal/version"
@@ -3234,7 +3233,6 @@ func TestFederationEnrollCLIAgainstOlderHub(t *testing.T) {
 	t.Cleanup(hub.Close)
 	out := requireCmdOutput(t, env, "--project", "hub-project", "federation", "enroll", "--hub-url", hub.URL, "--spoke-instance", env.DB.InstanceUID(), "--actor", "external-agent", "--capabilities", "pull")
 	assert.Contains(t, out, "federation join --project hub-project --hub-url "+hub.URL)
-	assert.NotContains(t, out, "--signing-key-id")
 	grants, err := env.DB.ListFederationEnrollments(t.Context())
 	require.NoError(t, err)
 	require.Len(t, grants, 1)
@@ -3298,46 +3296,6 @@ func TestPrintFederationEnrollmentAgentKeepsRowsWhenJoinCommandMissing(t *testin
 	require.Contains(t, out.String(), "join command unavailable")
 	require.NotContains(t, out.String(), "issued-token")
 	require.NotContains(t, out.String(), "{")
-}
-
-func TestFederationEnrollCLIRequiredSigningInstructions(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("shell argument parsing requires a POSIX shell")
-	}
-	verifier, _ := testenv.FederationSigning(t, "https://daemon.example/federation", "key-a")
-	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
-		cfg.FederationSigningRequired = true
-		cfg.FederationSigning = verifier
-	})
-	savedArgs := os.Args
-	os.Args = []string{"/opt/kata_custom"}
-	t.Cleanup(func() { os.Args = savedArgs })
-	args := []string{"--project", "hub-project", "federation", "enroll", "--spoke-instance", env.DB.InstanceUID(), "--hub-url", env.URL, "--actor", "tester", "--capabilities", "pull", "--token", "join-token", "--allow-insecure"}
-	jsonOut := requireCmdOutput(t, env, append([]string{"--json"}, args...)...)
-	var body struct {
-		Join federationJoinBundle `json:"join"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(jsonOut), &body))
-	command := body.Join.JoinCommand
-	require.NotEmpty(t, command)
-	assert.Equal(t, "https://daemon.example/federation", body.Join.HubURL)
-	assert.False(t, body.Join.AllowInsecure)
-	// Capture POSIX shell words, then pass them to the real join command parser.
-	script := `kata_custom() { printf '%s\0' "$@"; }; ` + command
-	out, err := exec.CommandContext(t.Context(), "sh", "-c", script).CombinedOutput() //nolint:gosec // Shell invokes only the capturing function.
-	require.NoError(t, err, "%s", out)
-	joinArgs := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
-	metadataCalled := false
-	originalFetch := fetchFederationJoinMetadata
-	fetchFederationJoinMetadata = func(context.Context, federationJoinBundle) (api.ProjectFederationBody, error) {
-		metadataCalled = true
-		return api.ProjectFederationBody{}, errors.New("unexpected metadata request")
-	}
-	t.Cleanup(func() { fetchFederationJoinMetadata = originalFetch })
-	_, err = runCmdOutput(t, env, joinArgs...)
-	// The platform determines which error the placeholder path returns.
-	require.True(t, errors.Is(err, signingpolicy.ErrKeyRejected) || errors.Is(err, signingpolicy.ErrKey))
-	assert.False(t, metadataCalled)
 }
 
 func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {

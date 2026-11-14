@@ -449,13 +449,7 @@ func TestRequiredSigningPreservesLocalBearerLeaseAuthority(t *testing.T) {
 }
 
 func TestOptionalSigningRejectsEmptySignatureHeader(t *testing.T) {
-	t.Setenv("TEST_OPTIONAL_KEY", strings.Repeat("k", 64))
-	state := filepath.Join(t.TempDir(), "state")
-	require.NoError(t, federationsigning.InitializeReplayState(state))
-	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_OPTIONAL_KEY"}
-	v, err := federationsigning.NewVerifier("https://daemon.example", []signingpolicy.Key{{Source: source, EnrollmentID: 1}}, state)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = v.Close() })
+	v, _ := testenv.FederationSigning(t, "https://daemon.example", "key-a")
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.FederationSigning = v })
 	project := createFederatedHubProject(t, env, "hub-project")
 	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "enrollment", SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "pull", Actor: "example-actor"})
