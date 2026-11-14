@@ -211,7 +211,7 @@ func TestMoveRebuildRemovesStaleLinksBeforeIssues(t *testing.T) {
 	require.NoError(t, err)
 	_, err = seed.CreateLink(ctx, db.CreateLinkParams{FromIssueID: orphan.ID, ToIssueID: issue.ID, Type: "blocks", Author: "tester"})
 	require.NoError(t, err)
-	// A partial archive can contain a projection without its event history.
+	// Replay projections with only the source project's event history.
 	var records []db.ImportRecord
 	for row, err := range seed.ExportProjects(ctx, db.ExportFilter{}) {
 		require.NoError(t, err)
