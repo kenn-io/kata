@@ -17,6 +17,15 @@ import (
 // R4/R5: a root-signed checkpoint and the live immediate-hop translation
 // replace state together. Source labels alone never confer verified creation.
 func RunSignedRelayResetCommitments(t *testing.T, store db.Storage) {
+	runSignedRelayResetCommitments(t, store, false)
+}
+
+// RunSignedRelayResetUnresolvedPeer checks a forwarded checkpoint before its peer arrives.
+func RunSignedRelayResetUnresolvedPeer(t *testing.T, store db.Storage) {
+	runSignedRelayResetCommitments(t, store, true)
+}
+
+func runSignedRelayResetCommitments(t *testing.T, store db.Storage, unresolved bool) {
 	installer, ok := store.(interface {
 		InstallRelayReset(context.Context, string, db.RootResetManifest, db.RootResetSnapshot, db.RelayResetTranslation) error
 	})
@@ -46,7 +55,13 @@ func RunSignedRelayResetCommitments(t *testing.T, store db.Storage) {
 	proof, err := db.SignRootReceipt(db.AttributionReceipt{Version: 1, ProjectUID: project.UID, EventUID: source.EventUID, ContentHash: source.ContentHash, AuthorityUID: rootUID, KeyID: pin.KeyID, AccountableActor: "company-member", SourceActor: source.Actor, IngressInstanceUID: rootUID, AcceptedAt: time.Now().UTC(), ResetEpoch: 1, Sequence: 1}, private)
 	require.NoError(t, err)
 	// Snapshots describe current state but are not original creation events.
-	entity := newRemoteEvent(t, project, &issueUID, "issue.snapshot", "source-assistant", rootUID, 400, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"After snapshot","author":"source-assistant","metadata":{},"comments":[],"labels":[],"links":[]}`)))
+	peerUID, err := uid.New()
+	require.NoError(t, err)
+	links := `[]`
+	if unresolved {
+		links = `[{"type":"blocks","to_issue_uid":"` + peerUID + `"}]`
+	}
+	entity := newRemoteEvent(t, project, &issueUID, "issue.snapshot", "source-assistant", rootUID, 400, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"After snapshot","author":"source-assistant","metadata":{},"comments":[],"labels":[],"links":`+links+`}`)))
 	entityBytes, err := db.EncodeRelaySourceEvent(entity)
 	require.NoError(t, err)
 	events, err := json.Marshal([][]byte{sourceBytes})
@@ -179,10 +194,21 @@ func RunSignedRelayResetCommitments(t *testing.T, store db.Storage) {
 		CreateRelayReset(context.Context, string, db.RootAttributionSigner) (db.RelayResetCheckpoint, error)
 	})
 	require.True(t, ok)
+	var peerProject db.Project
+	var peerIssue db.Issue
+	if unresolved {
+		ctx = db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures)
+		peerProject, err = store.CreateProject(ctx, "resolved-reset-peer")
+		require.NoError(t, err)
+		peerIssue, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: peerProject.ID, UID: peerUID, Author: "member", Title: "Resolved peer"})
+		require.NoError(t, err)
+	}
 	forwardChild, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000009", ProtocolVersion: db.RelayProtocolVersion, Token: "reset-forward-child-test-token"})
 	require.NoError(t, err)
-	_, err = forwarder.CreateRelayReset(ctx, forwardChild.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
-	require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush, "initial emitted child intent must be resolved first")
+	if !unresolved {
+		_, err = forwarder.CreateRelayReset(ctx, forwardChild.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
+		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush, "initial emitted child intent must be resolved first")
+	}
 	for _, stream := range []string{db.RelayStreamEvent, db.RelayStreamReceipt} {
 		items, err := store.PendingRelayDeliveries(ctx, forwardChild.Enrollment.RelayBindingUID, stream, 100)
 		require.NoError(t, err)
@@ -190,6 +216,37 @@ func RunSignedRelayResetCommitments(t *testing.T, store db.Storage) {
 			last := items[len(items)-1]
 			require.NoError(t, store.AckRelayDeliveries(ctx, forwardChild.Enrollment.RelayBindingUID, 1, stream, last.Sequence, last.Digest))
 		}
+	}
+	if unresolved {
+		_, err := store.PurgeIssue(ctx, peerIssue.ID, "member", nil)
+		require.NoError(t, err)
+		denied := db.WithProjectAccessTransactionCheck(ctx, func(_ context.Context, _ db.Transaction, projectUID string) error {
+			require.Equal(t, peerProject.UID, projectUID)
+			return db.ErrNotFound
+		})
+		var beforeState []db.ImportRecord
+		for record, err := range store.ExportRelayState(ctx) {
+			require.NoError(t, err)
+			beforeState = append(beforeState, record)
+		}
+		before, err := store.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		withheld, err := forwarder.CreateRelayReset(denied, forwardChild.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
+		require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
+		require.Equal(t, db.RelayResetCheckpoint{}, withheld)
+		after, err := store.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+		var afterState []db.ImportRecord
+		for record, err := range store.ExportRelayState(ctx) {
+			require.NoError(t, err)
+			afterState = append(afterState, record)
+		}
+		require.Equal(t, beforeState, afterState)
+		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: peerProject.ID, UID: peerUID, Author: "member", Title: "Resolved peer"})
+		require.NoError(t, err)
+		_, err = forwarder.CreateRelayReset(denied, forwardChild.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
+		require.ErrorIs(t, err, db.ErrNotFound, "the resolved peer must be authorized")
 	}
 	forwarded, err := forwarder.CreateRelayReset(ctx, forwardChild.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
 	require.NoError(t, err, "relay must forward its retained signed checkpoint without a root private key")
