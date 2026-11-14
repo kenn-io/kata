@@ -69,7 +69,8 @@ is optional on the ordinary daemon listeners.
    the signing key ID and absolute spoke key file path. Replace each whole
    quoted placeholder, including the angle brackets, before running it on the
    spoke: for example, `'<signing-key-id>'` becomes `spoke-key-1` and
-   `'<absolute-path-to-spoke-key>'` becomes `/path/to/spoke.key`. Alternatively,
+   `'<absolute-path-to-spoke-key>'` becomes `'/path/to/spoke key'`. Keep the
+   quotes around the key path. Alternatively,
    replace `--signing-key-file` with
    `--signing-key-env KATA_SPOKE_SIGNING_KEY`. The same source must exist in
    the spoke CLI and daemon environments because the CLI fetches metadata

@@ -381,7 +381,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		hubURL := in.Body.HubURL
 		allowInsecure := in.Body.AllowInsecure
-		if hubURL != "" {
+		signingTemplate := cfg.FederationSigningRequired && cfg.FederationSigning != nil
+		if signingTemplate {
+			hubURL = cfg.FederationSigning.Base()
+			allowInsecure = false
+		} else if hubURL != "" {
 			baseURL, err := httpurl.CanonicalHTTPBaseURL(hubURL)
 			if err != nil {
 				return nil, api.NewError(http.StatusBadRequest, "validation", "hub_url must be an HTTP(S) base URL allowed by transport policy", "", nil)
@@ -392,11 +396,6 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			hubURL = baseURL
 			allowInsecure, _ = httpurl.EffectiveHTTPAllowInsecure(hubURL, allowInsecure)
-		}
-		signingTemplate := cfg.FederationSigningRequired && cfg.FederationSigning != nil
-		if signingTemplate {
-			hubURL = cfg.FederationSigning.Base()
-			allowInsecure = false
 		}
 		// Resolve all response metadata before issuing a durable credential.
 		var join *api.FederationJoinInstructions

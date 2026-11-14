@@ -3372,7 +3372,7 @@ func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
 	t.Setenv("SSL_CERT_FILE", certFile)
 	t.Setenv("PATH", filepath.Dir(binary)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	// The verifier rejects requests until its replay quarantine has elapsed.
-	time.Sleep(federationsigning.Quarantine + time.Second)
+	<-time.After(federationsigning.Quarantine + time.Second)
 	output, err := exec.CommandContext(t.Context(), "sh", "-c", command, "--", key).CombinedOutput() //nolint:gosec // Command and binary come from this test's enrollment and fixture.
 	require.NoError(t, err, "%s", output)
 	project, err := spoke.DB.ProjectByName(t.Context(), "hub-project")

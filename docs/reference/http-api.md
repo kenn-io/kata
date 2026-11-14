@@ -857,14 +857,13 @@ capabilities, token, transport options, and `join_command`. Supply `hub_url`
 as an HTTP(S) base URL reachable by the spoke, optionally with a federation
 API reverse-proxy prefix. The server does not infer a federation address
 from its browser origin; dedicated browser listeners and authentication proxies
-may not serve federation transport. Non-loopback HTTP URLs, including private
-IP addresses, require `allow_insecure: true`. Without it, enrollment returns
-`400` before issuing a token. For an ordinary join, the returned command
+may not serve federation transport. For an ordinary join, non-loopback HTTP
+URLs, including private IP addresses, require `allow_insecure: true`. Without
+it, enrollment returns `400` before issuing a token. The returned command
 carries `--allow-insecure` when needed; HTTPS still verifies certificates.
 On a hub that requires signing, `join.hub_url` uses the hub's signing
-`external_url`. A supplied `hub_url` is still validated, but is not used for
-the join. The command includes signing key placeholders and does not include
-`--allow-insecure`.
+`external_url`. The hub ignores a supplied `hub_url`. The command includes
+signing key placeholders and does not include `--allow-insecure`.
 
 The returned command includes `--project` and the hub project ID, plus any
 push/adoption options. Join fetches the current UID and cursors from the hub
