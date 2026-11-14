@@ -661,24 +661,18 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 			retained, readErr := store.IssueByID(ctx, issue.ID)
 			require.NoError(t, readErr)
 			require.Equal(t, source.ID, retained.ProjectID)
+			if kind == "bridge" {
+				prepareRehomePull(t, store, source, target, "pull")
+				_, err = store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{event})
+				require.NoError(t, err)
+				err = store.MaterializeFederatedProject(ctx, target.ID)
+				require.ErrorIs(t, err, db.ErrExternalRootClaimActive)
+				require.ErrorContains(t, err, "apply move")
+				require.ErrorContains(t, err, event.EventUID)
+				require.ErrorContains(t, err, event.ProjectUID)
+			}
 		})
 	}
-	t.Run("pull apply error envelope", func(t *testing.T) {
-		ctx := t.Context()
-		from, to, pinned, blocked := federatedRehomeFixture(t, store, "apply-error")
-		prepareRehomePull(t, store, from, to, "pull")
-		root, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{ProjectID: from.ID, IssueID: pinned.ID, ConnectorInstance: "apply-error-notes", ExternalRootKey: "root", ExternalAccountKey: "account", Actor: "worker", ReceiveCommentsAfter: time.Now().UTC()})
-		require.NoError(t, err)
-		_, _, err = store.ClaimExternalRootBinding(ctx, root.ID, "bridge-worker", time.Now().UTC(), time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter))
-		require.NoError(t, err)
-		_, err = store.InsertRemoteEvents(ctx, to.ID, []db.RemoteEvent{blocked})
-		require.NoError(t, err)
-		err = store.MaterializeFederatedProject(ctx, to.ID)
-		require.ErrorIs(t, err, db.ErrExternalRootClaimActive)
-		require.ErrorContains(t, err, "apply move")
-		require.ErrorContains(t, err, blocked.EventUID)
-		require.ErrorContains(t, err, blocked.ProjectUID)
-	})
 	return nil
 }
 
