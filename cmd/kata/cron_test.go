@@ -810,3 +810,61 @@ func TestCronCLIParentUpdateKeepsBindingProtections(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, parents[0].UID, stored.Definition.Issue.ParentUID)
 }
+
+func TestCronRunStatsCLI(t *testing.T) {
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	raw, _, err := executeCronCLI(t, env.URL, nil, "run", "stats", "--since", "2d", "--until", "2026-11-01T00:00:00Z", "--bucket", "day")
+	require.NoError(t, err)
+	var result map[string]any
+	require.NoError(t, json.Unmarshal([]byte(raw), &result))
+	window := result["window"].(map[string]any)
+	require.Equal(t, "2026-10-30T00:00:00Z", window["since"])
+	require.Equal(t, "2026-11-01T00:00:00Z", window["until"])
+}
+
+func TestCronRunStatsRequiresAPIVersion(t *testing.T) {
+	var statsCalls atomic.Int32
+	var healthCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/health":
+			healthCalls.Add(1)
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.46.0"}`))
+		case "/api/v1/projects":
+			_, _ = w.Write([]byte(`{"projects":[{"id":1,"name":"example-project","uid":"01HAAAAAAAAAAAAAAAAAAAAAAA"}]}`))
+		case "/api/v1/projects/1":
+			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project","uid":"01HAAAAAAAAAAAAAAAAAAAAAAA"}}`))
+		case "/api/v1/projects/1/cron/runs/stats":
+			statsCalls.Add(1)
+			http.NotFound(w, r)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "--project", "example-project", "cron", "run", "stats")
+	var cliErr *cliError
+	require.ErrorAs(t, err, &cliErr)
+	require.Equal(t, "daemon_api_too_old", cliErr.Code)
+	require.EqualValues(t, 1, healthCalls.Load())
+	require.Zero(t, statsCalls.Load())
+}
+
+func TestCronRunStatsRejectsEmptyFilters(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	for _, flag := range []string{"--job-uid", "--workflow-uid"} {
+		t.Run(flag, func(t *testing.T) {
+			_, _, err := executeCronCLI(t, server.URL, nil, "run", "stats", flag, "")
+			require.ErrorContains(t, err, flag+" must not be empty")
+			require.Zero(t, calls.Load())
+		})
+	}
+}

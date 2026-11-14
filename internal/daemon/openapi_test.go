@@ -772,3 +772,16 @@ func TestOpenAPIDocumentShowIssueCarriesLabelStrings(t *testing.T) {
 
 	require.NotContains(t, schemas["Issue"].Properties, "labels")
 }
+
+func TestOpenAPICronStatisticsNulls(t *testing.T) {
+	doc := OpenAPIDocument()
+	body := doc.Components.Schemas.Map()["CronRunStatsResponseBody"]
+	require.NotNil(t, body)
+	require.True(t, body.Properties["success_rate"].Nullable)
+	duration := doc.Components.Schemas.Map()["DurationStats"]
+	require.NotNil(t, duration)
+	require.True(t, duration.Nullable)
+	bucket := doc.Components.Schemas.Map()["RunStatBucket"]
+	require.NotNil(t, bucket)
+	require.True(t, bucket.Properties["median_duration_seconds"].Nullable)
+}

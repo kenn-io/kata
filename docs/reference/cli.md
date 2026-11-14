@@ -2446,6 +2446,7 @@ kata cron capabilities --json
 kata cron run observe <run-uid> --json-input observation.json --json
 kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --json
 kata cron run show <run-uid> --json
+kata cron run stats [--job-uid <uid> | --workflow-uid <uid>] [--since <RFC3339|Nd|Nh>] [--until <RFC3339>] [--bucket day] [--timezone <IANA>] --json
 kata show <issue-ref> --planning-dates --json
 ```
 
@@ -2456,6 +2457,7 @@ generated or explicit definition UID after a lost create response; inspect it ra
 assuming a create conflict is successful. Mutable definitions require the
 current expected event UID, from `--expected-event-uid` or the request body. Independent runs use a retained run UID, exact
 same-write retry idempotency, and ordinary revision CAS for changed evidence.
+See [Run statistics](cron.md#run-statistics) for window and truncation rules.
 The planning-date read returns native resolved dates without changing readiness.
 
 ## Federation

@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
+	"time"
+
+	"go.kenn.io/kata/internal/cron"
 
 	"github.com/danielgtaylor/huma/v2"
 	"go.kenn.io/kata/internal/api"
@@ -61,6 +65,57 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		}
 		out := &api.CronRunResponse{}
 		out.Body.Run = api.CronRunFrom(run)
+		return out, nil
+	})
+	huma.Register(h, huma.Operation{OperationID: "getCronRunStats", Method: http.MethodGet, Path: base + "/runs/stats"}, func(ctx context.Context, in *api.CronRunStatsRequest) (*api.CronRunStatsResponse, error) {
+		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		invalid := func(message string) error { return api.NewError(400, "validation", message, "", nil) }
+		until := time.Now().UTC()
+		if in.Until != "" {
+			until, err = time.Parse(time.RFC3339, in.Until)
+			if err != nil {
+				return nil, invalid("invalid until")
+			}
+		}
+		since := until.Add(-cron.RunStatsDefaultWindow)
+		if in.Since != "" {
+			since, err = time.Parse(time.RFC3339, in.Since)
+			if err != nil {
+				return nil, invalid("invalid since")
+			}
+		}
+		if since.UTC().Year() < 0 || since.UTC().Year() > 9999 || until.UTC().Year() < 0 || until.UTC().Year() > 9999 {
+			return nil, invalid("window endpoint outside RFC3339 UTC range")
+		}
+		if until.Sub(since) > cron.RunStatsMaxWindow {
+			return nil, invalid("window must be at most 366 days")
+		}
+		if in.Bucket != "" && in.Bucket != "none" && in.Bucket != "day" {
+			return nil, invalid("invalid bucket")
+		}
+		zone := in.Timezone
+		if zone == "" {
+			zone = "UTC"
+		}
+		loc, err := time.LoadLocation(zone)
+		if err != nil || zone == "Local" {
+			return nil, invalid("invalid timezone")
+		}
+		rows, truncated, err := cfg.DB.CronRunStats(ctx, db.CronRunStatsQuery{ProjectID: in.ProjectID, JobUID: in.JobUID, WorkflowUID: in.WorkflowUID, Since: since, Until: until})
+		if err != nil {
+			return nil, cronRunAPIError(ctx, cfg, err, in.ProjectID, "")
+		}
+		if truncated {
+			since = rows[len(rows)-1].Executed()
+		}
+		out := &api.CronRunStatsResponse{}
+		out.Body.ProjectUID, out.Body.JobUID, out.Body.WorkflowUID = project.UID, strings.ToUpper(in.JobUID), strings.ToUpper(in.WorkflowUID)
+		out.Body.Window = api.CronRunStatsWindow{Since: since.UTC(), Until: until.UTC()}
+		out.Body.Truncated = truncated
+		out.Body.RunStatistics = cron.SummarizeRuns(rows, in.Bucket == "day", loc)
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "listCronRuns", Method: http.MethodGet, Path: base + "/runs"}, func(ctx context.Context, in *api.CronRunsRequest) (*api.CronRunsResponse, error) {

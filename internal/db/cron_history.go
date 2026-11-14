@@ -83,3 +83,10 @@ func (*CronWorkflowExport) ImportKind() string { return ImportKindCronWorkflow }
 
 // ImportKind identifies a portable independent observation record.
 func (*CronRunExport) ImportKind() string { return ImportKindCronRun }
+
+// CronRunStatsQuery scopes a bounded execution-time scan.
+type CronRunStatsQuery struct {
+	ProjectID           int64
+	JobUID, WorkflowUID string
+	Since, Until        time.Time
+}

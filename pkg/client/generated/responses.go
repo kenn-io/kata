@@ -243,6 +243,10 @@ type ListCronRunsResponse = CronRunsResponseBody
 
 type ListCronRunsErrorResponse = ErrorEnvelope
 
+type GetCronRunStatsResponse = CronRunStatsResponseBody
+
+type GetCronRunStatsErrorResponse = ErrorEnvelope
+
 type ShowCronRunResponse = CronRunResponseBody
 
 type ShowCronRunErrorResponse = ErrorEnvelope
@@ -1101,6 +1105,14 @@ type ListCronRunsResp struct {
 	StatusCode   int
 	JSON200      *ListCronRunsResponse
 	JSONDefault  *ListCronRunsErrorResponse
+}
+
+type GetCronRunStatsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetCronRunStatsResponse
+	JSONDefault  *GetCronRunStatsErrorResponse
 }
 
 type ShowCronRunResp struct {

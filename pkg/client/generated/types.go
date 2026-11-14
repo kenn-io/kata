@@ -1573,6 +1573,74 @@ func (c CronRunResponseBody) Validate() error {
 	return errors
 }
 
+type CronRunStatsResponseBody struct {
+	Buckets             *[]RunStatBucket   `json:"buckets,omitempty"`
+	ByStatus            map[string]int64   `json:"by_status"`
+	ConsecutiveFailures int64              `json:"consecutive_failures"`
+	DurationSeconds     *DurationStats     `json:"duration_seconds"`
+	JobUID              *string            `json:"job_uid,omitempty"`
+	LastFailedAt        *time.Time         `json:"last_failed_at" validate:"required"`
+	LastSucceededAt     *time.Time         `json:"last_succeeded_at" validate:"required"`
+	ProjectUID          string             `json:"project_uid" validate:"required"`
+	Scanned             int64              `json:"scanned"`
+	SuccessRate         *float64           `json:"success_rate"`
+	Truncated           bool               `json:"truncated"`
+	Window              CronRunStatsWindow `json:"window"`
+	WorkflowUID         *string            `json:"workflow_uid,omitempty"`
+}
+
+func (c CronRunStatsResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(c.Buckets).(runtime.Validator); ok && v != nil {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Buckets", err)
+		}
+	}
+	if c.DurationSeconds != nil {
+		if v, ok := any(c.DurationSeconds).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("DurationSeconds", err)
+			}
+		}
+	}
+	if c.LastFailedAt != nil {
+		if err := typesValidator.Var(c.LastFailedAt, "required"); err != nil {
+			errors = errors.Append("LastFailedAt", err)
+		}
+	}
+	if c.LastSucceededAt != nil {
+		if err := typesValidator.Var(c.LastSucceededAt, "required"); err != nil {
+			errors = errors.Append("LastSucceededAt", err)
+		}
+	}
+	if err := typesValidator.Var(c.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if v, ok := any(c.SuccessRate).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("SuccessRate", err)
+		}
+	}
+	if v, ok := any(c.Window).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Window", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronRunStatsWindow struct {
+	Since time.Time `json:"since" validate:"required"`
+	Until time.Time `json:"until" validate:"required"`
+}
+
+func (c CronRunStatsWindow) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
 type CronRunsResponseBody struct {
 	NextBeforeUID *string   `json:"next_before_uid,omitempty"`
 	Runs          []CronRun `json:"runs" validate:"required"`
@@ -1963,6 +2031,14 @@ func (d DoctorResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type DurationStats struct {
+	Count  int64   `json:"count"`
+	Max    float64 `json:"max"`
+	Median float64 `json:"median"`
+	Min    float64 `json:"min"`
+	P95    float64 `json:"p95"`
 }
 
 type EditCommentRequestBody struct {
@@ -6684,6 +6760,28 @@ func (r RunIssueSyncOnceResponseBody) Validate() error {
 	if v, ok := any(r.Status).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Status", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type RunStatBucket struct {
+	ByStatus              map[string]int64 `json:"by_status"`
+	Date                  string           `json:"date" validate:"required"`
+	MedianDurationSeconds *float64         `json:"median_duration_seconds"`
+}
+
+func (r RunStatBucket) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(r.Date, "required"); err != nil {
+		errors = errors.Append("Date", err)
+	}
+	if v, ok := any(r.MedianDurationSeconds).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("MedianDurationSeconds", err)
 		}
 	}
 	if len(errors) == 0 {
