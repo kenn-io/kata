@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
@@ -148,4 +149,89 @@ func testSyncFederationInvalidPullHash(t *testing.T, local bool) {
 	if !local {
 		require.GreaterOrEqual(t, binding.PullCursorEventID, event.ID)
 	}
+}
+
+func TestSyncFederationMoveBackfillFailureStatusContext(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "backfill-source", "backfill-target")
+	spoke := newMoveDeliverySpoke(t, hub, projects[1:])
+	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Incoming", Author: "worker"})
+	require.NoError(t, err)
+	move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	require.NotNil(t, move.Event)
+	target, err := url.Parse(hub.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/federation/events") && r.URL.Query().Get("issue_uid") == issue.UID {
+			http.Error(w, "history unavailable", http.StatusInternalServerError)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	credential := spoke.credentials[projects[1].UID]
+	credential.HubURL = server.URL
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	require.Error(t, SyncFederationPullOnlyOnce(ctx, spoke.env.DB, binding, credential, spoke.credentials))
+	status, err := spoke.env.DB.FederationSyncStatusByProject(ctx, binding.ProjectID)
+	require.NoError(t, err)
+	require.NotNil(t, status.LastError)
+	assert.Contains(t, *status.LastError, "backfill")
+	assert.Contains(t, *status.LastError, move.Event.ProjectUID)
+	assert.Contains(t, *status.LastError, move.Event.UID)
+}
+
+func TestSyncFederationUnsyncedCommentBeforeUnjoinedMove(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "source", "destination")
+	spoke := newMoveDeliverySpoke(t, hub, projects[:1])
+	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Issue", Author: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	local, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Unsynced local comment"})
+	require.NoError(t, err)
+	move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	require.NotNil(t, move.Event)
+	_, later, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Later work", Author: "worker"})
+	require.NoError(t, err)
+	err = spoke.sync(t, 0)
+	require.ErrorContains(t, err, "403")
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, binding.PullCursorEventID, later.ID)
+	retained, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, local.ID, retained.ID)
+	destination, err := spoke.env.DB.ProjectByUID(ctx, projects[1].UID)
+	require.NoError(t, err)
+	require.NotNil(t, destination.DeletedAt)
+	require.Equal(t, destination.ID, retained.ProjectID)
+	comments, err := spoke.env.DB.CommentsByIssue(ctx, retained.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "Unsynced local comment", comments[0].Body)
+}
+
+func TestSyncFederationDuplicateRecoveryFailureStatusContext(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "duplicate-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects)
+	_, event, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Local issue", Author: "worker"})
+	require.NoError(t, err)
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	err = SyncFederationOnceWithPulledEvents(ctx, failingDeliveryLookup{spoke.env.DB}, binding, spoke.credentials[projects[0].UID], clientpkg.Opts{}, func(int64, []db.Event) {}, spoke.credentials)
+	require.ErrorContains(t, err, "delivery lookup failed")
+	status, err := spoke.env.DB.FederationSyncStatusByProject(ctx, binding.ProjectID)
+	require.NoError(t, err)
+	require.NotNil(t, status.LastError)
+	assert.Contains(t, *status.LastError, "duplicate")
+	assert.Contains(t, *status.LastError, projects[0].UID)
+	assert.Contains(t, *status.LastError, event.UID)
 }

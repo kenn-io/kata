@@ -68,6 +68,10 @@ func TestSyncFederationMoveBackfillsLocalCreationAfterSourceLeave(t *testing.T) 
 				spoke.credentials[target.UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[1].ID, Token: grant.Token, Actor: "worker"}
 			}
 			require.NoError(t, spoke.sync(t, 1), "recovered local history must not require its retired source binding")
+			got, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, spoke.projects[1].ID, got.ProjectID)
+			require.Equal(t, "locally created history", got.Title)
 		})
 	}
 }

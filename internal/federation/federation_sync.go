@@ -389,12 +389,16 @@ func syncDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	runStartBinding := binding
+	var pushErr error
 	if pushThisTurn {
 		// A push that waits for the hub's history is finished by the pull
-		// below and the next cycle's push.
-		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts); err != nil &&
-			!errors.Is(err, db.ErrFederationPushAwaitsPull) {
-			return err
+		// below and the next cycle's push. A failed push is returned after it.
+		pushErr = pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts)
+		if errors.Is(pushErr, errFederationRunnerLeaseInvalid) {
+			return pushErr
+		}
+		if errors.Is(pushErr, db.ErrFederationPushAwaitsPull) {
+			pushErr = nil
 		}
 	}
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
@@ -646,11 +650,15 @@ func syncDirectSpoke(
 			start = end
 		}
 	}
+	return errors.Join(recordFederationPullSuccess(ctx, store, binding.ProjectID, pullStartedAt), pushErr)
+}
+
+func recordFederationPullSuccess(ctx context.Context, store db.Storage, projectID int64, startedAt time.Time) error {
 	completedAt := time.Now().UTC()
-	if completedAt.Before(pullStartedAt) {
-		completedAt = pullStartedAt
+	if completedAt.Before(startedAt) {
+		completedAt = startedAt
 	}
-	return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, completedAt)
+	return store.RecordFederationSyncPullSuccess(ctx, projectID, completedAt)
 }
 
 func startFederationPull(ctx context.Context, store db.Storage, projectID int64) (bool, time.Time, error) {
@@ -688,7 +696,12 @@ func shouldDeliverDuplicateLocalEcho(
 	binding db.FederationBinding,
 	runStartBinding db.FederationBinding,
 	ev api.EventEnvelope,
-) (bool, error) {
+) (deliver bool, err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("duplicate local echo project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+		}
+	}()
 	projectID := binding.ProjectID
 	if ev.ProjectUID != binding.HubProjectUID {
 		project, err := store.ProjectByUID(ctx, ev.ProjectUID)

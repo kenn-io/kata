@@ -177,7 +177,7 @@ func reconcileFederatedLinkGroup(
 }
 
 func reconcileParkedIssueLinks(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueUID string) error {
-	ids, err := db.FederatedLinkIssueIDs(ctx, tx, projection)
+	ids, err := db.FederatedLinkIssueIDs(ctx, tx, projection, issueUID)
 	if err != nil {
 		return err
 	}

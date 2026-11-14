@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 
@@ -15,7 +16,7 @@ import (
 // cursor can already be newer than those deltas even when creation is retained.
 // Using the original clocks avoids treating the move snapshot as a content edit.
 func backfillFederationMoveHistory(ctx context.Context, client *Client, projectID int64, page api.PollEventsBody) ([]api.EventEnvelope, error) {
-	movedSubjects := map[string]bool{}
+	moves := map[string]api.EventEnvelope{}
 	var subjects []string
 	seen := map[string]bool{}
 	for _, event := range page.Events {
@@ -23,9 +24,9 @@ func backfillFederationMoveHistory(ctx context.Context, client *Client, projectI
 		if event.Type != "issue.moved" || event.IssueUID == nil {
 			continue
 		}
-		if !movedSubjects[*event.IssueUID] {
+		if _, known := moves[*event.IssueUID]; !known {
 			subjects = append(subjects, *event.IssueUID)
-			movedSubjects[*event.IssueUID] = true
+			moves[*event.IssueUID] = event
 		}
 	}
 	events := slices.Clone(page.Events)
@@ -34,7 +35,8 @@ func backfillFederationMoveHistory(ctx context.Context, client *Client, projectI
 		// The hub checks current ownership before returning this history.
 		history, err := client.issueHistoryThrough(ctx, projectID, uid, page.NextAfterID)
 		if err != nil {
-			return nil, err
+			move := moves[uid]
+			return nil, fmt.Errorf("backfill issue %s history for moved event project %s event %s: %w", uid, move.ProjectUID, move.EventUID, err)
 		}
 		for _, event := range history {
 			if !seen[event.EventUID] {
