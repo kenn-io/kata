@@ -3,7 +3,6 @@ package federation
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -38,11 +37,6 @@ func newPulledDuplicateRecovery(store db.Storage, binding db.FederationBinding, 
 // different stream to recover its hooks. Recovery remains at-least-once when
 // existing cursors cannot prove acknowledgement; there is no outbox.
 func (r *pulledDuplicateRecovery) recover(ctx context.Context, event api.EventEnvelope) (publish, invalidate bool, err error) {
-	defer func() {
-		if err != nil {
-			err = fmt.Errorf("duplicate recovery project %s event %s: %w", event.ProjectUID, event.EventUID, err)
-		}
-	}()
 	// A move is stored under its destination envelope, but its first pull and
 	// mutation-hook delivery belong to the source stream that exposed it.
 	publicationProjectUID := event.ProjectUID

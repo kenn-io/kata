@@ -566,7 +566,7 @@ func syncDirectSpoke(
 					deliver[i], invalidate, err = recovery.recover(ctx, ev)
 				}
 				if err != nil {
-					return err
+					return fmt.Errorf("recover duplicate project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 				}
 			}
 			if deliver[i] || invalidate {
@@ -652,15 +652,11 @@ func syncDirectSpoke(
 			start = end
 		}
 	}
-	return errors.Join(recordFederationPullSuccess(ctx, store, binding.ProjectID, pullStartedAt), pushErr)
-}
-
-func recordFederationPullSuccess(ctx context.Context, store db.Storage, projectID int64, startedAt time.Time) error {
 	completedAt := time.Now().UTC()
-	if completedAt.Before(startedAt) {
-		completedAt = startedAt
+	if completedAt.Before(pullStartedAt) {
+		completedAt = pullStartedAt
 	}
-	return store.RecordFederationSyncPullSuccess(ctx, projectID, completedAt)
+	return errors.Join(store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, completedAt), pushErr)
 }
 
 func startFederationPull(ctx context.Context, store db.Storage, projectID int64) (bool, time.Time, error) {
@@ -698,12 +694,7 @@ func shouldDeliverDuplicateLocalEcho(
 	binding db.FederationBinding,
 	runStartBinding db.FederationBinding,
 	ev api.EventEnvelope,
-) (deliver bool, err error) {
-	defer func() {
-		if err != nil {
-			err = fmt.Errorf("duplicate local echo project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
-		}
-	}()
+) (bool, error) {
 	projectID := binding.ProjectID
 	if ev.ProjectUID != binding.HubProjectUID {
 		project, err := store.ProjectByUID(ctx, ev.ProjectUID)
