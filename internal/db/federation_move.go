@@ -397,12 +397,17 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, decision.TargetID).Scan(&decision.Joined); err != nil {
 			return nil, nil, err
 		}
-		err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id,b.project_id IS NULL AND (p.deleted_at IS NULL OR NOT EXISTS(SELECT 1 FROM meta WHERE key='federation_retained_project.' || p.uid)) FROM issues i JOIN projects p ON p.id=i.project_id LEFT JOIN federation_bindings b ON b.project_id=p.id WHERE i.uid=$1`, issue.UID).Scan(&decision.IssueID, &decision.SourceID, &decision.RecurrenceID, &decision.SourceUID, &decision.SourceName, &decision.SourceShortID, &decision.SourceStandalone)
+		var retained sql.NullString
+		var unbound, active bool
+		err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id,b.project_id IS NULL,p.deleted_at IS NULL,m.value FROM issues i JOIN projects p ON p.id=i.project_id LEFT JOIN federation_bindings b ON b.project_id=p.id LEFT JOIN meta m ON m.key='federation_retained_project.' || p.uid WHERE i.uid=$1`, issue.UID).Scan(&decision.IssueID, &decision.SourceID, &decision.RecurrenceID, &decision.SourceUID, &decision.SourceName, &decision.SourceShortID, &unbound, &active, &retained)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, err
 		}
+		if retained.Valid && retained.String != "1" {
+			return nil, nil, fmt.Errorf("invalid retained project marker for %s: %q", decision.SourceUID, retained.String)
+		}
 		decision.Exists = err == nil
-		decision.SourceStandalone = decision.SourceStandalone && !decision.Joined
+		decision.SourceStandalone = unbound && (active || !retained.Valid) && !decision.Joined
 		if decision.Joined && decision.Active {
 			projects[decision.TargetID] = true
 		}
@@ -624,7 +629,7 @@ func releaseLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, projectID int64
 		ready := len(event.issues) > 0
 		for _, uid := range event.issues {
 			var present bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues i JOIN federation_bindings b ON b.project_id=i.project_id WHERE i.uid=$1 AND i.project_id=$2)`, uid, projectID).Scan(&present); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=$1 AND project_id=$2)`, uid, projectID).Scan(&present); err != nil {
 				return err
 			}
 			if !present {
