@@ -543,6 +543,13 @@ func atomicLinkByEndpointsTx(
 }
 
 func deleteAtomicLinkTx(ctx context.Context, tx *sql.Tx, linkID int64) (bool, error) {
+	link, err := scanLink(tx.QueryRowContext(ctx, linkSelect+` WHERE id=$1`, linkID))
+	if err != nil {
+		return false, err
+	}
+	if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+		return false, err
+	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = $1`, linkID)
 	if err != nil {
 		return false, mapSQLError(err, nil)

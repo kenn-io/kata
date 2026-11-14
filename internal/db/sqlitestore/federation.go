@@ -1273,7 +1273,7 @@ func (d *Store) materializeFederatedProjectRelayTx(
 	acceptedEventUIDs []string,
 	validator *db.CronReplayValidator,
 ) error {
-	return d.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, true)
+	return d.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, false)
 }
 
 func (d *Store) materializeFederatedProjectTxScoped(
@@ -2829,7 +2829,7 @@ func federationGroupFoldProjection(
 	if err != nil {
 		return db.FoldProjection{}, err
 	}
-	return db.FoldEvents(events), nil
+	return relayFoldEventsTx(ctx, tx, events)
 }
 
 func federationGroupIssueIDs(

@@ -39,6 +39,9 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 	require.NoError(t, err)
 	pin := db.RootKeyPin{ProjectUID: selected.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}
 	require.NoError(t, store.PinRootAuthority(ctx, pin))
+	otherPublic, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: unselected.UID, AuthorityUID: "00000000000000000000000007", KeyID: db.RootPublicKeyID(otherPublic), PublicKey: otherPublic}))
 	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		Actor: "member", AdminActor: "admin",
 		PlaintextToken: "legacy-reset-parent-test-token", // #nosec G101 -- synthetic API token used only in this test.

@@ -9,7 +9,7 @@ import (
 )
 
 // A relay-sourced issue.links_changed folds without its crossing additions and
-// with every removal, crossing or not, over links the project already had.
+// with same-project removals over links the project already had.
 func TestStripCrossProjectLinkAdditionsFoldsMixedLinksChanged(t *testing.T) {
 	const (
 		project       = "00000000000000000000000001"
@@ -43,7 +43,7 @@ func TestStripCrossProjectLinkAdditionsFoldsMixedLinksChanged(t *testing.T) {
 		`"blocked_by_added_uids":["`+sameBlockedBy+`","`+foreignBlkBy+`"],`+
 		`"related_added_uids":["`+sameRelated+`","`+foreignRel+`"]}`)
 
-	stripped, keep, err := db.StripCrossProjectLinkAdditions(changed, crossProject)
+	stripped, keep, err := db.StripCrossProjectLinkAdditions(changed, db.RelayLinkPolicy{CrossProject: crossProject, SameRoot: func(string) bool { return false }})
 	require.NoError(t, err)
 	require.True(t, keep, "a links_changed with same-project effects stays in the fold")
 	projection := db.FoldEvents(append(history, stripped))
@@ -54,10 +54,10 @@ func TestStripCrossProjectLinkAdditionsFoldsMixedLinksChanged(t *testing.T) {
 	}
 	require.Equal(t, map[db.FoldLinkKey]bool{
 		{FromUID: base, ToUID: sameOld, Type: "blocks"}:       false,
-		{FromUID: base, ToUID: foreignOld, Type: "blocks"}:    false,
-		{FromUID: base, ToUID: foreignParent, Type: "parent"}: false,
+		{FromUID: base, ToUID: foreignOld, Type: "blocks"}:    true,
+		{FromUID: base, ToUID: foreignParent, Type: "parent"}: true,
 		{FromUID: base, ToUID: sameBlocks, Type: "blocks"}:    true,
 		{FromUID: sameBlockedBy, ToUID: base, Type: "blocks"}: true,
 		{FromUID: base, ToUID: sameRelated, Type: "related"}:  true,
-	}, present, "crossing additions are stripped; same-project additions and all removals are applied")
+	}, present, "crossing mutations are stripped; same-project mutations apply")
 }

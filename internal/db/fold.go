@@ -9,7 +9,7 @@ import (
 
 // FoldEvents applies events in deterministic HLC order and returns the resulting
 // replay projection.
-func FoldEvents(events []FoldEvent) FoldProjection {
+func FoldEvents(events []FoldEvent, removalCheck ...FoldParentRemovalCheck) FoldProjection {
 	p := FoldProjection{
 		CronRuns:        map[string]FoldCronRun{},
 		CronJobs:        map[string]FoldCronJob{},
@@ -20,6 +20,9 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 		Links:           map[FoldLinkKey]FoldElementState{},
 		IssueMetadata:   map[string]jsontext.Value{},
 		ProjectMetadata: map[string]jsontext.Value{},
+	}
+	if len(removalCheck) > 0 {
+		p.parentRemovalCheck = removalCheck[0]
 	}
 	ordered := append([]FoldEvent(nil), events...)
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -718,12 +721,19 @@ func (p *FoldProjection) setLink(from, to, typ string, present bool, clock FoldC
 		from, to = to, from
 	}
 	if typ == "parent" && present {
-		p.clearOlderParents(from, to, clock)
+		if !p.clearOlderParents(from, to, clock) {
+			return
+		}
 	}
 	p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}] = FoldElementState{Present: present, Clock: clock, Author: author, CreatedAt: createdAt}
 }
 
-func (p *FoldProjection) clearOlderParents(childUID, keepParentUID string, clock FoldClock) {
+func (p *FoldProjection) clearOlderParents(childUID, keepParentUID string, clock FoldClock) bool {
+	for key, state := range p.Links {
+		if key.Type == "parent" && key.FromUID == childUID && key.ToUID != keepParentUID && state.Present && compareClock(state.Clock, clock) <= 0 && p.parentRemovalCheck != nil && !p.parentRemovalCheck(childUID, key.ToUID, state.Clock, clock) {
+			return false
+		}
+	}
 	for key, state := range p.Links {
 		if key.Type != "parent" || key.FromUID != childUID || key.ToUID == keepParentUID || !state.Present {
 			continue
@@ -733,6 +743,7 @@ func (p *FoldProjection) clearOlderParents(childUID, keepParentUID string, clock
 		}
 		p.Links[key] = FoldElementState{Present: false, Clock: clock, Author: state.Author}
 	}
+	return true
 }
 
 func (p *FoldProjection) ensureIssue(uid string) FoldIssue {

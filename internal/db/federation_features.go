@@ -25,8 +25,11 @@ const IssueMoveEventFeature = "issue_move_v1"
 // event a hub writes for a winning copy.
 const RepeatedAdoptionEventFeature = "repeated_adoption_v1"
 
+// RelayCrossLinksEventFeature identifies support for cross-project relay links.
+const RelayCrossLinksEventFeature = "relay_cross_links_v1"
+
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature + "," + RelayCrossLinksEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -370,4 +373,62 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		out.NextAfterID = event.ID
 	}
 	return out, nil
+}
+
+// WithRelayPeerEventFeatures carries the requesting peer's advertised formats.
+func WithRelayPeerEventFeatures(ctx context.Context, features string) context.Context {
+	return context.WithValue(ctx, relayPeerEventFeaturesKey{}, features)
+}
+
+type relayPeerEventFeaturesKey struct{}
+
+// RelayPeerEventFeatures returns the requesting peer's advertised formats.
+func RelayPeerEventFeatures(ctx context.Context) string {
+	features, _ := ctx.Value(relayPeerEventFeaturesKey{}).(string)
+	return features
+}
+
+// RelayContentRequiredFeatures identifies root links a peer must understand.
+// resolve returns an empty project for an endpoint that has not arrived yet.
+func RelayContentRequiredFeatures(event RemoteEvent, root string, resolve func(string) (string, error)) (string, error) {
+	if event.OriginInstanceUID != root || !FederationEventAffectsLinks(event.Type) {
+		return "", nil
+	}
+	payload := PayloadMap(event.Payload)
+	var refs []string
+	if event.RelatedIssueUID != nil {
+		refs = append(refs, *event.RelatedIssueUID)
+	}
+	for _, key := range []string{"from_uid", "to_uid", "from_issue_uid", "to_issue_uid", "parent_set_uid", "parent_removed_uid"} {
+		if uid, ok := StringValue(payload[key]); ok {
+			refs = append(refs, uid)
+		}
+	}
+	for _, key := range []string{"blocks_added_uids", "blocks_removed_uids", "blocked_by_added_uids", "blocked_by_removed_uids", "related_added_uids", "related_removed_uids"} {
+		refs = append(refs, StringSlice(payload[key])...)
+	}
+	if raw := payload["links"]; len(raw) > 0 && string(raw) != "null" {
+		var links []struct {
+			ToIssueUID string `json:"to_issue_uid"`
+		}
+		if err := json.Unmarshal(raw, &links); err != nil {
+			return "", err
+		}
+		for _, link := range links {
+			refs = append(refs, link.ToIssueUID)
+		}
+	}
+	for _, ref := range refs {
+		if ref == "" || (event.IssueUID != nil && ref == *event.IssueUID) {
+			continue
+		}
+		project, err := resolve(ref)
+		if err != nil {
+			return "", err
+		}
+		if project != event.ProjectUID {
+			return RelayCrossLinksEventFeature, nil
+		}
+	}
+	return "", nil
 }

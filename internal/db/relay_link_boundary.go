@@ -7,32 +7,34 @@ import (
 	"fmt"
 )
 
-// StripCrossProjectLinkAdditions removes from one relay-sourced fold event
-// every link addition whose peer crossProject reports as living in another
-// project, and keeps everything else the event carries. A composite creation
-// or snapshot keeps its same-project links; a links_changed keeps its removals
-// and its same-project additions; a single-edge issue.linked is dropped only
-// when its own peer crosses. Removals are never dropped: taking an edge away
-// cannot create a boundary crossing, and dropping a removal would leave the
-// hub with an edge its replicas no longer have. The returned bool is false
-// when the whole event is to be left out of the fold.
-func StripCrossProjectLinkAdditions(event FoldEvent, crossProject func(peerUID string) bool) (FoldEvent, bool, error) {
+// RelayLinkPolicy decides which cross-project link mutations may be folded.
+type RelayLinkPolicy struct {
+	RootOrigin   bool
+	SameRoot     func(string) bool
+	CrossProject func(string) bool
+}
+
+// StripCrossProjectLinkAdditions excludes links outside the relay's authority.
+func StripCrossProjectLinkAdditions(event FoldEvent, policy RelayLinkPolicy) (FoldEvent, bool, error) {
+	blocked := func(peer string) bool {
+		return policy.CrossProject(peer) && (!policy.RootOrigin || !policy.SameRoot(peer))
+	}
 	switch event.Type {
-	case "issue.linked":
+	case "issue.linked", "issue.unlinked":
 		payload := PayloadMap(event.Payload)
 		for _, key := range []string{"from_uid", "to_uid", "from_issue_uid", "to_issue_uid"} {
-			if peer, ok := StringValue(payload[key]); ok && crossProject(peer) {
+			if peer, ok := StringValue(payload[key]); ok && blocked(peer) {
 				return event, false, nil
 			}
 		}
-		if event.RelatedIssueUID != "" && crossProject(event.RelatedIssueUID) {
+		if event.RelatedIssueUID != "" && blocked(event.RelatedIssueUID) {
 			return event, false, nil
 		}
 		return event, true, nil
 	case "issue.created", "issue.snapshot":
-		return stripCreationLinks(event, crossProject)
+		return stripCreationLinks(event, blocked)
 	case "issue.links_changed":
-		return stripLinksChangedAdditions(event, crossProject)
+		return stripLinksChangedAdditions(event, blocked)
 	}
 	return event, true, nil
 }
@@ -69,11 +71,13 @@ func stripCreationLinks(event FoldEvent, crossProject func(string) bool) (FoldEv
 func stripLinksChangedAdditions(event FoldEvent, crossProject func(string) bool) (FoldEvent, bool, error) {
 	payload := PayloadMap(event.Payload)
 	changed := false
-	if parent, ok := StringValue(payload["parent_set_uid"]); ok && crossProject(parent) {
-		delete(payload, "parent_set_uid")
-		changed = true
+	for _, key := range []string{"parent_set_uid", "parent_removed_uid"} {
+		if parent, ok := StringValue(payload[key]); ok && crossProject(parent) {
+			delete(payload, key)
+			changed = true
+		}
 	}
-	for _, key := range []string{"blocks_added_uids", "blocked_by_added_uids", "related_added_uids"} {
+	for _, key := range []string{"blocks_added_uids", "blocked_by_added_uids", "related_added_uids", "blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
 		added := StringSlice(payload[key])
 		kept := make([]string, 0, len(added))
 		for _, peer := range added {
@@ -130,7 +134,18 @@ func ValidateLegacyRelayAdmission(ctx context.Context, event RemoteEvent, uidCro
 	switch event.Type {
 	case "issue.linked", "issue.links_changed", "issue.created", "issue.snapshot":
 		fold := FoldEvent{UID: event.EventUID, Type: event.Type, Payload: event.Payload}
-		if _, _, err := StripCrossProjectLinkAdditions(fold, checkUID); err != nil {
+		if event.Type == "issue.links_changed" {
+			payload := PayloadMap(event.Payload)
+			for _, key := range []string{"parent_removed_uid", "blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
+				delete(payload, key)
+			}
+			var err error
+			fold.Payload, err = json.Marshal(payload)
+			if err != nil {
+				return err
+			}
+		}
+		if _, _, err := StripCrossProjectLinkAdditions(fold, RelayLinkPolicy{CrossProject: checkUID, SameRoot: func(string) bool { return false }}); err != nil {
 			return err
 		}
 	case "issue.closed":
@@ -168,4 +183,30 @@ func ValidateLegacyRelayAdmission(ctx context.Context, event RemoteEvent, uidCro
 		return fmt.Errorf("%w: event %s: %w", ErrFederationIngestValidation, event.EventUID, ErrFederationCrossProjectBoundary)
 	}
 	return nil
+}
+
+// RelayFoldAuthority holds the group and root of known link endpoints.
+type RelayFoldAuthority struct {
+	Projects map[string]string
+	Roots    map[string]string
+	Groups   map[string]map[string]bool
+}
+
+// Policy filters one relay event using the endpoint's current membership.
+func (a RelayFoldAuthority) Policy(event FoldEvent) RelayLinkPolicy {
+	return RelayLinkPolicy{
+		RootOrigin:   a.Roots[event.ProjectUID] != "" && a.Roots[event.ProjectUID] == event.OriginInstanceUID,
+		CrossProject: func(uid string) bool { return a.Projects[uid] != "" && a.Projects[uid] != event.ProjectUID },
+		SameRoot: func(uid string) bool {
+			peer := a.Projects[uid]
+			return a.Roots[peer] != "" && a.Roots[peer] == a.Roots[event.ProjectUID] && a.Groups[event.ProjectUID][peer]
+		},
+	}
+}
+
+// AllowParentRemoval preserves a root crossing against a replica's edit.
+func (a RelayFoldAuthority) AllowParentRemoval(child, parent string, previous, next FoldClock) bool {
+	project, peer := a.Projects[child], a.Projects[parent]
+	root := a.Roots[project]
+	return project == "" || peer == "" || project == peer || root == "" || a.Roots[peer] != root || !a.Groups[project][peer] || previous.OriginInstanceUID != root || next.OriginInstanceUID == root
 }

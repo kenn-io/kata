@@ -144,6 +144,11 @@ func RunRelayLinkBoundaryKeepsSameProjectEffects(t *testing.T, store db.Storage)
 func RunRelayLinkBoundaryFollowsActiveGrants(t *testing.T, store db.Storage) {
 	ctx := t.Context()
 	fixture := newRelayLinkBoundaryFixture(t, store, "boundary-grants")
+	otherPublic, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	otherRoot, err := uid.New()
+	require.NoError(t, err)
+	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: fixture.sibling.UID, AuthorityUID: otherRoot, KeyID: db.RootPublicKeyID(otherPublic), PublicKey: otherPublic}))
 	peerInstanceUID, err := uid.New()
 	require.NoError(t, err)
 	//nolint:gosec // This is a deterministic fixture credential, never an operational secret.

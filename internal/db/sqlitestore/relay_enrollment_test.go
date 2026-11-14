@@ -82,3 +82,10 @@ func TestRelayEnrollmentBootstrapCompactedArtifacts(t *testing.T) {
 		return err
 	})
 }
+
+func TestRelaySharedLinks(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunRelaySharedLinks(t, store)
+}

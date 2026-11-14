@@ -5202,7 +5202,7 @@ components:
         relay:
           $ref: "#/components/schemas/RelayHandshake"
         relay_links_checked:
-          description: True when relay_protocol_version was requested and the project has no cross-project issue links. Older daemons omit it.
+          description: True when relay_protocol_version was requested and all existing cross-project links are allowed within the shared group. Older daemons omit it.
           type: boolean
         replay_horizon_event_id:
           format: int64
@@ -7553,7 +7553,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.47.0
+  version: 0.48.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -9579,12 +9579,12 @@ paths:
           schema:
             format: int64
             type: integer
-        - description: Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed.
+        - description: Check existing cross-project links before relay enrollment. Links within a shared group are allowed; other links return 409 relay_cross_project_links.
           explode: false
           in: query
           name: relay_protocol_version
           schema:
-            description: Optionally check existing cross-project issue links for relay protocol 1 before enrollment. Returns 409 relay_cross_project_links when links must be removed.
+            description: Check existing cross-project links before relay enrollment. Links within a shared group are allowed; other links return 409 relay_cross_project_links.
             format: int64
             maximum: 1
             minimum: 1
@@ -9870,6 +9870,10 @@ paths:
     get:
       operationId: offerRelayDeliveries
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9930,6 +9934,10 @@ paths:
     get:
       operationId: getRelayReset
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true

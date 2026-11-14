@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-11
+last_edited: 2026-11-14
 ---
 
 # Federation
@@ -154,13 +154,7 @@ unsupported relay,
 provenance or embedding artifact protocols and local project-name collisions
 before enrollment.
 
-A relayed project cannot have cross-project issue links. Preflight and connect
-return `409 relay_cross_project_links` when the project has related, blocks, or
-parent links to another project, including incoming links and links on closed
-issues. The error says whether the links are on the hub or in this daemon's copy
-of the project. Remove them on that side and retry; ask an operator there to
-remove links to projects you cannot access. Links that were already removed do
-not count.
+The common root can link issues in projects that share a relay binding group and root authority. Preflight and connect return `409 relay_cross_project_links` for links outside that group. The root authors crossing links and relays forward them; a missing endpoint stays deferred until it arrives.
 
 Fresh direct-spoke pushes also reject additions, close parents, and
 duplicate or superseded evidence that name a stored sibling issue when either
@@ -2396,7 +2390,7 @@ the issues, and then the spoke operator retries the quarantine.
 
 ### Other validation quarantines
 
-A fresh cross-project addition involving a relayed project also returns
+A fresh direct-spoke cross-project addition involving a relayed project also returns
 `400 validation` and quarantines the whole push batch, including earlier valid
 events. The error names the offending event UID. Unlinking locally and retrying
 resends the same stored addition, so it is refused again while either project
@@ -2529,11 +2523,9 @@ local or downstream work blocks the reset, resolve the
 root can quarantine the same batch again. Do not skip relay data or edit a
 database cursor instead.
 
-A live cross-project link is unsupported. The root refuses to sign a checkpoint
-while the link exists and keeps the owner's link and events. The spoke reports
-`409 relay_cross_project_links` as a hub-side refusal. Ask a hub operator to
-remove cross-project related, blocks, and parent links. A reset never strips
-the link silently or shares its private endpoint.
+A relay checkpoint can contain links between projects in the same group and root.
+An older peer receives `409 unsupported_event_features` naming
+`relay_cross_links_v1`; upgrade it and retry.
 
 On current `main` (unreleased), automatic retries wait at least the greater of
 one minute and the sync interval, doubling to a ceiling of the greater of five
@@ -2603,7 +2595,7 @@ Federation has expected stale or deferred states:
   Negotiated relays preserve source actors separately from accountable
   attribution; see [Project boundaries and attribution](#project-boundaries-and-attribution).
 - Direct-spoke links may span projects when neither project uses a relay;
-  negotiated relays reject cross-project links. For direct spokes, a missing peer
+  negotiated relays allow root-authored links inside a shared group. A missing peer
   does not quarantine push: the event and cursor advance while the edge remains
   absent. The edge materializes when both endpoint projects are enabled through
   the same hub federation group.

@@ -252,8 +252,8 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 	if err != nil {
 		return err
 	}
-	m.links = db.FoldEvents(events)
-	return nil
+	m.links, err = relayFoldEventsTx(ctx, tx, events)
+	return err
 }
 
 func (m *federationMaterialization) recordMoveIssueUIDs(events []db.FoldEvent) {

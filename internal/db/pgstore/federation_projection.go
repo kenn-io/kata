@@ -502,7 +502,7 @@ func (s *Store) materializeFederatedProjectRelayTx(
 	acceptedEventUIDs []string,
 	validator *db.CronReplayValidator,
 ) error {
-	return s.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, true)
+	return s.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, false)
 }
 
 func (s *Store) materializeFederatedProjectTxScoped(

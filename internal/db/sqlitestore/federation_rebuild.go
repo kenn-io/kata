@@ -169,12 +169,15 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 				}
 			}
 			maps.Copy(owners, moveOwners)
-			events, err = filterRelayLinkEvents(events, m.relayOrigins, owners)
+			events, err = filterRelayLinkEvents(ctx, tx, events, m.relayOrigins, owners)
 			if err != nil {
 				return preparedFederationRebuild{}, err
 			}
 		}
-		m.links = db.FoldEvents(events)
+		m.links, err = relayFoldEventsTx(ctx, tx, events)
+		if err != nil {
+			return preparedFederationRebuild{}, err
+		}
 		if _, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, 0, nil, nil, m.rowHasher); err != nil {
 			return preparedFederationRebuild{}, err
 		}

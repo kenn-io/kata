@@ -160,6 +160,34 @@ func (p RelayResetProtocol) AuthorizeCheckpointDownload(ctx context.Context, bin
 	if _, err := p.Backend.RelayGrant(ctx, bindingUID, "pull"); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
+	pin, err := p.Backend.RootPin(ctx, checkpoint.Manifest.ProjectUID, checkpoint.Manifest.KeyID)
+	if err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	events, _, err := DecodeRootResetPayload(pin, checkpoint.Snapshot)
+	if err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	known := map[string]bool{}
+	for _, event := range events {
+		if event.IssueUID != nil && (event.Type == "issue.created" || event.Type == "issue.snapshot") {
+			known[*event.IssueUID] = true
+		}
+	}
+	for _, event := range events {
+		required, err := RelayContentRequiredFeatures(event, pin.AuthorityUID, func(uid string) (string, error) {
+			if known[uid] {
+				return event.ProjectUID, nil
+			}
+			return p.Backend.IssueProjectUID(ctx, uid)
+		})
+		if err != nil {
+			return RelayResetCheckpoint{}, err
+		}
+		if err := RequireEventFeatures(RelayPeerEventFeatures(ctx), required); err != nil {
+			return RelayResetCheckpoint{}, err
+		}
+	}
 	return checkpoint, nil
 }
 

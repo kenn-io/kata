@@ -6,6 +6,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"slices"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -27,6 +28,13 @@ func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int
 		return err
 	}
 	if relayed {
+		shared, err := relaySharedProjectsTx(ctx, tx, fromProject, toProject, true)
+		if err != nil {
+			return err
+		}
+		if shared {
+			return nil
+		}
 		return errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
 	}
 	return nil
@@ -93,14 +101,96 @@ func (d *Store) CheckRelayProjectLinks(ctx context.Context, projectID int64) err
 	return rejectRelayProjectLinksTx(ctx, tx, projectID)
 }
 
-// Reject before new relay admission. Never silently strip existing hashed links.
+// relaySharedProjectsTx checks the binding group and its root authority.
+func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID int64, localWrite bool) (bool, error) {
+	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, projectID))
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !binding.Enabled || (localWrite && binding.Role != db.FederationRoleHub) {
+		return false, nil
+	}
+	peer, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, peerID))
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !peer.Enabled || (localWrite && peer.Role != db.FederationRoleHub) {
+		return false, nil
+	}
+	group, err := federationBindingGroupProjectIDsUnlocked(ctx, tx, binding)
+	if err != nil {
+		return false, err
+	}
+	if !slices.Contains(group, peerID) {
+		return false, nil
+	}
+	var instance string
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&instance); err != nil {
+		return false, err
+	}
+	root := func(id int64, binding db.FederationBinding) (string, error) {
+		var uid string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&uid); err != nil {
+			return "", err
+		}
+		pin, err := rootPinTx(ctx, tx, uid, "")
+		if errors.Is(err, db.ErrNotFound) && binding.Role == db.FederationRoleHub {
+			return instance, nil
+		}
+		if errors.Is(err, db.ErrNotFound) {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		return pin.AuthorityUID, nil
+	}
+	first, err := root(projectID, binding)
+	if err != nil {
+		return false, err
+	}
+	second, err := root(peerID, peer)
+	if err != nil {
+		return false, err
+	}
+	return first != "" && first == second && (!localWrite || first == instance), nil
+}
+
+// Enrollment retains links only when their projects share a root and group.
 func rejectRelayProjectLinksTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
-	var crossing bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM links l JOIN issues f ON f.id=l.from_issue_id JOIN issues t ON t.id=l.to_issue_id WHERE f.project_id<>t.project_id AND (f.project_id=$1 OR t.project_id=$2))`, projectID, projectID).Scan(&crossing); err != nil {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT CASE WHEN f.project_id=$1 THEN t.project_id ELSE f.project_id END FROM links l JOIN issues f ON f.id=l.from_issue_id JOIN issues t ON t.id=l.to_issue_id WHERE f.project_id<>t.project_id AND (f.project_id=$2 OR t.project_id=$3)`, projectID, projectID, projectID)
+	if err != nil {
 		return err
 	}
-	if crossing {
-		return errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
+	var peers []int64
+	for rows.Next() {
+		var peer int64
+		if err = rows.Scan(&peer); err != nil {
+			break
+		}
+		peers = append(peers, peer)
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, peer := range peers {
+		shared, err := relaySharedProjectsTx(ctx, tx, projectID, peer, false)
+		if err != nil {
+			return err
+		}
+		if !shared {
+			return errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
+		}
 	}
 	return nil
 }
@@ -127,9 +217,36 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 	if event.IssueUID != nil {
 		refs = append(refs, *event.IssueUID)
 	}
+	rootLink := false
+	if db.FederationEventAffectsLinks(event.Type) {
+		pin, pinErr := rootPinTx(ctx, tx, event.ProjectUID, "")
+		if pinErr != nil && !errors.Is(pinErr, db.ErrNotFound) {
+			return false, pinErr
+		}
+		rootLink = pinErr == nil && pin.AuthorityUID == event.OriginInstanceUID
+	}
 	for _, ref := range refs {
 		if ref == "" {
 			continue
+		}
+		if rootLink && (event.IssueUID == nil || ref != *event.IssueUID) {
+			var peerID int64
+			err := tx.QueryRowContext(ctx, `SELECT project_id FROM issues WHERE uid=$1`, ref).Scan(&peerID)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return false, err
+			}
+			if peerID != projectID {
+				shared, err := relaySharedProjectsTx(ctx, tx, projectID, peerID, false)
+				if err != nil {
+					return false, err
+				}
+				if shared {
+					continue
+				}
+			}
 		}
 		var own bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=$1 AND project_id=$2)`, ref, projectID).Scan(&own); err != nil {

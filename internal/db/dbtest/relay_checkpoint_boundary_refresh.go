@@ -1,6 +1,7 @@
 package dbtest
 
 import (
+	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"testing"
 
@@ -15,6 +16,11 @@ import (
 func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openReplica func(*testing.T) db.Storage, seedHistory func(*testing.T, db.Project, db.RemoteEvent)) {
 	ctx := t.Context()
 	fixture := newRelayLinkBoundaryFixture(t, store, "checkpoint-boundary")
+	otherPublic, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	otherRoot, err := uid.New()
+	require.NoError(t, err)
+	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: fixture.sibling.UID, AuthorityUID: otherRoot, KeyID: db.RootPublicKeyID(otherPublic), PublicKey: otherPublic}))
 	private, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Private endpoint", Author: "member"})
 	require.NoError(t, err)
 	writeCtx := db.WithRootAttribution(ctx, fixture.signer, "relay-member")
@@ -79,11 +85,11 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	_, err = resetter.CreateRelayReset(ctx, bindingUID, fixture.signer)
 	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "a live private link must be refused before signing shared current state")
 	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID), "a refused reset must preserve the owner's private link")
-	_, err = store.DeleteLinkAndEvent(writeCtx, links[0], db.LinkEventParams{
-		EventType: "issue.unlinked", EventIssueID: issue.ID, Actor: "member",
-		FromUID: issue.UID, ToUID: private.UID, FromShortID: issue.ShortID, ToShortID: private.ShortID,
-	})
-	require.NoError(t, err)
+	// A legacy peer can remove its own previously accepted crossing history.
+	unlinkPayload := jsontext.Value(`{"from_uid":"` + issue.UID + `","to_uid":"` + private.UID + `","link_from_uid":"` + issue.UID + `","link_to_uid":"` + private.UID + `","type":"blocks"}`)
+	unlink := newRemoteEvent(t, fixture.project, &issueUID, "issue.unlinked", "member", legacyUID, 601, unlinkPayload)
+	seedHistory(t, fixture.project, unlink)
+
 	require.Empty(t, linkTargetUIDs(t, store, issue.ID), "remove the live boundary without rewriting private history")
 
 	later, _, err := store.CreateIssue(writeCtx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Later ordinary issue", Author: "member"})

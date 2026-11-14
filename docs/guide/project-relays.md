@@ -1,7 +1,7 @@
 ---
 title: Share projects between hubs
 description: Connect a selected project to another Kata daemon, relay it to your devices, and understand sync and recovery.
-last_edited: 2026-11-10
+last_edited: 2026-11-14
 ---
 
 # Share projects between hubs
@@ -205,8 +205,9 @@ Ordinary edits are local-first. [Leases](../operations/federation.md#leases-and-
 offer optional coordination; they are not a prerequisite for every edit.
 Reads can be stale, and concurrent changes have
 [consistency limits](../operations/federation.md#consistency-limitations).
-Cross-project issue moves are unsupported while either project is federated;
-negotiated relay projects also reject cross-project links.
+Cross-project issue moves are unsupported while either project is federated.
+The root can link issues across projects in the same relay group when both projects
+share its root authority. Relays retain the link until both issues arrive.
 
 Embeddings are optional. A project can select one producer and share compatible
 vectors so each device need not generate them again. See

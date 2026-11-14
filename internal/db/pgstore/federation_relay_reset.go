@@ -142,3 +142,12 @@ func (b relayResetBackend) InsertRelayCursor(ctx context.Context, seed db.RelayC
 func (b relayResetBackend) ReserveAttributionUIReset(ctx context.Context, projectUID string) error {
 	return reserveAttributionUIResetTx(ctx, b.tx, projectUID)
 }
+
+func (b relayResetBackend) IssueProjectUID(ctx context.Context, issueUID string) (string, error) {
+	var projectUID string
+	err := b.tx.QueryRowContext(ctx, `SELECT p.uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, issueUID).Scan(&projectUID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return projectUID, err
+}

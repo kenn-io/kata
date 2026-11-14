@@ -34,6 +34,9 @@ func (s *Store) ReplaceParentAndEvents(
 		); err != nil {
 			return err
 		}
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, input.Link.FromIssueID, input.ExpectedParentIssueID); err != nil {
+			return err
+		}
 		if err := ensureRelayLinkBoundaryTx(ctx, tx, input.Link.FromIssueID, input.Link.ToIssueID); err != nil {
 			return err
 		}

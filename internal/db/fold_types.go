@@ -26,19 +26,23 @@ type FoldClock struct {
 	EventUID          string
 }
 
+// FoldParentRemovalCheck decides whether an event may replace a parent.
+type FoldParentRemovalCheck func(childUID, parentUID string, previous, next FoldClock) bool
+
 // FoldProjection is the folded state derived from a set of portable events.
 type FoldProjection struct {
-	CronRuns        map[string]FoldCronRun
-	CronJobs        map[string]FoldCronJob
-	CronWorkflows   map[string]FoldCronWorkflow
-	Issues          map[string]FoldIssue
-	Comments        map[string]FoldComment
-	Labels          map[FoldLabelKey]FoldElementState
-	Links           map[FoldLinkKey]FoldElementState
-	IssueMetadata   map[string]jsontext.Value
-	ProjectMetadata map[string]jsontext.Value
-	Warnings        []string
-	cronAuthors     map[string]foldCronAuthorCandidate
+	parentRemovalCheck FoldParentRemovalCheck
+	CronRuns           map[string]FoldCronRun
+	CronJobs           map[string]FoldCronJob
+	CronWorkflows      map[string]FoldCronWorkflow
+	Issues             map[string]FoldIssue
+	Comments           map[string]FoldComment
+	Labels             map[FoldLabelKey]FoldElementState
+	Links              map[FoldLinkKey]FoldElementState
+	IssueMetadata      map[string]jsontext.Value
+	ProjectMetadata    map[string]jsontext.Value
+	Warnings           []string
+	cronAuthors        map[string]foldCronAuthorCandidate
 }
 
 // FoldCronJob retains project identity alongside the winning job document.

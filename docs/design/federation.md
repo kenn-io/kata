@@ -154,7 +154,7 @@ Adopting an existing project is a current-state cutover, not a history merge. It
 current issues, comments, labels and links through fresh snapshot events and replaces the
 pre-adoption event timeline. A direct-spoke enrollment's historical-author permission spans the
 entire initial baseline, including retries, and is consumed only after its terminal chunk
-commits. Negotiated relay adoption rejects cross-project links. Export the old timeline before
+commits. Negotiated relay adoption accepts links within the same group and root authority. Export the old timeline before
 adoption when it is needed for audit. The
 [adoption procedure](../operations/federation.md#adopting-an-existing-project) owns the commands
 and confirmation rules.
@@ -360,7 +360,11 @@ quarantine on the spoke instead of retrying forever.
 
 ### Cross-Project Link Convergence
 
-Direct-spoke federation can carry cross-project links; negotiated relay projects reject them.
+Direct-spoke federation can carry cross-project links. The common root can author links
+between negotiated relay projects in the same binding group. Relays retain a root link
+while an endpoint is missing and project it after both endpoints arrive. A peer without
+`relay_cross_links_v1` receives `409 unsupported_event_features` before receiving a
+crossing event or checkpoint. Per-peer release authorization follows in the next slice.
 For direct spokes, a missing link peer is not a permanent validation failure. The hub accepts
 the event, advances the push cursor, and keeps the edge absent until both endpoint issues are
 materialized inside one compatible federation group. Hub projects on one daemon form a group.
