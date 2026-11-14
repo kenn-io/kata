@@ -571,37 +571,6 @@ func scanLocalMoveEvents(rows *sql.Rows, issueUID string, references func(Remote
 
 type movedProjectPassKey struct{}
 
-// PreserveMovedIssueLabels retains labels that have no folded add or remove.
-func PreserveMovedIssueLabels(ctx context.Context, tx *sql.Tx, projectID int64, p FoldProjection, decisions []FederatedMoveDecision) error {
-	for _, decision := range decisions {
-		if !decision.Exists || !decision.Joined || decision.TargetID != projectID {
-			continue
-		}
-		rows, err := tx.QueryContext(ctx, `SELECT label FROM issue_labels WHERE issue_id=$1`, decision.IssueID)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var label string
-			if err := rows.Scan(&label); err != nil {
-				_ = rows.Close()
-				return err
-			}
-			key := FoldLabelKey{IssueUID: decision.IssueUID, Label: label}
-			if _, ok := p.Labels[key]; !ok {
-				p.Labels[key] = FoldElementState{Present: true}
-			}
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // FollowingMovedProjects reports whether a destination reconciliation pass is running.
 func FollowingMovedProjects(ctx context.Context) bool {
 	v, _ := ctx.Value(movedProjectPassKey{}).(bool)

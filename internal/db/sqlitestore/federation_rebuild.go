@@ -104,9 +104,6 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			return preparedFederationRebuild{}, err
 		}
 		p.uid = projectUID
-		if err := db.PreserveMovedIssueLabels(ctx, tx, p.id, p.projection, p.decisions); err != nil {
-			return preparedFederationRebuild{}, err
-		}
 		p.moved = p.projection
 		p.moved.Issues = maps.Clone(p.projection.Issues)
 		p.moved.Comments = maps.Clone(p.projection.Comments)
