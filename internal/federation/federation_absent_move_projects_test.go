@@ -243,3 +243,34 @@ func TestSyncFederationDuplicateLocalEchoFailureStatusContext(t *testing.T) {
 		require.ErrorContains(t, err, "project lookup failed")
 	})
 }
+
+func TestSyncFederationHardPushErrorsStopBeforePull(t *testing.T) {
+	for _, failure := range []struct {
+		name string
+		code int
+		body string
+	}{
+		{"invalid credential", http.StatusForbidden, `{"status":403,"error":{"code":"auth_invalid","message":"federation token is invalid for this project or capability"}}`},
+		{"hub failure", http.StatusInternalServerError, "hub failure"},
+	} {
+		t.Run(failure.name, func(t *testing.T) {
+			ctx := t.Context()
+			hub, projects := newMoveDeliveryHub(t, "project")
+			spoke := newMoveDeliverySpoke(t, hub, projects)
+			_, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Pending", Author: "worker"})
+			require.NoError(t, err)
+			var requests atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests.Add(1)
+				http.Error(w, failure.body, failure.code)
+			}))
+			t.Cleanup(server.Close)
+			credential := spoke.credentials[projects[0].UID]
+			credential.HubURL = server.URL
+			binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+			require.NoError(t, err)
+			require.Error(t, SyncFederationOnce(ctx, spoke.env.DB, binding, credential, spoke.credentials))
+			require.EqualValues(t, 1, requests.Load(), "a failed push must not send a pull")
+		})
+	}
+}

@@ -391,14 +391,16 @@ func syncDirectSpoke(
 	runStartBinding := binding
 	var pushErr error
 	if pushThisTurn {
-		// A push that waits for the hub's history is finished by the pull
-		// below and the next cycle's push. A failed push is returned after it.
+		// A push awaiting history can finish after the pull. A moved issue may
+		// also reject its old project's credential before the move is pulled.
 		pushErr = pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts)
-		if errors.Is(pushErr, errFederationRunnerLeaseInvalid) {
-			return pushErr
-		}
 		if errors.Is(pushErr, db.ErrFederationPushAwaitsPull) {
 			pushErr = nil
+		} else if pushErr != nil {
+			status, ok := errors.AsType[*HubStatusError](pushErr)
+			if !ok || status.StatusCode != http.StatusForbidden || !strings.HasSuffix(status.Path, "/federation/events:ingest") || !strings.Contains(status.Body, "federation credential is not currently authorized") {
+				return pushErr
+			}
 		}
 	}
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
