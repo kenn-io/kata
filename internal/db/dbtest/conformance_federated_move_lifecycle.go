@@ -84,7 +84,7 @@ func checkFederatedMoveDetachedDestination(t *testing.T, store db.Storage) error
 	require.NoError(t, err)
 	other, err := store.CreateProject(ctx, "detached-later-target")
 	require.NoError(t, err)
-	var payload map[string]any
+	payload := map[string]any{}
 	require.NoError(t, json.Unmarshal(move.Payload, &payload))
 	payload["from_project_uid"], payload["to_project_uid"] = target.UID, other.UID
 	encoded, err := json.Marshal(payload)
