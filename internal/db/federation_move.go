@@ -359,7 +359,7 @@ type FederatedMoveDecision struct {
 	IssueUID, SourceUID, SourceName, SourceShortID string
 	IssueID, SourceID, TargetID                    int64
 	RecurrenceID                                   sql.NullInt64
-	Active, Joined, Exists, SourceJoined           bool
+	Active, Joined, Exists                         bool
 }
 
 // IndexFederatedMoveEvents selects the latest move for each issue.
@@ -395,11 +395,6 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 			return nil, nil, err
 		}
 		decision.Exists = err == nil
-		if !decision.Joined && decision.Exists {
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, decision.SourceID).Scan(&decision.SourceJoined); err != nil {
-				return nil, nil, err
-			}
-		}
 		if decision.Joined && decision.Active {
 			projects[decision.TargetID] = true
 		}
@@ -424,7 +419,7 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 		target, active := decision.TargetID, decision.Active
 		if !decision.Joined {
 			delete(p.Issues, issue.UID)
-			if !decision.Exists || !decision.SourceJoined {
+			if !decision.Exists {
 				continue
 			}
 		}
@@ -496,6 +491,15 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 		if !decision.Joined {
 			if err := applyUnjoined(target, issue, p); err != nil {
 				return err
+			}
+			// Source-group reconciliation no longer sees this issue's links.
+			for key, state := range p.Links {
+				if state.Present || key.FromUID != issue.UID && key.ToUID != issue.UID {
+					continue
+				}
+				if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE type=$1 AND (from_issue_uid=$2 AND to_issue_uid=$3 OR $1='related' AND from_issue_uid=$3 AND to_issue_uid=$2)`, key.Type, key.FromUID, key.ToUID); err != nil {
+					return err
+				}
 			}
 		}
 	}

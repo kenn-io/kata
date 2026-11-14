@@ -236,7 +236,14 @@ func TestMoveRebuildRetainsUnjoinedIssuesAndPrunesStaleLinks(t *testing.T) {
 	unapplyMove(t, d, orphan, destination, third, true)
 	_, err = d.LeaveFederationReplica(ctx, third.ID)
 	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `INSERT INTO links(from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author) VALUES(?,?,?,?,'blocks','tester')`, orphan.ID, issue.ID, orphan.UID, issue.UID)
+	from, to := orphan, issue
+	if from.ID > to.ID {
+		from, to = to, from
+	}
+	_, err = d.ExecContext(ctx, `INSERT INTO links(from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author) VALUES(?,?,?,?,'related','tester')`, from.ID, to.ID, from.UID, to.UID)
+	require.NoError(t, err)
+	typ, payload := incrementalFuzzPayload(16, from.UID, to.UID, 1)
+	_, err = d.InsertRemoteEvents(ctx, destination.ID, []db.RemoteEvent{incrementalRemoteEvent(t, destination, from.UID, typ, payload, 8_000_000_000_000)})
 	require.NoError(t, err)
 	attempts := 0
 	d.federationIngestPrepared = func() { attempts++ }
@@ -273,20 +280,22 @@ func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
 	require.NoError(t, d.MaterializeFederatedProject(ctx, source.ID))
 	require.Equal(t, 1, attempts)
 	require.NoError(t, locked.materializeFederatedProject(ctx, source.ID))
-	got, err := locked.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-	require.NoError(t, err)
-	require.Equal(t, issue.ID, got.ID)
-	require.Equal(t, destination.ID, got.ProjectID)
-	require.Equal(t, "work 42", got.Title)
-	require.JSONEq(t, `{"area":"value-42"}`, string(got.Metadata))
-	comments, err := locked.CommentsByIssue(ctx, issue.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 2)
-	require.ElementsMatch(t, []string{"local comment", "comment"}, []string{comments[0].Body, comments[1].Body})
-	labels, err := locked.LabelsByIssue(ctx, issue.ID)
-	require.NoError(t, err)
-	require.Len(t, labels, 1)
-	require.Equal(t, "area:db", labels[0].Label)
+	for _, store := range []*Store{d, locked} {
+		got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		require.Equal(t, issue.ID, got.ID)
+		require.Equal(t, destination.ID, got.ProjectID)
+		require.Equal(t, "work 42", got.Title)
+		require.JSONEq(t, `{"area":"value-42"}`, string(got.Metadata))
+		comments, err := store.CommentsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 2)
+		require.ElementsMatch(t, []string{"local comment", "comment"}, []string{comments[0].Body, comments[1].Body})
+		labels, err := store.LabelsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, labels, 1)
+		require.Equal(t, "area:db", labels[0].Label)
+	}
 }
 
 func TestMoveRebuildAssignsCollidingShortIDsInOrder(t *testing.T) {
