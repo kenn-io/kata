@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -19,7 +20,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -3333,59 +3333,53 @@ func TestFederationEnrollCLIRequiredSigningInstructions(t *testing.T) {
 
 func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("shell argument parsing requires a POSIX shell")
+		t.Skip("shell command requires a POSIX shell")
 	}
-	synctest.Test(t, func(t *testing.T) {
-		const external = "https://hub.example"
-		const internal = "http://127.0.0.1:47741"
-		const local = "http://127.0.0.1:47742"
-		home := t.TempDir()
-		t.Setenv("KATA_HOME", home)
-		t.Setenv("KATA_AUTH_TOKEN", "admin-token")
-		t.Setenv("TEST_HUB_TOKEN", "admin-token")
-		verifier, key := testenv.FederationSigning(t, external)
-		savedArgs := os.Args
-		os.Args = []string{"/opt/kata_custom"}
-		t.Cleanup(func() { os.Args = savedArgs })
-		hubDB := openKataTestDB(t, filepath.Join(t.TempDir(), "hub.db"))
-		spokeDB := openKataTestDB(t, filepath.Join(t.TempDir(), "spoke.db"))
-		t.Cleanup(func() { require.NoError(t, hubDB.Close()); require.NoError(t, spokeDB.Close()) })
-		hubServer := daemon.NewServer(daemon.ServerConfig{DB: hubDB, FederationSigningRequired: true, FederationSigning: verifier, Auth: config.AuthConfig{Token: "admin-token"}})
-		spokeServer := daemon.NewServer(daemon.ServerConfig{DB: spokeDB, Auth: config.AuthConfig{Token: "admin-token"}})
-		t.Cleanup(func() { require.NoError(t, hubServer.Close()); require.NoError(t, spokeServer.Close()) })
-		server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Host == "127.0.0.1:47742" {
-				spokeServer.Handler().ServeHTTP(w, r)
-			} else {
-				hubServer.Handler().ServeHTTP(w, r)
-			}
-		}))
-		previous := http.DefaultTransport
-		http.DefaultTransport = server.Client().Transport
-		t.Cleanup(func() { http.DefaultTransport = previous })
-		hub := &testenv.Env{URL: internal, DB: hubDB, Home: home}
-		spoke := &testenv.Env{URL: local, DB: spokeDB, Home: home}
-		hubProject, err := hubDB.CreateProject(t.Context(), "hub-project")
-		require.NoError(t, err)
-		out := requireCmdOutput(t, hub, "--json", "--project", "hub-project", "federation", "enroll", "--spoke-instance", spokeDB.InstanceUID(), "--hub-url", internal, "--hub-token-env", "TEST_HUB_TOKEN", "--actor", "tester", "--capabilities", "pull")
-		var body struct {
-			Join federationJoinBundle `json:"join"`
-		}
-		require.NoError(t, json.Unmarshal([]byte(out), &body))
-		command := strings.ReplaceAll(body.Join.JoinCommand, "'<signing-key-id>'", "key-a")
-		command = strings.ReplaceAll(command, "'<absolute-path-to-spoke-key>'", `"$1"`)
-		script := `kata_custom() { printf '%s\0' "$@"; }; ` + command
-		captured, err := exec.CommandContext(t.Context(), "sh", "-c", script, "--", key).CombinedOutput() //nolint:gosec // Shell invokes only the capturing function.
-		require.NoError(t, err, "%s", captured)
-		args := strings.Split(strings.TrimSuffix(string(captured), "\x00"), "\x00")
-		time.Sleep(federationsigning.Quarantine + time.Second)
-		requireCmdOutput(t, spoke, args...)
-		project, err := spokeDB.ProjectByName(t.Context(), "hub-project")
-		require.NoError(t, err)
-		binding, err := spokeDB.FederationBindingByProject(t.Context(), project.ID)
-		require.NoError(t, err)
-		assert.Equal(t, external, binding.HubURL)
-		assert.Equal(t, hubProject.ID, binding.HubProjectID)
-		assert.Equal(t, hubProject.UID, project.UID)
-	})
+	binary := kataTestBinary(t, "signed-join")
+	t.Setenv("KATA_AUTH_TOKEN", "admin-token")
+	t.Setenv("TEST_HUB_TOKEN", "admin-token")
+	var hubServer *daemon.Server
+	external := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hubServer.Handler().ServeHTTP(w, r)
+	}))
+	base := "https://" + external.Listener.Addr().String()
+	verifier, key := testenv.FederationSigning(t, base)
+	hubDB := openKataTestDB(t, filepath.Join(t.TempDir(), "hub.db"))
+	t.Cleanup(func() { require.NoError(t, hubDB.Close()) })
+	hubServer = daemon.NewServer(daemon.ServerConfig{DB: hubDB, FederationSigningRequired: true, FederationSigning: verifier, Auth: config.AuthConfig{Token: "admin-token"}})
+	t.Cleanup(func() { require.NoError(t, hubServer.Close()) })
+	external.StartTLS()
+	t.Cleanup(external.Close)
+	admin := httptest.NewServer(hubServer.Handler())
+	t.Cleanup(admin.Close)
+	spoke := testenv.New(t, testenv.WithAuthToken("admin-token"))
+	hub := &testenv.Env{URL: admin.URL, DB: hubDB}
+	hubProject, err := hubDB.CreateProject(t.Context(), "hub-project")
+	require.NoError(t, err)
+	savedArgs := os.Args
+	os.Args = []string{binary}
+	t.Cleanup(func() { os.Args = savedArgs })
+	out := requireCmdOutput(t, hub, "--json", "--project", "hub-project", "federation", "enroll", "--spoke-instance", spoke.DB.InstanceUID(), "--hub-url", admin.URL, "--hub-token-env", "TEST_HUB_TOKEN", "--actor", "tester", "--capabilities", "pull")
+	var body struct {
+		Join federationJoinBundle `json:"join"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &body))
+	command := strings.ReplaceAll(body.Join.JoinCommand, "'<signing-key-id>'", "key-a")
+	command = strings.ReplaceAll(command, "'<absolute-path-to-spoke-key>'", `"$1"`)
+	certFile := filepath.Join(t.TempDir(), "hub-cert.pem")
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: external.Certificate().Raw}), 0600))
+	t.Setenv("KATA_SERVER", spoke.URL)
+	t.Setenv("SSL_CERT_FILE", certFile)
+	t.Setenv("PATH", filepath.Dir(binary)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// The verifier rejects requests until its replay quarantine has elapsed.
+	time.Sleep(federationsigning.Quarantine + time.Second)
+	output, err := exec.CommandContext(t.Context(), "sh", "-c", command, "--", key).CombinedOutput() //nolint:gosec // Command and binary come from this test's enrollment and fixture.
+	require.NoError(t, err, "%s", output)
+	project, err := spoke.DB.ProjectByName(t.Context(), "hub-project")
+	require.NoError(t, err)
+	binding, err := spoke.DB.FederationBindingByProject(t.Context(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, base, binding.HubURL)
+	assert.Equal(t, hubProject.ID, binding.HubProjectID)
+	assert.Equal(t, hubProject.UID, project.UID)
 }
