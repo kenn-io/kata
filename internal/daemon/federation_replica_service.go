@@ -1794,11 +1794,40 @@ func adoptExistingReplica(
 	projectName := p.ProjectName
 	if project, err := store.ProjectByUID(ctx, p.HubProjectUID); err == nil {
 		if project.DeletedAt != nil {
-			return db.AdoptProjectIntoFederationResult{}, false, federationReplicaError(
-				errFederationReplicaProjectCollision,
-				"hub project UID belongs to an archived local project",
-				"",
-			)
+			retained, err := db.IsFederationRetainedProject(ctx, store, project.UID)
+			if err != nil {
+				return db.AdoptProjectIntoFederationResult{}, false, fmt.Errorf("check retained federation project: %w", err)
+			}
+			if !retained {
+				return db.AdoptProjectIntoFederationResult{}, false, federationReplicaError(
+					errFederationReplicaProjectCollision,
+					"hub project UID belongs to an archived local project",
+					"",
+				)
+			}
+			if project.Name != projectName {
+				if _, err := store.ProjectByNameIncludingArchived(ctx, projectName); err == nil {
+					return db.AdoptProjectIntoFederationResult{}, false, federationReplicaError(errFederationReplicaProjectCollision, "local project name already exists", "")
+				} else if !errors.Is(err, db.ErrNotFound) {
+					return db.AdoptProjectIntoFederationResult{}, false, fmt.Errorf("lookup local project name: %w", err)
+				}
+				var event *db.Event
+				project, event, _, err = store.RenameProjectAndEvent(ctx, project.ID, projectName, p.Credential.Actor)
+				if err != nil {
+					return db.AdoptProjectIntoFederationResult{}, false, fmt.Errorf("rename retained federation project: %w", err)
+				}
+				if event != nil && p.ProjectEventSink != nil {
+					p.ProjectEventSink(*event)
+				}
+			}
+			var event *db.Event
+			project, event, _, err = store.RestoreProject(ctx, project.ID, p.Credential.Actor)
+			if err != nil {
+				return db.AdoptProjectIntoFederationResult{}, false, fmt.Errorf("restore retained federation project: %w", err)
+			}
+			if event != nil && p.ProjectEventSink != nil {
+				p.ProjectEventSink(*event)
+			}
 		}
 		binding, bindErr := store.FederationBindingByProject(ctx, project.ID)
 		if bindErr != nil {

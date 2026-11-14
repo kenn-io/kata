@@ -558,7 +558,7 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 		_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: source.ID, Actor: "worker"})
 		require.NoError(t, err)
 	})
-	for _, kind := range []string{"recurrence", "bridge", "ownership", "enrollment", "host-scope", "two-enrollments", "wrong-source-actor", "wrong-source-instance", "read-only-source", "missing-source-proof"} {
+	for _, kind := range []string{"recurrence", "bridge", "pull-side-error-context", "ownership", "enrollment", "host-scope", "two-enrollments", "wrong-source-actor", "wrong-source-instance", "read-only-source", "missing-source-proof"} {
 		t.Run(kind, func(t *testing.T) {
 			source, err := store.CreateProject(ctx, kind+"-move-source")
 			require.NoError(t, err)
@@ -575,11 +575,11 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 			} else {
 				issue, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "claimed", Author: "worker"})
 				require.NoError(t, err)
-				if kind == "bridge" || kind == "ownership" {
+				if kind == "bridge" || kind == "pull-side-error-context" || kind == "ownership" {
 					b, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{ProjectID: source.ID, IssueID: issue.ID, ConnectorInstance: "notes", ExternalRootKey: "root-key-" + kind, ExternalAccountKey: "account-key", Actor: "worker", ReceiveCommentsAfter: time.Now().UTC()})
 					require.NoError(t, err)
 
-					if kind == "bridge" {
+					if kind == "bridge" || kind == "pull-side-error-context" {
 						_, _, err = store.ClaimExternalRootBinding(ctx, b.ID, "bridge-worker", time.Now().UTC(), time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter))
 						require.NoError(t, err)
 					}
@@ -600,6 +600,17 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 			raw, err := json.Marshal(map[string]any{"issue_uid": issue.UID, "from_project_uid": source.UID, "from_short_id": issue.ShortID, "to_project_uid": target.UID, "to_short_id": issue.ShortID, "updated_at": time.Now().UTC().Format(time.RFC3339Nano), "snapshot": map[string]string{"uid": issue.UID, "title": issue.Title, "author": "worker", "short_id": issue.ShortID, "status": "open"}})
 			require.NoError(t, err)
 			event := newRemoteEvent(t, target, &issue.UID, "issue.moved", "worker", origin, time.Now().Add(time.Second).UnixMilli(), jsontext.Value(raw))
+			if kind == "pull-side-error-context" {
+				prepareRehomePull(t, store, source, target, "pull")
+				_, err = store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{event})
+				require.NoError(t, err)
+				err = store.MaterializeFederatedProject(ctx, target.ID)
+				require.ErrorIs(t, err, db.ErrExternalRootClaimActive)
+				require.ErrorContains(t, err, "apply move")
+				require.ErrorContains(t, err, event.EventUID)
+				require.ErrorContains(t, err, event.ProjectUID)
+				return
+			}
 			cursor, err := store.MaxEventID(ctx)
 			require.NoError(t, err)
 
@@ -661,16 +672,6 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 			retained, readErr := store.IssueByID(ctx, issue.ID)
 			require.NoError(t, readErr)
 			require.Equal(t, source.ID, retained.ProjectID)
-			if kind == "bridge" {
-				prepareRehomePull(t, store, source, target, "pull")
-				_, err = store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{event})
-				require.NoError(t, err)
-				err = store.MaterializeFederatedProject(ctx, target.ID)
-				require.ErrorIs(t, err, db.ErrExternalRootClaimActive)
-				require.ErrorContains(t, err, "apply move")
-				require.ErrorContains(t, err, event.EventUID)
-				require.ErrorContains(t, err, event.ProjectUID)
-			}
 		})
 	}
 	return nil
