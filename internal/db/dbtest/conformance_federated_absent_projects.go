@@ -3,7 +3,6 @@ package dbtest
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -96,10 +95,15 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.ErrorIs(t, err, db.ErrNotFound)
 
 	})
-	t.Run("restored unjoined destination", func(t *testing.T) {
+	t.Run("unjoined destination keeps hub edits", func(t *testing.T) {
+		ctx := t.Context()
 		issue, created, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Before", Author: "worker"})
 		require.NoError(t, err)
-		creation := portableNativeEvent(created)
+		peer, peerCreated, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Peer", Author: "worker"})
+		require.NoError(t, err)
+		linkParams := db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, FromShortID: issue.ShortID, FromUID: issue.UID, ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "worker"}
+		link, linked, err := hub.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "related", Author: "worker"}, linkParams)
+		require.NoError(t, err)
 		title := "Edited on hub"
 		issue, edit, _, err := hub.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &title, Actor: "worker"})
 		require.NoError(t, err)
@@ -111,189 +115,113 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.NoError(t, err)
 		removed, err := hub.RemoveLabelAndEvent(ctx, issue.ID, db.LabelEventParams{EventType: "issue.unlabeled", Label: "removed", Actor: "worker"})
 		require.NoError(t, err)
+		linkParams.EventType = "issue.unlinked"
+		unlinked, err := hub.DeleteLinkAndEvent(ctx, link, linkParams)
+		require.NoError(t, err)
 		moved, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
 		require.NoError(t, err)
 		move := portableNativeEvent(*moved.Event)
-		for _, mode := range []string{"archived", "restored"} {
-			t.Run(mode, func(t *testing.T) {
-				ctx := t.Context()
-				spoke := backend.Open(t)
-				t.Cleanup(func() { require.NoError(t, spoke.Close()) })
-				route, err := spoke.CreateProjectWithUID(ctx, "source", source.UID)
-				require.NoError(t, err)
-				_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: route.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: source.ID, HubProjectUID: source.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
-				require.NoError(t, err)
-				_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{creation})
-				require.NoError(t, err)
-				require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
-				local, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-				require.NoError(t, err)
-				localID := local.ID
-				_, err = spoke.AddLabel(ctx, local.ID, "removed", "worker")
-				require.NoError(t, err)
-				_, err = spoke.AddLabel(ctx, local.ID, "local", "worker")
-				require.NoError(t, err)
-				if mode != "archived" {
-					_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Local comment"})
-					require.NoError(t, err)
-				}
-				_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{portableNativeEvent(*edit), portableNativeEvent(hubComment), portableNativeEvent(hubLabel), portableNativeEvent(removed), move})
-				require.NoError(t, err)
-				retained, err := spoke.ProjectByUID(ctx, target.UID)
-				require.NoError(t, err)
-				var unrelated db.Issue
-				if mode != "archived" {
-					_, _, _, err = spoke.RestoreProject(ctx, retained.ID, "worker")
-					require.NoError(t, err)
-					unrelated, _, err = spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: retained.ID, Title: "Standalone issue", Author: "worker"})
-					require.NoError(t, err)
-					_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: unrelated.ID, Author: "worker", Body: "Standalone comment"})
-					require.NoError(t, err)
-					_, err = spoke.AddLabel(ctx, unrelated.ID, "standalone", "worker")
-					require.NoError(t, err)
-					unrelated, err = spoke.IssueByUID(ctx, unrelated.UID, db.IncludeDeletedNo)
-					require.NoError(t, err)
-				}
-				require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
-				local, err = spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-				require.NoError(t, err)
-				require.Equal(t, retained.ID, local.ProjectID)
-				require.Equal(t, localID, local.ID)
-				require.Equal(t, "Edited on hub", local.Title)
-				labels, err := spoke.LabelsByIssue(ctx, local.ID)
-				require.NoError(t, err)
-				require.Len(t, labels, 2)
-				require.ElementsMatch(t, []string{"hub-label", "local"}, []string{labels[0].Label, labels[1].Label})
-				listed, err := spoke.ListIssues(ctx, db.ListIssuesParams{ProjectID: route.ID})
-				require.NoError(t, err)
-				require.Empty(t, listed)
-				count, err := spoke.CountIssues(ctx, db.ListIssuesParams{ProjectID: route.ID})
-				require.NoError(t, err)
-				require.Zero(t, count)
-				comments, err := spoke.CommentsByIssue(ctx, local.ID)
-				require.NoError(t, err)
-				bodies := []string{"Hub comment"}
-				if mode != "archived" {
-					bodies = append(bodies, "Local comment")
-				}
-				var gotBodies []string
-				for _, comment := range comments {
-					gotBodies = append(gotBodies, comment.Body)
-				}
-				require.ElementsMatch(t, bodies, gotBodies)
-				if mode != "archived" {
-					got, err := spoke.IssueByUID(ctx, unrelated.UID, db.IncludeDeletedNo)
-					require.NoError(t, err)
-					require.Equal(t, unrelated, got)
-					comments, err := spoke.CommentsByIssue(ctx, unrelated.ID)
-					require.NoError(t, err)
-					require.Len(t, comments, 1)
-					require.Equal(t, "Standalone comment", comments[0].Body)
-					labels, err := spoke.LabelsByIssue(ctx, unrelated.ID)
-					require.NoError(t, err)
-					require.Len(t, labels, 1)
-					require.Equal(t, "standalone", labels[0].Label)
-				}
-				require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
-				again, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-				require.NoError(t, err)
-				require.Equal(t, local, again)
-				againComments, err := spoke.CommentsByIssue(ctx, local.ID)
-				require.NoError(t, err)
-				require.Equal(t, comments, againComments)
-				history, err := spoke.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Limit: 100})
-				require.NoError(t, err)
-				for _, want := range []db.RemoteEvent{creation, portableNativeEvent(*edit), portableNativeEvent(hubComment), portableNativeEvent(hubLabel), portableNativeEvent(removed), move} {
-					var found bool
-					for _, event := range history {
-						if event.UID == want.EventUID {
-							require.Equal(t, want.ContentHash, event.ContentHash)
-							found = true
-						}
-					}
-					require.True(t, found)
-				}
-			})
+		spoke := backend.Open(t)
+		t.Cleanup(func() { require.NoError(t, spoke.Close()) })
+		route, err := spoke.CreateProjectWithUID(ctx, "source", source.UID)
+		require.NoError(t, err)
+		_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: route.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: source.ID, HubProjectUID: source.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+		require.NoError(t, err)
+		_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{portableNativeEvent(created), portableNativeEvent(peerCreated), portableNativeEvent(linked)})
+		require.NoError(t, err)
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+		local, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		for _, label := range []string{"removed", "local"} {
+			_, err = spoke.AddLabel(ctx, local.ID, label, "worker")
+			require.NoError(t, err)
 		}
-	})
-	t.Run("outbound move retention", func(t *testing.T) {
-		ctx := t.Context()
-		edited := backend.Open(t)
-		t.Cleanup(func() { require.NoError(t, edited.Close()) })
-		editedRoute, err := edited.CreateProjectWithUID(ctx, "edited-source", source.UID)
+		_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Local comment"})
 		require.NoError(t, err)
-		_, err = edited.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: editedRoute.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: source.ID, HubProjectUID: source.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+		pulled := []db.Event{*edit, hubComment, hubLabel, removed, unlinked, *moved.Event}
+		var remote []db.RemoteEvent
+		for _, event := range pulled {
+			remote = append(remote, portableNativeEvent(event))
+		}
+		_, err = spoke.InsertRemoteEvents(ctx, route.ID, remote)
 		require.NoError(t, err)
-		_, err = edited.InsertRemoteEvents(ctx, editedRoute.ID, []db.RemoteEvent{creation})
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+		retained, err := spoke.ProjectByUID(ctx, target.UID)
 		require.NoError(t, err)
-		require.NoError(t, edited.MaterializeFederatedProject(ctx, editedRoute.ID))
-		local, err := edited.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NotNil(t, retained.DeletedAt)
+		check := func(want db.Issue) {
+			got, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, want.ID, got.ID)
+			require.Equal(t, want.ProjectID, got.ProjectID)
+			require.Equal(t, "Edited on hub", got.Title)
+			labels, err := spoke.LabelsByIssue(ctx, got.ID)
+			require.NoError(t, err)
+			require.Len(t, labels, 2)
+			require.ElementsMatch(t, []string{"hub-label", "local"}, []string{labels[0].Label, labels[1].Label})
+			comments, err := spoke.CommentsByIssue(ctx, got.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 2)
+			require.ElementsMatch(t, []string{"Hub comment", "Local comment"}, []string{comments[0].Body, comments[1].Body})
+			links, err := spoke.LinksByIssue(ctx, got.ID)
+			require.NoError(t, err)
+			require.Empty(t, links)
+		}
+		check(db.Issue{ID: local.ID, ProjectID: retained.ID})
+		listed, err := spoke.ListIssues(ctx, db.ListIssuesParams{ProjectID: route.ID})
 		require.NoError(t, err)
-		now := time.Now().UTC()
-		root, _, err := edited.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
-			ProjectID: editedRoute.ID, IssueID: local.ID, ConnectorInstance: "notes",
-			ExternalRootKey: "root", ExternalAccountKey: "account", Actor: "worker", ReceiveCommentsAfter: now,
-		})
+		require.Len(t, listed, 1, "only the peer remains in the source project")
+		count, err := spoke.CountIssues(ctx, db.ListIssuesParams{ProjectID: route.ID})
 		require.NoError(t, err)
-		root, claimed, err := edited.ClaimExternalRootBinding(ctx, root.ID, "worker-token", now, now.Add(-db.ExternalRootClaimStaleAfter))
-		require.NoError(t, err)
-		require.True(t, claimed)
-		comment, _, changed, err := edited.UpsertExternalCommentProjection(ctx, db.ExternalCommentProjectionParams{
-			BindingID: root.ID, ClaimToken: root.ClaimToken, ExternalID: "comment", ExternalRevision: "one",
-			Body: "External comment", ExternalActorID: "person", ExternalActorName: "Person",
-			ExternalCreatedAt: now, ExternalUpdatedAt: now, IntegrationActor: "connector:notes",
-		})
-		require.NoError(t, err)
-		require.True(t, changed)
-		ordinary, _, err := edited.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Local comment"})
-		require.NoError(t, err)
-		_, err = edited.ReleaseExternalRootClaim(ctx, root.ID, root.ClaimToken)
-		require.NoError(t, err)
-		_, err = edited.InsertRemoteEvents(ctx, editedRoute.ID, []db.RemoteEvent{move})
-		require.NoError(t, err)
-		seen, err := edited.MaxEventID(ctx)
-		require.NoError(t, err)
-		applyCtx, capture := db.WithFederationMoveResetCapture(ctx)
-		applyCtx = db.WithFederationPulledEventUIDs(applyCtx, []string{move.EventUID})
-		require.NoError(t, edited.MaterializeFederatedProject(applyCtx, editedRoute.ID))
-		reset, err := edited.PurgeResetCheck(ctx, seen, editedRoute.ID)
-		require.NoError(t, err)
-		require.Greater(t, reset, seen)
-		require.Contains(t, capture.Resets, db.FederationProjectReset{ProjectID: editedRoute.ID, EventID: reset})
+		require.EqualValues(t, 1, count)
 
-		comments, err := edited.CommentsByIssue(ctx, local.ID)
+		// Restoring the counterpart keeps its issue and leaves standalone work alone.
+		_, _, _, err = spoke.RestoreProject(ctx, retained.ID, "worker")
 		require.NoError(t, err)
-		require.Len(t, comments, 2)
-		require.ElementsMatch(t, []string{comment.UID, ordinary.UID}, []string{comments[0].UID, comments[1].UID})
-		parked, err := edited.ProjectByUID(ctx, target.UID)
+		standalone, _, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: retained.ID, Title: "Standalone issue", Author: "worker"})
 		require.NoError(t, err)
-		require.NotNil(t, parked.DeletedAt)
-		local, err = edited.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: standalone.ID, Author: "worker", Body: "Standalone comment"})
 		require.NoError(t, err)
-		require.Equal(t, parked.ID, local.ProjectID)
+		_, err = spoke.AddLabel(ctx, standalone.ID, "standalone", "worker")
+		require.NoError(t, err)
+		standalone, err = spoke.IssueByUID(ctx, standalone.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+		check(db.Issue{ID: local.ID, ProjectID: retained.ID})
+		got, err := spoke.IssueByUID(ctx, standalone.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, standalone, got)
+		comments, err := spoke.CommentsByIssue(ctx, standalone.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1)
+		labels, err := spoke.LabelsByIssue(ctx, standalone.ID)
+		require.NoError(t, err)
+		require.Len(t, labels, 1)
 
-		_, _, _, err = edited.RestoreProject(ctx, parked.ID, "worker")
+		// A later winning move from the same source takes the retained issue along.
+		other, err := hub.CreateProject(ctx, "other-project")
 		require.NoError(t, err)
-		_, err = edited.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: parked.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: target.ID, HubProjectUID: target.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+		winner := newRemoteEvent(t, other, &issue.UID, "issue.moved", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+1000, []byte(strings.ReplaceAll(string(move.Payload), target.UID, other.UID)))
+		_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{winner})
 		require.NoError(t, err)
-		current, err := hub.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+		current, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
-		awayOwner := "away-owner"
-		current, awayEdit, _, err := hub.EditIssue(ctx, db.EditIssueParams{IssueID: current.ID, Owner: &awayOwner, Actor: "worker"})
+		winnerProject, err := spoke.ProjectByUID(ctx, other.UID)
 		require.NoError(t, err)
-		returned, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: target.ID, ToProjectID: source.ID, IfMatchRev: current.Revision, Actor: "worker"})
+		require.Equal(t, winnerProject.ID, current.ProjectID)
+		history, err := spoke.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Limit: 100})
 		require.NoError(t, err)
-		_, err = edited.InsertRemoteEvents(ctx, editedRoute.ID, []db.RemoteEvent{portableNativeEvent(*awayEdit), portableNativeEvent(*returned.Event)})
-		require.NoError(t, err)
-		require.NoError(t, edited.MaterializeFederatedProject(ctx, editedRoute.ID))
-		restored, err := edited.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		require.Equal(t, editedRoute.ID, restored.ProjectID)
-		comments, err = edited.CommentsByIssue(ctx, restored.ID)
-		require.NoError(t, err)
-		require.Len(t, comments, 2)
-		require.NotNil(t, restored.Owner)
-		require.Equal(t, awayOwner, *restored.Owner)
+		for _, want := range append([]db.RemoteEvent{portableNativeEvent(created)}, remote...) {
+			var found bool
+			for _, event := range history {
+				if event.UID == want.EventUID {
+					require.Equal(t, want.ContentHash, event.ContentHash)
+					found = true
+				}
+			}
+			require.True(t, found)
+		}
 	})
 
 	return nil

@@ -1796,7 +1796,7 @@ func adoptExistingReplica(
 		if project.DeletedAt != nil {
 			return db.AdoptProjectIntoFederationResult{}, false, federationReplicaError(
 				errFederationReplicaProjectCollision,
-				fmt.Sprintf("hub project UID belongs to archived local project %q; run `kata projects restore %s`, then rerun join with `--project %s`", project.Name, project.Name, project.Name),
+				"hub project UID belongs to an archived local project",
 				"",
 			)
 		}
@@ -1974,8 +1974,8 @@ func ensureReplicaBinding(
 		return ensuredReplicaBinding{}, federationReplicaError(
 			errFederationReplicaProjectCollision,
 			fmt.Sprintf(
-				"archived local project %q has the hub project UID; run `kata projects restore %s`, then rerun join with `--project %s`",
-				project.Name, project.Name, project.Name,
+				"an archived local project %q already has the hub project UID; restore it with `kata projects restore` first",
+				project.Name,
 			),
 			"",
 		)

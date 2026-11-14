@@ -1703,6 +1703,9 @@ func TestSyncFederationOnceRejectsLocalPushEchoHashMismatch(t *testing.T) {
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, db.ErrRemoteEventConflict)
+	assert.ErrorContains(t, err, "reconcile echo")
+	assert.ErrorContains(t, err, project.UID)
+	assert.ErrorContains(t, err, envelope.EventUID)
 	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(99), binding.PullCursorEventID)

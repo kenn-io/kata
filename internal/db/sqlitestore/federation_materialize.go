@@ -472,7 +472,17 @@ func applyUnjoinedMovedIssue(ctx context.Context, tx *sql.Tx, projectID int64, i
 			delete(m.labelRows, key)
 		}
 	}
-	return m.apply(ctx, tx, projectID, db.NewCronReplayValidator(tx, false))
+	changed, err := reconcileFederatedIssuesFromRows(ctx, tx, projectID, m.projection, m.issueRows)
+	if err != nil {
+		return err
+	}
+	for uid, id := range changed {
+		m.issueIDs[uid] = id
+	}
+	if err := reconcileFederatedCommentsFromRows(ctx, tx, m.issueIDs, m.projection, m.commentRows); err != nil {
+		return err
+	}
+	return reconcileFederatedLabelsFromRows(ctx, tx, m.issueIDs, m.projection, m.labelRows)
 }
 
 // prepareRows compares against persisted values, rather than a previous fold:

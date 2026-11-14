@@ -497,16 +497,12 @@ func syncDirectSpoke(
 		for i, ev := range body.Events {
 			if ev.OriginInstanceUID == localInstanceUID {
 				id, err := projectID(ev)
-				if err != nil && !errors.Is(err, db.ErrNotFound) {
+				if err != nil {
 					return err
-				}
-				if id == 0 {
-					pending = append(pending, i)
-					continue
 				}
 				exists, err := store.ReconcileLocalFederationEcho(ctx, id, remoteEventFromEnvelope(ev))
 				if err != nil {
-					return err
+					return fmt.Errorf("reconcile echo project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 				}
 				if exists {
 					duplicate[i] = true
@@ -559,7 +555,7 @@ func syncDirectSpoke(
 					deliver[i], invalidate, err = recovery.recover(ctx, ev)
 				}
 				if err != nil {
-					return err
+					return fmt.Errorf("recover duplicate project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 				}
 			}
 			if deliver[i] || invalidate {
