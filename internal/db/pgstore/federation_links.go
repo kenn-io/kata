@@ -176,16 +176,25 @@ func reconcileFederatedLinkGroup(
 	return reconcileFederatedLinkRows(ctx, tx, projection, issueIDs, existing)
 }
 
-func reconcileParkedIssueLinks(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueUID string) error {
-	ids, err := db.FederatedLinkIssueIDs(ctx, tx, projection, issueUID)
-	if err != nil {
-		return err
+func reconcileParkedIssueLinks(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueUIDs []string) error {
+	if len(issueUIDs) == 0 {
+		return nil
 	}
-	links, err := federatedLinkRows(ctx, tx, nil, issueUID)
-	if err != nil {
-		return err
+	ids := map[string]int64{}
+	links := map[db.FoldLinkKey]federatedLinkRow{}
+	for _, issueUID := range issueUIDs {
+		issueIDs, err := db.FederatedLinkIssueIDs(ctx, tx, projection, issueUID)
+		if err != nil {
+			return err
+		}
+		maps.Copy(ids, issueIDs)
+		issueRows, err := federatedLinkRows(ctx, tx, nil, issueUID)
+		if err != nil {
+			return err
+		}
+		maps.Copy(links, issueRows)
 	}
-	return reconcileFederatedLinkRows(ctx, tx, projection, ids, links, issueUID)
+	return reconcileFederatedLinkRows(ctx, tx, projection, ids, links, issueUIDs...)
 }
 
 func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueIDs map[string]int64, existing map[db.FoldLinkKey]federatedLinkRow, scope ...string) error {
@@ -211,7 +220,7 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 	graph := desired
 	if len(scope) > 0 {
 		var err error
-		graph, err = db.ScopedFederatedLinkGraph(ctx, tx, projection, scope[0], desired)
+		graph, err = db.ScopedFederatedLinkGraph(ctx, tx, projection, scope, desired)
 		if err != nil {
 			return err
 		}
@@ -237,7 +246,7 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 		}
 	}
 	for key, row := range desired {
-		if len(scope) > 0 && key.FromUID != scope[0] && key.ToUID != scope[0] {
+		if len(scope) > 0 && !slices.Contains(scope, key.FromUID) && !slices.Contains(scope, key.ToUID) {
 			continue
 		}
 		author := nonEmptyFederationAuthor(row.author)

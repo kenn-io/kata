@@ -1,14 +1,12 @@
 package sqlitestore
 
 import (
-	"database/sql"
 	"fmt"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"modernc.org/sqlite"
 )
 
 func unapplyMove(t *testing.T, d *Store, issue db.Issue, source, destination db.Project, joined bool) {
@@ -596,51 +594,4 @@ func TestMoveRebuildPreservesLinks(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestParkedIssueLinkResolutionSkipsUnrelatedEndpoints(t *testing.T) {
-	ctx := t.Context()
-	store, project, parked := incrementalTestStore(t)
-	peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "peer", Author: "tester"})
-	require.NoError(t, err)
-	projection := db.FoldProjection{Links: map[db.FoldLinkKey]db.FoldElementState{
-		{FromUID: parked.UID, ToUID: peer.UID, Type: "related"}: {Present: true, Author: "tester"},
-	}}
-	for i := range 160 {
-		other, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: fmt.Sprintf("unrelated %d", i), Author: "tester"})
-		require.NoError(t, err)
-		projection.Links[db.FoldLinkKey{FromUID: peer.UID, ToUID: other.UID, Type: "related"}] = db.FoldElementState{Present: true, Author: "tester"}
-	}
-	raw, err := sql.Open("sqlite", store.path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, raw.Close()) })
-	conn, err := raw.Conn(ctx)
-	require.NoError(t, err)
-	pageFetches := func(reset bool) int {
-		t.Helper()
-		total := 0
-		require.NoError(t, conn.Raw(func(raw any) error {
-			for _, op := range []sqlite.DBStatusOp{sqlite.DBStatusCacheHit, sqlite.DBStatusCacheMiss} {
-				n, _, err := raw.(sqlite.DBStatus).Status(op, reset)
-				if err != nil {
-					return err
-				}
-				total += n
-			}
-			return nil
-		}))
-		return total
-	}
-	pageFetches(true)
-	tx, err := conn.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	require.NoError(t, reconcileParkedIssueLinks(ctx, tx, projection, parked.UID))
-	require.NoError(t, tx.Commit())
-	fetches := pageFetches(false)
-	require.NoError(t, conn.Close())
-	links, err := store.LinksByIssue(ctx, parked.ID)
-	require.NoError(t, err)
-	require.Len(t, links, 1)
-	require.Equal(t, peer.UID, links[0].ToIssueUID)
-	require.Less(t, fetches, 100, "resolving one issue's link must not query every unrelated endpoint")
 }

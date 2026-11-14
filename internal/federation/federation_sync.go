@@ -503,10 +503,6 @@ func syncDirectSpoke(
 		for i, ev := range body.Events {
 			if ev.OriginInstanceUID == localInstanceUID {
 				id, err := projectID(ev)
-				if errors.Is(err, db.ErrNotFound) {
-					pending = append(pending, i)
-					continue
-				}
 				if err != nil {
 					return err
 				}

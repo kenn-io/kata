@@ -666,13 +666,9 @@ func (s *Store) materializeFederatedProjectTxScoped(
 			return err
 		}
 	}
-	for _, decision := range decisions {
-		if decision.Exists && !decision.Joined && !decision.SourceStandalone {
-			if err := reconcileParkedIssueLinks(ctx, tx, projection, decision.IssueUID); err != nil {
-				move := moved[decision.IssueUID]
-				return fmt.Errorf("apply move project %s event %s: %w", move.ProjectUID, move.UID, err)
-			}
-		}
+	parked := db.ParkedFederatedMoveIssues(decisions)
+	if err := reconcileParkedIssueLinks(ctx, tx, projection, parked); err != nil {
+		return db.ParkedFederatedLinkError(moved, parked, err)
 	}
 	if err := pruneFederatedIssues(ctx, tx, m, issueIDs); err != nil {
 		return err
