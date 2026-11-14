@@ -1,7 +1,7 @@
 ---
 title: Federation request signing
 description: Configure native signed federation and a restricted HTTPS ingress.
-last_edited: 2026-10-17
+last_edited: 2026-11-12
 ---
 
 # Federation request signing
@@ -59,9 +59,11 @@ is optional on the ordinary daemon listeners.
    listen = "127.0.0.1:7780"
    ```
 
-5. Start the hub normally. Signing initially returns `503` for at least
-   96 seconds, and until wall time has passed the persisted maximum admitted
-   signature expiry. This gate also applies after a restart.
+5. Start the hub normally. While replay protection warms up, signed requests
+   get `503` with code `signing_warming` and `Retry-After: 5`. Warm-up lasts
+   at least 96 seconds, and until wall time has passed the persisted maximum
+   admitted signature expiry. This gate also applies after a restart. A
+   `signing_warming` answer means wait and retry, not check keys or clocks.
 6. Run the native enrollment join command on the spoke with
    `--hub-url https://daemon.example/federation`, adding
    `--signing-key-id spoke-key-1 --signing-key-env KATA_SPOKE_SIGNING_KEY`.
@@ -221,5 +223,7 @@ Two ingests may run at once, retaining the native adoption snapshot limit.
 Metadata, event polls and leases use a separate pool so slow uploads do not
 block them. Both pools hold admission through handler completion. A full pool
 or replay cache returns `429` with `Retry-After: 1`; native sync retries create
-fresh signatures. Authentication failure and unavailable keys never dispatch
-the operation. Logs and errors do not include secrets or bodies.
+fresh signatures. During replay warm-up, including a clock-rollback fence,
+signed requests get `503` with code `signing_warming` and `Retry-After: 5`.
+Authentication failure and unavailable keys never dispatch the operation.
+Logs and errors do not include secrets or bodies.

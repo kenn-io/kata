@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -21,7 +23,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
+func TestFederationIngressSigningResponses(t *testing.T) {
 	t.Setenv("TEST_INGRESS_POLICY_KEY", strings.Repeat("k", 64))
 	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_INGRESS_POLICY_KEY"}
 	env := testenv.New(t)
@@ -39,30 +41,81 @@ func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
 		}, state)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, v.Close()) }()
-		time.Sleep(federationsigning.Quarantine)
 		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: v})
 		ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
 		require.NoError(t, err)
 		path := "https://hub.example" + projectPath(project.ID) + "/federation/metadata"
+
+		// During replay warm-up a signed request is told to
+		// retry instead of being reported as a bad signature.
+		warming := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		warming.Header.Set("Authorization", "Bearer "+enrollment.Token)
+		require.NoError(t, federationsigning.Sign(warming, source))
+		w := httptest.NewRecorder()
+		ingress.ServeHTTP(w, warming)
+		assertAPIError(t, w.Code, w.Body.Bytes(), http.StatusServiceUnavailable, "signing_warming")
+		require.Equal(t, "5", w.Header().Get("Retry-After"))
+
+		time.Sleep(federationsigning.Quarantine)
 		for _, tc := range []struct {
-			name    string
-			handler http.Handler
-			signed  bool
-			want    int
+			name     string
+			handler  http.Handler
+			signed   bool
+			tampered bool
+			want     int
+			code     string
 		}{
-			{"private unsigned", srv.Handler(), false, http.StatusOK},
-			{"ingress unsigned", ingress, false, http.StatusUnauthorized},
-			{"ingress signed", ingress, true, http.StatusOK},
+			{"private unsigned", srv.Handler(), false, false, http.StatusOK, ""},
+			{"ingress unsigned", ingress, false, false, http.StatusUnauthorized, ""},
+			{"ingress signed", ingress, true, false, http.StatusOK, ""},
+			{"ingress tampered digest", ingress, true, true, http.StatusUnauthorized, "signature_invalid"},
 		} {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 			req.Header.Set("Authorization", "Bearer "+enrollment.Token)
 			if tc.signed {
 				require.NoError(t, federationsigning.Sign(req, source))
 			}
+			if tc.tampered {
+				req.Header.Set("Content-Digest", "sha-256=:"+strings.Repeat("A", 43)+"=:")
+			}
 			w := httptest.NewRecorder()
 			tc.handler.ServeHTTP(w, req)
-			require.Equal(t, tc.want, w.Code, "%s: %s", tc.name, w.Body.String())
+			if tc.code != "" {
+				assertAPIError(t, w.Code, w.Body.Bytes(), tc.want, tc.code)
+				require.Empty(t, w.Header().Get("Retry-After"), tc.name)
+			} else {
+				require.Equal(t, tc.want, w.Code, "%s: %s", tc.name, w.Body.String())
+			}
 		}
+
+		// Model an expiry persisted before the wall clock moved backward.
+		state = filepath.Join(t.TempDir(), "rollback.state")
+		require.NoError(t, federationsigning.InitializeReplayState(state))
+		watermark := time.Now().Add(federationsigning.Quarantine + time.Minute).Unix()
+		require.NoError(t, os.WriteFile(state, []byte(strconv.FormatInt(watermark, 10)+"\n"), 0600))
+		rollbackVerifier, err := federationsigning.NewVerifier("https://hub.example", []signingpolicy.Key{
+			{Source: source, EnrollmentID: enrollment.Enrollment.ID},
+		}, state)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, rollbackVerifier.Close()) }()
+		rollbackServer := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: rollbackVerifier})
+		rollbackIngress, err := rollbackServer.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
+		require.NoError(t, err)
+		time.Sleep(federationsigning.Quarantine)
+		request := func() *httptest.ResponseRecorder {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer "+enrollment.Token)
+			require.NoError(t, federationsigning.Sign(req, source))
+			w := httptest.NewRecorder()
+			rollbackIngress.ServeHTTP(w, req)
+			return w
+		}
+		w = request()
+		assertAPIError(t, w.Code, w.Body.Bytes(), http.StatusServiceUnavailable, "signing_warming")
+		require.Equal(t, "5", w.Header().Get("Retry-After"))
+		time.Sleep(time.Minute + time.Second)
+		w = request()
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	})
 }
 
