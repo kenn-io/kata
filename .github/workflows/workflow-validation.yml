@@ -68,7 +68,7 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.53.0
 
       - name: Install frozen web dependencies
         run: kit-retry 3 5 make web-install

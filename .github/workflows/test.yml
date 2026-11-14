@@ -85,7 +85,7 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.53.0
 
       - name: Install frozen web dependencies
         run: kit-retry 3 5 make web-install
@@ -152,7 +152,7 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.53.0
 
       - name: Install frozen web dependencies
         run: kit-retry 3 5 make web-install
@@ -311,7 +311,7 @@ jobs:
       # and the check's fetch does not ask for it. /index.html is the same page
       # with the same headers.
       - name: Check first paint
-        uses: kenn-io/actions/first-paint@6a8b4227ec7ce3c28c6b042b735781b1601211f4  # main
+        uses: kenn-io/actions/first-paint@33ced853fa88b70eb178ecd40ec74ef64420479d  # main
         with:
           dist: docs/site
           urls: http://127.0.0.1:7777/index.html
@@ -381,7 +381,7 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.53.0
 
       - name: Install frozen web dependencies
         run: kit-retry 3 5 make web-install
@@ -476,7 +476,7 @@ jobs:
         with:
           node-version: 26.12.1
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.53.0
 
       # Exercise the declared minimum native APIs without running package scripts.
       - name: Install published native APIs
@@ -555,7 +555,7 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.53.0
 
       - name: Fetch OpenAPI client generator
         run: kit-retry 3 5 go run -n github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.76.5
@@ -620,7 +620,7 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.53.0
 
       - name: Install frozen web dependencies
         run: kit-retry 3 5 make web-install
@@ -836,7 +836,7 @@ jobs:
           cache: true
           install: true
 
-      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.53.0
 
       - name: Locate Go caches
         run: |
