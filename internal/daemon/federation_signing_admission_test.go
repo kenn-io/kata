@@ -23,7 +23,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
+func TestFederationIngressSigningResponses(t *testing.T) {
 	t.Setenv("TEST_INGRESS_POLICY_KEY", strings.Repeat("k", 64))
 	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_INGRESS_POLICY_KEY"}
 	env := testenv.New(t)
