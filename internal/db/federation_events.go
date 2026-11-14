@@ -17,16 +17,6 @@ func FederationPushEligible(event string) string {
 	return `NOT EXISTS (SELECT 1 FROM meta WHERE key='federation_local_only_event.'||` + event + `.uid)`
 }
 
-// FederationPushPending selects eligible events after the push cursor.
-func FederationPushPending(event, cursor string) string {
-	return `(` + event + `.id>` + cursor + ` AND ` + FederationPushEligible(event) + `)`
-}
-
-// FederationPushPendingIDs selects eligible events for a project and origin.
-func FederationPushPendingIDs(project, origin, cursor string) string {
-	return `SELECT pending.id FROM events pending WHERE pending.project_id=` + project + ` AND pending.origin_instance_uid=` + origin + ` AND ` + FederationPushPending("pending", cursor)
-}
-
 // ProjectMetadataAdoptionPayload encodes existing project metadata as a
 // synthetic from-empty diff for a federation adoption baseline.
 func ProjectMetadataAdoptionPayload(metadata JSONBlob) (string, error) {

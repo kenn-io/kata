@@ -11,14 +11,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-var pendingFederationPushWhere = `
-		WHERE e.project_id = $1
-		  AND e.origin_instance_uid = $2
-		  AND e.id IN (` + db.FederationPushPendingIDs("$1", "$2", "$3") + `)
-		  AND ` + federationPushEventTypeCondition("e.type") + `
-		ORDER BY e.id ASC
-		LIMIT $4`
-
 // PendingFederationPushEvents returns local-origin events that have not yet
 // been acknowledged by the hub for a push-enabled spoke binding.
 func (d *Store) PendingFederationPushEvents(
@@ -31,7 +23,11 @@ func (d *Store) PendingFederationPushEvents(
 	if limit <= 0 {
 		limit = 1000
 	}
-	out, err := d.queryPendingFederationPushEvents(ctx, pendingFederationPushWhere, projectID, originInstanceUID, afterID, limit)
+	out, err := d.queryPendingFederationPushEvents(ctx, `
+		WHERE e.project_id = ? AND e.origin_instance_uid = ? AND e.id > ?
+		  AND `+db.FederationPushEligible("e")+`
+		  AND `+federationPushEventTypeCondition("e.type")+`
+		ORDER BY e.id ASC LIMIT ?`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +44,7 @@ func (d *Store) PendingFederationPushEvents(
 			  AND e.origin_instance_uid = ?
 			  AND e.id > ?
 			  AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
-			  AND `+db.FederationPushPending("e", "0")+`
+			  AND `+db.FederationPushEligible("e")+`
 			  AND e.id <= COALESCE((
 			    SELECT MIN(barrier.id)
 			      FROM events barrier
@@ -56,7 +52,7 @@ func (d *Store) PendingFederationPushEvents(
 			       AND barrier.origin_instance_uid = ?
 			       AND barrier.id > ?
 			       AND `+federationPushEventTypeCondition("barrier.type")+`
-			       AND `+db.FederationPushPending("barrier", "0")+`
+			       AND `+db.FederationPushEligible("barrier")+`
 			       AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  ), 9223372036854775807)
 			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, projectID, originInstanceUID, runStartAfterID)
@@ -115,7 +111,8 @@ func (d *Store) PendingFederationPushStats(
 		  FROM events
 		 WHERE project_id = $1
 		   AND origin_instance_uid = $2
-		   AND id IN (`+db.FederationPushPendingIDs("$1", "$2", "$3")+`)
+		   AND id > $3
+		   AND `+db.FederationPushEligible("events")+`
 		   AND `+federationPushEventTypeCondition("type"),
 		projectID, originInstanceUID, afterID).Scan(&count, &maxID); err != nil {
 		return 0, 0, fmt.Errorf("count pending federation push: %w", err)
@@ -174,15 +171,7 @@ func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 // the hub for a spoke binding.
 func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return d.RetryTransient(ctx, func() error {
-		tx, err := d.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = tx.Rollback() }()
-		if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
-			return err
-		}
-		return tx.Commit()
+		return advanceFederationPushCursor(ctx, d, projectID, nextCursor)
 	})
 }
 
@@ -309,7 +298,8 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		         FROM events e
 		        WHERE e.project_id = $4
 		          AND e.origin_instance_uid = $5
-		          AND e.id IN (`+db.FederationPushPendingIDs("$4", "$5", "$6")+`)
+		          AND e.id > $6
+		          AND `+db.FederationPushEligible("e")+`
 		          AND `+federationPushEventTypeCondition("e.type")+`
 		   )
 		   AND NOT EXISTS (

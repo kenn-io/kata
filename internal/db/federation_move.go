@@ -286,8 +286,8 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 		var role string
 		var enabled int
 		var relay bool
-		if err := tx.QueryRowContext(ctx, `SELECT b.role,b.enabled,b.relay_config IS NOT NULL
- FROM federation_bindings b WHERE b.project_id=$1`, route).Scan(&role, &enabled, &relay); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT role,enabled,relay_config IS NOT NULL
+ FROM federation_bindings WHERE project_id=$1`, route).Scan(&role, &enabled, &relay); err != nil {
 			if missing && errors.Is(err, sql.ErrNoRows) {
 				return 0, fmt.Errorf("%w: event project is not joined", ErrFederationIngestValidation)
 			}
@@ -709,7 +709,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
  JOIN federation_bindings b ON b.project_id=e.project_id
  WHERE e.project_id<>$1 AND e.origin_instance_uid=$2
  AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
- AND `+FederationPushPending("e", "b.push_cursor_event_id")+`
+ AND `+`e.id>b.push_cursor_event_id AND `+FederationPushEligible("e")+`
  AND e.type IN (`+FederationPushEventTypesSQL()+`))`, projectID, originInstanceUID).Scan(&pending); err != nil {
 		return err
 	}

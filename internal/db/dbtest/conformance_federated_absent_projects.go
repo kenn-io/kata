@@ -27,20 +27,24 @@ func checkFederatedParkedMoveRecovery(t *testing.T, _ db.Storage, backend Backen
 
 func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, destinationFirst, leaveSource bool) error {
 	ctx := t.Context()
+	prior, err := hub.CreateProject(ctx, "prior-project")
+	require.NoError(t, err)
 	source, err := hub.CreateProject(ctx, "source-project")
 	require.NoError(t, err)
 	target, err := hub.CreateProject(ctx, "target-project")
 	require.NoError(t, err)
-	for _, project := range []db.Project{source, target} {
+	for _, project := range []db.Project{prior, source, target} {
 		_, err = hub.EnableProjectFederation(ctx, project.ID, "worker")
 		require.NoError(t, err)
 	}
-	issue, created, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "U", Author: "worker"})
+	issue, created, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: prior.ID, Title: "U", Author: "worker"})
 	require.NoError(t, err)
-	moved, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	inbound, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: prior.ID, ToProjectID: source.ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	moved, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: inbound.Issue.Revision, Actor: "worker"})
 	require.NoError(t, err)
 	u := issue.UID
-	creations := []db.RemoteEvent{portableNativeEvent(created)}
+	creations := []db.RemoteEvent{portableNativeEvent(created), portableNativeEvent(*inbound.Event)}
 	moves := []db.RemoteEvent{portableNativeEvent(*moved.Event)}
 	spoke := backend.Open(t)
 	t.Cleanup(func() { require.NoError(t, spoke.Close()) })
@@ -51,8 +55,16 @@ func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, dest
 	_, err = spoke.InsertRemoteEvents(ctx, route.ID, creations)
 	require.NoError(t, err)
 	require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+	missingSource, err := spoke.ProjectByUID(ctx, prior.UID)
+	require.NoError(t, err)
+	require.NotNil(t, missingSource.DeletedAt)
+	inboundHistory, err := spoke.EventsByUIDs(ctx, missingSource.ID, []string{created.UID})
+	require.NoError(t, err)
+	require.Len(t, inboundHistory, 1)
+	require.Equal(t, created.ContentHash, inboundHistory[0].ContentHash)
 	localU, err := spoke.IssueByUID(ctx, u, db.IncludeDeletedNo)
 	require.NoError(t, err)
+	require.Equal(t, route.ID, localU.ProjectID)
 	otherIssue, later, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "local work", Author: "worker"})
 	require.NoError(t, err)
 	if leaveSource {
@@ -90,6 +102,8 @@ func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, dest
 	if leaveSource {
 		_, err = spoke.LeaveFederationReplica(ctx, route.ID)
 		require.NoError(t, err)
+		_, err = spoke.FederationBindingByProject(ctx, route.ID)
+		require.ErrorIs(t, err, db.ErrNotFound)
 		return nil
 	}
 	parked, err := spoke.ProjectByUID(ctx, target.UID)
@@ -127,6 +141,8 @@ func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, dest
 	pending, err = spoke.PendingFederationPushEvents(ctx, route.ID, spoke.InstanceUID(), later.ID, 100)
 	require.NoError(t, err)
 	require.NotContains(t, eventUIDs(pending), comment.UID, "joining the destination keeps the original project's edit local")
+	_, err = spoke.AddLabel(ctx, localU.ID, "local", "worker")
+	require.NoError(t, err)
 	hubIssue, err := hub.IssueByUID(ctx, u, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	returned, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: hubIssue.ID, FromProjectID: target.ID, ToProjectID: source.ID, IfMatchRev: hubIssue.Revision, Actor: "worker"})
@@ -144,5 +160,9 @@ func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, dest
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
 	require.Equal(t, "local comment", comments[0].Body)
+	labels, err := spoke.LabelsByIssue(ctx, localU.ID)
+	require.NoError(t, err)
+	require.Len(t, labels, 1)
+	require.Equal(t, "local", labels[0].Label)
 	return nil
 }

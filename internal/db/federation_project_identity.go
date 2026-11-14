@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// FederationProjectIdentityDependencyPrefix stores project UIDs that a
+// FederationProjectIdentityDependencyPrefix stores former project UIDs that a
 // joined replica still needs.
 const FederationProjectIdentityDependencyPrefix = "federation_identity_dependency."
 
@@ -21,7 +21,7 @@ func ClearFederationRetainedProject(ctx context.Context, tx interface {
 	return err
 }
 
-// CheckFederationProjectIdentityRetirement protects identities
+// CheckFederationProjectIdentityRetirement protects only former identities
 // still referenced by another joined project's portable issue history. Archive
 // and leave retain the identity; purge and merge must wait for those streams to
 // detach. Local history covered by an adoption baseline creates no dependency.
@@ -174,18 +174,12 @@ func PreserveFederationProjectIdentityDependencies(ctx context.Context, tx *sql.
 		return closeErr
 	}
 	for requiredUID := range dependencies {
-		if err := recordFederationProjectIdentityDependency(ctx, tx, dependentUID, requiredUID); err != nil {
+		key := FederationProjectIdentityDependencyPrefix + dependentUID + "." + requiredUID
+		if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'1') ON CONFLICT(key) DO NOTHING`, key); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// recordFederationProjectIdentityDependency holds an identity for a joined stream.
-func recordFederationProjectIdentityDependency(ctx context.Context, tx *sql.Tx, dependentUID, requiredUID string) error {
-	key := FederationProjectIdentityDependencyPrefix + dependentUID + "." + requiredUID
-	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'1') ON CONFLICT(key) DO NOTHING`, key)
-	return err
 }
 
 // ClearFederationProjectIdentityDependencies retires the identity holds owned

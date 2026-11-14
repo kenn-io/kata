@@ -14,11 +14,6 @@ import (
 
 var federationPushEventTypeList = "(" + db.FederationPushEventTypesSQL() + ")"
 
-var pendingFederationPushSQL = eventSelect + `
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id IN (` + db.FederationPushPendingIDs("$1", "$2", "$3") + `)
-  AND ` + pgFederationPushEventTypeCondition("e.type") + `
-ORDER BY e.id ASC LIMIT $4`
-
 func pgFederationPushEventTypeCondition(column string) string {
 	return column + ` IN ` + federationPushEventTypeList
 }
@@ -34,7 +29,10 @@ func (s *Store) PendingFederationPushEvents(
 	if limit <= 0 {
 		limit = 1000
 	}
-	output, err := s.queryPendingFederationPushEvents(ctx, pendingFederationPushSQL, projectID, originInstanceUID, afterID, limit)
+	output, err := s.queryPendingFederationPushEvents(ctx, eventSelect+`
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND `+db.FederationPushEligible("e")+`
+  AND `+pgFederationPushEventTypeCondition("e.type")+`
+ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -47,14 +45,14 @@ func (s *Store) PendingFederationPushEvents(
 			}
 		}
 		extra, err := s.queryPendingFederationPushEvents(ctx, eventSelect+`
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`) AND `+db.FederationPushPending("e", "0")+`
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`) AND `+db.FederationPushEligible("e")+`
   AND e.id <= COALESCE((
     SELECT MIN(barrier.id) FROM events barrier
      WHERE barrier.project_id=$1
        AND barrier.origin_instance_uid=$2
        AND barrier.id>$4
        AND `+pgFederationPushEventTypeCondition("barrier.type")+`
-       AND `+db.FederationPushPending("barrier", "0")+`
+       AND `+db.FederationPushEligible("barrier")+`
        AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
   ), 9223372036854775807)
 ORDER BY e.id ASC`, projectID, originInstanceUID, output[len(output)-1].ID, runStartAfterID)
@@ -108,7 +106,7 @@ func (s *Store) PendingFederationPushStats(
 	var count int64
 	var highWater sql.NullInt64
 	err := s.QueryRowContext(ctx, `SELECT COUNT(*),MAX(id) FROM events
-WHERE project_id=$1 AND origin_instance_uid=$2 AND id IN (`+db.FederationPushPendingIDs("$1", "$2", "$3")+`) AND `+pgFederationPushEventTypeCondition("type"),
+WHERE project_id=$1 AND origin_instance_uid=$2 AND id>$3 AND `+db.FederationPushEligible("events")+` AND `+pgFederationPushEventTypeCondition("type"),
 		projectID, originInstanceUID, afterID).Scan(&count, &highWater)
 	if err != nil {
 		return 0, 0, mapSQLError(err, nil)
