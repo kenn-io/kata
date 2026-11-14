@@ -443,6 +443,8 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 		sourceShort := decision.SourceShortID
 		if !decision.Exists {
 			if active {
+				// A cold replica can expose an empty projection at the append
+				// cursor before this fold creates the destination issue row.
 				from, _ := StringValue(PayloadMap(winner.Payload)["from_project_uid"])
 				if err := tx.QueryRowContext(ctx, `SELECT id,uid,name FROM projects WHERE uid=$1`, from).Scan(&sourceProject.ID, &sourceProject.UID, &sourceProject.Name); err != nil {
 					return err
@@ -466,6 +468,8 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 		if decision.Joined && !active {
 			return ErrNotFound
 		}
+		// Move ingress has already checked its authority and endpoints. Replaying
+		// trusted history must also work after a former source has left.
 		if decision.RecurrenceID.Valid {
 			return fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
 		}
@@ -479,6 +483,11 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE issues SET project_id=$1,short_id=$2,revision=revision+1 WHERE id=$3`, target, short, id); err != nil {
 			return err
+		}
+		if decision.Joined {
+			if err := releaseLocalOnlyMoveEvents(ctx, tx, target, origin, references); err != nil {
+				return err
+			}
 		}
 		if err := afterRehome(issue.UID, issue.ProjectUID); err != nil {
 			return err
@@ -514,9 +523,10 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 }
 
 func markLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, projectID int64, origin, issueUID string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) error {
+	//nolint:gosec // The eligibility expression is fixed SQL; values are bound.
 	rows, err := tx.QueryContext(ctx, `SELECT e.uid,e.issue_uid,e.related_issue_uid,e.type,e.payload FROM events e
  JOIN federation_bindings b ON b.project_id=e.project_id
- WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>b.push_cursor_event_id`, projectID, origin)
+ WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND (e.id>b.push_cursor_event_id OR NOT (`+FederationPushEligible("e")+`))`, projectID, origin)
 	if err != nil {
 		return err
 	}
@@ -553,11 +563,90 @@ func markLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, projectID int64, o
 		return err
 	}
 	for _, uid := range marked {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'1') ON CONFLICT(key) DO NOTHING`, "federation_local_only_event."+uid); err != nil {
+		result, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'v1:held') ON CONFLICT(key) DO UPDATE SET value='v1:held' WHERE meta.value IN ('v1:held','v1:deliver')`, "federation_local_only_event."+uid)
+		if err != nil {
 			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			return fmt.Errorf("unknown local event marker for event %s", uid)
 		}
 	}
 	return nil
+}
+
+func releaseLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, projectID int64, origin string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) error {
+	rows, err := tx.QueryContext(ctx, `SELECT e.uid,e.issue_uid,e.related_issue_uid,e.type,e.payload FROM events e JOIN meta m ON m.key='federation_local_only_event.'||e.uid WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND m.value='v1:held'`, projectID, origin)
+	if err != nil {
+		return err
+	}
+	type candidate struct {
+		uid    string
+		issues []string
+	}
+	var candidates []candidate
+	for rows.Next() {
+		var event RemoteEvent
+		var issue, related sql.NullString
+		var payload string
+		if err := rows.Scan(&event.EventUID, &issue, &related, &event.Type, &payload); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if issue.Valid {
+			event.IssueUID = &issue.String
+		}
+		if related.Valid {
+			event.RelatedIssueUID = &related.String
+		}
+		event.Payload = jsontext.Value(payload)
+		refs, err := references(event, PayloadMap(event.Payload))
+		if err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if issue.Valid && issue.String != "" {
+			refs = append(refs, issue.String)
+		}
+		candidates = append(candidates, candidate{event.EventUID, refs})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, event := range candidates {
+		ready := len(event.issues) > 0
+		for _, uid := range event.issues {
+			var present bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues i JOIN federation_bindings b ON b.project_id=i.project_id WHERE i.uid=$1 AND i.project_id=$2)`, uid, projectID).Scan(&present); err != nil {
+				return err
+			}
+			if !present {
+				ready = false
+				break
+			}
+		}
+		if ready {
+			if _, err := tx.ExecContext(ctx, `UPDATE meta SET value='v1:deliver' WHERE key=$1`, "federation_local_only_event."+event.uid); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// ClearDeliveredFederationEvents removes markers for acknowledged events.
+func ClearDeliveredFederationEvents(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, projectID, cursor int64) error {
+	_, err := exec.ExecContext(ctx, `DELETE FROM meta WHERE value='v1:deliver' AND key IN (SELECT 'federation_local_only_event.'||uid FROM events WHERE project_id=$1 AND id<=$2)`, projectID, cursor)
+	return err
 }
 
 type movedProjectPassKey struct{}
@@ -689,8 +778,8 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
  JOIN federation_bindings b ON b.project_id=e.project_id
  WHERE e.project_id<>$1 AND e.origin_instance_uid=$2
  AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
- AND e.id>b.push_cursor_event_id
- AND e.type IN (`+FederationPushEventTypesSQL()+`) AND `+FederationPushEligible("e")+`)`, projectID, originInstanceUID).Scan(&pending); err != nil {
+ AND `+FederationPushPending("e", "b.push_cursor_event_id")+`
+ AND e.type IN (`+FederationPushEventTypesSQL()+`))`, projectID, originInstanceUID).Scan(&pending); err != nil {
 		return err
 	}
 	if pending {

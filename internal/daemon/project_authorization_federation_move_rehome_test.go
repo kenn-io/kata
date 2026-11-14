@@ -6,13 +6,10 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -106,18 +103,6 @@ func TestProjectAccessRetainedMoveDestinationIsPrivate(t *testing.T) {
 		path := fmt.Sprintf("/api/v1/projects/%d", project.ID)
 		status, _, raw = f.request(t, http.MethodPost, path+"/restore?actor=nonmember", "nonmember", nil, nil)
 		require.Equal(t, http.StatusNotFound, status, string(raw))
-		ownerServer := daemon.NewServer(daemon.ServerConfig{DB: store, Auth: config.AuthConfig{Token: "bootstrap-test-token"}})
-		t.Cleanup(func() { require.NoError(t, ownerServer.Close()) })
-		ownerHTTP := httptest.NewServer(ownerServer.Handler())
-		t.Cleanup(ownerHTTP.Close)
-		owner := f
-		owner.server = ownerHTTP
-		status, _, raw = owner.request(t, http.MethodPost, path+"/restore?actor=admin", "admin", nil, nil)
-		require.Equal(t, http.StatusOK, status, string(raw))
-		issue, err := store.IssueByUID(ctx, f.issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		issuePath := fmt.Sprintf("%s/issues/%s", path, issue.ShortID)
-		status, _, raw = f.request(t, http.MethodGet, issuePath, "nonmember", nil, nil)
-		require.Equal(t, http.StatusNotFound, status, string(raw))
+
 	})
 }

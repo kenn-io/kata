@@ -304,7 +304,7 @@ func pushDirectSpoke(
 					}
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
-				if ack.PushCursorEventID <= binding.PushCursorEventID {
+				if ack.PushCursorEventID < batch[0].ID {
 					return recordFederationSyncError(ctx, store, binding.ProjectID,
 						errors.New("federation push cursor did not advance"))
 				}
@@ -337,7 +337,7 @@ func pushDirectSpoke(
 						onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
 					}
 				}
-				binding.PushCursorEventID = ack.PushCursorEventID
+				binding.PushCursorEventID = max(binding.PushCursorEventID, ack.PushCursorEventID)
 				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
 			}
 		}
