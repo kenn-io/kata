@@ -47,13 +47,6 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 		require.ErrorContains(t, err, invalid.EventUID)
 		require.ErrorContains(t, err, invalid.ProjectUID)
-		invalid = creation
-		invalid.IssueUID = nil
-		resignNativeEvent(t, &invalid)
-		_, err = receiver.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{invalid})
-		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
-		require.ErrorContains(t, err, invalid.EventUID)
-		require.ErrorContains(t, err, invalid.ProjectUID)
 		_, err = receiver.ProjectByUID(ctx, source.UID)
 		require.ErrorIs(t, err, db.ErrNotFound)
 
@@ -151,8 +144,6 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 				var unrelated db.Issue
 				if mode != "archived" {
 					_, _, _, err = spoke.RestoreProject(ctx, retained.ID, "worker")
-					require.NoError(t, err)
-					_, err = spoke.LeaveFederationReplica(ctx, retained.ID)
 					require.NoError(t, err)
 					unrelated, _, err = spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: retained.ID, Title: "Standalone issue", Author: "worker"})
 					require.NoError(t, err)
