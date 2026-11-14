@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-11
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -617,6 +617,9 @@ remove its retained history or the project's cron capability requirement.
 See [Cron triggers](#triggers) for the expression rules.
 
 ## Independent run evidence
+
+To notify an inbox recipient when an observation reports a failure, see
+[Alert on cron run failures](../guide/cron-failure-alerts.md).
 
 An adapter creates one independent run UID and retains it across retries:
 
