@@ -100,8 +100,11 @@ func TestSyncFederationDelayedSourceEditCurrentProjectAuthority(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, comments)
 	sender.credentials[projects[1].UID] = credential
-	require.NoError(t, sender.sync(t, 0), "joined current-project proof allows retry without rewriting the source envelope")
+	require.NoError(t, sender.sync(t, 0))
 	comments, err = hub.DB.CommentsByIssue(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Empty(t, comments, "the source edit stays local after the move is pulled")
+	comments, err = sender.env.DB.CommentsByIssue(t.Context(), local.ID)
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
 	require.Equal(t, "Authorized delayed edit", comments[0].Body)
