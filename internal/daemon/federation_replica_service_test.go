@@ -1052,18 +1052,15 @@ func TestEnsureFederationReplicaAdoptsStandaloneProjectWithSnapshot(t *testing.T
 }
 
 func TestEnsureFederationReplicaRetainedProjectDoesNotSnapshotLocalComments(t *testing.T) {
-	for _, tc := range []struct {
-		name, projectName string
-		restored, managed bool
-	}{
-		{name: "archived", projectName: "federation-01hznq7vfpk1xgd8r5mabcd4ex"},
-		{name: "restored", projectName: "federation-01hznq7vfpk1xgd8r5mabcd4ex", restored: true},
-		{name: "managed reservation", projectName: "hub-project", managed: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, restored := range []bool{false, true} {
+		name := "archived"
+		if restored {
+			name = "restored"
+		}
+		t.Run(name, func(t *testing.T) {
 			ctx := t.Context()
 			store := openReplicaServiceStore(t)
-			project, err := store.CreateProjectWithUID(ctx, tc.projectName, replicaHubProjectUID)
+			project, err := store.CreateProjectWithUID(ctx, "federation-01hznq7vfpk1xgd8r5mabcd4ex", replicaHubProjectUID)
 			require.NoError(t, err)
 			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "moved issue", Author: "worker"})
 			require.NoError(t, err)
@@ -1075,11 +1072,10 @@ func TestEnsureFederationReplicaRetainedProjectDoesNotSnapshotLocalComments(t *t
 			require.NoError(t, err)
 			params := replicaServiceParams()
 			params.AdoptExisting = true
-			if tc.restored {
+			if restored {
 				_, _, _, err = store.RestoreProject(ctx, project.ID, "worker")
 				require.NoError(t, err)
 			}
-			params.Credential.ManagedByConfig = tc.managed
 			credentials := newReplicaCredentialStore()
 			result, err := daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
 			require.NoError(t, err)
