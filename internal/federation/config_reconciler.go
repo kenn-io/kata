@@ -1290,11 +1290,11 @@ func reserveManagedFederationCredential(
 }
 
 func retainedMappingProject(ctx context.Context, store db.Storage, uid, name string) (db.Project, error) {
-	_, err := store.ProjectByNameIncludingArchived(ctx, name)
-	if err == nil {
+	named, err := store.ProjectByNameIncludingArchived(ctx, name)
+	if err == nil && named.UID != uid {
 		return db.Project{}, nil
 	}
-	if !errors.Is(err, db.ErrNotFound) {
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
 		return db.Project{}, reconcileError(ErrLocalStorage, "resolve local federation project")
 	}
 	project, err := store.ProjectByUID(ctx, uid)

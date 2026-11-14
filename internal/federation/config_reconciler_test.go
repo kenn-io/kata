@@ -1040,6 +1040,25 @@ func TestReconcileMappingAdoptsRetainedProject(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestReconcileMappingAdoptsRetainedProjectWithConfiguredName(t *testing.T) {
+	store := openReconcileStore(t)
+	ctx := t.Context()
+	project, err := store.CreateProjectWithUID(ctx, "spoke-project", hubProjectUID)
+	require.NoError(t, err)
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker", Force: true})
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FederationRetainedProjectPrefix+hubProjectUID)
+	require.NoError(t, err)
+
+	err = federation.ReconcileMapping(ctx, store, newFakeCredentialStore(), newFakeHub(), testCatalog(), testMapping(), nil)
+	require.NoError(t, err)
+	joined, err := store.ProjectByName(ctx, "spoke-project")
+	require.NoError(t, err)
+	assert.Equal(t, project.ID, joined.ID)
+	_, err = store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+}
+
 func TestReconcileMappingRejectsRetainedProjectCollisions(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
