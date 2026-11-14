@@ -9,10 +9,6 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Keep unsent edits in the original project when an issue moves to an unjoined
-  destination. Joining that destination later keeps those edits local; they can
-  synchronize if the issue returns to the original joined project.
-
 - Upgrade to schema 51, which reads issue history through an index on each
   event's header issue UID instead of one built from event payloads. PostgreSQL
   needs `kata storage postgres migrate` with the daemon stopped while the index
@@ -74,6 +70,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Keep syncing a joined project when issue history references projects the spoke
   has not joined. Issues moved out keep their folded hub content and local state
   in the retained counterpart; restore it and join with its local name to subscribe.
+  Unsent source edits stay local, even after joining the destination, and can
+  synchronize if the issue returns to the original joined project.
 
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and

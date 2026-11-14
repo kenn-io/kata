@@ -90,8 +90,8 @@ project's lists. Find its UID and local name with `GET /api/v1/projects?include=
 The placeholder starts owner-only; restore it, then broaden its project access
 when others should see its issues. Restoring without joining does not subscribe
 to the project, but later moves can still place issues there. Offline edits made
-in the source before the move stay local and are not shared while the issue is
-in the destination.
+in the source before the move stay local even if the destination is later joined;
+they can synchronize if the issue returns to the original joined project.
 To subscribe later, run `kata projects restore <local-name>`, optionally run
 `kata projects rename <local-name> <chosen-name>`, then rerun the enrollment's
 join command using `--project <current-local-name>`.
@@ -124,10 +124,6 @@ A standalone move is covered by the first retained federation baseline after
 that move, including after leaving and reenrolling in federation. Spokes can
 receive later moves without joining the former local project; later edits and
 comments still synchronize normally.
-
-Edits made in the original project before an issue moves to an unjoined project
-stay local if that destination is joined later. They can synchronize if the
-issue returns to the original joined project.
 
 The spoke sends the source project's existing enrollment credential with the
 move batch, alongside the destination credential, only to their shared hub

@@ -726,7 +726,6 @@ func TestSyncFederationOncePushPoisonLeavesCursorUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Equal(t, localEvent.ID, pending[0].ID)
-
 }
 
 func TestSyncFederationOncePushPoisonRecordsQuarantine(t *testing.T) {
