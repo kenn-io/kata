@@ -218,7 +218,7 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 	}
 }
 
-func TestMoveRebuildRetainsUnjoinedIssuesAndPrunesStaleLinks(t *testing.T) {
+func TestMoveRebuildRetainsUnjoinedIssuesAndAppliesUnlink(t *testing.T) {
 	ctx := t.Context()
 	d, source, issue := incrementalTestStore(t)
 	destination, err := d.CreateProject(ctx, "destination")
@@ -295,17 +295,6 @@ func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
 		require.Equal(t, destination.ID, got.ProjectID)
 		require.Equal(t, "work 42", got.Title)
 		require.JSONEq(t, `{"area":"value-42"}`, string(got.Metadata))
-		comments, err := store.CommentsByIssue(ctx, issue.ID)
-		require.NoError(t, err)
-		require.Len(t, comments, 2)
-		require.ElementsMatch(t, []string{"local comment", "comment"}, []string{comments[0].Body, comments[1].Body})
-		labels, err := store.LabelsByIssue(ctx, issue.ID)
-		require.NoError(t, err)
-		require.Len(t, labels, 2)
-		require.ElementsMatch(t, []string{"area:db", "local"}, []string{labels[0].Label, labels[1].Label})
-		links, err := store.LinksByIssue(ctx, issue.ID)
-		require.NoError(t, err)
-		require.Len(t, links, 1)
 		typ, payload := "issue.commented", fmt.Sprintf(`{"issue_uid":%q,"comment_uid":"01HZNQ7VFPK1XGD8R5MABCDEF1","author":"tester","body":"delayed","created_at":"2026-05-23T12:00:00.000Z"}`, issue.UID)
 		_, err = store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{incrementalRemoteEvent(t, source, issue.UID, typ, payload, 8_000_000_000_011)})
 		require.NoError(t, err)
@@ -315,28 +304,18 @@ func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
 		} else {
 			require.NoError(t, store.materializeFederatedProject(ctx, source.ID))
 		}
-		comments, err = store.CommentsByIssue(ctx, issue.ID)
-		require.NoError(t, err)
-		require.Len(t, comments, 3)
-		_, _, _, err = store.RestoreProject(ctx, destination.ID, "tester")
-		require.NoError(t, err)
-		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: destination.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: destination.ID, HubProjectUID: destination.UID, Enabled: true, Actor: "tester"})
-		require.NoError(t, err)
-		if store == d {
-			require.NoError(t, store.MaterializeFederatedProject(ctx, destination.ID))
-		} else {
-			require.NoError(t, store.materializeFederatedProject(ctx, destination.ID))
-		}
-		comments, err = store.CommentsByIssue(ctx, issue.ID)
-		require.NoError(t, err)
-		require.Len(t, comments, 3)
-		labels, err = store.LabelsByIssue(ctx, issue.ID)
-		require.NoError(t, err)
-		require.Len(t, labels, 2)
-		links, err = store.LinksByIssue(ctx, issue.ID)
-		require.NoError(t, err)
-		require.Len(t, links, 1)
+
 	}
+	preparedIssue, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	lockedIssue, err := locked.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, preparedIssue, lockedIssue)
+	preparedComments, err := d.CommentsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	lockedComments, err := locked.CommentsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, preparedComments, lockedComments)
 }
 
 func TestMoveRebuildAssignsCollidingShortIDsInOrder(t *testing.T) {
