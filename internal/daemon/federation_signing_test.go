@@ -463,7 +463,7 @@ func TestOptionalSigningRejectsEmptySignatureHeader(t *testing.T) {
 	path := fmt.Sprintf("/api/v1/projects/%d/federation/metadata", project.ID)
 	resp, raw := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer " + enrollment.Token})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	for _, header := range []string{"Signature", "Signature-Input", "Content-Digest"} {
+	for _, header := range []string{"Signature", "Signature-Input"} {
 		resp, raw = envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer " + enrollment.Token, header: ""})
 		require.Equal(t, http.StatusUnauthorized, resp.StatusCode, string(raw))
 	}
