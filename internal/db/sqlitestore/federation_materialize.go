@@ -8,6 +8,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"hash"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -476,9 +477,7 @@ func applyUnjoinedMovedIssue(ctx context.Context, tx *sql.Tx, projectID int64, i
 	if err != nil {
 		return err
 	}
-	for uid, id := range changed {
-		m.issueIDs[uid] = id
-	}
+	maps.Copy(m.issueIDs, changed)
 	if err := reconcileFederatedCommentsFromRows(ctx, tx, m.issueIDs, m.projection, m.commentRows); err != nil {
 		return err
 	}
