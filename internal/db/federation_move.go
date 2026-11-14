@@ -407,17 +407,10 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, origin string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error), assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, applyUnjoined func(int64, FoldIssue, FoldProjection) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) (resultErr error) {
-	var applying *FoldEvent
-	defer func() {
-		if resultErr != nil && applying != nil {
-			resultErr = fmt.Errorf("apply move project %s event %s: %w", applying.ProjectUID, applying.UID, resultErr)
-		}
-	}()
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, origin string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error), assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, applyUnjoined func(int64, FoldIssue, FoldProjection) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) error {
 	for _, decision := range decisions {
 		issue := p.Issues[decision.IssueUID]
 		winner := moved[issue.UID]
-		applying = &winner
 		target, active := decision.TargetID, decision.Active
 		if decision.SourceStandalone {
 			delete(p.Issues, issue.UID)

@@ -788,13 +788,13 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 	for i, ev := range events {
 		payload, createdAt, err := validateRemoteEventContentHash(ev)
 		if err != nil {
-			return nil, fmt.Errorf("validate remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+			return nil, err
 		}
 		if _, err := db.RemoteEventIssueUID(ev); err != nil {
-			return nil, fmt.Errorf("validate remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+			return nil, err
 		}
 		if err := db.ValidateFederationEntries(ev.Type, ev.EventUID, payload); err != nil {
-			return nil, fmt.Errorf("validate remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+			return nil, err
 		}
 		payloads[i], createdAts[i] = payload, createdAt
 	}
@@ -810,7 +810,7 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 	for i, ev := range events {
 		inserted[i], err = d.insertRemoteEventTx(ctx, tx, projectID, ev, payloads[i], createdAts[i], validator)
 		if err != nil {
-			return nil, fmt.Errorf("remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+			return nil, err
 		}
 	}
 	if err := tx.Commit(); err != nil {

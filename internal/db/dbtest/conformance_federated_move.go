@@ -648,9 +648,6 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 				require.ErrorAs(t, err, new(*db.RecurrencePinnedError))
 			case "bridge":
 				require.ErrorIs(t, err, db.ErrExternalRootClaimActive)
-				require.ErrorContains(t, err, "apply move")
-				require.ErrorContains(t, err, event.EventUID)
-				require.ErrorContains(t, err, event.ProjectUID)
 			case "ownership":
 				require.ErrorIs(t, err, db.ErrExternalRootIssueSyncConflict)
 			case "host-scope":
