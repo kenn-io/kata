@@ -3365,7 +3365,7 @@ func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &body))
 	command := strings.ReplaceAll(body.Join.JoinCommand, "'<signing-key-id>'", "key-a")
-	command = strings.ReplaceAll(command, "'<absolute-path-to-spoke-key>'", `"$1"`)
+	command = strings.ReplaceAll(command, "'<absolute-path-to-spoke-key>'", "'"+strings.ReplaceAll(key, "'", `'"'"'`)+"'")
 	certFile := filepath.Join(t.TempDir(), "hub-cert.pem")
 	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: external.Certificate().Raw}), 0600))
 	t.Setenv("KATA_SERVER", spoke.URL)
@@ -3373,7 +3373,7 @@ func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
 	t.Setenv("PATH", filepath.Dir(binary)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	// The verifier rejects requests until its replay quarantine has elapsed.
 	<-time.After(federationsigning.Quarantine + time.Second)
-	output, err := exec.CommandContext(t.Context(), "sh", "-c", command, "--", key).CombinedOutput() //nolint:gosec // Command and binary come from this test's enrollment and fixture.
+	output, err := exec.CommandContext(t.Context(), "sh", "-c", command).CombinedOutput() //nolint:gosec // Command and binary come from this test's enrollment and fixture.
 	require.NoError(t, err, "%s", output)
 	project, err := spoke.DB.ProjectByName(t.Context(), "hub-project")
 	require.NoError(t, err)
