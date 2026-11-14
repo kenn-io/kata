@@ -458,10 +458,6 @@ type federatedShortIDCheck struct {
 
 func applyUnjoinedMovedIssue(ctx context.Context, tx *sql.Tx, projectID int64, issue db.FoldIssue, projection db.FoldProjection) error {
 	view := db.FoldMovedIssue(projection, issue)
-	labels := make(map[string]bool, len(view.Labels))
-	for key := range view.Labels {
-		labels[key.Label] = true
-	}
 	m := federationMaterialization{projection: view}
 	if err := m.prepareRows(ctx, tx, projectID, []string{issue.UID}); err != nil {
 		return err
@@ -472,7 +468,7 @@ func applyUnjoinedMovedIssue(ctx context.Context, tx *sql.Tx, projectID int64, i
 		}
 	}
 	for key := range m.labelRows {
-		if !labels[key.label] {
+		if _, ok := projection.Labels[db.FoldLabelKey{IssueUID: issue.UID, Label: key.label}]; !ok {
 			delete(m.labelRows, key)
 		}
 	}

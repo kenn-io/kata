@@ -835,7 +835,7 @@ func reconcileFederatedComments(
 	projection db.FoldProjection,
 	scope ...string,
 ) error {
-	existing, err := federatedCommentRowsByUID(ctx, tx, projectID, scope...)
+	existing, err := federatedCommentRowsByUID(ctx, tx, projectID)
 	if err != nil {
 		return err
 	}
@@ -937,16 +937,9 @@ func federatedCommentRowsByUID(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectID int64,
-	scope ...string,
 ) (map[string]federatedCommentRow, error) {
-	query := `SELECT c.uid,c.id,c.issue_id,c.author,c.body,c.created_at,c.teammate,c.reply_to_uid,c.reply_kind,c.edited_at FROM comments c
-JOIN issues i ON i.id=c.issue_id WHERE i.project_id=$1`
-	args := []any{projectID}
-	if len(scope) > 0 {
-		query += ` AND i.uid=$2`
-		args = append(args, scope[0])
-	}
-	rows, err := tx.QueryContext(ctx, query, args...)
+	rows, err := tx.QueryContext(ctx, `SELECT c.uid,c.id,c.issue_id,c.author,c.body,c.created_at,c.teammate,c.reply_to_uid,c.reply_kind,c.edited_at FROM comments c
+JOIN issues i ON i.id=c.issue_id WHERE i.project_id=$1`, projectID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}

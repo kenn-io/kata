@@ -301,35 +301,21 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 			return 0, errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported)
 		}
 	}
-	dependencies := []string{e.ProjectUID}
 	if e.Type == "issue.moved" {
 		_, destination, err := federationMoveProjects(ctx, tx, route, e, true)
 		if err != nil {
 			return 0, err
 		}
 		project, missing = destination, false
-		from, _ := StringValue(PayloadMap(e.Payload)["from_project_uid"])
-		dependencies = append(dependencies, from)
 	}
 	if missing || project != route {
 		if EventIssueUID(e.IssueUID) == "" {
 			return 0, fmt.Errorf("%w: project event outside requested stream", ErrFederationIngestValidation)
 		}
 	}
-	if missing || project != route || e.Type == "issue.moved" {
-		for _, uid := range dependencies {
-			if uid == routeUID {
-				continue
-			}
-			var bound bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b JOIN projects p ON p.id=b.project_id WHERE p.uid=$1)`, uid).Scan(&bound); err != nil {
-				return 0, err
-			}
-			if !bound {
-				if err := recordFederationProjectIdentityDependency(ctx, tx, routeUID, uid); err != nil {
-					return 0, err
-				}
-			}
+	if (missing || project != route) && e.ProjectUID != routeUID {
+		if err := recordFederationProjectIdentityDependency(ctx, tx, routeUID, e.ProjectUID); err != nil {
+			return 0, err
 		}
 	}
 	if missing {
