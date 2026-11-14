@@ -558,7 +558,11 @@ func fetchFederationRebindMetadata(
 		return api.ProjectFederationBody{}, federationReplicaError(ErrFederationReplicaCredentialConflict, "replacement hub requires signed requests", "Run kata federation signing configure --project-uid <local-project-uid> with --key-id and --key-env or --key-file, and --hub-url <new-https-base>, then retry.")
 	}
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-		return api.ProjectFederationBody{}, federationReplicaError(ErrFederationReplicaCredentialConflict, "replacement hub rejected the existing federation enrollment", "verify this catalog entry points to the same hub")
+		return api.ProjectFederationBody{}, federationReplicaError(
+			ErrFederationReplicaCredentialConflict,
+			"replacement hub rejected the existing federation enrollment",
+			"verify this catalog entry points to the same hub",
+		)
 	}
 	if response.StatusCode == http.StatusNotFound {
 		return api.ProjectFederationBody{}, federationReplicaError(

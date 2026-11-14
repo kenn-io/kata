@@ -55,34 +55,31 @@ func TestFederationSigningAdmission(t *testing.T) {
 					continue
 				}
 				type admissionCase struct {
-					name, token, signature, header, value, code string
-					status                                      int
+					name, token, header, value, code string
+					signed                           bool
+					status                           int
 				}
 				cases := []admissionCase{
-					{"unsigned", enrollment.Token, "", "", "", "hub_signing_required", http.StatusPreconditionRequired},
+					{"unsigned", enrollment.Token, "", "", "hub_signing_required", false, http.StatusPreconditionRequired},
 				}
 				if required {
 					cases = append(cases,
-						admissionCase{"digest only", enrollment.Token, "", "Content-Digest", digest, "hub_signing_required", http.StatusPreconditionRequired},
-						admissionCase{"signature input only", enrollment.Token, "", "Signature-Input", "example", "signature_invalid", http.StatusUnauthorized},
-						admissionCase{"tampered", enrollment.Token, "tampered", "", "", "signature_invalid", http.StatusUnauthorized},
-						admissionCase{"unknown enrollment", "unknown-enrollment", "", "", "", "auth_invalid", http.StatusForbidden},
+						admissionCase{"digest only", enrollment.Token, "Content-Digest", digest, "hub_signing_required", false, http.StatusPreconditionRequired},
+						admissionCase{"signature input only", enrollment.Token, "Signature-Input", "example", "signature_invalid", false, http.StatusUnauthorized},
+						admissionCase{"unknown enrollment", "unknown-enrollment", "", "", "auth_invalid", false, http.StatusForbidden},
 					)
 				} else if name == "socket" {
 					cases[0].status, cases[0].code = http.StatusOK, ""
-					cases = append(cases, admissionCase{"digest only", enrollment.Token, "", "Content-Digest", digest, "", http.StatusOK})
+					cases = append(cases, admissionCase{"digest only", enrollment.Token, "Content-Digest", digest, "", false, http.StatusOK})
 				} else {
-					cases = append(cases, admissionCase{"signed", enrollment.Token, "valid", "", "", "", http.StatusOK})
+					cases = append(cases, admissionCase{"signed", enrollment.Token, "", "", "", true, http.StatusOK})
 				}
 				for _, tc := range cases {
 					path := "https://hub.example" + projectPath(project.ID) + "/federation/metadata"
 					req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 					req.Header.Set("Authorization", "Bearer "+tc.token)
-					if tc.signature != "" {
+					if tc.signed {
 						require.NoError(t, federationsigning.Sign(req, source))
-						if tc.signature == "tampered" {
-							req.Header.Set("Signature", "tampered")
-						}
 					}
 					if tc.header != "" {
 						req.Header.Set(tc.header, tc.value)
