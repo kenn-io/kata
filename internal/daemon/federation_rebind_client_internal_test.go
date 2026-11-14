@@ -157,6 +157,28 @@ func TestFederationRebindPreflightClassifiesEnrollmentRejection(t *testing.T) {
 	assert.False(t, errors.Is(err, ErrFederationReplicaHubUnavailable))
 }
 
+func TestFederationRebindPreflightClassifiesSigningRequired(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPreconditionRequired)
+		_, _ = w.Write([]byte(`{"status":428,"error":{"code":"hub_signing_required","message":"hub requires signed requests"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	originalFactory := newFederationRebindHTTPClient
+	newFederationRebindHTTPClient = func(_ context.Context, _ string, token string) (*http.Client, error) {
+		return federationRebindTestBearerClient(t, server.Client(), server.URL, token), nil
+	}
+	t.Cleanup(func() { newFederationRebindHTTPClient = originalFactory })
+
+	_, err := fetchFederationRebindMetadata(t.Context(), server.URL, "enrollment-secret", 41, nil)
+	require.Error(t, err)
+	var apiErr *api.APIError
+	require.ErrorAs(t, federationReplicaAPIError(err), &apiErr)
+	assert.Contains(t, strings.ToLower(apiErr.Message+" "+apiErr.Hint), "signing")
+	assert.Contains(t, apiErr.Hint, "kata federation signing configure")
+}
+
 func TestFederationRebindPreflightClassifiesPinnedSigningBaseMismatch(t *testing.T) {
 	t.Setenv("TEST_REBIND_SIGNING_KEY", strings.Repeat("k", 64))
 	requestReachedHub := false
