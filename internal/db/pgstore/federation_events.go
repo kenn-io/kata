@@ -14,6 +14,11 @@ import (
 
 var federationPushEventTypeList = "(" + db.FederationPushEventTypesSQL() + ")"
 
+var pendingFederationPushSQL = eventSelect + `
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id IN (` + db.FederationPushPendingIDs("$1", "$2", "$3") + `)
+  AND ` + pgFederationPushEventTypeCondition("e.type") + `
+ORDER BY e.id ASC LIMIT $4`
+
 func pgFederationPushEventTypeCondition(column string) string {
 	return column + ` IN ` + federationPushEventTypeList
 }
@@ -32,10 +37,7 @@ func (s *Store) PendingFederationPushEvents(
 	if limit <= 0 {
 		limit = 1000
 	}
-	output, err := s.queryPendingFederationPushEvents(ctx, eventSelect+`
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id IN (`+db.FederationPushPendingIDs("$1", "$2", "$3")+`)
-  AND `+pgFederationPushEventTypeCondition("e.type")+`
-ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
+	output, err := s.queryPendingFederationPushEvents(ctx, pendingFederationPushSQL, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
 		return nil, err
 	}

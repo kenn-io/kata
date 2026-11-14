@@ -9,6 +9,8 @@ import (
 // they can pin the exact wire bytes without making the function public.
 var LinksChangedPayloadForTest = linksChangedPayload
 
+var PendingFederationPushWhereForTest = pendingFederationPushWhere
+
 // InstallEnrollmentRotationStageForTest observes the transaction after its
 // replacement lookup without adding a production Store method.
 func InstallEnrollmentRotationStageForTest(
