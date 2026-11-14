@@ -435,7 +435,6 @@ func TestEnsureFederationReplicaJoinsRetainedProjectAfterRestore(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, retained.ID, result.Project.ID)
 	require.Equal(t, retained.UID, result.Binding.HubProjectUID)
-
 }
 
 func TestEnsureFederationReplicaPreservesHubURLPathPrefix(t *testing.T) {

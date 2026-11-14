@@ -180,6 +180,9 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	if err := deleteProjectRelayMetadata(ctx, tx, source.UID); err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("delete source project relay metadata: %w", err)
 	}
+	if err := db.ClearFederationRetainedProject(ctx, tx, source.UID); err != nil {
+		return db.ProjectMergeResult{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, source.ID); err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("delete source project: %w", err)
 	}

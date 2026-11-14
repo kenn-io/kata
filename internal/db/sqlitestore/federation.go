@@ -785,13 +785,13 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 	for i, ev := range events {
 		payload, createdAt, err := validateRemoteEventContentHash(ev)
 		if err != nil {
-			return nil, fmt.Errorf("remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+			return nil, err
 		}
 		if _, err := db.RemoteEventIssueUID(ev); err != nil {
-			return nil, fmt.Errorf("remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+			return nil, err
 		}
 		if err := db.ValidateFederationEntries(ev.Type, ev.EventUID, payload); err != nil {
-			return nil, fmt.Errorf("remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+			return nil, err
 		}
 		payloads[i], createdAts[i] = payload, createdAt
 	}
@@ -1367,6 +1367,14 @@ func (d *Store) materializeFederatedProjectTxScoped(
 		}
 		if err != nil {
 			return err
+		}
+	}
+	for _, decision := range decisions {
+		if decision.Exists && !decision.Joined && !decision.SourceStandalone {
+			if err := reconcileParkedIssueLinks(ctx, tx, projection, decision.IssueUID); err != nil {
+				move := moved[decision.IssueUID]
+				return fmt.Errorf("apply move project %s event %s: %w", move.ProjectUID, move.UID, err)
+			}
 		}
 	}
 	if err := pruneFederatedIssues(ctx, tx, projectID, issueIDs); err != nil {
@@ -2528,7 +2536,27 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 		}
 		desired[row.key()] = row
 	}
-	if err := validateFederatedParentGraph(desired); err != nil {
+	graph := desired
+	if len(scope) > 0 {
+		graph = map[db.FoldLinkKey]federatedLinkRow{}
+		hasParent := false
+		for key, row := range desired {
+			if key.FromUID == scope[0] || key.ToUID == scope[0] {
+				graph[key] = row
+				hasParent = hasParent || key.Type == "parent"
+			}
+		}
+		if hasParent {
+			parents, err := db.FederatedPreservedParentLinks(ctx, tx, projection, scope[0])
+			if err != nil {
+				return err
+			}
+			for _, key := range parents {
+				graph[key] = federatedLinkRow{}
+			}
+		}
+	}
+	if err := validateFederatedParentGraph(graph); err != nil {
 		return err
 	}
 	for key, row := range existing {

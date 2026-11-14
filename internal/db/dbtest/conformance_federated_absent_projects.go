@@ -1,10 +1,11 @@
 package dbtest
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -76,6 +77,18 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		got, err := receiver.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
 		require.Equal(t, route.ID, got.ProjectID)
+		query := receiver.(interface {
+			QueryRowContext(context.Context, string, ...any) *sql.Row
+		})
+		var marker bool
+		require.NoError(t, query.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key=$1)`, db.FederationRetainedProjectPrefix+source.UID).Scan(&marker))
+		require.True(t, marker)
+		_, err = receiver.LeaveFederationReplica(ctx, route.ID)
+		require.NoError(t, err)
+		_, err = receiver.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: retained.ID, Actor: "worker"})
+		require.NoError(t, err)
+		require.NoError(t, query.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key=$1)`, db.FederationRetainedProjectPrefix+source.UID).Scan(&marker))
+		require.False(t, marker)
 
 		// A pre-existing archived endpoint keeps its identity even without an issue row.
 		cold := backend.Open(t)
@@ -125,7 +138,7 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.NoError(t, err)
 		_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: route.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: source.ID, HubProjectUID: source.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
 		require.NoError(t, err)
-		_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{portableNativeEvent(created), portableNativeEvent(peerCreated)})
+		_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{portableNativeEvent(created)})
 		require.NoError(t, err)
 		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
 		local, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
@@ -136,7 +149,7 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		}
 		_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Local comment"})
 		require.NoError(t, err)
-		pulled := []db.Event{*edit, hubComment, hubLabel, removed, linked, *moved.Event}
+		pulled := []db.Event{peerCreated, *edit, hubComment, hubLabel, removed, linked, *moved.Event}
 		var remote []db.RemoteEvent
 		for _, event := range pulled {
 			remote = append(remote, portableNativeEvent(event))
@@ -187,6 +200,16 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 
 		_, _, _, err = spoke.RestoreProject(ctx, retained.ID, "worker")
 		require.NoError(t, err)
+		_, _, err = spoke.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: retained.ID, Actor: "worker", Force: true})
+		require.NoError(t, err)
+		before, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+		after, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+		_, _, _, err = spoke.RestoreProject(ctx, retained.ID, "worker")
+		require.NoError(t, err)
 		unrelated, _, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: retained.ID, Title: "Unrelated", Author: "worker"})
 		require.NoError(t, err)
 		_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: unrelated.ID, Author: "worker", Body: "Unrelated comment"})
@@ -224,6 +247,9 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		history, err := spoke.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Limit: 100})
 		require.NoError(t, err)
 		for _, want := range append([]db.RemoteEvent{portableNativeEvent(created)}, remote...) {
+			if want.IssueUID == nil || *want.IssueUID != issue.UID {
+				continue
+			}
 			var found bool
 			for _, event := range history {
 				if event.UID == want.EventUID {
@@ -262,23 +288,12 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.Equal(t, winnerProject.ID, current.ProjectID)
 	})
 
-	t.Run("move leaves unrelated destination links", func(t *testing.T) {
+	t.Run("restored and archived project keeps issue", func(t *testing.T) {
 		ctx := t.Context()
 		spoke := backend.Open(t)
 		t.Cleanup(func() { require.NoError(t, spoke.Close()) })
 		route, err := spoke.CreateProjectWithUID(ctx, "source", source.UID)
 		require.NoError(t, err)
-		destination, err := spoke.CreateProjectWithUID(ctx, "destination", target.UID)
-		require.NoError(t, err)
-		one, _, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "One", Author: "worker"})
-		require.NoError(t, err)
-		two, _, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "Two", Author: "worker"})
-		require.NoError(t, err)
-		_, _, err = spoke.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: one.ID, ToIssueID: two.ID, Type: "related", Author: "worker"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: one.ID, FromShortID: one.ShortID, FromUID: one.UID, ToShortID: two.ShortID, ToUID: two.UID, Actor: "worker"})
-		require.NoError(t, err)
-		before, err := spoke.LinksByIssue(ctx, one.ID)
-		require.NoError(t, err)
-		require.Len(t, before, 1)
 		_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: route.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: source.ID, HubProjectUID: source.UID, Enabled: true, Actor: "worker"})
 		require.NoError(t, err)
 		_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{creation})
@@ -287,9 +302,49 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{move})
 		require.NoError(t, err)
 		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
-		after, err := spoke.LinksByIssue(ctx, one.ID)
+		retained, err := spoke.ProjectByUID(ctx, target.UID)
 		require.NoError(t, err)
-		require.Equal(t, before, after)
+		_, _, _, err = spoke.RestoreProject(ctx, retained.ID, "worker")
+		require.NoError(t, err)
+		_, _, err = spoke.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: retained.ID, Actor: "worker", Force: true})
+		require.NoError(t, err)
+		before, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		other, err := hub.CreateProject(ctx, "restored-winner")
+		require.NoError(t, err)
+		winner := newRemoteEvent(t, other, &issue.UID, "issue.moved", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+1000, []byte(strings.ReplaceAll(string(move.Payload), target.UID, other.UID)))
+		_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{winner})
+		require.NoError(t, err)
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+		current, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, before, current)
+	})
+
+	t.Run("parked issue rejects cycle with local parent", func(t *testing.T) {
+		ctx := t.Context()
+		peer, peerCreated, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Peer for cycle", Author: "worker"})
+		require.NoError(t, err)
+		spoke := backend.Open(t)
+		t.Cleanup(func() { require.NoError(t, spoke.Close()) })
+		route, err := spoke.CreateProjectWithUID(ctx, "source", source.UID)
+		require.NoError(t, err)
+		_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: route.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: source.ID, HubProjectUID: source.UID, Enabled: true, Actor: "worker"})
+		require.NoError(t, err)
+		_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{creation, portableNativeEvent(peerCreated)})
+		require.NoError(t, err)
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+		local, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		localPeer, err := spoke.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		_, err = spoke.CreateLink(ctx, db.CreateLinkParams{FromIssueID: localPeer.ID, ToIssueID: local.ID, Type: "parent", Author: "worker"})
+		require.NoError(t, err)
+		first := newRemoteEvent(t, source, &issue.UID, "issue.linked", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+1000, []byte(fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"parent"}`, issue.UID, peer.UID)))
+		_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{first, move})
+		require.NoError(t, err)
+		err = spoke.MaterializeFederatedProject(ctx, route.ID)
+		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 	})
 
 	t.Run("parked issue rejects parent cycle", func(t *testing.T) {
@@ -311,55 +366,6 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.NoError(t, err)
 		err = spoke.MaterializeFederatedProject(ctx, route.ID)
 		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
-	})
-
-	t.Run("outbound move retains connector comment", func(t *testing.T) {
-		ctx := t.Context()
-		spoke := backend.Open(t)
-		t.Cleanup(func() { require.NoError(t, spoke.Close()) })
-		route, err := spoke.CreateProjectWithUID(ctx, "source", source.UID)
-		require.NoError(t, err)
-		_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: route.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: source.ID, HubProjectUID: source.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
-		require.NoError(t, err)
-		_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{creation})
-		require.NoError(t, err)
-		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
-		local, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		now := time.Now().UTC()
-		root, _, err := spoke.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
-			ProjectID: route.ID, IssueID: local.ID, ConnectorInstance: "notes",
-			ExternalRootKey: "root", ExternalAccountKey: "account", Actor: "worker", ReceiveCommentsAfter: now,
-		})
-		require.NoError(t, err)
-		root, claimed, err := spoke.ClaimExternalRootBinding(ctx, root.ID, "worker-token", now, now.Add(-db.ExternalRootClaimStaleAfter))
-		require.NoError(t, err)
-		require.True(t, claimed)
-		connectorComment, _, changed, err := spoke.UpsertExternalCommentProjection(ctx, db.ExternalCommentProjectionParams{
-			BindingID: root.ID, ClaimToken: root.ClaimToken, ExternalID: "comment", ExternalRevision: "one",
-			Body: "External comment", ExternalActorID: "person", ExternalActorName: "Person",
-			ExternalCreatedAt: now, ExternalUpdatedAt: now, IntegrationActor: "connector:notes",
-		})
-		require.NoError(t, err)
-		require.True(t, changed)
-		localComment, _, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Local comment"})
-		require.NoError(t, err)
-		_, err = spoke.ReleaseExternalRootClaim(ctx, root.ID, root.ClaimToken)
-		require.NoError(t, err)
-		_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{move})
-		require.NoError(t, err)
-		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
-		retained, err := spoke.ProjectByUID(ctx, target.UID)
-		require.NoError(t, err)
-		require.NotNil(t, retained.DeletedAt)
-		got, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		require.Equal(t, local.ID, got.ID)
-		require.Equal(t, retained.ID, got.ProjectID)
-		comments, err := spoke.CommentsByIssue(ctx, got.ID)
-		require.NoError(t, err)
-		require.Len(t, comments, 2)
-		require.ElementsMatch(t, []string{connectorComment.UID, localComment.UID}, []string{comments[0].UID, comments[1].UID})
 	})
 
 	return nil

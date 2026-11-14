@@ -176,6 +176,18 @@ func reconcileFederatedLinkGroup(
 	return reconcileFederatedLinkRows(ctx, tx, projection, issueIDs, existing)
 }
 
+func reconcileParkedIssueLinks(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueUID string) error {
+	ids, err := db.FederatedLinkIssueIDs(ctx, tx, projection)
+	if err != nil {
+		return err
+	}
+	links, err := federatedLinkRows(ctx, tx, nil, issueUID)
+	if err != nil {
+		return err
+	}
+	return reconcileFederatedLinkRows(ctx, tx, projection, ids, links, issueUID)
+}
+
 func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueIDs map[string]int64, existing map[db.FoldLinkKey]federatedLinkRow, scope ...string) error {
 	desired := map[db.FoldLinkKey]federatedLinkRow{}
 	for _, edge := range projection.PresentLinks() {
@@ -196,7 +208,27 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 		}
 		desired[row.key()] = row
 	}
-	if err := validateFederatedParentGraph(desired); err != nil {
+	graph := desired
+	if len(scope) > 0 {
+		graph = map[db.FoldLinkKey]federatedLinkRow{}
+		hasParent := false
+		for key, row := range desired {
+			if key.FromUID == scope[0] || key.ToUID == scope[0] {
+				graph[key] = row
+				hasParent = hasParent || key.Type == "parent"
+			}
+		}
+		if hasParent {
+			parents, err := db.FederatedPreservedParentLinks(ctx, tx, projection, scope[0])
+			if err != nil {
+				return err
+			}
+			for _, key := range parents {
+				graph[key] = federatedLinkRow{}
+			}
+		}
+	}
+	if err := validateFederatedParentGraph(graph); err != nil {
 		return err
 	}
 	for key, row := range existing {

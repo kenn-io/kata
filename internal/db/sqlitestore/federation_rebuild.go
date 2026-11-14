@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"maps"
 	"slices"
 
@@ -104,13 +105,13 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			return preparedFederationRebuild{}, err
 		}
 		p.uid = projectUID
+		if err := db.PreserveMovedIssueLabels(ctx, tx, p.id, p.projection, p.decisions); err != nil {
+			return preparedFederationRebuild{}, err
+		}
 		p.moved = p.projection
 		p.moved.Issues = maps.Clone(p.projection.Issues)
 		p.moved.Comments = maps.Clone(p.projection.Comments)
 		p.moved.Labels = maps.Clone(p.projection.Labels)
-		if err := db.PreserveMovedIssueLabels(ctx, tx, p.id, p.projection, p.decisions); err != nil {
-			return preparedFederationRebuild{}, err
-		}
 		db.RestrictFoldProjectWhere(&p.projection, projectUID, func(uid string) bool {
 			decision, ok := result.moved[uid]
 			return !ok || (!decision.SourceStandalone && decision.Joined && (decision.Active || decision.Exists) && !isFederationRehome(decision))
@@ -271,6 +272,16 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 			}
 			if err := reconcileFederatedLinkRows(ctx, tx, m.links, ids, rows); err != nil {
 				return err
+			}
+		}
+		for _, p := range prepared.projects {
+			for _, decision := range p.decisions {
+				if decision.Exists && !decision.Joined && !decision.SourceStandalone {
+					if err := reconcileParkedIssueLinks(ctx, tx, p.moveProjection, decision.IssueUID); err != nil {
+						move := p.moveEvents[decision.IssueUID]
+						return fmt.Errorf("apply move project %s event %s: %w", move.ProjectUID, move.UID, err)
+					}
+				}
 			}
 		}
 		for _, p := range prepared.projects {
