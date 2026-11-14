@@ -1878,42 +1878,53 @@ func federationFoldEventsForIssues(ctx context.Context, tx *sql.Tx, projectID in
 }
 
 func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes, issueScope []string) ([]db.FoldEvent, error) {
-	// The unary + keeps the issue_uid indexes out of this plan: scanning events
-	// in ID order and checking moves through the issue.moved partial index
-	// costs less than seeking every issue's events and their moves.
-	query := `
-		SELECT e.uid, e.origin_instance_uid, p.uid, e.issue_uid, e.related_issue_uid,
-		       e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.created_at
-		  FROM events e JOIN projects p ON p.id=e.project_id
- WHERE (e.project_id=$1 OR (+e.issue_uid IN (
-   SELECT h.issue_uid FROM events h WHERE h.project_id=$1
-   UNION SELECT uid FROM issues WHERE project_id=$1)
- AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND +m.issue_uid = e.issue_uid)))`
-	args := []any{projectID}
-	if len(eventTypes) > 0 {
-		placeholders := make([]string, 0, len(eventTypes))
-		for _, eventType := range eventTypes {
-			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)+1))
-			args = append(args, eventType)
-		}
-		//nolint:gosec // G202: generated ? placeholders only; values are bound separately.
-		query += " AND e.type IN (" + strings.Join(placeholders, ",") + ")"
-	}
-	if len(issueScope) > 0 {
-		// NULL envelopes may carry issue identity in payloads. Historical project
-		// events (notably author rewrites) also participate in each issue's fold.
-		//nolint:gosec // G202: generated ? placeholders only; issue UIDs are bound separately.
-		query += " AND (e.issue_uid IN (?" + strings.Repeat(",?", len(issueScope)-1) + ") OR e.issue_uid IS NULL OR e.issue_uid = '' OR e.type LIKE 'project.%')"
-		for _, uid := range issueScope {
-			args = append(args, uid)
-		}
-	}
-	query += " ORDER BY e.id ASC"
+	query, args := federationFoldEventsQuery(projectID, eventTypes, issueScope)
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated events: %w", err)
 	}
 	return scanFederationFoldEvents(rows, issueScope)
+}
+
+func federationFoldEventsQuery(projectID int64, eventTypes, issueScope []string) (string, []any) {
+	// Scan events once and collect moved subjects once. The unary + keeps
+	// SQLite from seeking every issue's history through its UID index.
+	selector := `(e.project_id=?1 OR +e.issue_uid IN (
+   SELECT m.issue_uid FROM events m WHERE m.type='issue.moved' AND m.issue_uid IN (
+     SELECT h.issue_uid FROM events h WHERE h.project_id=?1
+     UNION SELECT uid FROM issues WHERE project_id=?1)))`
+	args := []any{projectID}
+	if len(issueScope) > 0 {
+		// Scoped pushes only check moves after narrowing to the touched issues.
+		selector = `(e.project_id=?1 OR (e.issue_uid IN (
+   SELECT h.issue_uid FROM events h WHERE h.project_id=?1
+   UNION SELECT uid FROM issues WHERE project_id=?1)
+ AND e.issue_uid IN (SELECT m.issue_uid FROM events m WHERE m.type='issue.moved')))`
+		// Evaluate the scope before looking up moves.
+		placeholders := make([]string, 0, len(issueScope))
+		for _, uid := range issueScope {
+			placeholders = append(placeholders, fmt.Sprintf("?%d", len(args)+1))
+			args = append(args, uid)
+		}
+		//nolint:gosec // G202: generated placeholders only; issue UIDs are bound separately.
+		selector = `CASE WHEN e.type LIKE 'project.%' OR e.issue_uid IN (` + strings.Join(placeholders, ",") + `) THEN ` + selector + ` ELSE 0 END`
+	}
+	query := `
+		SELECT e.uid, e.origin_instance_uid, p.uid, e.issue_uid, e.related_issue_uid,
+		       e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.created_at
+		  FROM events e JOIN projects p ON p.id=e.project_id
+ WHERE ` + selector
+	if len(eventTypes) > 0 {
+		placeholders := make([]string, 0, len(eventTypes))
+		for _, eventType := range eventTypes {
+			placeholders = append(placeholders, fmt.Sprintf("?%d", len(args)+1))
+			args = append(args, eventType)
+		}
+		//nolint:gosec // G202: generated ? placeholders only; values are bound separately.
+		query += " AND e.type IN (" + strings.Join(placeholders, ",") + ")"
+	}
+	query += " ORDER BY e.id ASC"
+	return query, args
 }
 
 func scanFederationFoldEvents(rows *sql.Rows, issueScope []string) ([]db.FoldEvent, error) {
