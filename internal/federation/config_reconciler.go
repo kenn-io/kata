@@ -1304,14 +1304,14 @@ func retainedMappingProject(ctx context.Context, store db.Storage, uid, name str
 	if err != nil {
 		return db.Project{}, reconcileError(ErrLocalStorage, "check local federation project UID ownership")
 	}
-	retained, err := db.IsFederationRetainedProject(ctx, store, uid)
+	retained, err := store.IsFederationRetainedProject(ctx, uid)
 	if err != nil {
 		return db.Project{}, reconcileError(ErrLocalStorage, "check retained federation project")
 	}
 	if project.DeletedAt != nil && retained {
 		return project, nil
 	}
-	return db.Project{}, nil
+	return db.Project{}, reconcileError(ErrBindingConflict, "hub project UID belongs to another local project")
 }
 
 func resolveOrCreateLocalProject(

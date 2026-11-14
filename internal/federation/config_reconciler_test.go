@@ -1070,6 +1070,10 @@ func TestReconcileMappingRejectsRetainedProjectCollisions(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, project.Name, unchanged.Name)
 			assert.NotNil(t, unchanged.DeletedAt)
+			if !tc.collision {
+				_, err = store.ProjectByNameIncludingArchived(ctx, "spoke-project")
+				assert.ErrorIs(t, err, db.ErrNotFound)
+			}
 		})
 	}
 }

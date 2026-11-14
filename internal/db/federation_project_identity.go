@@ -14,16 +14,12 @@ const FederationProjectIdentityDependencyPrefix = "federation_identity_dependenc
 const FederationRetainedProjectPrefix = "federation_retained_project."
 
 // IsFederationRetainedProject reports whether the identity is a placeholder.
-func IsFederationRetainedProject(ctx context.Context, store Storage, uid string) (bool, error) {
-	for row, err := range store.ExportMeta(ctx) {
-		if err != nil {
-			return false, err
-		}
-		if row.Key == FederationRetainedProjectPrefix+uid {
-			return true, nil
-		}
-	}
-	return false, nil
+func IsFederationRetainedProject(ctx context.Context, queryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, uid string) (bool, error) {
+	var found bool
+	err := queryer.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key=$1)`, FederationRetainedProjectPrefix+uid).Scan(&found)
+	return found, err
 }
 
 // ClearFederationRetainedProject retires placeholder ownership on restore or deletion.

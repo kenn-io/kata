@@ -421,6 +421,7 @@ type Storage interface {
 	SkipFederationQuarantine(ctx context.Context, p SkipFederationQuarantineParams) (FederationQuarantine, error)
 	RetryFederationQuarantine(ctx context.Context, p RetryFederationQuarantineParams) (FederationQuarantine, error)
 	UpsertFederationBinding(ctx context.Context, b FederationBinding) (FederationBinding, error)
+	IsFederationRetainedProject(ctx context.Context, uid string) (bool, error)
 	LeaveFederationReplica(ctx context.Context, projectID int64) (LeaveFederationResult, error)
 	AdoptProjectIntoFederation(ctx context.Context, p AdoptProjectIntoFederationParams) (AdoptProjectIntoFederationResult, error)
 	AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error

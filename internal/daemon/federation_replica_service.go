@@ -1794,7 +1794,7 @@ func adoptExistingReplica(
 	projectName := p.ProjectName
 	if project, err := store.ProjectByUID(ctx, p.HubProjectUID); err == nil {
 		if project.DeletedAt != nil {
-			retained, err := db.IsFederationRetainedProject(ctx, store, project.UID)
+			retained, err := store.IsFederationRetainedProject(ctx, project.UID)
 			if err != nil {
 				return db.AdoptProjectIntoFederationResult{}, false, fmt.Errorf("check retained federation project: %w", err)
 			}
