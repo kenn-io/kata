@@ -7,6 +7,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -570,7 +571,11 @@ func (s *Store) materializeFederatedProjectTxScoped(
 		}
 		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
 	}, func(projectID int64, issue db.FoldIssue, projection db.FoldProjection) error {
-		view := db.FoldMovedIssue(projection, issue)
+		view := projection
+		view.Issues = map[string]db.FoldIssue{issue.UID: issue}
+		view.Comments = maps.Clone(projection.Comments)
+		view.Labels = maps.Clone(projection.Labels)
+		db.RestrictFoldProject(&view, issue.ProjectUID)
 		rows, err := federatedIssueRowsByUID(ctx, tx, projectID, issue.UID)
 		if err != nil {
 			return err
