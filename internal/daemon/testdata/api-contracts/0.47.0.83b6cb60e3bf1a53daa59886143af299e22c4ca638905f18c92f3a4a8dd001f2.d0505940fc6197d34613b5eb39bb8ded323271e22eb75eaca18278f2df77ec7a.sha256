@@ -1,0 +1,1 @@
+Unsigned federation requests return 428 hub_signing_required, including requests with only a content digest.

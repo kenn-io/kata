@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-11
+last_edited: 2026-11-13
 ---
 
 # Federation
@@ -245,7 +245,8 @@ signature failure. It can clear after access returns. Explicit enrollment revoca
 enrollment.
 
 `signing_rejected` means the hub refused or could not verify this
-bridge's request signature; the grant is intact, so fix the signing source on
+bridge's request signature, including an unsigned request answered with `428
+hub_signing_required`. The grant is intact, so fix the signing source on
 this daemon or the key registration on the hub instead of reconnecting. Sync
 timestamps show how recent that observation is. An ambiguous pending project
 name returns a conflict instead of choosing a credential.
