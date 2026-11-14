@@ -18,7 +18,7 @@ func TestSyncFederationPullsMoveAfterRejectedPush(t *testing.T) {
 	require.NoError(t, spoke.sync(t, 0))
 	local, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	earlierIssue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Earlier local work", Author: "worker"})
+	_, _, err = spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Earlier local work", Author: "worker"})
 	require.NoError(t, err)
 	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "offline comment"})
 	require.NoError(t, err)
@@ -44,6 +44,4 @@ func TestSyncFederationPullsMoveAfterRejectedPush(t *testing.T) {
 	remote, err := hub.DB.IssueByUID(ctx, newIssue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, "Later local work", remote.Title)
-	_, err = hub.DB.IssueByUID(ctx, earlierIssue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
 }

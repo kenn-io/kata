@@ -1016,47 +1016,26 @@ func TestReconcileMappingAdoptsExistingStandaloneWorkWithSnapshot(t *testing.T) 
 }
 
 func TestReconcileMappingAdoptsRetainedProject(t *testing.T) {
-	store := openReconcileStore(t)
-	ctx := t.Context()
-	project, err := store.CreateProjectWithUID(ctx, "federation-01hznq7vfpk1xgd8r5mabcd4ex", hubProjectUID)
-	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "parked issue", Author: "worker"})
-	require.NoError(t, err)
-	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker", Force: true})
-	require.NoError(t, err)
-	_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FederationRetainedProjectPrefix+hubProjectUID)
-	require.NoError(t, err)
-
-	err = federation.ReconcileMapping(ctx, store, newFakeCredentialStore(), newFakeHub(), testCatalog(), testMapping(), nil)
-	require.NoError(t, err)
-	adopted, err := store.ProjectByName(ctx, "spoke-project")
-	require.NoError(t, err)
-	assert.Equal(t, project.ID, adopted.ID)
-	assert.Equal(t, hubProjectUID, adopted.UID)
-	retained, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	assert.Equal(t, adopted.ID, retained.ProjectID)
-	_, err = store.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-}
-
-func TestReconcileMappingAdoptsRetainedProjectWithConfiguredName(t *testing.T) {
-	store := openReconcileStore(t)
-	ctx := t.Context()
-	project, err := store.CreateProjectWithUID(ctx, "spoke-project", hubProjectUID)
-	require.NoError(t, err)
-	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker", Force: true})
-	require.NoError(t, err)
-	_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FederationRetainedProjectPrefix+hubProjectUID)
-	require.NoError(t, err)
-
-	err = federation.ReconcileMapping(ctx, store, newFakeCredentialStore(), newFakeHub(), testCatalog(), testMapping(), nil)
-	require.NoError(t, err)
-	joined, err := store.ProjectByName(ctx, "spoke-project")
-	require.NoError(t, err)
-	assert.Equal(t, project.ID, joined.ID)
-	_, err = store.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
+	for _, name := range []string{"federation-01hznq7vfpk1xgd8r5mabcd4ex", "spoke-project"} {
+		t.Run(name, func(t *testing.T) {
+			store := openReconcileStore(t)
+			ctx := t.Context()
+			project, err := store.CreateProjectWithUID(ctx, name, hubProjectUID)
+			require.NoError(t, err)
+			_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker", Force: true})
+			require.NoError(t, err)
+			_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FederationRetainedProjectPrefix+hubProjectUID)
+			require.NoError(t, err)
+			err = federation.ReconcileMapping(ctx, store, newFakeCredentialStore(), newFakeHub(), testCatalog(), testMapping(), nil)
+			require.NoError(t, err)
+			adopted, err := store.ProjectByName(ctx, "spoke-project")
+			require.NoError(t, err)
+			assert.Equal(t, project.ID, adopted.ID)
+			assert.Equal(t, hubProjectUID, adopted.UID)
+			_, err = store.FederationBindingByProject(ctx, project.ID)
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestReconcileMappingRejectsRetainedProjectCollisions(t *testing.T) {

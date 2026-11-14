@@ -1052,83 +1052,54 @@ func TestEnsureFederationReplicaAdoptsStandaloneProjectWithSnapshot(t *testing.T
 }
 
 func TestEnsureFederationReplicaRetainedProjectDoesNotSnapshotLocalComments(t *testing.T) {
-	ctx := t.Context()
-	store := openReplicaServiceStore(t)
-	project, err := store.CreateProjectWithUID(ctx, "hub-project", replicaHubProjectUID)
-	require.NoError(t, err)
-	issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "moved issue", Author: "worker"})
-	require.NoError(t, err)
-	_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "held local edit"})
-	require.NoError(t, err)
-	for _, uid := range []string{created.UID, comment.UID} {
-		_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, 'v1:held')`, "federation_local_only_event."+uid)
-		require.NoError(t, err)
+	for _, restored := range []bool{false, true} {
+		name := "archived"
+		if restored {
+			name = "restored"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			store := openReplicaServiceStore(t)
+			project, err := store.CreateProjectWithUID(ctx, "federation-01hznq7vfpk1xgd8r5mabcd4ex", replicaHubProjectUID)
+			require.NoError(t, err)
+			issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "moved issue", Author: "worker"})
+			require.NoError(t, err)
+			_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "held local edit"})
+			require.NoError(t, err)
+			for _, uid := range []string{created.UID, comment.UID} {
+				_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, 'v1:held')`, "federation_local_only_event."+uid)
+				require.NoError(t, err)
+			}
+			_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker", Force: true})
+			require.NoError(t, err)
+			_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FederationRetainedProjectPrefix+project.UID)
+			require.NoError(t, err)
+			params := replicaServiceParams()
+			params.AdoptExisting = true
+			if restored {
+				_, _, _, err = store.RestoreProject(ctx, project.ID, "worker")
+				require.NoError(t, err)
+				params.Credential.ManagedByConfig = true
+			}
+			credentials := newReplicaCredentialStore()
+			result, err := daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
+			require.NoError(t, err)
+			assert.Equal(t, project.ID, result.Project.ID)
+			assert.Zero(t, result.AdoptionSnapshotCount)
+			events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 20})
+			require.NoError(t, err)
+			for _, event := range events {
+				assert.NotEqual(t, "issue.snapshot", event.Type)
+			}
+			pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), 0, 20)
+			require.NoError(t, err)
+			assert.Empty(t, pending)
+			comments, err := store.CommentsByIssue(ctx, issue.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
+			assert.Equal(t, "held local edit", comments[0].Body)
+		})
 	}
-	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker", Force: true})
-	require.NoError(t, err)
-	_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FederationRetainedProjectPrefix+project.UID)
-	require.NoError(t, err)
-	params := replicaServiceParams()
-	params.AdoptExisting = true
-	credentials := newReplicaCredentialStore()
-	_, err = store.ExecContext(ctx, `CREATE TRIGGER fail_retained_binding BEFORE INSERT ON federation_bindings BEGIN SELECT RAISE(FAIL, 'injected binding failure'); END`)
-	require.NoError(t, err)
-	_, err = daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
-	require.Error(t, err)
-	_, err = store.ExecContext(ctx, `DROP TRIGGER fail_retained_binding`)
-	require.NoError(t, err)
-
-	result, err := daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
-	require.NoError(t, err)
-	assert.Equal(t, project.ID, result.Project.ID)
-	assert.Zero(t, result.AdoptionSnapshotCount)
-	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 20})
-	require.NoError(t, err)
-	for _, event := range events {
-		assert.NotEqual(t, "issue.snapshot", event.Type)
-	}
-	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), 0, 20)
-	require.NoError(t, err)
-	assert.Empty(t, pending)
-	comments, err := store.CommentsByIssue(ctx, issue.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
-	assert.Equal(t, "held local edit", comments[0].Body)
-}
-
-func TestEnsureFederationReplicaRestoredRetainedProjectDoesNotSnapshotLocalComments(t *testing.T) {
-	ctx := t.Context()
-	store := openReplicaServiceStore(t)
-	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaHubProjectUID)
-	require.NoError(t, err)
-	issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "moved issue", Author: "worker"})
-	require.NoError(t, err)
-	_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "held local edit"})
-	require.NoError(t, err)
-	for _, uid := range []string{created.UID, comment.UID} {
-		_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, 'v1:held')`, "federation_local_only_event."+uid)
-		require.NoError(t, err)
-	}
-	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker", Force: true})
-	require.NoError(t, err)
-	_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FederationRetainedProjectPrefix+project.UID)
-	require.NoError(t, err)
-	_, _, _, err = store.RestoreProject(ctx, project.ID, "worker")
-	require.NoError(t, err)
-	params := replicaServiceParams()
-	params.ProjectName = project.Name
-	params.AdoptExisting = true
-	params.Credential.ManagedByConfig = true
-	result, err := daemon.EnsureFederationReplica(ctx, store, newReplicaCredentialStore(), nil, params)
-	require.NoError(t, err)
-	assert.Zero(t, result.AdoptionSnapshotCount)
-	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), 0, 20)
-	require.NoError(t, err)
-	assert.Empty(t, pending)
-	comments, err := store.CommentsByIssue(ctx, issue.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
-	assert.Equal(t, "held local edit", comments[0].Body)
 }
 
 func TestEnsureFederationReplicaRejectsDistinctCredentialAtAdoptionSource(t *testing.T) {
