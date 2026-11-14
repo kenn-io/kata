@@ -262,9 +262,13 @@ func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
 	ctx := t.Context()
 	d, source, issue := incrementalTestStore(t)
 	issue = resetToRemoteIssue(t, d, source, issue)
+	peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "peer", Author: "tester"})
+	require.NoError(t, err)
 	destination, err := d.CreateProject(ctx, "destination")
 	require.NoError(t, err)
 	_, _, err = d.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "local comment"})
+	require.NoError(t, err)
+	_, err = d.AddLabel(ctx, issue.ID, "local", "tester")
 	require.NoError(t, err)
 	unapplyMove(t, d, issue, source, destination, false)
 	var events []db.RemoteEvent
@@ -272,6 +276,8 @@ func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
 		typ, payload := incrementalFuzzPayload(kind, issue.UID, "", 42)
 		events = append(events, incrementalRemoteEvent(t, source, issue.UID, typ, payload, 8_000_000_000_000+int64(i)))
 	}
+	typ, payload := incrementalFuzzPayload(15, issue.UID, peer.UID, 42)
+	events = append(events, incrementalRemoteEvent(t, source, issue.UID, typ, payload, 8_000_000_000_010))
 	_, err = d.InsertRemoteEvents(ctx, source.ID, events)
 	require.NoError(t, err)
 	locked := cloneIncrementalStore(t, d)
@@ -293,8 +299,43 @@ func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
 		require.ElementsMatch(t, []string{"local comment", "comment"}, []string{comments[0].Body, comments[1].Body})
 		labels, err := store.LabelsByIssue(ctx, issue.ID)
 		require.NoError(t, err)
-		require.Len(t, labels, 1)
-		require.Equal(t, "area:db", labels[0].Label)
+		require.Len(t, labels, 2)
+		require.ElementsMatch(t, []string{"area:db", "local"}, []string{labels[0].Label, labels[1].Label})
+		links, err := store.LinksByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, links, 1)
+		typ, payload := "issue.commented", fmt.Sprintf(`{"issue_uid":%q,"comment_uid":"01HZNQ7VFPK1XGD8R5MABCDEF1","author":"tester","body":"delayed","created_at":"2026-05-23T12:00:00.000Z"}`, issue.UID)
+		_, err = store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{incrementalRemoteEvent(t, source, issue.UID, typ, payload, 8_000_000_000_011)})
+		require.NoError(t, err)
+		if store == d {
+			require.NoError(t, store.MaterializeFederatedProject(ctx, source.ID))
+			require.Equal(t, 2, attempts)
+		} else {
+			require.NoError(t, store.materializeFederatedProject(ctx, source.ID))
+		}
+		comments, err = store.CommentsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 3)
+		_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: destination.ID, Actor: "tester", Force: true})
+		require.NoError(t, err)
+		_, _, _, err = store.RestoreProject(ctx, destination.ID, "tester")
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: destination.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: destination.ID, HubProjectUID: destination.UID, Enabled: true, Actor: "tester"})
+		require.NoError(t, err)
+		if store == d {
+			require.NoError(t, store.MaterializeFederatedProject(ctx, destination.ID))
+		} else {
+			require.NoError(t, store.materializeFederatedProject(ctx, destination.ID))
+		}
+		comments, err = store.CommentsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 3)
+		labels, err = store.LabelsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, labels, 2)
+		links, err = store.LinksByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, links, 1)
 	}
 }
 

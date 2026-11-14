@@ -443,6 +443,14 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 			continue
 		}
 		if source == target {
+			if !decision.Joined {
+				if err := applyUnjoined(target, issue, p); err != nil {
+					return err
+				}
+				if err := reconcileParkedIssueLinks(ctx, tx, issue.UID, p); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		if decision.Joined && !active {
@@ -492,21 +500,87 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 			if err := applyUnjoined(target, issue, p); err != nil {
 				return err
 			}
-			// Source-group reconciliation no longer sees this issue's links.
-			for key, state := range p.Links {
-				if state.Present || key.FromUID != issue.UID && key.ToUID != issue.UID {
-					continue
-				}
-				if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE type=$1 AND (from_issue_uid=$2 AND to_issue_uid=$3 OR $1='related' AND from_issue_uid=$3 AND to_issue_uid=$2)`, key.Type, key.FromUID, key.ToUID); err != nil {
-					return err
-				}
+			if err := reconcileParkedIssueLinks(ctx, tx, issue.UID, p); err != nil {
+				return err
 			}
 		}
 	}
 	return nil
 }
 
+func reconcileParkedIssueLinks(ctx context.Context, tx *sql.Tx, issueUID string, p FoldProjection) error {
+	for key, state := range p.Links {
+		if state.Present || key.FromUID != issueUID && key.ToUID != issueUID {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE type=$1 AND (from_issue_uid=$2 AND to_issue_uid=$3 OR $1='related' AND from_issue_uid=$3 AND to_issue_uid=$2)`, key.Type, key.FromUID, key.ToUID); err != nil {
+			return err
+		}
+	}
+	for _, edge := range p.PresentLinks() {
+		key, state := edge.Key, edge.State
+		if key.FromUID != issueUID && key.ToUID != issueUID {
+			continue
+		}
+		var fromID, toID int64
+		err := tx.QueryRowContext(ctx, `SELECT a.id,b.id FROM issues a JOIN issues b ON b.uid=$2 WHERE a.uid=$1`, key.FromUID, key.ToUID).Scan(&fromID, &toID)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if key.Type == "related" && fromID > toID {
+			fromID, toID = toID, fromID
+			key.FromUID, key.ToUID = key.ToUID, key.FromUID
+		}
+		author := state.Author
+		if strings.TrimSpace(author) == "" {
+			author = "federation"
+		}
+		created := state.CreatedAt
+		if created == "" {
+			created = time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO links(from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author,created_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(from_issue_id,to_issue_id,type) DO UPDATE SET author=excluded.author,created_at=CASE WHEN $8='' THEN links.created_at ELSE excluded.created_at END`, fromID, toID, key.FromUID, key.ToUID, key.Type, author, created, state.CreatedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type movedProjectPassKey struct{}
+
+// PreserveMovedIssueLabels retains labels that have no folded add or remove.
+func PreserveMovedIssueLabels(ctx context.Context, tx *sql.Tx, projectID int64, p FoldProjection, decisions []FederatedMoveDecision) error {
+	for _, decision := range decisions {
+		if !decision.Exists || !decision.Joined || decision.TargetID != projectID {
+			continue
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT label FROM issue_labels WHERE issue_id=$1`, decision.IssueID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var label string
+			if err := rows.Scan(&label); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			key := FoldLabelKey{IssueUID: decision.IssueUID, Label: label}
+			if _, ok := p.Labels[key]; !ok {
+				p.Labels[key] = FoldElementState{Present: true}
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // FoldMovedIssue limits reconciliation to the rehomed issue and its history.
 func FoldMovedIssue(p FoldProjection, issue FoldIssue) FoldProjection {

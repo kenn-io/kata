@@ -613,6 +613,9 @@ func (s *Store) materializeFederatedProjectTxScoped(
 	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&projectUID); err != nil {
 		return err
 	}
+	if err := db.PreserveMovedIssueLabels(ctx, tx, projectID, projection, decisions); err != nil {
+		return err
+	}
 	db.RestrictFoldProject(&projection, projectUID)
 
 	if validator == nil {
