@@ -1090,7 +1090,9 @@ func federationIngestError(err error) error {
 	switch {
 	case errors.Is(err, db.ErrTransactionFinalizationFailed):
 		return internalAPIError(err)
-	case errors.Is(err, ErrHostAccessDenied), errors.Is(err, db.ErrFederationMoveSourceUnauthorized):
+	case errors.Is(err, db.ErrFederationMoveSourceUnauthorized):
+		return federationCredentialDenied()
+	case errors.Is(err, ErrHostAccessDenied):
 		return federationCredentialDenied()
 	case errors.Is(err, ErrHostFederationAdmissionLimited):
 		return api.NewError(http.StatusTooManyRequests, "admission_limited", "federation request admission is full", "", nil)

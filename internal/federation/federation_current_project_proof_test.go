@@ -3,6 +3,7 @@ package federation
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,4 +71,38 @@ func TestFederationOrdinarySourceProofIncludesJoinedCurrentProject(t *testing.T)
 			}
 		})
 	}
+}
+
+func TestSyncFederationDelayedSourceEditCurrentProjectAuthority(t *testing.T) {
+	hub, projects := newMoveDeliveryHub(t, "delayed-edit-source", "delayed-edit-target")
+	sender := newMoveDeliverySpoke(t, hub, projects)
+	issue, _, err := hub.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Delayed source work", Author: "worker"})
+	require.NoError(t, err)
+	for i := range projects {
+		require.NoError(t, sender.sync(t, i))
+	}
+	local, err := sender.env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, _, err = sender.env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Authorized delayed edit"})
+	require.NoError(t, err)
+	_, err = hub.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	credential := sender.credentials[projects[1].UID]
+	delete(sender.credentials, projects[1].UID)
+	err = sender.sync(t, 0)
+	var status *HubStatusError
+	require.ErrorAs(t, err, &status)
+	if status == nil {
+		t.Fatal("expected missing current-project authority to be rejected")
+	}
+	require.Equal(t, http.StatusForbidden, status.StatusCode)
+	comments, err := hub.DB.CommentsByIssue(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Empty(t, comments)
+	sender.credentials[projects[1].UID] = credential
+	require.NoError(t, sender.sync(t, 0), "joined current-project proof allows retry without rewriting the source envelope")
+	comments, err = hub.DB.CommentsByIssue(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "Authorized delayed edit", comments[0].Body)
 }

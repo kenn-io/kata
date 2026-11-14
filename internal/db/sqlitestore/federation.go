@@ -2913,7 +2913,6 @@ func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64, stam
 		  JOIN issues t ON t.id = l.to_issue_id
 		 WHERE f.project_id IN (` + placeholders + `)
 		   AND t.project_id IN (` + placeholders + `)`
-
 	if stamp != nil {
 		query += ` ORDER BY l.id`
 	}

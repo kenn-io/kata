@@ -26,9 +26,8 @@ func (d *Store) PendingFederationPushEvents(
 	out, err := d.queryPendingFederationPushEvents(ctx, `
 		WHERE e.project_id = ?
 		  AND e.origin_instance_uid = ?
-		  AND e.id > ?
+		  AND `+db.FederationPushPending("e", "?")+`
 		  AND `+federationPushEventTypeCondition("e.type")+`
-		  AND `+db.FederationPushEligible("e")+`
 		ORDER BY e.id ASC
 		LIMIT ?`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
@@ -47,7 +46,7 @@ func (d *Store) PendingFederationPushEvents(
 			  AND e.origin_instance_uid = ?
 			  AND e.id > ?
 			  AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
-			  AND `+db.FederationPushEligible("e")+`
+			  AND (`+db.FederationPushEligible("e")+` OR `+db.FederationPushPending("e", "0")+`)
 			  AND e.id <= COALESCE((
 			    SELECT MIN(barrier.id)
 			      FROM events barrier
@@ -55,7 +54,7 @@ func (d *Store) PendingFederationPushEvents(
 			       AND barrier.origin_instance_uid = ?
 			       AND barrier.id > ?
 			       AND `+federationPushEventTypeCondition("barrier.type")+`
-			       AND `+db.FederationPushEligible("barrier")+`
+			       AND (`+db.FederationPushEligible("barrier")+` OR `+db.FederationPushPending("barrier", "0")+`)
 			       AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  ), 9223372036854775807)
 			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, projectID, originInstanceUID, runStartAfterID)
@@ -117,13 +116,12 @@ func (d *Store) PendingFederationPushStats(
 	var count int64
 	var maxID sql.NullInt64
 	if err := d.QueryRowContext(ctx, `
-		SELECT COUNT(*), MAX(e.id)
-		  FROM events e
-		 WHERE e.project_id = ?
-		   AND e.origin_instance_uid = ?
-		   AND e.id > ?
-		   AND `+federationPushEventTypeCondition("e.type")+`
-		   AND `+db.FederationPushEligible("e"),
+		SELECT COUNT(*), MAX(id)
+		  FROM events
+		 WHERE project_id = ?
+		   AND origin_instance_uid = ?
+		   AND `+db.FederationPushPending("events", "?")+`
+		   AND `+federationPushEventTypeCondition("type"),
 		projectID, originInstanceUID, afterID).Scan(&count, &maxID); err != nil {
 		return 0, 0, fmt.Errorf("count pending federation push: %w", err)
 	}
@@ -181,7 +179,15 @@ func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 // the hub for a spoke binding.
 func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return d.RetryTransient(ctx, func() error {
-		return advanceFederationPushCursor(ctx, d, projectID, nextCursor)
+		tx, err := d.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
+			return err
+		}
+		return tx.Commit()
 	})
 }
 
@@ -208,7 +214,7 @@ func advanceFederationPushCursor(ctx context.Context, exec interface {
 	if n == 0 {
 		return db.ErrNotFound
 	}
-	return nil
+	return db.ClearDeliveredFederationEvents(ctx, exec, projectID, nextCursor)
 }
 
 // EnableFederationPush marks an existing spoke binding push-enabled and keeps
@@ -305,11 +311,11 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		 WHERE project_id = ?
 		   AND NOT EXISTS (
 		       SELECT 1
-		         FROM events
-		        WHERE project_id = ?
-		          AND origin_instance_uid = ?
-		          AND id > ?
-		          AND `+federationPushEventTypeCondition("type")+`
+		         FROM events e
+		        WHERE e.project_id = ?
+		          AND e.origin_instance_uid = ?
+		          AND `+db.FederationPushPending("e", "?")+`
+		          AND `+federationPushEventTypeCondition("e.type")+`
 		   )
 		   AND NOT EXISTS (
 		       SELECT 1

@@ -17,6 +17,11 @@ func FederationPushEligible(event string) string {
 	return `NOT EXISTS (SELECT 1 FROM meta WHERE key='federation_local_only_event.'||` + event + `.uid)`
 }
 
+// FederationPushPending includes released local events below the push cursor.
+func FederationPushPending(event, cursor string) string {
+	return `((` + event + `.id>` + cursor + ` AND ` + FederationPushEligible(event) + `) OR EXISTS (SELECT 1 FROM meta WHERE key='federation_local_only_event.'||` + event + `.uid AND value='v1:deliver'))`
+}
+
 // ProjectMetadataAdoptionPayload encodes existing project metadata as a
 // synthetic from-empty diff for a federation adoption baseline.
 func ProjectMetadataAdoptionPayload(metadata JSONBlob) (string, error) {

@@ -173,10 +173,6 @@ func reconcileFederatedLinkGroup(
 	if err != nil {
 		return err
 	}
-	return reconcileFederatedLinkRows(ctx, tx, projection, issueIDs, existing)
-}
-
-func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueIDs map[string]int64, existing map[db.FoldLinkKey]federatedLinkRow) error {
 	desired := map[db.FoldLinkKey]federatedLinkRow{}
 	for _, edge := range projection.PresentLinks() {
 		key, state := edge.Key, edge.State
@@ -409,12 +405,10 @@ func federatedLinkRows(
 	toPlaceholders, toArgs := postgresIDPlaceholders(projectIDs, len(fromArgs)+1)
 	args := append(fromArgs, toArgs...)
 	//nolint:gosec // IN values use generated placeholders with separately bound integer IDs.
-	query := `SELECT l.id,l.from_issue_id,l.to_issue_id,
+	rows, err := tx.QueryContext(ctx, `SELECT l.id,l.from_issue_id,l.to_issue_id,
 l.from_issue_uid,l.to_issue_uid,l.type,l.author,l.created_at FROM links l
 JOIN issues f ON f.id=l.from_issue_id JOIN issues t ON t.id=l.to_issue_id
-WHERE f.project_id IN (` + fromPlaceholders + `) AND t.project_id IN (` + toPlaceholders + `)`
-
-	rows, err := tx.QueryContext(ctx, query, args...)
+WHERE f.project_id IN (`+fromPlaceholders+`) AND t.project_id IN (`+toPlaceholders+`)`, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
