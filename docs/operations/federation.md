@@ -125,6 +125,10 @@ that move, including after leaving and reenrolling in federation. Spokes can
 receive later moves without joining the former local project; later edits and
 comments still synchronize normally.
 
+Edits made in the original project before an issue moves to an unjoined project
+stay local if that destination is joined later. They can synchronize if the
+issue returns to the original joined project.
+
 The spoke sends the source project's existing enrollment credential with the
 move batch, alongside the destination credential, only to their shared hub
 origin. Both grants must permit push for the same spoke and actor. Joining both

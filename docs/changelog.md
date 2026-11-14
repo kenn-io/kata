@@ -9,6 +9,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Keep unsent edits in the original project when an issue moves to an unjoined
+  destination. Joining that destination later keeps those edits local; they can
+  synchronize if the issue returns to the original joined project.
+
 - Upgrade to schema 51, which reads issue history through an index on each
   event's header issue UID instead of one built from event payloads. PostgreSQL
   needs `kata storage postgres migrate` with the daemon stopped while the index

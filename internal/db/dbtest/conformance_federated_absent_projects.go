@@ -122,6 +122,9 @@ func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, dest
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
 	require.Equal(t, "local comment", comments[0].Body)
+	pending, err = spoke.PendingFederationPushEvents(ctx, route.ID, spoke.InstanceUID(), later.ID, 100)
+	require.NoError(t, err)
+	require.NotContains(t, eventUIDs(pending), comment.UID, "joining the destination keeps the original project's edit local")
 	hubIssue, err := hub.IssueByUID(ctx, u, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	third, err := hub.CreateProject(ctx, "third-project")
@@ -169,5 +172,11 @@ func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, dest
 	require.NoError(t, err)
 	require.Zero(t, count)
 	require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, route.ID, 0, 0, spoke.InstanceUID(), later.ID))
+	_, err = sqlStore.ExecContext(ctx, `UPDATE meta SET value='v1:deliver' WHERE key=$1`, "federation_local_only_event."+comment.UID)
+	require.NoError(t, err)
+	require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, route.ID, later.ID))
+	pending, err = spoke.PendingFederationPushEvents(ctx, route.ID, spoke.InstanceUID(), later.ID, 100)
+	require.NoError(t, err)
+	require.NotContains(t, eventUIDs(pending), comment.UID, "acknowledged released events must leave the pending queue")
 	return nil
 }

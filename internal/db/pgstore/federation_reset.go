@@ -67,7 +67,7 @@ WHERE project_id=$1 AND skipped_at IS NULL ORDER BY id ASC LIMIT 1 FOR UPDATE`, 
 		}
 		var pending bool
 		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events e
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND `+db.FederationPushPending("e", "$3")+` AND `+
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id IN (`+db.FederationPushPendingIDs("$1", "$2", "$3")+`) AND `+
 			pgFederationPushEventTypeCondition("e.type")+`)`, projectID, originInstanceUID, pushCursorEventID).
 			Scan(&pending)
 		if err != nil {

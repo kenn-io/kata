@@ -27,12 +27,12 @@ func (d *Store) PendingFederationPushEvents(
 		limit = 1000
 	}
 	out, err := d.queryPendingFederationPushEvents(ctx, `
-		WHERE e.project_id = ?
-		  AND e.origin_instance_uid = ?
-		  AND `+db.FederationPushPending("e", "?")+`
+		WHERE e.project_id = $1
+		  AND e.origin_instance_uid = $2
+		  AND e.id IN (`+db.FederationPushPendingIDs("$1", "$2", "$3")+`)
 		  AND `+federationPushEventTypeCondition("e.type")+`
 		ORDER BY e.id ASC
-		LIMIT ?`, projectID, originInstanceUID, afterID, limit)
+		LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -124,9 +124,9 @@ func (d *Store) PendingFederationPushStats(
 	if err := d.QueryRowContext(ctx, `
 		SELECT COUNT(*), MAX(id)
 		  FROM events
-		 WHERE project_id = ?
-		   AND origin_instance_uid = ?
-		   AND `+db.FederationPushPending("events", "?")+`
+		 WHERE project_id = $1
+		   AND origin_instance_uid = $2
+		   AND id IN (`+db.FederationPushPendingIDs("$1", "$2", "$3")+`)
 		   AND `+federationPushEventTypeCondition("type"),
 		projectID, originInstanceUID, afterID).Scan(&count, &maxID); err != nil {
 		return 0, 0, fmt.Errorf("count pending federation push: %w", err)
@@ -314,22 +314,22 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 
 	res, err := tx.ExecContext(ctx, `
 		UPDATE federation_bindings
-		   SET replay_horizon_event_id = ?,
-		       pull_cursor_event_id = ?,
+		   SET replay_horizon_event_id = $1,
+		       pull_cursor_event_id = $2,
 		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE project_id = ?
+		 WHERE project_id = $3
 		   AND NOT EXISTS (
 		       SELECT 1
 		         FROM events e
-		        WHERE e.project_id = ?
-		          AND e.origin_instance_uid = ?
-		          AND `+db.FederationPushPending("e", "?")+`
+		        WHERE e.project_id = $4
+		          AND e.origin_instance_uid = $5
+		          AND e.id IN (`+db.FederationPushPendingIDs("$4", "$5", "$6")+`)
 		          AND `+federationPushEventTypeCondition("e.type")+`
 		   )
 		   AND NOT EXISTS (
 		       SELECT 1
 		         FROM federation_quarantine
-		        WHERE project_id = ?
+		        WHERE project_id = $7
 		          AND skipped_at IS NULL
 		   )`,
 		replayHorizonEventID, pullCursorEventID, projectID,
