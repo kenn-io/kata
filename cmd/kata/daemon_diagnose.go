@@ -62,10 +62,7 @@ func daemonDiagnoseCmd() *cobra.Command {
 		if err := validateExpectedProjectUID(expected); err != nil {
 			return err
 		}
-		result, _, err := diagnoseDaemon(cmd.Context(), expected)
-		if err != nil {
-			return err
-		}
+		result, _, _ := diagnoseDaemon(cmd.Context(), expected)
 		return printDaemonDiagnosis(cmd, result)
 	}}
 	cmd.Flags().StringVar(&expected, "expect-project-uid", "", "assert the existing bound project's UID")
@@ -78,10 +75,7 @@ func daemonRecoverCmd() *cobra.Command {
 		if err := validateExpectedProjectUID(expected); err != nil {
 			return err
 		}
-		result, selection, err := diagnoseDaemon(cmd.Context(), expected)
-		if err != nil {
-			return err
-		}
+		result, selection, _ := diagnoseDaemon(cmd.Context(), expected)
 		if selection.Profile == nil {
 			return &cliError{Message: "daemon recover requires a registered local profile with home and instance_uid; explicit URLs stay pinned", Kind: kindValidation, ExitCode: ExitValidation}
 		}
@@ -94,7 +88,7 @@ func daemonRecoverCmd() *cobra.Command {
 		if _, err := client.EnsureLocalProfileSelection(cmd.Context(), selection); err != nil {
 			return cliDaemonTargetError(err)
 		}
-		result, _, err = diagnoseDaemonSelection(cmd.Context(), expected, selection)
+		result, _, err := diagnoseDaemonSelection(cmd.Context(), expected, selection)
 		if err != nil {
 			return err
 		}
@@ -116,10 +110,11 @@ func validateExpectedProjectUID(value string) error {
 	return nil
 }
 
+// diagnoseDaemon retains selection errors alongside their diagnostic report.
 func diagnoseDaemon(ctx context.Context, expectedProject string) (daemonDiagnosis, client.DaemonSelection, error) {
 	selection, err := client.InspectSelection(ctx, workspaceStartForRemote(), flags.Daemon)
 	if err != nil {
-		return selectionErrorDiagnosis(err), selection, nil
+		return selectionErrorDiagnosis(err), selection, err
 	}
 	result, selection, err := diagnoseDaemonSelection(ctx, expectedProject, selection)
 	if err != nil {
@@ -127,7 +122,7 @@ func diagnoseDaemon(ctx context.Context, expectedProject string) (daemonDiagnosi
 		result.Message = err.Error()
 		result = withDiagnosisAction(result)
 	}
-	return result, selection, nil
+	return result, selection, err
 }
 
 func selectionErrorDiagnosis(err error) daemonDiagnosis {

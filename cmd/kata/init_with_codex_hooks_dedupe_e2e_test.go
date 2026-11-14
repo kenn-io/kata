@@ -9,7 +9,54 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kit/agenthook"
 )
+
+func TestE2E_InitWithCodexHooksRunsOwnershipMarkedCommands(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	t.Setenv("CODEX_HOME", t.TempDir())
+	configPath := filepath.Join(dir, ".codex", "hooks.json")
+	foreign := map[string]any{"type": "command", "command": "example-tool contract"}
+	data, err := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{
+		map[string]any{"hooks": []any{foreign}},
+	}}})
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o700))
+	require.NoError(t, os.WriteFile(configPath, data, 0o600)) //nolint:gosec // Test config lives under the isolated workspace.
+
+	_, _, err = applyCodexHooks(t.Context(), dir)
+	require.NoError(t, err)
+	entries, err := inspectAgentHookEntries(agenthook.AgentCodex, configPath)
+	require.NoError(t, err)
+	var contractArgs []string
+	for _, entry := range entries {
+		if entry.Kind != contractHook {
+			continue
+		}
+		marker, ok := agentHookEntryOwnershipSource(entry)
+		require.True(t, ok)
+		_, ok = agentSetupHookOwnershipToken(marker, contractHook)
+		require.True(t, ok)
+		argv, ok := literalAgentHookWords(entry.Command, false, false)
+		require.True(t, ok)
+		require.NotEmpty(t, argv)
+		contractArgs = argv[1:]
+		break
+	}
+	require.NotEmpty(t, contractArgs)
+	require.Contains(t, contractArgs, "--ownership-marker")
+
+	ref := createIssue(t, env, pid, "session hook ownership")
+	t.Setenv("KATA_REF", ref)
+	contract := runCLI(t, env, dir, contractArgs...)
+	var response struct {
+		HookSpecificOutput struct {
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contract), &response))
+	assert.Equal(t, agentContractText, response.HookSpecificOutput.AdditionalContext)
+}
 
 func TestE2E_InitWithCodexHooks_DedupeAndRestore(t *testing.T) {
 	env := testenv.New(t)

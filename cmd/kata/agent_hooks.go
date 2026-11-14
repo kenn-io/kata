@@ -25,7 +25,7 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 			"These contract and attention entry points are distinct from daemon event\n" +
 			"hooks configured in hooks.toml.",
 	}
-	var source string
+	var source, ownershipMarker string
 	contract := &cobra.Command{
 		Use:   "contract <harness>",
 		Short: "Read stdin and emit a harness-native contract response",
@@ -51,6 +51,9 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 			}
 			if !capability.Contract {
 				return agentHookUsage(capability.Name + " does not consume hook contract context; use committed AGENTS.md")
+			}
+			if cmd.Flags().Changed("ownership-marker") && !isAgentHookOwnershipArg(contractHook, "--ownership-marker", ownershipMarker) {
+				return agentHookUsage("invalid Kata hook ownership marker")
 			}
 			text, err := readAgentContractSource(source, cmd.Flags().Changed("source"))
 			if err != nil {
@@ -86,6 +89,8 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 		},
 	}
 	contract.Flags().StringVar(&source, "source", "", "local UTF-8 prompt file (missing file uses built-in contract)")
+	contract.Flags().StringVar(&ownershipMarker, "ownership-marker", "", "")
+	_ = contract.Flags().MarkHidden("ownership-marker")
 	attention := &cobra.Command{
 		Use:   "attention",
 		Short: "Track workspace attention at session start and end",
@@ -99,7 +104,7 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 }
 
 func newAgentHookAttentionCmd(mode string) *cobra.Command {
-	var source string
+	var source, ownershipMarker string
 	short := "Establish the attention baseline at session start"
 	if mode == "end" {
 		short = "Raise attention if the session ended without a hand-off"
@@ -114,11 +119,16 @@ func newAgentHookAttentionCmd(mode string) *cobra.Command {
 			if cmd.Flags().Changed("source") && source != legacyAttentionHookSource+mode {
 				return agentHookUsage("--source must be " + legacyAttentionHookSource + mode)
 			}
+			if cmd.Flags().Changed("ownership-marker") && !isAgentHookOwnershipArg(agentHookKind(mode), "--ownership-marker", ownershipMarker) {
+				return agentHookUsage("invalid Kata hook ownership marker")
+			}
 			runAttentionHook(cmd, mode)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&source, "source", "", "optional ownership marker: "+legacyAttentionHookSource+mode)
+	cmd.Flags().StringVar(&ownershipMarker, "ownership-marker", "", "")
+	_ = cmd.Flags().MarkHidden("ownership-marker")
 	return cmd
 }
 

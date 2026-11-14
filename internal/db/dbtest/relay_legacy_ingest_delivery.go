@@ -28,7 +28,7 @@ func RunRelayOffersLegacyIngestedEvents(t *testing.T, store db.Storage) {
 		require.NoError(t, err)
 		issueUID, err := uid.New()
 		require.NoError(t, err)
-		created := newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "spoke", spoke, 700, jsontext.Value(`{"uid":"`+issueUID+`","title":"Pushed by a direct spoke","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+		created := newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "spoke", spoke, 700, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"Pushed by a direct spoke","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)))
 		push := db.FederationIngestParams{
 			ProjectID: fixture.project.ID, SpokeInstanceUID: spoke, BoundActor: "spoke",
 			Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: created}},
@@ -129,7 +129,7 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 					if kind == "snapshot" {
 						eventType = "issue.snapshot"
 					}
-					payload = `{"uid":"` + primary.UID + `","title":"Legacy creation","body":"","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"` + peer.UID + `","author":"member"}]}`
+					payload = `{"uid":"` + primary.UID + `","short_id":"` + strings.ToLower(primary.UID[len(primary.UID)-4:]) + `","title":"Legacy creation","body":"","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"` + peer.UID + `","author":"member"}]}`
 				case "composite", "composite cleanup", "parent replacement":
 					eventType = "issue.links_changed"
 					removal, err := uid.New()
@@ -173,7 +173,7 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 				if kind == "creation" && mode == "sibling" {
 					precedingUID, err = uid.New()
 					require.NoError(t, err)
-					valid := newRemoteEvent(t, fixture.project, &precedingUID, "issue.created", "member", spoke, 899, jsontext.Value(`{"uid":"`+precedingUID+`","title":"Earlier valid creation","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+					valid := newRemoteEvent(t, fixture.project, &precedingUID, "issue.created", "member", spoke, 899, IssueDocument(t, precedingUID, jsontext.Value(`{"uid":"`+precedingUID+`","title":"Earlier valid creation","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)))
 					push.Events = []db.FederationIngestEvent{{SourceEventID: 1, Event: valid}, {SourceEventID: 2, Event: event}}
 				}
 				authorizedProjects := []string{fixture.project.UID}

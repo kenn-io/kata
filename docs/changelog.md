@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-11
+last_edited: 2026-11-13
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -12,7 +12,57 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Watch project sync progress refresh every 30 seconds in a visible web tab and
   when you return.
 
+- Upgrade to schema 51, which reads issue history through an index on each
+  event's header issue UID instead of one built from event payloads. PostgreSQL
+  needs `kata storage postgres migrate` with the daemon stopped while the index
+  builds; SQLite replaces the index in place at startup. See the
+  [schema 51 migration requirements](development/postgres-migrations.md#schema-51-issue-history-index-on-the-event-header).
+
+- Install user hooks for Claude Code and Codex with `kata agent setup`, and use `kata doctor` to find hooks that need review. Open Codex and run `/hooks` when prompted. See [agent setup](workflows/agents.md#contract-in-every-session).
+
+- Restart a local daemon from Settings after turning on search by meaning. Confirm the interruption for every project and client, then reopen `kata ui` if the browser address changes. The API reports the `restart` job state and `restart_in_progress` during the handoff.
+
+- Use `kata daemon status` in scripts to check the selected daemon's readiness.
+  It exits 0 only for a ready selected daemon. Stopped or unavailable
+  selections and the `version_mismatch` state exit 7, an unknown named daemon
+  exits 3, and other invalid routing configuration exits 1. Status still prints
+  its diagnostics; previously these cases exited 0.
+
+- Continue an incomplete lexical search by copying the command printed with its results.
+
+- Recover automatically when the web UI's first daemon roster, workspace, or teams read fails briefly. Retry and Refresh teams remain available after persistent failures or refusals.
+
+- Repeat or resume an adoption push into a hub project that already holds
+  some of the issues, or bring it up to date from a newer copy of the project.
+  A snapshot with a newer `updated_at` updates the issue and merges its
+  comments by UID with their original author and time. An older or identical
+  one is acknowledged and writes nothing. Links are added and never removed.
+  The hub records a winning copy as one `issue.restated` event, not as a
+  second snapshot, and the Kata home that pushed it then takes the hub's state. A
+  push for an issue that another project on the hub holds, including an
+  archived one, now returns `400 validation` naming the issue and is
+  quarantined on the spoke; before, it returned 404 and the spoke retried
+  without showing an error. The hub and the pushing spoke must both run this
+  version. After a newer copy wins, every other spoke of the project must run
+  it too before it can pull again. See
+  [repeating an adoption](operations/federation.md#repeating-an-adoption).
+
+- Purge an archived project from an embedding host with
+  `Service.PurgeArchivedProject`, including a project that is a federation hub.
+  The purge retires the hub binding, deletes the project's enrollments, and
+  writes the usual purge log, so the old project's task UIDs are free for a
+  replacement project. See
+  [embedding](development/embedding.md#host-managed-projects).
+
+- Keep links between projects when you move them one at a time.
+  `kata import --merge` now creates a snapshot's links to issues of other
+  projects that are already in the target. A link appears once both projects
+  are merged, in either order, and adopting the projects into a hub then
+  carries it there. Before, a merge skipped every such link. See
+  [links between merged projects](operations/backup-restore.md#links-between-merged-projects).
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
+- Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot confirm the shared choice was saved, setup succeeds and Kata logs the failure; other apps may miss the choice if it wasn't saved. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 
 - Upgrade a large PostgreSQL database without the schema migration rolling
   back. A migration statement no longer stops after 30 seconds, so a long index
@@ -27,6 +77,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Keep search focus and text when keyboard selection opens task detail.
 - Keep local writes responsive while a federation pull updates projects with long histories.
+- Keep local writes responsive while moved issues and claim changes trigger a federation rebuild.
 - See why Docbank attachments fail when the daemon cannot read its own key.
   With daemon API 0.44.0 or newer, uploads, reads, and links return HTTP 503
   `docbank_key_unavailable` with the reason, such as

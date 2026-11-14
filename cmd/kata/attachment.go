@@ -25,10 +25,12 @@ func newAttachmentCmd() *cobra.Command {
 	for _, action := range []string{"add", "ls", "get", "rm"} {
 		var output string
 		var force bool
+		var reuseExisting bool
 		cmd := &cobra.Command{Use: action + " <issue> <attachment>", Short: action + " issue attachments", Args: cobra.ExactArgs(2)}
 		if action == "add" {
 			cmd.Use = "add <issue> <file>..."
 			cmd.Args = cobra.MinimumNArgs(2)
+			cmd.Flags().BoolVar(&reuseExisting, "reuse-existing", false, "reuse an existing reference to the uploaded version")
 		}
 		if action == "ls" {
 			cmd.Use = "ls <issue>"
@@ -48,7 +50,12 @@ func newAttachmentCmd() *cobra.Command {
 				return err
 			}
 			if action == "add" {
-				return addAttachmentsCLI(ctx, cmd, hc, base, pid, ref.RefForAPI, args[1:])
+				if reuseExisting {
+					if err := requireDaemonAPIVersion(ctx, hc, base, apiVersionDocbankAttachmentReuse, "Docbank attachment reuse"); err != nil {
+						return err
+					}
+				}
+				return addAttachmentsCLI(ctx, cmd, hc, base, pid, ref.RefForAPI, args[1:], reuseExisting)
 			}
 			issue, _, err := fetchMetaIssue(ctx, hc, base, pid, ref.RefForAPI)
 			if err != nil {
@@ -152,7 +159,7 @@ func printAttachmentsCLI(cmd *cobra.Command, entries map[string]metadata.Attachm
 	}
 	return nil
 }
-func addAttachmentsCLI(ctx context.Context, cmd *cobra.Command, c *http.Client, base string, pid int64, ref string, files []string) error {
+func addAttachmentsCLI(ctx context.Context, cmd *cobra.Command, c *http.Client, base string, pid int64, ref string, files []string, reuseExisting bool) error {
 	actor, _ := resolveActor(ctx, flags.As, nil)
 	type outcome struct {
 		File  string `json:"file"`
@@ -162,7 +169,7 @@ func addAttachmentsCLI(ctx context.Context, cmd *cobra.Command, c *http.Client, 
 	out := make([]outcome, 0, len(files))
 	var failures []error
 	for _, file := range files {
-		id, err := uploadAttachmentCLI(ctx, c, base, pid, ref, actor, file)
+		id, err := uploadAttachmentCLI(ctx, c, base, pid, ref, actor, file, reuseExisting)
 		result := outcome{File: file, ID: id}
 		if err != nil {
 			result.Error = err.Error()
@@ -196,7 +203,7 @@ func addAttachmentsCLI(ctx context.Context, cmd *cobra.Command, c *http.Client, 
 	}
 	return errors.Join(failures...)
 }
-func uploadAttachmentCLI(ctx context.Context, c *http.Client, base string, pid int64, ref, actor, filename string) (string, error) {
+func uploadAttachmentCLI(ctx context.Context, c *http.Client, base string, pid int64, ref, actor, filename string, reuseExisting bool) (string, error) {
 	file, err := os.Open(filename) //nolint:gosec // The operator selects the source file.
 	if err != nil {
 		return "", externalCLIValidation(err.Error())
@@ -206,7 +213,11 @@ func uploadAttachmentCLI(ctx context.Context, c *http.Client, base string, pid i
 	if err != nil {
 		return "", err
 	}
-	endpoint := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments?", base, pid, url.PathEscape(ref)) + url.Values{"name": {filepath.Base(filename)}, "actor": {actor}}.Encode()
+	query := url.Values{"name": {filepath.Base(filename)}, "actor": {actor}}
+	if reuseExisting {
+		query.Set("reuse_existing", "true")
+	}
+	endpoint := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments?", base, pid, url.PathEscape(ref)) + query.Encode()
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, file)
 	if err != nil {
 		return "", err

@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"go.kenn.io/kata/internal/testfix"
@@ -12,7 +16,7 @@ import (
 )
 
 // Existing workspace-hook tests assume no user hook. Isolate the test process
-// from the developer's real Codex config; user-hook tests select their own homes
+// from the developer's real agent configs; user-hook tests select their own homes
 // with t.Setenv. No production behavior or real user config is changed.
 func TestMain(m *testing.M) {
 	if os.Getenv("KATA_TEST_CLI_PANIC") != "" {
@@ -39,6 +43,10 @@ func TestMain(m *testing.M) {
 			}
 		}
 	}
+	if err := useSelectedNode(); err != nil {
+		fmt.Fprintf(os.Stderr, "select test Node executable: %v\n", err)
+		os.Exit(1)
+	}
 	home, err := os.MkdirTemp("", "kata-test-codex-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create test Codex home: %v\n", err)
@@ -46,6 +54,11 @@ func TestMain(m *testing.M) {
 	}
 	if err := os.Setenv("CODEX_HOME", home); err != nil {
 		fmt.Fprintf(os.Stderr, "set test Codex home: %v\n", err)
+		_ = os.RemoveAll(home)
+		os.Exit(1)
+	}
+	if err := os.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, "claude")); err != nil {
+		fmt.Fprintf(os.Stderr, "set test Claude config: %v\n", err)
 		_ = os.RemoveAll(home)
 		os.Exit(1)
 	}
@@ -59,4 +72,20 @@ func TestMain(m *testing.M) {
 		code = 1
 	}
 	os.Exit(code)
+}
+
+// useSelectedNode puts the Node executable a version manager selects first
+// on PATH. The tests run Node under a temporary HOME, where the manager's
+// shim can no longer find its own configuration. Without Node on PATH the
+// tests that need it skip.
+func useSelectedNode() error {
+	output, err := exec.CommandContext(context.Background(), "node", "-p", "process.execPath").Output()
+	if err != nil {
+		return nil
+	}
+	executable := strings.TrimSpace(string(output))
+	if !filepath.IsAbs(executable) {
+		return nil
+	}
+	return os.Setenv("PATH", filepath.Dir(executable)+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

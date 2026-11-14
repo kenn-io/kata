@@ -412,12 +412,7 @@ func (s *Service) activeSubscriptions(ctx context.Context) ([]scanSubscription, 
 // lost its authority; any other error means authority is unavailable now.
 func (s *Service) concerns(ctx context.Context, sub scanSubscription, event db.Event, auths map[string]*scanAuthority) (bool, error) {
 	o := Occurrence{EventID: event.ID, EventUID: event.UID, Type: event.Type, ProjectUID: event.ProjectUID, Payload: []byte(event.Payload)}
-	if strings.HasPrefix(event.Type, "issue.") {
-		// Some federated issue events name their issue only in the payload.
-		o.IssueUID = db.FederationEventIssueUID(event.IssueUID, event.Payload)
-	} else if event.IssueUID != nil {
-		o.IssueUID = *event.IssueUID
-	}
+	o.IssueUID = db.EventIssueUID(event.IssueUID)
 	from := movedFrom(o)
 	visibleProject, departure := o.ProjectUID, false
 	if !sub.selects(o.ProjectUID) {
@@ -533,7 +528,7 @@ func (s *Service) scanAuthority(ctx context.Context, row db.MCPEventSubscription
 // own issue holds no request.
 func scopeChange(o Occurrence) bool {
 	switch o.Type {
-	case "issue.linked", "issue.unlinked", "issue.links_changed", "issue.snapshot", "issue.moved":
+	case "issue.linked", "issue.unlinked", "issue.links_changed", "issue.snapshot", "issue.restated", "issue.moved":
 		return true
 	}
 	return issueLifecycle(o)

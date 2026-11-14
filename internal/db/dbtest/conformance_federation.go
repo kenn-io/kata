@@ -1814,7 +1814,7 @@ func checkFederationProjectionLifecycle(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return err
 	}
-	snapshotPayload := jsontext.Value(`{"uid":"` + remoteIssueUID + `","title":"remote issue","body":"remote body","author":"remote-agent","status":"open","metadata":{"source":"federation"},"labels":["remote"],"comments":[{"comment_uid":"` + remoteCommentUID + `","author":"remote-reviewer","teammate":"reviewer-7","body":"remote comment","created_at":"2026-05-23T12:00:00.000Z"},{"comment_uid":"` + remoteLegacyCommentUID + `","author":"remote-reviewer","body":"legacy remote comment","created_at":"2026-05-23T12:00:01.000Z"}],"created_at":"2026-05-23T12:00:00.000Z","updated_at":"2026-05-23T12:00:00.000Z"}`)
+	snapshotPayload := IssueDocument(t, remoteIssueUID, jsontext.Value(`{"uid":"`+remoteIssueUID+`","title":"remote issue","body":"remote body","author":"remote-agent","status":"open","metadata":{"source":"federation"},"labels":["remote"],"comments":[{"comment_uid":"`+remoteCommentUID+`","author":"remote-reviewer","teammate":"reviewer-7","body":"remote comment","created_at":"2026-05-23T12:00:00.000Z"},{"comment_uid":"`+remoteLegacyCommentUID+`","author":"remote-reviewer","body":"legacy remote comment","created_at":"2026-05-23T12:00:01.000Z"}],"created_at":"2026-05-23T12:00:00.000Z","updated_at":"2026-05-23T12:00:00.000Z"}`))
 	snapshotRemote := newRemoteEvent(t, spoke, &remoteIssueUID, "issue.snapshot", "remote-agent",
 		projectEvent.OriginInstanceUID, 201, snapshotPayload)
 	inserted, err = store.InsertRemoteEvent(ctx, spoke.ID, snapshotRemote)
@@ -1958,7 +1958,7 @@ func checkFederationIngestLifecycle(t *testing.T, store db.Storage) error {
 		return err
 	}
 	created := newRemoteEvent(t, hub, &issueUID, "issue.created", "sync-agent", spokeUID, 300,
-		jsontext.Value(`{"uid":"`+issueUID+`","title":"pushed issue","body":"from spoke","author":"sync-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+		IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"pushed issue","body":"from spoke","author":"sync-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)))
 	commentUID, err := uid.New()
 	if err != nil {
 		return err
@@ -2012,7 +2012,7 @@ func checkFederationIngestLifecycle(t *testing.T, store db.Storage) error {
 		return err
 	}
 	invalidCreated := newRemoteEvent(t, hub, &invalidCreatedIssueUID, "issue.created", "sync-agent", spokeUID, 302,
-		jsontext.Value(`{"uid":"`+invalidCreatedIssueUID+`","title":"invalid embedded teammate","body":"","author":"sync-agent","status":"open","metadata":{},"comments":[{"comment_uid":"`+invalidCreatedCommentUID+`","author":"sync-agent","teammate":"@invalid","body":"invalid","created_at":"2026-05-23T12:02:00.000Z"}],"created_at":"2026-05-23T12:02:00.000Z"}`))
+		IssueDocument(t, invalidCreatedIssueUID, jsontext.Value(`{"uid":"`+invalidCreatedIssueUID+`","title":"invalid embedded teammate","body":"","author":"sync-agent","status":"open","metadata":{},"comments":[{"comment_uid":"`+invalidCreatedCommentUID+`","author":"sync-agent","teammate":"@invalid","body":"invalid","created_at":"2026-05-23T12:02:00.000Z"}],"created_at":"2026-05-23T12:02:00.000Z"}`)))
 	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
 		ProjectID: hub.ID, SpokeInstanceUID: spokeUID, BoundActor: "sync-agent",
 		Events: []db.FederationIngestEvent{{SourceEventID: 12, Event: invalidCreated}},
@@ -2033,7 +2033,7 @@ func checkFederationIngestLifecycle(t *testing.T, store db.Storage) error {
 		}
 		invalidCreated := newRemoteEvent(t, hub, &invalidIssueUID, "issue.created", "sync-agent", spokeUID,
 			int64(302+index*2),
-			jsontext.Value(`{"uid":"`+invalidIssueUID+`","title":"invalid teammate rollback","body":"","author":"sync-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:02:00.000Z"}`))
+			IssueDocument(t, invalidIssueUID, jsontext.Value(`{"uid":"`+invalidIssueUID+`","title":"invalid teammate rollback","body":"","author":"sync-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:02:00.000Z"}`)))
 		invalidCommentUID, uidErr := uid.New()
 		if uidErr != nil {
 			return uidErr
@@ -2102,7 +2102,7 @@ func checkFederationIngestLifecycle(t *testing.T, store db.Storage) error {
 		return err
 	}
 	rollbackCreated := newRemoteEvent(t, hub, &rollbackIssueUID, "issue.created", "sync-agent", spokeUID, 302,
-		jsontext.Value(`{"uid":"`+rollbackIssueUID+`","title":"rolled back","body":"","author":"sync-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:02:00.000Z"}`))
+		IssueDocument(t, rollbackIssueUID, jsontext.Value(`{"uid":"`+rollbackIssueUID+`","title":"rolled back","body":"","author":"sync-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:02:00.000Z"}`)))
 	badHash := newRemoteEvent(t, hub, &rollbackIssueUID, "issue.updated", "sync-agent", spokeUID, 303,
 		jsontext.Value(`{"title":"invalid","updated_at":"2026-05-23T12:03:00.000Z"}`))
 	badHash.ContentHash = strings.Repeat("0", 64)
@@ -2229,7 +2229,7 @@ func checkFederationTeammateRemoteValidation(t *testing.T, store db.Storage) err
 				commentUID, err := uid.New()
 				require.NoError(t, err)
 				created := newRemoteEvent(t, project, &issueUID, "issue.created", "remote-agent", originUID, 503,
-					jsontext.Value(`{"uid":"`+issueUID+`","title":"invalid created teammate","body":"","author":"remote-agent","status":"open","metadata":{},"comments":[{"comment_uid":"`+commentUID+`","author":"remote-agent","teammate":42,"body":"invalid","created_at":"2026-05-23T12:00:00.000Z"}],"created_at":"2026-05-23T12:00:00.000Z"}`))
+					IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"invalid created teammate","body":"","author":"remote-agent","status":"open","metadata":{},"comments":[{"comment_uid":"`+commentUID+`","author":"remote-agent","teammate":42,"body":"invalid","created_at":"2026-05-23T12:00:00.000Z"}],"created_at":"2026-05-23T12:00:00.000Z"}`)))
 				return []db.RemoteEvent{created}
 			},
 		},
@@ -2237,7 +2237,7 @@ func checkFederationTeammateRemoteValidation(t *testing.T, store db.Storage) err
 			name: "commented non-string teammate",
 			events: func(t *testing.T, project db.Project, issueUID string) []db.RemoteEvent {
 				created := newRemoteEvent(t, project, &issueUID, "issue.created", "remote-agent", originUID, 500,
-					jsontext.Value(`{"uid":"`+issueUID+`","title":"invalid comment teammate","body":"","author":"remote-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+					IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"invalid comment teammate","body":"","author":"remote-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)))
 				commentUID, err := uid.New()
 				require.NoError(t, err)
 				commented := newRemoteEvent(t, project, &issueUID, "issue.commented", "remote-agent", originUID, 501,
@@ -2251,7 +2251,7 @@ func checkFederationTeammateRemoteValidation(t *testing.T, store db.Storage) err
 				commentUID, err := uid.New()
 				require.NoError(t, err)
 				snapshot := newRemoteEvent(t, project, &issueUID, "issue.snapshot", "remote-agent", originUID, 502,
-					jsontext.Value(`{"uid":"`+issueUID+`","title":"invalid snapshot teammate","body":"","author":"remote-agent","status":"open","metadata":{},"comments":[{"comment_uid":"`+commentUID+`","author":"remote-agent","teammate":"@invalid","body":"invalid","created_at":"2026-05-23T12:00:00.000Z"}],"created_at":"2026-05-23T12:00:00.000Z"}`))
+					IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"invalid snapshot teammate","body":"","author":"remote-agent","status":"open","metadata":{},"comments":[{"comment_uid":"`+commentUID+`","author":"remote-agent","teammate":"@invalid","body":"invalid","created_at":"2026-05-23T12:00:00.000Z"}],"created_at":"2026-05-23T12:00:00.000Z"}`)))
 				return []db.RemoteEvent{snapshot}
 			},
 		},
@@ -2411,7 +2411,7 @@ func checkFederationAdoptionIngestLifecycle(t *testing.T, store db.Storage) erro
 		return err
 	}
 	invalidSnapshot := newRemoteEvent(t, project, &invalidSnapshotIssueUID, "issue.snapshot", "adoption-agent",
-		spokeUID, 400, jsontext.Value(`{"uid":"`+invalidSnapshotIssueUID+`","title":"invalid snapshot","body":"","author":"historical-author","status":"open","metadata":{},"comments":[{"comment_uid":"`+invalidSnapshotCommentUID+`","author":"historical-reviewer","teammate":"@invalid","body":"invalid","created_at":"2026-05-23T12:00:00.000Z"}],"created_at":"2026-05-23T12:00:00.000Z"}`))
+		spokeUID, 400, IssueDocument(t, invalidSnapshotIssueUID, jsontext.Value(`{"uid":"`+invalidSnapshotIssueUID+`","title":"invalid snapshot","body":"","author":"historical-author","status":"open","metadata":{},"comments":[{"comment_uid":"`+invalidSnapshotCommentUID+`","author":"historical-reviewer","teammate":"@invalid","body":"invalid","created_at":"2026-05-23T12:00:00.000Z"}],"created_at":"2026-05-23T12:00:00.000Z"}`)))
 	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
 		ProjectID: project.ID, FederationEnrollmentID: created.Enrollment.ID,
 		SpokeInstanceUID: spokeUID, BoundActor: "adoption-agent",
@@ -2430,7 +2430,7 @@ func checkFederationAdoptionIngestLifecycle(t *testing.T, store db.Storage) erro
 	assert.Equal(t, int64(11), enrollment.AdoptionBaselineNextSourceEventID,
 		"invalid snapshot must roll back adoption progress")
 	firstSnapshot := newRemoteEvent(t, project, &firstIssueUID, "issue.snapshot", "adoption-agent",
-		spokeUID, 400, jsontext.Value(`{"uid":"`+firstIssueUID+`","title":"historical first","body":"","author":"historical-author","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+		spokeUID, 400, IssueDocument(t, firstIssueUID, jsontext.Value(`{"uid":"`+firstIssueUID+`","title":"historical first","body":"","author":"historical-author","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)))
 	second, err := store.IngestFederationEvents(ctx, db.FederationIngestParams{
 		ProjectID: project.ID, FederationEnrollmentID: created.Enrollment.ID,
 		SpokeInstanceUID: spokeUID, BoundActor: "adoption-agent",
@@ -2464,7 +2464,7 @@ func checkFederationAdoptionIngestLifecycle(t *testing.T, store db.Storage) erro
 		return err
 	}
 	secondSnapshot := newRemoteEvent(t, project, &secondIssueUID, "issue.snapshot", "adoption-agent",
-		spokeUID, 400, jsontext.Value(`{"uid":"`+secondIssueUID+`","title":"historical second","body":"","author":"another-historical-author","status":"open","metadata":{},"comments":[{"comment_uid":"`+commentUID+`","author":"historical-reviewer","body":"original comment","created_at":"2026-05-23T12:00:00.000Z"}],"links":[{"type":"related","to_issue_uid":"`+firstIssueUID+`","author":"historical-linker","created_at":"2026-04-01T09:10:11.123456789Z"},{"type":"blocks","to_issue_uid":"`+firstIssueUID+`","author":"historical-linker"}],"created_at":"2026-05-23T12:00:00.000Z"}`))
+		spokeUID, 400, IssueDocument(t, secondIssueUID, jsontext.Value(`{"uid":"`+secondIssueUID+`","title":"historical second","body":"","author":"another-historical-author","status":"open","metadata":{},"comments":[{"comment_uid":"`+commentUID+`","author":"historical-reviewer","body":"original comment","created_at":"2026-05-23T12:00:00.000Z"}],"links":[{"type":"related","to_issue_uid":"`+firstIssueUID+`","author":"historical-linker","created_at":"2026-04-01T09:10:11.123456789Z"},{"type":"blocks","to_issue_uid":"`+firstIssueUID+`","author":"historical-linker"}],"created_at":"2026-05-23T12:00:00.000Z"}`)))
 	terminalParams := db.FederationIngestParams{
 		ProjectID: project.ID, FederationEnrollmentID: created.Enrollment.ID,
 		SpokeInstanceUID: spokeUID, BoundActor: "adoption-agent",

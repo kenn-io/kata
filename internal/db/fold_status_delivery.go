@@ -20,11 +20,11 @@ func ReconcileFoldStatusIntent(previous, current FoldIssue, pendingUID string, a
 	ordered := append([]FoldEvent(nil), accepted...)
 	sort.SliceStable(ordered, func(i, j int) bool { return compareClock(clockOf(ordered[i]), clockOf(ordered[j])) < 0 })
 	for _, event := range ordered {
-		if compareClock(clockOf(event), previous.StatusClock) <= 0 || issueUID(event, PayloadMap(event.Payload)) != current.UID {
+		if compareClock(clockOf(event), previous.StatusClock) <= 0 || event.IssueUID != current.UID {
 			continue
 		}
 		switch event.Type {
-		case "issue.created", "issue.snapshot", "issue.updated", "issue.closed", "issue.reopened":
+		case "issue.created", "issue.snapshot", "issue.updated", RepeatedImportEventType, "issue.closed", "issue.reopened":
 			projection.apply(event)
 		}
 	}

@@ -221,6 +221,24 @@ func TestAgentHooksContractCustomSource(t *testing.T) {
 	assertCodexPrompt(t, out, "replacement")
 }
 
+func TestAgentHooksOwnershipMarkerDoesNotSelectContractSource(t *testing.T) {
+	t.Chdir(writeKataWorkspace(t, t.TempDir()))
+	t.Setenv("KATA_REF", "")
+	require.NoError(t, os.WriteFile(legacyAgentContractHookSource, []byte("custom source"), 0o600))
+	marker := agentSetupHookOwnershipMarker(contractHook, "0123456789abcdef")
+	out, stderr, err := executeAgentHook(t, strings.NewReader(contractHookPayload(agenthook.AgentClaude)), "agent-hook", "contract", "claude", "--ownership-marker", marker)
+	require.NoError(t, err, stderr)
+	assertNativePrompt(t, agenthook.AgentClaude, out, agentContractText)
+
+	for _, args := range [][]string{
+		{"agent-hook", "attention", "start", "--ownership-marker", agentSetupHookOwnershipMarker(attentionStartHook, "0123456789abcdef")},
+		{"agent-hook", "attention-native", "claude", "end", "--ownership-marker", agentSetupHookOwnershipMarker(attentionEndHook, "0123456789abcdef")},
+	} {
+		_, stderr, err := executeAgentHook(t, strings.NewReader(`{"session_id":"example-session","cwd":"."}`), args...)
+		require.NoError(t, err, stderr)
+	}
+}
+
 func TestAgentHooksContractSourceAllHarnesses(t *testing.T) {
 	t.Chdir(writeKataWorkspace(t, t.TempDir()))
 	prompt := "custom \"prompt\"\nUnicode 世界\n"

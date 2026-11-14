@@ -1019,9 +1019,10 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		cfg.Publish().EventsByProject(result.Events)
 		return &api.FederationIngestEventsResponse{EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: result.RequiredEventFeatures, Body: api.FederationIngestEventsBody{
-			Accepted:          result.Accepted,
-			Duplicates:        result.Duplicates,
-			PushCursorEventID: result.PushCursorEventID,
+			Accepted:            result.Accepted,
+			Duplicates:          result.Duplicates,
+			PushCursorEventID:   result.PushCursorEventID,
+			SupersededEventUIDs: result.SupersededEventUIDs,
 		}}, nil
 	})
 }

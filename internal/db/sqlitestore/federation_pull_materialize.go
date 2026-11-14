@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"reflect"
@@ -96,7 +97,7 @@ func preparePulledFederationMaterialization(ctx context.Context, tx *sql.Tx, pro
 	var scope []string
 	full := false
 	for _, ev := range events {
-		uid := db.FederationEventIssueUID(ev.IssueUID, ev.Payload)
+		uid := db.EventIssueUID(ev.IssueUID)
 		switch {
 		case db.EventRequiredFeatures(ev.Type) == db.CronEventFeature:
 			// Common preparation folds complete cron history separately.
@@ -145,11 +146,18 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
 		return err
 	}
+	if err := checkFullPullPreparation(ctx, tx, projectID, m); err != nil {
+		return err
+	}
+	return applyPulledFederationMaterialization(ctx, tx, projectID, eventUIDs, m)
+}
+
+func checkFullPullPreparation(ctx context.Context, tx *sql.Tx, projectID int64, m federationMaterialization) error {
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id = ?`, projectID))
 	if err != nil {
 		return err
 	}
-	stamp, err := federationEventStamp(ctx, tx, projectID, nil)
+	stamp, err := federationEventStamp(ctx, tx, projectID, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -159,8 +167,7 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 		return errStaleFederationPreparation
 	}
 	// A move can add history for an issue included in the prepared fold.
-	//nolint:gosec // The UID expression is fixed SQL; the event ID is bound.
-	rows, err := tx.QueryContext(ctx, `SELECT COALESCE(`+db.FederationReadIssueUIDExpr(false)+`, '') FROM events e WHERE e.id>? AND e.type='issue.moved'`, m.maxEventID)
+	rows, err := tx.QueryContext(ctx, `SELECT COALESCE(e.issue_uid, '') FROM events e WHERE e.id>? AND e.type='issue.moved'`, m.maxEventID)
 	if err != nil {
 		return err
 	}
@@ -200,7 +207,7 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 			}
 		}
 		for id, expected := range m.linkStamps {
-			stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes())
+			stamp, err := federationEventStamp(ctx, tx, id, db.FederationLinkAffectingEventTypes(), nil)
 			if err != nil {
 				return err
 			}
@@ -209,7 +216,7 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 			}
 		}
 	}
-	rowStamp, err := federationRowStamp(ctx, tx, projectID, m.linkProjects)
+	rowStamp, err := federationRowStamp(ctx, tx, projectID, m.linkProjects, m.linksUnderWriter)
 	if err != nil {
 		return err
 	}
@@ -225,7 +232,7 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 			return errStaleFederationPreparation
 		}
 	}
-	return applyPulledFederationMaterialization(ctx, tx, projectID, eventUIDs, m)
+	return nil
 }
 
 func applyPulledFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, eventUIDs []string, m federationMaterialization) error {
@@ -242,10 +249,17 @@ func applyPulledFederationMaterialization(ctx context.Context, tx *sql.Tx, proje
 func scopedFederationRows(query string, projectID int64, column string, scope []string) (string, []any) {
 	args := []any{projectID}
 	if len(scope) > 0 {
-		//nolint:gosec // Only internal column names and generated placeholders; values are bound.
-		query += " AND " + column + " IN (?" + strings.Repeat(",?", len(scope)-1) + ")"
-		for _, uid := range scope {
-			args = append(args, uid)
+		if len(scope) <= federationIngestIssueScopeLimit {
+			//nolint:gosec // Only internal column names and generated placeholders enter the query.
+			query += " AND " + column + " IN (?" + strings.Repeat(",?", len(scope)-1) + ")"
+			for _, uid := range scope {
+				args = append(args, uid)
+			}
+		} else {
+			encoded, _ := json.Marshal(scope)
+			//nolint:gosec // Only internal column names enter the query; values are bound.
+			query += " AND " + column + " IN (SELECT value FROM json_each(?))"
+			args = append(args, string(encoded))
 		}
 	}
 	return query, args

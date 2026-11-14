@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -25,9 +27,15 @@ import (
 const (
 	legacyAgentContractHookSource = "kata-agent-contract-hook"
 	legacyAttentionHookSource     = "kata-agent-hook-"
+	agentSetupHookSourcePrefix    = "kata-agent-setup-hook-"
 )
 
 type agentHookKind string
+
+type agentHookOwnership struct {
+	Required bool
+	Token    string
+}
 
 const (
 	contractHook       agentHookKind = "contract"
@@ -40,6 +48,10 @@ var agentHookCommandFields = []string{"command", "commandWindows", "bash", "powe
 // Ownership is an exact direct invocation, across every populated platform.
 // An explicit built-in source marker also identifies a renamed executable.
 func classifyAgentHookHandler(agent agenthook.Agent, handler map[string]any) agentHookKind {
+	return classifyAgentHookHandlerForGOOS(agent, handler, runtime.GOOS)
+}
+
+func classifyAgentHookHandlerForGOOS(agent agenthook.Agent, handler map[string]any, goos string) agentHookKind {
 	if raw, exists := handler["type"]; exists && raw != "command" {
 		return ""
 	}
@@ -53,6 +65,9 @@ func classifyAgentHookHandler(agent agenthook.Agent, handler map[string]any) age
 			return ""
 		}
 	}
+	powershellWindowsCommand, _ := handler["commandWindows"].(string)
+	// Kit keeps command in POSIX syntax when commandWindows is PowerShell.
+	commandFieldIsPOSIX := strings.HasPrefix(strings.TrimSpace(powershellWindowsCommand), "& ")
 	populated := false
 	for _, field := range agentHookCommandFields {
 		raw, exists := handler[field]
@@ -67,7 +82,10 @@ func classifyAgentHookHandler(agent agenthook.Agent, handler map[string]any) age
 			continue
 		}
 		populated = true
-		candidate := classifyAgentHookCommand(agent, command, field)
+		candidate := classifyAgentHookCommandForGOOS(agent, command, field, goos)
+		if field == "command" && commandFieldIsPOSIX {
+			candidate = classifyAgentHookCommandWithSyntax(agent, command, false, false)
+		}
 		if execForm && field == "command" {
 			candidate = kind
 		}
@@ -113,13 +131,23 @@ func agentHookExecForm(agent agenthook.Agent, handler map[string]any) (executabl
 }
 
 func classifyAgentHookCommand(agent agenthook.Agent, command, field string) agentHookKind {
-	powershell := field == "powershell"
+	return classifyAgentHookCommandForGOOS(agent, command, field, runtime.GOOS)
+}
+
+func classifyAgentHookCommandForGOOS(agent agenthook.Agent, command, field, goos string) agentHookKind {
+	command = strings.TrimSpace(command)
+	powershell := field == "powershell" || (field == "commandWindows" && strings.HasPrefix(command, "& "))
+	windows := (field == "commandWindows" && !powershell) || (field == "command" && goos == "windows")
+	return classifyAgentHookCommandWithSyntax(agent, command, powershell, windows)
+}
+
+func classifyAgentHookCommandWithSyntax(agent agenthook.Agent, command string, powershell, windows bool) agentHookKind {
 	command = strings.TrimSpace(command)
 	if powershell && strings.HasPrefix(command, "& ") {
 		command = strings.TrimSpace(command[1:])
 	}
 	// Parse only literal argv. No substitutions, shell operators or assignments.
-	argv, ok := literalAgentHookWords(command, powershell, field == "commandWindows" || (field == "command" && runtime.GOOS == "windows"))
+	argv, ok := literalAgentHookWords(command, powershell, windows)
 	if !ok {
 		return ""
 	}
@@ -162,11 +190,7 @@ func classifyAgentHookArgv(agent agenthook.Agent, argv []string) agentHookKind {
 	if len(tail) == 0 && isKataHookExecutable(executable) {
 		return kind
 	}
-	source := legacyAgentContractHookSource
-	if kind != contractHook {
-		source = legacyAttentionHookSource + string(kind)
-	}
-	if slices.Equal(tail, []string{"--source", source}) {
+	if len(tail) == 2 && isAgentHookOwnershipArg(kind, tail[0], tail[1]) {
 		return kind
 	}
 	return ""
@@ -187,18 +211,223 @@ func isKataHookExecutable(executable string) bool {
 	return name == "kata" || name == "kata.exe"
 }
 
-func agentHookOwnershipArgs(executable string, args []string, kind agentHookKind) []string {
-	if isKataHookExecutable(executable) {
+func agentHookDefaultSource(kind agentHookKind) string {
+	if kind == contractHook {
+		return legacyAgentContractHookSource
+	}
+	return legacyAttentionHookSource + string(kind)
+}
+
+func agentSetupHookOwnershipMarker(kind agentHookKind, token string) string {
+	return agentSetupHookSourcePrefix + token + "-" + string(kind)
+}
+
+func agentSetupHookOwnershipToken(marker string, kind agentHookKind) (string, bool) {
+	if !strings.HasPrefix(marker, agentSetupHookSourcePrefix) || !strings.HasSuffix(marker, "-"+string(kind)) {
+		return "", false
+	}
+	token := strings.TrimSuffix(strings.TrimPrefix(marker, agentSetupHookSourcePrefix), "-"+string(kind))
+	parts := strings.Split(token, "-")
+	if len(parts) == 0 || len(parts) > 2 || len(parts[0]) != 16 {
+		return "", false
+	}
+	if _, err := hex.DecodeString(parts[0]); err != nil {
+		return "", false
+	}
+	if len(parts) == 2 {
+		attempt, err := strconv.Atoi(parts[1])
+		if err != nil || attempt < 1 {
+			return "", false
+		}
+	}
+	return token, true
+}
+
+func isAgentHookOwnershipArg(kind agentHookKind, flag, value string) bool {
+	if flag == "--source" {
+		return value == agentHookDefaultSource(kind)
+	}
+	if flag == "--ownership-marker" {
+		_, ok := agentSetupHookOwnershipToken(value, kind)
+		return ok
+	}
+	return false
+}
+
+func agentHookOwnershipArgs(executable string, args []string, kind agentHookKind, ownership agentHookOwnership) []string {
+	if isKataHookExecutable(executable) && !ownership.Required {
 		return args
 	}
-	source := legacyAgentContractHookSource
-	if kind != contractHook {
-		source = legacyAttentionHookSource + string(kind)
+	if ownership.Token != "" {
+		marker := agentSetupHookOwnershipMarker(kind, ownership.Token)
+		if len(args) >= 2 && slices.Equal(args[len(args)-2:], []string{"--ownership-marker", marker}) {
+			return args
+		}
+		return append(args, "--ownership-marker", marker)
 	}
+	source := agentHookDefaultSource(kind)
 	if len(args) >= 2 && slices.Equal(args[len(args)-2:], []string{"--source", source}) {
 		return args
 	}
 	return append(args, "--source", source)
+}
+
+func agentHookConfigOwnershipMarkers(agent agenthook.Agent, path, executable string) map[agentHookKind]agentHookOwnership {
+	if agent != agenthook.AgentClaude && agent != agenthook.AgentCodex {
+		return nil
+	}
+	// Let the check or installer report config errors to the user.
+	data, _, err := readNativeAgentHookFile(path)
+	if err != nil {
+		return nil
+	}
+	entries, err := parseAgentHookEntries(agent, data)
+	if err != nil {
+		return nil
+	}
+	return agentHookOwnershipMarkers(agent, path, executable, entries)
+}
+
+func agentHookOwnershipMarkers(agent agenthook.Agent, configPath, executable string, entries []agentHookEntry) map[agentHookKind]agentHookOwnership {
+	if agent != agenthook.AgentClaude && agent != agenthook.AgentCodex {
+		return nil
+	}
+	markers := []struct {
+		text string
+		kind agentHookKind
+	}{
+		{text: "contract", kind: contractHook},
+		{text: "attention-hook start", kind: attentionStartHook},
+		{text: "attention-hook end", kind: attentionEndHook},
+		{text: "attention-native " + string(agent) + " start", kind: attentionStartHook},
+		{text: "attention-native " + string(agent) + " end", kind: attentionEndHook},
+	}
+	genericCollisions := make(map[agentHookKind]bool)
+	for _, marker := range markers {
+		if strings.Contains(executable, marker.text) {
+			genericCollisions[marker.kind] = true
+		}
+	}
+	existingTokens := make(map[agentHookKind]string)
+	existingLegacyMarkers := make(map[agentHookKind]bool)
+	legacyCollisions := make(map[agentHookKind]bool)
+	for _, entry := range entries {
+		if entry.Kind != "" {
+			if source, ok := agentHookEntryOwnershipSource(entry); ok {
+				if token, dynamic := agentSetupHookOwnershipToken(source, entry.Kind); dynamic {
+					existingTokens[entry.Kind] = token
+				} else if agentHookEntryUsesAgentHookCommand(agent, entry, runtime.GOOS) {
+					existingLegacyMarkers[entry.Kind] = true
+				}
+			}
+		}
+		command := agentHookKitMarkerText(entry.Fields)
+		for _, marker := range markers {
+			if entry.Kind != "" && entry.Kind == marker.kind {
+				continue
+			}
+			if strings.Contains(command, marker.text) {
+				genericCollisions[marker.kind] = true
+			}
+		}
+		for _, kind := range []agentHookKind{contractHook, attentionStartHook, attentionEndHook} {
+			if entry.Kind != kind && strings.Contains(command, "--source "+agentHookDefaultSource(kind)) {
+				legacyCollisions[kind] = true
+			}
+		}
+	}
+	seed := sha256.Sum256([]byte(filepath.Clean(configPath) + "\x00" + string(agent)))
+	baseToken := hex.EncodeToString(seed[:8])
+	result := make(map[agentHookKind]agentHookOwnership)
+	for _, kind := range []agentHookKind{contractHook, attentionStartHook, attentionEndHook} {
+		collision := genericCollisions[kind] || legacyCollisions[kind]
+		if token := existingTokens[kind]; token != "" && !agentHookSetupTokenCollides(kind, token, executable, entries) {
+			result[kind] = agentHookOwnership{Required: true, Token: token}
+			continue
+		}
+		if existingLegacyMarkers[kind] && !legacyCollisions[kind] {
+			result[kind] = agentHookOwnership{Required: true}
+			continue
+		}
+		if !collision && isKataHookExecutable(executable) && existingTokens[kind] == "" {
+			continue
+		}
+		result[kind] = agentHookOwnership{Required: true}
+		if !collision && existingTokens[kind] == "" {
+			continue
+		}
+		for attempt := 0; ; attempt++ {
+			token := baseToken
+			if attempt > 0 {
+				token += "-" + strconv.Itoa(attempt)
+			}
+			if !agentHookSetupTokenCollides(kind, token, executable, entries) {
+				result[kind] = agentHookOwnership{Required: true, Token: token}
+				break
+			}
+		}
+	}
+	return result
+}
+
+func agentHookKitMarkerText(handler map[string]any) string {
+	var joined strings.Builder
+	command, _ := handler["command"].(string)
+	joined.WriteString(command)
+	if args, ok := handler["args"].([]any); ok {
+		for _, arg := range args {
+			text, _ := arg.(string)
+			joined.WriteString(" " + text)
+		}
+	}
+	return joined.String()
+}
+
+func agentHookEntryOwnershipSource(entry agentHookEntry) (string, bool) {
+	if entry.Kind == "" {
+		return "", false
+	}
+	if args, ok := entry.Fields["args"].([]any); ok && len(args) >= 2 {
+		flag, _ := args[len(args)-2].(string)
+		value, _ := args[len(args)-1].(string)
+		if isAgentHookOwnershipArg(entry.Kind, flag, value) {
+			return value, true
+		}
+	}
+	for _, field := range agentHookCommandFields {
+		command, _ := entry.Fields[field].(string)
+		words := strings.Fields(command)
+		if len(words) >= 2 {
+			flag := words[len(words)-2]
+			value := strings.Trim(words[len(words)-1], "\"'")
+			if isAgentHookOwnershipArg(entry.Kind, flag, value) {
+				return value, true
+			}
+		}
+	}
+	return "", false
+}
+
+func agentHookEntryUsesAgentHookCommand(agent agenthook.Agent, entry agentHookEntry, goos string) bool {
+	return classifyAgentHookHandlerForGOOS(agent, entry.Fields, goos) == entry.Kind
+}
+
+func agentHookSetupTokenCollides(kind agentHookKind, token, executable string, entries []agentHookEntry) bool {
+	ownershipMarker := agentSetupHookOwnershipMarker(kind, token)
+	marker := "--ownership-marker " + ownershipMarker
+	if strings.Contains(executable, marker) {
+		return true
+	}
+	for _, entry := range entries {
+		if !strings.Contains(agentHookKitMarkerText(entry.Fields), marker) {
+			continue
+		}
+		if existing, ok := agentHookEntryOwnershipSource(entry); ok && entry.Kind == kind && existing == ownershipMarker {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func literalAgentHookWords(command string, powershell, windows bool) ([]string, bool) {
@@ -407,7 +636,13 @@ func planOwnedAgentHookInstall(agent agenthook.Agent, opts agenthook.InstallOpti
 	if kind == "" {
 		return ownedAgentHookPlan{}, errors.New("installer requires a built-in hook command")
 	}
-	opts.Arguments = agentHookOwnershipArgs(opts.Executable, opts.Arguments, kind)
+	ownership := agentHookConfigOwnershipMarkers(agent, opts.ConfigPath, opts.Executable)[kind]
+	opts.Arguments = agentHookOwnershipArgs(opts.Executable, opts.Arguments, kind, ownership)
+	if ownership.Token != "" {
+		opts.Marker = "--ownership-marker " + agentSetupHookOwnershipMarker(kind, ownership.Token)
+	} else if len(opts.Arguments) >= 2 && slices.Equal(opts.Arguments[len(opts.Arguments)-2:], []string{"--source", agentHookDefaultSource(kind)}) {
+		opts.Marker = "--source " + agentHookDefaultSource(kind)
+	}
 	return planOwnedAgentHookMutation(agent, opts.ConfigPath, kind, &opts)
 }
 func installOwnedAgentHooks(agent agenthook.Agent, opts agenthook.InstallOptions) (agenthook.Result, error) {
@@ -590,6 +825,23 @@ func protectAgentHookCommands(agent agenthook.Agent, data []byte, entries, desir
 			} else {
 				handler["command"] = marker
 			}
+		}
+	}
+	// Kit retains group fields during reinstall. Move owned handlers out of
+	// conditional groups so the requested default registration can run.
+	for _, entry := range slices.Backward(entries) {
+		if entry.GroupIndex < 0 || classifyAgentHookHandlerFromEntry(entry) != kind || sameAgentHookGroupBehavior(entry.GroupFields, nil) {
+			continue
+		}
+		groups := hooks[entry.Event].([]any)
+		group := groups[entry.GroupIndex].(map[string]any)
+		handlers := group["hooks"].([]any)
+		handlers = append(handlers[:entry.HandlerIndex], handlers[entry.HandlerIndex+1:]...)
+		if len(handlers) == 0 {
+			groups = append(groups[:entry.GroupIndex], groups[entry.GroupIndex+1:]...)
+			hooks[entry.Event] = groups
+		} else {
+			group["hooks"] = handlers
 		}
 	}
 	staged, err := marshalAgentHookJSON(document)

@@ -42,7 +42,9 @@ func FederationMoveBaselineEvents(events []FoldEvent) []FoldEvent {
 		baseline, exists := baselines[event.IssueUID]
 		if exists && compareClock(clockOf(event), clockOf(baseline)) < 0 {
 			switch event.Type {
-			case "issue.created", "issue.snapshot":
+			case "issue.created", "issue.snapshot", RepeatedImportEventType:
+				// The baseline is the issue's whole state, so it covers an
+				// earlier creation, snapshot, or whole copy.
 				continue
 			case "issue.commented", "issue.comment_edited":
 				uid, body, version := federationCommentEditVersion(event)

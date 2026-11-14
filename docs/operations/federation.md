@@ -1734,6 +1734,101 @@ writes by rewriting the same rows.
 Adopted issues become ordinary federated spoke issues. You can keep editing
 them locally; acquire a hub lease only when you want exclusive coordination.
 
+### Repeating an adoption
+
+A hub accepts an adoption push for issues its project already holds. Use this
+to repeat an adoption, to resume one that copied only some issues, or to bring
+a hub project up to date from a newer copy of the same project. The newer copy
+must keep the same issue UIDs, and it joins with its own adoption-enabled
+enrollment token.
+
+For each issue the hub already holds, the snapshot's `updated_at` decides the
+result. The hub compares it with the issue's `updated_at` to the millisecond.
+The order in which pushes arrive does not matter.
+
+| Incoming snapshot | Result on the hub |
+| --- | --- |
+| Newer than the hub issue | Title, body, status, owner, priority, closed and deleted state, labels, and metadata become the snapshot's. Comments merge. |
+| Same `updated_at`, older, or no `updated_at` | Nothing. The hub acknowledges the snapshot and writes no event. |
+
+When a newer snapshot wins:
+
+- Comments merge by comment UID. A comment the hub lacks is added with its
+  original author and created time. A comment the hub has keeps its author and
+  created time, and takes the snapshot's text only when the snapshot carries a
+  later edit time. A comment only the hub has stays.
+- Links are added and never removed. Remove an unwanted link on the hub after
+  the push. A link to an issue the hub does not hold is left out.
+- An issue that already has a parent keeps it. Change the parent on the hub
+  with `kata edit --parent`.
+- The issue keeps its author.
+
+The hub does not store the pushed snapshot for an issue it already holds. For
+a winning copy it writes its own events, with the pushing actor as their
+actor:
+
+- One `issue.restated` event carries the whole copy: every field, the label
+  set, the metadata, the comments, and the copy's `updated_at`. Labels and
+  metadata keys the copy does not have are removed. The metadata keys that the
+  hub's recurrence scheduler owns stay.
+- `issue.linked` events carry the links the hub lacked.
+
+The hub decides once, when the copy arrives. After that an `issue.restated`
+event applies in the order of the project's history, like any other change. An
+older edit that reaches the hub afterwards applies after the copy.
+
+An older or identical copy leaves no event, so pushing the same copy again
+changes nothing.
+
+Hooks that subscribe to `issue.closed`, `issue.assigned`, or another specific
+change do not fire for a copy that restates the issue. Subscribe to
+`issue.restated` to react to a winning copy.
+
+A link in the snapshot to an issue of another hub project needs the same
+authority as any other push that touches that project. Without it the hub
+refuses the push.
+
+Issues the hub does not hold are created as usual.
+
+The hub's answer names the snapshots it did not store. The Kata home that
+pushed them deletes those snapshots from its own history and shows the hub's
+state. It does this only after a pull has brought the hub's history of those
+issues, so the push is acknowledged one sync cycle later than usual. Until
+then `kata federation status` shows that the push waits for the hub's history.
+If its copy was older, the comments and links only that home had are gone from
+it afterwards.
+
+Every Kata home that reads the project must support this. The hub accepts a
+repeated snapshot only from a spoke that advertises the `repeated_adoption_v1`
+event feature. An older spoke gets `400 validation` with `targets existing
+issue`, as before, and quarantines the push; upgrade it and resume. After a
+newer copy wins, the project holds an `issue.restated` event, and a spoke or
+relay without the feature cannot pull the project until it is upgraded.
+
+Limits:
+
+- A Kata home that already completed an adoption of a project cannot adopt
+  the same project into the same hub again. Push a newer copy from another
+  home.
+- A link from a held issue to an issue that arrives in a later chunk of the
+  same adoption is not created. Add it on the hub afterwards.
+- Links are compared only when a copy wins and are not part of the
+  `updated_at` rule. An unlink that reaches the hub later still removes a link
+  that a winning copy added.
+- Repeat imports into a project from one home at a time, and let each home
+  finish a sync before the next one pushes. When two homes push repeated
+  imports of the same issues at once, an edit one of them made after adopting
+  can be lost.
+
+The create-only rule still applies outside an adoption push. A fresh
+`issue.created`, or an `issue.snapshot` in an ordinary push, for an issue the
+project holds returns the same `400 validation`.
+
+Issue UIDs are unique across a hub. A snapshot or creation for an issue that
+another project on the hub holds returns `400 validation` and names the issue,
+and the spoke [quarantines](#issue-held-by-another-project) the push. An
+archived project still holds its issues.
+
 ## Leaving a federation
 
 `kata federation leave` is the inverse of `join`: it revokes the spoke's hub
@@ -2279,6 +2374,28 @@ quarantine whose retained error has the exact former cross-project peer
 validation shape. Current hubs accept a missing link peer as deferred state,
 so the original batch can advance and the edge materializes after both endpoint
 projects reach the same hub federation group.
+
+### Issue held by another project
+
+A push that creates an issue whose UID another project on the hub holds returns
+`400 validation`:
+
+```text
+fresh issue.snapshot targets issue <uid>, which another project on this hub
+already holds
+```
+
+The spoke quarantines the batch, and `kata federation status` shows the error.
+This happens when a hub project was archived and replaced, and the same issues
+are pushed into the replacement: an archived project keeps its issues, so their
+UIDs stay taken. The error does not name the other project, because the spoke
+may not be allowed to see it.
+
+A retry cannot succeed while the other project holds the issue. The hub
+operator must free the UIDs first, by purging the archived project or moving
+the issues, and then the spoke operator retries the quarantine.
+
+### Other validation quarantines
 
 A fresh cross-project addition involving a relayed project also returns
 `400 validation` and quarantines the whole push batch, including earlier valid

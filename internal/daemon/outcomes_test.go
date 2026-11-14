@@ -12,6 +12,7 @@ import (
 	"testing/iotest"
 	"time"
 
+	"github.com/cenkalti/backoff/v7"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/issuesync"
@@ -167,7 +168,12 @@ func TestOutcomesProviderTransportReasons(t *testing.T) {
 			return err
 		}},
 		{"todoist", func(t *testing.T, rt http.RoundTripper) error {
-			_, err := todoistsync.NewClient(todoistsync.ClientConfig{LookupEnv: lookup, Transport: rt}).Account(t.Context())
+			// Todoist retries failed reads. The reason is the subject here, so
+			// the retries run without the production backoff delay.
+			_, err := todoistsync.NewClient(todoistsync.ClientConfig{
+				LookupEnv: lookup, Transport: rt,
+				BackOff: func() backoff.BackOff { return &backoff.ZeroBackOff{} },
+			}).Account(t.Context())
 			return err
 		}},
 	} {

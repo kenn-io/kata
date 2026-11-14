@@ -10,6 +10,12 @@ This applies to canonical DDL, schema-version changes, migration assets and
 registries, extensions, functions, triggers, indexes, and other persisted
 objects. Approval for a feature is not approval for its database design.
 
+## Schema version markers
+
+Each schema version has a marker in `internal/db/testdata/schema-contracts` named `NNNNNN-<digest>.txt`. Its contents are a one-line summary. Run `make api-breaking BASE_REF=origin/main` to check the database layouts and migration history against the base branch.
+
+If the schema check names a replacement for your draft marker, replace that file and keep the version. If the marker already exists on the base branch, preserve it and use the next schema version and the marker named by the check.
+
 ## Adding a migration
 
 After the persisted-state change is approved:
@@ -462,4 +468,28 @@ place, with an atomic schema-version update.
 
 Start the matching schema 50 binary after migration. Older binaries cannot open
 schema 50. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.
+
+## Schema 51: issue history index on the event header
+
+Every issue event now carries its issue UID in the `events.issue_uid` header
+column, so issue history no longer needs an index built from the payload. The
+50→51 migration drops `idx_events_resolved_issue_uid`, adds
+`idx_events_issue_uid_id` on `events(issue_uid, id)` for rows where `issue_uid`
+is set, then runs `ANALYZE events`. Per-issue history and federation reads seek
+the header UID and read events in ID order. Fresh PostgreSQL and SQLite
+databases include the same index. Event contents and table columns stay intact,
+and `idx_events_issue_uid` is unchanged.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Building the
+index reads `events` and blocks event writes; allow an offline window that fits
+the event log's size. Existing table grants remain sufficient. Validation-only
+runtime credentials cannot migrate. Versions 25–50 follow the existing
+immutable migration chain first. SQLite stores at schema 41 or later upgrade
+[in place](../operations/backup-restore.md#slow-or-interrupted-upgrade-startup):
+schemas 43 through 50 drop the old index, and schemas 41 and 42 never create it.
+
+Start the matching schema 51 binary after migration. Older binaries cannot open
+schema 51. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.

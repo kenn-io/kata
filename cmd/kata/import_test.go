@@ -328,7 +328,18 @@ func TestImportMergeRefusesMultiProjectSnapshotWithoutMutation(t *testing.T) {
 	assert.Equal(t, existing.Name, got.Name)
 }
 
-func TestImportMergeSkipsCrossProjectLink(t *testing.T) {
+func TestImportMergeCreatesCrossProjectLink(t *testing.T) {
+	merged, importedID, peerID := mergeCrossProjectLinkFixture(t)
+	link, err := merged.LinkByEndpoints(t.Context(), importedID, peerID, "blocks")
+	require.NoError(t, err)
+	assert.Equal(t, "fixture-author", link.Author)
+}
+
+// mergeCrossProjectLinkFixture merges one project into a target that already
+// holds the project its issue is linked to, and returns the merged store with
+// the local IDs of the imported issue and its peer.
+func mergeCrossProjectLinkFixture(t *testing.T) (db.Storage, int64, int64) {
+	t.Helper()
 	home := setupKataEnv(t)
 	ctx := t.Context()
 	source := openKataTestDB(t, filepath.Join(home, "source-links.db"))
@@ -366,8 +377,7 @@ func TestImportMergeSkipsCrossProjectLink(t *testing.T) {
 	input := filepath.Join(home, "spoke-links.jsonl")
 	require.NoError(t, os.WriteFile(input, importedSnapshot.Bytes(), 0o600))
 
-	_, err = runCmdOutput(t, nil,
-		"import", "--merge", "--input", input, "--target", target)
+	_, err = runCmdOutput(t, nil, "import", "--merge", "--input", input, "--target", target)
 	require.NoError(t, err)
 
 	merged := openKataTestDB(t, target)
@@ -376,8 +386,7 @@ func TestImportMergeSkipsCrossProjectLink(t *testing.T) {
 	require.NoError(t, err)
 	gotPeer, err := merged.IssueByUID(ctx, peerIssue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	_, err = merged.LinkByEndpoints(ctx, gotImported.ID, gotPeer.ID, "blocks")
-	require.ErrorIs(t, err, db.ErrNotFound)
+	return merged, gotImported.ID, gotPeer.ID
 }
 
 func TestImportRejectsExistingTargetSidecarWithoutForce(t *testing.T) {

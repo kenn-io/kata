@@ -2554,6 +2554,10 @@ components:
         push_cursor_event_id:
           format: int64
           type: integer
+        superseded_event_uids:
+          items:
+            type: string
+          type: array
       required:
         - accepted
         - duplicates
@@ -4304,6 +4308,8 @@ components:
       properties:
         can_change:
           type: boolean
+        can_restart:
+          type: boolean
         download_bytes:
           format: int64
           type: integer
@@ -4320,6 +4326,8 @@ components:
             - built_in
             - other
           type: string
+        restart_in_progress:
+          type: boolean
       required:
         - provider
         - download_bytes
@@ -7325,7 +7333,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.45.0
+  version: 0.48.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -7616,6 +7624,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LocalEmbeddingsStatus"
+          description: Accepted
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Internal Server Error
+  /api/v1/embeddings/local/restart:
+    post:
+      operationId: restartLocalEmbeddings
+      responses:
+        "202":
           description: Accepted
         "403":
           content:
@@ -10699,6 +10737,11 @@ paths:
           name: actor
           schema:
             type: string
+        - explode: false
+          in: query
+          name: reuse_existing
+          schema:
+            type: boolean
       requestBody:
         content:
           application/octet-stream:

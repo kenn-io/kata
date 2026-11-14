@@ -299,7 +299,7 @@ func extraHookArguments(target string, kind agentHookKind) []string {
 }
 
 func extraHookHandler(opts nativeAgentHookOptions, kind agentHookKind) (map[string]any, error) {
-	args := agentHookOwnershipArgs(opts.Executable, extraHookArguments(opts.Agent, kind), kind)
+	args := agentHookOwnershipArgs(opts.Executable, extraHookArguments(opts.Agent, kind), kind, agentHookOwnership{})
 	if opts.Agent == "zcode" {
 		if strings.TrimSpace(opts.Executable) == "" {
 			return nil, errors.New("hook executable is required")

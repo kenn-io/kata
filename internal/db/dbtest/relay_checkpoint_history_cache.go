@@ -81,7 +81,7 @@ func RunRelayCheckpointHistoryValidationCache(t *testing.T, store db.Storage, ba
 	check()
 	require.Equal(t, 4, fullScans, "unrelated snapshot issue creation preserves checkpoint validations")
 	snapshotOther := newRemoteEvent(t, unrelated, &unrelatedIssue.UID, "issue.snapshot", "member", grants[0].SpokeInstanceUID, 650,
-		jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"Unrelated snapshot issue","author":"member","status":"open","metadata":{},"comments":[],"labels":[],"links":[]}`, unrelatedIssue.UID)))
+		jsontext.Value(fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"Unrelated snapshot issue","body":"","author":"member","status":"open","metadata":{},"comments":[],"labels":[],"links":[],"created_at":%q}`, unrelatedIssue.UID, unrelatedIssue.ShortID, unrelatedIssue.CreatedAt.UTC().Format(db.EventTimestampFormat))))
 	_, err = store.InsertRemoteEvents(ctx, unrelated.ID, []db.RemoteEvent{snapshotOther})
 	require.NoError(t, err)
 	check()
@@ -95,7 +95,7 @@ func RunRelayCheckpointHistoryValidationCache(t *testing.T, store db.Storage, ba
 	check()
 	require.Equal(t, 4, fullScans, "same-project snapshot issue creation preserves checkpoint validations")
 	snapshot := newRemoteEvent(t, fixture.project, &snapshotIssue.UID, "issue.snapshot", "member", grants[0].SpokeInstanceUID, 700,
-		jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"Checkpoint snapshot issue","author":"member","status":"open","metadata":{},"comments":[],"labels":[],"links":[]}`, snapshotIssue.UID)))
+		IssueDocument(t, snapshotIssue.UID, jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"Checkpoint snapshot issue","author":"member","status":"open","metadata":{},"comments":[],"labels":[],"links":[]}`, snapshotIssue.UID))))
 	_, err = store.InsertRemoteEvents(ctx, fixture.project.ID, []db.RemoteEvent{snapshot})
 	require.NoError(t, err)
 	bootstrap := store.(db.RelayResetBootstrapStore)
