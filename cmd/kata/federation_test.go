@@ -3332,6 +3332,9 @@ func TestFederationEnrollCLIRequiredSigningInstructions(t *testing.T) {
 }
 
 func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("shell argument parsing requires a POSIX shell")
+	}
 	synctest.Test(t, func(t *testing.T) {
 		const external = "https://hub.example"
 		const internal = "http://127.0.0.1:47741"
@@ -3341,6 +3344,13 @@ func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
 		t.Setenv("KATA_AUTH_TOKEN", "admin-token")
 		t.Setenv("TEST_HUB_TOKEN", "admin-token")
 		verifier, key := testenv.FederationSigning(t, external)
+		keyBytes, err := os.ReadFile(key)
+		require.NoError(t, err)
+		key = filepath.Join(home, "spoke signing.key")
+		require.NoError(t, os.WriteFile(key, keyBytes, 0600))
+		savedArgs := os.Args
+		os.Args = []string{"/opt/kata_custom"}
+		t.Cleanup(func() { os.Args = savedArgs })
 		hubDB := openKataTestDB(t, filepath.Join(t.TempDir(), "hub.db"))
 		spokeDB := openKataTestDB(t, filepath.Join(t.TempDir(), "spoke.db"))
 		t.Cleanup(func() { require.NoError(t, hubDB.Close()); require.NoError(t, spokeDB.Close()) })
@@ -3366,18 +3376,14 @@ func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
 			Join federationJoinBundle `json:"join"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(out), &body))
-		args := strings.Fields(body.Join.JoinCommand)
-		require.Greater(t, len(args), 1)
-		for i, arg := range args {
-			switch arg {
-			case "'<signing-key-id>'":
-				args[i] = "key-a"
-			case "'<absolute-path-to-spoke-key>'":
-				args[i] = key
-			}
-		}
+		command := strings.ReplaceAll(body.Join.JoinCommand, "'<signing-key-id>'", "key-a")
+		command = strings.ReplaceAll(command, "'<absolute-path-to-spoke-key>'", `"$1"`)
+		script := `kata_custom() { printf '%s\0' "$@"; }; ` + command
+		captured, err := exec.CommandContext(t.Context(), "sh", "-c", script, "--", key).CombinedOutput() //nolint:gosec // Shell invokes only the capturing function.
+		require.NoError(t, err, "%s", captured)
+		args := strings.Split(strings.TrimSuffix(string(captured), "\x00"), "\x00")
 		time.Sleep(federationsigning.Quarantine + time.Second)
-		requireCmdOutput(t, spoke, args[1:]...)
+		requireCmdOutput(t, spoke, args...)
 		project, err := spokeDB.ProjectByName(t.Context(), "hub-project")
 		require.NoError(t, err)
 		binding, err := spokeDB.FederationBindingByProject(t.Context(), project.ID)
