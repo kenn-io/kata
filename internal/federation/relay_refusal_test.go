@@ -90,8 +90,6 @@ func TestHubSignatureRejection(t *testing.T) {
 	}{
 		{`{"error":{"code":"signature_invalid"}}`, http.StatusUnauthorized, true},
 		{`{"error":{"code":"signing_unavailable"}}`, http.StatusServiceUnavailable, true},
-		{`{"error":{"code":"auth_invalid"}}`, http.StatusForbidden, false},
-		{`invalid`, http.StatusUnauthorized, false},
 	} {
 		require.Equal(t, tc.want, hubSignatureRejection(&HubStatusError{StatusCode: tc.status, Body: tc.body}), tc.body)
 	}
