@@ -84,7 +84,7 @@ the per-issue restrictions.
 To author a federated move, a spoke must join both projects. A direct spoke
 pulling move history retains an archived, unbound identity for a missing
 counterpart without subscribing to that project. An issue already present on the
-spoke moves into the retained identity, even if it has been restored, preserving its comments and local state
+spoke moves into the destination project, preserving its comments and local state
 while removing it from the source project's lists. Find its UID and local name with
 `GET /api/v1/projects?include=archived`.
 To subscribe later, run `kata projects restore` with that local name, optionally

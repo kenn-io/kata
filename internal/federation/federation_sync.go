@@ -460,7 +460,7 @@ func syncDirectSpoke(
 	}
 	body.Events, err = backfillFederationMoveHistory(ctx, client, hubProjectID, body)
 	if err != nil {
-		return recordPullError(fmt.Errorf("backfill project %s: %w", binding.HubProjectUID, err))
+		return recordPullError(err)
 	}
 	var pulledEvents []db.Event
 	insertedThisPull := map[string]bool{}
@@ -482,21 +482,29 @@ func syncDirectSpoke(
 		repairEcho := make([]bool, len(body.Events))
 		duplicate := make([]bool, len(body.Events))
 		pending := make([]int, 0, len(body.Events))
-		eventProjects := make([]int64, len(body.Events))
 		projectsByUID := map[string]int64{binding.HubProjectUID: binding.ProjectID}
-		for i, ev := range body.Events {
-			projectID, ok := projectsByUID[ev.ProjectUID]
-			if !ok {
-				project, err := store.ProjectByUID(ctx, ev.ProjectUID)
-				if err != nil && !errors.Is(err, db.ErrNotFound) {
-					return fmt.Errorf("resolve echo project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
-				}
-				projectID = project.ID
-				projectsByUID[ev.ProjectUID] = projectID
+		projectID := func(ev api.EventEnvelope) (int64, error) {
+			if id := projectsByUID[ev.ProjectUID]; id != 0 {
+				return id, nil
 			}
-			eventProjects[i] = projectID
-			if projectID != 0 && ev.OriginInstanceUID == localInstanceUID {
-				exists, err := store.ReconcileLocalFederationEcho(ctx, projectID, remoteEventFromEnvelope(ev))
+			project, err := store.ProjectByUID(ctx, ev.ProjectUID)
+			if err != nil {
+				return 0, fmt.Errorf("resolve project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+			}
+			projectsByUID[ev.ProjectUID] = project.ID
+			return project.ID, nil
+		}
+		for i, ev := range body.Events {
+			if ev.OriginInstanceUID == localInstanceUID {
+				id, err := projectID(ev)
+				if err != nil && !errors.Is(err, db.ErrNotFound) {
+					return err
+				}
+				if id == 0 {
+					pending = append(pending, i)
+					continue
+				}
+				exists, err := store.ReconcileLocalFederationEcho(ctx, id, remoteEventFromEnvelope(ev))
 				if err != nil {
 					return fmt.Errorf("reconcile echo project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 				}
@@ -558,17 +566,9 @@ func syncDirectSpoke(
 				applyUIDs = append(applyUIDs, ev.EventUID)
 			}
 			if deliver[i] {
-				project := eventProjects[i]
-				if project == 0 {
-					project = projectsByUID[ev.ProjectUID]
-					if project == 0 {
-						persisted, err := store.ProjectByUID(ctx, ev.ProjectUID)
-						if err != nil {
-							return fmt.Errorf("resolve persisted project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
-						}
-						project = persisted.ID
-						projectsByUID[ev.ProjectUID] = project
-					}
+				project, err := projectID(ev)
+				if err != nil {
+					return err
 				}
 				if _, ok := deliverUIDs[project]; !ok {
 					deliverProjects = append(deliverProjects, project)

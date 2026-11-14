@@ -33,9 +33,6 @@ enabled,created_at,updated_at,last_sync_at,relay_config
 		pgReplayBoolInt(pushEnabled), binding.PushCursorEventID, actor,
 		pgReplayBoolInt(binding.AllowInsecure), pgReplayBoolInt(binding.Enabled),
 		binding.CreatedAt, binding.UpdatedAt, binding.LastSyncAt, raw)
-	if err == nil {
-		err = db.ClearFederationPlaceholder(ctx, tx, binding.ProjectID)
-	}
 	return pgReplayError(db.ImportKindFederationBinding, err)
 }
 
