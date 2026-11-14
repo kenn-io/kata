@@ -661,9 +661,9 @@ func RestrictFoldProjectWhere(p *FoldProjection, projectUID string, keep func(st
 	}
 }
 
-// ClearFederatedMovedIssueHistory removes every contributing stream for issues
-// being reset. Keeping a former source baseline would recreate a purged issue.
-func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
+// ClearFederatedMovedIssueHistory clears contributing streams while retaining
+// local events that cannot be pushed after a remote move.
+func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, postgres bool) error {
 	// Only quarantines covering subject events being removed block this reset;
 	// unrelated quarantined work in a contributing stream remains independent.
 	rows, err := tx.QueryContext(ctx, `SELECT q.event_uids FROM federation_quarantine q
@@ -723,7 +723,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
  WHERE e.project_id<>$1 AND e.origin_instance_uid=$2
  AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
  AND e.id>b.push_cursor_event_id
- AND e.type IN (`+FederationPushEventTypesSQL()+`))`, projectID, originInstanceUID).Scan(&pending); err != nil {
+ AND e.type IN (`+FederationPushEventTypesSQL()+`) AND `+FederationPushEligible("e", postgres)+`)`, projectID, originInstanceUID).Scan(&pending); err != nil {
 		return err
 	}
 	if pending {
@@ -732,7 +732,9 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	if err := PreserveFederationProjectIdentityDependencies(ctx, tx, projectID); err != nil {
 		return fmt.Errorf("preserve former project identity dependencies: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
+	//nolint:gosec // The eligibility expression is fixed SQL; values are bound.
+	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
+ AND NOT (e.origin_instance_uid=$2 AND NOT (`+FederationPushEligible("e", postgres)+`))`, projectID, originInstanceUID)
 	return err
 }
 

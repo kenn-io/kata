@@ -1455,7 +1455,7 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
 		return err
 	}
 	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID); err != nil {
