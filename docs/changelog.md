@@ -67,8 +67,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   waiting. Ordinary queries keep the 30-second limit. See
   [PostgreSQL operations](operations/postgres.md).
 - Keep syncing a joined project when issue history references projects the spoke
-  has not joined. Issues moved out leave its lists while their local state waits
-  in the destination's archived identity.
+  has not joined. Issues moved out keep their folded hub content and local state
+  in the retained counterpart; restore it and join with its local name to subscribe.
 
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and
@@ -435,9 +435,6 @@ the [federation procedure](operations/federation.md#compatibility-and-rolling-up
   replicas must use the same actor and allow pushes in both projects. Projects
   connected through a relay cannot move issues yet. See
   [Moving issues between projects](operations/federation.md#moving-issues-between-projects).
-- Keep pulling move history on a spoke that joined only one project. Outbound
-  issues retain folded hub content and local state in the retained counterpart;
-  restore it and join with its local project name to subscribe later.
 - Start, change, or stop a recurrence with
   `kata schedule <ref> <date> --repeat '<rrule>'`. `--repeat -` stops future
   occurrences and keeps existing ones. `kata show` prints the rule, time zone,

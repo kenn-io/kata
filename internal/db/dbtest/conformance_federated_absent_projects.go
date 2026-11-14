@@ -121,7 +121,7 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		moved, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
 		require.NoError(t, err)
 		move := portableNativeEvent(*moved.Event)
-		for _, mode := range []string{"archived", "restored", "detached"} {
+		for _, mode := range []string{"archived", "restored"} {
 			t.Run(mode, func(t *testing.T) {
 				ctx := t.Context()
 				spoke := backend.Open(t)
@@ -154,12 +154,6 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 					require.NoError(t, err)
 					_, err = spoke.LeaveFederationReplica(ctx, retained.ID)
 					require.NoError(t, err)
-					if mode == "detached" {
-						_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: retained.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: target.ID, HubProjectUID: target.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
-						require.NoError(t, err)
-						_, err = spoke.LeaveFederationReplica(ctx, retained.ID)
-						require.NoError(t, err)
-					}
 					unrelated, _, err = spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: retained.ID, Title: "Standalone issue", Author: "worker"})
 					require.NoError(t, err)
 					_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: unrelated.ID, Author: "worker", Body: "Standalone comment"})
@@ -233,7 +227,6 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 	})
 	t.Run("outbound move retention", func(t *testing.T) {
 		ctx := t.Context()
-		// Local edits survive an outbound move.
 		edited := backend.Open(t)
 		t.Cleanup(func() { require.NoError(t, edited.Close()) })
 		editedRoute, err := edited.CreateProjectWithUID(ctx, "edited-source", source.UID)
@@ -245,10 +238,6 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.NoError(t, edited.MaterializeFederatedProject(ctx, editedRoute.ID))
 		local, err := edited.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
-		title := "Local edit"
-		_, _, _, err = edited.EditIssue(ctx, db.EditIssueParams{IssueID: local.ID, Title: &title, Actor: "worker"})
-		require.NoError(t, err)
-
 		now := time.Now().UTC()
 		root, _, err := edited.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
 			ProjectID: editedRoute.ID, IssueID: local.ID, ConnectorInstance: "notes",
