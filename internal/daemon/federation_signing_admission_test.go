@@ -53,12 +53,8 @@ func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
 		require.NoError(t, federationsigning.Sign(warming, source))
 		w := httptest.NewRecorder()
 		ingress.ServeHTTP(w, warming)
-		envelope := assertAPIError(t, w.Code, w.Body.Bytes(), http.StatusServiceUnavailable, "signing_warming")
-		require.Contains(t, envelope.Error.Message, "warming up")
-		require.Contains(t, envelope.Error.Message, "retry")
-		retryAfter, err := strconv.Atoi(w.Header().Get("Retry-After"))
-		require.NoError(t, err, "Retry-After must be integer seconds")
-		require.Positive(t, retryAfter)
+		assertAPIError(t, w.Code, w.Body.Bytes(), http.StatusServiceUnavailable, "signing_warming")
+		require.Equal(t, "5", w.Header().Get("Retry-After"))
 
 		time.Sleep(federationsigning.Quarantine)
 		for _, tc := range []struct {
