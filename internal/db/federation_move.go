@@ -507,14 +507,24 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 	return nil
 }
 
-// FederatedPreservedParentLinks returns local parents untouched by a scoped fold.
-func FederatedPreservedParentLinks(ctx context.Context, tx *sql.Tx, p FoldProjection, issueUID string) ([]FoldLinkKey, error) {
+// ScopedFederatedLinkGraph combines a moved issue's links with preserved parents.
+func ScopedFederatedLinkGraph[T any](ctx context.Context, tx *sql.Tx, p FoldProjection, issueUID string, desired map[FoldLinkKey]T) (map[FoldLinkKey]T, error) {
+	graph := map[FoldLinkKey]T{}
+	hasParent := false
+	for key, row := range desired {
+		if key.FromUID == issueUID || key.ToUID == issueUID {
+			graph[key] = row
+			hasParent = hasParent || key.Type == "parent"
+		}
+	}
+	if !hasParent {
+		return graph, nil
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT from_issue_uid,to_issue_uid FROM links WHERE type='parent'`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var links []FoldLinkKey
 	for rows.Next() {
 		key := FoldLinkKey{Type: "parent"}
 		if err := rows.Scan(&key.FromUID, &key.ToUID); err != nil {
@@ -525,9 +535,10 @@ func FederatedPreservedParentLinks(ctx context.Context, tx *sql.Tx, p FoldProjec
 				continue
 			}
 		}
-		links = append(links, key)
+		var empty T
+		graph[key] = empty
 	}
-	return links, rows.Err()
+	return graph, rows.Err()
 }
 
 // FederatedLinkIssueIDs resolves the endpoints available to a scoped fold.

@@ -2538,22 +2538,10 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 	}
 	graph := desired
 	if len(scope) > 0 {
-		graph = map[db.FoldLinkKey]federatedLinkRow{}
-		hasParent := false
-		for key, row := range desired {
-			if key.FromUID == scope[0] || key.ToUID == scope[0] {
-				graph[key] = row
-				hasParent = hasParent || key.Type == "parent"
-			}
-		}
-		if hasParent {
-			parents, err := db.FederatedPreservedParentLinks(ctx, tx, projection, scope[0])
-			if err != nil {
-				return err
-			}
-			for _, key := range parents {
-				graph[key] = federatedLinkRow{}
-			}
+		var err error
+		graph, err = db.ScopedFederatedLinkGraph(ctx, tx, projection, scope[0], desired)
+		if err != nil {
+			return err
 		}
 	}
 	if err := validateFederatedParentGraph(graph); err != nil {
