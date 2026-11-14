@@ -1135,7 +1135,7 @@ export const getCreateFederationEnrollmentUrl = () => {
 }
 
 /**
- * Creates a hub-side transport grant. Database account tokens must include relay configuration so the grant remains bound to the account credential; legacy grants require daemon-owner authorization. In identity mode, bootstrap credentials require actor to name an existing hub account with an unscoped API token, including expired or revoked tokens. The actor must be able to see a project-scoped grant's project. Direct grants remain valid after account tokens expire or are revoked. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after enrollment revocation returns 409.
+ * Creates a hub-side transport grant. When signing is required, the join command uses the configured external URL and ignores hub_url. Database account tokens must include relay configuration so the grant remains bound to the account credential; legacy grants require daemon-owner authorization. In identity mode, bootstrap credentials require actor to name an existing hub account with an unscoped API token, including expired or revoked tokens. The actor must be able to see a project-scoped grant's project. Direct grants remain valid after account tokens expire or are revoked. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after enrollment revocation returns 409.
  * @summary Create a federation enrollment
  */
 export const createFederationEnrollment = async (

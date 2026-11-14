@@ -68,10 +68,10 @@ is optional on the ordinary daemon listeners.
    join command. The command uses `external_url` and includes placeholders for
    the signing key ID and absolute spoke key file path. Replace each whole
    quoted placeholder, including the angle brackets, before running it on the
-   spoke: for example, `'<signing-key-id>'` becomes `spoke-key-1` and
-   `'<absolute-path-to-spoke-key>'` becomes `'/path/to/spoke key'`. Keep the
-   quotes around the key path. Alternatively,
-   replace `--signing-key-file` with
+   spoke. Quote both values for the shell. For example, an ID of `spoke'$KEY`
+   becomes `'spoke'"'"'$KEY'`, and the path `/path/to/spoke's key` becomes
+   `'/path/to/spoke'"'"'s key'`. The `"'"` parts represent literal apostrophes.
+   Alternatively, replace `--signing-key-file` with
    `--signing-key-env KATA_SPOKE_SIGNING_KEY`. The same source must exist in
    the spoke CLI and daemon environments because the CLI fetches metadata
    before saving the enrollment.

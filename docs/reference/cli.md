@@ -2577,8 +2577,8 @@ the hub's bootstrap token and set `--actor` to an existing account with an
 unscoped API token, which may be expired or revoked. First enable the hub
 project with an account token using `kata federation enable`. Bootstrap enrollment
 reads the enabled hub's metadata and creates a grant bound to the selected actor's
-project visibility. Select
-the project with a positional argument, `--project`, or a bound workspace.
+project visibility. Select the project with a positional argument, `--project`,
+or a bound workspace.
 Outside identity mode, enrollment can create a missing project selected with
 `--project` and enable it. The CLI should otherwise remain pointed at the spoke
 daemon so the printed join command can include `--adopt-existing` when the
