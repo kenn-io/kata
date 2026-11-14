@@ -88,5 +88,27 @@ func checkFederatedParkedLinkGraph(t *testing.T, hub db.Storage, backend Backend
 	for _, event := range pending {
 		require.NotEqual(t, comment.UID, event.UID)
 	}
+	localU, err = spoke.IssueByUID(ctx, u, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = spoke.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: localU.ID, FromProjectID: other.ID, ToProjectID: parked.ID, IfMatchRev: localU.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: parked.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: target.ID, HubProjectUID: target.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, route.ID, later.ID))
+	require.NoError(t, spoke.ResetFederatedProject(ctx, route.ID, 0, 0))
+	require.NoError(t, spoke.ResetFederatedProject(ctx, parked.ID, 0, 0))
+	history, err := spoke.EventsByUIDs(ctx, route.ID, []string{comment.UID})
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	require.Equal(t, comment.ContentHash, history[0].ContentHash)
+	_, err = spoke.InsertRemoteEvents(ctx, parked.ID, append(slices.Clone(creations), moves...))
+	require.NoError(t, err)
+	require.NoError(t, spoke.MaterializeFederatedProject(ctx, parked.ID))
+	localU, err = spoke.IssueByUID(ctx, u, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	comments, err := spoke.CommentsByIssue(ctx, localU.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "local comment", comments[0].Body)
 	return nil
 }
