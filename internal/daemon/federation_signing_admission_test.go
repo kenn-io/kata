@@ -88,6 +88,7 @@ func TestFederationIngressSigningResponses(t *testing.T) {
 			}
 		}
 
+		// Model an expiry persisted before the wall clock moved backward.
 		state = filepath.Join(t.TempDir(), "rollback.state")
 		require.NoError(t, federationsigning.InitializeReplayState(state))
 		watermark := time.Now().Add(federationsigning.Quarantine + time.Minute).Unix()
