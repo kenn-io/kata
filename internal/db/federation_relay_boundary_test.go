@@ -52,6 +52,22 @@ func TestRelayEventPeerProjects(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, projects, "peer")
 	})
+	missing := "00000000000000000000000003"
+	for _, tc := range []struct {
+		name  string
+		event RemoteEvent
+	}{
+		{"missing subject", RemoteEvent{Type: "issue.updated", IssueUID: &missing, Payload: jsontext.Value(`{}`)}},
+		{"missing related", RemoteEvent{Type: "issue.linked", RelatedIssueUID: &missing, Payload: jsontext.Value(`{}`)}},
+		{"missing link diff", RemoteEvent{Type: "issue.links_changed", Payload: jsontext.Value(`{"blocks_added_uids":["` + missing + `"]}`)}},
+		{"missing snapshot link", RemoteEvent{Type: "issue.snapshot", Payload: jsontext.Value(`{"links":[{"to_issue_uid":"` + missing + `"}]}`)}},
+		{"missing close parent", RemoteEvent{Type: "issue.closed", Payload: jsontext.Value(`{"parent_uid":"` + missing + `"}`)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := RelayEventPeerProjects(tc.event, lookup)
+			require.ErrorIs(t, err, ErrRelayReferenceUnprovable)
+		})
+	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			projects, err := RelayEventPeerProjects(RemoteEvent{ProjectUID: "own", Type: tc.kind, Payload: jsontext.Value(tc.payload), RelatedIssueUID: tc.related}, lookup)
