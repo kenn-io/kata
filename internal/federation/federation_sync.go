@@ -610,7 +610,7 @@ func syncDirectSpoke(
 			for _, project := range deliverProjects {
 				events, err := store.EventsByUIDs(ctx, project, deliverUIDs[project])
 				if err != nil {
-					return fmt.Errorf("load delivery project %s events %v: %w", binding.HubProjectUID, deliverUIDs[project], err)
+					return fmt.Errorf("load delivery for pull route %s events %v: %w", binding.HubProjectUID, deliverUIDs[project], err)
 				}
 				for _, event := range events {
 					byUID[event.UID] = event
