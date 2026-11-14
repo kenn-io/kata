@@ -10,6 +10,15 @@ import (
 // joined replica still needs.
 const FederationProjectIdentityDependencyPrefix = "federation_identity_dependency."
 
+// FederationPlaceholderPrefix identifies projects created for retained history.
+const FederationPlaceholderPrefix = "federation_placeholder."
+
+// ClearFederationPlaceholder retires placeholder origin after joining or leaving.
+func ClearFederationPlaceholder(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1 || (SELECT uid FROM projects WHERE id=$2)`, FederationPlaceholderPrefix, projectID)
+	return err
+}
+
 // CheckFederationProjectIdentityRetirement protects identities
 // still referenced by another joined project's portable issue history. Archive
 // and leave retain the identity; purge and merge must wait for those streams to

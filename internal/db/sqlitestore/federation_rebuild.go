@@ -277,5 +277,5 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 }
 
 func isFederationRehome(decision db.FederatedMoveDecision) bool {
-	return decision.Exists && decision.SourceID != decision.TargetID && (decision.Joined && decision.Active || !decision.Joined && !decision.Active && decision.SourceJoined)
+	return decision.Exists && decision.SourceID != decision.TargetID && (decision.Joined && decision.Active || !decision.Joined && (!decision.Active || decision.Placeholder) && decision.SourceJoined)
 }

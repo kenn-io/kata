@@ -52,6 +52,13 @@ func reconcileFederationBindingTransitionLinks(
 	previous *db.FederationBinding,
 	current db.FederationBinding,
 ) error {
+	projectID := current.ProjectID
+	if projectID == 0 && previous != nil {
+		projectID = previous.ProjectID
+	}
+	if err := db.ClearFederationPlaceholder(ctx, tx, projectID); err != nil {
+		return err
+	}
 	if previous != nil && previous.Enabled {
 		remainingProjectIDs, err := federationBindingGroupProjectIDs(ctx, tx, *previous)
 		if err != nil {

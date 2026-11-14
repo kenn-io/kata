@@ -354,6 +354,9 @@ func retainFederationProject(ctx context.Context, tx *sql.Tx, uid string) (int64
 		err := tx.QueryRowContext(ctx, `INSERT INTO projects(uid,name,deleted_at) VALUES($1,$2,$3)
  ON CONFLICT DO NOTHING RETURNING id`, uid, name, time.Now().UTC().Format(EventTimestampFormat)).Scan(&id)
 		if err == nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'1')`, FederationPlaceholderPrefix+uid); err != nil {
+				return 0, err
+			}
 			return id, nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -372,10 +375,10 @@ func retainFederationProject(ctx context.Context, tx *sql.Tx, uid string) (int64
 // FederatedMoveDecision records the state used to decide whether to rehome an
 // issue. It can be compared with a fresh decision before applying a snapshot.
 type FederatedMoveDecision struct {
-	IssueUID, SourceUID, SourceName, SourceShortID string
-	IssueID, SourceID, TargetID                    int64
-	RecurrenceID                                   sql.NullInt64
-	Active, Joined, Exists, SourceJoined           bool
+	IssueUID, SourceUID, SourceName, SourceShortID    string
+	IssueID, SourceID, TargetID                       int64
+	RecurrenceID                                      sql.NullInt64
+	Active, Joined, Placeholder, Exists, SourceJoined bool
 }
 
 // IndexFederatedMoveEvents selects the latest move for each issue.
@@ -406,7 +409,12 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, decision.TargetID).Scan(&decision.Joined); err != nil {
 			return nil, nil, err
 		}
-		if decision.Joined || !decision.Active {
+		if !decision.Joined {
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key=$1)`, FederationPlaceholderPrefix+issue.ProjectUID).Scan(&decision.Placeholder); err != nil {
+				return nil, nil, err
+			}
+		}
+		if decision.Joined || !decision.Active || decision.Placeholder {
 			err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, issue.UID).Scan(&decision.IssueID, &decision.SourceID, &decision.RecurrenceID, &decision.SourceUID, &decision.SourceName, &decision.SourceShortID)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return nil, nil, err
@@ -444,7 +452,7 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 		// may keep syncing, but cannot reconcile that destination's projection.
 		if !decision.Joined {
 			delete(p.Issues, issue.UID)
-			if active || !decision.Exists || !decision.SourceJoined {
+			if (active && !decision.Placeholder) || !decision.Exists || !decision.SourceJoined {
 				continue
 			}
 		}
