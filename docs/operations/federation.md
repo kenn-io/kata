@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-11
+last_edited: 2026-11-12
 ---
 
 # Federation
@@ -1113,6 +1113,8 @@ the agent the hub's administration token.
 3. On the spoke, run the generated `kata federation join` command. Keep its
    hub URL, project ID, actor, and capability values intact. Join reads the
    current project UID and replay/baseline cursors from the hub when it runs.
+   For a hub that requires signing, replace the signing key placeholders as
+   described in [Federation signing](federation-signing.md#prepare-the-hub-and-spoke).
    A manual command has this shape:
 
    ```sh
@@ -1611,8 +1613,9 @@ kata federation enroll --project fedlab \
 The hub binds the direct-spoke enrollment to the requested actor. Treat the
 actor and capabilities in the returned join command as the enrollment contract.
 
-The `--hub-url` value is the URL the spoke will store and use later for pull,
-push, and lease transport.
+The spoke stores the `--hub-url` value for later pull, push, and lease
+transport unless the hub requires signing, in which case it stores the hub's
+`external_url`; see [federation signing](federation-signing.md).
 
 Manual `--hub-url` values may include a reverse-proxy path prefix, such as
 `https://hub.example/kata`; the prefix is retained for later federation

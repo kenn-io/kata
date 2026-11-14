@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-11
+last_edited: 2026-11-12
 ---
 
 # HTTP API schema
@@ -271,6 +271,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.48.0` | Enrollment join instructions use the signing hub's external URL and include signing key placeholders. |
 | `0.47.0` | Attachment uploads accept `reuse_existing`. Reuse on uploads and links returns `attachment_invalid` when the daemon cannot read an existing reference. |
 | `0.46.0` | Federation ingest responses add optional `superseded_event_uids`, the adoption snapshots the hub did not store. |
 | `0.45.0` | Adds `POST /api/v1/embeddings/local/restart` to restart the daemon after local embeddings setup. Older daemons do not serve this route. |
@@ -856,16 +857,20 @@ capabilities, token, transport options, and `join_command`. Supply `hub_url`
 as an HTTP(S) base URL reachable by the spoke, optionally with a federation
 API reverse-proxy prefix. The server does not infer a federation address
 from its browser origin; dedicated browser listeners and authentication proxies
-may not serve federation transport. Non-loopback HTTP URLs, including private
-IP addresses, require `allow_insecure: true`. Without it, enrollment returns
-`400` before issuing a token. The returned join command carries
-`--allow-insecure`; HTTPS still verifies certificates.
+may not serve federation transport. For an ordinary join, non-loopback HTTP
+URLs, including private IP addresses, require `allow_insecure: true`. Without
+it, enrollment returns `400` before issuing a token. The returned command
+carries `--allow-insecure` when needed; HTTPS still verifies certificates.
+On a hub that requires signing, `join.hub_url` uses the hub's signing
+`external_url`. The hub ignores a supplied `hub_url`. The command includes
+signing key placeholders and does not include `--allow-insecure`.
 
 The returned command includes `--project` and the hub project ID, plus any
 push/adoption options. Join fetches the current UID and cursors from the hub
 when it runs, so a purge after enrollment does not leave it using an old baseline.
-Treat the response and command as secrets. Wildcard grants have no project join object; grants without `pull`, or servers without a
-supplied hub URL, have no runnable join command. Legacy API callers
+Treat the response and command as secrets. Wildcard grants have no project join
+object. Grants without `pull`, or without a supplied hub URL or a required-signing
+external URL, have no runnable join command. Legacy API callers
 omitting `hub_url` may issue a grant before enabling federation; those responses
 omit `join` until hub metadata exists. Listing grants
 never returns plaintext tokens or join commands.

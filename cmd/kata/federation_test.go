@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -3285,4 +3287,58 @@ func TestPrintFederationEnrollmentAgentKeepsRowsWhenJoinCommandMissing(t *testin
 	require.Contains(t, out.String(), "join command unavailable")
 	require.NotContains(t, out.String(), "issued-token")
 	require.NotContains(t, out.String(), "{")
+}
+
+func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("shell command requires a POSIX shell")
+	}
+	binary := kataTestBinary(t, "signed-join")
+	t.Setenv("KATA_AUTH_TOKEN", "admin-token")
+	t.Setenv("TEST_HUB_TOKEN", "admin-token")
+	var hubServer *daemon.Server
+	external := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hubServer.Handler().ServeHTTP(w, r)
+	}))
+	base := "https://" + external.Listener.Addr().String()
+	const keyID = "spoke'$HOME"
+	verifier, key := testenv.FederationSigning(t, base, keyID)
+	hubDB := openKataTestDB(t, filepath.Join(t.TempDir(), "hub.db"))
+	t.Cleanup(func() { require.NoError(t, hubDB.Close()) })
+	hubServer = daemon.NewServer(daemon.ServerConfig{DB: hubDB, FederationSigningRequired: true, FederationSigning: verifier, Auth: config.AuthConfig{Token: "admin-token"}})
+	t.Cleanup(func() { require.NoError(t, hubServer.Close()) })
+	external.StartTLS()
+	t.Cleanup(external.Close)
+	admin := httptest.NewServer(hubServer.Handler())
+	t.Cleanup(admin.Close)
+	spoke := testenv.New(t, testenv.WithAuthToken("admin-token"))
+	hub := &testenv.Env{URL: admin.URL, DB: hubDB}
+	hubProject, err := hubDB.CreateProject(t.Context(), "hub-project")
+	require.NoError(t, err)
+	savedArgs := os.Args
+	os.Args = []string{binary}
+	t.Cleanup(func() { os.Args = savedArgs })
+	out := requireCmdOutput(t, hub, "--json", "--project", "hub-project", "federation", "enroll", "--spoke-instance", spoke.DB.InstanceUID(), "--hub-url", admin.URL, "--hub-token-env", "TEST_HUB_TOKEN", "--actor", "tester", "--capabilities", "pull", "--allow-insecure")
+	var body struct {
+		Join federationJoinBundle `json:"join"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &body))
+	assert.Equal(t, base, body.Join.HubURL)
+	assert.False(t, body.Join.AllowInsecure)
+	command := strings.ReplaceAll(body.Join.JoinCommand, "'<signing-key-id>'", shellQuote(keyID))
+	command = strings.ReplaceAll(command, "'<absolute-path-to-spoke-key>'", shellQuote(key))
+	certFile := filepath.Join(t.TempDir(), "hub-cert.pem")
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: external.Certificate().Raw}), 0600))
+	t.Setenv("KATA_SERVER", spoke.URL)
+	t.Setenv("SSL_CERT_FILE", certFile)
+	t.Setenv("PATH", filepath.Dir(binary)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	output, err := exec.CommandContext(t.Context(), "sh", "-c", command).CombinedOutput() //nolint:gosec // Command and binary come from this test's enrollment and fixture.
+	require.NoError(t, err, "%s", output)
+	project, err := spoke.DB.ProjectByName(t.Context(), "hub-project")
+	require.NoError(t, err)
+	binding, err := spoke.DB.FederationBindingByProject(t.Context(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, base, binding.HubURL)
+	assert.Equal(t, hubProject.ID, binding.HubProjectID)
+	assert.Equal(t, hubProject.UID, binding.HubProjectUID)
 }

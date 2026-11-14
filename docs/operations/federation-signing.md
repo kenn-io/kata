@@ -1,7 +1,7 @@
 ---
 title: Federation request signing
 description: Configure native signed federation and a restricted HTTPS ingress.
-last_edited: 2026-10-17
+last_edited: 2026-11-12
 ---
 
 # Federation request signing
@@ -25,7 +25,8 @@ is optional on the ordinary daemon listeners.
    [the native enrollment workflow](federation.md). Use CLI enrollment and join
    for required-signing hubs. The TUI wizard does not accept signing references
    and its metadata step cannot complete against a required-signing hub.
-   Record the enrollment ID.
+   Pass an explicit `--token` and record it along with the enrollment ID from
+   the `enrollment.id` field in `--json` output.
    Ingress rejects global enrollments, even when the signature is valid.
 2. Provision a separate secret with at least 64 bytes, independently of the
    enrollment bearer. For example, `openssl rand -hex 32` produces 64 ASCII
@@ -62,11 +63,18 @@ is optional on the ordinary daemon listeners.
 5. Start the hub normally. Signing initially returns `503` for at least
    96 seconds, and until wall time has passed the persisted maximum admitted
    signature expiry. This gate also applies after a restart.
-6. Run the native enrollment join command on the spoke with
-   `--hub-url https://daemon.example/federation`, adding
-   `--signing-key-id spoke-key-1 --signing-key-env KATA_SPOKE_SIGNING_KEY`.
-   The same source must exist in the spoke CLI and daemon environments because
-   the CLI fetches metadata before saving the enrollment.
+6. Re-run the same `enroll` command against the hub's main API with the same
+   `--token`. An exact retry returns the same enrollment and prints its signed
+   join command. The command uses `external_url` and includes placeholders for
+   the signing key ID and absolute spoke key file path. Replace each whole
+   quoted placeholder, including the angle brackets, before running it on the
+   spoke. Quote both values for the shell. For example, an ID of `spoke'$KEY`
+   becomes `'spoke'"'"'$KEY'`, and the path `/path/to/spoke's key` becomes
+   `'/path/to/spoke'"'"'s key'`.
+   Alternatively, replace `--signing-key-file` with
+   `--signing-key-env KATA_SPOKE_SIGNING_KEY`. The same source must exist in
+   the spoke CLI and daemon environments because the CLI fetches metadata
+   before saving the enrollment.
 
 For an existing spoke, select the key without replacing its bearer. This
 command uses the selected daemon, including `KATA_SERVER` or a daemon catalog
