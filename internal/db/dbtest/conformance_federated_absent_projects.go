@@ -73,5 +73,20 @@ func checkFederatedParkedLinkGraph(t *testing.T, hub db.Storage, backend Backend
 	count, _, err := spoke.PendingFederationPushStats(ctx, route.ID, spoke.InstanceUID(), 0)
 	require.NoError(t, err)
 	require.EqualValues(t, len(pending), count)
+	parked, err := spoke.ProjectByUID(ctx, target.UID)
+	require.NoError(t, err)
+	_, _, _, err = spoke.RestoreProject(ctx, parked.ID, "worker")
+	require.NoError(t, err)
+	other, err := spoke.CreateProject(ctx, "other")
+	require.NoError(t, err)
+	localU, err = spoke.IssueByUID(ctx, u, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = spoke.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: localU.ID, FromProjectID: parked.ID, ToProjectID: other.ID, IfMatchRev: localU.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	pending, err = spoke.PendingFederationPushEvents(ctx, route.ID, spoke.InstanceUID(), 0, 100)
+	require.NoError(t, err)
+	for _, event := range pending {
+		require.NotEqual(t, comment.UID, event.UID)
+	}
 	return nil
 }

@@ -28,7 +28,7 @@ func (d *Store) PendingFederationPushEvents(
 		  AND e.origin_instance_uid = ?
 		  AND e.id > ?
 		  AND `+federationPushEventTypeCondition("e.type")+`
-		  AND `+db.FederationPushEligible("e")+`
+		  AND `+db.FederationPushEligible("e", false)+`
 		ORDER BY e.id ASC
 		LIMIT ?`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
@@ -47,7 +47,7 @@ func (d *Store) PendingFederationPushEvents(
 			  AND e.origin_instance_uid = ?
 			  AND e.id > ?
 			  AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
-			  AND `+db.FederationPushEligible("e")+`
+			  AND `+db.FederationPushEligible("e", false)+`
 			  AND e.id <= COALESCE((
 			    SELECT MIN(barrier.id)
 			      FROM events barrier
@@ -55,7 +55,7 @@ func (d *Store) PendingFederationPushEvents(
 			       AND barrier.origin_instance_uid = ?
 			       AND barrier.id > ?
 			       AND `+federationPushEventTypeCondition("barrier.type")+`
-			       AND `+db.FederationPushEligible("barrier")+`
+			       AND `+db.FederationPushEligible("barrier", false)+`
 			       AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  ), 9223372036854775807)
 			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, projectID, originInstanceUID, runStartAfterID)
@@ -123,7 +123,7 @@ func (d *Store) PendingFederationPushStats(
 		   AND e.origin_instance_uid = ?
 		   AND e.id > ?
 		   AND `+federationPushEventTypeCondition("e.type")+`
-		   AND `+db.FederationPushEligible("e"),
+		   AND `+db.FederationPushEligible("e", false),
 		projectID, originInstanceUID, afterID).Scan(&count, &maxID); err != nil {
 		return 0, 0, fmt.Errorf("count pending federation push: %w", err)
 	}
