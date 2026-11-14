@@ -152,8 +152,9 @@ func TestFederationRebindPreflightClassifiesEnrollmentRejection(t *testing.T) {
 			if status == http.StatusPreconditionRequired {
 				var apiErr *api.APIError
 				require.ErrorAs(t, federationReplicaAPIError(err), &apiErr)
-				assert.Contains(t, apiErr.Message, "signing")
+				assert.Equal(t, "replacement hub requires signed requests", apiErr.Message)
 				assert.Contains(t, apiErr.Hint, "kata federation signing configure")
+				assert.Contains(t, apiErr.Hint, "--hub-url <new-https-base>")
 			}
 		})
 	}
