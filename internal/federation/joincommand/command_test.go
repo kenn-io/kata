@@ -36,7 +36,6 @@ func TestJoinCommandPreservesArguments(t *testing.T) {
 			}, args)
 		})
 	}
-
 }
 
 func TestJoinCommandRequiresJoinAuthority(t *testing.T) {
