@@ -3,6 +3,7 @@ package dbtest
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -222,6 +223,55 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 			}
 			require.True(t, found)
 		}
+	})
+
+	t.Run("outbound move retains connector comment", func(t *testing.T) {
+		ctx := t.Context()
+		spoke := backend.Open(t)
+		t.Cleanup(func() { require.NoError(t, spoke.Close()) })
+		route, err := spoke.CreateProjectWithUID(ctx, "source", source.UID)
+		require.NoError(t, err)
+		_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: route.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: source.ID, HubProjectUID: source.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+		require.NoError(t, err)
+		_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{creation})
+		require.NoError(t, err)
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+		local, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		now := time.Now().UTC()
+		root, _, err := spoke.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+			ProjectID: route.ID, IssueID: local.ID, ConnectorInstance: "notes",
+			ExternalRootKey: "root", ExternalAccountKey: "account", Actor: "worker", ReceiveCommentsAfter: now,
+		})
+		require.NoError(t, err)
+		root, claimed, err := spoke.ClaimExternalRootBinding(ctx, root.ID, "worker-token", now, now.Add(-db.ExternalRootClaimStaleAfter))
+		require.NoError(t, err)
+		require.True(t, claimed)
+		connectorComment, _, changed, err := spoke.UpsertExternalCommentProjection(ctx, db.ExternalCommentProjectionParams{
+			BindingID: root.ID, ClaimToken: root.ClaimToken, ExternalID: "comment", ExternalRevision: "one",
+			Body: "External comment", ExternalActorID: "person", ExternalActorName: "Person",
+			ExternalCreatedAt: now, ExternalUpdatedAt: now, IntegrationActor: "connector:notes",
+		})
+		require.NoError(t, err)
+		require.True(t, changed)
+		localComment, _, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Local comment"})
+		require.NoError(t, err)
+		_, err = spoke.ReleaseExternalRootClaim(ctx, root.ID, root.ClaimToken)
+		require.NoError(t, err)
+		_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{move})
+		require.NoError(t, err)
+		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+		retained, err := spoke.ProjectByUID(ctx, target.UID)
+		require.NoError(t, err)
+		require.NotNil(t, retained.DeletedAt)
+		got, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, local.ID, got.ID)
+		require.Equal(t, retained.ID, got.ProjectID)
+		comments, err := spoke.CommentsByIssue(ctx, got.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 2)
+		require.ElementsMatch(t, []string{connectorComment.UID, localComment.UID}, []string{comments[0].UID, comments[1].UID})
 	})
 
 	return nil
