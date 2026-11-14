@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -106,28 +105,7 @@ func TestDigest_OutputShape(t *testing.T) {
 func TestDigest_RejectsBadSince(t *testing.T) {
 	f := newCLIFixture(t)
 
-	for _, since := range []string{"blarg", "1h1d"} {
-		err := f.execute("digest", "--since", since)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid time spec")
-	}
-}
-
-func TestDigest_ParseSinceUntil(t *testing.T) {
-	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
-
-	got, err := parseSinceUntil("24h", now)
-	require.NoError(t, err)
-	assert.Equal(t, now.Add(-24*time.Hour), got)
-
-	got, err = parseSinceUntil("7d", now)
-	require.NoError(t, err)
-	assert.Equal(t, now.Add(-7*24*time.Hour), got)
-
-	got, err = parseSinceUntil("2026-05-01T00:00:00Z", now)
-	require.NoError(t, err)
-	assert.Equal(t, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), got)
-
-	_, err = parseSinceUntil("garbage", now)
+	err := f.execute("digest", "--since", "blarg")
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid time spec")
 }

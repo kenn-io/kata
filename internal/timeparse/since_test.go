@@ -41,6 +41,10 @@ func TestSince(t *testing.T) {
 		{"24h", now.Add(-24 * time.Hour), false}, {"7d", now.Add(-7 * 24 * time.Hour), false},
 		{"+1.5d", now.Add(-36 * time.Hour), false}, {"-0.5d", now.Add(12 * time.Hour), false},
 		{"1h30m", now.Add(-90 * time.Minute), false},
+		{"0.0000000000001d", now.Add(-8 * time.Nanosecond), false},
+		{"-0.0000000000001d", now.Add(8 * time.Nanosecond), false},
+		{"1.0000000000001d", now.Add(-24*time.Hour - 8*time.Nanosecond), false},
+		{"0.00000000000025d", now.Add(-21 * time.Nanosecond), false},
 		{".5d", now.Add(-12 * time.Hour), false}, {"1.d", now.Add(-24 * time.Hour), false},
 		{"1h1d", time.Time{}, true}, {"1d1d", time.Time{}, true},
 		{"2026-05-01T00:00:00Z", time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), false},
@@ -51,26 +55,6 @@ func TestSince(t *testing.T) {
 			got, err := Since(tc.input, now)
 			if (err != nil) != tc.bad || (!tc.bad && !got.Equal(tc.want)) {
 				t.Fatalf("got %v, %v; want %v, bad=%v", got, err, tc.want, tc.bad)
-			}
-		})
-	}
-}
-
-func TestSinceFractionalDayNanosecondPrecision(t *testing.T) {
-	now := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
-	for _, tc := range []struct {
-		input string
-		want  time.Time
-	}{
-		{"0.0000000000001d", now.Add(-8 * time.Nanosecond)},
-		{"-0.0000000000001d", now.Add(8 * time.Nanosecond)},
-		{"1.0000000000001d", now.Add(-24*time.Hour - 8*time.Nanosecond)},
-		{"0.00000000000025d", now.Add(-21 * time.Nanosecond)},
-	} {
-		t.Run(tc.input, func(t *testing.T) {
-			got, err := Since(tc.input, now)
-			if err != nil || !got.Equal(tc.want) {
-				t.Fatalf("Since(%q) = %v, %v; want %v", tc.input, got, err, tc.want)
 			}
 		})
 	}

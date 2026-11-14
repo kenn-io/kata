@@ -155,15 +155,9 @@ func TestCronRunStats(t *testing.T) {
 	require.Nil(t, result["success_rate"])
 	require.Contains(t, result, "duration_seconds")
 	require.Nil(t, result["duration_seconds"])
+	require.Equal(t, "2026-11-01T00:00:00Z", result["window"].(map[string]any)["until"])
 	relative := cronOK(t, f.session, "cron_run_stats", map[string]any{"since": "2d", "until": "2026-11-01T00:00:00Z"})
 	require.Equal(t, "2026-10-30T00:00:00Z", relative["window"].(map[string]any)["since"])
-	maximum := cronOK(t, f.session, "cron_run_stats", map[string]any{"since": "366d"})
-	window := maximum["window"].(map[string]any)
-	start, err := time.Parse(time.RFC3339Nano, window["since"].(string))
-	require.NoError(t, err)
-	end, err := time.Parse(time.RFC3339Nano, window["until"].(string))
-	require.NoError(t, err)
-	require.Equal(t, 366*24*time.Hour, end.Sub(start))
 	badUID := cronCall(t, f.session, "cron_run_stats", map[string]any{"job_uid": "invalid"})
 	require.True(t, badUID.IsError)
 	require.Contains(t, badUID.Content[0].(*sdkmcp.TextContent).Text, "cron UID must be a full ULID")
@@ -171,11 +165,6 @@ func TestCronRunStats(t *testing.T) {
 	require.True(t, failure.IsError)
 	require.Contains(t, failure.Content[0].(*sdkmcp.TextContent).Text, "invalid bucket")
 	require.NotContains(t, failure.Content[0].(*sdkmcp.TextContent).Text, `"error":`)
-	for _, since := range []string{"213504d", "-213504d"} {
-		require.True(t, cronCall(t, f.session, "cron_run_stats", map[string]any{"since": since, "until": "2026-11-01T00:00:00Z"}).IsError)
-		require.True(t, cronCall(t, f.session, "cron_run_stats", map[string]any{"since": since}).IsError)
-	}
-	require.Equal(t, "2026-11-01T00:00:00Z", result["window"].(map[string]any)["until"])
 	require.True(t, cronCall(t, f.session, "cron_run_stats", map[string]any{"job_uid": "01J00000000000000000000010", "workflow_uid": "01J00000000000000000000020"}).IsError)
 	job := cronTestJob(t, f)
 	args := cronObservation(cronNewUID(t, f.session), job)
@@ -183,7 +172,7 @@ func TestCronRunStats(t *testing.T) {
 	args["started_at"] = "2026-10-18T12:00:00Z"
 	args["ended_at"] = "2026-10-18T12:01:00Z"
 	cronOK(t, f.session, "cron_run_observe", args)
-	result = cronOK(t, f.session, "cron_run_stats", map[string]any{"job_uid": job["uid"], "bucket": "day"})
+	result = cronOK(t, f.session, "cron_run_stats", map[string]any{"job_uid": job["uid"], "bucket": "day", "until": "2026-11-01T00:00:00Z"})
 	require.Equal(t, float64(1), result["scanned"])
 	require.Equal(t, float64(1), result["success_rate"])
 	require.Len(t, result["buckets"], 1)

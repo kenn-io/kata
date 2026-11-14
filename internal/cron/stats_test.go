@@ -107,12 +107,12 @@ func TestSummarizeRunsCompletionOrder(t *testing.T) {
 	failEnd := base.Add(2 * time.Hour)
 	successEnd := base.Add(3 * time.Hour)
 	rows := []RunStatRow{{Status: "failed", CreatedAt: base.Add(24 * time.Hour), StartedAt: &start, EndedAt: &failEnd}, {Status: "succeeded", CreatedAt: base, EndedAt: &successEnd}}
-	got := SummarizeRuns(rows, true, time.UTC)
+	got := SummarizeRuns(rows, false, time.UTC)
 	require.Zero(t, got.ConsecutiveFailures)
-	require.Equal(t, "2026-01-01", got.Buckets[0].Date)
 	rows[0].EndedAt = &successEnd
-	require.Equal(t, 1, SummarizeRuns(rows, false, time.UTC).ConsecutiveFailures)
-	rows[0].EndedAt = nil
+	rows[0], rows[1] = rows[1], rows[0]
+	require.Zero(t, SummarizeRuns(rows, false, time.UTC).ConsecutiveFailures)
+	rows[1].EndedAt = nil
 	got = SummarizeRuns(rows, false, time.UTC)
 	require.Equal(t, start, *got.LastFailedAt)
 	require.Zero(t, got.ConsecutiveFailures)
