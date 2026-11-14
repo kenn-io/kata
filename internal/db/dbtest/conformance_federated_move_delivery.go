@@ -209,8 +209,15 @@ func checkFederatedMoveDelivery(t *testing.T, store db.Storage) error {
 			winner := makeMove(2, at+1)
 			_, err = store.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{winner})
 			require.NoError(t, err)
+			seen, err := store.MaxEventID(ctx)
+			require.NoError(t, err)
+			var reattachReset int64
 			if kind == "reattach" {
 				require.NoError(t, store.MaterializeFederatedProject(ctx, local[0].ID))
+				reset, err := store.PurgeResetCheck(ctx, seen, local[1].ID)
+				require.NoError(t, err)
+				require.Greater(t, reset, seen)
+				reattachReset = reset
 				_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: local[2].ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 3, HubProjectUID: local[2].UID, Enabled: true, PushEnabled: true, Actor: "worker"})
 				require.NoError(t, err)
 			}
@@ -220,8 +227,10 @@ func checkFederatedMoveDelivery(t *testing.T, store db.Storage) error {
 				_, err = store.InsertRemoteEvents(ctx, local[0].ID, []db.RemoteEvent{newRemoteEvent(t, local[0], &issue.UID, "issue.updated", "worker", origin, at+2, payload)})
 				require.NoError(t, err)
 			}
-			seen, err := store.MaxEventID(ctx)
-			require.NoError(t, err)
+			if kind != "reattach" {
+				seen, err = store.MaxEventID(ctx)
+				require.NoError(t, err)
+			}
 			require.NoError(t, store.MaterializeFederatedProject(ctx, local[2].ID))
 			got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
@@ -229,6 +238,9 @@ func checkFederatedMoveDelivery(t *testing.T, store db.Storage) error {
 			reset, err := store.PurgeResetCheck(ctx, seen, local[1].ID)
 			require.NoError(t, err)
 			require.Greater(t, reset, seen, "a reader can already be past the retained winning move before materialization")
+			if kind == "reattach" {
+				require.Equal(t, reattachReset, reset)
+			}
 			query := store.(interface {
 				QueryRowContext(context.Context, string, ...any) *sql.Row
 				ExecContext(context.Context, string, ...any) (sql.Result, error)

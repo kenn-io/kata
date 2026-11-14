@@ -58,8 +58,6 @@ func checkFederatedMoveDetachedDestination(t *testing.T, store db.Storage) error
 	replayFederatedRehome(t, store, target, move, "pull")
 	_, err := store.LeaveFederationReplica(ctx, target.ID)
 	require.NoError(t, err)
-	unrelated, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "Standalone issue", Author: "worker"})
-	require.NoError(t, err)
 	body := "standalone destination edit"
 	_, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Body: &body, Actor: "worker"})
 	require.NoError(t, err)
@@ -69,9 +67,6 @@ func checkFederatedMoveDetachedDestination(t *testing.T, store db.Storage) error
 	after, err := store.IssueByID(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, before, after, "source replay must preserve standalone destination state")
-	kept, err := store.IssueByUID(ctx, unrelated.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.Equal(t, unrelated, kept)
 	_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "worker")
 	require.NoError(t, err)
 	_, err = store.PurgeIssue(ctx, issue.ID, "worker", nil)

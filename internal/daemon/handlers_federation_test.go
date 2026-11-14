@@ -946,6 +946,8 @@ func TestFederationReplicaSetupAdoptExistingRejectsArchivedProjectWithHubUID(t *
 
 	assert.Equal(t, http.StatusConflict, resp.StatusCode, "response: %s", raw)
 	assert.Contains(t, string(raw), "federation_project_collision")
+	assert.Contains(t, string(raw), "kata projects restore spoke")
+	assert.Contains(t, string(raw), "--project spoke")
 }
 
 func TestFederationReplicaSetupAdoptExistingRejectsHubUIDBoundToDifferentProject(t *testing.T) {

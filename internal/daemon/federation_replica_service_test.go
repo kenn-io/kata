@@ -416,6 +416,91 @@ func TestEnsureFederationReplicaCreatesProjectBindingAndCredential(t *testing.T)
 	assert.Equal(t, 1, credentials.storeCallCount())
 }
 
+func TestEnsureFederationReplicaJoinsRetainedProjectAfterRestore(t *testing.T) {
+	for _, rename := range []bool{false, true} {
+		t.Run(map[bool]string{false: "generated name", true: "renamed"}[rename], func(t *testing.T) {
+			ctx := t.Context()
+			hub := openReplicaServiceStore(t)
+			spoke := openReplicaServiceStore(t)
+			source, err := hub.CreateProject(ctx, "source")
+			require.NoError(t, err)
+			target, err := hub.CreateProject(ctx, "target")
+			require.NoError(t, err)
+			for _, project := range []db.Project{source, target} {
+				_, err = hub.EnableProjectFederation(ctx, project.ID, "tester")
+				require.NoError(t, err)
+			}
+			issue, created, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Before", Author: "tester"})
+			require.NoError(t, err)
+			route, err := spoke.CreateProjectWithUID(ctx, "source", source.UID)
+			require.NoError(t, err)
+			_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: route.ID, Role: db.FederationRoleSpoke, HubURL: "http://hub.example", HubProjectID: source.ID, HubProjectUID: source.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
+			require.NoError(t, err)
+			portable := func(event db.Event) db.RemoteEvent {
+				return db.RemoteEvent{EventUID: event.UID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: event.ProjectUID, ProjectName: event.ProjectName, IssueUID: event.IssueUID, RelatedIssueUID: event.RelatedIssueUID, Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, ContentHash: event.ContentHash, Payload: []byte(event.Payload), CreatedAt: event.CreatedAt}
+			}
+			_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{portable(created)})
+			require.NoError(t, err)
+			require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+			local, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "tester", Body: "local comment"})
+			require.NoError(t, err)
+			title := "Edited on hub"
+			issue, edit, _, err := hub.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &title, Actor: "tester"})
+			require.NoError(t, err)
+			moved, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+			require.NoError(t, err)
+			_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{portable(*edit), portable(*moved.Event)})
+			require.NoError(t, err)
+			require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+			retained, err := spoke.ProjectByUID(ctx, target.UID)
+			require.NoError(t, err)
+			require.NotNil(t, retained.DeletedAt)
+			params := replicaServiceParams()
+			params.HubProjectUID, params.HubProjectID = target.UID, target.ID
+			params.Credential.HubProjectID = target.ID
+			params.ProjectName = retained.Name
+			credentials := newReplicaCredentialStore()
+			_, err = daemon.EnsureFederationReplica(ctx, spoke, credentials, nil, params)
+			require.ErrorContains(t, err, "kata projects restore "+retained.Name)
+			require.ErrorContains(t, err, "--project "+retained.Name)
+			_, _, _, err = spoke.RestoreProject(ctx, retained.ID, "tester")
+			require.NoError(t, err)
+			if rename {
+				other, err := spoke.CreateProject(ctx, "taken")
+				require.NoError(t, err)
+				otherIssue, _, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "Keep", Author: "tester"})
+				require.NoError(t, err)
+				_, err = spoke.RenameProject(ctx, retained.ID, other.Name)
+				require.Error(t, err)
+				unchanged, err := spoke.ProjectByUID(ctx, other.UID)
+				require.NoError(t, err)
+				require.Equal(t, other, unchanged)
+				kept, err := spoke.IssueByUID(ctx, otherIssue.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				require.Equal(t, otherIssue, kept)
+				retained, err = spoke.RenameProject(ctx, retained.ID, "chosen-name")
+				require.NoError(t, err)
+				params.ProjectName = retained.Name
+			}
+			result, err := daemon.EnsureFederationReplica(ctx, spoke, credentials, nil, params)
+			require.NoError(t, err)
+			require.Equal(t, retained.ID, result.Project.ID)
+			require.Equal(t, target.UID, result.Binding.HubProjectUID)
+			require.NoError(t, spoke.MaterializeFederatedProject(ctx, retained.ID))
+			got, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, local.ID, got.ID)
+			require.Equal(t, "Edited on hub", got.Title)
+			comments, err := spoke.CommentsByIssue(ctx, local.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
+			require.Equal(t, "local comment", comments[0].Body)
+		})
+	}
+}
+
 func TestEnsureFederationReplicaPreservesHubURLPathPrefix(t *testing.T) {
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()

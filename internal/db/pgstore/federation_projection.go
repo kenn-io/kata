@@ -569,6 +569,20 @@ func (s *Store) materializeFederatedProjectTxScoped(
 			return err
 		}
 		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
+	}, func(projectID int64, issue db.FoldIssue, projection db.FoldProjection) error {
+		view := db.FoldMovedIssue(projection, issue)
+		rows, err := federatedIssueRowsByUID(ctx, tx, projectID, issue.UID)
+		if err != nil {
+			return err
+		}
+		ids, err := s.reconcileFederatedIssues(ctx, tx, &federatedMaterialization{projectID: projectID, existingIssues: rows}, view)
+		if err != nil {
+			return err
+		}
+		if err := reconcileFederatedComments(ctx, tx, projectID, ids, view, issue.UID); err != nil {
+			return err
+		}
+		return reconcileFederatedLabels(ctx, tx, projectID, ids, view, issue.UID)
 	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
 		payload := "{}"
 		var issueUID *string
@@ -788,9 +802,15 @@ func federatedIssueRowsByUID(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectID int64,
+	scope ...string,
 ) (map[string]federatedIssueRow, error) {
-	rows, err := tx.QueryContext(ctx,
-		`SELECT uid,id,short_id,title,body,deleted_at IS NOT NULL FROM issues WHERE project_id=$1`, projectID)
+	query := `SELECT uid,id,short_id,title,body,deleted_at IS NOT NULL FROM issues WHERE project_id=$1`
+	args := []any{projectID}
+	if len(scope) > 0 {
+		query += ` AND uid=$2`
+		args = append(args, scope[0])
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -813,8 +833,9 @@ func reconcileFederatedComments(
 	projectID int64,
 	issueIDs map[string]int64,
 	projection db.FoldProjection,
+	scope ...string,
 ) error {
-	existing, err := federatedCommentRowsByUID(ctx, tx, projectID)
+	existing, err := federatedCommentRowsByUID(ctx, tx, projectID, scope...)
 	if err != nil {
 		return err
 	}
@@ -824,6 +845,9 @@ func reconcileFederatedComments(
 		desired[comment.UID] = struct{}{}
 	}
 	for commentUID, row := range existing {
+		if len(scope) > 0 {
+			continue
+		}
 		if _, ok := desired[commentUID]; ok {
 			continue
 		}
@@ -913,9 +937,16 @@ func federatedCommentRowsByUID(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectID int64,
+	scope ...string,
 ) (map[string]federatedCommentRow, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT c.uid,c.id,c.issue_id,c.author,c.body,c.created_at,c.teammate,c.reply_to_uid,c.reply_kind,c.edited_at FROM comments c
-JOIN issues i ON i.id=c.issue_id WHERE i.project_id=$1`, projectID)
+	query := `SELECT c.uid,c.id,c.issue_id,c.author,c.body,c.created_at,c.teammate,c.reply_to_uid,c.reply_kind,c.edited_at FROM comments c
+JOIN issues i ON i.id=c.issue_id WHERE i.project_id=$1`
+	args := []any{projectID}
+	if len(scope) > 0 {
+		query += ` AND i.uid=$2`
+		args = append(args, scope[0])
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -946,8 +977,9 @@ func reconcileFederatedLabels(
 	projectID int64,
 	issueIDs map[string]int64,
 	projection db.FoldProjection,
+	scope ...string,
 ) error {
-	existing, err := federatedLabelKeys(ctx, tx, projectID)
+	existing, err := federatedLabelKeys(ctx, tx, projectID, scope...)
 	if err != nil {
 		return err
 	}
@@ -960,6 +992,11 @@ func reconcileFederatedLabels(
 		desired[federatedLabelKey{issueID: issueID, label: key.Label}] = struct{}{}
 	}
 	for key := range existing {
+		if len(scope) > 0 {
+			if _, ok := projection.Labels[db.FoldLabelKey{IssueUID: scope[0], Label: key.label}]; !ok {
+				continue
+			}
+		}
 		if _, ok := desired[key]; ok {
 			continue
 		}
@@ -985,9 +1022,16 @@ func federatedLabelKeys(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectID int64,
+	scope ...string,
 ) (map[federatedLabelKey]struct{}, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT il.issue_id,il.label FROM issue_labels il
-JOIN issues i ON i.id=il.issue_id WHERE i.project_id=$1`, projectID)
+	query := `SELECT il.issue_id,il.label FROM issue_labels il
+JOIN issues i ON i.id=il.issue_id WHERE i.project_id=$1`
+	args := []any{projectID}
+	if len(scope) > 0 {
+		query += ` AND i.uid=$2`
+		args = append(args, scope[0])
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
