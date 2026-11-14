@@ -87,7 +87,7 @@ func federationMoveSourceHasPendingEvents(
  WHERE e.project_id=$1 AND e.origin_instance_uid=$2`
 	var pending bool
 	if err := tx.QueryRowContext(ctx, movedIssueEvents+` AND e.id>b.push_cursor_event_id
- AND e.type IN (`+FederationPushEventTypesSQL()+`))`,
+ AND `+FederationPushEligible("e")+` AND e.type IN (`+FederationPushEventTypesSQL()+`))`,
 		projectID, originInstanceUID).Scan(&pending); err != nil {
 		return false, err
 	}
@@ -279,7 +279,6 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 		return 0, err
 	}
 	missing := errors.Is(err, sql.ErrNoRows)
-	var routeUID string
 	if missing || e.Type == "issue.moved" || project != route {
 		// Native pull trusts the joined hub with this stream's issue history.
 		// A retained historical project identity needs no live credential or
@@ -287,8 +286,8 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 		var role string
 		var enabled int
 		var relay bool
-		if err := tx.QueryRowContext(ctx, `SELECT b.role,b.enabled,b.relay_config IS NOT NULL,p.uid
- FROM federation_bindings b JOIN projects p ON p.id=b.project_id WHERE b.project_id=$1`, route).Scan(&role, &enabled, &relay, &routeUID); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT b.role,b.enabled,b.relay_config IS NOT NULL
+ FROM federation_bindings b WHERE b.project_id=$1`, route).Scan(&role, &enabled, &relay); err != nil {
 			if missing && errors.Is(err, sql.ErrNoRows) {
 				return 0, fmt.Errorf("%w: event project is not joined", ErrFederationIngestValidation)
 			}
@@ -311,11 +310,6 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 	if missing || project != route {
 		if EventIssueUID(e.IssueUID) == "" {
 			return 0, fmt.Errorf("%w: project event outside requested stream", ErrFederationIngestValidation)
-		}
-	}
-	if (missing || project != route) && e.ProjectUID != routeUID {
-		if err := recordFederationProjectIdentityDependency(ctx, tx, routeUID, e.ProjectUID); err != nil {
-			return 0, err
 		}
 	}
 	if missing {
@@ -403,9 +397,6 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, err
 		}
-		if retained.Valid && retained.String != "1" {
-			return nil, nil, fmt.Errorf("invalid retained project marker for %s: %q", decision.SourceUID, retained.String)
-		}
 		decision.Exists = err == nil
 		decision.SourceStandalone = unbound && (active || !retained.Valid) && !decision.Joined
 		if decision.Joined && decision.Active {
@@ -439,7 +430,7 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 			if !decision.Exists {
 				continue
 			}
-			if err := markLocalOnlyMoveEvents(ctx, tx, decision.SourceID, origin, issue.UID, references); err != nil {
+			if err := markLocalOnlyMoveEvents(ctx, tx, origin, issue.UID, references); err != nil {
 				return err
 			}
 		}
@@ -489,11 +480,6 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 		if _, err := tx.ExecContext(ctx, `UPDATE issues SET project_id=$1,short_id=$2,revision=revision+1 WHERE id=$3`, target, short, id); err != nil {
 			return err
 		}
-		if decision.Joined {
-			if err := releaseLocalOnlyMoveEvents(ctx, tx, target, origin, references); err != nil {
-				return err
-			}
-		}
 		if err := afterRehome(issue.UID, issue.ProjectUID); err != nil {
 			return err
 		}
@@ -527,12 +513,10 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 	return nil
 }
 
-func markLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, projectID int64, origin, issueUID string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) error {
+func markLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, origin, issueUID string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) error {
 	rows, err := tx.QueryContext(ctx, `SELECT e.uid,e.issue_uid,e.related_issue_uid,e.type,e.payload FROM events e
- WHERE e.id IN (SELECT pending.id FROM events pending JOIN federation_bindings b ON b.project_id=pending.project_id
- WHERE pending.project_id=$1 AND pending.origin_instance_uid=$2 AND pending.id>b.push_cursor_event_id
- UNION SELECT marked.id FROM meta m JOIN events marked ON marked.uid=substr(m.key,length('federation_local_only_event.')+1) JOIN federation_bindings b ON b.project_id=marked.project_id
- WHERE m.key>='federation_local_only_event' AND m.key<'federation_local_only_evenu' AND substr(m.key,1,length('federation_local_only_event.'))='federation_local_only_event.' AND marked.project_id=$1 AND marked.origin_instance_uid=$2)`, projectID, origin)
+ JOIN federation_bindings b ON b.project_id=e.project_id
+ WHERE e.origin_instance_uid=$1 AND e.id>b.push_cursor_event_id`, origin)
 	if err != nil {
 		return err
 	}
@@ -547,46 +531,8 @@ func markLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, projectID int64, o
 		}
 	}
 	for _, uid := range marked {
-		result, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'v1:held') ON CONFLICT(key) DO UPDATE SET value='v1:held' WHERE meta.value IN ('v1:held','v1:deliver')`, "federation_local_only_event."+uid)
-		if err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'v1:held') ON CONFLICT(key) DO NOTHING`, "federation_local_only_event."+uid); err != nil {
 			return err
-		}
-		count, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if count == 0 {
-			return fmt.Errorf("unknown local federation marker for event %s; upgrade Kata to resume sync", uid)
-		}
-	}
-	return nil
-}
-
-func releaseLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, projectID int64, origin string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) error {
-	rows, err := tx.QueryContext(ctx, `SELECT e.uid,e.issue_uid,e.related_issue_uid,e.type,e.payload FROM meta m JOIN events e ON e.uid=substr(m.key,length('federation_local_only_event.')+1) WHERE m.key>='federation_local_only_event' AND m.key<'federation_local_only_evenu' AND substr(m.key,1,length('federation_local_only_event.'))='federation_local_only_event.' AND m.value='v1:held' AND e.project_id=$1 AND e.origin_instance_uid=$2`, projectID, origin)
-	if err != nil {
-		return err
-	}
-	candidates, err := scanLocalMoveEvents(rows, references)
-	if err != nil {
-		return err
-	}
-	for _, event := range candidates {
-		ready := len(event.issues) > 0
-		for _, uid := range event.issues {
-			var present bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=$1 AND project_id=$2)`, uid, projectID).Scan(&present); err != nil {
-				return err
-			}
-			if !present {
-				ready = false
-				break
-			}
-		}
-		if ready {
-			if _, err := tx.ExecContext(ctx, `UPDATE meta SET value='v1:deliver' WHERE key=$1`, "federation_local_only_event."+event.uid); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
@@ -632,14 +578,6 @@ func scanLocalMoveEvents(rows *sql.Rows, references func(RemoteEvent, map[string
 		return nil, err
 	}
 	return candidates, nil
-}
-
-// ClearDeliveredFederationEvents removes markers for acknowledged events.
-func ClearDeliveredFederationEvents(ctx context.Context, exec interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}, projectID, cursor int64) error {
-	_, err := exec.ExecContext(ctx, `DELETE FROM meta WHERE key>='federation_local_only_event' AND key<'federation_local_only_evenu' AND substr(key,1,length('federation_local_only_event.'))='federation_local_only_event.' AND value='v1:deliver' AND EXISTS (SELECT 1 FROM events WHERE uid=substr(meta.key,length('federation_local_only_event.')+1) AND project_id=$1 AND id<=$2)`, projectID, cursor)
-	return err
 }
 
 type movedProjectPassKey struct{}
@@ -713,9 +651,6 @@ func RestrictFoldProjectWhere(p *FoldProjection, projectUID string, keep func(st
 // ClearFederatedMovedIssueHistory clears contributing streams while retaining
 // local events that cannot be pushed after a remote move.
 func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
-	if err := ValidateFederationLocalEventMarkers(ctx, tx, projectID); err != nil {
-		return err
-	}
 	// Only quarantines covering subject events being removed block this reset;
 	// unrelated quarantined work in a contributing stream remains independent.
 	rows, err := tx.QueryContext(ctx, `SELECT q.event_uids FROM federation_quarantine q

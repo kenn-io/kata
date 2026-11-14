@@ -223,9 +223,7 @@ func (s *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 
 // AdvanceFederationPushCursor advances the acknowledged local event id monotonically.
 func (s *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
-	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-		return updateFederationCursor(ctx, tx, projectID, nextCursor, true)
-	})
+	return s.updateFederationCursor(ctx, projectID, nextCursor, true)
 }
 
 func (s *Store) updateFederationCursor(ctx context.Context, projectID, nextCursor int64, push bool) error {
@@ -255,9 +253,6 @@ WHERE project_id=$2`
 	}
 	if count == 0 {
 		return db.ErrNotFound
-	}
-	if push {
-		return db.ClearDeliveredFederationEvents(ctx, exec, projectID, nextCursor)
 	}
 	return nil
 }

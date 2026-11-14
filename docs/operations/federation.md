@@ -91,7 +91,7 @@ The placeholder starts owner-only; restore it, then broaden its project access
 when others should see its issues. Restoring without joining does not subscribe
 to the project, but later moves can still place issues there. Offline edits made
 in the source before the move stay local even if the destination is later joined;
-they can synchronize if the issue returns to the original joined project.
+they stay local if the issue returns to the original joined project.
 To subscribe later, run `kata projects restore <local-name>`, optionally run
 `kata projects rename <local-name> <chosen-name>`, then rerun the enrollment's
 join command using `--project <current-local-name>`.

@@ -1,11 +1,8 @@
 package db
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -20,34 +17,14 @@ func FederationPushEligible(event string) string {
 	return `NOT EXISTS (SELECT 1 FROM meta WHERE key='federation_local_only_event.'||` + event + `.uid)`
 }
 
-// FederationPushPending includes released local events below the push cursor.
+// FederationPushPending selects eligible events after the push cursor.
 func FederationPushPending(event, cursor string) string {
-	return `((` + event + `.id>` + cursor + ` AND ` + FederationPushEligible(event) + `) OR EXISTS (SELECT 1 FROM meta WHERE key='federation_local_only_event.'||` + event + `.uid AND value='v1:deliver'))`
+	return `(` + event + `.id>` + cursor + ` AND ` + FederationPushEligible(event) + `)`
 }
 
-// FederationPushPendingIDs seeks new events and looks up released markers by UID.
+// FederationPushPendingIDs selects eligible events for a project and origin.
 func FederationPushPendingIDs(project, origin, cursor string) string {
-	return `SELECT pending.id FROM events pending WHERE pending.project_id=` + project + ` AND pending.origin_instance_uid=` + origin + ` AND pending.id>` + cursor + ` AND ` + FederationPushEligible("pending") + `
- UNION SELECT released.id FROM meta m JOIN events released ON released.uid=substr(m.key,length('federation_local_only_event.')+1)
- WHERE m.key>='federation_local_only_event' AND m.key<'federation_local_only_evenu' AND substr(m.key,1,length('federation_local_only_event.'))='federation_local_only_event.' AND m.value='v1:deliver'
- AND released.project_id=` + project + ` AND released.origin_instance_uid=` + origin
-}
-
-// ValidateFederationLocalEventMarkers rejects event states this version cannot interpret.
-func ValidateFederationLocalEventMarkers(ctx context.Context, query interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, _ int64) error {
-	var uid, value string
-	err := query.QueryRowContext(ctx, `SELECT substr(key,length('federation_local_only_event.')+1),value FROM meta
- WHERE key>='federation_local_only_event' AND key<'federation_local_only_evenu' AND substr(key,1,length('federation_local_only_event.'))='federation_local_only_event.'
- AND value NOT IN ('v1:held','v1:deliver') LIMIT 1`).Scan(&uid, &value)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("check local federation event markers: %w", err)
-	}
-	return fmt.Errorf("unknown local federation marker %q for event %s; upgrade Kata to resume sync", value, uid)
+	return `SELECT pending.id FROM events pending WHERE pending.project_id=` + project + ` AND pending.origin_instance_uid=` + origin + ` AND ` + FederationPushPending("pending", cursor)
 }
 
 // ProjectMetadataAdoptionPayload encodes existing project metadata as a

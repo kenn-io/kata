@@ -31,9 +31,6 @@ func (s *Store) PendingFederationPushEvents(
 	afterID int64,
 	limit int,
 ) ([]db.Event, error) {
-	if err := db.ValidateFederationLocalEventMarkers(ctx, s, projectID); err != nil {
-		return nil, err
-	}
 	if limit <= 0 {
 		limit = 1000
 	}
@@ -104,9 +101,6 @@ func (s *Store) PendingFederationPushStats(
 	originInstanceUID string,
 	afterID int64,
 ) (int64, int64, error) {
-	if err := db.ValidateFederationLocalEventMarkers(ctx, s, projectID); err != nil {
-		return 0, 0, err
-	}
 	if count, highWater, negotiated, err := s.pendingRelayRootStats(ctx, projectID, originInstanceUID); err != nil || negotiated {
 		return count, highWater, err
 	}

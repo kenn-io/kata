@@ -28,9 +28,6 @@ func (d *Store) PendingFederationPushEvents(
 	afterID int64,
 	limit int,
 ) ([]db.Event, error) {
-	if err := db.ValidateFederationLocalEventMarkers(ctx, d, projectID); err != nil {
-		return nil, err
-	}
 	if limit <= 0 {
 		limit = 1000
 	}
@@ -107,9 +104,6 @@ func (d *Store) PendingFederationPushStats(
 	originInstanceUID string,
 	afterID int64,
 ) (int64, int64, error) {
-	if err := db.ValidateFederationLocalEventMarkers(ctx, d, projectID); err != nil {
-		return 0, 0, err
-	}
 	if count, highWater, negotiated, err := d.pendingRelayRootStats(ctx, projectID, originInstanceUID); err != nil || negotiated {
 		return count, highWater, err
 	}
@@ -215,7 +209,7 @@ func advanceFederationPushCursor(ctx context.Context, exec interface {
 	if n == 0 {
 		return db.ErrNotFound
 	}
-	return db.ClearDeliveredFederationEvents(ctx, exec, projectID, nextCursor)
+	return nil
 }
 
 // EnableFederationPush marks an existing spoke binding push-enabled and keeps
@@ -301,9 +295,6 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
-		return err
-	}
-	if err := db.ValidateFederationLocalEventMarkers(ctx, tx, projectID); err != nil {
 		return err
 	}
 
