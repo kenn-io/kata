@@ -172,10 +172,13 @@ func TestFederationRebindPreflightClassifiesSigningRequired(t *testing.T) {
 	t.Cleanup(func() { newFederationRebindHTTPClient = originalFactory })
 
 	_, err := fetchFederationRebindMetadata(t.Context(), server.URL, "enrollment-secret", 41, nil)
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrFederationReplicaCredentialConflict)
+	assert.NotErrorIs(t, err, ErrFederationReplicaHubUnavailable)
 	var apiErr *api.APIError
 	require.ErrorAs(t, federationReplicaAPIError(err), &apiErr)
-	assert.Contains(t, strings.ToLower(apiErr.Message+" "+apiErr.Hint), "signing")
+	assert.Equal(t, http.StatusConflict, apiErr.Status)
+	assert.Equal(t, "federation_credential_conflict", apiErr.Code)
+	assert.Contains(t, apiErr.Message, "signing")
 	assert.Contains(t, apiErr.Hint, "kata federation signing configure")
 }
 
