@@ -582,10 +582,7 @@ func (s *Store) materializeFederatedProjectTxScoped(
 		if err := reconcileFederatedComments(ctx, tx, projectID, ids, view, issue.UID); err != nil {
 			return err
 		}
-		if err := reconcileFederatedLabels(ctx, tx, projectID, ids, view, issue.UID); err != nil {
-			return err
-		}
-		return reconcileParkedIssueLinks(ctx, tx, projection, issue.UID)
+		return reconcileFederatedLabels(ctx, tx, projectID, ids, view, issue.UID)
 	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
 		payload := "{}"
 		var issueUID *string

@@ -481,10 +481,7 @@ func applyUnjoinedMovedIssue(ctx context.Context, tx *sql.Tx, projectID int64, i
 	if err := reconcileFederatedCommentsFromRows(ctx, tx, m.issueIDs, m.projection, m.commentRows); err != nil {
 		return err
 	}
-	if err := reconcileFederatedLabelsFromRows(ctx, tx, m.issueIDs, m.projection, m.labelRows); err != nil {
-		return err
-	}
-	return reconcileParkedIssueLinks(ctx, tx, projection, issue.UID)
+	return reconcileFederatedLabelsFromRows(ctx, tx, m.issueIDs, m.projection, m.labelRows)
 }
 
 func reconcileParkedIssueLinks(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueUID string) error {

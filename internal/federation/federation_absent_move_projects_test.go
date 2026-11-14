@@ -1,6 +1,8 @@
 package federation
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"testing"
 
@@ -8,6 +10,12 @@ import (
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
 )
+
+type failingDeliveryLookup struct{ db.Storage }
+
+func (failingDeliveryLookup) EventsByUIDs(context.Context, int64, []string) ([]db.Event, error) {
+	return nil, errors.New("delivery lookup failed")
+}
 
 // A direct spoke must be able to consume B's history without local A or C rows.
 func TestSyncFederationMoveHistoryWithAbsentCounterpartProjects(t *testing.T) {
@@ -31,6 +39,10 @@ func TestSyncFederationMoveHistoryWithAbsentCounterpartProjects(t *testing.T) {
 	expected := []string{created.UID, inMove.Event.UID, outboundCreated.UID, outMove.Event.UID, laterEvent.UID}
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 	require.NoError(t, err)
+	err = SyncFederationOnceWithPulledEvents(ctx, failingDeliveryLookup{spoke.env.DB}, binding, spoke.credentials[projects[1].UID], clientpkg.Opts{}, func(int64, []db.Event) {}, spoke.credentials)
+	require.ErrorContains(t, err, "load delivery project")
+	require.ErrorContains(t, err, projects[1].UID)
+	require.ErrorContains(t, err, outboundCreated.UID)
 	var delivered []string
 	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.env.DB, binding, spoke.credentials[projects[1].UID], clientpkg.Opts{}, func(_ int64, events []db.Event) {
 		for _, event := range events {

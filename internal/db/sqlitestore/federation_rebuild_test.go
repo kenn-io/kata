@@ -218,7 +218,7 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 	}
 }
 
-func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
+func moveRebuildPreservesLocalLabelsOnReturn(t *testing.T) {
 	ctx := t.Context()
 	d, source, issue := incrementalTestStore(t)
 	issue = resetToRemoteIssue(t, d, source, issue)
@@ -256,37 +256,12 @@ func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
 	require.NoError(t, d.MaterializeFederatedProject(ctx, source.ID))
 	require.Equal(t, 1, attempts)
 	require.NoError(t, locked.materializeFederatedProject(ctx, source.ID))
-	for _, store := range []*Store{d, locked} {
-		got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-		require.NoError(t, err)
-		require.Equal(t, issue.ID, got.ID)
-		require.Equal(t, destination.ID, got.ProjectID)
-		require.Equal(t, "work 42", got.Title)
-		require.JSONEq(t, `{"area":"value-42"}`, string(got.Metadata))
-		links, err := store.LinksByIssue(ctx, issue.ID)
-		require.NoError(t, err)
-		require.Len(t, links, 1)
-		typ, payload := "issue.commented", fmt.Sprintf(`{"issue_uid":%q,"comment_uid":"01HZNQ7VFPK1XGD8R5MABCDEF1","author":"tester","body":"delayed","created_at":"2026-05-23T12:00:00.000Z"}`, issue.UID)
-		_, err = store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{incrementalRemoteEvent(t, source, issue.UID, typ, payload, 8_000_000_000_011)})
-		require.NoError(t, err)
-		if store == d {
-			require.NoError(t, store.MaterializeFederatedProject(ctx, source.ID))
-			require.Equal(t, 2, attempts)
-		} else {
-			require.NoError(t, store.materializeFederatedProject(ctx, source.ID))
-		}
-
-	}
 	preparedIssue, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	lockedIssue, err := locked.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	require.Equal(t, preparedIssue, lockedIssue)
-	preparedComments, err := d.CommentsByIssue(ctx, issue.ID)
-	require.NoError(t, err)
-	lockedComments, err := locked.CommentsByIssue(ctx, issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, preparedComments, lockedComments)
+	require.Equal(t, federationProjectionRows(t, locked, source.ID), federationProjectionRows(t, d, source.ID))
 	for _, store := range []*Store{d, locked} {
 		payload := fmt.Sprintf(`{"issue_uid":%q,"from_project_uid":%q,"from_short_id":%q,"to_project_uid":%q,"to_short_id":%q,"snapshot":{"uid":%q,"short_id":%q,"title":"work 42","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}}`, issue.UID, destination.UID, issue.ShortID, source.UID, issue.ShortID, issue.UID, issue.ShortID)
 		_, err := store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{incrementalRemoteEvent(t, source, issue.UID, "issue.moved", payload, 9_000_000_000_001)})
@@ -298,9 +273,13 @@ func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
 		}
 		labels, err := store.LabelsByIssue(ctx, issue.ID)
 		require.NoError(t, err)
-		require.Len(t, labels, 2)
-		require.ElementsMatch(t, []string{"area:db", "local"}, []string{labels[0].Label, labels[1].Label})
+		var names []string
+		for _, label := range labels {
+			names = append(names, label.Label)
+		}
+		require.ElementsMatch(t, []string{"area:db", "local"}, names)
 	}
+	require.Equal(t, federationProjectionRows(t, locked, source.ID), federationProjectionRows(t, d, source.ID))
 }
 
 func TestMoveRebuildAssignsCollidingShortIDsInOrder(t *testing.T) {
@@ -385,6 +364,7 @@ func TestMoveRebuildDoesNotResurrectArchivedDestination(t *testing.T) {
 }
 
 func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
+	t.Run("parked issue return keeps local labels", moveRebuildPreservesLocalLabelsOnReturn)
 	t.Run("relay link across chained project moves", func(t *testing.T) {
 		ctx := t.Context()
 		d, source, issue := incrementalTestStore(t)

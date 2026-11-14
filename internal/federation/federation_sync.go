@@ -540,6 +540,7 @@ func syncDirectSpoke(
 			}
 		}
 		deliverUIDs := map[int64][]string{}
+		deliverProjectUIDs := map[int64]string{}
 		var deliverProjects []int64
 		materializeUIDs := make([]string, 0, len(body.Events))
 		var applyUIDs []string
@@ -572,6 +573,7 @@ func syncDirectSpoke(
 				}
 				if _, ok := deliverUIDs[project]; !ok {
 					deliverProjects = append(deliverProjects, project)
+					deliverProjectUIDs[project] = ev.ProjectUID
 				}
 				deliverUIDs[project] = append(deliverUIDs[project], ev.EventUID)
 			}
@@ -610,7 +612,7 @@ func syncDirectSpoke(
 			for _, project := range deliverProjects {
 				events, err := store.EventsByUIDs(ctx, project, deliverUIDs[project])
 				if err != nil {
-					return err
+					return fmt.Errorf("load delivery project %s for pull route %s events %v: %w", deliverProjectUIDs[project], binding.HubProjectUID, deliverUIDs[project], err)
 				}
 				for _, event := range events {
 					byUID[event.UID] = event
