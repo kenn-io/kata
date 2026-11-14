@@ -868,3 +868,19 @@ func TestCronRunStatsRequiresAPIVersion(t *testing.T) {
 	require.EqualValues(t, 1, healthCalls.Load())
 	require.Zero(t, statsCalls.Load())
 }
+
+func TestCronRunStatsRejectsEmptyFilters(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	for _, flag := range []string{"--job-uid", "--workflow-uid"} {
+		t.Run(flag, func(t *testing.T) {
+			_, _, err := executeCronCLI(t, server.URL, nil, "run", "stats", flag, "")
+			require.ErrorContains(t, err, flag+" must not be empty")
+			require.Zero(t, calls.Load())
+		})
+	}
+}

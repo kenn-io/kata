@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
+	"go.kenn.io/kata/internal/timeparse"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -125,30 +126,9 @@ cross-project digest.`,
 	return cmd
 }
 
-// parseSinceUntil accepts either a Go duration (e.g. 24h, 30m, 7d) or an
-// RFC3339 timestamp. Durations are interpreted as "now minus duration"; the
-// "d" suffix is expanded to hours since Go's time.ParseDuration doesn't
-// support days natively.
+// parseSinceUntil resolves a duration or RFC3339 timestamp.
 func parseSinceUntil(s string, now time.Time) (time.Time, error) {
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t.UTC(), nil
-	}
-	expanded := s
-	if before, ok := strings.CutSuffix(s, "d"); ok {
-		num := before
-		// Trust no integer-overflow wraparound here: a multi-year window is
-		// the user's call, and ParseDuration will reject pathological inputs
-		// (e.g. trailing "d" with non-numeric prefix).
-		expanded = num + "h"
-		if d, err := time.ParseDuration(expanded); err == nil {
-			return now.Add(-24 * d).UTC(), nil
-		}
-	}
-	d, err := time.ParseDuration(expanded)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid time spec %q: must be a duration (24h, 7d) or RFC3339 timestamp", s)
-	}
-	return now.Add(-d).UTC(), nil
+	return timeparse.Since(s, now)
 }
 
 type digestURLOpts struct {

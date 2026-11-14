@@ -106,9 +106,11 @@ func TestDigest_OutputShape(t *testing.T) {
 func TestDigest_RejectsBadSince(t *testing.T) {
 	f := newCLIFixture(t)
 
-	err := f.execute("digest", "--since", "blarg")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid time spec")
+	for _, since := range []string{"blarg", "1h1d"} {
+		err := f.execute("digest", "--since", since)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid time spec")
+	}
 }
 
 func TestDigest_ParseSinceUntil(t *testing.T) {

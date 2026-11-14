@@ -232,6 +232,13 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if cmd.Flags().Changed("parent") && strings.TrimSpace(o.parent) == "" {
 		return cronCLIValidation("--parent must not be empty")
 	}
+	if o.resource == "run" && o.action == "stats" {
+		for _, filter := range []struct{ name, value string }{{"job-uid", o.jobUID}, {"workflow-uid", o.workflowUID}} {
+			if cmd.Flags().Changed(filter.name) && strings.TrimSpace(filter.value) == "" {
+				return cronCLIValidation("--" + filter.name + " must not be empty")
+			}
+		}
+	}
 	for _, value := range []*string{&o.identity, &o.beforeUID, &o.jobUID, &o.workflowUID} {
 		if *value != "" {
 			normalized, err := normalizedCronCLIUID(*value)

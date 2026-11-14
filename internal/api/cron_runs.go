@@ -94,7 +94,7 @@ type CronRunsResponse struct {
 	}
 }
 
-// CronRunStatsRequest selects a execution-time window and optional filter.
+// CronRunStatsRequest selects an execution-time window and optional filter.
 type CronRunStatsRequest struct {
 	CronProjectRequest
 	JobUID      string `query:"job_uid"`
