@@ -1,9 +1,17 @@
 package federation
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"slices"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -43,6 +51,12 @@ func TestSyncFederationMoveHistoryWithAbsentCounterpartProjects(t *testing.T) {
 	require.ErrorContains(t, err, "load delivery project")
 	require.ErrorContains(t, err, projects[1].UID)
 	require.ErrorContains(t, err, outboundCreated.UID)
+	status, err := spoke.env.DB.FederationSyncStatusByProject(ctx, binding.ProjectID)
+	require.NoError(t, err)
+	require.NotNil(t, status.LastError)
+	require.Contains(t, *status.LastError, "load delivery project")
+	require.Contains(t, *status.LastError, projects[1].UID)
+	require.Contains(t, *status.LastError, outboundCreated.UID)
 	var delivered []string
 	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.env.DB, binding, spoke.credentials[projects[1].UID], clientpkg.Opts{}, func(_ int64, events []db.Event) {
 		for _, event := range events {
@@ -55,4 +69,58 @@ func TestSyncFederationMoveHistoryWithAbsentCounterpartProjects(t *testing.T) {
 	binding, err = spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, binding.PullCursorEventID, laterEvent.ID)
+}
+
+func TestSyncFederationReportsInvalidPullHashAndRetries(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "hash-project")
+	spoke := newMoveDeliverySpoke(t, hub, projects)
+	_, event, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Pull event", Author: "worker"})
+	require.NoError(t, err)
+	require.NotEmpty(t, event.ContentHash)
+	target, err := url.Parse(hub.URL)
+	require.NoError(t, err)
+	proxy := &httputil.ReverseProxy{Rewrite: func(request *httputil.ProxyRequest) {
+		request.SetURL(target)
+		request.Out.Header.Set("Accept-Encoding", "identity")
+	}}
+	var corrupt atomic.Bool
+	corrupt.Store(true)
+	proxy.ModifyResponse = func(response *http.Response) error {
+		if !corrupt.Load() {
+			return nil
+		}
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			return err
+		}
+		if err := response.Body.Close(); err != nil {
+			return err
+		}
+		body = bytes.ReplaceAll(body, []byte(event.ContentHash), []byte(strings.Repeat("0", len(event.ContentHash))))
+		response.Body = io.NopCloser(bytes.NewReader(body))
+		return nil
+	}
+	server := httptest.NewServer(proxy)
+	t.Cleanup(server.Close)
+	credential := spoke.credentials[projects[0].UID]
+	credential.HubURL = server.URL
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	err = SyncFederationPullOnlyOnce(ctx, spoke.env.DB, binding, credential, spoke.credentials)
+	require.ErrorContains(t, err, "validate remote event")
+	status, err := spoke.env.DB.FederationSyncStatusByProject(ctx, binding.ProjectID)
+	require.NoError(t, err)
+	require.NotNil(t, status.LastError)
+	require.Contains(t, *status.LastError, "validate remote event")
+	require.Contains(t, *status.LastError, projects[0].UID)
+	require.Contains(t, *status.LastError, event.UID)
+	binding, err = spoke.env.DB.FederationBindingByProject(ctx, binding.ProjectID)
+	require.NoError(t, err)
+	require.Less(t, binding.PullCursorEventID, event.ID)
+	corrupt.Store(false)
+	require.NoError(t, SyncFederationPullOnlyOnce(ctx, spoke.env.DB, binding, credential, spoke.credentials))
+	binding, err = spoke.env.DB.FederationBindingByProject(ctx, binding.ProjectID)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, binding.PullCursorEventID, event.ID)
 }
