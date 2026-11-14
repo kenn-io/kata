@@ -38,7 +38,7 @@ func federationCronFoldEvents(ctx context.Context, tx *sql.Tx, projectID int64) 
 	if err != nil {
 		return nil, fmt.Errorf("list federated cron events: %w", err)
 	}
-	return scanFederationFoldEvents(rows, nil)
+	return scanFederationFoldEvents(rows)
 }
 
 // Cron rows derive only from cron events. A cron-only pull still folds their
@@ -77,7 +77,7 @@ func prepareCronPullMaterialization(ctx context.Context, tx *sql.Tx, projectID i
 	if err != nil {
 		return federationMaterialization{}, fmt.Errorf("list federated cron events: %w", err)
 	}
-	events, err := scanFederationFoldEvents(rows, nil)
+	events, err := scanFederationFoldEvents(rows)
 	if err != nil {
 		return federationMaterialization{}, err
 	}

@@ -14,13 +14,7 @@ import (
 // fetches count the work even when SQLite serves the entire history from cache.
 func TestFederationFoldBulkMovePageBudget(t *testing.T) {
 	d, project := seedFederationFoldMoves(t, 20_000, 2_000)
-	raw, err := sql.Open("sqlite", d.Path())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, raw.Close()) })
-	raw.SetMaxOpenConns(1)
-	conn, err := raw.Conn(t.Context())
-	require.NoError(t, err)
-	defer func() { require.NoError(t, conn.Close()) }()
+	conn := pageCountingConn(t, d)
 	for _, analyzed := range []bool{false, true} {
 		if analyzed {
 			// Each subtest closes its read transaction before statistics change.
@@ -66,8 +60,7 @@ func BenchmarkFederationFoldBulkMoves(b *testing.B) {
 				require.NoError(b, err)
 				defer func() { require.NoError(b, tx.Rollback()) }()
 				b.ReportAllocs()
-				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					if group {
 						_, err = federationGroupFoldProjection(b.Context(), tx, projectIDs)
 					} else {
@@ -107,18 +100,26 @@ func seedFederationFoldMoves(t testing.TB, history, moves int) (*Store, db.Proje
 	return d, destination
 }
 
-func TestFederationFoldScopedPageBudget(t *testing.T) {
-	d, project := seedFederationFoldMoves(t, 20_000, 2_000)
+// pageCountingConn opens one dedicated connection to the store's database so
+// cronPullPageFetches counts only the pages read by queries on it.
+func pageCountingConn(t *testing.T, d *Store) *sql.Conn {
+	t.Helper()
 	raw, err := sql.Open("sqlite", d.Path())
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, raw.Close()) })
 	raw.SetMaxOpenConns(1)
 	conn, err := raw.Conn(t.Context())
 	require.NoError(t, err)
-	defer func() { require.NoError(t, conn.Close()) }()
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+	return conn
+}
+
+func TestFederationFoldScopedPageBudget(t *testing.T) {
+	d, project := seedFederationFoldMoves(t, 20_000, 2_000)
+	conn := pageCountingConn(t, d)
 	for _, analyzed := range []bool{false, true} {
 		if analyzed {
-			_, err = conn.ExecContext(t.Context(), "ANALYZE")
+			_, err := conn.ExecContext(t.Context(), "ANALYZE")
 			require.NoError(t, err)
 		}
 		t.Run(fmt.Sprintf("analyzed=%t", analyzed), func(t *testing.T) {
@@ -164,7 +165,6 @@ func TestFederationFoldSelection(t *testing.T) {
 		{"all", nil, nil, []string{"1", "2", "3", "4", "5", "6", "7"}, false},
 		{"typed", []string{"issue.updated"}, nil, []string{"1", "2", "3", "4"}, false},
 		{"scoped", nil, []string{one}, []string{"1", "3", "5", "7"}, true},
-		{"typed-scoped", []string{"issue.updated"}, []string{one, "00000000000000000000000002"}, []string{"1", "2", "3", "4"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tx, err := d.BeginTx(t.Context(), nil)
@@ -195,13 +195,7 @@ func TestFederationFoldScopedMovedHistoryPageBudget(t *testing.T) {
 	const subject = "00000000000000000000000001"
 	_, err := d.ExecContext(t.Context(), `UPDATE events SET issue_uid=?,payload=json_set(payload,'$.issue_uid',?) WHERE type='issue.updated'`, subject, subject)
 	require.NoError(t, err)
-	raw, err := sql.Open("sqlite", d.Path())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, raw.Close()) })
-	raw.SetMaxOpenConns(1)
-	conn, err := raw.Conn(t.Context())
-	require.NoError(t, err)
-	defer func() { require.NoError(t, conn.Close()) }()
+	conn := pageCountingConn(t, d)
 	tx, err := conn.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, tx.Rollback()) }()

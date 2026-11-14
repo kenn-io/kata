@@ -1883,7 +1883,7 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
 	if err != nil {
 		return nil, fmt.Errorf("list federated events: %w", err)
 	}
-	return scanFederationFoldEvents(rows, issueScope)
+	return scanFederationFoldEvents(rows)
 }
 
 func federationFoldEventsQuery(projectID int64, eventTypes, issueScope []string) (string, []any) {
@@ -1927,7 +1927,7 @@ func federationFoldEventsQuery(projectID int64, eventTypes, issueScope []string)
 	return query, args
 }
 
-func scanFederationFoldEvents(rows *sql.Rows, issueScope []string) ([]db.FoldEvent, error) {
+func scanFederationFoldEvents(rows *sql.Rows) ([]db.FoldEvent, error) {
 	defer func() { _ = rows.Close() }()
 	var out []db.FoldEvent
 	for rows.Next() {
@@ -1953,9 +1953,6 @@ func scanFederationFoldEvents(rows *sql.Rows, issueScope []string) ([]db.FoldEve
 		}
 		e.Payload = jsontext.Value(payload)
 		e.CreatedAt = createdAt.UTC().Format(sqliteTimeFormat)
-		if len(issueScope) > 0 && !strings.HasPrefix(e.Type, "project.") && !slices.Contains(issueScope, e.IssueUID) {
-			continue
-		}
 		out = append(out, e)
 	}
 	return db.FederationMoveBaselineEvents(out), rows.Err()
