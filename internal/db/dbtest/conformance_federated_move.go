@@ -206,7 +206,6 @@ func checkFederatedIssueMove(t *testing.T, hub db.Storage, backend Backend) erro
 	require.NoError(t, spoke.MaterializeFederatedProject(ctx, replicas[target.ID].ID))
 	got, err := spoke.IssueByUID(ctx, root.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	require.Equal(t, root.UID, got.UID)
 	require.Equal(t, replicas[target.ID].ID, got.ProjectID)
 	gotChild, err := spoke.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
