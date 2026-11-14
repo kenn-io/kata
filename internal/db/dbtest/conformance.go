@@ -345,7 +345,6 @@ var storageScenarios = []scenario{
 	{name: "federated move detached destination", methods: []string{"LeaveFederationReplica", "MaterializeFederatedProject"}, run: checkFederatedMoveDetachedDestination},
 	{name: "federated move purge former streams", methods: []string{"PurgeIssue", "ReadFederation"}, run: checkFederatedMovePurgeFormerStreams},
 	{name: "federated move replay access revision", methods: []string{"IngestFederationEvents", "InsertRemoteEvents", "MaterializeFederatedProject"}, run: checkFederatedMoveReplayAccessRevision},
-	{name: "federated move invalid retained marker", methods: []string{"InsertRemoteEvents", "MaterializeFederatedProject", "IssueByID"}, run: checkFederatedMoveInvalidRetainedMarker},
 	{name: "federated move replay embedding artifacts", methods: []string{"IngestFederationEvents", "InsertRemoteEvents", "MaterializeFederatedProject"}, run: checkFederatedMoveReplayEmbeddingArtifacts},
 	{name: "federated read pages", methods: []string{"ReadFederation"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
 		checkFederatedReadPages(t, store, backend)

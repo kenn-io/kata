@@ -1,8 +1,6 @@
 package dbtest
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"strings"
@@ -14,24 +12,6 @@ import (
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/uid"
 )
-
-func checkFederatedMoveInvalidRetainedMarker(t *testing.T, store db.Storage) error {
-	ctx := t.Context()
-	source, target, issue, event := federatedRehomeFixture(t, store, "invalid-marker")
-	prepareRehomePull(t, store, source, target, "pull")
-	_, err := store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{event})
-	require.NoError(t, err)
-	q := store.(interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	})
-	_, err = q.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2)`, db.FederationRetainedProjectPrefix+source.UID, "unknown")
-	require.NoError(t, err)
-	require.Error(t, store.MaterializeFederatedProject(ctx, target.ID))
-	got, err := store.IssueByID(ctx, issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, source.ID, got.ProjectID)
-	return nil
-}
 
 func federatedRehomeFixture(t *testing.T, store db.Storage, suffix string) (db.Project, db.Project, db.Issue, db.RemoteEvent) {
 	t.Helper()

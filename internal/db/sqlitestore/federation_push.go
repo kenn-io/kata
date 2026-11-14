@@ -11,6 +11,14 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+var pendingFederationPushWhere = `
+		WHERE e.project_id = $1
+		  AND e.origin_instance_uid = $2
+		  AND e.id IN (` + db.FederationPushPendingIDs("$1", "$2", "$3") + `)
+		  AND ` + federationPushEventTypeCondition("e.type") + `
+		ORDER BY e.id ASC
+		LIMIT $4`
+
 // PendingFederationPushEvents returns local-origin events that have not yet
 // been acknowledged by the hub for a push-enabled spoke binding.
 func (d *Store) PendingFederationPushEvents(
@@ -26,13 +34,7 @@ func (d *Store) PendingFederationPushEvents(
 	if limit <= 0 {
 		limit = 1000
 	}
-	out, err := d.queryPendingFederationPushEvents(ctx, `
-		WHERE e.project_id = $1
-		  AND e.origin_instance_uid = $2
-		  AND e.id IN (`+db.FederationPushPendingIDs("$1", "$2", "$3")+`)
-		  AND `+federationPushEventTypeCondition("e.type")+`
-		ORDER BY e.id ASC
-		LIMIT $4`, projectID, originInstanceUID, afterID, limit)
+	out, err := d.queryPendingFederationPushEvents(ctx, pendingFederationPushWhere, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -81,14 +83,7 @@ func (d *Store) PendingFederationPushEvents(
 }
 
 func (d *Store) queryPendingFederationPushEvents(ctx context.Context, where string, args ...any) ([]db.Event, error) {
-	rows, err := d.QueryContext(ctx, `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
-	             e.issue_id, e.issue_uid, i.short_id, e.related_issue_id, e.related_issue_uid, ri.short_id,
-	             e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
-	      FROM events e
-	      JOIN projects p ON p.id = e.project_id
-	      LEFT JOIN issues i ON i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid)
-	      LEFT JOIN issues ri ON ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid)
-	      `+where, args...)
+	rows, err := d.QueryContext(ctx, eventSelect+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("pending federation push events: %w", err)
 	}

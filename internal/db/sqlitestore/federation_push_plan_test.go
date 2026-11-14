@@ -6,12 +6,24 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 func TestFederationPendingPushUsesCursorRange(t *testing.T) {
 	store := openTestDB(t)
-	query := `SELECT e.id FROM events e WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id IN (` + db.FederationPushPendingIDs("$1", "$2", "$3") + `)`
-	rows, err := store.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+query, 1, store.InstanceUID(), 100)
+	project, err := store.CreateProject(t.Context(), "push-budget")
+	require.NoError(t, err)
+	for range 100 {
+		_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "pending work", Author: "tester"})
+		require.NoError(t, err)
+	}
+	cursor, err := store.MaxEventID(t.Context())
+	require.NoError(t, err)
+	pending, err := store.PendingFederationPushEvents(t.Context(), project.ID, store.InstanceUID(), cursor, 100)
+	require.NoError(t, err)
+	require.Empty(t, pending)
+	query := sqlitestore.EventSelectForTest + sqlitestore.PendingFederationPushWhereForTest
+	rows, err := store.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+query, project.ID, store.InstanceUID(), cursor, 100)
 	require.NoError(t, err)
 	var plan []string
 	for rows.Next() {
