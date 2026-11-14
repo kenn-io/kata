@@ -16,7 +16,15 @@ func (d *Store) CreateRelayReset(ctx context.Context, bindingUID string, signer 
 		var err error
 		protocol := db.RelayResetProtocol{Backend: relayResetBackend{d: d, tx: tx, scanRelayHistory: scan}, InstanceUID: d.instanceUID}
 		result, err = protocol.CreateReset(ctx, bindingUID, signer)
-		return err
+		if err != nil {
+			return err
+		}
+		var events []db.RemoteEvent
+		if err := db.VisitRelayResetSources(result.Snapshot, func(event db.RemoteEvent) error { events = append(events, event); return nil }); err != nil {
+			return err
+		}
+		lookup := eventIssueLookup(db.WithoutIssueRegistries(db.WithAuthorizedProjects(ctx, nil)), tx)
+		return db.AuthorizeRelayRelease(ctx, tx, lookup, result.Manifest.ProjectUID, events)
 	})
 	if err != nil {
 		return db.RelayResetCheckpoint{}, err

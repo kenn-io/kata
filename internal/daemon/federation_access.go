@@ -71,10 +71,11 @@ func federationTransportOperation(operationID string) HostFederationOperation {
 // HostFederationAccessRequest carries native credential and project facts to
 // the public service adapter.
 type HostFederationAccessRequest struct {
-	Enrollment db.FederationEnrollment
-	Project    db.Project
-	Capability string
-	Operation  HostFederationOperation
+	Enrollment           db.FederationEnrollment
+	EnrollmentProjectUID string
+	Project              db.Project
+	Capability           string
+	Operation            HostFederationOperation
 }
 
 // HostFederationAccessDecision contains an optional mutation fence.

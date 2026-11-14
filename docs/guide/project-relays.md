@@ -42,6 +42,10 @@ The names above may differ, but all three copies retain the same project UID.
 Only the selected project travels over each connection. Workspace paths and
 aliases stay local. A relay does not grant access to the hub's other projects.
 
+A relay withholds an entire update or checkpoint when it names a project the
+account cannot access or a reference whose project cannot be established.
+Data already received remains available, and the hop retries when access returns.
+
 Use a [remote daemon](../operations/remote-daemon.md) when every client needs
 to read and write one central copy. See [Sharing models](../workflows/sharing.md)
 for the other choices.

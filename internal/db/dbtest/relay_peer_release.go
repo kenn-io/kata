@@ -1,0 +1,142 @@
+package dbtest
+
+import (
+	"context"
+	"crypto/ed25519"
+	"encoding/json/jsontext"
+	"errors"
+	"fmt"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+)
+
+// RunRelayPeerRelease checks whole-response refusal and retained retries.
+func RunRelayPeerRelease(t *testing.T, store db.Storage) {
+	fixture := NewRelaySharedAccessFixture(t, store)
+	binding := fixture.Grants[0].Enrollment.RelayBindingUID
+	ctx := db.WithRelayPeerEventFeatures(t.Context(), db.SupportedEventFeatures)
+	denied := errors.New("peer denied")
+	rejecting := db.WithProjectAccessTransactionCheck(ctx, func(_ context.Context, _ db.Transaction, uid string) error {
+		if uid == fixture.Projects[1].UID {
+			return denied
+		}
+		return nil
+	})
+	state := func() []db.ImportRecord {
+		var records []db.ImportRecord
+		for record, err := range store.ExportRelayState(ctx) {
+			require.NoError(t, err)
+			records = append(records, record)
+		}
+		return records
+	}
+	before := state()
+	grants, err := store.ListProjectFederationEnrollments(ctx, fixture.Projects[0].ID)
+	require.NoError(t, err)
+	out, err := store.PendingRelayDeliveries(rejecting, binding, db.RelayStreamEvent, 100)
+	require.ErrorIs(t, err, denied)
+	require.Empty(t, out)
+	require.Equal(t, before, state())
+	afterGrants, err := store.ListProjectFederationEnrollments(ctx, fixture.Projects[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, grants, afterGrants)
+	offered, err := store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
+	require.NoError(t, err)
+	require.NotEmpty(t, offered)
+	out, err = store.PendingRelayDeliveries(rejecting, binding, db.RelayStreamEvent, 100)
+	require.ErrorIs(t, err, denied)
+	require.Empty(t, out)
+	retried, err := store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
+	require.NoError(t, err)
+	require.Equal(t, offered, retried)
+
+	reset := store.(db.RelayResetStore)
+	before = state()
+	grants, err = store.ListProjectFederationEnrollments(ctx, fixture.Projects[0].ID)
+	require.NoError(t, err)
+	maxEvent, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	blocked, err := reset.CreateRelayReset(rejecting, binding, fixture.Signer)
+	require.ErrorIs(t, err, denied)
+	require.NotContains(t, err.Error(), fixture.Issues[1].UID)
+	require.NotContains(t, err.Error(), fixture.Projects[1].UID)
+	require.Equal(t, db.RelayResetCheckpoint{}, blocked)
+	require.Equal(t, before, state())
+	afterGrants, err = store.ListProjectFederationEnrollments(ctx, fixture.Projects[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, grants, afterGrants)
+	currentEvent, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, maxEvent, currentEvent)
+	checkpoint, err := reset.CreateRelayReset(ctx, binding, fixture.Signer)
+	require.NoError(t, err)
+	public := fixture.Signer.PrivateKey.Public().(ed25519.PublicKey)
+	pin := db.RootKeyPin{ProjectUID: fixture.Projects[0].UID, AuthorityUID: fixture.Signer.AuthorityUID, KeyID: db.RootPublicKeyID(public), PublicKey: public}
+	require.NoError(t, db.VerifyRootResetManifest(pin, checkpoint.Manifest, checkpoint.Snapshot))
+	before = state()
+	blocked, err = reset.CreateRelayReset(rejecting, binding, fixture.Signer)
+	require.ErrorIs(t, err, denied)
+	require.Equal(t, db.RelayResetCheckpoint{}, blocked)
+	require.Equal(t, before, state())
+	repeated, err := reset.CreateRelayReset(ctx, binding, fixture.Signer)
+	require.NoError(t, err)
+	require.Equal(t, checkpoint, repeated)
+	activated := db.WithRelayRequestedEpoch(ctx, checkpoint.Translation.Authority.Epoch)
+	_, err = store.PendingRelayDeliveries(activated, binding, db.RelayStreamEvent, 100)
+	require.NoError(t, err)
+	before = state()
+	deniedActivated := db.WithProjectAccessTransactionCheck(activated, func(_ context.Context, _ db.Transaction, uid string) error {
+		if uid == fixture.Projects[1].UID {
+			return denied
+		}
+		return nil
+	})
+	blocked, err = reset.CreateRelayReset(deniedActivated, binding, fixture.Signer)
+	require.ErrorIs(t, err, denied)
+	require.Equal(t, db.RelayResetCheckpoint{}, blocked)
+	require.Equal(t, before, state())
+	repeated, err = reset.CreateRelayReset(activated, binding, fixture.Signer)
+	require.NoError(t, err)
+	require.Equal(t, checkpoint, repeated)
+}
+
+// RunRelayMissingNotification refuses an event whose comment owner is gone.
+func RunRelayMissingNotification(t *testing.T, store db.Storage, deleted bool) {
+	fixture := NewRelaySharedAccessFixture(t, store)
+	ctx := db.WithRelayPeerEventFeatures(t.Context(), db.SupportedEventFeatures)
+	targetUID := "00000000000000000000000009"
+	if deleted {
+		project, err := store.CreateProject(ctx, "comment-target-project")
+		require.NoError(t, err)
+		target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Author: "member", Title: "Comment target"})
+		require.NoError(t, err)
+		comment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "member", Body: "Target"})
+		require.NoError(t, err)
+		targetUID = comment.UID
+		_, err = store.PurgeIssue(ctx, target.ID, "member", nil)
+		require.NoError(t, err)
+	}
+	_, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: fixture.Issues[0].ID, Actor: "member", Patch: map[string]jsontext.Value{"notify.reader": jsontext.Value(fmt.Sprintf(`{"re":%q}`, targetUID))}})
+	require.NoError(t, err)
+	before := func() []db.ImportRecord {
+		var records []db.ImportRecord
+		for record, err := range store.ExportRelayState(ctx) {
+			require.NoError(t, err)
+			records = append(records, record)
+		}
+		return records
+	}()
+	envelopes, err := store.PendingRelayDeliveries(ctx, fixture.Grants[0].Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
+	require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
+	require.Empty(t, envelopes)
+	var after []db.ImportRecord
+	for record, err := range store.ExportRelayState(ctx) {
+		require.NoError(t, err)
+		after = append(after, record)
+	}
+	require.Equal(t, before, after)
+	_, err = store.(db.RelayResetStore).CreateRelayReset(ctx, fixture.Grants[0].Enrollment.RelayBindingUID, fixture.Signer)
+	require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
+}
