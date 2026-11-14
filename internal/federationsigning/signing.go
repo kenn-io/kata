@@ -82,16 +82,12 @@ func NewVerifier(base string, keys []signingpolicy.Key, statePath string) (*Veri
 		base: u, keys: make(map[string]signingpolicy.Key), seen: make(map[string]time.Time),
 		capacity: 8192, started: time.Now(), now: time.Now,
 	}
-	secrets := map[string]bool{}
+	if err := signingpolicy.CheckDistinctSecrets(keys, v.started); err != nil {
+		return nil, err
+	}
 	for _, k := range keys {
 		if k.NotAfter != 0 && v.started.Unix() >= k.NotAfter {
 			continue
-		}
-		if key, err := k.Load(); err == nil {
-			if secrets[string(key)] {
-				return nil, signingpolicy.ErrKey
-			}
-			secrets[string(key)] = true
 		}
 		v.keys[k.KeyID] = k
 	}

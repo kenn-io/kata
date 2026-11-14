@@ -94,3 +94,28 @@ enabled = true
 		})
 	}
 }
+
+func TestDaemonStartRejectsKeysSharingOneSecretFile(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("PORT", "")
+	secret := strings.Repeat("k", 64)
+	keyFile := filepath.Join(home, "signing.key")
+	require.NoError(t, os.WriteFile(keyFile, []byte(secret), 0600))
+	body := fmt.Sprintf(`[federation.signing]
+external_url = "https://daemon.example/federation"
+[[federation.signing.key]]
+key_id = "key-a"
+enrollment_id = 1
+key_file = %q
+[[federation.signing.key]]
+key_id = "key-b"
+enrollment_id = 2
+key_file = %q
+`, keyFile, keyFile)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0600))
+	err := runDaemonWithListen(t.Context(), "", false, false)
+	require.ErrorIs(t, err, signingpolicy.ErrSharedSecret)
+	require.ErrorContains(t, err, "key-a")
+	require.ErrorContains(t, err, "key-b")
+}

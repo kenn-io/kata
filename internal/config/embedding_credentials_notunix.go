@@ -2,8 +2,12 @@
 
 package config
 
-import "os"
+import (
+	"os"
+
+	"go.kenn.io/kata/internal/credentialfile"
+)
 
 func openEmbeddingCredentialFile(path string) (*os.File, error) {
-	return os.Open(path) //nolint:gosec // G304: path comes from the operator's key-file configuration.
+	return credentialfile.Open(path)
 }

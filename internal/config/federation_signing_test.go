@@ -95,7 +95,7 @@ enrollment_id = 1
 key_id = "key-b"
 key_env = "TEST_DUPLICATE_SIGNING_KEY"
 enrollment_id = 2`,
-			want: signingpolicy.ErrKey,
+			want: signingpolicy.ErrSharedSecret,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

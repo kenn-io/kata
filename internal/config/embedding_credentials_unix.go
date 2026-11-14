@@ -6,21 +6,23 @@ import (
 	"os"
 
 	"golang.org/x/sys/unix"
+
+	"go.kenn.io/kata/internal/credentialfile"
 )
 
 func openEmbeddingCredentialFile(path string) (*os.File, error) {
-	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	f, err := credentialfile.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	var fileInfo unix.Stat_t
-	if err := unix.Fstat(fd, &fileInfo); err != nil {
-		_ = unix.Close(fd)
+	if err := unix.Fstat(int(f.Fd()), &fileInfo); err != nil {
+		_ = f.Close()
 		return nil, err
 	}
 	if int64(fileInfo.Uid) != int64(os.Geteuid()) {
-		_ = unix.Close(fd)
+		_ = f.Close()
 		return nil, errEmbeddingCredentialWrongOwner
 	}
-	return os.NewFile(uintptr(fd), path), nil
+	return f, nil
 }
