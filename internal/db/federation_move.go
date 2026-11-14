@@ -528,44 +528,23 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 }
 
 func markLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, projectID int64, origin, issueUID string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) error {
-	//nolint:gosec // The eligibility expression is fixed SQL; values are bound.
 	rows, err := tx.QueryContext(ctx, `SELECT e.uid,e.issue_uid,e.related_issue_uid,e.type,e.payload FROM events e
- JOIN federation_bindings b ON b.project_id=e.project_id
- WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND (e.id>b.push_cursor_event_id OR NOT (`+FederationPushEligible("e")+`))`, projectID, origin)
+ WHERE e.id IN (SELECT pending.id FROM events pending JOIN federation_bindings b ON b.project_id=pending.project_id
+ WHERE pending.project_id=$1 AND pending.origin_instance_uid=$2 AND pending.id>b.push_cursor_event_id
+ UNION SELECT marked.id FROM meta m JOIN events marked ON marked.uid=substr(m.key,length('federation_local_only_event.')+1) JOIN federation_bindings b ON b.project_id=marked.project_id
+ WHERE m.key>='federation_local_only_event' AND m.key<'federation_local_only_evenu' AND substr(m.key,1,length('federation_local_only_event.'))='federation_local_only_event.' AND marked.project_id=$1 AND marked.origin_instance_uid=$2)`, projectID, origin)
+	if err != nil {
+		return err
+	}
+	candidates, err := scanLocalMoveEvents(rows, references)
 	if err != nil {
 		return err
 	}
 	var marked []string
-	for rows.Next() {
-		var event RemoteEvent
-		var issue, related sql.NullString
-		var payload string
-		if err := rows.Scan(&event.EventUID, &issue, &related, &event.Type, &payload); err != nil {
-			_ = rows.Close()
-			return err
+	for _, event := range candidates {
+		if slices.Contains(event.issues, issueUID) {
+			marked = append(marked, event.uid)
 		}
-		if issue.Valid {
-			event.IssueUID = &issue.String
-		}
-		if related.Valid {
-			event.RelatedIssueUID = &related.String
-		}
-		event.Payload = jsontext.Value(payload)
-		refs, err := references(event, PayloadMap(event.Payload))
-		if err != nil {
-			_ = rows.Close()
-			return err
-		}
-		if EventIssueUID(event.IssueUID) == issueUID || slices.Contains(refs, issueUID) {
-			marked = append(marked, event.EventUID)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
 	}
 	for _, uid := range marked {
 		result, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'v1:held') ON CONFLICT(key) DO UPDATE SET value='v1:held' WHERE meta.value IN ('v1:held','v1:deliver')`, "federation_local_only_event."+uid)
@@ -584,45 +563,12 @@ func markLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, projectID int64, o
 }
 
 func releaseLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, projectID int64, origin string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) error {
-	rows, err := tx.QueryContext(ctx, `SELECT e.uid,e.issue_uid,e.related_issue_uid,e.type,e.payload FROM events e JOIN meta m ON m.key='federation_local_only_event.'||e.uid WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND m.value='v1:held'`, projectID, origin)
+	rows, err := tx.QueryContext(ctx, `SELECT e.uid,e.issue_uid,e.related_issue_uid,e.type,e.payload FROM meta m JOIN events e ON e.uid=substr(m.key,length('federation_local_only_event.')+1) WHERE m.key>='federation_local_only_event' AND m.key<'federation_local_only_evenu' AND substr(m.key,1,length('federation_local_only_event.'))='federation_local_only_event.' AND m.value='v1:held' AND e.project_id=$1 AND e.origin_instance_uid=$2`, projectID, origin)
 	if err != nil {
 		return err
 	}
-	type candidate struct {
-		uid    string
-		issues []string
-	}
-	var candidates []candidate
-	for rows.Next() {
-		var event RemoteEvent
-		var issue, related sql.NullString
-		var payload string
-		if err := rows.Scan(&event.EventUID, &issue, &related, &event.Type, &payload); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		if issue.Valid {
-			event.IssueUID = &issue.String
-		}
-		if related.Valid {
-			event.RelatedIssueUID = &related.String
-		}
-		event.Payload = jsontext.Value(payload)
-		refs, err := references(event, PayloadMap(event.Payload))
-		if err != nil {
-			_ = rows.Close()
-			return err
-		}
-		if issue.Valid && issue.String != "" {
-			refs = append(refs, issue.String)
-		}
-		candidates = append(candidates, candidate{event.EventUID, refs})
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return err
-	}
-	if err := rows.Close(); err != nil {
+	candidates, err := scanLocalMoveEvents(rows, references)
+	if err != nil {
 		return err
 	}
 	for _, event := range candidates {
@@ -646,11 +592,53 @@ func releaseLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, projectID int64
 	return nil
 }
 
+type localMoveEvent struct {
+	uid    string
+	issues []string
+}
+
+func scanLocalMoveEvents(rows *sql.Rows, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) ([]localMoveEvent, error) {
+	var candidates []localMoveEvent
+	for rows.Next() {
+		var event RemoteEvent
+		var issue, related sql.NullString
+		var payload string
+		if err := rows.Scan(&event.EventUID, &issue, &related, &event.Type, &payload); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if issue.Valid {
+			event.IssueUID = &issue.String
+		}
+		if related.Valid {
+			event.RelatedIssueUID = &related.String
+		}
+		event.Payload = jsontext.Value(payload)
+		refs, err := references(event, PayloadMap(event.Payload))
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if issue.Valid && issue.String != "" {
+			refs = append(refs, issue.String)
+		}
+		candidates = append(candidates, localMoveEvent{event.EventUID, refs})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return candidates, nil
+}
+
 // ClearDeliveredFederationEvents removes markers for acknowledged events.
 func ClearDeliveredFederationEvents(ctx context.Context, exec interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, projectID, cursor int64) error {
-	_, err := exec.ExecContext(ctx, `DELETE FROM meta WHERE value='v1:deliver' AND key IN (SELECT 'federation_local_only_event.'||uid FROM events WHERE project_id=$1 AND id<=$2)`, projectID, cursor)
+	_, err := exec.ExecContext(ctx, `DELETE FROM meta WHERE key>='federation_local_only_event' AND key<'federation_local_only_evenu' AND substr(key,1,length('federation_local_only_event.'))='federation_local_only_event.' AND value='v1:deliver' AND EXISTS (SELECT 1 FROM events WHERE uid=substr(meta.key,length('federation_local_only_event.')+1) AND project_id=$1 AND id<=$2)`, projectID, cursor)
 	return err
 }
 

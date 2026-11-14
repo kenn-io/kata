@@ -199,3 +199,25 @@ func TestReadFederationBulkMovePageBudget(t *testing.T) {
 		})
 	}
 }
+
+func TestFederationPendingPushCursorBudget(t *testing.T) {
+	store, _ := openConformanceStore(t)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "push-budget")
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
+ SELECT lpad(x::text,26,'0'),$1,$2,'push-budget','issue.updated','tester','{}',1,0,repeat('a',64)
+ FROM generate_series(1,20000) n(x)`, store.InstanceUID(), project.ID)
+	require.NoError(t, err)
+	cursor, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `ANALYZE events`)
+	require.NoError(t, err)
+	query := `SELECT e.id FROM events e WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id IN (` + db.FederationPushPendingIDs("$1", "$2", "$3") + `)`
+	var raw []byte
+	require.NoError(t, store.QueryRowContext(ctx, `EXPLAIN (ANALYZE, FORMAT JSON) `+query, project.ID, store.InstanceUID(), cursor).Scan(&raw))
+	var plans []struct{ Plan federationPagePlan }
+	require.NoError(t, json.Unmarshal(raw, &plans))
+	require.LessOrEqual(t, plans[0].Plan.visitedEvents(), float64(100), "a quiet push must seek past event history")
+}
