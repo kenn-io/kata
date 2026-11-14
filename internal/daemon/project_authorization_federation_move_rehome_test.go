@@ -103,6 +103,5 @@ func TestProjectAccessRetainedMoveDestinationIsPrivate(t *testing.T) {
 		path := fmt.Sprintf("/api/v1/projects/%d", project.ID)
 		status, _, raw = f.request(t, http.MethodPost, path+"/restore?actor=nonmember", "nonmember", nil, nil)
 		require.Equal(t, http.StatusNotFound, status, string(raw))
-
 	})
 }
