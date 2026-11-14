@@ -15,7 +15,7 @@ import (
 func FederationSigning(t *testing.T, base string) (*federationsigning.Verifier, string) {
 	t.Helper()
 	dir := t.TempDir()
-	key := filepath.Join(dir, "signing.key")
+	key := filepath.Join(dir, "spoke signing.key")
 	require.NoError(t, os.WriteFile(key, []byte(strings.Repeat("k", 64)), 0600))
 	state := filepath.Join(dir, "replay.state")
 	require.NoError(t, federationsigning.InitializeReplayState(state))

@@ -3515,10 +3515,6 @@ func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
 		t.Setenv("KATA_AUTH_TOKEN", "admin-token")
 		t.Setenv("TEST_HUB_TOKEN", "admin-token")
 		verifier, key := testenv.FederationSigning(t, external)
-		keyBytes, err := os.ReadFile(key)
-		require.NoError(t, err)
-		key = filepath.Join(home, "spoke signing.key")
-		require.NoError(t, os.WriteFile(key, keyBytes, 0600))
 		savedArgs := os.Args
 		os.Args = []string{"/opt/kata_custom"}
 		t.Cleanup(func() { os.Args = savedArgs })
