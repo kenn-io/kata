@@ -398,21 +398,21 @@ func syncDirectSpoke(
 			pushErr = nil
 		} else if pushErr != nil {
 			status, ok := errors.AsType[*HubStatusError](pushErr)
-			if !ok || status.StatusCode != http.StatusForbidden || !strings.HasSuffix(status.Path, "/federation/events:ingest") || federationHubErrorCode(status.Body) != "federation_move_source_unauthorized" {
+			if !ok || status.StatusCode != http.StatusForbidden || !strings.HasSuffix(status.Path, "/federation/events:ingest") {
 				return pushErr
 			}
 		}
 	}
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
 	if err != nil {
-		return err
+		return errors.Join(err, pushErr)
 	}
 	recordPullError := func(pullErr error) error {
 		at := time.Now().UTC()
 		if at.Before(pullStartedAt) {
 			at = pullStartedAt
 		}
-		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
+		return errors.Join(recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at), pushErr)
 	}
 	body, err := client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
 	if err != nil {
@@ -546,7 +546,6 @@ func syncDirectSpoke(
 			}
 		}
 		deliverUIDs := map[int64][]string{}
-		deliverProjectUIDs := map[int64]string{}
 		var deliverProjects []int64
 		materializeUIDs := make([]string, 0, len(body.Events))
 		var applyUIDs []string
@@ -579,7 +578,6 @@ func syncDirectSpoke(
 				}
 				if _, ok := deliverUIDs[project]; !ok {
 					deliverProjects = append(deliverProjects, project)
-					deliverProjectUIDs[project] = ev.ProjectUID
 				}
 				deliverUIDs[project] = append(deliverUIDs[project], ev.EventUID)
 			}
@@ -605,7 +603,7 @@ func syncDirectSpoke(
 				err = store.MaterializeFederatedProject(applyCtx, binding.ProjectID)
 			}
 			if err != nil {
-				return fmt.Errorf("apply pull page project %s through %d: %w", binding.HubProjectUID, body.NextAfterID, err)
+				return err
 			}
 			if onPulledEvents != nil {
 				for _, reset := range resets.Resets {
@@ -618,7 +616,7 @@ func syncDirectSpoke(
 			for _, project := range deliverProjects {
 				events, err := store.EventsByUIDs(ctx, project, deliverUIDs[project])
 				if err != nil {
-					return fmt.Errorf("load delivery project %s for pull route %s events %v: %w", deliverProjectUIDs[project], binding.HubProjectUID, deliverUIDs[project], err)
+					return err
 				}
 				for _, event := range events {
 					byUID[event.UID] = event

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -412,7 +413,7 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, applyUnjoined func(int64, FoldIssue, FoldProjection) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) (resultErr error) {
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, origin string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error), assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, applyUnjoined func(int64, FoldIssue, FoldProjection) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) (resultErr error) {
 	var applying *FoldEvent
 	defer func() {
 		if resultErr != nil && applying != nil {
@@ -433,14 +434,15 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 			if !decision.Exists {
 				continue
 			}
+			if err := markLocalOnlyMoveEvents(ctx, tx, decision.SourceID, origin, issue.UID, references); err != nil {
+				return err
+			}
 		}
 		id, source := decision.IssueID, decision.SourceID
 		sourceProject := Project{UID: decision.SourceUID, Name: decision.SourceName}
 		sourceShort := decision.SourceShortID
 		if !decision.Exists {
 			if active {
-				// A cold replica can expose an empty projection at the append
-				// cursor before this fold creates the destination issue row.
 				from, _ := StringValue(PayloadMap(winner.Payload)["from_project_uid"])
 				if err := tx.QueryRowContext(ctx, `SELECT id,uid,name FROM projects WHERE uid=$1`, from).Scan(&sourceProject.ID, &sourceProject.UID, &sourceProject.Name); err != nil {
 					return err
@@ -464,8 +466,6 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 		if decision.Joined && !active {
 			return ErrNotFound
 		}
-		// Move ingress has already checked its authority and endpoints. Replaying
-		// trusted history must also work after a former source has left.
 		if decision.RecurrenceID.Valid {
 			return fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
 		}
@@ -513,84 +513,51 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 	return nil
 }
 
-// ScopedFederatedLinkGraph combines a moved issue's links with preserved parents.
-func ScopedFederatedLinkGraph[T any](ctx context.Context, tx *sql.Tx, p FoldProjection, scope []string, desired map[FoldLinkKey]T) (map[FoldLinkKey]T, error) {
-	graph := map[FoldLinkKey]T{}
-	hasParent := false
-	for key, row := range desired {
-		if slices.Contains(scope, key.FromUID) || slices.Contains(scope, key.ToUID) {
-			graph[key] = row
-			hasParent = hasParent || key.Type == "parent"
-		}
-	}
-	if !hasParent {
-		return graph, nil
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT from_issue_uid,to_issue_uid FROM links WHERE type='parent'`)
+func markLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, projectID int64, origin, issueUID string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) error {
+	rows, err := tx.QueryContext(ctx, `SELECT e.uid,e.issue_uid,e.related_issue_uid,e.type,e.payload FROM events e
+ JOIN federation_bindings b ON b.project_id=e.project_id
+ WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>b.push_cursor_event_id`, projectID, origin)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer func() { _ = rows.Close() }()
+	var marked []string
 	for rows.Next() {
-		key := FoldLinkKey{Type: "parent"}
-		if err := rows.Scan(&key.FromUID, &key.ToUID); err != nil {
-			return nil, err
+		var event RemoteEvent
+		var issue, related sql.NullString
+		var payload string
+		if err := rows.Scan(&event.EventUID, &issue, &related, &event.Type, &payload); err != nil {
+			_ = rows.Close()
+			return err
 		}
-		if slices.Contains(scope, key.FromUID) || slices.Contains(scope, key.ToUID) {
-			if _, known := p.Links[key]; known {
-				continue
-			}
+		if issue.Valid {
+			event.IssueUID = &issue.String
 		}
-		var empty T
-		graph[key] = empty
-	}
-	return graph, rows.Err()
-}
-
-// ParkedFederatedMoveIssues lists issues retained outside joined projects.
-func ParkedFederatedMoveIssues(decisions []FederatedMoveDecision) []string {
-	var uids []string
-	for _, decision := range decisions {
-		if decision.Exists && !decision.Joined && !decision.SourceStandalone {
-			uids = append(uids, decision.IssueUID)
+		if related.Valid {
+			event.RelatedIssueUID = &related.String
 		}
-	}
-	return uids
-}
-
-// ParkedFederatedLinkError identifies the moves in a failed link batch.
-func ParkedFederatedLinkError(moved map[string]FoldEvent, uids []string, err error) error {
-	var events []string
-	for _, uid := range uids {
-		move := moved[uid]
-		events = append(events, fmt.Sprintf("project %s event %s", move.ProjectUID, move.UID))
-	}
-	return fmt.Errorf("apply move links %v: %w", events, err)
-}
-
-// FederatedLinkIssueIDs resolves the endpoints available to a scoped fold.
-func FederatedLinkIssueIDs(ctx context.Context, tx *sql.Tx, p FoldProjection, issueUID string) (map[string]int64, error) {
-	ids := map[string]int64{}
-	for _, edge := range p.PresentLinks() {
-		if edge.Key.FromUID != issueUID && edge.Key.ToUID != issueUID {
-			continue
+		event.Payload = jsontext.Value(payload)
+		refs, err := references(event, PayloadMap(event.Payload))
+		if err != nil {
+			_ = rows.Close()
+			return err
 		}
-		for _, uid := range []string{edge.Key.FromUID, edge.Key.ToUID} {
-			if _, ok := ids[uid]; ok {
-				continue
-			}
-			var id int64
-			err := tx.QueryRowContext(ctx, `SELECT id FROM issues WHERE uid=$1`, uid).Scan(&id)
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
-			if err != nil {
-				return nil, err
-			}
-			ids[uid] = id
+		if EventIssueUID(event.IssueUID) == issueUID || slices.Contains(refs, issueUID) {
+			marked = append(marked, event.EventUID)
 		}
 	}
-	return ids, nil
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, uid := range marked {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'1') ON CONFLICT(key) DO NOTHING`, "federation_local_only_event."+uid); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type movedProjectPassKey struct{}
@@ -663,7 +630,7 @@ func RestrictFoldProjectWhere(p *FoldProjection, projectUID string, keep func(st
 
 // ClearFederatedMovedIssueHistory clears contributing streams while retaining
 // local events that cannot be pushed after a remote move.
-func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, postgres bool) error {
+func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
 	// Only quarantines covering subject events being removed block this reset;
 	// unrelated quarantined work in a contributing stream remains independent.
 	rows, err := tx.QueryContext(ctx, `SELECT q.event_uids FROM federation_quarantine q
@@ -723,7 +690,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
  WHERE e.project_id<>$1 AND e.origin_instance_uid=$2
  AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
  AND e.id>b.push_cursor_event_id
- AND e.type IN (`+FederationPushEventTypesSQL()+`) AND `+FederationPushEligible("e", postgres)+`)`, projectID, originInstanceUID).Scan(&pending); err != nil {
+ AND e.type IN (`+FederationPushEventTypesSQL()+`) AND `+FederationPushEligible("e")+`)`, projectID, originInstanceUID).Scan(&pending); err != nil {
 		return err
 	}
 	if pending {
@@ -734,7 +701,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	}
 	//nolint:gosec // The eligibility expression is fixed SQL; values are bound.
 	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
- AND NOT (e.origin_instance_uid=$2 AND NOT (`+FederationPushEligible("e", postgres)+`))`, projectID, originInstanceUID)
+ AND NOT (e.origin_instance_uid=$2 AND NOT (`+FederationPushEligible("e")+`))`, projectID, originInstanceUID)
 	return err
 }
 
@@ -742,7 +709,8 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 // issues now owned elsewhere. A source reset cannot rewind those destinations.
 func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.project_id=$1
- AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.uid=e.issue_uid AND i.project_id<>$1)`, projectID); err != nil {
+ AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.uid=e.issue_uid AND i.project_id<>$1)
+ AND `+FederationPushEligible("e"), projectID); err != nil {
 		return err
 	}
 	// Retained envelopes may still refer numerically to a peer being reset.

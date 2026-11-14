@@ -145,10 +145,7 @@ func TestFederationMoveSourceHostAuthority(t *testing.T) {
 			headers[db.EventFeaturesHeader] = db.SupportedEventFeatures
 			response, raw := envDoRaw(t, env, http.MethodPost, projectPath(target.ID)+"/federation/events:ingest", request, headers)
 			require.Equalf(t, tc.status, response.StatusCode, "%s", raw)
-			if tc.mode == "missing-proof" {
-				require.Contains(t, string(raw), `"code":"federation_move_source_unauthorized"`)
-			}
-			if tc.mode == "invalid-proof" || strings.HasPrefix(tc.mode, "proof-") {
+			if tc.mode == "missing-proof" || tc.mode == "invalid-proof" || strings.HasPrefix(tc.mode, "proof-") {
 				require.Contains(t, string(raw), `"code":"auth_invalid"`)
 			}
 			if tc.mode != "missing-proof" && tc.mode != "invalid-proof" && !strings.HasPrefix(tc.mode, "proof-") {

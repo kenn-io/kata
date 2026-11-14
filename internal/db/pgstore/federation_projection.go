@@ -544,7 +544,7 @@ func (s *Store) materializeFederatedProjectTxScoped(
 	if err != nil {
 		return err
 	}
-	err = db.RehomeFederatedMovedIssues(ctx, tx, moved, projection, decisions, func(pid int64, issue db.FoldIssue) (string, error) {
+	err = db.RehomeFederatedMovedIssues(ctx, tx, moved, projection, decisions, s.InstanceUID(), payloadReferencedIssueUIDs, func(pid int64, issue db.FoldIssue) (string, error) {
 		return resolveFederatedIssueShortID(ctx, tx, pid, issue, federatedIssueRow{}, false)
 	}, func(id, source, target int64) error {
 		if err := lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil {
@@ -665,10 +665,6 @@ func (s *Store) materializeFederatedProjectTxScoped(
 		if err := reconcileFederatedLinkGroup(ctx, tx, m, issueIDs); err != nil {
 			return err
 		}
-	}
-	parked := db.ParkedFederatedMoveIssues(decisions)
-	if err := reconcileParkedIssueLinks(ctx, tx, projection, parked); err != nil {
-		return db.ParkedFederatedLinkError(moved, parked, err)
 	}
 	if err := pruneFederatedIssues(ctx, tx, m, issueIDs); err != nil {
 		return err
