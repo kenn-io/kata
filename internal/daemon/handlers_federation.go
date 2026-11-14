@@ -975,6 +975,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		for _, event := range in.Body.Events {
 			required, err := db.PayloadRequiredFeatures(event.Type, string(event.Payload))
 			if err != nil {
+				if strings.HasPrefix(event.Type, "cron.workflow.") {
+					return nil, federationIngestError(fmt.Errorf("%w: invalid workflow event payload: %v", db.ErrFederationIngestValidation, err))
+				}
 				return nil, federationFeatureError(err)
 			}
 			if err := db.RequireEventFeatures(in.EventFeatures, required); err != nil {

@@ -3,8 +3,11 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
 	"go.kenn.io/kata/internal/cron"
 )
@@ -15,27 +18,17 @@ import (
 // stored snapshot and must not reload an edited workflow through this helper.
 func CheckCronDependencies(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, projectID int64, definition cron.JobDefinition) error {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, postgres bool, projectID int64, definition cron.JobDefinition) error {
 	check := func(table, kind, id string) error {
 		if id == "" {
 			return nil
 		}
-		var owner int64
-		var deleted sql.NullString
-		err := q.QueryRowContext(ctx, "SELECT project_id,deleted_at FROM "+table+" WHERE uid=$1", id).Scan(&owner, &deleted)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("%w: missing %s dependency %s", cron.ErrInvalid, kind, id)
+		deleted, err := cronDependency(ctx, q, postgres, projectID, table, kind, id)
+		if err == nil && deleted {
+			err = fmt.Errorf("%w: tombstoned %s dependency %s", cron.ErrInvalid, kind, id)
 		}
-		if err != nil {
-			return fmt.Errorf("read %s dependency: %w", kind, err)
-		}
-		if owner != projectID {
-			return fmt.Errorf("%w: %s dependency belongs to another project", cron.ErrInvalid, kind)
-		}
-		if deleted.Valid {
-			return fmt.Errorf("%w: tombstoned %s dependency %s", cron.ErrInvalid, kind, id)
-		}
-		return nil
+		return err
 	}
 	if err := check("cron_workflows", "workflow", definition.Action.WorkflowUID); err != nil {
 		return err
@@ -54,6 +47,88 @@ func CheckCronDependencies(ctx context.Context, q interface {
 		issueUID = definition.Issue.UID
 	}
 	return check("issues", "issue", issueUID)
+}
+
+// workflowRevisionSupport reports held retained evidence by exact revision.
+func workflowRevisionSupport(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, postgres bool, projectID int64, revisions map[string]string) (map[string]error, error) {
+	held, versions := map[string]error{}, slices.Collect(maps.Keys(revisions))
+	raw, err := json.Marshal(versions)
+	if err != nil || len(versions) == 0 {
+		return held, err
+	}
+	rows, err := q.QueryContext(ctx, cronRetainedWorkflowRevisionQuery(postgres), projectID, string(raw))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var e FoldEvent
+		var version sql.NullString
+		var payload string
+		if err := rows.Scan(&e.UID, &e.Type, &e.OriginInstanceUID, &e.HLCPhysicalMS, &e.HLCCounter, &version, &payload); err != nil {
+			return nil, err
+		}
+		revision := e.UID
+		if _, ok := revisions[version.String]; ok {
+			revision = version.String
+		}
+		uid, ok := revisions[revision]
+		if !ok || !workflowDefinitionEvent(e.Type) {
+			continue
+		}
+		e.Payload = []byte(payload)
+		body, value, err := parseCronDefinitionEvent(e)
+		if err == nil && (value.DefinitionEventUID != revision || value.UID != uid) {
+			continue
+		}
+		if err == nil {
+			_, err = cron.DecodeWorkflow(body.Definition)
+		}
+		if err != nil {
+			held[revision] = fmt.Errorf("%w: workflow revision is unsupported: %v", cron.ErrInvalid, err)
+		}
+	}
+	return held, rows.Err()
+}
+
+// cronDependency checks project ownership, tombstones and workflow evidence.
+func cronDependency(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, postgres bool, projectID int64, table, kind, id string) (bool, error) {
+	var owner int64
+	var deleted sql.NullString
+	var revision, row string
+	query, dest := "SELECT project_id,deleted_at FROM "+table+" WHERE uid=$1", []any{&owner, &deleted}
+	if table == "cron_workflows" {
+		query = "SELECT project_id,deleted_at,definition_event_uid,definition_json FROM cron_workflows WHERE uid=$1"
+		dest = append(dest, &revision, &row)
+	}
+	err := q.QueryRowContext(ctx, query, id).Scan(dest...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("%w: missing %s dependency %s", cron.ErrInvalid, kind, id)
+	}
+	if err != nil {
+		return false, fmt.Errorf("read %s dependency: %w", kind, err)
+	}
+	if owner != projectID {
+		return false, fmt.Errorf("%w: %s dependency belongs to another project", cron.ErrInvalid, kind)
+	}
+	if table == "cron_workflows" {
+		if _, err := cron.DecodeWorkflow([]byte(row)); err != nil {
+			return false, fmt.Errorf("%w: workflow dependency is unsupported: %v", cron.ErrInvalid, err)
+		}
+		support, err := workflowRevisionSupport(ctx, q, postgres, projectID, map[string]string{revision: id})
+		if err != nil {
+			return false, err
+		}
+		if err := support[revision]; err != nil {
+			return false, fmt.Errorf("%w: workflow dependency is unsupported: %v", cron.ErrInvalid, err)
+		}
+	}
+	return deleted.Valid, nil
 }
 
 // checkWorkflowUnused refuses to tombstone a workflow that a live job in the

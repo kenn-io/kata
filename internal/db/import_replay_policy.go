@@ -113,11 +113,11 @@ func validateCronImportEvents(records []ImportRecord) error {
 		if err != nil {
 			return fmt.Errorf("cron import event timestamp: %w", err)
 		}
-		if err := ValidateAcceptedCronEvent(RemoteEvent{
+		if err := validateCronEvent(RemoteEvent{
 			EventUID: event.UID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: projects[event.ProjectID],
 			Actor: event.Actor, Type: event.Type, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter,
 			Payload: event.Payload, CreatedAt: created,
-		}); err != nil {
+		}, false, true); err != nil {
 			return err
 		}
 	}
