@@ -46,7 +46,7 @@ func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
 		require.NoError(t, err)
 		path := "https://hub.example" + projectPath(project.ID) + "/federation/metadata"
 
-		// Contract (#1114): during replay warm-up a signed request is told to
+		// During replay warm-up a signed request is told to
 		// retry instead of being reported as a bad signature.
 		warming := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		warming.Header.Set("Authorization", "Bearer "+enrollment.Token)
