@@ -171,6 +171,7 @@
   let referenceAbort: AbortController | undefined
   let referenceGeneration = 0
   let credentialTokens = $state<TokenOut[]>([])
+  let syncRefreshGeneration = $state(0)
   let credentialLoading = $state(false)
   let credentialError = $state<string | undefined>()
   let credentialAbort: AbortController | undefined
@@ -340,7 +341,10 @@
   onMount(() => {
     const visibility = () => {
       scheduler.visibilityChanged(!document.hidden)
-      if (!document.hidden && !credentialLoading) void refreshCredentials()
+      if (!document.hidden) {
+        syncRefreshGeneration++
+        if (!credentialLoading) void refreshCredentials()
+      }
     }
     const focus = () => {
       scheduler.focused()
@@ -366,7 +370,10 @@
     window.addEventListener('popstate', popstate)
     window.addEventListener('kata:versionMismatch', showVersionMismatch)
     const credentialRefreshTimer = window.setInterval(() => {
-      if (!document.hidden && !credentialLoading) void refreshCredentials()
+      if (!document.hidden) {
+        syncRefreshGeneration++
+        if (!credentialLoading) void refreshCredentials()
+      }
     }, 30_000)
     reportAppOpened()
     if (route.kind !== 'route-error' && launch.kind !== 'login') {
@@ -1366,6 +1373,7 @@
     {/if}
     {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
       <AppShell
+        {syncRefreshGeneration}
         {searchSettingsPostFetch}
         route={acceptedRoute ?? route}
         requestedRoute={route !== acceptedRoute ? route : undefined}

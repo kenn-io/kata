@@ -65,6 +65,7 @@
   type ChildParent = { projectID: number; projectUID: string; issueUID: string }
 
   interface Props {
+    syncRefreshGeneration?: number
     route: AppRoute
     requestedRoute?: AppRoute | undefined
     snapshot: UISnapshot
@@ -137,6 +138,7 @@
   }
 
   let {
+    syncRefreshGeneration = 0,
     route: acceptedRoute,
     requestedRoute = undefined,
     snapshot,
@@ -789,7 +791,11 @@
   </TopBar>
   {#if selectedProject && !daemonRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
     {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
-      <ProjectSyncStatus projectID={selectedProject.id} projectUID={selectedProject.uid} />
+      <ProjectSyncStatus
+        projectID={selectedProject.id}
+        projectUID={selectedProject.uid}
+        refreshGeneration={syncRefreshGeneration}
+      />
     {/key}
   {/if}
   <div class="kata-layout" aria-busy={loading}>

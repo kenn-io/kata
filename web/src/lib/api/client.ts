@@ -61,15 +61,19 @@ async function readRawResponseBody(response: Response): Promise<string | Blob | 
 
 export async function orvalFetch<T>(
   url: string,
-  options: RequestInit & ({ retry: true; signal: AbortSignal } | { retry?: false }),
+  options: RequestInit & { onResponse?: (response: Response) => void } & (
+      | { retry: true; signal: AbortSignal }
+      | { retry?: false }
+    ),
   fetcher: typeof fetch = generatedFetch,
 ): Promise<T> {
-  const { retry, ...requestOptions } = options
+  const { retry, onResponse, ...requestOptions } = options
   const read = () => fetcher(applicationURL(url), requestOptions)
   const result = retry
     ? await retryTransientRead(read, options.signal, readRawResponseBody)
     : { response: await read() }
   const response = result.response
+  onResponse?.(response)
   const body = 'body' in result ? result.body : await readRawResponseBody(response)
   const data =
     typeof body === 'string' && response.headers.get('Content-Type')?.includes('json')
