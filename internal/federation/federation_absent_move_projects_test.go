@@ -43,6 +43,9 @@ func TestSyncFederationEditedIssueMovedToUnjoinedProject(t *testing.T) {
 		}
 	}, spoke.credentials)
 	require.ErrorContains(t, err, "403", "the rejected push is still reported")
+	var hubError *HubStatusError
+	require.ErrorAs(t, err, &hubError)
+	require.Equal(t, "federation_move_source_unauthorized", federationHubErrorCode(hubError.Body))
 	require.Equal(t, []string{move.Event.UID, later.UID}, delivered)
 	binding, err = spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 	require.NoError(t, err)
@@ -94,7 +97,7 @@ func TestSyncFederationHardPushErrorsStopBeforePull(t *testing.T) {
 		code int
 		body string
 	}{
-		{"invalid credential", http.StatusForbidden, `{"status":403,"error":{"code":"auth_invalid","message":"federation token is invalid for this project or capability"}}`},
+		{"invalid credential", http.StatusForbidden, `{"status":403,"error":{"code":"auth_invalid","message":"federation credential is not currently authorized"}}`},
 		{"hub failure", http.StatusInternalServerError, "hub failure"},
 	} {
 		t.Run(failure.name, func(t *testing.T) {

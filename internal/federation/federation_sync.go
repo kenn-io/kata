@@ -398,7 +398,7 @@ func syncDirectSpoke(
 			pushErr = nil
 		} else if pushErr != nil {
 			status, ok := errors.AsType[*HubStatusError](pushErr)
-			if !ok || status.StatusCode != http.StatusForbidden || !strings.HasSuffix(status.Path, "/federation/events:ingest") || !strings.Contains(status.Body, "federation credential is not currently authorized") {
+			if !ok || status.StatusCode != http.StatusForbidden || !strings.HasSuffix(status.Path, "/federation/events:ingest") || federationHubErrorCode(status.Body) != "federation_move_source_unauthorized" {
 				return pushErr
 			}
 		}
@@ -503,6 +503,10 @@ func syncDirectSpoke(
 		for i, ev := range body.Events {
 			if ev.OriginInstanceUID == localInstanceUID {
 				id, err := projectID(ev)
+				if errors.Is(err, db.ErrNotFound) {
+					pending = append(pending, i)
+					continue
+				}
 				if err != nil {
 					return err
 				}
