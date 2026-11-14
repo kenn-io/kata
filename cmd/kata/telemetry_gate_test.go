@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
@@ -42,6 +43,10 @@ func TestContractHookQuietPreflight(t *testing.T) {
 					_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
 				case "/api/v1/ui/telemetry":
 					posts.Add(1)
+					// Hold the receipt past the command's bounded exit wait so the
+					// fixture must wait for the background worker to record it.
+					//nolint:kennlint // sleeptest: Exercise a real HTTP response arriving after telemetry.ExitWait.
+					time.Sleep(100 * time.Millisecond)
 					w.WriteHeader(http.StatusAccepted)
 					_, _ = fmt.Fprint(w, `{"status":"disabled"}`)
 				default:
