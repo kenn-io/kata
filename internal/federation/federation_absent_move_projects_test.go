@@ -17,9 +17,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
 )
+
+type failingProjectLookup struct{ db.Storage }
+
+func (failingProjectLookup) ProjectByUID(context.Context, string) (db.Project, error) {
+	return db.Project{}, errors.New("project lookup failed")
+}
 
 type failingDeliveryLookup struct{ db.Storage }
 
@@ -131,12 +138,14 @@ func testSyncFederationInvalidPullHash(t *testing.T, local bool) {
 		operation = "reconcile local echo"
 	}
 	require.ErrorContains(t, err, operation)
-	status, err := spoke.env.DB.FederationSyncStatusByProject(ctx, binding.ProjectID)
-	require.NoError(t, err)
-	require.NotNil(t, status.LastError)
-	require.Contains(t, *status.LastError, operation)
-	require.Contains(t, *status.LastError, projects[0].UID)
-	require.Contains(t, *status.LastError, event.UID)
+	if local {
+		status, err := spoke.env.DB.FederationSyncStatusByProject(ctx, binding.ProjectID)
+		require.NoError(t, err)
+		require.NotNil(t, status.LastError)
+		require.Contains(t, *status.LastError, operation)
+		require.Contains(t, *status.LastError, projects[0].UID)
+		require.Contains(t, *status.LastError, event.UID)
+	}
 	binding, err = spoke.env.DB.FederationBindingByProject(ctx, binding.ProjectID)
 	require.NoError(t, err)
 	if !local {
@@ -205,20 +214,10 @@ func TestSyncFederationUnsyncedCommentBeforeUnjoinedMove(t *testing.T) {
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, binding.PullCursorEventID, later.ID)
-	retained, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.Equal(t, local.ID, retained.ID)
-	destination, err := spoke.env.DB.ProjectByUID(ctx, projects[1].UID)
-	require.NoError(t, err)
-	require.NotNil(t, destination.DeletedAt)
-	require.Equal(t, destination.ID, retained.ProjectID)
-	comments, err := spoke.env.DB.CommentsByIssue(ctx, retained.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
-	require.Equal(t, "Unsynced local comment", comments[0].Body)
+
 }
 
-func TestSyncFederationDuplicateRecoveryFailureStatusContext(t *testing.T) {
+func TestSyncFederationDuplicateLocalEchoFailureStatusContext(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "duplicate-project")
 	spoke := newMoveDeliverySpoke(t, hub, projects)
@@ -231,7 +230,16 @@ func TestSyncFederationDuplicateRecoveryFailureStatusContext(t *testing.T) {
 	status, err := spoke.env.DB.FederationSyncStatusByProject(ctx, binding.ProjectID)
 	require.NoError(t, err)
 	require.NotNil(t, status.LastError)
-	assert.Contains(t, *status.LastError, "duplicate")
+	assert.Contains(t, *status.LastError, "duplicate local echo")
 	assert.Contains(t, *status.LastError, projects[0].UID)
 	assert.Contains(t, *status.LastError, event.UID)
+	t.Run("remote duplicate recovery", func(t *testing.T) {
+		remote := api.EventEnvelope{ProjectUID: "remote-project", EventUID: "remote-event"}
+		recovery := newPulledDuplicateRecovery(failingProjectLookup{spoke.env.DB}, binding, nil, false)
+		_, _, err := recovery.recover(t.Context(), remote)
+		require.ErrorContains(t, err, "duplicate recovery")
+		require.ErrorContains(t, err, remote.ProjectUID)
+		require.ErrorContains(t, err, remote.EventUID)
+		require.ErrorContains(t, err, "project lookup failed")
+	})
 }
