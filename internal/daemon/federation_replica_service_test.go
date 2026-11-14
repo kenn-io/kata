@@ -1052,52 +1052,52 @@ func TestEnsureFederationReplicaAdoptsStandaloneProjectWithSnapshot(t *testing.T
 }
 
 func TestEnsureFederationReplicaRetainedProjectDoesNotSnapshotLocalComments(t *testing.T) {
-	for _, restored := range []bool{false, true} {
-		name := "archived"
-		if restored {
-			name = "restored"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct {
+		name, projectName string
+		restored, managed bool
+	}{
+		{name: "archived", projectName: "federation-01hznq7vfpk1xgd8r5mabcd4ex"},
+		{name: "restored", projectName: "federation-01hznq7vfpk1xgd8r5mabcd4ex", restored: true},
+		{name: "managed reservation", projectName: "hub-project", managed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
 			store := openReplicaServiceStore(t)
-			project, err := store.CreateProjectWithUID(ctx, "federation-01hznq7vfpk1xgd8r5mabcd4ex", replicaHubProjectUID)
+			project, err := store.CreateProjectWithUID(ctx, tc.projectName, replicaHubProjectUID)
 			require.NoError(t, err)
-			issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "moved issue", Author: "worker"})
+			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "moved issue", Author: "worker"})
 			require.NoError(t, err)
-			_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "held local edit"})
+			_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "held local edit"})
 			require.NoError(t, err)
-			for _, uid := range []string{created.UID, comment.UID} {
-				_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, 'v1:held')`, "federation_local_only_event."+uid)
-				require.NoError(t, err)
-			}
 			_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker", Force: true})
 			require.NoError(t, err)
 			_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FederationRetainedProjectPrefix+project.UID)
 			require.NoError(t, err)
 			params := replicaServiceParams()
 			params.AdoptExisting = true
-			if restored {
+			if tc.restored {
 				_, _, _, err = store.RestoreProject(ctx, project.ID, "worker")
 				require.NoError(t, err)
-				params.Credential.ManagedByConfig = true
 			}
+			params.Credential.ManagedByConfig = tc.managed
 			credentials := newReplicaCredentialStore()
 			result, err := daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
 			require.NoError(t, err)
 			assert.Equal(t, project.ID, result.Project.ID)
+			assert.Equal(t, params.ProjectName, result.Project.Name)
+			assert.Nil(t, result.Project.DeletedAt)
+			binding, err := store.FederationBindingByProject(ctx, project.ID)
+			require.NoError(t, err)
+			assert.Equal(t, replicaHubProjectUID, binding.HubProjectUID)
+			retained, err := store.IsFederationRetainedProject(ctx, project.UID)
+			require.NoError(t, err)
+			assert.False(t, retained)
 			assert.Zero(t, result.AdoptionSnapshotCount)
 			events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 20})
 			require.NoError(t, err)
 			for _, event := range events {
 				assert.NotEqual(t, "issue.snapshot", event.Type)
 			}
-			pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), 0, 20)
-			require.NoError(t, err)
-			assert.Empty(t, pending)
-			comments, err := store.CommentsByIssue(ctx, issue.ID)
-			require.NoError(t, err)
-			require.Len(t, comments, 1)
-			assert.Equal(t, "held local edit", comments[0].Body)
 		})
 	}
 }

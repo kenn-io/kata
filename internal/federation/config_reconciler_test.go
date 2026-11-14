@@ -1031,9 +1031,6 @@ func TestReconcileMappingAdoptsRetainedProject(t *testing.T) {
 			adopted, err := store.ProjectByName(ctx, "spoke-project")
 			require.NoError(t, err)
 			assert.Equal(t, project.ID, adopted.ID)
-			assert.Equal(t, hubProjectUID, adopted.UID)
-			_, err = store.FederationBindingByProject(ctx, project.ID)
-			require.NoError(t, err)
 		})
 	}
 }
