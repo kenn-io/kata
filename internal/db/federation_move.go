@@ -390,7 +390,7 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, decision.TargetID).Scan(&decision.Joined); err != nil {
 			return nil, nil, err
 		}
-		err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id,b.project_id IS NULL AND NOT EXISTS(SELECT 1 FROM meta WHERE key='federation_retained_project.' || p.uid) FROM issues i JOIN projects p ON p.id=i.project_id LEFT JOIN federation_bindings b ON b.project_id=p.id WHERE i.uid=$1`, issue.UID).Scan(&decision.IssueID, &decision.SourceID, &decision.RecurrenceID, &decision.SourceUID, &decision.SourceName, &decision.SourceShortID, &decision.SourceStandalone)
+		err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id,b.project_id IS NULL AND (p.deleted_at IS NULL OR NOT EXISTS(SELECT 1 FROM meta WHERE key='federation_retained_project.' || p.uid)) FROM issues i JOIN projects p ON p.id=i.project_id LEFT JOIN federation_bindings b ON b.project_id=p.id WHERE i.uid=$1`, issue.UID).Scan(&decision.IssueID, &decision.SourceID, &decision.RecurrenceID, &decision.SourceUID, &decision.SourceName, &decision.SourceShortID, &decision.SourceStandalone)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, err
 		}
@@ -531,9 +531,12 @@ func FederatedPreservedParentLinks(ctx context.Context, tx *sql.Tx, p FoldProjec
 }
 
 // FederatedLinkIssueIDs resolves the endpoints available to a scoped fold.
-func FederatedLinkIssueIDs(ctx context.Context, tx *sql.Tx, p FoldProjection) (map[string]int64, error) {
+func FederatedLinkIssueIDs(ctx context.Context, tx *sql.Tx, p FoldProjection, issueUID string) (map[string]int64, error) {
 	ids := map[string]int64{}
 	for _, edge := range p.PresentLinks() {
+		if edge.Key.FromUID != issueUID && edge.Key.ToUID != issueUID {
+			continue
+		}
 		for _, uid := range []string{edge.Key.FromUID, edge.Key.ToUID} {
 			if _, ok := ids[uid]; ok {
 				continue

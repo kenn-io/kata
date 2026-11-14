@@ -20,14 +20,6 @@ func labelsValues(labels []db.IssueLabel) []string {
 	return values
 }
 
-func commentsValues(comments []db.Comment) []string {
-	values := make([]string, 0, len(comments))
-	for _, comment := range comments {
-		values = append(values, comment.Body)
-	}
-	return values
-}
-
 // Direct pulls retain issue history and missing move endpoints atomically.
 func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend) error {
 	ctx := t.Context()
@@ -191,7 +183,7 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.ElementsMatch(t, []string{"hub-label", "local"}, labelsValues(labels))
 		comments, err := spoke.CommentsByIssue(ctx, got.ID)
 		require.NoError(t, err)
-		require.ElementsMatch(t, []string{"Hub comment", "Local comment"}, commentsValues(comments))
+		require.ElementsMatch(t, []string{"Hub comment", "Local comment"}, importCommentBodies(comments))
 		links, err := spoke.LinksByIssue(ctx, got.ID)
 		require.NoError(t, err)
 		require.Len(t, links, 1)
@@ -205,7 +197,7 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
 		comments, err = spoke.CommentsByIssue(ctx, got.ID)
 		require.NoError(t, err)
-		require.ElementsMatch(t, []string{"Hub comment", "Local comment", "Delayed comment"}, commentsValues(comments))
+		require.ElementsMatch(t, []string{"Hub comment", "Local comment", "Delayed comment"}, importCommentBodies(comments))
 		links, err = spoke.LinksByIssue(ctx, got.ID)
 		require.NoError(t, err)
 		require.Empty(t, links)
@@ -233,7 +225,7 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.Equal(t, retained.ID, got.ProjectID)
 		comments, err = spoke.CommentsByIssue(ctx, got.ID)
 		require.NoError(t, err)
-		require.ElementsMatch(t, []string{"Hub comment", "Local comment", "Delayed comment"}, commentsValues(comments))
+		require.ElementsMatch(t, []string{"Hub comment", "Local comment", "Delayed comment"}, importCommentBodies(comments))
 		labels, err = spoke.LabelsByIssue(ctx, got.ID)
 		require.NoError(t, err)
 		require.ElementsMatch(t, []string{"hub-label", "local"}, labelsValues(labels))
@@ -277,8 +269,8 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.NoError(t, err)
 		winner, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: target.ID, ToProjectID: other.ID, IfMatchRev: current.Revision, Actor: "worker"})
 		require.NoError(t, err)
-		for _, restored := range []bool{false, true} {
-			t.Run(fmt.Sprint(restored), func(t *testing.T) {
+		for _, restore := range []string{"none", "current", "older"} {
+			t.Run(restore, func(t *testing.T) {
 				spoke := backend.Open(t)
 				t.Cleanup(func() { require.NoError(t, spoke.Close()) })
 				route, err := spoke.CreateProjectWithUID(ctx, "source", source.UID)
@@ -293,18 +285,28 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 				require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
 				retained, err := spoke.ProjectByUID(ctx, target.UID)
 				require.NoError(t, err)
-				if restored {
+				if restore != "none" {
 					_, _, _, err = spoke.RestoreProject(ctx, retained.ID, "worker")
 					require.NoError(t, err)
-					_, _, err = spoke.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: retained.ID, Actor: "worker", Force: true})
-					require.NoError(t, err)
+					if restore == "older" {
+						// Older restores left the retained marker behind.
+						writer := spoke.(interface {
+							ExecContext(context.Context, string, ...any) (sql.Result, error)
+						})
+						_, err = writer.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'1') ON CONFLICT(key) DO NOTHING`, db.FederationRetainedProjectPrefix+target.UID)
+						require.NoError(t, err)
+					}
+					if restore == "current" {
+						_, _, err = spoke.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: retained.ID, Actor: "worker", Force: true})
+						require.NoError(t, err)
+					}
 				}
 				_, err = spoke.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{portableNativeEvent(*winner.Event)})
 				require.NoError(t, err)
 				require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
 				got, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 				require.NoError(t, err)
-				if restored {
+				if restore != "none" {
 					require.Equal(t, retained.ID, got.ProjectID)
 				} else {
 					winnerProject, err := spoke.ProjectByUID(ctx, other.UID)
