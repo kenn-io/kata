@@ -373,7 +373,7 @@ func TestInit_HumanOutputKeepsProjectCreatedSemanticsForFreshWorkspace(t *testin
 	out, err := callInit(t.Context(), env.URL, dir, callInitOpts{})
 
 	require.NoError(t, err)
-	assert.Equal(t, "bound project kata\n", out)
+	assert.Equal(t, "bound project kata\nRun kata agent setup to connect Claude Code or Codex.\n", out)
 }
 
 func TestInit_AgentOutputChangedWhenOnlyGitignoreUpdated(t *testing.T) {

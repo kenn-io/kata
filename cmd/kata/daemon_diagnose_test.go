@@ -188,7 +188,7 @@ func TestDaemonStatusSelectedProfileDoesNotReportPersonalReady(t *testing.T) {
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(personal.URL, "http://")})
 	require.NoError(t, err)
 	out, _, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-	require.NoError(t, err)
+	assert.Equal(t, kindDaemonUnavail, requireCLIError(t, err, ExitDaemonUnavail).Kind)
 	var body struct {
 		Daemons  []any          `json:"daemons"`
 		Selected map[string]any `json:"selected"`
@@ -234,7 +234,7 @@ func TestDaemonStatusKeepsCurrentHomeListWhenSelectionIsInvalid(t *testing.T) {
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777"})
 	require.NoError(t, err)
 	out, _, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-	require.NoError(t, err)
+	assert.Equal(t, kindValidation, requireCLIError(t, err, ExitValidation).Kind)
 	var body struct {
 		Daemons  []any          `json:"daemons"`
 		Selected map[string]any `json:"selected"`
@@ -359,9 +359,8 @@ func TestDaemonStatusEmptyHomeDoesNotInitialize(t *testing.T) {
 	t.Setenv("KATA_DSN", "")
 	t.Setenv("KATA_SERVER", "")
 	t.Chdir(t.TempDir())
-	_, _, err := executeRootCapture(t, t.Context(), "daemon", "status", "--json")
-	require.NoError(t, err)
-	_, err = os.Stat(filepath.Join(home, "runtime"))
+	_, _, _ = executeRootCapture(t, t.Context(), "daemon", "status", "--json")
+	_, err := os.Stat(filepath.Join(home, "runtime"))
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
@@ -745,14 +744,18 @@ func TestDaemonDefaultVersionDifferenceIsInformational(t *testing.T) {
 func TestDaemonSelectionErrorExplainsRoutingFailure(t *testing.T) {
 	stoppedProfileCLI(t)
 	t.Setenv("KATA_HOME", t.TempDir())
-	for _, command := range []string{"diagnose", "status"} {
-		for _, mode := range []string{"--json", "--agent", "--format=human"} {
-			out, _, err := executeRootCapture(t, t.Context(), "daemon", command, mode)
-			require.NoError(t, err)
-			assert.Contains(t, out, "selection_error")
-			assert.Contains(t, out, "named daemon not found")
-			assert.Contains(t, out, "work")
-		}
+	for _, mode := range []string{"--json", "--agent", "--format=human"} {
+		out, _, err := executeRootCapture(t, t.Context(), "daemon", "diagnose", mode)
+		require.NoError(t, err)
+		assert.Contains(t, out, "selection_error")
+		assert.Contains(t, out, "named daemon not found")
+		assert.Contains(t, out, "work")
+
+		out, _, err = executeRootCapture(t, t.Context(), "daemon", "status", mode)
+		assert.Equal(t, kindValidation, requireCLIError(t, err, ExitValidation).Kind)
+		assert.Contains(t, out, "selection_error")
+		assert.Contains(t, out, "named daemon not found")
+		assert.Contains(t, out, "work")
 	}
 }
 

@@ -16,7 +16,7 @@ import (
 // (info.version). It tracks the HTTP API contract, not the build version, so
 // the committed schema artifact stays stable across builds and is bumped
 // deliberately when the wire contract changes.
-const APISchemaVersion = "0.46.0"
+const APISchemaVersion = "0.49.0"
 
 // OpenAPIDocument builds the daemon's complete OpenAPI model by wiring every
 // route through NewServer with a zero ServerConfig. It binds no listener and
@@ -165,10 +165,8 @@ func OpenAPIJSONVersion(version string) ([]byte, error) {
 // relaxResponseAdditionalProperties lets response bodies carry fields a client's
 // generated schema does not yet know about. Huma stamps additionalProperties:false
 // on every struct it emits, which would make a strict client validator reject
-// additive response fields — contradicting the compatibility policy in
-// docs/reference/http-api.md, where additive optional response fields may appear
-// without an api_schema_version bump. It walks every response schema and flips
-// that strict default to an explicit additionalProperties:true, while leaving
+// additive response fields. It walks every response schema and flips that
+// strict default to an explicit additionalProperties:true, while leaving
 // request schemas untouched so request validation is unchanged.
 func relaxResponseAdditionalProperties(doc *huma.OpenAPI) {
 	replaceStrictResponseAdditionalProperties(doc, true)

@@ -17,15 +17,17 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestFederationMoveBackfillAcceptsPayloadIssueIdentity(t *testing.T) {
+func TestFederationMoveBackfillReturnsTheMovedIssueHistory(t *testing.T) {
 	ctx := t.Context()
 	issueUID := "01ARZ3NDEKTSV4RRFFQ69AAA11"
 	sourceUID := "01ARZ3NDEKTSV4RRFFQ69AAA12"
 	targetUID := "01ARZ3NDEKTSV4RRFFQ69AAA13"
+	historyIssueUID := issueUID
 	history := api.EventEnvelope{
 		EventID: 8, EventUID: "01ARZ3NDEKTSV4RRFFQ69AAA14", OriginInstanceUID: "01ARZ3NDEKTSV4RRFFQ69AAA15",
 		Type: "issue.updated", ProjectID: 41, ProjectUID: sourceUID, ProjectName: "history-source",
-		Actor: "worker", ContentHash: "history-hash", Payload: jsontext.Value(`{"uid":"` + issueUID + `","title":"payload history"}`),
+		IssueUID: &historyIssueUID, Actor: "worker", ContentHash: "history-hash",
+		Payload:   jsontext.Value(`{"title":"earlier edit"}`),
 		CreatedAt: time.Unix(1, 0).UTC(),
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -62,8 +64,9 @@ func TestFederationMoveBackfillAcceptsPayloadIssueIdentity(t *testing.T) {
 	backfilled, err := backfillFederationMoveHistory(ctx, client, 42, page)
 	require.NoError(t, err)
 	require.Len(t, backfilled, 2)
-	require.Nil(t, backfilled[0].IssueUID, "backfill keeps the signed envelope unchanged")
-	require.Equal(t, issueUID, db.FederationEventIssueUID(backfilled[0].IssueUID, string(backfilled[0].Payload)))
+	require.Equal(t, history.EventUID, backfilled[0].EventUID, "earlier history precedes the move")
+	require.Equal(t, issueUID, db.EventIssueUID(backfilled[0].IssueUID))
+	require.JSONEq(t, `{"title":"earlier edit"}`, string(backfilled[0].Payload), "backfill keeps the signed payload unchanged")
 }
 
 func TestSyncFederationMoveBackfillsClaimAuditHistory(t *testing.T) {

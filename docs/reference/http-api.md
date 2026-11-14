@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-09
+last_edited: 2026-11-11
 ---
 
 # HTTP API schema
@@ -27,9 +27,9 @@ or filesystem paths.
 
 ## Local embeddings setup
 
-`GET /api/v1/embeddings/local` reports the configured provider, missing download bytes, Ollama availability, setup job, indexing progress, and `can_change`. `indexing.failed` reports an indexing error while the daemon keeps retrying. Aggregate indexing counts, time estimates, and detailed setup errors are visible only to daemon owners. Other viewers receive progress and failure state without those details. Issue-scoped credentials can read the status.
+`GET /api/v1/embeddings/local` reports the configured provider, missing download bytes, Ollama availability, setup job, indexing progress, `can_change`, and `can_restart`. `indexing.failed` reports an indexing error while the daemon keeps retrying. Aggregate indexing counts, time estimates, and detailed setup errors are visible only to daemon owners. Other viewers receive progress and failure state without those details. Issue-scoped credentials can read the status.
 
-`POST /api/v1/embeddings/local` starts setup and returns `202` with the same status. It shares the CLI's download and config checks, saves the setting, and reports the `restart` job state until the daemon restarts. Run `kata daemon restart` locally, or restart the daemon on its host. Reopen `kata ui` or sign in again afterward to see indexing progress.
+`POST /api/v1/embeddings/local` starts setup and returns `202` with the same status. It shares the CLI's download and config checks, saves the setting, and reports the `restart` job state until the daemon restarts. A daemon administrator can use `POST /api/v1/embeddings/local/restart` when `can_restart` is true. It returns `202` with no response body, keeps the job state at `restart`, sets `restart_in_progress`, and disables `can_restart`, and briefly disconnects all projects and clients. It returns `404` if setup is unavailable, `403` if the caller lacks daemon administration, and `409` if restart is unavailable or setup is not ready. This action is unavailable through the daemon switcher. For other daemons, run `kata daemon restart` on the host or use the service manager. Reopen `kata ui` if its address changes, or sign in again afterward to see indexing progress.
 
 Setup is available only when no embeddings provider is configured and no setup job is active. It requires a local owner browser session, a bootstrap token, or a static daemon token, with a writable browser session manager when present. It returns `403` for other viewers and through the daemon switcher proxy, `404` when setup is unavailable, and `409` while setup is already running. The switcher proxy permits status reads.
 
@@ -273,10 +273,15 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 ### Version history
 
+This table highlights notable changes. Marker history starts at `0.44.0`.
+
 | Version | Change |
 | --- | --- |
-| `0.46.0` | `GET /api/v1/projects/resolve` resolves a project by name for readers. Project federation status accepts `omit_errors=true` to withhold diagnostic error text. |
-| `0.45.0` | Project federation status accepts `compact=true` to omit relay checkpoint capacity measurement. |
+| `0.49.0` | `GET /api/v1/projects/resolve` resolves a project by name for readers. Project federation status accepts `omit_errors=true` to withhold diagnostic error text. |
+| `0.48.0` | Project federation status accepts `compact=true` to omit relay checkpoint capacity measurement. |
+| `0.47.0` | Attachment uploads accept `reuse_existing`. Reuse on uploads and links returns `attachment_invalid` when the daemon cannot read an existing reference. |
+| `0.46.0` | Federation ingest responses add optional `superseded_event_uids`, the adoption snapshots the hub did not store. |
+| `0.45.0` | Adds `POST /api/v1/embeddings/local/restart` to restart the daemon after local embeddings setup. Older daemons do not serve this route. |
 | `0.44.0` | Attachment routes return `503 docbank_key_unavailable` instead of `502 docbank_unauthorized` when the daemon cannot resolve its own Docbank key. Health diagnostics add a `docbank` block. |
 | `0.43.0` | Adds the daemon-owned MCP Events routes `POST /api/v1/mcp-events/list`, `POST /api/v1/mcp-events/subscribe`, `POST /api/v1/mcp-events/unsubscribe`, and `GET /api/v1/mcp-events/subscriptions` (status). Subscribe and unsubscribe arguments name either a non-empty `project_uids` list or `all_projects: true`. Failures return an `mcp_events` error whose `data` carries `mcp_code` and `mcp_data`. Older daemons do not serve these routes. Both issue list routes accept `compact=true`. |
 | `0.42.0` | Adds daemon-wide local embeddings setup and status at `GET` and `POST /embeddings/local`, and the `X-Kata-Embeddings-Configured` search response header. |
@@ -369,7 +374,7 @@ instead of the size fields and the rest of the response is unaffected.
 
 `GET /api/v1/projects/{project_id}/federation/status?compact=true` skips relay
 checkpoint capacity measurement while retaining diagnostic errors. Starting
-with API 0.46.0, add `omit_errors=true` to withhold sync, held-batch, embedding,
+with API 0.49.0, add `omit_errors=true` to withhold sync, held-batch, embedding,
 and relay checkpoint error text. The response uses `has_sync_error` to indicate
 a non-empty sync error while retaining status facts. Omit `omit_errors` to read
 the full diagnostic.
@@ -683,21 +688,14 @@ a full candidate window must not be treated as the whole matching set.
 
 These are the current intentions, not a contractual guarantee:
 
-- **Additive changes are not signalled.** New endpoints, and new optional
-  response fields, can appear without an `api_schema_version` change. Response
-  objects are published with `additionalProperties: true`, so a client generated
-  from the schema tolerates fields it does not yet know about even under strict
-  validation. The response relaxation never loosens request schemas: those keep
-  the strictness their types declare: `additionalProperties: false` by default,
-  so unknown request fields are rejected unless a type explicitly opts in.
-  New optional request fields and query parameters do bump
-  `api_schema_version`: generated clients may emit them, and older strict
-  daemons may reject them.
-  The OpenAPI 3.0 flavor (`kata openapi --version 3.0`), which exists as
-  code-generator input, leaves `additionalProperties` unset on response
-  schemas instead: the same permissive meaning, phrased so generators model
-  optional object-valued response fields (such as `parent`) as pointers
-  rather than always-present values.
+- **Contract changes bump `api_schema_version`.** New endpoints and schema fields,
+  including optional response fields, take a new version. Documentation-only edits
+  keep the existing version. Response objects use
+  `additionalProperties: true`, so older clients accept unknown optional response
+  fields. Request schemas remain strict by default and reject unknown fields unless
+  a type explicitly opts in. The OpenAPI 3.0 flavor (`kata openapi --version 3.0`)
+  leaves `additionalProperties` unset on response schemas so generators model
+  optional object-valued response fields as pointers.
 - **Breaking changes bump `api_schema_version`.** Removing or renaming a field,
   changing a field's type, or removing an endpoint is a breaking change and is
   signalled by a change to `api_schema_version`. A client that pins or checks
@@ -706,6 +704,8 @@ These are the current intentions, not a contractual guarantee:
 - **Regeneration stays honest.** A committed golden test fails if
   `api/openapi.yaml` drifts from the routes, so the published schema cannot
   silently fall out of date with the daemon it describes.
+
+See the [API contract workflow](../development/contributing.md#api-contract-changes) for version bumps and marker records.
 
 If you build against this schema and hit a gap, please open an issue. The
 contract is meant to be useful to external clients, and feedback shapes how far
@@ -995,7 +995,10 @@ federated event log.
 
 `POST /api/v1/projects/{project_id}/issues/{ref}/attachments?name=<file>`
 uploads the raw request body as `application/octet-stream` to Docbank and
-returns the new `attachment_id` with its stored reference. `GET
+returns the `attachment_id` with its stored reference. Since API 0.47.0,
+set the query parameter `reuse_existing=true` to return the smallest existing
+attachment ID for the resolved Docbank version, or create a reference if none
+exists. On uploads and links, reuse returns `attachment_invalid` if the daemon cannot read an existing reference. Omitting it or setting it to `false` creates a new reference. `GET
 /api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content`
 streams the file back. `POST /api/v1/projects/{project_id}/issues/{ref}/attachments/links` saves a reference to an existing Docbank file version. Its JSON body takes exactly one of `node_id` or `path`, an optional `version_id`, and `actor`. Set `reuse_existing` to `true` to return the smallest existing attachment ID for that version without adding another reference; if no reference exists, the route creates one. Omitting this field creates a new reference. All three routes return `docbank_not_configured` when the daemon has no Docbank, and `503 docbank_key_unavailable` without contacting Docbank when the daemon cannot resolve its Docbank key; the message gives the reason, and the health `docbank` block names the source. See [Issue attachments](../guide/attachments.md).
 

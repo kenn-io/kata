@@ -839,6 +839,7 @@ func restrictWebDaemonLocalEmbeddings(response *http.Response, administrator boo
 		return fmt.Errorf("decode daemon embeddings response: %w", err)
 	}
 	status.CanChange = false
+	status.CanRestart = false
 	if !administrator {
 		redactLocalEmbeddingsStatus(&status)
 	}
@@ -902,6 +903,9 @@ func webDaemonOutboundHeaders(in http.Header) http.Header {
 }
 
 func webDaemonProxyRequestAllowed(r *http.Request, path string) bool {
+	if path == "/api/v1/embeddings/local/restart" {
+		return false
+	}
 	if path == "/api/v1/embeddings/local" {
 		return r.Method == http.MethodGet
 	}

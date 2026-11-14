@@ -226,7 +226,7 @@ func TestFederationStatusProjectVersionRouting(t *testing.T) {
 	}{
 		{"older denied", "0.45.0", http.StatusForbidden, true},
 		{"older not found", "0.45.0", http.StatusNotFound, true},
-		{"current denied", "0.46.0", http.StatusForbidden, false},
+		{"current denied", "0.49.0", http.StatusForbidden, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var global, lookup atomic.Int32

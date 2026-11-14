@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-09
+last_edited: 2026-11-12
 ---
 
 # CLI reference
@@ -244,6 +244,10 @@ the other output modes.
 
 [`kata agent-hook contract <harness>`](#contract-injection) injects this text in a harness-native response by default. To load it in every session, see
 [Contract in every session](../workflows/agents.md#contract-in-every-session).
+
+## Agent setup
+
+In unreleased builds, `kata agent setup [<harness>...]` installs user hooks for selected agents. With no names it selects installed Claude Code and Codex. Add `--check` to inspect readiness without installing. Open Codex and run `/hooks` when its hooks need review. The command exits 1 when a selected agent needs attention.
 
 ## Agent hook
 
@@ -865,7 +869,9 @@ exclusive and force a strategy:
 For an exhaustive lexical scan, use `--lexical --json`, then pass each
 `next_cursor` back with `--cursor` and the same query and filters until
 `complete` is true. Agent output also includes completeness and continuation;
-human output prints an incomplete-results hint to stderr. Other modes keep
+human output prints a command to continue the search to stderr. The command
+retains the query and filters and uses POSIX syntax on Unix or PowerShell
+syntax on Windows. Other modes keep
 ranked, bounded results without continuation. Their `complete` field is false
 when retrieval is truncated, degraded, or cannot establish exhaustion.
 
@@ -1863,13 +1869,14 @@ set `[tui] confirm_quit = false`; see
 Start with `kata doctor` when commands cannot reach the daemon, a workspace
 points at the wrong project, or hooks and integrations stop working. It reports
 local configuration problems, the selected daemon's health and version, project
-visibility, active hook availability and retained failures, embeddings, and
-declarative federation mapping convergence. Each finding includes a suggested
+visibility, active hook availability and retained failures, embeddings,
+declarative federation mapping convergence, and agent hook readiness. Each finding includes a suggested
 fix. See the [doctor troubleshooting guide](../operations/doctor.md).
 
 Doctor never starts or restarts a daemon, opens storage, runs hooks, repairs
 bindings, or edits configuration. Existing daemon authentication and access
-logging may still record the request. `--json` emits one report with stable
+logging may still record the request. The agent check can create Codex state.
+`--json` emits one report with stable
 check IDs, `ok`/`info`/`warn`/`fail` statuses, and summary counts. Failed checks
 exit **1** with error kind `checks_failed`; warnings alone exit **0**. `--quiet`
 hides successful and informational findings in text output; JSON always
@@ -2002,8 +2009,24 @@ resolved web UI URL on its own line after the daemon transport address.
 `daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
 `KATA_HOME` and reject `--daemon`. Set the home explicitly for those operations.
 `daemon status` reports current-home processes and a separate selected-daemon
-diagnosis. `daemon diagnose` inspects selection, home, database/project identity,
-schema, process, and federation origin without starting or changing anything.
+diagnosis. For a process automatically started by a Kata command, human output
+shows `started: automatically by a kata command` and JSON includes
+`auto_started: true`. This includes a registered local profile started by
+`daemon recover` or by a command that routes to it. An omitted JSON field means
+the startup origin is unknown.
+Agent output includes `auto_started=true` when there is exactly one process and
+it was automatically started; it omits the field when multiple processes are
+listed. An existing process's startup marker survives an in-place restart or
+re-exec. The command exits 0 only when the selected daemon is ready. Stopped or
+unavailable selections and the `version_mismatch` state exit 7; an unknown
+named daemon exits 3; other invalid routing configuration, such as a malformed
+`KATA_SERVER` URL, exits 1. Diagnostics are printed in every output mode.
+In agent mode, the `OK daemon` report on stdout indicates that the report was
+produced; a non-ready selection also emits an `ERR status` line on stderr. See
+the [agent output contract](agent-output.md#stability-contract).
+`daemon diagnose` inspects selection, home,
+database/project identity, schema, process, and federation origin without
+starting or changing anything.
 `daemon recover` starts only a registered existing local profile, verifies its
 pinned database UID, and optionally checks `--expect-project-uid` before and
 after startup. It never initializes storage or projects or changes routing. See
@@ -2322,7 +2345,9 @@ for the exact retained and omitted data and an isolated-home example.
 
 `--merge` instead adds exactly one non-system project snapshot to an existing
 SQLite or Postgres target. It remaps numeric database IDs while preserving
-portable identities and leaves unrelated projects unchanged. A multi-project
+portable identities. It also creates the snapshot's links to issues of other
+projects that are already in the target, and changes nothing else in those
+projects. A multi-project
 snapshot or any imported UID that already exists in the target causes the
 transaction to be refused. Stop every daemon using the target first. See
 [Backup and restore](../operations/backup-restore.md) for name collisions,
@@ -2473,7 +2498,7 @@ kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --re
 
 `kata federation status --project <project>` shows detailed sync status for one
 project using the selected daemon. Project readers need a CLI with scoped
-status support and daemon API 0.46.0 or later. Owners can use this command
+status support and daemon API 0.49.0 or later. Owners can use this command
 with older daemons. Without `--project`, status covers all bound projects and
 requires daemon-owner authority.
 
@@ -2648,12 +2673,14 @@ Legacy numeric refs no longer resolve.
 Attach files to an issue with Docbank, then list, download, or remove their references. See [Issue attachments](../guide/attachments.md).
 
 ```sh
-kata docbank attachments add <issue> <file>...
-kata docbank attachments link <issue> <node-id|/path> [--version UUID]
+kata docbank attachments add <issue> <file>... [--reuse-existing]
+kata docbank attachments link <issue> <node-id|/path> [--version UUID] [--reuse-existing]
 kata docbank attachments ls <issue>
 kata docbank attachments get <issue> <attachment> [-o PATH] [--force]
 kata docbank attachments rm <issue> <attachment>
 ```
+
+`--reuse-existing` returns an existing reference to the resolved version, or creates one if absent. With this flag, `add` requires daemon API 0.47.0 or newer, and `link` requires 0.39.0 or newer. Since API 0.47.0, reuse returns `attachment_invalid` if the issue has a reference the daemon cannot read. Without the flag, each add or link creates a reference.
 
 `<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
 

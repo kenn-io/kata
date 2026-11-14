@@ -836,6 +836,7 @@
           <SearchSettings
             postFetch={searchSettingsPostFetch}
             {canAdministerDaemon}
+            originStable={snapshot.origin_stable}
             onback={onBackFromCredentials}
             remoteHost={settingsHost}
           />

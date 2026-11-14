@@ -16,6 +16,8 @@ const MinMCPEventsMaxTTL = 60 * time.Second
 
 // MCPEventsConfig is the [mcp_events] block. Events is off unless enabled.
 type MCPEventsConfig struct {
+	// TrustedCallbacks grants exact origins static private destinations.
+	TrustedCallbacks []MCPEventsTrustedCallback `toml:"trusted_callbacks"`
 	// Enabled starts the daemon-owned MCP Events delivery service.
 	Enabled bool `toml:"enabled"`
 	// MaxTTL caps finite subscription grants as a Go duration such as "720h".
@@ -42,4 +44,11 @@ func (c MCPEventsConfig) MaxTTLDuration() (time.Duration, error) {
 		return 0, fmt.Errorf("mcp_events.max_ttl must be a duration of at least %s: %q", MinMCPEventsMaxTTL, c.MaxTTL)
 	}
 	return d, nil
+}
+
+// MCPEventsTrustedCallback is one daemon operator callback grant. Validation
+// belongs to the Events transport at startup so a bad grant disables only Events.
+type MCPEventsTrustedCallback struct {
+	Origin    string   `toml:"origin"`
+	Addresses []string `toml:"addresses"`
 }

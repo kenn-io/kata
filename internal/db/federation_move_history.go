@@ -35,7 +35,7 @@ func ReadFederationMoveHistory(ctx context.Context, tx *sql.Tx, afterID int64, l
 		}
 		for _, event := range page {
 			afterID = event.ID
-			issueUID := FederationEventIssueUID(event.IssueUID, event.Payload)
+			issueUID := EventIssueUID(event.IssueUID)
 			if issueUID != "" && event.ID < cutoffs[issueUID] {
 				continue
 			}
@@ -54,7 +54,7 @@ func ReadFederationMoveHistory(ctx context.Context, tx *sql.Tx, afterID int64, l
 func loadFederationMoveHistoryCutoffs(ctx context.Context, tx federationHistoryQuery, page []Event, cutoffs map[string]int64) error {
 	var pending []string
 	for _, event := range page {
-		issueUID := FederationEventIssueUID(event.IssueUID, event.Payload)
+		issueUID := EventIssueUID(event.IssueUID)
 		if issueUID == "" {
 			continue
 		}

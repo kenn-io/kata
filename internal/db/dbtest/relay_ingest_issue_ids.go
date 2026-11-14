@@ -42,7 +42,7 @@ func AcceptRelayedIssueCreation(t *testing.T, store db.Storage) RelayedIssueCrea
 	require.NoError(t, err)
 	commentUID, err := uid.New()
 	require.NoError(t, err)
-	created := newRemoteEvent(t, project, &issueUID, "issue.created", "relay-member", peer, 500, jsontext.Value(`{"uid":"`+issueUID+`","title":"Relayed hook issue","body":"","author":"relay-member","status":"open","metadata":{},"labels":["relayed"],"created_at":"2026-05-23T12:00:00.000Z"}`))
+	created := newRemoteEvent(t, project, &issueUID, "issue.created", "relay-member", peer, 500, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"Relayed hook issue","body":"","author":"relay-member","status":"open","metadata":{},"labels":["relayed"],"created_at":"2026-05-23T12:00:00.000Z"}`)))
 	commented := newRemoteEvent(t, project, &issueUID, "issue.commented", "relay-member", peer, 501, jsontext.Value(`{"comment_uid":"`+commentUID+`","author":"relay-member","body":"Relayed comment","created_at":"2026-05-23T12:01:00.000Z"}`))
 	envelopes := []db.RelayEnvelope{}
 	for sequence, event := range []db.RemoteEvent{created, commented} {

@@ -40,6 +40,8 @@ func TestEventResolvedIssueIndexMigrationUpgradesVersion42(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, events, 1)
 	require.Equal(t, created.UID, events[0].UID)
-	var definition string
-	require.NoError(t, admin.QueryRowContext(ctx, `SELECT indexdef FROM pg_indexes WHERE schemaname='history_upgrade' AND indexname='idx_events_resolved_issue_uid'`).Scan(&definition))
+	// Schema 43 adds the resolved index and schema 51 replaces it.
+	indexes := eventIssueIndexes(ctx, t, admin, "history_upgrade")
+	require.NotContains(t, indexes, "idx_events_resolved_issue_uid")
+	require.Contains(t, indexes, "idx_events_issue_uid_id")
 }

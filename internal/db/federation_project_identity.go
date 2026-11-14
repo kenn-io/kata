@@ -121,7 +121,7 @@ func CheckFederationProjectIdentityRetirement(ctx context.Context, tx federation
 // PreserveFederationProjectIdentityDependencies records native move endpoints
 // before a reset deletes their events. The dependency belongs to the joined
 // project stream and is retired when that stream leaves federation.
-func PreserveFederationProjectIdentityDependencies(ctx context.Context, tx *sql.Tx, projectID int64, postgres bool) error {
+func PreserveFederationProjectIdentityDependencies(ctx context.Context, tx *sql.Tx, projectID int64) error {
 	var dependentUID string
 	var role sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT p.uid,b.role FROM projects p
@@ -131,10 +131,8 @@ func PreserveFederationProjectIdentityDependencies(ctx context.Context, tx *sql.
 	if !role.Valid || role.String != string(FederationRoleSpoke) {
 		return nil
 	}
-	issueUIDExpr := FederationReadIssueUIDExpr(postgres)
-	//nolint:gosec // G202: issueUIDExpr is a fixed dialect expression; values are bound.
 	rows, err := tx.QueryContext(ctx, `SELECT e.payload FROM events e
- WHERE e.type='issue.moved' AND `+issueUIDExpr+` IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
+ WHERE e.type='issue.moved' AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
 	if err != nil {
 		return err
 	}

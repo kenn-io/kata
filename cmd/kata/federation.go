@@ -1374,7 +1374,7 @@ func federationStatusCmd() *cobra.Command {
 				}
 			}
 			// Remove the old-daemon branch and its dedicated tests when the CLI's
-			// documented minimum daemon API reaches 0.46.0.
+			// documented minimum daemon API reaches 0.49.0.
 			if flags.Project == "" || versionErr != nil {
 				callResp, callErr = apiClient.GetFederationStatusWithResponse(a.ctx, &generated.GetFederationStatusRequestOptions{})
 			}

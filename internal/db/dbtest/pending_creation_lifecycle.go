@@ -234,7 +234,7 @@ func RunRelayResetDropsOrphanPendingCreations(t *testing.T, store db.Storage) {
 	keptUID, err := uid.New()
 	require.NoError(t, err)
 	kept := newRemoteEvent(t, project, &keptUID, "issue.snapshot", "example-actor", rootUID, 400,
-		jsontext.Value(`{"uid":"`+keptUID+`","title":"Kept by the root","author":"example-actor","metadata":{},"comments":[],"labels":[],"links":[]}`))
+		IssueDocument(t, keptUID, jsontext.Value(`{"uid":"`+keptUID+`","title":"Kept by the root","author":"example-actor","metadata":{},"comments":[],"labels":[],"links":[]}`)))
 	raw, err := db.EncodeRelaySourceEvent(kept)
 	require.NoError(t, err)
 	entities, err := json.Marshal([][]byte{raw})

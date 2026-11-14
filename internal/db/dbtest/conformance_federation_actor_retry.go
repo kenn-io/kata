@@ -27,7 +27,7 @@ func checkFederationIngestActorRebindRetry(t *testing.T, store db.Storage) error
 	require.NoError(t, err)
 	history := []db.FederationIngestEvent{}
 	for i, input := range []struct{ kind, payload string }{
-		{"issue.created", `{"uid":"` + issueUID + `","title":"original","author":"earlier-worker","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`},
+		{"issue.created", `{"uid":"` + issueUID + `","short_id":"` + strings.ToLower(issueUID[len(issueUID)-4:]) + `","title":"original","body":"","author":"earlier-worker","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`},
 		{"issue.commented", `{"comment_uid":"` + commentUID + `","author":"earlier-worker","teammate":"builder","body":"retained work","created_at":"2026-05-23T12:01:00.000Z"}`},
 		{"issue.metadata_updated", `{"diff":{"review.state":{"from":null,"to":"ready"}},"revision_new":3}`},
 		{"issue.assigned", `{"owner":"earlier-worker"}`},
@@ -135,7 +135,7 @@ func checkFederationIngestActorRebindRetry(t *testing.T, store db.Storage) error
 		snapshotIssueUID, err := uid.New()
 		require.NoError(t, err)
 		snapshot := newRemoteEvent(t, project, &snapshotIssueUID, "issue.snapshot", "earlier-worker", spokeUID, 600,
-			jsontext.Value(`{"uid":"`+snapshotIssueUID+`","title":"snapshot","author":"current-worker","status":"open","metadata":{}}`))
+			IssueDocument(t, snapshotIssueUID, jsontext.Value(`{"uid":"`+snapshotIssueUID+`","title":"snapshot","author":"current-worker","status":"open","metadata":{}}`)))
 		inserted, err := store.InsertRemoteEvent(ctx, project.ID, snapshot)
 		require.NoError(t, err)
 		require.True(t, inserted)

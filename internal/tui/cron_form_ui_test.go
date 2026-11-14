@@ -520,6 +520,7 @@ func TestCronTextFieldsUseExternalEditorWithoutChangingStoredText(t *testing.T) 
 }
 
 func TestCronNativeCreateRefreshesParentActivity(t *testing.T) {
+	useInstantTicks(t)
 	env := testenv.New(t)
 	c := NewClient(env.URL, env.HTTP)
 	project, err := c.EnsureProject(t.Context(), "cron-parent-example", "alice")

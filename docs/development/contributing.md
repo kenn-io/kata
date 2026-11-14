@@ -68,6 +68,80 @@ make nilaway
 
 Pull requests select checks based on the changed files. See the filters and job conditions in [test.yml](https://github.com/kenn-io/kata/blob/main/.github/workflows/test.yml) for the selection rules. Pushes to `main` run every check.
 
+### Git hooks
+
+Install the hooks to catch common CI failures before you push:
+
+```sh
+prek install
+```
+
+[prek.toml](https://github.com/kenn-io/kata/blob/main/prek.toml) lists the
+hooks for each stage. The commit hooks are fast. The push hooks run the API,
+lint, and nil-safety checks that CI also runs.
+
+To run the push hooks without pushing, commit your work and run:
+
+```sh
+prek run --stage pre-push --from-ref origin/main --to-ref HEAD
+```
+
+The push hooks run `make` targets on your working tree, not on the commits
+being pushed. Uncommitted changes are checked too, and a branch you push from
+another checkout is not checked at all.
+
+Hooks do not replace CI. The pull request's checks run on the pushed commit,
+and those are the ones a maintainer reads.
+
+### Local review (optional)
+
+Each pull request gets a `roborev` review status next to its CI checks. You do
+not need [Roborev](https://github.com/kenn-io/roborev) to contribute. If you
+already run it, you can read the same kind of review before you push.
+
+To review the whole branch and wait for the result:
+
+```sh
+roborev review --branch --wait
+```
+
+Agents follow [AGENTS.md](https://github.com/kenn-io/kata/blob/main/AGENTS.md)
+and start a review only when you ask for one.
+
+A review covers your work only when its `git_ref` ends at the commit you are
+about to push. Compare `git rev-parse HEAD` with the jobs for your branch:
+
+```sh
+roborev job list --json
+```
+
+| `status` | `verdict` | `git_ref` ends at | Meaning |
+| --- | --- | --- | --- |
+| `done` | `P` | your `HEAD` | Reviewed, no findings. |
+| `done` | `F` | your `HEAD` | Reviewed with findings. Read them with `roborev job show --job <id>`. |
+| `queued` or `running` | none | your `HEAD` | Not reviewed yet. |
+| `failed` | none | your `HEAD` | The reviewer did not finish, for example a rate limit or a timeout. `error` says why. This is not a verdict. |
+| any | any | an older commit | Stale. You committed, amended, or rebased after the review. |
+
+No job for your `HEAD` means it has not been reviewed.
+
+Roborev's own Git hooks only queue reviews. They never block a commit or a
+push, so a successful push does not mean a review ran or passed.
+
+As of Roborev 0.75, `roborev job show <sha>` and `roborev job wait <sha>` find
+a review of that single commit only. They report no review for a commit that
+a range review covers, so read `roborev job list --json` instead.
+
+### API contract changes
+
+Every HTTP wire-contract change, including an optional response field, needs a new `APISchemaVersion`.
+
+1. Bump `APISchemaVersion` and run `make api-generate`.
+2. Run `go test ./internal/daemon -run '^TestAPISchemaVersionMatchesRecordedContract$'`.
+3. Add the suggested marker with a one-line summary. Keep all base markers and their summaries; you may correct a summary in its existing file.
+
+If another change takes your version, move your marker and any feature minimum checks introduced by your change to the next minor version. Regenerate the combined contract and use its digest in the marker name, retaining the summary suffix.
+
 ### Native agent plugins
 
 The `native-agent-plugins` job in
@@ -144,7 +218,7 @@ make test-federation-docker
 ```
 
 The pre-commit hook protects released PostgreSQL migration history. Install
-the configured hooks with `prek install`; see [PostgreSQL
+it with the other [Git hooks](#git-hooks); see [PostgreSQL
 migrations](postgres-migrations.md) before proposing a schema change.
 
 `make test-stress` runs randomized and failpoint tests through gotestsum. It
