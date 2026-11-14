@@ -506,7 +506,7 @@ func syncDirectSpoke(
 				}
 				exists, err := store.ReconcileLocalFederationEcho(ctx, id, remoteEventFromEnvelope(ev))
 				if err != nil {
-					return err
+					return fmt.Errorf("reconcile local echo project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 				}
 				if exists {
 					duplicate[i] = true

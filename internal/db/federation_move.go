@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -584,27 +583,6 @@ func PreserveMovedIssueLabels(ctx context.Context, tx *sql.Tx, projectID int64, 
 		}
 	}
 	return nil
-}
-
-// FoldMovedIssue limits reconciliation to the rehomed issue and its history.
-func FoldMovedIssue(p FoldProjection, issue FoldIssue) FoldProjection {
-	result := FoldProjection{
-		Issues:        map[string]FoldIssue{issue.UID: issue},
-		IssueMetadata: map[string]jsontext.Value{issue.UID: p.IssueMetadata[issue.UID]},
-		Comments:      make(map[string]FoldComment),
-		Labels:        make(map[FoldLabelKey]FoldElementState),
-	}
-	for uid, comment := range p.Comments {
-		if comment.IssueUID == issue.UID {
-			result.Comments[uid] = comment
-		}
-	}
-	for key, state := range p.Labels {
-		if key.IssueUID == issue.UID {
-			result.Labels[key] = state
-		}
-	}
-	return result
 }
 
 // FollowingMovedProjects reports whether a destination reconciliation pass is running.

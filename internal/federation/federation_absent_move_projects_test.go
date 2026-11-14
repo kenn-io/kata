@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -72,10 +73,20 @@ func TestSyncFederationMoveHistoryWithAbsentCounterpartProjects(t *testing.T) {
 }
 
 func TestSyncFederationReportsInvalidPullHashAndRetries(t *testing.T) {
+	for _, local := range []bool{false, true} {
+		t.Run(fmt.Sprint(local), func(t *testing.T) { testSyncFederationInvalidPullHash(t, local) })
+	}
+}
+
+func testSyncFederationInvalidPullHash(t *testing.T, local bool) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "hash-project")
 	spoke := newMoveDeliverySpoke(t, hub, projects)
-	_, event, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Pull event", Author: "worker"})
+	eventStore, eventProject := hub.DB, projects[0].ID
+	if local {
+		eventStore, eventProject = spoke.env.DB, spoke.projects[0].ID
+	}
+	_, event, err := eventStore.CreateIssue(ctx, db.CreateIssueParams{ProjectID: eventProject, Title: "Pull event", Author: "worker"})
 	require.NoError(t, err)
 	require.NotEmpty(t, event.ContentHash)
 	target, err := url.Parse(hub.URL)
@@ -107,20 +118,34 @@ func TestSyncFederationReportsInvalidPullHashAndRetries(t *testing.T) {
 	credential.HubURL = server.URL
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 	require.NoError(t, err)
-	err = SyncFederationPullOnlyOnce(ctx, spoke.env.DB, binding, credential, spoke.credentials)
-	require.ErrorContains(t, err, "validate remote event")
+	sync := func(binding db.FederationBinding) error {
+		if local {
+			return SyncFederationOnce(ctx, spoke.env.DB, binding, credential, spoke.credentials)
+		}
+		return SyncFederationPullOnlyOnce(ctx, spoke.env.DB, binding, credential, spoke.credentials)
+	}
+	err = sync(binding)
+	operation := "validate remote event"
+	if local {
+		operation = "reconcile local echo"
+	}
+	require.ErrorContains(t, err, operation)
 	status, err := spoke.env.DB.FederationSyncStatusByProject(ctx, binding.ProjectID)
 	require.NoError(t, err)
 	require.NotNil(t, status.LastError)
-	require.Contains(t, *status.LastError, "validate remote event")
+	require.Contains(t, *status.LastError, operation)
 	require.Contains(t, *status.LastError, projects[0].UID)
 	require.Contains(t, *status.LastError, event.UID)
 	binding, err = spoke.env.DB.FederationBindingByProject(ctx, binding.ProjectID)
 	require.NoError(t, err)
-	require.Less(t, binding.PullCursorEventID, event.ID)
+	if !local {
+		require.Less(t, binding.PullCursorEventID, event.ID)
+	}
 	corrupt.Store(false)
-	require.NoError(t, SyncFederationPullOnlyOnce(ctx, spoke.env.DB, binding, credential, spoke.credentials))
+	require.NoError(t, sync(binding))
 	binding, err = spoke.env.DB.FederationBindingByProject(ctx, binding.ProjectID)
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, binding.PullCursorEventID, event.ID)
+	if !local {
+		require.GreaterOrEqual(t, binding.PullCursorEventID, event.ID)
+	}
 }

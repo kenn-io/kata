@@ -3,6 +3,7 @@ package dbtest
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"fmt"
 	"strings"
 	"testing"
@@ -131,7 +132,7 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 	})
 	t.Run("unjoined destination keeps hub edits", func(t *testing.T) {
 		ctx := t.Context()
-		issue, created, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Before", Author: "worker"})
+		issue, created, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Before", Author: "worker", Metadata: map[string]jsontext.Value{"test": jsontext.Value(`"value"`)}})
 		require.NoError(t, err)
 		peer, peerCreated, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Peer", Author: "worker"})
 		require.NoError(t, err)
@@ -184,6 +185,7 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.Equal(t, local.ID, got.ID)
 		require.Equal(t, retained.ID, got.ProjectID)
 		require.Equal(t, "Edited on hub", got.Title)
+		require.JSONEq(t, `{"test":"value"}`, string(got.Metadata))
 		labels, err := spoke.LabelsByIssue(ctx, got.ID)
 		require.NoError(t, err)
 		require.ElementsMatch(t, []string{"hub-label", "local"}, labelsValues(labels))
