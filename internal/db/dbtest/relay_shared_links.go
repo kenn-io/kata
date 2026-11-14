@@ -69,6 +69,7 @@ func NewRelaySharedAccessFixture(t *testing.T, store db.Storage) RelaySharedAcce
 	return RelaySharedAccessFixture{Projects: projects, Issues: issues, Grants: grants, Linked: linked, Team: team, Signer: db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}}
 }
 
+// RunRelaySharedLinks checks shared links across relay deliveries and resets.
 func RunRelaySharedLinks(t *testing.T, store db.Storage) {
 	fixture := NewRelaySharedAccessFixture(t, store)
 	ctx := t.Context()
