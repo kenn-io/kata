@@ -5,4 +5,5 @@
 export type AddAttachmentParams = {
   name: string
   actor?: string
+  reuse_existing?: boolean
 }
