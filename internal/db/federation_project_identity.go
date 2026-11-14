@@ -7,7 +7,7 @@ import (
 )
 
 // FederationProjectIdentityDependencyPrefix stores former project UIDs that a
-// joined replica still needs.
+// joined replica still needs after a reset removes its move events.
 const FederationProjectIdentityDependencyPrefix = "federation_identity_dependency."
 
 // FederationRetainedProjectPrefix marks identities created for absent projects.

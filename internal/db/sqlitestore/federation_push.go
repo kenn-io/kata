@@ -24,10 +24,13 @@ func (d *Store) PendingFederationPushEvents(
 		limit = 1000
 	}
 	out, err := d.queryPendingFederationPushEvents(ctx, `
-		WHERE e.project_id = ? AND e.origin_instance_uid = ? AND e.id > ?
+		WHERE e.project_id = ?
+		  AND e.origin_instance_uid = ?
+		  AND e.id > ?
 		  AND `+db.FederationPushEligible("e")+`
 		  AND `+federationPushEventTypeCondition("e.type")+`
-		ORDER BY e.id ASC LIMIT ?`, projectID, originInstanceUID, afterID, limit)
+		ORDER BY e.id ASC
+		LIMIT ?`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +79,14 @@ func (d *Store) PendingFederationPushEvents(
 }
 
 func (d *Store) queryPendingFederationPushEvents(ctx context.Context, where string, args ...any) ([]db.Event, error) {
-	rows, err := d.QueryContext(ctx, eventSelect+where, args...)
+	rows, err := d.QueryContext(ctx, `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
+	             e.issue_id, e.issue_uid, i.short_id, e.related_issue_id, e.related_issue_uid, ri.short_id,
+	             e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
+	      FROM events e
+	      JOIN projects p ON p.id = e.project_id
+	      LEFT JOIN issues i ON i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid)
+	      LEFT JOIN issues ri ON ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid)
+	      `+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("pending federation push events: %w", err)
 	}
@@ -109,9 +119,9 @@ func (d *Store) PendingFederationPushStats(
 	if err := d.QueryRowContext(ctx, `
 		SELECT COUNT(*), MAX(id)
 		  FROM events
-		 WHERE project_id = $1
-		   AND origin_instance_uid = $2
-		   AND id > $3
+		 WHERE project_id = ?
+		   AND origin_instance_uid = ?
+		   AND id > ?
 		   AND `+db.FederationPushEligible("events")+`
 		   AND `+federationPushEventTypeCondition("type"),
 		projectID, originInstanceUID, afterID).Scan(&count, &maxID); err != nil {
@@ -289,23 +299,23 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 
 	res, err := tx.ExecContext(ctx, `
 		UPDATE federation_bindings
-		   SET replay_horizon_event_id = $1,
-		       pull_cursor_event_id = $2,
+		   SET replay_horizon_event_id = ?,
+		       pull_cursor_event_id = ?,
 		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE project_id = $3
+		 WHERE project_id = ?
 		   AND NOT EXISTS (
 		       SELECT 1
-		         FROM events e
-		        WHERE e.project_id = $4
-		          AND e.origin_instance_uid = $5
-		          AND e.id > $6
-		          AND `+db.FederationPushEligible("e")+`
-		          AND `+federationPushEventTypeCondition("e.type")+`
+		         FROM events
+		        WHERE project_id = ?
+		          AND origin_instance_uid = ?
+		          AND id > ?
+		          AND `+db.FederationPushEligible("events")+`
+		          AND `+federationPushEventTypeCondition("type")+`
 		   )
 		   AND NOT EXISTS (
 		       SELECT 1
 		         FROM federation_quarantine
-		        WHERE project_id = $7
+		        WHERE project_id = ?
 		          AND skipped_at IS NULL
 		   )`,
 		replayHorizonEventID, pullCursorEventID, projectID,

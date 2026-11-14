@@ -286,17 +286,15 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 		var role string
 		var enabled int
 		var relay bool
-		if err := tx.QueryRowContext(ctx, `SELECT role,enabled,relay_config IS NOT NULL
- FROM federation_bindings WHERE project_id=$1`, route).Scan(&role, &enabled, &relay); err != nil {
-			if missing && errors.Is(err, sql.ErrNoRows) {
-				return 0, fmt.Errorf("%w: event project is not joined", ErrFederationIngestValidation)
-			}
+		err := tx.QueryRowContext(ctx, `SELECT role,enabled,relay_config IS NOT NULL
+ FROM federation_bindings WHERE project_id=$1`, route).Scan(&role, &enabled, &relay)
+		if missing && (errors.Is(err, sql.ErrNoRows) || err == nil && (role != string(FederationRoleSpoke) || enabled != 1 || relay)) {
+			return 0, fmt.Errorf("%w: event project is not joined", ErrFederationIngestValidation)
+		}
+		if err != nil {
 			return 0, err
 		}
 		if role != string(FederationRoleSpoke) || enabled != 1 || relay {
-			if missing {
-				return 0, fmt.Errorf("%w: event project is not joined", ErrFederationIngestValidation)
-			}
 			return 0, errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported)
 		}
 	}
@@ -520,15 +518,9 @@ func markLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, origin, issueUID s
 	if err != nil {
 		return err
 	}
-	candidates, err := scanLocalMoveEvents(rows, references)
+	marked, err := scanLocalMoveEvents(rows, issueUID, references)
 	if err != nil {
 		return err
-	}
-	var marked []string
-	for _, event := range candidates {
-		if slices.Contains(event.issues, issueUID) {
-			marked = append(marked, event.uid)
-		}
 	}
 	for _, uid := range marked {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'v1:held') ON CONFLICT(key) DO NOTHING`, "federation_local_only_event."+uid); err != nil {
@@ -538,13 +530,8 @@ func markLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, origin, issueUID s
 	return nil
 }
 
-type localMoveEvent struct {
-	uid    string
-	issues []string
-}
-
-func scanLocalMoveEvents(rows *sql.Rows, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) ([]localMoveEvent, error) {
-	var candidates []localMoveEvent
+func scanLocalMoveEvents(rows *sql.Rows, issueUID string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) ([]string, error) {
+	var candidates []string
 	for rows.Next() {
 		var event RemoteEvent
 		var issue, related sql.NullString
@@ -568,7 +555,9 @@ func scanLocalMoveEvents(rows *sql.Rows, references func(RemoteEvent, map[string
 		if issue.Valid && issue.String != "" {
 			refs = append(refs, issue.String)
 		}
-		candidates = append(candidates, localMoveEvent{event.EventUID, refs})
+		if slices.Contains(refs, issueUID) {
+			candidates = append(candidates, event.EventUID)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
