@@ -88,7 +88,10 @@ spoke moves into the destination project with the latest folded hub content,
 preserving its comments and local state while removing it from the source
 project's lists. Find its UID and local name with `GET /api/v1/projects?include=archived`.
 The placeholder starts owner-only; restore it, then broaden its project access
-when others should see its issues.
+when others should see its issues. Restoring without joining does not subscribe
+to the project, but later moves can still place issues there. Offline edits made
+in the source before the move stay local and are not shared while the issue is
+in the destination.
 To subscribe later, run `kata projects restore <local-name>`, optionally run
 `kata projects rename <local-name> <chosen-name>`, then rerun the enrollment's
 join command using `--project <current-local-name>`.
