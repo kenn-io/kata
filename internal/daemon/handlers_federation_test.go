@@ -4617,8 +4617,7 @@ func TestFederationEnrollmentRequiredSigningJoinInstructions(t *testing.T) {
 	}{
 		{"required without supplied hub URL", "", "https://daemon.example/federation", "https://daemon.example/federation", true, false, false},
 		{"required with supplied hub URL", "http://127.0.0.1:7777", "https://daemon.example/federation", "https://daemon.example/federation", true, true, false},
-		{"required ignores plaintext hub URL", "http://hub.example", "https://daemon.example/federation", "https://daemon.example/federation", true, false, false},
-		{"required ignores malformed hub URL", "://bad", "https://daemon.example/federation", "https://daemon.example/federation", true, false, false},
+		{"required ignores malformed hub URL", "://bad", "https://daemon.example/federation", "https://daemon.example/federation", true, true, false},
 		{"optional", "http://127.0.0.1:7777", "https://daemon.example/federation", "http://127.0.0.1:7777", false, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

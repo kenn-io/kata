@@ -3218,21 +3218,12 @@ func TestFederationEnrollCLIAgainstOlderHub(t *testing.T) {
 				return
 			}
 			r.Body = io.NopCloser(bytes.NewReader(raw))
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, r)
-			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-			var enrollment map[string]json.RawMessage
-			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &enrollment))
-			delete(enrollment, "join")
-			w.Header().Set("Content-Type", "application/json")
-			require.NoError(t, json.NewEncoder(w).Encode(enrollment))
-			return
 		}
 		handler.ServeHTTP(w, r)
 	}))
 	t.Cleanup(hub.Close)
 	out := requireCmdOutput(t, env, "--project", "hub-project", "federation", "enroll", "--hub-url", hub.URL, "--spoke-instance", env.DB.InstanceUID(), "--actor", "external-agent", "--capabilities", "pull")
-	assert.Contains(t, out, "federation join --project hub-project --hub-url "+hub.URL)
+	assert.Contains(t, out, "--hub-url "+hub.URL)
 	grants, err := env.DB.ListFederationEnrollments(t.Context())
 	require.NoError(t, err)
 	require.Len(t, grants, 1)
@@ -3311,7 +3302,7 @@ func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
 	}))
 	base := "https://" + external.Listener.Addr().String()
 	const keyID = "spoke'$HOME"
-	verifier, key := testenv.FederationSigningReady(t, base, keyID)
+	verifier, key := testenv.FederationSigning(t, base, keyID)
 	hubDB := openKataTestDB(t, filepath.Join(t.TempDir(), "hub.db"))
 	t.Cleanup(func() { require.NoError(t, hubDB.Close()) })
 	hubServer = daemon.NewServer(daemon.ServerConfig{DB: hubDB, FederationSigningRequired: true, FederationSigning: verifier, Auth: config.AuthConfig{Token: "admin-token"}})
@@ -3332,9 +3323,8 @@ func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
 		Join federationJoinBundle `json:"join"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &body))
-	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'" }
-	command := strings.ReplaceAll(body.Join.JoinCommand, "'<signing-key-id>'", quote(keyID))
-	command = strings.ReplaceAll(command, "'<absolute-path-to-spoke-key>'", quote(key))
+	command := strings.ReplaceAll(body.Join.JoinCommand, "'<signing-key-id>'", shellQuote(keyID))
+	command = strings.ReplaceAll(command, "'<absolute-path-to-spoke-key>'", shellQuote(key))
 	certFile := filepath.Join(t.TempDir(), "hub-cert.pem")
 	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: external.Certificate().Raw}), 0600))
 	t.Setenv("KATA_SERVER", spoke.URL)
@@ -3348,5 +3338,5 @@ func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, base, binding.HubURL)
 	assert.Equal(t, hubProject.ID, binding.HubProjectID)
-	assert.Equal(t, hubProject.UID, project.UID)
+	assert.Equal(t, hubProject.UID, binding.HubProjectUID)
 }

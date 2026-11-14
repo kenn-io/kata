@@ -70,7 +70,7 @@ is optional on the ordinary daemon listeners.
    quoted placeholder, including the angle brackets, before running it on the
    spoke. Quote both values for the shell. For example, an ID of `spoke'$KEY`
    becomes `'spoke'"'"'$KEY'`, and the path `/path/to/spoke's key` becomes
-   `'/path/to/spoke'"'"'s key'`. The `"'"` parts represent literal apostrophes.
+   `'/path/to/spoke'"'"'s key'`.
    Alternatively, replace `--signing-key-file` with
    `--signing-key-env KATA_SPOKE_SIGNING_KEY`. The same source must exist in
    the spoke CLI and daemon environments because the CLI fetches metadata
