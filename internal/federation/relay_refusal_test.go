@@ -80,3 +80,17 @@ func TestRelayRefusalRetryLifecycle(t *testing.T) {
 		})
 	}
 }
+
+// TestHubSignatureRejection checks whether a hub error body is a signing refusal.
+func TestHubSignatureRejection(t *testing.T) {
+	for _, tc := range []struct {
+		body   string
+		status int
+		want   bool
+	}{
+		{`{"error":{"code":"signature_invalid"}}`, http.StatusUnauthorized, true},
+		{`{"error":{"code":"signing_unavailable"}}`, http.StatusServiceUnavailable, true},
+	} {
+		require.Equal(t, tc.want, hubSignatureRejection(&HubStatusError{StatusCode: tc.status, Body: tc.body}), tc.body)
+	}
+}

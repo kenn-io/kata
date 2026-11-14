@@ -1,7 +1,7 @@
 ---
 title: Federation request signing
 description: Configure native signed federation and a restricted HTTPS ingress.
-last_edited: 2026-10-17
+last_edited: 2026-11-13
 ---
 
 # Federation request signing
@@ -14,8 +14,12 @@ later on the hub and its spokes.
 
 Existing private deployments stay unsigned unless the hub enables required
 signing. Optional mode rejects invalid supplied signatures. Required mode
-rejects unsigned enrollment requests on every daemon listener; a spoke cannot
-negotiate it away. Owner-local administration keeps its existing authority.
+rejects unsigned enrollment requests on every daemon listener, including the
+Unix socket, with `428 hub_signing_required`; a spoke cannot negotiate it away.
+Enabling `required = true` stops every spoke that joined unsigned, over TCP
+and the Unix socket, until its signing key is registered on the hub and selected
+on the spoke.
+Owner-local administration keeps its existing authority.
 The restricted ingress listener always requires signatures, even when signing
 is optional on the ordinary daemon listeners.
 
@@ -59,22 +63,39 @@ is optional on the ordinary daemon listeners.
    listen = "127.0.0.1:7780"
    ```
 
-5. Start the hub normally. Signing initially returns `503` for at least
-   96 seconds, and until wall time has passed the persisted maximum admitted
-   signature expiry. This gate also applies after a restart.
+5. Start the hub normally. Signed requests initially receive `503` for at least
+   96 seconds, and until wall time has passed the
+   persisted maximum admitted signature expiry; this gate also applies after a
+   restart. Unsigned requests receive `428` immediately.
 6. Run the native enrollment join command on the spoke with
    `--hub-url https://daemon.example/federation`, adding
    `--signing-key-id spoke-key-1 --signing-key-env KATA_SPOKE_SIGNING_KEY`.
    The same source must exist in the spoke CLI and daemon environments because
    the CLI fetches metadata before saving the enrollment.
 
-For an existing spoke, select the key without replacing its bearer. This
-command uses the selected daemon, including `KATA_SERVER` or a daemon catalog
-selection, and requires daemon-owner authority:
+When enabling required signing on an existing hub, add a
+`[[federation.signing.key]]` entry for each unsigned spoke enrollment and
+restart the hub. Wait for the replay warmup in step 5, then configure the
+spoke with the same secret without replacing its bearer. The spoke is refused
+until it signs requests. The following command uses the selected daemon,
+including `KATA_SERVER` or a daemon catalog selection, and requires
+daemon-owner authority:
 
 ```sh
 kata federation signing configure --project-uid <local-project-uid> \
   --key-id spoke-key-1 --key-env KATA_SPOKE_SIGNING_KEY
+```
+
+For a spoke bound to an HTTP URL, first configure the source for the new HTTPS
+base. Without `--hub-url`, the command uses the stored HTTP URL and fails
+HTTPS validation. Set a remote daemon catalog entry to the same HTTPS base and
+restart the spoke daemon to load it, then run:
+
+```sh
+kata federation signing configure --project-uid <local-project-uid> \
+  --key-id spoke-key-1 --key-env KATA_SPOKE_SIGNING_KEY \
+  --hub-url <new-https-base>
+kata federation rebind <spoke-project> --hub <catalog-name>
 ```
 
 The selected daemon reads and validates the source in its own environment.
@@ -97,7 +118,11 @@ not credentials.
 A bridge created with `kata federation bridge connect` signs its relay
 requests when its credential selects a signing source. A hub with
 `required = true` advertises `federation_signing_required`, and bridge connect
-refuses it with `hub_signing_required` until the bridge has a source.
+refuses it with `409 hub_signing_required` until the bridge has a source. An
+unsigned request receives `428 hub_signing_required` on any federation listener.
+An older bridge keeps its grant and reports `offline` instead of
+`signing_rejected` when this response causes its sync to fail, unless a
+higher-priority state applies.
 
 1. On the daemon that will hold the bridge, provision the secret as above and
    connect with `--signing-key-id <key-id>` plus `--signing-key-env <var>` or

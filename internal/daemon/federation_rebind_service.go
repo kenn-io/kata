@@ -554,6 +554,9 @@ func fetchFederationRebindMetadata(
 		return api.ProjectFederationBody{}, federationReplicaError(ErrFederationReplicaHubUnavailable, "replacement hub metadata request failed", "check the HTTPS catalog endpoint and retry")
 	}
 	response := result.HTTPResponse
+	if response.StatusCode == http.StatusPreconditionRequired {
+		return api.ProjectFederationBody{}, federationReplicaError(ErrFederationReplicaCredentialConflict, "replacement hub requires signed requests", "Run kata federation signing configure --project-uid <local-project-uid> with --key-id and --key-env or --key-file, and --hub-url <new-https-base>, then retry.")
+	}
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
 		return api.ProjectFederationBody{}, federationReplicaError(
 			ErrFederationReplicaCredentialConflict,

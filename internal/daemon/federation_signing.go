@@ -86,7 +86,7 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			http.NotFound(w, r)
 			return
 		}
-		supplied := len(r.Header.Values("Signature")) != 0 || len(r.Header.Values("Signature-Input")) != 0 || len(r.Header.Values("Content-Digest")) != 0
+		supplied := len(r.Header.Values("Signature")) != 0 || len(r.Header.Values("Signature-Input")) != 0
 		if !ingress && !supplied {
 			if !s.cfg.FederationSigningRequired {
 				next.ServeHTTP(w, r)
@@ -158,6 +158,11 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		if ingress || supplied || s.cfg.FederationSigningRequired {
 			if s.cfg.FederationSigning == nil {
 				api.WriteEnvelope(w, http.StatusServiceUnavailable, "signing_unavailable", "federation signing unavailable")
+				return
+			}
+			if !supplied {
+				// Older bridges treat other 401, 403, and 404 responses as revoked grants.
+				api.WriteEnvelope(w, http.StatusPreconditionRequired, "hub_signing_required", "hub requires signed requests")
 				return
 			}
 			r = r.WithContext(ctx)

@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -136,25 +135,29 @@ func TestFederationRebindPreflightBoundsRemoteErrors(t *testing.T) {
 }
 
 func TestFederationRebindPreflightClassifiesEnrollmentRejection(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-	}))
-	t.Cleanup(server.Close)
-
-	originalFactory := newFederationRebindHTTPClient
-	newFederationRebindHTTPClient = func(
-		context.Context, string, string,
-	) (*http.Client, error) {
-		return federationRebindTestBearerClient(t, server.Client(), server.URL, "enrollment-secret"), nil
+	for _, status := range []int{http.StatusUnauthorized, http.StatusPreconditionRequired} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+			}))
+			t.Cleanup(server.Close)
+			originalFactory := newFederationRebindHTTPClient
+			newFederationRebindHTTPClient = func(_ context.Context, _ string, token string) (*http.Client, error) {
+				return federationRebindTestBearerClient(t, server.Client(), server.URL, token), nil
+			}
+			t.Cleanup(func() { newFederationRebindHTTPClient = originalFactory })
+			_, err := fetchFederationRebindMetadata(t.Context(), server.URL, "enrollment-secret", 41, nil)
+			require.ErrorIs(t, err, ErrFederationReplicaCredentialConflict)
+			assert.NotErrorIs(t, err, ErrFederationReplicaHubUnavailable)
+			if status == http.StatusPreconditionRequired {
+				var apiErr *api.APIError
+				require.ErrorAs(t, federationReplicaAPIError(err), &apiErr)
+				assert.Equal(t, "replacement hub requires signed requests", apiErr.Message)
+				assert.Contains(t, apiErr.Hint, "kata federation signing configure")
+				assert.Contains(t, apiErr.Hint, "--hub-url <new-https-base>")
+			}
+		})
 	}
-	t.Cleanup(func() { newFederationRebindHTTPClient = originalFactory })
-
-	_, err := fetchFederationRebindMetadata(
-		t.Context(), server.URL, "enrollment-secret", 41, nil,
-	)
-
-	require.ErrorIs(t, err, ErrFederationReplicaCredentialConflict)
-	assert.False(t, errors.Is(err, ErrFederationReplicaHubUnavailable))
 }
 
 func TestFederationRebindPreflightClassifiesPinnedSigningBaseMismatch(t *testing.T) {
