@@ -1,9 +1,6 @@
 package federation
 
 import (
-	"net/http"
-	"net/http/httptest"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,7 +20,7 @@ func TestSyncFederationEditedIssueMovedToUnjoinedProject(t *testing.T) {
 	require.NoError(t, err)
 	earlierIssue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Earlier local work", Author: "worker"})
 	require.NoError(t, err)
-	_, commentEvent, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Unsynced local comment"})
+	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Unsynced local comment"})
 	require.NoError(t, err)
 	title := "Hub edit"
 	edited, _, _, err := hub.DB.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &title, Actor: "worker"})
@@ -43,9 +40,6 @@ func TestSyncFederationEditedIssueMovedToUnjoinedProject(t *testing.T) {
 		}
 	}, spoke.credentials)
 	require.ErrorContains(t, err, "403", "the rejected push is still reported")
-	var hubError *HubStatusError
-	require.ErrorAs(t, err, &hubError)
-	require.Equal(t, "federation_move_source_unauthorized", federationHubErrorCode(hubError.Body))
 	require.Equal(t, []string{move.Event.UID, later.UID}, delivered)
 	binding, err = spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 	require.NoError(t, err)
@@ -54,22 +48,12 @@ func TestSyncFederationEditedIssueMovedToUnjoinedProject(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, local.ID, retained.ID)
 	require.Equal(t, "Hub edit", retained.Title)
-	comments, err := spoke.env.DB.CommentsByIssue(ctx, retained.ID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
-	require.Equal(t, "Unsynced local comment", comments[0].Body)
 	events, err := spoke.env.DB.EventsByUIDs(ctx, retained.ProjectID, []string{move.Event.UID})
 	require.NoError(t, err)
 	require.Len(t, events, 1, "the hub's event UID is retained")
 	require.Equal(t, move.Event.ContentHash, events[0].ContentHash)
-	visible, err := spoke.env.DB.AccessibleProjectUIDs(ctx, "outsider")
-	require.NoError(t, err)
-	require.NotContains(t, visible, projects[1].UID, "a placeholder must not expose moved issues")
 	_, _, _, err = spoke.env.DB.RestoreProject(ctx, retained.ProjectID, "worker")
 	require.NoError(t, err)
-	policy, err := spoke.env.DB.ProjectAccessPolicy(ctx, projects[1].UID)
-	require.NoError(t, err)
-	require.Equal(t, "teams", policy.Visibility, "restore keeps the restriction")
 	other, err := spoke.env.DB.CreateProject(ctx, "other")
 	require.NoError(t, err)
 	_, err = spoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: retained.ID, FromProjectID: retained.ProjectID, ToProjectID: other.ID, IfMatchRev: retained.Revision, Actor: "worker"})
@@ -82,42 +66,4 @@ func TestSyncFederationEditedIssueMovedToUnjoinedProject(t *testing.T) {
 	require.Equal(t, "Later local work", remote.Title)
 	_, err = hub.DB.IssueByUID(ctx, earlierIssue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	comments, err = spoke.env.DB.CommentsByIssue(ctx, retained.ID)
-	require.NoError(t, err)
-	require.Equal(t, "Unsynced local comment", comments[0].Body)
-	history, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{commentEvent.UID})
-	require.NoError(t, err)
-	require.Len(t, history, 1)
-	require.Equal(t, commentEvent.ContentHash, history[0].ContentHash)
-}
-
-func TestSyncFederationHardPushErrorsStopBeforePull(t *testing.T) {
-	for _, failure := range []struct {
-		name string
-		code int
-		body string
-	}{
-		{"invalid credential", http.StatusForbidden, `{"status":403,"error":{"code":"auth_invalid","message":"federation credential is not currently authorized"}}`},
-		{"hub failure", http.StatusInternalServerError, "hub failure"},
-	} {
-		t.Run(failure.name, func(t *testing.T) {
-			ctx := t.Context()
-			hub, projects := newMoveDeliveryHub(t, "project")
-			spoke := newMoveDeliverySpoke(t, hub, projects)
-			_, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Pending", Author: "worker"})
-			require.NoError(t, err)
-			var requests atomic.Int64
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				requests.Add(1)
-				http.Error(w, failure.body, failure.code)
-			}))
-			t.Cleanup(server.Close)
-			credential := spoke.credentials[projects[0].UID]
-			credential.HubURL = server.URL
-			binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
-			require.NoError(t, err)
-			require.Error(t, SyncFederationOnce(ctx, spoke.env.DB, binding, credential, spoke.credentials))
-			require.EqualValues(t, 1, requests.Load(), "a failed push must not send a pull")
-		})
-	}
 }

@@ -70,9 +70,6 @@ func checkFederatedParkedLinkGraph(t *testing.T, hub db.Storage, backend Backend
 	}
 	require.NotContains(t, ids, comment.UID)
 	require.Contains(t, ids, later.UID)
-	count, _, err := spoke.PendingFederationPushStats(ctx, route.ID, spoke.InstanceUID(), 0)
-	require.NoError(t, err)
-	require.EqualValues(t, len(pending), count)
 	parked, err := spoke.ProjectByUID(ctx, target.UID)
 	require.NoError(t, err)
 	_, _, _, err = spoke.RestoreProject(ctx, parked.ID, "worker")

@@ -726,6 +726,27 @@ func TestSyncFederationOncePushPoisonLeavesCursorUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pending, 1)
 	assert.Equal(t, localEvent.ID, pending[0].ID)
+
+	t.Run("invalid credential", func(t *testing.T) {
+		hub, projects := newMoveDeliveryHub(t, "project")
+		spoke := newMoveDeliverySpoke(t, hub, projects)
+		_, _, err := spoke.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Pending", Author: "worker"})
+		require.NoError(t, err)
+		polled := false
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/federation/events") {
+				polled = true
+			}
+			http.Error(w, `{"status":403,"error":{"code":"auth_invalid","message":"federation credential is not currently authorized"}}`, http.StatusForbidden)
+		}))
+		t.Cleanup(server.Close)
+		credential := spoke.credentials[projects[0].UID]
+		credential.HubURL = server.URL
+		binding, err := spoke.env.DB.FederationBindingByProject(t.Context(), spoke.projects[0].ID)
+		require.NoError(t, err)
+		require.Error(t, SyncFederationOnce(t.Context(), spoke.env.DB, binding, credential, spoke.credentials))
+		require.False(t, polled, "invalid credentials must stop before pull")
+	})
 }
 
 func TestSyncFederationOncePushPoisonRecordsQuarantine(t *testing.T) {
