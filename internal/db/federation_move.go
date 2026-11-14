@@ -572,7 +572,7 @@ func markLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, projectID int64, o
 			return err
 		}
 		if count == 0 {
-			return fmt.Errorf("unknown local event marker for event %s", uid)
+			return fmt.Errorf("unknown local federation marker for event %s; upgrade Kata to resume sync", uid)
 		}
 	}
 	return nil
@@ -720,6 +720,9 @@ func RestrictFoldProjectWhere(p *FoldProjection, projectUID string, keep func(st
 // ClearFederatedMovedIssueHistory clears contributing streams while retaining
 // local events that cannot be pushed after a remote move.
 func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
+	if err := ValidateFederationLocalEventMarkers(ctx, tx, projectID); err != nil {
+		return err
+	}
 	// Only quarantines covering subject events being removed block this reset;
 	// unrelated quarantined work in a contributing stream remains independent.
 	rows, err := tx.QueryContext(ctx, `SELECT q.event_uids FROM federation_quarantine q

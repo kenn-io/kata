@@ -52,6 +52,9 @@ func (s *Store) ResetFederatedProjectIfNoPendingPush(
 		if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 			return err
 		}
+		if err := db.ValidateFederationLocalEventMarkers(ctx, tx, projectID); err != nil {
+			return err
+		}
 		var quarantineID int64
 		err := tx.QueryRowContext(ctx, `SELECT id FROM federation_quarantine
 WHERE project_id=$1 AND skipped_at IS NULL ORDER BY id ASC LIMIT 1 FOR UPDATE`, projectID).

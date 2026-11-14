@@ -26,6 +26,9 @@ func (s *Store) PendingFederationPushEvents(
 	afterID int64,
 	limit int,
 ) ([]db.Event, error) {
+	if err := db.ValidateFederationLocalEventMarkers(ctx, s, projectID); err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 1000
 	}
@@ -45,14 +48,14 @@ ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 			}
 		}
 		extra, err := s.queryPendingFederationPushEvents(ctx, eventSelect+`
-WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`) AND (`+db.FederationPushEligible("e")+` OR `+db.FederationPushPending("e", "0")+`)
+WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`) AND `+db.FederationPushPending("e", "0")+`
   AND e.id <= COALESCE((
     SELECT MIN(barrier.id) FROM events barrier
      WHERE barrier.project_id=$1
        AND barrier.origin_instance_uid=$2
        AND barrier.id>$4
        AND `+pgFederationPushEventTypeCondition("barrier.type")+`
-       AND (`+db.FederationPushEligible("barrier")+` OR `+db.FederationPushPending("barrier", "0")+`)
+       AND `+db.FederationPushPending("barrier", "0")+`
        AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
   ), 9223372036854775807)
 ORDER BY e.id ASC`, projectID, originInstanceUID, output[len(output)-1].ID, runStartAfterID)
@@ -99,6 +102,9 @@ func (s *Store) PendingFederationPushStats(
 	originInstanceUID string,
 	afterID int64,
 ) (int64, int64, error) {
+	if err := db.ValidateFederationLocalEventMarkers(ctx, s, projectID); err != nil {
+		return 0, 0, err
+	}
 	if count, highWater, negotiated, err := s.pendingRelayRootStats(ctx, projectID, originInstanceUID); err != nil || negotiated {
 		return count, highWater, err
 	}
