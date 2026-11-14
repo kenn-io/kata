@@ -488,16 +488,25 @@ func applyUnjoinedMovedIssue(ctx context.Context, tx *sql.Tx, projectID int64, i
 	return reconcileFederatedLabelsFromRows(ctx, tx, m.issueIDs, m.projection, m.labelRows)
 }
 
-func reconcileParkedIssueLinks(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueUID string) error {
-	ids, err := db.FederatedLinkIssueIDs(ctx, tx, projection, issueUID)
-	if err != nil {
-		return err
+func reconcileParkedIssueLinks(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueUIDs []string) error {
+	if len(issueUIDs) == 0 {
+		return nil
 	}
-	rows, err := federatedLinkRows(ctx, tx, nil, nil, issueUID)
-	if err != nil {
-		return err
+	ids := map[string]int64{}
+	rows := map[db.FoldLinkKey]federatedLinkRow{}
+	for _, issueUID := range issueUIDs {
+		issueIDs, err := db.FederatedLinkIssueIDs(ctx, tx, projection, issueUID)
+		if err != nil {
+			return err
+		}
+		maps.Copy(ids, issueIDs)
+		issueRows, err := federatedLinkRows(ctx, tx, nil, nil, issueUID)
+		if err != nil {
+			return err
+		}
+		maps.Copy(rows, issueRows)
 	}
-	return reconcileFederatedLinkRows(ctx, tx, projection, ids, rows, issueUID)
+	return reconcileFederatedLinkRows(ctx, tx, projection, ids, rows, issueUIDs...)
 }
 
 // prepareRows compares against persisted values, rather than a previous fold:

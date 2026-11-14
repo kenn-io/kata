@@ -1369,13 +1369,9 @@ func (d *Store) materializeFederatedProjectTxScoped(
 			return err
 		}
 	}
-	for _, decision := range decisions {
-		if decision.Exists && !decision.Joined && !decision.SourceStandalone {
-			if err := reconcileParkedIssueLinks(ctx, tx, projection, decision.IssueUID); err != nil {
-				move := moved[decision.IssueUID]
-				return fmt.Errorf("apply move project %s event %s: %w", move.ProjectUID, move.UID, err)
-			}
-		}
+	parked := db.ParkedFederatedMoveIssues(decisions)
+	if err := reconcileParkedIssueLinks(ctx, tx, projection, parked); err != nil {
+		return db.ParkedFederatedLinkError(moved, parked, err)
 	}
 	if err := pruneFederatedIssues(ctx, tx, projectID, issueIDs); err != nil {
 		return err
@@ -2539,7 +2535,7 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 	graph := desired
 	if len(scope) > 0 {
 		var err error
-		graph, err = db.ScopedFederatedLinkGraph(ctx, tx, projection, scope[0], desired)
+		graph, err = db.ScopedFederatedLinkGraph(ctx, tx, projection, scope, desired)
 		if err != nil {
 			return err
 		}
@@ -2561,7 +2557,7 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 		}
 	}
 	for key, row := range desired {
-		if len(scope) > 0 && key.FromUID != scope[0] && key.ToUID != scope[0] {
+		if len(scope) > 0 && !slices.Contains(scope, key.FromUID) && !slices.Contains(scope, key.ToUID) {
 			continue
 		}
 		if existingRow, ok := existing[key]; ok {

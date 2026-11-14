@@ -337,6 +337,12 @@ func retainFederationProject(ctx context.Context, tx *sql.Tx, uid string) (int64
 		err := tx.QueryRowContext(ctx, `INSERT INTO projects(uid,name,deleted_at) VALUES($1,$2,$3)
  ON CONFLICT DO NOTHING RETURNING id`, uid, name, time.Now().UTC().Format(EventTimestampFormat)).Scan(&id)
 		if err == nil {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO project_access_policies(project_uid,visibility) VALUES($1,'teams')`, uid); err != nil {
+				return 0, err
+			}
+			if _, err = tx.ExecContext(ctx, `UPDATE meta SET value=CAST(CAST(value AS BIGINT)+1 AS TEXT) WHERE key='project_access_revision'`); err != nil {
+				return 0, err
+			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'1') ON CONFLICT(key) DO NOTHING`, FederationRetainedProjectPrefix+uid)
 			return id, err
 		}
@@ -508,11 +514,11 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 }
 
 // ScopedFederatedLinkGraph combines a moved issue's links with preserved parents.
-func ScopedFederatedLinkGraph[T any](ctx context.Context, tx *sql.Tx, p FoldProjection, issueUID string, desired map[FoldLinkKey]T) (map[FoldLinkKey]T, error) {
+func ScopedFederatedLinkGraph[T any](ctx context.Context, tx *sql.Tx, p FoldProjection, scope []string, desired map[FoldLinkKey]T) (map[FoldLinkKey]T, error) {
 	graph := map[FoldLinkKey]T{}
 	hasParent := false
 	for key, row := range desired {
-		if key.FromUID == issueUID || key.ToUID == issueUID {
+		if slices.Contains(scope, key.FromUID) || slices.Contains(scope, key.ToUID) {
 			graph[key] = row
 			hasParent = hasParent || key.Type == "parent"
 		}
@@ -530,7 +536,7 @@ func ScopedFederatedLinkGraph[T any](ctx context.Context, tx *sql.Tx, p FoldProj
 		if err := rows.Scan(&key.FromUID, &key.ToUID); err != nil {
 			return nil, err
 		}
-		if key.FromUID == issueUID || key.ToUID == issueUID {
+		if slices.Contains(scope, key.FromUID) || slices.Contains(scope, key.ToUID) {
 			if _, known := p.Links[key]; known {
 				continue
 			}
@@ -539,6 +545,27 @@ func ScopedFederatedLinkGraph[T any](ctx context.Context, tx *sql.Tx, p FoldProj
 		graph[key] = empty
 	}
 	return graph, rows.Err()
+}
+
+// ParkedFederatedMoveIssues lists issues retained outside joined projects.
+func ParkedFederatedMoveIssues(decisions []FederatedMoveDecision) []string {
+	var uids []string
+	for _, decision := range decisions {
+		if decision.Exists && !decision.Joined && !decision.SourceStandalone {
+			uids = append(uids, decision.IssueUID)
+		}
+	}
+	return uids
+}
+
+// ParkedFederatedLinkError identifies the moves in a failed link batch.
+func ParkedFederatedLinkError(moved map[string]FoldEvent, uids []string, err error) error {
+	var events []string
+	for _, uid := range uids {
+		move := moved[uid]
+		events = append(events, fmt.Sprintf("project %s event %s", move.ProjectUID, move.UID))
+	}
+	return fmt.Errorf("apply move links %v: %w", events, err)
 }
 
 // FederatedLinkIssueIDs resolves the endpoints available to a scoped fold.

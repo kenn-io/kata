@@ -3,7 +3,6 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"maps"
 	"slices"
 
@@ -275,13 +274,9 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 			}
 		}
 		for _, p := range prepared.projects {
-			for _, decision := range p.decisions {
-				if decision.Exists && !decision.Joined && !decision.SourceStandalone {
-					if err := reconcileParkedIssueLinks(ctx, tx, p.moveProjection, decision.IssueUID); err != nil {
-						move := p.moveEvents[decision.IssueUID]
-						return fmt.Errorf("apply move project %s event %s: %w", move.ProjectUID, move.UID, err)
-					}
-				}
+			parked := db.ParkedFederatedMoveIssues(p.decisions)
+			if err := reconcileParkedIssueLinks(ctx, tx, p.moveProjection, parked); err != nil {
+				return db.ParkedFederatedLinkError(p.moveEvents, parked, err)
 			}
 		}
 		for _, p := range prepared.projects {

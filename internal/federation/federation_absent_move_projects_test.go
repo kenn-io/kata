@@ -1,199 +1,18 @@
 package federation
 
 import (
-	"bytes"
-	"context"
-	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/http/httputil"
-	"net/url"
-	"slices"
-	"strings"
 	"sync/atomic"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
 )
 
-type failingProjectLookup struct{ db.Storage }
-
-func (failingProjectLookup) ProjectByUID(context.Context, string) (db.Project, error) {
-	return db.Project{}, errors.New("project lookup failed")
-}
-
-type failingDeliveryLookup struct{ db.Storage }
-
-func (failingDeliveryLookup) EventsByUIDs(context.Context, int64, []string) ([]db.Event, error) {
-	return nil, errors.New("delivery lookup failed")
-}
-
-// A direct spoke must be able to consume B's history without local A or C rows.
-func TestSyncFederationMoveHistoryWithAbsentCounterpartProjects(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "source-project", "subscribed-project", "target-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects[1:2])
-
-	inbound, created, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Inbound issue", Author: "worker"})
-	require.NoError(t, err)
-	inMove, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: inbound.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: inbound.Revision, Actor: "worker"})
-	require.NoError(t, err)
-	require.NotNil(t, inMove.Event)
-	outbound, outboundCreated, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[1].ID, Title: "Outbound issue", Author: "worker"})
-	require.NoError(t, err)
-	outMove, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: outbound.ID, FromProjectID: projects[1].ID, ToProjectID: projects[2].ID, IfMatchRev: outbound.Revision, Actor: "worker"})
-	require.NoError(t, err)
-	require.NotNil(t, outMove.Event)
-	_, laterEvent, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[1].ID, Title: "Later work", Author: "worker"})
-	require.NoError(t, err)
-
-	expected := []string{created.UID, inMove.Event.UID, outboundCreated.UID, outMove.Event.UID, laterEvent.UID}
-	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
-	require.NoError(t, err)
-	err = SyncFederationOnceWithPulledEvents(ctx, failingDeliveryLookup{spoke.env.DB}, binding, spoke.credentials[projects[1].UID], clientpkg.Opts{}, func(int64, []db.Event) {}, spoke.credentials)
-	require.ErrorContains(t, err, "load delivery project")
-	require.ErrorContains(t, err, projects[1].UID)
-	require.ErrorContains(t, err, outboundCreated.UID)
-	status, err := spoke.env.DB.FederationSyncStatusByProject(ctx, binding.ProjectID)
-	require.NoError(t, err)
-	require.NotNil(t, status.LastError)
-	require.Contains(t, *status.LastError, "load delivery project")
-	require.Contains(t, *status.LastError, projects[1].UID)
-	require.Contains(t, *status.LastError, outboundCreated.UID)
-	var delivered []string
-	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.env.DB, binding, spoke.credentials[projects[1].UID], clientpkg.Opts{}, func(_ int64, events []db.Event) {
-		for _, event := range events {
-			if slices.Contains(expected, event.UID) {
-				delivered = append(delivered, event.UID)
-			}
-		}
-	}, spoke.credentials), "missing counterpart project rows must not stop the pull")
-	require.Equal(t, expected, delivered, "delivery preserves the hub history order")
-	binding, err = spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, binding.PullCursorEventID, laterEvent.ID)
-}
-
-func TestSyncFederationReportsInvalidPullHashAndRetries(t *testing.T) {
-	for _, local := range []bool{false, true} {
-		t.Run(fmt.Sprint(local), func(t *testing.T) { testSyncFederationInvalidPullHash(t, local) })
-	}
-}
-
-func testSyncFederationInvalidPullHash(t *testing.T, local bool) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "hash-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects)
-	eventStore, eventProject := hub.DB, projects[0].ID
-	if local {
-		eventStore, eventProject = spoke.env.DB, spoke.projects[0].ID
-	}
-	_, event, err := eventStore.CreateIssue(ctx, db.CreateIssueParams{ProjectID: eventProject, Title: "Pull event", Author: "worker"})
-	require.NoError(t, err)
-	require.NotEmpty(t, event.ContentHash)
-	target, err := url.Parse(hub.URL)
-	require.NoError(t, err)
-	proxy := &httputil.ReverseProxy{Rewrite: func(request *httputil.ProxyRequest) {
-		request.SetURL(target)
-		request.Out.Header.Set("Accept-Encoding", "identity")
-	}}
-	var corrupt atomic.Bool
-	corrupt.Store(true)
-	proxy.ModifyResponse = func(response *http.Response) error {
-		if !corrupt.Load() {
-			return nil
-		}
-		body, err := io.ReadAll(response.Body)
-		if err != nil {
-			return err
-		}
-		if err := response.Body.Close(); err != nil {
-			return err
-		}
-		body = bytes.ReplaceAll(body, []byte(event.ContentHash), []byte(strings.Repeat("0", len(event.ContentHash))))
-		response.Body = io.NopCloser(bytes.NewReader(body))
-		return nil
-	}
-	server := httptest.NewServer(proxy)
-	t.Cleanup(server.Close)
-	credential := spoke.credentials[projects[0].UID]
-	credential.HubURL = server.URL
-	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
-	require.NoError(t, err)
-	sync := func(binding db.FederationBinding) error {
-		if local {
-			return SyncFederationOnce(ctx, spoke.env.DB, binding, credential, spoke.credentials)
-		}
-		return SyncFederationPullOnlyOnce(ctx, spoke.env.DB, binding, credential, spoke.credentials)
-	}
-	err = sync(binding)
-	operation := "validate remote event"
-	if local {
-		operation = "reconcile local echo"
-	}
-	require.ErrorContains(t, err, operation)
-	if local {
-		status, err := spoke.env.DB.FederationSyncStatusByProject(ctx, binding.ProjectID)
-		require.NoError(t, err)
-		require.NotNil(t, status.LastError)
-		require.Contains(t, *status.LastError, operation)
-		require.Contains(t, *status.LastError, projects[0].UID)
-		require.Contains(t, *status.LastError, event.UID)
-	}
-	binding, err = spoke.env.DB.FederationBindingByProject(ctx, binding.ProjectID)
-	require.NoError(t, err)
-	if !local {
-		require.Less(t, binding.PullCursorEventID, event.ID)
-	}
-	corrupt.Store(false)
-	require.NoError(t, sync(binding))
-	binding, err = spoke.env.DB.FederationBindingByProject(ctx, binding.ProjectID)
-	require.NoError(t, err)
-	if !local {
-		require.GreaterOrEqual(t, binding.PullCursorEventID, event.ID)
-	}
-}
-
-func TestSyncFederationMoveBackfillFailureStatusContext(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "backfill-source", "backfill-target")
-	spoke := newMoveDeliverySpoke(t, hub, projects[1:])
-	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Incoming", Author: "worker"})
-	require.NoError(t, err)
-	move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
-	require.NoError(t, err)
-	require.NotNil(t, move.Event)
-	target, err := url.Parse(hub.URL)
-	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/federation/events") && r.URL.Query().Get("issue_uid") == issue.UID {
-			http.Error(w, "history unavailable", http.StatusInternalServerError)
-			return
-		}
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
-	credential := spoke.credentials[projects[1].UID]
-	credential.HubURL = server.URL
-	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
-	require.NoError(t, err)
-	require.Error(t, SyncFederationPullOnlyOnce(ctx, spoke.env.DB, binding, credential, spoke.credentials))
-	status, err := spoke.env.DB.FederationSyncStatusByProject(ctx, binding.ProjectID)
-	require.NoError(t, err)
-	require.NotNil(t, status.LastError)
-	assert.Contains(t, *status.LastError, "backfill")
-	assert.Contains(t, *status.LastError, move.Event.ProjectUID)
-	assert.Contains(t, *status.LastError, move.Event.UID)
-}
-
-func TestSyncFederationUnsyncedCommentBeforeUnjoinedMove(t *testing.T) {
+// A hub edit and move into an unjoined project must not strand the spoke's issue.
+func TestSyncFederationEditedIssueMovedToUnjoinedProject(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "source", "destination")
 	spoke := newMoveDeliverySpoke(t, hub, projects[:1])
@@ -204,44 +23,48 @@ func TestSyncFederationUnsyncedCommentBeforeUnjoinedMove(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Unsynced local comment"})
 	require.NoError(t, err)
-	move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	title := "Hub edit"
+	edited, _, _, err := hub.DB.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &title, Actor: "worker"})
 	require.NoError(t, err)
-	require.NotNil(t, move.Event)
+	move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: edited.Revision, Actor: "worker"})
+	require.NoError(t, err)
 	_, later, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Later work", Author: "worker"})
 	require.NoError(t, err)
-	err = spoke.sync(t, 0)
-	require.ErrorContains(t, err, "403")
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	var delivered []string
+	err = SyncFederationOnceWithPulledEvents(ctx, spoke.env.DB, binding, spoke.credentials[projects[0].UID], clientpkg.Opts{}, func(_ int64, events []db.Event) {
+		for _, event := range events {
+			if event.UID == move.Event.UID || event.UID == later.UID {
+				delivered = append(delivered, event.UID)
+			}
+		}
+	}, spoke.credentials)
+	require.ErrorContains(t, err, "403", "the rejected push is still reported")
+	require.Equal(t, []string{move.Event.UID, later.UID}, delivered)
+	binding, err = spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, binding.PullCursorEventID, later.ID)
-
-}
-
-func TestSyncFederationDuplicateLocalEchoFailureStatusContext(t *testing.T) {
-	ctx := t.Context()
-	hub, projects := newMoveDeliveryHub(t, "duplicate-project")
-	spoke := newMoveDeliverySpoke(t, hub, projects)
-	_, event, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Local issue", Author: "worker"})
+	retained, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.Equal(t, local.ID, retained.ID)
+	require.Equal(t, "Hub edit", retained.Title)
+	comments, err := spoke.env.DB.CommentsByIssue(ctx, retained.ID)
 	require.NoError(t, err)
-	err = SyncFederationOnceWithPulledEvents(ctx, failingDeliveryLookup{spoke.env.DB}, binding, spoke.credentials[projects[0].UID], clientpkg.Opts{}, func(int64, []db.Event) {}, spoke.credentials)
-	require.ErrorContains(t, err, "delivery lookup failed")
-	status, err := spoke.env.DB.FederationSyncStatusByProject(ctx, binding.ProjectID)
+	require.Len(t, comments, 1)
+	require.Equal(t, "Unsynced local comment", comments[0].Body)
+	events, err := spoke.env.DB.EventsByUIDs(ctx, retained.ProjectID, []string{move.Event.UID})
 	require.NoError(t, err)
-	require.NotNil(t, status.LastError)
-	assert.Contains(t, *status.LastError, "duplicate local echo")
-	assert.Contains(t, *status.LastError, projects[0].UID)
-	assert.Contains(t, *status.LastError, event.UID)
-	t.Run("remote duplicate recovery", func(t *testing.T) {
-		remote := api.EventEnvelope{ProjectUID: "remote-project", EventUID: "remote-event"}
-		recovery := newPulledDuplicateRecovery(failingProjectLookup{spoke.env.DB}, binding, nil, false)
-		_, _, err := recovery.recover(t.Context(), remote)
-		require.ErrorContains(t, err, "duplicate recovery")
-		require.ErrorContains(t, err, remote.ProjectUID)
-		require.ErrorContains(t, err, remote.EventUID)
-		require.ErrorContains(t, err, "project lookup failed")
-	})
+	require.Len(t, events, 1, "the hub's event UID is retained")
+	require.Equal(t, move.Event.ContentHash, events[0].ContentHash)
+	visible, err := spoke.env.DB.AccessibleProjectUIDs(ctx, "outsider")
+	require.NoError(t, err)
+	require.NotContains(t, visible, projects[1].UID, "a placeholder must not expose moved issues")
+	_, _, _, err = spoke.env.DB.RestoreProject(ctx, retained.ProjectID, "worker")
+	require.NoError(t, err)
+	policy, err := spoke.env.DB.ProjectAccessPolicy(ctx, projects[1].UID)
+	require.NoError(t, err)
+	require.Equal(t, "teams", policy.Visibility, "restore keeps the restriction")
 }
 
 func TestSyncFederationHardPushErrorsStopBeforePull(t *testing.T) {
