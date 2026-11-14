@@ -213,7 +213,7 @@ var storageScenarios = []scenario{
 	{name: "concurrent local comment replies", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "CommentsByIssue"}, run: checkConcurrentLocalCommentReplies},
 	{name: "comment read graph", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "ReadCommentGraph", "IssueByID", "MoveIssueProject", "PurgeIssue"}, run: checkCommentReadGraph},
 	{name: "screen view claims", methods: []string{"ClaimScreenView", "ReleaseScreenView"}, run: checkScreenViewClaims},
-	{name: "federated parked link graph", methods: []string{"CreateIssue", "CreateProject", "CreateProjectWithUID", "EnableProjectFederation", "InsertRemoteEvents", "LinksByIssue", "MaterializeFederatedProject", "MoveIssueProject", "UpsertFederationBinding", "IssueByUID"}, runWithBackend: checkFederatedParkedLinkGraph},
+	{name: "federated parked link graph", methods: []string{"CreateComment", "PendingFederationPushEvents", "PendingFederationPushStats", "CreateIssue", "CreateProject", "CreateProjectWithUID", "EnableProjectFederation", "InsertRemoteEvents", "LinksByIssue", "MaterializeFederatedProject", "MoveIssueProject", "UpsertFederationBinding", "IssueByUID"}, runWithBackend: checkFederatedParkedLinkGraph},
 	{name: "remote event batch insert", methods: []string{"InsertRemoteEvents", "AdoptProjectIntoFederation", "MaterializeFederatedProject"}, runWithBackend: checkRemoteEventBatchInsert},
 	{name: "pushed definition authorship", methods: []string{"PutCronWorkflow", "IngestFederationEvents", "CronWorkflow"}, run: checkPushedDefinitionAuthorship},
 	{name: "run actor survives push enablement", methods: []string{"ObserveCronRun", "AdoptProjectIntoFederation", "EnableFederationPush"}, run: checkRunActorSurvivesPushEnablement},

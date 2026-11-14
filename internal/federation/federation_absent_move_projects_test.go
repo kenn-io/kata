@@ -21,7 +21,9 @@ func TestSyncFederationEditedIssueMovedToUnjoinedProject(t *testing.T) {
 	require.NoError(t, spoke.sync(t, 0))
 	local, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Unsynced local comment"})
+	earlierIssue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Earlier local work", Author: "worker"})
+	require.NoError(t, err)
+	_, commentEvent, err := spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Unsynced local comment"})
 	require.NoError(t, err)
 	title := "Hub edit"
 	edited, _, _, err := hub.DB.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &title, Actor: "worker"})
@@ -65,6 +67,21 @@ func TestSyncFederationEditedIssueMovedToUnjoinedProject(t *testing.T) {
 	policy, err := spoke.env.DB.ProjectAccessPolicy(ctx, projects[1].UID)
 	require.NoError(t, err)
 	require.Equal(t, "teams", policy.Visibility, "restore keeps the restriction")
+	newIssue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Later local work", Author: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	remote, err := hub.DB.IssueByUID(ctx, newIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "Later local work", remote.Title)
+	_, err = hub.DB.IssueByUID(ctx, earlierIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	comments, err = spoke.env.DB.CommentsByIssue(ctx, retained.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Unsynced local comment", comments[0].Body)
+	history, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{commentEvent.UID})
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	require.Equal(t, commentEvent.ContentHash, history[0].ContentHash)
 }
 
 func TestSyncFederationHardPushErrorsStopBeforePull(t *testing.T) {
