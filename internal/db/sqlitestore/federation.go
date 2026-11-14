@@ -1333,6 +1333,9 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	if err != nil {
 		return err
 	}
+	if err := db.PreserveMovedIssueLabels(ctx, tx, projectID, projection, decisions); err != nil {
+		return err
+	}
 	db.RestrictFoldProject(&projection, projectUID)
 
 	if db.CronMaterializationNeeded(events, acceptedEventUIDs) {
