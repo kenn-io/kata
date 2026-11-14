@@ -81,7 +81,7 @@ func SummarizeRuns(rows []RunStatRow, day bool, loc *time.Location) RunStatistic
 	out := RunStatistics{Scanned: len(rows), ByStatus: map[string]int{"running": 0, "succeeded": 0, "failed": 0, "cancelled": 0, "unknown": 0}}
 	var durations []float64
 	byDay := map[string]int{}
-	var daily [][]float64
+	daily := make([][]float64, 0)
 	for _, r := range rows {
 		out.ByStatus[r.Status]++
 		instant := r.completed()
@@ -102,7 +102,7 @@ func SummarizeRuns(rows []RunStatRow, day bool, loc *time.Location) RunStatistic
 				idx = len(out.Buckets)
 				byDay[date] = idx
 				out.Buckets = append(out.Buckets, RunStatBucket{Date: date, ByStatus: map[string]int{}})
-				daily = append(daily, nil)
+				daily = append(daily, []float64{})
 			}
 			out.Buckets[idx].ByStatus[r.Status]++
 		}
