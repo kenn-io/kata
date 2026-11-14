@@ -3318,11 +3318,13 @@ func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
 	savedArgs := os.Args
 	os.Args = []string{binary}
 	t.Cleanup(func() { os.Args = savedArgs })
-	out := requireCmdOutput(t, hub, "--json", "--project", "hub-project", "federation", "enroll", "--spoke-instance", spoke.DB.InstanceUID(), "--hub-url", admin.URL, "--hub-token-env", "TEST_HUB_TOKEN", "--actor", "tester", "--capabilities", "pull")
+	out := requireCmdOutput(t, hub, "--json", "--project", "hub-project", "federation", "enroll", "--spoke-instance", spoke.DB.InstanceUID(), "--hub-url", admin.URL, "--hub-token-env", "TEST_HUB_TOKEN", "--actor", "tester", "--capabilities", "pull", "--allow-insecure")
 	var body struct {
 		Join federationJoinBundle `json:"join"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &body))
+	assert.Equal(t, base, body.Join.HubURL)
+	assert.False(t, body.Join.AllowInsecure)
 	command := strings.ReplaceAll(body.Join.JoinCommand, "'<signing-key-id>'", shellQuote(keyID))
 	command = strings.ReplaceAll(command, "'<absolute-path-to-spoke-key>'", shellQuote(key))
 	certFile := filepath.Join(t.TempDir(), "hub-cert.pem")
