@@ -484,15 +484,19 @@ func applyUnjoinedMovedIssue(ctx context.Context, tx *sql.Tx, projectID int64, i
 	if err := reconcileFederatedLabelsFromRows(ctx, tx, m.issueIDs, m.projection, m.labelRows); err != nil {
 		return err
 	}
+	return reconcileParkedIssueLinks(ctx, tx, projection, issue.UID)
+}
+
+func reconcileParkedIssueLinks(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueUID string) error {
 	ids, err := db.FederatedLinkIssueIDs(ctx, tx, projection)
 	if err != nil {
 		return err
 	}
-	rows, err := federatedLinkRows(ctx, tx, nil, nil, issue.UID)
+	rows, err := federatedLinkRows(ctx, tx, nil, nil, issueUID)
 	if err != nil {
 		return err
 	}
-	return reconcileFederatedLinkRows(ctx, tx, projection, ids, rows, issue.UID)
+	return reconcileFederatedLinkRows(ctx, tx, projection, ids, rows, issueUID)
 }
 
 // prepareRows compares against persisted values, rather than a previous fold:

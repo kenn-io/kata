@@ -338,7 +338,8 @@ func retainFederationProject(ctx context.Context, tx *sql.Tx, uid string) (int64
 		err := tx.QueryRowContext(ctx, `INSERT INTO projects(uid,name,deleted_at) VALUES($1,$2,$3)
  ON CONFLICT DO NOTHING RETURNING id`, uid, name, time.Now().UTC().Format(EventTimestampFormat)).Scan(&id)
 		if err == nil {
-			return id, nil
+			_, err = tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'1') ON CONFLICT(key) DO NOTHING`, FederationRetainedProjectPrefix+uid)
+			return id, err
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return 0, err
@@ -390,12 +391,13 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, decision.TargetID).Scan(&decision.Joined); err != nil {
 			return nil, nil, err
 		}
-		err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id,p.deleted_at IS NULL AND b.project_id IS NULL FROM issues i JOIN projects p ON p.id=i.project_id LEFT JOIN federation_bindings b ON b.project_id=p.id WHERE i.uid=$1`, issue.UID).Scan(&decision.IssueID, &decision.SourceID, &decision.RecurrenceID, &decision.SourceUID, &decision.SourceName, &decision.SourceShortID, &decision.SourceStandalone)
+		err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id,b.project_id IS NULL AND NOT EXISTS(SELECT 1 FROM meta WHERE key='federation_retained_project.' || p.uid) FROM issues i JOIN projects p ON p.id=i.project_id LEFT JOIN federation_bindings b ON b.project_id=p.id WHERE i.uid=$1`, issue.UID).Scan(&decision.IssueID, &decision.SourceID, &decision.RecurrenceID, &decision.SourceUID, &decision.SourceName, &decision.SourceShortID, &decision.SourceStandalone)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, err
 		}
 		decision.Exists = err == nil
-		if decision.Joined && decision.Active && !decision.SourceStandalone {
+		decision.SourceStandalone = decision.SourceStandalone && !decision.Joined
+		if decision.Joined && decision.Active {
 			projects[decision.TargetID] = true
 		}
 		decisions = append(decisions, decision)
@@ -504,6 +506,29 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 		}
 	}
 	return nil
+}
+
+// FederatedPreservedParentLinks returns local parents untouched by a scoped fold.
+func FederatedPreservedParentLinks(ctx context.Context, tx *sql.Tx, p FoldProjection, issueUID string) ([]FoldLinkKey, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT from_issue_uid,to_issue_uid FROM links WHERE type='parent'`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var links []FoldLinkKey
+	for rows.Next() {
+		key := FoldLinkKey{Type: "parent"}
+		if err := rows.Scan(&key.FromUID, &key.ToUID); err != nil {
+			return nil, err
+		}
+		if key.FromUID == issueUID || key.ToUID == issueUID {
+			if _, known := p.Links[key]; known {
+				continue
+			}
+		}
+		links = append(links, key)
+	}
+	return links, rows.Err()
 }
 
 // FederatedLinkIssueIDs resolves the endpoints available to a scoped fold.

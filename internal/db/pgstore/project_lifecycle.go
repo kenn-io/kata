@@ -137,6 +137,9 @@ func (s *Store) restoreProject(
 		if _, err := tx.ExecContext(ctx, `UPDATE projects SET deleted_at = NULL WHERE id = $1`, project.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
+		if err := db.ClearFederationRetainedProject(ctx, tx, project.UID); err != nil {
+			return err
+		}
 		created, err := s.insertEventTx(ctx, tx, eventInsert{
 			ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
 			Type: "project.restored", Actor: actor, Payload: `{}`,
@@ -277,6 +280,9 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 			return mapSQLError(err, nil)
 		}
 		if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, project); err != nil {
+			return err
+		}
+		if err := db.ClearFederationRetainedProject(ctx, tx, project.UID); err != nil {
 			return err
 		}
 		if err := rejectActiveExternalRootProjectPurge(ctx, tx, project.ID); err != nil {

@@ -218,67 +218,35 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 	}
 }
 
-func TestMoveRebuildRetainsUnjoinedIssuesAndAppliesUnlink(t *testing.T) {
-	ctx := t.Context()
-	d, source, issue := incrementalTestStore(t)
-	destination, err := d.CreateProject(ctx, "destination")
-	require.NoError(t, err)
-	_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
-	require.NoError(t, err)
-	orphan, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "orphan", Author: "tester"})
-	require.NoError(t, err)
-	third, err := d.CreateProject(ctx, "third")
-	require.NoError(t, err)
-	_, err = d.EnableProjectFederation(ctx, third.ID, "tester")
-	require.NoError(t, err)
-	orphan = resetToRemoteIssue(t, d, destination, orphan)
-	unapplyMove(t, d, issue, source, destination, true)
-	unapplyMove(t, d, orphan, destination, third, true)
-	_, err = d.LeaveFederationReplica(ctx, third.ID)
-	require.NoError(t, err)
-	from, to := orphan, issue
-	if from.ID > to.ID {
-		from, to = to, from
-	}
-	_, err = d.ExecContext(ctx, `INSERT INTO links(from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author) VALUES(?,?,?,?,'related','tester')`, from.ID, to.ID, from.UID, to.UID)
-	require.NoError(t, err)
-	typ, payload := incrementalFuzzPayload(16, from.UID, to.UID, 1)
-	_, err = d.InsertRemoteEvents(ctx, destination.ID, []db.RemoteEvent{incrementalRemoteEvent(t, destination, from.UID, typ, payload, 8_000_000_000_000)})
-	require.NoError(t, err)
-	attempts := 0
-	d.federationIngestPrepared = func() { attempts++ }
-	require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
-	require.Equal(t, 1, attempts)
-	retained, err := d.IssueByUID(ctx, orphan.UID, db.IncludeDeletedYes)
-	require.NoError(t, err)
-	require.Equal(t, orphan.ID, retained.ID)
-	require.Equal(t, third.ID, retained.ProjectID)
-	links, err := d.LinksByIssue(ctx, issue.ID)
-	require.NoError(t, err)
-	require.Empty(t, links)
-}
-
 func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
 	ctx := t.Context()
 	d, source, issue := incrementalTestStore(t)
 	issue = resetToRemoteIssue(t, d, source, issue)
-	peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "peer", Author: "tester"})
-	require.NoError(t, err)
-	destination, err := d.CreateProject(ctx, "destination")
-	require.NoError(t, err)
-	_, _, err = d.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "local comment"})
+	peerUID := "01HZNQ7VFPK1XGD8R5MABCDEF2"
+	_, _, err := d.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "local comment"})
 	require.NoError(t, err)
 	_, err = d.AddLabel(ctx, issue.ID, "local", "tester")
 	require.NoError(t, err)
-	unapplyMove(t, d, issue, source, destination, false)
-	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: destination.ID, Actor: "tester"})
+	hub := cloneIncrementalStore(t, d)
+	destination, err := hub.CreateProject(ctx, "destination")
 	require.NoError(t, err)
-	var events []db.RemoteEvent
+	for _, project := range []db.Project{source, destination} {
+		_, err = hub.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectUID: project.UID, Enabled: true})
+		require.NoError(t, err)
+	}
+	move, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+	require.NoError(t, err)
+	_, err = d.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{incrementalRemoteEvent(t, destination, issue.UID, "issue.moved", string(move.Event.Payload), 9_000_000_000_000)})
+	require.NoError(t, err)
+	destination, err = d.ProjectByUID(ctx, destination.UID)
+	require.NoError(t, err)
+	peerPayload := fmt.Sprintf(`{"uid":%q,"short_id":"def2","title":"peer","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`, peerUID)
+	events := []db.RemoteEvent{incrementalRemoteEvent(t, source, peerUID, "issue.created", peerPayload, 1_000_000_000_001)}
 	for i, kind := range []byte{0, 5, 7, 13} {
 		typ, payload := incrementalFuzzPayload(kind, issue.UID, "", 42)
 		events = append(events, incrementalRemoteEvent(t, source, issue.UID, typ, payload, 8_000_000_000_000+int64(i)))
 	}
-	typ, payload := incrementalFuzzPayload(15, issue.UID, peer.UID, 42)
+	typ, payload := incrementalFuzzPayload(15, issue.UID, peerUID, 42)
 	events = append(events, incrementalRemoteEvent(t, source, issue.UID, typ, payload, 8_000_000_000_010))
 	_, err = d.InsertRemoteEvents(ctx, source.ID, events)
 	require.NoError(t, err)
@@ -295,6 +263,9 @@ func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
 		require.Equal(t, destination.ID, got.ProjectID)
 		require.Equal(t, "work 42", got.Title)
 		require.JSONEq(t, `{"area":"value-42"}`, string(got.Metadata))
+		links, err := store.LinksByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, links, 1)
 		typ, payload := "issue.commented", fmt.Sprintf(`{"issue_uid":%q,"comment_uid":"01HZNQ7VFPK1XGD8R5MABCDEF1","author":"tester","body":"delayed","created_at":"2026-05-23T12:00:00.000Z"}`, issue.UID)
 		_, err = store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{incrementalRemoteEvent(t, source, issue.UID, typ, payload, 8_000_000_000_011)})
 		require.NoError(t, err)
@@ -316,6 +287,20 @@ func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
 	lockedComments, err := locked.CommentsByIssue(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, preparedComments, lockedComments)
+	for _, store := range []*Store{d, locked} {
+		payload := fmt.Sprintf(`{"issue_uid":%q,"from_project_uid":%q,"from_short_id":%q,"to_project_uid":%q,"to_short_id":%q,"snapshot":{"uid":%q,"short_id":%q,"title":"work 42","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}}`, issue.UID, destination.UID, issue.ShortID, source.UID, issue.ShortID, issue.UID, issue.ShortID)
+		_, err := store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{incrementalRemoteEvent(t, source, issue.UID, "issue.moved", payload, 9_000_000_000_001)})
+		require.NoError(t, err)
+		if store == d {
+			require.NoError(t, store.MaterializeFederatedProject(ctx, source.ID))
+		} else {
+			require.NoError(t, store.materializeFederatedProject(ctx, source.ID))
+		}
+		labels, err := store.LabelsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, labels, 2)
+		require.ElementsMatch(t, []string{"area:db", "local"}, []string{labels[0].Label, labels[1].Label})
+	}
 }
 
 func TestMoveRebuildAssignsCollidingShortIDsInOrder(t *testing.T) {

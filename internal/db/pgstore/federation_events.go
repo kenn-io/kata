@@ -135,13 +135,13 @@ func (s *Store) InsertRemoteEvents(ctx context.Context, projectID int64, events 
 	for i, remote := range events {
 		payload, createdAt, err := db.ValidateRemoteEventContentHash(remote)
 		if err != nil {
-			return nil, fmt.Errorf("remote event project %s event %s: %w", remote.ProjectUID, remote.EventUID, err)
+			return nil, err
 		}
 		if _, err := db.RemoteEventIssueUID(remote); err != nil {
-			return nil, fmt.Errorf("remote event project %s event %s: %w", remote.ProjectUID, remote.EventUID, err)
+			return nil, err
 		}
 		if err := db.ValidateFederationEntries(remote.Type, remote.EventUID, payload); err != nil {
-			return nil, fmt.Errorf("remote event project %s event %s: %w", remote.ProjectUID, remote.EventUID, err)
+			return nil, err
 		}
 		payloads[i], createdAts[i] = payload, createdAt
 	}

@@ -585,15 +585,7 @@ func (s *Store) materializeFederatedProjectTxScoped(
 		if err := reconcileFederatedLabels(ctx, tx, projectID, ids, view, issue.UID); err != nil {
 			return err
 		}
-		linkIDs, err := db.FederatedLinkIssueIDs(ctx, tx, projection)
-		if err != nil {
-			return err
-		}
-		links, err := federatedLinkRows(ctx, tx, nil, issue.UID)
-		if err != nil {
-			return err
-		}
-		return reconcileFederatedLinkRows(ctx, tx, projection, linkIDs, links, issue.UID)
+		return reconcileParkedIssueLinks(ctx, tx, projection, issue.UID)
 	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
 		payload := "{}"
 		var issueUID *string
@@ -670,6 +662,14 @@ func (s *Store) materializeFederatedProjectTxScoped(
 		}
 		if err := reconcileFederatedLinkGroup(ctx, tx, m, issueIDs); err != nil {
 			return err
+		}
+	}
+	for _, decision := range decisions {
+		if decision.Exists && !decision.Joined && !decision.SourceStandalone {
+			if err := reconcileParkedIssueLinks(ctx, tx, projection, decision.IssueUID); err != nil {
+				move := moved[decision.IssueUID]
+				return fmt.Errorf("apply move project %s event %s: %w", move.ProjectUID, move.UID, err)
+			}
 		}
 	}
 	if err := pruneFederatedIssues(ctx, tx, m, issueIDs); err != nil {

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -47,4 +48,36 @@ func TestSyncFederationMoveBackfillsLocalCreationAfterSourceLeave(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, spoke.projects[1].ID, moved.ProjectID)
 	require.Equal(t, issue.Title, moved.Title)
+}
+
+func TestSyncFederationMoveAfterPurgingLocalSource(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "purged-local-source", "joined-later-target")
+	spoke := newMoveDeliverySpoke(t, hub, projects[:1])
+	issue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "local history", Author: "worker"})
+	require.NoError(t, err)
+	require.NoError(t, spoke.sync(t, 0))
+	current, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: current.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	_, err = spoke.env.DB.LeaveFederationReplica(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	_, _, err = spoke.env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: spoke.projects[0].ID, Actor: "worker", Force: true})
+	require.NoError(t, err)
+	_, err = spoke.env.DB.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: spoke.projects[0].ID, Actor: "worker"})
+	require.NoError(t, err)
+	target, err := spoke.env.DB.CreateProjectWithUID(ctx, projects[1].Name, projects[1].UID)
+	require.NoError(t, err)
+	_, err = spoke.env.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: projects[1].ID, HubProjectUID: target.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+	require.NoError(t, err)
+	grant, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &projects[1].ID, Capabilities: "push,pull", Actor: "worker"})
+	require.NoError(t, err)
+	spoke.projects = append(spoke.projects, target)
+	spoke.credentials[target.UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: projects[1].ID, Token: grant.Token, Actor: "worker"}
+	require.NoError(t, spoke.sync(t, 1))
+	got, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, target.ID, got.ProjectID)
+	require.Equal(t, issue.Title, got.Title)
 }
