@@ -62,7 +62,7 @@ cross-project digest.`,
 				}
 			}
 			now := time.Now().UTC()
-			since, err := parseSinceUntil(sinceStr, now)
+			since, err := timeparse.Since(sinceStr, now)
 			if err != nil {
 				return &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
 			}
@@ -70,7 +70,7 @@ cross-project digest.`,
 			if untilStr == "" {
 				until = now
 			} else {
-				until, err = parseSinceUntil(untilStr, now)
+				until, err = timeparse.Since(untilStr, now)
 				if err != nil {
 					return &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
 				}
@@ -124,11 +124,6 @@ cross-project digest.`,
 	cmd.Flags().BoolVar(&allProjects, "all", false, "summarize all projects")
 	cmd.Flags().StringSliceVar(&actors, "actor", nil, "limit to one or more actors (repeatable)")
 	return cmd
-}
-
-// parseSinceUntil resolves a duration or RFC3339 timestamp.
-func parseSinceUntil(s string, now time.Time) (time.Time, error) {
-	return timeparse.Since(s, now)
 }
 
 type digestURLOpts struct {
