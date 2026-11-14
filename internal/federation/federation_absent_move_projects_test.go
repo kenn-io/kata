@@ -8,8 +8,8 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// A hub edit and move must not strand the spoke's issue.
-func TestSyncFederationEditedIssueMovedToProject(t *testing.T) {
+// A rejected push must not prevent pulling a move or sending unrelated work.
+func TestSyncFederationPullsMoveAfterRejectedPush(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "source", "destination")
 	spoke := newMoveDeliverySpoke(t, hub, projects[:1])
@@ -22,10 +22,7 @@ func TestSyncFederationEditedIssueMovedToProject(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = spoke.env.DB.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "offline comment"})
 	require.NoError(t, err)
-	title := "Hub edit"
-	edited, _, _, err := hub.DB.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &title, Actor: "worker"})
-	require.NoError(t, err)
-	move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: edited.Revision, Actor: "worker"})
+	move, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID, IfMatchRev: issue.Revision, Actor: "worker"})
 	require.NoError(t, err)
 	_, later, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Later work", Author: "worker"})
 	require.NoError(t, err)

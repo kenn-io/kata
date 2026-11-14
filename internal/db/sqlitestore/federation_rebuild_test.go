@@ -35,22 +35,6 @@ func unapplyMove(t *testing.T, d *Store, issue db.Issue, source, destination db.
 	require.NoError(t, err)
 }
 
-func resetToRemoteIssue(t *testing.T, d *Store, project db.Project, issue db.Issue) db.Issue {
-	t.Helper()
-	ctx := t.Context()
-	require.NoError(t, d.ResetFederatedProject(ctx, project.ID, 1, 0))
-	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
-	require.NoError(t, err)
-	payload := fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":%q,"body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`, issue.UID, issue.ShortID, issue.Title)
-	event := incrementalRemoteEvent(t, project, issue.UID, "issue.created", payload, 1_000_000_000_000)
-	_, err = d.InsertRemoteEvents(ctx, project.ID, []db.RemoteEvent{event})
-	require.NoError(t, err)
-	require.NoError(t, d.MaterializeFederatedProject(ctx, project.ID))
-	issue, err = d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-	require.NoError(t, err)
-	return issue
-}
-
 func TestFederationRebuildRetriesChangedRows(t *testing.T) {
 	for _, change := range []string{"comment", "label", "link"} {
 		t.Run(change, func(t *testing.T) {
