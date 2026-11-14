@@ -472,7 +472,7 @@ func applyUnjoinedMovedIssue(ctx context.Context, tx *sql.Tx, projectID int64, i
 			delete(m.labelRows, key)
 		}
 	}
-	return m.apply(ctx, tx, projectID, nil)
+	return m.apply(ctx, tx, projectID, db.NewCronReplayValidator(tx, false))
 }
 
 // prepareRows compares against persisted values, rather than a previous fold:
