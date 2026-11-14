@@ -1096,6 +1096,41 @@ func TestEnsureFederationReplicaRetainedProjectDoesNotSnapshotLocalComments(t *t
 	assert.Equal(t, "held local edit", comments[0].Body)
 }
 
+func TestEnsureFederationReplicaRestoredRetainedProjectDoesNotSnapshotLocalComments(t *testing.T) {
+	ctx := t.Context()
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaHubProjectUID)
+	require.NoError(t, err)
+	issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "moved issue", Author: "worker"})
+	require.NoError(t, err)
+	_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "held local edit"})
+	require.NoError(t, err)
+	for _, uid := range []string{created.UID, comment.UID} {
+		_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, 'v1:held')`, "federation_local_only_event."+uid)
+		require.NoError(t, err)
+	}
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker", Force: true})
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FederationRetainedProjectPrefix+project.UID)
+	require.NoError(t, err)
+	_, _, _, err = store.RestoreProject(ctx, project.ID, "worker")
+	require.NoError(t, err)
+	params := replicaServiceParams()
+	params.ProjectName = project.Name
+	params.AdoptExisting = true
+	params.Credential.ManagedByConfig = true
+	result, err := daemon.EnsureFederationReplica(ctx, store, newReplicaCredentialStore(), nil, params)
+	require.NoError(t, err)
+	assert.Zero(t, result.AdoptionSnapshotCount)
+	pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), 0, 20)
+	require.NoError(t, err)
+	assert.Empty(t, pending)
+	comments, err := store.CommentsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	assert.Equal(t, "held local edit", comments[0].Body)
+}
+
 func TestEnsureFederationReplicaRejectsDistinctCredentialAtAdoptionSource(t *testing.T) {
 	ctx := t.Context()
 	store := openReplicaServiceStore(t)

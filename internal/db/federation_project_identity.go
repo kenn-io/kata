@@ -10,7 +10,8 @@ import (
 // joined replica still needs after a reset removes its move events.
 const FederationProjectIdentityDependencyPrefix = "federation_identity_dependency."
 
-// FederationRetainedProjectPrefix marks identities created for absent projects.
+// FederationRetainedProjectPrefix marks identities created for absent projects
+// until they are both restored and bound to their hub.
 const FederationRetainedProjectPrefix = "federation_retained_project."
 
 // IsFederationRetainedProject reports whether the identity is a placeholder.
@@ -22,7 +23,7 @@ func IsFederationRetainedProject(ctx context.Context, queryer interface {
 	return found, err
 }
 
-// ClearFederationRetainedProject retires placeholder ownership on restore or deletion.
+// ClearFederationRetainedProject retires placeholder ownership on deletion.
 func ClearFederationRetainedProject(ctx context.Context, tx interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, uid string) error {

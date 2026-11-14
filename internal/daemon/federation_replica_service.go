@@ -1795,11 +1795,11 @@ func adoptExistingReplica(
 ) (db.AdoptProjectIntoFederationResult, bool, error) {
 	projectName := p.ProjectName
 	if project, err := store.ProjectByUID(ctx, p.HubProjectUID); err == nil {
-		if project.DeletedAt != nil {
-			retained, err := store.IsFederationRetainedProject(ctx, project.UID)
-			if err != nil {
-				return db.AdoptProjectIntoFederationResult{}, false, fmt.Errorf("check retained federation project: %w", err)
-			}
+		retained, err := store.IsFederationRetainedProject(ctx, project.UID)
+		if err != nil {
+			return db.AdoptProjectIntoFederationResult{}, false, fmt.Errorf("check retained federation project: %w", err)
+		}
+		if project.DeletedAt != nil || retained {
 			if !retained {
 				return db.AdoptProjectIntoFederationResult{}, false, federationReplicaError(
 					errFederationReplicaProjectCollision,

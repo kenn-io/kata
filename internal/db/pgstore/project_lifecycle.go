@@ -137,7 +137,7 @@ func (s *Store) restoreProject(
 		if _, err := tx.ExecContext(ctx, `UPDATE projects SET deleted_at = NULL WHERE id = $1`, project.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
-		if err := db.ClearFederationRetainedProject(ctx, tx, project.UID); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key = $1 AND EXISTS (SELECT 1 FROM federation_bindings WHERE project_id = $2)`, db.FederationRetainedProjectPrefix+project.UID, project.ID); err != nil {
 			return err
 		}
 		created, err := s.insertEventTx(ctx, tx, eventInsert{
