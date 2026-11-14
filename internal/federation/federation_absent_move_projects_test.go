@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -28,17 +29,12 @@ func TestSyncFederationMoveHistoryWithAbsentCounterpartProjects(t *testing.T) {
 	require.NoError(t, err)
 
 	expected := []string{created.UID, inMove.Event.UID, outboundCreated.UID, outMove.Event.UID, laterEvent.UID}
-	expectedSet := make(map[string]bool, len(expected))
-	for _, eventUID := range expected {
-		expectedSet[eventUID] = true
-	}
-
 	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
 	require.NoError(t, err)
 	var delivered []string
 	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.env.DB, binding, spoke.credentials[projects[1].UID], clientpkg.Opts{}, func(_ int64, events []db.Event) {
 		for _, event := range events {
-			if expectedSet[event.UID] {
+			if slices.Contains(expected, event.UID) {
 				delivered = append(delivered, event.UID)
 			}
 		}
