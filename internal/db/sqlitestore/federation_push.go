@@ -11,6 +11,14 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+var pendingFederationPushWhere = `
+		WHERE e.project_id = $1
+		  AND e.origin_instance_uid = $2
+		  AND e.id IN (` + db.FederationPushPendingIDs("$1", "$2", "$3") + `)
+		  AND ` + federationPushEventTypeCondition("e.type") + `
+		ORDER BY e.id ASC
+		LIMIT $4`
+
 // PendingFederationPushEvents returns local-origin events that have not yet
 // been acknowledged by the hub for a push-enabled spoke binding.
 func (d *Store) PendingFederationPushEvents(
@@ -20,16 +28,13 @@ func (d *Store) PendingFederationPushEvents(
 	afterID int64,
 	limit int,
 ) ([]db.Event, error) {
+	if err := db.ValidateFederationLocalEventMarkers(ctx, d, projectID); err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 1000
 	}
-	out, err := d.queryPendingFederationPushEvents(ctx, `
-		WHERE e.project_id = ?
-		  AND e.origin_instance_uid = ?
-		  AND e.id > ?
-		  AND `+federationPushEventTypeCondition("e.type")+`
-		ORDER BY e.id ASC
-		LIMIT ?`, projectID, originInstanceUID, afterID, limit)
+	out, err := d.queryPendingFederationPushEvents(ctx, pendingFederationPushWhere, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -46,6 +51,7 @@ func (d *Store) PendingFederationPushEvents(
 			  AND e.origin_instance_uid = ?
 			  AND e.id > ?
 			  AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
+			  AND `+db.FederationPushPending("e", "0")+`
 			  AND e.id <= COALESCE((
 			    SELECT MIN(barrier.id)
 			      FROM events barrier
@@ -53,6 +59,7 @@ func (d *Store) PendingFederationPushEvents(
 			       AND barrier.origin_instance_uid = ?
 			       AND barrier.id > ?
 			       AND `+federationPushEventTypeCondition("barrier.type")+`
+			       AND `+db.FederationPushPending("barrier", "0")+`
 			       AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  ), 9223372036854775807)
 			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, projectID, originInstanceUID, runStartAfterID)
@@ -76,14 +83,7 @@ func (d *Store) PendingFederationPushEvents(
 }
 
 func (d *Store) queryPendingFederationPushEvents(ctx context.Context, where string, args ...any) ([]db.Event, error) {
-	rows, err := d.QueryContext(ctx, `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
-	             e.issue_id, e.issue_uid, i.short_id, e.related_issue_id, e.related_issue_uid, ri.short_id,
-	             e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
-	      FROM events e
-	      JOIN projects p ON p.id = e.project_id
-	      LEFT JOIN issues i ON i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid)
-	      LEFT JOIN issues ri ON ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid)
-	      `+where, args...)
+	rows, err := d.QueryContext(ctx, eventSelect+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("pending federation push events: %w", err)
 	}
@@ -107,6 +107,9 @@ func (d *Store) PendingFederationPushStats(
 	originInstanceUID string,
 	afterID int64,
 ) (int64, int64, error) {
+	if err := db.ValidateFederationLocalEventMarkers(ctx, d, projectID); err != nil {
+		return 0, 0, err
+	}
 	if count, highWater, negotiated, err := d.pendingRelayRootStats(ctx, projectID, originInstanceUID); err != nil || negotiated {
 		return count, highWater, err
 	}
@@ -116,9 +119,9 @@ func (d *Store) PendingFederationPushStats(
 	if err := d.QueryRowContext(ctx, `
 		SELECT COUNT(*), MAX(id)
 		  FROM events
-		 WHERE project_id = ?
-		   AND origin_instance_uid = ?
-		   AND id > ?
+		 WHERE project_id = $1
+		   AND origin_instance_uid = $2
+		   AND id IN (`+db.FederationPushPendingIDs("$1", "$2", "$3")+`)
 		   AND `+federationPushEventTypeCondition("type"),
 		projectID, originInstanceUID, afterID).Scan(&count, &maxID); err != nil {
 		return 0, 0, fmt.Errorf("count pending federation push: %w", err)
@@ -177,7 +180,15 @@ func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCu
 // the hub for a spoke binding.
 func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return d.RetryTransient(ctx, func() error {
-		return advanceFederationPushCursor(ctx, d, projectID, nextCursor)
+		tx, err := d.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
+			return err
+		}
+		return tx.Commit()
 	})
 }
 
@@ -204,7 +215,7 @@ func advanceFederationPushCursor(ctx context.Context, exec interface {
 	if n == 0 {
 		return db.ErrNotFound
 	}
-	return nil
+	return db.ClearDeliveredFederationEvents(ctx, exec, projectID, nextCursor)
 }
 
 // EnableFederationPush marks an existing spoke binding push-enabled and keeps
@@ -292,25 +303,28 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
+	if err := db.ValidateFederationLocalEventMarkers(ctx, tx, projectID); err != nil {
+		return err
+	}
 
 	res, err := tx.ExecContext(ctx, `
 		UPDATE federation_bindings
-		   SET replay_horizon_event_id = ?,
-		       pull_cursor_event_id = ?,
+		   SET replay_horizon_event_id = $1,
+		       pull_cursor_event_id = $2,
 		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE project_id = ?
+		 WHERE project_id = $3
 		   AND NOT EXISTS (
 		       SELECT 1
-		         FROM events
-		        WHERE project_id = ?
-		          AND origin_instance_uid = ?
-		          AND id > ?
-		          AND `+federationPushEventTypeCondition("type")+`
+		         FROM events e
+		        WHERE e.project_id = $4
+		          AND e.origin_instance_uid = $5
+		          AND e.id IN (`+db.FederationPushPendingIDs("$4", "$5", "$6")+`)
+		          AND `+federationPushEventTypeCondition("e.type")+`
 		   )
 		   AND NOT EXISTS (
 		       SELECT 1
 		         FROM federation_quarantine
-		        WHERE project_id = ?
+		        WHERE project_id = $7
 		          AND skipped_at IS NULL
 		   )`,
 		replayHorizonEventID, pullCursorEventID, projectID,

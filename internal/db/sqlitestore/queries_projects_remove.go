@@ -171,6 +171,10 @@ func (d *Store) restoreProject(ctx context.Context, projectID int64, actor strin
 		return updated, nil, false, nil
 	}
 
+	if err := db.ClearFederationRetainedProject(ctx, tx, project.UID); err != nil {
+		return db.Project{}, nil, false, err
+	}
+
 	evt, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   project.ID,
 		ProjectName: project.Name,

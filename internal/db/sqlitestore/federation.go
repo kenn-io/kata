@@ -785,13 +785,13 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 	for i, ev := range events {
 		payload, createdAt, err := validateRemoteEventContentHash(ev)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("validate remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 		}
 		if _, err := db.RemoteEventIssueUID(ev); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("validate remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 		}
 		if err := db.ValidateFederationEntries(ev.Type, ev.EventUID, payload); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("validate remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 		}
 		payloads[i], createdAts[i] = payload, createdAt
 	}
@@ -807,7 +807,7 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 	for i, ev := range events {
 		inserted[i], err = d.insertRemoteEventTx(ctx, tx, projectID, ev, payloads[i], createdAts[i], validator)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -1333,6 +1333,9 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	if err != nil {
 		return err
 	}
+	if err := db.PreserveMovedIssueLabels(ctx, tx, projectID, projection, decisions); err != nil {
+		return err
+	}
 	db.RestrictFoldProject(&projection, projectUID)
 
 	if db.CronMaterializationNeeded(events, acceptedEventUIDs) {
@@ -1373,7 +1376,7 @@ func (d *Store) materializeFederatedProjectTxScoped(
 }
 
 func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]db.FoldEvent, projection db.FoldProjection, decisions []db.FederatedMoveDecision, acceptedEventUIDs []string) error {
-	return db.RehomeFederatedMovedIssues(ctx, tx, moved, projection, decisions, func(pid int64, issue db.FoldIssue) (string, error) {
+	return db.RehomeFederatedMovedIssues(ctx, tx, moved, projection, decisions, d.InstanceUID(), payloadReferencedIssueUIDs, func(pid int64, issue db.FoldIssue) (string, error) {
 		return resolveFederatedIssueShortID(ctx, tx, pid, issue.UID, issue.ShortID, nil)
 	}, func(id, source, target int64) error {
 		if err := lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil {
@@ -1399,6 +1402,8 @@ func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, move
 			return err
 		}
 		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
+	}, func(projectID int64, issue db.FoldIssue, projection db.FoldProjection) error {
+		return applyUnjoinedMovedIssue(ctx, tx, projectID, issue, projection)
 	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
 		payload := "{}"
 		var issueUID *string

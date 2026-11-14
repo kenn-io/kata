@@ -661,6 +661,16 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 			retained, readErr := store.IssueByID(ctx, issue.ID)
 			require.NoError(t, readErr)
 			require.Equal(t, source.ID, retained.ProjectID)
+			if kind == "bridge" {
+				prepareRehomePull(t, store, source, target, "pull")
+				_, err = store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{event})
+				require.NoError(t, err)
+				err = store.MaterializeFederatedProject(ctx, target.ID)
+				require.ErrorIs(t, err, db.ErrExternalRootClaimActive)
+				require.ErrorContains(t, err, "apply move")
+				require.ErrorContains(t, err, event.EventUID)
+				require.ErrorContains(t, err, event.ProjectUID)
+			}
 		})
 	}
 	return nil

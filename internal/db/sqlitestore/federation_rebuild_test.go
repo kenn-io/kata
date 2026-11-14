@@ -220,33 +220,104 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 
 func TestMoveRebuildRemovesStaleLinksBeforeIssues(t *testing.T) {
 	ctx := t.Context()
-	d, source, issue := incrementalTestStore(t)
-	destination, err := d.CreateProject(ctx, "destination")
+	seed, source, issue := incrementalTestStore(t)
+	destination, err := seed.CreateProject(ctx, "destination")
 	require.NoError(t, err)
-	_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
+	orphan, _, err := seed.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "orphan", Author: "tester"})
 	require.NoError(t, err)
-	orphan, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "orphan", Author: "tester"})
+	_, err = seed.CreateLink(ctx, db.CreateLinkParams{FromIssueID: orphan.ID, ToIssueID: issue.ID, Type: "blocks", Author: "tester"})
 	require.NoError(t, err)
-	third, err := d.CreateProject(ctx, "third")
+	// A partial archive can contain a projection without its event history.
+	var records []db.ImportRecord
+	for row, err := range seed.ExportProjects(ctx, db.ExportFilter{}) {
+		require.NoError(t, err)
+		records = append(records, &row)
+	}
+	for row, err := range seed.ExportIssues(ctx, db.ExportFilter{}) {
+		require.NoError(t, err)
+		records = append(records, &row)
+	}
+	for row, err := range seed.ExportLinks(ctx, db.ExportFilter{}) {
+		require.NoError(t, err)
+		records = append(records, &row)
+	}
+	for row, err := range seed.ExportEvents(ctx, db.ExportFilter{ProjectID: &source.ID}) {
+		require.NoError(t, err)
+		records = append(records, &row)
+	}
+	d, err := Open(ctx, filepath.Join(t.TempDir(), "replay.db"))
 	require.NoError(t, err)
-	_, err = d.EnableProjectFederation(ctx, third.ID, "tester")
-	require.NoError(t, err)
-	orphan = resetToRemoteIssue(t, d, destination, orphan)
+	t.Cleanup(func() { require.NoError(t, d.Close()) })
+	require.NoError(t, d.ImportReplay(ctx, records, db.ImportOptions{}))
 	unapplyMove(t, d, issue, source, destination, true)
-	unapplyMove(t, d, orphan, destination, third, true)
-	_, err = d.LeaveFederationReplica(ctx, third.ID)
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `INSERT INTO links(from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author) VALUES(?,?,?,?,'blocks','tester')`, orphan.ID, issue.ID, orphan.UID, issue.UID)
-	require.NoError(t, err)
-	attempts := 0
-	d.federationIngestPrepared = func() { attempts++ }
 	require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
-	require.Equal(t, 1, attempts)
 	_, err = d.IssueByUID(ctx, orphan.UID, db.IncludeDeletedYes)
 	require.ErrorIs(t, err, db.ErrNotFound)
 	links, err := d.LinksByIssue(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Empty(t, links)
+}
+
+func moveRebuildPreservesLocalLabelsOnReturn(t *testing.T) {
+	ctx := t.Context()
+	d, source, issue := incrementalTestStore(t)
+	issue = resetToRemoteIssue(t, d, source, issue)
+	peerUID := "01HZNQ7VFPK1XGD8R5MABCDEF2"
+	_, err := d.AddLabel(ctx, issue.ID, "local", "tester")
+	require.NoError(t, err)
+	hub := cloneIncrementalStore(t, d)
+	destination, err := hub.CreateProject(ctx, "destination")
+	require.NoError(t, err)
+	for _, project := range []db.Project{source, destination} {
+		_, err = hub.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectUID: project.UID, Enabled: true})
+		require.NoError(t, err)
+	}
+	move, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: issue.Revision, Actor: "tester"})
+	require.NoError(t, err)
+	_, err = d.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{incrementalRemoteEvent(t, destination, issue.UID, "issue.moved", string(move.Event.Payload), 9_000_000_000_000)})
+	require.NoError(t, err)
+	destination, err = d.ProjectByUID(ctx, destination.UID)
+	require.NoError(t, err)
+	peerPayload := fmt.Sprintf(`{"uid":%q,"short_id":"def2","title":"peer","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`, peerUID)
+	events := []db.RemoteEvent{incrementalRemoteEvent(t, source, peerUID, "issue.created", peerPayload, 1_000_000_000_001)}
+	for i, kind := range []byte{0, 5, 7, 13} {
+		typ, payload := incrementalFuzzPayload(kind, issue.UID, "", 42)
+		events = append(events, incrementalRemoteEvent(t, source, issue.UID, typ, payload, 8_000_000_000_000+int64(i)))
+	}
+	typ, payload := incrementalFuzzPayload(15, issue.UID, peerUID, 42)
+	events = append(events, incrementalRemoteEvent(t, source, issue.UID, typ, payload, 8_000_000_000_010))
+	_, err = d.InsertRemoteEvents(ctx, source.ID, events)
+	require.NoError(t, err)
+	locked := cloneIncrementalStore(t, d)
+	attempts := 0
+	d.federationIngestPrepared = func() { attempts++ }
+	require.NoError(t, d.MaterializeFederatedProject(ctx, source.ID))
+	require.Equal(t, 1, attempts)
+	require.NoError(t, locked.materializeFederatedProject(ctx, source.ID))
+	preparedIssue, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	lockedIssue, err := locked.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Equal(t, preparedIssue, lockedIssue)
+	require.Equal(t, federationProjectionRows(t, locked, source.ID), federationProjectionRows(t, d, source.ID))
+	for _, store := range []*Store{d, locked} {
+		payload := fmt.Sprintf(`{"issue_uid":%q,"from_project_uid":%q,"from_short_id":%q,"to_project_uid":%q,"to_short_id":%q,"snapshot":{"uid":%q,"short_id":%q,"title":"work 42","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}}`, issue.UID, destination.UID, issue.ShortID, source.UID, issue.ShortID, issue.UID, issue.ShortID)
+		_, err := store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{incrementalRemoteEvent(t, source, issue.UID, "issue.moved", payload, 9_000_000_000_001)})
+		require.NoError(t, err)
+		if store == d {
+			require.NoError(t, store.MaterializeFederatedProject(ctx, source.ID))
+		} else {
+			require.NoError(t, store.materializeFederatedProject(ctx, source.ID))
+		}
+		labels, err := store.LabelsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		var names []string
+		for _, label := range labels {
+			names = append(names, label.Label)
+		}
+		require.ElementsMatch(t, []string{"area:db", "local"}, names)
+	}
+	require.Equal(t, federationProjectionRows(t, locked, source.ID), federationProjectionRows(t, d, source.ID))
 }
 
 func TestMoveRebuildAssignsCollidingShortIDsInOrder(t *testing.T) {
@@ -331,6 +402,7 @@ func TestMoveRebuildDoesNotResurrectArchivedDestination(t *testing.T) {
 }
 
 func TestMoveRebuildMatchesLockedRebuild(t *testing.T) {
+	t.Run("parked issue return keeps local labels", moveRebuildPreservesLocalLabelsOnReturn)
 	t.Run("relay link across chained project moves", func(t *testing.T) {
 		ctx := t.Context()
 		d, source, issue := incrementalTestStore(t)

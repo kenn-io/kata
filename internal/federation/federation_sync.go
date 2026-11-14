@@ -304,7 +304,7 @@ func pushDirectSpoke(
 					}
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
-				if ack.PushCursorEventID <= binding.PushCursorEventID {
+				if ack.PushCursorEventID < batch[0].ID {
 					return recordFederationSyncError(ctx, store, binding.ProjectID,
 						errors.New("federation push cursor did not advance"))
 				}
@@ -337,7 +337,7 @@ func pushDirectSpoke(
 						onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
 					}
 				}
-				binding.PushCursorEventID = ack.PushCursorEventID
+				binding.PushCursorEventID = max(binding.PushCursorEventID, ack.PushCursorEventID)
 				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
 			}
 		}
@@ -389,24 +389,30 @@ func syncDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	runStartBinding := binding
+	var pushErr error
 	if pushThisTurn {
-		// A push that waits for the hub's history is finished by the pull
-		// below and the next cycle's push.
-		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts); err != nil &&
-			!errors.Is(err, db.ErrFederationPushAwaitsPull) {
-			return err
+		// A push awaiting history can finish after the pull. A moved issue may
+		// also reject its old project's credential before the move is pulled.
+		pushErr = pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts)
+		if errors.Is(pushErr, db.ErrFederationPushAwaitsPull) {
+			pushErr = nil
+		} else if pushErr != nil {
+			status, ok := errors.AsType[*HubStatusError](pushErr)
+			if !ok || status.StatusCode != http.StatusForbidden || !strings.HasSuffix(status.Path, "/federation/events:ingest") {
+				return pushErr
+			}
 		}
 	}
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
 	if err != nil {
-		return err
+		return errors.Join(err, pushErr)
 	}
 	recordPullError := func(pullErr error) error {
 		at := time.Now().UTC()
 		if at.Before(pullStartedAt) {
 			at = pullStartedAt
 		}
-		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
+		return errors.Join(recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at), pushErr)
 	}
 	body, err := client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
 	if err != nil {
@@ -482,23 +488,31 @@ func syncDirectSpoke(
 		repairEcho := make([]bool, len(body.Events))
 		duplicate := make([]bool, len(body.Events))
 		pending := make([]int, 0, len(body.Events))
-		eventProjects := make([]int64, len(body.Events))
 		projectsByUID := map[string]int64{binding.HubProjectUID: binding.ProjectID}
+		projectID := func(ev api.EventEnvelope) (int64, error) {
+			if id := projectsByUID[ev.ProjectUID]; id != 0 {
+				return id, nil
+			}
+			project, err := store.ProjectByUID(ctx, ev.ProjectUID)
+			if err != nil {
+				return 0, fmt.Errorf("resolve project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
+			}
+			projectsByUID[ev.ProjectUID] = project.ID
+			return project.ID, nil
+		}
 		for i, ev := range body.Events {
-			projectID, ok := projectsByUID[ev.ProjectUID]
-			if !ok {
-				project, err := store.ProjectByUID(ctx, ev.ProjectUID)
+			if ev.OriginInstanceUID == localInstanceUID {
+				id, err := projectID(ev)
+				if errors.Is(err, db.ErrNotFound) {
+					pending = append(pending, i)
+					continue
+				}
 				if err != nil {
 					return err
 				}
-				projectID = project.ID
-				projectsByUID[ev.ProjectUID] = projectID
-			}
-			eventProjects[i] = projectID
-			if ev.OriginInstanceUID == localInstanceUID {
-				exists, err := store.ReconcileLocalFederationEcho(ctx, projectID, remoteEventFromEnvelope(ev))
+				exists, err := store.ReconcileLocalFederationEcho(ctx, id, remoteEventFromEnvelope(ev))
 				if err != nil {
-					return err
+					return fmt.Errorf("reconcile local echo project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 				}
 				if exists {
 					duplicate[i] = true
@@ -551,14 +565,17 @@ func syncDirectSpoke(
 					deliver[i], invalidate, err = recovery.recover(ctx, ev)
 				}
 				if err != nil {
-					return err
+					return fmt.Errorf("recover duplicate project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 				}
 			}
 			if deliver[i] || invalidate {
 				applyUIDs = append(applyUIDs, ev.EventUID)
 			}
 			if deliver[i] {
-				project := eventProjects[i]
+				project, err := projectID(ev)
+				if err != nil {
+					return err
+				}
 				if _, ok := deliverUIDs[project]; !ok {
 					deliverProjects = append(deliverProjects, project)
 				}
@@ -637,7 +654,7 @@ func syncDirectSpoke(
 	if completedAt.Before(pullStartedAt) {
 		completedAt = pullStartedAt
 	}
-	return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, completedAt)
+	return errors.Join(store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, completedAt), pushErr)
 }
 
 func startFederationPull(ctx context.Context, store db.Storage, projectID int64) (bool, time.Time, error) {

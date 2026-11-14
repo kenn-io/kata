@@ -81,9 +81,21 @@ checks the whole tree without changing issues, claims, or cursors. Use `--single
 to move only the selected issue. The [CLI reference](../reference/cli.md) owns
 the per-issue restrictions.
 
-Spokes must join both projects before applying a move. Sync refuses the batch
-without partial writes when a project is missing; join it and retry sync. Upgrade
-both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
+To author a federated move, a spoke must join both projects. A direct spoke
+pulling move history retains an archived, unbound identity for a missing
+counterpart without subscribing to that project. An issue already present on the
+spoke moves into the destination project with hub content as of the move,
+preserving its comments and local state while removing it from the source
+project's lists. Find its UID and local name with `GET /api/v1/projects?include=archived`.
+The placeholder starts owner-only; restore it, then broaden its project access
+when others should see its issues. Restoring without joining does not subscribe
+to the project, but later moves can still place issues there. Offline edits made
+in the source before the move stay local even if the destination is later joined;
+they can synchronize if the issue returns to the original joined project.
+To subscribe later, run `kata projects restore <local-name>`, optionally run
+`kata projects rename <local-name> <chosen-name>`, then rerun the enrollment's
+join command using `--project <current-local-name>`.
+Upgrade both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
 move history instead of applying a payload they cannot understand. Moves preserve
 stable UIDs, nesting, state, comments, and links. Established author and
 teammate attribution must match trusted history, and a spoke cannot change

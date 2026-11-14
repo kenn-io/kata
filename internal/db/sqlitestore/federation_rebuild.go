@@ -53,7 +53,10 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		if err != nil {
 			return nil, err
 		}
-		moveProjection := db.FoldProjection{Issues: make(map[string]db.FoldIssue, len(decisions))}
+		moveProjection := projection
+		moveProjection.Issues = make(map[string]db.FoldIssue, len(decisions))
+		moveProjection.Comments = maps.Clone(projection.Comments)
+		moveProjection.Labels = maps.Clone(projection.Labels)
 		for _, decision := range decisions {
 			result.moved[decision.IssueUID] = decision
 			moveOwners[decision.IssueUID] = projection.Issues[decision.IssueUID].ProjectUID
@@ -101,13 +104,16 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			return preparedFederationRebuild{}, err
 		}
 		p.uid = projectUID
+		if err := db.PreserveMovedIssueLabels(ctx, tx, p.id, p.projection, p.decisions); err != nil {
+			return preparedFederationRebuild{}, err
+		}
 		p.moved = p.projection
 		p.moved.Issues = maps.Clone(p.projection.Issues)
 		p.moved.Comments = maps.Clone(p.projection.Comments)
 		p.moved.Labels = maps.Clone(p.projection.Labels)
 		db.RestrictFoldProjectWhere(&p.projection, projectUID, func(uid string) bool {
 			decision, ok := result.moved[uid]
-			return !ok || (decision.Joined && (decision.Active || decision.Exists) && !isFederationRehome(decision))
+			return !ok || (!decision.SourceStandalone && decision.Joined && (decision.Active || decision.Exists) && !isFederationRehome(decision))
 		})
 		db.RestrictFoldProjectWhere(&p.moved, projectUID, func(uid string) bool {
 			decision, ok := result.moved[uid]
@@ -277,5 +283,5 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 }
 
 func isFederationRehome(decision db.FederatedMoveDecision) bool {
-	return decision.Joined && decision.Active && decision.Exists && decision.SourceID != decision.TargetID
+	return decision.Exists && !decision.SourceStandalone && decision.SourceID != decision.TargetID && (!decision.Joined || decision.Active)
 }
