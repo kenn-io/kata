@@ -1,8 +1,11 @@
 package db
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -20,6 +23,24 @@ func FederationPushEligible(event string) string {
 // FederationPushPending includes released local events below the push cursor.
 func FederationPushPending(event, cursor string) string {
 	return `((` + event + `.id>` + cursor + ` AND ` + FederationPushEligible(event) + `) OR EXISTS (SELECT 1 FROM meta WHERE key='federation_local_only_event.'||` + event + `.uid AND value='v1:deliver'))`
+}
+
+// ValidateFederationLocalEventMarkers rejects event states this version cannot interpret.
+func ValidateFederationLocalEventMarkers(ctx context.Context, query interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, projectID int64) error {
+	var uid, value string
+	err := query.QueryRowContext(ctx, `SELECT e.uid,m.value FROM events e
+ JOIN meta m ON m.key='federation_local_only_event.'||e.uid
+ WHERE (e.project_id=$1 OR e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1))
+ AND m.value NOT IN ('v1:held','v1:deliver') LIMIT 1`, projectID).Scan(&uid, &value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check local federation event markers: %w", err)
+	}
+	return fmt.Errorf("unknown local federation marker %q for event %s; upgrade Kata to resume sync", value, uid)
 }
 
 // ProjectMetadataAdoptionPayload encodes existing project metadata as a
