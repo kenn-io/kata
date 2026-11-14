@@ -202,6 +202,31 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 	}
 }
 
+func TestMoveRebuildRemovesStaleLinksBeforeIssues(t *testing.T) {
+	ctx := t.Context()
+	d, source, issue := incrementalTestStore(t)
+	destination, err := d.CreateProject(ctx, "destination")
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, destination.ID, "tester")
+	require.NoError(t, err)
+	orphan, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "orphan", Author: "tester"})
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `DELETE FROM events WHERE issue_id = ?`, orphan.ID)
+	require.NoError(t, err)
+	unapplyMove(t, d, issue, source, destination, true)
+	_, err = d.ExecContext(ctx, `INSERT INTO links(from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author) VALUES(?,?,?,?,'blocks','tester')`, orphan.ID, issue.ID, orphan.UID, issue.UID)
+	require.NoError(t, err)
+	attempts := 0
+	d.federationIngestPrepared = func() { attempts++ }
+	require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
+	require.Equal(t, 1, attempts)
+	_, err = d.IssueByUID(ctx, orphan.UID, db.IncludeDeletedYes)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	links, err := d.LinksByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Empty(t, links)
+}
+
 func TestMoveRebuildAssignsCollidingShortIDsInOrder(t *testing.T) {
 	ctx := t.Context()
 	d, err := Open(ctx, filepath.Join(t.TempDir(), "spoke.db"))
