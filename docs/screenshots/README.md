@@ -30,6 +30,12 @@ somewhere else, run:
 docs/screenshots/generate.sh --out /tmp/kata-docs-screenshots
 ```
 
+With `DOCS_SCREENSHOTS_OUTPUT` set, `make docs-screenshots` runs the same
+generator inside `docs/screenshots/Dockerfile` and writes the complete
+`docs-assets` tree to `$DOCS_SCREENSHOTS_OUTPUT/assets`. The host needs only
+Bash and Docker, so a machine without Go, Bun or Freeze can regenerate the
+branch contents for review.
+
 A custom destination must either not exist or be a complete asset directory
 created by this generator. Existing unrelated directories, symlinks, empty
 paths, and broad repository paths are rejected. Generation happens in a
