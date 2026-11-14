@@ -1183,6 +1183,9 @@ func importFederationBinding(ctx context.Context, tx *sql.Tx, b *db.FederationBi
 		b.ReplayHorizonEventID, b.PullCursorEventID, pushEnabled,
 		b.PushCursorEventID, actor, allowInsecure, enabled,
 		b.CreatedAt, b.UpdatedAt, b.LastSyncAt, raw)
+	if err == nil {
+		err = db.ClearFederationPlaceholder(ctx, tx, b.ProjectID)
+	}
 	return wrapImportErr(db.ImportKindFederationBinding, err)
 }
 

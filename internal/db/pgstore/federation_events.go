@@ -138,7 +138,7 @@ func (s *Store) InsertRemoteEvents(ctx context.Context, projectID int64, events 
 			return nil, fmt.Errorf("remote event project %s event %s: %w", remote.ProjectUID, remote.EventUID, err)
 		}
 		if _, err := db.RemoteEventIssueUID(remote); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("remote event project %s event %s: %w", remote.ProjectUID, remote.EventUID, err)
 		}
 		if err := db.ValidateFederationEntries(remote.Type, remote.EventUID, payload); err != nil {
 			return nil, fmt.Errorf("remote event project %s event %s: %w", remote.ProjectUID, remote.EventUID, err)

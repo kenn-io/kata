@@ -623,6 +623,9 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	binding, err := federationBindingByProject(ctx, tx, projectID)
 	switch {
 	case errors.Is(err, db.ErrNotFound):
+		if err := db.ClearFederationPlaceholder(ctx, tx, projectID); err != nil {
+			return db.LeaveFederationResult{}, err
+		}
 		if err := tx.Commit(); err != nil {
 			return db.LeaveFederationResult{}, err
 		}
@@ -788,7 +791,7 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 			return nil, fmt.Errorf("remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 		}
 		if _, err := db.RemoteEventIssueUID(ev); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
 		}
 		if err := db.ValidateFederationEntries(ev.Type, ev.EventUID, payload); err != nil {
 			return nil, fmt.Errorf("remote event project %s event %s: %w", ev.ProjectUID, ev.EventUID, err)
@@ -2615,6 +2618,13 @@ func reconcileFederationBindingTransitionLinks(
 	previous *db.FederationBinding,
 	current db.FederationBinding,
 ) error {
+	projectID := current.ProjectID
+	if projectID == 0 && previous != nil {
+		projectID = previous.ProjectID
+	}
+	if err := db.ClearFederationPlaceholder(ctx, tx, projectID); err != nil {
+		return err
+	}
 	if previous != nil && previous.Enabled {
 		remainingProjectIDs, err := federationBindingGroupProjectIDs(ctx, tx, *previous)
 		if err != nil {

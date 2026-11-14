@@ -156,7 +156,7 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 		binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
 		if errors.Is(err, db.ErrNotFound) {
-			return nil
+			return db.ClearFederationPlaceholder(ctx, tx, projectID)
 		}
 		if err != nil {
 			return err
