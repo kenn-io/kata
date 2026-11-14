@@ -206,8 +206,9 @@ offer optional coordination; they are not a prerequisite for every edit.
 Reads can be stale, and concurrent changes have
 [consistency limits](../operations/federation.md#consistency-limitations).
 Cross-project issue moves are unsupported while either project is federated.
-The root can link issues across projects in the same relay group when both projects
-share its root authority. Relays retain the link until both issues arrive.
+The root can link issues across projects that share a relay group, root authority,
+and audience. Relays retain the link until both issues arrive. If a relay reports
+`409 unsupported_event_features`, upgrade that peer and retry.
 
 Embeddings are optional. A project can select one producer and share compatible
 vectors so each device need not generate them again. See

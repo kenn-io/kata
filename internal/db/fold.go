@@ -9,7 +9,16 @@ import (
 
 // FoldEvents applies events in deterministic HLC order and returns the resulting
 // replay projection.
-func FoldEvents(events []FoldEvent, removalCheck ...FoldParentRemovalCheck) FoldProjection {
+func FoldEvents(events []FoldEvent) FoldProjection {
+	return foldEvents(events, nil)
+}
+
+// FoldRelayLinkEvents preserves root parent links while folding relay history.
+func FoldRelayLinkEvents(events []FoldEvent, removalCheck FoldParentRemovalCheck) FoldProjection {
+	return foldEvents(events, removalCheck)
+}
+
+func foldEvents(events []FoldEvent, removalCheck FoldParentRemovalCheck) FoldProjection {
 	p := FoldProjection{
 		CronRuns:        map[string]FoldCronRun{},
 		CronJobs:        map[string]FoldCronJob{},
@@ -21,9 +30,7 @@ func FoldEvents(events []FoldEvent, removalCheck ...FoldParentRemovalCheck) Fold
 		IssueMetadata:   map[string]jsontext.Value{},
 		ProjectMetadata: map[string]jsontext.Value{},
 	}
-	if len(removalCheck) > 0 {
-		p.parentRemovalCheck = removalCheck[0]
-	}
+	p.parentRemovalCheck = removalCheck
 	ordered := append([]FoldEvent(nil), events...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return compareClock(clockOf(ordered[i]), clockOf(ordered[j])) < 0

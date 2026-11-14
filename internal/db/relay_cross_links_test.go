@@ -36,11 +36,11 @@ func TestRelayCrossLinkFeatureAndParentFold(t *testing.T) {
 		{UID: "1", ProjectUID: "a", IssueUID: child, OriginInstanceUID: root, Type: "issue.links_changed", HLCPhysicalMS: 1, Payload: jsontext.Value(`{"parent_set_uid":"foreign"}`)},
 		{UID: "2", ProjectUID: "a", IssueUID: child, OriginInstanceUID: replica, Type: "issue.links_changed", HLCPhysicalMS: 2, Payload: jsontext.Value(`{"parent_set_uid":"local"}`)},
 	}
-	projection := db.FoldEvents(events, authority.AllowParentRemoval)
+	projection := db.FoldRelayLinkEvents(events, authority.AllowParentRemoval)
 	require.True(t, projection.Links[db.FoldLinkKey{FromUID: child, ToUID: foreign, Type: "parent"}].Present)
 	require.False(t, projection.Links[db.FoldLinkKey{FromUID: child, ToUID: local, Type: "parent"}].Present)
 	events[1].OriginInstanceUID = root
-	projection = db.FoldEvents(events, authority.AllowParentRemoval)
+	projection = db.FoldRelayLinkEvents(events, authority.AllowParentRemoval)
 	require.False(t, projection.Links[db.FoldLinkKey{FromUID: child, ToUID: foreign, Type: "parent"}].Present)
 	require.True(t, projection.Links[db.FoldLinkKey{FromUID: child, ToUID: local, Type: "parent"}].Present)
 }

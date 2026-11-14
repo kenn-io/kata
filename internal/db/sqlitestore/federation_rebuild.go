@@ -150,25 +150,35 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		m := &p.materialization
 		events := p.linkEvents
 		if slices.ContainsFunc(p.linkEvents, m.relayOrigins.relaySourced) {
-			owners, err := relayLinkEndpointProjects(ctx, tx, m.linkProjects)
+			owners, err := relayLinkEndpointProjects(ctx, tx, p.linkEvents)
 			if err != nil {
 				return preparedFederationRebuild{}, err
 			}
 			for _, other := range result.projects {
 				for uid := range other.materialization.staleIssues {
-					delete(owners, uid)
+					if _, referenced := owners[uid]; referenced {
+						owners[uid] = ""
+					}
 				}
 				if !slices.Contains(m.linkProjects, other.id) {
 					continue
 				}
 				for uid := range other.projection.Issues {
-					owners[uid] = other.uid
+					if _, referenced := owners[uid]; referenced {
+						owners[uid] = other.uid
+					}
 				}
 				for uid := range other.moved.Issues {
-					owners[uid] = other.uid
+					if _, referenced := owners[uid]; referenced {
+						owners[uid] = other.uid
+					}
 				}
 			}
-			maps.Copy(owners, moveOwners)
+			for uid, project := range moveOwners {
+				if _, referenced := owners[uid]; referenced {
+					owners[uid] = project
+				}
+			}
 			events, err = filterRelayLinkEvents(ctx, tx, events, m.relayOrigins, owners)
 			if err != nil {
 				return preparedFederationRebuild{}, err

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -165,7 +166,7 @@ func filterRelayCrossProjectLinkEvents(
 	if !slices.ContainsFunc(events, classifier.relaySourced) {
 		return events, classifier, nil
 	}
-	issueProjects, err := relayLinkEndpointProjects(ctx, tx, projectIDs)
+	issueProjects, err := relayLinkEndpointProjects(ctx, tx, events)
 	if err != nil {
 		return nil, classifier, err
 	}
@@ -174,6 +175,11 @@ func filterRelayCrossProjectLinkEvents(
 }
 
 func filterRelayLinkEvents(ctx context.Context, tx *sql.Tx, events []db.FoldEvent, classifier relayOriginClassifier, issueProjects map[string]string) ([]db.FoldEvent, error) {
+	for _, event := range events {
+		if event.IssueUID != "" && issueProjects[event.IssueUID] == "" {
+			issueProjects[event.IssueUID] = event.ProjectUID
+		}
+	}
 	authority, err := relayFoldAuthorityTx(ctx, tx, issueProjects)
 	if err != nil {
 		return nil, err
@@ -195,56 +201,92 @@ func filterRelayLinkEvents(ctx context.Context, tx *sql.Tx, events []db.FoldEven
 	return filtered, nil
 }
 
-func relayLinkEndpointProjects(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map[string]string, error) {
-	issueRows, err := tx.QueryContext(ctx, `SELECT i.uid, p.uid FROM issues i JOIN projects p ON p.id=i.project_id`)
-	if err != nil {
-		return nil, fmt.Errorf("list relay link endpoint projects: %w", err)
-	}
-	issueProjects := map[string]string{}
-	for issueRows.Next() {
-		var issueUID, projectUID string
-		if err := issueRows.Scan(&issueUID, &projectUID); err != nil {
-			_ = issueRows.Close()
-			return nil, fmt.Errorf("scan relay link endpoint project: %w", err)
+// relayLinkEndpointProjects resolves only issue UIDs referenced by this fold.
+func relayLinkEndpointProjects(ctx context.Context, tx *sql.Tx, events []db.FoldEvent) (map[string]string, error) {
+	refs := map[string]struct{}{}
+	for _, event := range events {
+		if event.IssueUID != "" {
+			refs[event.IssueUID] = struct{}{}
 		}
-		issueProjects[issueUID] = projectUID
+		var related *string
+		if event.RelatedIssueUID != "" {
+			related = &event.RelatedIssueUID
+		}
+		remote := db.RemoteEvent{EventUID: event.UID, Type: event.Type, RelatedIssueUID: related, Payload: event.Payload}
+		peers, err := payloadReferencedIssueUIDs(remote, db.PayloadMap(event.Payload))
+		if err != nil {
+			return nil, err
+		}
+		for _, peer := range peers {
+			if peer != "" {
+				refs[peer] = struct{}{}
+			}
+		}
 	}
-	if err := issueRows.Err(); err != nil {
-		_ = issueRows.Close()
-		return nil, fmt.Errorf("iterate relay link endpoint projects: %w", err)
+	ids := make([]string, 0, len(refs))
+	for id := range refs {
+		ids = append(ids, id)
 	}
-	if err := issueRows.Close(); err != nil {
-		return nil, fmt.Errorf("close relay link endpoint projects: %w", err)
+	slices.Sort(ids)
+	owners := make(map[string]string, len(ids))
+	for _, id := range ids {
+		owners[id] = ""
 	}
-	return issueProjects, nil
+	for len(ids) > 0 {
+		n := min(500, len(ids))
+		parts, args := make([]string, n), make([]any, n)
+		for i, id := range ids[:n] {
+			parts[i] = "?"
+			args[i] = id
+		}
+		//nolint:gosec // Placeholders are generated from the batch size; UIDs remain bound parameters.
+		rows, err := tx.QueryContext(ctx, `SELECT i.uid,p.uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid IN (`+strings.Join(parts, ",")+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var issue, project string
+			if err = rows.Scan(&issue, &project); err != nil {
+				break
+			}
+			owners[issue] = project
+		}
+		if err == nil {
+			err = rows.Err()
+		}
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		ids = ids[n:]
+	}
+	return owners, nil
 }
 
 // relayFoldAuthorityTx loads live project membership for relay link folding.
 func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]string) (db.RelayFoldAuthority, error) {
 	a := db.RelayFoldAuthority{Projects: owners, Roots: map[string]string{}, Groups: map[string]map[string]bool{}}
-	rows, err := tx.QueryContext(ctx, `SELECT id,uid FROM projects WHERE deleted_at IS NULL`)
-	if err != nil {
-		return a, err
-	}
 	ids := map[string]int64{}
 	uids := map[int64]string{}
-	for rows.Next() {
+	for _, uid := range owners {
+		if uid == "" {
+			continue
+		}
+		if _, exists := ids[uid]; exists {
+			continue
+		}
 		var id int64
-		var uid string
-		if err = rows.Scan(&id, &uid); err != nil {
-			break
+		err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=? AND deleted_at IS NULL`, uid).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return a, err
 		}
 		ids[uid], uids[id] = id, uid
 	}
-	if err == nil {
-		err = rows.Err()
-	}
-	_ = rows.Close()
-	if err != nil {
-		return a, err
-	}
 	var instance string
-	if err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&instance); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&instance); err != nil {
 		return a, err
 	}
 	for uid, id := range ids {
@@ -274,29 +316,16 @@ func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]str
 		}
 		a.Groups[uid] = map[string]bool{}
 		for _, peer := range group {
-			a.Groups[uid][uids[peer]] = true
+			if peerUID := uids[peer]; peerUID != "" {
+				a.Groups[uid][peerUID] = true
+			}
 		}
 	}
 	return a, nil
 }
 
 func relayFoldEventsTx(ctx context.Context, tx *sql.Tx, events []db.FoldEvent) (db.FoldProjection, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT i.uid,p.uid FROM issues i JOIN projects p ON p.id=i.project_id`)
-	if err != nil {
-		return db.FoldProjection{}, err
-	}
-	owners := map[string]string{}
-	for rows.Next() {
-		var issue, project string
-		if err = rows.Scan(&issue, &project); err != nil {
-			break
-		}
-		owners[issue] = project
-	}
-	if err == nil {
-		err = rows.Err()
-	}
-	_ = rows.Close()
+	owners, err := relayLinkEndpointProjects(ctx, tx, events)
 	if err != nil {
 		return db.FoldProjection{}, err
 	}
@@ -309,5 +338,5 @@ func relayFoldEventsTx(ctx context.Context, tx *sql.Tx, events []db.FoldEvent) (
 	if err != nil {
 		return db.FoldProjection{}, err
 	}
-	return db.FoldEvents(events, authority.AllowParentRemoval), nil
+	return db.FoldRelayLinkEvents(events, authority.AllowParentRemoval), nil
 }
