@@ -359,7 +359,7 @@ type FederatedMoveDecision struct {
 	IssueUID, SourceUID, SourceName, SourceShortID string
 	IssueID, SourceID, TargetID                    int64
 	RecurrenceID                                   sql.NullInt64
-	Active, Joined, Exists                         bool
+	Active, Joined, Exists, SourceStandalone       bool
 }
 
 // IndexFederatedMoveEvents selects the latest move for each issue.
@@ -390,12 +390,12 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, decision.TargetID).Scan(&decision.Joined); err != nil {
 			return nil, nil, err
 		}
-		err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, issue.UID).Scan(&decision.IssueID, &decision.SourceID, &decision.RecurrenceID, &decision.SourceUID, &decision.SourceName, &decision.SourceShortID)
+		err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id,p.deleted_at IS NULL AND b.project_id IS NULL FROM issues i JOIN projects p ON p.id=i.project_id LEFT JOIN federation_bindings b ON b.project_id=p.id WHERE i.uid=$1`, issue.UID).Scan(&decision.IssueID, &decision.SourceID, &decision.RecurrenceID, &decision.SourceUID, &decision.SourceName, &decision.SourceShortID, &decision.SourceStandalone)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, err
 		}
 		decision.Exists = err == nil
-		if decision.Joined && decision.Active {
+		if decision.Joined && decision.Active && !decision.SourceStandalone {
 			projects[decision.TargetID] = true
 		}
 		decisions = append(decisions, decision)
@@ -417,6 +417,10 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 		winner := moved[issue.UID]
 		applying = &winner
 		target, active := decision.TargetID, decision.Active
+		if decision.SourceStandalone {
+			delete(p.Issues, issue.UID)
+			continue
+		}
 		if !decision.Joined {
 			delete(p.Issues, issue.UID)
 			if !decision.Exists {
@@ -443,11 +447,8 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 			continue
 		}
 		if source == target {
-			if !decision.Joined {
+			if !decision.Joined && !active {
 				if err := applyUnjoined(target, issue, p); err != nil {
-					return err
-				}
-				if err := reconcileParkedIssueLinks(ctx, tx, issue.UID, p); err != nil {
 					return err
 				}
 			}
@@ -500,53 +501,31 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 			if err := applyUnjoined(target, issue, p); err != nil {
 				return err
 			}
-			if err := reconcileParkedIssueLinks(ctx, tx, issue.UID, p); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
 }
 
-func reconcileParkedIssueLinks(ctx context.Context, tx *sql.Tx, issueUID string, p FoldProjection) error {
-	for key, state := range p.Links {
-		if state.Present || key.FromUID != issueUID && key.ToUID != issueUID {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE type=$1 AND (from_issue_uid=$2 AND to_issue_uid=$3 OR $1='related' AND from_issue_uid=$3 AND to_issue_uid=$2)`, key.Type, key.FromUID, key.ToUID); err != nil {
-			return err
-		}
-	}
+// FederatedLinkIssueIDs resolves the endpoints available to a scoped fold.
+func FederatedLinkIssueIDs(ctx context.Context, tx *sql.Tx, p FoldProjection) (map[string]int64, error) {
+	ids := map[string]int64{}
 	for _, edge := range p.PresentLinks() {
-		key, state := edge.Key, edge.State
-		if key.FromUID != issueUID && key.ToUID != issueUID {
-			continue
-		}
-		var fromID, toID int64
-		err := tx.QueryRowContext(ctx, `SELECT a.id,b.id FROM issues a JOIN issues b ON b.uid=$2 WHERE a.uid=$1`, key.FromUID, key.ToUID).Scan(&fromID, &toID)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if key.Type == "related" && fromID > toID {
-			fromID, toID = toID, fromID
-			key.FromUID, key.ToUID = key.ToUID, key.FromUID
-		}
-		author := state.Author
-		if strings.TrimSpace(author) == "" {
-			author = "federation"
-		}
-		created := state.CreatedAt
-		if created == "" {
-			created = time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO links(from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author,created_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(from_issue_id,to_issue_id,type) DO UPDATE SET author=excluded.author,created_at=CASE WHEN $8='' THEN links.created_at ELSE excluded.created_at END`, fromID, toID, key.FromUID, key.ToUID, key.Type, author, created, state.CreatedAt); err != nil {
-			return err
+		for _, uid := range []string{edge.Key.FromUID, edge.Key.ToUID} {
+			if _, ok := ids[uid]; ok {
+				continue
+			}
+			var id int64
+			err := tx.QueryRowContext(ctx, `SELECT id FROM issues WHERE uid=$1`, uid).Scan(&id)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			ids[uid] = id
 		}
 	}
-	return nil
+	return ids, nil
 }
 
 type movedProjectPassKey struct{}

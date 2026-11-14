@@ -66,6 +66,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   build finishes, and an opener waiting for another opener's migration keeps
   waiting. Ordinary queries keep the 30-second limit. See
   [PostgreSQL operations](operations/postgres.md).
+
 - Keep syncing a joined project when issue history references projects the spoke
   has not joined. Issues moved out keep their folded hub content and local state
   in the retained counterpart; restore it and join with its local name to subscribe.

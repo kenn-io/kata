@@ -2500,7 +2500,7 @@ func reconcileFederatedLinkProjection(
 	return reconcileFederatedLinkRows(ctx, tx, projection, issueIDs, existing)
 }
 
-func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueIDs map[string]int64, existing map[db.FoldLinkKey]federatedLinkRow) error {
+func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueIDs map[string]int64, existing map[db.FoldLinkKey]federatedLinkRow, scope ...string) error {
 	desired := map[db.FoldLinkKey]federatedLinkRow{}
 	for _, edge := range projection.PresentLinks() {
 		key, state := edge.Key, edge.State
@@ -2532,6 +2532,11 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 		return err
 	}
 	for key, row := range existing {
+		if len(scope) > 0 {
+			if _, known := projection.Links[canonicalFederatedLinkKey(key)]; !known {
+				continue
+			}
+		}
 		if _, ok := desired[key]; ok {
 			continue
 		}
@@ -2540,6 +2545,9 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 		}
 	}
 	for key, row := range desired {
+		if len(scope) > 0 && key.FromUID != scope[0] && key.ToUID != scope[0] {
+			continue
+		}
 		if existingRow, ok := existing[key]; ok {
 			if existingRow.fromID == row.fromID && existingRow.toID == row.toID && existingRow.author == nonEmptyAuthor(row.author) && (row.createdAt == "" || existingRow.createdAt == row.createdAt) {
 				continue
@@ -2897,8 +2905,8 @@ func federationGroupIssueIDs(
 // group. A group cannot delete a link owned by an event stream that has not
 // joined it; binding transitions remove only the departing project's former
 // group boundaries through removeFederatedBoundaryLinksBetweenProjectAndGroup.
-func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64, stamp *federationRowHasher) (map[db.FoldLinkKey]federatedLinkRow, error) {
-	if len(projectIDs) == 0 {
+func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64, stamp *federationRowHasher, scope ...string) (map[db.FoldLinkKey]federatedLinkRow, error) {
+	if len(projectIDs) == 0 && len(scope) == 0 {
 		return map[db.FoldLinkKey]federatedLinkRow{}, nil
 	}
 	placeholders, args := projectIDPlaceholders(projectIDs)
@@ -2913,6 +2921,10 @@ func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64, stam
 		  JOIN issues t ON t.id = l.to_issue_id
 		 WHERE f.project_id IN (` + placeholders + `)
 		   AND t.project_id IN (` + placeholders + `)`
+	if len(scope) > 0 {
+		query = `SELECT l.id,l.from_issue_id,l.to_issue_id,l.from_issue_uid,l.to_issue_uid,l.type,l.author,CAST(l.created_at AS TEXT) FROM links l WHERE l.from_issue_uid=? OR l.to_issue_uid=?`
+		queryArgs = []any{scope[0], scope[0]}
+	}
 	if stamp != nil {
 		query += ` ORDER BY l.id`
 	}
