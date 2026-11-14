@@ -1,7 +1,7 @@
 ---
 title: Federation request signing
 description: Configure native signed federation and a restricted HTTPS ingress.
-last_edited: 2026-11-12
+last_edited: 2026-11-13
 ---
 
 # Federation request signing
@@ -84,6 +84,18 @@ daemon-owner authority:
 ```sh
 kata federation signing configure --project-uid <local-project-uid> \
   --key-id spoke-key-1 --key-env KATA_SPOKE_SIGNING_KEY
+```
+
+For a spoke bound to an HTTP URL, first configure the source for the new HTTPS
+base. Without `--hub-url`, the command uses the stored HTTP URL and fails
+HTTPS validation. Set a remote daemon catalog entry to the same HTTPS base and
+restart the spoke daemon to load it, then run:
+
+```sh
+kata federation signing configure --project-uid <local-project-uid> \
+  --key-id spoke-key-1 --key-env KATA_SPOKE_SIGNING_KEY \
+  --hub-url <new-https-base>
+kata federation rebind <spoke-project> --hub <catalog-name>
 ```
 
 The selected daemon reads and validates the source in its own environment.
