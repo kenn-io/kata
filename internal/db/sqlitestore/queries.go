@@ -175,6 +175,11 @@ func (d *Store) ProjectByUID(ctx context.Context, uid string) (db.Project, error
 	return hideSystemProject(scanProject(row))
 }
 
+// ProjectByUIDTx resolves a project on the caller's transaction.
+func (d *Store) ProjectByUIDTx(ctx context.Context, tx db.Transaction, uid string) (db.Project, error) {
+	return hideSystemProject(scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE uid = ?`, uid)))
+}
+
 // HardDeleteProject permanently removes a project row by id and returns the
 // reset cursor reserved for its deleted lifecycle events. It exists for the
 // init-race orphan-cleanup path (a freshly created project whose alias attach

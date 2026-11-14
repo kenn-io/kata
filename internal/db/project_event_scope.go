@@ -61,6 +61,43 @@ func EventRequiresProjectScopeReset(
 		_, visible := allowed[issue.ProjectUID]
 		return !visible, nil
 	}
+	refIsPrivate := func(ref string) (bool, error) {
+		if ref == "" || issueByRef == nil {
+			return true, nil
+		}
+		issue, err := issueByRef(event.ProjectUID, ref)
+		if errors.Is(err, ErrNotFound) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		_, visible := allowed[issue.ProjectUID]
+		return !visible, nil
+	}
+	commentIsPrivate := func(uid, kind string) (bool, error) {
+		if len(uid) != 26 || !ValidCommentReplyKind(kind) || commentIssueByUID == nil {
+			return true, nil
+		}
+		issue, err := commentIssueByUID(uid)
+		if errors.Is(err, ErrNotFound) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if _, visible := allowed[issue.ProjectUID]; !visible {
+			return true, nil
+		}
+		RecordExposedIssue(ctx, issue.ID)
+		return false, nil
+	}
+	projectIsPrivate := func(uid string) (bool, error) { _, visible := allowed[uid]; return !visible, nil }
+	return walkEventProjectReferences(event, issueIsPrivate, refIsPrivate, commentIsPrivate, projectIsPrivate)
+}
+
+// walkEventProjectReferences visits structured references without selecting a visibility policy.
+func walkEventProjectReferences(event Event, issueIsPrivate func(string) (bool, error), refIsPrivate func(string) (bool, error), commentIsPrivate func(string, string) (bool, error), projectIsPrivate func(string) (bool, error)) (bool, error) {
 	for _, relatedUID := range []*string{event.RelatedIssueUID} {
 		if relatedUID == nil {
 			continue
@@ -81,18 +118,9 @@ func EventRequiresProjectScopeReset(
 	}
 	checkRefs := func(refs []string) (bool, error) {
 		for _, ref := range refs {
-			if ref == "" || issueByRef == nil {
-				return true, nil
-			}
-			issue, err := issueByRef(event.ProjectUID, ref)
-			if errors.Is(err, ErrNotFound) {
-				return true, nil
-			}
-			if err != nil {
-				return false, err
-			}
-			if _, visible := allowed[issue.ProjectUID]; !visible {
-				return true, nil
+			private, err := refIsPrivate(ref)
+			if err != nil || private {
+				return private, err
 			}
 		}
 		return false, nil
@@ -135,20 +163,10 @@ func EventRequiresProjectScopeReset(
 			if comment.ReplyToUID == "" && comment.ReplyKind == "" {
 				continue
 			}
-			if len(comment.ReplyToUID) != 26 || !ValidCommentReplyKind(comment.ReplyKind) || commentIssueByUID == nil {
-				return true, nil
+			private, err := commentIsPrivate(comment.ReplyToUID, comment.ReplyKind)
+			if err != nil || private {
+				return private, err
 			}
-			issue, err := commentIssueByUID(comment.ReplyToUID)
-			if errors.Is(err, ErrNotFound) {
-				return true, nil
-			}
-			if err != nil {
-				return false, err
-			}
-			if _, visible := allowed[issue.ProjectUID]; !visible {
-				return true, nil
-			}
-			RecordExposedIssue(ctx, issue.ID)
 		}
 		return false, nil
 	}
@@ -164,8 +182,9 @@ func EventRequiresProjectScopeReset(
 			if !ok || uid == "" {
 				return true, nil
 			}
-			if _, visible := allowed[uid]; !visible {
-				return true, nil
+			private, err := projectIsPrivate(uid)
+			if err != nil || private {
+				return private, err
 			}
 		}
 		if snapshot, found := payload["snapshot"]; found {

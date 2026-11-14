@@ -2,6 +2,7 @@ package sqlitestore_test
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -88,4 +89,22 @@ func TestRelaySharedLinks(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	dbtest.RunRelaySharedLinks(t, store)
+}
+
+func TestRelayPeerRelease(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunRelayPeerRelease(t, store)
+}
+
+func TestRelayMissingNotification(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deleted=%v", deleted), func(t *testing.T) {
+			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = store.Close() })
+			dbtest.RunRelayMissingNotification(t, store, deleted)
+		})
+	}
 }

@@ -95,6 +95,7 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 			if err != nil {
 				return err
 			}
+			var events []db.RemoteEvent
 			for i, envelope := range output {
 				event, err := db.DecodeRelaySourceEvent(envelope.Body)
 				if err != nil {
@@ -113,6 +114,11 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 					output, ids = output[:i], ids[:i]
 					break
 				}
+				events = append(events, event)
+			}
+			lookup := eventIssueLookup(db.WithoutIssueRegistries(db.WithAuthorizedProjects(ctx, nil)), tx)
+			if err := db.AuthorizeRelayRelease(ctx, tx, lookup, projectUID, events); err != nil {
+				return err
 			}
 		}
 		for _, id := range ids {

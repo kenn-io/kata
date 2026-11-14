@@ -130,6 +130,11 @@ func (s *Store) ProjectByUID(ctx context.Context, uid string) (db.Project, error
 	return visibleProject(scanProject(s.QueryRowContext(ctx, projectSelect+` WHERE uid = $1`, uid)))
 }
 
+// ProjectByUIDTx resolves a project on the caller's transaction.
+func (s *Store) ProjectByUIDTx(ctx context.Context, tx db.Transaction, uid string) (db.Project, error) {
+	return visibleProject(scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE uid = $1`, uid)))
+}
+
 // RenameProject changes only the canonical name.
 func (s *Store) RenameProject(ctx context.Context, id int64, name string) (db.Project, error) {
 	project, _, _, err := s.RenameProjectAndEvent(ctx, id, name, db.SystemActor)
