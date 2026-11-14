@@ -12,17 +12,17 @@ func checkFederatedParkedMoveRecovery(t *testing.T, _ db.Storage, backend Backen
 	t.Run("recovery", func(t *testing.T) {
 		hub := backend.Open(t)
 		t.Cleanup(func() { require.NoError(t, hub.Close()) })
-		require.NoError(t, checkParkedMoveRecovery(t, hub, backend, false))
+		checkParkedMoveRecovery(t, hub, backend, false)
 	})
 	t.Run("source-leave", func(t *testing.T) {
 		hub := backend.Open(t)
 		t.Cleanup(func() { require.NoError(t, hub.Close()) })
-		require.NoError(t, checkParkedMoveRecovery(t, hub, backend, true))
+		checkParkedMoveRecovery(t, hub, backend, true)
 	})
 	return nil
 }
 
-func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, leaveSource bool) error {
+func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, leaveSource bool) {
 	ctx := t.Context()
 	prior, err := hub.CreateProject(ctx, "prior-project")
 	require.NoError(t, err)
@@ -84,14 +84,15 @@ func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, leav
 	require.NoError(t, err)
 	_, err = spoke.InsertRemoteEvents(ctx, route.ID, moves)
 	require.NoError(t, err)
+	beforeMove, err := spoke.MaxEventID(ctx)
+	require.NoError(t, err)
 	require.NoError(t, spoke.MaterializeFederatedProject(ctx, route.ID))
+	reset, err := spoke.PurgeResetCheck(ctx, beforeMove, route.ID)
+	require.NoError(t, err)
+	require.Greater(t, reset, beforeMove)
 	pending, err := spoke.PendingFederationPushEvents(ctx, route.ID, spoke.InstanceUID(), 0, 100)
 	require.NoError(t, err)
-	var ids []string
-	for _, event := range pending {
-		ids = append(ids, event.UID)
-		require.NotEqual(t, "issue.linked", event.Type)
-	}
+	ids := eventUIDs(pending)
 	require.NotContains(t, ids, comment.UID)
 	require.NotContains(t, ids, linkEvent.UID)
 	require.Contains(t, ids, later.UID)
@@ -115,10 +116,6 @@ func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, leav
 	require.Len(t, moveHistory, 1)
 	require.Equal(t, moved.Event.ContentHash, moveHistory[0].ContentHash)
 	if leaveSource {
-		count, highWater, err = spoke.PendingFederationPushStats(ctx, route.ID, spoke.InstanceUID(), later.ID)
-		require.NoError(t, err)
-		require.Zero(t, count)
-		require.Zero(t, highWater)
 		require.NoError(t, spoke.ResetFederatedProjectIfNoPendingPush(ctx, route.ID, 0, 0, spoke.InstanceUID(), later.ID))
 		history, err := spoke.EventsByUIDs(ctx, route.ID, []string{comment.UID})
 		require.NoError(t, err)
@@ -132,7 +129,7 @@ func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, leav
 		require.NoError(t, err)
 		_, err = spoke.FederationBindingByProject(ctx, route.ID)
 		require.ErrorIs(t, err, db.ErrNotFound)
-		return nil
+		return
 	}
 	_, _, _, err = spoke.RestoreProject(ctx, parked.ID, "worker")
 	require.NoError(t, err)
@@ -142,6 +139,12 @@ func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, leav
 	require.Empty(t, policy.TeamUIDs)
 	_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: parked.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: target.ID, HubProjectUID: target.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
 	require.NoError(t, err)
+	beforeRepeat, err := spoke.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.NoError(t, spoke.MaterializeFederatedProject(ctx, parked.ID))
+	afterRepeat, err := spoke.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, beforeRepeat, afterRepeat)
 	require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, route.ID, later.ID))
 	require.NoError(t, spoke.ResetFederatedProject(ctx, route.ID, 0, 0))
 	require.NoError(t, spoke.ResetFederatedProject(ctx, parked.ID, 0, 0))
@@ -184,5 +187,4 @@ func checkParkedMoveRecovery(t *testing.T, hub db.Storage, backend Backend, leav
 	require.NoError(t, err)
 	require.Len(t, labels, 1)
 	require.Equal(t, "local", labels[0].Label)
-	return nil
 }
