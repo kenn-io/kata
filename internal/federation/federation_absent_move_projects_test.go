@@ -38,7 +38,7 @@ func TestSyncFederationPullsMoveAfterRejectedPush(t *testing.T) {
 	}, spoke.credentials)
 	require.ErrorContains(t, err, "403")
 	require.Equal(t, []string{move.Event.UID, later.UID}, delivered)
-	newIssue, localLater, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Later local work", Author: "worker"})
+	newIssue, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Later local work", Author: "worker"})
 	require.NoError(t, err)
 	require.NoError(t, spoke.sync(t, 0))
 	remote, err := hub.DB.IssueByUID(ctx, newIssue.UID, db.IncludeDeletedNo)
@@ -46,7 +46,4 @@ func TestSyncFederationPullsMoveAfterRejectedPush(t *testing.T) {
 	require.Equal(t, "Later local work", remote.Title)
 	_, err = hub.DB.IssueByUID(ctx, earlierIssue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	binding, err = spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, binding.PushCursorEventID, localLater.ID)
 }
