@@ -7333,7 +7333,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.47.0
+  version: 0.48.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -7849,7 +7849,7 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
     post:
-      description: Creates a hub-side transport grant. Database account tokens must include relay configuration so the grant remains bound to the account credential; legacy grants require daemon-owner authorization. In identity mode, bootstrap credentials require actor to name an existing hub account with an unscoped API token, including expired or revoked tokens. The actor must be able to see a project-scoped grant's project. Direct grants remain valid after account tokens expire or are revoked. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after enrollment revocation returns 409.
+      description: Creates a hub-side transport grant. When signing is required, the join command uses the configured external URL and ignores hub_url. Database account tokens must include relay configuration so the grant remains bound to the account credential; legacy grants require daemon-owner authorization. In identity mode, bootstrap credentials require actor to name an existing hub account with an unscoped API token, including expired or revoked tokens. The actor must be able to see a project-scoped grant's project. Direct grants remain valid after account tokens expire or are revoked. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after enrollment revocation returns 409.
       operationId: createFederationEnrollment
       requestBody:
         content:

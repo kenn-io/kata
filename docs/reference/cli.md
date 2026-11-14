@@ -2570,16 +2570,14 @@ enrollment API call to the hub main API at `<url>` using `--hub-token-env` or
 a daemon catalog credential whose URL matches the hub origin. When entries share an origin,
 the matching URL path takes precedence. A selected `--daemon` entry chooses
 the hub credential only when its full base URL matches `--hub-url`.
-It never forwards the local
-daemon's global `KATA_AUTH_TOKEN` to the hub; callers that used that variable
-for enrollment must pass the hub credential through `--hub-token-env` or a matching
-catalog entry. In identity mode, use the hub's bootstrap token and set `--actor`
+It never forwards the local daemon's global `KATA_AUTH_TOKEN` to the hub;
+callers that used that variable for enrollment must pass the hub credential
+through `--hub-token-env` or a matching catalog entry. In identity mode, use the hub's bootstrap token and set `--actor`
 to an existing account with an unscoped API token, which may be expired or
 revoked. First enable the hub project with an account token using
 `kata federation enable`. Bootstrap enrollment reads the enabled hub's metadata
-and creates a grant bound to the selected
-actor's project visibility. Select the project with a positional argument,
-`--project`, or a bound workspace. Outside identity mode, enrollment can create
+and creates a grant bound to the selected actor's project visibility. Select
+the project with a positional argument, `--project`, or a bound workspace. Outside identity mode, enrollment can create
 a missing project selected with `--project` and enable it. The CLI
 should otherwise remain pointed at the spoke daemon so the printed join
 command can include `--adopt-existing` when the spoke project already exists.

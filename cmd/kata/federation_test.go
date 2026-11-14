@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -3294,14 +3295,7 @@ func TestFederationEnrollCLIRequiredSigningInstructions(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("shell argument parsing requires a POSIX shell")
 	}
-	dir := t.TempDir()
-	keyFile := filepath.Join(dir, "signing.key")
-	require.NoError(t, os.WriteFile(keyFile, []byte(strings.Repeat("k", 64)), 0600))
-	state := filepath.Join(dir, "replay.state")
-	require.NoError(t, federationsigning.InitializeReplayState(state))
-	verifier, err := federationsigning.NewVerifier("https://daemon.example/federation", []signingpolicy.Key{{KeyID: "key-a", KeyFile: keyFile, EnrollmentID: 1}}, state)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, verifier.Close()) })
+	verifier, _ := testenv.FederationSigning(t, "https://daemon.example/federation")
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
 		cfg.FederationSigningRequired = true
 		cfg.FederationSigning = verifier
@@ -3335,4 +3329,61 @@ func TestFederationEnrollCLIRequiredSigningInstructions(t *testing.T) {
 	// The platform determines which error the placeholder path returns.
 	require.True(t, errors.Is(err, signingpolicy.ErrKeyRejected) || errors.Is(err, signingpolicy.ErrKey))
 	assert.False(t, metadataCalled)
+}
+
+func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const external = "https://hub.example"
+		const internal = "http://127.0.0.1:47741"
+		const local = "http://127.0.0.1:47742"
+		home := t.TempDir()
+		t.Setenv("KATA_HOME", home)
+		t.Setenv("KATA_AUTH_TOKEN", "admin-token")
+		t.Setenv("TEST_HUB_TOKEN", "admin-token")
+		verifier, key := testenv.FederationSigning(t, external)
+		hubDB := openKataTestDB(t, filepath.Join(t.TempDir(), "hub.db"))
+		spokeDB := openKataTestDB(t, filepath.Join(t.TempDir(), "spoke.db"))
+		t.Cleanup(func() { require.NoError(t, hubDB.Close()); require.NoError(t, spokeDB.Close()) })
+		hubServer := daemon.NewServer(daemon.ServerConfig{DB: hubDB, FederationSigningRequired: true, FederationSigning: verifier, Auth: config.AuthConfig{Token: "admin-token"}})
+		spokeServer := daemon.NewServer(daemon.ServerConfig{DB: spokeDB, Auth: config.AuthConfig{Token: "admin-token"}})
+		t.Cleanup(func() { require.NoError(t, hubServer.Close()); require.NoError(t, spokeServer.Close()) })
+		server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Host == "127.0.0.1:47742" {
+				spokeServer.Handler().ServeHTTP(w, r)
+			} else {
+				hubServer.Handler().ServeHTTP(w, r)
+			}
+		}))
+		previous := http.DefaultTransport
+		http.DefaultTransport = server.Client().Transport
+		t.Cleanup(func() { http.DefaultTransport = previous })
+		hub := &testenv.Env{URL: internal, DB: hubDB, Home: home}
+		spoke := &testenv.Env{URL: local, DB: spokeDB, Home: home}
+		hubProject, err := hubDB.CreateProject(t.Context(), "hub-project")
+		require.NoError(t, err)
+		out := requireCmdOutput(t, hub, "--json", "--project", "hub-project", "federation", "enroll", "--spoke-instance", spokeDB.InstanceUID(), "--hub-url", internal, "--hub-token-env", "TEST_HUB_TOKEN", "--actor", "tester", "--capabilities", "pull")
+		var body struct {
+			Join federationJoinBundle `json:"join"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &body))
+		args := strings.Fields(body.Join.JoinCommand)
+		require.Greater(t, len(args), 1)
+		for i, arg := range args {
+			switch arg {
+			case "'<signing-key-id>'":
+				args[i] = "key-a"
+			case "'<absolute-path-to-spoke-key>'":
+				args[i] = key
+			}
+		}
+		time.Sleep(federationsigning.Quarantine + time.Second)
+		requireCmdOutput(t, spoke, args[1:]...)
+		project, err := spokeDB.ProjectByName(t.Context(), "hub-project")
+		require.NoError(t, err)
+		binding, err := spokeDB.FederationBindingByProject(t.Context(), project.ID)
+		require.NoError(t, err)
+		assert.Equal(t, external, binding.HubURL)
+		assert.Equal(t, hubProject.ID, binding.HubProjectID)
+		assert.Equal(t, hubProject.UID, project.UID)
+	})
 }
