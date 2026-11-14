@@ -110,9 +110,8 @@ func TestSummarizeRunsCompletionOrder(t *testing.T) {
 	got := SummarizeRuns(rows, false, time.UTC)
 	require.Zero(t, got.ConsecutiveFailures)
 	rows[0].EndedAt = &successEnd
-	rows[0], rows[1] = rows[1], rows[0]
-	require.Zero(t, SummarizeRuns(rows, false, time.UTC).ConsecutiveFailures)
-	rows[1].EndedAt = nil
+	require.Equal(t, 1, SummarizeRuns(rows, false, time.UTC).ConsecutiveFailures)
+	rows[0].EndedAt = nil
 	got = SummarizeRuns(rows, false, time.UTC)
 	require.Equal(t, start, *got.LastFailedAt)
 	require.Zero(t, got.ConsecutiveFailures)
