@@ -62,7 +62,7 @@ func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 			req.Header.Set("Authorization", "Bearer "+enrollment.Token)
 			if tc.digest {
-				req.Header.Set("Content-Digest", "sha-256=:abc:")
+				req.Header.Set("Content-Digest", "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:")
 			}
 			if tc.signed {
 				require.NoError(t, federationsigning.Sign(req, source))
@@ -103,14 +103,14 @@ func TestRequiredSigningRejectsUnsignedEnrollment(t *testing.T) {
 		for name, handler := range map[string]http.Handler{"main": main, "socket": srv.Handler(), "ingress": ingress} {
 			path := "https://hub.example" + projectPath(project.ID) + "/federation/metadata"
 			for _, tc := range []struct {
-				name, token, signature, header, code string
-				status                               int
+				name, token, signature, header, value, code string
+				status                                      int
 			}{
-				{"unsigned", enrollment.Token, "", "", "hub_signing_required", http.StatusPreconditionRequired},
-				{"digest only", enrollment.Token, "", "Content-Digest", "hub_signing_required", http.StatusPreconditionRequired},
-				{"signature input only", enrollment.Token, "", "Signature-Input", "signature_invalid", http.StatusUnauthorized},
-				{"tampered", enrollment.Token, "tampered", "", "signature_invalid", http.StatusUnauthorized},
-				{"unknown enrollment", "unknown-enrollment", "", "", "auth_invalid", http.StatusForbidden},
+				{"unsigned", enrollment.Token, "", "", "", "hub_signing_required", http.StatusPreconditionRequired},
+				{"digest only", enrollment.Token, "", "Content-Digest", "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:", "hub_signing_required", http.StatusPreconditionRequired},
+				{"signature input only", enrollment.Token, "", "Signature-Input", "example", "signature_invalid", http.StatusUnauthorized},
+				{"tampered", enrollment.Token, "tampered", "", "", "signature_invalid", http.StatusUnauthorized},
+				{"unknown enrollment", "unknown-enrollment", "", "", "", "auth_invalid", http.StatusForbidden},
 			} {
 				req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 				if tc.token != "" {
@@ -121,7 +121,7 @@ func TestRequiredSigningRejectsUnsignedEnrollment(t *testing.T) {
 					req.Header.Set("Signature", tc.signature)
 				}
 				if tc.header != "" {
-					req.Header.Set(tc.header, "example")
+					req.Header.Set(tc.header, tc.value)
 				}
 				w := httptest.NewRecorder()
 				handler.ServeHTTP(w, req)
