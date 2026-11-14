@@ -29,7 +29,6 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/testenv"
 	katauid "go.kenn.io/kata/internal/uid"
@@ -3354,7 +3353,7 @@ func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
 	}))
 	base := "https://" + external.Listener.Addr().String()
 	const keyID = "spoke'$HOME"
-	verifier, key := testenv.FederationSigning(t, base, keyID)
+	verifier, key := testenv.FederationSigningReady(t, base, keyID)
 	hubDB := openKataTestDB(t, filepath.Join(t.TempDir(), "hub.db"))
 	t.Cleanup(func() { require.NoError(t, hubDB.Close()) })
 	hubServer = daemon.NewServer(daemon.ServerConfig{DB: hubDB, FederationSigningRequired: true, FederationSigning: verifier, Auth: config.AuthConfig{Token: "admin-token"}})
@@ -3383,8 +3382,6 @@ func TestFederationEnrollCLISignedJoinBindsSpoke(t *testing.T) {
 	t.Setenv("KATA_SERVER", spoke.URL)
 	t.Setenv("SSL_CERT_FILE", certFile)
 	t.Setenv("PATH", filepath.Dir(binary)+string(os.PathListSeparator)+os.Getenv("PATH"))
-	// The verifier rejects requests until its replay quarantine has elapsed.
-	<-time.After(federationsigning.Quarantine + time.Second)
 	output, err := exec.CommandContext(t.Context(), "sh", "-c", command).CombinedOutput() //nolint:gosec // Command and binary come from this test's enrollment and fixture.
 	require.NoError(t, err, "%s", output)
 	project, err := spoke.DB.ProjectByName(t.Context(), "hub-project")
