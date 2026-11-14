@@ -1007,9 +1007,6 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			Events:                           federationIngestEventsToDB(in.Body.Events),
 		})
 		if err != nil {
-			if errors.Is(err, db.ErrFederationMoveSourceUnauthorized) && len(moveSources) < len(in.Body.MoveSourceTokens) {
-				return nil, federationCredentialDenied()
-			}
 			return nil, federationIngestError(err)
 		}
 		for _, reset := range result.Resets {
@@ -1093,9 +1090,7 @@ func federationIngestError(err error) error {
 	switch {
 	case errors.Is(err, db.ErrTransactionFinalizationFailed):
 		return internalAPIError(err)
-	case errors.Is(err, db.ErrFederationMoveSourceUnauthorized):
-		return api.NewError(http.StatusForbidden, "federation_move_source_unauthorized", "federation credential is not currently authorized", "", nil)
-	case errors.Is(err, ErrHostAccessDenied):
+	case errors.Is(err, ErrHostAccessDenied), errors.Is(err, db.ErrFederationMoveSourceUnauthorized):
 		return federationCredentialDenied()
 	case errors.Is(err, ErrHostFederationAdmissionLimited):
 		return api.NewError(http.StatusTooManyRequests, "admission_limited", "federation request admission is full", "", nil)

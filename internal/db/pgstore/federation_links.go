@@ -176,28 +176,7 @@ func reconcileFederatedLinkGroup(
 	return reconcileFederatedLinkRows(ctx, tx, projection, issueIDs, existing)
 }
 
-func reconcileParkedIssueLinks(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueUIDs []string) error {
-	if len(issueUIDs) == 0 {
-		return nil
-	}
-	ids := map[string]int64{}
-	links := map[db.FoldLinkKey]federatedLinkRow{}
-	for _, issueUID := range issueUIDs {
-		issueIDs, err := db.FederatedLinkIssueIDs(ctx, tx, projection, issueUID)
-		if err != nil {
-			return err
-		}
-		maps.Copy(ids, issueIDs)
-		issueRows, err := federatedLinkRows(ctx, tx, nil, issueUID)
-		if err != nil {
-			return err
-		}
-		maps.Copy(links, issueRows)
-	}
-	return reconcileFederatedLinkRows(ctx, tx, projection, ids, links, issueUIDs...)
-}
-
-func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueIDs map[string]int64, existing map[db.FoldLinkKey]federatedLinkRow, scope ...string) error {
+func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueIDs map[string]int64, existing map[db.FoldLinkKey]federatedLinkRow) error {
 	desired := map[db.FoldLinkKey]federatedLinkRow{}
 	for _, edge := range projection.PresentLinks() {
 		key, state := edge.Key, edge.State
@@ -217,27 +196,10 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 		}
 		desired[row.key()] = row
 	}
-	graph := desired
-	if len(scope) > 0 {
-		var err error
-		graph, err = db.ScopedFederatedLinkGraph(ctx, tx, projection, scope, desired)
-		if err != nil {
-			return err
-		}
-	}
-	if err := validateFederatedParentGraph(graph); err != nil {
+	if err := validateFederatedParentGraph(desired); err != nil {
 		return err
 	}
 	for key, row := range existing {
-		if len(scope) > 0 {
-			canonical := key
-			if canonical.Type == "related" && canonical.FromUID > canonical.ToUID {
-				canonical.FromUID, canonical.ToUID = canonical.ToUID, canonical.FromUID
-			}
-			if _, known := projection.Links[canonical]; !known {
-				continue
-			}
-		}
 		if _, ok := desired[key]; ok {
 			continue
 		}
@@ -246,9 +208,6 @@ func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.F
 		}
 	}
 	for key, row := range desired {
-		if len(scope) > 0 && !slices.Contains(scope, key.FromUID) && !slices.Contains(scope, key.ToUID) {
-			continue
-		}
 		author := nonEmptyFederationAuthor(row.author)
 		if existingRow, ok := existing[key]; ok {
 			if existingRow.fromID == row.fromID && existingRow.toID == row.toID && existingRow.author == author && (row.createdAt == "" || existingRow.createdAt == row.createdAt) {
@@ -442,9 +401,8 @@ func federatedLinkRows(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectIDs []int64,
-	scope ...string,
 ) (map[db.FoldLinkKey]federatedLinkRow, error) {
-	if len(projectIDs) == 0 && len(scope) == 0 {
+	if len(projectIDs) == 0 {
 		return map[db.FoldLinkKey]federatedLinkRow{}, nil
 	}
 	fromPlaceholders, fromArgs := postgresIDPlaceholders(projectIDs, 1)
@@ -455,10 +413,7 @@ func federatedLinkRows(
 l.from_issue_uid,l.to_issue_uid,l.type,l.author,l.created_at FROM links l
 JOIN issues f ON f.id=l.from_issue_id JOIN issues t ON t.id=l.to_issue_id
 WHERE f.project_id IN (` + fromPlaceholders + `) AND t.project_id IN (` + toPlaceholders + `)`
-	if len(scope) > 0 {
-		query = `SELECT l.id,l.from_issue_id,l.to_issue_id,l.from_issue_uid,l.to_issue_uid,l.type,l.author,l.created_at FROM links l WHERE l.from_issue_uid=$1 OR l.to_issue_uid=$1`
-		args = []any{scope[0]}
-	}
+
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)

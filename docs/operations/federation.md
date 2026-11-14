@@ -84,7 +84,7 @@ the per-issue restrictions.
 To author a federated move, a spoke must join both projects. A direct spoke
 pulling move history retains an archived, unbound identity for a missing
 counterpart without subscribing to that project. An issue already present on the
-spoke moves into the destination project with the latest folded hub content,
+spoke moves into the destination project with hub content as of the move,
 preserving its comments and local state while removing it from the source
 project's lists. Find its UID and local name with `GET /api/v1/projects?include=archived`.
 The placeholder starts owner-only; restore it, then broaden its project access
