@@ -86,7 +86,7 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			http.NotFound(w, r)
 			return
 		}
-		supplied := len(r.Header.Values("Signature")) != 0 || len(r.Header.Values("Signature-Input")) != 0 || len(r.Header.Values("Content-Digest")) != 0
+		supplied := len(r.Header.Values("Signature")) != 0 || len(r.Header.Values("Signature-Input")) != 0
 		if !ingress && !supplied {
 			if !s.cfg.FederationSigningRequired {
 				next.ServeHTTP(w, r)
