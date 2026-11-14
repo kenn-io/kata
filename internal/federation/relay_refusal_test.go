@@ -81,7 +81,7 @@ func TestRelayRefusalRetryLifecycle(t *testing.T) {
 	}
 }
 
-// hubSignatureRejection reports whether a hub error body is a signing refusal.
+// TestHubSignatureRejection checks whether a hub error body is a signing refusal.
 func TestHubSignatureRejection(t *testing.T) {
 	for _, tc := range []struct {
 		body string

@@ -21,8 +21,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - A hub that requires signing now answers an enrolled spoke's unsigned request
   with 428 `hub_signing_required`, so it is distinguishable from
-  `signature_invalid`. Relay bridges keep their grant on the new response. See
-  [federation signing](operations/federation-signing.md).
+  `signature_invalid`. A request with only a content digest follows the unsigned
+  path, including when signing is optional. Relay bridges keep their grant on the
+  new response. See [federation signing](operations/federation-signing.md).
 
 - Use `kata daemon status` in scripts to check the selected daemon's readiness.
   It exits 0 only for a ready selected daemon. Stopped or unavailable
