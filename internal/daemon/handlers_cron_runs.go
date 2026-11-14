@@ -109,7 +109,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 			return nil, cronRunAPIError(ctx, cfg, err, in.ProjectID, "")
 		}
 		if truncated {
-			since = rows[len(rows)-1].CreatedAt
+			since = rows[len(rows)-1].Executed()
 		}
 		out := &api.CronRunStatsResponse{}
 		out.Body.ProjectUID, out.Body.JobUID, out.Body.WorkflowUID = project.UID, strings.ToUpper(in.JobUID), strings.ToUpper(in.WorkflowUID)

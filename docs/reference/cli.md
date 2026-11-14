@@ -245,6 +245,10 @@ the other output modes.
 [`kata agent-hook contract <harness>`](#contract-injection) injects this text in a harness-native response by default. To load it in every session, see
 [Contract in every session](../workflows/agents.md#contract-in-every-session).
 
+## Agent setup
+
+In unreleased builds, `kata agent setup [<harness>...]` installs user hooks for selected agents. With no names it selects installed Claude Code and Codex. Add `--check` to inspect readiness without installing. Open Codex and run `/hooks` when its hooks need review. The command exits 1 when a selected agent needs attention.
+
 ## Agent hook
 
 These commands require Kata 0.19.0 or later.
@@ -1865,13 +1869,14 @@ set `[tui] confirm_quit = false`; see
 Start with `kata doctor` when commands cannot reach the daemon, a workspace
 points at the wrong project, or hooks and integrations stop working. It reports
 local configuration problems, the selected daemon's health and version, project
-visibility, active hook availability and retained failures, embeddings, and
-declarative federation mapping convergence. Each finding includes a suggested
+visibility, active hook availability and retained failures, embeddings,
+declarative federation mapping convergence, and agent hook readiness. Each finding includes a suggested
 fix. See the [doctor troubleshooting guide](../operations/doctor.md).
 
 Doctor never starts or restarts a daemon, opens storage, runs hooks, repairs
 bindings, or edits configuration. Existing daemon authentication and access
-logging may still record the request. `--json` emits one report with stable
+logging may still record the request. The agent check can create Codex state.
+`--json` emits one report with stable
 check IDs, `ok`/`info`/`warn`/`fail` statuses, and summary counts. Failed checks
 exit **1** with error kind `checks_failed`; warnings alone exit **0**. `--quiet`
 hides successful and informational findings in text output; JSON always
@@ -2340,7 +2345,9 @@ for the exact retained and omitted data and an isolated-home example.
 
 `--merge` instead adds exactly one non-system project snapshot to an existing
 SQLite or Postgres target. It remaps numeric database IDs while preserving
-portable identities and leaves unrelated projects unchanged. A multi-project
+portable identities. It also creates the snapshot's links to issues of other
+projects that are already in the target, and changes nothing else in those
+projects. A multi-project
 snapshot or any imported UID that already exists in the target causes the
 transaction to be refused. Stop every daemon using the target first. See
 [Backup and restore](../operations/backup-restore.md) for name collisions,
@@ -2662,12 +2669,14 @@ Legacy numeric refs no longer resolve.
 Attach files to an issue with Docbank, then list, download, or remove their references. See [Issue attachments](../guide/attachments.md).
 
 ```sh
-kata docbank attachments add <issue> <file>...
-kata docbank attachments link <issue> <node-id|/path> [--version UUID]
+kata docbank attachments add <issue> <file>... [--reuse-existing]
+kata docbank attachments link <issue> <node-id|/path> [--version UUID] [--reuse-existing]
 kata docbank attachments ls <issue>
 kata docbank attachments get <issue> <attachment> [-o PATH] [--force]
 kata docbank attachments rm <issue> <attachment>
 ```
+
+`--reuse-existing` returns an existing reference to the resolved version, or creates one if absent. With this flag, `add` requires daemon API 0.47.0 or newer, and `link` requires 0.39.0 or newer. Since API 0.47.0, reuse returns `attachment_invalid` if the issue has a reference the daemon cannot read. Without the flag, each add or link creates a reference.
 
 `<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
 

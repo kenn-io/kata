@@ -26,6 +26,18 @@ const clientSpecArtifactPath = "../../pkg/client/openapi.yaml"
 const clientGeneratedDir = "../../pkg/client/generated"
 const skipOpenAPIClientCheckEnv = "KATA_SKIP_OPENAPI_CLIENT_CHECK"
 
+func TestLocalEmbeddingsSchemaAcceptsEarlierResponse(t *testing.T) {
+	doc := openAPIClientDocument()
+	schemas := doc.Components.Schemas
+	schema := schemas.Map()["LocalEmbeddingsStatus"]
+	require.NotNil(t, schema)
+	result := &huma.ValidateResult{}
+	huma.Validate(schemas, schema, huma.NewPathBuffer(nil, 0), huma.ModeReadFromServer, map[string]any{
+		"provider": "none", "download_bytes": float64(0), "ollama_available": false, "can_change": true,
+	}, result)
+	require.Empty(t, result.Errors, "a response from an earlier daemon must remain valid")
+}
+
 // TestOpenAPIArtifactUpToDate fails if the committed api/openapi.yaml no longer
 // matches the schema generated from the current routes. Regenerate with
 // `make openapi`.

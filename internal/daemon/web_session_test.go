@@ -79,6 +79,7 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 		{name: "daemon roster", method: http.MethodGet, path: "/api/v1/ui/daemons", want: http.StatusNoContent},
 		{name: "local embeddings status", method: http.MethodGet, path: "/api/v1/embeddings/local", want: http.StatusNoContent},
 		{name: "local embeddings setup", method: http.MethodPost, path: "/api/v1/embeddings/local", want: http.StatusNoContent},
+		{name: "local embeddings restart", method: http.MethodPost, path: "/api/v1/embeddings/local/restart", want: http.StatusNoContent},
 		{name: "project sync status", method: http.MethodGet, path: "/api/v1/projects/7/federation/status", want: http.StatusNoContent},
 		{name: "global sync status", method: http.MethodGet, path: "/api/v1/federation/status", want: http.StatusForbidden},
 		{name: "proxied project sync status", method: http.MethodGet, path: "/api/v1/ui/proxy/api/v1/projects/7/federation/status", want: http.StatusForbidden},

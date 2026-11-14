@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -42,6 +43,76 @@ func TestLocalEmbeddingsSetupStatus(t *testing.T) {
 			require.False(t, status.CanChange)
 		})
 	}
+}
+
+func TestLocalEmbeddingsRestart(t *testing.T) {
+	previous := localEmbeddingsInspect
+	localEmbeddingsInspect = func(context.Context, embedlocal.Options) (embedlocal.Status, error) { return embedlocal.Status{}, nil }
+	t.Cleanup(func() { localEmbeddingsInspect = previous })
+	startErr := errors.New("helper could not start")
+	exitErr := errors.New("replacement refused")
+	for _, tc := range []struct {
+		name              string
+		callback          bool
+		startErr, exitErr error
+		attempts, calls   int
+		wantErr           error
+		canRestart        bool
+	}{
+		{name: "repeated request", callback: true, attempts: 2, calls: 1},
+		{name: "missing callback", attempts: 1, wantErr: daemon.ErrLocalEmbeddingsBusy},
+		{name: "start failure", callback: true, startErr: startErr, attempts: 1, calls: 1, wantErr: startErr, canRestart: true},
+		{name: "helper exit", callback: true, attempts: 1, calls: 1, exitErr: exitErr, canRestart: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			setup := &localEmbeddingsSetup{job: &api.LocalEmbeddingsJob{State: "restart"}}
+			if tc.callback {
+				setup.restart = func() error { calls++; return tc.startErr }
+			}
+			status, err := setup.Status(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, tc.callback, status.CanRestart)
+			for range tc.attempts {
+				require.ErrorIs(t, setup.Restart(t.Context()), tc.wantErr)
+			}
+			if tc.exitErr != nil {
+				setup.restartExited(tc.exitErr)
+			}
+			status, err = setup.Status(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, "restart", status.Job.State)
+			require.Equal(t, tc.canRestart, status.CanRestart)
+			require.Equal(t, tc.calls, calls)
+			if tc.startErr != nil {
+				require.Contains(t, status.Job.Error, tc.startErr.Error())
+			}
+			if tc.exitErr != nil {
+				require.Contains(t, status.Job.Error, tc.exitErr.Error())
+			}
+		})
+	}
+	t.Run("status during restart start", func(t *testing.T) {
+		started, release, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+		setup := &localEmbeddingsSetup{job: &api.LocalEmbeddingsJob{State: "restart"}, restart: func() error {
+			close(started)
+			<-release
+			return nil
+		}}
+		go func() { finished <- setup.Restart(t.Context()) }()
+		defer func() { close(release); <-finished }()
+		<-started
+		statusDone := make(chan api.LocalEmbeddingsStatus, 1)
+		go func() { status, _ := setup.Status(t.Context()); statusDone <- status }()
+		select {
+		case status := <-statusDone:
+			require.Equal(t, "restart", status.Job.State)
+			require.False(t, status.CanRestart)
+			require.True(t, status.RestartInProgress)
+		case <-time.After(time.Second):
+			t.Fatal("status blocked while restart was starting")
+		}
+	})
 }
 
 func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {

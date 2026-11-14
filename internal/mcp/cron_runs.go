@@ -22,7 +22,7 @@ type CronRunsInput struct {
 	JobUID    string `json:"job_uid,omitempty"`
 }
 
-// CronRunStatsInput selects a bounded creation-time window.
+// CronRunStatsInput selects a bounded execution-time window.
 type CronRunStatsInput struct {
 	CronProjectInput
 	JobUID      string `json:"job_uid,omitempty"`
@@ -60,7 +60,10 @@ func registerCronRunTools(server *sdkmcp.Server, h toolHandlers) {
 }
 
 // CronRunStatsOutput preserves nullable numbers from the daemon response.
-type CronRunStatsOutput = api.CronRunStatsResponseBody
+type CronRunStatsOutput struct {
+	generated.GetCronRunStatsResponse
+	Buckets *[]generated.RunStatBucket `json:"buckets,omitzero"`
+}
 
 func (h toolHandlers) cronRunStats(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronRunStatsInput) (*sdkmcp.CallToolResult, CronRunStatsOutput, error) {
 	var err error
@@ -87,16 +90,11 @@ func (h toolHandlers) cronRunStats(ctx context.Context, _ *sdkmcp.CallToolReques
 	if err != nil {
 		return nil, CronRunStatsOutput{}, err
 	}
-	response, err := h.options.Client.GetCronRunStatsWithResponse(ctx, &generated.GetCronRunStatsRequestOptions{PathParams: &generated.GetCronRunStatsPath{ProjectID: p.ID}, Query: &generated.GetCronRunStatsQuery{JobUID: optionalString(in.JobUID), WorkflowUID: optionalString(in.WorkflowUID), Since: optionalString(in.Since), Until: optionalString(in.Until), Bucket: optionalString(in.Bucket), Timezone: optionalString(in.Timezone)}})
+	response, err := h.options.Client.GetCronRunStats(ctx, &generated.GetCronRunStatsRequestOptions{PathParams: &generated.GetCronRunStatsPath{ProjectID: p.ID}, Query: &generated.GetCronRunStatsQuery{JobUID: optionalString(in.JobUID), WorkflowUID: optionalString(in.WorkflowUID), Since: optionalString(in.Since), Until: optionalString(in.Until), Bucket: optionalString(in.Bucket), Timezone: optionalString(in.Timezone)}})
 	if err != nil {
 		return nil, CronRunStatsOutput{}, err
 	}
-
-	var out CronRunStatsOutput
-	if err := json.Unmarshal(response.Body, &out); err != nil {
-		return nil, CronRunStatsOutput{}, err
-	}
-	return successResult(), out, nil
+	return successResult(), CronRunStatsOutput{GetCronRunStatsResponse: *response, Buckets: response.Buckets}, nil
 }
 func (h toolHandlers) cronRuns(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronRunsInput) (*sdkmcp.CallToolResult, generated.ListCronRunsResponse, error) {
 	limit := int64(defaultResultLimit)

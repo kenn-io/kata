@@ -63,7 +63,7 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 		if db.EventRequiredFeatures(ev.Type) == db.CronEventFeature {
 			continue
 		}
-		uid := db.FederationEventIssueUID(ev.IssueUID, string(ev.Payload))
+		uid := db.EventIssueUID(ev.IssueUID)
 		// Project events, moves and unidentified events can affect the entire
 		// projection. Ordinary issue batches use the same scope as pulled pages.
 		if uid == "" || strings.HasPrefix(ev.Type, "project.") || ev.Type == "issue.moved" {
@@ -258,12 +258,8 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 
 func (m *federationMaterialization) recordMoveIssueUIDs(events []db.FoldEvent) {
 	for _, event := range events {
-		uid := event.IssueUID
-		if uid == "" && strings.HasPrefix(event.Type, "issue.") {
-			uid = db.FederationEventIssueUID(nil, string(event.Payload))
-		}
-		if uid != "" {
-			m.moveIssueUIDs[uid] = struct{}{}
+		if event.IssueUID != "" {
+			m.moveIssueUIDs[event.IssueUID] = struct{}{}
 		}
 	}
 }
@@ -386,8 +382,7 @@ func federationEventStamp(ctx context.Context, tx *sql.Tx, projectID int64, even
 		if err != nil {
 			return [32]byte{}, err
 		}
-		//nolint:gosec // The identity expression is fixed and UIDs are bound.
-		query = `SELECT id,content_hash FROM events e WHERE ` + db.FederationReadIssueUIDExpr(false) + ` IN (SELECT value FROM json_each(?))`
+		query = `SELECT id,content_hash FROM events e WHERE e.issue_uid IN (SELECT value FROM json_each(?))`
 		args = []any{string(encoded)}
 	} else if len(eventTypes) > 0 {
 		//nolint:gosec // Only generated placeholders enter the query; event types are bound.
@@ -510,7 +505,8 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 		}
 		issueID, exists := m.issueIDs[comment.IssueUID]
 		if exists && row.issueID == issueID && row.author == nonEmptyAuthor(comment.Author) && row.body == comment.Body &&
-			row.teammate == comment.Teammate && row.createdAt == nonEmptyTime(comment.CreatedAt) {
+			row.teammate == comment.Teammate && row.createdAt == nonEmptyTime(comment.CreatedAt) &&
+			row.sameEditTime(comment.EditedAt) {
 			delete(m.projection.Comments, uid)
 			delete(comments, uid)
 		}

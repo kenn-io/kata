@@ -9,3 +9,6 @@ actions:
   - target: '$.components.schemas.RunStatBucket.properties.median_duration_seconds'
     update:
       x-go-type: '*float64'
+  - target: '$.components.schemas.CronRunStatsResponseBody.properties.buckets'
+    update:
+      x-go-type: '*[]RunStatBucket'

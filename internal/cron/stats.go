@@ -2,6 +2,7 @@ package cron
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"time"
 )
@@ -22,6 +23,21 @@ type RunStatRow struct {
 	StartedAt, EndedAt *time.Time
 }
 
+// Executed returns the start instant, or creation when no start was recorded.
+func (r RunStatRow) Executed() time.Time {
+	if r.StartedAt != nil {
+		return *r.StartedAt
+	}
+	return r.CreatedAt
+}
+
+func (r RunStatRow) completed() time.Time {
+	if r.EndedAt != nil {
+		return *r.EndedAt
+	}
+	return r.Executed()
+}
+
 // DurationStats summarizes qualifying run durations in seconds.
 type DurationStats struct {
 	_      struct{} `nullable:"true"`
@@ -32,7 +48,7 @@ type DurationStats struct {
 	Max    float64  `json:"max"`
 }
 
-// RunStatBucket summarizes runs created on one local date.
+// RunStatBucket summarizes runs started on one local date.
 type RunStatBucket struct {
 	Date                  string         `json:"date"`
 	ByStatus              map[string]int `json:"by_status"`
@@ -66,21 +82,9 @@ func SummarizeRuns(rows []RunStatRow, day bool, loc *time.Location) RunStatistic
 	var durations []float64
 	byDay := map[string]int{}
 	daily := []struct{ durations []float64 }{}
-	streak := true
 	for _, r := range rows {
 		out.ByStatus[r.Status]++
-		if streak {
-			switch r.Status {
-			case "failed":
-				out.ConsecutiveFailures++
-			case "succeeded":
-				streak = false
-			}
-		}
-		instant := r.CreatedAt
-		if r.EndedAt != nil {
-			instant = *r.EndedAt
-		}
+		instant := r.completed()
 		if r.Status == "succeeded" && (out.LastSucceededAt == nil || instant.After(*out.LastSucceededAt)) {
 			v := instant
 			out.LastSucceededAt = &v
@@ -91,7 +95,7 @@ func SummarizeRuns(rows []RunStatRow, day bool, loc *time.Location) RunStatistic
 		}
 		idx := -1
 		if day {
-			date := r.CreatedAt.In(loc).Format("2006-01-02")
+			date := r.Executed().In(loc).Format("2006-01-02")
 			var ok bool
 			idx, ok = byDay[date]
 			if !ok {
@@ -108,6 +112,21 @@ func SummarizeRuns(rows []RunStatRow, day bool, loc *time.Location) RunStatistic
 			if day {
 				daily[idx].durations = append(daily[idx].durations, d)
 			}
+		}
+	}
+	finished := make([]RunStatRow, 0, len(rows))
+	for _, r := range rows {
+		if r.Status == "succeeded" || r.Status == "failed" {
+			finished = append(finished, r)
+		}
+	}
+	slices.SortStableFunc(finished, func(a, b RunStatRow) int { return b.completed().Compare(a.completed()) })
+	for _, r := range finished {
+		if r.Status == "succeeded" {
+			break
+		}
+		if r.Status == "failed" {
+			out.ConsecutiveFailures++
 		}
 	}
 	if n := out.ByStatus["succeeded"] + out.ByStatus["failed"]; n > 0 {

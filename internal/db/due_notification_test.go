@@ -95,6 +95,19 @@ func TestPlanDueNotificationTreatsWrittenAndClearedValuesAsDelivered(t *testing.
 	)
 	require.NoError(t, err)
 	assert.Empty(t, patch)
+
+	// A whole copy carries the issue's metadata like a snapshot, so a
+	// reminder it held counts as delivered even after a later copy drops it.
+	history = []Event{
+		{Type: RepeatedImportEventType, Payload: `{"status":"open","metadata":{"scheduled_on":"2026-09-16","` + key + `":` + value + `}}`},
+		{Type: RepeatedImportEventType, Payload: `{"status":"open","metadata":{"scheduled_on":"2026-09-16"}}`},
+	}
+	patch, err = PlanDueNotification(
+		json.RawMessage(`{"scheduled_on":"2026-09-16"}`),
+		"worker-a", "coordinator", now, "UTC", "UTC", history,
+	)
+	require.NoError(t, err)
+	assert.Empty(t, patch)
 }
 
 func TestPlanDueNotificationRearmsChangedValueAndRejectsInvalidRecipient(t *testing.T) {

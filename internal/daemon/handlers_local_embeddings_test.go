@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,12 +16,19 @@ import (
 )
 
 type localEmbeddingsFixture struct {
-	calls int
-	busy  bool
+	calls       int
+	restarts    int
+	busy        bool
+	restartable atomic.Bool
+	restartErr  error
 }
 
 func (f *localEmbeddingsFixture) Status(context.Context) (api.LocalEmbeddingsStatus, error) {
-	return api.LocalEmbeddingsStatus{Provider: "none", CanChange: !f.busy, DownloadBytes: 290_000_000, Job: &api.LocalEmbeddingsJob{State: "failed", Error: "setup provider detail"}}, nil
+	state := "failed"
+	if f.restartable.Load() {
+		state = "restart"
+	}
+	return api.LocalEmbeddingsStatus{Provider: "none", CanChange: !f.busy && !f.restartable.Load(), CanRestart: f.restartable.Load(), DownloadBytes: 290_000_000, Job: &api.LocalEmbeddingsJob{State: state, Error: "setup provider detail"}}, nil
 }
 func (f *localEmbeddingsFixture) TurnOn(context.Context) error {
 	if f.busy {
@@ -29,6 +37,8 @@ func (f *localEmbeddingsFixture) TurnOn(context.Context) error {
 	f.calls++
 	return nil
 }
+
+func (f *localEmbeddingsFixture) Restart(context.Context) error { f.restarts++; return f.restartErr }
 
 func TestLocalEmbeddingsAdministration(t *testing.T) {
 	for _, tc := range []struct {
@@ -79,6 +89,22 @@ func TestLocalEmbeddingsAdministration(t *testing.T) {
 					require.Equal(t, 1, fixture.calls)
 				}
 			}
+			fixture.restartable.Store(true)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequestWithContext(WithPrincipal(t.Context(), Principal{Kind: tc.kind}), http.MethodGet, "/api/v1/embeddings/local", nil))
+			require.Equal(t, http.StatusOK, rec.Code)
+			var restartStatus api.LocalEmbeddingsStatus
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &restartStatus))
+			require.Equal(t, tc.allowed, restartStatus.CanRestart)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, httptest.NewRequestWithContext(WithPrincipal(t.Context(), Principal{Kind: tc.kind}), http.MethodPost, "/api/v1/embeddings/local/restart", nil))
+			if tc.allowed {
+				require.Equal(t, http.StatusAccepted, response.Code)
+				require.Equal(t, 1, fixture.restarts)
+			} else {
+				require.Equal(t, http.StatusForbidden, response.Code)
+				require.Zero(t, fixture.restarts)
+			}
 		})
 	}
 	t.Run("unavailable", func(t *testing.T) {
@@ -89,13 +115,19 @@ func TestLocalEmbeddingsAdministration(t *testing.T) {
 			mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), method, "/api/v1/embeddings/local", nil))
 			require.Equal(t, 404, rec.Code)
 		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequestWithContext(WithPrincipal(t.Context(), Principal{Kind: PrincipalWebLocal}), http.MethodPost, "/api/v1/embeddings/local/restart", nil))
+		require.Equal(t, http.StatusNotFound, rec.Code)
 	})
 	t.Run("busy", func(t *testing.T) {
 		mux := http.NewServeMux()
-		registerLocalEmbeddingsHandlers(humago.New(mux, huma.DefaultConfig("test", "1")), ServerConfig{LocalEmbeddings: &localEmbeddingsFixture{busy: true}})
+		registerLocalEmbeddingsHandlers(humago.New(mux, huma.DefaultConfig("test", "1")), ServerConfig{LocalEmbeddings: &localEmbeddingsFixture{busy: true, restartErr: ErrLocalEmbeddingsBusy}})
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequestWithContext(WithPrincipal(t.Context(), Principal{Kind: PrincipalWebLocal}), "POST", "/api/v1/embeddings/local", nil))
 		require.Equal(t, 409, rec.Code)
+		rec = httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequestWithContext(WithPrincipal(t.Context(), Principal{Kind: PrincipalWebLocal}), http.MethodPost, "/api/v1/embeddings/local/restart", nil))
+		require.Equal(t, http.StatusConflict, rec.Code)
 	})
 }
 

@@ -14,11 +14,16 @@ var dayQuantity = regexp.MustCompile(`^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$`)
 
 // Since resolves a duration relative to anchor, or parses an RFC3339 instant.
 func Since(s string, anchor time.Time) (time.Time, error) {
+	t, _, err := parseSince(s, anchor)
+	return t, err
+}
+
+func parseSince(s string, anchor time.Time) (time.Time, bool, error) {
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t.UTC(), nil
+		return t.UTC(), true, nil
 	}
-	invalid := func() (time.Time, error) {
-		return time.Time{}, fmt.Errorf("invalid time spec %q: must be a duration (24h, 7d) or RFC3339 timestamp", s)
+	invalid := func() (time.Time, bool, error) {
+		return time.Time{}, false, fmt.Errorf("invalid time spec %q: must be a duration (24h, 7d) or RFC3339 timestamp", s)
 	}
 	var d time.Duration
 	if before, ok := strings.CutSuffix(s, "d"); ok {
@@ -46,7 +51,7 @@ func Since(s string, anchor time.Time) (time.Time, error) {
 	if d == time.Duration(math.MinInt64) {
 		return invalid()
 	}
-	return anchor.Add(-d).UTC(), nil
+	return anchor.Add(-d).UTC(), false, nil
 }
 
 // Window resolves a relative start against its end, using one sampled instant
@@ -64,12 +69,11 @@ func Window(since, until string, now time.Time) (string, string, error) {
 			return "", "", fmt.Errorf("invalid until")
 		}
 	}
-	_, absoluteErr := time.Parse(time.RFC3339, since)
-	instant, err := Since(since, anchor)
+	instant, absolute, err := parseSince(since, anchor)
 	if err != nil {
 		return "", "", err
 	}
-	if absoluteErr != nil && until == "" {
+	if !absolute && until == "" {
 		until = anchor.UTC().Format(time.RFC3339Nano)
 	}
 	return instant.Format(time.RFC3339Nano), until, nil

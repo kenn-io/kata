@@ -94,7 +94,7 @@ type CronRunsResponse struct {
 	}
 }
 
-// CronRunStatsRequest selects a creation-time window and optional filter.
+// CronRunStatsRequest selects a execution-time window and optional filter.
 type CronRunStatsRequest struct {
 	CronProjectRequest
 	JobUID      string `query:"job_uid"`
@@ -105,14 +105,14 @@ type CronRunStatsRequest struct {
 	Timezone    string `query:"timezone"`
 }
 
-// CronRunStatsWindow identifies the creation-time window summarized.
+// CronRunStatsWindow identifies the execution-time window summarized.
 type CronRunStatsWindow struct {
 	Since time.Time `json:"since"`
 	Until time.Time `json:"until"`
 }
 
 // CronRunStatsAPIVersion is the first daemon API supporting this read.
-const CronRunStatsAPIVersion = "0.47.0"
+const CronRunStatsAPIVersion = "0.48.0"
 
 // CronRunStatsResponseBody reports statistics over retained runs.
 type CronRunStatsResponseBody struct {

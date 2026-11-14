@@ -215,7 +215,8 @@ type Storage interface {
 	// PurgeProject permanently deletes an archived project and all its
 	// project-scoped rows, writing a project_purge_log tombstone. Refuses
 	// active (ErrProjectNotArchived) or federated (*ProjectFederatedError)
-	// projects; ErrNotFound if the project does not exist.
+	// projects; ErrNotFound if the project does not exist. With
+	// RetireHubBinding it also accepts a hub project and removes its binding.
 	PurgeProject(ctx context.Context, p PurgeProjectParams) (ProjectPurgeLog, error)
 	ClaimOwner(ctx context.Context, p ClaimOwnerParams) (ClaimResult, error)
 	ExpireAssignments(ctx context.Context, p ExpireAssignmentsParams) ([]Event, error)
@@ -478,6 +479,12 @@ type Storage interface {
 	PendingFederationPushEvents(ctx context.Context, projectID int64, originInstanceUID string, afterID int64, limit int) ([]Event, error)
 	PendingFederationPushStats(ctx context.Context, projectID int64, originInstanceUID string, afterID int64) (int64, int64, error)
 	AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error
+	// AcknowledgeFederationPush advances the push cursor. It also deletes this
+	// home's own adoption snapshots that the hub acknowledged without storing
+	// and rebuilds the project from the remaining history, all in one
+	// transaction. It changes nothing and returns ErrFederationPushAwaitsPull
+	// while the home has no other history of one of those issues.
+	AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error
 	EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (FederationBinding, error)
 	ResetFederatedProjectIfNoPendingPush(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64, originInstanceUID string, pushCursorEventID int64) error
 	IngestFederationEvents(ctx context.Context, p FederationIngestParams) (FederationIngestResult, error)

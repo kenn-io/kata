@@ -73,7 +73,7 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 		}
 		for _, event := range page.Events {
 			switch event.Type {
-			case "issue.closed", "issue.reopened", "issue.updated", "issue.created", "issue.snapshot":
+			case "issue.closed", "issue.reopened", "issue.updated", db.RepeatedImportEventType, "issue.created", "issue.snapshot":
 				if event.IssueUID == nil || *event.IssueUID != ref {
 					return nil, errors.New("history includes another issue's events")
 				}

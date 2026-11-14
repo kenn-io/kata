@@ -118,8 +118,11 @@ func TestAgentHooksInstallKitManagedProfiles(t *testing.T) {
 			}
 			// Kit uses the native form except for Copilot's explicitly POSIX bash field.
 			expected := commands.Native
-			if profile.Agent == agenthook.AgentCopilot {
+			if profile.Agent == agenthook.AgentCodex || profile.Agent == agenthook.AgentCopilot {
 				expected = commands.POSIX
+			}
+			if profile.Agent == agenthook.AgentCodex {
+				require.Equal(t, commands.PowerShell, owned["commandWindows"])
 			}
 			// Claude on Windows receives the executable and arguments separately.
 			if profile.Agent == agenthook.AgentClaude && runtime.GOOS == "windows" {

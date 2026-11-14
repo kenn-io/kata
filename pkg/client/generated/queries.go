@@ -321,8 +321,9 @@ func (s ShowIssueQuery) Validate() error {
 }
 
 type AddAttachmentQuery struct {
-	Name  string  `json:"name" validate:"required"`
-	Actor *string `json:"actor,omitempty"`
+	Name          string  `json:"name" validate:"required"`
+	Actor         *string `json:"actor,omitempty"`
+	ReuseExisting *bool   `json:"reuse_existing,omitempty"`
 }
 
 func (a AddAttachmentQuery) Validate() error {

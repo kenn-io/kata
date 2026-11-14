@@ -140,8 +140,14 @@ docs-preview:
 docs-check:
 	bash scripts/check-docs.sh
 
+# With DOCS_SCREENSHOTS_OUTPUT set, build the complete docs-assets tree into
+# $(DOCS_SCREENSHOTS_OUTPUT)/assets using only Docker on the host.
 docs-screenshots:
+ifdef DOCS_SCREENSHOTS_OUTPUT
+	bash docs/screenshots/generate-in-docker.sh "$(DOCS_SCREENSHOTS_OUTPUT)"
+else
 	bash docs/screenshots/generate.sh
+endif
 
 docs-assets-branch:
 	bash docs/screenshots/update-assets-branch.sh

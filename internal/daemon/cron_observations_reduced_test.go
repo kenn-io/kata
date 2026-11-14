@@ -236,7 +236,8 @@ func (s truncatedStatsStore) CronRunStats(_ context.Context, _ db.CronRunStatsQu
 	newest := time.Date(2026, 11, 1, 1, 0, 0, 0, time.UTC)
 	rows := make([]cron.RunStatRow, cron.RunStatsScanLimit)
 	for i := range rows {
-		rows[i] = cron.RunStatRow{Status: "failed", CreatedAt: newest.Add(-time.Duration(i) * time.Second)}
+		start := newest.Add(-time.Duration(i) * time.Second)
+		rows[i] = cron.RunStatRow{Status: "failed", CreatedAt: newest.Add(24 * time.Hour), StartedAt: &start}
 	}
 	return rows, true, nil
 }

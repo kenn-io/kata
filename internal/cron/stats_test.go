@@ -23,13 +23,12 @@ func TestSummarizeRuns(t *testing.T) {
 	require.Equal(t, 2, got.ConsecutiveFailures)
 	require.InDelta(t, 0.3333, *got.SuccessRate, 0.00001)
 	require.Equal(t, 20.0, got.DurationSeconds.Median)
-	require.Len(t, got.Buckets, 3)
-	require.Equal(t, "2026-03-09", got.Buckets[0].Date)
+	require.Len(t, got.Buckets, 2)
+	require.Equal(t, "2026-03-08", got.Buckets[0].Date)
 	require.Equal(t, 20.0, *got.Buckets[0].MedianDurationSeconds)
-	require.Equal(t, "2026-03-08", got.Buckets[1].Date)
+	require.Equal(t, "2026-03-07", got.Buckets[1].Date)
 	require.Nil(t, got.Buckets[1].MedianDurationSeconds)
-	require.Equal(t, map[string]int{"running": 1, "failed": 1}, got.Buckets[1].ByStatus)
-	require.Equal(t, "2026-03-07", got.Buckets[2].Date)
+	require.Equal(t, map[string]int{"running": 1, "failed": 2}, got.Buckets[0].ByStatus)
 	empty := SummarizeRuns(nil, false, loc)
 	require.Nil(t, empty.DurationSeconds)
 	require.Nil(t, empty.Buckets)
@@ -100,4 +99,21 @@ func TestSummarizeRunsLongDuration(t *testing.T) {
 	got := SummarizeRuns([]RunStatRow{{Status: "succeeded", CreatedAt: start, StartedAt: &start, EndedAt: &end}}, true, time.UTC)
 	require.Equal(t, float64(end.Unix()-start.Unix()), got.DurationSeconds.Median)
 	require.Equal(t, got.DurationSeconds.Median, *got.Buckets[0].MedianDurationSeconds)
+}
+
+func TestSummarizeRunsCompletionOrder(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	start := base.Add(time.Hour)
+	failEnd := base.Add(2 * time.Hour)
+	successEnd := base.Add(3 * time.Hour)
+	rows := []RunStatRow{{Status: "failed", CreatedAt: base.Add(24 * time.Hour), StartedAt: &start, EndedAt: &failEnd}, {Status: "succeeded", CreatedAt: base, EndedAt: &successEnd}}
+	got := SummarizeRuns(rows, true, time.UTC)
+	require.Zero(t, got.ConsecutiveFailures)
+	require.Equal(t, "2026-01-01", got.Buckets[0].Date)
+	rows[0].EndedAt = &successEnd
+	require.Equal(t, 1, SummarizeRuns(rows, false, time.UTC).ConsecutiveFailures)
+	rows[0].EndedAt = nil
+	got = SummarizeRuns(rows, false, time.UTC)
+	require.Equal(t, start, *got.LastFailedAt)
+	require.Zero(t, got.ConsecutiveFailures)
 }

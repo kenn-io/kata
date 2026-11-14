@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -687,6 +689,39 @@ func TestWaitAllStillFailsOnBadRefEvenWhenOtherRefAlreadySatisfied(t *testing.T)
 	_ = requireCLIError(t, err, ExitNotFound)
 }
 
+// deleteAfterWaitRead forwards to the real daemon, deleting ref only after
+// its first successful GET has captured the open issue. Once the wait observes
+// the 404, it closes closeRef, if supplied. This orders mutations by reads rather
+// than assuming the CLI starts and polls within waitMutDelay.
+func deleteAfterWaitRead(t *testing.T, env *testenv.Env, pid int64, ref, closeRef string) string {
+	t.Helper()
+	backend, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(backend) },
+		ModifyResponse: func(resp *http.Response) error {
+			if resp.Request.Method != http.MethodGet || resp.Request.URL.Path !=
+				fmt.Sprintf("/api/v1/projects/%d/issues/%s", pid, ref) {
+				return nil
+			}
+			var err error
+			switch resp.StatusCode {
+			case http.StatusOK:
+				err = deleteIssueHTTP(resp.Request.Context(), env, pid, ref)
+			case http.StatusNotFound:
+				if closeRef != "" {
+					err = closeIssueHTTP(resp.Request.Context(), env, pid, closeRef)
+				}
+			}
+			assert.NoError(t, err, "mutate issue after wait read")
+			return err
+		},
+	}
+	srv := httptest.NewServer(proxy)
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
 // TestWaitAllAbortsOnDeletedRefMidWait: a ref deleted while --all is polling
 // is a permanent 404, so the wait aborts promptly with the daemon's not-found
 // exit code (4) rather than treating it as a transient blip and eventually
@@ -695,16 +730,11 @@ func TestWaitAllAbortsOnDeletedRefMidWait(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "deleted mid-wait")
 
-	errc := make(chan error, 1)
-	go func() {
-		time.Sleep(waitMutDelay)
-		errc <- deleteIssueHTTP(t.Context(), env, pid, ref)
-	}()
+	waitURL := deleteAfterWaitRead(t, env, pid, ref, "")
 
 	start := time.Now()
-	_, err := runCLICapture(t, env, dir,
+	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), waitURL), "--workspace", dir,
 		"wait", ref, "--poll-interval", waitFastPoll, "--timeout", waitSafetyNet)
-	require.NoError(t, <-errc)
 	_ = requireCLIError(t, err, ExitNotFound)
 	assert.Less(t, time.Since(start), 3*time.Second,
 		"a permanent 404 should abort promptly, not burn the whole timeout")
@@ -718,18 +748,10 @@ func TestWaitAnyAbandonsDeletedRefCompletesOnOther(t *testing.T) {
 	ref1 := createIssue(t, env, pid, "abandoned ref")
 	ref2 := createIssue(t, env, pid, "closes later")
 
-	errc := make(chan error, 2)
-	go func() {
-		time.Sleep(waitMutDelay)
-		errc <- deleteIssueHTTP(t.Context(), env, pid, ref1)
-		time.Sleep(waitMutDelay)
-		errc <- closeIssueHTTP(t.Context(), env, pid, ref2)
-	}()
+	waitURL := deleteAfterWaitRead(t, env, pid, ref1, ref2)
 
-	stdout, _, err := runCLIWithErr(t, env, dir,
+	stdout, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), waitURL), "--workspace", dir,
 		"wait", ref1, ref2, "--any", "--poll-interval", waitFastPoll, "--timeout", waitSafetyNet)
-	require.NoError(t, <-errc)
-	require.NoError(t, <-errc)
 	require.NoError(t, err)
 	assert.Contains(t, stdout, ref2)
 	assert.Contains(t, stdout, "closed")
@@ -747,18 +769,10 @@ func TestWaitAnyAbandonedAgentUsesNonErrorRow(t *testing.T) {
 	ref1 := createIssue(t, env, pid, "abandoned agent ref")
 	ref2 := createIssue(t, env, pid, "closes later agent")
 
-	errc := make(chan error, 2)
-	go func() {
-		time.Sleep(waitMutDelay)
-		errc <- deleteIssueHTTP(t.Context(), env, pid, ref1)
-		time.Sleep(waitMutDelay)
-		errc <- closeIssueHTTP(t.Context(), env, pid, ref2)
-	}()
+	waitURL := deleteAfterWaitRead(t, env, pid, ref1, ref2)
 
-	stdout, _, err := runCLIWithErr(t, env, dir,
+	stdout, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), waitURL), "--workspace", dir,
 		"--agent", "wait", ref1, ref2, "--any", "--poll-interval", waitFastPoll, "--timeout", waitSafetyNet)
-	require.NoError(t, <-errc)
-	require.NoError(t, <-errc)
 	require.NoError(t, err)
 
 	// Command succeeded, so no streamed line may carry the ERR failure prefix.
@@ -778,18 +792,10 @@ func TestWaitAnyAbandonedRefAppearsInJSON(t *testing.T) {
 	ref1 := createIssue(t, env, pid, "abandoned json ref")
 	ref2 := createIssue(t, env, pid, "closes later json")
 
-	errc := make(chan error, 2)
-	go func() {
-		time.Sleep(waitMutDelay)
-		errc <- deleteIssueHTTP(t.Context(), env, pid, ref1)
-		time.Sleep(waitMutDelay)
-		errc <- closeIssueHTTP(t.Context(), env, pid, ref2)
-	}()
+	waitURL := deleteAfterWaitRead(t, env, pid, ref1, ref2)
 
-	stdout, _, err := runCLIWithErr(t, env, dir,
+	stdout, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), waitURL), "--workspace", dir,
 		"--json", "wait", ref1, ref2, "--any", "--poll-interval", waitFastPoll, "--timeout", waitSafetyNet)
-	require.NoError(t, <-errc)
-	require.NoError(t, <-errc)
 	require.NoError(t, err)
 
 	obj := parseWaitJSON(t, stdout)

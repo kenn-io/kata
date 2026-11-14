@@ -197,7 +197,7 @@ func TestCronRunStatsRequiresAPIVersion(t *testing.T) {
 	var calls atomic.Int32
 	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/health" {
-			writeJSON(w, map[string]any{"api_schema_version": "0.46.0"})
+			writeJSON(w, map[string]any{"api_schema_version": "0.47.0"})
 			return
 		}
 		calls.Add(1)
