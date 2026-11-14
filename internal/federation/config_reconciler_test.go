@@ -1061,11 +1061,15 @@ func TestReconcileMappingRejectsRetainedProjectCollisions(t *testing.T) {
 				require.NoError(t, err)
 			}
 			if tc.collision {
-				_, err = store.CreateProject(ctx, "spoke-project")
+				colliding, err := store.CreateProject(ctx, "spoke-project")
+				require.NoError(t, err)
+				_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: colliding.ID, Actor: "worker"})
 				require.NoError(t, err)
 			}
-			err = federation.ReconcileMapping(ctx, store, newFakeCredentialStore(), newFakeHub(), testCatalog(), testMapping(), nil)
+			hub := newFakeHub()
+			err = federation.ReconcileMapping(ctx, store, newFakeCredentialStore(), hub, testCatalog(), testMapping(), nil)
 			require.Error(t, err)
+			assert.Empty(t, hub.enrollmentCalls)
 			unchanged, err := store.ProjectByUID(ctx, hubProjectUID)
 			require.NoError(t, err)
 			assert.Equal(t, project.Name, unchanged.Name)
