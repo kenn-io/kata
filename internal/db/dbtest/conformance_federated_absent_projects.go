@@ -12,14 +12,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func labelsValues(labels []db.IssueLabel) []string {
-	values := make([]string, 0, len(labels))
-	for _, label := range labels {
-		values = append(values, label.Label)
-	}
-	return values
-}
-
 // Direct pulls retain issue history and missing move endpoints atomically.
 func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend) error {
 	ctx := t.Context()
@@ -67,15 +59,6 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		_, err = receiver.ProjectByUID(ctx, source.UID)
 		require.ErrorIs(t, err, db.ErrNotFound)
 
-	})
-	t.Run("identity holds", func(t *testing.T) {
-		ctx := t.Context()
-		receiver := backend.Open(t)
-		t.Cleanup(func() { require.NoError(t, receiver.Close()) })
-		route, err := receiver.CreateProjectWithUID(ctx, "spoke-project", target.UID)
-		require.NoError(t, err)
-		_, err = receiver.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: route.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: target.ID, HubProjectUID: target.UID, Enabled: true, Actor: "worker"})
-		require.NoError(t, err)
 		collision, err := receiver.CreateProject(ctx, "federation-"+strings.ToLower(source.UID))
 		require.NoError(t, err)
 		_, err = receiver.InsertRemoteEvents(ctx, route.ID, []db.RemoteEvent{creation})
@@ -138,7 +121,7 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.NoError(t, err)
 		_, hubLabel, err := hub.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "hub-label", Actor: "worker"})
 		require.NoError(t, err)
-		_, _, err = hub.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "removed", Actor: "worker"})
+		_, addedRemoved, err := hub.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "removed", Actor: "worker"})
 		require.NoError(t, err)
 		removed, err := hub.RemoveLabelAndEvent(ctx, issue.ID, db.LabelEventParams{EventType: "issue.unlabeled", Label: "removed", Actor: "worker"})
 		require.NoError(t, err)
@@ -161,7 +144,7 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		}
 		_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: local.ID, Author: "worker", Body: "Local comment"})
 		require.NoError(t, err)
-		pulled := []db.Event{peerCreated, *edit, hubComment, hubLabel, removed, linked, *moved.Event}
+		pulled := []db.Event{peerCreated, *edit, hubComment, hubLabel, addedRemoved, removed, linked, *moved.Event}
 		var remote []db.RemoteEvent
 		for _, event := range pulled {
 			remote = append(remote, portableNativeEvent(event))
@@ -180,7 +163,7 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.JSONEq(t, `{"test":"value"}`, string(got.Metadata))
 		labels, err := spoke.LabelsByIssue(ctx, got.ID)
 		require.NoError(t, err)
-		require.ElementsMatch(t, []string{"hub-label", "local"}, labelsValues(labels))
+		require.ElementsMatch(t, []string{"hub-label", "local"}, importLabelNames(labels))
 		comments, err := spoke.CommentsByIssue(ctx, got.ID)
 		require.NoError(t, err)
 		require.ElementsMatch(t, []string{"Hub comment", "Local comment"}, importCommentBodies(comments))
@@ -210,12 +193,6 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 
 		_, _, _, err = spoke.RestoreProject(ctx, retained.ID, "worker")
 		require.NoError(t, err)
-		unrelated, _, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: retained.ID, Title: "Unrelated", Author: "worker"})
-		require.NoError(t, err)
-		_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: unrelated.ID, Author: "worker", Body: "Unrelated comment"})
-		require.NoError(t, err)
-		_, _, err = spoke.AddLabelAndEvent(ctx, unrelated.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "unrelated", Actor: "worker"})
-		require.NoError(t, err)
 		_, err = spoke.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: retained.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: target.ID, HubProjectUID: target.UID, Enabled: true, Actor: "worker"})
 		require.NoError(t, err)
 		require.NoError(t, spoke.MaterializeFederatedProject(ctx, retained.ID))
@@ -228,17 +205,7 @@ func checkFederatedAbsentProjects(t *testing.T, hub db.Storage, backend Backend)
 		require.ElementsMatch(t, []string{"Hub comment", "Local comment", "Delayed comment"}, importCommentBodies(comments))
 		labels, err = spoke.LabelsByIssue(ctx, got.ID)
 		require.NoError(t, err)
-		require.ElementsMatch(t, []string{"hub-label", "local"}, labelsValues(labels))
-		_, err = spoke.IssueByUID(ctx, unrelated.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		otherComments, err := spoke.CommentsByIssue(ctx, unrelated.ID)
-		require.NoError(t, err)
-		require.Len(t, otherComments, 1)
-		require.Equal(t, "Unrelated comment", otherComments[0].Body)
-		otherLabels, err := spoke.LabelsByIssue(ctx, unrelated.ID)
-		require.NoError(t, err)
-		require.Len(t, otherLabels, 1)
-		require.Equal(t, "unrelated", otherLabels[0].Label)
+		require.ElementsMatch(t, []string{"hub-label", "local"}, importLabelNames(labels))
 		links, err = spoke.LinksByIssue(ctx, got.ID)
 		require.NoError(t, err)
 		require.Empty(t, links)

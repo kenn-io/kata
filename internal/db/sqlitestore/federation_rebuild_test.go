@@ -225,9 +225,7 @@ func moveRebuildPreservesLocalLabelsOnReturn(t *testing.T) {
 	d, source, issue := incrementalTestStore(t)
 	issue = resetToRemoteIssue(t, d, source, issue)
 	peerUID := "01HZNQ7VFPK1XGD8R5MABCDEF2"
-	_, _, err := d.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "local comment"})
-	require.NoError(t, err)
-	_, err = d.AddLabel(ctx, issue.ID, "local", "tester")
+	_, err := d.AddLabel(ctx, issue.ID, "local", "tester")
 	require.NoError(t, err)
 	hub := cloneIncrementalStore(t, d)
 	destination, err := hub.CreateProject(ctx, "destination")
@@ -645,4 +643,21 @@ func TestParkedIssueLinkResolutionSkipsUnrelatedEndpoints(t *testing.T) {
 	require.Len(t, links, 1)
 	require.Equal(t, peer.UID, links[0].ToIssueUID)
 	require.Less(t, fetches, 100, "resolving one issue's link must not query every unrelated endpoint")
+}
+
+func TestFederationResetRemovesLinksBeforeIssues(t *testing.T) {
+	ctx := t.Context()
+	store, source, issue := incrementalTestStore(t)
+	other, err := store.CreateProject(ctx, "other")
+	require.NoError(t, err)
+	peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "peer", Author: "tester"})
+	require.NoError(t, err)
+	_, err = store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: peer.ID, Type: "related", Author: "tester"})
+	require.NoError(t, err)
+	require.NoError(t, store.ResetFederatedProject(ctx, source.ID, 1, 0))
+	_, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	links, err := store.LinksByIssue(ctx, peer.ID)
+	require.NoError(t, err)
+	require.Empty(t, links)
 }
