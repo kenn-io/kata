@@ -17,6 +17,8 @@ export interface FederationProjectStatus {
   embedding?: FederationEmbeddingStatus
   enabled: boolean
   enrollment_count: number
+  /** True when a sync error was recorded and omit_errors removed its text. */
+  has_sync_error?: boolean
   hub_project_id?: number
   hub_project_uid?: string
   hub_url?: string

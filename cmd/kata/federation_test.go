@@ -11,6 +11,8 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -117,6 +119,175 @@ func TestFederationStatusProjectFilter(t *testing.T) {
 		assert.Empty(t, out)
 		assert.Contains(t, err.Error(), "missing-project")
 	}
+	local, err := env.DB.CreateProject(t.Context(), "local-project")
+	require.NoError(t, err)
+	_, err = runCmdOutput(t, env, "federation", "status", "--project", local.Name)
+	_ = requireCLIError(t, err, ExitNotFound)
+	assert.Contains(t, err.Error(), "no federation status for project")
+}
+
+func TestFederationStatusProjectRenamedDuringLookup(t *testing.T) {
+	env, project := setupFederationStatusCLIState(t)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/federation/status", project.ID) {
+			if _, err := env.DB.RenameProject(r.Context(), project.ID, "renamed-project"); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		r.Host = target.Host
+		r.Header["X-Forwarded-For"] = nil
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	clientEnv := *env
+	clientEnv.URL = server.URL
+	out := requireCmdOutput(t, &clientEnv, "federation", "status", "--project", project.Name, "--format", "json")
+	var result struct {
+		Statuses []struct {
+			ProjectID   int64  `json:"project_id"`
+			ProjectName string `json:"project_name"`
+		} `json:"statuses"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Len(t, result.Statuses, 1)
+	assert.Equal(t, project.ID, result.Statuses[0].ProjectID)
+	assert.Equal(t, "renamed-project", result.Statuses[0].ProjectName)
+}
+
+func TestFederationStatusProjectMember(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("owner-token"), testenv.WithRequireTokenIdentity())
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://127.0.0.1:7373", HubProjectID: 42, HubProjectUID: project.UID, Actor: "owner", Enabled: true})
+	require.NoError(t, err)
+	require.NoError(t, env.DB.RecordFederationSyncError(t.Context(), project.ID, errors.New("hub offline"), time.Now()))
+	team, _, err := env.DB.CreateTeam(t.Context(), "project-team", "owner")
+	require.NoError(t, err)
+	_, err = env.DB.SetTeamMembership(t.Context(), team.UID, "member", true, "owner")
+	require.NoError(t, err)
+	_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{team.UID}}, "owner")
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "member-token", Actor: "member", AdminActor: db.BootstrapActor})
+	require.NoError(t, err)
+	t.Setenv("KATA_AUTH_TOKEN", "member-token")
+	out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name, "--format", "json")
+	assert.Contains(t, out, project.Name)
+	assert.Contains(t, out, "hub offline")
+}
+
+func TestFederationStatusProjectAnonymousReadonly(t *testing.T) {
+	env := testenv.New(t, testenv.WithInsecureReadonly())
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://127.0.0.1:7373", HubProjectID: 42, HubProjectUID: project.UID, Actor: "owner", Enabled: true})
+	require.NoError(t, err)
+	require.NoError(t, env.DB.RecordFederationSyncError(t.Context(), project.ID, errors.New("hub offline"), time.Now()))
+	out := requireCmdOutput(t, env, "federation", "status", "--project", project.Name)
+	assert.Contains(t, out, project.Name)
+	assert.Contains(t, out, "hub offline")
+}
+
+func TestFederationStatusProjectOlderDaemon(t *testing.T) {
+	env, project := setupFederationStatusCLIState(t)
+	other, err := env.DB.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: other.ID, Role: db.FederationRoleHub, HubProjectUID: other.UID, Enabled: true})
+	require.NoError(t, err)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.45.0"}`))
+			return
+		}
+		r.Host = target.Host
+		r.Header["X-Forwarded-For"] = nil
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	older := *env
+	older.URL = server.URL
+	out := requireCmdOutput(t, &older, "federation", "status", "--project", project.Name, "--format", "json")
+	assert.Contains(t, out, project.Name)
+	assert.NotContains(t, out, other.Name)
+}
+
+func TestFederationStatusProjectVersionRouting(t *testing.T) {
+	for _, tc := range []struct {
+		name, version string
+		status        int
+		global        bool
+	}{
+		{"older denied", "0.45.0", http.StatusForbidden, true},
+		{"older not found", "0.45.0", http.StatusNotFound, true},
+		{"current denied", "0.49.0", http.StatusForbidden, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var global, lookup atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/health":
+					_ = json.NewEncoder(w).Encode(map[string]string{"api_schema_version": tc.version})
+				case "/api/v1/federation/status":
+					global.Add(1)
+					w.WriteHeader(tc.status)
+				case "/api/v1/projects/resolve":
+					lookup.Add(1)
+					w.WriteHeader(tc.status)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "federation", "status", "--project", "spoke-project")
+			require.Error(t, err)
+			var ce *cliError
+			require.ErrorAs(t, err, &ce)
+			if tc.global {
+				assert.Equal(t, "daemon_api_too_old", ce.Code)
+				assert.Contains(t, ce.Message, "upgrade the daemon")
+			} else {
+				assert.Equal(t, tc.status, ce.HTTPStatus)
+			}
+			assert.Equal(t, !tc.global, lookup.Load() == 1)
+			assert.Equal(t, tc.global, global.Load() == 1)
+		})
+	}
+}
+
+type federationStatusHostAccess struct{}
+
+func (federationStatusHostAccess) Authorize(_ context.Context, request daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
+	if request.Operation.AllProjects {
+		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
+	}
+	return daemon.HostAccessDecision{}, nil
+}
+
+func TestFederationStatusProjectHostScope(t *testing.T) {
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "http://127.0.0.1:7373", HubProjectID: 42, HubProjectUID: project.UID, Actor: "owner", Enabled: true})
+	require.NoError(t, err)
+	require.NoError(t, env.DB.RecordFederationSyncError(t.Context(), project.ID, errors.New("hub offline"), time.Now()))
+	daemonServer := daemon.NewServer(daemon.ServerConfig{DB: env.DB, StartedAt: time.Now(), HostAccess: federationStatusHostAccess{}})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "worker"})
+		daemonServer.Handler().ServeHTTP(w, r.WithContext(ctx))
+	}))
+	t.Cleanup(server.Close)
+	host := *env
+	host.URL = server.URL
+	out := requireCmdOutput(t, &host, "federation", "status", "--project", project.Name)
+	assert.Contains(t, out, project.Name)
+	assert.Contains(t, out, "hub offline")
 }
 
 func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {

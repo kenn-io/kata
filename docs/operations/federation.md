@@ -773,6 +773,16 @@ entry. Remote workspaces do not delegate federation reads through their target
 credentials. Retained-window counts describe stored artifacts, not provider
 requests or billing.
 
+The browser status summary withholds diagnostic error text. When sync needs
+attention, copy the diagnostic command for Bash/Zsh or
+PowerShell. Connect the CLI to the same daemon with your own credential. A local
+install uses its existing home or registered daemon profile. For a remote daemon,
+select its configured API connection with `--daemon` or `KATA_SERVER`.
+Project readers need daemon API 0.49.0 or later. Owners can use the diagnostic
+against older daemons. Remove the older-daemon path, its dedicated tests, and
+its filtering helper if unused when the CLI's documented minimum supported
+daemon API reaches 0.49.0.
+
 ### Embedding transfer and reuse
 
 The artifact stream accepts bounded manifest offers separately from issue

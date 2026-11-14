@@ -175,6 +175,10 @@ type InitProjectResponse = InitProjectResponseBody
 
 type InitProjectErrorResponse = ErrorEnvelope
 
+type ReadProjectByNameResponse = ProjectResolveBody
+
+type ReadProjectByNameErrorResponse = ErrorEnvelope
+
 type ResolveProjectResponse = ProjectResolveBody
 
 type ResolveProjectErrorResponse = ErrorEnvelope
@@ -960,6 +964,14 @@ type InitProjectResp struct {
 	StatusCode   int
 	JSON200      *InitProjectResponse
 	JSONDefault  *InitProjectErrorResponse
+}
+
+type ReadProjectByNameResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ReadProjectByNameResponse
+	JSONDefault  *ReadProjectByNameErrorResponse
 }
 
 type ResolveProjectResp struct {

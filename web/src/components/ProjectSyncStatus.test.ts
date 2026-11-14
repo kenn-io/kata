@@ -10,12 +10,13 @@ function response(projectID = 7, uid = projectUID, pending = 2): Response {
       {
         project_id: projectID,
         project_uid: uid,
+        project_name: "spoke project’s'",
         role: 'replica',
         enabled: true,
         pending_push_count: pending,
         last_successful_sync_at: '2026-10-01T12:00:00Z',
         credential_status: 'live',
-        last_error: 'private-token-never-display',
+        has_sync_error: true,
         embedding: {
           state: 'reused',
           artifact_limit: 32,
@@ -32,10 +33,23 @@ function response(projectID = 7, uid = projectUID, pending = 2): Response {
 }
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
   vi.useRealTimers()
   vi.restoreAllMocks()
 })
 describe('ProjectSyncStatus', () => {
+  it('copies a quoted status command', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    setGeneratedFetch(vi.fn().mockResolvedValueOnce(response()))
+    render(ProjectSyncStatus, { props: { projectID: 7, projectUID } })
+    await screen.findByText('Project readers: if the command fails, update your Kata CLI.')
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Copy PowerShell sync status command' }),
+    )
+    expect(writeText).toHaveBeenCalledWith("kata federation status --project 'spoke project’’s'''")
+  })
+
   it.each(['network', 'body', '503', 403, 'mismatch'])(
     'clears status after %s and retries on the next cycle',
     async (failure) => {
@@ -326,11 +340,11 @@ describe('ProjectSyncStatus', () => {
     const url = new URL(String(fetcher.mock.calls[0]?.[0]), 'https://daemon.example')
     expect(url.pathname).toBe('/api/v1/projects/7/federation/status')
     expect(url.searchParams.get('compact')).toBe('true')
+    expect(url.searchParams.get('omit_errors')).toBe('true')
     expect(screen.getByText('Retained window: 3/32 (limited)')).not.toBeNull()
     expect(screen.getByText('Retained without index: 1')).not.toBeNull()
     expect(screen.getByText('Recipe: example-model (2 dimensions)')).not.toBeNull()
     expect(screen.getByText('Sync needs attention')).not.toBeNull()
-    expect(screen.queryByText('private-token-never-display')).toBeNull()
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 

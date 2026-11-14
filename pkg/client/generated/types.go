@@ -2825,41 +2825,44 @@ func (f FederationJoinInstructions) Validate() error {
 }
 
 type FederationProjectStatus struct {
-	ActiveQuarantineCount       int64                         `json:"active_quarantine_count"`
-	ActiveQuarantines           []FederationQuarantineSummary `json:"active_quarantines" validate:"required"`
-	AllowInsecure               *bool                         `json:"allow_insecure,omitempty"`
-	BoundActor                  *string                       `json:"bound_actor,omitempty"`
-	Capabilities                *string                       `json:"capabilities,omitempty"`
-	CredentialExpiresAt         *time.Time                    `json:"credential_expires_at,omitempty"`
-	CredentialStatus            *string                       `json:"credential_status,omitempty"`
-	Embedding                   *FederationEmbeddingStatus    `json:"embedding,omitempty"`
-	Enabled                     bool                          `json:"enabled"`
-	EnrollmentCount             int64                         `json:"enrollment_count"`
-	HubProjectID                *int64                        `json:"hub_project_id,omitempty"`
-	HubProjectUID               *string                       `json:"hub_project_uid,omitempty"`
-	HubURL                      *string                       `json:"hub_url,omitempty"`
-	LastError                   *string                       `json:"last_error,omitempty"`
-	LastErrorAt                 *time.Time                    `json:"last_error_at,omitempty"`
-	LastPullStartedAt           *time.Time                    `json:"last_pull_started_at,omitempty"`
-	LastPullSuccessAt           *time.Time                    `json:"last_pull_success_at,omitempty"`
-	LastPushStartedAt           *time.Time                    `json:"last_push_started_at,omitempty"`
-	LastPushSuccessAt           *time.Time                    `json:"last_push_success_at,omitempty"`
-	LastResetAt                 *time.Time                    `json:"last_reset_at,omitempty"`
-	LastSuccessfulSyncAt        *time.Time                    `json:"last_successful_sync_at,omitempty"`
-	LastSyncAt                  *time.Time                    `json:"last_sync_at,omitempty"`
-	LiveClaimCount              int64                         `json:"live_claim_count"`
-	PendingClaimCount           int64                         `json:"pending_claim_count"`
-	PendingPushCount            int64                         `json:"pending_push_count"`
-	PendingPushHighWaterEventID int64                         `json:"pending_push_high_water_event_id"`
-	ProjectID                   int64                         `json:"project_id"`
-	ProjectName                 string                        `json:"project_name" validate:"required"`
-	ProjectUID                  string                        `json:"project_uid" validate:"required"`
-	ProviderStatus              *string                       `json:"provider_status,omitempty"`
-	PullCursorEventID           int64                         `json:"pull_cursor_event_id"`
-	PushCursorEventID           int64                         `json:"push_cursor_event_id"`
-	PushEnabled                 bool                          `json:"push_enabled"`
-	RecentViolationCount        int64                         `json:"recent_violation_count"`
-	RecentViolations            []FederationViolationSummary  `json:"recent_violations" validate:"required"`
+	ActiveQuarantineCount int64                         `json:"active_quarantine_count"`
+	ActiveQuarantines     []FederationQuarantineSummary `json:"active_quarantines" validate:"required"`
+	AllowInsecure         *bool                         `json:"allow_insecure,omitempty"`
+	BoundActor            *string                       `json:"bound_actor,omitempty"`
+	Capabilities          *string                       `json:"capabilities,omitempty"`
+	CredentialExpiresAt   *time.Time                    `json:"credential_expires_at,omitempty"`
+	CredentialStatus      *string                       `json:"credential_status,omitempty"`
+	Embedding             *FederationEmbeddingStatus    `json:"embedding,omitempty"`
+	Enabled               bool                          `json:"enabled"`
+	EnrollmentCount       int64                         `json:"enrollment_count"`
+
+	// HasSyncError True when a sync error was recorded and omit_errors removed its text.
+	HasSyncError                *bool                        `json:"has_sync_error,omitempty"`
+	HubProjectID                *int64                       `json:"hub_project_id,omitempty"`
+	HubProjectUID               *string                      `json:"hub_project_uid,omitempty"`
+	HubURL                      *string                      `json:"hub_url,omitempty"`
+	LastError                   *string                      `json:"last_error,omitempty"`
+	LastErrorAt                 *time.Time                   `json:"last_error_at,omitempty"`
+	LastPullStartedAt           *time.Time                   `json:"last_pull_started_at,omitempty"`
+	LastPullSuccessAt           *time.Time                   `json:"last_pull_success_at,omitempty"`
+	LastPushStartedAt           *time.Time                   `json:"last_push_started_at,omitempty"`
+	LastPushSuccessAt           *time.Time                   `json:"last_push_success_at,omitempty"`
+	LastResetAt                 *time.Time                   `json:"last_reset_at,omitempty"`
+	LastSuccessfulSyncAt        *time.Time                   `json:"last_successful_sync_at,omitempty"`
+	LastSyncAt                  *time.Time                   `json:"last_sync_at,omitempty"`
+	LiveClaimCount              int64                        `json:"live_claim_count"`
+	PendingClaimCount           int64                        `json:"pending_claim_count"`
+	PendingPushCount            int64                        `json:"pending_push_count"`
+	PendingPushHighWaterEventID int64                        `json:"pending_push_high_water_event_id"`
+	ProjectID                   int64                        `json:"project_id"`
+	ProjectName                 string                       `json:"project_name" validate:"required"`
+	ProjectUID                  string                       `json:"project_uid" validate:"required"`
+	ProviderStatus              *string                      `json:"provider_status,omitempty"`
+	PullCursorEventID           int64                        `json:"pull_cursor_event_id"`
+	PushCursorEventID           int64                        `json:"push_cursor_event_id"`
+	PushEnabled                 bool                         `json:"push_enabled"`
+	RecentViolationCount        int64                        `json:"recent_violation_count"`
+	RecentViolations            []FederationViolationSummary `json:"recent_violations" validate:"required"`
 
 	// RelayCheckpointBytes Measured size in bytes of the signed relay reset checkpoint this root would build for the project now. Present only for hub projects rooted on this daemon.
 	RelayCheckpointBytes *int64 `json:"relay_checkpoint_bytes,omitempty"`

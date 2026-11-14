@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -80,6 +82,13 @@ func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 		require.NoError(t, err)
 	}
 	wrapped.failFor = broken.ID
+	require.NoError(t, store.RecordFederationSyncError(ctx, relayed.ID, errors.New("example sync failure"), time.Now().UTC()))
+	_, err = store.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
+		ProjectID: relayed.ID, Direction: db.FederationQuarantineDirectionPush,
+		FirstEventID: 7, LastEventID: 7, EventUIDs: []string{"example-event"},
+		Error: "example held-back batch failure", CreatedAt: time.Now().UTC(),
+	})
+	require.NoError(t, err)
 
 	server := daemon.NewServer(daemon.ServerConfig{DB: wrapped, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
@@ -113,8 +122,8 @@ func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 	require.Zero(t, statuses[broken.ID].RelayCheckpointCapacity)
 	require.Contains(t, statuses[broken.ID].RelayCheckpointError, "retained artifact manifest is malformed")
 
-	readProject := func(query string) api.FederationProjectStatus {
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/federation/status%s", httpServer.URL, relayed.ID, query), nil)
+	readProject := func(projectID int64, query string) (api.FederationProjectStatus, []byte) {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/federation/status%s", httpServer.URL, projectID, query), nil)
 		require.NoError(t, err)
 		request.Header.Set("Authorization", "Bearer bootstrap-test-token")
 		response, err := httpServer.Client().Do(request)
@@ -128,25 +137,44 @@ func TestFederationStatusRelayMeasurementAndCompactRead(t *testing.T) {
 		}
 		require.NoError(t, json.Unmarshal(data, &raw))
 		require.Len(t, raw.Statuses, 1)
-		if query == "" {
-			require.Contains(t, raw.Statuses[0], "relay_checkpoint_bytes")
-			require.Contains(t, raw.Statuses[0], "relay_checkpoint_capacity_bytes")
-		} else {
-			require.NotContains(t, raw.Statuses[0], "relay_checkpoint_bytes")
-			require.NotContains(t, raw.Statuses[0], "relay_checkpoint_capacity_bytes")
-		}
 		var body api.FederationStatusBody
 		require.NoError(t, json.Unmarshal(data, &body))
 		require.Len(t, body.Statuses, 1)
-		return body.Statuses[0]
+		return body.Statuses[0], data
 	}
-	full := readProject("")
+	full, _ := readProject(relayed.ID, "")
 	require.Equal(t, 2, wrapped.count(relayed.ID))
 	require.Positive(t, full.RelayCheckpointBytes)
 	require.EqualValues(t, db.RelayCheckpointCapacityBytes, full.RelayCheckpointCapacity)
-	compact := readProject("?compact=true")
+	compact, _ := readProject(relayed.ID, "?compact=true")
 	require.Equal(t, 2, wrapped.count(relayed.ID), "compact status must skip checkpoint measurement")
 	full.RelayCheckpointBytes = 0
 	full.RelayCheckpointCapacity = 0
-	require.Equal(t, full, compact)
+	require.Equal(t, "example sync failure", *full.LastError)
+	require.Len(t, full.ActiveQuarantines, 1)
+	require.Equal(t, "example held-back batch failure", full.ActiveQuarantines[0].Error)
+	t.Run("compact keeps diagnostic details", func(t *testing.T) {
+		require.Equal(t, full, compact)
+	})
+	t.Run("browser omits diagnostic details", func(t *testing.T) {
+		omitted, raw := readProject(relayed.ID, "?compact=true&omit_errors=true")
+		require.NotContains(t, string(raw), "example sync failure")
+		require.NotContains(t, string(raw), "example held-back batch failure")
+		want := full
+		want.LastError, want.HasSyncError = nil, true
+		want.ActiveQuarantines = slices.Clone(full.ActiveQuarantines)
+		want.ActiveQuarantines[0].Error = ""
+		require.Equal(t, want, omitted)
+	})
+	t.Run("omission without compact keeps measurement", func(t *testing.T) {
+		omitted, raw := readProject(broken.ID, "?omit_errors=true")
+		require.NotContains(t, string(raw), "retained artifact manifest is malformed")
+		require.Empty(t, omitted.RelayCheckpointError)
+		require.Equal(t, 2, wrapped.count(broken.ID))
+	})
+	t.Run("cleared sync error removes attention", func(t *testing.T) {
+		require.NoError(t, store.ClearFederationSyncError(ctx, relayed.ID))
+		_, raw := readProject(relayed.ID, "?compact=true&omit_errors=true")
+		require.NotContains(t, string(raw), `"has_sync_error":true`)
+	})
 }
