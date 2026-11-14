@@ -271,6 +271,8 @@ func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
 	_, err = d.AddLabel(ctx, issue.ID, "local", "tester")
 	require.NoError(t, err)
 	unapplyMove(t, d, issue, source, destination, false)
+	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: destination.ID, Actor: "tester"})
+	require.NoError(t, err)
 	var events []db.RemoteEvent
 	for i, kind := range []byte{0, 5, 7, 13} {
 		typ, payload := incrementalFuzzPayload(kind, issue.UID, "", 42)
@@ -316,8 +318,6 @@ func TestMoveRebuildKeepsHubEditInUnjoinedDestination(t *testing.T) {
 		comments, err = store.CommentsByIssue(ctx, issue.ID)
 		require.NoError(t, err)
 		require.Len(t, comments, 3)
-		_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: destination.ID, Actor: "tester", Force: true})
-		require.NoError(t, err)
 		_, _, _, err = store.RestoreProject(ctx, destination.ID, "tester")
 		require.NoError(t, err)
 		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: destination.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: destination.ID, HubProjectUID: destination.UID, Enabled: true, Actor: "tester"})

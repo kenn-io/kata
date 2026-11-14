@@ -582,7 +582,18 @@ func (s *Store) materializeFederatedProjectTxScoped(
 		if err := reconcileFederatedComments(ctx, tx, projectID, ids, view, issue.UID); err != nil {
 			return err
 		}
-		return reconcileFederatedLabels(ctx, tx, projectID, ids, view, issue.UID)
+		if err := reconcileFederatedLabels(ctx, tx, projectID, ids, view, issue.UID); err != nil {
+			return err
+		}
+		linkIDs, err := db.FederatedLinkIssueIDs(ctx, tx, projection)
+		if err != nil {
+			return err
+		}
+		links, err := federatedLinkRows(ctx, tx, nil, issue.UID)
+		if err != nil {
+			return err
+		}
+		return reconcileFederatedLinkRows(ctx, tx, projection, linkIDs, links, issue.UID)
 	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
 		payload := "{}"
 		var issueUID *string
@@ -849,6 +860,8 @@ func reconcileFederatedComments(
 	}
 	for commentUID, row := range existing {
 		if len(scope) > 0 {
+			// The lookup covers the project to find matching UIDs, but a moved
+			// issue must not delete comments outside its folded history.
 			continue
 		}
 		if _, ok := desired[commentUID]; ok {

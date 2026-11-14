@@ -173,6 +173,10 @@ func reconcileFederatedLinkGroup(
 	if err != nil {
 		return err
 	}
+	return reconcileFederatedLinkRows(ctx, tx, projection, issueIDs, existing)
+}
+
+func reconcileFederatedLinkRows(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueIDs map[string]int64, existing map[db.FoldLinkKey]federatedLinkRow, scope ...string) error {
 	desired := map[db.FoldLinkKey]federatedLinkRow{}
 	for _, edge := range projection.PresentLinks() {
 		key, state := edge.Key, edge.State
@@ -196,6 +200,15 @@ func reconcileFederatedLinkGroup(
 		return err
 	}
 	for key, row := range existing {
+		if len(scope) > 0 {
+			canonical := key
+			if canonical.Type == "related" && canonical.FromUID > canonical.ToUID {
+				canonical.FromUID, canonical.ToUID = canonical.ToUID, canonical.FromUID
+			}
+			if _, known := projection.Links[canonical]; !known {
+				continue
+			}
+		}
 		if _, ok := desired[key]; ok {
 			continue
 		}
@@ -204,6 +217,9 @@ func reconcileFederatedLinkGroup(
 		}
 	}
 	for key, row := range desired {
+		if len(scope) > 0 && key.FromUID != scope[0] && key.ToUID != scope[0] {
+			continue
+		}
 		author := nonEmptyFederationAuthor(row.author)
 		if existingRow, ok := existing[key]; ok {
 			if existingRow.fromID == row.fromID && existingRow.toID == row.toID && existingRow.author == author && (row.createdAt == "" || existingRow.createdAt == row.createdAt) {
@@ -397,18 +413,24 @@ func federatedLinkRows(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectIDs []int64,
+	scope ...string,
 ) (map[db.FoldLinkKey]federatedLinkRow, error) {
-	if len(projectIDs) == 0 {
+	if len(projectIDs) == 0 && len(scope) == 0 {
 		return map[db.FoldLinkKey]federatedLinkRow{}, nil
 	}
 	fromPlaceholders, fromArgs := postgresIDPlaceholders(projectIDs, 1)
 	toPlaceholders, toArgs := postgresIDPlaceholders(projectIDs, len(fromArgs)+1)
 	args := append(fromArgs, toArgs...)
 	//nolint:gosec // IN values use generated placeholders with separately bound integer IDs.
-	rows, err := tx.QueryContext(ctx, `SELECT l.id,l.from_issue_id,l.to_issue_id,
+	query := `SELECT l.id,l.from_issue_id,l.to_issue_id,
 l.from_issue_uid,l.to_issue_uid,l.type,l.author,l.created_at FROM links l
 JOIN issues f ON f.id=l.from_issue_id JOIN issues t ON t.id=l.to_issue_id
-WHERE f.project_id IN (`+fromPlaceholders+`) AND t.project_id IN (`+toPlaceholders+`)`, args...)
+WHERE f.project_id IN (` + fromPlaceholders + `) AND t.project_id IN (` + toPlaceholders + `)`
+	if len(scope) > 0 {
+		query = `SELECT l.id,l.from_issue_id,l.to_issue_id,l.from_issue_uid,l.to_issue_uid,l.type,l.author,l.created_at FROM links l WHERE l.from_issue_uid=$1 OR l.to_issue_uid=$1`
+		args = []any{scope[0]}
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,7 +60,12 @@ func checkFederatedMoveDetachedDestination(t *testing.T, store db.Storage) error
 	_, err := store.LeaveFederationReplica(ctx, target.ID)
 	require.NoError(t, err)
 	body := "standalone destination edit"
-	_, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Body: &body, Actor: "worker"})
+	title := "standalone title"
+	_, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Title: &title, Body: &body, Actor: "worker"})
+	require.NoError(t, err)
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "standalone comment"})
+	require.NoError(t, err)
+	_, err = store.AddLabel(ctx, issue.ID, "standalone", "worker")
 	require.NoError(t, err)
 	before, err := store.IssueByID(ctx, issue.ID)
 	require.NoError(t, err)
@@ -67,6 +73,23 @@ func checkFederatedMoveDetachedDestination(t *testing.T, store db.Storage) error
 	after, err := store.IssueByID(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, before, after, "source replay must preserve standalone destination state")
+	comments, err := store.CommentsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	require.Equal(t, "standalone comment", comments[0].Body)
+	labels, err := store.LabelsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Len(t, labels, 1)
+	require.Equal(t, "standalone", labels[0].Label)
+	other, err := store.CreateProject(ctx, "detached-later-target")
+	require.NoError(t, err)
+	winner := newRemoteEvent(t, other, &issue.UID, "issue.moved", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+1000, []byte(strings.ReplaceAll(string(move.Payload), target.UID, other.UID)))
+	_, err = store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{winner})
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, source.ID))
+	after, err = store.IssueByID(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "a later move must not take an issue from a detached project")
 	_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "worker")
 	require.NoError(t, err)
 	_, err = store.PurgeIssue(ctx, issue.ID, "worker", nil)
