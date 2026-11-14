@@ -90,10 +90,6 @@ preserving its comments and local state while removing it from the source projec
 To subscribe later, run `kata projects restore <local-name>`, optionally run
 `kata projects rename <local-name> <chosen-name>`, then rerun the enrollment's
 join command using `--project <current-local-name>`.
-A restored project also exposes the issue's history at
-`GET /api/v1/projects/{project_id}/events?issue={issue_uid}`.
-A counterpart that was unbound when admitted cannot be purged or merged until
-the dependent route leaves, even if it is later joined or its history is purged.
 Upgrade both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
 move history instead of applying a payload they cannot understand. Moves preserve
 stable UIDs, nesting, state, comments, and links. Established author and
