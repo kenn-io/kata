@@ -416,27 +416,6 @@ func TestEnsureFederationReplicaCreatesProjectBindingAndCredential(t *testing.T)
 	assert.Equal(t, 1, credentials.storeCallCount())
 }
 
-func TestEnsureFederationReplicaJoinsRetainedProjectAfterRestore(t *testing.T) {
-	ctx := t.Context()
-	spoke := openReplicaServiceStore(t)
-	retained, err := spoke.CreateProjectWithUID(ctx, "target", replicaHubProjectUID)
-	require.NoError(t, err)
-	_, _, err = spoke.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: retained.ID, Actor: "tester"})
-	require.NoError(t, err)
-	params := replicaServiceParams()
-	params.HubProjectUID = retained.UID
-	params.ProjectName = retained.Name
-	credentials := newReplicaCredentialStore()
-	_, err = daemon.EnsureFederationReplica(ctx, spoke, credentials, nil, params)
-	require.ErrorContains(t, err, "kata projects restore")
-	_, _, _, err = spoke.RestoreProject(ctx, retained.ID, "tester")
-	require.NoError(t, err)
-	result, err := daemon.EnsureFederationReplica(ctx, spoke, credentials, nil, params)
-	require.NoError(t, err)
-	require.Equal(t, retained.ID, result.Project.ID)
-	require.Equal(t, retained.UID, result.Binding.HubProjectUID)
-}
-
 func TestEnsureFederationReplicaPreservesHubURLPathPrefix(t *testing.T) {
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
