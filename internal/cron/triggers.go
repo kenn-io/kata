@@ -33,7 +33,7 @@ func (t Trigger) validate() (cron.Schedule, error) {
 		var err error
 		schedule, err = ParseCron(t.Cron)
 		if err != nil {
-			return nil, invalid("invalid cron expression")
+			return nil, err
 		}
 	case "interval":
 		if t.IntervalSeconds <= 0 {
@@ -91,6 +91,11 @@ var cronParser = cron.MustNewParser(cron.Minute | cron.Hour | cron.Dom | cron.Mo
 // ParseCron preserves the shared five-field and descriptor grammar. Callers
 // evaluating schedules must use this parser rather than another cron dialect.
 // The parser rejects a TZ= or CRON_TZ= directive without a following schedule.
+// Rejections wrap ErrInvalid and explain the unsupported input.
 func ParseCron(expression string) (cron.Schedule, error) {
-	return cronParser.Parse(expression)
+	schedule, err := cronParser.Parse(expression)
+	if err != nil {
+		return nil, explainCron(expression, err)
+	}
+	return schedule, nil
 }
