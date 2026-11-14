@@ -1,7 +1,7 @@
 ---
 title: Diagnosing setup
 description: Diagnose setup with kata doctor.
-last_edited: 2026-11-08
+last_edited: 2026-11-12
 ---
 
 # Diagnosing setup
@@ -64,6 +64,10 @@ files; remote process findings come from the selected daemon.
 | `daemon.embeddings` | Existing reconciler error and backlog aggregate | Check model/provider credentials and daemon logs. |
 | `daemon.docbank` | The daemon can resolve its `[docbank]` API key; Docbank itself is not contacted, and `local = true` has no key source to check | Fix the key source the check names on the daemon host; see the [key file rules](../reference/configuration.md#credentials-and-batching). |
 | `daemon.federation` | Declarative mapping convergence | Resolve pending/conflicting mappings and credential origin problems. |
+
+For federation signing and ingress validation failures, `config.daemon` includes
+the reason in `details`. Other configuration errors, parser text, unknown key
+names and credentials remain omitted from reports.
 
 Doctor checks the same project name as ordinary commands: `--project`, then
 `[project].name` in `.kata.toml`. Project lookup uses an exact name and GET

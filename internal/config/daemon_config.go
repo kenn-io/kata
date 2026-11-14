@@ -384,6 +384,16 @@ func (c CloseThrottleConfig) ThrottleWindow() (time.Duration, error) {
 	return d, nil
 }
 
+// SafeDiagnosticError marks a configuration error whose text contains no
+// credentials, file contents, or parser output. It may name a validated
+// address or field and is suitable for display in diagnostic reports.
+type SafeDiagnosticError struct {
+	err error
+}
+
+func (e *SafeDiagnosticError) Error() string { return e.err.Error() }
+func (e *SafeDiagnosticError) Unwrap() error { return e.err }
+
 // ReadDaemonConfig parses <KATA_HOME>/config.toml. Returns a zero-value
 // DaemonConfig and nil error when the file is absent — daemon startup
 // should not fail just because the file isn't there. Other I/O or parse
@@ -578,8 +588,10 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 	if err := normalizeDaemonCatalog(&cfg); err != nil {
 		return nil, err
 	}
+	// SafeDiagnosticError shows these errors in kata doctor, so errors added to
+	// normalizeFederationSigning must not contain credentials, file contents, or parser output.
 	if err := normalizeFederationSigning(&cfg, filepath.Dir(path)); err != nil {
-		return nil, err
+		return nil, &SafeDiagnosticError{err: err}
 	}
 	if err := validateFederationConfig(&cfg); err != nil {
 		return nil, err

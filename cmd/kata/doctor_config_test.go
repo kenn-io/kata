@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/diagnostics"
 )
 
@@ -22,15 +23,17 @@ func doctorFinding(t *testing.T, r diagnostics.Report, id string) diagnostics.Ch
 }
 
 func TestDoctorLocalConfiguration(t *testing.T) {
-	for _, tc := range []struct{ name, file, content, id, status string }{
-		{"missing daemon config", "", "", "config.daemon", "info"},
-		{"invalid daemon config", "config.toml", "[auth]\ntoken = [secret-token\n", "config.daemon", "fail"},
-		{"unknown daemon key", "config.toml", "litsen = '127.0.0.1:7777'", "config.daemon", "fail"},
-		{"untrusted web origin", "config.toml", untrustedWebConfig, "config.daemon", "fail"},
-		{"invalid display config", "config.toml", "[display]\nmarkdown_renderer=['']", "config.daemon", "fail"},
-		{"invalid create config", "config.toml", "[create]\ndefault_priority=5", "config.daemon", "fail"},
-		{"unknown hook key", "hooks.toml", "[hooks]\npol_size=2", "config.hooks", "fail"},
-		{"missing hooks", "", "", "config.hooks", "info"},
+	for _, tc := range []struct{ name, file, content, id, status, detail string }{
+		{"missing daemon config", "", "", "config.daemon", "info", ""},
+		{"invalid daemon config", "config.toml", "[auth]\ntoken = [secret-token\n", "config.daemon", "fail", ""},
+		{"unknown daemon key", "config.toml", "litsen = '127.0.0.1:7777'", "config.daemon", "fail", ""},
+		{"ingress without signing", "config.toml", "[federation.ingress]\nenabled = true", "config.daemon", "fail", "federation.ingress requires federation signing configuration"},
+		{"signing plain HTTP", "config.toml", "[federation.signing]\nexternal_url = 'http://hub.example'\n[[federation.signing.key]]\nkey_id = 'key-a'\nkey_env = 'TEST_SIGNING_KEY'\nenrollment_id = 1", "config.daemon", "fail", "daemon error"},
+		{"untrusted web origin", "config.toml", untrustedWebConfig, "config.daemon", "fail", ""},
+		{"invalid display config", "config.toml", "[display]\nmarkdown_renderer=['']", "config.daemon", "fail", ""},
+		{"invalid create config", "config.toml", "[create]\ndefault_priority=5", "config.daemon", "fail", ""},
+		{"unknown hook key", "hooks.toml", "[hooks]\npol_size=2", "config.hooks", "fail", ""},
+		{"missing hooks", "", "", "config.hooks", "info", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home, workspace := doctorTestEnv(t)
@@ -39,7 +42,17 @@ func TestDoctorLocalConfiguration(t *testing.T) {
 			}
 			flags = globalFlags{Workspace: workspace}
 			r := collectDoctor(t.Context())
-			require.EqualValues(t, tc.status, doctorFinding(t, r, tc.id).Status)
+			finding := doctorFinding(t, r, tc.id)
+			require.EqualValues(t, tc.status, finding.Status)
+			if tc.detail == "daemon error" {
+				_, err := config.ReadDaemonConfig()
+				require.Error(t, err)
+				require.Equal(t, []string{err.Error()}, finding.Details)
+			} else if tc.detail != "" {
+				require.Contains(t, finding.Details, tc.detail)
+			} else {
+				require.Empty(t, finding.Details)
+			}
 			data, err := json.Marshal(r)
 			require.NoError(t, err)
 			require.NotContains(t, string(data), "secret-token")

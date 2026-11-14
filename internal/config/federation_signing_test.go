@@ -70,6 +70,23 @@ enabled = true
 	require.ErrorContains(t, err, "federation.ingress requires federation signing")
 }
 
+func TestFederationSigningErrorIsSafeAndPreservesIdentity(t *testing.T) {
+	home := t.TempDir()
+	content := `[federation.signing]
+external_url = "http://hub.example"
+[[federation.signing.key]]
+key_id = "key-a"
+key_env = "TEST_SIGNING_KEY"
+enrollment_id = 1
+`
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(content), 0600))
+	_, err := config.ReadDaemonConfigForHome(home)
+	require.ErrorIs(t, err, signingpolicy.ErrInvalid)
+	var safe *config.SafeDiagnosticError
+	require.ErrorAs(t, err, &safe)
+	require.Equal(t, signingpolicy.ErrInvalid.Error(), safe.Error())
+}
+
 func TestFederationSigningConfigReadDefersSecretValidationToDaemonVerifier(t *testing.T) {
 	t.Setenv("TEST_DAEMON_SIGNING_KEY", "")
 	t.Setenv("TEST_DUPLICATE_SIGNING_KEY", strings.Repeat("k", 64))
