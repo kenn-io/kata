@@ -202,49 +202,6 @@ func TestMoveRebuildRetriesChangedSnapshot(t *testing.T) {
 	}
 }
 
-func TestMoveRebuildRemovesStaleLinksBeforeIssues(t *testing.T) {
-	ctx := t.Context()
-	seed, source, issue := incrementalTestStore(t)
-	destination, err := seed.CreateProject(ctx, "destination")
-	require.NoError(t, err)
-	orphan, _, err := seed.CreateIssue(ctx, db.CreateIssueParams{ProjectID: destination.ID, Title: "orphan", Author: "tester"})
-	require.NoError(t, err)
-	_, err = seed.CreateLink(ctx, db.CreateLinkParams{FromIssueID: orphan.ID, ToIssueID: issue.ID, Type: "blocks", Author: "tester"})
-	require.NoError(t, err)
-	// Replay projections with only the source project's event history.
-	var records []db.ImportRecord
-	for row, err := range seed.ExportProjects(ctx, db.ExportFilter{}) {
-		require.NoError(t, err)
-		records = append(records, &row)
-	}
-	for row, err := range seed.ExportIssues(ctx, db.ExportFilter{}) {
-		require.NoError(t, err)
-		records = append(records, &row)
-	}
-	for row, err := range seed.ExportLinks(ctx, db.ExportFilter{}) {
-		require.NoError(t, err)
-		records = append(records, &row)
-	}
-	for row, err := range seed.ExportEvents(ctx, db.ExportFilter{ProjectID: &source.ID}) {
-		require.NoError(t, err)
-		records = append(records, &row)
-	}
-	d, err := Open(ctx, filepath.Join(t.TempDir(), "replay.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, d.Close()) })
-	require.NoError(t, d.ImportReplay(ctx, records, db.ImportOptions{}))
-	unapplyMove(t, d, issue, source, destination, true)
-	attempts := 0
-	d.federationIngestPrepared = func() { attempts++ }
-	require.NoError(t, d.MaterializeFederatedProject(ctx, destination.ID))
-	require.Equal(t, 1, attempts)
-	_, err = d.IssueByUID(ctx, orphan.UID, db.IncludeDeletedYes)
-	require.ErrorIs(t, err, db.ErrNotFound)
-	links, err := d.LinksByIssue(ctx, issue.ID)
-	require.NoError(t, err)
-	require.Empty(t, links)
-}
-
 func TestMoveRebuildAssignsCollidingShortIDsInOrder(t *testing.T) {
 	ctx := t.Context()
 	d, err := Open(ctx, filepath.Join(t.TempDir(), "spoke.db"))

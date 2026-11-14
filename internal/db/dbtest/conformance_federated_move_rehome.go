@@ -65,6 +65,47 @@ func replayFederatedRehome(t *testing.T, store db.Storage, target db.Project, ev
 	}
 }
 
+func checkFederatedMovePullClaimError(t *testing.T, hub db.Storage, backend Backend) error {
+	ctx := t.Context()
+	source, err := hub.CreateProject(ctx, "pull-claim-source")
+	require.NoError(t, err)
+	target, err := hub.CreateProject(ctx, "pull-claim-target")
+	require.NoError(t, err)
+	for _, project := range []db.Project{source, target} {
+		_, err = hub.EnableProjectFederation(ctx, project.ID, "worker")
+		require.NoError(t, err)
+	}
+	issue, created, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "claimed", Author: "worker"})
+	require.NoError(t, err)
+	move, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	spoke := backend.Open(t)
+	t.Cleanup(func() { require.NoError(t, spoke.Close()) })
+	localSource, err := spoke.CreateProjectWithUID(ctx, "source", source.UID)
+	require.NoError(t, err)
+	localTarget, err := spoke.CreateProjectWithUID(ctx, "target", target.UID)
+	require.NoError(t, err)
+	prepareRehomePull(t, spoke, localSource, localTarget, "pull")
+	_, err = spoke.InsertRemoteEvents(ctx, localSource.ID, []db.RemoteEvent{portableNativeEvent(created)})
+	require.NoError(t, err)
+	require.NoError(t, spoke.MaterializeFederatedProject(ctx, localSource.ID))
+	localIssue, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	binding, _, err := spoke.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{ProjectID: localSource.ID, IssueID: localIssue.ID, ConnectorInstance: "notes", ExternalRootKey: "root-key", ExternalAccountKey: "account-key", Actor: "worker", ReceiveCommentsAfter: time.Now().UTC()})
+	require.NoError(t, err)
+	_, _, err = spoke.ClaimExternalRootBinding(ctx, binding.ID, "bridge-worker", time.Now().UTC(), time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter))
+	require.NoError(t, err)
+	event := portableNativeEvent(*move.Event)
+	_, err = spoke.InsertRemoteEvents(ctx, localTarget.ID, []db.RemoteEvent{event})
+	require.NoError(t, err)
+	err = spoke.MaterializeFederatedProject(ctx, localTarget.ID)
+	require.ErrorIs(t, err, db.ErrExternalRootClaimActive)
+	require.ErrorContains(t, err, "apply move")
+	require.ErrorContains(t, err, event.EventUID)
+	require.ErrorContains(t, err, event.ProjectUID)
+	return nil
+}
+
 func checkFederatedMoveReplayAccessRevision(t *testing.T, store db.Storage) error {
 	for _, mode := range []string{"push", "pull"} {
 		t.Run(mode, func(t *testing.T) {
