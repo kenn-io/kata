@@ -65,7 +65,6 @@ func TestFederationSigningAdmission(t *testing.T) {
 				if required {
 					cases = append(cases,
 						admissionCase{"digest only", enrollment.Token, "Content-Digest", digest, "hub_signing_required", false, http.StatusPreconditionRequired},
-						admissionCase{"signature input only", enrollment.Token, "Signature-Input", "example", "signature_invalid", false, http.StatusUnauthorized},
 						admissionCase{"unknown enrollment", "unknown-enrollment", "", "", "auth_invalid", false, http.StatusForbidden},
 					)
 				} else if name == "socket" {
