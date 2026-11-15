@@ -154,20 +154,20 @@ func filterRelayCrossProjectLinkEvents(
 	tx *sql.Tx,
 	projectIDs []int64,
 	events []db.FoldEvent,
-) ([]db.FoldEvent, error) {
+) ([]db.FoldEvent, relayOriginClassifier, error) {
 	if len(projectIDs) == 0 || len(events) == 0 {
-		return events, nil
+		return events, relayOriginClassifier{}, nil
 	}
 	classifier, err := loadRelayOriginClassifier(ctx, tx, projectIDs)
 	if err != nil {
-		return nil, err
+		return nil, classifier, err
 	}
 	if !slices.ContainsFunc(events, classifier.relaySourced) {
-		return events, nil
+		return events, classifier, nil
 	}
 	issueProjects, err := relayLinkEndpointProjects(ctx, tx, events)
 	if err != nil {
-		return nil, err
+		return nil, classifier, err
 	}
 
 	for _, event := range events {
@@ -177,7 +177,7 @@ func filterRelayCrossProjectLinkEvents(
 	}
 	authority, err := relayFoldAuthorityTx(ctx, tx, issueProjects)
 	if err != nil {
-		return nil, err
+		return nil, classifier, err
 	}
 	filtered := make([]db.FoldEvent, 0, len(events))
 	for _, event := range events {
@@ -187,13 +187,13 @@ func filterRelayCrossProjectLinkEvents(
 		}
 		stripped, keep, err := db.StripCrossProjectLinkAdditions(event, authority.Policy(event))
 		if err != nil {
-			return nil, err
+			return nil, classifier, err
 		}
 		if keep {
 			filtered = append(filtered, stripped)
 		}
 	}
-	return filtered, nil
+	return filtered, classifier, nil
 }
 
 // relayLinkEndpointProjects resolves only issue UIDs referenced by this fold.
@@ -319,7 +319,16 @@ func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]str
 	return a, nil
 }
 
-func relayFoldEventsTx(ctx context.Context, tx *sql.Tx, events []db.FoldEvent) (db.FoldProjection, error) {
+func relayFoldEventsTx(ctx context.Context, tx *sql.Tx, events []db.FoldEvent, classifier relayOriginClassifier) (db.FoldProjection, error) {
+	relayEvents := make(map[string]bool)
+	for _, event := range events {
+		if classifier.relaySourced(event) {
+			relayEvents[event.UID] = true
+		}
+	}
+	if len(relayEvents) == 0 {
+		return db.FoldEvents(events), nil
+	}
 	owners, err := relayLinkEndpointProjects(ctx, tx, events)
 	if err != nil {
 		return db.FoldProjection{}, err
@@ -333,5 +342,7 @@ func relayFoldEventsTx(ctx context.Context, tx *sql.Tx, events []db.FoldEvent) (
 	if err != nil {
 		return db.FoldProjection{}, err
 	}
-	return db.FoldRelayLinkEvents(events, authority.AllowParentRemoval), nil
+	return db.FoldRelayLinkEvents(events, func(child, parent string, previous, next db.FoldClock) bool {
+		return !relayEvents[next.EventUID] || authority.AllowParentRemoval(child, parent, previous, next)
+	}), nil
 }

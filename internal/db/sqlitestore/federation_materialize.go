@@ -252,7 +252,7 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 	if err != nil {
 		return err
 	}
-	m.links, err = relayFoldEventsTx(ctx, tx, events)
+	m.links, err = relayFoldEventsTx(ctx, tx, events, m.relayOrigins)
 	return err
 }
 

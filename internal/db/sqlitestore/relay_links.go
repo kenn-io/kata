@@ -324,7 +324,16 @@ func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]str
 	return a, nil
 }
 
-func relayFoldEventsTx(ctx context.Context, tx *sql.Tx, events []db.FoldEvent) (db.FoldProjection, error) {
+func relayFoldEventsTx(ctx context.Context, tx *sql.Tx, events []db.FoldEvent, classifier relayOriginClassifier) (db.FoldProjection, error) {
+	relayEvents := make(map[string]bool)
+	for _, event := range events {
+		if classifier.relaySourced(event) {
+			relayEvents[event.UID] = true
+		}
+	}
+	if len(relayEvents) == 0 {
+		return db.FoldEvents(events), nil
+	}
 	owners, err := relayLinkEndpointProjects(ctx, tx, events)
 	if err != nil {
 		return db.FoldProjection{}, err
@@ -338,5 +347,7 @@ func relayFoldEventsTx(ctx context.Context, tx *sql.Tx, events []db.FoldEvent) (
 	if err != nil {
 		return db.FoldProjection{}, err
 	}
-	return db.FoldRelayLinkEvents(events, authority.AllowParentRemoval), nil
+	return db.FoldRelayLinkEvents(events, func(child, parent string, previous, next db.FoldClock) bool {
+		return !relayEvents[next.EventUID] || authority.AllowParentRemoval(child, parent, previous, next)
+	}), nil
 }

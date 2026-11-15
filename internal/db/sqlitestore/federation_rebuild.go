@@ -184,7 +184,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 				return preparedFederationRebuild{}, err
 			}
 		}
-		m.links, err = relayFoldEventsTx(ctx, tx, events)
+		m.links, err = relayFoldEventsTx(ctx, tx, events, m.relayOrigins)
 		if err != nil {
 			return preparedFederationRebuild{}, err
 		}

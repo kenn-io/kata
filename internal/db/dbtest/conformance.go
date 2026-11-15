@@ -205,6 +205,10 @@ var storageScenarios = []scenario{
 		RunArchivedPortableDataExport(t, store, backend)
 		return nil
 	}},
+	{name: "direct federation parent replacement", run: func(t *testing.T, store db.Storage) error {
+		RunDirectFederationParentReplacement(t, store)
+		return nil
+	}},
 	{name: "parent replacement with removed expected link", methods: []string{"CreateProject", "CreateIssue", "CreateLinkAndEvent", "DeleteLinkAndEvent", "ParentOf"}, run: func(t *testing.T, store db.Storage) error {
 		RunParentReplacementMissingExpectedLink(t, store)
 		return nil

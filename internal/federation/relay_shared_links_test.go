@@ -1,6 +1,7 @@
 package federation_test
 
 import (
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,9 +54,19 @@ func TestRelaySharedLinksAcrossHops(t *testing.T) {
 					body, err := io.ReadAll(response.Body)
 					require.NoError(t, err)
 					require.NoError(t, response.Body.Close())
-					require.Equal(t, http.StatusConflict, response.StatusCode, string(body))
-					require.Contains(t, string(body), "unsupported_event_features")
-					require.Contains(t, string(body), db.RelayCrossLinksEventFeature)
+					if path == "/federation/relay?stream=events" {
+						require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+						var batch db.RelayBatch
+						require.NoError(t, json.Unmarshal(body, &batch))
+						require.NotEmpty(t, batch.Envelopes)
+						for _, envelope := range batch.Envelopes {
+							require.NotEqual(t, linkEvent.UID, envelope.SourceUID)
+						}
+					} else {
+						require.Equal(t, http.StatusConflict, response.StatusCode, string(body))
+						require.Contains(t, string(body), "unsupported_event_features")
+						require.Contains(t, string(body), db.RelayCrossLinksEventFeature)
+					}
 				}
 				order := []int{0, 1}
 				if reverse {

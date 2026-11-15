@@ -89,7 +89,7 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 			if err != nil {
 				return err
 			}
-			for _, envelope := range output {
+			for i, envelope := range output {
 				event, err := db.DecodeRelaySourceEvent(envelope.Body)
 				if err != nil {
 					return err
@@ -106,7 +106,11 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 					return err
 				}
 				if err := db.RequireEventFeatures(db.RelayPeerEventFeatures(ctx), required); err != nil {
-					return err
+					if i == 0 {
+						return err
+					}
+					output, ids = output[:i], ids[:i]
+					break
 				}
 			}
 		}
