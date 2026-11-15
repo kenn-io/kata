@@ -17,15 +17,6 @@ import (
 // R4/R5: a root-signed checkpoint and the live immediate-hop translation
 // replace state together. Source labels alone never confer verified creation.
 func RunSignedRelayResetCommitments(t *testing.T, store db.Storage) {
-	runSignedRelayResetCommitments(t, store, false)
-}
-
-// RunSignedRelayResetPurgedPeer checks a forwarded checkpoint after its peer is purged.
-func RunSignedRelayResetPurgedPeer(t *testing.T, store db.Storage) {
-	runSignedRelayResetCommitments(t, store, true)
-}
-
-func runSignedRelayResetCommitments(t *testing.T, store db.Storage, purgedPeer bool) {
 	installer, ok := store.(interface {
 		InstallRelayReset(context.Context, string, db.RootResetManifest, db.RootResetSnapshot, db.RelayResetTranslation) error
 	})
@@ -55,13 +46,7 @@ func runSignedRelayResetCommitments(t *testing.T, store db.Storage, purgedPeer b
 	proof, err := db.SignRootReceipt(db.AttributionReceipt{Version: 1, ProjectUID: project.UID, EventUID: source.EventUID, ContentHash: source.ContentHash, AuthorityUID: rootUID, KeyID: pin.KeyID, AccountableActor: "company-member", SourceActor: source.Actor, IngressInstanceUID: rootUID, AcceptedAt: time.Now().UTC(), ResetEpoch: 1, Sequence: 1}, private)
 	require.NoError(t, err)
 	// Snapshots describe current state but are not original creation events.
-	peerUID, err := uid.New()
-	require.NoError(t, err)
-	links := `[]`
-	if purgedPeer {
-		links = `[{"type":"blocks","to_issue_uid":"` + peerUID + `"}]`
-	}
-	entity := newRemoteEvent(t, project, &issueUID, "issue.snapshot", "source-assistant", rootUID, 400, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"After snapshot","author":"source-assistant","metadata":{},"comments":[],"labels":[],"links":`+links+`}`)))
+	entity := newRemoteEvent(t, project, &issueUID, "issue.snapshot", "source-assistant", rootUID, 400, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"After snapshot","author":"source-assistant","metadata":{},"comments":[],"labels":[],"links":[]}`)))
 	entityBytes, err := db.EncodeRelaySourceEvent(entity)
 	require.NoError(t, err)
 	events, err := json.Marshal([][]byte{sourceBytes})
@@ -152,25 +137,6 @@ func runSignedRelayResetCommitments(t *testing.T, store db.Storage, purgedPeer b
 	childRequired, err := store.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, child.Enrollment.RelayBindingUID)
 	require.NoError(t, err)
 	require.True(t, childRequired, "the downstream grant is moved to the forwarded checkpoint")
-	var peerProject db.Project
-	var peerIssue db.Issue
-	if purgedPeer {
-		before := relayStateForBinding(t, store, child.Enrollment.RelayBindingUID)
-		features := db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures)
-		withheld, err := store.(db.RelayResetStore).CreateRelayReset(features, child.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
-		require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
-		require.Equal(t, db.RelayResetCheckpoint{}, withheld)
-		after := relayStateForBinding(t, store, child.Enrollment.RelayBindingUID)
-		require.Equal(t, before, after)
-		peerProject, err = store.CreateProject(ctx, "resolved-reset-peer")
-		require.NoError(t, err)
-		peerIssue, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: peerProject.ID, UID: peerUID, Author: "member", Title: "Resolved peer"})
-		require.NoError(t, err)
-		resolved, err := store.(db.RelayResetStore).CreateRelayReset(features, child.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
-		require.NoError(t, err)
-		require.Equal(t, manifest, resolved.Manifest)
-		require.Equal(t, snapshot, resolved.Snapshot)
-	}
 	require.NoError(t, store.RevokeFederationEnrollment(ctx, child.Enrollment.ID))
 	issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
@@ -187,8 +153,9 @@ func runSignedRelayResetCommitments(t *testing.T, store db.Storage, purgedPeer b
 	require.Equal(t, int64(19), binding.RelayConfig.ResetEpoch)
 	require.NoError(t, installer.InstallRelayReset(ctx, bindingUID, manifest, snapshot, translation), "lost commit response retries the exact retained checkpoint")
 	cursors := map[string]int64{}
-	for _, record := range relayStateForBinding(t, store, bindingUID) {
-		if cursor, ok := record.(*db.RelayCursorExport); ok && cursor.ResetEpoch == 19 {
+	for record, err := range store.ExportRelayState(ctx) {
+		require.NoError(t, err)
+		if cursor, ok := record.(*db.RelayCursorExport); ok && cursor.BindingUID == bindingUID && cursor.ResetEpoch == 19 {
 			cursors[cursor.Stream] = cursor.AcceptedThrough
 			require.Equal(t, cursor.AcceptedThrough, cursor.OfferedThrough)
 			require.Zero(t, cursor.AcknowledgedThrough)
@@ -212,15 +179,10 @@ func runSignedRelayResetCommitments(t *testing.T, store db.Storage, purgedPeer b
 		CreateRelayReset(context.Context, string, db.RootAttributionSigner) (db.RelayResetCheckpoint, error)
 	})
 	require.True(t, ok)
-	if purgedPeer {
-		ctx = db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures)
-	}
 	forwardChild, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000009", ProtocolVersion: db.RelayProtocolVersion, Token: "reset-forward-child-test-token"})
 	require.NoError(t, err)
-	if !purgedPeer {
-		_, err = forwarder.CreateRelayReset(ctx, forwardChild.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
-		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush, "initial emitted child intent must be resolved first")
-	}
+	_, err = forwarder.CreateRelayReset(ctx, forwardChild.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
+	require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush, "initial emitted child intent must be resolved first")
 	for _, stream := range []string{db.RelayStreamEvent, db.RelayStreamReceipt} {
 		items, err := store.PendingRelayDeliveries(ctx, forwardChild.Enrollment.RelayBindingUID, stream, 100)
 		require.NoError(t, err)
@@ -228,33 +190,6 @@ func runSignedRelayResetCommitments(t *testing.T, store db.Storage, purgedPeer b
 			last := items[len(items)-1]
 			require.NoError(t, store.AckRelayDeliveries(ctx, forwardChild.Enrollment.RelayBindingUID, 1, stream, last.Sequence, last.Digest))
 		}
-	}
-	if purgedPeer {
-		_, err := store.PurgeIssue(ctx, peerIssue.ID, "member", nil)
-		require.NoError(t, err)
-		denied := db.WithProjectAccessTransactionCheck(ctx, func(_ context.Context, _ db.Transaction, projectUID string) error {
-			require.Equal(t, peerProject.UID, projectUID)
-			return db.ErrNotFound
-		})
-		beforeState := relayStateForBinding(t, store, forwardChild.Enrollment.RelayBindingUID)
-		before, err := store.FederationBindingByProject(ctx, project.ID)
-		require.NoError(t, err)
-		withheld, err := forwarder.CreateRelayReset(denied, forwardChild.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
-		require.ErrorIs(t, err, db.ErrNotFound, "the purged peer's project must be authorized")
-		require.Equal(t, db.RelayResetCheckpoint{}, withheld)
-		after, err := store.FederationBindingByProject(ctx, project.ID)
-		require.NoError(t, err)
-		require.Equal(t, before, after)
-		afterState := relayStateForBinding(t, store, forwardChild.Enrollment.RelayBindingUID)
-		require.Equal(t, beforeState, afterState)
-		purged, err := forwarder.CreateRelayReset(ctx, forwardChild.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
-		require.NoError(t, err)
-		require.Equal(t, manifest, purged.Manifest)
-		require.Equal(t, snapshot, purged.Snapshot)
-		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: peerProject.ID, UID: peerUID, Author: "member", Title: "Resolved peer"})
-		require.NoError(t, err)
-		_, err = forwarder.CreateRelayReset(denied, forwardChild.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
-		require.ErrorIs(t, err, db.ErrNotFound, "the resolved peer must be authorized")
 	}
 	forwarded, err := forwarder.CreateRelayReset(ctx, forwardChild.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
 	require.NoError(t, err, "relay must forward its retained signed checkpoint without a root private key")

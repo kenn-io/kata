@@ -42,7 +42,7 @@ The names above may differ, but all three copies retain the same project UID.
 Only the selected project travels over each connection. Workspace paths and
 aliases stay local. A relay does not grant access to the hub's other projects.
 
-A relay withholds an update or checkpoint when the account cannot access a referenced project or the referenced issue has not reached the relay. An ordered stream also holds back every update behind the blocked event. Sync the peer project to the relay or restore access to resume. References to purged comments and cross-project `name#id` references cannot be recovered and remain blocked.
+A relay withholds an update or checkpoint when the account cannot access a project it references. An ordered stream holds later updates until access is restored, and a retry releases the same signed bytes. References that do not resolve are released as before.
 
 Use a [remote daemon](../operations/remote-daemon.md) when every client needs
 to read and write one central copy. See [Sharing models](../workflows/sharing.md)

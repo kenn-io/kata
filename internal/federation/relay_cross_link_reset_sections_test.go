@@ -68,6 +68,12 @@ func TestRelayCrossLinkResetSections(t *testing.T) {
 					}
 					return nil
 				})
+				before := relayState(root.store)
+				_, err = rootResets.CreateRelayReset(ctx, binding.RelayConfig.BindingUID, root.signer)
+				require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+				_, err = rootResets.CreateRelayReset(rejectPeer, binding.RelayConfig.BindingUID, root.signer)
+				require.ErrorIs(t, err, denied)
+				require.Equal(t, before, relayState(root.store))
 				checkpoint, err := rootResets.CreateRelayReset(features, binding.RelayConfig.BindingUID, root.signer)
 				require.NoError(t, err)
 				for name, raw := range map[string][]byte{"events": checkpoint.Snapshot.Events, "entities": checkpoint.Snapshot.Entities} {
@@ -81,6 +87,13 @@ func TestRelayCrossLinkResetSections(t *testing.T) {
 					}
 					require.Equal(t, name == section, found, "crossing belongs only to the selected section")
 				}
+				_, err = rootResets.CreateRelayReset(ctx, binding.RelayConfig.BindingUID, root.signer)
+				require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+				_, err = rootResets.CreateRelayReset(rejectPeer, binding.RelayConfig.BindingUID, root.signer)
+				require.ErrorIs(t, err, denied)
+				retry, err := rootResets.CreateRelayReset(features, binding.RelayConfig.BindingUID, root.signer)
+				require.NoError(t, err)
+				require.Equal(t, checkpoint, retry)
 				hubResets := hub.store.(db.RelayResetStore)
 				require.NoError(t, hubResets.InstallRelayReset(ctx, binding.RelayConfig.BindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation))
 				enrollRelayMatrixReplica(t, hub, leaf, "reset-leaf", false)
@@ -93,10 +106,13 @@ func TestRelayCrossLinkResetSections(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, checkpoint.Manifest, forwarded.Manifest)
 				require.Equal(t, checkpoint.Snapshot, forwarded.Snapshot)
-				before := relayState(hub.store)
+				before = relayState(hub.store)
 				_, err = hubResets.CreateRelayReset(rejectPeer, downstream.RelayConfig.BindingUID, db.RootAttributionSigner{})
 				require.ErrorIs(t, err, denied)
 				require.Equal(t, before, relayState(hub.store))
+				retry, err = hubResets.CreateRelayReset(features, downstream.RelayConfig.BindingUID, db.RootAttributionSigner{})
+				require.NoError(t, err)
+				require.Equal(t, forwarded, retry)
 			})
 		}
 	}

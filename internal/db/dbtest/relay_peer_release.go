@@ -84,13 +84,13 @@ func RunRelayCommentReplyRelease(t *testing.T, store db.Storage) {
 	})
 	require.NoError(t, err)
 	offered, err = store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
-	require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
-	require.Empty(t, offered)
+	require.NoError(t, err)
+	require.NotEmpty(t, offered)
 }
 
 // RunRelayPeerRelease checks whole-response refusal and retained retries.
-func RunRelayPeerRelease(t *testing.T, store db.Storage, purgedPeer bool) {
-	fixture := newRelaySharedAccessFixture(t, store, purgedPeer)
+func RunRelayPeerRelease(t *testing.T, store db.Storage) {
+	fixture := NewRelaySharedAccessFixture(t, store)
 	binding := fixture.Grant.Enrollment.RelayBindingUID
 	ctx := db.WithRelayPeerEventFeatures(t.Context(), db.SupportedEventFeatures)
 	denied := errors.New("peer denied")
@@ -100,12 +100,8 @@ func RunRelayPeerRelease(t *testing.T, store db.Storage, purgedPeer bool) {
 		}
 		return nil
 	})
-	if !purgedPeer {
-		_, err := store.PendingRelayDeliveries(t.Context(), binding, db.RelayStreamEvent, 100)
-		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-		_, err = store.(db.RelayResetStore).CreateRelayReset(t.Context(), binding, fixture.Signer)
-		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-	}
+	_, err := store.(db.RelayResetStore).CreateRelayReset(t.Context(), binding, fixture.Signer)
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
 	before := relayStateForBinding(t, store, binding)
 	grants, err := store.ListProjectFederationEnrollments(ctx, fixture.Projects[0].ID)
 	require.NoError(t, err)
@@ -119,9 +115,6 @@ func RunRelayPeerRelease(t *testing.T, store db.Storage, purgedPeer bool) {
 	offered, err := store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
 	require.NoError(t, err)
 	require.NotEmpty(t, offered)
-	if purgedPeer {
-		return
-	}
 	var crossing db.RelayEnvelope
 	for _, envelope := range offered {
 		if envelope.SourceUID == fixture.Linked.UID {
@@ -184,28 +177,4 @@ func RunRelayPeerRelease(t *testing.T, store db.Storage, purgedPeer bool) {
 	repeated, err = reset.CreateRelayReset(activated, binding, fixture.Signer)
 	require.NoError(t, err)
 	require.Equal(t, checkpoint, repeated)
-}
-
-// RunRelayMissingNotification refuses an event whose comment owner is gone.
-func RunRelayMissingNotification(t *testing.T, store db.Storage) {
-	fixture := NewRelaySharedAccessFixture(t, store)
-	ctx := db.WithRelayPeerEventFeatures(t.Context(), db.SupportedEventFeatures)
-	project, err := store.CreateProject(ctx, "comment-target-project")
-	require.NoError(t, err)
-	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Author: "member", Title: "Comment target"})
-	require.NoError(t, err)
-	comment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "member", Body: "Target"})
-	require.NoError(t, err)
-	_, err = store.PurgeIssue(ctx, target.ID, "member", nil)
-	require.NoError(t, err)
-	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: fixture.Issues[0].ID, Actor: "member", Patch: map[string]jsontext.Value{"notify.reader": jsontext.Value(fmt.Sprintf(`{"re":%q}`, comment.UID))}})
-	require.NoError(t, err)
-	binding := fixture.Grant.Enrollment.RelayBindingUID
-	before := relayStateForBinding(t, store, binding)
-	envelopes, err := store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
-	require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
-	require.Empty(t, envelopes)
-	require.Equal(t, before, relayStateForBinding(t, store, binding))
-	_, err = store.(db.RelayResetStore).CreateRelayReset(ctx, fixture.Grant.Enrollment.RelayBindingUID, fixture.Signer)
-	require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
 }

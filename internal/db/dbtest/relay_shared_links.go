@@ -21,10 +21,6 @@ type RelaySharedAccessFixture struct {
 // NewRelaySharedAccessFixture enrolls the same native pair for storage and
 // relay tests, keeping the initial regression at native admission.
 func NewRelaySharedAccessFixture(t *testing.T, store db.Storage) RelaySharedAccessFixture {
-	return newRelaySharedAccessFixture(t, store, false)
-}
-
-func newRelaySharedAccessFixture(t *testing.T, store db.Storage, purgePeer bool) RelaySharedAccessFixture {
 	t.Helper()
 
 	ctx := t.Context()
@@ -57,21 +53,11 @@ func newRelaySharedAccessFixture(t *testing.T, store db.Storage, purgePeer bool)
 			Author: "member", Title: "Shared endpoint"})
 		require.NoError(t, err)
 	}
-	var linked db.Event
-	if purgePeer {
-		result, err := store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: issues[0].ID, Actor: "member", AddBlocks: []int64{issues[1].ID}})
-		require.NoError(t, err)
-		require.Len(t, result.Events, 1)
-		linked = result.Events[0]
-		_, err = store.PurgeIssue(ctx, issues[1].ID, "member", nil)
-		require.NoError(t, err)
-	} else {
-		_, linked, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issues[0].ID,
-			ToIssueID: issues[1].ID, Type: "blocks", Author: "member"},
-			db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: "member",
-				FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
-		require.NoError(t, err)
-	}
+	_, linked, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issues[0].ID,
+		ToIssueID: issues[1].ID, Type: "blocks", Author: "member"},
+		db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: "member",
+			FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
+	require.NoError(t, err)
 	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: projects[0].ID,
 		ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000006",
 		ProtocolVersion: db.RelayProtocolVersion, Token: "first-shared-relay-test-token"})

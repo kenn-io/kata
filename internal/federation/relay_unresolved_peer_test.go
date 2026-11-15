@@ -8,7 +8,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestRelayUnresolvedPeerDeliveryRetry(t *testing.T) {
+func TestRelayUnresolvedPeerDelivery(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
@@ -48,19 +48,6 @@ func TestRelayUnresolvedPeerDeliveryRetry(t *testing.T) {
 			require.False(t, retained.Emitted)
 			features := db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures)
 			batch, err := hub.store.PendingRelayDeliveries(features, bindingUID, db.RelayStreamEvent, 100)
-			require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
-			require.Empty(t, batch)
-			peerHub := &relayMatrixNode{store: hub.store, http: hub.http, signer: hub.signer, userToken: hub.userToken, account: hub.account, credentials: hub.credentials}
-			root.project = projects[1]
-			enrollRelayMatrixReplica(t, root, peerHub, "hub-peer", true)
-			syncRelayMatrixNode(t, peerHub)
-			source, err := hub.store.IssueByUID(ctx, issues[0].UID, db.IncludeDeletedYes)
-			require.NoError(t, err)
-			links, err := hub.store.LinksByIssue(ctx, source.ID)
-			require.NoError(t, err)
-			require.Len(t, links, 1)
-			require.Equal(t, issues[1].UID, links[0].ToIssueUID)
-			batch, err = hub.store.PendingRelayDeliveries(features, bindingUID, db.RelayStreamEvent, 100)
 			require.NoError(t, err)
 			var expected db.RelayEnvelope
 			require.NoError(t, json.Unmarshal([]byte(retained.Envelope), &expected))

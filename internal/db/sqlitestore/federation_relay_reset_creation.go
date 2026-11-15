@@ -25,7 +25,7 @@ func (d *Store) CreateRelayReset(ctx context.Context, bindingUID string, signer 
 }
 
 func (b relayResetBackend) AuthorizeRelayRelease(ctx context.Context, projectUID string, events []db.RemoteEvent) error {
-	lookup := relayEventIssueLookup(db.WithoutIssueRegistries(db.WithAuthorizedProjects(ctx, nil)), b.tx)
+	lookup := eventIssueLookup(db.WithoutIssueRegistries(db.WithAuthorizedProjects(ctx, nil)), b.tx)
 	return db.AuthorizeRelayRelease(ctx, b.tx, lookup, projectUID, events)
 }
 
