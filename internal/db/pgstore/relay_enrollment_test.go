@@ -123,6 +123,19 @@ func TestRelayPeerRelease(t *testing.T) {
 	dbtest.RunRelayPeerRelease(t, store)
 }
 
+func TestRelayCommentReplyRelease(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("missing=%v", missing), func(t *testing.T) {
+			dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
+			t.Cleanup(cleanup)
+			store, err := pgstore.Open(t.Context(), dsn)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = store.Close() })
+			dbtest.RunRelayCommentReplyRelease(t, store, missing)
+		})
+	}
+}
+
 func TestRelayPurgedPeer(t *testing.T) {
 	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
 	t.Cleanup(cleanup)
