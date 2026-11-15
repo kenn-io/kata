@@ -1280,7 +1280,12 @@ func connectTestServer(t *testing.T) *sdkmcp.ClientSession {
 
 func connectTestServerWithClient(t *testing.T, apiClient *kataclient.Client) *sdkmcp.ClientSession {
 	t.Helper()
-	return connectTestServerWithOptions(t, defaultCatalogOptions(apiClient))
+	// Request fixtures model the legacy bound scope without a live project catalog.
+	// Catalog-only fixtures use defaultCatalogOptions with an explicit immutable UID.
+	return connectTestServerWithOptions(t, Options{
+		Client: apiClient, ProjectID: 42, ProjectName: "spoke-project",
+		Actor: "example-agent", Version: "test-version",
+	})
 }
 
 func defaultCatalogOptions(apiClient *kataclient.Client) Options {
