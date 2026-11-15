@@ -348,7 +348,7 @@ of unrelated event history and untouched projection rows. Batches with cron
 events also materialize cron definitions and run observations in the write
 phase. Total preparation still reads and folds project history, plus
 link-bearing group history when links can change. Existing full-text search
-triggers can aggregate comments on a changed issue, and claim auditing can
+triggers index each issue and comment separately, and claim auditing can
 expire claims. Custom transaction fences that write may acquire the lock before
 preparation; native enrollment fences only read. Explicit full materialization
 remains available for recovery.
@@ -633,9 +633,19 @@ boundary rather than being routine, because deleting replay history fights
 event-truth. Recurrence materialization stays hub-only: running the scheduler on
 multiple spokes would each materialize duplicate occurrences, since the
 occurrence-uniqueness constraint is per-database and UIDs differ across nodes.
-Cross-project issue moves involving any federated project are unsupported.
-The replay protocol cannot apply a move across project event logs. Deferred work
-includes element-level array CRDTs for metadata,
+Cross-project issue moves are supported within one active hub federation group.
+Spokes join both projects and use their existing project credentials to prove
+push authority at both endpoints. Fresh events authored under a former project
+also require push, actor, and host authority for each affected issue’s current
+project. Spokes include their joined push credentials for the same hub origin and
+actor so delayed edits can prove that authority even before the sender learns of
+a move. Supplemental credentials stay outside hashed event envelopes and are
+never persisted in history; accepted duplicate retries need no new current-owner
+authority. Moves across different hubs, paused bindings, and mixed
+local/federated projects remain unsupported. Source leave and archive refuse
+known pending moves until the destination acknowledges them, retaining the
+source credential needed for delivery. Deferred work includes
+element-level array CRDTs for metadata,
 HLC skew-guard thresholds, a snapshot fast-path for very large projects, and
 federated authoring of recurrences from spokes.
 

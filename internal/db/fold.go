@@ -25,6 +25,34 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return compareClock(clockOf(ordered[i]), clockOf(ordered[j])) < 0
 	})
+	// A destination cursor can start after creation. Seed its first available
+	// move snapshot before replaying deltas, including deltas preceding the move.
+	// The snapshot is a baseline rather than a later content edit.
+	baselines := map[string]bool{}
+	for _, e := range ordered {
+		if e.Type == "issue.created" || e.Type == "issue.snapshot" {
+			if e.IssueUID != "" {
+				baselines[e.IssueUID] = true
+			}
+		}
+	}
+	for _, e := range ordered {
+		payload := PayloadMap(e.Payload)
+		uid := e.IssueUID
+		if uid == "" || baselines[uid] {
+			continue
+		}
+		if e.Type == "issue.moved" {
+			if raw := payload["snapshot"]; len(raw) > 0 {
+				snapshot := e
+				snapshot.Type, snapshot.Payload = "issue.snapshot", raw
+				snapshot.ProjectUID, _ = stringValue(payload["to_project_uid"])
+				snapshot.HLCPhysicalMS, snapshot.HLCCounter = 0, 0
+				p.applyIssueCreated(snapshot)
+				baselines[uid] = true
+			}
+		}
+	}
 	for _, e := range ordered {
 		p.apply(e)
 	}
@@ -46,6 +74,8 @@ func (p *FoldProjection) apply(e FoldEvent) {
 		p.applyIssueCreated(e)
 	case "issue.updated":
 		p.applyIssueUpdated(e, payload)
+	case RepeatedImportEventType:
+		p.applyIssueRestated(e)
 	case "issue.assigned", "issue.unassigned":
 		p.applyOwner(e, payload)
 	case "issue.assignment_renewed":
@@ -79,7 +109,7 @@ func (p *FoldProjection) apply(e FoldEvent) {
 	case "issue.moved":
 		p.applyMoved(e, payload)
 	case "issue.metadata_updated":
-		uid := issueUID(e, payload)
+		uid := e.IssueUID
 		if uid != "" {
 			p.IssueMetadata[uid] = applyMetadataDiff(p.IssueMetadata[uid], payload["diff"])
 			p.touchIssue(uid, issueUpdatedAt(e, payload))
@@ -108,46 +138,9 @@ func (p *FoldProjection) apply(e FoldEvent) {
 }
 
 func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
-	var in struct {
-		UID                 string         `json:"uid"`
-		ShortID             string         `json:"short_id"`
-		Title               string         `json:"title"`
-		Body                string         `json:"body"`
-		Author              string         `json:"author"`
-		Owner               *string        `json:"owner"`
-		AssignmentExpiresOn *string        `json:"assignment_expires_on"`
-		Priority            *int64         `json:"priority"`
-		Status              string         `json:"status"`
-		ClosedReason        *string        `json:"closed_reason"`
-		ClosedAt            *string        `json:"closed_at"`
-		DeletedAt           *string        `json:"deleted_at"`
-		Metadata            jsontext.Value `json:"metadata"`
-		Labels              []string       `json:"labels"`
-		Links               []struct {
-			Type       string `json:"type"`
-			ToIssueUID string `json:"to_issue_uid"`
-			Incoming   bool   `json:"incoming"`
-			Author     string `json:"author"`
-			CreatedAt  string `json:"created_at"`
-		} `json:"links"`
-		Comments []struct {
-			ReplyToUID string `json:"reply_to_uid"`
-			ReplyKind  string `json:"reply_kind"`
-			EditedAt   string `json:"edited_at"`
-			CommentUID string `json:"comment_uid"`
-			Author     string `json:"author"`
-			Teammate   string `json:"teammate,omitempty"`
-			Body       string `json:"body"`
-			CreatedAt  string `json:"created_at"`
-		} `json:"comments"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
-	}
+	var in IssueDocumentPayload
 	_ = json.Unmarshal(e.Payload, &in)
-	uid := in.UID
-	if uid == "" {
-		uid = e.IssueUID
-	}
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -209,7 +202,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 }
 
 func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -257,8 +250,84 @@ func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]jsont
 	p.Issues[uid] = issue
 }
 
+// applyIssueRestated applies the whole copy a hub recorded for a winning
+// repeated adoption snapshot. The hub decided the copy was newer than the
+// issue it held when the copy arrived, so replay applies it in event order
+// like any other change: the copy's fields, labels, and metadata replace the
+// issue's, and its comments merge by UID.
+func (p *FoldProjection) applyIssueRestated(e FoldEvent) {
+	uid := e.IssueUID
+	var in repeatedImportPayload
+	if uid == "" || json.Unmarshal(e.Payload, &in) != nil {
+		return
+	}
+	issue := p.ensureIssue(uid)
+	issue.Title, issue.Body = in.Title, in.Body
+	issue.Owner = cloneStringPtr(in.Owner)
+	clearFoldAssignmentExpiry(&issue)
+	setFoldAssignmentExpiry(&issue, in.AssignmentExpiresOn)
+	issue.Priority = cloneInt64Ptr(in.Priority)
+	if in.Status != "" {
+		setFoldStatus(&issue, in.Status, e, false)
+	}
+	issue.ClosedReason = cloneStringPtr(in.ClosedReason)
+	issue.ClosedAt = cloneStringPtr(in.ClosedAt)
+	issue.DeletedAt = cloneStringPtr(in.DeletedAt)
+	advanceIssueUpdatedAt(&issue, in.UpdatedAt)
+	p.Issues[uid] = issue
+
+	clock := clockOf(e)
+	for key := range p.Labels {
+		if key.IssueUID == uid {
+			p.Labels[key] = FoldElementState{Present: false, Clock: clock}
+		}
+	}
+	for _, label := range in.Labels {
+		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clock}
+	}
+	if metadata, err := json.Marshal(in.Metadata, json.Deterministic(true)); err == nil {
+		p.IssueMetadata[uid] = replaceOrdinaryMetadata(p.IssueMetadata[uid], metadata)
+	}
+	for _, comment := range in.Comments {
+		if comment.CommentUID == "" {
+			continue
+		}
+		existing, known := p.Comments[comment.CommentUID]
+		if !known || existing.CreatedAt == "" {
+			p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt,
+				comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clock)
+			continue
+		}
+		// A comment both sides hold keeps the text with the later edit.
+		if comment.EditedAt != "" && timestampBefore(existing.EditedAt, comment.EditedAt) {
+			p.editCommentBody(comment.CommentUID, uid, comment.Body, comment.EditedAt, clock)
+		}
+	}
+}
+
+// replaceOrdinaryMetadata returns replacement as the issue's whole metadata,
+// keeping only the recurrence keys of current, which the hub's scheduler owns.
+func replaceOrdinaryMetadata(current, replacement jsontext.Value) jsontext.Value {
+	out := map[string]jsontext.Value{}
+	for key, value := range parseRawObject(replacement) {
+		if !recurringMetadataKey(key) {
+			out[key] = canonicalJSON(value)
+		}
+	}
+	for key, value := range parseRawObject(current) {
+		if recurringMetadataKey(key) {
+			out[key] = value
+		}
+	}
+	raw, err := json.Marshal(out, json.Deterministic(true))
+	if err != nil {
+		return current
+	}
+	return raw
+}
+
 func (p *FoldProjection) applyOwner(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -280,7 +349,7 @@ func (p *FoldProjection) applyOwner(e FoldEvent, payload map[string]jsontext.Val
 }
 
 func (p *FoldProjection) applyAssignmentRenewed(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -301,7 +370,7 @@ func (p *FoldProjection) applyAssignmentRenewed(e FoldEvent, payload map[string]
 }
 
 func (p *FoldProjection) applyAssignmentExpired(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -338,7 +407,7 @@ func foldStringPtrEqual(got *string, want string) bool {
 }
 
 func (p *FoldProjection) applyPriority(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -353,7 +422,7 @@ func (p *FoldProjection) applyPriority(e FoldEvent, payload map[string]jsontext.
 }
 
 func (p *FoldProjection) applyClosed(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -373,7 +442,7 @@ func (p *FoldProjection) applyClosed(e FoldEvent, payload map[string]jsontext.Va
 }
 
 func (p *FoldProjection) applyReopened(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -386,7 +455,7 @@ func (p *FoldProjection) applyReopened(e FoldEvent, payload map[string]jsontext.
 }
 
 func (p *FoldProjection) applyDeleted(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -414,7 +483,7 @@ func setFoldStatus(issue *FoldIssue, state string, event FoldEvent, explicit boo
 }
 
 func (p *FoldProjection) applyRestored(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -433,7 +502,7 @@ func (p *FoldProjection) applyComment(e FoldEvent, payload map[string]jsontext.V
 	teammate, _ := stringValue(payload["teammate"])
 	body, _ := stringValue(payload["body"])
 	createdAt, _ := stringValue(payload["created_at"])
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	replyTo, _ := stringValue(payload["reply_to_uid"])
 	replyKind, _ := stringValue(payload["reply_kind"])
 	editedAt, _ := stringValue(payload["edited_at"])
@@ -453,7 +522,7 @@ func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]json
 	if !ok {
 		return
 	}
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	editedAt := e.CreatedAt
 	if v, ok := stringValue(payload["edited_at"]); ok && v != "" {
 		editedAt = v
@@ -505,7 +574,7 @@ func (p *FoldProjection) editCommentBody(commentUID, issueUID, body, editedAt st
 }
 
 func (p *FoldProjection) applyLabel(e FoldEvent, payload map[string]jsontext.Value, present bool) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	label, ok := stringValue(payload["label"])
 	if !ok || uid == "" {
 		return
@@ -532,11 +601,11 @@ func (p *FoldProjection) applyLinkEvent(e FoldEvent, payload map[string]jsontext
 		}
 	}
 	p.setLink(from, to, typ, present, clockOf(e), e.Actor, "")
-	p.touchIssue(issueUID(e, payload), issueUpdatedAt(e, payload))
+	p.touchIssue(e.IssueUID, issueUpdatedAt(e, payload))
 }
 
 func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]jsontext.Value) {
-	base := issueUID(e, payload)
+	base := e.IssueUID
 	if base == "" {
 		return
 	}
@@ -564,7 +633,7 @@ func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]jsont
 }
 
 func (p *FoldProjection) applyMoved(e FoldEvent, payload map[string]jsontext.Value) {
-	uid := issueUID(e, payload)
+	uid := e.IssueUID
 	if uid == "" {
 		return
 	}
@@ -689,33 +758,6 @@ func advanceIssueUpdatedAt(issue *FoldIssue, updatedAt string) {
 	if issue.UpdatedAt == "" || updatedAt > issue.UpdatedAt {
 		issue.UpdatedAt = updatedAt
 	}
-}
-
-func issueUID(e FoldEvent, payload map[string]jsontext.Value) string {
-	return resolveIssueUID(e.IssueUID, payload)
-}
-
-// FederationEventIssueUID resolves the issue identity carried by a federated
-// event, using the same envelope and payload fields as the fold engine.
-func FederationEventIssueUID(issueUID *string, payload string) string {
-	envelope := ""
-	if issueUID != nil {
-		envelope = *issueUID
-	}
-	return resolveIssueUID(envelope, PayloadMap(jsontext.Value(payload)))
-}
-
-func resolveIssueUID(envelope string, payload map[string]jsontext.Value) string {
-	if envelope != "" {
-		return envelope
-	}
-	if v, ok := stringValue(payload["issue_uid"]); ok {
-		return v
-	}
-	if v, ok := stringValue(payload["uid"]); ok {
-		return v
-	}
-	return ""
 }
 
 func issueUpdatedAt(e FoldEvent, payload map[string]jsontext.Value) string {

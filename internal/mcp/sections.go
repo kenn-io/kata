@@ -8,6 +8,38 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// LoadedSections retains section selections across servers with the same
+// principal and options. Its zero value is ready to use; it holds no servers.
+type LoadedSections struct {
+	mu  sync.Mutex
+	ids map[string]bool
+}
+
+func (s *LoadedSections) selectSection(id string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ids == nil {
+		s.ids = make(map[string]bool)
+	}
+	s.ids[id] = true
+}
+
+func (s *LoadedSections) snapshot() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]string, 0, len(s.ids))
+	for id := range s.ids {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // ToolSectionInput loads one section's typed tools into the MCP catalog.
 type ToolSectionInput struct{}
 
@@ -35,6 +67,18 @@ func registerSectionLoaders(server *sdkmcp.Server, options Options) error {
 		options.StorageAdmin != nil,
 		options.EnableTokenAdmin && options.Scope.Mode() == ScopeAll,
 	)
+	if options.Events {
+		for i := range sections {
+			if sections[i].section == "coordination" {
+				sections[i].tools = []string{"kata.assign", "kata.event_subscriptions", "kata.inbox", "kata.status", "kata.unassign"}
+				sections[i].description += " Native Events can signal exact-recipient inbox changes. Includes the principal's webhook delivery health from the daemon."
+				sections[i].register = func(server *sdkmcp.Server, h toolHandlers) {
+					registerCoordinationTools(server, h)
+					registerEventDeliveryTools(server, h)
+				}
+			}
+		}
+	}
 	byID := make(map[string]toolSection, len(sections))
 	for _, definition := range sections {
 		byID[definition.section] = definition
@@ -54,6 +98,9 @@ func registerSectionLoaders(server *sdkmcp.Server, options Options) error {
 				mutex.Lock()
 				defer mutex.Unlock()
 				load(definition)
+				if loaded[definition.section] {
+					options.LoadedSections.selectSection(definition.section)
+				}
 				return successResult(), ToolSectionOutput{
 					Section: definition.section, Available: definition.available,
 					Loaded: loaded[definition.section], Tools: append([]string(nil), definition.tools...),
@@ -73,6 +120,11 @@ func registerSectionLoaders(server *sdkmcp.Server, options Options) error {
 		}
 		load(definition)
 	}
+	for _, id := range options.LoadedSections.snapshot() {
+		if definition, ok := byID[id]; ok {
+			load(definition)
+		}
+	}
 	return nil
 }
 
@@ -85,7 +137,7 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 		},
 		{
 			loader: "kata.load_coordination", section: "coordination", title: "Load coordination tools",
-			description: "Load typed assign, unassign, inbox, and issue-status tools for handing work between actors, then refresh the MCP tool list.",
+			description: "Load inbox, assign, unassign, and issue-status tools. Inbox reads are paginated. Refresh the MCP tool list.",
 			tools:       []string{"kata.assign", "kata.inbox", "kata.status", "kata.unassign"}, available: true, register: registerCoordinationTools,
 		},
 		{
@@ -113,7 +165,7 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 		{
 			loader: "kata.load_federation", section: "federation", title: "Load federation tools",
 			description: "Load typed project bridge connect/status/disconnect, federation status, enrollment revocation, rebind, leave, quarantine, and root key repin tools, then refresh the MCP tool list.",
-			tools:       []string{"kata.federation_bridge_connect", "kata.federation_bridge_disconnect", "kata.federation_bridge_status", "kata.federation_enrollment_revoke", "kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_root_key_repin", "kata.federation_status"},
+			tools:       []string{"kata.federation_bridge_connect", "kata.federation_bridge_disconnect", "kata.federation_bridge_status", "kata.federation_enrollment_revoke", "kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_root_key_repin", "kata.federation_spoke_name", "kata.federation_status"},
 			available:   true, register: registerFederationTools,
 		},
 		{
@@ -129,8 +181,8 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 		},
 		{
 			loader: "kata.load_issue_lifecycle", section: "issue_lifecycle", title: "Load issue lifecycle tools",
-			description: "Load typed close, reopen, delete, restore, purge, wait, and close-audit tools, then refresh the MCP tool list.",
-			tools:       []string{"kata.audit_closes", "kata.close", "kata.delete", "kata.purge", "kata.reopen", "kata.restore", "kata.wait"},
+			description: "Load typed close, reopen, delete, restore, purge, wait, close-audit, and file-evidence tools, then refresh the MCP tool list.",
+			tools:       []string{"kata.file_evidence", "kata.audit_closes", "kata.close", "kata.delete", "kata.purge", "kata.reopen", "kata.restore", "kata.wait"},
 			available:   true, register: registerIssueLifecycleTools,
 		},
 		{

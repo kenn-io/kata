@@ -2,6 +2,7 @@ package sqlitestore_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testfix"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -27,10 +29,38 @@ func openTestDB(t *testing.T) *sqlitestore.Store {
 func openTestDBWithPath(t *testing.T) (*sqlitestore.Store, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kata.db")
-	d, err := sqlitestore.Open(t.Context(), path)
+	d, err := testfix.OpenSQLite(t.Context(), path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return d, path
+}
+
+// openPageBudgetDB seeds 50k issues without planner statistics on one connection.
+func openPageBudgetDB(t *testing.T) (*sql.DB, int64) {
+	t.Helper()
+	d, path := openTestDBWithPath(t)
+	ctx := t.Context()
+	p, err := d.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	raw.SetMaxOpenConns(1)
+	_, err = raw.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<50000)
+ INSERT INTO issues(uid,project_id,short_id,title,author)
+ SELECT printf('%026d',x),?,printf('%08d',x),'ordinary task','tester' FROM n`, p.ID)
+	require.NoError(t, err)
+	return raw, p.ID
+}
+
+// prepareSeed compiles a seeding statement once for the transaction, which
+// closes it. Compiling the same SQL text for every row costs about as much
+// as inserting the rows.
+func prepareSeed(t *testing.T, tx *sql.Tx, query string) *sql.Stmt {
+	t.Helper()
+	statement, err := tx.PrepareContext(t.Context(), query)
+	require.NoError(t, err)
+	return statement
 }
 
 // assertSchemaVersion checks that the schema_version row in meta matches the

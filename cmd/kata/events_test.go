@@ -105,6 +105,15 @@ func TestEvents_OneShotAgentResetRequired(t *testing.T) {
 	assert.Regexp(t, `^OK events reset_required=true reset_after_id=\d+\n?$`, out)
 }
 
+func TestEvents_OneShotHumanResetRequired(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+	short := createIssueViaHTTP(t, env, dir, "doomed")
+	runCLI(t, env, dir, "purge", short, "--force", "--confirm", "PURGE kata#"+short)
+
+	out := runCLI(t, env, dir, "events", "--after", "0")
+	assert.Regexp(t, `^reset_required: reload your data, then resume with --after \d+\n?$`, out)
+}
+
 func TestEvents_OneShotAllProjectsHitsCrossProject(t *testing.T) {
 	env := testenv.New(t)
 	dirA := initBoundWorkspace(t, env.URL, "https://github.com/wesm/a.git")
@@ -150,7 +159,7 @@ func TestEvents_TailAgentEmitsOneLinePerEvent(t *testing.T) {
 	second := createIssueViaHTTP(t, env, dir, "second")
 
 	out := a.awaitOutput(func(s string) bool {
-		return strings.Count(s, "OK event ") >= 2
+		return completeAgentEventLineCount(s) >= 2
 	}, 2*time.Second)
 
 	lines := []string{}
@@ -166,6 +175,16 @@ func TestEvents_TailAgentEmitsOneLinePerEvent(t *testing.T) {
 	}
 	assert.Contains(t, lines[0], "issue="+first)
 	assert.Contains(t, lines[1], "issue="+second)
+}
+
+func completeAgentEventLineCount(output string) int {
+	count := 0
+	for _, line := range strings.SplitAfter(output, "\n") {
+		if strings.HasPrefix(line, "OK event ") && strings.HasSuffix(line, "\n") {
+			count++
+		}
+	}
+	return count
 }
 
 func TestEvents_TailAgentProgressUsesSSEID(t *testing.T) {

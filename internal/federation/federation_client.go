@@ -3,6 +3,7 @@ package federation
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,11 +19,19 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
+var errRelayCrossProjectLinks = errors.New("hub relay cross-project links refusal")
+
 // HubStatusError reports a non-2xx response from the configured hub.
 type HubStatusError struct {
-	Path       string
-	StatusCode int
-	Body       string
+	relayCrossProjectLinks bool
+	Path                   string
+	StatusCode             int
+	Body                   string
+}
+
+// Is classifies the canonical refusal even through joined sync errors.
+func (e *HubStatusError) Is(target error) bool {
+	return target == errRelayCrossProjectLinks && e.relayCrossProjectLinks
 }
 
 // HTTPStatus exposes the hub response code to outcome classification.
@@ -63,11 +72,24 @@ func NewClient(ctx context.Context, baseURL string, token string, opts clientpkg
 func (c *Client) PollProjectEvents(
 	ctx context.Context, hubProjectID, afterID int64, limit int,
 ) (api.PollEventsBody, error) {
+	return c.pollProjectEvents(ctx, hubProjectID, "", afterID, limit)
+}
+
+// PollIssueEvents reads retained history for an issue currently owned by the
+// authenticated hub project, independently of that project's polling cursor.
+func (c *Client) PollIssueEvents(ctx context.Context, hubProjectID int64, issueUID string, afterID int64, limit int) (api.PollEventsBody, error) {
+	return c.pollProjectEvents(ctx, hubProjectID, issueUID, afterID, limit)
+}
+
+func (c *Client) pollProjectEvents(ctx context.Context, hubProjectID int64, issueUID string, afterID int64, limit int) (api.PollEventsBody, error) {
 	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
 	if err != nil {
 		return api.PollEventsBody{}, err
 	}
 	query := &generated.PollFederationProjectEventsQuery{AfterID: &afterID}
+	if issueUID != "" {
+		query.IssueUID = &issueUID
+	}
 	if limit > 0 {
 		query.Limit = new(int64(limit))
 	}
@@ -95,6 +117,7 @@ func (c *Client) IngestProjectEvents(
 
 // IngestProjectEventsOptions carries optional metadata for federation ingest.
 type IngestProjectEventsOptions struct {
+	MoveSourceTokens           map[string]string
 	AdoptionBaseline           string
 	AdoptionBaselineEndEventID int64
 }
@@ -124,7 +147,7 @@ func (c *Client) IngestProjectEventsWithOptions(
 		}
 		schemaVersion = max(schemaVersion, version)
 		if required != "" {
-			requiredFeatures = required
+			requiredFeatures = db.MergeEventFeatures(requiredFeatures, required)
 		}
 	}
 	if requiredFeatures != "" {
@@ -138,7 +161,7 @@ func (c *Client) IngestProjectEventsWithOptions(
 	}
 	data, err := json.Marshal(api.FederationIngestEventsRequestBody{
 		SchemaVersion: schemaVersion, AdoptionBaseline: opts.AdoptionBaseline,
-		AdoptionBaselineEndEventID: opts.AdoptionBaselineEndEventID, Events: events,
+		AdoptionBaselineEndEventID: opts.AdoptionBaselineEndEventID, Events: events, MoveSourceTokens: opts.MoveSourceTokens,
 	})
 	if err != nil {
 		return api.FederationIngestEventsBody{}, err
@@ -289,7 +312,13 @@ func (d replicationDoer) Do(ctx context.Context, req *http.Request) (*http.Respo
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer func() { _ = resp.Body.Close() }()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, &HubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+		failure := &HubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+		if resp.StatusCode == http.StatusConflict && federationHubErrorCode(string(body)) == "relay_cross_project_links" {
+			canonical, _ := json.Marshal(api.NewRelayCrossProjectLinksError("hub").Envelope())
+			failure.Body = string(canonical)
+			failure.relayCrossProjectLinks = true
+		}
+		return nil, failure
 	}
 	if err := db.RequireEventFeatures(db.SupportedEventFeatures, resp.Header.Get(db.RequiredEventFeaturesHeader)); err != nil {
 		_ = resp.Body.Close()

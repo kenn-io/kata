@@ -110,7 +110,7 @@ func (ix *Index) ReconcileArtifacts(ctx context.Context, key string, source db.S
 	if !ok {
 		return 0, nil
 	}
-	docs, err := ix.flowStore.PendingForGeneration(ctx, key, 256)
+	docs, err := ix.flowStore.PendingForGeneration(ctx, key, nil, 256)
 	if err != nil || len(docs) == 0 {
 		return 0, err
 	}

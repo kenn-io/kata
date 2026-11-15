@@ -20,7 +20,6 @@ type fakeListAPI struct {
 	listAllCalls       int
 	createCalls        int
 	closeCalls         int
-	reopenCalls        int
 	setPriorityCalls   int
 	lastListProjectID  int64
 	lastListFilter     ListFilter
@@ -29,9 +28,6 @@ type fakeListAPI struct {
 	lastCloseProjectID int64
 	lastCloseRef       string
 	lastCloseActor     string
-	lastReopenProject  int64
-	lastReopenRef      string
-	lastReopenActor    string
 	lastPriorityPID    int64
 	lastPriorityRef    string
 	lastPriorityValue  *int64
@@ -40,13 +36,11 @@ type fakeListAPI struct {
 	listAllResult      []Issue
 	createResult       *MutationResp
 	closeResult        *MutationResp
-	reopenResult       *MutationResp
 	setPriorityResult  *MutationResp
 	listIssuesErr      error
 	listAllErr         error
 	createErr          error
 	closeErr           error
-	reopenErr          error
 	setPriorityErr     error
 }
 
@@ -84,16 +78,6 @@ func (f *fakeListAPI) Close(
 	f.lastCloseRef = ref
 	f.lastCloseActor = actor
 	return f.closeResult, f.closeErr
-}
-
-func (f *fakeListAPI) Reopen(
-	_ context.Context, projectID int64, ref, actor string,
-) (*MutationResp, error) {
-	f.reopenCalls++
-	f.lastReopenProject = projectID
-	f.lastReopenRef = ref
-	f.lastReopenActor = actor
-	return f.reopenResult, f.reopenErr
 }
 
 func (f *fakeListAPI) SetPriority(
@@ -1266,33 +1250,6 @@ func TestList_AuthorFilter_NarrowsDisplay(t *testing.T) {
 	out := filteredIssues(issues, ListFilter{Author: "wes"})
 	if len(out) != 2 || out[0].ShortID != "aaa1" || out[1].ShortID != "ccc3" {
 		t.Fatalf("wrong issues filtered: %+v", out)
-	}
-}
-
-// TestList_Reopen_DispatchesAPI covers the list-local 'r' binding. Close is
-// intentionally tested through Model because it first resolves the daemon's
-// evidence requirement and opens the close form.
-func TestList_Reopen_DispatchesAPI(t *testing.T) {
-	api, km, sc := newListEnv()
-	api.reopenResult = &MutationResp{Issue: &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Status: "open"}}
-	lm := listModel{
-		actor: "tester",
-		issues: []Issue{
-			{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "first"},
-		},
-	}
-
-	lm, cmd := lm.Update(runeKey('r'), km, api, sc)
-	if cmd == nil {
-		t.Fatal("expected reopen cmd from r")
-	}
-	_ = drainCmd(t, lm, cmd, km, api, sc)
-	if api.reopenCalls != 1 {
-		t.Fatalf("reopenCalls = %d, want 1", api.reopenCalls)
-	}
-	if api.lastReopenRef != "aaa1" || api.lastReopenActor != "tester" {
-		t.Fatalf("reopen args wrong: ref=%q actor=%q",
-			api.lastReopenRef, api.lastReopenActor)
 	}
 }
 

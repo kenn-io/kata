@@ -165,11 +165,13 @@ func isRevisionConflict(err error) bool {
 // save, so the form can show the values that beat it. When the read fails the
 // response is returned unchanged and the form reports the refusal as it is.
 func withCurrentIssue(ctx context.Context, apiClient any, target formTarget, resp *MutationResp) *MutationResp {
-	reader, ok := apiClient.(detailAPI)
+	reader, ok := apiClient.(interface {
+		readIssue(context.Context, int64, string) (*IssueDetail, error)
+	})
 	if !ok {
 		return resp
 	}
-	detail, err := reader.GetIssueDetail(ctx, target.projectID, target.issueShortID)
+	detail, err := reader.readIssue(ctx, target.projectID, target.issueShortID)
 	if err != nil || detail == nil || detail.Issue == nil {
 		return resp
 	}
@@ -186,15 +188,28 @@ func (m Model) reloadDatesForm(current Issue) Model {
 	m.input = m.input.loadDates(current)
 	m.input.saving = false
 	m.input.err = datesChangedMessage
-	for i := range m.list.issues {
-		if m.list.issues[i].UID == current.UID {
-			m.list.issues[i].Metadata, m.list.issues[i].Revision = current.Metadata, current.Revision
+	if m.detail.issue != nil && m.detail.issue.UID == current.UID {
+		*m.detail.issue = current
+	}
+	m, _ = m.refreshListDay(func(lm listModel) listModel { return lm.withCurrentIssue(current) })
+	return m
+}
+
+// withCurrentIssue refreshes conflict-owned fields while keeping list projections.
+func (lm listModel) withCurrentIssue(current Issue) listModel {
+	for i := range lm.issues {
+		if lm.issues[i].UID == current.UID {
+			lm.issues[i] = lm.issues[i].withCurrentDates(current)
 		}
 	}
-	if m.detail.issue != nil && m.detail.issue.UID == current.UID {
-		m.detail.issue.Metadata, m.detail.issue.Revision = current.Metadata, current.Revision
-	}
-	return m
+	return lm
+}
+
+func (issue Issue) withCurrentDates(current Issue) Issue {
+	issue.Metadata, issue.Revision = current.Metadata, current.Revision
+	issue.Status, issue.ClosedAt = current.Status, current.ClosedAt
+	issue.ScheduledOnDate, issue.DeadlineOnDate = current.ScheduledOnDate, current.DeadlineOnDate
+	return issue
 }
 
 // renderDatesForm lays out the two date fields, each with the day its text

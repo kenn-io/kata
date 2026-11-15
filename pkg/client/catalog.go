@@ -11,8 +11,8 @@ type CatalogDaemon struct {
 	// Endpoint is "local" for a local entry and the URL's host[:port] for a
 	// remote one. It is for display; DiscoverOptions.Daemon connects by Name.
 	Endpoint string
-	// HasToken reports that the entry sets token or token_env. The variable
-	// token_env names is not read, so it can still be unset.
+	// HasToken reports that the entry sets token, token_file or token_env.
+	// Credential files and environment variables are not read.
 	HasToken bool
 	// Active reports that active_daemon names this entry.
 	Active bool

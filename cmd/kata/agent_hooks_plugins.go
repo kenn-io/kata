@@ -854,9 +854,9 @@ function nativeDirectory(value) {
   return path.resolve(value);
 }
 const maxOutputBytes = 16 * 1024 * 1024;
-function run(args, cwd, env = process.env) {
+function run(args, cwd, env = process.env, workspace = cwd) {
   return new Promise((resolve, reject) => {
-    const child = spawn(options.executable, ["--workspace", cwd, ...args],
+    const child = spawn(options.executable, ["--workspace", workspace, ...args],
       { cwd, env: { ...env }, timeout: 10000, windowsHide: true });
     const stdout = [];
     let outputBytes = 0;
@@ -909,7 +909,9 @@ async function readContext(cwd, includeContract, onContractLoaded) {
     try {
       const sourceCwd = options.scope === "project" && options.sourceSet && !path.isAbsolute(options.source)
         ? options.workspace : cwd;
-      const text = JSON.parse(await run(args, sourceCwd))?.hookSpecificOutput?.additionalContext;
+      // A relative source resolves against the install workspace, but the
+      // contract gate checks the session directory named by --workspace.
+      const text = JSON.parse(await run(args, sourceCwd, process.env, cwd))?.hookSpecificOutput?.additionalContext;
       if (typeof text !== "string") throw new Error("invalid contract response");
       contract = text;
       onContractLoaded?.();

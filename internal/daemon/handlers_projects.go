@@ -66,6 +66,15 @@ func scopedProjectOut(p db.Project) api.ProjectOut {
 	}
 }
 
+// projectOutForCaller gives an issue-scoped credential the restricted project
+// projection that the project read returns, and everyone else the full one.
+func projectOutForCaller(ctx context.Context, p db.Project) api.ProjectOut {
+	if issueScopeFromContext(ctx) != nil {
+		return scopedProjectOut(p)
+	}
+	return dbProjectToOut(p)
+}
+
 // includeContains reports whether the comma-separated ?include= value
 // names the given token. Whitespace is trimmed; matching is case-
 // insensitive on the token side. Spec §7.1.
@@ -82,6 +91,21 @@ func includeContains(includeParam, token string) bool {
 // show) on humaAPI. Resolution and init semantics live entirely on the daemon
 // per spec §2.4 so all clients (CLI, TUI, future) see identical behavior.
 func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "readProjectByName",
+		Method:      "GET",
+		Path:        "/api/v1/projects/resolve",
+	}, func(ctx context.Context, in *api.ReadProjectByNameRequest) (*api.ResolveProjectResponse, error) {
+		out, err := resolveByName(ctx, cfg.DB, in.Name)
+		if err != nil {
+			return nil, hideMissingProject(ctx, err)
+		}
+		if _, err := authorizeHostProjectScope(ctx, []int64{out.Project.ID}, nil, false); err != nil {
+			return nil, err
+		}
+		return &api.ResolveProjectResponse{Body: *out}, nil
+	})
+
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "resolveProject",
 		Method:      "POST",
@@ -293,6 +317,10 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(409, "project_merge_archived_target",
 				"target project is archived", "", nil)
 		}
+		if errors.Is(err, db.ErrFederationProjectIdentityRequired) {
+			return nil, api.NewError(409, "federation_project_identity_required", err.Error(),
+				"leave the joined projects that still expose this move history before purging or merging the former project", nil)
+		}
 		if errors.Is(err, db.ErrProjectMergeFederationBinding) {
 			return nil, api.NewError(409, "project_merge_federation_binding",
 				"cannot merge federated projects", "", nil)
@@ -351,6 +379,8 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case errors.Is(err, db.ErrProjectAlreadyArchived):
 			return nil, api.NewError(409, "project_already_archived",
 				"project is already archived", "", nil)
+		case errors.Is(err, db.ErrFederationResetBlockedByPendingPush), errors.Is(err, db.ErrFederationResetBlockedByDownstream):
+			return nil, federationReplicaAPIError(err)
 		}
 		if openErr, ok := errors.AsType[*db.ProjectHasOpenIssuesError](err); ok {
 			return nil, api.NewError(409, "project_has_open_issues",
@@ -404,6 +434,10 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(409, "project_not_archived",
 				"project is not archived",
 				"run `kata projects remove "+project.Name+"` first", nil)
+		}
+		if errors.Is(err, db.ErrFederationProjectIdentityRequired) {
+			return nil, api.NewError(409, "federation_project_identity_required", err.Error(),
+				"leave the joined projects that still expose this move history before purging or merging the former project", nil)
 		}
 		if fedErr, ok := errors.AsType[*db.ProjectFederatedError](err); ok {
 			hint := "run `kata federation leave " + project.Name + "` first"
@@ -657,7 +691,7 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 		if project.DeletedAt != nil {
 			return nil, api.NewError(404, "project_not_initialized",
 				"alias "+info.Identity+" points at an archived project",
-				`run "kata init" to bind this workspace to an active project`, nil)
+				`run "kata init" to bind this workspace to an active project`, map[string]any{"alias": info.Identity})
 		}
 		if err := authorizeIssueScopedProject(ctx, project); err != nil {
 			return nil, err
@@ -677,7 +711,7 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 	if name == "" {
 		return nil, api.NewError(404, "project_not_initialized",
 			"alias "+info.Identity+" is not registered",
-			`run "kata init" in this workspace`, nil)
+			`run "kata init" in this workspace`, map[string]any{"alias": info.Identity})
 	}
 	if err := config.ValidateProjectName(name); err != nil {
 		return nil, api.NewError(400, "validation", err.Error(), "", nil)
@@ -686,7 +720,7 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, api.NewError(404, "project_not_initialized",
 			"project "+name+" is not registered",
-			`run "kata init" in this workspace`, nil)
+			`run "kata init" in this workspace`, map[string]any{"project": name})
 	}
 	if err != nil {
 		return nil, internalAPIError(err)
@@ -726,7 +760,7 @@ func resolveByName(ctx context.Context, store db.Storage, name string) (*api.Pro
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, api.NewError(404, "project_not_initialized",
 			"project "+name+" is not registered",
-			`run "kata init" in this workspace`, nil)
+			`run "kata init" in this workspace`, map[string]any{"project": name})
 	}
 	if err != nil {
 		return nil, internalAPIError(err)
@@ -734,7 +768,7 @@ func resolveByName(ctx context.Context, store db.Storage, name string) (*api.Pro
 	if err := authorizeIssueScopedProject(ctx, project); err != nil {
 		return nil, err
 	}
-	return &api.ProjectResolveBody{Project: dbProjectToOut(project)}, nil
+	return &api.ProjectResolveBody{Project: projectOutForCaller(ctx, project)}, nil
 }
 
 // resolveByKataToml returns (body, true, nil) when a .kata.toml binding
@@ -768,7 +802,7 @@ func resolveByKataToml(ctx context.Context, store db.Storage, disc config.Discov
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, false, api.NewError(404, "project_not_initialized",
 			"project "+cfgFile.Project.Name+" is bound by .kata.toml but not registered",
-			`run "kata init" in this workspace`, nil)
+			`run "kata init" in this workspace`, map[string]any{"project": cfgFile.Project.Name})
 	}
 	if err != nil {
 		return nil, false, internalAPIError(err)

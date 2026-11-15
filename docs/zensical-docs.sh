@@ -40,10 +40,14 @@ fi
 tmp_docs=""
 tmp_config_base=""
 tmp_config=""
+tmp_archive=""
 
 cleanup() {
   if [[ -n "$tmp_docs" ]]; then
     rm -rf "$tmp_docs"
+  fi
+  if [[ -n "$tmp_archive" ]]; then
+    rm -f "$tmp_archive"
   fi
   if [[ -n "$tmp_config" ]]; then
     rm -f "$tmp_config"
@@ -66,6 +70,7 @@ if [[ -e "$tmp_config" ]]; then
 fi
 mv "$tmp_config_base" "$tmp_config"
 tmp_config_base=""
+tmp_archive="$(mktemp)"
 
 (
   cd "$docs_root"
@@ -96,8 +101,11 @@ tmp_config_base=""
     --exclude '.kata.local.toml' \
     --exclude '*.test' \
     --exclude '*.out' \
-    -cf - .
-) | (cd "$tmp_docs" && tar -xf -)
+    -cf "$tmp_archive" .
+)
+tar -xf "$tmp_archive" -C "$tmp_docs"
+rm -f "$tmp_archive"
+tmp_archive=""
 # The docs tier renders under /docs/; the hand-written website tier owns the
 # site root.
 docs_output_dir="$site_dir/docs"
@@ -154,6 +162,7 @@ case "$command_name" in
     (cd "$docs_root" && "$zensical_bin" build --strict --config-file "$tmp_config_name" "$@")
     (cd "$docs_root" && python3 scripts/copy_public_markdown_sources.py --docs-dir "$tmp_docs_name" --site-dir "$docs_output_dir" --config "$tmp_config_name")
     assemble_site_root
+    (cd "$docs_root" && python3 scripts/embed_first_paint.py --site-dir "$site_dir")
     ;;
   serve)
     (cd "$docs_root" && "$zensical_bin" serve --config-file "$tmp_config_name" "$@")

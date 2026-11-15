@@ -68,6 +68,80 @@ make nilaway
 
 Pull requests select checks based on the changed files. See the filters and job conditions in [test.yml](https://github.com/kenn-io/kata/blob/main/.github/workflows/test.yml) for the selection rules. Pushes to `main` run every check.
 
+### Git hooks
+
+Install the hooks to catch common CI failures before you push:
+
+```sh
+prek install
+```
+
+[prek.toml](https://github.com/kenn-io/kata/blob/main/prek.toml) lists the
+hooks for each stage. The commit hooks are fast. The push hooks run the API,
+lint, and nil-safety checks that CI also runs.
+
+To run the push hooks without pushing, commit your work and run:
+
+```sh
+prek run --stage pre-push --from-ref origin/main --to-ref HEAD
+```
+
+The push hooks run `make` targets on your working tree, not on the commits
+being pushed. Uncommitted changes are checked too, and a branch you push from
+another checkout is not checked at all.
+
+Hooks do not replace CI. The pull request's checks run on the pushed commit,
+and those are the ones a maintainer reads.
+
+### Local review (optional)
+
+Each pull request gets a `roborev` review status next to its CI checks. You do
+not need [Roborev](https://github.com/kenn-io/roborev) to contribute. If you
+already run it, you can read the same kind of review before you push.
+
+To review the whole branch and wait for the result:
+
+```sh
+roborev review --branch --wait
+```
+
+Agents follow [AGENTS.md](https://github.com/kenn-io/kata/blob/main/AGENTS.md)
+and start a review only when you ask for one.
+
+A review covers your work only when its `git_ref` ends at the commit you are
+about to push. Compare `git rev-parse HEAD` with the jobs for your branch:
+
+```sh
+roborev job list --json
+```
+
+| `status` | `verdict` | `git_ref` ends at | Meaning |
+| --- | --- | --- | --- |
+| `done` | `P` | your `HEAD` | Reviewed, no findings. |
+| `done` | `F` | your `HEAD` | Reviewed with findings. Read them with `roborev job show --job <id>`. |
+| `queued` or `running` | none | your `HEAD` | Not reviewed yet. |
+| `failed` | none | your `HEAD` | The reviewer did not finish, for example a rate limit or a timeout. `error` says why. This is not a verdict. |
+| any | any | an older commit | Stale. You committed, amended, or rebased after the review. |
+
+No job for your `HEAD` means it has not been reviewed.
+
+Roborev's own Git hooks only queue reviews. They never block a commit or a
+push, so a successful push does not mean a review ran or passed.
+
+As of Roborev 0.75, `roborev job show <sha>` and `roborev job wait <sha>` find
+a review of that single commit only. They report no review for a commit that
+a range review covers, so read `roborev job list --json` instead.
+
+### API contract changes
+
+Every HTTP wire-contract change, including an optional response field, needs a new `APISchemaVersion`.
+
+1. Bump `APISchemaVersion` and run `make api-generate`.
+2. Run `go test ./internal/daemon -run '^TestAPISchemaVersionMatchesRecordedContract$'`.
+3. Add the suggested marker with a one-line summary. Keep all base markers and their summaries; you may correct a summary in its existing file.
+
+If another change takes your version, move your marker and any feature minimum checks introduced by your change to the next minor version. Regenerate the combined contract and use its digest in the marker name, retaining the summary suffix.
+
 ### Native agent plugins
 
 The `native-agent-plugins` job in
@@ -122,6 +196,8 @@ make web-e2e
 
 The browser check creates a real session inside its isolated run; it
 does not use an installed daemon or a developer database.
+Install PowerShell (`pwsh`) to run the copied PowerShell diagnostic in the
+project sync browser test. The Bash diagnostic runs without it.
 
 Before release packaging, run:
 
@@ -142,14 +218,18 @@ make test-federation-docker
 ```
 
 The pre-commit hook protects released PostgreSQL migration history. Install
-the configured hooks with `prek install`; see [PostgreSQL
+it with the other [Git hooks](#git-hooks); see [PostgreSQL
 migrations](postgres-migrations.md) before proposing a schema change.
 
-`make test-stress` runs randomized and failpoint tests. If Rapid prints a
-failing seed, reproduce it with the seed from the failure output:
+`make test-stress` runs randomized and failpoint tests through gotestsum. It
+reruns a failed test up to twice, lists those reruns in its summary, and writes
+the test events to `gotestsum/`. The target sets
+`RAPID_CHECKS=5`; a direct test run defaults to 100 generated cases. Rapid
+shrinks failing inputs, saves them for replay, and prints a failing seed.
+Reproduce a failure with that seed and the same case count:
 
 ```sh
-RAPID_SEED=<seed> go test -tags federation_stress ./e2e \
+RAPID_CHECKS=5 RAPID_SEED=<seed> go test -tags federation_stress ./e2e \
   -run TestFederationStressRandomizedWorkload \
   -count=1 \
   -timeout 2m
@@ -177,6 +257,12 @@ make docs-serve
 
 Zensical's preview server is for local preview only. Publish the generated
 static files from `site/` with a real static host, CDN, or web server.
+
+The release command check compares README and installer examples with the latest
+release. For a command that hasn't shipped, put a visible
+`Not in the latest release yet` paragraph before its README block. In an installer, put
+`# Not in the latest release yet` before the output lines and leave a blank
+source line after them. Remove the note once the command ships.
 
 ## Documentation standards
 
@@ -230,6 +316,15 @@ renders the reference site from the Markdown pages listed in
 `/`, the introductory guide at `/guide/`, and the documentation at `/docs/`.
 Keep `docs/llms.txt` links aligned with those public routes.
 
+Pages must not paint before their stylesheets and fonts load. The build embeds
+each `/fonts/<name>.woff2` that `docs/website/styles/site.css` references, and
+inlines `docs/website/hold-first-paint.js` right after each built page's
+`<meta charset="utf-8">`. The Zensical theme's font loading stays off;
+`docs/stylesheets/extra.css` sets the docs faces. The First paint CI job reads
+the HTML and CSS of the built site and of the web UI the daemon serves. When
+you move that job's pin, copy the pinned commit's `hold-first-paint.js` code
+too.
+
 When changing behavior:
 
 - update CLI help when flags or contracts change;
@@ -269,6 +364,11 @@ last_edited: 2026-09-15
 
 Do not leave accepted repository changes uncommitted at the end of a task.
 Do not squash or amend history unless explicitly asked.
+
+End the pull request description with a `Model used:` line naming the model, such as
+`Model used: Opus 5.5` or `Model used: GPT-6.1 Sol`. Add a `Co-authored-by:`
+trailer for the tool to each commit it wrote and to the end of the description,
+because squash-merge keeps only the description.
 
 When closing kata issues, close with a substantive message and typed evidence:
 

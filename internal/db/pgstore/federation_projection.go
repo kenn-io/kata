@@ -175,6 +175,9 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 		if err != nil {
 			return err
 		}
+		if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, project.UID); err != nil {
+			return mapSQLError(err, nil)
+		}
 		for _, query := range []string{
 			`DELETE FROM federation_quarantine WHERE project_id=$1`,
 			`DELETE FROM federation_sync_status WHERE project_id=$1`,
@@ -291,7 +294,7 @@ func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Is
 	if issue.OccurrenceKey != nil {
 		occurrenceKey = *issue.OccurrenceKey
 	}
-	payload, err := json.Marshal(issueCreatedPayload{
+	payload, err := json.Marshal(db.IssueDocumentPayload{
 		UID: issue.UID, ShortID: issue.ShortID, Title: issue.Title, Body: issue.Body,
 		Author: issue.Author, Owner: issue.Owner, AssignmentExpiresOn: optionalStoredTime(issue.AssignmentExpiresOn), Priority: issue.Priority, Status: issue.Status,
 		ClosedReason: issue.ClosedReason, ClosedAt: optionalStoredTime(issue.ClosedAt),
@@ -332,7 +335,7 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 	return output, mapSQLError(rows.Err(), nil)
 }
 
-func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]createdLink, error) {
+func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueDocumentLink, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT l.type,peer.short_id,peer.uid,FALSE,l.author,l.created_at
 FROM links l JOIN issues peer ON peer.id=l.to_issue_id WHERE l.from_issue_id=$1
 UNION ALL
@@ -344,9 +347,9 @@ ORDER BY 1 ASC,3 ASC,4 ASC`, issueID)
 		return nil, mapSQLError(err, nil)
 	}
 	defer func() { _ = rows.Close() }()
-	var output []createdLink
+	var output []db.IssueDocumentLink
 	for rows.Next() {
-		var link createdLink
+		var link db.IssueDocumentLink
 		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Incoming, &link.Author, &link.CreatedAt); err != nil {
 			return nil, mapSQLError(err, nil)
 		}
@@ -359,16 +362,16 @@ func federationIssueComments(
 	ctx context.Context,
 	tx *sql.Tx,
 	issueID int64,
-) ([]issueSnapshotComment, error) {
+) ([]db.IssueDocumentComment, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT uid,author,body,created_at,teammate,reply_to_uid,reply_kind,edited_at FROM comments WHERE issue_id=$1 ORDER BY id ASC`, issueID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
 	defer func() { _ = rows.Close() }()
-	var output []issueSnapshotComment
+	var output []db.IssueDocumentComment
 	for rows.Next() {
-		var comment issueSnapshotComment
+		var comment db.IssueDocumentComment
 		var teammate, replyTo, replyKind, editedAt sql.NullString
 		if err := rows.Scan(&comment.CommentUID, &comment.Author, &comment.Body, &comment.CreatedAt, &teammate, &replyTo, &replyKind, &editedAt); err != nil {
 			return nil, mapSQLError(err, nil)
@@ -394,9 +397,46 @@ func federationIssueRecurrenceUID(ctx context.Context, tx *sql.Tx, recurrenceID 
 
 // MaterializeFederatedProject rebuilds one project's read model from portable events.
 func (s *Store) MaterializeFederatedProject(ctx context.Context, projectID int64) error {
-	return s.withSerializableTx(ctx, func(tx *sql.Tx) error {
-		return s.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil)
+	return s.materializeFederatedProjectAfter(ctx, projectID, nil)
+}
+
+// materializeFederatedProjectAfter runs before in the transaction that then
+// rebuilds the project, so a change to the event log and the rows built from
+// it commit together.
+func (s *Store) materializeFederatedProjectAfter(ctx context.Context, projectID int64, before func(context.Context, *sql.Tx) error) error {
+	// Ownership can change while retained history is folded. Take the policy
+	// writer lock before request fences or project rows to avoid lock upgrades.
+	original := ctx
+	ctx = db.WithTransactionFence(ctx, func(fenceCtx context.Context, tx db.Transaction) error {
+		if err := lockProjectAccessExclusive(fenceCtx, tx); err != nil {
+			return err
+		}
+		return db.ApplyTransactionFence(original, tx)
 	})
+	var resets *db.FederationMoveResetCapture
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		var applyCtx context.Context
+		applyCtx, resets = db.WithFederationMoveResetCapture(ctx)
+		if before != nil {
+			if err := before(applyCtx, tx); err != nil {
+				return err
+			}
+		}
+		if err := s.materializeFederatedProjectTx(applyCtx, tx, projectID, true, nil, nil); err != nil {
+			return err
+		}
+		if err := db.RecordFederationCurrentProjectResets(applyCtx, tx, db.FederationPulledEventUIDs(applyCtx), func(project db.Project) (int64, error) {
+			event, err := s.insertEventTx(applyCtx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: "{}", SkipRelay: true})
+			return event.ID, err
+		}); err != nil {
+			return err
+		}
+		return db.RecordMCPEventsRematch(applyCtx, tx, db.FederationPulledEventUIDs(applyCtx))
+	})
+	if err == nil && resets != nil {
+		db.CommitFederationMoveResets(ctx, resets.Resets)
+	}
+	return err
 }
 
 // federatedMaterialization names everything one materialization pass operates
@@ -498,6 +538,69 @@ func (s *Store) materializeFederatedProjectTxScoped(
 		}
 	}
 	projection := db.FoldEvents(events)
+	moved := db.IndexFederatedMoveEvents(events)
+	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection)
+	if err != nil {
+		return err
+	}
+	err = db.RehomeFederatedMovedIssues(ctx, tx, moved, projection, decisions, func(pid int64, issue db.FoldIssue) (string, error) {
+		return resolveFederatedIssueShortID(ctx, tx, pid, issue, federatedIssueRow{}, false)
+	}, func(id, source, target int64) error {
+		if err := lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil {
+			return err
+		}
+		if err := rejectIssueMoveExternalRootIssueSyncTx(ctx, tx, id, source, target); err != nil {
+			return err
+		}
+		collisions, err := issueMoveImportMappingCollisionsTx(ctx, tx, id, source, target)
+		if err != nil {
+			return err
+		}
+		if len(collisions) > 0 {
+			return &db.ProjectMergeImportMappingCollisionError{Mappings: collisions}
+		}
+		var issueUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM issues WHERE id=$1`, id).Scan(&issueUID); err != nil {
+			return err
+		}
+		return db.CheckNativeRecurringParentMove(ctx, tx, true, source, issueUID)
+	}, func(issueUID, targetProjectUID string) error {
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return err
+		}
+		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
+	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
+		payload := "{}"
+		var issueUID *string
+		if reference != nil {
+			encoded, err := json.Marshal(reference)
+			if err != nil {
+				return 0, err
+			}
+			payload = string(encoded)
+			issueUID = &reference.IssueUID
+		}
+		event, err := s.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, IssueUID: issueUID, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: payload, SkipRelay: true})
+		return event.ID, err
+	})
+	if err != nil {
+		return err
+	}
+	if !db.FollowingMovedProjects(ctx) {
+		for _, pid := range destinations {
+			if pid != projectID {
+				if err := s.materializeFederatedProjectTx(db.WithMovedProjectPass(ctx), tx, pid, true, acceptedEventUIDs, validator); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	var projectUID string
+	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&projectUID); err != nil {
+		return err
+	}
+	db.RestrictFoldProject(&projection, projectUID)
+
 	if validator == nil {
 		validator = db.NewCronReplayValidator(tx, true)
 	}
@@ -665,6 +768,14 @@ UNION ALL SELECT 1 FROM purge_log WHERE project_id=$1 AND short_id=$2
 )`, projectID, candidate, issue.UID).Scan(&occupied)
 		if err != nil {
 			return "", mapSQLError(err, nil)
+		}
+		if !occupied {
+			historical, err := db.MovedIssueUID(ctx, tx, projectID, candidate, true)
+			if err == nil {
+				occupied = historical != issue.UID
+			} else if !errors.Is(err, db.ErrNotFound) {
+				return "", err
+			}
 		}
 		if !occupied {
 			return candidate, nil

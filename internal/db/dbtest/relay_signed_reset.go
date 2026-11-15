@@ -24,6 +24,8 @@ func RunSignedRelayResetCommitments(t *testing.T, store db.Storage) {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "reset-replica")
 	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
 	rootUID := "00000000000000000000000002"
 	public, private, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
@@ -38,20 +40,20 @@ func RunSignedRelayResetCommitments(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	issueUID, err := uid.New()
 	require.NoError(t, err)
-	source := newRemoteEvent(t, project, &issueUID, "issue.created", "source-assistant", rootUID, 300, jsontext.Value(`{"uid":"`+issueUID+`","title":"Before snapshot","author":"source-assistant","metadata":{}}`))
+	source := newRemoteEvent(t, project, &issueUID, "issue.created", "source-assistant", rootUID, 300, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"Before snapshot","author":"source-assistant","metadata":{}}`)))
 	sourceBytes, err := db.EncodeRelaySourceEvent(source)
 	require.NoError(t, err)
 	proof, err := db.SignRootReceipt(db.AttributionReceipt{Version: 1, ProjectUID: project.UID, EventUID: source.EventUID, ContentHash: source.ContentHash, AuthorityUID: rootUID, KeyID: pin.KeyID, AccountableActor: "company-member", SourceActor: source.Actor, IngressInstanceUID: rootUID, AcceptedAt: time.Now().UTC(), ResetEpoch: 1, Sequence: 1}, private)
 	require.NoError(t, err)
 	// Snapshots describe current state but are not original creation events.
-	entity := newRemoteEvent(t, project, &issueUID, "issue.snapshot", "source-assistant", rootUID, 400, jsontext.Value(`{"uid":"`+issueUID+`","title":"After snapshot","author":"source-assistant","metadata":{},"comments":[],"labels":[],"links":[]}`))
+	entity := newRemoteEvent(t, project, &issueUID, "issue.snapshot", "source-assistant", rootUID, 400, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"After snapshot","author":"source-assistant","metadata":{},"comments":[],"labels":[],"links":[]}`)))
 	entityBytes, err := db.EncodeRelaySourceEvent(entity)
 	require.NoError(t, err)
 	events, err := json.Marshal([][]byte{sourceBytes})
 	require.NoError(t, err)
 	legacyUID, err := uid.New()
 	require.NoError(t, err)
-	legacy := newRemoteEvent(t, project, &legacyUID, "issue.snapshot", "historical-author", rootUID, 400, jsontext.Value(`{"uid":"`+legacyUID+`","title":"Legacy snapshot","author":"historical-author","metadata":{},"comments":[],"labels":[],"links":[]}`))
+	legacy := newRemoteEvent(t, project, &legacyUID, "issue.snapshot", "historical-author", rootUID, 400, IssueDocument(t, legacyUID, jsontext.Value(`{"uid":"`+legacyUID+`","title":"Legacy snapshot","author":"historical-author","metadata":{},"comments":[],"labels":[],"links":[]}`)))
 	legacyBytes, err := db.EncodeRelaySourceEvent(legacy)
 	require.NoError(t, err)
 	entities, err := json.Marshal([][]byte{entityBytes, legacyBytes})
@@ -63,6 +65,41 @@ func RunSignedRelayResetCommitments(t *testing.T, store db.Storage) {
 	}{[]db.RootKeyPin{pin}, []db.AttributionReceipt{proof}, []db.EntityProvenance{{ProjectUID: project.UID, Kind: "issue", EntityUID: issueUID, EventUID: source.EventUID}}})
 	require.NoError(t, err)
 	snapshot := db.RootResetSnapshot{Events: events, Entities: entities, Provenance: provenance, Artifacts: []byte(`[]`)}
+	movePayload, err := json.Marshal(map[string]any{
+		"issue_uid": issueUID, "from_project_uid": project.UID, "from_short_id": "0001",
+		"to_project_uid": target.UID, "to_short_id": "0001",
+		"snapshot": map[string]any{
+			"uid": issueUID, "short_id": "0001", "title": "Moved issue",
+			"author": "source-assistant", "status": "open", "metadata": map[string]any{},
+			"comments": []any{}, "labels": []any{}, "links": []any{},
+		},
+	})
+	require.NoError(t, err)
+	move := newRemoteEvent(t, project, &issueUID, "issue.moved", "source-assistant", rootUID, 500, jsontext.Value(movePayload))
+	moveBytes, err := db.EncodeRelaySourceEvent(move)
+	require.NoError(t, err)
+	moveEvents, err := json.Marshal([][]byte{sourceBytes, moveBytes})
+	require.NoError(t, err)
+	moveSnapshot := snapshot
+	moveSnapshot.Events = moveEvents
+	moveSnapshotUID, err := uid.New()
+	require.NoError(t, err)
+	moveManifest, err := db.SignRootResetManifest(db.RootResetManifest{
+		Version: 1, ProjectUID: project.UID, AuthorityUID: rootUID,
+		KeyID: pin.KeyID, ResetEpoch: 3, SnapshotUID: moveSnapshotUID,
+		RootBaselines: db.RelayStreamCursors{Events: 11, Receipts: 13, Artifacts: 17},
+	}, moveSnapshot, private)
+	require.NoError(t, err)
+	moveTranslation := db.RelayResetTranslation{
+		Authority: db.RelayHopAuthority{
+			BindingUID: bindingUID, ProjectUID: project.UID, AuthorityUID: rootUID,
+			SenderInstanceUID: rootUID, ReceiverInstanceUID: store.InstanceUID(), Epoch: 19,
+		},
+		SnapshotUID: moveManifest.SnapshotUID, SnapshotDigest: moveManifest.SnapshotDigest,
+		HopBaselines: db.RelayStreamCursors{Events: 101, Receipts: 113, Artifacts: 117},
+	}
+	require.ErrorIs(t, installer.InstallRelayReset(ctx, bindingUID, moveManifest, moveSnapshot, moveTranslation), db.ErrFederationIngestValidation,
+		"relay reset must reject cross-project issue moves")
 	snapshotUID, err := uid.New()
 	require.NoError(t, err)
 	manifest, err := db.SignRootResetManifest(db.RootResetManifest{Version: 1, ProjectUID: project.UID, AuthorityUID: rootUID, KeyID: pin.KeyID, ResetEpoch: 3, SnapshotUID: snapshotUID, RootBaselines: db.RelayStreamCursors{Events: 11, Receipts: 13, Artifacts: 17}}, snapshot, private)
@@ -197,7 +234,7 @@ func RunSignedRelayResetCommitments(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	foreignIssue, foreignEvent, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: foreignProject.ID, Title: "Keep sibling", Author: "personal-member"})
 	require.NoError(t, err)
-	collision := newRemoteEvent(t, project, &foreignIssue.UID, "issue.created", "personal-member", rootUID, 500, jsontext.Value(`{"uid":"`+foreignIssue.UID+`","title":"Collision","author":"personal-member","metadata":{}}`))
+	collision := newRemoteEvent(t, project, &foreignIssue.UID, "issue.created", "personal-member", rootUID, 500, IssueDocument(t, foreignIssue.UID, jsontext.Value(`{"uid":"`+foreignIssue.UID+`","title":"Collision","author":"personal-member","metadata":{}}`)))
 	collision.EventUID = foreignEvent.UID
 	collision.ContentHash, err = db.EventContentHash(db.EventHashInput{UID: collision.EventUID, OriginInstanceUID: collision.OriginInstanceUID, ProjectUID: collision.ProjectUID, ProjectName: collision.ProjectName, IssueUID: collision.IssueUID, Type: collision.Type, Actor: collision.Actor, HLCPhysicalMS: collision.HLCPhysicalMS, HLCCounter: collision.HLCCounter, CreatedAt: collision.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: collision.Payload})
 	require.NoError(t, err)

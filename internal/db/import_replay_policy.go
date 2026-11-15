@@ -70,6 +70,9 @@ func ValidateImportRecords(records []ImportRecord) error {
 			return fmt.Errorf("import record %d: %w", i, err)
 		}
 	}
+	if err := validateSpokeNameReplay(records); err != nil {
+		return err
+	}
 	if err := validateCronImportEvents(records); err != nil {
 		return err
 	}
@@ -151,7 +154,7 @@ func validateReplayStatusIntent(records []ImportRecord) error {
 		event := events[*normalized.PendingEventUID]
 		if issue == nil || event == nil || issue.ProjectID != mapping.ProjectID || event.ProjectID != mapping.ProjectID ||
 			(event.IssueID != nil && *event.IssueID != issue.ID) ||
-			FederationEventIssueUID(event.IssueUID, string(event.Payload)) != issue.UID ||
+			EventIssueUID(event.IssueUID) != issue.UID ||
 			(event.Type != "issue.closed" && event.Type != "issue.reopened") {
 			return invalidIssueStatusState()
 		}
@@ -277,6 +280,11 @@ func validateImportRecord(record ImportRecord) error {
 	switch rec := record.(type) {
 	case *CronJobExport, *CronWorkflowExport, *CronRunExport:
 		return ValidateCronRecord(record)
+	case *MCPEventSubscriptionExport:
+		if rec == nil {
+			return errors.New("nil mcp event subscription")
+		}
+		return ValidateMCPEventSubscription(rec.Subscription())
 	case nil:
 		return errors.New("nil record")
 	case *EmbeddingArtifactExport:
@@ -494,6 +502,11 @@ func PrepareReplayEvent(
 	}
 	if event.HLCCounter < 0 {
 		return fmt.Errorf("event %d has negative hlc_counter", event.ID)
+	}
+	// Both backends fill a missing header from the event's local issue row
+	// before this check, so only an issue event that names no issue fails.
+	if strings.HasPrefix(event.Type, "issue.") && EventIssueUID(event.IssueUID) == "" {
+		return fmt.Errorf("event %d (%s) has no issue_uid", event.ID, event.Type)
 	}
 	if !recomputeHash && !ValidReplayContentHash(event.ContentHash) {
 		return fmt.Errorf("event %d invalid content_hash %q", event.ID, event.ContentHash)

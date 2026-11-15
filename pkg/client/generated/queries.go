@@ -59,9 +59,12 @@ type ListAllIssuesQuery struct {
 	Cursor *string `json:"cursor,omitempty"`
 
 	// IncludeTotal Count all matching issues, ignoring cursor and limit
-	IncludeTotal *bool                     `json:"include_total,omitempty"`
-	ProjectID    *int64                    `json:"project_id,omitempty"`
-	Status       *ListAllIssuesQueryStatus `json:"status,omitempty"`
+	IncludeTotal *bool `json:"include_total,omitempty"`
+
+	// Compact Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+	Compact   *bool                     `json:"compact,omitempty"`
+	ProjectID *int64                    `json:"project_id,omitempty"`
+	Status    *ListAllIssuesQueryStatus `json:"status,omitempty"`
 
 	// Priority exact priority filter (0..4 or none for unset); empty = no filter
 	Priority *string `json:"priority,omitempty"`
@@ -128,6 +131,15 @@ type ListProjectsQuery struct {
 	Include *string `json:"include,omitempty"`
 }
 
+type ReadProjectByNameQuery struct {
+	// Name project name
+	Name string `json:"name" validate:"required"`
+}
+
+func (r ReadProjectByNameQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type RemoveProjectQuery struct {
 	Actor string `json:"actor" validate:"required"`
 	Force *bool  `json:"force,omitempty"`
@@ -179,6 +191,9 @@ type PollProjectEventsQuery struct {
 	Issue   *string `json:"issue,omitempty"`
 	AfterID *int64  `json:"after_id,omitempty"`
 	Limit   *int64  `json:"limit,omitempty"`
+
+	// IncludeEffectiveCloseEventUID Include the effective native close event UID in issue history when available.
+	IncludeEffectiveCloseEventUID *bool `json:"include_effective_close_event_uid,omitempty"`
 }
 
 type GetProjectFederationQuery struct {
@@ -192,7 +207,10 @@ func (g GetProjectFederationQuery) Validate() error {
 
 type PollFederationProjectEventsQuery struct {
 	AfterID *int64 `json:"after_id,omitempty"`
-	Limit   *int64 `json:"limit,omitempty"`
+
+	// IssueUID Read retained history only for an issue currently owned by this project, independently of the project cursor.
+	IssueUID *string `json:"issue_uid,omitempty"`
+	Limit    *int64  `json:"limit,omitempty"`
 }
 
 type OfferRelayDeliveriesQuery struct {
@@ -230,13 +248,24 @@ func (o OfferRelayDeliveriesQuery) Validate() error {
 	return errors
 }
 
+type GetProjectFederationStatusQuery struct {
+	// Compact Omit relay checkpoint capacity measurement. Error details are unchanged unless omit_errors is also set.
+	Compact *bool `json:"compact,omitempty"`
+
+	// OmitErrors Remove error text from the status: the sync error, held-back batch errors, the embedding producer error, and the relay checkpoint error. State, timestamps, and counts remain, and has_sync_error reports whether a sync error was removed.
+	OmitErrors *bool `json:"omit_errors,omitempty"`
+}
+
 type ListIssuesQuery struct {
 	// Cursor Opaque next_cursor from a matching stable-order page
 	Cursor *string `json:"cursor,omitempty"`
 
 	// IncludeTotal Count all matching issues, ignoring cursor and limit
-	IncludeTotal *bool                  `json:"include_total,omitempty"`
-	Status       *ListIssuesQueryStatus `json:"status,omitempty"`
+	IncludeTotal *bool `json:"include_total,omitempty"`
+
+	// Compact Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+	Compact *bool                  `json:"compact,omitempty"`
+	Status  *ListIssuesQueryStatus `json:"status,omitempty"`
 
 	// Priority exact priority filter (0..4 or none for unset); empty = no filter
 	Priority *string `json:"priority,omitempty"`
@@ -300,8 +329,9 @@ func (s ShowIssueQuery) Validate() error {
 }
 
 type AddAttachmentQuery struct {
-	Name  string  `json:"name" validate:"required"`
-	Actor *string `json:"actor,omitempty"`
+	Name          string  `json:"name" validate:"required"`
+	Actor         *string `json:"actor,omitempty"`
+	ReuseExisting *bool   `json:"reuse_existing,omitempty"`
 }
 
 func (a AddAttachmentQuery) Validate() error {
@@ -314,6 +344,17 @@ type UnbindExternalRootQuery struct {
 
 type GetExternalRootBridgeQuery struct {
 	Actor *string `json:"actor,omitempty"`
+}
+
+type ReadFileEvidenceQuery struct {
+	EventUID   *string `json:"event_uid,omitempty"`
+	Index      *int64  `json:"index,omitempty" validate:"omitempty,gte=0"`
+	Historical *bool   `json:"historical,omitempty"`
+	Content    *bool   `json:"content,omitempty"`
+}
+
+func (r ReadFileEvidenceQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
 type ReachableIssueGraphQuery struct {
@@ -358,11 +399,28 @@ func (i IssuePlanningDatesQuery) Validate() error {
 }
 
 type ReadyIssuesQuery struct {
-	Limit        *int64   `json:"limit,omitempty"`
-	Unowned      *bool    `json:"unowned,omitempty"`
-	Owner        *string  `json:"owner,omitempty"`
-	Label        []string `json:"label,omitempty"`
-	ExcludeLabel []string `json:"exclude_label,omitempty"`
+	// Sort priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+	Sort         *ReadyIssuesQuerySort `json:"sort,omitempty"`
+	Limit        *int64                `json:"limit,omitempty"`
+	Unowned      *bool                 `json:"unowned,omitempty"`
+	Owner        *string               `json:"owner,omitempty"`
+	Label        []string              `json:"label,omitempty"`
+	ExcludeLabel []string              `json:"exclude_label,omitempty"`
+}
+
+func (r ReadyIssuesQuery) Validate() error {
+	var errors runtime.ValidationErrors
+	if r.Sort != nil {
+		if v, ok := any(r.Sort).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Sort", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type DeleteRecurrenceQuery struct {
@@ -427,11 +485,28 @@ func (s SearchIssuesQuery) Validate() error {
 }
 
 type ReadyIssuesGlobalQuery struct {
-	Limit        *int64   `json:"limit,omitempty"`
-	Unowned      *bool    `json:"unowned,omitempty"`
-	Owner        *string  `json:"owner,omitempty"`
-	Label        []string `json:"label,omitempty"`
-	ExcludeLabel []string `json:"exclude_label,omitempty"`
+	// Sort priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+	Sort         *ReadyIssuesGlobalQuerySort `json:"sort,omitempty"`
+	Limit        *int64                      `json:"limit,omitempty"`
+	Unowned      *bool                       `json:"unowned,omitempty"`
+	Owner        *string                     `json:"owner,omitempty"`
+	Label        []string                    `json:"label,omitempty"`
+	ExcludeLabel []string                    `json:"exclude_label,omitempty"`
+}
+
+func (r ReadyIssuesGlobalQuery) Validate() error {
+	var errors runtime.ValidationErrors
+	if r.Sort != nil {
+		if v, ok := any(r.Sort).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Sort", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type ResolveUIIssueReferenceQuery struct {

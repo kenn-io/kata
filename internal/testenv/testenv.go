@@ -17,9 +17,11 @@ import (
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testfix"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -56,6 +58,14 @@ func WithCloseThrottleEnabled() Option {
 func WithCloseThrottleWindow(window time.Duration) Option {
 	return func(cfg *daemon.ServerConfig) {
 		cfg.CloseThrottle.SiblingBurstWindow = window
+	}
+}
+
+// WithFederationPullOnce installs the synchronous pull callback used when a
+// forwarded timed claim follows an issue into another joined project.
+func WithFederationPullOnce(pull func(context.Context, db.FederationBinding, config.FederationCredential) error) Option {
+	return func(cfg *daemon.ServerConfig) {
+		cfg.FederationPullOnce = pull
 	}
 }
 
@@ -116,7 +126,7 @@ func New(t *testing.T, opts ...Option) *Env {
 	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
 
 	ctx := t.Context()
-	d, err := sqlitestore.Open(ctx, filepath.Join(home, "kata.db"))
+	d, err := testfix.OpenSQLite(ctx, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 

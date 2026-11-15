@@ -14,8 +14,23 @@ import (
 
 var errEmbeddingCredentialWrongOwner = errors.New("credential file is not owned by the daemon user")
 
+// CredentialSourceError reports why the selected source cannot supply a key.
+// Reason never names the source, so it may reach clients that must not learn
+// daemon-host paths or environment variable names.
+type CredentialSourceError struct {
+	Source string
+	Reason string
+}
+
+func (e *CredentialSourceError) Error() string {
+	return fmt.Sprintf("%v: %s: %s", ErrCredentialSource, e.Source, e.Reason)
+}
+
+func (e *CredentialSourceError) Unwrap() error { return ErrCredentialSource }
+
 // ResolveSecret selects inline > file > named environment variable. An unusable
-// selected source is an error, never a reason to fall back. Source is safe to log.
+// selected source is a *CredentialSourceError, never a reason to fall back.
+// Source is safe to log.
 func ResolveSecret(inline, file, env string) (key, source string, err error) {
 	if key = strings.TrimSpace(inline); key != "" {
 		return key, "inline", nil
@@ -24,7 +39,7 @@ func ResolveSecret(inline, file, env string) (key, source string, err error) {
 		source = "file:" + file
 		key, err = readSecretFile(file)
 		if err != nil {
-			return "", source, fmt.Errorf("%w: %s: %v", ErrCredentialSource, source, err)
+			return "", source, &CredentialSourceError{Source: source, Reason: err.Error()}
 		}
 		return key, source, nil
 	}
@@ -32,7 +47,7 @@ func ResolveSecret(inline, file, env string) (key, source string, err error) {
 		source = "env:" + env
 		key = strings.TrimSpace(os.Getenv(env))
 		if key == "" {
-			return "", source, fmt.Errorf("%w: %s is unset or empty", ErrCredentialSource, source)
+			return "", source, &CredentialSourceError{Source: source, Reason: "environment variable is unset or empty"}
 		}
 		return key, source, nil
 	}
@@ -68,7 +83,7 @@ func readSecretFile(path string) (string, error) {
 	}
 	if runtime.GOOS == "windows" {
 		if err := safefileio.ValidatePrivateCurrentUserFile(f); err != nil {
-			return "", errors.New("must be a private current-user file")
+			return "", errors.New("must be a private current-user file: turn off inheritance and allow only the current user, SYSTEM and Administrators")
 		}
 	} else if info.Mode().Perm()&0o077 != 0 {
 		return "", errors.New("group/world-readable; use chmod 600")

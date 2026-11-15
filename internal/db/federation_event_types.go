@@ -21,8 +21,10 @@ type federationEventType struct {
 var federationEventTypes = []federationEventType{
 	{name: "project.metadata_updated", version: 30},
 	{name: "issue.created", version: 30},
+	{name: "issue.moved", version: 30, feature: IssueMoveEventFeature},
 	{name: "issue.snapshot", version: 30, snapshot: true},
 	{name: "issue.updated", version: 30},
+	{name: RepeatedImportEventType, version: 30, feature: RepeatedAdoptionEventFeature},
 	{name: "issue.closed", version: 30},
 	{name: "issue.reopened", version: 30},
 	{name: "issue.soft_deleted", version: 30},
@@ -134,6 +136,17 @@ func IsFederationSnapshotEvent(kind string) bool {
 func isCronDefinitionEvent(kind string) bool {
 	_, ok := lookupFederationEventType(kind)
 	return ok && (strings.HasPrefix(kind, "cron.job.") || strings.HasPrefix(kind, "cron.workflow."))
+}
+
+// CronDefinitionEventTypesSQL is the quoted SQL list of cron definition types.
+func CronDefinitionEventTypesSQL() string {
+	var names []string
+	for _, declared := range federationEventTypes {
+		if isCronDefinitionEvent(declared.name) {
+			names = append(names, declared.name)
+		}
+	}
+	return sqlStringList(names)
 }
 
 // FederationPushEventTypesSQL is the quoted SQL list of every event type a

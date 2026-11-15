@@ -26,6 +26,7 @@ import (
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kata/internal/projectscope"
 )
 
 // projectScopedClaimActionEvent rewrites the lease action response's event
@@ -680,6 +681,24 @@ func claimForwardClient(
 	if err != nil {
 		return nil, config.FederationCredential{}, internalAPIError(err)
 	}
+	return newClaimForwardClient(ctx, binding, cred)
+}
+
+// Show classifies optional setup cancellation before API conversion loses
+// the cause. Explicit lease operations keep their existing error mapping.
+func showClaimForwardClient(ctx context.Context, cfg ServerConfig, binding db.FederationBinding) (*claimHubClient, config.FederationCredential, error) {
+	project, err := cfg.DB.ProjectByID(ctx, binding.ProjectID)
+	if err != nil {
+		return nil, config.FederationCredential{}, err
+	}
+	cred, _, err := cfg.federationCredentialStore().FederationCredential(ctx, project.UID)
+	if err != nil {
+		return nil, config.FederationCredential{}, err
+	}
+	return newClaimForwardClient(ctx, binding, cred)
+}
+
+func newClaimForwardClient(ctx context.Context, binding db.FederationBinding, cred config.FederationCredential) (*claimHubClient, config.FederationCredential, error) {
 	if cred.RelayEnrollmentPending {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "relay enrollment pending", "finish bridge enrollment before forwarding claims", nil)
 	}
@@ -957,6 +976,9 @@ func (c *claimHubClient) ClaimIssue(
 		return api.ClaimResponseBody{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if err := addClaimForwardProjectScope(ctx, req); err != nil {
+		return api.ClaimResponseBody{}, err
+	}
 	resp, err := c.client.Do(req) //nolint:gosec // the binding's canonical hub origin configures this client and pins its bearer token.
 	if err != nil {
 		return api.ClaimResponseBody{}, err
@@ -1004,34 +1026,82 @@ func applyForwardedAssignmentClaim(
 	for _, event := range forwarded.Events {
 		allUIDs = append(allUIDs, event.UID)
 	}
-	insertedUIDs := make([]string, 0, len(receivedEvents))
+	type eventGroup struct {
+		projectID    int64
+		eventUIDs    []string
+		insertedUIDs map[string]struct{}
+		seenUIDs     map[string]struct{}
+	}
+	groupsByProject := make(map[int64]*eventGroup)
+	groups := make([]*eventGroup, 0, len(receivedEvents))
+	projectIDsByUID := make(map[string]int64)
 	for _, event := range receivedEvents {
-		inserted, err := cfg.DB.InsertRemoteEvent(ctx, projectID, remoteEventFromStoredEvent(event))
+		eventProjectID := projectID
+		if event.ProjectUID != "" {
+			var known bool
+			eventProjectID, known = projectIDsByUID[event.ProjectUID]
+			if !known {
+				project, err := cfg.DB.ProjectByUID(ctx, event.ProjectUID)
+				if err != nil {
+					return nil, err
+				}
+				eventProjectID = project.ID
+				projectIDsByUID[event.ProjectUID] = eventProjectID
+			}
+		}
+		group := groupsByProject[eventProjectID]
+		if group == nil {
+			group = &eventGroup{
+				projectID: eventProjectID, insertedUIDs: make(map[string]struct{}),
+				seenUIDs: make(map[string]struct{}),
+			}
+			groupsByProject[eventProjectID] = group
+			groups = append(groups, group)
+		}
+		if _, seen := group.seenUIDs[event.UID]; !seen {
+			group.eventUIDs = append(group.eventUIDs, event.UID)
+			group.seenUIDs[event.UID] = struct{}{}
+		}
+		inserted, err := cfg.DB.InsertRemoteEvent(ctx, eventProjectID, remoteEventFromStoredEvent(event))
 		if err != nil {
 			return nil, err
 		}
 		if inserted {
-			insertedUIDs = append(insertedUIDs, event.UID)
+			group.insertedUIDs[event.UID] = struct{}{}
 		}
 	}
-	if len(receivedEvents) > 0 {
-		if err := cfg.DB.MaterializeFederatedProject(ctx, projectID); err != nil {
+	for _, group := range groups {
+		if err := cfg.DB.MaterializeFederatedProject(ctx, group.projectID); err != nil {
 			return nil, err
+		}
+	}
+	storedByUID := make(map[string]db.Event, len(receivedEvents))
+	for _, group := range groups {
+		stored, err := cfg.DB.EventsByUIDs(ctx, group.projectID, group.eventUIDs)
+		if err != nil {
+			return nil, err
+		}
+		insertedEvents := make([]db.Event, 0, len(group.insertedUIDs))
+		for _, event := range stored {
+			storedByUID[event.UID] = event
+			if _, inserted := group.insertedUIDs[event.UID]; inserted {
+				insertedEvents = append(insertedEvents, event)
+			}
+		}
+		// Publish each committed event under its envelope project before any
+		// response-only issue or projection read can fail.
+		cfg.Publish().Events(group.projectID, insertedEvents)
+	}
+	events := make([]db.Event, 0, len(allUIDs))
+	for _, uid := range allUIDs {
+		if event, ok := storedByUID[uid]; ok {
+			events = append(events, event)
 		}
 	}
 	issue, err := cfg.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
 	if err != nil {
 		return nil, err
 	}
-	events, err := cfg.DB.EventsByUIDs(ctx, projectID, allUIDs)
-	if err != nil {
-		return nil, err
-	}
-	insertedEvents, err := cfg.DB.EventsByUIDs(ctx, projectID, insertedUIDs)
-	if err != nil {
-		return nil, err
-	}
-	cfg.Publish().Events(projectID, insertedEvents)
 	// Response events follow the scoped projection contract shared by every
 	// mutation response; publishing above stays raw so mirror subscribers and
 	// hooks keep the durable form. Remote event rows carry no local issue_id
@@ -1175,7 +1245,11 @@ func normalizeForwardedClaimStatus(body *api.ClaimStatusBody) {
 type claimHubDoer struct{ client *http.Client }
 
 func (d claimHubDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	resp, err := d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated lease routes use the operator-configured federation hub and its origin-pinned transport.
+	req = req.Clone(ctx)
+	if err := addClaimForwardProjectScope(ctx, req); err != nil {
+		return nil, err
+	}
+	resp, err := d.client.Do(req) //nolint:gosec // G704: generated lease routes use the operator-configured federation hub and its origin-pinned transport.
 	if err != nil {
 		return nil, err
 	}
@@ -1185,6 +1259,29 @@ func (d claimHubDoer) Do(ctx context.Context, req *http.Request) (*http.Response
 		return nil, &claimHubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
 	return resp, nil
+}
+
+// Native hub and spoke project UIDs identify the same projects. Carry the
+// caller's effective project authority, including fixed request limits, so a
+// broader transport credential cannot escape it when the spoke is stale.
+func addClaimForwardProjectScope(ctx context.Context, req *http.Request) error {
+	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
+	if decision == nil {
+		return nil
+	}
+	projects := narrowProjectUIDs(decision.ProjectUIDs, decision.fixedUIDs)
+	if projects == nil {
+		return nil
+	}
+	if len(projects) == 0 {
+		return projectAccessDenied()
+	}
+	limit, err := json.Marshal(projects)
+	if err != nil {
+		return err
+	}
+	req.Header.Add(projectscope.Header, string(limit))
+	return nil
 }
 
 func requireHubClaimBinding(ctx context.Context, store db.Storage, projectID int64) error {
@@ -1281,7 +1378,39 @@ func showIssueClaimRelevant(ctx context.Context, store db.Storage, projectID int
 }
 
 func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issue) (*time.Time, error) {
-	finishTransport, err := beginClaimFederationTransport(ctx, cfg, issue.ProjectID)
+	// Leave time to persist a failed remote attempt, but never let optional
+	// cache writes wait indefinitely behind another local writer.
+	refreshCtx, cancel := context.WithTimeout(ctx, showClaimStatusRefreshTimeout+100*time.Millisecond)
+	defer cancel()
+	hubNow, err := refreshShowClaimStatusWithinBudget(refreshCtx, cfg, issue)
+	if ctx.Err() != nil {
+		return nil, internalAPIError(ctx.Err())
+	}
+	if errors.Is(err, federationcoord.ErrBusy) ||
+		(refreshCtx.Err() != nil && showClaimStatusContextError(err)) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, claimAPIError(err)
+	}
+	return hubNow, nil
+}
+
+// Joined errors can carry failed rollback or authorization finalization.
+// Only a chain ending in cancellation is safe to treat as optional expiry.
+func showClaimStatusContextError(err error) bool {
+	for err != nil {
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			return true
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
+}
+
+func refreshShowClaimStatusWithinBudget(ctx context.Context, cfg ServerConfig, issue db.Issue) (*time.Time, error) {
+	finishTransport, err := federationcoord.TryBeginSync(ctx,
+		federationcoord.Key(cfg.DB.InstanceUID(), issue.ProjectID), cfg.DB, issue.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -1292,7 +1421,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 		return nil, nil
 	}
 	if err != nil {
-		return nil, internalAPIError(err)
+		return nil, err
 	}
 	if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
 		if binding.Enabled && binding.Role == db.FederationRoleHub {
@@ -1300,7 +1429,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 			// writer lock. The sweeper and explicit status endpoint persist expiry.
 			status, err := cfg.DB.ClaimStatusReadOnly(ctx, issue.ProjectID, issue.UID, time.Now().UTC())
 			if err != nil {
-				return nil, claimAPIError(err)
+				return nil, err
 			}
 			hubNow := status.HubNow
 			if hubNow.IsZero() {
@@ -1312,16 +1441,16 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 	now := time.Now().UTC()
 	if skip, err := skipRecentShowClaimStatusError(ctx, cfg.DB, issue, now); err != nil {
-		return nil, internalAPIError(err)
+		return nil, err
 	} else if skip {
 		return nil, nil
 	}
 	remoteCtx, cancelRemote := context.WithTimeout(ctx, showClaimStatusRefreshTimeout)
-	remote, cred, err := claimForwardClient(remoteCtx, cfg, binding)
+	remote, cred, err := showClaimForwardClient(remoteCtx, cfg, binding)
 	if err != nil {
 		budgetErr := remoteCtx.Err()
 		cancelRemote()
-		if budgetErr != nil {
+		if budgetErr != nil && showClaimStatusContextError(err) {
 			return nil, markShowClaimStatusRefreshFailure(ctx, cfg.DB, issue, 0,
 				fmt.Sprintf("status refresh transport: %s", budgetErr.Error()), now)
 		}
@@ -1330,7 +1459,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 		}
 		return nil, err
 	}
-	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.ShortID)
+	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.UID)
 	cancelRemote()
 	if err != nil {
 		if statusErr, ok := errors.AsType[*claimHubStatusError](err); ok {
@@ -1341,19 +1470,24 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 	resp, err = remapCachedClaimStatus(ctx, cfg.DB, binding.ProjectID, issue.UID, resp)
 	if err != nil {
-		return nil, claimAPIError(err)
+		return nil, err
 	}
 	if err := cfg.DB.ApplyClaimStatus(ctx, binding.ProjectID, issue.UID, claimStatusFromAPI(resp)); err != nil {
-		return nil, claimAPIError(err)
+		return nil, err
+	}
+	var hubNow *time.Time
+	if !resp.HubNow.IsZero() {
+		hubNow = &resp.HubNow
 	}
 	if err := cfg.DB.ClearClaimStatusRefreshError(ctx, issue.ProjectID, issue.UID); err != nil {
-		return nil, claimAPIError(err)
+		// The cache already holds the hub's status, so its clock must survive an
+		// expired budget; a leftover marker only delays the next optional refresh.
+		if ctx.Err() != nil && showClaimStatusContextError(err) {
+			return hubNow, nil
+		}
+		return nil, err
 	}
-	if resp.HubNow.IsZero() {
-		return nil, nil
-	}
-	hubNow := resp.HubNow
-	return &hubNow, nil
+	return hubNow, nil
 }
 
 func skipRecentShowClaimStatusError(ctx context.Context, store db.Storage, issue db.Issue, now time.Time) (bool, error) {
@@ -1400,15 +1534,15 @@ func markShowClaimStatusRefreshFailure(
 	now time.Time,
 ) error {
 	if err := store.MarkClaimStatusRefreshError(ctx, issue.ProjectID, issue.UID, statusCode, msg, now); err != nil {
-		return internalAPIError(err)
+		return err
 	}
 	pending, err := store.ListPendingClaimRequestsForIssue(ctx, issue.ProjectID, issue.UID, 0)
 	if err != nil {
-		return internalAPIError(err)
+		return err
 	}
 	for _, req := range pending {
 		if err := store.MarkPendingClaimAttempt(ctx, req.RequestUID, msg, now); err != nil {
-			return internalAPIError(err)
+			return err
 		}
 	}
 	return nil

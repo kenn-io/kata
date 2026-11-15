@@ -3,6 +3,7 @@ package pgstore
 import (
 	"database/sql"
 	"encoding/json/jsontext"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,7 +60,7 @@ func (f *federationGroupFixture) seedIssue(t *testing.T, project db.Project, cou
 	t.Helper()
 	issueUID, err := uid.New()
 	require.NoError(t, err)
-	payload := jsontext.Value(`{"uid":"` + issueUID + `","title":"seeded","body":"",` +
+	payload := jsontext.Value(`{"uid":"` + issueUID + `","short_id":"` + strings.ToLower(issueUID[len(issueUID)-4:]) + `","title":"seeded","body":"",` +
 		`"author":"remote","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 	event := projectionSnapshotEvent(t, project, issueUID, f.origin, counter, payload)
 	inserted, err := f.store.InsertRemoteEvent(t.Context(), project.ID, event)
@@ -238,7 +239,7 @@ func TestMaterializeFederatedProjectPersistsCanonicalAssignmentExpiryText(t *tes
 	issueUID, err := uid.New()
 	require.NoError(t, err)
 
-	base := `{"uid":"` + issueUID + `","title":"expiring","body":"",` +
+	base := `{"uid":"` + issueUID + `","short_id":"` + strings.ToLower(issueUID[len(issueUID)-4:]) + `","title":"expiring","body":"",` +
 		`"author":"remote","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"`
 	materialize := func(counter int64, ownerJSON, expiresOn string) {
 		payload := base

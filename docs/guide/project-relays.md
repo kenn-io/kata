@@ -1,7 +1,7 @@
 ---
 title: Share projects between hubs
 description: Connect a selected project to another Kata daemon, relay it to your devices, and understand sync and recovery.
-last_edited: 2026-10-17
+last_edited: 2026-11-11
 ---
 
 # Share projects between hubs
@@ -89,13 +89,21 @@ Add this entry to the receiving daemon's `<KATA_HOME>/config.toml`:
 [[daemon]]
 name = "team-hub"
 url = "https://hub.example"
-token_env = "KATA_TEAM_HUB_TOKEN"
+token_file = "~/.config/kata/tokens/team-hub"
 ```
 
-Provide `KATA_TEAM_HUB_TOKEN` to the receiving **daemon process** through its
-service environment, then restart that daemon to load the catalog. Exporting
-the variable only in a CLI shell does not update an already running daemon.
-Keep the actual token out of repository files and agent transcripts.
+For a device, store the account token in that file, owned by the user running
+the receiving daemon, and use `chmod 600` to make it owner-only. The file must
+be readable by that **daemon process**. Restart the daemon to load the catalog;
+the token file is read when connecting. After connecting, sync uses the saved
+project-scoped credential.
+
+For containers and service managers that already inject secrets, use
+`token_env = "KATA_TEAM_HUB_TOKEN"` instead. Provide the variable to the
+receiving daemon's service environment; exporting it only in a CLI shell does
+not update an already running daemon. Keep the actual token out of repository
+files and agent transcripts. Catalog credentials use `token` > `token_file` >
+`token_env`; a failed selected source stops the connection without fallback.
 
 Use a root HTTP(S) origin, with no path prefix. Non-loopback plain HTTP needs
 the catalog's explicit `allow_insecure` opt-in for a trusted private network;
@@ -143,8 +151,9 @@ kata federation status --json
 Bridge status reads locally recorded state; `connected` is not a fresh hub
 health check. Inspect sync timestamps and pending work before treating the
 replicas as caught up. Use `--agent` for concise agent output, or `--json` when
-a script needs the full diagnostics. The web project's **Refresh sync** action
-also reads the recorded project state.
+a script needs the full diagnostics. The web project's sync summary refreshes
+its recorded state every 30 seconds while the tab is visible and when you return.
+Use **Refresh sync** to read it now.
 
 To bind a workspace to the replica after connection, run
 `kata init --project shared-replica` in that workspace. In identity mode, use an

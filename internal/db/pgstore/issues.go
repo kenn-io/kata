@@ -28,54 +28,6 @@ const scheduledIssueSelect = `SELECT ` + issueColumns + `, schedule_recurrence.t
   JOIN projects p ON p.id = i.project_id
   LEFT JOIN recurrences schedule_recurrence ON schedule_recurrence.id = i.recurrence_id`
 
-type issueCreatedPayload struct {
-	UID                    string                 `json:"uid"`
-	ShortID                string                 `json:"short_id"`
-	Title                  string                 `json:"title"`
-	Body                   string                 `json:"body"`
-	Author                 string                 `json:"author"`
-	Owner                  *string                `json:"owner,omitempty"`
-	AssignmentExpiresOn    *string                `json:"assignment_expires_on,omitempty"`
-	Priority               *int64                 `json:"priority,omitempty"`
-	Status                 string                 `json:"status"`
-	ClosedReason           *string                `json:"closed_reason,omitempty"`
-	ClosedAt               *string                `json:"closed_at,omitempty"`
-	DeletedAt              *string                `json:"deleted_at,omitempty"`
-	Metadata               jsontext.Value         `json:"metadata"`
-	Labels                 []string               `json:"labels,omitempty"`
-	Links                  []createdLink          `json:"links,omitempty"`
-	Comments               []issueSnapshotComment `json:"comments,omitempty"`
-	CreatedAt              string                 `json:"created_at"`
-	UpdatedAt              string                 `json:"updated_at,omitempty"`
-	Revision               int64                  `json:"revision,omitzero"`
-	IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
-	IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
-	RecurrenceUID          string                 `json:"recurrence_uid,omitempty"`
-	OccurrenceKey          string                 `json:"occurrence_key,omitempty"`
-	Source                 string                 `json:"source,omitempty"`
-	ExternalID             string                 `json:"external_id,omitempty"`
-}
-
-type createdLink struct {
-	Type       string `json:"type"`
-	ToShortID  string `json:"to_short_id,omitempty"`
-	ToIssueUID string `json:"to_issue_uid,omitempty"`
-	Incoming   bool   `json:"incoming,omitzero"`
-	Author     string `json:"author,omitempty"`
-	CreatedAt  string `json:"created_at,omitempty"`
-}
-
-type issueSnapshotComment struct {
-	ReplyToUID string `json:"reply_to_uid,omitempty"`
-	ReplyKind  string `json:"reply_kind,omitempty"`
-	EditedAt   string `json:"edited_at,omitempty"`
-	CommentUID string `json:"comment_uid"`
-	Author     string `json:"author"`
-	Teammate   string `json:"teammate,omitempty"`
-	Body       string `json:"body"`
-	CreatedAt  string `json:"created_at"`
-}
-
 // CreateIssue persists the initial issue projection and its creation event in
 // one serializable transaction.
 func (s *Store) CreateIssue(ctx context.Context, params db.CreateIssueParams) (db.Issue, db.Event, error) {
@@ -162,7 +114,7 @@ func (s *Store) createIssueTx(ctx context.Context, tx *sql.Tx, params db.CreateI
 				return mapSQLError(err, nil)
 			}
 		}
-		linkPayloads := make([]createdLink, 0, len(links))
+		linkPayloads := make([]db.IssueDocumentLink, 0, len(links))
 		for _, link := range links {
 			var targetID int64
 			var targetUID, targetShortID, targetProjectUID, targetProjectName string
@@ -214,12 +166,12 @@ func (s *Store) createIssueTx(ctx context.Context, tx *sql.Tx, params db.CreateI
 				fromID, toID, fromUID, toUID, link.Type, effectiveActor); err != nil {
 				return mapSQLError(err, linkConstraintErrors)
 			}
-			linkPayloads = append(linkPayloads, createdLink{
+			linkPayloads = append(linkPayloads, db.IssueDocumentLink{
 				Type: link.Type, ToShortID: targetShortID, ToIssueUID: targetUID,
 				Incoming: link.Incoming, Author: effectiveActor,
 			})
 		}
-		payload, err := json.Marshal(issueCreatedPayload{
+		payload, err := json.Marshal(db.IssueDocumentPayload{
 			UID: issueUID, ShortID: shortIDValue, Title: params.Title, Body: params.Body,
 			Author: effectiveActor, Owner: owner, Priority: params.Priority, Status: "open",
 			Metadata: metadataBlob, Labels: labels, Links: linkPayloads, CreatedAt: createdAt,
@@ -306,7 +258,7 @@ func (s *Store) IssuesByUIDs(ctx context.Context, uids []string, include db.Incl
 	return issues, mapSQLError(rows.Err(), nil)
 }
 
-// IssueUIDPrefixMatch returns deterministic UID-prefix matches.
+// IssueUIDPrefixMatch returns case-sensitive UID-prefix matches in byte order.
 func (s *Store) IssueUIDPrefixMatch(
 	ctx context.Context,
 	prefix string,
@@ -316,14 +268,24 @@ func (s *Store) IssueUIDPrefixMatch(
 	if limit <= 0 {
 		limit = 20
 	}
-	query := issueSelect + ` WHERE i.uid LIKE $1 || '%'`
-	if include == db.IncludeDeletedNo {
+	query := issueSelect + ` WHERE i.uid LIKE $1`
+	args := []any{prefix + "%"}
+	if _, restricted := db.AuthorizedProjects(ctx); restricted {
+		// Bound each project's candidates before combining the authorized projects.
+		query = `SELECT ` + issueColumns + ` FROM projects p JOIN LATERAL (
+SELECT candidate.id FROM issues candidate WHERE candidate.project_id = p.id AND candidate.uid LIKE $1`
+		if include == db.IncludeDeletedNo {
+			query += ` AND candidate.deleted_at IS NULL`
+		}
+		query += ` ORDER BY candidate.uid USING ~<~ LIMIT $2) matches ON true
+JOIN issues i ON i.id = matches.id WHERE `
+		args = append(args, limit)
+		query += authorizedProjectPredicate(ctx, "p.uid", &args)
+	} else if include == db.IncludeDeletedNo {
 		query += ` AND i.deleted_at IS NULL`
 	}
-	args := []any{prefix}
-	query += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
 	args = append(args, limit)
-	query += fmt.Sprintf(` ORDER BY i.uid ASC LIMIT $%d`, len(args))
+	query += fmt.Sprintf(` ORDER BY i.uid USING ~<~ LIMIT $%d`, len(args))
 	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
@@ -353,6 +315,9 @@ func buildListIssuesQuery(ctx context.Context, params db.ListIssuesParams, count
 	appendIssueScopePostgres(&scopeFilter, &args, params.IssueScope)
 	if scopeFilter.Len() > 0 {
 		conditions = append(conditions, strings.TrimPrefix(scopeFilter.String(), " AND "))
+	}
+	if params.ExactTitle != "" {
+		add(`i.title COLLATE "C" = $%d`, params.ExactTitle)
 	}
 	if params.Status != "" {
 		add("i.status = $%d", params.Status)
@@ -409,6 +374,9 @@ func buildListIssuesQuery(ctx context.Context, params db.ListIssuesParams, count
 	}
 	if params.OldestFirst {
 		order = `i.created_at ASC, i.id ASC`
+	}
+	if params.ShortestBodyFirst {
+		order = `length(i.body), i.id`
 	}
 	query := issueSelect + ` WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY ` + order
 	if params.Limit > 0 {

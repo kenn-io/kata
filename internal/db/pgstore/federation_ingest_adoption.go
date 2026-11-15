@@ -303,8 +303,10 @@ WHERE project_id=$1 AND origin_instance_uid=$2
   AND type IN ('project.metadata_updated',`+db.FederationSnapshotEventTypesSQL()+`)
 ORDER BY id ASC LIMIT 1`, projectID, spokeInstanceUID).Scan(&physicalMS, &counter)
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("%w: adoption baseline continuation has no recorded baseline boundary",
-			db.ErrFederationIngestValidation)
+		// Earlier chunks held only issues this project already had, so the
+		// hub stored none of their snapshots and has no boundary to compare
+		// with. The chunk must still be one baseline.
+		return db.ValidateAdoptionBaselineSingleClock(events)
 	}
 	if err != nil {
 		return mapSQLError(err, nil)
@@ -410,7 +412,7 @@ func federationEventHashMatches(
 	if storedHash == event.ContentHash {
 		return true, nil
 	}
-	if !allowCanonicalSnapshotAuthors {
+	if !allowCanonicalSnapshotAuthors || event.Actor != boundActor {
 		return false, nil
 	}
 	canonical, err := db.CanonicalizeFederationSnapshotAuthors(event, boundActor)

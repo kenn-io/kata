@@ -246,3 +246,8 @@ it('offers downloads for types outside the inline list', () => {
   expect(screen.queryByRole('button', { name: 'Preview screen.png' })).toBeNull()
   expect(screen.getByRole('button', { name: 'Download screen.png' })).toBeTruthy()
 })
+
+it('gives each reference a stable history anchor', () => {
+  const { container } = render(IssueAttachments, { attachments: { [id]: entry }, baseURL: '/attachments' })
+  expect(container.querySelector(`[id="kata-attachment-${id}"]`)?.textContent).toContain('screen.png')
+})

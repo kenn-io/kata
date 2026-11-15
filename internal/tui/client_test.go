@@ -19,7 +19,9 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/testfix"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 // newTestClient stands up an httptest server with handler, registers
@@ -145,8 +147,9 @@ func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) {
 	require.NoError(t, err)
 	spoke := NewClient(spokeSrv.URL, spokeHTTP)
 	hubAdmin, _, err := newHubAdminClient(ctx, daemonTarget{
-		Name: "hub",
-		URL:  hubSrv.URL,
+		Name:  "hub",
+		Token: "hub-admin-token",
+		URL:   hubSrv.URL,
 		resolved: clientpkg.ResolvedDaemon{
 			Source: clientpkg.DaemonSourceInjected, BaseURL: hubSrv.URL, Token: "hub-admin-token",
 		},
@@ -264,8 +267,9 @@ func TestClientListTokensDecodesRedactedAuditInventory(t *testing.T) {
 
 func TestTUIHubAdminClientRejectsPlainHTTPHostnameWithoutAllowInsecure(t *testing.T) {
 	_, _, err := newHubAdminClient(t.Context(), daemonTarget{
-		Name: "hub",
-		URL:  "http://hub.internal:7777",
+		Name:  "hub",
+		Token: "hub-admin-token",
+		URL:   "http://hub.internal:7777",
 		resolved: clientpkg.ResolvedDaemon{
 			Source: clientpkg.DaemonSourceInjected, BaseURL: "http://hub.internal:7777", Token: "hub-admin-token",
 		},
@@ -639,11 +643,15 @@ func TestModel_FetchInitialUsesQueueFetchFilter(t *testing.T) {
 func TestClient_GetIssueDetail_DecodesWrappedEnvelope(t *testing.T) {
 	var gotPath string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects/7/recurrences" {
+			respondJSON(t, w, map[string]any{"recurrences": []any{}})
+			return
+		}
 		gotPath = r.URL.Path
 		respondJSON(t, w, map[string]any{
 			"issue": map[string]any{
 				"uid": "01JZ0000000000000000000001", "project_uid": "01JZ0000000000000000000002",
-				"short_id": "abc4", "title": "fix", "status": "open",
+				"short_id": "abc4", "project_id": 7, "title": "fix", "status": "open",
 				"revision": 9, "recurrence_id": 23,
 			},
 			"lease":    map[string]any{"claim_uid": "lease-1", "issue_uid": "01JZ0000000000000000000001"},
@@ -1505,4 +1513,29 @@ func TestTelemetrySkipsLocalDaemonRecovery(t *testing.T) {
 	})
 	require.Error(t, c.ReportScreenViewed(t.Context(), "issues"))
 	require.False(t, refreshed)
+}
+
+func TestRecurrenceHistoricalRefUsesCurrentProject(t *testing.T) {
+	h := newRecurrenceHarness(t, viewDetail)
+	oldProject, oldRef := h.issue.ProjectID, h.issue.ShortID
+	destination, err := h.env.DB.CreateProject(t.Context(), "destination-project")
+	require.NoError(t, err)
+	moved, err := h.api.MoveIssueWithResponse(t.Context(), &generated.MoveIssueRequestOptions{
+		PathParams: &generated.MoveIssuePath{ProjectID: oldProject, Ref: oldRef},
+		Body:       &generated.MoveIssueBody{ToProjectUID: destination.UID, Actor: new("alice")},
+		Header:     &generated.MoveIssueHeaders{IfMatch: new(recurrenceclient.ETag(h.issue.Revision))},
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, moved.HTTPResponse.StatusCode, string(moved.Body))
+	h.issue.ProjectID = destination.ID
+	h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+	detail, err := h.client.GetIssueDetail(t.Context(), oldProject, oldRef)
+	require.NoError(t, err)
+	assert.NotNil(t, detail.Recurrence, "historical references show the destination's recurrence")
+	changed, err := h.client.SaveRecurrence(t.Context(), oldProject, oldRef, RecurrenceInput{
+		Rule: "FREQ=DAILY", Start: "2026-11-09", Zone: "Europe/Paris", Recurrence: new(h.rows()[0]), Actor: "alice",
+	})
+	require.NoError(t, err)
+	assert.True(t, changed.Changed)
+	assert.Equal(t, "FREQ=DAILY", h.rows()[0].RRule, "saves through a historical reference use the current project")
 }

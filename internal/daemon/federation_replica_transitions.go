@@ -40,6 +40,14 @@ type federationReplicaTransition struct {
 	releasedState federationReplicaTransitionState
 	inFlight      int
 	drained       chan struct{}
+	nativeFence   *federationReplicaNativeFence
+}
+
+type federationReplicaNativeFence struct {
+	instanceUID string
+	projectID   int64
+	enabled     bool
+	pushEnabled bool
 }
 
 // federationReplicaRegistry owns every per-mapping transition record.
@@ -206,7 +214,9 @@ func newFederationReplicaPreparation(
 // prepared an explicit leave. A retry with the same preparation adds a hold to
 // the same preparation instead of creating another one.
 func (r *federationReplicaRegistry) markLeavePending(
-	key string, preparation federationReplicaPreparation,
+	key string,
+	preparation federationReplicaPreparation,
+	nativeFences ...*federationReplicaNativeFence,
 ) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -214,6 +224,17 @@ func (r *federationReplicaRegistry) markLeavePending(
 	if !ok {
 		transition = &federationReplicaTransition{}
 		r.transitions[key] = transition
+	}
+	if transition.nativeFence == nil && len(nativeFences) > 0 && nativeFences[0] != nil {
+		nativeFence := *nativeFences[0]
+		for _, current := range r.transitions {
+			if current.nativeFence != nil && current.nativeFence.instanceUID == preparation.instanceUID &&
+				current.nativeFence.projectID == preparation.projectID {
+				nativeFence = *current.nativeFence
+				break
+			}
+		}
+		transition.nativeFence = &nativeFence
 	}
 	if transition.state != federationReplicaLeavePending {
 		transition.releasedState = transition.state
@@ -223,6 +244,61 @@ func (r *federationReplicaRegistry) markLeavePending(
 		transition.preparations = make(map[federationReplicaPreparation]int)
 	}
 	transition.preparations[preparation]++
+}
+
+// nativeFenceForFinalRelease returns the original native binding state when
+// releasing the selected hold would release every abortable preparation for
+// that project. The caller holds ensureFederationReplicaMu across this check,
+// any database restoration, and the subsequent release.
+func (r *federationReplicaRegistry) nativeFenceForFinalRelease(
+	preparation federationReplicaPreparation,
+	key string,
+	releaseOne bool,
+) (*federationReplicaNativeFence, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var (
+		fence        *federationReplicaNativeFence
+		totalHolds   int
+		releaseHolds int
+	)
+	for transitionKey, transition := range r.transitions {
+		for current, holds := range transition.preparations {
+			if current.instanceUID != preparation.instanceUID || current.projectID != preparation.projectID {
+				continue
+			}
+			totalHolds += holds
+			if current == preparation {
+				if releaseOne {
+					if transitionKey == key && holds > 0 {
+						releaseHolds++
+					}
+				} else {
+					releaseHolds += holds
+				}
+			}
+		}
+		if transition.nativeFence != nil && transition.nativeFence.instanceUID == preparation.instanceUID &&
+			transition.nativeFence.projectID == preparation.projectID {
+			fence = transition.nativeFence
+		}
+	}
+	return fence, totalHolds > 0 && totalHolds == releaseHolds
+}
+
+// clearNativeFenceForProject discards temporary rollback state after the final
+// abortable preparation restores the binding or a leave completes.
+func (r *federationReplicaRegistry) clearNativeFenceForProject(instanceUID string, projectID int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key, transition := range r.transitions {
+		if transition.nativeFence == nil || transition.nativeFence.instanceUID != instanceUID ||
+			transition.nativeFence.projectID != projectID {
+			continue
+		}
+		transition.nativeFence = nil
+		r.pruneLocked(key, transition)
+	}
 }
 
 // preparationKeys returns every key that preparation holds. It searches every
@@ -240,6 +316,35 @@ func (r *federationReplicaRegistry) preparationKeys(
 		}
 	}
 	return keys
+}
+
+func (r *federationReplicaRegistry) preparationHoldCount(
+	preparation federationReplicaPreparation,
+) int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var total int
+	for _, transition := range r.transitions {
+		total += transition.preparations[preparation]
+	}
+	return total
+}
+
+func (r *federationReplicaRegistry) nativeFenceForProject(
+	instanceUID string,
+	projectID int64,
+) *federationReplicaNativeFence {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, transition := range r.transitions {
+		if transition.nativeFence == nil || transition.nativeFence.instanceUID != instanceUID ||
+			transition.nativeFence.projectID != projectID {
+			continue
+		}
+		fence := *transition.nativeFence
+		return &fence
+	}
+	return nil
 }
 
 // releasePreparedLeave releases a preparation of a leave that stopped before
@@ -318,6 +423,7 @@ func (r *federationReplicaRegistry) setState(
 	transition.state = state
 	transition.preparations = nil
 	transition.releasedState = federationReplicaIdle
+	transition.nativeFence = nil
 	r.pruneLocked(key, transition)
 }
 

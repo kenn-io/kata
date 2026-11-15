@@ -4844,6 +4844,14 @@ func TestMaterializeFederatedProject_ReconcilesExistingRowsAndEdges(t *testing.T
 	require.NoError(t, err)
 	assert.Equal(t, reconciledRevision, unchanged.Revision, "duplicate materialization must not bump issue revision")
 
+	_, err = d.DB.ExecContext(ctx, `UPDATE issues SET title = 'drifted title' WHERE id = ?`, issue.ID)
+	require.NoError(t, err)
+	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	repaired, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	assert.Equal(t, "remote title", repaired.Title)
+	assert.Equal(t, issue.ShortID, repaired.ShortID)
+
 	var eventIssueID int64
 	require.NoError(t, d.QueryRowContext(ctx,
 		`SELECT issue_id FROM events WHERE id = ?`, createdEvent.ID).Scan(&eventIssueID))
@@ -4895,6 +4903,11 @@ func TestMaterializeFederatedProjectExtendsCollidingIncomingShortIDs(t *testing.
 	assert.NotEqual(t, a.ShortID, b.ShortID)
 	assert.Greater(t, len(b.ShortID), len("d4ec"))
 	assert.True(t, strings.HasSuffix(uidB, strings.ToUpper(b.ShortID)))
+
+	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	replayed, err := d.IssueByUID(ctx, uidB, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	assert.Equal(t, b.ShortID, replayed.ShortID)
 }
 
 func TestFederatedSpokeWriteGatePushDisabledRejectsAndPushEnabledPermits(t *testing.T) {

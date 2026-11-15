@@ -100,6 +100,15 @@ func sameCronRunIdentity(a, b CronRun) bool {
 	return a.UID == b.UID && reflect.DeepEqual(a.JobUID, b.JobUID) && reflect.DeepEqual(a.DefinitionEventUID, b.DefinitionEventUID) && reflect.DeepEqual(a.WorkflowUID, b.WorkflowUID) && reflect.DeepEqual(a.WorkflowDefinitionEventUID, b.WorkflowDefinitionEventUID) && reflect.DeepEqual(a.OccurrenceKey, b.OccurrenceKey) && reflect.DeepEqual(a.IssueUID, b.IssueUID) && a.Actor == b.Actor && reflect.DeepEqual(a.Teammate, b.Teammate) && reflect.DeepEqual(a.ExecutorLabel, b.ExecutorLabel) && a.CreatedAt.Equal(b.CreatedAt)
 }
 
+// CronRunHistoryPredicateSQL selects run histories by a JSON array of run UIDs.
+// Keep LIKE explicit so the planner can use the partial cron index.
+func CronRunHistoryPredicateSQL(postgres bool) string {
+	if postgres {
+		return `type LIKE 'cron.%' AND type IN ('cron.run.observed','cron.run.snapshot') AND (payload::jsonb->>'uid') IN (SELECT jsonb_array_elements_text($2::jsonb))`
+	}
+	return `type LIKE 'cron.%' AND type IN ('cron.run.observed','cron.run.snapshot') AND json_extract(payload,'$.uid') IN (SELECT value FROM json_each($2))`
+}
+
 // Validate preserves identity constraints using only this transaction's facts.
 func (v *CronReplayValidator) Validate(ctx context.Context, projectID int64, event RemoteEvent) error {
 	if event.Type != "cron.run.observed" && event.Type != "cron.run.snapshot" && !isCronDefinitionEvent(event.Type) {
@@ -133,10 +142,15 @@ func (v *CronReplayValidator) Validate(ctx context.Context, projectID int64, eve
 	if err := v.references(ctx, refs); err != nil {
 		return classifyCronReferenceError(err, ErrFederationIngestValidation)
 	}
-	if !v.runsLoaded[projectID] {
-		// Pending events may precede materialization. Read that project's run history
-		// once per batch so identity changes cannot hide behind ordering or compaction.
-		rows, err := v.tx.QueryContext(ctx, `SELECT uid,origin_instance_uid,type,hlc_physical_ms,hlc_counter,payload FROM events WHERE project_id=$1 AND type IN ('cron.run.observed','cron.run.snapshot')`, projectID)
+	if !v.runsLoaded[incoming.UID] {
+		// Pending events may precede materialization. Load this run's history
+		// before comparing identity, including observations that lost the fold.
+		runJSON, err := json.Marshal([]string{incoming.UID})
+		if err != nil {
+			return err
+		}
+		//nolint:gosec // Only fixed backend SQL is concatenated; project and run UIDs are bound.
+		rows, err := v.tx.QueryContext(ctx, `SELECT uid,origin_instance_uid,type,hlc_physical_ms,hlc_counter,payload FROM events WHERE project_id=$1 AND `+CronRunHistoryPredicateSQL(v.postgres), projectID, string(runJSON))
 		if err != nil {
 			return err
 		}
@@ -170,7 +184,7 @@ func (v *CronReplayValidator) Validate(ctx context.Context, projectID int64, eve
 		if err != nil {
 			return err
 		}
-		v.runsLoaded[projectID] = true
+		v.runsLoaded[incoming.UID] = true
 	}
 	incoming.ProjectID = projectID
 	previous, known := v.runs[incoming.UID]

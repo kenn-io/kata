@@ -8,5 +8,7 @@
 │ login                                                                              │
 │ Labels                                                                             │
 │                                                                                    │
+│ Date                                                                               │
+│ [X] any   [ ] today   [ ] scheduled                                                │
 │ ctrl+o apply · esc cancel · tab next · ctrl+r reset                                │
 ╰────────────────────────────────────────────────────────────────────────────────────╯

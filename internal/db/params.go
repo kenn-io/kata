@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"time"
 
@@ -111,11 +112,13 @@ type CloseIssueParams struct {
 
 // ListIssuesParams filters single-project list output.
 type ListIssuesParams struct {
-	PriorityUnset bool                 // only issues with no priority
-	CreatedFirst  bool                 // created_at DESC; OldestFirst selects ASC
-	After         *pagination.Position // stable keyset boundary
+	PriorityUnset     bool                 // only issues with no priority
+	CreatedFirst      bool                 // created_at DESC; OldestFirst selects ASC
+	ShortestBodyFirst bool                 // body length ASC, id ASC
+	After             *pagination.Position // stable keyset boundary
 
 	ProjectID     int64
+	ExactTitle    string       // empty = no filter; otherwise identical full title text
 	Status        string       // "open" | "closed" | "" (any)
 	Priority      *int64       // nil = no filter; non-nil = exactly this value
 	MaxPriority   *int64       // nil = no filter; non-nil = priority <= MaxPriority
@@ -287,6 +290,7 @@ type ExpireAssignmentsParams struct {
 
 // ReadyIssuesFilter holds optional filters for the ready query.
 type ReadyIssuesFilter struct {
+	PriorityFirst bool     // priority ascending, unprioritized last, then ready order
 	Unowned       bool     // only issues effectively unassigned at At
 	Owner         string   // only active assignments to this owner (empty = no filter)
 	Labels        []string // issues must have ALL these labels (AND logic)
@@ -309,6 +313,8 @@ type SearchFTSParams struct {
 	Status          string // "open" | "closed" | "" (any)
 	ProjectID       int64
 	Query           string
+	TitleQuery      string // title prefix; opts into SQLite look-alike scoring
+	TitleBody       string // original body for look-alike scoring
 	Limit           int
 	IncludeDeleted  bool
 	Labels          []string // issues must have ALL these labels (AND logic)
@@ -498,6 +504,11 @@ type PurgeProjectParams struct {
 	ProjectID int64
 	Actor     string
 	Reason    *string
+	// RetireHubBinding lets the purge remove an archived project that is a
+	// federation hub. The purge deletes the hub binding and every enrollment
+	// scoped to the project in the same transaction. A spoke replica is still
+	// refused: it must leave its hub first.
+	RetireHubBinding bool
 }
 
 // DetachAliasParams identifies a single alias to drop. ProjectID scopes the
@@ -547,6 +558,8 @@ type ProjectMergeResult struct {
 type MoveIssueProjectIn struct {
 	// AuthorizeProjects checks source project UIDs resolved inside the transaction.
 	AuthorizeProjects func([]string) error
+	// ExpectedIssueIDs fences externally validated subtree membership.
+	ExpectedIssueIDs []int64
 	// DryRun validates inside the move transaction, then rolls back without moving.
 	DryRun bool
 	// Single moves only the selected issue; the default includes descendants.
@@ -847,6 +860,12 @@ type FederationIngestEvent struct {
 // FederationIngestParams is the all-or-nothing DB ingest boundary used by the
 // hub transport handler.
 type FederationIngestParams struct {
+	// MoveSourceEnrollmentIDs contains supplemental grants authenticated by transport.
+	// A matching spoke/actor enrollment alone does not prove token possession.
+	MoveSourceEnrollmentIDs map[string]int64
+	// AuthorizeMove checks supplemental host authority for move sources and the
+	// current owners of fresh events, using a transactionally fenced native grant.
+	AuthorizeMove                    func(context.Context, Transaction, FederationEnrollment, Project) error
 	EventFeatures                    string
 	ProjectID                        int64
 	FederationEnrollmentID           int64
@@ -871,6 +890,7 @@ const (
 // only fresh events, including generated claim audit events in insertion order,
 // so callers can avoid rebroadcasting response-lost retries.
 type FederationIngestResult struct {
+	Resets []FederationProjectReset `json:"-"`
 	// Events retains every committed event in transaction insertion order.
 	Events                []Event
 	RequiredEventFeatures string
@@ -878,11 +898,16 @@ type FederationIngestResult struct {
 	Duplicates            int
 	PushCursorEventID     int64
 	InsertedEventUIDs     []string
+	// SupersededEventUIDs lists pushed adoption snapshots the hub did not
+	// store because its project already holds the issue. The pushing spoke
+	// deletes them and takes the hub's state.
+	SupersededEventUIDs []string
 }
 
 // CreateFederationEnrollmentParams carries the plaintext token at creation
 // time only. The database stores only its SHA-256 hash.
 type CreateFederationEnrollmentParams struct {
+	SpokeName                    string // Optional hub-local display name; empty leaves it unchanged.
 	Token                        string
 	SpokeInstanceUID             string
 	ProjectID                    *int64

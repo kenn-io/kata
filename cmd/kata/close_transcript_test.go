@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 const transcriptSessionOne = "00000000-0000-4000-8000-000000000001"
@@ -32,18 +33,8 @@ func TestCloseTranscript_OptIn(t *testing.T) {
 			if enabled {
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\nenabled = true\nagentsview_url = \"https://agentsview.example/archive/\"\n"), 0600))
 			}
-			out, stderr, err := runCLIWithErr(t, env, dir, "--json", "close", ref,
-				"--done", "--message", "Implemented the example behavior and ran the focused tests.", "--test", "go test ./internal/example")
-			require.NoError(t, err)
+			payload, stderr := closeIssueWithEvidence(t, env, dir, ref)
 			require.Empty(t, stderr)
-			var response struct {
-				Event struct {
-					Payload string `json:"payload"`
-				} `json:"event"`
-			}
-			require.NoError(t, json.Unmarshal([]byte(out), &response))
-			var payload map[string]any
-			require.NoError(t, json.Unmarshal([]byte(response.Event.Payload), &payload))
 			if enabled {
 				assert.Equal(t, map[string]any{"agent": "codex", "session_id": transcriptSessionOne, "url": "https://agentsview.example/archive/sessions/codex/" + transcriptSessionOne}, payload["transcript"])
 				// Readers retrieve the same provenance without keeping the close receipt.
@@ -67,6 +58,44 @@ func TestCloseTranscript_OptIn(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Precedence between the variable and the file is covered in internal/config;
+// this case proves a real close attaches with no config file at all.
+func TestCloseTranscript_EnabledEnvironmentWithoutConfigFile(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "Completed example work")
+	t.Setenv("KATA_HOME", t.TempDir())
+	for name, value := range map[string]string{
+		"KATA_CLOSE_TRANSCRIPT_ENABLED": "true",
+		"KATA_TRANSCRIPT_AGENT":         "omp",
+		"KATA_TRANSCRIPT_SESSION_ID":    transcriptSessionOne,
+		"CODEX_THREAD_ID":               "",
+		"CODEX_SESSION_ID":              "",
+		"CLAUDE_CODE_SESSION_ID":        "",
+	} {
+		t.Setenv(name, value)
+	}
+	payload, stderr := closeIssueWithEvidence(t, env, dir, ref)
+	assert.Empty(t, stderr)
+	assert.Equal(t, map[string]any{"agent": "omp", "session_id": transcriptSessionOne}, payload["transcript"])
+}
+
+// closeIssueWithEvidence closes ref through the daemon and returns the close
+// event's payload and the command's stderr.
+func closeIssueWithEvidence(t *testing.T, env *testenv.Env, dir, ref string) (map[string]any, string) {
+	t.Helper()
+	out, stderr, err := runCLIWithErr(t, env, dir, "--json", "close", ref,
+		"--done", "--message", "Implemented the example behavior and ran the focused tests.", "--test", "go test ./internal/example")
+	require.NoError(t, err)
+	var response struct {
+		Event struct {
+			Payload string `json:"payload"`
+		} `json:"event"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &response))
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(response.Event.Payload), &payload))
+	return payload, stderr
 }
 
 func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {

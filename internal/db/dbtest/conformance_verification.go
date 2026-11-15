@@ -56,7 +56,7 @@ func checkVerificationLateReplication(t *testing.T, store db.Storage) error {
 	const claimUID = "01AAAAAAAAAAAAAAAAAAAAAAAA"
 	const originUID = "01DDDDDDDDDDDDDDDDDDDDDDDD"
 	issueRef := issueUID
-	snapshot := newRemoteEvent(t, p, &issueRef, "issue.snapshot", "worker", originUID, 1, jsontext.Value(`{"uid":"`+issueUID+`","title":"Completed task","author":"worker","status":"open","created_at":"2026-10-07T11:00:00Z","comments":[{"comment_uid":"`+claimUID+`","author":"worker","body":"Completion claim","created_at":"2026-10-07T11:00:00Z"},{"comment_uid":"01BBBBBBBBBBBBBBBBBBBBBBBB","author":"reviewer","body":"Confirmed","created_at":"2026-10-07T11:01:00Z","reply_to_uid":"`+claimUID+`","reply_kind":"confirm"}]}`))
+	snapshot := newRemoteEvent(t, p, &issueRef, "issue.snapshot", "worker", originUID, 1, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","short_id":"cccc","title":"Completed task","author":"worker","status":"open","created_at":"2026-10-07T11:00:00Z","comments":[{"comment_uid":"`+claimUID+`","author":"worker","body":"Completion claim","created_at":"2026-10-07T11:00:00Z"},{"comment_uid":"01BBBBBBBBBBBBBBBBBBBBBBBB","author":"reviewer","body":"Confirmed","created_at":"2026-10-07T11:01:00Z","reply_to_uid":"`+claimUID+`","reply_kind":"confirm"}]}`)))
 	closed := newRemoteEvent(t, p, &issueRef, "issue.closed", "worker", originUID, 2, jsontext.Value(`{"reason":"done","message":"Completed the requested work and checked its focused tests.","closed_at":"2026-10-07T11:02:00Z","evidence":[{"type":"confirmed","comment":"`+claimUID+`"}]}`))
 	for _, event := range []db.RemoteEvent{snapshot, closed} {
 		_, err = store.InsertRemoteEvent(ctx, p.ID, event)

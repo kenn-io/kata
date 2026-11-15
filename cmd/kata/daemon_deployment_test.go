@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -38,13 +37,13 @@ func TestDeploymentStatusReportsConfigSources(t *testing.T) {
 	require.NoError(t, ns.EnsureDirs())
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777", Metadata: map[string]string{"config_listen_source": "KATA_LISTEN", "config_auth_source": "persisted_file", "db_path": "database", "unrelated": "ignored"}})
 	require.NoError(t, err)
-	out := executeRoot(t, newRootCmd(), "--json", "daemon", "status")
+	out, _, _ := executeRootCapture(t, t.Context(), "--json", "daemon", "status")
 	var response struct {
 		Daemons []struct {
 			ConfigSources map[string]string `json:"config_sources"`
 		} `json:"daemons"`
 	}
-	require.NoError(t, json.Unmarshal(out, &response))
+	require.NoError(t, json.Unmarshal([]byte(out), &response))
 	require.Len(t, response.Daemons, 1)
 	require.Equal(t, map[string]string{"listen": "KATA_LISTEN", "auth": "persisted_file"}, response.Daemons[0].ConfigSources)
 }
@@ -82,25 +81,6 @@ func TestDeploymentNoAutoTokenStopsCreation(t *testing.T) {
 	require.Error(t, err)
 	_, err = os.Stat(filepath.Join(home, "auth-token"))
 	require.True(t, os.IsNotExist(err))
-}
-
-func TestDeploymentNoAutoTokenFlagReachesStartAndRestart(t *testing.T) {
-	for _, action := range []string{"start", "restart"} {
-		t.Run(action, func(t *testing.T) {
-			resetFlags(t)
-			deploymentHome(t)
-			old := startDetachedDaemon
-			t.Cleanup(func() { startDetachedDaemon = old })
-			var disabled bool
-			startDetachedDaemon = func(_ context.Context, _ string, _ bool, noAutoToken bool) (daemonStartOutput, error) {
-				disabled = noAutoToken
-				return daemonStartOutput{Action: "started"}, nil
-			}
-			_, _, err := executeRootCapture(t, t.Context(), "daemon", action, "--listen", "127.0.0.1:7777", "--no-auto-token")
-			require.NoError(t, err)
-			require.True(t, disabled)
-		})
-	}
 }
 
 // Contract: explicit non-loopback service startup mints one private persisted

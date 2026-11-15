@@ -162,6 +162,6 @@ func renderAttentionRows(s attentionState, width, budget int) []string {
 	return out
 }
 
-func attentionHelpRows(_ Model) [][]helplayout.HelpItem {
-	return [][]helplayout.HelpItem{{{Key: "↑↓", Description: "move"}, {Key: "pgup/pgdn", Description: "message"}, {Key: "↵", Description: "open"}, {Key: "c", Description: "clear"}, {Key: "r", Description: "refresh"}, {Key: "esc", Description: "back"}, {Key: "D", Description: "daemons"}, {Key: "F", Description: "federation"}, {Key: "C", Description: "credentials"}, {Key: "?", Description: "help"}, {Key: "q", Description: "quit"}}}
+func attentionHelpRows(m Model) [][]helplayout.HelpItem {
+	return appendUndoHint([][]helplayout.HelpItem{{{Key: "↑↓", Description: "move"}, {Key: "pgup/pgdn", Description: "message"}, {Key: "↵", Description: "open"}, {Key: "c", Description: "clear"}, {Key: "r", Description: "refresh"}, {Key: "esc", Description: "back"}, {Key: "D", Description: "daemons"}, {Key: "F", Description: "federation"}, {Key: "C", Description: "credentials"}, {Key: "?", Description: "help"}, {Key: "q", Description: "quit"}}}, m.undoOffered())
 }

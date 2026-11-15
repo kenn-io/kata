@@ -44,6 +44,11 @@
 - User or Developer Benefit: Pull requests must have a user-facing benefit or improve the developer
   experience, and the body must say which one.
 - English: Write issues and pull requests in English.
+- AI Attribution: End every commit message with a `Co-authored-by:` trailer naming the agent that
+  wrote the change.
+- AI Model Line: End the pull request description with a `Model used:` line naming the model, such
+  as `Model used: Opus 5.5` or `Model used: GPT-6.1 Sol`. Squash-merge keeps only the description,
+  so put the `Co-authored-by:` trailer there too.
 - No Unrequested GitHub Comments: Do not comment on GitHub issues or pull
   requests unless the user explicitly instructs you to post a comment.
 - No Compiled-In Source Paths: Never locate files from a path returned by
@@ -60,6 +65,66 @@
   own validation command, or writing a real parser-backed test. If direct
   behavior coverage is not practical, document the manual check instead of
   adding a brittle shell content test.
+
+## Before opening a pull request
+
+- Build for a use you have. Run the change on your own real data, such as an
+  export, archive, or photo library, and say in the body what it did there. If
+  nothing you use needs it yet, don't open it.
+- Make it useful if nothing after it merges. Don't add code that works only
+  once a later PR lands, or a guard for something `main` can't do yet.
+- Start from what the repo already does. Find the closest command, importer,
+  query, or library it already uses, extend it, and name it in the body. If it
+  can't be extended, say why.
+- Add only what the change uses now. Leave out options, states, paging, flags,
+  and API surface until something calls them.
+- Review your diff as a maintainer would: cut what `main` already does and
+  anything without a caller.
+- When review findings keep landing in the same code, rethink the design there
+  instead of patching each one.
+- Before each push, check that your schema, API, and protocol version numbers
+  are still the next ones free on `main`.
+
+## Pull requests from a fork
+
+This section applies only to PRs opened from a fork. PRs from branches in this
+repository are not limited by it.
+
+- Keep one unreviewed PR per stack. Open the next only after a maintainer has
+  reviewed the one below, even if you were asked to open the whole plan.
+  Review usually reshapes a PR, and everything built on it then has to be
+  rebuilt.
+- Keep at most 10 PRs open. Each one waits for a maintainer, and the ones
+  nobody gets to go stale. At 10, hold the next PR and tell the user. Leave
+  open PRs as they are.
+
+## Commit messages
+
+Commit subjects must use the Conventional Commits format. Pull requests are
+squash-merged: the PR title becomes the commit subject and the PR description
+becomes the commit body, so PR titles use the same format.
+
+```text
+type(scope): summary
+```
+
+The scope is optional and names the part of the project the change touches.
+Use one of these types:
+
+- `feat`: a new capability users can see or use.
+- `fix`: a bug fix users can notice.
+- `perf`: faster or lighter behavior users can notice.
+- `refactor`, `test`, `docs`, `build`, `ci`, or `chore`: a change that leaves
+  product behavior as it was.
+
+Mark a breaking change with `!` before the colon, as in
+`feat(api)!: remove the v1 endpoints`, and describe the break in a
+`BREAKING CHANGE:` footer at the end of the commit body or PR description.
+
+This format is required. Releases and release notes are generated from these
+messages: the type decides whether a change appears in the notes and under
+which heading, and the version bump follows the largest change since the last
+release, from a breaking change to `feat` to `fix`.
 
 ## Context use
 
@@ -85,6 +150,9 @@
   `lostcancel`; see `.golangci.yml`.
 
 ## Documentation
+
+- Follow the [API contract workflow](docs/development/contributing.md#api-contract-changes)
+  when changing the daemon HTTP API.
 
 - Follow the [page frontmatter policy](docs/development/contributing.md#page-frontmatter)
   when creating or editing guide, operations, and reference pages.
@@ -200,9 +268,16 @@ closes with `kata reopen <ref>`.
 
 ## CI runners
 
-All CI jobs use GitHub-hosted runners: `ubuntu-latest` for Linux and
+CI test jobs use GitHub-hosted runners: `ubuntu-latest` for Linux and
 `windows-2025` for Windows. Pull requests call the reusable test workflow from
 the same commit so workflow changes are exercised before merge.
+
+The `CI gate` job in `test-pr.yml` runs on the Namespace profile
+`namespace-profile-linux-1cpu` so it does not wait in the GitHub-hosted queue.
+That profile uses Namespace's
+[Restricted access level](https://namespace.so/docs/solutions/github-actions/runner-controls/access-levels),
+which disables workload access to Namespace features and APIs. GitHub fork
+approvals, token permissions, and secrets are separate controls.
 
 ## Repository-writer trust/threat model
 
@@ -305,8 +380,10 @@ authorization service. Review browser changes against these boundaries:
   assertions never reach a target. Targets are canonical root HTTP(S) origins,
   bearer credentials are pinned to that origin, and redirects are rejected.
   Identity-bound browser principals remain read-only across a remote gateway
-  hop because Kata has no delegated-identity protocol; request-actor sources
-  remain writable only when the target advertises the same actor policy. Before
+  hop because Kata has no delegated-identity protocol. Request-actor sources
+  remain writable when the target advertises the same actor policy or binds
+  its credential to an account; an account-bound target records every write
+  as that account, as it does for the CLI with the same catalog token. Before
   every remote mutation, the gateway rechecks the exact target origin and
   credential's live writable and actor-policy capabilities without projection
   reads.

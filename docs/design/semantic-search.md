@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-08
+last_edited: 2026-11-10
 ---
 
 # Semantic search technical notes
@@ -57,6 +57,10 @@ section is authorizing that data flow. The docs recommend a local endpoint
 
 Credential handling follows the existing bearer-token trust model:
 
+The built-in server (`local = true` without a configured `base_url`) is keyless
+and ignores API key settings. A configured endpoint from any source takes
+precedence and uses the credential rules below.
+
 - The embedding API key is attached only to requests whose origin exactly
   matches the configured `base_url` origin. The client reuses the
   origin-pinned transport machinery from `internal/config/bearer.go`
@@ -108,20 +112,18 @@ Components:
 [search.embeddings]
 base_url = "http://localhost:11434/v1"  # any OpenAI-compatible /embeddings
 model    = "nomic-embed-text"
-# api_key      = "..."          # or api_key_env = "SOME_VAR"; mutually exclusive
+# api_key      = "..."          # or api_key_file / api_key_env
 # fingerprint_salt = ""         # bump to force re-embed when weights change
 # trust_private_network = false # plaintext HTTP to literal non-public IPs
 # timeout_seconds, batch_size, dims  # defaulted; override rarely
 ```
 
-- Presence of the section enables the feature. `base_url` and `model` are
-  both required once the section exists: partial configuration is a startup
-  error, not a silent disable.
-- `api_key` / `api_key_env` are mutually exclusive, mirroring the daemon
-  catalog's `token` / `token_env` pair
-  (`internal/config/daemon_config.go`). There is no additional hardcoded
-  environment variable; `api_key_env = "KATA_EMBED_API_KEY"` is the
-  conventional spelling if an env var is wanted.
+- `local = true` enables the shared built-in Nomic server. A configured
+  `base_url` takes precedence, and requires `model`; partial external provider
+  configuration is a startup error.
+- Credentials use `ResolveSecret` precedence: `api_key` > `api_key_file` >
+  `api_key_env`. See [Credentials and batching](../reference/configuration.md#credentials-and-batching)
+  for the current source and file requirements.
 - The client POSTs `{model, input: [...]}` to `{base_url}/embeddings` and
   L2-normalizes returned vectors at the boundary, so similarity is a dot
   product everywhere downstream.
@@ -136,7 +138,7 @@ to a fixed cap, so long issues get full semantic coverage rather than losing
 everything past the old ~8k-character cutoff. Comments are deliberately not
 embedded:
 
-- A new comment is findable immediately through the FTS comments column; it
+- A new comment is findable immediately through the per-comment full-text index; it
   never creates embedding staleness or an embedding API call.
 - The named gap: comment-only *conceptual* matches (paraphrase that lives
   solely in comments) will not vector-match. Lexical comment matches still
@@ -221,7 +223,7 @@ reconciler re-embeds them.
 
 Cycle: wake on a debounced (~1–2s) post-commit nudge, on startup, and on a
 periodic safety sweep (~5m) that recovers anything missed across restarts.
-The embedding client still batches up to `batch_size` (default 64) inputs
+The embedding client batches up to `batch_size` (default 8 for the built-in server, 64 for configured endpoints) inputs
 per request; kit's `Fill` drives how many chunks go into a batch and upserts
 each chunk's coverage independently, so partial progress survives a crash or
 error mid-fill. Because `content_revision` moves only on real content

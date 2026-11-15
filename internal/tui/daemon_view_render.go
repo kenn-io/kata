@@ -122,7 +122,7 @@ func daemonEndpoint(target daemonTarget) string {
 }
 
 func daemonAuth(target daemonTarget) string {
-	if target.resolved.Token != "" || target.TokenEnv != "" {
+	if target.resolved.Token != "" || target.TokenFile != "" || target.TokenEnv != "" {
 		return "token"
 	}
 	return "no token"

@@ -35,11 +35,15 @@ for machine readers.
   and flag
 - [MCP reference](https://katatracker.com/docs/reference/mcp.md): stdio and
   Streamable HTTP transports, tool loading
+- [MCP Events webhooks](https://katatracker.com/docs/operations/mcp-events.md):
+  daemon-owned signed inbox wakes, subscriptions, keys and recovery
 - [Agent output format](https://katatracker.com/docs/reference/agent-output.md):
   the `--agent` output contract
 - [Go client](https://katatracker.com/docs/reference/go-client.md): typed Go
   client, daemon discovery, and an in-process test server
 - [Web UI](https://katatracker.com/docs/guide/web-ui.md): the browser workspace
+- [Issue attachments](https://katatracker.com/docs/guide/attachments.md):
+  Docbank file attachments, image and video previews, and close evidence
 - [Semantic search](https://katatracker.com/docs/guide/semantic-search.md):
   opt-in embeddings
 - [Gated workflows](https://katatracker.com/docs/workflows/gated-workflows.md):
@@ -87,3 +91,5 @@ for machine readers.
 - [Twenty sync](https://katatracker.com/docs/operations/twenty-sync.md): Mirror Twenty workspace tasks with self-hosted support and optional two-way status sync.
 - [Todoist sync](https://katatracker.com/docs/operations/todoist-sync.md): Scoped task import, status writeback, field ownership, and recovery.
 - [TickTick sync](https://katatracker.com/docs/operations/ticktick-sync.md): Import one task project and write ordinary completion back through the public API.
+
+- [File evidence](https://katatracker.com/docs/reference/file-evidence.md): configured local/remote references, exact-byte SHA-256, retrieval and resolver protocol.

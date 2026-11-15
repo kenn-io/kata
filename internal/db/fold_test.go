@@ -226,21 +226,13 @@ func TestFoldClosePreservesOwnerWithoutExpiry(t *testing.T) {
 	assert.Nil(t, reopened.AssignmentExpiresOn)
 }
 
-func TestFoldReopenRestoreUsePayloadIssueUID(t *testing.T) {
-	// Ingest validation accepts an issue event whose uid lives only in the
-	// payload (empty envelope issue_uid). reopened/restored must apply such an
-	// event like every other issue handler instead of dropping it.
-	payloadOnlyUID := func(eventType string, n int64, payload string) FoldEvent {
-		e := testEvent(eventType, n, payload)
-		e.IssueUID = ""
-		return e
-	}
+func TestFoldReopenAndRestoreReturnAnIssueToOpen(t *testing.T) {
 	events := []FoldEvent{
 		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","updated_at":"2026-05-23T12:00:00.000Z"}`),
 		testEvent("issue.closed", 2, `{"reason":"done","closed_at":"2026-05-23T12:00:02.000Z"}`),
-		payloadOnlyUID("issue.reopened", 3, `{"issue_uid":"issue-1","reopened_at":"2026-05-23T12:00:03.000Z"}`),
+		testEvent("issue.reopened", 3, `{"reopened_at":"2026-05-23T12:00:03.000Z"}`),
 		testEvent("issue.soft_deleted", 4, `{"deleted_at":"2026-05-23T12:00:04.000Z"}`),
-		payloadOnlyUID("issue.restored", 5, `{"issue_uid":"issue-1","restored_at":"2026-05-23T12:00:05.000Z"}`),
+		testEvent("issue.restored", 5, `{"restored_at":"2026-05-23T12:00:05.000Z"}`),
 	}
 
 	got := FoldEvents(events)
@@ -288,10 +280,9 @@ func TestFoldLabelAndLinkUsePayloadUpdatedAtWhenPresent(t *testing.T) {
 	assert.Equal(t, "2026-05-23T12:00:02.000Z", got.Issues["issue-1"].UpdatedAt)
 }
 
-func TestFoldLinksChangedUsesPayloadIssueUID(t *testing.T) {
+func TestFoldLinksChangedAddsBlocksLinks(t *testing.T) {
 	changed := testEvent("issue.links_changed", 2,
-		`{"issue_uid":"issue-1","blocks_added_uids":["issue-2"],"updated_at":"2026-05-23T12:00:02.000Z"}`)
-	changed.IssueUID = ""
+		`{"blocks_added_uids":["issue-2"],"updated_at":"2026-05-23T12:00:02.000Z"}`)
 	events := []FoldEvent{
 		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","updated_at":"2026-05-23T12:00:00.000Z"}`),
 		changed,
@@ -442,4 +433,25 @@ func TestFoldCommentTeammateSurvivesEdit(t *testing.T) {
 	require.Equal(t, "coordinator", got.Author)
 	require.Equal(t, "reviewer-7", got.Teammate)
 	require.Equal(t, "revised", got.Body)
+}
+
+func TestFoldMovedHydratesPartialIssueBaseline(t *testing.T) {
+	for _, event := range []FoldEvent{
+		testEvent("issue.commented", 2, `{"comment_uid":"comment-1","body":"discussion","author":"worker"}`),
+		testEvent("issue.updated", 2, `{"title":"newer title"}`),
+	} {
+		t.Run(event.Type, func(t *testing.T) {
+			move := testEvent("issue.moved", 3, `{"issue_uid":"issue-1","to_project_uid":"project-2","to_short_id":"efgh","snapshot":{"uid":"issue-1","title":"baseline title","body":"baseline body","author":"worker","status":"open","created_at":"2026-05-23T12:00:00.000Z"}}`)
+			projection := FoldEvents([]FoldEvent{event, move})
+			issue := projection.Issues["issue-1"]
+			require.Equal(t, "baseline body", issue.Body)
+			require.Equal(t, "worker", issue.Author)
+			require.Equal(t, "project-2", issue.ProjectUID)
+			if event.Type == "issue.updated" {
+				require.Equal(t, "newer title", issue.Title)
+			} else {
+				require.Equal(t, "baseline title", issue.Title)
+			}
+		})
+	}
 }

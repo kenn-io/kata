@@ -2,29 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { KataReachableGraphResponse, KataTaskSummary } from '../lib/kata/types'
+import { task } from '../test/task'
 import IssueGraph from './IssueGraph.svelte'
-
-function task(overrides: Partial<KataTaskSummary> = {}): KataTaskSummary {
-  const shortID = overrides.short_id ?? 'root'
-  return {
-    id: overrides.id ?? 1,
-    uid: overrides.uid ?? 'issue-root',
-    project_id: overrides.project_id ?? 7,
-    project_uid: overrides.project_uid ?? 'project-example',
-    project_name: overrides.project_name ?? 'example-project',
-    short_id: shortID,
-    qualified_id: overrides.qualified_id ?? `example-project#${shortID}`,
-    title: overrides.title ?? 'Root issue',
-    status: overrides.status ?? 'open',
-    metadata: overrides.metadata ?? {},
-    revision: overrides.revision ?? 1,
-    author: overrides.author ?? 'user-a',
-    priority: overrides.priority,
-    closed_reason: overrides.closed_reason,
-    created_at: overrides.created_at ?? '2026-08-01T12:00:00Z',
-    updated_at: overrides.updated_at ?? '2026-08-01T12:00:00Z',
-  }
-}
 
 function graphResponse(
   source: KataTaskSummary,
@@ -162,68 +141,6 @@ describe('IssueGraph', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Graph filters/ }))
     await fireEvent.click(screen.getByRole('button', { name: 'Hide done' }))
     await waitFor(() => expect(screen.queryAllByText('Closed issue')).toEqual([]))
-  })
-
-  it('removes descendants reachable only through a hidden closed issue', async () => {
-    const root = task({ uid: 'issue-root', short_id: 'root' })
-    const closed = task({
-      uid: 'issue-closed',
-      short_id: 'closed',
-      title: 'Closed intermediate',
-      status: 'closed',
-      closed_reason: 'duplicate',
-    })
-    const descendant = task({
-      uid: 'issue-descendant',
-      short_id: 'descendant',
-      title: 'Open descendant',
-    })
-    render(IssueGraph, {
-      props: {
-        graph: {
-          ...graphResponse(root, [root, closed, descendant]),
-          edges: [
-            { from_uid: root.uid, to_uid: closed.uid, kind: 'related', layout: false },
-            { from_uid: closed.uid, to_uid: descendant.uid, kind: 'blocks', layout: true },
-          ],
-        },
-        sourceIssue: root,
-        selectedUID: root.uid,
-        onBack: () => {},
-        onSelectIssue: () => {},
-      },
-    })
-
-    await waitFor(() => expect(screen.getAllByText('Open descendant').length).toBeGreaterThan(0))
-    await fireEvent.click(screen.getByRole('button', { name: /Graph filters/ }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Hide done' }))
-    await waitFor(() => expect(screen.queryAllByText('Closed intermediate')).toEqual([]))
-    expect(screen.queryAllByText('Open descendant')).toEqual([])
-  })
-
-  it('excludes disconnected nodes at full depth', async () => {
-    const root = task({ uid: 'issue-root', short_id: 'root', title: 'Root issue' })
-    const child = task({ uid: 'issue-child', short_id: 'child', title: 'Child issue' })
-    const disconnected = task({
-      uid: 'issue-disconnected',
-      short_id: 'elsewhere',
-      title: 'Disconnected issue',
-    })
-    render(IssueGraph, {
-      props: {
-        graph: {
-          ...graphResponse(root, [root, child, disconnected]),
-          edges: [{ from_uid: root.uid, to_uid: child.uid, kind: 'parent', layout: true }],
-        },
-        sourceIssue: root,
-        selectedUID: root.uid,
-        onBack: () => {},
-        onSelectIssue: () => {},
-      },
-    })
-
-    await waitFor(() => expect(screen.getAllByText('Child issue').length).toBeGreaterThan(0))
-    expect(screen.queryAllByText('Disconnected issue')).toEqual([])
   })
 
   it('selects cached nodes and returns to the list', async () => {

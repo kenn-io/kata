@@ -45,7 +45,9 @@ type FederationStatusRequest struct {
 // ProjectFederationStatusRequest reads status for one locally bound
 // federation project through the normal local/admin daemon auth surface.
 type ProjectFederationStatusRequest struct {
-	ProjectID int64 `path:"project_id"`
+	ProjectID  int64 `path:"project_id"`
+	Compact    bool  `query:"compact,omitempty" doc:"Omit relay checkpoint capacity measurement. Error details are unchanged unless omit_errors is also set."`
+	OmitErrors bool  `query:"omit_errors,omitempty" doc:"Remove error text from the status: the sync error, held-back batch errors, the embedding producer error, and the relay checkpoint error. State, timestamps, and counts remain, and has_sync_error reports whether a sync error was removed."`
 }
 
 // SkipFederationQuarantineRequest skips one quarantined federation batch
@@ -160,6 +162,7 @@ type FederationProjectStatus struct {
 	LastPushSuccessAt           *time.Time                    `json:"last_push_success_at,omitempty"`
 	LastErrorAt                 *time.Time                    `json:"last_error_at,omitempty"`
 	LastError                   *string                       `json:"last_error,omitempty"`
+	HasSyncError                bool                          `json:"has_sync_error,omitempty" doc:"True when a sync error was recorded and omit_errors removed its text."`
 	LastResetAt                 *time.Time                    `json:"last_reset_at,omitempty"`
 }
 
@@ -204,6 +207,7 @@ type FederationViolationSummary struct {
 // credential for one spoke.
 type CreateFederationEnrollmentRequest struct {
 	Body struct {
+		SpokeName                    string                  `json:"spoke_name,omitempty"`
 		HubURL                       string                  `json:"hub_url,omitempty"`
 		AllowInsecure                bool                    `json:"allow_insecure,omitempty,omitzero"`
 		SpokeInstanceUID             string                  `json:"spoke_instance_uid"`
@@ -296,6 +300,7 @@ type RelayAckResponse struct {
 // FederationEnrollmentOut is the API-owned enrollment representation. It
 // deliberately omits token_hash; Token is populated only on creation.
 type FederationEnrollmentOut struct {
+	SpokeName        string                      `json:"spoke_name,omitempty"`
 	ID               int64                       `json:"id"`
 	SpokeInstanceUID string                      `json:"spoke_instance_uid"`
 	ProjectID        *int64                      `json:"project_id"`
@@ -463,6 +468,7 @@ type FederationPollEventsRequest struct {
 	ProjectID     int64       `path:"project_id"`
 	Authorization string      `header:"Authorization"`
 	AfterID       int64       `query:"after_id,omitempty"`
+	IssueUID      string      `query:"issue_uid,omitempty" doc:"Read retained history only for an issue currently owned by this project, independently of the project cursor."`
 	Limit         OptionalInt `query:"limit,omitempty"`
 }
 
@@ -477,6 +483,10 @@ type FederationIngestEventsRequest struct {
 
 // FederationIngestEventsRequestBody carries an all-or-nothing push batch.
 type FederationIngestEventsRequestBody struct {
+	// MoveSourceTokens proves authority outside the route enrollment's scope:
+	// move sources and current owners of historical-envelope subjects or peers.
+	// These credentials are transport-only, never events.
+	MoveSourceTokens           map[string]string               `json:"move_source_tokens,omitempty" doc:"Supplemental project credentials proving move-source or current-project authority for fresh delayed events; transport-only, never persisted in event history."`
 	SchemaVersion              int                             `json:"schema_version"`
 	AdoptionBaseline           string                          `json:"adoption_baseline,omitempty"`
 	AdoptionBaselineEndEventID int64                           `json:"adoption_baseline_end_event_id,omitempty,omitzero"`
@@ -518,6 +528,10 @@ type FederationIngestEventsBody struct {
 	Accepted          int   `json:"accepted"`
 	Duplicates        int   `json:"duplicates"`
 	PushCursorEventID int64 `json:"push_cursor_event_id"`
+	// SupersededEventUIDs lists pushed adoption snapshots the hub did not
+	// store because its project already holds the issue. The spoke deletes
+	// them and takes the hub's state on its next pull.
+	SupersededEventUIDs []string `json:"superseded_event_uids,omitempty"`
 }
 
 // FederationIngestEventsResponse wraps FederationIngestEventsBody.
@@ -759,3 +773,25 @@ type FederationEmbeddingArtifactStatus struct {
 	State    string `json:"state"`
 	Reason   string `json:"reason,omitempty"`
 }
+
+// SetFederationSpokeNameRequest changes a hub-local label for an enrolled instance.
+type SetFederationSpokeNameRequest struct {
+	SpokeInstanceUID string `path:"spoke_instance_uid"`
+	Body             struct {
+		Name string `json:"name" minLength:"1" doc:"Lowercase spoke name: a letter, then up to 31 lowercase letters, digits or hyphens."`
+	}
+}
+
+// ClearFederationSpokeNameRequest removes an enrolled instance's hub-local label.
+type ClearFederationSpokeNameRequest struct {
+	SpokeInstanceUID string `path:"spoke_instance_uid"`
+}
+
+// FederationSpokeNameOut confirms the current label without exposing a credential.
+type FederationSpokeNameOut struct {
+	SpokeInstanceUID string `json:"spoke_instance_uid"`
+	SpokeName        string `json:"spoke_name,omitempty"`
+}
+
+// SetFederationSpokeNameResponse wraps the updated label.
+type SetFederationSpokeNameResponse struct{ Body FederationSpokeNameOut }

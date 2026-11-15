@@ -8,6 +8,7 @@
     minSecondary?: number
     responsiveBreakpoint?: number
     onResize?: (size: number) => void
+    showSecondary?: boolean
   }
 
   let {
@@ -17,6 +18,7 @@
     minSecondary = 200,
     responsiveBreakpoint = 0,
     onResize = () => {},
+    showSecondary = true,
   }: Props = $props()
 </script>
 
@@ -28,7 +30,9 @@
   {responsiveBreakpoint}
   ariaLabel="Resize Kata panes"
   {onResize}
+  secondary={showSecondary ? secondary : undefined}
 >
   {#snippet primary()}Primary{/snippet}
-  {#snippet secondary()}Secondary{/snippet}
 </SplitLayout>
+
+{#snippet secondary()}Secondary{/snippet}

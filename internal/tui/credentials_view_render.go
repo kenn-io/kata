@@ -23,13 +23,9 @@ func renderCredentials(m Model) string {
 		body = append(body, subtleStyle.Render("loading credential inventory..."))
 	} else if !state.available && state.err != nil {
 		body = append(body, errorStyle.Render(
-			"failed to determine credential audit access: "+sanitizeForLine(state.err.Error())))
+			"couldn't check whether this connection can view credentials: "+sanitizeForLine(state.err.Error())))
 	} else if !state.available {
-		body = append(body,
-			errorStyle.Render("credential audit unavailable for this connection"),
-			"",
-			subtleStyle.Render("the active principal does not have token audit read capability"),
-		)
+		body = append(body, errorStyle.Render("this connection cannot view credentials"))
 	} else if state.loading && len(state.tokens) == 0 {
 		body = append(body, subtleStyle.Render("loading credential inventory..."))
 	} else if state.err != nil && len(state.tokens) == 0 {

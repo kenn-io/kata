@@ -357,24 +357,52 @@ function graphPositions(
 
   for (const edge of edges) {
     if (!idSet.has(edge.source) || !idSet.has(edge.target)) continue
-    outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge.target])
+    outgoing.get(edge.source)!.push(edge.target)
     indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1)
   }
 
   const compareByStableOrder = (left: string, right: string) =>
     (stableOrder.get(left) ?? 0) - (stableOrder.get(right) ?? 0)
+  // A min-heap preserves stable ordering without sorting after every insertion.
   const ready = ids.filter((id) => (indegree.get(id) ?? 0) === 0).sort(compareByStableOrder)
+  const pushReady = (id: string) => {
+    let index = ready.length
+    ready.push(id)
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2)
+      if (compareByStableOrder(ready[parent]!, id) <= 0) break
+      ready[index] = ready[parent]!
+      index = parent
+    }
+    ready[index] = id
+  }
+  const popReady = (): string => {
+    const first = ready[0]!
+    const last = ready.pop()!
+    if (ready.length > 0) {
+      let index = 0
+      while (index * 2 + 1 < ready.length) {
+        let child = index * 2 + 1
+        if (child + 1 < ready.length && compareByStableOrder(ready[child + 1]!, ready[child]!) < 0)
+          child++
+        if (compareByStableOrder(last, ready[child]!) <= 0) break
+        ready[index] = ready[child]!
+        index = child
+      }
+      ready[index] = last
+    }
+    return first
+  }
   const topoOrder: string[] = []
 
   while (ready.length > 0) {
-    const id = ready.shift()!
+    const id = popReady()
     topoOrder.push(id)
     for (const target of [...(outgoing.get(id) ?? [])].sort(compareByStableOrder)) {
       const nextIndegree = (indegree.get(target) ?? 0) - 1
       indegree.set(target, nextIndegree)
       if (nextIndegree === 0) {
-        ready.push(target)
-        ready.sort(compareByStableOrder)
+        pushReady(target)
       }
     }
   }
@@ -395,7 +423,9 @@ function graphPositions(
   const layers = new Map<number, string[]>()
   for (const id of topoOrder) {
     const rank = rankByID.get(id) ?? 0
-    layers.set(rank, [...(layers.get(rank) ?? []), id])
+    const layer = layers.get(rank)
+    if (layer) layer.push(id)
+    else layers.set(rank, [id])
   }
 
   const positions = new Map<string, { x: number; y: number }>()
@@ -541,13 +571,17 @@ function visibleContextIDs(
   const distances = new Map<string, number>([[rootID, 0]])
   const adjacency = new Map<string, KataGraphEdge[]>()
   for (const edge of edges) {
-    adjacency.set(edge.source, [...(adjacency.get(edge.source) ?? []), edge])
-    adjacency.set(edge.target, [...(adjacency.get(edge.target) ?? []), edge])
+    const sourceEdges = adjacency.get(edge.source)
+    if (sourceEdges) sourceEdges.push(edge)
+    else adjacency.set(edge.source, [edge])
+    const targetEdges = adjacency.get(edge.target)
+    if (targetEdges) targetEdges.push(edge)
+    else adjacency.set(edge.target, [edge])
   }
 
   const queued = [rootID]
-  while (queued.length > 0) {
-    const id = queued.shift()!
+  for (let head = 0; head < queued.length; head++) {
+    const id = queued[head]!
     const distance = distances.get(id) ?? 0
     if (distance >= maxDepth) continue
     for (const edge of adjacency.get(id) ?? []) {

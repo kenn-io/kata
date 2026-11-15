@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-11-03
+last_edited: 2026-11-15
 ---
 
 # Agent workflows
@@ -108,13 +108,16 @@ does not enroll an agent, initialize a project, or configure embeddings.
 
 ## Contract in every session
 
-Load Kata's contract in every coding-agent session on this machine:
+In unreleased builds, load Kata's contract in Claude Code and Codex sessions that start inside a kata
+workspace on this machine. Setup selects whichever are installed:
 
 ```sh
-kata agent-hook install
+kata agent setup
 ```
 
-These commands require Kata 0.19.0 or later.
+Open Codex and run `/hooks` to trust its hooks. Run `kata agent setup --check` to check readiness.
+
+Name other agents with `kata agent setup gemini pi`, or run `kata agent-hook install` to set up every configured agent. The `agent-hook install` command and `--contract-only` require Kata 0.19.0 or later.
 User scope is the default. Bare installation discovers configured agents and
 installs their contract plus every available attention direction. Dedicated agent
 configuration directories count as evidence; `.github/` and `.agents/` alone do
@@ -156,8 +159,11 @@ completed project result separately from the hook failure.
 Most contract hooks use SessionStart; Hermes uses first-turn
 `pre_llm_call`, Kimi Code uses UserPromptSubmit, and Antigravity uses its first
 PreInvocation. Pi, Amp, OpenCode and OpenClaw use native code extensions.
-The contract also loads outside Kata workspaces. Attention requires a tracked
-issue in `KATA_REF` and uses the native workspace for routing.
+The contract loads only when the session starts inside a kata workspace, a
+directory under a `.kata.toml` written by `kata init`. Sessions in other
+directories receive no kata context, so agents are not told to track work in a
+repository that does not use kata. Attention requires a tracked issue in
+`KATA_REF` and uses the native workspace for routing.
 
 ### Hook target coverage
 
@@ -378,19 +384,21 @@ session-injected guidance stay aligned.
 
 To make a workspace self-documenting for agents, run `kata init --with-agents`
 once. It writes a marker-delimited kata briefing into existing real `AGENTS.md`
-and `CLAUDE.md` files, or creates `AGENTS.md` when neither exists. The block
-points back at `kata quickstart` and carries short planning-date and `work.*`
-conventions (see
-[agent orchestration](../operations/agent-orchestration.md)); re-running
-refreshes only kata's block, so a repo initialized before that section shipped
-gains it on the next run. If a target file still carries a Beads integration
+and `CLAUDE.md` files, or creates `AGENTS.md` when neither exists. The block is
+the same single-agent contract that hooks inject: search, reuse or create one
+issue, claim it, and close it with evidence. It sends agents to
+`kata quickstart` for subagents, inboxes, `work.*` attention signals (see
+[agent orchestration](../operations/agent-orchestration.md)), and planning
+dates. Re-running refreshes only kata's block, so a repository initialized with
+an older kata gets the current contract on the next run. If a target file still
+carries a Beads integration
 block, kata leaves it untouched
 and writes a `<file>.kata-proposed` sidecar to adopt or discard; see
 [`--with-agents`](../get-started/quickstart.md#initialize-a-workspace). If
 `AGENTS.md` is a symlink, kata refuses to manage it before reading the target;
 replace it with a regular file before using `--with-agents`.
 
-The generated block gives agents exact commands for native planning state:
+`kata quickstart` gives agents exact commands for native planning state:
 
 ```sh
 # A future schedule parks work until its gate opens.

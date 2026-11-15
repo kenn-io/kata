@@ -29,7 +29,8 @@ type hubAdminAuth struct {
 }
 
 // resolveHubAdminAuth applies precedence: --hub-token-env > named catalog entry
-// token/token_env > URL-matched catalog entry token/token_env > no credential
+// credential > URL-matched catalog entry credential > no credential. Catalog
+// credentials resolve token > token_file > token_env.
 // (empty token here; the caller builds an UNAUTHENTICATED hub client — the
 // local daemon's global KATA_AUTH_TOKEN/[auth].token is never sent to the hub
 // origin implicitly; a token-protected hub requires --hub-token-env or a catalog
@@ -148,9 +149,9 @@ func resolveHubAdminAuth(cat *config.DaemonConfig, in hubAuthInputs) (hubAdminAu
 }
 
 // selectedCatalogToken returns the admin token for a catalog entry that was
-// actively selected. token_env set but empty is an error so the wrong daemon
-// token is not sent; only an entry with no token configured at all yields the
-// empty-token global fallback.
+// actively selected, resolving token > token_file > token_env. A failed selected
+// source is an error; only an entry with no configured credential yields an
+// empty token for an unauthenticated hub request.
 func selectedCatalogToken(e *config.CatalogDaemonConfig) (string, error) {
 	token, err := e.ClientToken()
 	if empty, ok := errors.AsType[*config.TokenEnvError](err); ok {

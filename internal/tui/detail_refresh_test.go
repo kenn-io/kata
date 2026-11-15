@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -185,138 +187,179 @@ func TestDetailCanceledLiveTickDoesNotRestartReads(t *testing.T) {
 	require.Nil(t, cmd, "canceled read owner must not be revived by its pending tick")
 }
 
+func detailCompletionOrders(count int) [][]int {
+	if count == 0 {
+		return [][]int{{}}
+	}
+	var orders [][]int
+	for _, previous := range detailCompletionOrders(count - 1) {
+		for position := range count {
+			orders = append(orders, slices.Insert(slices.Clone(previous), position, count-1))
+		}
+	}
+	return orders
+}
+
 func TestSearchSnapshotsRejectCanceledReadsAndRetainMutation(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		m := sseDetailFixture(7, "abc4", "01UID-OPEN")
-		m.detail.gen = 1
-		m.nextGen = 1
-		old := m.detail.refetch(&fakeDetailAPI{})().(tea.BatchMsg)
-		snapshot := cloneDetailModel(m.detail)
-		m.input.kind = inputSearchBar
-		m.input.preSplitDetail = &snapshot
-		if rapid.Bool().Draw(t, "retarget") {
-			m = m.seedOpenDetail(Issue{ProjectID: 7, ShortID: "def5", UID: "01UID-NEXT"})
-		} else {
-			_ = m.detail.refetch(&fakeDetailAPI{})
+	for _, retarget := range []bool{false, true} {
+		for orderIndex, order := range detailCompletionOrders(5) {
+			t.Run(fmt.Sprintf("%t/%d", retarget, orderIndex), func(t *testing.T) {
+				m := sseDetailFixture(7, "abc4", "01UID-OPEN")
+				m.detail.gen = 1
+				m.nextGen = 1
+				old := m.detail.refetch(&fakeDetailAPI{})().(tea.BatchMsg)
+				snapshot := cloneDetailModel(m.detail)
+				m.input.kind = inputSearchBar
+				m.input.preSplitDetail = &snapshot
+				if retarget {
+					m = m.seedOpenDetail(Issue{ProjectID: 7, ShortID: "def5", UID: "01UID-NEXT"})
+				} else {
+					_ = m.detail.refetch(&fakeDetailAPI{})
+				}
+				defer m.detail.cancelReads()
+				messages := make([]tea.Msg, 0, 5)
+				for _, cmd := range old {
+					messages = append(messages, cmd())
+				}
+				messages = append(messages, mutationDoneMsg{origin: "detail", gen: 1, kind: "close", resp: &MutationResp{Issue: snapshot.issue}})
+				for _, index := range order {
+					msg := messages[index]
+					m = m.syncSearchDetailSnapshot(msg)
+				}
+				saved := m.input.preSplitDetail
+				if saved.err != nil || saved.commentsErr != nil || saved.eventsErr != nil || saved.linksErr != nil {
+					t.Fatalf("canceled reads polluted saved detail: %v %v %v %v", saved.err, saved.commentsErr, saved.eventsErr, saved.linksErr)
+				}
+				if saved.status == "" {
+					t.Fatal("accepted mutation status was lost")
+				}
+			})
 		}
-		defer m.detail.cancelReads()
-		messages := make([]tea.Msg, 0, 5)
-		for _, cmd := range old {
-			messages = append(messages, cmd())
-		}
-		messages = append(messages, mutationDoneMsg{origin: "detail", gen: 1, kind: "close", resp: &MutationResp{Issue: snapshot.issue}})
-		for _, msg := range rapid.Permutation(messages).Draw(t, "completion order") {
-			m = m.syncSearchDetailSnapshot(msg)
-		}
-		saved := m.input.preSplitDetail
-		if saved.err != nil || saved.commentsErr != nil || saved.eventsErr != nil || saved.linksErr != nil {
-			t.Fatalf("canceled reads polluted saved detail: %v %v %v %v", saved.err, saved.commentsErr, saved.eventsErr, saved.linksErr)
-		}
-		if saved.status == "" {
-			t.Fatal("accepted mutation status was lost")
-		}
-	})
+	}
 }
 
 func TestDetailLiveRefreshSettlesEveryCompletionOrder(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		m := sseDetailFixture(7, "abc4", "01UID-OPEN")
-		api := &fakeDetailAPI{}
-		if rapid.Bool().Draw(t, "read errors") {
-			api.getIssueErr = errors.New("read failed")
-			api.commentsErr = api.getIssueErr
-			api.eventsErr = api.getIssueErr
-			api.linksErr = api.getIssueErr
-		}
-		batch := m.detail.refetch(api)().(tea.BatchMsg)
-		floor := m.detail.reads.floor
-		messages := make([]tea.Msg, 0, 4)
-		for _, work := range batch {
-			messages = append(messages, work())
-		}
-		order := rapid.Permutation(messages).Draw(t, "completion order")
-		dirty, trailing := false, 0
-		for _, msg := range order {
-			count := rapid.Uint8().Draw(t, "events before completion")
-			for range min(int(count), 32) {
-				dirty = true
-				if m.maybeRefetchOpenDetail(eventReceivedMsg{projectID: 7, issueUID: "01UID-OPEN"}) != nil {
-					t.Fatal("active batch started overlapping reads")
+	for _, readErrors := range []bool{false, true} {
+		for orderIndex, order := range detailCompletionOrders(4) {
+			t.Run(fmt.Sprintf("%t/%d", readErrors, orderIndex), func(t *testing.T) {
+				check := func(t rapid.TB, counts [4]uint8) {
+					m := sseDetailFixture(7, "abc4", "01UID-OPEN")
+					defer m.detail.cancelReads()
+					api := &fakeDetailAPI{}
+					if readErrors {
+						api.getIssueErr = errors.New("read failed")
+						api.commentsErr = api.getIssueErr
+						api.eventsErr = api.getIssueErr
+						api.linksErr = api.getIssueErr
+					}
+					batch := m.detail.refetch(api)().(tea.BatchMsg)
+					floor := m.detail.reads.floor
+					messages := make([]tea.Msg, 0, 4)
+					for _, work := range batch {
+						messages = append(messages, work())
+					}
+					dirty, trailing := false, 0
+					for completion, index := range order {
+						msg := messages[index]
+						count := counts[completion]
+						for range min(int(count), 32) {
+							dirty = true
+							if m.maybeRefetchOpenDetail(eventReceivedMsg{projectID: 7, issueUID: "01UID-OPEN"}) != nil {
+								t.Fatal("active batch started overlapping reads")
+							}
+						}
+						if m.detail.reads.floor != floor || m.detail.reads.canceled {
+							t.Fatal("events replaced the active batch")
+						}
+						next, cmd := m.Update(msg)
+						m = next.(Model)
+						if cmd != nil {
+							trailing++
+						}
+					}
+					want := 0
+					if dirty {
+						want = 1
+					}
+					if trailing != want {
+						t.Fatalf("trailing refreshes=%d, want %d", trailing, want)
+					}
 				}
-			}
-			if m.detail.reads.floor != floor || m.detail.reads.canceled {
-				t.Fatal("events replaced the active batch")
-			}
-			next, cmd := m.Update(msg)
-			m = next.(Model)
-			if cmd != nil {
-				trailing++
-			}
+				check(t, [4]uint8{})
+				rapid.Check(t, func(rt *rapid.T) {
+					boundaries := rapid.Bool().Draw(rt, "boundary bursts")
+					var counts [4]uint8
+					for i := range counts {
+						if boundaries {
+							counts[i] = rapid.SampledFrom([]uint8{0, 1, 31, 32, 33, 255}).Draw(rt, "events before completion")
+						} else {
+							counts[i] = rapid.Uint8().Draw(rt, "events before completion")
+						}
+					}
+					check(rt, counts)
+				})
+			})
 		}
-		want := 0
-		if dirty {
-			want = 1
-		}
-		if trailing != want {
-			t.Fatalf("trailing refreshes=%d, want %d", trailing, want)
-		}
-		m.detail.cancelReads()
-	})
+	}
 }
 
 func TestDetailBackRestoresFreshReadsAtEveryCompletionBoundary(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		prior := dmFixture()
-		prior.gen = 1
-		api := &fakeDetailAPI{getIssueResult: prior.issue}
-		old := prior.refetch(api)().(tea.BatchMsg)
-		queued := make([]tea.Msg, 0, 4)
-		completed := rapid.IntRange(0, 4).Draw(t, "completed before jump")
-		for i := range completed {
-			msg := old[i]()
-			queued = append(queued, msg)
-			prior = prior.applyFetched(msg)
+	for completed := range 5 {
+		for orderIndex, order := range detailCompletionOrders(4) {
+			t.Run(fmt.Sprintf("%d/%d", completed, orderIndex), func(t *testing.T) {
+				prior := dmFixture()
+				prior.gen = 1
+				api := &fakeDetailAPI{getIssueResult: prior.issue}
+				old := prior.refetch(api)().(tea.BatchMsg)
+				queued := make([]tea.Msg, 0, 4)
+				for i := range completed {
+					msg := old[i]()
+					queued = append(queued, msg)
+					prior = prior.applyFetched(msg)
+				}
+				prior.cancelReads()
+				for i := completed; i < 4; i++ {
+					queued = append(queued, old[i]())
+				}
+				freshIssue := *prior.issue
+				freshIssue.Title = "freshly restored"
+				api.getIssueResult = &freshIssue
+				current := newDetailModel()
+				current.gen = 2
+				current.navStack = []detailModel{cloneDetailModel(prior)}
+				restored, cmd := current.Update(tea.KeyPressMsg{Code: tea.KeyEsc}, newKeymap(), api)
+				if cmd == nil {
+					t.Fatal("restored pane has no fresh reads")
+				}
+				for _, index := range order {
+					msg := queued[index]
+					if _, accepted := restored.applyFetchedIfFresh(msg); accepted {
+						t.Fatal("restored pane accepted old lifetime")
+					}
+				}
+				freshCount := 0
+				for _, work := range cmd().(tea.BatchMsg) {
+					msg := work()
+					var accepted bool
+					restored, accepted = restored.applyFetchedIfFresh(msg)
+					if !accepted {
+						t.Fatalf("restored pane rejected fresh response %T", msg)
+					}
+					freshCount++
+				}
+				if freshCount != 4 {
+					t.Fatalf("fresh detail responses = %d, want 4", freshCount)
+				}
+				if restored.issue == nil || restored.issue.Title != freshIssue.Title {
+					t.Fatalf("restored issue = %+v, want title %q", restored.issue, freshIssue.Title)
+				}
+				if restored.loading || restored.commentsLoading || restored.eventsLoading || restored.linksLoading || restored.err != nil {
+					t.Fatal("restored pane failed to finish fresh reads")
+				}
+				restored.cancelReads()
+			})
 		}
-		prior.cancelReads()
-		for i := completed; i < 4; i++ {
-			queued = append(queued, old[i]())
-		}
-		freshIssue := *prior.issue
-		freshIssue.Title = "freshly restored"
-		api.getIssueResult = &freshIssue
-		current := newDetailModel()
-		current.gen = 2
-		current.navStack = []detailModel{cloneDetailModel(prior)}
-		restored, cmd := current.Update(tea.KeyPressMsg{Code: tea.KeyEsc}, newKeymap(), api)
-		if cmd == nil {
-			t.Fatal("restored pane has no fresh reads")
-		}
-		for _, msg := range rapid.Permutation(queued).Draw(t, "queued order") {
-			if _, accepted := restored.applyFetchedIfFresh(msg); accepted {
-				t.Fatal("restored pane accepted old lifetime")
-			}
-		}
-		freshCount := 0
-		for _, work := range cmd().(tea.BatchMsg) {
-			msg := work()
-			var accepted bool
-			restored, accepted = restored.applyFetchedIfFresh(msg)
-			if !accepted {
-				t.Fatalf("restored pane rejected fresh response %T", msg)
-			}
-			freshCount++
-		}
-		if freshCount != 4 {
-			t.Fatalf("fresh detail responses = %d, want 4", freshCount)
-		}
-		if restored.issue == nil || restored.issue.Title != freshIssue.Title {
-			t.Fatalf("restored issue = %+v, want title %q", restored.issue, freshIssue.Title)
-		}
-		if restored.loading || restored.commentsLoading || restored.eventsLoading || restored.linksLoading || restored.err != nil {
-			t.Fatal("restored pane failed to finish fresh reads")
-		}
-		restored.cancelReads()
-	})
+	}
 }
 
 // countingDetailAPI answers detail reads at once and counts issue fetches, so
@@ -339,6 +382,21 @@ func (a *countingDetailAPI) ListEvents(context.Context, int64, string) ([]EventL
 }
 func (a *countingDetailAPI) ListLinks(context.Context, int64, string) ([]LinkEntry, error) {
 	return nil, nil
+}
+
+// useInstantTicks makes timer commands built during t deliver their message
+// without waiting, so helpers that run commands inline do not sit through
+// toast and debounce timers. The toast clock is untouched, so an expiry
+// message arrives before its toast is due and leaves the toast up. dayTick
+// re-arms itself: do not combine this with a helper that follows every
+// command.
+func useInstantTicks(t *testing.T) {
+	t.Helper()
+	prior := tickAfter
+	tickAfter = func(_ time.Duration, fn func(time.Time) tea.Msg) tea.Cmd {
+		return func() tea.Msg { return fn(time.Now()) }
+	}
+	t.Cleanup(func() { tickAfter = prior })
 }
 
 // runCmdTree runs cmd and every nested batch, returning the leaf messages.

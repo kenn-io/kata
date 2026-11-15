@@ -133,6 +133,17 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
 	}
+	var responseFields map[string]jsontext.Value
+	if err := json.Unmarshal(bs, &responseFields); err != nil {
+		return err
+	}
+	_, hasCloseEvidence := responseFields["close_evidence"]
+	if b.Issue.Status == "closed" && !hasCloseEvidence {
+		b.CloseEvidence, err = optionalCloseEvidenceForShow(ctx, client, baseURL, pid, b.Issue.UID)
+		if err != nil {
+			return err
+		}
+	}
 	b.Issue.ShortID, err = issueRefForOutput(daemonAPI{ctx: ctx, baseURL: baseURL, client: client}, pid, ref.ProjectName,
 		issueIdentityForOutput{ProjectID: b.Issue.ProjectID, UID: b.Issue.UID, ShortID: b.Issue.ShortID})
 	if err != nil {
@@ -191,7 +202,7 @@ func printShowHuman(
 		return err
 	}
 	if b.Recurrence != nil {
-		if _, err := fmt.Fprintln(out, b.Recurrence.line()); err != nil {
+		if _, err := fmt.Fprintln(out, recurrenceLine(b.Recurrence)); err != nil {
 			return err
 		}
 	}
@@ -286,7 +297,7 @@ func printShowHuman(
 			}
 		}
 	}
-	return nil
+	return printShowAttachmentEvidence(out, b)
 }
 
 func writeRenderedPrefixedLines(w io.Writer, prefix string, lines []string) error {
@@ -343,8 +354,9 @@ func compactJSON(raw jsontext.Value) string {
 // response. It is shared by both the human and agent renderers; the
 // federation lease fields are zero when the issue is not federated.
 type showResponseForCLI struct {
-	Verification *db.Verification `json:"verification"`
-	Issue        struct {
+	Verification  *db.Verification `json:"verification"`
+	CloseEvidence []db.Evidence    `json:"close_evidence"`
+	Issue         struct {
 		ProjectID int64  `json:"project_id"`
 		ShortID   string `json:"short_id"`
 		UID       string `json:"uid"`
@@ -564,7 +576,7 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 		}
 	}
 	if b.Recurrence != nil {
-		if err := writeAgentField(w, "Repeat", agentValue(b.Recurrence.line())); err != nil {
+		if err := writeAgentField(w, "Repeat", agentValue(recurrenceLine(b.Recurrence))); err != nil {
 			return err
 		}
 	}
@@ -599,6 +611,9 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 				return err
 			}
 		}
+	}
+	if err := printShowAttachmentEvidence(w, b); err != nil {
+		return err
 	}
 	if err := printShowAgentLeaseLines(w, b.Lease, b.PendingLeases, b.LeaseHubNow); err != nil {
 		return err

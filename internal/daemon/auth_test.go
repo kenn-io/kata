@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testfix"
 )
 
 func TestAuthMiddleware_NoTokenConfigured_AllRequestsPass(t *testing.T) {
@@ -150,6 +151,7 @@ func TestAuthMiddleware_IssueScopedTokenUsesExplicitRouteAllowlist(t *testing.T)
 		{name: "project catalog", method: http.MethodGet, path: "/api/v1/projects", want: http.StatusNoContent},
 		{name: "create child", method: http.MethodPost, path: "/api/v1/projects/1/issues", want: http.StatusNoContent},
 		{name: "add attachment", method: http.MethodPost, path: "/api/v1/projects/1/issues/abc4/attachments", want: http.StatusNoContent},
+		{name: "link attachment", method: http.MethodPost, path: "/api/v1/projects/1/issues/abc4/attachments/links", want: http.StatusNoContent},
 		{name: "edit issue", method: http.MethodPatch, path: "/api/v1/projects/1/issues/abc4", want: http.StatusNoContent},
 		{name: "link issues", method: http.MethodPost, path: "/api/v1/projects/1/issues/abc4/links", want: http.StatusNoContent},
 		{name: "renew lease", method: http.MethodPost, path: "/api/v1/projects/1/issues/abc4/lease/actions/renew", want: http.StatusNoContent},
@@ -455,7 +457,7 @@ func openAuthTestDB(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := t.Context()
-	d, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
+	d, err := testfix.OpenSQLite(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return d

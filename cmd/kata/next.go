@@ -28,6 +28,7 @@ filters. An empty queue succeeds (exit 0): --agent prints "OK next found=false",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			options := readyOptions{
+				Limit: 1, PriorityFirst: true,
 				All: all, Unowned: unowned, Owner: owner,
 				Labels: labels, NoLabels: noLabels,
 			}

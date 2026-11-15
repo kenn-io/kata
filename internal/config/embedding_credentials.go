@@ -13,6 +13,9 @@ type EmbeddingCredential struct {
 // ResolveCredential reads the selected embedding key at startup or reload.
 // An unusable selected source never falls through to another source.
 func (e EmbeddingsConfig) ResolveCredential() EmbeddingCredential {
+	if e.UsesLocal() {
+		return EmbeddingCredential{}
+	}
 	key, source, err := ResolveSecret(e.APIKey, e.APIKeyFile, e.APIKeyEnv)
 	credential := EmbeddingCredential{Key: key, Source: source}
 	if err != nil {

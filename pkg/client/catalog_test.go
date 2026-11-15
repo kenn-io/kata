@@ -44,6 +44,11 @@ token_env = "EXAMPLE_STAGING_TOKEN"
 allow_insecure = true
 
 [[daemon]]
+name = "file-hub"
+url = "https://file.example"
+token_file = "/missing/catalog-token"
+
+[[daemon]]
 name = "work"
 local = true
 home = "`+filepath.ToSlash(t.TempDir())+`"
@@ -56,6 +61,7 @@ instance_uid = "01HZZZZZZZZZZZZZZZZZZZZZ01"
 		{Name: "personal", Local: true, Endpoint: "local"},
 		{Name: "hub", Endpoint: "daemon.example:7443", HasToken: true, Active: true},
 		{Name: "staging", Endpoint: "100.64.0.5:7777", HasToken: true},
+		{Name: "file-hub", Endpoint: "file.example", HasToken: true},
 		{Name: "work", Local: true, Endpoint: "local"},
 	}, daemons)
 }

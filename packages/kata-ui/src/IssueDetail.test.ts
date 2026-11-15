@@ -120,7 +120,7 @@ describe('IssueDetail', () => {
     expect(within(region).getByText('roadmap#def5')).toBeTruthy()
     expect(within(region).getByText('Ready to ship')).toBeTruthy()
     expect(within(region).getByText('Claimed by agent-a')).toBeTruthy()
-    expect(within(region).getByText('Pending: agent-b')).toBeTruthy()
+    expect(within(region).getByText('Claim requested by agent-b')).toBeTruthy()
     expect(within(region).queryByRole('button', { name: /edit/i })).toBeNull()
     expect(within(region).queryByText(/recurrence/i)).toBeNull()
     expect(within(region).queryByText(/history/i)).toBeNull()
@@ -389,6 +389,18 @@ it('shows conflicting direct relation counts and chronological evidence without 
     issueUID: '01TASK',
     commentUID: 'original',
   })
+})
+
+it('offers to open a reply when its text is not loaded', async () => {
+  const links = [{ uid: 'reply', issue_uid: 'other', kind: 'reply', handle: 'bbbb:111111' }]
+  render(IssueDetail, {
+    props: {
+      detail: { ...detail, comments: [{ ...detail.comments[0]!, backlinks: links }] },
+      onOpenComment: vi.fn(),
+    },
+  })
+  await fireEvent.click(screen.getByRole('button', { name: 'Show 1 reply' }))
+  expect(screen.getByText('Open the reply to read its text')).toBeTruthy()
 })
 
 it('orders evidence chronologically when timestamps have different fractional precision', async () => {

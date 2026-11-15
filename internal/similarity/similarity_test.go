@@ -142,6 +142,11 @@ func TestScore_WeightedSum(t *testing.T) {
 	assertScore(t, 0.4,
 		"fix login crash", "shared body text",
 		"unrelated title", "shared body text")
+	assert.InDelta(t, similarity.MinTitleJaccard,
+		similarity.Jaccard(similarity.Tokenize("alpha beta"), similarity.Tokenize("alpha")), epsilon)
+	assertScore(t, similarity.Threshold,
+		"alpha beta", "shared body text",
+		"alpha", "shared body text")
 	assertScore(t, 0.0,
 		"alpha", "beta", "gamma", "delta")
 }
@@ -152,6 +157,25 @@ func TestScore_Body500CharLimit(t *testing.T) {
 		"same", prefix+" alpha-divergent",
 		"same", prefix+" beta-divergent",
 		"divergence past 500 chars must not affect the score")
+}
+
+func TestScore_MissingBody(t *testing.T) {
+	for _, tc := range []struct {
+		name, titleA, bodyA, titleB, bodyB string
+		want                               float64
+	}{
+		{"first empty", "fix login crash", "", "fix login crash", "stack trace here", 1},
+		{"second empty", "fix login crash", "stack trace here", "fix login crash", "", 1},
+		{"case differs", "fix LOGIN crash", "", "fix login crash", "", 0.6},
+		{"whitespace differs", " fix\tlogin crash ", "", "fix login crash", "", 0.6},
+		{"empty bounded body", "fix login crash", strings.Repeat(" ", 500) + "trace", "fix login crash", "trace", 1},
+		{"punctuation only", "!!!", "", "!!!", "", 1},
+		{"suffix past rune limit", strings.Repeat("界", 500) + "alpha", "", strings.Repeat("界", 500) + "beta", "", 0.6},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertScore(t, tc.want, tc.titleA, tc.bodyA, tc.titleB, tc.bodyB)
+		})
+	}
 }
 
 func TestScore_Title500RuneLimit(t *testing.T) {

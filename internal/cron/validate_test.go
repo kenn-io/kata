@@ -6,6 +6,8 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
+	_ "time/tzdata"
 
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
@@ -100,14 +102,24 @@ func TestParseWorkflow(t *testing.T) {
 	workflow, err := ParseWorkflow([]byte(`{"version":1,"steps":[{"key":"inspect","kind":"command","command":"git status"},{"key":"review","kind":"prompt","prompt":"Review","after":["inspect"],"retries":2}]}`))
 	require.NoError(t, err)
 	require.Len(t, workflow.Steps, 2)
-	for _, input := range []string{
-		`{"version":1,"steps":[]}`,
-		`{"version":1,"steps":[{"key":"a","kind":"prompt","prompt":"Hi","after":["a"]}]}`,
-		`{"version":1,"steps":[{"key":"a","kind":"command","command":"true","retries":-1}]}`,
-		`{"version":1,"steps":[{"key":"a","kind":"command","command":"true"},{"key":"a","kind":"command","command":"false"}]}`,
+	_, err = ParseWorkflow([]byte(`{"version":1,"steps":[]}`))
+	require.Error(t, err)
+	for _, tc := range []struct{ step, message string }{
+		{`{"key":"build","kind":"command","command":"make"}`, `step 2 "build": step keys must be unique portable names`},
+		{`{"key":"ship","kind":"command","command":"make","retries":-1}`, `step 2 "ship": retry count must be between 0 and 100`},
+		{`{"key":"ship","kind":"command","command":"make","retries":101}`, `step 2 "ship": retry count must be between 0 and 100`},
+		{`{"key":"ship","kind":"command","command":"make","after":["ship"]}`, `step 2 "ship": dependencies must name earlier steps`},
+		{`{"key":"ship","kind":"command","command":"make","after":["later"]}`, `step 2 "ship": dependencies must name earlier steps`},
+		{`{"key":"ship","kind":"command"}`, `step 2 "ship": command step requires only command`},
+		{`{"key":"ship","kind":"prompt"}`, `step 2 "ship": prompt step requires only prompt`},
+		{`{"key":"ship","kind":"bogus"}`, `step 2 "ship": unknown step kind`},
+		{`{"key":"ship","kind":"command","command":"make","options":{"token":"secret"}}`, `step 2 "ship":`},
 	} {
-		_, err := ParseWorkflow([]byte(input))
-		require.Error(t, err)
+		t.Run(tc.message, func(t *testing.T) {
+			_, err := ParseWorkflow([]byte(`{"version":1,"steps":[{"key":"build","kind":"command","command":"make"},` + tc.step + `]}`))
+			require.ErrorIs(t, err, ErrInvalid)
+			require.Contains(t, err.Error(), tc.message)
+		})
 	}
 }
 
@@ -296,4 +308,123 @@ func TestDurationSecondsAdmission(t *testing.T) {
 			})
 		}
 	}
+}
+
+// Dormant descriptors use the generic error; calendar failures explain the date.
+func TestCronRejectsSchedulesThatNeverFire(t *testing.T) {
+	for _, expression := range []string{"@manual", "@triggered", "@none", "CRON_TZ=UTC @manual", "CRON_TZ=UTC @triggered", "CRON_TZ=UTC @none", "0 0 30 2 *"} {
+		for _, native := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/native=%t", expression, native), func(t *testing.T) {
+				job, err := ParseJob([]byte(executeJSON))
+				require.NoError(t, err)
+				if native {
+					job = nativeJob(t)
+				}
+				job.Trigger = Trigger{Kind: "cron", Cron: expression}
+				err = job.Validate()
+				require.ErrorIs(t, err, ErrInvalid)
+				require.ErrorIs(t, err, ErrNeverFires)
+				expected := ErrNeverFires.Error()
+				if expression == "0 0 30 2 *" {
+					expected += ": its day of month does not occur in its months"
+				}
+				require.EqualError(t, err, expected)
+			})
+		}
+	}
+}
+
+// Sparse calendar dates, Vixie OR semantics, and historical zone gaps remain valid.
+func TestCronAcceptsRareButRealSchedules(t *testing.T) {
+	for _, trigger := range []Trigger{
+		{Kind: "cron", Cron: "0 0 31 */2 *"},
+		{Kind: "cron", Cron: "0 0 30 2 1"},
+		{Kind: "cron", Cron: "0 0 30 2,4 *"},
+		{Kind: "cron", Cron: "0 0 31 1-12/3 *"},
+		{Kind: "cron", Cron: "@yearly"},
+		{Kind: "cron", Cron: "CRON_TZ=Asia/Damascus 0 0 1 4 *", Timezone: "Asia/Damascus"},
+		{Kind: "cron", Cron: "0 0 1 4 *", Timezone: "Asia/Damascus"},
+		{Kind: "cron", Cron: "CRON_TZ=Asia/Damascus @yearly", Timezone: "Asia/Damascus"},
+	} {
+		t.Run(trigger.Cron+"/"+trigger.Timezone, func(t *testing.T) {
+			adapter, err := ParseJob([]byte(executeJSON))
+			require.NoError(t, err)
+			adapter.Trigger = trigger
+			require.NoError(t, adapter.Validate())
+			native := nativeJob(t)
+			native.Trigger = trigger
+			require.NoError(t, native.Validate())
+		})
+	}
+	// Constant-delay descriptors remain valid for adapter jobs only.
+	adapter, err := ParseJob([]byte(executeJSON))
+	require.NoError(t, err)
+	adapter.Trigger = Trigger{Kind: "cron", Cron: "@every 90m"}
+	require.NoError(t, adapter.Validate())
+}
+
+// A calendar date must exist in a leap year unless the explicit weekday range
+// rescues it through OR matching. Hours, zones, and star spellings do not change
+// calendar feasibility.
+func TestCronCalendarDateProperty(t *testing.T) {
+	baseNative := nativeJob(t)
+	check := func(t require.TestingT, trigger Trigger, native, enabled, valid bool) {
+		job, err := ParseJob([]byte(executeJSON))
+		require.NoError(t, err)
+		if native {
+			job = baseNative
+		}
+		job.Trigger, job.Enabled = trigger, enabled
+		err = job.Validate()
+		if valid {
+			require.NoError(t, err)
+		} else {
+			require.ErrorIs(t, err, ErrInvalid)
+			require.ErrorContains(t, err, "never fires")
+		}
+	}
+	// Keep the approved concrete counterexamples deterministic, sharing the
+	// property's assertion instead of repeating its native/enabled matrix.
+	for _, trigger := range []Trigger{
+		{Kind: "cron", Cron: "0 0 30 2 *"},
+		{Kind: "cron", Cron: "0 0 31 4 *"},
+		{Kind: "cron", Cron: "0 0 31 2,4,6,9,11 *"},
+		{Kind: "cron", Cron: "0 0 30-31 2 *"},
+		{Kind: "cron", Cron: "0 0 30 2 ?"},
+		{Kind: "cron", Cron: "0 0 30 2 *", Timezone: "Asia/Tokyo"},
+		{Kind: "cron", Cron: "CRON_TZ=America/New_York 0 0 31 4 *", Timezone: "America/New_York"},
+		{Kind: "cron", Cron: "CRON_TZ=Asia/Damascus 0 0 30 2 *", Timezone: "Asia/Damascus"},
+	} {
+		for _, native := range []bool{false, true} {
+			check(t, trigger, native, false, false)
+		}
+	}
+	for _, zone := range []string{"", "UTC", "America/New_York", "Pacific/Kiritimati"} {
+		for _, native := range []bool{false, true} {
+			check(t, Trigger{Kind: "cron", Cron: "0 0 29 2 *", Timezone: zone}, native, false, true)
+		}
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		month := rapid.IntRange(1, 12).Draw(t, "month")
+		day := rapid.IntRange(1, 31).Draw(t, "day")
+		minute := rapid.IntRange(0, 59).Draw(t, "minute")
+		hour := rapid.IntRange(0, 23).Draw(t, "hour")
+		weekday := rapid.SampledFrom([]string{"*", "?", "*/1", "0-6"}).Draw(t, "weekday")
+		zone := rapid.SampledFrom([]string{"", "UTC", "Asia/Tokyo", "America/New_York", "Asia/Damascus"}).Draw(t, "zone")
+		prefix := rapid.SampledFrom([]string{"", "TZ=", "CRON_TZ="}).Draw(t, "prefix")
+		native := rapid.Bool().Draw(t, "native")
+		enabled := rapid.Bool().Draw(t, "enabled")
+		expression := fmt.Sprintf("%d %d %d %d %s", minute, hour, day, month, weekday)
+		if prefix != "" && zone != "" {
+			expression = prefix + zone + " " + expression
+		}
+		date := time.Date(2000, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+		check(t, Trigger{Kind: "cron", Cron: expression, Timezone: zone}, native, enabled, date.Month() == time.Month(month) || weekday == "0-6")
+	})
+}
+
+// The reference must stay a fixed UTC leap year, independent of clock or host.
+func TestCronCalendarReference(t *testing.T) {
+	require.Equal(t, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC), calendarReference)
+	require.Same(t, time.UTC, calendarReference.Location())
 }

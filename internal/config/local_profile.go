@@ -54,13 +54,19 @@ type LocalProfileConfig struct {
 
 // ResolveLocalProfile reads only the selected home and derives its storage identity.
 func ResolveLocalProfile(entry CatalogDaemonConfig) (LocalProfileConfig, error) {
+	return ResolveLocalProfileForClient(entry, "")
+}
+
+// ResolveLocalProfileForClient uses the selected client credential for a
+// supervisor-owned profile without resolving the daemon's private token.
+func ResolveLocalProfileForClient(entry CatalogDaemonConfig, clientToken string) (LocalProfileConfig, error) {
 	if err := normalizeLocalProfileEntry(&entry); err != nil {
 		return LocalProfileConfig{}, err
 	}
 	if !entry.Local || entry.Home == "" {
 		return LocalProfileConfig{}, fmt.Errorf("daemon %q is not an explicit local profile", entry.Name)
 	}
-	cfg, err := ReadDaemonConfigForHome(entry.Home)
+	cfg, err := readDaemonConfig(filepath.Join(entry.Home, "config.toml"), false, clientToken != "")
 	if err != nil {
 		return LocalProfileConfig{}, err
 	}
@@ -153,11 +159,12 @@ func localProfileSigningReferences(profile LocalProfileConfig) ([]string, error)
 }
 
 // LocalProfileEnvironment constructs child state from an OS/toolchain allowlist
-// and credential references in the selected configuration, never parent daemon
-// overrides. The returned slice does not mutate the process environment.
+// and credential references in the selected configuration. Operator timeout and
+// telemetry settings pass through; parent daemon routing overrides do not.
+// The returned slice does not mutate the process environment.
 func LocalProfileEnvironment(profile LocalProfileConfig, autostart bool) ([]string, error) {
 	values := map[string]string{}
-	for _, key := range []string{"PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TMP", "TEMP", "TMPDIR", "XDG_RUNTIME_DIR", "LANG", "LC_ALL", "TZ", "GOCACHE", "GOMODCACHE", "GOPATH", "KATA_TELEMETRY_ENABLED", "TELEMETRY_ENABLED", "DO_NOT_TRACK", "CI", "SSL_CERT_FILE", "SSL_CERT_DIR"} {
+	for _, key := range []string{"PATH", "HOME", "USER", "LOGNAME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRoot", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TMP", "TEMP", "TMPDIR", "XDG_RUNTIME_DIR", "LANG", "LC_ALL", "TZ", "GOCACHE", "GOMODCACHE", "GOPATH", "KATA_HTTP_TIMEOUT", "KATA_TELEMETRY_ENABLED", "TELEMETRY_ENABLED", "DO_NOT_TRACK", "CI", "SSL_CERT_FILE", "SSL_CERT_DIR", "DOCBANK_HOME"} {
 		if value, ok := os.LookupEnv(key); ok {
 			values[key] = value
 		}

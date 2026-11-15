@@ -61,8 +61,11 @@ func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
 		name, listen, web, host, contentType string
 		startup                              string
 		unavailable, checkMountPolicy        bool
+		identity                             bool
 	}{
 		{name: "shared TCP", listen: "127.0.0.1:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "application/json", checkMountPolicy: true},
+		{name: "identity TCP", listen: "127.0.0.1:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "application/json", checkMountPolicy: true, identity: true},
+		{name: "identity Unix with web listener", web: "listen = '127.0.0.1:0'\n", contentType: "application/json", checkMountPolicy: true, identity: true},
 		{name: "mixed-case JSON", listen: "127.0.0.1:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "Application/JSON"},
 		{name: "Unix with web listener", web: "listen = '127.0.0.1:0'\n", contentType: "application/json"},
 		{name: "startup sections", listen: "127.0.0.1:0", contentType: "application/json", startup: `startup_sections = [" issue_mutation "]`},
@@ -82,17 +85,30 @@ func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
 			orig := newTelemetryReporter
 			newTelemetryReporter = func(telemetry.Options) telemetry.Client { return capture }
 			t.Cleanup(func() { newTelemetryReporter = orig })
-			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`[mcp]
+			//nolint:gosec // G101: names a fixture environment variable, not a credential.
+			tokenConfig := `token_env = "KATA_MCP_TEST_TOKEN"`
+			identityConfig := ""
+			if tt.identity {
+				tokenConfig = ""
+				identityConfig = "[auth]\ntoken = 'example-daemon-token'\nrequire_token_identity = true\n"
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(identityConfig+`[mcp]
 enabled = true
 actor = " gateway-agent "
 all_projects = true
-token_env = "KATA_MCP_TEST_TOKEN"
-`+tt.startup+`
+`+tokenConfig+"\n"+tt.startup+`
 [web]
 `+tt.web), 0o600))
 			store := openKataTestDB(t, filepath.Join(home, "kata.db"))
 			_, err := store.CreateProject(t.Context(), "example-project")
 			require.NoError(t, err)
+			if tt.identity {
+				//nolint:gosec // G101: synthetic identity token used only by this test daemon.
+				_, _, err = store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+					PlaintextToken: "test-mcp-token", Actor: "token-agent", AdminActor: db.BootstrapActor,
+				})
+				require.NoError(t, err)
+			}
 			require.NoError(t, store.Close())
 
 			ctx, cancel := context.WithCancel(t.Context())
@@ -167,6 +183,22 @@ token_env = "KATA_MCP_TEST_TOKEN"
 					require.NoError(t, response.Body.Close())
 					require.Equal(t, http.StatusUnauthorized, response.StatusCode)
 				}
+				if tt.checkMountPolicy {
+					raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": map[string]any{"_meta": map[string]any{"io.modelcontextprotocol/protocolVersion": currentMCPProtocolVersion, "io.modelcontextprotocol/clientCapabilities": map[string]any{}}}})
+					require.NoError(t, err)
+					request, err := http.NewRequestWithContext(callCtx, http.MethodPost, endpoint, bytes.NewReader(raw))
+					require.NoError(t, err)
+					request.Host = tt.host
+					request.Header.Set("Authorization", "Bearer test-mcp-token")
+					request.Header.Set("Content-Type", "application/json")
+					request.Header.Set("Accept", "application/json, text/event-stream")
+					request.Header.Set("Mcp-Protocol-Version", currentMCPProtocolVersion)
+					request.Header.Set("Mcp-Method", "server/discover")
+					response, err := httpClient.Do(request)
+					require.NoError(t, err)
+					require.NoError(t, response.Body.Close())
+					require.Equal(t, http.StatusOK, response.StatusCode)
+				}
 				mcpTransport := newAuthenticatedMCPHTTPTestTransport(endpoint)
 				mcpTransport.HTTPClient.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
 					clone := request.Clone(request.Context())
@@ -177,9 +209,10 @@ token_env = "KATA_MCP_TEST_TOKEN"
 					}
 					return transport.RoundTrip(clone)
 				})
-				session, err := newMCPHTTPTestClient().Connect(callCtx, mcpTransport, nil)
+				session, err := newMCPHTTPTestClient().Connect(callCtx, mcpTransport, &sdkmcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 				require.NoError(t, err)
 				defer func() { _ = session.Close() }()
+				assertMCPHTTPPublicIcon(t, httpClient, endpoint, tt.host, session.InitializeResult().ServerInfo)
 				if tt.checkMountPolicy {
 					loaded, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "kata.load_tokens"})
 					require.NoError(t, err)
@@ -203,7 +236,11 @@ token_env = "KATA_MCP_TEST_TOKEN"
 					require.NoError(t, err)
 					require.False(t, created.IsError, "%v", created.Content)
 					issue := created.StructuredContent.(map[string]any)["issue"].(map[string]any)
-					require.Equal(t, "gateway-agent", issue["author"])
+					wantActor := "gateway-agent"
+					if tt.identity {
+						wantActor = "token-agent"
+					}
+					require.Equal(t, wantActor, issue["author"])
 					//nolint:kennlint // sleeptest: Tool-use reporting finishes asynchronously through the daemon REST API.
 					require.Eventually(t, func() bool {
 						capture.mu.Lock()
@@ -364,7 +401,6 @@ func TestDaemonMCPProjectScope(t *testing.T) {
 
 func TestDaemonMCPPreflightRejectsInvalidAuthority(t *testing.T) {
 	for _, tt := range []struct{ name, listen, config, want string }{
-		{"identity mode", "127.0.0.1:7777", "[auth]\nrequire_token_identity = true\n[mcp]\nenabled = true\n", `[mcp] enabled cannot be combined with [auth] require_token_identity: the daemon MCP endpoint calls REST with the bootstrap token, which cannot perform attributed writes; run "kata mcp serve --http" with a user token instead`},
 		{"proxy actor", "127.0.0.1:7777", "[auth.proxy]\ntrusted_actor_header = 'X-Kata-Actor'\ntrusted_proxy_listeners = ['127.0.0.1:7777']\n[mcp]\nenabled = true\nactor = 'gateway-agent'\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", `[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" with REST access through a listener outside trusted_proxy_listeners or through the proxy that sets the actor header`},
 		{"proxy actor on expanded IPv6", "[0:0:0:0:0:0:0:1]:7777", "[auth.proxy]\ntrusted_actor_header = 'X-Kata-Actor'\ntrusted_proxy_listeners = ['[::1]:7777']\n[mcp]\nenabled = true\nactor = 'gateway-agent'\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", `[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" with REST access through a listener outside trusted_proxy_listeners or through the proxy that sets the actor header`},
 		{"proxy actor on another listener", "127.0.0.1:7777", "[auth.proxy]\ntrusted_actor_header = 'X-Kata-Actor'\ntrusted_proxy_listeners = ['127.0.0.1:8888']\n[mcp]\nenabled = true\nactor = 'gateway-agent'\nall_projects = true\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", ""},

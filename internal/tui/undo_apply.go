@@ -6,9 +6,29 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"time"
 
 	"go.kenn.io/kata/internal/api"
 )
+
+// undoBacklogLookupTimeout bounds the optional backlog lookup so a slow read
+// cannot use up the deadline the reopen itself needs.
+var undoBacklogLookupTimeout = 2 * time.Second
+
+// undoReopenReserve is the part of the attempt's deadline kept for the reopen
+// itself; the backlog lookup only gets time beyond it.
+const undoReopenReserve = 2 * time.Second
+
+// undoBacklogLookupBudget is how long the backlog lookup may run: at most
+// undoBacklogLookupTimeout, and never into the reserve for the reopen. Zero
+// means too little time remains, so the lookup is skipped.
+func undoBacklogLookupBudget(ctx context.Context) time.Duration {
+	budget := undoBacklogLookupTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = min(budget, time.Until(deadline)-undoReopenReserve)
+	}
+	return max(budget, 0)
+}
 
 type undoOutcome struct {
 	attempt       *undoAttempt
@@ -17,11 +37,22 @@ type undoOutcome struct {
 	changed       bool
 	already       bool
 	needsEvidence bool
+	backlog       int
 	conflict      string
 	err           error
 }
 
-func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired bool, evidence *CloseInput) undoOutcome {
+// undoOptions tunes one undo attempt. checkBacklog asks for the recurring
+// backlog before undoing a close, so the user can confirm a reopen that
+// delivers several children.
+type undoOptions struct {
+	evidenceRequired bool
+	evidence         *CloseInput
+	checkBacklog     bool
+}
+
+func (c *undoClient) undo(ctx context.Context, entry undoEntry, opts undoOptions) undoOutcome {
+	evidenceRequired, evidence := opts.evidenceRequired, opts.evidence
 	attempt, err := c.begin(ctx, false)
 	if err != nil {
 		return undoOutcome{err: err}
@@ -40,7 +71,13 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired
 		out.conflict = "daemon principal changed"
 		return out
 	}
-	detail, err := c.GetIssueDetail(ctx, entry.projectID, entry.uid)
+	// A deleted issue cannot be read. Restore by UID and let changed=false
+	// report that another client already restored it.
+	if entry.kind == "delete" {
+		out.resp, out.err = c.RestoreIssue(ctx, entry.projectID, entry.uid, entry.actor)
+		return c.finishUndo(ctx, entry, out)
+	}
+	detail, err := c.readIssue(ctx, entry.projectID, entry.uid)
 	if err != nil {
 		out.err = err
 		return out
@@ -76,6 +113,19 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired
 		if entry.kind == "reopen" && evidenceRequired && evidence == nil {
 			out.needsEvidence = true
 			return out
+		}
+		if entry.kind == "close" && opts.checkBacklog {
+			// A failed, slow or skipped lookup must not block undo; only a
+			// known backlog prompts.
+			if budget := undoBacklogLookupBudget(ctx); budget > 0 {
+				lookupCtx, cancel := context.WithTimeout(ctx, budget)
+				count, err := c.ReopenBacklog(lookupCtx, entry.projectID, entry.uid)
+				cancel()
+				if err == nil && count > 1 {
+					out.backlog = count
+					return out
+				}
+			}
 		}
 		if entry.kind == "close" {
 			out.resp, out.err = c.KataAPI.Reopen(ctx, entry.projectID, entry.uid, entry.actor)
@@ -211,17 +261,25 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired
 		out.err = fmt.Errorf("unsupported undo action %q", entry.kind)
 		return out
 	}
+	return c.finishUndo(ctx, entry, out)
+}
+
+func (c *undoClient) finishUndo(ctx context.Context, entry undoEntry, out undoOutcome) undoOutcome {
 	if out.err != nil {
-		attempt.unknown = ambiguousWriteError(out.err)
+		out.attempt.unknown = ambiguousWriteError(out.err)
 		return out
 	}
 	if out.resp == nil {
 		out.err = errors.New("undo returned no response")
-		attempt.unknown = true
+		out.attempt.unknown = true
 		return out
 	}
 	out.changed = out.resp.Changed
 	if !out.changed {
+		if entry.kind == "delete" {
+			out.already = true
+			return out
+		}
 		out.already, out.err = c.restoredAfterNoop(ctx, entry)
 		if out.err == nil && !out.already {
 			out.err = errors.New("undo returned no change; issue still needs correction")
@@ -231,7 +289,7 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired
 }
 
 func (c *undoClient) restoredAfterNoop(ctx context.Context, entry undoEntry) (bool, error) {
-	detail, err := c.GetIssueDetail(ctx, entry.projectID, entry.uid)
+	detail, err := c.readIssue(ctx, entry.projectID, entry.uid)
 	if err != nil {
 		return false, err
 	}

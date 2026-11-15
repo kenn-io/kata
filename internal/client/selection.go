@@ -127,7 +127,7 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 			// The profile's identity check sends this credential.
 			return DaemonSelection{}, credentialErr
 		}
-		profile, err := config.ResolveLocalProfile(entry)
+		profile, err := config.ResolveLocalProfileForClient(entry, token)
 		if err != nil {
 			return DaemonSelection{}, err
 		}
@@ -139,7 +139,7 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 		if token != "" {
 			resolved.Token = token
 		}
-		if _, err := config.LocalProfileEnvironment(profile, false); err != nil {
+		if _, err := config.LocalProfileEnvironment(profile, false); err != nil && profile.Config.AutostartEnabled() {
 			return DaemonSelection{}, err
 		}
 		return DaemonSelection{Resolved: resolved, Profile: &profile}, nil
@@ -155,8 +155,8 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 }
 
 // catalogClientToken is a catalog entry's credential as clients send it.
-// KATA_AUTH_TOKEN replaces a remote entry's credential, so its token_env is
-// not read then.
+// KATA_AUTH_TOKEN replaces a remote entry's credential, so its token_file or
+// token_env is not read then.
 func catalogClientToken(entry config.CatalogDaemonConfig) (string, error) {
 	if !entry.Local && globalAuthTokenOverrideSet() {
 		return entry.Token, nil

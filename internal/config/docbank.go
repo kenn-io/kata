@@ -14,6 +14,8 @@ import (
 // DocbankConfig selects a vault shared by every issue reader and metadata writer
 // served by this daemon. Folder placement is organization, not authorization.
 type DocbankConfig struct {
+	// Local finds the Docbank on this machine through its runtime record instead of a configured URL.
+	Local      bool   `toml:"local"`
 	URL        string `toml:"url"`
 	APIKey     string `toml:"api_key"`
 	APIKeyFile string `toml:"api_key_file"`
@@ -21,13 +23,25 @@ type DocbankConfig struct {
 	Folder     string `toml:"folder"`
 }
 
-// Enabled reports whether an operator configured a Docbank endpoint.
-func (c DocbankConfig) Enabled() bool { return c.URL != "" }
+// Enabled reports whether an operator configured a Docbank endpoint or selected the local one.
+func (c DocbankConfig) Enabled() bool { return c.URL != "" || c.Local }
+
+// UsesLocal reports whether the local Docbank is selected without a configured URL.
+func (c DocbankConfig) UsesLocal() bool { return c.Local && c.URL == "" }
 
 // NormalizeDocbankConfig applies daemon defaults and validates without reading secrets.
 func NormalizeDocbankConfig(c DocbankConfig) (DocbankConfig, error) {
 	err := normalizeDocbank(&c)
 	return c, err
+}
+
+// ParseDocbankFile reads [docbank] as written, without environment overrides or defaults.
+func ParseDocbankFile(data []byte) (DocbankConfig, error) {
+	var file struct {
+		Docbank DocbankConfig `toml:"docbank"`
+	}
+	err := decodeSectionData(data, "docbank", &file)
+	return file.Docbank, err
 }
 
 // ResolveKey reads the selected secret on every request, permitting key rotation.
@@ -50,7 +64,7 @@ func normalizeDocbank(c *DocbankConfig) error {
 	if !strings.HasPrefix(c.Folder, "/") || path.Clean(c.Folder) != c.Folder || strings.ContainsAny(c.Folder, `\`) || strings.ContainsFunc(c.Folder, unicode.IsControl) {
 		return fmt.Errorf("docbank.folder must be a clean absolute path")
 	}
-	if !c.Enabled() {
+	if !c.Enabled() || c.UsesLocal() {
 		return nil
 	}
 	base, err := httpurl.CanonicalHTTPBaseURL(c.URL)

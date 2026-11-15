@@ -43,6 +43,9 @@ type viewChrome struct {
 	daemon        string           // active daemon display label
 	modal         modalKind        // active confirmation; takes footer precedence
 	undoAvailable bool             // session history has an eligible action
+	moveStep      moveStep         // the Move form step, for its footer
+	deleteHidden  bool             // the connected credentials cannot delete
+	moveHidden    bool             // move is not on offer (credentials, saved context, or a pending lookup)
 }
 
 // View renders the list under the M3.5 chrome layer:
@@ -99,6 +102,17 @@ func (lm listModel) ViewBody(width, bodyRows int, chrome viewChrome) string {
 // listMinHeight is the smallest height for the full list chrome.
 // Below this we keep the title and search but omit the footer.
 const listMinHeight = 10
+
+// tooNarrowWidth is the width below which the TUI draws only its too-narrow
+// screen.
+const tooNarrowWidth = 80
+
+// footerDrawn reports whether the footer key table is on screen: the
+// too-narrow screen has none, and the list drops it in short terminals. Forms
+// that would otherwise rely on the footer to name their keys ask it.
+func footerDrawn(width, height int) bool {
+	return width >= tooNarrowWidth && height >= listMinHeight
+}
 
 // listBodyFloor is the smallest row count the table body will ever
 // render. Keeps a usable list visible even when the chrome math is
@@ -731,6 +745,9 @@ func renderChips(f ListFilter) string {
 		chips = append(chips, chipStyle.Render(
 			"label:"+sanitizeForDisplay(l)))
 	}
+	if f.Date != "" {
+		chips = append(chips, chipActive.Render("date:"+f.Date))
+	}
 	if len(chips) == 0 {
 		return ""
 	}
@@ -900,11 +917,36 @@ func buildRows(queueRows []queueRow, cursor, titleW int, narrow bool, chrome vie
 // the same project so repeating the name on every line is noise.
 func titleForRow(iss Issue, chrome viewChrome, titleW int) string {
 	clean := sanitizeForDisplay(iss.Title)
-	if !chrome.scope.allProjects {
+	if chrome.scope.allProjects {
+		clean = projectPrefix(iss.ProjectID, chrome.projectsByID) + clean
+	}
+	dates := rowDatesText(iss)
+	// Keep at least rowDatesMinTitle cells of title; on a cell too narrow
+	// for that the dates stay out of the way.
+	if dates == "" || titleW-1 < len(dates)+1+rowDatesMinTitle {
 		return truncate(clean, titleW)
 	}
-	prefix := projectPrefix(iss.ProjectID, chrome.projectsByID)
-	return truncate(prefix+clean, titleW)
+	return padToWidth(truncate(clean, titleW-1-len(dates)-1), titleW-1-len(dates)) + dates
+}
+
+// rowDatesMinTitle is the title width a row keeps before its dates
+// are dropped for lack of room.
+const rowDatesMinTitle = 15
+
+// rowDatesText renders an issue's resolved dates as "s:MM-DD d:MM-DD",
+// dropping the year for dates in the current year. A missing date is
+// omitted, and an issue with neither renders "".
+func rowDatesText(iss Issue) string {
+	year := renderNow().Format("2006") + "-"
+	short := func(d string) string { return strings.TrimPrefix(d, year) }
+	var parts []string
+	if iss.ScheduledOnDate != "" {
+		parts = append(parts, "s:"+short(iss.ScheduledOnDate))
+	}
+	if iss.DeadlineOnDate != "" {
+		parts = append(parts, "d:"+short(iss.DeadlineOnDate))
+	}
+	return strings.Join(parts, " ")
 }
 
 // projectPrefix renders the bracketed project name for a list row. Falls

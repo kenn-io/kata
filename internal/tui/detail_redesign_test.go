@@ -192,7 +192,7 @@ func TestDetailRedesign_FooterHintsAreComprehensive(t *testing.T) {
 		detailFocus: focusActivity,
 		activeTab:   tabComments,
 	}
-	rows := dm.detailHelpRows()
+	rows := dm.detailHelpRows(false)
 	keys := map[string]bool{}
 	for _, row := range rows {
 		for _, item := range row {

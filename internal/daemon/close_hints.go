@@ -46,6 +46,20 @@ func closeRefusalHint(ctx context.Context, store db.Storage, issue db.Issue, bod
 			for _, e := range body.Evidence {
 				values := []string{}
 				switch e.Type {
+				case api.EvidenceFile:
+					if e.File != nil {
+						kind := "file"
+						if e.File.CaptureSHA256 != nil {
+							if *e.File.CaptureSHA256 {
+								kind = "file-sha256"
+							} else {
+								retry.WriteString(" --evidence " + shellHintArg("file-no-sha256:"+e.File.Source+":"+e.File.Path))
+								continue
+							}
+						}
+						retry.WriteString(" --evidence " + shellHintArg(kind+":"+e.File.Source+":"+e.File.Path))
+						continue
+					}
 				case api.EvidenceCommit:
 					values = []string{e.SHA}
 				case api.EvidencePR:

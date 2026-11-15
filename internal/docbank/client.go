@@ -11,6 +11,7 @@ import (
 	"errors"
 	"hash"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -18,6 +19,8 @@ import (
 	"strings"
 	"time"
 	"uuid"
+
+	"go.kenn.io/kata/internal/config"
 )
 
 // Error exposes only the upstream status, keeping credentials and response details private.
@@ -25,32 +28,94 @@ type Error struct{ Status int }
 
 func (e *Error) Error() string { return "docbank: HTTP " + strconv.Itoa(e.Status) }
 
-// Client uses an endpoint normalized by config and resolves its key per request.
+// KeyError reports that the daemon could not resolve its own Docbank key, so
+// no request was sent. Err may name the key source; keep it out of responses.
+type KeyError struct{ Err error }
+
+func (e *KeyError) Error() string {
+	if e.Err == nil {
+		return "docbank: API key is empty"
+	}
+	return e.Err.Error()
+}
+
+func (e *KeyError) Unwrap() error { return e.Err }
+
+// Client resolves its endpoint and key on every request.
 type Client struct {
-	base string
-	key  func() (string, error)
-	http *http.Client
+	target func(context.Context) (base, key string, hc *http.Client, err error)
+	// key resolves the configured API key; nil for the local Docbank, whose
+	// key comes from its runtime record.
+	key func() (string, error)
+}
+
+// New returns the client for cfg, or nil when Docbank is not configured.
+// cfg must already be normalized.
+func New(cfg config.DocbankConfig) *Client {
+	switch {
+	case !cfg.Enabled():
+		return nil
+	case cfg.UsesLocal():
+		return NewLocalClient(Local{})
+	default:
+		return NewClient(cfg.URL, cfg.ResolveKey)
+	}
 }
 
 // NewClient uses the normalized endpoint and resolves credentials on each request.
 func NewClient(base string, key func() (string, error)) *Client {
-	return &Client{base: base, key: key, http: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	hc := noRedirectClient(nil)
+	c := &Client{key: key}
+	c.target = func(ctx context.Context) (string, string, *http.Client, error) {
+		k, err := c.resolveKey()
+		if err != nil {
+			slog.WarnContext(ctx, "docbank request not sent", "err", err)
+			return "", "", nil, err
+		}
+		return base, k, hc, nil
+	}
+	return c
 }
+
+// CheckKey resolves the configured key as a request would, without contacting
+// Docbank. A client for the local Docbank has no key source of its own, so
+// checked is false.
+func (c *Client) CheckKey() (checked bool, err error) {
+	if c.key == nil {
+		return false, nil
+	}
+	_, err = c.resolveKey()
+	return true, err
+}
+
+func (c *Client) resolveKey() (string, error) {
+	key, err := c.key()
+	if err != nil || key == "" {
+		return "", &KeyError{Err: err}
+	}
+	return key, nil
+}
+
+func noRedirectClient(rt http.RoundTripper) *http.Client {
+	return &http.Client{Transport: rt, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
 func (c *Client) request(ctx context.Context, method, endpoint string, body io.Reader, headers http.Header) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.base+endpoint, body)
+	base, key, hc, err := c.target(ctx)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, method, base+endpoint, body)
 	if err != nil {
 		return nil, &Error{}
 	}
-	key, err := c.key()
-	if err != nil || key == "" {
-		return nil, &Error{Status: 401}
-	}
+
 	req.Header = headers.Clone()
 	if req.Header == nil {
 		req.Header = make(http.Header)
 	}
 	req.Header.Set("X-Api-Key", key)
-	resp, err := c.http.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, &Error{}
 	}
@@ -76,7 +141,8 @@ func (c *Client) json(ctx context.Context, method, endpoint string, in, out any)
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if json.UnmarshalRead(io.LimitReader(resp.Body, 1<<20), out) != nil {
+	// Docbank node and version responses can embed up to 8 MiB of source metadata.
+	if json.UnmarshalRead(io.LimitReader(resp.Body, 9<<20), out) != nil {
 		return &Error{}
 	}
 	return nil
@@ -84,20 +150,18 @@ func (c *Client) json(ctx context.Context, method, endpoint string, in, out any)
 
 // EnsureFolder creates missing ancestors and returns the final folder ID.
 func (c *Client) EnsureFolder(ctx context.Context, folder string) (int64, error) {
-	var node struct {
-		ID int64 `json:"id"`
-	}
+	var node Node
 	var current strings.Builder
 	for segment := range strings.SplitSeq(strings.Trim(folder, "/"), "/") {
 		if segment != "" {
 			current.WriteString("/" + segment)
 		}
-		endpoint := "/api/v1/path?" + url.Values{"path": {current.String()}}.Encode()
-		err := c.json(ctx, "GET", endpoint, nil, &node)
+		var err error
+		node, err = c.ResolvePath(ctx, current.String())
 		if e, ok := errors.AsType[*Error](err); ok && e.Status == 404 {
 			err = c.json(ctx, "POST", "/api/v1/path/mkdir", map[string]string{"path": current.String()}, &node)
 			if e, ok := errors.AsType[*Error](err); ok && e.Status == 409 {
-				err = c.json(ctx, "GET", endpoint, nil, &node)
+				node, err = c.ResolvePath(ctx, current.String())
 			}
 		}
 		if err != nil {

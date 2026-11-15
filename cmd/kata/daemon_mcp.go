@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -36,6 +37,9 @@ func newDaemonMCPHandler(ctx context.Context, store db.Storage, cfg config.MCPCo
 	if err != nil {
 		return nil, err
 	}
+	if auth.RequireTokenIdentity {
+		return newDaemonMCPIdentityHandler(ctx, store, cfg, scope, endpoint, auth)
+	}
 	resolved := client.ResolvedDaemon{
 		Address: endpoint.Address, Network: endpoint.Network, BaseURL: endpoint.BaseURL(),
 		Token: auth.Token, TrustPrivateNetwork: auth.TrustPrivateNetwork, Direct: true,
@@ -52,21 +56,35 @@ func newDaemonMCPHandler(ctx context.Context, store db.Storage, cfg config.MCPCo
 	if err != nil {
 		return nil, err
 	}
-	observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
-	// Token admin is sidecar-only: the mount needs require_token_identity off, under which token creation 409s.
-	server, err := mcpserver.New(ctx, mcpserver.Options{
-		Client: apiClient, LongRunningClient: longRunningClient,
-		Scope: scope, Actor: cfg.Actor, Version: version.Version,
-		StartupSections: cfg.StartupSections,
-		ObserveToolCall: observe,
-	})
+	observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved, false)
+	// Token administration remains an explicit sidecar-only capability.
+	admission := mcpserver.NewToolAdmission()
+	newServer := func(events bool) (*sdkmcp.Server, error) {
+		return mcpserver.New(ctx, mcpserver.Options{
+			Client: apiClient, LongRunningClient: longRunningClient,
+			Scope: scope, Actor: cfg.Actor, Version: version.Version,
+			StartupSections: cfg.StartupSections, ObserveToolCall: observe,
+			Events: events, Admission: admission,
+		})
+	}
+	legacy, err := newServer(false)
+	if err != nil {
+		stopReporting()
+		return nil, err
+	}
+	current, err := newServer(true)
 	if err != nil {
 		stopReporting()
 		return nil, err
 	}
 	context.AfterFunc(ctx, stopReporting)
 	// ApplyListenerPolicy owns the daemon mount's Host validation.
-	return newMCPHTTPHandler(server, token, true), nil
+	handler := mcpserver.NewHTTPHandler(
+		func(*http.Request) *sdkmcp.Server { return legacy },
+		func(*http.Request) *sdkmcp.Server { return current },
+		mcpserver.HTTPOptions{DisableLocalhostProtection: true},
+	)
+	return requireMCPHTTPBearer(token, http.NewCrossOriginProtection().Handler(handler)), nil
 }
 
 func daemonMCPScope(ctx context.Context, store db.Storage, cfg config.MCPConfig) (*mcpserver.Scope, error) {
@@ -108,9 +126,6 @@ func resolveDaemonMCPStartup(ctx context.Context, cfg *config.DaemonConfig, endp
 	if !cfg.MCP.Enabled {
 		return "", nil
 	}
-	if cfg.Auth.RequireTokenIdentity {
-		return "", errors.New(`[mcp] enabled cannot be combined with [auth] require_token_identity: the daemon MCP endpoint calls REST with the bootstrap token, which cannot perform attributed writes; run "kata mcp serve --http" with a user token instead`)
-	}
 	self, err := daemonMCPSelfEndpoint(endpoint)
 	if err != nil {
 		return "", err
@@ -128,17 +143,25 @@ func resolveDaemonMCPStartup(ctx context.Context, cfg *config.DaemonConfig, endp
 			return "", errors.New(`[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" with REST access through a listener outside trusted_proxy_listeners or through the proxy that sets the actor header`)
 		}
 	}
-	cfg.MCP.Actor, _ = resolveActor(ctx, cfg.MCP.Actor, nil)
-	cfg.MCP.Actor = strings.TrimSpace(cfg.MCP.Actor)
-	if cfg.MCP.Actor == "" {
-		return "", errors.New("[mcp]: kata actor is required")
-	}
-	token, _, err := config.ResolveSecret("", cfg.MCP.TokenFile, cfg.MCP.TokenEnv)
-	if err != nil {
-		return "", fmt.Errorf("[mcp]: %w", err)
-	}
-	if token == "" {
-		return "", errors.New("[mcp] enabled requires token_file or token_env")
+	var token string
+	if cfg.Auth.RequireTokenIdentity {
+		if cfg.MCP.TokenFile != "" || cfg.MCP.TokenEnv != "" {
+			return "", errors.New("[mcp] identity mode uses caller tokens; remove token_file and token_env")
+		}
+	} else {
+		cfg.MCP.Actor, _ = resolveActor(ctx, cfg.MCP.Actor, nil)
+		cfg.MCP.Actor = strings.TrimSpace(cfg.MCP.Actor)
+		if cfg.MCP.Actor == "" {
+			return "", errors.New("[mcp]: kata actor is required")
+		}
+		var err error
+		token, _, err = config.ResolveSecret("", cfg.MCP.TokenFile, cfg.MCP.TokenEnv)
+		if err != nil {
+			return "", fmt.Errorf("[mcp]: %w", err)
+		}
+		if token == "" {
+			return "", errors.New("[mcp] enabled requires token_file or token_env")
+		}
 	}
 	// An all-project mount carries daemon-wide authority, so it must be chosen explicitly.
 	switch {

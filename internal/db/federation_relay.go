@@ -27,6 +27,16 @@ const (
 	MaxRelayEnvelopeBytes = 64 << 20
 )
 
+// ValidateRelaySourceEventType rejects events whose effects cross a project's
+// relay authorization boundary. Project moves must use the federated move
+// protocol, which proves authority for both source and destination projects.
+func ValidateRelaySourceEventType(eventType string) error {
+	if eventType == "issue.moved" {
+		return fmt.Errorf("%w: issue moves are not supported over relay", ErrFederationIngestValidation)
+	}
+	return nil
+}
+
 // RelayHopAuthority is resolved from the live enrolled transport. An envelope
 // digest detects corruption; it never establishes any of these permissions.
 type RelayHopAuthority struct {

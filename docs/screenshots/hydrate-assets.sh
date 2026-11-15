@@ -71,12 +71,16 @@ fi
 mkdir -p "$docs_root/assets"
 tmp_root="$(mktemp -d "$docs_root/assets/.screenshots-hydrate.XXXXXX")"
 staged="$tmp_root/screenshots"
+archive="$tmp_root/assets.tar"
 cleanup() {
   rm -rf "$tmp_root"
 }
 trap cleanup EXIT
 mkdir -p "$staged"
-git -C "$repo_root" archive "$asset_ref" | tar -xf - -C "$staged"
+# Extract from a file so tar's end-marker read behavior cannot turn a normal
+# consumer close into a producer EPIPE under pipefail.
+git -C "$repo_root" archive "$asset_ref" > "$archive"
+tar -xf "$archive" -C "$staged"
 if ! kata_docs_validate_assets "$staged"; then
   printf 'docs screenshots not hydrated: %s failed the expected asset contract\n' "$assets_branch" >&2
   exit 1

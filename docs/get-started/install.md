@@ -5,7 +5,7 @@ daemon it starts itself, and it stores data locally in SQLite.
 
 ## Requirements
 
-The release installers below do not require Go. Install Go 1.27.3 or later from
+The release installers below do not require Go. Install Go 1.27.4 or later from
 <https://go.dev/dl/> only when using `go install` or building from a clone.
 
 GitHub release binaries are available starting with `v0.5.0`. Since v0.14.0,
@@ -103,8 +103,13 @@ binds a new one.
 
 If the daemon does not come back, or it does not support automatic restart, the
 command reports that the binary was installed and returns an error. Resolve
-any reported startup problem, then run `kata daemon restart` with the daemon's
-original startup options.
+any reported startup problem, then run `kata daemon stop` followed by
+`kata daemon start` with the daemon's original startup options in its original
+host shell or service environment.
+After a package-manager upgrade, `kata daemon restart` uses the executable
+invoked by the CLI while retaining the running daemon's environment. Both
+processes must see the same process IDs and executable paths. Older
+signal-only daemons need one stop/start before explicit restart can do this.
 
 Package-managed installations keep
 `kata update --check`, but install-capable update forms direct you back to the

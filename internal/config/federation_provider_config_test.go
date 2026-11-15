@@ -35,6 +35,7 @@ credential_provider = ["example-credential-provider", "--profile", "team space"]
 		{"empty command", strings.ReplaceAll(base, `"example-credential-provider"`, `" "`), "credential_provider"},
 		{"empty array", strings.ReplaceAll(base, `["example-credential-provider", "--profile", "team space"]`, `[]`), "credential_provider"},
 		{"catalog token", strings.ReplaceAll(base, "[[federation.project]]", "token = 'synthetic-token'\n[[federation.project]]"), "token"},
+		{"catalog token file", strings.ReplaceAll(base, "[[federation.project]]", "token_file = '/missing/token'\n[[federation.project]]"), "token"},
 		{"catalog token env", strings.ReplaceAll(base, "[[federation.project]]", "token_env = 'EXAMPLE_TOKEN'\n[[federation.project]]"), "token"},
 		{"plaintext provider", strings.ReplaceAll(base, "https://hub.example/tasks", "http://127.0.0.1:8080/tasks"), "HTTPS"},
 		{"intent without provider", strings.ReplaceAll(base, `credential_provider = ["example-credential-provider", "--profile", "team space"]`, `actor = "user-a"`), "credential_provider"},

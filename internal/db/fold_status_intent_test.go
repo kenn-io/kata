@@ -34,8 +34,7 @@ func TestFoldStatusIntentSurvivesOnlyEffectiveExplicitTransitions(t *testing.T) 
 
 func TestFoldStatusIntentMatchesTraceForGeneratedPermutations(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		requested := rapid.IntRange(1, int(^uint(0)>>1)).Draw(t, "event count")
-		count := min(requested, 40)
+		count := rapid.IntRange(1, 40).Draw(t, "event count")
 		sharedTick := rapid.Int64Range(0, int64(^uint64(0)>>1)).Draw(t, "shared physical clock")
 		tiedPhysical := rapid.Bool().Draw(t, "physical clocks tied")
 		events := []FoldEvent{testEvent("issue.created", 0, `{"uid":"issue-1","status":"open"}`)}
@@ -111,26 +110,4 @@ func TestFoldStatusClockIncludesSameStateRestatements(t *testing.T) {
 	got := FoldEvents(events).Issues["issue-1"]
 	require.Equal(t, "event-003", got.StatusClock.EventUID)
 	require.Equal(t, "event-002", got.StatusIntentUID)
-}
-
-// Status-intent bookkeeping must attribute an envelope-less event to the same
-// issue the fold changes, or intent could point at an issue the event never
-// touched.
-func TestFederationEventIssueUIDMatchesFoldAttribution(t *testing.T) {
-	for _, tc := range []struct {
-		name, payload, issueUID, foldStatus string
-	}{
-		{"payload issue_uid", `{"issue_uid":"issue-1","reason":"done"}`, "issue-1", "closed"},
-		{"payload uid", `{"uid":"issue-1","reason":"done"}`, "issue-1", "closed"},
-		{"empty issue_uid wins over uid", `{"issue_uid":"","uid":"issue-1","reason":"done"}`, "", "open"},
-		{"no identity", `{"reason":"done"}`, "", "open"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			created := testEvent("issue.created", 1, `{"uid":"issue-1","status":"open","title":"Initial title"}`)
-			closed := testEvent("issue.closed", 2, tc.payload)
-			closed.IssueUID = ""
-			require.Equal(t, tc.foldStatus, FoldEvents([]FoldEvent{created, closed}).Issues["issue-1"].Status)
-			require.Equal(t, tc.issueUID, FederationEventIssueUID(nil, tc.payload))
-		})
-	}
 }

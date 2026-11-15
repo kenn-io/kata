@@ -3,13 +3,81 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
+
+func TestSearch_ContinuationCommandKeepsQueryAndFilters(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	for _, title := range []string{"inventory export first", "inventory export second", "inventory export third"} {
+		ref := createIssue(t, env, pid, title)
+		runCLI(t, env, dir, "label", "add", ref, "bug")
+		runCLI(t, env, dir, "label", "add", ref, "ui")
+		runCLI(t, env, dir, "label", "add", ref, "wont")
+	}
+	createIssue(t, env, pid, "inventory export distractor")
+	workspace := filepath.Join(t.TempDir(), "reader's workspace")
+	require.NoError(t, os.Mkdir(workspace, 0o700))
+	t.Chdir(t.TempDir())
+	ctx := contextWithBaseURL(t.Context(), env.URL)
+	out, stderr, err := executeRootCapture(t, ctx, "search", "--project", "kata", "--workspace", workspace, "--lexical", "--status", "open", "--limit", "1", "--include-deleted", "--label", "bug", "--label", "ui", "--no-label", `"wont,fix"`, "--no-label", ",excluded", "--", "inventory", "--export")
+	require.NoError(t, err, stderr)
+	assert.Contains(t, out, "inventory export first")
+	for _, title := range []string{"inventory export second", "inventory export third"} {
+		_, command, ok := strings.Cut(stderr, "search results are incomplete; continue with ")
+		require.True(t, ok, stderr)
+		command, _, _ = strings.Cut(command, "\n")
+		out, stderr, err = executeRootCapture(t, ctx, retryShellArgs(t, command)...)
+		require.NoError(t, err, stderr)
+		assert.Contains(t, out, title)
+		assert.NotContains(t, out, "distractor")
+		assert.Equal(t, 1, strings.Count(out, "inventory export"))
+	}
+}
+
+func TestSearch_ContinuationRendering(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mode    outputMode
+		quiet   bool
+		body    string
+		wantErr string
+		wantOut string
+	}{
+		{"complete", outputHuman, false, `{"complete":true,"results":[]}`, "", ""},
+		{"no cursor", outputHuman, false, `{"complete":false,"results":[]}`, "search results are incomplete\n", ""},
+		{"quiet", outputHuman, true, `{"complete":false,"next_cursor":"next","results":[]}`, "", ""},
+		{"json", outputJSON, false, `{"complete":false,"next_cursor":"next","results":[]}`, "", ""},
+		{"agent", outputAgent, false, `{"complete":false,"next_cursor":"next","results":[]}`, "", "next_cursor=next"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetFlags(t)
+			flags.Mode, flags.Quiet = tc.mode, tc.quiet
+			cmd := newSearchCmd()
+			var out, stderr bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&stderr)
+			require.NoError(t, printSearchResults(cmd, []byte(tc.body)))
+			assert.Equal(t, tc.wantErr, stderr.String())
+			if tc.quiet {
+				assert.Empty(t, out.String())
+			} else if tc.wantOut != "" {
+				assert.Contains(t, out.String(), tc.wantOut)
+			}
+		})
+	}
+}
 
 // renderSearch drives printSearchResults directly: it sets the active output
 // mode, feeds the raw response body, and returns captured stdout. It isolates
@@ -62,16 +130,80 @@ func TestSearch_ReturnsMatchedIssues(t *testing.T) {
 func TestSearch_AgentOutputEmptyEmitsOnlyHeader(t *testing.T) {
 	env, dir, _ := setupCLIWorkspace(t)
 
-	out, stderr, err := runCLIWithErr(t, env, dir, "--agent", "search", "login race")
+	out, stderr, err := runCLIWithErr(t, env, dir, "--agent", "search", "login")
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
-	assert.Equal(t, "OK search count=0 query=\"login race\" mode=lexical complete=true\n", out)
+	assert.Equal(t, "OK search count=0 query=login mode=lexical complete=true\n", out)
+}
+
+// Lexical search returns only issues that contain every word. An agent that
+// adds context words to its query gets nothing back and files a duplicate, so
+// an empty multi-word search says why on stderr.
+func TestSearch_EmptyMultiWordSearchHintsEveryWordMustMatch(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "paginate drops the last partial page")
+	const hint = "Hint: no issue contains every word; search again with fewer words\n"
+
+	out, stderr, err := runCLIWithErr(t, env, dir, "--agent", "search", "paginate inventory")
+	require.NoError(t, err)
+	assert.Equal(t, "OK search count=0 query=\"paginate inventory\" mode=lexical complete=true\n", out)
+	assert.Equal(t, hint, stderr)
+
+	out, stderr, err = runCLIWithErr(t, env, dir, "search", "paginate", "inventory")
+	require.NoError(t, err)
+	assert.Equal(t, "no matches\n", out)
+	assert.True(t, strings.HasPrefix(stderr, hint))
+
+	_, stderr, err = runCLIWithErr(t, env, dir, "--quiet", "search", "paginate inventory")
+	require.NoError(t, err)
+	assert.Empty(t, stderr, "--quiet suppresses hints")
+
+	out, stderr, err = runCLIWithErr(t, env, dir, "--agent", "search", "paginate partial")
+	require.NoError(t, err)
+	assert.Contains(t, out, "count=1")
+	assert.Empty(t, stderr, "a search with results needs no hint")
 }
 
 func TestSearch_EmptyQueryIsValidationError(t *testing.T) {
 	f := newCLIFixture(t)
 	_ = requireCLIError(t, f.execute("search", "  "), ExitValidation)
+}
+
+func TestSearch_JSONEmptyMultiWordHint(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "inventory export stalls")
+	out, stderr, err := runCLIWithErr(t, env, dir, "--json", "search", "paginate inventory")
+	require.NoError(t, err, stderr)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	assert.Equal(t, []any{map[string]any{"code": "every_word_required", "message": "no issue contains every word; search again with fewer words"}}, got["hints"])
+	assert.NotContains(t, stderr, "Hint:")
+}
+
+func TestSearch_EmptyContinuationHasNoHint(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	var ids []int64
+	for _, title := range []string{"inventory export stalls", "inventory export retries"} {
+		issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Author: "tester", Title: title})
+		require.NoError(t, err)
+		ids = append(ids, issue.ID)
+	}
+	out, _, err := runCLIWithErr(t, env, dir, "--json", "search", "--lexical", "--limit", "1", "inventory export")
+	require.NoError(t, err)
+	var first map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &first))
+	require.NotEmpty(t, first["next_cursor"])
+	for _, id := range ids {
+		_, _, _, err := env.DB.EditIssue(t.Context(), db.EditIssueParams{IssueID: id, Title: new("unrelated"), Actor: "tester"})
+		require.NoError(t, err)
+	}
+	out, _, err = runCLIWithErr(t, env, dir, "--json", "search", "--lexical", "--limit", "1", "--cursor", first["next_cursor"].(string), "inventory export")
+	require.NoError(t, err)
+	var continued map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &continued))
+	assert.Empty(t, continued["results"])
+	assert.NotContains(t, continued, "hints")
 }
 
 // TestSearch_UnquotedMultiTerm verifies that `kata search login Safari`
@@ -301,4 +433,91 @@ func TestSearchPlainLexicalHasNoFallbackWarning(t *testing.T) {
 	cmd.SetErr(&stderr)
 	require.NoError(t, printSearchResults(cmd, []byte(`{"query":"credential","mode":"lexical","results":[]}`)))
 	assert.Empty(t, stderr.String())
+}
+
+func TestSearchSuggestsSettings(t *testing.T) {
+	const hint = "Search by meaning is off; turn it on in Settings (kata ui) or run kata daemon local-embeddings.\n"
+	for _, tc := range []struct {
+		name                                            string
+		flags                                           []string
+		want, configured, remote, missingHeader, cursor bool
+	}{
+		{name: "human", want: true},
+		{name: "quiet", flags: []string{"--quiet"}},
+		{name: "agent", flags: []string{"--agent"}},
+		{name: "explicit", flags: []string{"--lexical"}, want: true},
+		{name: "json", flags: []string{"--json"}, want: true},
+		{name: "configured", flags: []string{"--lexical", "--json"}, configured: true},
+		{name: "remote", flags: []string{"--json"}, remote: true},
+		{name: "missing header", missingHeader: true},
+		{name: "continuation", flags: []string{"--lexical"}, cursor: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, dir, pid := setupCLIWorkspace(t)
+			createIssue(t, env, pid, "login crash")
+			if tc.missingHeader || tc.configured {
+				upstream := env.URL
+				proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					req, err := http.NewRequestWithContext(r.Context(), r.Method, upstream+r.URL.RequestURI(), r.Body) // #nosec G704 -- fixed loopback test daemon
+					require.NoError(t, err)
+					req.Header = r.Header.Clone()
+					response, err := env.HTTP.Do(req) // #nosec G704 -- fixed loopback test daemon
+					require.NoError(t, err)
+					defer func() { _ = response.Body.Close() }()
+					for name, values := range response.Header {
+						if strings.EqualFold(name, "X-Kata-Embeddings-Configured") {
+							continue
+						}
+						for _, value := range values {
+							w.Header().Add(name, value)
+						}
+					}
+					if tc.configured {
+						w.Header().Set("X-Kata-Embeddings-Configured", "true")
+					}
+					w.WriteHeader(response.StatusCode)
+					_, err = io.Copy(w, response.Body)
+					require.NoError(t, err)
+				}))
+				t.Cleanup(proxy.Close)
+				env.URL = proxy.URL
+			}
+			args := append([]string{"search", "login"}, tc.flags...)
+			if tc.cursor {
+				createIssue(t, env, pid, "login crash again")
+				first, _, err := runCLIWithErr(t, env, dir, "search", "login", "--lexical", "--json", "--limit", "1")
+				require.NoError(t, err)
+				var page struct {
+					NextCursor string `json:"next_cursor"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(first), &page))
+				require.NotEmpty(t, page.NextCursor)
+				args = append(args, "--cursor", page.NextCursor)
+			}
+			run := func(args []string) (string, string, error) {
+				if !tc.remote {
+					return runCLIWithErr(t, env, dir, args...)
+				}
+				t.Chdir(dir)
+				t.Setenv("KATA_SERVER", "")
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"), []byte(fmt.Sprintf("version = 1\n[server]\nurl = %q\n", env.URL)), 0600))
+				resetFlags(t)
+				cmd := newRootCmd()
+				var out, stderr bytes.Buffer
+				cmd.SetOut(&out)
+				cmd.SetErr(&stderr)
+				cmd.SetArgs(append([]string{"--workspace", dir}, args...))
+				err := cmd.ExecuteContext(t.Context())
+				return out.String(), stderr.String(), err
+			}
+			out, stderr, err := run(args)
+			require.NoError(t, err)
+			require.Contains(t, out, "login crash")
+			if tc.want {
+				require.Equal(t, hint, stderr)
+			} else {
+				require.Empty(t, stderr)
+			}
+		})
+	}
 }

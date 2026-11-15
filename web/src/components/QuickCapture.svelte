@@ -24,9 +24,14 @@
     onChangeInbox = undefined,
   }: Props = $props()
 
+  let input = $state<HTMLInputElement>()
   let title = $state('')
   let pending = $state(false)
   let lastDraftFenceGeneration = $state<number | null>(null)
+
+  $effect(() => {
+    if (open && !disabled) input?.focus()
+  })
 
   $effect(() => {
     if (!open) {
@@ -77,6 +82,7 @@
     }}
   >
     <input
+      bind:this={input}
       class="capture-input"
       type="text"
       aria-label="Quick capture"

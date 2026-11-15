@@ -12,9 +12,10 @@ import (
 // the checkpoint carries and when a retained one is disclosed again.
 func (d *Store) CreateRelayReset(ctx context.Context, bindingUID string, signer db.RootAttributionSigner) (db.RelayResetCheckpoint, error) {
 	var result db.RelayResetCheckpoint
-	err := d.relayTx(ctx, func(tx *sql.Tx) error {
+	err := d.relayTxFilled(ctx, func(tx *sql.Tx, scan bool) error {
 		var err error
-		result, err = d.relayReset(tx).CreateReset(ctx, bindingUID, signer)
+		protocol := db.RelayResetProtocol{Backend: relayResetBackend{d: d, tx: tx, scanRelayHistory: scan}, InstanceUID: d.instanceUID}
+		result, err = protocol.CreateReset(ctx, bindingUID, signer)
 		return err
 	})
 	if err != nil {
@@ -28,7 +29,7 @@ func (b relayResetBackend) Project(ctx context.Context, projectID int64) (db.Pro
 }
 
 func (b relayResetBackend) RelayCheckpointNeedsRefresh(ctx context.Context, projectUID string, checkpoint db.RelayResetCheckpoint) (bool, error) {
-	return b.d.relayCheckpointNeedsRefreshTx(ctx, b.tx, projectUID, checkpoint)
+	return b.d.relayCheckpointNeedsRefreshTx(ctx, b.tx, projectUID, checkpoint, b.scanRelayHistory)
 }
 
 func (b relayResetBackend) LatestEventID(ctx context.Context, projectID int64) (int64, error) {

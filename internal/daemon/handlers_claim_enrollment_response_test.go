@@ -1,17 +1,24 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/testenv"
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -226,4 +233,220 @@ func TestClaim_TimedAssignmentForwardingSpokeRepairsWithoutIssueContent(t *testi
 	require.NoError(t, err)
 	assert.Equal(t, authoritative.AssignmentExpiresOn, stored.AssignmentExpiresOn)
 	assert.Equal(t, out.Issue.AssignmentExpiresOn, stored.AssignmentExpiresOn)
+}
+
+func TestClaim_TimedAssignmentPullsUnseenMoveWithDestinationCredential(t *testing.T) {
+	runTimedAssignmentPullsUnseenMove(t, false)
+}
+
+func TestClaim_TimedAssignmentResetPreservesUnpushedDestinationWork(t *testing.T) {
+	runTimedAssignmentPullsUnseenMove(t, true)
+}
+
+func runTimedAssignmentPullsUnseenMove(t *testing.T, pendingDestinationWork bool) {
+	ctx := t.Context()
+	hub := testenv.New(t)
+	source := createPrivateContentHubProject(t, hub, "example-source")
+	target := createPrivateContentHubProject(t, hub, "example-target")
+	if pendingDestinationWork {
+		resetIssue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: target.ID, Title: "purged reset trigger", Author: "tester",
+		})
+		require.NoError(t, err)
+		_, err = hub.DB.PurgeIssue(ctx, resetIssue.ID, "tester", nil)
+		require.NoError(t, err)
+		_, refreshed, err := hub.DB.RefreshProjectFederationBaseline(ctx, target.ID, "tester")
+		require.NoError(t, err)
+		require.True(t, refreshed)
+	}
+	// Keep real hub pagination and replay, with small pages so recovery does
+	// not rebuild thousands of unrelated issues within the HTTP timeout.
+	upstream, err := url.Parse(hub.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	hubEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/federation/events", target.ID) {
+			query := r.URL.Query()
+			query.Set("limit", "2")
+			r.URL.RawQuery = query.Encode()
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(hubEndpoint.Close)
+	for i := range 3 {
+		_, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: target.ID, Title: fmt.Sprintf("unrelated pending issue %d", i), Author: "tester",
+		})
+		require.NoError(t, err)
+	}
+	hubTargetBinding, err := hub.DB.FederationBindingByProject(ctx, target.ID)
+	require.NoError(t, err)
+	pendingTargetEvents, err := hub.DB.EventsAfter(ctx, db.EventsAfterParams{
+		ProjectID: target.ID, AfterID: hubTargetBinding.ReplayHorizonEventID - 1, Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, pendingTargetEvents, 4)
+	issue := createPrivateEnrollmentIssue(t, hub, source.ID)
+	var spokeStore db.Storage
+	var pullCalls int
+	var localTarget db.Project
+	var firstPullCursor int64
+	var pullErr error
+	spoke := testenv.New(t, testenv.WithFederationPullOnce(func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+		pullCalls++
+		if pendingDestinationWork {
+			require.True(t, binding.PushEnabled, "claim recovery must preserve the durable destination push capability")
+		}
+		if pullErr = federation.SyncFederationPullOnlyOnce(ctx, spokeStore, binding, credential, config.DefaultFederationCredentialStore()); pullErr != nil {
+			return pullErr
+		}
+		pulled, err := spokeStore.FederationBindingByProject(ctx, localTarget.ID)
+		if err != nil {
+			return err
+		}
+		if pullCalls == 1 {
+			firstPullCursor = pulled.PullCursorEventID
+		}
+		return nil
+	}))
+	spokeStore = spoke.DB
+	localSource, err := spoke.DB.CreateProjectWithUID(ctx, source.Name, source.UID)
+	require.NoError(t, err)
+	localTarget, err = spoke.DB.CreateProjectWithUID(ctx, target.Name, target.UID)
+	require.NoError(t, err)
+	for _, pair := range []struct {
+		local       db.Project
+		hub         db.Project
+		pushEnabled bool
+	}{{localSource, source, true}, {localTarget, target, pendingDestinationWork}} {
+		_, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID: pair.local.ID, Role: db.FederationRoleSpoke,
+			HubURL: hubEndpoint.URL, HubProjectID: pair.hub.ID, HubProjectUID: pair.hub.UID,
+			ReplayHorizonEventID: 1, Actor: "tester", Enabled: true, PushEnabled: pair.pushEnabled,
+		})
+		require.NoError(t, err)
+	}
+	var localPendingIssue db.Issue
+	var pendingEvents []db.Event
+	if pendingDestinationWork {
+		localPendingIssue, _, err = spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: localTarget.ID, Title: "local destination work", Author: "local-worker",
+		})
+		require.NoError(t, err)
+		binding, err := spoke.DB.FederationBindingByProject(ctx, localTarget.ID)
+		require.NoError(t, err)
+		require.True(t, binding.PushEnabled, "the destination spoke must retain its durable push capability")
+		pendingEvents, err = spoke.DB.PendingFederationPushEvents(ctx, localTarget.ID, spoke.DB.InstanceUID(), binding.PushCursorEventID, 10)
+		require.NoError(t, err)
+		require.NotEmpty(t, pendingEvents)
+	}
+	created, err := hub.DB.EventsAfter(ctx, db.EventsAfterParams{
+		ProjectID: source.ID, IssueUID: issue.UID, Types: []string{"issue.created"}, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, created, 1)
+	inserted, err := spoke.DB.InsertRemoteEvent(ctx, localSource.ID, db.RemoteEvent{
+		EventUID: created[0].UID, OriginInstanceUID: created[0].OriginInstanceUID,
+		ProjectUID: created[0].ProjectUID, ProjectName: created[0].ProjectName,
+		IssueUID: created[0].IssueUID, RelatedIssueUID: created[0].RelatedIssueUID,
+		Type: created[0].Type, Actor: created[0].Actor,
+		HLCPhysicalMS: created[0].HLCPhysicalMS, HLCCounter: created[0].HLCCounter,
+		ContentHash: created[0].ContentHash, Payload: jsontext.Value(created[0].Payload),
+		CreatedAt: created[0].CreatedAt,
+	})
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, spoke.DB.MaterializeFederatedProject(ctx, localSource.ID))
+	localIssue, err := spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, localSource.ID, localIssue.ProjectID)
+
+	claimEnrollment, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: spoke.DB.InstanceUID(), Capabilities: "claim", Actor: "tester",
+	})
+	require.NoError(t, err)
+	pullEnrollment, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &target.ID, Capabilities: "pull", Actor: "tester",
+	})
+	require.NoError(t, err)
+	require.NoError(t, config.WriteFederationCredential(localSource.UID, config.FederationCredential{
+		HubURL: hubEndpoint.URL, HubProjectID: source.ID, Token: claimEnrollment.Token,
+		Capabilities: "claim", Actor: "tester",
+	}))
+	require.NoError(t, config.WriteFederationCredential(localTarget.UID, config.FederationCredential{
+		HubURL: hubEndpoint.URL, HubProjectID: target.ID, Token: pullEnrollment.Token,
+		Capabilities: "pull", Actor: "tester",
+	}))
+	if pendingDestinationWork {
+		localBinding, err := spoke.DB.FederationBindingByProject(ctx, localTarget.ID)
+		require.NoError(t, err)
+		pullClient, err := federation.NewClient(ctx, hubEndpoint.URL, pullEnrollment.Token, clientpkg.Opts{})
+		require.NoError(t, err)
+		page, err := pullClient.PollProjectEvents(ctx, target.ID, localBinding.PullCursorEventID, 1000)
+		require.NoError(t, err)
+		require.True(t, page.ResetRequired,
+			"fixture must require a reset: hub replay horizon %d, spoke cursor %d", hubTargetBinding.ReplayHorizonEventID, localBinding.PullCursorEventID)
+	}
+
+	moved, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+		IfMatchRev: issue.Revision, Actor: "tester",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, moved.Event)
+	require.Greater(t, moved.Event.ID, pendingTargetEvents[len(pendingTargetEvents)-1].ID,
+		"the move must follow more events than the destination pull page can return")
+
+	// The all-project claim-only credential can make the move destination's
+	// assignment without seeing the issue snapshot in its response.
+	resp, raw := envDoRaw(t, hub, http.MethodPost,
+		issuePathRef(target.ID, issue.ShortID, "actions/claim"),
+		map[string]any{"ttl_seconds": 300}, bearer(claimEnrollment.Token))
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
+	for _, secret := range enrollmentSecrets() {
+		assert.NotContainsf(t, string(raw), secret, "claim-only response leaked project content")
+	}
+	var hubClaim api.ClaimResponseBody
+	require.NoError(t, json.Unmarshal(raw, &hubClaim))
+	require.Equal(t, target.UID, hubClaim.Issue.ProjectUID)
+	for _, event := range hubClaim.Events {
+		assert.Truef(t, enrollmentAssignmentSafeEventTypes[event.Type],
+			"claim-only response carried non-assignment event %q", event.Type)
+	}
+
+	// The spoke forwards from its stale source replica. It must use the
+	// destination's separate pull-only credential to recover the move before
+	// returning the now-current assignment state.
+	resp, raw = envDoRaw(t, spoke, http.MethodPost,
+		issuePathRef(localSource.ID, localIssue.ShortID, "actions/claim"),
+		map[string]any{"actor": "tester", "ttl_seconds": 300}, nil)
+	if pendingDestinationWork {
+		require.Equalf(t, http.StatusBadGateway, resp.StatusCode, "body: %s", raw)
+		require.ErrorIs(t, pullErr, db.ErrFederationResetBlockedByPendingPush)
+		preserved, err := spoke.DB.IssueByUID(ctx, localPendingIssue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, "local destination work", preserved.Title)
+		binding, err := spoke.DB.FederationBindingByProject(ctx, localTarget.ID)
+		require.NoError(t, err)
+		pendingAfter, err := spoke.DB.PendingFederationPushEvents(ctx, localTarget.ID, spoke.DB.InstanceUID(), binding.PushCursorEventID, 10)
+		require.NoError(t, err)
+		require.Equal(t, pendingEvents, pendingAfter)
+		staleIssue, err := spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, localSource.ID, staleIssue.ProjectID, "failed reset must leave the stale source projection intact")
+		return
+	}
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
+	var spokeClaim api.ClaimResponseBody
+	require.NoError(t, json.Unmarshal(raw, &spokeClaim))
+	require.Less(t, firstPullCursor, moved.Event.ID,
+		"the first destination pull page must stop before the move event")
+	current, err := spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, localTarget.ID, current.ProjectID)
+	require.NotNil(t, current.Owner)
+	assert.Equal(t, "tester", *current.Owner)
+	assert.Equal(t, target.UID, spokeClaim.Issue.ProjectUID)
+	require.GreaterOrEqual(t, pullCalls, 2,
+		"destination recovery must continue across pages until it materializes the moved issue")
 }

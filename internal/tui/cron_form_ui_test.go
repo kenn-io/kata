@@ -26,11 +26,13 @@ type cronPut struct {
 // cronWriteTestAPI doubles the cron write boundary; reads come from the fixture.
 type cronWriteTestAPI struct {
 	*cronReadTestAPI
-	puts      []cronPut
-	putErrs   []error // consumed one per put
-	shown     db.CronJob
-	showErr   error
-	issueUIDs map[string]string
+	workflowPuts  []workflowPut
+	workflowShown db.CronWorkflow
+	puts          []cronPut
+	putErrs       []error // consumed one per put
+	shown         db.CronJob
+	showErr       error
+	issueUIDs     map[string]string
 }
 
 func (a *cronWriteTestAPI) ShowCronJob(context.Context, int64, string) (db.CronJob, error) {
@@ -39,25 +41,43 @@ func (a *cronWriteTestAPI) ShowCronJob(context.Context, int64, string) (db.CronJ
 
 func (a *cronWriteTestAPI) PutCronJob(_ context.Context, _ int64, uid string, w kataapi.PutCronJobBody) error {
 	a.puts = append(a.puts, cronPut{uid, w})
-	if len(a.putErrs) > 0 {
-		err := a.putErrs[0]
-		a.putErrs = a.putErrs[1:]
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Code == "cron_conflict" {
-			raw, marshalErr := json.Marshal(struct {
-				Current kataapi.CronJob `json:"current"`
-			}{kataapi.CronJobFrom(a.shown)})
-			if marshalErr != nil {
-				return marshalErr
-			}
-			apiErr.Data = raw
-		}
-		return err
-	}
-	return nil
+	return a.nextPutError(kataapi.CronJobFrom(a.shown))
 }
 
-func (a *cronWriteTestAPI) GetIssueDetail(_ context.Context, _ int64, ref string) (*IssueDetail, error) {
+type workflowPut struct {
+	uid   string
+	write kataapi.PutCronWorkflowBody
+}
+
+func (a *cronWriteTestAPI) ShowCronWorkflow(context.Context, int64, string) (db.CronWorkflow, error) {
+	return a.workflowShown, a.showErr
+}
+
+func (a *cronWriteTestAPI) PutCronWorkflow(_ context.Context, _ int64, uid string, w kataapi.PutCronWorkflowBody) error {
+	a.workflowPuts = append(a.workflowPuts, workflowPut{uid, w})
+	return a.nextPutError(kataapi.CronWorkflowFrom(a.workflowShown))
+}
+
+func (a *cronWriteTestAPI) nextPutError(current any) error {
+	if len(a.putErrs) == 0 {
+		return nil
+	}
+	err := a.putErrs[0]
+	a.putErrs = a.putErrs[1:]
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.Code == "cron_conflict" {
+		raw, marshalErr := json.Marshal(struct {
+			Current any `json:"current"`
+		}{current})
+		if marshalErr != nil {
+			return marshalErr
+		}
+		apiErr.Data = raw
+	}
+	return err
+}
+
+func (a *cronWriteTestAPI) readIssue(_ context.Context, _ int64, ref string) (*IssueDetail, error) {
 	uid, ok := a.issueUIDs[ref]
 	if !ok {
 		return nil, &APIError{Status: http.StatusNotFound, Code: "not_found"}
@@ -86,6 +106,8 @@ func settle(t *testing.T, m Model, cmd tea.Cmd) Model {
 	switch msg := cmd().(type) {
 	case cronSavedMsg:
 		m, _ = m.cronSaved(msg)
+	case workflowOpenedMsg:
+		m, _ = m.workflowOpened(msg)
 	case cronEditOpenedMsg:
 		m, _ = m.cronEditOpened(msg)
 	default:
@@ -123,6 +145,10 @@ func TestCronCreateResendKeepsUID(t *testing.T) {
 	api.putErrs = []error{errors.New("connection reset"), nil}
 
 	m, cmd := press(m, ctrlKey('o'))
+	require.True(t, m.cron.form.saving)
+	m, ignored := press(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	require.Nil(t, ignored)
+	require.NotNil(t, m.cron.form)
 	m = settle(t, m, cmd)
 	require.NotNil(t, m.cron.form, "a failed save keeps the draft")
 	require.Contains(t, m.cron.form.general, "connection reset")
@@ -145,12 +171,25 @@ func TestCronCtrlSSavesEditedJob(t *testing.T) {
 	require.NoError(t, err)
 	rec := executeRecord(`{}`)
 	require.NoError(t, c.PutCronJob(t.Context(), project.ID, rec.UID, kataapi.PutCronJobBody{Name: "Original", Actor: "alice", Definition: kataapi.CronJobDefinitionFrom(rec.Definition)}))
+	stale := rec.Definition
+	stale.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
+	raw, err := json.Marshal(stale)
+	require.NoError(t, err)
+	_, err = env.DB.ExecContext(t.Context(), `UPDATE cron_jobs SET definition_json=? WHERE uid=?`, string(raw), rec.UID)
+	require.NoError(t, err)
 	rec, err = c.ShowCronJob(t.Context(), project.ID, rec.UID)
 	require.NoError(t, err)
 	m := cronFixture(t)
 	m.api, m.scope.projectID, m.list.actor = c, project.ID, "alice"
 	m.cron.form, err = cronFormFor(rec, nil)
 	require.NoError(t, err)
+	require.Contains(t, stripANSI(m.viewBody()), "never fires")
+	m, refused := press(m, ctrlKey('s'))
+	require.Nil(t, refused)
+	unchanged, err := c.ShowCronJob(t.Context(), project.ID, rec.UID)
+	require.NoError(t, err)
+	require.Equal(t, rec.DefinitionEventUID, unchanged.DefinitionEventUID)
+	m.cron.form.val[cfCron] = "0 0 28 2 *"
 	m.cron.form.val[cfName] = "Renamed"
 	m, cmd := press(m, ctrlKey('s'))
 	if cmd != nil {
@@ -159,6 +198,8 @@ func TestCronCtrlSSavesEditedJob(t *testing.T) {
 	saved, err := c.ShowCronJob(t.Context(), project.ID, rec.UID)
 	require.NoError(t, err)
 	require.Equal(t, "Renamed", saved.Name)
+	require.NotEqual(t, rec.DefinitionEventUID, saved.DefinitionEventUID)
+	require.Equal(t, "0 0 28 2 *", saved.Definition.Trigger.Cron)
 	require.Nil(t, m.cron.form)
 }
 
@@ -199,6 +240,7 @@ func TestCronEditConflictKeepsDraftAndAppliesToCurrent(t *testing.T) {
 	m.cron.form.val[cfTitle] = "My edit"
 	api.shown.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FB8"
 	api.shown.Definition.Enabled = false
+	api.shown.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 0 30 2 *"}
 	api.showErr = errors.New("current job must come from the conflict response")
 	api.putErrs = []error{&APIError{Status: http.StatusConflict, Code: "cron_conflict"}, nil}
 
@@ -238,14 +280,17 @@ func TestCronConflictRefusesFutureVersion(t *testing.T) {
 }
 
 func TestCronJobKeysRespectMutationAuthority(t *testing.T) {
-	for _, key := range []rune{'n', 'e'} {
-		for _, pending := range []bool{false, true} {
-			m, _ := cronWriteFixture(t)
-			m.issueScoped, m.scopedWritable = !pending, true
-			m.authCapabilitiesRequired, m.authCapabilitiesReady = pending, false
-			m, cmd := updateModel(m, keyRune(key))
-			require.Nil(t, m.cron.form, "key=%c pending=%v", key, pending)
-			require.Equal(t, pending, cmd != nil, "key=%c pending=%v: only pending discovery is retried", key, pending)
+	for _, tab := range []rune{'2', '4'} {
+		for _, key := range []rune{'n', 'e'} {
+			for _, pending := range []bool{false, true} {
+				m, _ := cronWriteFixture(t)
+				m = sendRune(m, tab)
+				m.issueScoped, m.scopedWritable = !pending, true
+				m.authCapabilitiesRequired, m.authCapabilitiesReady = pending, false
+				m, cmd := updateModel(m, keyRune(key))
+				require.Nil(t, m.cron.form, "key=%c pending=%v", key, pending)
+				require.Equal(t, pending, cmd != nil, "key=%c pending=%v: only pending discovery is retried", key, pending)
+			}
 		}
 	}
 }
@@ -270,7 +315,8 @@ func TestCronEscAsksBeforeDiscardingADirtyDraft(t *testing.T) {
 	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	require.NotNil(t, m.cron.form)
 	require.Equal(t, modalDiscardCronJob, m.modal)
-	require.Contains(t, stripANSI(m.View().Content), "Discard job draft?")
+	require.Contains(t, stripANSI(m.View().Content), "Discard draft?")
+	require.Contains(t, stripANSI(m.View().Content), "Your unsaved changes will be lost.")
 	m, _ = updateModel(m, keyRune('n'))
 	require.NotNil(t, m.cron.form, "n keeps editing")
 	require.Equal(t, modalNone, m.modal)
@@ -331,8 +377,11 @@ func TestCronEditRefusesAnArchivedRecord(t *testing.T) {
 
 func TestCronEditResponseNeedsItsContext(t *testing.T) {
 	for name, away := range map[string]func(Model) Model{
-		"help":      func(m Model) Model { m, _ = updateModel(m, keyRune('?')); return m },
-		"other tab": func(m Model) Model { return sendRune(m, '3') },
+		"help":          func(m Model) Model { m, _ = updateModel(m, keyRune('?')); return m },
+		"other tab":     func(m Model) Model { return sendRune(m, '3') },
+		"connection":    func(m Model) Model { m.connGen++; return m },
+		"scope":         func(m Model) Model { m.scopeGen++; return m },
+		"edit sequence": func(m Model) Model { m.cron.editSeq++; return m },
 		"filtering": func(m Model) Model {
 			m, _ = press(m, keyRune('/'))
 			require.True(t, m.cron.filtering)
@@ -471,6 +520,7 @@ func TestCronTextFieldsUseExternalEditorWithoutChangingStoredText(t *testing.T) 
 }
 
 func TestCronNativeCreateRefreshesParentActivity(t *testing.T) {
+	useInstantTicks(t)
 	env := testenv.New(t)
 	c := NewClient(env.URL, env.HTTP)
 	project, err := c.EnsureProject(t.Context(), "cron-parent-example", "alice")

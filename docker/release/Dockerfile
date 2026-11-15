@@ -15,7 +15,7 @@ RUN bun install --frozen-lockfile
 COPY . .
 RUN cd web && bun run build && bun run scripts/validate-assets.ts dist
 
-FROM --platform=$BUILDPLATFORM golang:1.27.3-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.4-bookworm AS build
 
 # "|" falls back to the source repo on any proxy error, including HTTP/2 stream resets mid-download.
 ENV GOPROXY="https://proxy.golang.org|direct"

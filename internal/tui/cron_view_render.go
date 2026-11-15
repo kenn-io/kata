@@ -44,12 +44,34 @@ func cronSchedule(t generated.TriggerResponse) string {
 			}
 			value = "once " + at.In(zone).Format("2006-01-02 15:04")
 		}
+	case "issue-deadline":
+		if lead := deref(t.LeadSeconds); lead > 0 {
+			value += ", " + cronLead(lead) + " before"
+		}
 	}
 	if deref(t.Timezone) != "" && deref(t.Timezone) != "UTC" {
 		value += " (" + deref(t.Timezone) + ")"
 	}
 	return value
 }
+
+func cronLead(seconds int64) string {
+	for _, unit := range []struct {
+		seconds int64
+		name    string
+	}{{86400, "day"}, {3600, "hour"}, {60, "minute"}, {1, "second"}} {
+		if seconds%unit.seconds == 0 {
+			count := seconds / unit.seconds
+			name := unit.name
+			if count != 1 {
+				name += "s"
+			}
+			return fmt.Sprintf("%d %s", count, name)
+		}
+	}
+	return ""
+}
+
 func cronAction(p cronData, j generated.CronJob) string {
 	if j.Definition.Action.Kind == "notify" {
 		return "notify"
@@ -203,6 +225,12 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			name = j.Name
 			d.field("State", cronJobState(*j))
 			d.field("Schedule", cronSchedule(j.Definition.Trigger))
+			if label, times := cronNextRuns(p, *j, renderNow()); len(times) > 0 {
+				d.field(label, times[0])
+				for _, t := range times[1:] {
+					d.text(strings.Repeat(" ", d.labelWidth+1)+t, cronRef{})
+				}
+			}
 			d.field("Action", cronAction(p, *j))
 			if uid := deref(j.Definition.Action.WorkflowUID); uid != "" {
 				cronDefinitionLink(&d, p, uid, "", true)
@@ -317,24 +345,14 @@ func cronDefinitionLink(d *cronDoc, p cronData, uid, revision string, workflow b
 	d.text(label, cronRef{kind, uid})
 }
 func cronHistory(d *cronDoc, p cronData, ref cronRef) {
+	d.section("Run history from the latest 100 project runs")
 	if p.runsErr != nil {
 		d.section("Loaded runs · unavailable")
 		return
 	}
-	runs := []generated.CronRun{}
-	for _, r := range p.runs {
-		uid := r.JobUID
-		if ref.kind == cronWorkflows {
-			uid = r.WorkflowUID
-		}
-		if deref(uid) == ref.uid {
-			runs = append(runs, r)
-		}
-	}
-	d.section(fmt.Sprintf("Loaded runs (%d) · newest 100", len(runs)))
-	if len(runs) == 0 {
-		d.text("no loaded runs", cronRef{})
-	}
+	runs := cronProjectObservations(p.runs, ref)
+	d.text(cronObservationSummary(runs), cronRef{})
+	d.section("Loaded run links · newest 100")
 	for _, r := range runs {
 		d.text(r.Status+" · "+r.CreatedAt.Format(time.RFC3339)+" · "+deref(r.Summary.Message), cronRef{cronRuns, r.UID})
 	}
@@ -361,7 +379,7 @@ func cronKeyRows(m Model) []helplayout.HelpItem {
 	if len(m.cron.stack) == 0 {
 		rows = slices.Insert(rows, 2, helplayout.HelpItem{Key: "/", Description: "filter"})
 	}
-	if m.cronJobsScope() {
+	if m.cronJobsScope() || m.cronScope(cronWorkflows) {
 		rows = slices.Insert(rows, 3, helplayout.HelpItem{Key: "n/e", Description: "new/edit"})
 	}
 	return rows
@@ -477,7 +495,7 @@ func cronHelp(m Model) string {
 	intro := []string{
 		"A job is a schedule plus an action.",
 		"A workflow is a named list of steps jobs can run.",
-		"A run is what an executor recorded; runs remember the definition revision they used.",
+		"A run records what the executor reports and which version of the job or workflow it used.",
 		"kata cron --help shows creation examples.",
 	}
 	for i, s := range intro {

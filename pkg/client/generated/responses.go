@@ -40,6 +40,30 @@ type DoctorResponse = DoctorResponseBody
 
 type DoctorErrorResponse = ErrorEnvelope
 
+type GetLocalEmbeddingsResponse = LocalEmbeddingsStatus
+
+type GetLocalEmbeddingsErrorResponse = ErrorEnvelope
+
+type GetLocalEmbeddingsErrorResponseJSON = ErrorEnvelope
+
+type TurnOnLocalEmbeddingsResponse = LocalEmbeddingsStatus
+
+type TurnOnLocalEmbeddingsErrorResponse = ErrorEnvelope
+
+type TurnOnLocalEmbeddingsErrorResponseJSON = ErrorEnvelope
+
+type TurnOnLocalEmbeddingsErrorResponseJSON409 = ErrorEnvelope
+
+type TurnOnLocalEmbeddingsErrorResponseJSON500 = ErrorEnvelope
+
+type RestartLocalEmbeddingsErrorResponse = ErrorEnvelope
+
+type RestartLocalEmbeddingsErrorResponseJSON = ErrorEnvelope
+
+type RestartLocalEmbeddingsErrorResponseJSON409 = ErrorEnvelope
+
+type RestartLocalEmbeddingsErrorResponseJSON500 = ErrorEnvelope
+
 type PollEventsResponse = PollEventsBody
 
 type PollEventsErrorResponse = ErrorEnvelope
@@ -72,6 +96,14 @@ type CreateFederationEnrollmentErrorResponse = ErrorEnvelope
 type RotateFederationEnrollmentResponse = FederationEnrollmentOut
 
 type RotateFederationEnrollmentErrorResponse = ErrorEnvelope
+
+type ClearFederationSpokeNameResponse = FederationSpokeNameOut
+
+type ClearFederationSpokeNameErrorResponse = ErrorEnvelope
+
+type SetFederationSpokeNameResponse = FederationSpokeNameOut
+
+type SetFederationSpokeNameErrorResponse = ErrorEnvelope
 
 type RevokeFederationEnrollmentResponse = RevokeFederationEnrollmentBody
 
@@ -115,6 +147,22 @@ type ShowIssueByUIDResponse = ShowIssueResponseBody
 
 type ShowIssueByUIDErrorResponse = ErrorEnvelope
 
+type McpEventsListResponse = MCPEventsListResponseBody
+
+type McpEventsListErrorResponse = ErrorEnvelope
+
+type McpEventsSubscribeResponse = MCPEventsSubscribeResponseBody
+
+type McpEventsSubscribeErrorResponse = ErrorEnvelope
+
+type McpEventSubscriptionsResponse = MCPEventsSubscriptionsResponseBody
+
+type McpEventSubscriptionsErrorResponse = ErrorEnvelope
+
+type McpEventsUnsubscribeResponse = MCPEventsUnsubscribeResponseBody
+
+type McpEventsUnsubscribeErrorResponse = ErrorEnvelope
+
 type PingResponse = PingResponseBody
 
 type PingErrorResponse = ErrorEnvelope
@@ -126,6 +174,10 @@ type ListProjectsErrorResponse = ErrorEnvelope
 type InitProjectResponse = InitProjectResponseBody
 
 type InitProjectErrorResponse = ErrorEnvelope
+
+type ReadProjectByNameResponse = ProjectResolveBody
+
+type ReadProjectByNameErrorResponse = ErrorEnvelope
 
 type ResolveProjectResponse = ProjectResolveBody
 
@@ -367,6 +419,10 @@ type AddAttachmentResponse = AddAttachmentResponseBody
 
 type AddAttachmentErrorResponse = ErrorEnvelope
 
+type LinkAttachmentResponse = AddAttachmentResponseBody
+
+type LinkAttachmentErrorResponse = ErrorEnvelope
+
 type AttachmentContentResponse = []byte
 
 type AttachmentContentErrorResponse = ErrorEnvelope
@@ -410,6 +466,10 @@ type CreateCommentErrorResponse = ErrorEnvelope
 type EditCommentResponse = CommentResponseBody
 
 type EditCommentErrorResponse = ErrorEnvelope
+
+type ReadFileEvidenceResponse = FileEvidenceBody
+
+type ReadFileEvidenceErrorResponse = ErrorEnvelope
 
 type ReachableIssueGraphResponse = ReachableGraphResponseBody
 
@@ -651,6 +711,36 @@ type DoctorResp struct {
 	JSONDefault  *DoctorErrorResponse
 }
 
+type GetLocalEmbeddingsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetLocalEmbeddingsResponse
+	JSON404      *GetLocalEmbeddingsErrorResponse
+	JSON500      *GetLocalEmbeddingsErrorResponseJSON
+}
+
+type TurnOnLocalEmbeddingsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON202      *TurnOnLocalEmbeddingsResponse
+	JSON403      *TurnOnLocalEmbeddingsErrorResponse
+	JSON404      *TurnOnLocalEmbeddingsErrorResponseJSON
+	JSON409      *TurnOnLocalEmbeddingsErrorResponseJSON409
+	JSON500      *TurnOnLocalEmbeddingsErrorResponseJSON500
+}
+
+type RestartLocalEmbeddingsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON403      *RestartLocalEmbeddingsErrorResponse
+	JSON404      *RestartLocalEmbeddingsErrorResponseJSON
+	JSON409      *RestartLocalEmbeddingsErrorResponseJSON409
+	JSON500      *RestartLocalEmbeddingsErrorResponseJSON500
+}
+
 type PollEventsResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
 	XKataEventsIssueUID        string `header:"X-Kata-Events-Issue-UID"`
@@ -719,6 +809,22 @@ type RotateFederationEnrollmentResp struct {
 	StatusCode   int
 	JSON200      *RotateFederationEnrollmentResponse
 	JSONDefault  *RotateFederationEnrollmentErrorResponse
+}
+
+type ClearFederationSpokeNameResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ClearFederationSpokeNameResponse
+	JSONDefault  *ClearFederationSpokeNameErrorResponse
+}
+
+type SetFederationSpokeNameResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *SetFederationSpokeNameResponse
+	JSONDefault  *SetFederationSpokeNameErrorResponse
 }
 
 type RevokeFederationEnrollmentResp struct {
@@ -808,6 +914,38 @@ type ShowIssueByUIDResp struct {
 	JSONDefault  *ShowIssueByUIDErrorResponse
 }
 
+type McpEventsListResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *McpEventsListResponse
+	JSONDefault  *McpEventsListErrorResponse
+}
+
+type McpEventsSubscribeResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *McpEventsSubscribeResponse
+	JSONDefault  *McpEventsSubscribeErrorResponse
+}
+
+type McpEventSubscriptionsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *McpEventSubscriptionsResponse
+	JSONDefault  *McpEventSubscriptionsErrorResponse
+}
+
+type McpEventsUnsubscribeResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *McpEventsUnsubscribeResponse
+	JSONDefault  *McpEventsUnsubscribeErrorResponse
+}
+
 type PingResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -830,6 +968,14 @@ type InitProjectResp struct {
 	StatusCode   int
 	JSON200      *InitProjectResponse
 	JSONDefault  *InitProjectErrorResponse
+}
+
+type ReadProjectByNameResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ReadProjectByNameResponse
+	JSONDefault  *ReadProjectByNameErrorResponse
 }
 
 type ResolveProjectResp struct {
@@ -1405,6 +1551,14 @@ type AddAttachmentResp struct {
 	JSONDefault  *AddAttachmentErrorResponse
 }
 
+type LinkAttachmentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *LinkAttachmentResponse
+	JSONDefault  *LinkAttachmentErrorResponse
+}
+
 type AttachmentContentResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -1500,6 +1654,14 @@ type EditCommentResp struct {
 	JSON200      *EditCommentResponse
 	Headers200   *EditCommentResp200Headers
 	JSONDefault  *EditCommentErrorResponse
+}
+
+type ReadFileEvidenceResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ReadFileEvidenceResponse
+	JSONDefault  *ReadFileEvidenceErrorResponse
 }
 
 type ReachableIssueGraphResp struct {
@@ -1728,11 +1890,16 @@ type RestoreProjectResp struct {
 	JSONDefault  *RestoreProjectErrorResponse
 }
 
+type SearchIssuesResp200Headers struct {
+	XKataEmbeddingsConfigured string `header:"X-Kata-Embeddings-Configured"`
+}
+
 type SearchIssuesResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *SearchIssuesResponse
+	Headers200   *SearchIssuesResp200Headers
 	JSON400      *SearchIssuesErrorResponse
 	JSON401      *SearchIssuesErrorResponseJSON
 	JSON403      *SearchIssuesErrorResponseJSON403

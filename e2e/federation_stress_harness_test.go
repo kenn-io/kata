@@ -531,7 +531,7 @@ func (fx *federationStressFixture) drawLiveClaim(
 	label string,
 ) (federationStressLiveClaim, bool) {
 	t.Helper()
-	rows, err := node.db.QueryContext(context.Background(), `
+	rows, err := node.db.QueryContext(t.Context(), `
 		SELECT i.short_id, c.holder
 		  FROM issue_claims c
 		  JOIN issues i ON i.uid = c.issue_uid
@@ -754,7 +754,7 @@ func startFederationStressUnixDaemon(t federationStressTB, bin string, dirs e2eD
 
 func assertNoDuplicateLiveClaimsOnNode(t federationStressTB, node *federationStressNode) {
 	t.Helper()
-	rows, err := node.db.QueryContext(context.Background(), `
+	rows, err := node.db.QueryContext(t.Context(), `
 		SELECT issue_uid, COUNT(*)
 		  FROM issue_claims
 		 WHERE released_at IS NULL

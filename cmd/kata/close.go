@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -12,6 +13,7 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/fileevidence"
 	"go.kenn.io/kata/internal/textsafe"
 )
 
@@ -36,6 +38,7 @@ func newCloseCmd() *cobra.Command {
 		sugarPR            []string
 		sugarTest          []string
 		sugarReviewed      []string
+		sugarDocbank       []string
 	)
 	cmd := &cobra.Command{
 		Use:   "close <issue-ref>",
@@ -167,6 +170,11 @@ The close message has a minimum length that depends on the reason:
 					Message: fmt.Sprintf("flag conflict: duplicate evidence item %s (provided more than once via canonical and/or sugar)", dup)}
 			}
 
+			parsed, err = prepareCloseAttachments(cmd, args[0], reason, message, parsed, sugarDocbank, dryRun)
+			if err != nil {
+				return err
+			}
+
 			extra := map[string]any{
 				"reason":   reason,
 				"message":  message,
@@ -210,7 +218,7 @@ The close message has a minimum length that depends on the reason:
 	cmd.Flags().StringArrayVar(&evidence, "evidence", nil,
 		"typed evidence, repeatable: commit:<sha>, pr:<url>, test:<cmd>, "+
 			"reviewed-paths:<path>, external:<account>, no-change-audit:<text>, "+
-			"duplicate-of:<N>, superseded-by:<N>, confirmed:c:<claim>, refuted:c:<claim>")
+			"duplicate-of:<N>, superseded-by:<N>, confirmed:c:<claim>, refuted:c:<claim>, attachment:<id-or-suffix>, file:<source>:<path>, file-sha256:<source>:<path>")
 	cmd.Flags().BoolVar(&dryRun, "dry", false,
 		"validate without mutating; reports the would-be close event")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "",
@@ -229,6 +237,7 @@ The close message has a minimum length that depends on the reason:
 	cmd.Flags().StringArrayVar(&sugarPR, "pr", nil, "sugar for --evidence pr:<url>, repeatable")
 	cmd.Flags().StringArrayVar(&sugarTest, "test", nil, "sugar for --evidence test:<command>, repeatable")
 	cmd.Flags().StringArrayVar(&sugarReviewed, "reviewed", nil, "sugar for --evidence reviewed-paths:<path>, repeatable")
+	cmd.Flags().StringArrayVar(&sugarDocbank, "docbank", nil, "link a Docbank node id or absolute path as done evidence, repeatable")
 	addCommentFlag(cmd)
 	cmd.Flags().SetNormalizeFunc(normalizeCloseBodyFlag)
 	return cmd
@@ -248,8 +257,27 @@ func parseEvidenceFlags(raw []string) ([]api.Evidence, error) {
 		}
 		kind, value := api.EvidenceType(before), after
 		switch kind {
+		case api.EvidenceFile, api.EvidenceType("file-sha256"), api.EvidenceType("file-no-sha256"):
+			source, path, ok := strings.Cut(value, ":")
+			if !ok {
+				return nil, evidenceValueError("file evidence requires source:path")
+			}
+			ref := fileevidence.Reference{Source: source, Path: path}
+			if kind != "file" {
+				yes := kind == "file-sha256"
+				ref.CaptureSHA256 = &yes
+			}
+			if err := ref.ValidateRequest(); err != nil {
+				return nil, evidenceValueError("%s", err)
+			}
+			out = append(out, api.Evidence{Type: api.EvidenceFile, File: &ref})
 		case api.EvidenceConfirmed, api.EvidenceRefuted:
 			out = append(out, api.Evidence{Type: kind, Comment: value})
+		case api.EvidenceAttachment:
+			if strings.TrimSpace(value) == "" {
+				return nil, evidenceValueError("attachment requires an id or unique suffix")
+			}
+			out = append(out, api.Evidence{Type: kind, AttachmentID: value})
 		case api.EvidenceCommit:
 			out = append(out, api.Evidence{Type: kind, SHA: value})
 		case api.EvidencePR:
@@ -327,6 +355,18 @@ func runActionWithHeaders(
 	if action == "close" && body["transcript"] != nil {
 		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body); err != nil {
 			return err
+		}
+	}
+	if action == "close" {
+		if evidence, ok := body["evidence"].([]api.Evidence); ok {
+			for _, e := range evidence {
+				if e.Type == api.EvidenceFile {
+					clone := *client
+					clone.Timeout = envHTTPTimeout(5 * time.Minute)
+					client = &clone
+					break
+				}
+			}
 		}
 	}
 	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
@@ -447,8 +487,14 @@ func findDuplicateEvidence(items []api.Evidence) string {
 
 func evidencePayloadKey(e api.Evidence) string {
 	switch e.Type {
+	case api.EvidenceFile:
+		if e.File != nil {
+			return e.File.Source + ":" + e.File.Path
+		}
 	case api.EvidenceConfirmed, api.EvidenceRefuted:
 		return e.Comment
+	case api.EvidenceAttachment:
+		return e.AttachmentID
 	case api.EvidenceCommit:
 		return e.SHA
 	case api.EvidencePR:

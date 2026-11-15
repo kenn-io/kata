@@ -14,7 +14,7 @@ import (
 
 type statusTestAdapter struct {
 	*testAdapter
-	run *statusTestRun
+	run StatusRun
 }
 
 func (*statusTestAdapter) Provider() string { return "notion" }
@@ -58,7 +58,7 @@ func statusProviderFixture(t *testing.T, n int, provider string) (*sqlitestore.S
 	}
 	return s, b, mappings, at
 }
-func statusAdapter(_ db.IssueSyncBinding, run *statusTestRun) *statusTestAdapter {
+func statusAdapter(_ db.IssueSyncBinding, run StatusRun) *statusTestAdapter {
 	return &statusTestAdapter{run: run, testAdapter: &testAdapter{prepare: func(_ context.Context, binding db.IssueSyncBinding, _ time.Time) (Prepared, error) {
 		return Prepared{Binding: binding, Batch: db.ImportBatchParams{Actor: "notion-sync"}}, nil
 	}}}
@@ -466,4 +466,32 @@ func TestStatusRunnerSuccessCannotAdvanceCursorAfterOperatorEdit(t *testing.T) {
 	current, err := s.IssueSyncBindingByID(t.Context(), b.ID)
 	require.NoError(t, err)
 	require.Nil(t, current.LastCursorAt, "old pass cannot advance a reset cursor for the edited configuration")
+}
+
+type prefetchStatusTestRun struct {
+	*statusTestRun
+	mappings []db.IssueStatusMapping
+}
+
+func (r *prefetchStatusTestRun) PrefetchStatuses(_ context.Context, mappings []db.IssueStatusMapping) {
+	r.mappings = mappings
+}
+
+func TestStatusRunnerPrefetchExcludesPendingMappings(t *testing.T) {
+	s, b, ms, at := statusFixture(t, 2)
+	_, _, _, err := s.CloseIssue(t.Context(), *ms[0].Mapping.IssueID, "done", "worker", "Completed task", nil)
+	require.NoError(t, err)
+	run := &prefetchStatusTestRun{statusTestRun: &statusTestRun{}}
+	run.write = func(_ context.Context, _ db.IssueStatusMapping, desired string, admit func() error) (StatusObservation, error) {
+		require.NoError(t, admit())
+		return observed(desired, at), nil
+	}
+	run.read = func(_ context.Context, m db.IssueStatusMapping) (StatusObservation, error) {
+		require.Len(t, run.mappings, 1)
+		require.Equal(t, ms[1].Mapping.ID, run.mappings[0].Mapping.ID)
+		require.Equal(t, ms[1].Mapping.ID, m.Mapping.ID)
+		return observed("open", at), nil
+	}
+	_, err = NewRunner(RunnerConfig{Store: s, Adapter: statusAdapter(b, run), Clock: func() time.Time { return at }}).RunOnce(t.Context(), b.ID)
+	require.NoError(t, err)
 }

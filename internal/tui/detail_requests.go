@@ -8,7 +8,8 @@ import (
 )
 
 // Read ownership is separate from mutation and navigation identity. Snapshots
-// keep presentation state; only a live detail pane retains a batch.
+// copy presentation state and the canceled flag into a fresh batch; only a live
+// detail pane owns in-flight reads.
 type detailReadBatch struct {
 	cancel    context.CancelFunc
 	floor     uint64
@@ -108,7 +109,7 @@ func (m *Model) scheduleDetailRefresh() tea.Cmd {
 	}
 	b.pending = true
 	tick := detailRefreshTickMsg{owner: b, floor: b.floor, gen: m.detail.gen, connGen: m.connGen}
-	return tea.Tick(detailFollowDebounce, func(time.Time) tea.Msg { return tick })
+	return tickAfter(detailFollowDebounce, func(time.Time) tea.Msg { return tick })
 }
 
 func (m Model) handleDetailRefreshTick(msg detailRefreshTickMsg) (Model, tea.Cmd) {

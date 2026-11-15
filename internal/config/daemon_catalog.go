@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 )
 
@@ -18,24 +17,24 @@ func (e *TokenEnvError) Error() string {
 	return fmt.Sprintf("daemon %q: token_env %q is unset or empty", e.Daemon, e.Env)
 }
 
-// ClientToken returns the bearer credential a client sends to this entry: its
-// token, or the value of the variable token_env names. An unset or empty
-// token_env variable returns a *TokenEnvError, so a client never falls back to
-// a credential meant for another daemon.
+// ClientToken resolves token > token_file > token_env. A failed selected
+// source never falls back to another credential.
+// An unset or empty selected token_env retains the *TokenEnvError contract.
 func (d CatalogDaemonConfig) ClientToken() (string, error) {
-	if d.TokenEnv == "" {
-		return d.Token, nil
+	token, source, err := ResolveSecret(d.Token, d.TokenFile, d.TokenEnv)
+	if err != nil {
+		if strings.HasPrefix(source, "env:") {
+			return "", &TokenEnvError{Daemon: d.Name, Env: strings.TrimSpace(d.TokenEnv)}
+		}
+		return "", fmt.Errorf("daemon %q: %w", d.Name, err)
 	}
-	if token := strings.TrimSpace(os.Getenv(d.TokenEnv)); token != "" {
-		return token, nil
-	}
-	return "", &TokenEnvError{Daemon: d.Name, Env: d.TokenEnv}
+	return token, nil
 }
 
-// HasClientToken reports that the entry configures token or token_env. It
-// does not read the token_env variable.
+// HasClientToken reports a configured token selector without reading any
+// credential file or environment variable.
 func (d CatalogDaemonConfig) HasClientToken() bool {
-	return d.Token != "" || d.TokenEnv != ""
+	return d.Token != "" || d.TokenFile != "" || d.TokenEnv != ""
 }
 
 // DisplayEndpoint names where the entry points, for display: "local" for a

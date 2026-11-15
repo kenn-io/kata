@@ -61,7 +61,7 @@ func registerEventsHandlers(humaAPI huma.API, mux *http.ServeMux, cfg ServerConf
 			if err != nil {
 				return nil, err
 			}
-			return pollIssueHistory(ctx, cfg.DB, in.AfterID, in.Limit, issue)
+			return pollIssueHistory(ctx, cfg.DB, in.AfterID, in.Limit, issue, in.IncludeEffectiveCloseEventUID)
 		}
 		return doPollEvents(ctx, cfg, in.AfterID, in.Limit, in.ProjectID)
 	})
@@ -142,7 +142,23 @@ func doPollEvents(
 	return out, nil
 }
 
-func readVisibleEvents(
+// Resolve hub-local labels once per visible response batch, including SSE.
+func readVisibleEvents(ctx context.Context, store db.Storage, afterID, projectID, throughID int64, limit int) ([]db.Event, int64, int64, error) {
+	rows, next, reset, err := readVisibleEventsWithoutNames(ctx, store, afterID, projectID, throughID, limit)
+	if err != nil || len(rows) == 0 {
+		return rows, next, reset, err
+	}
+	names, err := store.ListFederationSpokeNames(ctx)
+	if err != nil {
+		return nil, afterID, 0, internalAPIError(err)
+	}
+	for i := range rows {
+		rows[i].OriginSpokeName = names[rows[i].OriginInstanceUID]
+	}
+	return rows, next, reset, nil
+}
+
+func readVisibleEventsWithoutNames(
 	ctx context.Context, store db.Storage, afterID, projectID, throughID int64, limit int,
 ) ([]db.Event, int64, int64, error) {
 	scope := issueScopeFromContext(ctx)
@@ -309,6 +325,10 @@ func hiddenEventRequiresScopedReset(
 			return true, nil
 		}
 		return hiddenIssueTouchesScope(ctx, store, event.IssueID, allowed)
+	case db.RepeatedImportEventType:
+		// A whole copy can close, reopen, or delete a hidden issue, which
+		// changes the readiness of a related issue in scope.
+		return hiddenIssueTouchesScope(ctx, store, event.IssueID, allowed)
 	case "issue.snapshot":
 		// Federation snapshots establish an issue baseline. Later relationship
 		// changes arrive as link events, so only a currently related hidden
@@ -474,12 +494,13 @@ func issueScopedEventInScope(event db.Event, allowed map[int64]struct{}, project
 
 func scopedEventPayload(event db.Event) (string, bool) {
 	allowedKeys := map[string]map[string]struct{}{
-		"issue.created":        keySet("title", "body", "owner", "priority", "labels", "metadata", "created_at"),
-		"issue.updated":        keySet("title", "body", "owner", "changes", "updated_at"),
-		"issue.commented":      keySet("comment_uid", "author", "teammate", "body", "created_at"),
-		"issue.comment_edited": keySet("comment_uid", "body", "edited_at"),
-		"issue.assigned":       keySet("owner", "assignment_expires_on", "updated_at"),
-		"issue.unassigned":     keySet("owner"),
+		"issue.created":            keySet("title", "body", "owner", "priority", "labels", "metadata", "created_at"),
+		"issue.updated":            keySet("title", "body", "owner", "changes", "updated_at"),
+		db.RepeatedImportEventType: keySet("title", "body", "owner", "updated_at"),
+		"issue.commented":          keySet("comment_uid", "author", "teammate", "body", "created_at"),
+		"issue.comment_edited":     keySet("comment_uid", "body", "edited_at"),
+		"issue.assigned":           keySet("owner", "assignment_expires_on", "updated_at"),
+		"issue.unassigned":         keySet("owner"),
 		"issue.assignment_renewed": keySet(
 			"owner", "old_assignment_expires_on", "assignment_expires_on", "updated_at",
 		),
@@ -590,6 +611,7 @@ func eventToEnvelope(e db.Event) api.EventEnvelope {
 		EventID:           e.ID,
 		EventUID:          e.UID,
 		OriginInstanceUID: e.OriginInstanceUID,
+		OriginSpokeName:   e.OriginSpokeName,
 		Type:              e.Type,
 		ProjectID:         e.ProjectID,
 		ProjectUID:        e.ProjectUID,

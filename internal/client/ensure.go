@@ -81,10 +81,17 @@ const (
 	daemonStartupWait       = 30 * time.Second
 )
 
+// ErrDaemonManagedExternally means the home's supervisor owns implicit startup.
+var ErrDaemonManagedExternally = errors.New("kata daemon is not ready; it is managed externally (autostart = false)")
+
 // ErrDaemonNotReplaceable means this binary left a live daemon of another
 // version running because it cannot open that daemon's storage or is an older
 // release than the daemon.
 var ErrDaemonNotReplaceable = errors.New("left the running daemon in place")
+
+// RestartLocalDaemon is installed by the CLI to replace a capable daemon in
+// its own environment. The caller holds the start lock through readiness.
+var RestartLocalDaemon func(context.Context, *daemonruntime.Namespace, kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error)
 
 var (
 	currentVersionForEnsure      = func() string { return version.Version }
@@ -177,10 +184,20 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 	if err != nil {
 		return RunningDaemon{}, err
 	}
-	found, err := discoverForEnsure(ctx, ns.DataDir)
+	enabled, configPath, err := config.ReadAutostartEnabled()
 	if err != nil {
 		return RunningDaemon{}, err
 	}
+	if !enabled {
+		return waitForSupervisedDaemon(ctx, configPath, sqliteCutoverLocked, func(ctx context.Context) (ensureDiscovery, error) {
+			return discoverForEnsure(ctx, ns.DataDir)
+		})
+	}
+	found, release, err := discoverForStart(ctx, ns.DataDir)
+	if err != nil {
+		return RunningDaemon{}, err
+	}
+	defer release()
 	switch found.Outcome {
 	case daemonScanCompatible:
 		return runningDaemonForLive(found.Daemon), nil
@@ -188,11 +205,104 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 		if err := checkDaemonReplaceable(ctx, found.Daemon.Info); err != nil {
 			return RunningDaemon{}, err
 		}
+		if canRestartLocalDaemon(found.Daemon.Record) {
+			return restartLocalDaemon(ctx, ns, found.Daemon.Record)
+		}
 		if err := stopRunningDaemonsForEnsure(ctx, ns.DataDir, ns.DBHash); err != nil {
 			return RunningDaemon{}, err
 		}
 	}
 	return startDaemonForEnsure(ctx, ns.DataDir)
+}
+
+func externallyManagedVersionError(info PingInfo) error {
+	if err := refuseDaemonDowngrade(info); err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: running kata daemon %s differs from this kata binary %s; restart it with your service manager (autostart = false)", ErrDaemonNotReplaceable, daemonVersionLabel(info), currentVersionForEnsure())
+}
+
+// waitForSupervisedDaemon polls scan for the supervisor's daemon within the
+// startup limit. migrating reports a SQLite cutover on the selected storage, so
+// a timeout during migration does not advise restarting the daemon.
+func waitForSupervisedDaemon(
+	ctx context.Context, configPath string, migrating func(context.Context) bool,
+	scan func(context.Context) (ensureDiscovery, error),
+) (RunningDaemon, error) {
+	ctx, cancel := context.WithTimeout(ctx, daemonStartupWait)
+	defer cancel()
+	var running RunningDaemon
+	var unreachable error
+	err := waitForDaemonStartup(ctx, nil, daemonStartupWait, nil, func(ctx context.Context) (bool, error) {
+		found, err := scan(ctx)
+		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
+			return false, err
+		}
+		unreachable = err
+		switch found.Outcome {
+		case daemonScanCompatible:
+			running = runningDaemonForLive(found.Daemon)
+			return true, nil
+		case daemonScanStale:
+			return false, externallyManagedVersionError(found.Daemon.Info)
+		}
+		return false, nil
+	}, false)
+	if err == nil {
+		return running, nil
+	}
+	if !errors.Is(err, ErrLocalDaemonUnreachable) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		return RunningDaemon{}, err
+	}
+	message := fmt.Errorf("%w; did not become ready (limit %s or the caller's deadline); start or restart it with your service manager (%s)", ErrDaemonManagedExternally, daemonStartupWait, configPath)
+	if migrating(ctx) {
+		message = fmt.Errorf("%w; a SQLite migration is in progress; retry when it finishes and do not interrupt the daemon (%s)", ErrDaemonManagedExternally, configPath)
+	}
+	if unreachable != nil {
+		message = fmt.Errorf("%w: %w", message, unreachable)
+	}
+	if ctx.Err() != nil {
+		return RunningDaemon{}, fmt.Errorf("%w: %w", message, ctx.Err())
+	}
+	return RunningDaemon{}, message
+}
+
+func canRestartLocalDaemon(record kitdaemon.RuntimeRecord) bool {
+	return record.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "1" && daemonruntime.RuntimeProcessAlive(record)
+}
+
+func restartLocalDaemon(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord) (RunningDaemon, error) {
+	if RestartLocalDaemon == nil {
+		return RunningDaemon{}, errors.New("in-place daemon restart is unavailable in this client")
+	}
+	record, err := RestartLocalDaemon(ctx, ns, previous)
+	if err != nil {
+		return RunningDaemon{}, err
+	}
+	_, baseURL := LocalHTTPClient(record.Endpoint().ConfigAddress())
+	return runningDaemonForLive(liveDaemon{Record: record, BaseURL: baseURL}), nil
+}
+
+// discoverForStart returns a compatible daemon without locking. Any other
+// outcome is discovered again under the runtime store's start lock, which an
+// in-place restart holds until its replacement is ready, so the caller's stop,
+// replace, and start decisions follow that restart. The caller holds the lock
+// until it calls release.
+func discoverForStart(ctx context.Context, dataDir string) (ensureDiscovery, func(), error) {
+	found, err := discoverForEnsure(ctx, dataDir)
+	if (err != nil && !errors.Is(err, ErrLocalDaemonUnreachable)) || found.Outcome == daemonScanCompatible {
+		return found, func() {}, err
+	}
+	release, err := (kitdaemon.RuntimeStore{Dir: dataDir}).AcquireStartLock(ctx)
+	if err != nil {
+		return ensureDiscovery{}, nil, fmt.Errorf("auto-start daemon: %w", err)
+	}
+	found, err = discoverForEnsure(ctx, dataDir)
+	if err != nil {
+		release()
+		return ensureDiscovery{}, nil, err
+	}
+	return found, release, nil
 }
 
 // checkDaemonReplaceable refuses to stop a live daemon that this binary could
@@ -289,9 +399,13 @@ type ensureDiscovery struct {
 }
 
 func discoverForEnsure(ctx context.Context, dataDir string) (ensureDiscovery, error) {
+	return discoverForEnsureUsing(ctx, dataDir, liveDaemons)
+}
+
+func discoverForEnsureUsing(ctx context.Context, dataDir string, scan liveDaemonScanner) (ensureDiscovery, error) {
 	var stale ensureDiscovery
 	var unreachable error
-	for candidate, err := range liveDaemons(ctx, dataDir) {
+	for candidate, err := range scan(ctx, dataDir) {
 		if err != nil {
 			if errors.Is(err, ErrLocalDaemonUnreachable) {
 				if unreachable == nil {

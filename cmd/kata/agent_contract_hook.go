@@ -10,16 +10,18 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/config"
 )
 
 // newAgentContractHookCmd emits Codex's SessionStart envelope without requiring
 // a stdin payload. The canonical contract remains in agent_contract.go.
 func newAgentContractHookCmd() *cobra.Command {
-	var source string
+	var source, ownershipMarker string
 	cmd := &cobra.Command{
 		Use:   "agent-contract-hook",
 		Short: "Emit the agent contract as Codex SessionStart context",
-		Long: "Emit the built-in agent contract as a Codex SessionStart response.\n\n" +
+		Long: "Emit the built-in agent contract as a Codex SessionStart response.\n" +
+			"Outside a kata workspace (no .kata.toml) the context is empty.\n\n" +
 			"--source selects a local UTF-8 prompt file that replaces the entire contract.\n" +
 			"The reserved source kata-agent-contract-hook keeps the built-in contract; use ./kata-agent-contract-hook for a file with that name.\n" +
 			"Relative paths stay within the current directory; parent traversal and symlink escapes fail.\n" +
@@ -27,6 +29,9 @@ func newAgentContractHookCmd() *cobra.Command {
 			"An empty file supplies an intentionally empty prompt. Stdin is ignored.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if cmd.Flags().Changed("ownership-marker") && !isAgentHookOwnershipArg(contractHook, "--ownership-marker", ownershipMarker) {
+				return agentHookUsage("invalid Kata hook ownership marker")
+			}
 			text, err := readAgentContractSource(source, cmd.Flags().Changed("source"))
 			if err != nil {
 				return err
@@ -38,12 +43,48 @@ func newAgentContractHookCmd() *cobra.Command {
 				} `json:"hookSpecificOutput"`
 			}{}
 			response.HookSpecificOutput.HookEventName = "SessionStart"
-			response.HookSpecificOutput.AdditionalContext = text
+			response.HookSpecificOutput.AdditionalContext = contractForDir(flags.Workspace, text)
 			return json.MarshalWrite(cmd.OutOrStdout(), response)
 		},
 	}
 	cmd.Flags().StringVar(&source, "source", "", "local UTF-8 prompt file (missing file uses built-in contract)")
+	cmd.Flags().StringVar(&ownershipMarker, "ownership-marker", "", "")
+	_ = cmd.Flags().MarkHidden("ownership-marker")
 	return cmd
+}
+
+// contractForDir returns text when dir is inside a kata workspace and ""
+// otherwise. A workspace is a .kata.toml ancestor found by the discovery rules
+// project resolution uses. User-scope hooks run in every session, so this keeps
+// agents in unrelated directories from being told to track their work in kata.
+func contractForDir(dir, text string) string {
+	if dir == "" {
+		dir = "."
+	}
+	disc, err := config.DiscoverPaths(dir)
+	if err != nil || disc.WorkspaceRoot == "" {
+		return ""
+	}
+	return text
+}
+
+// contractPayloadDir returns the session directory named by a native hook
+// payload, or "" when the payload names none.
+func contractPayloadDir(data []byte) string {
+	var payload struct {
+		CWD            string   `json:"cwd"`
+		WorkspaceRoots []string `json:"workspace_roots"`
+		WorkspacePaths []string `json:"workspacePaths"`
+	}
+	if json.Unmarshal(data, &payload) != nil {
+		return ""
+	}
+	for _, dirs := range [][]string{{payload.CWD}, payload.WorkspaceRoots, payload.WorkspacePaths} {
+		if len(dirs) > 0 && dirs[0] != "" {
+			return dirs[0]
+		}
+	}
+	return ""
 }
 
 func readAgentContractSource(path string, specified bool) (string, error) {

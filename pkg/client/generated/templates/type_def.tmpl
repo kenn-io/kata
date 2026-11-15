@@ -27,6 +27,7 @@
         IssueShortID        *string         `json:"issue_short_id,omitempty"`
         IssueUID            *string         `json:"issue_uid,omitempty"`
         OriginInstanceUID   string          `json:"origin_instance_uid" validate:"required"`
+        OriginSpokeName     *string         `json:"origin_spoke_name,omitempty"`
         Payload             json.RawMessage `json:"payload,omitempty"`
         ProjectID           int64           `json:"project_id"`
         ProjectName         string          `json:"project_name" validate:"required"`

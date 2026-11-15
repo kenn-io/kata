@@ -18,7 +18,10 @@ func TestEmbeddingCredentialResolution(t *testing.T) {
 	t.Chdir(home)
 	path := filepath.Join(home, "embedding.key")
 	writePrivateCredentialFixture(t, path, []byte("file-secret\n"))
-	for _, tt := range []struct{ name, inline, file, env, key, source, reason string }{
+	for _, tt := range []struct {
+		name, inline, file, env, key, source, reason string
+		local                                        bool
+	}{
 		{name: "inline precedence", inline: "inline-secret", file: path, env: "EXAMPLE_EMBEDDING_KEY", key: "inline-secret", source: "inline"},
 		{name: "file precedence", file: path, env: "EXAMPLE_EMBEDDING_KEY", key: "file-secret", source: "file:" + path},
 		{name: "tilde", file: "~/embedding.key", key: "file-secret", source: "file:~/embedding.key"},
@@ -27,9 +30,10 @@ func TestEmbeddingCredentialResolution(t *testing.T) {
 		{name: "missing file does not fall through", file: path + ".missing", env: "EXAMPLE_EMBEDDING_KEY", source: "file:" + path + ".missing", reason: "cannot read"},
 		{name: "relative file does not fall through", file: "embedding.key", env: "EXAMPLE_EMBEDDING_KEY", source: "file:embedding.key", reason: "absolute path"},
 		{name: "no source allows keyless providers", source: "none"},
+		{name: "local ignores unavailable key file", local: true, file: path + ".missing"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			c := (EmbeddingsConfig{APIKey: tt.inline, APIKeyFile: tt.file, APIKeyEnv: tt.env}).ResolveCredential()
+			c := (EmbeddingsConfig{Local: tt.local, APIKey: tt.inline, APIKeyFile: tt.file, APIKeyEnv: tt.env}).ResolveCredential()
 			if c.Key != tt.key || c.Source != tt.source || !strings.Contains(c.Reason, tt.reason) || (tt.reason == "" && c.Reason != "") {
 				t.Fatalf("unexpected credential: source=%q reason=%q key matches=%t", c.Source, c.Reason, c.Key == tt.key)
 			}

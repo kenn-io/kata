@@ -181,8 +181,7 @@ func TestStatusMembershipWithGeneratedWorkflowOptions(t *testing.T) {
 		for i := range p.Groups {
 			p.Groups[i].OptionIDs = nil
 		}
-		requested := rapid.IntRange(2, int(^uint(0)>>1)).Draw(t, "option count")
-		count := min(requested, 40) // Bound test materialization, not the generated domain.
+		count := rapid.IntRange(2, 40).Draw(t, "option count")
 		roles := make([]int, count)
 		for i := range count {
 			role := rapid.IntRange(0, 2).Draw(t, "group")

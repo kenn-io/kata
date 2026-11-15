@@ -3,11 +3,13 @@
  */
 import type { AuditCloseRowVerificationEndpointProjects } from './auditCloseRowVerificationEndpointProjects.ts'
 import type { EvidenceResponse } from './evidenceResponse.ts'
+import type { RetainedEvidence } from './retainedEvidence.ts'
 
 export interface AuditCloseRow {
   actor: string
   event_id: number
   evidence_types?: string[]
+  file_evidence?: RetainedEvidence[]
   flags?: string[]
   issue: string
   message?: string

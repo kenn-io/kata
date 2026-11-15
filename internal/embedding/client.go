@@ -17,6 +17,7 @@ import (
 )
 
 type Config struct {
+	Endpoint            func(context.Context) (string, error)
 	BaseURL             string
 	Model               string
 	Credential          config.EmbeddingCredential
@@ -33,6 +34,7 @@ type Config struct {
 }
 
 type Client struct {
+	endpoint           func(context.Context) (string, error)
 	options            embedclient.Options
 	space              embedmodel.Descriptor
 	generation         kitvec.Generation
@@ -41,6 +43,7 @@ type Client struct {
 	credential         config.EmbeddingCredential
 	credentialRevision uint64
 	credentialHealth   CredentialHealth
+	batchLimit         int
 }
 
 const (
@@ -62,10 +65,12 @@ func New(cfg Config) (*Client, error) {
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
+	baseURL := cfg.BaseURL
+	if cfg.Endpoint != nil {
+		baseURL = "http://127.0.0.1"
+	}
 	parts, err := (embedconfig.Embedder{
-		BaseURL: cfg.BaseURL, Model: cfg.Model, Dims: dims,
-		FingerprintSalt: cfg.Salt, BatchSize: batch,
-		TrustPrivateNetwork: cfg.TrustPrivateNetwork,
+		BaseURL: baseURL, Model: cfg.Model, Dims: dims, FingerprintSalt: cfg.Salt, BatchSize: batch, TrustPrivateNetwork: cfg.TrustPrivateNetwork,
 	}).Parts()
 	if err != nil {
 		return nil, fmt.Errorf("embedding: configure client: %w", err)
@@ -107,7 +112,7 @@ func New(cfg Config) (*Client, error) {
 	if err := space.Validate(); err != nil {
 		return nil, fmt.Errorf("embedding: configure identity: %w", err)
 	}
-	client := &Client{options: options, space: space, generation: generation, http: &http.Client{Timeout: timeout}}
+	client := &Client{options: options, space: space, generation: generation, http: &http.Client{Timeout: timeout}, endpoint: cfg.Endpoint}
 	client.SetCredential(cfg.Credential)
 	return client, nil
 }
@@ -155,6 +160,25 @@ func (c *Client) embed(ctx context.Context, role embedconfig.Role, texts []strin
 		return nil, err
 	}
 	options := c.options
+	c.mu.Lock()
+	if c.batchLimit > 0 {
+		options.Batch.Items = min(options.Batch.Items, c.batchLimit)
+	}
+	c.mu.Unlock()
+	if c.endpoint != nil {
+		options.Deployment.BaseURL, err = c.endpoint(ctx)
+		if err != nil {
+			c.mu.Lock()
+			if revision == c.credentialRevision {
+				now := time.Now().UTC()
+				c.credentialHealth.LastError = err.Error()
+				c.credentialHealth.LastErrorAt = &now
+				c.credentialHealth.LastErrorStatus = 0
+			}
+			c.mu.Unlock()
+			return nil, err
+		}
+	}
 	options.APIKey = credential.Key
 	options.HTTP = c.http
 	provider, err := embedclient.New(options)
@@ -163,6 +187,12 @@ func (c *Client) embed(ctx context.Context, role embedconfig.Role, texts []strin
 	}
 	vectors, err := provider.EmbedTexts(ctx, role, texts)
 	if err != nil {
+		// Start later built-in fills with single inputs after a timeout.
+		if transport, ok := errors.AsType[*embedclient.TransportError](err); c.endpoint != nil && ok && transport.Timeout() && ctx.Err() == nil {
+			c.mu.Lock()
+			c.batchLimit = 1
+			c.mu.Unlock()
+		}
 		if rejected, ok := errors.AsType[*embedclient.APIError](err); ok && rejected.CredentialsRejected() {
 			return nil, c.rejectCredential(credential, revision, rejected)
 		}

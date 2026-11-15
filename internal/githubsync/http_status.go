@@ -64,13 +64,17 @@ func (s *httpFetcherBindingSession) ReadStatus(ctx context.Context, cfg Config, 
 	if err := s.validateStatusIssue(wire, id, number); err != nil {
 		return zero, err
 	}
-	raw := wire.State
-	obs := issuesync.StatusObservation{RawStatus: &raw, Status: raw, Version: wire.UpdatedAt.UTC(), Locator: strconv.Itoa(number)}
+	return statusObservation(wire.Issue), nil
+}
+
+func statusObservation(issue Issue) issuesync.StatusObservation {
+	raw := issue.State
+	obs := issuesync.StatusObservation{RawStatus: &raw, Status: raw, Version: issue.UpdatedAt.UTC(), Locator: strconv.Itoa(issue.Number)}
 	if raw == "closed" {
-		obs.ClosedReason = issueClosedReason(wire.Issue)
-		obs.ClosedAt = wire.ClosedAt
+		obs.ClosedReason = issueClosedReason(issue)
+		obs.ClosedAt = issue.ClosedAt
 	}
-	return obs, nil
+	return obs
 }
 
 // verifyStatusRepository checks the bound repository identity once per session,
@@ -145,16 +149,21 @@ func (s *httpFetcherBindingSession) statusRequest(ctx context.Context, method, e
 }
 
 func (s *httpFetcherBindingSession) statusRequestWithHeaders(ctx context.Context, method, endpoint string, body any, out any, admission func() error, headers *http.Header) error {
+	requestURL, err := s.fetcher.restEndpointURL(s.binding, endpoint)
+	if err != nil {
+		return fmt.Errorf("invalid GitHub status endpoint")
+	}
+	return s.statusRequestURL(ctx, method, requestURL, body, out, admission, headers)
+}
+
+func (s *httpFetcherBindingSession) statusRequestURL(ctx context.Context, method, requestURL string, body any, out any, admission func() error, headers *http.Header) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := s.fetcher.statusCooldownError(s.binding); err != nil {
 		return err
 	}
-	requestURL, err := s.fetcher.restEndpointURL(s.binding, endpoint)
-	if err != nil {
-		return fmt.Errorf("invalid GitHub status endpoint")
-	}
+	var err error
 	var encoded []byte
 	if body != nil {
 		encoded, err = json.Marshal(body)
@@ -245,4 +254,88 @@ func (f *HTTPFetcher) statusCooldownError(binding Binding) error {
 		return &issuesync.StatusError{Message: "GitHub status requests are cooling down", RetryAfter: wait}
 	}
 	return nil
+}
+
+// StatusResult keeps per-issue failures final within a successful batch.
+type StatusResult struct {
+	Observation issuesync.StatusObservation
+	Err         error
+}
+
+// StatusBatchSession reads at most one bounded sweep page.
+type StatusBatchSession interface {
+	ReadStatuses(context.Context, Config, []StatusLocator) map[string]StatusResult
+}
+
+func (s *httpFetcherBindingSession) ReadStatuses(ctx context.Context, cfg Config, targets []StatusLocator) map[string]StatusResult {
+	valid := make([]StatusLocator, 0, len(targets))
+	numbers := make([]int, 0, len(targets))
+	ids := make([]int64, 0, len(targets))
+	for _, target := range targets {
+		// Invalid targets stay out of the batch; their per-item read reports the error.
+		if id, err := s.statusConfig(cfg, target.ExternalID, target.Number); err == nil {
+			valid = append(valid, target)
+			ids = append(ids, id)
+			numbers = append(numbers, target.Number)
+		}
+	}
+	if len(valid) == 0 {
+		return nil
+	}
+	if err := s.verifyStatusRepository(ctx, cfg); err != nil {
+		return nil
+	}
+	requestURL, err := s.fetcher.graphQLEndpointURL(s.binding)
+	if err != nil {
+		return nil
+	}
+	var response parentGraphQLResponse
+	var headers http.Header
+	body := parentGraphQLRequest{Query: targetedStatusGraphQLQuery(numbers), Variables: map[string]any{"owner": s.binding.Owner, "repo": s.binding.Repo}}
+	if err := s.statusRequestURL(ctx, http.MethodPost, requestURL, body, &response, nil, &headers); err != nil {
+		return nil
+	}
+	if graphQLErrorsRateLimited(response.Errors) {
+		s.fetcher.deferStatusRequests(s.binding, retryWait(headers, s.fetcher.now()))
+		return nil
+	}
+	remaining, _ := parentErrorsWithoutMissingChildren(response.Errors, response.Data, len(valid))
+	if len(remaining) > 0 {
+		return nil
+	}
+	if response.Data == nil || response.Data.Repository == nil {
+		return nil
+	}
+	results := make(map[string]StatusResult, len(valid))
+	for i, target := range valid {
+		var node struct {
+			FullDatabaseID graphQLBigInt `json:"fullDatabaseId"`
+			Number         int           `json:"number"`
+			State          string        `json:"state"`
+			StateReason    *string       `json:"stateReason"`
+			ClosedAt       *time.Time    `json:"closedAt"`
+			UpdatedAt      *time.Time    `json:"updatedAt"`
+			Repository     struct {
+				DatabaseID int64 `json:"databaseId"`
+			} `json:"repository"`
+		}
+		raw, present := response.Data.Repository[fmt.Sprintf("i%d", i)]
+		result := StatusResult{}
+		switch {
+		case !present || bytes.Equal(bytes.TrimSpace(raw), []byte("null")):
+			result.Err = &issuesync.StatusError{Message: "GitHub status issue not found", Blocked: true}
+		case json.Unmarshal(raw, &node) != nil:
+			result.Err = fmt.Errorf("GitHub status observation has invalid state or version")
+		case int64(node.FullDatabaseID) != ids[i] || node.Number != target.Number:
+			result.Err = fmt.Errorf("GitHub status issue identity changed or is a pull request")
+		case node.Repository.DatabaseID != cfg.RepoID:
+			result.Err = fmt.Errorf("GitHub status issue is outside the bound repository")
+		case node.State != "OPEN" && node.State != "CLOSED" || node.UpdatedAt == nil || node.UpdatedAt.IsZero():
+			result.Err = fmt.Errorf("GitHub status observation has invalid state or version")
+		default:
+			result.Observation = statusObservation(Issue{Number: node.Number, State: strings.ToLower(node.State), StateReason: node.StateReason, ClosedAt: node.ClosedAt, UpdatedAt: node.UpdatedAt})
+		}
+		results[target.ExternalID] = result
+	}
+	return results
 }

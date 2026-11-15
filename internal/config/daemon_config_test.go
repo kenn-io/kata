@@ -662,24 +662,6 @@ token_env = "KATA_WORK_TOKEN"
 	assert.Empty(t, cfg.Daemons[1].Token)
 }
 
-func TestReadDaemonConfig_RejectsDaemonTokenAndTokenEnv(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("KATA_HOME", home)
-	t.Setenv("KATA_WORK_TOKEN", "secret-from-env")
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
-[[daemon]]
-name = "work"
-url = "https://kata.example.test"
-token = "inline-token"
-token_env = "KATA_WORK_TOKEN"
-`), 0o600))
-
-	_, err := config.ReadDaemonConfig()
-	require.Error(t, err, "token and token_env are mutually exclusive")
-	assert.Contains(t, err.Error(), "token")
-	assert.Contains(t, err.Error(), "token_env")
-}
-
 func TestReadDaemonConfig_TrimsDaemonTokenEnv(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)

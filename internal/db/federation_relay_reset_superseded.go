@@ -1,7 +1,7 @@
 package db
 
 // RelayResetSupersededMetadataPrefix scopes the per-enrollment record a relay
-// writes when installing a root reset moves a downstream grant to a new epoch.
+// writes when a root or forwarded reset prepares a downstream grant's next epoch.
 // Keys are the prefix, the project UID, a dot and the downstream binding UID.
 const RelayResetSupersededMetadataPrefix = "relay_reset_superseded."
 
@@ -12,8 +12,8 @@ func RelayResetSupersededMetadataKey(projectUID, bindingUID string) string {
 }
 
 // RelayResetSupersededDeliveries records the event and artifact deliveries a
-// downstream had not acknowledged when its relay installed a root reset. The
-// forwarded checkpoint carries the root's authoritative state for them, so
+// downstream had not acknowledged when its root captured or relay installed a
+// root reset. The checkpoint carries the root's authoritative state for them, so
 // those outbox rows stay as history and are never offered again, neither in
 // the superseded epoch nor by the activation that leaves it.
 //
@@ -24,11 +24,11 @@ func RelayResetSupersededMetadataKey(projectUID, bindingUID string) string {
 type RelayResetSupersededDeliveries struct {
 	// Epoch is the downstream epoch whose unacknowledged rows were superseded.
 	Epoch int64 `json:"epoch"`
-	// NextEpoch is the forwarded checkpoint's downstream epoch.
+	// NextEpoch is the prepared checkpoint's downstream epoch.
 	NextEpoch int64 `json:"next_epoch"`
 	// SnapshotUID identifies the root checkpoint that superseded the rows.
 	SnapshotUID string `json:"snapshot_uid"`
-	// ThroughID is the greatest outbox row ID retained for Epoch at install.
+	// ThroughID bounds the retained event/artifact prefix the checkpoint covers.
 	ThroughID int64 `json:"through_id"`
 	Events    int   `json:"events"`
 	Artifacts int   `json:"artifacts"`

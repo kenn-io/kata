@@ -127,7 +127,7 @@ func TestFormatInitOutputJSONHasStableHookFieldOrder(t *testing.T) {
 	hooks := []agentHookMutation{{Harness: "codex", State: "installed", Warnings: []string{}}}
 	response := []byte(`{"project":{"name":"example-project"},"created":true,"extra":42}`)
 	for range 30 {
-		output, err := formatInitOutput(response, "example-project", "", true, true, hooks)
+		output, err := formatInitOutput(response, "example-project", "", true, true, hooks, "")
 		require.NoError(t, err)
 		require.Less(t, strings.Index(output, `"agent_hooks":`), strings.Index(output, `"created":`))
 		require.Less(t, strings.Index(output, `"created":`), strings.Index(output, `"extra":`))
@@ -148,7 +148,7 @@ func TestFormatInitOutputJSONRejectsNonObjects(t *testing.T) {
 				var output string
 				var err error
 				require.NotPanics(t, func() {
-					output, err = formatInitOutput([]byte(response), "example-project", "", true, true, hooks)
+					output, err = formatInitOutput([]byte(response), "example-project", "", true, true, hooks, "")
 				})
 				require.Error(t, err)
 				require.Empty(t, output)
@@ -167,7 +167,7 @@ func TestFormatInitOutputJSONPreservesDaemonObject(t *testing.T) {
 				hooks = []agentHookMutation{{Harness: "codex", State: "installed", Changed: true, Warnings: []string{}}}
 			}
 			response := `{"project":{"name":"example-project"},"created":true,"extra":{"value":9007199254740993}}`
-			output, err := formatInitOutput([]byte(response), "example-project", "", true, true, hooks)
+			output, err := formatInitOutput([]byte(response), "example-project", "", true, true, hooks, "")
 			require.NoError(t, err)
 			var result map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal([]byte(output), &result))

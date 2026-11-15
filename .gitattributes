@@ -5,3 +5,6 @@
 # breaks every snapshot test on Windows CI. text=auto leaves detected
 # binary files untouched.
 * text=auto eol=lf
+
+# Preserve the exact PNG bytes embedded in MCP server metadata.
+internal/mcpicon/assets/*.png binary

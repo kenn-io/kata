@@ -10,7 +10,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"go.kenn.io/kit/consolewindow"
 )
+
+const repositoryCommentsPageLimit = 300
 
 // ParentScan states which fetch outcome produced a ParentData value.
 type ParentScan uint8
@@ -83,6 +87,9 @@ type Fetcher interface {
 	Repository(ctx context.Context, host, owner, repo string) (Repository, error)
 	Issues(ctx context.Context, binding Binding, since *time.Time) ([]Issue, error)
 	Comments(ctx context.Context, binding Binding, issueNumber int) ([]Comment, error)
+	// RepositoryComments groups comments updated at or after since by issue
+	// number, in creation order, and reports incomplete at 30,000 rows or more.
+	RepositoryComments(ctx context.Context, binding Binding, since *time.Time) (map[int][]Comment, bool, error)
 	// ParentData returns child issue parent REST IDs plus the child numbers
 	// covered by the scan. Unsupported providers should return ParentScanUnsupported.
 	ParentData(ctx context.Context, binding Binding, request ParentRequest) (ParentData, error)
@@ -114,6 +121,7 @@ func (execCommandRunner) Run(ctx context.Context, name string, args ...string) (
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	consolewindow.Hide(cmd)
 	err = cmd.Run()
 	return stdout.Bytes(), stderr.Bytes(), err
 }
@@ -154,6 +162,14 @@ func commentsEndpoint(binding Binding, issueNumber int) string {
 	query := url.Values{}
 	query.Set("per_page", "100")
 	return repositoryEndpoint(binding) + "/issues/" + strconv.Itoa(issueNumber) + "/comments?" + query.Encode()
+}
+
+func repositoryCommentsEndpoint(binding Binding, since *time.Time) string {
+	query := url.Values{"per_page": {"100"}, "sort": {"created"}, "direction": {"asc"}}
+	if since != nil {
+		query.Set("since", since.Format(time.RFC3339))
+	}
+	return repositoryEndpoint(binding) + "/issues/comments?" + query.Encode()
 }
 
 var tokenRedactions = []*regexp.Regexp{

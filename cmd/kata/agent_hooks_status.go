@@ -123,7 +123,7 @@ func agentHookCommandForPlatform(agent agenthook.Agent, entry agentHookEntry, go
 			}
 		}
 		if command := commandField("commandWindows"); command != "" {
-			return command, false
+			return command, strings.HasPrefix(strings.TrimSpace(command), "& ")
 		}
 		if command := commandField("powershell"); command != "" {
 			return command, true

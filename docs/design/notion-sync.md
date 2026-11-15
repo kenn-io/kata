@@ -345,7 +345,7 @@ HTTP requests have a
    timestamp. This detects observed races; Notion offers no transaction across
    these calls, and indexing/descendant edit propagation is not guaranteed.
 5. Prepare the complete bounded batch before writing issue rows. Import in the
-   existing 5,000-item chunks with `IssueSyncImportGuard`. Deliver each chunk's
+   existing import chunks with `IssueSyncImportGuard`. Deliver each chunk's
    committed events immediately through the existing broadcaster/hook sink.
 6. After all chunks and finalization succeed, record success with cursor equal
    to run start, never fetch completion or the maximum returned timestamp.

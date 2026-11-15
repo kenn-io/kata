@@ -31,6 +31,11 @@ type PreparedFederationEnrollment struct {
 func PrepareFederationEnrollmentParams(
 	input CreateFederationEnrollmentParams,
 ) (PreparedFederationEnrollment, error) {
+	if input.SpokeName != "" {
+		if err := ValidateFederationSpokeName(input.SpokeInstanceUID, input.SpokeName); err != nil {
+			return PreparedFederationEnrollment{}, err
+		}
+	}
 	explicitToken := input.Token != ""
 	if input.Token == "" {
 		token, err := NewFederationToken()

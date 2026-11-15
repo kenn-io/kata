@@ -1,3 +1,4 @@
+import { FlashBanner } from '@kenn-io/kit-ui'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import type { ComponentProps } from 'svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -212,8 +213,11 @@ describe('Sidebar', () => {
     expect(onOpenProject).toHaveBeenCalledWith('project-example')
   })
 
-  it('submits project creation without deriving navigation from the mutation result', async () => {
-    const onCreateProject = vi.fn(async () => ({ changed: true }))
+  it('keeps a refused project draft for retry and leaves navigation to the caller', async () => {
+    render(FlashBanner)
+    const onCreateProject = vi
+      .fn(async () => ({ changed: true }))
+      .mockRejectedValueOnce(new Error('Project creation refused'))
     const onOpenProject = vi.fn()
 
     renderSidebar({ onCreateProject, onOpenProject })
@@ -224,8 +228,12 @@ describe('Sidebar', () => {
     await fireEvent.input(input, { target: { value: 'New Project' } })
     await fireEvent.submit(input.closest('form')!)
 
+    expect(await screen.findByText('Project creation refused')).not.toBeNull()
+    expect((input as HTMLInputElement).value).toBe('New Project')
+    await fireEvent.submit(input.closest('form')!)
     await waitFor(() => {
       expect(onCreateProject).toHaveBeenCalledWith('New Project')
+      expect(onCreateProject).toHaveBeenCalledTimes(2)
     })
     expect(onOpenProject).not.toHaveBeenCalled()
     expect(screen.queryByRole('textbox', { name: 'New project name' })).toBeNull()
@@ -252,6 +260,18 @@ describe('Sidebar', () => {
     expect(input.disabled).toBe(true)
     await fireEvent.submit(input.closest('form')!)
     expect(onCreateProject).not.toHaveBeenCalled()
+  })
+
+  it('discards its local draft when shared project creation ends', async () => {
+    const view = renderSidebar({ creationIntent: 'task' })
+    await fireEvent.input(screen.getByRole('textbox', { name: 'New project name' }), {
+      target: { value: 'cancelled-project' },
+    })
+    await view.rerender({ creationIntent: null })
+    await fireEvent.click(screen.getByRole('button', { name: 'New project' }))
+    expect(
+      (screen.getByRole('textbox', { name: 'New project name' }) as HTMLInputElement).value,
+    ).toBe('')
   })
 
   it('resets a project draft after authentication authority changes', async () => {

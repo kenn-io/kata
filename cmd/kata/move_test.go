@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -130,4 +131,20 @@ func TestMoveCLI_TreeOutputNamesDescendants(t *testing.T) {
 			assert.Contains(t, out, child.UID)
 		})
 	}
+}
+
+func TestMoveCLI_FederatedOldReferenceUsesCurrentClaim(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "tester")
+	env, dir, source, target, issue := setupMoveCLIProjects(t)
+	_, err := env.DB.EnableProjectFederation(t.Context(), source.ID, "tester")
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(t.Context(), target.ID, "tester")
+	require.NoError(t, err)
+	_, err = env.DB.AcquireClaim(t.Context(), db.AcquireClaimParams{ProjectID: source.ID, IssueRef: issue.UID, Principal: db.ClaimPrincipal{HolderInstanceUID: env.DB.InstanceUID(), Holder: "tester", ClientKind: "cli"}, ClaimKind: "hard", Now: time.Now().UTC()})
+	require.NoError(t, err)
+	runCLI(t, env, dir, "--project", source.Name, "move", issue.ShortID, target.Name)
+	runCLI(t, env, dir, "edit", source.Name+"#"+issue.ShortID, "--title", "continued work")
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "continued work", got.Title)
 }

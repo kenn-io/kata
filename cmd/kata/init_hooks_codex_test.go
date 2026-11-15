@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kit/agenthook"
 )
 
 func readCodexHooks(t *testing.T, dir string) map[string]any {
@@ -26,20 +27,37 @@ func expectedCodexHandler() map[string]any {
 	return map[string]any{
 		"type":           "command",
 		"command":        "kata attention-hook start",
-		"commandWindows": "kata attention-hook start",
+		"commandWindows": expectedCodexWindowsCommand("attention-hook", "start"),
 		"timeout":        json.Number("10"),
 	}
 }
 
+func expectedCodexWindowsCommand(args ...string) string {
+	commands, err := agenthook.BuildCommand("kata", args...)
+	if err != nil {
+		panic(err)
+	}
+	return commands.PowerShell
+}
+
 func expectedCodexSessionEndGroups() []any {
-	return []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "kata attention-hook end", "commandWindows": "kata attention-hook end", "timeout": json.Number("10")}}}}
+	return []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "kata attention-hook end", "commandWindows": expectedCodexWindowsCommand("attention-hook", "end"), "timeout": json.Number("10")}}}}
 }
 
 func expectedCodexContractHandler() map[string]any {
 	return map[string]any{
 		"type":           "command",
 		"command":        "kata agent-contract-hook",
-		"commandWindows": "kata agent-contract-hook",
+		"commandWindows": expectedCodexWindowsCommand("agent-contract-hook"),
+		"timeout":        json.Number("10"),
+	}
+}
+
+func expectedCodexContractHandlerWithLegacyMarker() map[string]any {
+	return map[string]any{
+		"type":           "command",
+		"command":        "kata agent-contract-hook --source kata-agent-contract-hook",
+		"commandWindows": "& 'kata' 'agent-contract-hook' '--source' 'kata-agent-contract-hook'",
 		"timeout":        json.Number("10"),
 	}
 }
@@ -87,12 +105,18 @@ func TestApplyCodexHooks_UpgradesManagedCommands(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Empty(t, warnings)
-	assert.Equal(t, expectedCodexSessionStartGroups(),
-		readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
+	expectedAttention := expectedCodexHandler()
+	expectedAttention["command"] = "kata attention-hook start --source kata-agent-hook-start"
+	expectedAttention["commandWindows"] = "& 'kata' 'attention-hook' 'start' '--source' 'kata-agent-hook-start'"
+	expectedContract := expectedCodexContractHandlerWithLegacyMarker()
+	expected := []any{
+		map[string]any{"matcher": codexSessionStartMatcher, "hooks": []any{expectedAttention}},
+		map[string]any{"matcher": codexContractSessionStartMatcher, "hooks": []any{expectedContract}},
+	}
+	assert.Equal(t, expected, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
 	_, _, err = applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
-	assert.Equal(t, expectedCodexSessionStartGroups(),
-		readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
+	assert.Equal(t, expected, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
 }
 
 func TestApplyCodexHooks_NormalizesDefaultWithNonScopedMatcher(t *testing.T) {

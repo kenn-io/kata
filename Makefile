@@ -58,7 +58,9 @@ api-check:
 # Fail when the committed OpenAPI contract introduces breaking changes for
 # existing clients relative to BASE_REF (default origin/main).
 api-breaking:
+	API_VERSION_BASE_REF="$(if $(BASE_REF),$(BASE_REF),origin/main)" go test ./internal/daemon -run '^TestAPIVersionBaseRecords$$' -count=1
 	bash scripts/openapi-breaking.sh $(BASE_REF)
+	SCHEMA_VERSION_BASE_REF=$(or $(BASE_REF),origin/main) go test ./internal/db/pgstore -run '^TestSchemaVersionContract$$'
 
 web-install:
 	cd web && bun install --frozen-lockfile
@@ -73,7 +75,7 @@ kata-ui-test:
 	bun run --cwd packages/kata-ui test
 
 kata-ui-pack-check:
-	cd packages/kata-ui && bun x vp test pack.test.ts
+	cd packages/kata-ui && bun x vp test pack.test.ts --outputFile.json=test-results/vitest/kata-ui-pack.json
 
 web-check: kata-ui-check
 	cd web && bun run check
@@ -113,8 +115,12 @@ openapi: api-generate
 test-short:
 	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK go test -short $(GOFLAGS_TEST) ./...
 
+# gotestsum places packages after Go flags, so use Rapid's environment setting.
 test-stress:
-	go test -tags federation_stress ./e2e -run 'TestFederationStress|TestFederationFailpoint' -rapid.checks=5 -count=1 -timeout $(FEDERATION_STRESS_TIMEOUT)
+	RAPID_CHECKS=5 go tool gotestsum --format pkgname-and-test-fails --format-icons text \
+		--jsonfile gotestsum/federation-stress.json --rerun-fails=2 \
+		--rerun-fails-report gotestsum/federation-stress-reruns.txt --packages ./e2e -- \
+		-tags federation_stress -run 'TestFederationStress|TestFederationFailpoint' -count=1 -timeout $(FEDERATION_STRESS_TIMEOUT)
 
 test-federation-docker:
 	./scripts/test-federation-docker.sh
@@ -134,8 +140,14 @@ docs-preview:
 docs-check:
 	bash scripts/check-docs.sh
 
+# With DOCS_SCREENSHOTS_OUTPUT set, build the complete docs-assets tree into
+# $(DOCS_SCREENSHOTS_OUTPUT)/assets using only Docker on the host.
 docs-screenshots:
+ifdef DOCS_SCREENSHOTS_OUTPUT
+	bash docs/screenshots/generate-in-docker.sh "$(DOCS_SCREENSHOTS_OUTPUT)"
+else
 	bash docs/screenshots/generate.sh
+endif
 
 docs-assets-branch:
 	bash docs/screenshots/update-assets-branch.sh

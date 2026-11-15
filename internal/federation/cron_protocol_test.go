@@ -202,7 +202,7 @@ func TestCronClientRejectsUnknownRequirementsBeforeReset(t *testing.T) {
 	for _, required := range []string{"future_v2", "cron_notify_children_v1"} {
 		t.Run(required, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				require.Equal(t, "cron_v1", r.Header.Get("X-Kata-Event-Features"))
+				require.Equal(t, db.SupportedEventFeatures, r.Header.Get(db.EventFeaturesHeader))
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("X-Kata-Required-Event-Features", required)
 				_, _ = w.Write([]byte(`{"reset_required":true,"reset_after_id":90,"next_after_id":90,"events":[]}`))
@@ -403,5 +403,38 @@ func TestCronFederationBackendPairs(t *testing.T) {
 
 			})
 		}
+	}
+}
+
+// Every required format must survive preflight, regardless of event order.
+func TestMixedMoveCronPublicationRequiresAllFeatures(t *testing.T) {
+	for _, first := range []string{"issue.moved", "cron.job.created"} {
+		t.Run(first, func(t *testing.T) {
+			posts := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
+				if r.Method == http.MethodPost {
+					posts++
+					_, _ = w.Write([]byte(`{"accepted":2,"push_cursor_event_id":2}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"project_id":1,"project_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","replay_horizon_event_id":1,"baseline_through_event_id":1}`))
+			}))
+			t.Cleanup(server.Close)
+			client, err := federation.NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
+			require.NoError(t, err)
+			kinds := []string{"issue.moved", "cron.job.created"}
+			if first == "cron.job.created" {
+				kinds[0], kinds[1] = kinds[1], kinds[0]
+			}
+			events := []api.FederationIngestEventEnvelope{
+				{EventID: 1, Type: kinds[0], Payload: jsontext.Value(`{}`)},
+				{EventID: 2, Type: kinds[1], Payload: jsontext.Value(`{}`)},
+			}
+			_, err = client.IngestProjectEvents(t.Context(), 1, events)
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+			require.Zero(t, posts, "a cron-only peer cannot receive a move in any batch order")
+		})
 	}
 }

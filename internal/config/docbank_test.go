@@ -38,6 +38,18 @@ api_key="test-key"
 		require.Error(t, err, extra)
 	}
 }
+func TestDocbankLocalConfig(t *testing.T) {
+	cfg, err := readDocbank(t, "[docbank]\nlocal=true\n")
+	require.NoError(t, err, "the local Docbank publishes its own key")
+	require.True(t, cfg.Docbank.Enabled())
+	require.True(t, cfg.Docbank.UsesLocal())
+	require.Equal(t, "/kata", cfg.Docbank.Folder)
+
+	t.Setenv("KATA_DOCBANK_URL", "https://docbank.example")
+	cfg, err = readDocbank(t, "[docbank]\nlocal=true\napi_key=\"test-key\"\n")
+	require.NoError(t, err)
+	require.False(t, cfg.Docbank.UsesLocal(), "a configured url selects that Docbank instead")
+}
 func TestDocbankConfigDefersKeyResolution(t *testing.T) {
 	t.Setenv("DOCBANK_MISSING_TEST_KEY", "")
 	missingFile := filepath.Join(t.TempDir(), "missing-key")

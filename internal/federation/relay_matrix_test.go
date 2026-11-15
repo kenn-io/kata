@@ -21,9 +21,11 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/testfix"
 )
 
 type relayMatrixNode struct {
@@ -67,16 +69,25 @@ func openRelayMatrixStore(t *testing.T, backend string, withVectors bool, opts .
 	t.Helper()
 	var store db.Storage
 	if backend == "sqlite" {
-		s, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"), opts...)
-		require.NoError(t, err)
-		store = s
+		path := filepath.Join(t.TempDir(), "kata.db")
+		if len(opts) == 0 {
+			// Most nodes take a copy of a schema-ready database instead of
+			// installing the schema again.
+			s, err := testfix.OpenSQLite(t.Context(), path)
+			require.NoError(t, err)
+			store = s
+		} else {
+			s, err := sqlitestore.Open(t.Context(), path, opts...)
+			require.NoError(t, err)
+			store = s
+		}
 	} else {
 		var dsn string
 		var cleanup func()
 		if withVectors {
 			dsn, cleanup = testenv.NewPostgresWithPgvectorContainer(t, t.Context())
 		} else {
-			dsn, cleanup = testenv.NewPostgresContainer(t, t.Context())
+			dsn, cleanup = pgstoretest.NewDatabase(t, t.Context())
 		}
 		t.Cleanup(cleanup)
 		s, err := pgstore.Open(t.Context(), dsn, opts...)
@@ -122,6 +133,14 @@ func enrollRelayMatrixReplica(t *testing.T, upstream, local *relayMatrixNode, al
 	var grant api.FederationEnrollmentOut
 	require.NoError(t, json.Unmarshal(raw, &grant))
 	require.NotNil(t, grant.Relay)
+	adoptRelayMatrixReplica(t, upstream, local, alias, grant)
+	require.NoError(t, federation.PinRelayRootAuthority(t.Context(), local.store, *grant.Relay))
+	_, err = local.store.SetRelayBindingConfig(t.Context(), local.project.ID, db.RelayBindingConfig{ProtocolVersion: grant.Relay.ProtocolVersion, BindingUID: grant.Relay.BindingUID, UpstreamInstanceUID: grant.Relay.UpstreamInstanceUID, AuthorityUID: grant.Relay.Root.AuthorityUID, HubPath: grant.Relay.HubPath, LocalActor: local.account, ServeDownstream: downstream, ResetEpoch: grant.Relay.ResetEpoch})
+	require.NoError(t, err)
+}
+
+func adoptRelayMatrixReplica(t *testing.T, upstream, local *relayMatrixNode, alias string, grant api.FederationEnrollmentOut) {
+	t.Helper()
 	project, err := local.store.CreateProject(t.Context(), alias)
 	require.NoError(t, err)
 	adopted, err := local.store.AdoptProjectIntoFederation(t.Context(), db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: upstream.http.URL, HubProjectID: upstream.project.ID, HubProjectUID: upstream.project.UID, Actor: grant.Actor, EmptyOnly: true})
@@ -131,9 +150,6 @@ func enrollRelayMatrixReplica(t *testing.T, upstream, local *relayMatrixNode, al
 	binding.Enabled = true
 	binding.PushEnabled = true
 	_, err = local.store.UpsertFederationBinding(t.Context(), binding)
-	require.NoError(t, err)
-	require.NoError(t, federation.PinRelayRootAuthority(t.Context(), local.store, *grant.Relay))
-	_, err = local.store.SetRelayBindingConfig(t.Context(), local.project.ID, db.RelayBindingConfig{ProtocolVersion: grant.Relay.ProtocolVersion, BindingUID: grant.Relay.BindingUID, UpstreamInstanceUID: grant.Relay.UpstreamInstanceUID, AuthorityUID: grant.Relay.Root.AuthorityUID, HubPath: grant.Relay.HubPath, LocalActor: local.account, ServeDownstream: downstream, ResetEpoch: grant.Relay.ResetEpoch})
 	require.NoError(t, err)
 	local.credential = config.FederationCredential{HubURL: upstream.http.URL, HubProjectID: upstream.project.ID, Token: grant.Token, Actor: grant.Actor, Capabilities: grant.Capabilities}
 	require.NoError(t, local.credentials.StoreFederationCredential(t.Context(), local.project.UID, local.credential))

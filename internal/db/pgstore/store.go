@@ -39,6 +39,7 @@ type Store struct {
 	installedFreshSchema         bool
 	servingConn                  *sql.Conn
 	federationLease              *federationRunnerLeaseState
+	federationLockSlots          chan struct{}
 	federationLockDB             *sql.DB
 	idempotencyDB                *sql.DB
 	exportQ                      exportQueryer

@@ -11,6 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestClaim_HelpOmitsWorkAttention(t *testing.T) {
+	help := string(executeRoot(t, newRootCmd(), "claim", "--help"))
+	assert.NotContains(t, help, "work.attention")
+}
+
 func TestClaim_Success(t *testing.T) {
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)

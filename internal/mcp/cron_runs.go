@@ -44,63 +44,63 @@ func registerCronRunTools(server *sdkmcp.Server, h toolHandlers) {
 	addCronTool(server, "kata.cron_run", "Read cron run evidence", "Read one independently attributed run observation; never launches work or claims issue ownership.", read, h.cronRun)
 	addCronTool(server, "kata.cron_run_observe", "Record cron run evidence", "Record evidence using a retained run UID and expected_revision (0 for new). Identical retries are replayed. Does not launch work, claim ownership, or change linked issue status.", toolHints(false, true, false), h.cronRunObserve)
 }
-func (h toolHandlers) cronRuns(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronRunsInput) (*sdkmcp.CallToolResult, *generated.ListCronRunsResponse, error) {
+func (h toolHandlers) cronRuns(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronRunsInput) (*sdkmcp.CallToolResult, generated.ListCronRunsResponse, error) {
 	limit := int64(defaultResultLimit)
 	if in.Limit != nil {
 		limit = *in.Limit
 	}
 	if limit < 1 || limit > maximumResultLimit {
-		return nil, nil, errors.New("limit must be from 1 through 100")
+		return nil, generated.ListCronRunsResponse{}, errors.New("limit must be from 1 through 100")
 	}
 	var err error
 	if in.BeforeUID != "" {
 		in.BeforeUID, err = cronUID(in.BeforeUID)
 		if err != nil {
-			return nil, nil, err
+			return nil, generated.ListCronRunsResponse{}, err
 		}
 	}
 	if in.JobUID != "" {
 		in.JobUID, err = cronUID(in.JobUID)
 		if err != nil {
-			return nil, nil, err
+			return nil, generated.ListCronRunsResponse{}, err
 		}
 	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ListCronRunsResponse{}, err
 	}
 	return cronResult(h.options.Client.ListCronRuns(ctx, &generated.ListCronRunsRequestOptions{PathParams: &generated.ListCronRunsPath{ProjectID: p.ID}, Query: &generated.ListCronRunsQuery{Limit: &limit, JobUID: optionalString(in.JobUID), BeforeUID: optionalString(in.BeforeUID)}}))
 }
-func (h toolHandlers) cronRun(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronIdentityInput) (*sdkmcp.CallToolResult, *generated.ShowCronRunResponse, error) {
+func (h toolHandlers) cronRun(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronIdentityInput) (*sdkmcp.CallToolResult, generated.ShowCronRunResponse, error) {
 	id, err := cronUID(in.UID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ShowCronRunResponse{}, err
 	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ShowCronRunResponse{}, err
 	}
 	return cronResult(h.options.Client.ShowCronRun(ctx, &generated.ShowCronRunRequestOptions{PathParams: &generated.ShowCronRunPath{ProjectID: p.ID, RunUID: id}}))
 }
-func (h toolHandlers) cronRunObserve(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronRunObserveInput) (*sdkmcp.CallToolResult, *generated.ObserveCronRunResponse, error) {
+func (h toolHandlers) cronRunObserve(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronRunObserveInput) (*sdkmcp.CallToolResult, generated.ObserveCronRunResponse, error) {
 	id, err := cronUID(in.UID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ObserveCronRunResponse{}, err
 	}
 	handle, err := teammate.Resolve(in.Teammate, h.options.Teammate)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ObserveCronRunResponse{}, err
 	}
 	raw, err := json.Marshal(in.Summary)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ObserveCronRunResponse{}, err
 	}
 	if _, err = cron.ParseSummary(raw); err != nil {
-		return nil, nil, err
+		return nil, generated.ObserveCronRunResponse{}, err
 	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ObserveCronRunResponse{}, err
 	}
 	return cronResult(h.options.Client.ObserveCronRun(ctx, &generated.ObserveCronRunRequestOptions{PathParams: &generated.ObserveCronRunPath{ProjectID: p.ID, RunUID: id}, Body: &generated.ObserveCronRunBody{Actor: &h.options.Actor, ExpectedRevision: in.ExpectedRevision, Teammate: optionalString(handle), JobUID: in.JobUID, DefinitionEventUID: in.DefinitionEventUID, WorkflowUID: in.WorkflowUID, WorkflowDefinitionEventUID: in.WorkflowDefinitionEventUID, IssueUID: in.IssueUID, OccurrenceKey: in.OccurrenceKey, ExecutorLabel: in.ExecutorLabel, Status: in.Status, Summary: in.Summary, StartedAt: in.StartedAt, EndedAt: in.EndedAt}}))
 }

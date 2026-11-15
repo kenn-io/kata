@@ -2,8 +2,11 @@ package pgstore
 
 import (
 	"context"
+	"testing"
 	"time"
 )
+
+const BatchProjectStatsSQLForTest = batchProjectStatsSQL
 
 // NewStoreForTesting builds a Store with the given dsn but no live *sql.DB.
 // EXPORTED FOR TESTS ONLY — production callers cannot reach this. Used by
@@ -38,3 +41,20 @@ func InstallRelayHistoryFullScanObserverForTest(store *Store, observe func()) fu
 	store.relayHistoryFullScanObserver = observe
 	return func() { store.relayHistoryFullScanObserver = previous }
 }
+
+const EventSelectForTest = eventSelect
+
+var ScanEventForTest = scanEvent
+
+// SetStatementTimeoutForTest shortens the per-statement limit for connections
+// opened after the call. A test that calls it must not run in parallel.
+func SetStatementTimeoutForTest(t testing.TB, timeout string) {
+	t.Helper()
+	old := statementTimeout
+	statementTimeout = timeout
+	t.Cleanup(func() { statementTimeout = old })
+}
+
+// FederationFoldEventsQueryForTest returns the SQL and arguments that the
+// federation fold runs for projectID, so cost tests can EXPLAIN it.
+var FederationFoldEventsQueryForTest = federationFoldEventsQuery

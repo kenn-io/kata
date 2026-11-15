@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"go.kenn.io/kata/internal/transcript"
@@ -18,7 +20,29 @@ type CloseTranscriptConfig struct {
 }
 
 // ReadCloseTranscriptConfig avoids daemon policy and credential resolution.
+// KATA_CLOSE_TRANSCRIPT_ENABLED overrides the file's enabled flag for one
+// process; false skips the file, so its transcript settings cannot warn.
 func ReadCloseTranscriptConfig() (CloseTranscriptConfig, error) {
+	value := strings.TrimSpace(os.Getenv("KATA_CLOSE_TRANSCRIPT_ENABLED"))
+	if value == "" {
+		return readCloseTranscriptFile()
+	}
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return CloseTranscriptConfig{}, errors.New("KATA_CLOSE_TRANSCRIPT_ENABLED must be true or false")
+	}
+	if !enabled {
+		return CloseTranscriptConfig{}, nil
+	}
+	cfg, err := readCloseTranscriptFile()
+	if err != nil {
+		return CloseTranscriptConfig{}, err
+	}
+	cfg.Enabled = true
+	return cfg, nil
+}
+
+func readCloseTranscriptFile() (CloseTranscriptConfig, error) {
 	path, err := DaemonConfigPath()
 	if err != nil {
 		return CloseTranscriptConfig{}, err

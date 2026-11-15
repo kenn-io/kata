@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -147,21 +148,30 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve MCP project scope: %w", err)
 			}
-			observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
+			observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved, false)
 			defer stopReporting()
-			server, err := mcpserver.New(ctx, mcpserver.Options{
-				Client:            apiClient,
-				ObserveToolCall:   observe,
-				LongRunningClient: longRunningAPIClient,
-				Scope:             scope,
-				ProjectID:         projectID,
-				ProjectName:       projectName,
-				Actor:             actor,
-				Teammate:          handle,
-				Version:           version.Version,
-				StorageAdmin:      storage,
-				EnableTokenAdmin:  enableTokenAdmin,
-			})
+			// Events forwards to the daemon, which owns every subscription, and is
+			// served only on stdio and the 2026-07-28 HTTP path. The legacy-session
+			// server never registers or advertises it.
+			admission := mcpserver.NewToolAdmission()
+			newServer := func(events bool) (*sdkmcp.Server, error) {
+				return mcpserver.New(ctx, mcpserver.Options{
+					Events:            events,
+					Admission:         admission,
+					Client:            apiClient,
+					ObserveToolCall:   observe,
+					LongRunningClient: longRunningAPIClient,
+					Scope:             scope,
+					ProjectID:         projectID,
+					ProjectName:       projectName,
+					Actor:             actor,
+					Teammate:          handle,
+					Version:           version.Version,
+					StorageAdmin:      storage,
+					EnableTokenAdmin:  enableTokenAdmin,
+				})
+			}
+			server, err := newServer(true)
 			if err != nil {
 				return err
 			}
@@ -174,7 +184,11 @@ func newMCPServeCmd() *cobra.Command {
 				if resolved.Network == "unix" {
 					backendURL = "unix://" + resolved.UnixSocket
 				}
-				return serveMCPHTTP(ctx, command.ErrOrStderr(), httpAddress, httpToken, server, filepath.Join(home, "mcp"), backendURL)
+				legacyServer, err := newServer(false)
+				if err != nil {
+					return err
+				}
+				return serveMCPHTTP(ctx, command.ErrOrStderr(), httpAddress, httpToken, legacyServer, server, filepath.Join(home, "mcp"), backendURL)
 			}
 			transport := mcpserver.NewStdioTransport(
 				asReadCloser(command.InOrStdin()),
@@ -217,12 +231,15 @@ func newMCPAPIClients(ctx context.Context, resolved client.ResolvedDaemon, httpC
 	return apiClient, longRunningAPIClient, err
 }
 
-func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client, target client.ResolvedDaemon) (func(), context.CancelFunc) {
+// drainOnStop lets modern request cleanup finish queued observations within one second.
+func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client, target client.ResolvedDaemon, drainOnStop bool) (func(), context.CancelFunc) {
 	if !posthog.Eligible("KATA", version.Version) {
 		return nil, func() {}
 	}
 	reportCtx, cancel := context.WithCancel(ctx)
 	queue := make(chan struct{}, 128)
+	var queueMu sync.Mutex
+	queueStopped := false
 	marker := client.TelemetryDayMarkerPath(target, "agent-full-")
 	var gate client.TelemetryGate
 	done := make(chan struct{})
@@ -233,8 +250,8 @@ func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client,
 			select {
 			case <-reportCtx.Done():
 				return
-			case <-queue:
-				if reportCtx.Err() != nil {
+			case _, ok := <-queue:
+				if !ok || reportCtx.Err() != nil {
 					return
 				}
 				day := cliUseNow().UTC().Format(time.DateOnly)
@@ -255,12 +272,35 @@ func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client,
 		}
 	}()
 	observe := func() {
+		queueMu.Lock()
+		defer queueMu.Unlock()
+		if queueStopped {
+			return
+		}
 		select {
 		case queue <- struct{}{}:
 		default:
 		}
 	}
-	return observe, func() { cancel(); <-done }
+	return observe, func() {
+		queueMu.Lock()
+		if !queueStopped {
+			queueStopped = true
+			if drainOnStop {
+				close(queue)
+			} else {
+				cancel()
+			}
+		}
+		queueMu.Unlock()
+		if drainOnStop {
+			// One deadline bounds the entire queue, including an in-flight report.
+			timer := time.AfterFunc(time.Second, cancel)
+			defer timer.Stop()
+		}
+		<-done
+		cancel()
+	}
 }
 
 func startMCPIdleKeepalive(

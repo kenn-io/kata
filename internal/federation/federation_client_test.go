@@ -24,26 +24,26 @@ func TestFederationClientPollProjectEvents(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		assert.Equal(t, "/api/v1/projects/42/federation/events", r.URL.Path)
-		assert.Equal(t, "7", r.URL.Query().Get("after_id"))
+		assert.Equal(t, "1251852", r.URL.Query().Get("after_id"))
 		assert.Equal(t, "2", r.URL.Query().Get("limit"))
 		require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
 			Events: []api.EventEnvelope{
-				{EventID: 8, EventUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Type: "issue.snapshot"},
+				{EventID: 1251853, EventUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Type: "issue.snapshot"},
 			},
-			NextAfterID: 8,
+			NextAfterID: 1251853,
 		}))
 	}))
 	t.Cleanup(srv.Close)
 
 	client, err := NewClient(t.Context(), srv.URL, "hub-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	body, err := client.PollProjectEvents(t.Context(), 42, 7, 2)
+	body, err := client.PollProjectEvents(t.Context(), 42, 1251852, 2)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Bearer hub-token", gotAuth)
 	require.Len(t, body.Events, 1)
-	assert.Equal(t, int64(8), body.Events[0].EventID)
-	assert.Equal(t, int64(8), body.NextAfterID)
+	assert.Equal(t, int64(1251853), body.Events[0].EventID)
+	assert.Equal(t, int64(1251853), body.NextAfterID)
 }
 
 func TestFederationClientSignsRelayBatchAbovePreviousBodyLimit(t *testing.T) {

@@ -133,9 +133,8 @@ func parseAuditWindow(sinceIn, untilIn string) (since, until string, err error) 
 	return since, until, nil
 }
 
-// closeEventPayload is the wire shape the daemon writes into the
-// payload column for issue.closed events. Defined locally because the
-// db package does not export it.
+// closeEventPayload reads the fields the close audit needs from stored
+// issue.closed event payloads. Storage owns the full event shape.
 //
 // ParentUID is the parent's immutable UID at close time. ParentShortID
 // is the close-time display value, retained as a fallback when the
@@ -149,7 +148,7 @@ func parseAuditWindow(sinceIn, untilIn string) (since, until string, err error) 
 type closeEventPayload struct {
 	Reason                       string            `json:"reason"`
 	Message                      string            `json:"message,omitempty"`
-	Evidence                     []api.Evidence    `json:"evidence,omitempty"`
+	Evidence                     []db.Evidence     `json:"evidence,omitempty"`
 	OverruledRefutations         []string          `json:"overruled_refutations,omitempty"`
 	VerificationEndpointProjects map[string]string `json:"verification_endpoint_projects,omitempty"`
 	ParentUID                    *string           `json:"parent_uid,omitempty"`
@@ -283,9 +282,12 @@ func buildAuditRows(
 		row.OverruledRefutations = p.OverruledRefutations
 		row.VerificationEndpointProjects = p.VerificationEndpointProjects
 		for _, e := range p.Evidence {
+			if e.Type == "file" {
+				row.FileEvidence = append(row.FileEvidence, api.RetainedEvidence(e))
+			}
 			row.EvidenceTypes = append(row.EvidenceTypes, string(e.Type))
-			if e.Type == api.EvidenceConfirmed || e.Type == api.EvidenceRefuted {
-				row.VerdictEvidence = append(row.VerdictEvidence, e)
+			if e.Type == string(api.EvidenceConfirmed) || e.Type == string(api.EvidenceRefuted) {
+				row.VerdictEvidence = append(row.VerdictEvidence, api.Evidence{Type: api.EvidenceType(e.Type), Comment: e.Comment})
 			}
 		}
 		// Spec §5: legacy / pre-v1 closes have no evidence and surface

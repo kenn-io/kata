@@ -18,6 +18,7 @@ import (
 
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/searchhint"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -190,8 +191,13 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		results = results[:limit]
 		truncated = true
 	}
+	var hints []searchhint.Hint
+	if len(searches) > 0 {
+		hints = searchhint.EmptyLexical(query, effectiveMode, len(results), input.Cursor == "")
+	}
 	project, outputProjects := outputProjectScope(projects)
 	return successResult(), SearchOutput{
+		Hints:          hints,
 		Project:        project,
 		Projects:       outputProjects,
 		Query:          query,
@@ -431,7 +437,13 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
-	return successResult(), ShowOutput{
+	files := []generated.RetainedEvidence{}
+	for _, e := range response.CloseEvidence {
+		if e.Type == "file" {
+			files = append(files, e)
+		}
+	}
+	return successResult(), ShowOutput{FileEvidence: files, CloseEventUID: response.CloseEventUID,
 		Verification: response.Verification,
 		Project:      project,
 		Issue: IssueDetail{
@@ -857,7 +869,14 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 			return nil, MutationOutput{}, err
 		}
 	}
-	response, err := h.options.Client.CloseIssue(ctx, &generated.CloseIssueRequestOptions{
+	closeClient := h.options.Client
+	for _, e := range input.Evidence {
+		if e.Type == "file" {
+			closeClient = h.fileOperationClient()
+			break
+		}
+	}
+	response, err := closeClient.CloseIssue(ctx, &generated.CloseIssueRequestOptions{
 		PathParams: &generated.CloseIssuePath{ProjectID: project.ID, Ref: ref},
 		Body: &generated.CloseIssueBody{
 			Actor:         &h.options.Actor,
@@ -1305,7 +1324,13 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 	if qualified == "" {
 		qualified = project.Name + "#" + issue.ShortID
 	}
+	projectUID := project.UID
+	if issue.ProjectUID != nil {
+		projectUID = *issue.ProjectUID
+	}
 	return IssueSummary{
+		oversized:           issue.Oversized != nil && *issue.Oversized,
+		projectUID:          projectUID,
 		Author:              issue.Author,
 		AccountableActor:    issue.AccountableActor,
 		SourceActor:         issue.SourceActor,
@@ -1335,7 +1360,13 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 }
 
 func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
+	projectUID := ""
+	if issue.ProjectUID != nil {
+		projectUID = *issue.ProjectUID
+	}
 	return IssueSummary{
+		oversized:        issue.Oversized != nil && *issue.Oversized,
+		projectUID:       projectUID,
 		Author:           issue.Author,
 		AccountableActor: issue.AccountableActor,
 		SourceActor:      issue.SourceActor,
@@ -1574,14 +1605,20 @@ func linkPeerSummary(peer *generated.LinkPeer) *LinkPeerSummary {
 func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdentity, input Evidence) (generated.Evidence, error) {
 	typeName := strings.TrimSpace(input.Type)
 	allowed := map[string]bool{
-		"commit": true, "pr": true, "test": true, "reviewed-paths": true,
+		"file": true, "attachment": true, "commit": true, "pr": true, "test": true, "reviewed-paths": true,
 		"external": true, "no-change-audit": true, "duplicate-of": true, "superseded-by": true, "confirmed": true, "refuted": true,
 	}
 	if !allowed[typeName] {
 		return generated.Evidence{}, fmt.Errorf("unknown type %q", typeName)
 	}
+	if typeName != "file" && input.File != nil {
+		return generated.Evidence{}, errors.New("file payload requires file type")
+	}
 	paths := compactStrings(input.Paths)
 	result := generated.Evidence{Type: typeName, Paths: paths}
+	if strings.TrimSpace(input.AttachmentID) != "" {
+		result.AttachmentID = new(input.AttachmentID)
+	}
 	result.Sha = optionalString(input.SHA)
 	result.URL = optionalString(input.URL)
 	result.Command = optionalString(input.Command)
@@ -1596,10 +1633,29 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 		result.IssueRef = &target.IssueUID
 	}
 	switch typeName {
+	case "file":
+		if input.File == nil {
+			return generated.Evidence{}, errors.New("file evidence requires file reference")
+		}
+		if err := input.File.ValidateRequest(); err != nil {
+			return generated.Evidence{}, err
+		}
+		raw, err := json.Marshal(input)
+		if err != nil {
+			return generated.Evidence{}, err
+		}
+		if err = json.Unmarshal(raw, &result); err != nil {
+			return generated.Evidence{}, err
+		}
 	case "confirmed", "refuted":
 		if result.Comment == nil {
 			return generated.Evidence{}, fmt.Errorf("%s evidence requires comment", typeName)
 		}
+	case "attachment":
+		if result.AttachmentID == nil {
+			return generated.Evidence{}, errors.New("attachment evidence requires attachment_id")
+		}
+
 	case "commit":
 		if result.Sha == nil {
 			return generated.Evidence{}, errors.New("commit evidence requires sha")

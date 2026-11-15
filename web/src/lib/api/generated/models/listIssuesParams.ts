@@ -13,6 +13,10 @@ export type ListIssuesParams = {
    * Count all matching issues, ignoring cursor and limit
    */
   include_total?: boolean
+  /**
+   * Leave out issue bodies and keep only the metadata keys meta filters name, so a large issue cannot make the page too large to read
+   */
+  compact?: boolean
   status?: ListIssuesStatus
   /**
    * exact priority filter (0..4 or none for unset); empty = no filter

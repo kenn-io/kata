@@ -1,7 +1,7 @@
 ---
 title: Agent output format
 description: Reference Kata's compact, stable agent output format and its command-specific response contracts.
-last_edited: 2026-10-12
+last_edited: 2026-11-11
 ---
 
 # Agent output format
@@ -42,6 +42,10 @@ Agent output is plain UTF-8 with no ANSI styling. Its shape is stable:
 - In non-quiet agent mode the first token is always `OK` for success or `ERR`
   for failure. Success goes to stdout; failure goes to stderr with a nonzero
   exit code.
+- `kata daemon status` is the one exception. It always prints its `OK daemon`
+  report on stdout. When the selected daemon is not ready, it also writes an
+  `ERR status` line to stderr and exits nonzero. Check its exit code, not the
+  first token, to decide readiness.
 - The second token is the command or record kind: `create`, `comment`, `list`,
   `show`, `event`, and so on. The literal `kata` appears only on a top-level
   parse error before a subcommand runs.
@@ -82,6 +86,8 @@ Hint: run "kata init --project <name>" in the workspace root, or pass --project 
 - Create idempotency and look-alike conflicts append the existing issues'
   qualified refs, for example
   `ERR create conflict: 1 existing issue matches this title (example-project#abc4)`.
+  Human-mode look-alike refusals include the same refs after the message,
+  for example `kata: 1 existing issue matches this title (example-project#abc4)`.
 - `<kind>` reuses the CLI error taxonomy: `usage`, `validation`, `not_found`,
   `conflict`, `confirm`, `daemon_unavailable`, `checks_failed`, `internal`.
   `checks_failed` means `kata doctor` completed and found failed checks;

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -71,6 +72,20 @@ func TestSearchStatusTracksCloseAndReopenWithoutReembedding(t *testing.T) {
 // A status-only filter must trigger deep retrieval and report an exhausted
 // candidate budget just as a label filter does.
 func TestSearchStatusCandidateLimits(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "target issue", Body: "x", Author: "a",
+	})
+	require.NoError(t, err)
+	idx := openTestVectorIndex(t)
+	seedEmb := labelAxisEmbedClient(t)
+	emb := fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	closed := 0
+	// The rows grow one corpus, so each sees the same issues its own store held.
 	for _, tc := range []struct {
 		name    string
 		closed  int
@@ -81,25 +96,18 @@ func TestSearchStatusCandidateLimits(t *testing.T) {
 		{name: "beyond ceiling", closed: knnDeepLimit + 1, bounded: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := t.Context()
-			store := newReconcilerTestStore(t)
-			project, err := store.CreateProject(ctx, "spoke-project")
-			require.NoError(t, err)
-			target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
-				ProjectID: project.ID, Title: "target issue", Body: "x", Author: "a",
-			})
-			require.NoError(t, err)
-			for i := range tc.closed {
-				issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
-					ProjectID: project.ID, Title: fmt.Sprintf("distractor %d", i), Body: "x", Author: "a",
-				})
-				require.NoError(t, err)
-				_, _, _, err = store.CloseIssue(ctx, issue.ID, "done", "a", "", nil)
-				require.NoError(t, err)
+			items := make([]db.ImportItem, tc.closed-closed)
+			for i := range items {
+				n := closed + i
+				items[i] = db.ImportItem{
+					ExternalID: fmt.Sprint(n), Title: fmt.Sprintf("distractor %d", n), Body: "x", Author: "a",
+					Status: "closed", ClosedReason: new("done"), CreatedAt: base, UpdatedAt: base, ClosedAt: &base,
+				}
 			}
-			idx := openTestVectorIndex(t)
-			fillGeneration(ctx, t, store, idx, labelAxisEmbedClient(t))
-			emb := fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})
+			_, _, err := store.ImportBatch(ctx, db.ImportBatchParams{ProjectID: project.ID, Source: "fixture", Actor: "a", Items: items})
+			require.NoError(t, err)
+			closed = tc.closed
+			fillGeneration(ctx, t, store, idx, seedEmb)
 			for _, mode := range []string{"semantic", "hybrid", "auto"} {
 				res, err := hybridSearch(ctx, store, idx, emb, hybridParams{
 					ProjectID: project.ID, Query: "semantic query", Limit: 10, Requested: mode, Status: "open",

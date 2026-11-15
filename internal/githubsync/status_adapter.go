@@ -31,9 +31,10 @@ func (a *adapter) OpenStatus(ctx context.Context, b db.IssueSyncBinding, _ time.
 }
 
 type githubStatusRun struct {
-	session  StatusSession
-	config   Config
-	locators StatusLocatorSession
+	session    StatusSession
+	config     Config
+	locators   StatusLocatorSession
+	prefetched map[string]StatusResult
 }
 
 func statusMappingNumber(m db.IssueStatusMapping) (int, error) {
@@ -43,7 +44,24 @@ func statusMappingNumber(m db.IssueStatusMapping) (int, error) {
 	}
 	return number, nil
 }
+func (r *githubStatusRun) PrefetchStatuses(ctx context.Context, mappings []db.IssueStatusMapping) {
+	batch, ok := r.session.(StatusBatchSession)
+	if !ok {
+		return
+	}
+	targets := make([]StatusLocator, 0, len(mappings))
+	for _, m := range mappings {
+		if number, err := statusMappingNumber(m); err == nil {
+			targets = append(targets, StatusLocator{ExternalID: m.Mapping.ExternalID, Number: number})
+		}
+	}
+	r.prefetched = batch.ReadStatuses(ctx, r.config, targets)
+}
+
 func (r *githubStatusRun) ReadStatus(ctx context.Context, m db.IssueStatusMapping) (issuesync.StatusObservation, error) {
+	if result, ok := r.prefetched[m.Mapping.ExternalID]; ok {
+		return result.Observation, result.Err
+	}
 	number, err := statusMappingNumber(m)
 	if err != nil {
 		return issuesync.StatusObservation{}, err

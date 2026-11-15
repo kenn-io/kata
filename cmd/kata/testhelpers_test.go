@@ -23,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/testfix"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 	gitcmd "go.kenn.io/kit/git/cmd"
@@ -35,6 +36,8 @@ func setupKataEnv(t *testing.T) string {
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_DB", filepath.Join(tmp, "kata.db"))
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	return tmp
 }
 
@@ -42,7 +45,7 @@ func setupKataEnv(t *testing.T) string {
 func openKataTestDB(t *testing.T, path string) *sqlitestore.Store {
 	t.Helper()
 	ctx := t.Context()
-	d, err := sqlitestore.Open(ctx, path)
+	d, err := testfix.OpenSQLite(ctx, path)
 	require.NoError(t, err)
 	return d
 }
@@ -524,11 +527,12 @@ func rootSubcommands() map[string]*cobra.Command {
 // care about decode to their zero value.
 type errorEnvelopeForTest struct {
 	Error struct {
-		Kind     string `json:"kind"`
-		Code     string `json:"code"`
-		Message  string `json:"message"`
-		Hint     string `json:"hint"`
-		ExitCode int    `json:"exit_code"`
+		Kind     string          `json:"kind"`
+		Code     string          `json:"code"`
+		Message  string          `json:"message"`
+		Hint     string          `json:"hint"`
+		ExitCode int             `json:"exit_code"`
+		Data     json.RawMessage `json:"data"`
 	} `json:"error"`
 }
 

@@ -24,8 +24,7 @@ func newClaimCmd() *cobra.Command {
 the client-selected actor when present. Use kata status <ref> to check the
 effective actor and current owner; kata whoami shows only the client-selected actor.
 Refuses when another actor owns it unless --force.
---ttl releases the claim after 1m-24h. After claiming, mark the work tracked:
-  kata meta set <ref> work.attention ok
+--ttl releases the claim after 1m-24h.
 kata assign sets a different owner; kata unassign --expect-owner releases.`,
 		Example: `  kata claim abc4 --agent
   kata claim abc4 --if-unowned --ttl 2h --comment "starting on the Safari path" --agent`,

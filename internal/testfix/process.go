@@ -13,9 +13,9 @@ import (
 	"testing"
 )
 
-// RunIsolated gives a test package its own application and user home. Child test
-// processes retain their parent's explicit fixture setup.
-func RunIsolated(m *testing.M) int {
+// RunIsolated gives a test package its own application home and temporary files.
+// Child test processes retain their parent's explicit fixture setup.
+func RunIsolated(m *testing.M) (code int) {
 	if os.Getenv("KATA_TEST_HOME") != "" {
 		return m.Run()
 	}
@@ -39,12 +39,28 @@ func RunIsolated(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "decode test toolchain: %v\n", err)
 		return 1
 	}
-	home, err := os.MkdirTemp("", "kata-test-home-")
+	// Process-scoped files such as hook locks do not belong to an individual
+	// t.TempDir. Keep them under one short root that is removed after the suite.
+	temporary, err := os.MkdirTemp("", "kt-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create test temporary directory: %v\n", err)
+		return 1
+	}
+	defer func() {
+		if err := os.RemoveAll(temporary); err != nil {
+			fmt.Fprintf(os.Stderr, "remove test temporary directory: %v\n", err)
+			code = 1
+		}
+	}()
+	home, err := os.MkdirTemp(temporary, "home-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create test home: %v\n", err)
 		return 1
 	}
-	environment := map[string]string{"HOME": home, "USERPROFILE": home, "KATA_HOME": home, "KATA_TEST_HOME": home}
+	environment := map[string]string{
+		"HOME": home, "USERPROFILE": home, "KATA_HOME": home, "KATA_TEST_HOME": home,
+		"TMPDIR": temporary, "TMP": temporary, "TEMP": temporary,
+	}
 	maps.Copy(environment, toolchain)
 	// Keep the selected Go executable when HOME changes a tool manager's lookup.
 	environment["PATH"] = filepath.Join(toolchain["GOROOT"], "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
@@ -63,7 +79,7 @@ func RunIsolated(m *testing.M) int {
 			return 1
 		}
 	}
-	code := m.Run()
+	code = m.Run()
 	if err := os.RemoveAll(home); err != nil {
 		fmt.Fprintf(os.Stderr, "remove test home: %v\n", err)
 		code = 1

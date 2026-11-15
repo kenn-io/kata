@@ -160,7 +160,7 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), Principal{
-				Kind: PrincipalStaticToken,
+				Kind: PrincipalStaticToken, Subject: staticTokenSubject(p.Token),
 			})))
 		})
 	}

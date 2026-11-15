@@ -326,7 +326,7 @@ export class RefreshScheduler {
   }
 }
 
-function waitForReconnect(delay: number, signal: AbortSignal): Promise<void> {
+export function waitForReconnect(delay: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, delay)
     signal.addEventListener(

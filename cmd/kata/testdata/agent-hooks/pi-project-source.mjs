@@ -20,6 +20,6 @@ factory(pi);
 assert.equal(typeof beforeAgentStart, "function");
 const event = { systemPromptOptions: { sections: {} } };
 await beforeAgentStart(event, { cwd, ui: { notify() {} } });
-assert.equal(event.systemPromptOptions.sections.kata_contract, "workspace contract");
+assert.equal(event.systemPromptOptions.sections.kata_contract, "workspace contract\nsession: " + cwd);
 assert.notEqual(event.systemPromptOptions.sections.kata_contract, "nested decoy");
 console.log("project workspace: " + workspace);

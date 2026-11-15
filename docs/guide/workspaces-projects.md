@@ -1,7 +1,7 @@
 ---
 title: Workspaces and projects
 description: Understand how workspaces resolve Kata projects and configure local or remote daemon targets.
-last_edited: 2026-09-15
+last_edited: 2026-11-08
 ---
 
 # Workspaces and projects
@@ -156,11 +156,17 @@ operations so you know which project and aliases are affected.
 The committed binding file is intentionally small:
 
 ```toml
+# This repository tracks its work in kata.
+# Coding agents: read `kata quickstart --format contract` before changing code here.
 version = 1
 
 [project]
 name = "product"
 ```
+
+Rerunning `kata init` on a binding that lacks the contract command adds these
+two lines above its existing contents and changes nothing else in the file.
+If the header can't be written, init reports a warning and continues setup.
 
 Do not put tokens or host-specific daemon URLs in `.kata.toml`.
 

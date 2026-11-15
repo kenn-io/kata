@@ -8,8 +8,10 @@ const creationCursorTimeFormat = "2006-01-02T15:04:05.000000000"
 // precision. SQLite's date functions round fractions to milliseconds, so only
 // the whole-second part goes through strftime. Imports use Go's time.Time text
 // form, which can include a numeric offset and zone abbreviation; ordinary
-// writes use RFC3339. Neither representation needs a persisted change.
+// writes use RFC3339.
 // alias is a query-local identifier supplied by this package, never user input.
+// Both creation-order indexes in schema.sql copy this expression over created_at.
+// TestCreationOrderPagesUseCreatedIndex catches drift between them.
 func creationKeySQL(alias string) string {
 	stored := "replace(" + alias + ".created_at, ' +0000 UTC', 'Z')"
 	goOffset := fmt.Sprintf("max(instr(%[1]s, ' +'), instr(%[1]s, ' -'))", stored)

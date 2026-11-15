@@ -4,7 +4,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { tick } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
+vi.mock('./lib/kata/projection', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./lib/kata/projection')>()
+  return { ...original, normalizeKataUISnapshot: vi.fn(original.normalizeKataUISnapshot) }
+})
+
 import App from './App.svelte'
+import { normalizeKataUISnapshot } from './lib/kata/projection'
 import { preferencesStorageKey } from './lib/state/preferences'
 
 describe('App', () => {
@@ -21,6 +27,211 @@ describe('App', () => {
     vi.unstubAllGlobals()
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('shows a clicked project from the loaded list and keeps it current', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    history.replaceState(null, '', '/kata?view=all-open')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const otherProjectUID = '01J00000000000000000000003'
+    const initial = snapshot()
+    initial.catalog.push({
+      project: {
+        active: true,
+        id: 8,
+        uid: otherProjectUID,
+        name: 'other-project',
+        metadata: { area: 'Personal' },
+        revision: 1,
+        created_at: '2026-08-01T09:00:00.000Z',
+      },
+      stats: { Open: 1, Closed: 0, LastEventAt: '2026-08-01T12:00:00.000Z' },
+    })
+    const otherIssue = (id: number, uid: string, shortID: string, title: string) => ({
+      ...initial.collection[0]!,
+      id,
+      uid,
+      project_id: 8,
+      project_uid: otherProjectUID,
+      project_name: 'other-project',
+      short_id: shortID,
+      qualified_id: `other-project#${shortID}`,
+      title,
+    })
+    initial.collection.push(otherIssue(2, '01J00000000000000000000004', 'b2', 'Other issue'))
+    const refreshed = structuredClone(initial)
+    refreshed.cursor = 13
+    refreshed.catalog[1]!.stats.Open = 2
+    refreshed.collection.push(
+      otherIssue(3, '01J00000000000000000000005', 'c3', 'Issue from another client'),
+    )
+    const snapshotRequests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotRequests.push(request)
+          if (snapshotRequests.length === 1) {
+            return Response.json(initial, { headers: { ETag: '"snapshot-1"' } })
+          }
+          return Response.json(refreshed, { headers: { ETag: '"snapshot-2"' } })
+        }
+        return Response.json({ error: { code: 'not_found' } }, { status: 404 })
+      }),
+    )
+    render(App)
+    await screen.findByRole('button', { name: /Other issue/ })
+    await waitFor(() => expect(snapshotRequests).toHaveLength(1))
+
+    const projectButton = [
+      ...document.querySelectorAll<HTMLButtonElement>('.project-select-button'),
+    ].find((button) => button.textContent?.includes('other-project'))!
+    await fireEvent.click(projectButton)
+
+    expect(new URL(window.location.href).searchParams.get('scope')).toBe(otherProjectUID)
+    expect(screen.getByRole('heading', { name: 'other-project' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: /Other issue/ })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /Example issue/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled')).not.toBe(
+      'true',
+    )
+    expect(snapshotRequests).toHaveLength(1)
+
+    await fireEvent(window, new Event('focus'))
+
+    expect(await screen.findByRole('button', { name: /Issue from another client/ })).not.toBeNull()
+    expect(screen.queryByRole('button', { name: /Example issue/ })).toBeNull()
+    const refresh = new URL(snapshotRequests[1]!.url)
+    expect(refresh.searchParams.get('project_uid')).toBeNull()
+    expect(snapshotRequests[1]!.headers.get('If-None-Match')).toBe('"snapshot-1"')
+  })
+
+  it('blocks a task-limited New task after leaving the task for its project list', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const projectUID = '01J00000000000000000000002'
+    const issueUID = '01J00000000000000000000001'
+    history.replaceState(null, '', `/kata?view=all-open&issue=${issueUID}`)
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const scoped = {
+      ...snapshot(),
+      capabilities: {
+        writable: true,
+        updates: 'poll',
+        actor_policy: 'token',
+        token_audit_read: false,
+        scope: { kind: 'issue_subtree', project_uid: projectUID, root_issue_uid: issueUID },
+        expires_at: '2099-01-01T00:00:00Z',
+        allowed_actions: ['issue.read', 'issue.create_child'],
+        close_requires_evidence: true,
+      },
+    }
+    const selected = {
+      ...scoped,
+      selected: {
+        state: 'available',
+        issue: { ...scoped.collection[0]! },
+        comments: [],
+        labels: [],
+        links: [],
+        recurrences: [],
+        history: [],
+      },
+    }
+    let snapshotReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = new URL(requestOf(input, init).url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+          // Later reads stay in flight, so the list keeps showing the task's snapshot.
+          if (snapshotReads > 1) return new Promise<Response>(() => {})
+          return Response.json(selected, { headers: { ETag: '"snapshot-1"' } })
+        }
+        return Response.json({ error: { code: 'not_found' } }, { status: 404 })
+      }),
+    )
+    render(App)
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
+    )
+
+    const projectButton = [
+      ...document.querySelectorAll<HTMLButtonElement>('.project-select-button'),
+    ].find((button) => button.textContent?.includes('example-project'))!
+    await fireEvent.click(projectButton)
+
+    expect(new URL(window.location.href).searchParams.get('issue')).toBeNull()
+    expect(
+      screen
+        .getByRole('button', {
+          name: 'New task',
+          description: 'Open a task first. This credential can only add subtasks.',
+        })
+        .getAttribute('aria-disabled'),
+    ).toBe('true')
+  })
+
+  it('keeps the normalized collection when focus revalidation returns unchanged', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const requests: Request[] = []
+    let referencesRequested = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname.endsWith('/references')) {
+          referencesRequested = true
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        requests.push(request)
+        if (request.headers.get('If-None-Match') === '"snapshot-1"')
+          return new Response(null, { status: 304 })
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+    render(App)
+    await screen.findByRole('button', { name: /Example issue/ })
+    await waitFor(() => expect(referencesRequested).toBe(true))
+    await tick()
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
+    expect(normalizations).toBeGreaterThan(0)
+    await fireEvent(window, new Event('focus'))
+    await waitFor(() => expect(requests).toHaveLength(2))
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).not.toBe('true'),
+    )
+    await tick()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
   })
 
   it.each([
@@ -537,6 +748,67 @@ describe('App', () => {
     expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
   })
 
+  it.each([false, true])(
+    'recovers an initial daemon roster failure, exhausted: %s',
+    async (exhausted) => {
+      vi.useFakeTimers()
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      let reads = 0
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const target = new URL(String(input), window.location.origin)
+          if (target.pathname === '/api/v1/ui/daemons') {
+            reads++
+            return reads <= (exhausted ? 4 : 1)
+              ? new Response('', { status: 503 })
+              : Response.json(daemonRoster())
+          }
+          if (target.pathname.endsWith('/api/v1/ui/snapshot'))
+            return Response.json(snapshot(), { headers: { ETag: '"snapshot"' } })
+          return Response.json({})
+        }),
+      )
+      render(App)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(screen.queryByRole('button', { name: 'Retry daemon roster' })).toBeNull()
+      await vi.advanceTimersByTimeAsync(exhausted ? 7000 : 1000)
+      await tick()
+      if (exhausted) {
+        await fireEvent.click(screen.getByRole('button', { name: 'Retry daemon roster' }))
+        await vi.advanceTimersByTimeAsync(0)
+        await tick()
+      }
+      expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+      expect(reads).toBe(exhausted ? 5 : 2)
+    },
+  )
+
+  it('cancels pending daemon roster retries on unmount', async () => {
+    vi.useFakeTimers()
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let reads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (new URL(String(input), window.location.origin).pathname === '/api/v1/ui/daemons')
+          reads++
+        return new Response('', { status: 503 })
+      }),
+    )
+    render(App)
+    await vi.advanceTimersByTimeAsync(0)
+    cleanup()
+    await vi.advanceTimersByTimeAsync(7000)
+    expect(reads).toBe(1)
+  })
+
   it('does not fall through to local authority when the initial roster is empty', async () => {
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -660,7 +932,7 @@ describe('App', () => {
         }
         if (target.pathname === '/api/v1/ui/daemons') {
           rosterReads += 1
-          if (rosterReads === 1) return new Response('', { status: 503 })
+          if (rosterReads === 1) return new Response('', { status: 403 })
           markRosterRequested()
           return rosterResponse
         }
@@ -1190,42 +1462,42 @@ describe('App', () => {
     expect(paths).toEqual(['/api/v1/ui/daemons'])
   })
 
-  it('recovers an initial snapshot failure through an in-app retry', async () => {
-    history.replaceState(null, '', '/kata?view=all-open#direct=1')
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    let snapshotReads = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const target = new URL(String(input), window.location.origin)
-        if (target.pathname !== '/api/v1/ui/snapshot') {
-          return new Response('{}', {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        }
-        snapshotReads += 1
-        if (snapshotReads === 1) return new Response('', { status: 503 })
-        return new Response(JSON.stringify(snapshot()), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
-        })
-      }),
-    )
-
-    render(App)
-
-    const retry = await screen.findByRole('button', { name: 'Retry Kata snapshot' })
-    expect(screen.getByRole('alert').textContent).toContain('Snapshot unavailable')
-    await fireEvent.click(retry)
-
-    expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
-    expect(snapshotReads).toBe(2)
-    expect(screen.queryByRole('button', { name: 'Retry Kata snapshot' })).toBeNull()
-  })
+  it.each([false, true])(
+    'recovers an initial snapshot failure, exhausted: %s',
+    async (exhausted) => {
+      vi.useFakeTimers()
+      history.replaceState(null, '', '/kata?view=all-open#direct=1')
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      let snapshotReads = 0
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const target = new URL(String(input), window.location.origin)
+          if (target.pathname !== '/api/v1/ui/snapshot') return Response.json({})
+          snapshotReads++
+          if (snapshotReads <= (exhausted ? 4 : 1)) return new Response('', { status: 503 })
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }),
+      )
+      render(App)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+      await vi.advanceTimersByTimeAsync(exhausted ? 7000 : 1000)
+      await tick()
+      if (exhausted) {
+        expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
+        await fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+        await vi.advanceTimersByTimeAsync(0)
+        await tick()
+      }
+      expect(screen.getByRole('button', { name: /Example issue/ })).not.toBeNull()
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+      expect(snapshotReads).toBe(exhausted ? 5 : 2)
+    },
+  )
 
   it('fences browser authority when project creation rejects the session', async () => {
     history.replaceState(null, '', '/kata#direct=1')
@@ -1617,6 +1889,76 @@ describe('App', () => {
     expect(sessionStorage.getItem('kata.web.session.v1')).toContain('admin-session')
   })
 
+  it.each(['accepted', 'rejected-session'] as const)(
+    'turns on search directly for a selected local daemon and handles %s',
+    async (outcome) => {
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const off = {
+        provider: 'none',
+        can_change: true,
+        download_bytes: 289184780,
+        ollama_available: false,
+      }
+      const posts: Request[] = []
+      let statusPath: string | undefined
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          const target = new URL(request.url)
+          if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+          if (target.pathname === '/api/v1/ui/daemons') {
+            return Response.json({
+              daemons: daemonRoster().daemons.map((daemon) => ({ ...daemon, local: true })),
+            })
+          }
+          if (target.pathname.endsWith('/references')) {
+            return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+          }
+          if (target.pathname.endsWith('/embeddings/local')) {
+            if (request.method === 'POST') {
+              posts.push(request)
+              return outcome === 'accepted'
+                ? Response.json(
+                    { ...off, can_change: false, job: { state: 'restart' } },
+                    { status: 202 },
+                  )
+                : new Response('', { status: 401 })
+            }
+            statusPath = target.pathname
+            return Response.json(off)
+          }
+          if (target.pathname.endsWith('/snapshot')) {
+            return Response.json(snapshot(), {
+              headers: { ETag: '"snapshot"', 'X-Kata-Web-Authentication': 'login' },
+            })
+          }
+          throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+        }),
+      )
+      render(App)
+      await screen.findByRole('button', { name: /Example issue/ })
+      await fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+      await fireEvent.click(await screen.findByRole('button', { name: 'Turn on' }))
+
+      if (outcome === 'accepted') {
+        await waitFor(() => expect(posts).toHaveLength(1))
+        expect(sessionStorage.getItem('kata.web.session.v1')).toContain('tab-session')
+      } else {
+        await screen.findByRole('form', { name: 'Log in to Kata' })
+        expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
+      }
+      expect(statusPath).toBe('/api/v1/ui/proxy/api/v1/embeddings/local')
+      expect(posts).toHaveLength(1)
+      expect(posts[0]!.headers.get('X-Kata-Web-Daemon')).toBeNull()
+      expect(posts[0]!.headers.get('X-Kata-Web-Session')).toBe('tab-session')
+      expect(posts[0]!.headers.get('X-Kata-CSRF')).toBe('tab-csrf')
+    },
+  )
+
   it('routes a credential-list 401 through the existing authentication-loss transition', async () => {
     history.replaceState(null, '', '/kata?view=credentials#direct=1')
     sessionStorage.setItem(
@@ -1653,6 +1995,60 @@ describe('App', () => {
 
     expect(await screen.findByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
+  })
+
+  it('refreshes selected project sync on the visible app cycle', async () => {
+    vi.useFakeTimers()
+    history.replaceState(null, '', '/kata?scope=01J00000000000000000000002#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let pending = 2
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const path = new URL(request.url).pathname
+        if (path.endsWith('/federation/status')) {
+          return Response.json({
+            statuses: [
+              {
+                project_id: 7,
+                project_uid: '01J00000000000000000000002',
+                enabled: true,
+                role: 'replica',
+                pending_push_count: pending,
+              },
+            ],
+          })
+        }
+        if (path === '/api/v1/events/stream')
+          return new Response(new ReadableStream(), {
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (path.endsWith('/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        const result = snapshot()
+        result.capabilities.updates = 'sse'
+        return Response.json(result, { headers: { ETag: '"snapshot"' } })
+      }),
+    )
+    render(App)
+    await vi.advanceTimersByTimeAsync(0)
+    await tick()
+    expect(screen.getByText('Pending: 2')).not.toBeNull()
+    pending = 0
+    await vi.advanceTimersByTimeAsync(30_000)
+    await tick()
+    expect(screen.getByText('Pending: 0')).not.toBeNull()
+    pending = 3
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(0)
+    await tick()
+    expect(screen.getByText('Pending: 3')).not.toBeNull()
   })
 
   it('refreshes credential metadata periodically only while the page is visible', async () => {
@@ -1918,6 +2314,7 @@ describe('App', () => {
   })
 
   it('offers daemon switching when the default snapshot is unavailable', async () => {
+    vi.useFakeTimers()
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -1965,11 +2362,162 @@ describe('App', () => {
 
     render(App)
 
-    expect((await screen.findByRole('alert')).textContent).toContain('Snapshot unavailable')
+    await vi.advanceTimersByTimeAsync(7000)
+    await tick()
+    expect(screen.getByRole('alert').textContent).toContain("Couldn't load workspace")
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
-    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await vi.advanceTimersByTimeAsync(0)
+    await tick()
+    expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
   })
+
+  it.each(['success', 'creation refusal', 'designation retry', 'conflict', 'event overlap'])(
+    'creates the first project as Inbox before opening task capture: %s',
+    async (outcome) => {
+      history.replaceState(null, '', '/kata#direct=1')
+      sessionStorage.setItem(
+        'kata.web.session.v1',
+        JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+      )
+      const created = snapshot()
+      created.collection = []
+      created.catalog[0]!.project.revision = 1
+      if (outcome === 'event overlap') created.capabilities.updates = 'sse'
+      const empty = { ...created, catalog: [] }
+      let accepted: typeof created = empty
+      const requests: Request[] = []
+      let recoveryReads = 0
+      let designationRefused = false
+      let projectExists = false
+      let stream: ReadableStreamDefaultController<Uint8Array> | undefined
+      let finishCreation: (() => void) | undefined
+      let release: (() => void) | undefined
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = requestOf(input, init)
+          requests.push(request)
+          const path = new URL(request.url).pathname
+          if (path === '/api/v1/events/stream')
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  stream = controller
+                  request.signal.addEventListener('abort', () => controller.close(), { once: true })
+                },
+              }),
+              { headers: { 'Content-Type': 'text/event-stream' } },
+            )
+          if (path === '/api/v1/ui/snapshot' && finishCreation) {
+            const complete = finishCreation
+            finishCreation = undefined
+            complete()
+            return new Promise<Response>((resolve) => {
+              release = () => resolve(Response.json(created))
+            })
+          }
+          if (request.method === 'POST' && path === '/api/v1/projects') {
+            if (outcome === 'creation refusal')
+              return Response.json(
+                { error: { code: 'validation', message: 'Project creation refused' } },
+                { status: 422 },
+              )
+            accepted = created
+            const response = Response.json({
+              created: !projectExists,
+              project: created.catalog[0]!.project,
+            })
+            projectExists = true
+            if (outcome === 'event overlap') {
+              stream!.enqueue(
+                new TextEncoder().encode('id: 13\nevent: project.created\ndata: {}\n\n'),
+              )
+              return new Promise<Response>((resolve) => (finishCreation = () => resolve(response)))
+            }
+            return response
+          }
+          if (request.method === 'POST' && path === '/api/v1/projects/7/metadata') {
+            if (
+              (outcome === 'designation retry' || outcome === 'conflict') &&
+              !designationRefused
+            ) {
+              designationRefused = true
+              return Response.json(
+                {
+                  error: {
+                    code: outcome === 'conflict' ? 'revision_conflict' : 'validation',
+                    message: 'Inbox designation refused',
+                  },
+                },
+                { status: outcome === 'conflict' ? 412 : 422 },
+              )
+            }
+            created.catalog[0]!.project.metadata.role = 'inbox'
+            created.catalog[0]!.project.revision = 2
+            return Response.json({ changed: true, project: created.catalog[0]!.project })
+          }
+          if (designationRefused && path === '/api/v1/ui/snapshot') recoveryReads += 1
+          return new Response(JSON.stringify(accepted), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', ETag: `"snapshot-${requests.length}"` },
+          })
+        }),
+      )
+      render(App)
+      await fireEvent.click(await screen.findByRole('button', { name: 'New task' }))
+      const input = screen.getByRole('textbox', { name: 'New project name' })
+      await fireEvent.input(input, { target: { value: 'example-project' } })
+      await fireEvent.keyDown(input, { key: 'Enter' })
+      if (
+        outcome === 'creation refusal' ||
+        outcome === 'designation retry' ||
+        outcome === 'conflict'
+      ) {
+        await waitFor(() => {
+          expect(
+            requests.some(
+              (request) =>
+                request.method === 'POST' && new URL(request.url).pathname === '/api/v1/projects',
+            ),
+          ).toBe(true)
+          expect((input as HTMLInputElement).disabled).toBe(false)
+        })
+        if (outcome === 'creation refusal') {
+          expect(
+            requests.some((request) => new URL(request.url).pathname.endsWith('/metadata')),
+          ).toBe(false)
+          return
+        }
+        expect(await screen.findByRole('button', { name: /example-project/ })).not.toBeNull()
+        await waitFor(() => expect((input as HTMLInputElement).disabled).toBe(false))
+        expect(recoveryReads).toBe(1)
+        if (outcome !== 'conflict') await fireEvent.keyDown(input, { key: 'Enter' })
+      }
+      if (outcome !== 'conflict')
+        expect(await screen.findByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
+      const designation = requests.findLast(
+        (request) =>
+          request.method === 'POST' &&
+          new URL(request.url).pathname === '/api/v1/projects/7/metadata',
+      )!
+      expect(await designation.json()).toEqual({ actor: 'kata-web', patch: { role: 'inbox' } })
+      expect(designation.headers.get('If-Match')).toBe('"rev-1"')
+      if (outcome === 'conflict') return
+      expect(screen.getByRole('dialog', { name: 'New task' }).textContent).toContain(
+        'example-project',
+      )
+      if (outcome === 'event overlap') {
+        expect(release).toBeDefined()
+        release!()
+        await waitFor(() =>
+          expect(
+            (screen.getByRole('textbox', { name: 'Quick capture' }) as HTMLInputElement).disabled,
+          ).toBe(false),
+        )
+      }
+    },
+  )
 
   it('designates the capture Inbox from New task on a fresh catalog', async () => {
     history.replaceState(null, '', '/kata#direct=1')
@@ -2474,6 +3022,7 @@ describe('App', () => {
       expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session'),
     )
     await waitFor(() => expect(renewedSnapshotAccepted).toBe(true))
+    expect(screen.getByText("Can't make changes. Refresh or check access.")).toBeTruthy()
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
@@ -2707,8 +3256,12 @@ describe('App', () => {
         }
         if (target.pathname === '/api/v1/ui/snapshot') {
           snapshotRequests.push(request)
+          const etag = snapshotRequests.length === 1 ? '"snapshot-1"' : '"snapshot-2"'
+          if (request.headers.get('If-None-Match') === etag) {
+            return new Response(null, { status: 304 })
+          }
           return Response.json(snapshotRequests.length === 1 ? initial : refreshed, {
-            headers: { ETag: `"snapshot-${snapshotRequests.length}"` },
+            headers: { ETag: etag },
           })
         }
         throw new Error(`Unexpected request ${request.method} ${target.pathname}`)
@@ -2735,10 +3288,98 @@ describe('App', () => {
     )
 
     await waitFor(() => expect(snapshotRequests).toHaveLength(2))
-    expect(snapshotRequests[1]?.headers.has('If-None-Match')).toBe(false)
+    expect(snapshotRequests[1]?.headers.get('If-None-Match')).toBe('"snapshot-1"')
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /Revoked project issue/ })).toBeNull(),
     )
+  })
+
+  it('revalidates without normalizing again when SSE opens after load and row selection', async () => {
+    history.replaceState(null, '', '/kata?view=inbox#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const current = snapshot()
+    current.capabilities.updates = 'sse'
+    current.catalog[0]!.project.metadata = { role: 'inbox' }
+    const snapshotRequests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/events/stream') {
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                init?.signal?.addEventListener('abort', () => controller.close(), { once: true })
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+          )
+        }
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          snapshotRequests.push(request)
+          if (target.searchParams.has('selected_issue_uid')) {
+            if (request.headers.get('If-None-Match') === '"snapshot-selected"') {
+              return new Response(null, { status: 304 })
+            }
+            return Response.json(
+              {
+                ...current,
+                selected: {
+                  state: 'available',
+                  issue: current.collection[0],
+                  comments: [],
+                  labels: [],
+                  links: [],
+                  recurrences: [],
+                  history: [],
+                },
+              },
+              { headers: { ETag: '"snapshot-selected"' } },
+            )
+          }
+          if (request.headers.get('If-None-Match') === '"snapshot-1"') {
+            return new Response(null, { status: 304 })
+          }
+          return Response.json(current, { headers: { ETag: '"snapshot-1"' } })
+        }
+        throw new Error(`Unexpected request ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
+    render(App)
+
+    await waitFor(() => expect(snapshotRequests).toHaveLength(2))
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
+    )
+    await tick()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations + 1)
+    await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+
+    await waitFor(() => expect(snapshotRequests).toHaveLength(4))
+    expect(new URL(snapshotRequests[2]!.url).searchParams.get('selected_issue_uid')).toBe(
+      '01J00000000000000000000001',
+    )
+    expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
+    expect(snapshotRequests[3]?.headers.get('If-None-Match')).toBe('"snapshot-selected"')
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
+    )
+    await tick()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations + 2)
   })
 
   it('refreshes membership after an SSE reconnect opens', async () => {
@@ -2938,7 +3579,9 @@ describe('App', () => {
     await waitFor(() => expect(snapshotRequests).toHaveLength(3))
     expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
     await waitFor(() =>
-      expect(screen.queryByText('Snapshot may be out of date. Changes are paused.')).toBeNull(),
+      expect(
+        screen.queryByText('Workspace data may be out of date. Editing is paused.'),
+      ).toBeNull(),
     )
   })
 

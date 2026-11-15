@@ -182,7 +182,7 @@ func relayCrossProjectLinksAPIError(err error) *api.APIError {
 	if !errors.Is(err, db.ErrFederationCrossProjectBoundary) {
 		return nil
 	}
-	return newRelayCrossProjectLinksError("local")
+	return api.NewRelayCrossProjectLinksError("local")
 }
 
 // relayProjectLinksCheckError maps a read-only link check outside relay
@@ -197,18 +197,10 @@ func relayProjectLinksCheckError(err error) error {
 	return internalAPIError(err)
 }
 
-func newRelayCrossProjectLinksError(side string) *api.APIError {
-	message := "this daemon's copy of the project has cross-project issue links"
-	location := "locally"
-	if side == "hub" {
-		message = "the project on the hub has cross-project issue links"
-		location = "on the hub"
-	}
-	return api.NewError(http.StatusConflict, "relay_cross_project_links",
-		message, "remove cross-project related, blocks, and parent links "+location+" before retrying; ask an operator on that side to remove links to projects you cannot access", nil)
-}
-
 func createRelayEnrollment(ctx context.Context, cfg ServerConfig, in *api.CreateFederationEnrollmentRequest) (*api.CreateFederationEnrollmentResponse, error) {
+	if in.Body.SpokeName != "" {
+		return nil, api.NewError(http.StatusBadRequest, "validation", "spoke_name requires daemon-owner enrollment; ask the hub owner to name an existing relay spoke", "", nil)
+	}
 	options := in.Body.Relay
 	if options.ProtocolVersion != db.RelayProtocolVersion || in.Body.ProjectID == nil || *in.Body.ProjectID <= 0 || !uid.Valid(in.Body.SpokeInstanceUID) || in.Body.AllowAdoptionSnapshotAuthors {
 		return nil, api.NewError(http.StatusBadRequest, "validation", "relay requires a supported protocol, one project and a valid peer", "", nil)

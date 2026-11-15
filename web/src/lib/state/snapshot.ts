@@ -16,6 +16,7 @@ export interface SnapshotRequestOptions {
   signal: AbortSignal
   etag?: string
   full: boolean
+  retry?: boolean
 }
 
 export type SnapshotResponse<TSnapshot> =
@@ -81,12 +82,20 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
     const abort = new AbortController()
     this.#abort = abort
     const sameAuthority = requestedKey === this.#acceptedKey
+    // Revalidating the shown intent keeps it usable: a 304 or a newer copy of
+    // the same intent replaces it, and a failure still withdraws authority. A
+    // full reload or another intent hides authority until its snapshot arrives.
+    const revalidation =
+      sameAuthority &&
+      options.full !== true &&
+      this.state.snapshot !== undefined &&
+      !this.state.stale
     this.#setState({
       ...this.state,
       generation,
-      loading: true,
+      loading: !revalidation,
       error: undefined,
-      canMutate: false,
+      canMutate: revalidation && this.state.canMutate,
       authenticationRequired: false,
     })
 
@@ -94,6 +103,7 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
       const requestOptions: SnapshotRequestOptions = {
         signal: abort.signal,
         full: options.full === true,
+        retry: this.state.snapshot === undefined,
       }
       if (sameAuthority && this.state.etag && !requestOptions.full) {
         requestOptions.etag = this.state.etag
@@ -177,7 +187,7 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
       generation,
       loading: false,
       stale: this.state.snapshot !== undefined,
-      error: 'Snapshot unavailable',
+      error: "Couldn't load workspace",
       canMutate: false,
       authenticationRequired: false,
     })
@@ -224,7 +234,7 @@ export function snapshotIntentForRoute(
   now: Date = new Date(),
   timeZone: string = Intl.DateTimeFormat().resolvedOptions().timeZone,
 ): UISnapshotIntent {
-  if (route.view === 'credentials') {
+  if (route.view === 'credentials' || route.view === 'settings') {
     return {
       view: 'all-open',
       statuses: [],
@@ -259,8 +269,44 @@ export function snapshotIntentForRoute(
   return intent
 }
 
+// The daemon's list for one project is its list for every project filtered to
+// that project, so the browser requests every project and filters locally.
+// Moving between projects then needs no request.
+export function snapshotRequestIntent(intent: UISnapshotIntent): UISnapshotIntent {
+  const request = { ...intent }
+  delete request.projectUID
+  return request
+}
+
+// Filters a snapshot of every project to one project the way the daemon's
+// project view does: that project's issues, and the links with an endpoint
+// among them.
+export function projectUISnapshot(snapshot: UISnapshot, projectUID: string): UISnapshot {
+  const collection = snapshot.collection.filter((issue) => issue.project_uid === projectUID)
+  const uids = new Set(collection.map((issue) => issue.uid))
+  return {
+    ...snapshot,
+    collection,
+    collection_links: snapshot.collection_links.filter(
+      (link) => uids.has(link.from_issue_uid) || uids.has(link.to_issue_uid),
+    ),
+  }
+}
+
 export function uiSnapshotIntentKey(intent: UISnapshotIntent): string {
   return JSON.stringify(intent)
+}
+
+// Names the task list an intent loads, ignoring which task it selects. Two
+// routes with the same key show the same list.
+export function collectionIntentKey(intent: UISnapshotIntent): string {
+  // JSON.stringify drops the undefined fields.
+  return JSON.stringify({
+    ...intent,
+    selectedIssueUID: undefined,
+    includeGraph: undefined,
+    includeHistory: undefined,
+  })
 }
 
 type ReadUISnapshot = typeof readUISnapshot
@@ -285,6 +331,7 @@ export function createUISnapshotRequest(
     if (intent.timeZone) params.time_zone = intent.timeZone
     const response = await request(params, {
       signal: options.signal,
+      ...(options.retry ? { retry: true } : {}),
       ...(options.etag ? { headers: { 'If-None-Match': options.etag } } : {}),
     })
     const status: number = response.status

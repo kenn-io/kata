@@ -269,6 +269,42 @@ func TestGeneratedClientUsesRepeatedQueryKeysForArrayParams(t *testing.T) {
 	assert.NotContains(t, gotQuery, "alice%2Cbob")
 }
 
+func TestGeneratedClientSendsLargeIntegerQueryParams(t *testing.T) {
+	var gotQueries []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQueries = append(gotQueries, r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/projects/42/events":
+			_, _ = w.Write([]byte(`{"events":[],"next_after_id":1251852,"reset_required":false}`))
+		case "/api/v1/issues":
+			_, _ = w.Write([]byte(`{"issues":[],"complete":true,"truncated":false}`))
+		default:
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	api, err := NewWithHTTPClient(server.URL, server.Client())
+	require.NoError(t, err)
+
+	afterID := int64(1251852)
+	_, err = api.PollProjectEvents(t.Context(), &generated.PollProjectEventsRequestOptions{
+		PathParams: &generated.PollProjectEventsPath{ProjectID: 42},
+		Query:      &generated.PollProjectEventsQuery{AfterID: &afterID},
+	})
+	require.NoError(t, err)
+	_, err = api.ListAllIssues(t.Context(), &generated.ListAllIssuesRequestOptions{
+		Query: &generated.ListAllIssuesQuery{ProjectIds: []int64{42, 1251853}},
+	})
+	require.NoError(t, err)
+
+	require.Len(t, gotQueries, 2)
+	assert.Equal(t, "after_id=1251852", gotQueries[0])
+	assert.ElementsMatch(t, []string{"42", "1251853"}, mustParseQuery(t, gotQueries[1])["project_ids"])
+}
+
 func TestStreamEventsRawSetsAcceptAndDoesNotBuffer(t *testing.T) {
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })

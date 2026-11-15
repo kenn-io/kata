@@ -241,3 +241,15 @@ func EnsureCancelled(ctx context.Context) error {
 	}
 	return nil
 }
+
+// NewRelayCrossProjectLinksError identifies the side whose links block relay setup or reset.
+func NewRelayCrossProjectLinksError(side string) *APIError {
+	message := "this daemon's copy of the project has cross-project issue links"
+	location := "locally"
+	if side == "hub" {
+		message = "the project on the hub has cross-project issue links"
+		location = "on the hub"
+	}
+	return NewError(http.StatusConflict, "relay_cross_project_links",
+		message, "remove cross-project related, blocks, and parent links "+location+" before retrying; ask an operator on that side to remove links to projects you cannot access", nil)
+}

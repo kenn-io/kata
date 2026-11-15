@@ -21,7 +21,7 @@ jobs:
     name: CI gate
     needs: run
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-linux-1cpu
     steps:
       - env:
           RUN_RESULT: ${{ needs.run.result }}

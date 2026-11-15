@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -111,4 +112,60 @@ func rewritePayload(event FoldEvent, payload map[string]jsontext.Value, key stri
 		return event, false, fmt.Errorf("encode %s payload of %s: %w", event.Type, event.UID, err)
 	}
 	return event, true, nil
+}
+
+// ValidateLegacyRelayAdmission rejects fresh crossing additions while preserving
+// missing peers and cleanup. Callers resolve membership within the ingest transaction.
+func ValidateLegacyRelayAdmission(ctx context.Context, event RemoteEvent, uidCrosses, shortIDCrosses, refCrosses func(context.Context, string) (bool, error)) error {
+	var lookupErr error
+	crossing := false
+	checkUID := func(peer string) bool {
+		if peer != "" && lookupErr == nil {
+			var restricted bool
+			restricted, lookupErr = uidCrosses(ctx, peer)
+			crossing = crossing || restricted
+		}
+		return false // Inspect additions without rewriting the hashed payload.
+	}
+	switch event.Type {
+	case "issue.linked", "issue.links_changed", "issue.created", "issue.snapshot":
+		fold := FoldEvent{UID: event.EventUID, Type: event.Type, Payload: event.Payload}
+		if _, _, err := StripCrossProjectLinkAdditions(fold, checkUID); err != nil {
+			return err
+		}
+	case "issue.closed":
+		payload := PayloadMap(event.Payload)
+		if parent, _ := StringValue(payload["parent_uid"]); parent != "" {
+			checkUID(parent) // The UID takes precedence over historical short IDs.
+		} else if parent, _ := StringValue(payload["parent_short_id"]); parent != "" {
+			restricted, err := shortIDCrosses(ctx, parent)
+			if err != nil {
+				return err
+			}
+			crossing = crossing || restricted
+		}
+		var evidence []Evidence
+		if raw, ok := payload["evidence"]; ok {
+			if err := json.Unmarshal(raw, &evidence); err != nil {
+				return fmt.Errorf("%w: event %s has invalid close evidence: %w", ErrFederationIngestValidation, event.EventUID, err)
+			}
+		}
+		for _, item := range evidence {
+			if item.Type != "duplicate-of" && item.Type != "superseded-by" {
+				continue
+			}
+			restricted, err := refCrosses(ctx, item.IssueRef)
+			if err != nil {
+				return err
+			}
+			crossing = crossing || restricted
+		}
+	}
+	if lookupErr != nil {
+		return lookupErr
+	}
+	if crossing {
+		return fmt.Errorf("%w: event %s: %w", ErrFederationIngestValidation, event.EventUID, ErrFederationCrossProjectBoundary)
+	}
+	return nil
 }

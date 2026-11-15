@@ -75,19 +75,38 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 				"to_project_uid resolves to the issue's current project", "", nil)
 		}
 
-		res, err := cfg.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		move := db.MoveIssueProjectIn{
 			IssueID:       iss.ID,
 			FromProjectID: iss.ProjectID,
 			ToProjectID:   tgt.ID,
 			IfMatchRev:    rev,
 			Actor:         actor,
-			DryRun:        in.Body.DryRun,
+			DryRun:        true,
 			Single:        in.Body.Single,
 			AuthorizeProjects: func(uids []string) error {
 				_, err := authorizeHostProjectScope(ctx, nil, uids, false)
 				return err
 			},
-		})
+		}
+		res, err := cfg.DB.MoveIssueProject(ctx, move)
+		if err == nil {
+			for _, issue := range res.Issues {
+				if err := requireFederatedIssueClaimWithRefresh(ctx, cfg, issue, actor, !in.Body.DryRun); err != nil {
+					return nil, err
+				}
+			}
+			if !in.Body.DryRun {
+				move.DryRun = false
+				move.ExpectedIssueIDs = make([]int64, len(res.Issues))
+				for i, issue := range res.Issues {
+					move.ExpectedIssueIDs[i] = issue.ID
+				}
+				res, err = cfg.DB.MoveIssueProject(ctx, move)
+			}
+		}
+		if errors.Is(err, db.ErrIssueMoveTreeChanged) {
+			return nil, api.NewError(409, "issue_move_tree_changed", "issue subtree changed during claim validation", "retry the move to validate the current subtree", nil)
+		}
 		if err != nil {
 			return nil, moveIssueAPIError(err)
 		}

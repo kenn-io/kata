@@ -1,12 +1,10 @@
 <script lang="ts">
   /* eslint-disable svelte/prefer-svelte-reactivity */
-  import { onDestroy, tick } from 'svelte'
+  import { onDestroy, tick, untrack, type Snippet } from 'svelte'
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
-  import ChevronRightIcon from '@lucide/svelte/icons/chevron-right'
   import ChevronUpIcon from '@lucide/svelte/icons/chevron-up'
   import ListChevronsDownUpIcon from '@lucide/svelte/icons/list-chevrons-down-up'
   import ListChevronsUpDownIcon from '@lucide/svelte/icons/list-chevrons-up-down'
-  import NetworkIcon from '@lucide/svelte/icons/network'
   import { relativeTime, shortDate } from '../lib/kata/dates'
   import { kataTaskStatusMatchesFilter } from '../lib/kata/filters'
   import type { KataTaskSearchFilters, KataTaskSummary } from '../lib/kata/types'
@@ -38,6 +36,8 @@
 
   interface Props {
     currentView: KataCurrentView
+    now: number
+    resultsKey?: string
     issueCatalog: readonly KataTaskSummary[]
     scopeLabel?: string
     scopedProjectName?: string | null
@@ -50,12 +50,16 @@
     revealRequest?: KataIssueRevealRequest | null
     onSelect: (issue: KataTaskSummary) => void
     onOpenGraph?: ((issue: KataTaskSummary) => void) | undefined
+    /** Replaces the bare `No tasks` line when the list has no rows. */
+    empty?: Snippet | undefined
   }
 
   const EMPTY_READY_ISSUE_UIDS: ReadonlySet<string> = new Set()
 
   let {
     currentView,
+    now,
+    resultsKey = '',
     issueCatalog,
     scopeLabel = undefined,
     scopedProjectName = null,
@@ -68,6 +72,7 @@
     revealRequest = null,
     onSelect,
     onOpenGraph = undefined,
+    empty = undefined,
   }: Props = $props()
 
   const SORT_STORAGE_KEY = 'kata:issue-sort/v1'
@@ -155,17 +160,27 @@
   let lastRevealGeneration: number | null = null
   let anchorMeasurementGeneration = 0
   let catalogByUID = $derived(new Map(issueCatalog.map((issue) => [issue.uid, issue])))
+  let catalogByHierarchyKey = $derived(
+    new Map(issueCatalog.map((issue) => [issueHierarchyKey(issue), issue])),
+  )
+
+  function parentUIDOf(issue: KataTaskSummary): string | undefined {
+    return (
+      issue.parent?.uid ??
+      (issue.parent_short_id
+        ? catalogByHierarchyKey.get(`${issue.project_uid}:${issue.parent_short_id}`)?.uid
+        : undefined)
+    )
+  }
+
   let childrenByParentUID = $derived.by(() => {
-    const byHierarchyKey = new Map(issueCatalog.map((issue) => [issueHierarchyKey(issue), issue]))
     const children = new Map<string, KataTaskSummary[]>()
     for (const issue of issueCatalog) {
-      const parentUID =
-        issue.parent?.uid ??
-        (issue.parent_short_id
-          ? byHierarchyKey.get(`${issue.project_uid}:${issue.parent_short_id}`)?.uid
-          : undefined)
+      const parentUID = parentUIDOf(issue)
       if (!parentUID) continue
-      children.set(parentUID, [...(children.get(parentUID) ?? []), issue])
+      const siblings = children.get(parentUID)
+      if (siblings) siblings.push(issue)
+      else children.set(parentUID, [issue])
     }
     return children
   })
@@ -202,9 +217,9 @@
         }
       }
     }
-    const allIssues = groups.flatMap((group) => group.issues)
+    const visibleKeys = new Set(groups.flatMap((group) => group.issues.map(issueHierarchyKey)))
     return groups
-      .map((group) => ({ ...group, issues: topLevelIssues(group.issues, allIssues) }))
+      .map((group) => ({ ...group, issues: topLevelIssues(group.issues, visibleKeys) }))
       .filter((group) => group.issues.length > 0)
   })
 
@@ -223,10 +238,13 @@
         )
       : [],
   )
+  let sortedGroups = $derived(
+    visibleGroups.map((group) => ({ ...group, issues: sortKataTasks(group.issues, sort) })),
+  )
   let ordinaryRootIssues = $derived.by(() => {
     if (isProjectScoped) return sortKataTasks(flatIssues, sort)
     if (shouldFlatten) return globalSortedIssues
-    return visibleGroups.flatMap((group) => sortKataTasks(group.issues, sort))
+    return sortedGroups.flatMap((group) => group.issues)
   })
   let visibleTemporaryRevealChain = $derived(revealChainForStatus(temporaryRevealChain))
   let hasTemporaryReveal = $derived(visibleTemporaryRevealChain.length > 0)
@@ -247,6 +265,69 @@
       knownExpandableIssues.every((issue) => expanded[issue.uid] === true),
   )
   let hasAnyExpandedRows = $derived(Object.values(expanded).some(Boolean))
+
+  const ROW_LIMIT_STEP = 150
+  let listKey = $derived(JSON.stringify([currentView.name, resultsKey]))
+  // showRows overrides this; a new list key recomputes it in the same render.
+  let rowLimit = $derived.by(() => {
+    void listKey
+    return ROW_LIMIT_STEP
+  })
+
+  let rootIndexByUID = $derived(
+    new Map(visibleRootIssues.map((issue, index) => [issue.uid, index])),
+  )
+
+  function rootIndexOf(uid: string | null | undefined): number {
+    const seen = new Set<string>()
+    while (uid && !seen.has(uid)) {
+      const index = rootIndexByUID.get(uid)
+      if (index !== undefined) return index
+      seen.add(uid)
+      const issue = catalogByUID.get(uid)
+      uid = issue ? parentUIDOf(issue) : undefined
+    }
+    return -1
+  }
+
+  let pinnedRows = $derived.by(() => {
+    // Refresh focus pins even when there is no selection to look up.
+    void rootIndexByUID
+    const key = listKey
+    const focusedUID = untrack(() => {
+      const active = typeof document === 'undefined' ? null : document.activeElement
+      const row = active?.closest('.row-frame')?.querySelector<HTMLButtonElement>('button.row')
+      return row?.dataset.listKey === key && tableBody?.contains(row) ? row.dataset.uid : undefined
+    })
+    return Math.max(rootIndexOf(selectedIssueUID), rootIndexOf(focusedUID)) + 1
+  })
+  let renderedLimit = $derived(Math.max(rowLimit, pinnedRows))
+  let rowSentinel: HTMLDivElement | null = $state(null)
+  let hasHiddenRows = $derived(visibleRootIssues.length > renderedLimit)
+  let renderedRoots = $derived(visibleRootIssues.slice(0, renderedLimit))
+  let renderedGroups = $derived.by(() => {
+    let remaining = renderedLimit
+    const groups = []
+    for (const group of sortedGroups) {
+      if (remaining <= 0) break
+      groups.push({
+        ...group,
+        total: group.issues.length,
+        issues: group.issues.slice(0, remaining),
+      })
+      remaining -= group.issues.length
+    }
+    return groups
+  })
+
+  function showRows(count: number): void {
+    if (count > rowLimit) rowLimit = count
+  }
+
+  // Rows revealed by a pin stay rendered after selection or focus moves away.
+  $effect(() => {
+    showRows(pinnedRows)
+  })
 
   function loadSort(): KataTaskSort {
     if (typeof window === 'undefined') return DEFAULT_KATA_TASK_SORT
@@ -401,13 +482,12 @@
 
   function topLevelIssues(
     issues: readonly KataTaskSummary[],
-    allIssues: readonly KataTaskSummary[] = issues,
+    visibleKeys: ReadonlySet<string> = new Set(issues.map(issueHierarchyKey)),
   ): KataTaskSummary[] {
     // A child collapses into its parent only when that parent is actually
     // present in the visible set. Search and filter results often surface a
     // matching child without its parent; those rows must still render as
     // their own top-level row instead of vanishing into a missing ancestor.
-    const visibleKeys = new Set(allIssues.map(issueHierarchyKey))
     return issues.filter((issue) => {
       const parentKey = parentHierarchyKey(issue)
       return parentKey === null || !visibleKeys.has(parentKey)
@@ -597,6 +677,20 @@
     switch (event.key) {
       case 'ArrowDown':
       case 'j':
+        if (idx === rows.length - 1 && hasHiddenRows) {
+          // Past the rendered prefix: render the next chunk, then move.
+          event.preventDefault()
+          heldNavKeys.add(event.code)
+          showRows(renderedLimit + ROW_LIMIT_STEP)
+          void tick().then(() => {
+            const nextRows = Array.from(
+              tableBody?.querySelectorAll<HTMLElement>('button.row') ?? [],
+            )
+            const at = nextRows.indexOf(target)
+            if (at !== -1) focusRow(nextRows[at + 1] ?? null)
+          })
+          return
+        }
         nextIdx = Math.min(rows.length - 1, idx + 1)
         break
       case 'ArrowUp':
@@ -609,6 +703,17 @@
         break
       case 'End':
       case 'G':
+        if (hasHiddenRows) {
+          // End means the last row of the whole list, so render all of it.
+          event.preventDefault()
+          heldNavKeys.add(event.code)
+          showRows(Infinity)
+          void tick().then(() => {
+            const all = Array.from(tableBody?.querySelectorAll<HTMLElement>('button.row') ?? [])
+            focusRow(all[all.length - 1] ?? null)
+          })
+          return
+        }
         nextIdx = rows.length - 1
         break
       case 'ArrowRight': {
@@ -704,6 +809,24 @@
     return () => {
       if (anchorMeasurementGeneration === generation) anchorMeasurementGeneration += 1
     }
+  })
+
+  // Grow when the end sentinel comes within a few screens of the viewport.
+  $effect(() => {
+    const body = tableBody
+    const sentinel = rowSentinel
+    // A fresh observer reports the sentinel's current state, so a sentinel
+    // that is still near the viewport after a chunk lands asks for another.
+    void renderedLimit
+    if (!body || !sentinel || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) showRows(renderedLimit + ROW_LIMIT_STEP)
+      },
+      { root: body, rootMargin: '1500px 0px' },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
   })
 
   // Clear stale expansion before the reveal effect below so a snapshot that
@@ -920,33 +1043,32 @@
       </div>
 
       {#if visibleRootIssues.length === 0}
-        <div class="empty">No tasks</div>
+        {#if empty}
+          {@render empty()}
+        {:else}
+          <div class="empty">No tasks</div>
+        {/if}
       {/if}
 
-      {#if hasTemporaryReveal}
-        {#each visibleRootIssues as issue (issue.uid)}
-          {@render row(issue)}
-        {/each}
-      {:else if isProjectScoped}
-        {#each visibleRootIssues as issue (issue.uid)}
-          {@render row(issue)}
-        {/each}
-      {:else if shouldFlatten}
-        {#each globalSortedIssues as issue (issue.uid)}
+      {#if hasTemporaryReveal || isProjectScoped || shouldFlatten}
+        {#each renderedRoots as issue (issue.uid)}
           {@render row(issue)}
         {/each}
       {:else}
-        {#each visibleGroups as group (group.id)}
+        {#each renderedGroups as group (group.id)}
           <section class="group" aria-labelledby={`group-${group.id}`}>
             <h3 class="group-title" id={`group-${group.id}`}>
               <span>{group.title}</span>
-              <span class="group-count">{group.issues.length}</span>
+              <span class="group-count">{group.total}</span>
             </h3>
-            {#each sortKataTasks(group.issues, sort) as issue (issue.uid)}
+            {#each group.issues as issue (issue.uid)}
               {@render row(issue)}
             {/each}
           </section>
         {/each}
+      {/if}
+      {#if hasHiddenRows}
+        <div class="row-sentinel" bind:this={rowSentinel} aria-hidden="true"></div>
       {/if}
     </div>
   </div>
@@ -967,6 +1089,7 @@
       aria-current={isSelected(issue) ? 'true' : undefined}
       aria-expanded={expandable ? isExpanded : undefined}
       data-uid={issue.uid}
+      data-list-key={listKey}
       onclick={() => selectNow(issue)}
     >
       <span class="cell cell-id"
@@ -984,7 +1107,21 @@
             aria-hidden="true"
             onclick={(event) => toggleExpand(issue, event)}
           >
-            <ChevronRightIcon size={12} strokeWidth={2} />
+            <!-- Lucide chevron-right as static markup: a list renders one per
+                 parent row, and a component per row costs more than cloning. -->
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="lucide-icon lucide lucide-chevron-right"
+              aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg
+            >
           </span>
         {:else}
           <span class="chevron chevron--placeholder" aria-hidden="true"></span>
@@ -993,7 +1130,7 @@
       </span>
       {#if columnVisibility.updated}
         <span class="cell cell-updated" title={issue.updated_at}>
-          {relativeTime(issue.updated_at)}
+          {relativeTime(issue.updated_at, new Date(now))}
         </span>
       {/if}
       {#if columnVisibility.priority}
@@ -1037,7 +1174,30 @@
         title="Open reachable graph"
         onclick={(event) => openGraph(issue, event)}
       >
-        <NetworkIcon size={13} strokeWidth={1.9} aria-hidden="true" />
+        <!-- Lucide network as static markup: every row renders one, and a
+             component per row costs more than cloning. -->
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.9"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="lucide-icon lucide lucide-network"
+          aria-hidden="true"
+          ><rect x="16" y="16" width="6" height="6" rx="1" /><rect
+            x="2"
+            y="16"
+            width="6"
+            height="6"
+            rx="1"
+          /><rect x="9" y="2" width="6" height="6" rx="1" /><path
+            d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"
+          /><path d="M12 12V8" /></svg
+        >
       </button>
     {/if}
   </div>
@@ -1207,6 +1367,9 @@
   .table-body {
     flex: 1;
     overflow: auto;
+    /* Reserve the scrollbar's width so columns do not shift when a search or
+       filter changes whether the rows overflow. */
+    scrollbar-gutter: stable;
     padding: 0 0 12px;
   }
 
@@ -1219,6 +1382,9 @@
 
   .group {
     margin-top: 6px;
+  }
+  .row-sentinel {
+    height: 1px;
   }
 
   .group:first-of-type {
@@ -1268,6 +1434,10 @@
   .row-frame {
     position: relative;
     min-width: var(--table-min-width);
+    /* Rows below the fold skip layout and paint until they scroll near, so a
+       long list paints its first screen at once. */
+    content-visibility: auto;
+    contain-intrinsic-block-size: auto 30px;
   }
 
   .row:hover {

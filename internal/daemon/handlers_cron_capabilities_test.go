@@ -22,7 +22,7 @@ func TestCronCapabilitiesEmptyProjectReadOnly(t *testing.T) {
 	require.NoError(t, err)
 	response, raw := envDoRaw(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", project.ID), nil, nil)
 	require.Equalf(t, 200, response.StatusCode, "%s", raw)
-	require.Equal(t, "cron_v1", response.Header.Get(db.EventFeaturesHeader))
+	require.Equal(t, db.SupportedEventFeatures, response.Header.Get(db.EventFeaturesHeader))
 	var body struct {
 		EventFeatures []string `json:"event_features"`
 	}

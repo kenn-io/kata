@@ -47,7 +47,7 @@ func RunRelayDownstreamOrigin(t *testing.T, store db.Storage) {
 	created := func(origin string, physicalMS int64) (string, db.RemoteEvent) {
 		issueUID, err := uid.New()
 		require.NoError(t, err)
-		payload := jsontext.Value(`{"uid":"` + issueUID + `","title":"Relayed task","author":"source-assistant","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		payload := IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"Relayed task","author":"source-assistant","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
 		return issueUID, newRemoteEvent(t, project, &issueUID, "issue.created", "source-assistant", origin, physicalMS, payload)
 	}
 	forgedIssues := []string{}

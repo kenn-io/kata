@@ -9,12 +9,16 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/fileevidence"
+
 	"github.com/google/jsonschema-go/jsonschema"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/time/rate"
 
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/mcpicon"
 	"go.kenn.io/kata/internal/notification"
+	"go.kenn.io/kata/internal/searchhint"
 	"go.kenn.io/kata/internal/storageadmin"
 	"go.kenn.io/kata/internal/teammate"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -29,8 +33,32 @@ const (
 	toolCallConcurrency = 8
 )
 
+// ToolAdmission bounds tool-call rate and concurrency. Share one between the
+// servers of a process so two protocol paths cannot double the limits.
+type ToolAdmission struct {
+	limiter    *rate.Limiter
+	concurrent chan struct{}
+}
+
+// NewToolAdmission creates the default process-wide tool-call limits.
+func NewToolAdmission() *ToolAdmission {
+	return newToolAdmission(toolCallsPerSecond, toolCallBurst, toolCallConcurrency)
+}
+
+func newToolAdmission(perSecond rate.Limit, burst, concurrency int) *ToolAdmission {
+	return &ToolAdmission{limiter: rate.NewLimiter(perSecond, burst), concurrent: make(chan struct{}, concurrency)}
+}
+
 // Options fixes the Kata daemon scope and actor for one MCP process.
 type Options struct {
+	// Events registers the MCP Events methods, which forward to the daemon. Set
+	// it for stdio and the 2026-07-28 HTTP server only; the legacy-session
+	// server must not serve Events.
+	Events bool
+	// Admission is shared across servers of one process; nil creates its own.
+	Admission *ToolAdmission
+	// LoadedSections shares selected section IDs across servers; nil keeps selections local.
+	LoadedSections    *LoadedSections
 	Client            *kataclient.Client
 	LongRunningClient *kataclient.Client
 	Scope             *Scope
@@ -107,21 +135,35 @@ func New(ctx context.Context, options Options) (*sdkmcp.Server, error) {
 		Title:       "Kata issue tracker",
 		Description: "Scoped Kata data and administration tools for coding agents.",
 		Version:     options.Version,
+		WebsiteURL:  "https://katatracker.com",
+		Icons: []sdkmcp.Icon{{
+			Source: mcpicon.Source, MIMEType: "image/png", Sizes: []string{"256x256"},
+		}},
 	}, &sdkmcp.ServerOptions{
-		Instructions: "Use returned web_url values when linking to issues. Use Kata to search before creating work, claim actionable issues, record progress, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + ".",
+		Instructions: "Use returned web_url values when linking to issues. Use Kata to search before creating work, claim actionable issues, record progress, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + `. Call kata.skills with {"name":"workflow"} before your first write; call it with no arguments to list the other guides.`,
 		Capabilities: &sdkmcp.ServerCapabilities{
 			Tools: &sdkmcp.ToolCapabilities{ListChanged: true},
 		},
 	})
+	if options.Admission == nil {
+		options.Admission = NewToolAdmission()
+	}
 	server.AddReceivingMiddleware(toolAdmissionMiddleware(
-		rate.NewLimiter(toolCallsPerSecond, toolCallBurst),
-		make(chan struct{}, toolCallConcurrency),
+		options.Admission.limiter,
+		options.Admission.concurrent,
 		options.ObserveToolCall,
 	))
 	server.AddReceivingMiddleware(cacheHintsMiddleware)
+	if options.Events {
+		if err := registerNativeEvents(server, options.Client, options.LongRunningClient, options.Scope); err != nil {
+			return nil, err
+		}
+	}
 	if err := registerSectionLoaders(server, options); err != nil {
 		return nil, err
 	}
+	registerSkillsTool(server)
+	registerToolSearch(server, options)
 	return server, nil
 }
 
@@ -174,7 +216,7 @@ func registerIssueDiscoveryTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.list", "List issues", "List compact issue summaries in the selected project scope with bounded filters.", read, handlers.list)
 	addTool(server, "kata.next", "Next issue", "Select the highest-priority ready issue.", read, handlers.next)
 	addTool(server, "kata.ready", "List ready issues", "List open issues with no open blocking predecessor in the selected project scope.", read, handlers.ready)
-	addTool(server, "kata.search", "Search issues", "Search titles, bodies, and comments before creating duplicate work.", searchRead, handlers.search)
+	addTool(server, "kata.search", "Search issues", "Search titles, bodies, and comments before creating duplicate work. Lexical results contain every query word, so use one or two distinctive words.", searchRead, handlers.search)
 	addTool(server, "kata.show", "Show issue", "Read one issue with its body, metadata, relationships, and a bounded comment history.", read, handlers.show)
 }
 
@@ -197,6 +239,7 @@ func registerIssueLifecycleTools(server *sdkmcp.Server, handlers toolHandlers) {
 	read := toolHints(true, false, false)
 	additive := toolHints(false, false, false)
 	mutating := toolHints(false, true, false)
+	addTool(server, "kata.file_evidence", "Read file evidence", "Retrieve or compare bytes referenced by a visible close event. Select a zero-based file-only index. Foreign origins return their instance UID without forwarding credentials.", read, handlers.fileEvidence)
 	addTool(server, "kata.audit_closes", "Audit closes", "List close records with bounded project and time filters.", read, handlers.auditCloses)
 	addTool(server, "kata.close", "Close issue", "Close with a reason, substantive message, and typed evidence. Post a completion claim comment and ask another teammate or author to confirm/refute it. Cite the claim with confirmed evidence only for done, or refuted evidence only for wontfix, duplicate, or superseded; contested claims fail either type. verify.required=true demands an explicit confirmed citation on done. Resolve open refutations by superseding or rebutting; overrule deliberately names the refutation, not the claim. Warnings include a post-close show command.", mutating, handlers.close)
 	addTool(server, "kata.delete", "Delete issue", "Soft-delete an issue after exact confirmation.", mutating, handlers.deleteIssue)
@@ -277,6 +320,14 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 	}
 
 	switch toolName {
+	case "kata.search_tools":
+		setStringBounds("query", 1, toolSearchQueryBytes)
+		setNumberBounds("limit", 1, toolSearchMaxResults)
+		property("limit").Type = "integer"
+		property("limit").Types = nil
+	case "kata.skills":
+		setStringBounds("name", 0, 64)
+		property("name").Description = "Guide name: " + strings.Join(SkillGuides(), ", ") + "; omit to list the guides"
 	case "kata.connectors":
 		setStringBounds("instance", 1, 128)
 	case "kata.connector_fields":
@@ -515,6 +566,11 @@ func evidenceVariant(kind string) *jsonschema.Schema {
 		MinItems: &pathMinimum,
 	}
 	switch kind {
+	case "file":
+		v := variant(kind, "file", &jsonschema.Schema{Type: "object", Properties: map[string]*jsonschema.Schema{"source": stringValue(1, 64), "path": stringValue(1, 4096), "capture_sha256": {Type: "boolean"}}, Required: []string{"source", "path"}, AdditionalProperties: &jsonschema.Schema{Not: &jsonschema.Schema{}}})
+		return v
+	case "attachment":
+		return variant(kind, "attachment_id", stringValue(1, 256))
 	case "commit":
 		sha := stringValue(7, 40)
 		sha.Pattern = `^[0-9a-fA-F]{7,40}$`
@@ -547,7 +603,7 @@ func evidenceSchemaFor(kinds ...string) *jsonschema.Schema {
 }
 
 func evidenceSchema() *jsonschema.Schema {
-	return evidenceSchemaFor("commit", "pr", "test", "reviewed-paths", "external", "no-change-audit", "duplicate-of", "superseded-by", "confirmed", "refuted")
+	return evidenceSchemaFor("file", "attachment", "commit", "pr", "test", "reviewed-paths", "external", "no-change-audit", "duplicate-of", "superseded-by", "confirmed", "refuted")
 }
 
 func closeReasonSchemas() []*jsonschema.Schema {
@@ -572,11 +628,11 @@ func closeReasonSchemas() []*jsonschema.Schema {
 			Required: []string{"reason", "message", "evidence"},
 		}
 	}
-	done := variant("done", 40, 1, -1, "commit", "pr", "test", "reviewed-paths", "external", "confirmed")
+	done := variant("done", 40, 1, -1, "file", "attachment", "commit", "pr", "test", "reviewed-paths", "external", "confirmed")
 	wontfix := variant("wontfix", 60, 0, -1, "refuted")
 	duplicate := variant("duplicate", 20, 1, -1, "duplicate-of", "refuted")
 	superseded := variant("superseded", 20, 1, -1, "superseded-by", "refuted")
-	audit := variant("audit-no-change", 40, 1, -1, "no-change-audit", "reviewed-paths")
+	audit := variant("audit-no-change", 40, 1, -1, "no-change-audit", "reviewed-paths", "file")
 	one := 1
 	for _, item := range []struct {
 		schema *jsonschema.Schema
@@ -649,6 +705,10 @@ type ListInput struct {
 	Labels        []string `json:"labels,omitempty" jsonschema:"Labels that every issue must have"`
 	ExcludeLabels []string `json:"exclude_labels,omitempty" jsonschema:"Labels that issues must not have"`
 	Metadata      []string `json:"metadata,omitempty" jsonschema:"Metadata filters as key or key=value"`
+
+	// compact asks for rows without bodies and with only the filtered
+	// metadata keys. It is set by callers inside this package, not by tools.
+	compact bool
 }
 
 // ReadyInput filters unblocked open work.
@@ -771,15 +831,17 @@ type SetMetadataInput struct {
 
 // Evidence is a typed completion proof accepted by Kata close.
 type Evidence struct {
-	Comment   string   `json:"comment,omitempty" jsonschema:"Claim comment handle or UID for confirmed/refuted; cite the claim, not its verdict reply"`
-	Type      string   `json:"type" jsonschema:"Evidence type: commit, pr, test, reviewed-paths, external, no-change-audit, duplicate-of, superseded-by, confirmed, or refuted"`
-	SHA       string   `json:"sha,omitempty" jsonschema:"Commit SHA for commit evidence"`
-	URL       string   `json:"url,omitempty" jsonschema:"Pull request URL for pr evidence"`
-	Command   string   `json:"command,omitempty" jsonschema:"Executed command for test evidence"`
-	Paths     []string `json:"paths,omitempty" jsonschema:"Reviewed paths for reviewed-paths evidence"`
-	Account   string   `json:"account,omitempty" jsonschema:"Free-text account of where and how externally completed work was done"`
-	Rationale string   `json:"rationale,omitempty" jsonschema:"Rationale for no-change-audit evidence"`
-	IssueRef  string   `json:"issue_ref,omitempty" jsonschema:"Target issue for duplicate-of or superseded-by evidence"`
+	File         *fileevidence.Reference `json:"file,omitempty" jsonschema:"Configured file source and relative path with optional capture_sha256"`
+	Comment      string                  `json:"comment,omitempty" jsonschema:"Claim comment handle or UID for confirmed/refuted; cite the claim, not its verdict reply"`
+	Type         string                  `json:"type" jsonschema:"Evidence type: file, attachment, commit, pr, test, reviewed-paths, external, no-change-audit, duplicate-of, superseded-by, confirmed, or refuted"`
+	SHA          string                  `json:"sha,omitempty" jsonschema:"Commit SHA for commit evidence"`
+	URL          string                  `json:"url,omitempty" jsonschema:"Pull request URL for pr evidence"`
+	Command      string                  `json:"command,omitempty" jsonschema:"Executed command for test evidence"`
+	Paths        []string                `json:"paths,omitempty" jsonschema:"Reviewed paths for reviewed-paths evidence"`
+	Account      string                  `json:"account,omitempty" jsonschema:"Free-text account of where and how externally completed work was done"`
+	Rationale    string                  `json:"rationale,omitempty" jsonschema:"Rationale for no-change-audit evidence"`
+	IssueRef     string                  `json:"issue_ref,omitempty" jsonschema:"Target issue for duplicate-of or superseded-by evidence"`
+	AttachmentID string                  `json:"attachment_id,omitempty" jsonschema:"Existing attachment ID for attachment evidence"`
 }
 
 // CloseInput makes the completion assertion explicit.
@@ -808,6 +870,7 @@ type ProjectIdentity struct {
 
 // IssueSummary is the compact issue form used by list-like tools.
 type IssueSummary struct {
+	projectUID          string
 	Author              string    `json:"author,omitempty"`
 	AccountableActor    *string   `json:"accountable_actor,omitempty"`
 	SourceActor         *string   `json:"source_actor,omitempty"`
@@ -833,6 +896,8 @@ type IssueSummary struct {
 	DeadlineOnDate      *string   `json:"deadline_on_date,omitempty" jsonschema:"deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable or the daemon predates API 0.36.0"`
 	updatedAt           time.Time
 	metadata            map[string]any
+	// oversized marks a compact row the daemon sent as identity only.
+	oversized bool
 }
 
 // IssueListOutput is a bounded collection without issue bodies or comments.
@@ -857,8 +922,9 @@ type SearchHit struct {
 
 // SearchOutput reports the effective mode and any semantic fallback.
 type SearchOutput struct {
-	Complete   bool    `json:"complete"`
-	NextCursor *string `json:"next_cursor,omitempty"`
+	Hints      []searchhint.Hint `json:"hints,omitempty"`
+	Complete   bool              `json:"complete"`
+	NextCursor *string           `json:"next_cursor,omitempty"`
 
 	Project        *ProjectIdentity  `json:"project,omitempty"`
 	Projects       []ProjectIdentity `json:"projects,omitempty"`
@@ -923,10 +989,12 @@ type IssueDetail struct {
 
 // ShowOutput wraps one issue with its project identity.
 type ShowOutput struct {
-	Verification      *generated.Verification `json:"verification,omitempty"`
-	Project           ProjectIdentity         `json:"project"`
-	Issue             IssueDetail             `json:"issue"`
-	CommentsTruncated bool                    `json:"comments_truncated"`
+	FileEvidence      []generated.RetainedEvidence `json:"file_evidence,omitempty"`
+	CloseEventUID     *string                      `json:"close_event_uid,omitempty"`
+	Verification      *generated.Verification      `json:"verification,omitempty"`
+	Project           ProjectIdentity              `json:"project"`
+	Issue             IssueDetail                  `json:"issue"`
+	CommentsTruncated bool                         `json:"comments_truncated"`
 }
 
 // EventSummary records the actual attributed event produced by a mutation.

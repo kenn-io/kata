@@ -520,6 +520,25 @@ func (l ListGlobalIssueOutVerification) Validate() error {
 	}
 }
 
+type LocalEmbeddingsStatusProvider string
+
+const (
+	BuiltIn                           LocalEmbeddingsStatusProvider = "built_in"
+	LocalEmbeddingsStatusProviderNone LocalEmbeddingsStatusProvider = "none"
+	Ollama                            LocalEmbeddingsStatusProvider = "ollama"
+	Other                             LocalEmbeddingsStatusProvider = "other"
+)
+
+// Validate checks if the LocalEmbeddingsStatusProvider value is valid
+func (l LocalEmbeddingsStatusProvider) Validate() error {
+	switch l {
+	case BuiltIn, LocalEmbeddingsStatusProviderNone, Ollama, Other:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid LocalEmbeddingsStatusProvider value, got: %v", l))
+	}
+}
+
 type MetadataPatchGuardOneOf1IfAbsent bool
 
 const (
@@ -948,6 +967,24 @@ func (i IssuePlanningDatesQueryKind) Validate() error {
 	}
 }
 
+// ReadyIssuesQuerySort priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+type ReadyIssuesQuerySort string
+
+const (
+	Priority                  ReadyIssuesQuerySort = "priority"
+	ReadyIssuesQuerySortEmpty ReadyIssuesQuerySort = ""
+)
+
+// Validate checks if the ReadyIssuesQuerySort value is valid
+func (r ReadyIssuesQuerySort) Validate() error {
+	switch r {
+	case Priority, ReadyIssuesQuerySortEmpty:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ReadyIssuesQuerySort value, got: %v", r))
+	}
+}
+
 // SearchIssuesQuerySort oldest selects exhaustive creation-ordered lexical pages; omit for relevance ranking
 type SearchIssuesQuerySort string
 
@@ -1000,6 +1037,24 @@ func (s SearchIssuesQueryMode) Validate() error {
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid SearchIssuesQueryMode value, got: %v", s))
+	}
+}
+
+// ReadyIssuesGlobalQuerySort priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+type ReadyIssuesGlobalQuerySort string
+
+const (
+	ReadyIssuesGlobalQuerySortEmpty    ReadyIssuesGlobalQuerySort = ""
+	ReadyIssuesGlobalQuerySortPriority ReadyIssuesGlobalQuerySort = "priority"
+)
+
+// Validate checks if the ReadyIssuesGlobalQuerySort value is valid
+func (r ReadyIssuesGlobalQuerySort) Validate() error {
+	switch r {
+	case ReadyIssuesGlobalQuerySortEmpty, ReadyIssuesGlobalQuerySortPriority:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ReadyIssuesGlobalQuerySort value, got: %v", r))
 	}
 }
 

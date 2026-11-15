@@ -48,7 +48,16 @@ func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(400, "validation", "hub_catalog must select a remote root HTTP(S) origin", "", nil)
 		}
 		token, err := catalog.ClientToken()
-		if err != nil || token == "" {
+		if err != nil {
+			message := "selected hub user credential is unavailable"
+			// Source names a daemon-host file or variable; only the reason is
+			// safe to return to the client.
+			if source, ok := errors.AsType[*config.CredentialSourceError](err); ok {
+				message += ": " + source.Reason
+			}
+			return nil, api.NewError(400, "hub_credential_required", message, "", nil)
+		}
+		if token == "" {
 			return nil, api.NewError(400, "hub_credential_required", "selected hub has no user credential", "", nil)
 		}
 		// Pin both the authorization header and secret-bearing enrollment body.
@@ -276,7 +285,7 @@ func reserveFederationBridgeCredential(ctx context.Context, store db.Storage, cr
 		return config.FederationCredential{}, internalAPIError(err)
 	}
 	if found {
-		if current.LeavePending || current.Provider != nil || current.HubURL != body.HubURL || current.HubProjectID != body.HubProjectID || current.Actor != body.UpstreamAccount || current.HubCatalog != body.HubCatalog || current.SpokeProjectName != body.ProjectName || current.RequestedActor != body.LocalAccount || current.AllowInsecure != allowInsecure || current.Capabilities != "claim,pull,push" || current.Token == "" {
+		if current.LeavePending || current.NativeLeave != nil || current.Provider != nil || current.HubURL != body.HubURL || current.HubProjectID != body.HubProjectID || current.Actor != body.UpstreamAccount || current.HubCatalog != body.HubCatalog || current.SpokeProjectName != body.ProjectName || current.RequestedActor != body.LocalAccount || current.AllowInsecure != allowInsecure || current.Capabilities != "claim,pull,push" || current.Token == "" {
 			return config.FederationCredential{}, api.NewError(409, "federation_credential_conflict", "existing project credential differs from the selected bridge", "resolve the existing binding before connecting", nil)
 		}
 		if current.Signing != nil || signing == nil {
@@ -374,7 +383,7 @@ func (d federationBridgeDoer) Do(ctx context.Context, request *http.Request) (*h
 			if readErr == nil && len(raw) <= 1<<20 && json.Unmarshal(raw, &envelope) == nil && envelope.Error.Code == "relay_cross_project_links" {
 				// Map only this public conflict to its known, endpoint-free message and
 				// remedy. Never forward arbitrary upstream diagnostic text or data.
-				failure := newRelayCrossProjectLinksError("hub")
+				failure := api.NewRelayCrossProjectLinksError("hub")
 				failure.Data = map[string]any{"hub_status": response.StatusCode}
 				return nil, failure
 			}

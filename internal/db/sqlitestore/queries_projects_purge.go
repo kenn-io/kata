@@ -53,13 +53,24 @@ func (d *Store) purgeProject(ctx context.Context, p db.PurgeProjectParams) (db.P
 	if err != nil {
 		return db.ProjectPurgeLog{}, err
 	}
-	if role != "" {
+	retireHub := p.RetireHubBinding && role == string(db.FederationRoleHub)
+	if role != "" && !retireHub {
 		return db.ProjectPurgeLog{}, &db.ProjectFederatedError{Role: db.FederationRole(role)}
+	}
+	if err := db.CheckFederationProjectIdentityRetirement(ctx, conn, project); err != nil {
+		return db.ProjectPurgeLog{}, err
 	}
 	if err := rejectActiveExternalRootProjectPurge(ctx, conn, project.ID); err != nil {
 		return db.ProjectPurgeLog{}, err
 	}
 
+	if retireHub {
+		// The project is archived, so no spoke can sync it. Its enrollments
+		// go with the project rows below.
+		if _, err := conn.ExecContext(ctx, `DELETE FROM federation_bindings WHERE project_id = ?`, project.ID); err != nil {
+			return db.ProjectPurgeLog{}, fmt.Errorf("retire hub federation binding: %w", err)
+		}
+	}
 	plID, err := purgeProjectCascade(ctx, conn, project, p.Actor, p.Reason, d.instanceUID)
 	if err != nil {
 		return db.ProjectPurgeLog{}, err
@@ -76,8 +87,8 @@ func (d *Store) purgeProject(ctx context.Context, p db.PurgeProjectParams) (db.P
 }
 
 // federationBindingRole returns the role of any federation_bindings row for the
-// project (hub or spoke), or "" when none exists. Presence of any binding
-// blocks purge — federation must be torn down first.
+// project (hub or spoke), or "" when none exists. A binding blocks purge
+// unless the caller asked to retire a hub binding.
 func federationBindingRole(ctx context.Context, q sqlReader, projectID int64) (string, error) {
 	var role string
 	err := q.QueryRowContext(ctx,
@@ -128,7 +139,7 @@ func countProjectPurge(ctx context.Context, c connExec, projectID int64) (projec
 // physically in the project are deleted; events in OTHER projects that reference
 // purged issues have only their local foreign keys detached, so signed UIDs and
 // a surviving reply's target identity and content hash stay intact.
-// federation_bindings is absent (refused upfront).
+// federation_bindings is absent: purge refuses it or retires it first.
 // NOTE: purge_log (issue tombstones) is intentionally NOT deleted — it has no FK
 // to projects so it survives, preserving prior-purge audit history (spec Finding 3).
 // recurrences / issue_sync_bindings / issue_sync_status / import_mappings are not
@@ -169,7 +180,10 @@ func deleteProjectScoped(ctx context.Context, c connExec, projectID int64) error
 			return fmt.Errorf("project purge delete (%s): %w", s.q, err)
 		}
 	}
-	return nil
+	// Names are shared across projects; release one only after its last
+	// enrollment has been removed in this transaction.
+	_, err := c.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,?)=? AND NOT EXISTS (SELECT 1 FROM federation_enrollments e WHERE meta.key=?||e.spoke_instance_uid)`, len(db.FederationSpokeNamePrefix), db.FederationSpokeNamePrefix, db.FederationSpokeNamePrefix)
+	return err
 }
 
 func purgeProjectCascade(ctx context.Context, c projectPurgeQueryer, project db.Project,

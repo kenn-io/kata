@@ -19,10 +19,7 @@ func validateRelayLinkEndpointsInProject(
 		return nil
 	}
 	payload := db.PayloadMap(event.Payload)
-	primaryUID, err := payloadIssueUID(event, payload)
-	if err != nil {
-		return err
-	}
+	primaryUID := db.EventIssueUID(event.IssueUID)
 	refs, err := payloadReferencedIssueUIDs(event, payload)
 	if err != nil {
 		return err
@@ -143,17 +140,48 @@ func filterRelayCrossProjectLinkEvents(
 	tx *sql.Tx,
 	projectIDs []int64,
 	events []db.FoldEvent,
-) ([]db.FoldEvent, error) {
-	if len(projectIDs) == 0 || len(events) == 0 {
-		return events, nil
+) ([]db.FoldEvent, relayOriginClassifier, error) {
+	if len(projectIDs) == 0 {
+		return events, relayOriginClassifier{}, nil
 	}
 	classifier, err := loadRelayOriginClassifier(ctx, tx, projectIDs)
 	if err != nil {
-		return nil, err
+		return nil, classifier, err
 	}
 	if !slices.ContainsFunc(events, classifier.relaySourced) {
-		return events, nil
+		return events, classifier, nil
 	}
+	issueProjects, err := relayLinkEndpointProjects(ctx, tx, projectIDs)
+	if err != nil {
+		return nil, classifier, err
+	}
+	filtered, err := filterRelayLinkEvents(events, classifier, issueProjects)
+	return filtered, classifier, err
+}
+
+func filterRelayLinkEvents(events []db.FoldEvent, classifier relayOriginClassifier, issueProjects map[string]string) ([]db.FoldEvent, error) {
+	filtered := make([]db.FoldEvent, 0, len(events))
+	for _, event := range events {
+		if !classifier.relaySourced(event) {
+			filtered = append(filtered, event)
+			continue
+		}
+		crossProject := func(peerUID string) bool {
+			projectUID, ok := issueProjects[peerUID]
+			return ok && projectUID != event.ProjectUID
+		}
+		stripped, keep, err := db.StripCrossProjectLinkAdditions(event, crossProject)
+		if err != nil {
+			return nil, err
+		}
+		if keep {
+			filtered = append(filtered, stripped)
+		}
+	}
+	return filtered, nil
+}
+
+func relayLinkEndpointProjects(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map[string]string, error) {
 	placeholders, args := projectIDPlaceholders(projectIDs)
 	//nolint:gosec // The IN clause contains only count-derived placeholders; project IDs stay bound.
 	issueRows, err := tx.QueryContext(ctx, `
@@ -179,23 +207,5 @@ func filterRelayCrossProjectLinkEvents(
 	if err := issueRows.Close(); err != nil {
 		return nil, fmt.Errorf("close relay link endpoint projects: %w", err)
 	}
-	filtered := make([]db.FoldEvent, 0, len(events))
-	for _, event := range events {
-		if !classifier.relaySourced(event) {
-			filtered = append(filtered, event)
-			continue
-		}
-		crossProject := func(peerUID string) bool {
-			projectUID, ok := issueProjects[peerUID]
-			return ok && projectUID != event.ProjectUID
-		}
-		stripped, keep, err := db.StripCrossProjectLinkAdditions(event, crossProject)
-		if err != nil {
-			return nil, err
-		}
-		if keep {
-			filtered = append(filtered, stripped)
-		}
-	}
-	return filtered, nil
+	return issueProjects, nil
 }

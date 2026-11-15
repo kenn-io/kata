@@ -22,6 +22,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+const preIndexOnlySchemaVersion = 40
+
 func TestAutoCutoverNoopsAtCurrentSchema(t *testing.T) {
 	ctx, path := setupClosedTestDB(t)
 
@@ -32,7 +34,7 @@ func TestAutoCutoverNoopsAtCurrentSchema(t *testing.T) {
 }
 
 func TestAutoCutoverPreservesIssueContentRevision(t *testing.T) {
-	for _, version := range []int{22, 26, db.CurrentSchemaVersion() - 1} {
+	for _, version := range []int{22, 26, preIndexOnlySchemaVersion} {
 		t.Run(fmt.Sprintf("schema_version=%d", version), func(t *testing.T) {
 			ctx := t.Context()
 			path := filepath.Join(t.TempDir(), "kata.db")
@@ -240,7 +242,7 @@ func TestAutoCutoverPreservesUIDOnlyHistory(t *testing.T) {
 	_, err = source.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, issue.ID)
 	require.NoError(t, err)
 	_, err = source.ExecContext(ctx,
-		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, preIndexOnlySchemaVersion)
 	require.NoError(t, err)
 	for _, includeDeleted := range []bool{false, true} {
 		records := exportAndDecode(ctx, t, source, jsonl.ExportOptions{
@@ -297,7 +299,7 @@ func TestAutoCutoverFoldsUncheckpointedWAL(t *testing.T) {
 	live := filepath.Join(t.TempDir(), "kata.db")
 	source := openCutoverTargetDB(t, ctx, live)
 	_, err := source.ExecContext(ctx,
-		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, preIndexOnlySchemaVersion)
 	require.NoError(t, err)
 	_, err = source.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -320,7 +322,7 @@ func TestAutoCutoverFoldsUncheckpointedWAL(t *testing.T) {
 	backups, err := filepath.Glob(path + ".bak.*")
 	require.NoError(t, err)
 	require.Len(t, backups, 1)
-	assertSchemaVersion(t, backups[0], db.CurrentSchemaVersion()-1)
+	assertSchemaVersion(t, backups[0], preIndexOnlySchemaVersion)
 	backup, err := sqlitestore.Open(ctx, backups[0], db.ReadOnly())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = backup.Close() })
@@ -338,7 +340,7 @@ func TestAutoCutoverRefusesDatabaseInUse(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kata.db")
 	source := openCutoverTargetDB(t, ctx, path)
 	_, err := source.ExecContext(ctx,
-		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, db.CurrentSchemaVersion()-1)
+		`UPDATE meta SET value = ? WHERE key = 'schema_version'`, preIndexOnlySchemaVersion)
 	require.NoError(t, err)
 	reader, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
@@ -505,7 +507,7 @@ func TestAutoCutover_ReconstructsAPITokensFromEvents(t *testing.T) {
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx,
 		`UPDATE meta SET value = ? WHERE key = 'schema_version'`,
-		db.CurrentSchemaVersion()-1)
+		preIndexOnlySchemaVersion)
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
 

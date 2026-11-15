@@ -18,6 +18,8 @@
 
   interface Props {
     selectedCommentUID?: string | undefined
+    // True while the task shows the list's copy and its comments load.
+    pending?: boolean | undefined
     navigationActive?: boolean | undefined
     initialReply?: KataCommentReplyIntent | undefined
     showList?: boolean | undefined
@@ -52,6 +54,7 @@
   let {
     issue,
     selectedCommentUID,
+    pending = false,
     navigationActive = true,
     initialReply = undefined,
     showList = true,
@@ -276,7 +279,9 @@
         >
         <Button size="sm" label="Cancel reply" disabled={actionsDisabled} onclick={cancelReply} />
       </div>
-      {#if evidenceTooShort}<p>Confirm and refute need at least 40 characters of evidence.</p>{/if}
+      {#if evidenceTooShort}<p>
+          Confirm and refute replies need at least 40 characters of evidence.
+        </p>{/if}
     {/if}
     <MentionTextarea
       ariaLabel={replyDraft ? 'Reply evidence' : 'Comment'}
@@ -311,7 +316,9 @@
       />{/if}
   </form>
   {#if showList}
-    {#if sortedComments.length === 0}
+    {#if pending}
+      <p role="status" aria-label="Loading comments">Loading comments…</p>
+    {:else if sortedComments.length === 0}
       <p>No comments</p>
     {:else}
       <div class="comment-list" bind:this={listElement}>

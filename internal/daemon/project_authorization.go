@@ -69,6 +69,26 @@ func projectAccessDenied() error {
 	return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
 }
 
+// restrictedProjectLookup reports whether the caller sees only part of the
+// catalog: a mounted host, an issue-scoped credential, or a project policy or
+// scope header that narrows what the principal may select.
+func restrictedProjectLookup(ctx context.Context) bool {
+	if _, mounted := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); mounted || issueScopeFromContext(ctx) != nil {
+		return true
+	}
+	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
+	return decision != nil && (!decision.owner || decision.fixedUIDs != nil)
+}
+
+// hideMissingProject gives a missing project the same response as a project
+// the caller cannot access, so a restricted lookup cannot reveal which names exist.
+func hideMissingProject(ctx context.Context, err error) error {
+	if apiErr, ok := errors.AsType[*api.APIError](err); ok && apiErr.Status == http.StatusNotFound && restrictedProjectLookup(ctx) {
+		return projectAccessDenied()
+	}
+	return err
+}
+
 func authorizeProjectTarget(ctx context.Context, projectUID string) error {
 	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
 	if decision == nil || decision.owner && decision.fixedUIDs == nil {
@@ -125,6 +145,12 @@ func accessibleProjectUIDs(ctx context.Context, store db.Storage, actor string) 
 // two reads surfaces on the next refresh instead of hiding behind the newer
 // revision.
 func (d *ProjectAccessDecision) refresh(ctx context.Context) (gained []string, kept, changed bool, err error) {
+	return d.refreshProjects(ctx, true)
+}
+
+// refreshProjects can adopt a narrowed catalog for durable subscriptions, whose
+// stored selection is resolved separately instead of admitting every project.
+func (d *ProjectAccessDecision) refreshProjects(ctx context.Context, rejectLoss bool) (gained []string, kept, changed bool, err error) {
 	if d.owner && d.fixedUIDs == nil {
 		return nil, true, false, nil
 	}
@@ -143,18 +169,20 @@ func (d *ProjectAccessDecision) refresh(ctx context.Context) (gained []string, k
 		}
 		accessible = narrowProjectUIDs(accessible, d.fixedUIDs)
 	}
-	for _, projectUID := range d.ProjectUIDs {
-		if slices.Contains(accessible, projectUID) {
-			continue
+	if rejectLoss {
+		for _, projectUID := range d.ProjectUIDs {
+			if slices.Contains(accessible, projectUID) {
+				continue
+			}
+			// A project this request merged or purged away is gone for everyone;
+			// only an existing project the caller can no longer see is a loss.
+			if _, err := d.store.ProjectByUID(ctx, projectUID); errors.Is(err, db.ErrNotFound) {
+				continue
+			} else if err != nil {
+				return nil, false, true, fmt.Errorf("resolving admitted project %s: %w", projectUID, err)
+			}
+			return nil, false, true, nil
 		}
-		// A project this request merged or purged away is gone for everyone;
-		// only an existing project the caller can no longer see is a loss.
-		if _, err := d.store.ProjectByUID(ctx, projectUID); errors.Is(err, db.ErrNotFound) {
-			continue
-		} else if err != nil {
-			return nil, false, true, fmt.Errorf("resolving admitted project %s: %w", projectUID, err)
-		}
-		return nil, false, true, nil
 	}
 	for _, projectUID := range accessible {
 		if !slices.Contains(d.ProjectUIDs, projectUID) {
@@ -359,7 +387,7 @@ func withProjectOperationAuthorization(humaAPI huma.API, store db.Storage) {
 		// project access; the selectors below fence every project they name.
 		// Token, team and federation administration grant or route authority
 		// beyond one project, so they stay with the daemon owner.
-		ownerOnly := policy.Kind == hostOperationTokenAdministration || op.OperationID == "getFederationStatus" || op.OperationID == "listFederationEnrollments" || op.OperationID == "revokeFederationEnrollment" || op.OperationID == "createFederationReplica" || op.OperationID == "disconnectFederationBridge" || op.OperationID == "connectFederationBridge" || op.OperationID == "getFederationBridgeStatus" || op.OperationID == "repinFederationRootKey"
+		ownerOnly := policy.Kind == hostOperationTokenAdministration || op.OperationID == "getFederationStatus" || op.OperationID == "listFederationEnrollments" || op.OperationID == "revokeFederationEnrollment" || op.OperationID == "setFederationSpokeName" || op.OperationID == "clearFederationSpokeName" || op.OperationID == "createFederationReplica" || op.OperationID == "disconnectFederationBridge" || op.OperationID == "connectFederationBridge" || op.OperationID == "getFederationBridgeStatus" || op.OperationID == "repinFederationRootKey"
 		principal, authenticated := PrincipalFromContext(ctx.Context())
 		// A mounting host adjudicates its administrative capabilities through
 		// HostAccess. Native project selection/fences still intersect that grant.

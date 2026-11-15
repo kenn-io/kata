@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -72,6 +73,8 @@ func TestDaemonView_CursorMovement(t *testing.T) {
 
 func TestDaemonView_RenderIncludesDaemonRows(t *testing.T) {
 	m := setupDaemonView()
+	fileOnly := daemonTarget{TokenFile: filepath.Join(t.TempDir(), "missing-credential")}
+	assert.Equal(t, "token", daemonAuth(fileOnly))
 
 	out := stripANSI(renderDaemons(m))
 

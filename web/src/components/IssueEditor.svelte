@@ -47,6 +47,8 @@
 
   interface Props {
     selectedCommentUID?: string | undefined
+    // True while the task shows the list's copy and its comments load.
+    pending?: boolean | undefined
     navigationActive?: boolean | undefined
     returnComment?: { issueUID: string; commentUID: string } | undefined
     commentError?: string | undefined
@@ -97,6 +99,7 @@
   let {
     issue,
     selectedCommentUID,
+    pending = false,
     navigationActive = true,
     commentError = undefined,
     events = [],
@@ -554,6 +557,7 @@
     <Comments
       {selectedCommentUID}
       {navigationActive}
+      {pending}
       {issue}
       {searchReferences}
       {actionsDisabled}
@@ -564,7 +568,7 @@
       onOpenComment={(uid, commentUID, returnComment) =>
         void onSelectIssue?.({ uid, commentUID, returnComment })}
     />
-    <IssueHistory {events} />
+    <IssueHistory {events} metadata={issue.issue.metadata} attachmentLinks={false} {pending} />
   {/key}
 </section>
 
@@ -586,6 +590,9 @@
     min-width: 0;
     min-height: 0;
     overflow: auto;
+    /* Reserve the scrollbar's width so actions do not shift when selecting a
+       longer issue makes the pane scroll. */
+    scrollbar-gutter: stable;
     background: var(--bg-primary);
     padding: 18px 22px;
     container-type: inline-size;

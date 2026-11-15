@@ -5,7 +5,7 @@ import (
 	"encoding/json/v2"
 )
 
-// SupersededDeliveries loads the record of deliveries a forwarded root reset
+// SupersededDeliveries loads the record of deliveries a root or forwarded reset
 // superseded for one downstream grant. Absence means nothing is hidden.
 func (p RelayResetProtocol) SupersededDeliveries(ctx context.Context, projectUID, bindingUID string) (RelayResetSupersededDeliveries, bool, error) {
 	raw, found, err := p.Backend.Meta(ctx, RelayResetSupersededMetadataKey(projectUID, bindingUID))

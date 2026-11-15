@@ -3,9 +3,9 @@ package tui
 import (
 	"os"
 	"os/exec"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"go.kenn.io/kata/internal/editorcmd"
 )
 
 // editorCmd suspends Bubble Tea, runs $EDITOR on a tmpfile pre-seeded
@@ -44,7 +44,7 @@ func editorCmd(kind, template string, formGen int64) tea.Cmd {
 		}
 	}
 	_ = tmp.Close()
-	editor := resolveEditor()
+	editor := editorcmd.Resolve()
 	//nolint:gosec,noctx // user-controlled $EDITOR is intentional; tea.ExecProcess runs it interactively and Bubble Tea commands have no context.
 	cmd := exec.Command(editor[0], append(editor[1:], name)...)
 	return tea.ExecProcess(cmd, func(execErr error) tea.Msg {
@@ -60,18 +60,4 @@ func editorCmd(kind, template string, formGen int64) tea.Cmd {
 			kind: kind, formGen: formGen, content: string(content),
 		}
 	})
-}
-
-// resolveEditor returns the command (with args) to invoke. Honors
-// $VISUAL > $EDITOR per POSIX convention; falls back to vi.
-func resolveEditor() []string {
-	for _, env := range []string{"VISUAL", "EDITOR"} {
-		if v := os.Getenv(env); v != "" {
-			parts := strings.Fields(v)
-			if len(parts) > 0 {
-				return parts
-			}
-		}
-	}
-	return []string{"vi"}
 }

@@ -134,7 +134,9 @@ func waitForDaemonStartupWithProbe(
 				}
 				return fmt.Errorf("daemon exited before readiness and no compatible daemon became ready within %s: %w; inspect kata daemon logs", daemonChildExitGrace, exitedBeforeReadiness)
 			}
-			if migrationAllowed && sqliteMigrationPending(ctx) {
+			// Without a child exit to observe, an old schema alone cannot tell a
+			// pending cutover from a replacement that failed before taking the lock.
+			if cutoverActive || exited != nil && migrationAllowed && sqliteMigrationPending(ctx) {
 				fmt.Fprintln(os.Stderr, "kata: SQLite migration in progress; waiting for daemon readiness (cancelling stops waiting and leaves the daemon running)")
 				deadline.Reset(wait)
 				continue
@@ -179,7 +181,13 @@ func sqliteMigrationPendingForPath(ctx context.Context, path string, inspector S
 
 func sqliteCutoverLocked(ctx context.Context) bool {
 	dsn, err := config.KataDSN(ctx)
-	if err != nil || strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+	return err == nil && sqliteCutoverLockedForDSN(dsn)
+}
+
+// sqliteCutoverLockedForDSN reports whether a SQLite cutover holds dsn's
+// import lock. PostgreSQL storage has no such lock.
+func sqliteCutoverLockedForDSN(dsn string) bool {
+	if dsn == "" || strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		return false
 	}
 	lock := flock.New(strings.TrimPrefix(dsn, "sqlite://")+".import.lock", flock.SetFlag(os.O_RDONLY))

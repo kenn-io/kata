@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -24,12 +25,13 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 			"These contract and attention entry points are distinct from daemon event\n" +
 			"hooks configured in hooks.toml.",
 	}
-	var source string
+	var source, ownershipMarker string
 	contract := &cobra.Command{
 		Use:   "contract <harness>",
 		Short: "Read stdin and emit a harness-native contract response",
 		Long: "Read a finite native SessionStart JSON payload from stdin through EOF\n" +
-			"and emit the kata contract in the harness's native response.\n\n" +
+			"and emit the kata contract in the harness's native response.\n" +
+			"Sessions outside a kata workspace (no .kata.toml) get an empty response.\n\n" +
 			"Hermes uses pre_llm_call instead, injecting only when extra.is_first_turn is true.\n" +
 			"Kit v0.26.0 requires a nonempty text extra.user_message; empty or multimodal messages fail.\n" +
 			"Command harnesses: claude, codex, copilot, cursor, gemini, hermes, qwen, droid, antigravity, kimi-code, muse, zcode.\n" +
@@ -50,6 +52,9 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 			if !capability.Contract {
 				return agentHookUsage(capability.Name + " does not consume hook contract context; use committed AGENTS.md")
 			}
+			if cmd.Flags().Changed("ownership-marker") && !isAgentHookOwnershipArg(contractHook, "--ownership-marker", ownershipMarker) {
+				return agentHookUsage("invalid Kata hook ownership marker")
+			}
 			text, err := readAgentContractSource(source, cmd.Flags().Changed("source"))
 			if err != nil {
 				return err
@@ -58,6 +63,19 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 			if isTerminal(input) {
 				return agentHookUsage("contract requires a finite JSON payload on stdin; use kata quickstart --format contract for plain text")
 			}
+			// Peek at the payload for its session directory, then hand the
+			// renderer the same bytes followed by anything left unread.
+			const peekLimit = 1024 * 1024
+			peeked, err := io.ReadAll(io.LimitReader(input, peekLimit+1))
+			if err != nil {
+				return &cliError{Message: firstLine(err.Error()), Kind: kindInternal, ExitCode: ExitInternal}
+			}
+			input = io.MultiReader(bytes.NewReader(peeked), input)
+			dir := flags.Workspace
+			if dir == "" {
+				dir = contractPayloadDir(peeked)
+			}
+			text = contractForDir(dir, text)
 			var renderErr error
 			if agentHookUsesKit(capability.Name) {
 				renderErr = writeNativeAgentContract(cmd.Context(), agenthook.Agent(capability.Name), input, cmd.OutOrStdout(), text)
@@ -71,6 +89,8 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 		},
 	}
 	contract.Flags().StringVar(&source, "source", "", "local UTF-8 prompt file (missing file uses built-in contract)")
+	contract.Flags().StringVar(&ownershipMarker, "ownership-marker", "", "")
+	_ = contract.Flags().MarkHidden("ownership-marker")
 	attention := &cobra.Command{
 		Use:   "attention",
 		Short: "Track workspace attention at session start and end",
@@ -84,7 +104,7 @@ func newAgentHooksCmdWithTerminalCheck(isTerminal func(io.Reader) bool) *cobra.C
 }
 
 func newAgentHookAttentionCmd(mode string) *cobra.Command {
-	var source string
+	var source, ownershipMarker string
 	short := "Establish the attention baseline at session start"
 	if mode == "end" {
 		short = "Raise attention if the session ended without a hand-off"
@@ -99,11 +119,16 @@ func newAgentHookAttentionCmd(mode string) *cobra.Command {
 			if cmd.Flags().Changed("source") && source != legacyAttentionHookSource+mode {
 				return agentHookUsage("--source must be " + legacyAttentionHookSource + mode)
 			}
+			if cmd.Flags().Changed("ownership-marker") && !isAgentHookOwnershipArg(agentHookKind(mode), "--ownership-marker", ownershipMarker) {
+				return agentHookUsage("invalid Kata hook ownership marker")
+			}
 			runAttentionHook(cmd, mode)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&source, "source", "", "optional ownership marker: "+legacyAttentionHookSource+mode)
+	cmd.Flags().StringVar(&ownershipMarker, "ownership-marker", "", "")
+	_ = cmd.Flags().MarkHidden("ownership-marker")
 	return cmd
 }
 

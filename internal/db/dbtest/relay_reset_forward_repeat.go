@@ -66,6 +66,12 @@ func RunRelayResetRepeatedBeforeDownstreamActivation(t *testing.T, store db.Stor
 	require.NoError(t, err)
 	require.Equal(t, manifest, forwarded.Manifest, "the downstream receives the latest root checkpoint")
 	require.Equal(t, device.Enrollment.RelayResetEpoch+1, forwarded.Translation.Authority.Epoch)
+	retry, err := installer.CreateRelayReset(ctx, deviceBinding, db.RootAttributionSigner{})
+	require.NoError(t, err)
+	require.Equal(t, forwarded, retry)
 	activated := db.WithRelayRequestedEpoch(ctx, forwarded.Translation.Authority.Epoch)
 	require.Empty(t, pendingSourceUIDs(activated, t, store, deviceBinding, db.RelayStreamEvent), "the first forward's rows for the purged issue must not survive the second checkpoint")
+	required, err := store.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, deviceBinding)
+	require.NoError(t, err)
+	require.False(t, required)
 }

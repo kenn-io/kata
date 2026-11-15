@@ -11,21 +11,9 @@ import (
 	"go.kenn.io/kata/internal/metadata"
 )
 
-// ReadyIssues returns actionable open issues that have no active blocker.
-// Issues marked someday=true or scheduled after their effective local date or
-// instant are parked and excluded. Optional owner and label filters are
-// composed here so the same query remains useful to the CLI's different ready
-// views.
-func (s *Store) ReadyIssues(
-	ctx context.Context,
-	projectID int64,
-	limit int,
-	filter db.ReadyIssuesFilter,
-) ([]db.Issue, error) {
-	at := filter.At
-	if at.IsZero() {
-		at = time.Now()
-	}
+const readyPriorityOrderBy = ` ORDER BY COALESCE(i.priority, 5), i.updated_at DESC, i.id DESC`
+
+func buildReadyIssuesQuery(ctx context.Context, projectID int64, filter db.ReadyIssuesFilter, at time.Time) (string, []any) {
 	args := []any{projectID}
 	var query strings.Builder
 	query.WriteString(scheduledIssueSelect + `
@@ -67,14 +55,31 @@ func (s *Store) ReadyIssues(
           SELECT 1 FROM issue_labels il
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
-	query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
-	rows, err := s.QueryContext(ctx, query.String(), args...)
-	if err != nil {
-		return nil, fmt.Errorf("ready issues: %w", mapSQLError(err, nil))
+	if filter.PriorityFirst {
+		query.WriteString(readyPriorityOrderBy)
+	} else {
+		query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
 	}
-	defer func() { _ = rows.Close() }()
-	var issues []db.Issue
-	for rows.Next() {
+	return query.String(), args
+}
+
+// ReadyIssues returns actionable open issues that have no active blocker.
+// Issues marked someday=true or scheduled after their effective local date or
+// instant are parked and excluded. Optional owner and label filters are
+// composed here so the same query remains useful to the CLI's different ready
+// views.
+func (s *Store) ReadyIssues(
+	ctx context.Context,
+	projectID int64,
+	limit int,
+	filter db.ReadyIssuesFilter,
+) ([]db.Issue, error) {
+	at := filter.At
+	if at.IsZero() {
+		at = time.Now()
+	}
+	query, args := buildReadyIssuesQuery(ctx, projectID, filter, at)
+	return readReadyBatches(ctx, s, query, args, limit, func(rows *sql.Rows) (*db.Issue, error) {
 		issue, recurrenceTimezone, err := scanScheduledIssue(ctx, rows)
 		if err != nil {
 			return nil, err
@@ -86,31 +91,17 @@ func (s *Store) ReadyIssues(
 			return nil, fmt.Errorf("ready issue %s schedule: %w", issue.UID, err)
 		}
 		if !due {
-			continue
+			return nil, nil
 		}
 		if issue.AssignmentExpiresOn != nil && !issue.AssignmentExpiresOn.After(at) {
 			issue.Owner = nil
 			issue.AssignmentExpiresOn = nil
 		}
-		issues = append(issues, issue)
-		if limit > 0 && len(issues) == limit {
-			break
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate ready issues: %w", mapSQLError(err, nil))
-	}
-	return issues, nil
+		return &issue, nil
+	})
 }
 
-// ReadyIssuesGlobal returns actionable ready issues from all active projects
-// along with the project name needed to render a qualified reference. Filter
-// and parked-item semantics match ReadyIssues.
-func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
-	at := filter.At
-	if at.IsZero() {
-		at = time.Now()
-	}
+func buildReadyIssuesGlobalQuery(ctx context.Context, filter db.ReadyIssuesFilter, at time.Time) (string, []any) {
 	args := []any{}
 	var query strings.Builder
 	query.WriteString(`SELECT ` + issueColumns + `, p.name, schedule_recurrence.timezone
@@ -155,15 +146,24 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
           SELECT 1 FROM issue_labels il
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
-	query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
-	rows, err := s.QueryContext(ctx, query.String(), args...)
-	if err != nil {
-		return nil, fmt.Errorf("ready issues global: %w", mapSQLError(err, nil))
+	if filter.PriorityFirst {
+		query.WriteString(readyPriorityOrderBy)
+	} else {
+		query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
 	}
-	defer func() { _ = rows.Close() }()
+	return query.String(), args
+}
 
-	var issues []db.ReadyGlobalIssue
-	for rows.Next() {
+// ReadyIssuesGlobal returns actionable ready issues from all active projects
+// along with the project name needed to render a qualified reference. Filter
+// and parked-item semantics match ReadyIssues.
+func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
+	at := filter.At
+	if at.IsZero() {
+		at = time.Now()
+	}
+	query, args := buildReadyIssuesGlobalQuery(ctx, filter, at)
+	return readReadyBatches(ctx, s, query, args, limit, func(rows *sql.Rows) (*db.ReadyGlobalIssue, error) {
 		var issue db.Issue
 		var assignmentExpiresOn, closedAt, deletedAt storedNullTime
 		var projectName string
@@ -186,21 +186,14 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 			return nil, fmt.Errorf("ready global issue %s schedule: %w", issue.UID, err)
 		}
 		if !due {
-			continue
+			return nil, nil
 		}
 		if issue.AssignmentExpiresOn != nil && !issue.AssignmentExpiresOn.After(at) {
 			issue.Owner = nil
 			issue.AssignmentExpiresOn = nil
 		}
-		issues = append(issues, db.ReadyGlobalIssue{Issue: issue, ProjectName: projectName})
-		if limit > 0 && len(issues) == limit {
-			break
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate ready global issues: %w", mapSQLError(err, nil))
-	}
-	return issues, nil
+		return &db.ReadyGlobalIssue{Issue: issue, ProjectName: projectName}, nil
+	})
 }
 
 func scheduleDefaultTimezone(recurrenceTimezone, daemonTimezone string) string {
@@ -273,4 +266,43 @@ func (s *Store) ListIssueContent(ctx context.Context, afterID int64, limit int) 
 		return nil, fmt.Errorf("iterate issue content: %w", mapSQLError(err, nil))
 	}
 	return content, nil
+}
+
+// Schedules are evaluated in Go. Grow the SQL prefix when parked rows fill
+// a batch, while keeping ordinary limited reads bounded on the wire.
+func readReadyBatches[T any](ctx context.Context, s *Store, query string, args []any, limit int, scan func(*sql.Rows) (*T, error)) ([]T, error) {
+	for batch := limit; ; batch *= 2 {
+		bounded := query
+		if batch > 0 {
+			bounded += fmt.Sprintf(" LIMIT %d", batch)
+		}
+		rows, err := s.QueryContext(ctx, bounded, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ready issues: %w", mapSQLError(err, nil))
+		}
+		var issues []T
+		count := 0
+		for rows.Next() {
+			count++
+			issue, err := scan(rows)
+			if err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			if issue != nil {
+				issues = append(issues, *issue)
+			}
+			if limit > 0 && len(issues) == limit {
+				break
+			}
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("iterate ready issues: %w", mapSQLError(err, nil))
+		}
+		if limit <= 0 || len(issues) == limit || count < batch {
+			return issues, nil
+		}
+	}
 }

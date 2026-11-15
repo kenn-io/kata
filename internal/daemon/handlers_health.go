@@ -2,12 +2,14 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"os"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/version"
 )
 
@@ -69,12 +71,17 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 				out.Body.Embeddings.Credential = c.Credential
 				out.Body.Embeddings.CredentialSource = c.CredentialSource
 				out.Body.Embeddings.CredentialReason = c.CredentialReason
-				// Only credential errors exclude provider-reflected issue text.
+				// Credential and built-in setup errors exclude provider-reflected issue text.
 				out.Body.Embeddings.LastError = c.LastError
 				out.Body.Embeddings.LastErrorAt = c.LastErrorAt
 				if c.LastErrorStatus != 0 || h.LastErrorStatus == 401 || h.LastErrorStatus == 403 {
 					out.Body.Embeddings.LastErrorStatus = c.LastErrorStatus
 				}
+			}
+		}
+		if diagnostics && cfg.Docbank != nil {
+			if checked, err := cfg.Docbank.CheckKey(); checked {
+				out.Body.Docbank = docbankHealth(err)
 			}
 		}
 		if diagnostics && cfg.FederationConfigHealth != nil {
@@ -103,4 +110,15 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		return out, nil
 	})
+}
+
+func docbankHealth(err error) *api.DocbankHealth {
+	if err == nil {
+		return &api.DocbankHealth{Credential: "ok"}
+	}
+	h := &api.DocbankHealth{Credential: "missing", CredentialReason: err.Error()}
+	if e, ok := errors.AsType[*config.CredentialSourceError](err); ok {
+		h.CredentialSource, h.CredentialReason = e.Source, e.Reason
+	}
+	return h
 }

@@ -34,8 +34,13 @@ func (s *Store) acquireFederationProjectLock(
 	if s.federationLockDB == nil {
 		return nil, errors.New("postgres federation project coordinator is unavailable")
 	}
+	releaseSlot, err := s.reserveFederationLockSlot(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reserve postgres federation project lock capacity: %w", err)
+	}
 	tx, err := s.federationLockDB.BeginTx(ctx, nil)
 	if err != nil {
+		releaseSlot()
 		return nil, fmt.Errorf("begin postgres federation project lock: %w", err)
 	}
 	lockQuery := `
@@ -51,13 +56,74 @@ func (s *Store) acquireFederationProjectLock(
 	lockIdentity := fmt.Sprintf("kata:federation:project:%s:%d", s.schema, projectID)
 	if _, err := tx.ExecContext(ctx, lockQuery, lockIdentity); err != nil {
 		_ = tx.Rollback()
+		releaseSlot()
 		return nil, fmt.Errorf("acquire postgres federation project lock: %w", mapSQLError(err, nil))
 	}
+	return releaseFederationProjectLock(func() { _ = tx.Rollback() }, releaseSlot), nil
+}
 
+func (s *Store) reserveFederationLockSlot(ctx context.Context) (func(), error) {
+	select {
+	case s.federationLockSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return releaseFederationProjectSlot(s.federationLockSlots), nil
+}
+
+func (s *Store) tryReserveFederationLockSlot() (func(), bool) {
+	select {
+	case s.federationLockSlots <- struct{}{}:
+		return releaseFederationProjectSlot(s.federationLockSlots), true
+	default:
+		return nil, false
+	}
+}
+
+func releaseFederationProjectSlot(slots chan struct{}) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() { <-slots })
+	}
+}
+
+func releaseFederationProjectLock(releaseTx, releaseSlot func()) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			_ = tx.Rollback()
+			releaseTx()
+			releaseSlot()
 		})
-	}, nil
+	}
+}
+
+// TryAcquireFederationProjectSharedLock never waits behind another process's
+// rebind or a saturated federation-lock connection pool. A false result leaves
+// no slot, transaction, or advisory lock behind.
+func (s *Store) TryAcquireFederationProjectSharedLock(ctx context.Context, projectID int64) (func(), bool, error) {
+	if s.federationLockDB == nil {
+		return nil, false, errors.New("postgres federation project coordinator is unavailable")
+	}
+	releaseSlot, reserved := s.tryReserveFederationLockSlot()
+	if !reserved {
+		return nil, false, nil
+	}
+	tx, err := s.federationLockDB.BeginTx(ctx, nil)
+	if err != nil {
+		releaseSlot()
+		return nil, false, fmt.Errorf("begin postgres federation project lock: %w", err)
+	}
+	identity := fmt.Sprintf("kata:federation:project:%s:%d", s.schema, projectID)
+	var acquired bool
+	err = tx.QueryRowContext(ctx, `SELECT pg_catalog.pg_try_advisory_xact_lock_shared(
+pg_catalog.hashtextextended(pg_catalog.current_database() || ':' || $1, 0))`, identity).Scan(&acquired)
+	if err != nil || !acquired {
+		_ = tx.Rollback()
+		releaseSlot()
+		if err != nil {
+			return nil, false, fmt.Errorf("try postgres federation project lock: %w", mapSQLError(err, nil))
+		}
+		return nil, false, nil
+	}
+	return releaseFederationProjectLock(func() { _ = tx.Rollback() }, releaseSlot), true, nil
 }

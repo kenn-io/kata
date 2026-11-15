@@ -59,19 +59,21 @@ describe('canonical Kata routes', () => {
     expect(serializeRoute(route)).toBe('/kata?view=scheduled')
   })
 
-  it('parses credentials as a daemon route without carrying issue workspace state', () => {
-    const route = parseRoute(
-      new URL(`https://daemon.example/kata?view=credentials&issue=${issueUID}&label=private-actor`),
-    )
-
-    expect(route).toEqual({
-      kind: 'kata',
-      view: 'credentials',
-      graph: false,
-      filters: { status: [], owner: [], label: [], relationship: [] },
-    })
-    expect(serializeRoute(route)).toBe('/kata?view=credentials')
-  })
+  it.each(['credentials', 'settings'])(
+    'parses %s as a daemon route without carrying issue workspace state',
+    (view) => {
+      const route = parseRoute(
+        new URL(`https://daemon.example/kata?view=${view}&issue=${issueUID}&label=ready`),
+      )
+      expect(route).toEqual({
+        kind: 'kata',
+        view,
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
+      })
+      expect(serializeRoute(route)).toBe(`/kata?view=${view}`)
+    },
+  )
 
   it('keeps invalid issue UIDs routed and gives short refs one search action', () => {
     expect(parseRoute(new URL('https://daemon.example/kata?issue=abc4'))).toEqual({
@@ -124,6 +126,7 @@ describe('screen names', () => {
     [`?issue=${issueUID}`, 'issue'],
     [`?issue=${issueUID}&graph=1`, 'graph'],
     [`?view=credentials&issue=${issueUID}`, 'credentials'],
+    [`?view=settings&issue=${issueUID}`, 'settings'],
     ['?view=unknown', undefined],
   ])('maps %s to %s', (query, screen) => {
     expect(screenNameForRoute(parseRoute(new URL(`https://daemon.example/kata${query}`)))).toBe(

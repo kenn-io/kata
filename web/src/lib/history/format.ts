@@ -82,6 +82,8 @@ export function describeKataEvent(event: KataTaskEvent): KataEventDescriptor {
     }
     case 'issue.updated':
       return { icon: PencilIcon, label: 'updated the task', tone: 'neutral' }
+    case 'issue.restated':
+      return { icon: PencilIcon, label: 'updated the task from an imported copy', tone: 'neutral' }
     case 'issue.linked':
       return { icon: ArrowRightLeftIcon, label: 'linked', tone: 'neutral' }
     case 'issue.unlinked':

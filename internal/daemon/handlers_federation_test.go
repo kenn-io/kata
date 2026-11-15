@@ -3481,6 +3481,9 @@ func TestLeaveFederationReplicaRouteDetach(t *testing.T) {
 func TestLeaveFederationReplicaRouteAbortReleasesPreparedLeave(t *testing.T) {
 	env := testenv.New(t)
 	project, binding := newSpokeProject(t, env)
+	binding.PushEnabled = true
+	binding, err := env.DB.UpsertFederationBinding(t.Context(), binding)
+	require.NoError(t, err)
 	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID)
 	preparationID := prepareLeaveThroughRoute(t, env, path)
 	require.True(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name))
@@ -3503,7 +3506,53 @@ func TestLeaveFederationReplicaRouteAbortReleasesPreparedLeave(t *testing.T) {
 	assert.False(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name))
 	stored, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
-	assert.Equal(t, binding, stored, "abort must not change the binding")
+	assert.Equal(t, binding.Enabled, stored.Enabled, "abort restores the original enabled state")
+	assert.Equal(t, binding.PushEnabled, stored.PushEnabled, "abort restores the original push state")
+	assert.Equal(t, binding.PushCursorEventID, stored.PushCursorEventID, "abort must preserve push progress")
+	_, pushedEvent, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "write after failed leave", Author: "wesm",
+	})
+	require.NoError(t, err, "writes must resume after the hub revoke fails and the leave is aborted")
+	page, err := env.DB.ReadFederation(t.Context(), db.FederationReadParams{
+		ProjectID: project.ID, AfterID: binding.PushCursorEventID, Limit: 100, Features: db.SupportedEventFeatures,
+	})
+	require.NoError(t, err)
+	foundPushEvent := false
+	for _, event := range page.Events {
+		if event.UID == pushedEvent.UID {
+			foundPushEvent = true
+			break
+		}
+	}
+	assert.True(t, foundPushEvent, "the restored push stream must expose events written after abort")
+}
+
+func TestLeaveFederationReplicaRouteAbortKeepsFenceUntilFinalPreparation(t *testing.T) {
+	env := testenv.New(t)
+	project, binding := newSpokeProject(t, env)
+	binding.PushEnabled = true
+	binding, err := env.DB.UpsertFederationBinding(t.Context(), binding)
+	require.NoError(t, err)
+	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID)
+	first := prepareLeaveThroughRoute(t, env, path)
+	second := prepareLeaveThroughRoute(t, env, path)
+	require.NotEqual(t, first, second)
+
+	for _, preparationID := range []string{first, second} {
+		resp, raw := envDoRaw(t, env, http.MethodPost, path,
+			map[string]any{"disposition": "detach", "actor": "wesm", "abort": true, "preparation_id": preparationID}, nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
+		stored, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
+		require.NoError(t, err)
+		if preparationID == first {
+			assert.False(t, stored.PushEnabled, "the first abort must retain another leave's write fence")
+			assert.True(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name))
+		} else {
+			assert.Equal(t, binding.Enabled, stored.Enabled)
+			assert.Equal(t, binding.PushEnabled, stored.PushEnabled, "the final abort restores the original push state")
+			assert.False(t, daemon.FederationReplicaMappingSuppressed(env.DB, project.Name))
+		}
+	}
 }
 
 func TestLeaveFederationReplicaRouteAbortRefusesStartedTeardown(t *testing.T) {
@@ -4358,23 +4407,54 @@ func TestFederationEnrollmentWildcardOmitsJoinInstructions(t *testing.T) {
 	assert.False(t, hasJoin)
 }
 
-// Fail the response metadata read while retaining the real enrollment store.
+// Fail the post-commit spoke-name read while retaining the real enrollment store.
 type enrollmentMetadataFailureStore struct{ db.Storage }
 
-func (s enrollmentMetadataFailureStore) MaxFederationBaselineEventID(context.Context, int64, int64) (int64, error) {
-	return 0, errors.New("metadata unavailable")
+func (s enrollmentMetadataFailureStore) ListFederationSpokeNames(context.Context) (map[string]string, error) {
+	return nil, errors.New("metadata unavailable")
 }
 
-func TestFederationEnrollmentMetadataFailureDoesNotStrandGrant(t *testing.T) {
+func TestFederationEnrollmentSpokeNameFailureReturnsCreatedGrant(t *testing.T) {
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DB = enrollmentMetadataFailureStore{cfg.DB} })
 	project := createFederatedHubProject(t, env, "hub-project")
 	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
 		"spoke_instance_uid": federationTestSpokeUID, "project_id": project.ID, "capabilities": "pull", "actor": "tester",
 	}, nil)
-	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode, "%s", raw)
+	if assert.Equal(t, http.StatusOK, resp.StatusCode, "%s", raw) {
+		var out api.FederationEnrollmentOut
+		require.NoError(t, json.Unmarshal(raw, &out))
+		assert.NotEmpty(t, out.Token, "the response must return the token for the committed enrollment")
+	}
 	grants, err := env.DB.ListFederationEnrollments(t.Context())
 	require.NoError(t, err)
-	assert.Empty(t, grants)
+	assert.Len(t, grants, 1, "the enrollment transaction committed before optional response metadata failed")
+}
+
+func TestFederationEnrollmentRotationSpokeNameFailureReturnsCreatedGrant(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("rotation-admin-token"), func(cfg *daemon.ServerConfig) {
+		cfg.DB = enrollmentMetadataFailureStore{cfg.DB}
+	})
+	project := createFederatedHubProject(t, env, "hub-project")
+	_, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+		Token: "old-enrollment-token", SpokeInstanceUID: federationTestSpokeUID,
+		ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
+	})
+	require.NoError(t, err)
+	const replacementToken = "replacement-enrollment-token" //nolint:gosec // test-only bearer token
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate", map[string]any{
+		"spoke_instance_uid": federationTestSpokeUID,
+		"project_id":         project.ID,
+		"capabilities":       "pull",
+		"token":              replacementToken,
+		"actor":              "tester",
+	}, bearer("rotation-admin-token"))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "%s", raw)
+	var out api.FederationEnrollmentOut
+	require.NoError(t, json.Unmarshal(raw, &out))
+	assert.Equal(t, replacementToken, out.Token)
+	active, err := env.DB.AuthorizeFederationToken(t.Context(), out.Token, project.ID, "pull")
+	require.NoError(t, err)
+	assert.Equal(t, out.ID, active.ID)
 }
 
 func TestFederationMetadataRequiresEnabledHub(t *testing.T) {

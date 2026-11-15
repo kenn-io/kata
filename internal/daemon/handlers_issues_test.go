@@ -2104,6 +2104,33 @@ func TestCreate_LookalikeSoftBlock(t *testing.T) {
 	assert.Contains(t, string(second.body), `"candidates"`)
 }
 
+func TestCreate_LookalikeMissingBody(t *testing.T) {
+	h, pid := bootstrapProject(t)
+	ts := h.ts.(*httptest.Server)
+	path := issuesURL(pid)
+	body := map[string]any{"actor": "agent-1", "title": "!!!"}
+	first := postWithHeader(t, ts, path, nil, body)
+	requireOK(t, first)
+	firstShortID := issueShortIDFromCreate(t, first.body)
+
+	second := postWithHeader(t, ts, path, nil, body)
+	require.Equal(t, http.StatusConflict, second.status, string(second.body))
+	var conflict struct {
+		Error struct {
+			Code string `json:"code"`
+			Data struct {
+				Candidates []struct {
+					ShortID string `json:"short_id"`
+				} `json:"candidates"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(second.body, &conflict))
+	assert.Equal(t, "duplicate_candidates", conflict.Error.Code)
+	require.Len(t, conflict.Error.Data.Candidates, 1)
+	assert.Equal(t, firstShortID, conflict.Error.Data.Candidates[0].ShortID)
+}
+
 // TestCreate_ForceNewBypassesLookalike verifies that force_new=true on a body
 // that would otherwise trip the look-alike check creates a new issue (200).
 func TestCreate_ForceNewBypassesLookalike(t *testing.T) {

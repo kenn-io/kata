@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -28,6 +29,8 @@ type readyOptions struct {
 	Owner    string
 	Labels   []string
 	NoLabels []string
+
+	PriorityFirst bool
 }
 
 type readyResultForCLI struct {
@@ -66,7 +69,18 @@ func (o readyOptions) fetch(cmd *cobra.Command) (readyResultForCLI, error) {
 	if err != nil {
 		return readyResultForCLI{}, err
 	}
-	if o.All && (o.Unowned || o.Owner != "" || len(o.Labels) > 0 || len(o.NoLabels) > 0) {
+	if o.PriorityFirst {
+		if err := requireDaemonAPIVersion(ctx, client, baseURL,
+			apiVersionReadyPrioritySort, "priority-ordered ready"); err != nil {
+			if cliErr, ok := errors.AsType[*cliError](err); !ok || cliErr.Code != "daemon_api_too_old" {
+				return readyResultForCLI{}, err
+			}
+			// Older daemons ignore sort but honor limit, so select from the full queue.
+			o.PriorityFirst = false
+			o.Limit = 0
+		}
+	}
+	if !o.PriorityFirst && o.All && (o.Unowned || o.Owner != "" || len(o.Labels) > 0 || len(o.NoLabels) > 0) {
 		if err := requireDaemonAPIVersion(ctx, client, baseURL,
 			apiVersionReadyAndSearchFilters, "filtered ready --all"); err != nil {
 			return readyResultForCLI{}, err
@@ -78,6 +92,9 @@ func (o readyOptions) fetch(cmd *cobra.Command) (readyResultForCLI, error) {
 		return readyResultForCLI{}, err
 	}
 	params := &generated.ReadyIssuesQuery{Label: o.Labels, ExcludeLabel: o.NoLabels}
+	if o.PriorityFirst {
+		params.Sort = new(generated.Priority)
+	}
 	if o.Limit > 0 {
 		params.Limit = new(int64(o.Limit))
 	}
@@ -89,7 +106,10 @@ func (o readyOptions) fetch(cmd *cobra.Command) (readyResultForCLI, error) {
 	}
 	if o.All {
 		response, callErr := apiClient.ReadyIssuesGlobalWithResponse(ctx, &generated.ReadyIssuesGlobalRequestOptions{
-			Query: (*generated.ReadyIssuesGlobalQuery)(params),
+			Query: &generated.ReadyIssuesGlobalQuery{
+				Sort: (*generated.ReadyIssuesGlobalQuerySort)(params.Sort), Limit: params.Limit,
+				Unowned: params.Unowned, Owner: params.Owner, Label: params.Label, ExcludeLabel: params.ExcludeLabel,
+			},
 		})
 		if response == nil {
 			return readyResultForCLI{}, externalCLITransportError(response, callErr)

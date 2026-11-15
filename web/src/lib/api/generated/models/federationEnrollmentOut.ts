@@ -15,6 +15,7 @@ export interface FederationEnrollmentOut {
   relay?: RelayHandshake
   revoked_at?: string
   spoke_instance_uid: string
+  spoke_name?: string
   token?: string
   updated_at: string
   [key: string]: unknown

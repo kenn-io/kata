@@ -223,6 +223,46 @@ func TestWaitForDaemonStartupReturnsChildExitForOldSchemaWithoutCutover(t *testi
 	})
 }
 
+func TestWaitForDaemonStartupBoundsOldSchemaWithoutChildOrCutover(t *testing.T) {
+	home := setupKataEnv(t)
+	t.Setenv("KATA_DSN", "")
+	source, err := sqlitestore.Open(t.Context(), filepath.Join(home, "kata.db"))
+	require.NoError(t, err)
+	_, err = source.ExecContext(t.Context(), `UPDATE meta SET value='28' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute+time.Second)
+		defer cancel()
+		started := time.Now()
+		err := WaitForDaemonStartup(ctx, nil, 60*time.Second, nil, func(context.Context) (bool, error) {
+			return false, nil
+		})
+		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+		require.Equal(t, 60*time.Second, time.Since(started))
+	})
+}
+
+func TestWaitForDaemonStartupExtendsBudgetWhileCutoverLockHeld(t *testing.T) {
+	home := setupKataEnv(t)
+	t.Setenv("KATA_DSN", "")
+	lock := flock.New(filepath.Join(home, "kata.db.import.lock"))
+	require.NoError(t, lock.Lock())
+	t.Cleanup(func() { require.NoError(t, lock.Close()) })
+
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute+time.Second)
+		defer cancel()
+		started := time.Now()
+		err := WaitForDaemonStartup(ctx, nil, 60*time.Second, nil, func(context.Context) (bool, error) {
+			return time.Since(started) >= 65*time.Second, nil
+		})
+		require.NoError(t, err)
+		require.Equal(t, 65*time.Second, time.Since(started))
+	})
+}
+
 func TestMigrationPendingUsesCutoverLockDuringSourceSwap(t *testing.T) {
 	home := setupKataEnv(t)
 	t.Setenv("KATA_DSN", "")

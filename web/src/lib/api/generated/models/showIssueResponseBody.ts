@@ -9,6 +9,7 @@ import type { IssueOut } from './issueOut.ts'
 import type { IssueRef } from './issueRef.ts'
 import type { LinkOut } from './linkOut.ts'
 import type { PendingClaimOut } from './pendingClaimOut.ts'
+import type { RetainedEvidence } from './retainedEvidence.ts'
 import type { ShowIssueOut } from './showIssueOut.ts'
 import type { Verification } from './verification.ts'
 
@@ -18,6 +19,8 @@ export interface ShowIssueResponseBody {
   claim_hub_now?: string
   claim_violation_count?: number
   claim_violations?: ClaimViolationOut[]
+  close_event_uid?: string
+  close_evidence?: RetainedEvidence[]
   comments: CommentOut[]
   comments_truncated?: boolean
   issue: ShowIssueOut

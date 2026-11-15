@@ -28,7 +28,8 @@ type DiscoverOptions struct {
 	// StartWith is the path of a kata executable. When it is set and the
 	// selected local daemon has no runtime, Discover runs `kata daemon start`,
 	// or `kata daemon recover` for a pinned local profile, then connects. Empty
-	// never starts a daemon, and a remote is never started.
+	// never starts a daemon, and a remote is never started. When the selected
+	// home disables autostart, Discover waits for its supervisor instead.
 	StartWith string
 }
 
@@ -51,10 +52,10 @@ type DiscoveredDaemon struct {
 // uses its own auth configuration and any catalog client credential.
 //
 // DiscoverOptions.Daemon selects one catalog entry instead, as the CLI's
-// global --daemon flag does. The entry's token or token_env is the
-// credential, except that KATA_AUTH_TOKEN overrides it for a remote entry.
-// Otherwise an unset or empty token_env variable is an error. An unknown name
-// returns an error matching ErrDaemonNotInCatalog.
+// global --daemon flag does. The entry resolves token > token_file > token_env,
+// except that KATA_AUTH_TOKEN overrides it for a remote entry. Otherwise a
+// failed selected file or an unset or empty token_env variable is an error.
+// An unknown name returns an error matching ErrDaemonNotInCatalog.
 //
 // Like `kata daemon locate`, Discover never starts the selected daemon unless
 // DiscoverOptions.StartWith is set. Use `kata daemon diagnose` and `kata
@@ -70,7 +71,7 @@ func Discover(ctx context.Context, discover DiscoverOptions, opts ...Option) (*C
 		Name:           discover.Daemon,
 		StartWith:      discover.StartWith,
 	})
-	if errors.Is(err, internalclient.ErrLocalDaemonUnreachable) || errors.Is(err, internalclient.ErrDaemonStartFailed) {
+	if errors.Is(err, internalclient.ErrLocalDaemonUnreachable) || errors.Is(err, internalclient.ErrDaemonStartFailed) || errors.Is(err, internalclient.ErrDaemonManagedExternally) {
 		return nil, fmt.Errorf("%w: %w", ErrDaemonUnavailable, err)
 	}
 	if err != nil {

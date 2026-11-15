@@ -50,10 +50,9 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 			return db.ErrFederationResetBlockedByPendingPush
 		}
 
+		eventsWhere := `(e.issue_id = $1 OR e.issue_uid = $2 OR ((e.related_issue_id = $1 OR e.related_issue_uid = $2) AND e.type NOT IN ('issue.links_changed', 'issue.commented')))`
 		var minEventID, maxEventID sql.NullInt64
-		if err := tx.QueryRowContext(ctx, `SELECT MIN(id), MAX(id) FROM events
-          WHERE issue_id = $1 OR (related_issue_id = $1 AND type NOT IN ('issue.links_changed', 'issue.commented'))`, issue.ID,
-		).Scan(&minEventID, &maxEventID); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT MIN(e.id), MAX(e.id) FROM events e WHERE `+eventsWhere, issue.ID, issue.UID).Scan(&minEventID, &maxEventID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		counts := make([]int64, 4)
@@ -61,10 +60,14 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 			`SELECT COUNT(*) FROM comments WHERE issue_id = $1`,
 			`SELECT COUNT(*) FROM links WHERE from_issue_id = $1 OR to_issue_id = $1`,
 			`SELECT COUNT(*) FROM issue_labels WHERE issue_id = $1`,
-			`SELECT COUNT(*) FROM events WHERE issue_id = $1 OR (related_issue_id = $1 AND type NOT IN ('issue.links_changed', 'issue.commented'))`,
+			`SELECT COUNT(*) FROM events e WHERE ` + eventsWhere,
 		}
 		for index, query := range queries {
-			if err := tx.QueryRowContext(ctx, query, issue.ID).Scan(&counts[index]); err != nil {
+			args := []any{issue.ID}
+			if index == 3 {
+				args = append(args, issue.UID)
+			}
+			if err := tx.QueryRowContext(ctx, query, args...).Scan(&counts[index]); err != nil {
 				return mapSQLError(err, nil)
 			}
 		}
@@ -72,8 +75,9 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM events
-          WHERE issue_id = $1 OR (related_issue_id = $1 AND type NOT IN ('issue.links_changed', 'issue.commented'))`, issue.ID); err != nil {
+		//nolint:gosec // G202: eventsWhere uses a fixed dialect expression; values are bound.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE id IN
+(SELECT e.id FROM events e WHERE `+eventsWhere+`)`, issue.ID, issue.UID); err != nil {
 			return mapSQLError(err, nil)
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE events SET related_issue_id = NULL

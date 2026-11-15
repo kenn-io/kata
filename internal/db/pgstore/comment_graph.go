@@ -9,6 +9,9 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// commentReplyTargetUIDExpr must match the expression in idx_events_reply_to.
+const commentReplyTargetUIDExpr = `(e.payload::jsonb->>'reply_to_uid')`
+
 // ReadCommentGraph captures visible comments and endpoint evidence together.
 func (s *Store) ReadCommentGraph(ctx context.Context, query db.CommentGraphQuery) (db.CommentGraphData, error) {
 	tx, err := s.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
@@ -43,7 +46,7 @@ func (s *Store) ReadCommentGraph(ctx context.Context, query db.CommentGraphQuery
 	}
 
 	data, err := db.ReadCommentGraphTx(ctx, tx, query, func(n int) string { return "$" + strconv.Itoa(n) },
-		parseStoredTime, `(e.payload::jsonb->>'reply_to_uid')`, strings.ReplaceAll(commentAttributionColumn, "comments.", "c."))
+		parseStoredTime, commentReplyTargetUIDExpr, strings.ReplaceAll(commentAttributionColumn, "comments.", "c."))
 	if err != nil {
 		return data, err
 	}

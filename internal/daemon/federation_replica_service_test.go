@@ -17,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testfix"
 )
 
 const (
@@ -2441,7 +2442,7 @@ func openReplicaServiceStore(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	unsetReplicaAuthToken(t)
 	ctx := t.Context()
-	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
+	store, err := testfix.OpenSQLite(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	// This fixture is discarded after the test; it needs no WAL checkpoint.
 	t.Cleanup(func() { require.NoError(t, store.DB.Close()) })

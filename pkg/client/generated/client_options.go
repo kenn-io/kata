@@ -658,6 +658,103 @@ func (o *RotateFederationEnrollmentRequestOptions) GetHeader() (map[string]strin
 	return nil, nil
 }
 
+// ClearFederationSpokeNameRequestOptions is the options needed to make a request to ClearFederationSpokeName.
+type ClearFederationSpokeNameRequestOptions struct {
+	PathParams *ClearFederationSpokeNamePath
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ClearFederationSpokeNameRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ClearFederationSpokeNameRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *ClearFederationSpokeNameRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ClearFederationSpokeNameRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ClearFederationSpokeNameRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// SetFederationSpokeNameRequestOptions is the options needed to make a request to SetFederationSpokeName.
+type SetFederationSpokeNameRequestOptions struct {
+	PathParams *SetFederationSpokeNamePath
+	Body       *SetFederationSpokeNameBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *SetFederationSpokeNameRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *SetFederationSpokeNameRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *SetFederationSpokeNameRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *SetFederationSpokeNameRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *SetFederationSpokeNameRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // RevokeFederationEnrollmentRequestOptions is the options needed to make a request to RevokeFederationEnrollment.
 type RevokeFederationEnrollmentRequestOptions struct {
 	PathParams *RevokeFederationEnrollmentPath
@@ -1108,6 +1205,94 @@ func (o *ShowIssueByUIDRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 
+// McpEventsSubscribeRequestOptions is the options needed to make a request to McpEventsSubscribe.
+type McpEventsSubscribeRequestOptions struct {
+	Body *McpEventsSubscribeBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *McpEventsSubscribeRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *McpEventsSubscribeRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *McpEventsSubscribeRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *McpEventsSubscribeRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *McpEventsSubscribeRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// McpEventsUnsubscribeRequestOptions is the options needed to make a request to McpEventsUnsubscribe.
+type McpEventsUnsubscribeRequestOptions struct {
+	Body *McpEventsUnsubscribeBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *McpEventsUnsubscribeRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *McpEventsUnsubscribeRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *McpEventsUnsubscribeRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *McpEventsUnsubscribeRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *McpEventsUnsubscribeRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // ListProjectsRequestOptions is the options needed to make a request to ListProjects.
 type ListProjectsRequestOptions struct {
 	Query *ListProjectsQuery
@@ -1193,6 +1378,50 @@ func (o *InitProjectRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *InitProjectRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// ReadProjectByNameRequestOptions is the options needed to make a request to ReadProjectByName.
+type ReadProjectByNameRequestOptions struct {
+	Query *ReadProjectByNameQuery
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ReadProjectByNameRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ReadProjectByNameRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *ReadProjectByNameRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ReadProjectByNameRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ReadProjectByNameRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 
@@ -3320,6 +3549,7 @@ func (o *DisconnectRelayEnrollmentRequestOptions) GetHeader() (map[string]string
 // GetProjectFederationStatusRequestOptions is the options needed to make a request to GetProjectFederationStatus.
 type GetProjectFederationStatusRequestOptions struct {
 	PathParams *GetProjectFederationStatusPath
+	Query      *GetProjectFederationStatusQuery
 }
 
 // Validate validates all the fields in the options.
@@ -3331,6 +3561,14 @@ func (o *GetProjectFederationStatusRequestOptions) Validate() error {
 		if v, ok := any(o.PathParams).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
 			}
 		}
 	}
@@ -3348,7 +3586,7 @@ func (o *GetProjectFederationStatusRequestOptions) GetPathParams() (map[string]a
 
 // GetQuery returns the query params as a map.
 func (o *GetProjectFederationStatusRequestOptions) GetQuery() (map[string]any, error) {
-	return nil, nil
+	return runtime.AsMap[any](o.Query)
 }
 
 // GetBody returns the payload in any type that can be marshalled to JSON by the client.
@@ -4484,6 +4722,59 @@ func (o *AddAttachmentRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 
+// LinkAttachmentRequestOptions is the options needed to make a request to LinkAttachment.
+type LinkAttachmentRequestOptions struct {
+	PathParams *LinkAttachmentPath
+	Body       *LinkAttachmentBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *LinkAttachmentRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *LinkAttachmentRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *LinkAttachmentRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *LinkAttachmentRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *LinkAttachmentRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // AttachmentContentRequestOptions is the options needed to make a request to AttachmentContent.
 type AttachmentContentRequestOptions struct {
 	PathParams *AttachmentContentPath
@@ -5064,6 +5355,59 @@ func (o *EditCommentRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *EditCommentRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// ReadFileEvidenceRequestOptions is the options needed to make a request to ReadFileEvidence.
+type ReadFileEvidenceRequestOptions struct {
+	PathParams *ReadFileEvidencePath
+	Query      *ReadFileEvidenceQuery
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ReadFileEvidenceRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ReadFileEvidenceRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *ReadFileEvidenceRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ReadFileEvidenceRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ReadFileEvidenceRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 

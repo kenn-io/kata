@@ -2003,6 +2003,7 @@ func TestFederationAdoptEnterOpensTypedConfirmation(t *testing.T) {
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "INTO hub project")
 	assert.Contains(t, rendered, "spoke-project")
+	assert.Contains(t, rendered, "its local event history will be replaced by a record of its current state")
 
 	out = typeFederationKeys(out, "wrong-name")
 	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -2177,8 +2178,9 @@ func TestFetchProjectsCarriesUIDs(t *testing.T) {
 }
 func daemonTargetWithResolvedAuth(name, baseURL, token string, allowInsecure bool) daemonTarget {
 	return daemonTarget{
-		Name: name,
-		URL:  baseURL,
+		Name:  name,
+		Token: token,
+		URL:   baseURL,
 		resolved: clientpkg.ResolvedDaemon{
 			Source: clientpkg.DaemonSourceInjected, Name: name, BaseURL: baseURL,
 			Token: token, AllowInsecure: allowInsecure,

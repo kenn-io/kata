@@ -1,7 +1,7 @@
 ---
 title: Go client
 description: Connect Go programs to a Kata daemon with the typed client, CLI-compatible daemon discovery, and an in-process test server.
-last_edited: 2026-10-30
+last_edited: 2026-11-10
 ---
 
 # Go client
@@ -48,8 +48,8 @@ Discover checks the same sources as
 The bearer token comes from the selected source, as it does for the CLI. The
 default local daemon uses `KATA_AUTH_TOKEN`, then the current home's
 `[auth].token`. A pinned local profile uses its own auth configuration; its
-catalog `token` or `token_env` can select a client credential in identity-token
-mode.
+catalog `token`, `token_file` or `token_env` can select a client credential in
+identity-token mode.
 
 Discover and `kata daemon locate` both inspect the selected daemon without
 starting it. Use `kata daemon diagnose` for stopped-profile state and recovery
@@ -114,7 +114,7 @@ for _, d := range daemons {
 | `Name` | The entry's `name`. |
 | `Local` | True for a `local = true` entry, including a pinned local profile. |
 | `Endpoint` | `local` for a local entry. For a remote entry, the URL's host and port, such as `daemon.example:7443`. |
-| `HasToken` | True when the entry sets `token` or `token_env`. Kata does not read the `token_env` variable here, so it can still be unset. |
+| `HasToken` | True when the entry sets `token`, `token_file` or `token_env`. Kata reads no credential files or variables here, so the selected source may still be unavailable. |
 | `Active` | True for the entry `active_daemon` names. |
 
 Entries carry no token values. Without a config file the list is empty; an
@@ -131,12 +131,13 @@ api, err := client.Discover(ctx, client.DiscoverOptions{Daemon: "example-workspa
 The named entry replaces every other selection source, and `Workspace` is
 ignored. Discover resolves it with the same catalog rules as `--daemon`:
 
-- A remote entry sends its `token`, or the value of the variable `token_env`
-  names. `KATA_AUTH_TOKEN` overrides both.
-- A local entry sends its `token` or `token_env` value. Without either, it
+- A remote entry resolves `token` > `token_file` > `token_env`.
+  `KATA_AUTH_TOKEN` overrides the catalog credential without reading its source.
+- A local entry uses the same catalog precedence. Without any selector, it
   falls back to `KATA_AUTH_TOKEN`, then the current home's `[auth].token`.
-- A `token_env` variable that is unset or empty returns an error, unless
-  `KATA_AUTH_TOKEN` overrides it for a remote entry.
+- A failed selected file or an unset or empty selected `token_env` returns an
+  error without fallback, unless `KATA_AUTH_TOKEN` overrides the credential for
+  a remote entry. Files follow the [catalog credential rules](configuration.md#daemon-config).
 - A local entry connects to the running default local daemon. A pinned local
   profile (`home` and `instance_uid`) connects to that profile's daemon after
   checking its instance UID.
