@@ -123,6 +123,15 @@ func TestRelayPeerRelease(t *testing.T) {
 	dbtest.RunRelayPeerRelease(t, store)
 }
 
+func TestRelayPurgedPeer(t *testing.T) {
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(t.Context(), dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunRelayPurgedPeer(t, store)
+}
+
 func TestRelayMissingNotification(t *testing.T) {
 	for _, deleted := range []bool{false, true} {
 		t.Run(fmt.Sprintf("deleted=%v", deleted), func(t *testing.T) {

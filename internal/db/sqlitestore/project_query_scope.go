@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/shortid"
@@ -10,6 +11,23 @@ import (
 
 type eventQueryRower interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// relayEventIssueLookup also resolves purged issue ownership for release checks.
+func relayEventIssueLookup(ctx context.Context, query eventQueryRower) *db.EventIssueLookup {
+	live := eventIssueLookup(ctx, query)
+	return db.NewEventIssueLookup(func(uid string) (db.Issue, error) {
+		issue, err := live.IssueByUID(uid)
+		if !errors.Is(err, db.ErrNotFound) {
+			return issue, err
+		}
+		var projectUID sql.NullString
+		err = query.QueryRowContext(ctx, `SELECT project_uid FROM purge_log WHERE issue_uid=? ORDER BY id DESC LIMIT 1`, uid).Scan(&projectUID)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && (!projectUID.Valid || projectUID.String == "") {
+			return db.Issue{}, db.ErrNotFound
+		}
+		return db.Issue{ProjectUID: projectUID.String}, err
+	}, live.IssueByRef, live.CommentIssueByUID)
 }
 
 // eventIssueLookup memoizes the event reference lookups below for one read.
