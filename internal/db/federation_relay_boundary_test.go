@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/notification"
 )
 
 func TestRelayEventPeerProjects(t *testing.T) {
@@ -44,8 +45,8 @@ func TestRelayEventPeerProjects(t *testing.T) {
 		{"restated", RepeatedImportEventType, `{"links":[{"to_issue_uid":"` + issueUID + `"}]}`, nil, true},
 		{"close parent", "issue.closed", `{"parent_uid":"` + issueUID + `"}`, nil, true},
 		{"close legacy parent before evidence", "issue.closed", `{"parent_short_id":"old1","evidence":[{"type":"duplicate-of","issue_ref":"` + issueUID + `"}]}`, nil, true},
-		{"metadata notification", "issue.created", `{"metadata":{"notify.recipient":{"re":"` + commentUID + `"}}}`, nil, true},
-		{"diff notification", "issue.metadata_updated", `{"diff":{"notify.recipient":{"from":{"re":"` + commentUID + `"},"to":{"re":"` + commentUID + `"}}}}`, nil, true},
+		{"metadata notification", "issue.created", `{"metadata":{"` + notification.MetadataKey("recipient") + `":{"re":"` + commentUID + `"}}}`, nil, true},
+		{"diff notification", "issue.metadata_updated", `{"diff":{"` + notification.MetadataKey("recipient") + `":{"from":{"re":"` + commentUID + `"},"to":{}}}}`, nil, true},
 	}
 	t.Run("subject moved to peer", func(t *testing.T) {
 		projects := map[string]bool{}
