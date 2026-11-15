@@ -149,6 +149,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		p := &result.projects[i]
 		m := &p.materialization
 		events := p.linkEvents
+		var check db.FoldParentRemovalCheck
 		if slices.ContainsFunc(p.linkEvents, m.relayOrigins.relaySourced) {
 			owners, err := relayLinkEndpointProjects(ctx, tx, p.linkEvents)
 			if err != nil {
@@ -156,38 +157,25 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			}
 			for _, other := range result.projects {
 				for uid := range other.materialization.staleIssues {
-					if _, referenced := owners[uid]; referenced {
-						owners[uid] = ""
-					}
+					delete(owners, uid)
 				}
 				if !slices.Contains(m.linkProjects, other.id) {
 					continue
 				}
 				for uid := range other.projection.Issues {
-					if _, referenced := owners[uid]; referenced {
-						owners[uid] = other.uid
-					}
+					owners[uid] = other.uid
 				}
 				for uid := range other.moved.Issues {
-					if _, referenced := owners[uid]; referenced {
-						owners[uid] = other.uid
-					}
+					owners[uid] = other.uid
 				}
 			}
-			for uid, project := range moveOwners {
-				if _, referenced := owners[uid]; referenced {
-					owners[uid] = project
-				}
-			}
-			events, err = filterRelayLinkEvents(ctx, tx, events, m.relayOrigins, owners)
+			maps.Copy(owners, moveOwners)
+			events, check, err = filterRelayLinkEvents(ctx, tx, events, m.relayOrigins, owners)
 			if err != nil {
 				return preparedFederationRebuild{}, err
 			}
 		}
-		m.links, err = relayFoldEventsTx(ctx, tx, events, m.relayOrigins)
-		if err != nil {
-			return preparedFederationRebuild{}, err
-		}
+		m.links = db.FoldRelayLinkEvents(events, check)
 		if _, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, 0, nil, nil, m.rowHasher); err != nil {
 			return preparedFederationRebuild{}, err
 		}

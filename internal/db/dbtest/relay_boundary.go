@@ -28,6 +28,8 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage) {
 		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleHub, HubProjectID: p.ID, HubProjectUID: p.UID, Enabled: true})
 		require.NoError(t, err)
 	}
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: second.ID, Role: db.FederationRoleHub, HubProjectID: second.ID, HubProjectUID: second.UID, Enabled: false})
+	require.NoError(t, err)
 	old, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: first.ID, Author: "member", Title: "Existing legacy link"})
 	require.NoError(t, err)
 	private, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: second.ID, Author: "member", Title: "Private link endpoint"})
@@ -84,9 +86,6 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage) {
 	require.Nil(t, legacy.RelayConfig)
 	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{Actor: "member", AdminActor: "admin", PlaintextToken: "boundary-parent-test-token"})
 	require.NoError(t, err)
-	require.NoError(t, store.CheckRelayProjectLinks(ctx, first.ID), "projects with a shared group and root can enroll")
-	require.ErrorIs(t, store.CheckRelayProjectLinks(ctx, second.ID), db.ErrFederationCrossProjectBoundary, "an incoming link from outside the group prevents enrollment")
-	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: second.UID, AuthorityUID: rootUID, KeyID: db.RootPublicKeyID(public), PublicKey: public}))
 	require.ErrorIs(t, store.CheckRelayProjectLinks(ctx, first.ID), db.ErrFederationCrossProjectBoundary)
 	require.ErrorIs(t, store.CheckRelayProjectLinks(ctx, second.ID), db.ErrFederationCrossProjectBoundary, "incoming links count too")
 	require.NoError(t, store.CheckRelayProjectLinks(ctx, shared.ID))

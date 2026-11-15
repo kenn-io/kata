@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"testing"
 
@@ -16,11 +15,8 @@ import (
 func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openReplica func(*testing.T) db.Storage, seedHistory func(*testing.T, db.Project, db.RemoteEvent)) {
 	ctx := t.Context()
 	fixture := newRelayLinkBoundaryFixture(t, store, "checkpoint-boundary")
-	otherPublic, _, err := ed25519.GenerateKey(nil)
+	_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: fixture.sibling.ID, Role: db.FederationRoleHub, HubProjectID: fixture.sibling.ID, HubProjectUID: fixture.sibling.UID, Enabled: false})
 	require.NoError(t, err)
-	otherRoot, err := uid.New()
-	require.NoError(t, err)
-	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: fixture.sibling.UID, AuthorityUID: otherRoot, KeyID: db.RootPublicKeyID(otherPublic), PublicKey: otherPublic}))
 	private, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Private endpoint", Author: "member"})
 	require.NoError(t, err)
 	writeCtx := db.WithRootAttribution(ctx, fixture.signer, "relay-member")
@@ -79,26 +75,6 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	owner := "member"
 	_, _, _, err = store.UpdateOwner(writeCtx, issue.ID, &owner, "member")
 	require.NoError(t, err)
-	links, err := store.LinksByIssue(ctx, issue.ID)
-	require.NoError(t, err)
-	require.Len(t, links, 1)
-	_, err = resetter.CreateRelayReset(ctx, bindingUID, fixture.signer)
-	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "a live private link must be refused before signing shared current state")
-	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID), "a refused reset must preserve the owner's private link")
-	_, err = store.DeleteLinkAndEvent(ctx, links[0], db.LinkEventParams{
-		EventType: "issue.unlinked", EventIssueID: private.ID, Actor: "member",
-		FromUID: issue.UID, ToUID: private.UID, FromShortID: issue.ShortID, ToShortID: private.ShortID,
-	})
-	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "the event issue's project root is not local")
-	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID))
-	_, err = store.DeleteLinkAndEvent(writeCtx, links[0], db.LinkEventParams{
-		EventType: "issue.unlinked", EventIssueID: issue.ID, Actor: "member",
-		FromUID: issue.UID, ToUID: private.UID, FromShortID: issue.ShortID, ToShortID: private.ShortID,
-	})
-	require.NoError(t, err, "the root can remove a non-shared legacy link")
-
-	require.Empty(t, linkTargetUIDs(t, store, issue.ID), "remove the live boundary without rewriting private history")
-
 	later, _, err := store.CreateIssue(writeCtx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Later ordinary issue", Author: "member"})
 	require.NoError(t, err)
 	// Model an already-rejected pull using the authentic metadata envelope

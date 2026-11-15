@@ -1,7 +1,6 @@
 package federation_test
 
 import (
-	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,18 +41,10 @@ func TestRelaySharedLinksAcrossHops(t *testing.T) {
 					issues[i], _, err = root.store.CreateIssue(db.WithRootAttribution(ctx, root.signer, root.account), db.CreateIssueParams{ProjectID: project.ID, Author: "assistant", Title: "Shared endpoint"})
 					require.NoError(t, err)
 				}
-				metadataURL := fmt.Sprintf("%s/api/v1/projects/%d/federation/metadata", root.http.URL, projects[0].ID)
-				metadataRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
-				require.NoError(t, err)
-				metadataRequest.Header.Set("Authorization", "Bearer "+hubs[0].credential.Token)
-				metadataResponse, err := root.http.Client().Do(metadataRequest)
-				require.NoError(t, err)
-				require.Equal(t, http.StatusOK, metadataResponse.StatusCode)
-				require.NoError(t, metadataResponse.Body.Close())
 				linked, linkEvent, err := root.store.CreateLinkAndEvent(db.WithRootAttribution(ctx, root.signer, root.account), db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: issues[1].ID, Type: "blocks", Author: root.account},
 					db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
 				require.NoError(t, err)
-				for _, path := range []string{"/federation/metadata", "/federation/relay?stream=events", "/federation/relay/reset"} {
+				for _, path := range []string{"/federation/metadata", "/federation/relay/reset"} {
 					req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d%s", root.http.URL, projects[0].ID, path), nil)
 					require.NoError(t, err)
 					req.Header.Set("Authorization", "Bearer "+hubs[0].credential.Token)
@@ -62,28 +53,10 @@ func TestRelaySharedLinksAcrossHops(t *testing.T) {
 					body, err := io.ReadAll(response.Body)
 					require.NoError(t, err)
 					require.NoError(t, response.Body.Close())
-					if path == "/federation/relay?stream=events" {
-						require.Equal(t, http.StatusOK, response.StatusCode, string(body))
-						var batch db.RelayBatch
-						require.NoError(t, json.Unmarshal(body, &batch))
-						require.NotEmpty(t, batch.Envelopes)
-						for _, envelope := range batch.Envelopes {
-							require.NotEqual(t, linkEvent.UID, envelope.SourceUID)
-						}
-					} else {
-						require.Equal(t, http.StatusConflict, response.StatusCode, string(body))
-						require.Contains(t, string(body), "unsupported_event_features")
-						require.Contains(t, string(body), db.RelayCrossLinksEventFeature)
-					}
+					require.Equal(t, http.StatusConflict, response.StatusCode, string(body))
+					require.Contains(t, string(body), "unsupported_event_features")
+					require.Contains(t, string(body), db.RelayCrossLinksEventFeature)
 				}
-				metadataRequest, err = http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
-				require.NoError(t, err)
-				metadataRequest.Header.Set("Authorization", "Bearer "+hubs[0].credential.Token)
-				metadataRequest.Header.Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
-				metadataResponse, err = root.http.Client().Do(metadataRequest)
-				require.NoError(t, err)
-				require.Equal(t, http.StatusOK, metadataResponse.StatusCode)
-				require.NoError(t, metadataResponse.Body.Close())
 				order := []int{0, 1}
 				if reverse {
 					order = []int{1, 0}

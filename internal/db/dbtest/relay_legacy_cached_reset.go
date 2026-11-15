@@ -22,10 +22,8 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 	require.NoError(t, err)
 	unselected, err := store.CreateProject(ctx, "unselected-project")
 	require.NoError(t, err)
-	for _, p := range []db.Project{selected, unselected} {
-		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleHub, HubProjectID: p.ID, HubProjectUID: p.UID, Enabled: true})
-		require.NoError(t, err)
-	}
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: selected.ID, Role: db.FederationRoleHub, HubProjectID: selected.ID, HubProjectUID: selected.UID, Enabled: true})
+	require.NoError(t, err)
 	from, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: selected.ID, Author: "member", Title: "Selected link source"})
 	require.NoError(t, err)
 	private, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: unselected.ID, Author: "member", Title: "Private link endpoint"})
@@ -39,9 +37,6 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 	require.NoError(t, err)
 	pin := db.RootKeyPin{ProjectUID: selected.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}
 	require.NoError(t, store.PinRootAuthority(ctx, pin))
-	otherPublic, _, err := ed25519.GenerateKey(nil)
-	require.NoError(t, err)
-	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: unselected.UID, AuthorityUID: "00000000000000000000000007", KeyID: db.RootPublicKeyID(otherPublic), PublicKey: otherPublic}))
 	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		Actor: "member", AdminActor: "admin",
 		PlaintextToken: "legacy-reset-parent-test-token", // #nosec G101 -- synthetic API token used only in this test.

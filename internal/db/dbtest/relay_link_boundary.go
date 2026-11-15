@@ -144,11 +144,8 @@ func RunRelayLinkBoundaryKeepsSameProjectEffects(t *testing.T, store db.Storage)
 func RunRelayLinkBoundaryFollowsActiveGrants(t *testing.T, store db.Storage) {
 	ctx := t.Context()
 	fixture := newRelayLinkBoundaryFixture(t, store, "boundary-grants")
-	otherPublic, _, err := ed25519.GenerateKey(nil)
+	_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: fixture.sibling.ID, Role: db.FederationRoleHub, HubProjectID: fixture.sibling.ID, HubProjectUID: fixture.sibling.UID, Enabled: false})
 	require.NoError(t, err)
-	otherRoot, err := uid.New()
-	require.NoError(t, err)
-	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: fixture.sibling.UID, AuthorityUID: otherRoot, KeyID: db.RootPublicKeyID(otherPublic), PublicKey: otherPublic}))
 	peerInstanceUID, err := uid.New()
 	require.NoError(t, err)
 	//nolint:gosec // This is a deterministic fixture credential, never an operational secret.
@@ -166,6 +163,8 @@ func RunRelayLinkBoundaryFollowsActiveGrants(t *testing.T, store db.Storage) {
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: source.ID, ToIssueID: target.ID, Type: "blocks", Author: "member"}, linkEvent)
 	require.NoError(t, err, "revoking the last relay grant allows local cross-project links again")
 	require.Equal(t, []string{target.UID}, linkTargetUIDs(t, store, source.ID))
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: fixture.sibling.ID, Role: db.FederationRoleHub, HubProjectID: fixture.sibling.ID, HubProjectUID: fixture.sibling.UID, Enabled: true})
+	require.NoError(t, err)
 
 	spokeInstanceUID, err := uid.New()
 	require.NoError(t, err)

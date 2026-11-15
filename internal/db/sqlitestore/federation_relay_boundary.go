@@ -45,13 +45,6 @@ func ensureRelayLinkRemovalBoundaryTx(ctx context.Context, tx *sql.Tx, link db.L
 	if !errors.Is(err, db.ErrFederationCrossProjectBoundary) || (eventIssue.ID != link.FromIssueID && eventIssue.ID != link.ToIssueID) {
 		return err
 	}
-	var exists bool
-	if queryErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM links WHERE id=? AND from_issue_id=? AND to_issue_id=?)`, link.ID, link.FromIssueID, link.ToIssueID).Scan(&exists); queryErr != nil {
-		return queryErr
-	}
-	if !exists {
-		return err
-	}
 	root, rootErr := relaySharedProjectsTx(ctx, tx, eventIssue.ProjectID, eventIssue.ProjectID, true)
 	if rootErr != nil {
 		return rootErr

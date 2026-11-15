@@ -95,12 +95,7 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 					return err
 				}
 				required, err := db.RelayContentRequiredFeatures(event, pin.AuthorityUID, func(uid string) (string, error) {
-					var project string
-					err := tx.QueryRowContext(ctx, `SELECT p.uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=?`, uid).Scan(&project)
-					if errors.Is(err, sql.ErrNoRows) {
-						return "", nil
-					}
-					return project, err
+					return (relayResetBackend{tx: tx}).IssueProjectUID(ctx, uid)
 				})
 				if err != nil {
 					return err

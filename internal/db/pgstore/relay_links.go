@@ -154,20 +154,20 @@ func filterRelayCrossProjectLinkEvents(
 	tx *sql.Tx,
 	projectIDs []int64,
 	events []db.FoldEvent,
-) ([]db.FoldEvent, relayOriginClassifier, error) {
+) ([]db.FoldEvent, db.FoldParentRemovalCheck, error) {
 	if len(projectIDs) == 0 || len(events) == 0 {
-		return events, relayOriginClassifier{}, nil
+		return events, nil, nil
 	}
 	classifier, err := loadRelayOriginClassifier(ctx, tx, projectIDs)
 	if err != nil {
-		return nil, classifier, err
+		return nil, nil, err
 	}
 	if !slices.ContainsFunc(events, classifier.relaySourced) {
-		return events, classifier, nil
+		return events, nil, nil
 	}
 	issueProjects, err := relayLinkEndpointProjects(ctx, tx, events)
 	if err != nil {
-		return nil, classifier, err
+		return nil, nil, err
 	}
 
 	for _, event := range events {
@@ -177,23 +177,27 @@ func filterRelayCrossProjectLinkEvents(
 	}
 	authority, err := relayFoldAuthorityTx(ctx, tx, issueProjects)
 	if err != nil {
-		return nil, classifier, err
+		return nil, nil, err
 	}
 	filtered := make([]db.FoldEvent, 0, len(events))
+	relayEvents := make(map[string]bool)
 	for _, event := range events {
 		if !classifier.relaySourced(event) {
 			filtered = append(filtered, event)
 			continue
 		}
+		relayEvents[event.UID] = true
 		stripped, keep, err := db.StripCrossProjectLinkAdditions(event, authority.Policy(event))
 		if err != nil {
-			return nil, classifier, err
+			return nil, nil, err
 		}
 		if keep {
 			filtered = append(filtered, stripped)
 		}
 	}
-	return filtered, classifier, nil
+	return filtered, func(child, parent string, previous, next db.FoldClock) bool {
+		return !relayEvents[next.EventUID] || authority.AllowParentRemoval(child, parent, previous, next)
+	}, nil
 }
 
 // relayLinkEndpointProjects resolves only issue UIDs referenced by this fold.
@@ -317,32 +321,4 @@ func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]str
 		}
 	}
 	return a, nil
-}
-
-func relayFoldEventsTx(ctx context.Context, tx *sql.Tx, events []db.FoldEvent, classifier relayOriginClassifier) (db.FoldProjection, error) {
-	relayEvents := make(map[string]bool)
-	for _, event := range events {
-		if classifier.relaySourced(event) {
-			relayEvents[event.UID] = true
-		}
-	}
-	if len(relayEvents) == 0 {
-		return db.FoldEvents(events), nil
-	}
-	owners, err := relayLinkEndpointProjects(ctx, tx, events)
-	if err != nil {
-		return db.FoldProjection{}, err
-	}
-	for _, event := range events {
-		if event.IssueUID != "" && owners[event.IssueUID] == "" {
-			owners[event.IssueUID] = event.ProjectUID
-		}
-	}
-	authority, err := relayFoldAuthorityTx(ctx, tx, owners)
-	if err != nil {
-		return db.FoldProjection{}, err
-	}
-	return db.FoldRelayLinkEvents(events, func(child, parent string, previous, next db.FoldClock) bool {
-		return !relayEvents[next.EventUID] || authority.AllowParentRemoval(child, parent, previous, next)
-	}), nil
 }

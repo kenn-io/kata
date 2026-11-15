@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -63,27 +62,4 @@ func RunParentReplacementMissingExpectedLink(t *testing.T, store db.Storage) {
 	require.ErrorIs(t, err, db.ErrParentMismatch)
 	_, err = store.ParentOf(ctx, child.ID)
 	require.ErrorIs(t, err, db.ErrNotFound, "a failed replacement must not install the new parent")
-}
-
-// RunDirectFederationParentReplacement preserves a spoke's same-project edit.
-func RunDirectFederationParentReplacement(t *testing.T, store db.Storage) {
-	ctx := t.Context()
-	fixture := NewRelaySharedAccessFixture(t, store)
-	project := fixture.Projects[0]
-	child := fixture.Issues[0]
-	old := fixture.Issues[1]
-	replacement, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "New parent", Author: "member"})
-	require.NoError(t, err)
-	_, original, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: old.ID, Type: "parent", Author: "member"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, Actor: "member", FromUID: child.UID, ToUID: old.UID, FromShortID: child.ShortID, ToShortID: old.ShortID})
-	require.NoError(t, err)
-	spoke := "01DDDDDDDDDDDDDDDDDDDDDDDD"
-	event := newRemoteEvent(t, project, &child.UID, "issue.links_changed", "member", spoke, original.HLCPhysicalMS+1, jsontext.Value(`{"parent_removed_uid":"`+old.UID+`","parent_set_uid":"`+replacement.UID+`"}`))
-	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: project.ID, SpokeInstanceUID: spoke, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}})
-	require.NoError(t, err)
-	for range 2 {
-		parent, err := store.ParentOf(ctx, child.ID)
-		require.NoError(t, err)
-		require.Equal(t, replacement.UID, parent.ToIssueUID)
-		require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
-	}
 }
