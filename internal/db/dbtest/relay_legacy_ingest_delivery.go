@@ -93,6 +93,8 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 				ctx := t.Context()
 				fixture := newRelayLinkBoundaryFixture(t, store, "legacy-"+kind+"-"+mode)
 				if mode == "relayed peer" {
+					_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: fixture.sibling.ID, Role: db.FederationRoleHub, HubProjectID: fixture.sibling.ID, HubProjectUID: fixture.sibling.UID, Enabled: true})
+					require.NoError(t, err)
 					fixture.project, fixture.sibling = fixture.sibling, fixture.project
 				}
 				peerProject := fixture.sibling

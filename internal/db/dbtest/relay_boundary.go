@@ -24,12 +24,10 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	adoptionIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: adopting.ID, Author: "member", Title: "Existing adoption link"})
 	require.NoError(t, err)
-	for _, p := range []db.Project{first, second, shared} {
+	for _, p := range []db.Project{first, shared} {
 		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleHub, HubProjectID: p.ID, HubProjectUID: p.UID, Enabled: true})
 		require.NoError(t, err)
 	}
-	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: second.ID, Role: db.FederationRoleHub, HubProjectID: second.ID, HubProjectUID: second.UID, Enabled: false})
-	require.NoError(t, err)
 	old, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: first.ID, Author: "member", Title: "Existing legacy link"})
 	require.NoError(t, err)
 	private, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: second.ID, Author: "member", Title: "Private link endpoint"})
