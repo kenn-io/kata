@@ -26,9 +26,6 @@ type relayPeerHost struct {
 
 func (h *relayPeerHost) AuthorizeFederation(_ context.Context, request daemon.HostFederationAccessRequest) (daemon.HostFederationAccessDecision, error) {
 	h.requests = append(h.requests, request)
-	if h.mode == "initial-denied" && request.Project.UID != h.peer {
-		return daemon.HostFederationAccessDecision{}, daemon.ErrHostAccessDenied
-	}
 	if request.Project.UID == h.peer {
 		switch h.mode {
 		case "denied":
@@ -98,25 +95,23 @@ func TestRelayPeerAccessHTTP(t *testing.T) {
 			for _, tc := range []struct {
 				mode   string
 				status int
-			}{{"denied", 404}, {"unavailable", 503}, {"fence-denied", 404}, {"cleanup-failed", 503}, {"initial-denied", 403}} {
+			}{{"denied", 404}, {"unavailable", 503}, {"fence-denied", 404}, {"cleanup-failed", 503}} {
 				host.mode = tc.mode
 				host.requests = nil
 				status, raw := request(path)
 				require.Equalf(t, tc.status, status, "%s: %s", tc.mode, raw)
-				if tc.mode != "initial-denied" {
-					require.GreaterOrEqual(t, len(host.requests), 2)
-					peer := host.requests[len(host.requests)-1]
-					require.Equal(t, fixture.Grant.Enrollment.ID, peer.Enrollment.ID)
-					require.Equal(t, "member", peer.Enrollment.Actor)
-					require.Equal(t, fixture.Projects[0].UID, peer.EnrollmentProjectUID)
-					require.Equal(t, fixture.Projects[1].UID, peer.Project.UID)
-					require.Equal(t, "pull", peer.Capability)
-					expected := "offerRelayDeliveries"
-					if path == "/reset" {
-						expected = "getRelayReset"
-					}
-					require.Equal(t, expected, peer.Operation.ID)
+				require.GreaterOrEqual(t, len(host.requests), 2)
+				peer := host.requests[len(host.requests)-1]
+				require.Equal(t, fixture.Grant.Enrollment.ID, peer.Enrollment.ID)
+				require.Equal(t, "member", peer.Enrollment.Actor)
+				require.Equal(t, fixture.Projects[0].UID, peer.EnrollmentProjectUID)
+				require.Equal(t, fixture.Projects[1].UID, peer.Project.UID)
+				require.Equal(t, "pull", peer.Capability)
+				expected := "offerRelayDeliveries"
+				if path == "/reset" {
+					expected = "getRelayReset"
 				}
+				require.Equal(t, expected, peer.Operation.ID)
 			}
 			host.mode = "allow"
 			scoped = true

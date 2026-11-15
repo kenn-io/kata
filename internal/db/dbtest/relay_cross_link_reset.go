@@ -13,7 +13,7 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-// RunRelayCrossLinkResetHistory checks feature gating for cached and forwarded reset history.
+// RunRelayCrossLinkResetHistory checks reset feature gating and forwarded peer-denial rollback.
 func RunRelayCrossLinkResetHistory(t *testing.T, root db.Storage, backend Backend) {
 	ctx := t.Context()
 	hub := backend.Open(t)
