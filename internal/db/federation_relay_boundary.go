@@ -11,8 +11,7 @@ import (
 
 // RelayEventPeerProjects resolves the projects named by a source event.
 // The lookup must use an unrestricted project context on the held transaction.
-func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]string, error) {
-	projects := map[string]bool{}
+func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup, visit func(string) error) error {
 	add := func(issue Issue, err error) (bool, error) {
 		if errors.Is(err, ErrNotFound) {
 			return false, nil
@@ -21,7 +20,7 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 			return false, err
 		}
 		if issue.ProjectUID != "" {
-			projects[issue.ProjectUID] = true
+			return false, visit(issue.ProjectUID)
 		}
 		return false, nil
 	}
@@ -48,13 +47,13 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 	}
 	project := func(uid string) (bool, error) {
 		if uid != "" {
-			projects[uid] = true
+			return false, visit(uid)
 		}
 		return false, nil
 	}
 	if event.IssueUID != nil && *event.IssueUID != "" {
 		if _, err := issueUID(*event.IssueUID); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	// Relay release checks reply and link targets that scoped readers handle elsewhere.
@@ -66,7 +65,7 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 		}
 		if json.Unmarshal(event.Payload, &payload) == nil && (payload.ReplyToUID != "" || payload.ReplyKind != "") {
 			if _, err := comment(payload.ReplyToUID, payload.ReplyKind); err != nil {
-				return nil, err
+				return err
 			}
 		}
 	case "issue.linked", "issue.unlinked":
@@ -75,7 +74,7 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 			for _, key := range []string{"from_uid", "to_uid", "from_issue_uid", "to_issue_uid"} {
 				if uid, ok := StringValue(payload[key]); ok && uid != "" {
 					if _, err := issueUID(uid); err != nil {
-						return nil, err
+						return err
 					}
 				}
 			}
@@ -83,7 +82,7 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 	}
 	_, err := walkEventProjectReferences(Event{ProjectUID: event.ProjectUID, RelatedIssueUID: event.RelatedIssueUID, Type: event.Type, Payload: string(event.Payload)}, issueUID, issueRef, comment, project)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	_, err = notification.WalkEventPayload(jsontext.Value(event.Payload), event.Type, func(slot jsontext.Value) (bool, error) {
 		for _, uid := range notification.References(slot) {
@@ -96,31 +95,24 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 		return true, nil
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	result := make([]string, 0, len(projects))
-	for uid := range projects {
-		result = append(result, uid)
-	}
-	return result, nil
+	return nil
 }
 
 // AuthorizeRelayRelease checks every distinct peer before releasing a batch.
 func AuthorizeRelayRelease(ctx context.Context, tx Transaction, lookup *EventIssueLookup, ownProjectUID string, events []RemoteEvent) error {
 	seen := map[string]bool{ownProjectUID: true}
-	for _, event := range events {
-		projects, err := RelayEventPeerProjects(event, lookup)
-		if err != nil {
-			return err
+	visit := func(uid string) error {
+		if seen[uid] {
+			return nil
 		}
-		for _, uid := range projects {
-			if seen[uid] {
-				continue
-			}
-			seen[uid] = true
-			if err := CheckProjectAccessTransaction(ctx, tx, uid); err != nil {
-				return err
-			}
+		seen[uid] = true
+		return CheckProjectAccessTransaction(ctx, tx, uid)
+	}
+	for _, event := range events {
+		if err := RelayEventPeerProjects(event, lookup, visit); err != nil {
+			return err
 		}
 	}
 	return nil

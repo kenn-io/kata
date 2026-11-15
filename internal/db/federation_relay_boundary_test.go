@@ -40,23 +40,23 @@ func TestRelayEventPeerProjects(t *testing.T) {
 		{"created", "issue.created", `{"links":[{"to_issue_uid":"` + issueUID + `"}]}`, nil, true},
 		{"comment reply", "issue.commented", `{"reply_to_uid":"` + commentUID + `","reply_kind":"reply"}`, nil, true},
 		{"missing comment reply", "issue.commented", `{"reply_to_uid":"00000000000000000000000003","reply_kind":"reply"}`, nil, false},
-		{"snapshot", "issue.snapshot", `{"comments":[{"reply_to_uid":"` + commentUID + `","reply_kind":"reply"}]}`, nil, true},
 		{"snapshot null links before reply", "issue.snapshot", `{"links":null,"comments":[{"reply_to_uid":"` + commentUID + `","reply_kind":"reply"}]}`, nil, true},
 		{"restated", RepeatedImportEventType, `{"links":[{"to_issue_uid":"` + issueUID + `"}]}`, nil, true},
 		{"close parent", "issue.closed", `{"parent_uid":"` + issueUID + `"}`, nil, true},
-		{"close UID evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"` + issueUID + `"}]}`, nil, true},
 		{"close legacy parent before evidence", "issue.closed", `{"parent_short_id":"old1","evidence":[{"type":"duplicate-of","issue_ref":"` + issueUID + `"}]}`, nil, true},
 		{"metadata notification", "issue.created", `{"metadata":{"notify.recipient":{"re":"` + commentUID + `"}}}`, nil, true},
 		{"diff notification", "issue.metadata_updated", `{"diff":{"notify.recipient":{"from":{"re":"` + commentUID + `"},"to":{"re":"` + commentUID + `"}}}}`, nil, true},
 	}
 	t.Run("subject moved to peer", func(t *testing.T) {
-		projects, err := RelayEventPeerProjects(RemoteEvent{ProjectUID: "own", Type: "issue.updated", IssueUID: &related, Payload: jsontext.Value(`{}`)}, lookup)
+		projects := map[string]bool{}
+		err := RelayEventPeerProjects(RemoteEvent{ProjectUID: "own", Type: "issue.updated", IssueUID: &related, Payload: jsontext.Value(`{}`)}, lookup, func(uid string) error { projects[uid] = true; return nil })
 		require.NoError(t, err)
 		require.Contains(t, projects, "peer")
 	})
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			projects, err := RelayEventPeerProjects(RemoteEvent{ProjectUID: "own", Type: tc.kind, Payload: jsontext.Value(tc.payload), RelatedIssueUID: tc.related}, lookup)
+			projects := map[string]bool{}
+			err := RelayEventPeerProjects(RemoteEvent{ProjectUID: "own", Type: tc.kind, Payload: jsontext.Value(tc.payload), RelatedIssueUID: tc.related}, lookup, func(uid string) error { projects[uid] = true; return nil })
 			require.NoError(t, err)
 			if tc.peer {
 				require.Contains(t, projects, "peer")

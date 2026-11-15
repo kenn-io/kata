@@ -127,6 +127,5 @@ func TestRelayPeerAccessHTTP(t *testing.T) {
 			require.Equal(t, 200, status, string(raw))
 		}
 		require.Equal(t, 4, host.cleaned)
-
 	})
 }
