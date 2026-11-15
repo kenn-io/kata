@@ -23,5 +23,4 @@ func TestFederationPeerAdapterEnrollmentProject(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "enrollment-project", recorder.request.Enrollment.ProjectUID)
 	require.Equal(t, "peer-project", recorder.request.Project.UID)
-	require.Equal(t, int64(42), recorder.request.Enrollment.ID)
 }

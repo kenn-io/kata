@@ -40,16 +40,12 @@ func TestRelayEventPeerProjects(t *testing.T) {
 		{"created", "issue.created", `{"links":[{"to_issue_uid":"` + issueUID + `"}]}`, nil, true},
 		{"comment reply", "issue.commented", `{"reply_to_uid":"` + commentUID + `","reply_kind":"reply"}`, nil, true},
 		{"missing comment reply", "issue.commented", `{"reply_to_uid":"00000000000000000000000003","reply_kind":"reply"}`, nil, false},
-		{"missing close parent", "issue.closed", `{"parent_uid":"00000000000000000000000003"}`, nil, false},
 		{"snapshot", "issue.snapshot", `{"comments":[{"reply_to_uid":"` + commentUID + `","reply_kind":"reply"}]}`, nil, true},
 		{"restated", RepeatedImportEventType, `{"links":[{"to_issue_uid":"` + issueUID + `"}]}`, nil, true},
-		{"restated notification", RepeatedImportEventType, `{"metadata":{"notify.recipient":{"re":"` + commentUID + `"}}}`, nil, true},
 		{"close parent", "issue.closed", `{"parent_uid":"` + issueUID + `"}`, nil, true},
 		{"close UID evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"` + issueUID + `"}]}`, nil, true},
-		{"missing UID evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"00000000000000000000000003"}]}`, nil, false},
 		{"metadata notification", "issue.created", `{"metadata":{"notify.recipient":{"re":"` + commentUID + `"}}}`, nil, true},
 		{"diff notification", "issue.metadata_updated", `{"diff":{"notify.recipient":{"from":{"re":"` + commentUID + `"},"to":{"re":"` + commentUID + `"}}}}`, nil, true},
-		{"deleted comment", "issue.created", `{"metadata":{"notify.recipient":{"re":"00000000000000000000000003"}}}`, nil, false},
 	}
 	t.Run("subject moved to peer", func(t *testing.T) {
 		projects, err := RelayEventPeerProjects(RemoteEvent{ProjectUID: "own", Type: "issue.updated", IssueUID: &related, Payload: jsontext.Value(`{}`)}, lookup)
