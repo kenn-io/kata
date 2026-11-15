@@ -242,6 +242,29 @@ func (d *Store) relayCheckpointNeedsRefreshTx(ctx context.Context, tx *sql.Tx, p
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1`, projectUID).Scan(&projectID); err != nil {
 			return false, err
 		}
+		// An archive can make references in a retained checkpoint private.
+		var archived bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE id>$1 AND type='project.removed')`, checkpoint.Manifest.HistoryEventID).Scan(&archived); err != nil {
+			return false, err
+		}
+		if archived {
+			for _, section := range [][]byte{checkpoint.Snapshot.Events, checkpoint.Snapshot.Entities} {
+				var bodies [][]byte
+				if err := json.Unmarshal(section, &bodies); err != nil {
+					return false, err
+				}
+				for _, body := range bodies {
+					event, err := db.DecodeRelaySourceEvent(body)
+					if err != nil {
+						return false, err
+					}
+					crossing, err := relayEventCrossesProjectTx(ctx, tx, projectID, event)
+					if crossing || err != nil {
+						return crossing, err
+					}
+				}
+			}
+		}
 		return d.relayHistoryNeedsResetCachedTx(ctx, tx, projectID, projectUID, &checkpoint, scan)
 	}
 	var raw string

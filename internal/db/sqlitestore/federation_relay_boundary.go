@@ -152,6 +152,9 @@ func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID in
 	root := func(id int64, binding db.FederationBinding) (string, error) {
 		var uid string
 		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=? AND deleted_at IS NULL`, id).Scan(&uid); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", nil
+			}
 			return "", err
 		}
 		pin, err := rootPinTx(ctx, tx, uid, "")

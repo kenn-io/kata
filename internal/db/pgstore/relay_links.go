@@ -182,6 +182,10 @@ func filterRelayCrossProjectLinkEvents(
 	filtered := make([]db.FoldEvent, 0, len(events))
 	relayEvents := make(map[string]bool)
 	for _, event := range events {
+		// Local edits on a relay spoke must also respect root-owned parents.
+		if _, relaySpoke := classifier.relaySpokes[event.ProjectUID]; relaySpoke {
+			relayEvents[event.UID] = true
+		}
 		if !classifier.relaySourced(event) {
 			filtered = append(filtered, event)
 			continue

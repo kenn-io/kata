@@ -249,7 +249,7 @@ func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, f
 		return err
 	}
 	var check db.FoldParentRemovalCheck
-	events, check, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, events)
+	events, check, m.relayOrigins, err = filterRelayCrossProjectLinkEvents(ctx, tx, m.linkProjects, events)
 	if err != nil {
 		return err
 	}

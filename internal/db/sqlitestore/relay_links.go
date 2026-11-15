@@ -155,22 +155,23 @@ func filterRelayCrossProjectLinkEvents(
 	tx *sql.Tx,
 	projectIDs []int64,
 	events []db.FoldEvent,
-) ([]db.FoldEvent, db.FoldParentRemovalCheck, error) {
+) ([]db.FoldEvent, db.FoldParentRemovalCheck, relayOriginClassifier, error) {
 	if len(projectIDs) == 0 {
-		return events, nil, nil
+		return events, nil, relayOriginClassifier{}, nil
 	}
 	classifier, err := loadRelayOriginClassifier(ctx, tx, projectIDs)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, classifier, err
 	}
 	if !slices.ContainsFunc(events, classifier.relaySourced) {
-		return events, nil, nil
+		return events, nil, classifier, nil
 	}
 	issueProjects, err := relayLinkEndpointProjects(ctx, tx, events)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, classifier, err
 	}
-	return filterRelayLinkEvents(ctx, tx, events, classifier, issueProjects)
+	filtered, check, err := filterRelayLinkEvents(ctx, tx, events, classifier, issueProjects)
+	return filtered, check, classifier, err
 }
 
 func filterRelayLinkEvents(ctx context.Context, tx *sql.Tx, events []db.FoldEvent, classifier relayOriginClassifier, issueProjects map[string]string) ([]db.FoldEvent, db.FoldParentRemovalCheck, error) {
@@ -186,6 +187,10 @@ func filterRelayLinkEvents(ctx context.Context, tx *sql.Tx, events []db.FoldEven
 	filtered := make([]db.FoldEvent, 0, len(events))
 	relayEvents := make(map[string]bool)
 	for _, event := range events {
+		// Local edits on a relay spoke must also respect root-owned parents.
+		if _, relaySpoke := classifier.relaySpokes[event.ProjectUID]; relaySpoke {
+			relayEvents[event.UID] = true
+		}
 		if !classifier.relaySourced(event) {
 			filtered = append(filtered, event)
 			continue

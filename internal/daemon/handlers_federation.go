@@ -307,9 +307,6 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		if principal.RelayProtocolVersion == db.RelayProtocolVersion {
-			if err := requireRelayMetadataFeatures(ctx, cfg.DB, in.ProjectID, in.EventFeatures); err != nil {
-				return nil, err
-			}
 			body, err := buildProjectFederationBody(ctx, cfg.DB, in.ProjectID, false)
 			if err != nil {
 				return nil, err
