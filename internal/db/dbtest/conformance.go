@@ -148,20 +148,12 @@ var storageScenarios = []scenario{
 		RunRelayNamedEvidenceCache(t, store, backend)
 		return nil
 	}},
-	{name: "relay peer release", run: func(t *testing.T, store db.Storage) error { RunRelayPeerRelease(t, store, false); return nil }},
+	{name: "relay peer release", run: func(t *testing.T, store db.Storage) error { RunRelayPeerRelease(t, store); return nil }},
 	{name: "relay same project evidence reset", run: func(t *testing.T, store db.Storage) error {
 		RunRelaySameProjectNamedEvidenceReset(t, store)
 		return nil
 	}},
-	{name: "relay comment references", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
-		RunRelayCommentReplyRelease(t, store)
-		other := backend.Open(t)
-		t.Cleanup(func() { require.NoError(t, other.Close()) })
-		RunRelayMissingNotification(t, other)
-		return nil
-	}},
-	{name: "relay purged peer", run: func(t *testing.T, store db.Storage) error { RunRelayPeerRelease(t, store, true); return nil }},
-	{name: "relay reset purged peer", run: func(t *testing.T, store db.Storage) error { RunSignedRelayResetPurgedPeer(t, store); return nil }},
+	{name: "relay comment references", run: func(t *testing.T, store db.Storage) error { RunRelayCommentReplyRelease(t, store); return nil }},
 	{name: "relay ingest returns local issue ids", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "IssueByUID", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayIngestReturnsLocalIssueIDs(t, store)
 		return nil

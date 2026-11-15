@@ -157,9 +157,6 @@ func relayTransportError(err error) error {
 	if errors.Is(err, db.ErrTransactionFinalizationFailed) || errors.Is(err, errHostFederationAccessUnavailable) {
 		return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "relay storage or authorization is unavailable", "", nil)
 	}
-	if errors.Is(err, db.ErrRelayReferenceUnprovable) {
-		return projectAccessDenied()
-	}
 	if errors.Is(err, db.ErrNotFound) {
 		return federationCredentialDenied()
 	}

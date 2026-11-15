@@ -31,6 +31,16 @@ func RunRelaySameProjectNamedEvidenceReset(t *testing.T, store db.Storage) {
 	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID, ParentTokenID: fixture.parentTokenID,
 		SpokeInstanceUID: "00000000000000000000000008", ProtocolVersion: db.RelayProtocolVersion})
 	require.NoError(t, err)
+	offered, err := store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
+	require.NoError(t, err)
+	var found bool
+	for _, envelope := range offered {
+		if envelope.SourceUID == event.EventUID {
+			found = true
+			require.Equal(t, event.ContentHash, envelope.SourceHash)
+		}
+	}
+	require.True(t, found)
 	checkpoint, err := store.(db.RelayResetStore).CreateRelayReset(ctx, grant.Enrollment.RelayBindingUID, fixture.signer)
 	require.NoError(t, err)
 	public := fixture.signer.PrivateKey.Public().(ed25519.PublicKey)

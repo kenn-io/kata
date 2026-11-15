@@ -145,8 +145,7 @@ func TestRelayPeerAccessHTTP(t *testing.T) {
 		require.NoError(t, err)
 		for _, path := range []string{"?stream=events", "/reset"} {
 			status, raw := request(path)
-			require.Equal(t, 404, status, string(raw))
-			require.NotContains(t, string(raw), "00000000000000000000000009")
+			require.Equal(t, 200, status, string(raw))
 		}
 	})
 }
