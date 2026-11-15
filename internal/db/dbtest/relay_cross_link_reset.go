@@ -120,22 +120,32 @@ func RunRelayCrossLinkResetHistory(t *testing.T, root db.Storage, backend Backen
 	require.NoError(t, err)
 	require.Equal(t, forwarded, retry)
 	t.Run("archive refreshes reset history", func(t *testing.T) {
+		bootstrap := root.(db.RelayResetBootstrapStore)
+		//nolint:gosec // This is a deterministic fixture credential.
+		parent, _, err := root.CreateAPIToken(ctx, db.CreateAPITokenParams{Actor: "member", AdminActor: "admin", PlaintextToken: "archived-peer-parent-test-token"})
+		require.NoError(t, err)
+		//nolint:gosec // This is a deterministic fixture credential.
+		warmGrant, err := root.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: projects[0].ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000005", ProtocolVersion: db.RelayProtocolVersion, Token: "warm-relay-test-token"})
+		require.NoError(t, err)
+		required, err := bootstrap.RelayEnrollmentNeedsReset(ctx, warmGrant.Enrollment.RelayBindingUID)
+		require.NoError(t, err)
+		require.False(t, required)
 		_, _, err = root.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: projects[1].ID, Actor: "root-member", Force: true})
 		require.NoError(t, err)
+		//nolint:gosec // This is a deterministic fixture credential.
+		newGrant, err := root.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: projects[0].ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000006", ProtocolVersion: db.RelayProtocolVersion, Token: "archived-peer-relay-test-token"})
+		require.NoError(t, err)
+		required, err = bootstrap.RelayEnrollmentNeedsReset(ctx, newGrant.Enrollment.RelayBindingUID)
+		require.NoError(t, err)
+		require.True(t, required)
+		newReset, err := rootResets.CreateRelayReset(features, newGrant.Enrollment.RelayBindingUID, signer)
+		require.NoError(t, err)
+		requireResetOmitsIssue(t, newReset, issues[1])
 		afterArchive, err := rootResets.CreateRelayReset(features, binding, signer)
 		require.NoError(t, err)
 		requireResetOmitsIssue(t, afterArchive, issues[1])
 		retry, err = rootResets.CreateRelayReset(features, binding, signer)
 		require.NoError(t, err)
 		require.Equal(t, afterArchive, retry)
-		//nolint:gosec // This is a deterministic fixture credential.
-		parent, _, err := root.CreateAPIToken(ctx, db.CreateAPITokenParams{Actor: "member", AdminActor: "admin", PlaintextToken: "archived-peer-parent-test-token"})
-		require.NoError(t, err)
-		//nolint:gosec // This is a deterministic fixture credential.
-		newGrant, err := root.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: projects[0].ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000006", ProtocolVersion: db.RelayProtocolVersion, Token: "archived-peer-relay-test-token"})
-		require.NoError(t, err)
-		newReset, err := rootResets.CreateRelayReset(features, newGrant.Enrollment.RelayBindingUID, signer)
-		require.NoError(t, err)
-		requireResetOmitsIssue(t, newReset, issues[1])
 	})
 }
