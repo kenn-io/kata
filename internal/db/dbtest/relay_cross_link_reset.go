@@ -1,8 +1,10 @@
 package dbtest
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json/jsontext"
+	"errors"
 	"testing"
 	"time"
 
@@ -58,15 +60,22 @@ func RunRelayCrossLinkResetHistory(t *testing.T, root db.Storage, backend Backen
 	params := db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: issues[1].ID, Type: "blocks", Author: "root-member"}
 	_, _, err = root.CreateLinkAndEvent(db.WithRootAttribution(ctx, signer, "root-member"), params, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: "root-member", FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
 	require.NoError(t, err)
-	binding := enroll(root, hub, projects[0], "reset-hub", true)
-	peerBinding := enroll(root, hub, projects[1], "reset-peer-hub", false)
 	spoke, err := uid.New()
 	require.NoError(t, err)
 	removed := newRemoteEvent(t, projects[0], &issues[0].UID, "issue.links_changed", "member", spoke, time.Now().UnixMilli()+10, jsontext.Value(`{"blocks_removed_uids":["`+issues[1].UID+`"]}`))
 	_, err = root.IngestFederationEvents(db.WithAuthorizedProjects(ctx, []string{projects[0].UID, projects[1].UID}), db.FederationIngestParams{ProjectID: projects[0].ID, SpokeInstanceUID: spoke, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: removed}}})
 	require.NoError(t, err)
 	require.Empty(t, linkTargetUIDs(t, root, issues[0].ID))
+	features := db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures)
 	rootResets := root.(db.RelayResetStore)
+	peerBinding := enroll(root, hub, projects[1], "reset-peer-hub", true)
+	peerCheckpoint, err := rootResets.CreateRelayReset(features, peerBinding, signer)
+	require.NoError(t, err)
+	hubResets := hub.(db.RelayResetStore)
+	require.NoError(t, hubResets.InstallRelayReset(ctx, peerBinding, peerCheckpoint.Manifest, peerCheckpoint.Snapshot, peerCheckpoint.Translation))
+	_, err = hub.IssueByUID(ctx, issues[1].UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	binding := enroll(root, hub, projects[0], "reset-hub", true)
 	relayState := func(store db.Storage) []db.ImportRecord {
 		var records []db.ImportRecord
 		for record, err := range store.ExportRelayState(ctx) {
@@ -84,7 +93,6 @@ func RunRelayCrossLinkResetHistory(t *testing.T, root db.Storage, backend Backen
 	afterGrants, err := root.ListProjectFederationEnrollments(ctx, projects[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, grants, afterGrants)
-	features := db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures)
 	checkpoint, err := rootResets.CreateRelayReset(features, binding, signer)
 	require.NoError(t, err)
 
@@ -93,11 +101,7 @@ func RunRelayCrossLinkResetHistory(t *testing.T, root db.Storage, backend Backen
 	retry, err := rootResets.CreateRelayReset(features, binding, signer)
 	require.NoError(t, err)
 	require.Equal(t, checkpoint, retry)
-	hubResets := hub.(db.RelayResetStore)
 	require.NoError(t, hubResets.InstallRelayReset(ctx, binding, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation))
-	peerCheckpoint, err := rootResets.CreateRelayReset(features, peerBinding, signer)
-	require.NoError(t, err)
-	require.NoError(t, hubResets.InstallRelayReset(ctx, peerBinding, peerCheckpoint.Manifest, peerCheckpoint.Snapshot, peerCheckpoint.Translation))
 	hubIssue, err := hub.IssueByUID(ctx, issues[0].UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	require.Empty(t, linkTargetUIDs(t, hub, hubIssue.ID))
@@ -128,6 +132,22 @@ func RunRelayCrossLinkResetHistory(t *testing.T, root db.Storage, backend Backen
 	require.NoError(t, err)
 	require.Equal(t, checkpoint.Manifest, forwarded.Manifest)
 	require.Equal(t, checkpoint.Snapshot, forwarded.Snapshot)
+	_, err = hubResets.CreateRelayReset(ctx, downstream, db.RootAttributionSigner{})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	denied := errors.New("peer denied")
+	rejectPeer := db.WithProjectAccessTransactionCheck(features, func(_ context.Context, _ db.Transaction, uid string) error {
+		if uid == projects[1].UID {
+			return denied
+		}
+		return nil
+	})
+	before = relayState(hub)
+	_, err = hubResets.CreateRelayReset(rejectPeer, downstream, db.RootAttributionSigner{})
+	require.ErrorIs(t, err, denied)
+	require.Equal(t, before, relayState(hub))
+	retry, err = hubResets.CreateRelayReset(features, downstream, db.RootAttributionSigner{})
+	require.NoError(t, err)
+	require.Equal(t, forwarded, retry)
 	t.Run("archive refreshes reset history", func(t *testing.T) {
 		bootstrap := root.(db.RelayResetBootstrapStore)
 		//nolint:gosec // This is a deterministic fixture credential.
