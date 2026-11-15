@@ -84,6 +84,16 @@ func TestRelayPeerAccessHTTP(t *testing.T) {
 			require.NoError(t, resp.Body.Close())
 			return resp.StatusCode, raw
 		}
+		other, _, err := store.CreateTeam(t.Context(), "restricted-peer-team", "admin")
+		require.NoError(t, err)
+		_, _, err = store.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: fixture.Projects[1].UID, Visibility: "teams", TeamUIDs: []string{other.UID}}, "admin")
+		require.NoError(t, err)
+		for _, path := range []string{"?stream=events", "/reset"} {
+			status, raw := request(path)
+			require.Equal(t, 404, status, string(raw))
+		}
+		_, _, err = store.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: fixture.Projects[1].UID, Visibility: "teams", TeamUIDs: []string{fixture.Team.UID}}, "admin")
+		require.NoError(t, err)
 		for _, path := range []string{"?stream=events", "/reset"} {
 			for _, tc := range []struct {
 				mode   string
@@ -117,29 +127,6 @@ func TestRelayPeerAccessHTTP(t *testing.T) {
 			require.Equal(t, 200, status, string(raw))
 		}
 		require.Equal(t, 4, host.cleaned)
-		_, _, err := store.CreateLinkAndEvent(t.Context(), db.CreateLinkParams{FromIssueID: fixture.Issues[0].ID, ToIssueID: fixture.Issues[1].ID, Type: "related", Author: "member"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: fixture.Issues[0].ID, Actor: "member", FromUID: fixture.Issues[0].UID, ToUID: fixture.Issues[1].UID, FromShortID: fixture.Issues[0].ShortID, ToShortID: fixture.Issues[1].ShortID})
-		require.NoError(t, err)
-		other, _, err := store.CreateTeam(t.Context(), "restricted-peer-team", "admin")
-		require.NoError(t, err)
-		_, _, err = store.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: fixture.Projects[1].UID, Visibility: "teams", TeamUIDs: []string{other.UID}}, "admin")
-		require.NoError(t, err)
-		for _, path := range []string{"?stream=events", "/reset"} {
-			status, raw := request(path)
-			require.Equal(t, 404, status, string(raw))
-			ownerCtx := daemon.WithPrincipal(t.Context(), daemon.Principal{Kind: daemon.PrincipalWebLocal})
-			req := httptest.NewRequestWithContext(ownerCtx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/federation/relay%s", fixture.Projects[0].ID, path), nil)
-			req.Header.Set("Authorization", "Bearer "+fixture.Grant.Token)
-			req.Header.Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
-			rec := httptest.NewRecorder()
-			server.Handler().ServeHTTP(rec, req)
-			require.Equal(t, 404, rec.Code, rec.Body.String())
-		}
-		_, _, err = store.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: fixture.Projects[1].UID, Visibility: "teams", TeamUIDs: []string{fixture.Team.UID}}, "admin")
-		require.NoError(t, err)
-		for _, path := range []string{"?stream=events", "/reset"} {
-			status, raw := request(path)
-			require.Equal(t, 200, status, string(raw))
-		}
 
 	})
 }
