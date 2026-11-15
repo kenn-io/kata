@@ -15,7 +15,7 @@ import (
 // RunRelayPeerRelease checks whole-response refusal and retained retries.
 func RunRelayPeerRelease(t *testing.T, store db.Storage) {
 	fixture := NewRelaySharedAccessFixture(t, store)
-	binding := fixture.Grants[0].Enrollment.RelayBindingUID
+	binding := fixture.Grant.Enrollment.RelayBindingUID
 	ctx := db.WithRelayPeerEventFeatures(t.Context(), db.SupportedEventFeatures)
 	denied := errors.New("peer denied")
 	rejecting := db.WithProjectAccessTransactionCheck(ctx, func(_ context.Context, _ db.Transaction, uid string) error {
@@ -102,6 +102,30 @@ func RunRelayPeerRelease(t *testing.T, store db.Storage) {
 	require.Equal(t, checkpoint, repeated)
 }
 
+// RunRelayPurgedPeer checks the retained event against the purged peer's project.
+func RunRelayPurgedPeer(t *testing.T, store db.Storage) {
+	fixture := newRelaySharedAccessFixture(t, store, true)
+	ctx := db.WithRelayPeerEventFeatures(t.Context(), db.SupportedEventFeatures)
+	binding := fixture.Grant.Enrollment.RelayBindingUID
+	denied := errors.New("peer denied")
+	restricted := db.WithProjectAccessTransactionCheck(ctx, func(_ context.Context, _ db.Transaction, uid string) error {
+		if uid == fixture.Projects[1].UID {
+			return denied
+		}
+		return nil
+	})
+	out, err := store.PendingRelayDeliveries(restricted, binding, db.RelayStreamEvent, 100)
+	require.ErrorIs(t, err, denied)
+	require.Empty(t, out)
+	out, err = store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
+	require.NoError(t, err)
+	require.NotEmpty(t, out)
+	_, err = store.(db.RelayResetStore).CreateRelayReset(restricted, binding, fixture.Signer)
+	require.ErrorIs(t, err, denied)
+	_, err = store.(db.RelayResetStore).CreateRelayReset(ctx, binding, fixture.Signer)
+	require.NoError(t, err)
+}
+
 // RunRelayMissingNotification refuses an event whose comment owner is gone.
 func RunRelayMissingNotification(t *testing.T, store db.Storage, deleted bool) {
 	fixture := NewRelaySharedAccessFixture(t, store)
@@ -128,7 +152,7 @@ func RunRelayMissingNotification(t *testing.T, store db.Storage, deleted bool) {
 		}
 		return records
 	}()
-	envelopes, err := store.PendingRelayDeliveries(ctx, fixture.Grants[0].Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
+	envelopes, err := store.PendingRelayDeliveries(ctx, fixture.Grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
 	require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
 	require.Empty(t, envelopes)
 	var after []db.ImportRecord
@@ -137,6 +161,6 @@ func RunRelayMissingNotification(t *testing.T, store db.Storage, deleted bool) {
 		after = append(after, record)
 	}
 	require.Equal(t, before, after)
-	_, err = store.(db.RelayResetStore).CreateRelayReset(ctx, fixture.Grants[0].Enrollment.RelayBindingUID, fixture.Signer)
+	_, err = store.(db.RelayResetStore).CreateRelayReset(ctx, fixture.Grant.Enrollment.RelayBindingUID, fixture.Signer)
 	require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
 }

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"errors"
+	"strings"
 
 	"go.kenn.io/kata/internal/notification"
+	"go.kenn.io/kata/internal/shortid"
 )
 
 // ErrRelayReferenceUnprovable means a relay reference has no provable owner.
@@ -27,8 +29,11 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 	}
 	issueUID := func(uid string) (bool, error) { issue, err := lookup.IssueByUID(uid); return add(issue, err, true) }
 	issueRef := func(ref string) (bool, error) {
+		if parsed, err := shortid.Parse(ref); err == nil && parsed.ULID != "" {
+			return issueUID(parsed.ULID)
+		}
 		issue, err := lookup.IssueByRef(event.ProjectUID, ref)
-		return add(issue, err, false)
+		return add(issue, err, strings.Contains(ref, "#"))
 	}
 	comment := func(uid, kind string) (bool, error) {
 		if len(uid) != 26 || !ValidCommentReplyKind(kind) {

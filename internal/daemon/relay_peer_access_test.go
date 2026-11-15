@@ -73,7 +73,7 @@ func TestRelayPeerAccessHTTP(t *testing.T) {
 		request := func(path string) (int, []byte) {
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/federation/relay%s", endpoint.URL, fixture.Projects[0].ID, path), nil)
 			require.NoError(t, err)
-			req.Header.Set("Authorization", "Bearer "+fixture.Grants[0].Token)
+			req.Header.Set("Authorization", "Bearer "+fixture.Grant.Token)
 			req.Header.Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
 			if scoped {
 				req.Header.Set(requestProjectScopeHeader, requestScopeValue(t, fixture.Projects[0].UID))
@@ -97,7 +97,7 @@ func TestRelayPeerAccessHTTP(t *testing.T) {
 				if tc.mode != "initial-denied" {
 					require.GreaterOrEqual(t, len(host.requests), 2)
 					peer := host.requests[len(host.requests)-1]
-					require.Equal(t, fixture.Grants[0].Enrollment.ID, peer.Enrollment.ID)
+					require.Equal(t, fixture.Grant.Enrollment.ID, peer.Enrollment.ID)
 					require.Equal(t, "member", peer.Enrollment.Actor)
 					require.Equal(t, fixture.Projects[0].UID, peer.EnrollmentProjectUID)
 					require.Equal(t, fixture.Projects[1].UID, peer.Project.UID)
@@ -129,7 +129,7 @@ func TestRelayPeerAccessHTTP(t *testing.T) {
 			require.Equal(t, 404, status, string(raw))
 			ownerCtx := daemon.WithPrincipal(t.Context(), daemon.Principal{Kind: daemon.PrincipalWebLocal})
 			req := httptest.NewRequestWithContext(ownerCtx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/federation/relay%s", fixture.Projects[0].ID, path), nil)
-			req.Header.Set("Authorization", "Bearer "+fixture.Grants[0].Token)
+			req.Header.Set("Authorization", "Bearer "+fixture.Grant.Token)
 			req.Header.Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
 			rec := httptest.NewRecorder()
 			server.Handler().ServeHTTP(rec, req)

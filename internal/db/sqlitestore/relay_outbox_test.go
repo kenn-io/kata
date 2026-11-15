@@ -40,11 +40,11 @@ func TestSignedRelayResetCommitments(t *testing.T) {
 	dbtest.RunSignedRelayResetCommitments(t, store)
 }
 
-func TestSignedRelayResetUnresolvedPeer(t *testing.T) {
+func TestSignedRelayResetPurgedPeer(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "reset.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
-	dbtest.RunSignedRelayResetUnresolvedPeer(t, store)
+	dbtest.RunSignedRelayResetPurgedPeer(t, store)
 }
 
 func TestCreateRelayResetAfterCompaction(t *testing.T) {

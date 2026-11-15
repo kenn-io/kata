@@ -756,12 +756,8 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 	if a.controller == nil {
 		return daemon.HostFederationAccessDecision{}, nil
 	}
-	enrollmentProjectUID := request.EnrollmentProjectUID
-	if enrollmentProjectUID == "" {
-		enrollmentProjectUID = request.Project.UID
-	}
 	decision, err := a.controller.AuthorizeFederation(ctx, FederationAccessRequest{
-		Enrollment: publicFederationEnrollment(request.Enrollment, enrollmentProjectUID),
+		Enrollment: publicFederationEnrollment(request.Enrollment, request.EnrollmentProjectUID),
 		Project:    publicProject(request.Project),
 		Capability: FederationCapability(request.Capability),
 		Operation: FederationOperation{

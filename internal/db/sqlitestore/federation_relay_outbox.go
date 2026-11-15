@@ -110,7 +110,7 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 				}
 				events = append(events, event)
 			}
-			lookup := eventIssueLookup(db.WithoutIssueRegistries(db.WithAuthorizedProjects(ctx, nil)), tx)
+			lookup := relayEventIssueLookup(db.WithoutIssueRegistries(db.WithAuthorizedProjects(ctx, nil)), tx)
 			if err := db.AuthorizeRelayRelease(ctx, tx, lookup, projectUID, events); err != nil {
 				return err
 			}
