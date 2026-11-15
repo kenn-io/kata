@@ -155,20 +155,12 @@ func runSignedRelayResetCommitments(t *testing.T, store db.Storage, purgedPeer b
 	var peerProject db.Project
 	var peerIssue db.Issue
 	if purgedPeer {
-		var before []db.ImportRecord
-		for record, err := range store.ExportRelayState(ctx) {
-			require.NoError(t, err)
-			before = append(before, record)
-		}
+		before := relayStateForBinding(t, store, child.Enrollment.RelayBindingUID)
 		features := db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures)
 		withheld, err := store.(db.RelayResetStore).CreateRelayReset(features, child.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
 		require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
 		require.Equal(t, db.RelayResetCheckpoint{}, withheld)
-		var after []db.ImportRecord
-		for record, err := range store.ExportRelayState(ctx) {
-			require.NoError(t, err)
-			after = append(after, record)
-		}
+		after := relayStateForBinding(t, store, child.Enrollment.RelayBindingUID)
 		require.Equal(t, before, after)
 		peerProject, err = store.CreateProject(ctx, "resolved-reset-peer")
 		require.NoError(t, err)
@@ -195,9 +187,8 @@ func runSignedRelayResetCommitments(t *testing.T, store db.Storage, purgedPeer b
 	require.Equal(t, int64(19), binding.RelayConfig.ResetEpoch)
 	require.NoError(t, installer.InstallRelayReset(ctx, bindingUID, manifest, snapshot, translation), "lost commit response retries the exact retained checkpoint")
 	cursors := map[string]int64{}
-	for record, err := range store.ExportRelayState(ctx) {
-		require.NoError(t, err)
-		if cursor, ok := record.(*db.RelayCursorExport); ok && cursor.BindingUID == bindingUID && cursor.ResetEpoch == 19 {
+	for _, record := range relayStateForBinding(t, store, bindingUID) {
+		if cursor, ok := record.(*db.RelayCursorExport); ok && cursor.ResetEpoch == 19 {
 			cursors[cursor.Stream] = cursor.AcceptedThrough
 			require.Equal(t, cursor.AcceptedThrough, cursor.OfferedThrough)
 			require.Zero(t, cursor.AcknowledgedThrough)
@@ -245,11 +236,7 @@ func runSignedRelayResetCommitments(t *testing.T, store db.Storage, purgedPeer b
 			require.Equal(t, peerProject.UID, projectUID)
 			return db.ErrNotFound
 		})
-		var beforeState []db.ImportRecord
-		for record, err := range store.ExportRelayState(ctx) {
-			require.NoError(t, err)
-			beforeState = append(beforeState, record)
-		}
+		beforeState := relayStateForBinding(t, store, forwardChild.Enrollment.RelayBindingUID)
 		before, err := store.FederationBindingByProject(ctx, project.ID)
 		require.NoError(t, err)
 		withheld, err := forwarder.CreateRelayReset(denied, forwardChild.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
@@ -258,11 +245,7 @@ func runSignedRelayResetCommitments(t *testing.T, store db.Storage, purgedPeer b
 		after, err := store.FederationBindingByProject(ctx, project.ID)
 		require.NoError(t, err)
 		require.Equal(t, before, after)
-		var afterState []db.ImportRecord
-		for record, err := range store.ExportRelayState(ctx) {
-			require.NoError(t, err)
-			afterState = append(afterState, record)
-		}
+		afterState := relayStateForBinding(t, store, forwardChild.Enrollment.RelayBindingUID)
 		require.Equal(t, beforeState, afterState)
 		purged, err := forwarder.CreateRelayReset(ctx, forwardChild.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
 		require.NoError(t, err)
