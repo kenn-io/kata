@@ -28,6 +28,21 @@ func TestFederationEventStreamPreservesPendingCrossProjectLink(t *testing.T) {
 	require.False(t, reset, "federation peers need the link UID before the peer issue reaches the hub")
 }
 
+func TestProjectScopePreservesPayloadOnlyReferences(t *testing.T) {
+	ctx := WithAuthorizedProjects(t.Context(), []string{"own"})
+	for _, event := range []Event{
+		{ProjectUID: "own", Type: "issue.commented", Payload: `{"reply_to_uid":"00000000000000000000000002","reply_kind":"reply"}`},
+		{ProjectUID: "own", Type: "issue.linked", Payload: `{"from_uid":"00000000000000000000000001","to_uid":"00000000000000000000000002"}`},
+		{ProjectUID: "own", Type: "issue.unlinked", Payload: `{"from_uid":"00000000000000000000000001","to_uid":"00000000000000000000000002"}`},
+	} {
+		t.Run(event.Type, func(t *testing.T) {
+			reset, err := EventRequiresProjectScopeReset(ctx, event, nil, nil, nil)
+			require.NoError(t, err)
+			require.False(t, reset)
+		})
+	}
+}
+
 // A whole-issue copy carries comments like a snapshot. A reply to a comment in
 // a project the reader cannot see must not reach that reader.
 func TestRepeatedImportEventHidesAReplyToAPrivateComment(t *testing.T) {
