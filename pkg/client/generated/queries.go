@@ -239,6 +239,11 @@ func (o OfferRelayDeliveriesQuery) Validate() error {
 	return errors
 }
 
+type GetProjectFederationStatusQuery struct {
+	// Compact Omit relay checkpoint capacity measurement.
+	Compact *bool `json:"compact,omitempty"`
+}
+
 type ListIssuesQuery struct {
 	// Cursor Opaque next_cursor from a matching stable-order page
 	Cursor *string `json:"cursor,omitempty"`

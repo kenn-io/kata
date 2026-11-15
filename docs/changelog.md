@@ -9,6 +9,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Watch project sync progress refresh every 30 seconds in a visible web tab and
+  when you return.
+
 - Upgrade to schema 51, which reads issue history through an index on each
   event's header issue UID instead of one built from event payloads. PostgreSQL
   needs `kata storage postgres migrate` with the daemon stopped while the index
