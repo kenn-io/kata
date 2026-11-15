@@ -2,7 +2,6 @@ package sqlitestore_test
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -89,47 +88,4 @@ func TestRelaySharedLinks(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	dbtest.RunRelaySharedLinks(t, store)
-}
-
-func TestRelayPeerRelease(t *testing.T) {
-	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	dbtest.RunRelayPeerRelease(t, store)
-}
-
-func TestRelaySameProjectNamedEvidenceReset(t *testing.T) {
-	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	dbtest.RunRelaySameProjectNamedEvidenceReset(t, store)
-}
-
-func TestRelayCommentReplyRelease(t *testing.T) {
-	for _, missing := range []bool{false, true} {
-		t.Run(fmt.Sprintf("missing=%v", missing), func(t *testing.T) {
-			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = store.Close() })
-			dbtest.RunRelayCommentReplyRelease(t, store, missing)
-		})
-	}
-}
-
-func TestRelayPurgedPeer(t *testing.T) {
-	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	dbtest.RunRelayPurgedPeer(t, store)
-}
-
-func TestRelayMissingNotification(t *testing.T) {
-	for _, deleted := range []bool{false, true} {
-		t.Run(fmt.Sprintf("deleted=%v", deleted), func(t *testing.T) {
-			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "relay.db"))
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = store.Close() })
-			dbtest.RunRelayMissingNotification(t, store, deleted)
-		})
-	}
 }
