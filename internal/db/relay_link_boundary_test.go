@@ -9,7 +9,7 @@ import (
 )
 
 // A relay-sourced issue.links_changed folds without its crossing additions and
-// with same-project removals over links the project already had.
+// with removals over links the project already had.
 func TestStripCrossProjectLinkAdditionsFoldsMixedLinksChanged(t *testing.T) {
 	const (
 		project       = "00000000000000000000000001"
@@ -54,10 +54,10 @@ func TestStripCrossProjectLinkAdditionsFoldsMixedLinksChanged(t *testing.T) {
 	}
 	require.Equal(t, map[db.FoldLinkKey]bool{
 		{FromUID: base, ToUID: sameOld, Type: "blocks"}:       false,
-		{FromUID: base, ToUID: foreignOld, Type: "blocks"}:    true,
-		{FromUID: base, ToUID: foreignParent, Type: "parent"}: true,
+		{FromUID: base, ToUID: foreignOld, Type: "blocks"}:    false,
+		{FromUID: base, ToUID: foreignParent, Type: "parent"}: false,
 		{FromUID: base, ToUID: sameBlocks, Type: "blocks"}:    true,
 		{FromUID: sameBlockedBy, ToUID: base, Type: "blocks"}: true,
 		{FromUID: base, ToUID: sameRelated, Type: "related"}:  true,
-	}, present, "crossing mutations are stripped; same-project mutations apply")
+	}, present, "crossing additions are stripped; removals apply")
 }

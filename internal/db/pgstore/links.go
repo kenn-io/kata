@@ -108,25 +108,18 @@ func (s *Store) CreateLinkAndEvent(
 // DeleteLinkByID removes one edge without emitting an event.
 func (s *Store) DeleteLinkByID(ctx context.Context, linkID int64) error {
 	return s.RetryTransient(ctx, func() error {
-		tx, err := s.BeginTx(ctx, nil)
+		result, err := s.ExecContext(ctx, `DELETE FROM links WHERE id = $1`, linkID)
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		count, err := result.RowsAffected()
 		if err != nil {
 			return err
 		}
-		defer func() { _ = tx.Rollback() }()
-		if err := lockProjectAccess(ctx, tx); err != nil {
-			return err
+		if count == 0 {
+			return db.ErrNotFound
 		}
-		link, err := scanLink(tx.QueryRowContext(ctx, linkSelect+` WHERE id = $1`, linkID))
-		if err != nil {
-			return err
-		}
-		if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = $1`, linkID); err != nil {
-			return err
-		}
-		return tx.Commit()
+		return nil
 	})
 }
 

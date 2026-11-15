@@ -98,7 +98,8 @@ func TestRelaySharedLinksAcrossHops(t *testing.T) {
 					require.Equal(t, local.Title, unchanged.Title)
 					_, err = nodes[0].store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: local.ID, Actor: nodes[0].account, Title: &title})
 					require.NoError(t, err)
-					require.ErrorIs(t, nodes[0].store.DeleteLinkByID(ctx, links[0].ID), db.ErrFederationCrossProjectBoundary)
+					_, err = nodes[0].store.DeleteLinkAndEvent(ctx, links[0], db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: local.ID, Actor: nodes[0].account, FromUID: local.UID, ToUID: peer.UID, FromShortID: local.ShortID, ToShortID: peer.ShortID})
+					require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
 				}
 				_, err = root.store.DeleteLinkAndEvent(ctx, linked, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
 				require.NoError(t, err)

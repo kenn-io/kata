@@ -67,10 +67,14 @@ func TestRelayCrossLinkPolicy(t *testing.T) {
 	require.False(t, keep)
 	authority.Groups["a"]["b"] = true
 	event.OriginInstanceUID = "replica"
-	event.Type = "issue.unlinked"
 	_, keep, err = db.StripCrossProjectLinkAdditions(event, authority.Policy(event))
 	require.NoError(t, err)
 	require.False(t, keep)
+	event.Type = "issue.unlinked"
+	_, keep, err = db.StripCrossProjectLinkAdditions(event, authority.Policy(event))
+	require.NoError(t, err)
+	require.True(t, keep)
+	event.Type = "issue.linked"
 	event.OriginInstanceUID = "root"
 	_, keep, err = db.StripCrossProjectLinkAdditions(event, authority.Policy(event))
 	require.NoError(t, err)

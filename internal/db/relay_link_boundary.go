@@ -20,7 +20,7 @@ func StripCrossProjectLinkAdditions(event FoldEvent, policy RelayLinkPolicy) (Fo
 		return policy.CrossProject(peer) && (!policy.RootOrigin || !policy.SameRoot(peer))
 	}
 	switch event.Type {
-	case "issue.linked", "issue.unlinked":
+	case "issue.linked":
 		payload := PayloadMap(event.Payload)
 		for _, key := range []string{"from_uid", "to_uid", "from_issue_uid", "to_issue_uid"} {
 			if peer, ok := StringValue(payload[key]); ok && blocked(peer) {
@@ -71,13 +71,11 @@ func stripCreationLinks(event FoldEvent, crossProject func(string) bool) (FoldEv
 func stripLinksChangedAdditions(event FoldEvent, crossProject func(string) bool) (FoldEvent, bool, error) {
 	payload := PayloadMap(event.Payload)
 	changed := false
-	for _, key := range []string{"parent_set_uid", "parent_removed_uid"} {
-		if parent, ok := StringValue(payload[key]); ok && crossProject(parent) {
-			delete(payload, key)
-			changed = true
-		}
+	if parent, ok := StringValue(payload["parent_set_uid"]); ok && crossProject(parent) {
+		delete(payload, "parent_set_uid")
+		changed = true
 	}
-	for _, key := range []string{"blocks_added_uids", "blocked_by_added_uids", "related_added_uids", "blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
+	for _, key := range []string{"blocks_added_uids", "blocked_by_added_uids", "related_added_uids"} {
 		added := StringSlice(payload[key])
 		kept := make([]string, 0, len(added))
 		for _, peer := range added {
@@ -134,17 +132,6 @@ func ValidateLegacyRelayAdmission(ctx context.Context, event RemoteEvent, uidCro
 	switch event.Type {
 	case "issue.linked", "issue.links_changed", "issue.created", "issue.snapshot":
 		fold := FoldEvent{UID: event.EventUID, Type: event.Type, Payload: event.Payload}
-		if event.Type == "issue.links_changed" {
-			payload := PayloadMap(event.Payload)
-			for _, key := range []string{"parent_removed_uid", "blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
-				delete(payload, key)
-			}
-			var err error
-			fold.Payload, err = json.Marshal(payload)
-			if err != nil {
-				return err
-			}
-		}
 		if _, _, err := StripCrossProjectLinkAdditions(fold, RelayLinkPolicy{CrossProject: checkUID, SameRoot: func(string) bool { return false }}); err != nil {
 			return err
 		}
