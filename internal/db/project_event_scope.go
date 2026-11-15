@@ -172,6 +172,18 @@ func walkEventProjectReferences(event Event, issueIsPrivate func(string) (bool, 
 	}
 
 	switch event.Type {
+	case "issue.commented":
+		var payload struct {
+			ReplyToUID string `json:"reply_to_uid"`
+			ReplyKind  string `json:"reply_kind"`
+		}
+		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+			return true, nil
+		}
+		if payload.ReplyToUID == "" && payload.ReplyKind == "" {
+			return false, nil
+		}
+		return commentIsPrivate(payload.ReplyToUID, payload.ReplyKind)
 	case "issue.linked", "issue.unlinked":
 		var payload map[string]jsontext.Value
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
