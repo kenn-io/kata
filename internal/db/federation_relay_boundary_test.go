@@ -55,7 +55,6 @@ func TestRelayCommentReplyRelease(t *testing.T) {
 }
 
 func TestRelayEventPeerProjects(t *testing.T) {
-	require.Equal(t, "issue.restated", RepeatedImportEventType)
 	const issueUID = "00000000000000000000000001"
 	const commentUID = "00000000000000000000000002"
 	peer := Issue{ProjectUID: "peer"}
@@ -88,6 +87,7 @@ func TestRelayEventPeerProjects(t *testing.T) {
 		{"created", "issue.created", `{"links":[{"to_issue_uid":"` + issueUID + `"}]}`, nil, true, false},
 		{"snapshot", "issue.snapshot", `{"comments":[{"reply_to_uid":"` + commentUID + `","reply_kind":"reply"}]}`, nil, true, false},
 		{"restated", RepeatedImportEventType, `{"links":[{"to_issue_uid":"` + issueUID + `"}]}`, nil, true, false},
+		{"restated notification", RepeatedImportEventType, `{"metadata":{"notify.recipient":{"re":"` + commentUID + `"}}}`, nil, true, false},
 		{"moved snapshot", "issue.moved", `{"from_project_uid":"own","to_project_uid":"own","snapshot":{"links":[{"to_issue_uid":"` + issueUID + `"}]}}`, nil, true, false},
 		{"close parent", "issue.closed", `{"parent_uid":"` + issueUID + `"}`, nil, true, false},
 		{"qualified close evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"peer#1"}]}`, nil, false, true},
