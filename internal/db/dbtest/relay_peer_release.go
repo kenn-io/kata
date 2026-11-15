@@ -14,7 +14,7 @@ import (
 )
 
 // RunRelayCommentReplyRelease checks a retained reply's target before offering it.
-func RunRelayCommentReplyRelease(t *testing.T, store db.Storage, missing bool) {
+func RunRelayCommentReplyRelease(t *testing.T, store db.Storage) {
 	fixture := NewRelaySharedAccessFixture(t, store)
 	ctx := db.WithRelayPeerEventFeatures(t.Context(), db.SupportedEventFeatures)
 	binding := fixture.Grant.Enrollment.RelayBindingUID
@@ -24,13 +24,9 @@ func RunRelayCommentReplyRelease(t *testing.T, store db.Storage, missing bool) {
 	last := initial[len(initial)-1]
 	require.NoError(t, store.AckRelayDeliveries(ctx, binding, 1, db.RelayStreamEvent, last.Sequence, last.Digest))
 
-	targetUID, err := uid.New()
+	target, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: fixture.Issues[1].ID, Author: "member", Body: "Target"})
 	require.NoError(t, err)
-	if !missing {
-		target, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: fixture.Issues[1].ID, Author: "member", Body: "Target"})
-		require.NoError(t, err)
-		targetUID = target.UID
-	}
+	targetUID := target.UID
 	commentUID, err := uid.New()
 	require.NoError(t, err)
 	spoke, err := uid.New()
@@ -53,15 +49,8 @@ func RunRelayCommentReplyRelease(t *testing.T, store db.Storage, missing bool) {
 		return nil
 	})
 	offered, err := store.PendingRelayDeliveries(restricted, binding, db.RelayStreamEvent, 100)
-	if missing {
-		require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
-	} else {
-		require.ErrorIs(t, err, denied)
-	}
+	require.ErrorIs(t, err, denied)
 	require.Empty(t, offered)
-	if missing {
-		return
-	}
 	offered, err = store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
 	require.NoError(t, err)
 	var found, foundSafe bool
@@ -81,11 +70,27 @@ func RunRelayCommentReplyRelease(t *testing.T, store db.Storage, missing bool) {
 	retry, err := store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
 	require.NoError(t, err)
 	require.Equal(t, offered, retry)
+	last = offered[len(offered)-1]
+	require.NoError(t, store.AckRelayDeliveries(ctx, binding, 1, db.RelayStreamEvent, last.Sequence, last.Digest))
+	missingUID, err := uid.New()
+	require.NoError(t, err)
+	commentUID, err = uid.New()
+	require.NoError(t, err)
+	missingEvent := newRemoteEvent(t, fixture.Projects[0], &fixture.Issues[0].UID, "issue.commented", "member", spoke, 701,
+		jsontext.Value(fmt.Sprintf(`{"comment_uid":%q,"author":"member","body":"Reply","created_at":"2026-05-23T12:01:00.000Z","reply_to_uid":%q,"reply_kind":"reply"}`, commentUID, missingUID)))
+	_, err = store.IngestFederationEvents(db.WithRootAttribution(ctx, fixture.Signer, "member"), db.FederationIngestParams{
+		ProjectID: fixture.Projects[0].ID, SpokeInstanceUID: spoke, BoundActor: "member",
+		Events: []db.FederationIngestEvent{{SourceEventID: 2, Event: missingEvent}},
+	})
+	require.NoError(t, err)
+	offered, err = store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
+	require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
+	require.Empty(t, offered)
 }
 
 // RunRelayPeerRelease checks whole-response refusal and retained retries.
-func RunRelayPeerRelease(t *testing.T, store db.Storage) {
-	fixture := NewRelaySharedAccessFixture(t, store)
+func RunRelayPeerRelease(t *testing.T, store db.Storage, purgedPeer bool) {
+	fixture := newRelaySharedAccessFixture(t, store, purgedPeer)
 	binding := fixture.Grant.Enrollment.RelayBindingUID
 	ctx := db.WithRelayPeerEventFeatures(t.Context(), db.SupportedEventFeatures)
 	denied := errors.New("peer denied")
@@ -95,6 +100,12 @@ func RunRelayPeerRelease(t *testing.T, store db.Storage) {
 		}
 		return nil
 	})
+	if !purgedPeer {
+		_, err := store.PendingRelayDeliveries(t.Context(), binding, db.RelayStreamEvent, 100)
+		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		_, err = store.(db.RelayResetStore).CreateRelayReset(t.Context(), binding, fixture.Signer)
+		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	}
 	before := relayStateForBinding(t, store, binding)
 	grants, err := store.ListProjectFederationEnrollments(ctx, fixture.Projects[0].ID)
 	require.NoError(t, err)
@@ -108,6 +119,16 @@ func RunRelayPeerRelease(t *testing.T, store db.Storage) {
 	offered, err := store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
 	require.NoError(t, err)
 	require.NotEmpty(t, offered)
+	if purgedPeer {
+		return
+	}
+	var crossing db.RelayEnvelope
+	for _, envelope := range offered {
+		if envelope.SourceUID == fixture.Linked.UID {
+			crossing = envelope
+		}
+	}
+	require.Equal(t, fixture.Linked.ContentHash, crossing.SourceHash)
 	out, err = store.PendingRelayDeliveries(rejecting, binding, db.RelayStreamEvent, 100)
 	require.ErrorIs(t, err, denied)
 	require.Empty(t, out)
@@ -163,30 +184,6 @@ func RunRelayPeerRelease(t *testing.T, store db.Storage) {
 	repeated, err = reset.CreateRelayReset(activated, binding, fixture.Signer)
 	require.NoError(t, err)
 	require.Equal(t, checkpoint, repeated)
-}
-
-// RunRelayPurgedPeer checks the retained event against the purged peer's project.
-func RunRelayPurgedPeer(t *testing.T, store db.Storage) {
-	fixture := newRelaySharedAccessFixture(t, store, true)
-	ctx := db.WithRelayPeerEventFeatures(t.Context(), db.SupportedEventFeatures)
-	binding := fixture.Grant.Enrollment.RelayBindingUID
-	denied := errors.New("peer denied")
-	restricted := db.WithProjectAccessTransactionCheck(ctx, func(_ context.Context, _ db.Transaction, uid string) error {
-		if uid == fixture.Projects[1].UID {
-			return denied
-		}
-		return nil
-	})
-	out, err := store.PendingRelayDeliveries(restricted, binding, db.RelayStreamEvent, 100)
-	require.ErrorIs(t, err, denied)
-	require.Empty(t, out)
-	out, err = store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
-	require.NoError(t, err)
-	require.NotEmpty(t, out)
-	_, err = store.(db.RelayResetStore).CreateRelayReset(restricted, binding, fixture.Signer)
-	require.ErrorIs(t, err, denied)
-	_, err = store.(db.RelayResetStore).CreateRelayReset(ctx, binding, fixture.Signer)
-	require.NoError(t, err)
 }
 
 // RunRelayMissingNotification refuses an event whose comment owner is gone.

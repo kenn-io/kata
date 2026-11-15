@@ -1,39 +1,11 @@
 package db
 
 import (
-	"context"
 	"encoding/json/jsontext"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
-
-func TestRelayCommentReplyRelease(t *testing.T) {
-	const commentUID = "00000000000000000000000002"
-	event := RemoteEvent{ProjectUID: "own", Type: "issue.commented", Payload: jsontext.Value(`{"reply_to_uid":"` + commentUID + `","reply_kind":"reply"}`)}
-	lookup := func(known bool) *EventIssueLookup {
-		return NewEventIssueLookup(nil, nil, func(uid string) (Issue, error) {
-			require.Equal(t, commentUID, uid)
-			if known {
-				return Issue{ProjectUID: "peer"}, nil
-			}
-			return Issue{}, ErrNotFound
-		})
-	}
-	denied := errors.New("peer denied")
-	ctx := WithProjectAccessTransactionCheck(t.Context(), func(_ context.Context, _ Transaction, projectUID string) error {
-		require.Equal(t, "peer", projectUID)
-		return denied
-	})
-	require.ErrorIs(t, AuthorizeRelayRelease(ctx, nil, lookup(true), "own", []RemoteEvent{event}), denied)
-	require.ErrorIs(t, AuthorizeRelayRelease(t.Context(), nil, lookup(false), "own", []RemoteEvent{event}), ErrRelayReferenceUnprovable)
-	allowed := WithProjectAccessTransactionCheck(t.Context(), func(_ context.Context, _ Transaction, projectUID string) error {
-		require.Equal(t, "peer", projectUID)
-		return nil
-	})
-	require.NoError(t, AuthorizeRelayRelease(allowed, nil, lookup(true), "own", []RemoteEvent{event}))
-}
 
 func TestRelayEventPeerProjects(t *testing.T) {
 	const issueUID = "00000000000000000000000001"
