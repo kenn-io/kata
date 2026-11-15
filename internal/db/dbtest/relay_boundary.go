@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // RunRelayCrossProjectBoundary exercises relay cross project boundary on the supplied native store.
@@ -58,10 +59,27 @@ func RunRelayCrossProjectBoundary(t *testing.T, store db.Storage) {
 	for _, p := range []db.Project{first, shared} {
 		require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: p.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
 	}
+	rootUID := "00000000000000000000000002"
+	var replicaIssues [2]db.Issue
+	for i, name := range []string{"replica-source", "replica-peer"} {
+		project, err := store.CreateProject(ctx, name)
+		require.NoError(t, err)
+		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "member", Enabled: true, PushEnabled: true})
+		require.NoError(t, err)
+		require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: rootUID, KeyID: db.RootPublicKeyID(public), PublicKey: public}))
+		bindingUID, err := uid.New()
+		require.NoError(t, err)
+		_, err = store.SetRelayBindingConfig(ctx, project.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID, AuthorityUID: rootUID, UpstreamInstanceUID: rootUID, HubPath: []string{rootUID, store.InstanceUID()}, LocalActor: "member", ResetEpoch: 1})
+		require.NoError(t, err)
+		replicaIssues[i], _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: name, Author: "member"})
+		require.NoError(t, err)
+	}
+	_, err = store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: replicaIssues[0].ID, ToIssueID: replicaIssues[1].ID, Type: "related", Author: "member"})
+	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
+
 	// An existing legacy spoke can also have local cross-project links. The
 	// negotiated setup path must return the same boundary sentinel without
 	// partially installing a relay configuration.
-	rootUID := "00000000000000000000000002"
 	var legacyProjects [2]db.Project
 	var legacyIssues [2]db.Issue
 	for i, name := range []string{"legacy-project", "legacy-peer-project"} {

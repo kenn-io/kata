@@ -179,22 +179,4 @@ func RunRelayLinkBoundaryFollowsActiveGrants(t *testing.T, store db.Storage) {
 	require.NoError(t, store.MaterializeFederatedProject(ctx, fixture.project.ID))
 	require.Empty(t, linkTargetUIDs(t, store, source.ID), "a later group materialization does not bring the removed link back")
 
-	var replicaIssues [2]db.Issue
-	rootUID := "00000000000000000000000002"
-	public := fixture.signer.PrivateKey.Public().(ed25519.PublicKey)
-	for i, name := range []string{"replica-source", "replica-peer"} {
-		project, err := store.CreateProject(ctx, name)
-		require.NoError(t, err)
-		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "member", Enabled: true, PushEnabled: true})
-		require.NoError(t, err)
-		require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: rootUID, KeyID: db.RootPublicKeyID(public), PublicKey: public}))
-		bindingUID, err := uid.New()
-		require.NoError(t, err)
-		_, err = store.SetRelayBindingConfig(ctx, project.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID, AuthorityUID: rootUID, UpstreamInstanceUID: rootUID, HubPath: []string{rootUID, store.InstanceUID()}, LocalActor: "member", ResetEpoch: 1})
-		require.NoError(t, err)
-		replicaIssues[i], _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: name, Author: "member"})
-		require.NoError(t, err)
-	}
-	_, err = store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: replicaIssues[0].ID, ToIssueID: replicaIssues[1].ID, Type: "related", Author: "member"})
-	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
 }

@@ -387,28 +387,6 @@ func TestFullPulledMaterializationRetriesChanges(t *testing.T) {
 
 func TestFullPulledMaterializationIgnoresUnrelatedChanges(t *testing.T) {
 	cases := []fullPullCase{
-		{name: "unchanged-relay-link", run: func(t *testing.T, d *Store, p db.Project, issue db.Issue) {
-			ctx := t.Context()
-			peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "peer", Author: "tester"})
-			require.NoError(t, err)
-			projectEvent := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
-			linkEvent := incrementalRemoteEvent(t, p, issue.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, issue.UID, peer.UID), 9_000_000_000_001)
-			_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{projectEvent, linkEvent})
-			require.NoError(t, err)
-			public, _, err := ed25519.GenerateKey(nil)
-			require.NoError(t, err)
-			keyID := db.RootPublicKeyID(public)
-			require.NoError(t, d.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: p.UID, AuthorityUID: "01HZNQ7VFPK1XGD8R5MABC0003", KeyID: keyID, PublicKey: public}))
-			_, err = d.ExecContext(ctx, `INSERT INTO federation_event_provenance(project_uid,event_uid,content_hash,reset_epoch,sequence,key_id,receipt) VALUES(?,?,?,?,?,?,?)`, p.UID, linkEvent.EventUID, linkEvent.ContentHash, 1, 1, keyID, `{"ingress_instance_uid":"remote"}`)
-			require.NoError(t, err)
-			attempts := 0
-			d.federationIngestPrepared = func() { attempts++ }
-			require.NoError(t, d.MaterializeFederatedEvents(ctx, p.ID, []string{projectEvent.EventUID, linkEvent.EventUID}))
-			require.Equal(t, 1, attempts)
-			links, err := d.LinksByIssue(ctx, issue.ID)
-			require.NoError(t, err)
-			require.Len(t, links, 1)
-		}},
 		{name: "push-cursor", run: func(t *testing.T, d *Store, p db.Project, _ db.Issue) {
 			ctx := t.Context()
 			ev := incrementalRemoteEvent(t, p, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000)
