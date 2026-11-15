@@ -9573,6 +9573,10 @@ paths:
     get:
       operationId: getProjectFederation
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true

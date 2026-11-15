@@ -180,6 +180,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err := cfg.DB.CheckRelayProjectLinks(ctx, in.ProjectID); err != nil {
 				return nil, relayProjectLinksCheckError(err)
 			}
+			if err := requireRelayMetadataFeatures(ctx, cfg.DB, in.ProjectID, in.EventFeatures); err != nil {
+				return nil, err
+			}
 			body.RelayLinksChecked = true
 		}
 		return &api.ProjectFederationResponse{Body: body}, nil
@@ -304,6 +307,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		if principal.RelayProtocolVersion == db.RelayProtocolVersion {
+			if err := requireRelayMetadataFeatures(ctx, cfg.DB, in.ProjectID, in.EventFeatures); err != nil {
+				return nil, err
+			}
 			body, err := buildProjectFederationBody(ctx, cfg.DB, in.ProjectID, false)
 			if err != nil {
 				return nil, err
@@ -1733,6 +1739,25 @@ func federationError(err error) error {
 func issueSyncFederationConflict() error {
 	return api.NewError(409, "issue_sync_federation_conflict",
 		"project has issue sync enabled; run GitHub sync on the federation hub, or disable issue sync before joining this project as a spoke", "", nil)
+}
+
+func requireRelayMetadataFeatures(ctx context.Context, store db.Storage, projectID int64, features string) error {
+	featureErr := db.RequireEventFeatures(features, db.RelayCrossLinksEventFeature)
+	if featureErr == nil {
+		return nil
+	}
+	reader, ok := store.(db.RelayMetadataFeatureReader)
+	if !ok {
+		return internalAPIError(errors.New("relay metadata feature inspection unavailable"))
+	}
+	required, err := reader.RelayMetadataRequiresCrossLinks(ctx, projectID)
+	if err != nil {
+		return internalAPIError(err)
+	}
+	if required {
+		return federationFeatureError(featureErr)
+	}
+	return nil
 }
 
 func federationFeatureError(err error) error {

@@ -42,10 +42,18 @@ func TestRelaySharedLinksAcrossHops(t *testing.T) {
 					issues[i], _, err = root.store.CreateIssue(db.WithRootAttribution(ctx, root.signer, root.account), db.CreateIssueParams{ProjectID: project.ID, Author: "assistant", Title: "Shared endpoint"})
 					require.NoError(t, err)
 				}
+				metadataURL := fmt.Sprintf("%s/api/v1/projects/%d/federation/metadata", root.http.URL, projects[0].ID)
+				metadataRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
+				require.NoError(t, err)
+				metadataRequest.Header.Set("Authorization", "Bearer "+hubs[0].credential.Token)
+				metadataResponse, err := root.http.Client().Do(metadataRequest)
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, metadataResponse.StatusCode)
+				require.NoError(t, metadataResponse.Body.Close())
 				linked, linkEvent, err := root.store.CreateLinkAndEvent(db.WithRootAttribution(ctx, root.signer, root.account), db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: issues[1].ID, Type: "blocks", Author: root.account},
 					db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
 				require.NoError(t, err)
-				for _, path := range []string{"/federation/relay?stream=events", "/federation/relay/reset"} {
+				for _, path := range []string{"/federation/metadata", "/federation/relay?stream=events", "/federation/relay/reset"} {
 					req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d%s", root.http.URL, projects[0].ID, path), nil)
 					require.NoError(t, err)
 					req.Header.Set("Authorization", "Bearer "+hubs[0].credential.Token)
@@ -68,6 +76,14 @@ func TestRelaySharedLinksAcrossHops(t *testing.T) {
 						require.Contains(t, string(body), db.RelayCrossLinksEventFeature)
 					}
 				}
+				metadataRequest, err = http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
+				require.NoError(t, err)
+				metadataRequest.Header.Set("Authorization", "Bearer "+hubs[0].credential.Token)
+				metadataRequest.Header.Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
+				metadataResponse, err = root.http.Client().Do(metadataRequest)
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, metadataResponse.StatusCode)
+				require.NoError(t, metadataResponse.Body.Close())
 				order := []int{0, 1}
 				if reverse {
 					order = []int{1, 0}
@@ -128,5 +144,58 @@ func TestRelaySharedLinksAcrossHops(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestRelaySharedLinksPreflightFeatures(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := t.Context()
+			root := newRelayMatrixNode(t, backend, "root-member")
+			var projects [2]db.Project
+			var issues [2]db.Issue
+			for i, name := range []string{"preflight-source", "preflight-peer"} {
+				project, err := root.store.CreateProject(ctx, name)
+				require.NoError(t, err)
+				projects[i] = project
+				_, err = root.store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
+				require.NoError(t, err)
+				issues[i], _, err = root.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Author: root.account, Title: name})
+				require.NoError(t, err)
+			}
+			url := fmt.Sprintf("%s/api/v1/projects/%d/federation?relay_protocol_version=1", root.http.URL, projects[0].ID)
+			get := func(features string) (int, string) {
+				t.Helper()
+				req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+				require.NoError(t, err)
+				req.Header.Set("Authorization", "Bearer "+root.userToken)
+				req.Header.Set(db.EventFeaturesHeader, features)
+				resp, err := root.http.Client().Do(req)
+				require.NoError(t, err)
+				body, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				require.NoError(t, resp.Body.Close())
+				return resp.StatusCode, string(body)
+			}
+			oldFeatures := db.CronEventFeature + "," + db.IssueMoveEventFeature + "," + db.RepeatedAdoptionEventFeature
+			status, body := get(oldFeatures)
+			require.Equal(t, http.StatusOK, status, body)
+			link, _, err := root.store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: issues[1].ID, Type: "blocks", Author: root.account}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
+			require.NoError(t, err)
+			status, body = get(oldFeatures)
+			require.Equal(t, http.StatusConflict, status, body)
+			require.Contains(t, body, "unsupported_event_features")
+			require.Contains(t, body, db.RelayCrossLinksEventFeature)
+			_, err = root.store.DeleteLinkAndEvent(ctx, link, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
+			require.NoError(t, err)
+			status, body = get(oldFeatures)
+			require.Equal(t, http.StatusConflict, status, body)
+			require.Contains(t, body, db.RelayCrossLinksEventFeature)
+			grants, err := root.store.ListProjectFederationEnrollments(ctx, projects[0].ID)
+			require.NoError(t, err)
+			require.Empty(t, grants)
+			status, body = get(db.SupportedEventFeatures)
+			require.Equal(t, http.StatusOK, status, body)
+		})
 	}
 }
