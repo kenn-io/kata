@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte'
+  import { CopyButton } from '@kenn-io/kit-ui'
   import { getProjectFederationStatus, type FederationProjectStatus } from '../lib/api/generated'
 
   interface Props {
@@ -76,7 +77,7 @@
       try {
         const result = await getProjectFederationStatus(
           { projectId: id },
-          { compact: true },
+          { compact: true, omit_errors: true },
           {
             signal: abort.signal,
             onResponse: (raw) => {
@@ -138,7 +139,38 @@
         ></span
       >
     {/if}
-    {#if status.last_error}<span>Sync needs attention</span>{/if}
+    {#if status.has_sync_error}
+      {@const bashCommand = `kata federation status --project '${status.project_name.replaceAll("'", "'\\''")}'`}
+      {@const powershellName = status.project_name.replace(/['‘’‚‛]/g, '$&$&')}
+      {@const legacyName = powershellName.replace(/(\\*)"/g, '$1$1\\"')}
+      {@const powershellCommand =
+        legacyName === powershellName
+          ? `kata federation status --project '${powershellName}'`
+          : `kata federation status --project $(if ($PSVersionTable.PSVersion -lt [version]'7.3' -or $PSNativeCommandArgumentPassing -eq 'Legacy') { '${legacyName}' } else { '${powershellName}' })`}
+      <div class="sync-attention">
+        <span class="attention">Sync needs attention</span>
+        <span>Run in a CLI connected to this daemon.</span>
+        <span>Project readers: if the command fails, update your Kata CLI.</span>
+        <div class="command">
+          <span class="shell">Bash/Zsh</span>
+          <code>{bashCommand}</code>
+          <CopyButton
+            text={bashCommand}
+            ariaLabel="Copy Bash/Zsh sync status command"
+            copiedAriaLabel="Copied Bash/Zsh sync status command"
+          />
+        </div>
+        <div class="command">
+          <span class="shell">PowerShell</span>
+          <code>{powershellCommand}</code>
+          <CopyButton
+            text={powershellCommand}
+            ariaLabel="Copy PowerShell sync status command"
+            copiedAriaLabel="Copied PowerShell sync status command"
+          />
+        </div>
+      </div>
+    {/if}
     {#if status.credential_status}<span>Credential: {status.credential_status}</span>{/if}
     {#if status.embedding}
       <span>Embeddings: {status.embedding.state}</span>
@@ -177,6 +209,37 @@
   }
   .project-sync span {
     min-width: 0;
+  }
+  .sync-attention {
+    display: flex;
+    flex-wrap: wrap;
+    flex-basis: 100%;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    min-width: 0;
+  }
+  .command {
+    display: flex;
+    flex-basis: 100%;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+  .shell {
+    flex: 0 0 5.5rem;
+    color: var(--text-primary);
+  }
+  code {
+    font-size: var(--font-size-sm);
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  .attention {
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--accent-amber) 14%, transparent);
+    color: var(--accent-amber);
+    padding: var(--space-1) var(--space-2);
+    font-weight: var(--font-weight-semibold);
   }
   button {
     color: var(--text-primary);

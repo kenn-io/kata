@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Copy a project sync diagnostic for Bash/Zsh or PowerShell from the web summary.
+
 - Watch project sync progress refresh every 30 seconds in a visible web tab and
   when you return.
 

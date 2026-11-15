@@ -19,6 +19,12 @@ discovery. [Cron](cron.md) documents job and workflow resources.
 
 Search responses include `X-Kata-Embeddings-Configured: true` when the answering daemon has an embeddings provider, even while its index is empty or read-only mode forces lexical search. The value is `false` when no provider is configured. The response body is unchanged.
 
+## Project lookup by name
+
+`GET /api/v1/projects/resolve?name=...` resolves an accessible project by its
+exact name. It requires read access to that project and does not resolve aliases
+or filesystem paths.
+
 ## Local embeddings setup
 
 `GET /api/v1/embeddings/local` reports the configured provider, missing download bytes, Ollama availability, setup job, indexing progress, `can_change`, and `can_restart`. `indexing.failed` reports an indexing error while the daemon keeps retrying. Aggregate indexing counts, time estimates, and detailed setup errors are visible only to daemon owners. Other viewers receive progress and failure state without those details. Issue-scoped credentials can read the status.
@@ -271,6 +277,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.49.0` | `GET /api/v1/projects/resolve` resolves a project by name for readers. Project federation status accepts `omit_errors=true` to withhold diagnostic error text. |
 | `0.48.0` | Project federation status accepts `compact=true` to omit relay checkpoint capacity measurement. |
 | `0.47.0` | Attachment uploads accept `reuse_existing`. Reuse on uploads and links returns `attachment_invalid` when the daemon cannot read an existing reference. |
 | `0.46.0` | Federation ingest responses add optional `superseded_event_uids`, the adoption snapshots the hub did not store. |
@@ -364,6 +371,13 @@ estimated size of the signed reset checkpoint the root would build now and
 the capacity that refuses new relay enrollments and resets once exceeded.
 When the measurement fails, the project carries `relay_checkpoint_error`
 instead of the size fields and the rest of the response is unaffected.
+
+`GET /api/v1/projects/{project_id}/federation/status?compact=true` skips relay
+checkpoint capacity measurement while retaining diagnostic errors. Starting
+with API 0.49.0, add `omit_errors=true` to withhold sync, held-batch, embedding,
+and relay checkpoint error text. The response uses `has_sync_error` to indicate
+a non-empty sync error while retaining status facts. Omit `omit_errors` to read
+the full diagnostic.
 
 `POST /api/v1/federation/root-keys/{project_name}/repin` is owner-only. It pins
 that hub project to the daemon's loaded root signing key and creates the key

@@ -69,6 +69,26 @@ func projectAccessDenied() error {
 	return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
 }
 
+// restrictedProjectLookup reports whether the caller sees only part of the
+// catalog: a mounted host, an issue-scoped credential, or a project policy or
+// scope header that narrows what the principal may select.
+func restrictedProjectLookup(ctx context.Context) bool {
+	if _, mounted := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); mounted || issueScopeFromContext(ctx) != nil {
+		return true
+	}
+	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
+	return decision != nil && (!decision.owner || decision.fixedUIDs != nil)
+}
+
+// hideMissingProject gives a missing project the same response as a project
+// the caller cannot access, so a restricted lookup cannot reveal which names exist.
+func hideMissingProject(ctx context.Context, err error) error {
+	if apiErr, ok := errors.AsType[*api.APIError](err); ok && apiErr.Status == http.StatusNotFound && restrictedProjectLookup(ctx) {
+		return projectAccessDenied()
+	}
+	return err
+}
+
 func authorizeProjectTarget(ctx context.Context, projectUID string) error {
 	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
 	if decision == nil || decision.owner && decision.fixedUIDs == nil {

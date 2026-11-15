@@ -2,8 +2,9 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
-import { join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { DatabaseSync } from 'node:sqlite'
 
 import { expect, test as base, type APIResponse, type Page } from '@playwright/test'
 
@@ -56,6 +57,10 @@ export interface KataFixture {
   restart(): Promise<void>
   restartReadonly(): Promise<void>
   restartIdentity(enabled?: boolean): Promise<void>
+  prepareSyncDiagnostic(): Promise<void>
+  recordSyncDiagnosticError(): void
+  clearSyncDiagnosticError(): void
+  runSyncDiagnostic(shell: 'bash' | 'pwsh', command: string, legacy?: boolean): string
 }
 
 interface RunningFixture {
@@ -65,7 +70,7 @@ interface RunningFixture {
 
 const daemonStderr = new WeakMap<ChildProcess, string>()
 
-export const test = base.extend<{ kata: KataFixture }>({
+export const test = base.extend<{ kata: KataFixture; diagnosticKata: KataFixture }>({
   kata: [
     async ({ browserName }, use) => {
       void browserName
@@ -78,6 +83,15 @@ export const test = base.extend<{ kata: KataFixture }>({
     },
     { scope: 'worker', timeout: 120_000 },
   ],
+  diagnosticKata: async ({ browserName }, use) => {
+    void browserName
+    const running = await startProductionFixture()
+    try {
+      await use(running.fixture)
+    } finally {
+      await running.stop()
+    }
+  },
 })
 
 export { expect }
@@ -193,6 +207,70 @@ listen = "127.0.0.1:${port}"
     origin,
     projectID: project.id,
     projectUID: project.uid,
+    async prepareSyncDiagnostic() {
+      const name = `spoke \\"project"’s'\\`
+      run(binary, ['projects', 'rename', 'example-project', name], workspace, environment)
+    },
+    recordSyncDiagnosticError() {
+      const database = new DatabaseSync(join(home, 'kata.db'))
+      try {
+        // A spoke awaiting leave can retain its last error while transport is disabled.
+        database
+          .prepare(
+            `UPDATE federation_bindings SET role='spoke', enabled=0, hub_url='http://127.0.0.1:9', hub_project_id=42, bound_actor='example-owner' WHERE project_id=?`,
+          )
+          .run(project.id)
+        database
+          .prepare(
+            `INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
+          SELECT id, '2026-10-01T12:00:00Z', 'example sync failure' FROM projects WHERE id = ?
+          ON CONFLICT(project_id) DO UPDATE SET last_error_at=excluded.last_error_at, last_error=excluded.last_error`,
+          )
+          .run(project.id)
+        database
+          .prepare(
+            `INSERT INTO federation_quarantine(project_id, direction, first_event_id, last_event_id, event_uids, error)
+          SELECT id, 'push', 1, 1, '["example-event"]', 'example held-back batch failure' FROM projects WHERE id = ?`,
+          )
+          .run(project.id)
+      } finally {
+        database.close()
+      }
+    },
+    clearSyncDiagnosticError() {
+      const database = new DatabaseSync(join(home, 'kata.db'))
+      try {
+        database
+          .prepare('UPDATE federation_sync_status SET last_error = NULL, last_error_at = NULL')
+          .run()
+      } finally {
+        database.close()
+      }
+    },
+    runSyncDiagnostic(shell, command, legacy = false) {
+      const result = spawnSync(
+        shell,
+        shell === 'bash'
+          ? ['-c', command]
+          : [
+              '-NoProfile',
+              '-NonInteractive',
+              '-Command',
+              legacy ? `$PSNativeCommandArgumentPassing='Legacy'; ${command}` : command,
+            ],
+        {
+          cwd: workspace,
+          env: {
+            ...environment,
+            PATH: `${dirname(binary)}${delimiter}${environment.PATH ?? environment.Path ?? ''}`,
+          },
+          encoding: 'utf8',
+        },
+      )
+      if (result.status !== 0)
+        throw new Error(`${shell} diagnostic failed: ${result.error?.message ?? result.stderr}`)
+      return result.stdout
+    },
     async launch(page, route = '/kata?view=all-open') {
       await page.goto(`${origin}${route}`)
       await expect(page.getByRole('button', { name: 'New task' })).toBeVisible()
