@@ -13,6 +13,8 @@ import (
 // forward supersedes, which downstream work blocks an install, or how a
 // checkpoint is translated per hop.
 type RelayResetBackend interface {
+	// AuthorizeRelayRelease checks the projects referenced by a checkpoint.
+	AuthorizeRelayRelease(ctx context.Context, projectUID string, events []RemoteEvent) error
 	// IssueProjectUID resolves an endpoint or returns an empty UID when absent.
 	IssueProjectUID(ctx context.Context, issueUID string) (string, error)
 	// ProjectUID returns the UID of a project row.

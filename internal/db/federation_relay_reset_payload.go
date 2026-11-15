@@ -17,11 +17,6 @@ type RootResetProvenance struct {
 	Entities []EntityProvenance   `json:"entities"`
 }
 
-// VisitRelayResetSources decodes both source sections without changing the snapshot.
-func VisitRelayResetSources(snapshot RootResetSnapshot, visit func(RemoteEvent) error) error {
-	return visitRelayResetSources(snapshot, func(_ int, event RemoteEvent) error { return visit(event) })
-}
-
 func visitRelayResetSources(snapshot RootResetSnapshot, visit func(int, RemoteEvent) error) error {
 	for section, raw := range [][]byte{snapshot.Events, snapshot.Entities} {
 		var bodies [][]byte
