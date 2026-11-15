@@ -30,8 +30,8 @@ func TestStripCrossProjectLinkAdditionsFoldsMixedLinksChanged(t *testing.T) {
 	event := func(uid, eventType string, at int64, payload string) db.FoldEvent {
 		return db.FoldEvent{UID: uid, OriginInstanceUID: "00000000000000000000000099", ProjectUID: project, IssueUID: base, Type: eventType, Actor: "relay-member", HLCPhysicalMS: at, CreatedAt: "2026-05-23T12:00:00.000Z", Payload: jsontext.Value(payload)}
 	}
-	// Links the project already had: a same-project edge, and crossing edges a
-	// legacy peer created before relay enrollment.
+	// Links retained from pre-feature relay history include a same-project edge
+	// and crossing edges.
 	history := []db.FoldEvent{
 		event("00000000000000000000000031", "issue.linked", 100, `{"issue_uid":"`+base+`","from_uid":"`+base+`","to_uid":"`+sameOld+`","type":"blocks"}`),
 		event("00000000000000000000000032", "issue.linked", 101, `{"issue_uid":"`+base+`","from_uid":"`+base+`","to_uid":"`+foreignOld+`","type":"blocks"}`),

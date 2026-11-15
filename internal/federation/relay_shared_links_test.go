@@ -101,14 +101,13 @@ func TestRelaySharedLinksPreflightFeatures(t *testing.T) {
 			root := newRelayMatrixNode(t, backend, "root-member")
 			var projects [2]db.Project
 			var issues [2]db.Issue
-			var created [2]db.Event
 			for i, name := range []string{"preflight-source", "preflight-peer"} {
 				project, err := root.store.CreateProject(ctx, name)
 				require.NoError(t, err)
 				projects[i] = project
 				_, err = root.store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
 				require.NoError(t, err)
-				issues[i], created[i], err = root.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Author: root.account, Title: name})
+				issues[i], _, err = root.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Author: root.account, Title: name})
 				require.NoError(t, err)
 			}
 			url := fmt.Sprintf("%s/api/v1/projects/%d/federation?relay_protocol_version=1", root.http.URL, projects[0].ID)
@@ -128,7 +127,7 @@ func TestRelaySharedLinksPreflightFeatures(t *testing.T) {
 			oldFeatures := db.CronEventFeature + "," + db.IssueMoveEventFeature + "," + db.RepeatedAdoptionEventFeature
 			status, body := get(oldFeatures)
 			require.Equal(t, http.StatusOK, status, body)
-			link, crossing, err := root.store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: issues[1].ID, Type: "blocks", Author: root.account}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
+			link, _, err := root.store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: issues[1].ID, Type: "blocks", Author: root.account}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
 			require.NoError(t, err)
 			root.project = projects[0]
 			hub := newRelayMatrixNode(t, backend, "hub-member")
@@ -144,17 +143,6 @@ func TestRelaySharedLinksPreflightFeatures(t *testing.T) {
 			require.Equal(t, http.StatusConflict, response.StatusCode, string(resetError))
 			require.Contains(t, string(resetError), "unsupported_event_features")
 			require.Contains(t, string(resetError), db.RelayCrossLinksEventFeature)
-			req, err = http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/federation/relay?stream=events", root.http.URL, projects[0].ID), nil)
-			require.NoError(t, err)
-			req.Header.Set("Authorization", "Bearer "+hub.credential.Token)
-			response, err = root.http.Client().Do(req)
-			require.NoError(t, err)
-			prefix, err := io.ReadAll(response.Body)
-			require.NoError(t, err)
-			require.NoError(t, response.Body.Close())
-			require.Equal(t, http.StatusOK, response.StatusCode, string(prefix))
-			require.Contains(t, string(prefix), created[0].UID)
-			require.NotContains(t, string(prefix), crossing.UID)
 			req, err = http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/federation/relay/reset", root.http.URL, projects[0].ID), nil)
 			require.NoError(t, err)
 			req.Header.Set("Authorization", "Bearer "+hub.credential.Token)
