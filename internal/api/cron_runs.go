@@ -93,3 +93,36 @@ type CronRunsResponse struct {
 		NextBeforeUID string    `json:"next_before_uid,omitempty"`
 	}
 }
+
+// CronRunStatsRequest selects an execution-time window and optional filter.
+type CronRunStatsRequest struct {
+	CronProjectRequest
+	JobUID      string `query:"job_uid"`
+	WorkflowUID string `query:"workflow_uid"`
+	Since       string `query:"since"`
+	Until       string `query:"until"`
+	Bucket      string `query:"bucket"`
+	Timezone    string `query:"timezone"`
+}
+
+// CronRunStatsWindow identifies the execution-time window summarized.
+type CronRunStatsWindow struct {
+	Since time.Time `json:"since"`
+	Until time.Time `json:"until"`
+}
+
+// CronRunStatsAPIVersion is the first daemon API supporting this read.
+const CronRunStatsAPIVersion = "0.48.0"
+
+// CronRunStatsResponseBody reports statistics over retained runs.
+type CronRunStatsResponseBody struct {
+	ProjectUID  string             `json:"project_uid"`
+	JobUID      string             `json:"job_uid,omitempty"`
+	WorkflowUID string             `json:"workflow_uid,omitempty"`
+	Window      CronRunStatsWindow `json:"window"`
+	Truncated   bool               `json:"truncated"`
+	cron.RunStatistics
+}
+
+// CronRunStatsResponse wraps the statistics body.
+type CronRunStatsResponse struct{ Body CronRunStatsResponseBody }

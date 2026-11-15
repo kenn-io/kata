@@ -28,6 +28,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Continue an incomplete lexical search by copying the command printed with its results.
 
 - Recover automatically when the web UI's first daemon roster, workspace, or teams read fails briefly. Retry and Refresh teams remain available after persistent failures or refusals.
+- Summarize retained cron runs by status, duration and day with CLI, HTTP and MCP statistics (daemon API 0.48.0). See [cron statistics](reference/cron.md).
+- `kata digest` now rejects mixed day durations such as `1h1d`. Use `48h` or `2d` for the former `1h1d` result. It also rejects day durations that overflow.
 
 - Repeat or resume an adoption push into a hub project that already holds
   some of the issues, or bring it up to date from a newer copy of the project.

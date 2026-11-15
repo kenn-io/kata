@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-11
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -616,6 +616,33 @@ Stored definitions and events stay unchanged. Deleting a cron job does not
 remove its retained history or the project's cron capability requirement.
 See [Cron triggers](#triggers) for the expression rules.
 
+## Run statistics
+
+Use `kata cron run stats --since 30d --bucket day --timezone America/New_York --json` to summarize retained runs. Filter by `--job-uid` or `--workflow-uid`, but not both. `--since` accepts an RFC 3339 instant or a duration such as `30d` or `24h`; a day suffix accepts one signed decimal quantity, not mixed units such as `1h1d`. `--until` accepts an RFC 3339 instant. Relative `--since` durations count back from `--until`, or from now when omitted. The default window is the 30 days ending at `until` or now. The maximum span is 366 days, with an inclusive start and exclusive end. Window endpoints must be representable as UTC RFC 3339 timestamps. Timezones must be named IANA zones; `Local` is not accepted.
+
+The response counts every status. Success rate is succeeded divided by succeeded plus failed, rounded to four decimal places, or null when neither exists. Durations cover succeeded and failed runs with start and end times; min, median, p95 and max use seconds and nearest-rank percentiles. A failure streak skips running, cancelled and unknown runs and stops at a success. Last success and failure are the maximum end instant, falling back to start, then creation, for each run. The streak covers the reported window and follows finish order, with ties ordered by later start, then UID. Running, cancelled and unknown runs do not enter the success rate or failure streak, so those figures alone do not show unfinished or unknown runs. Day buckets group start instants, or creation when a start was not recorded, in the requested IANA time zone, default UTC, and appear newest first; they omit empty days and zero status counts.
+
+The response contains `project_uid`, optional `job_uid` or `workflow_uid`, `window.since` and `window.until`, `scanned`, `truncated`, `by_status`, `success_rate`, `duration_seconds`, `last_succeeded_at`, `last_failed_at` and `consecutive_failures`. The duration object contains `count`, `min`, `median`, `p95` and `max`, or is null when no run qualifies. Last timestamps are null when no matching run exists. With `bucket=day`, `buckets` contains objects with `date`, `by_status` and nullable `median_duration_seconds`; an empty result has an empty array. Without day buckets, `buckets` is omitted.
+
+For example:
+
+```json
+{
+  "project_uid": "01J00000000000000000000001",
+  "window": {"since": "2026-11-10T00:00:00Z", "until": "2026-11-11T00:00:00Z"},
+  "scanned": 1, "truncated": false,
+  "by_status": {"running": 0, "succeeded": 1, "failed": 0, "cancelled": 0, "unknown": 0},
+  "success_rate": 1, "duration_seconds": null,
+  "last_succeeded_at": "2026-11-10T12:00:00Z", "last_failed_at": null,
+  "consecutive_failures": 0,
+  "buckets": [{"date": "2026-11-10", "by_status": {"succeeded": 1}, "median_duration_seconds": null}]
+}
+```
+
+Windows filter by start instant, or creation when no start was recorded. The read scans the project's retained runs because no index covers start time, and returns at most 10,000 matching runs, newest first. `truncated` means older runs were omitted and `window.since` is the oldest scanned instant; equal timestamps at that boundary can include omitted runs. Results cover only retained runs held by this daemon. Pruning or a replica that has not pulled all events reduces the data available. The read returns no message, actor, label or issue reference. MCP accepts the same relative `since` shorthand as the CLI; HTTP accepts RFC 3339 timestamps only. The forms use the same filters, window, bucket and timezone; the HTTP operation is `getCronRunStats` and the MCP tool is `kata.cron_run_stats` under `kata.load_cron`. This read requires daemon API 0.48.0.
+
+`workflow_uid` matches the `workflow_uid` recorded on each observation. It scans the project index, so sparse matches can examine more than 10,000 index entries. Unknown well-formed job or workflow UIDs return empty statistics, as with the run list.
+
 ## Independent run evidence
 
 An adapter creates one independent run UID and retains it across retries:
@@ -828,6 +855,7 @@ entries follow `kata.`. CLI and MCP create definitions through stable-UID
 | `DELETE` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}` | `archiveCronWorkflow` | `workflow delete` | `cron_workflow_delete` |
 | `POST` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}/restore` | `restoreCronWorkflow` | `workflow restore` | `cron_workflow_restore` |
 | `GET` | `/api/v1/projects/{project_id}/cron/runs` | `listCronRuns` | `run list` | `cron_runs` |
+| `GET` | `/api/v1/projects/{project_id}/cron/runs/stats` | `getCronRunStats` | `run stats` | `cron_run_stats` |
 | `GET` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `showCronRun` | `run show` | `cron_run` |
 | `PUT` | `/api/v1/projects/{project_id}/cron/runs/{run_uid}` | `observeCronRun` | `run observe` | `cron_run_observe` |
 

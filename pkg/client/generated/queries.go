@@ -163,6 +163,15 @@ func (l ListCronRunsQuery) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(l))
 }
 
+type GetCronRunStatsQuery struct {
+	JobUID      *string `json:"job_uid,omitempty"`
+	WorkflowUID *string `json:"workflow_uid,omitempty"`
+	Since       *string `json:"since,omitempty"`
+	Until       *string `json:"until,omitempty"`
+	Bucket      *string `json:"bucket,omitempty"`
+	Timezone    *string `json:"timezone,omitempty"`
+}
+
 type ListCronWorkflowsQuery struct {
 	IncludeDeleted *bool `json:"include_deleted,omitempty"`
 }

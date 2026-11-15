@@ -271,6 +271,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.48.0` | Adds `GET /projects/{project_id}/cron/runs/stats` for bounded retained-run statistics. |
 | `0.47.0` | Attachment uploads accept `reuse_existing`. Reuse on uploads and links returns `attachment_invalid` when the daemon cannot read an existing reference. |
 | `0.46.0` | Federation ingest responses add optional `superseded_event_uids`, the adoption snapshots the hub did not store. |
 | `0.45.0` | Adds `POST /api/v1/embeddings/local/restart` to restart the daemon after local embeddings setup. Older daemons do not serve this route. |
