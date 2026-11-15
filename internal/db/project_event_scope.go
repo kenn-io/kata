@@ -145,12 +145,13 @@ func walkEventProjectReferences(event Event, issueIsPrivate func(string) (bool, 
 		return checkUIDs(uids)
 	}
 	checkSnapshotReferences := func(payload map[string]jsontext.Value) (bool, error) {
-		if reset, err := checkSnapshotLinks(payload); reset || err != nil {
-			return reset, err
+		reset, err := checkSnapshotLinks(payload)
+		if err != nil {
+			return false, err
 		}
 		raw, found := payload["comments"]
 		if !found {
-			return false, nil
+			return reset, nil
 		}
 		var comments *[]struct {
 			ReplyToUID string `json:"reply_to_uid"`
@@ -168,7 +169,7 @@ func walkEventProjectReferences(event Event, issueIsPrivate func(string) (bool, 
 				return private, err
 			}
 		}
-		return false, nil
+		return reset, nil
 	}
 
 	switch event.Type {
@@ -210,9 +211,10 @@ func walkEventProjectReferences(event Event, issueIsPrivate func(string) (bool, 
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
 			return true, nil
 		}
+		reset := false
 		if payload.ParentUID == nil || *payload.ParentUID == "" {
 			if payload.ParentShortID != nil && *payload.ParentShortID != "" {
-				return true, nil
+				reset = true
 			}
 		} else {
 			private, err := issueIsPrivate(*payload.ParentUID)
@@ -226,7 +228,8 @@ func walkEventProjectReferences(event Event, issueIsPrivate func(string) (bool, 
 				refs = append(refs, evidence.IssueRef)
 			}
 		}
-		return checkRefs(refs)
+		private, err := checkRefs(refs)
+		return reset || private, err
 	case "issue.links_changed":
 		var payload map[string]jsontext.Value
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
