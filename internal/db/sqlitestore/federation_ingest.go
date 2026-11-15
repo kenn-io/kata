@@ -1467,7 +1467,11 @@ type payloadLink struct {
 }
 
 func payloadLinks(ev db.RemoteEvent) ([]payloadLink, error) {
+	moved := ev.Type == "issue.moved"
 	ev = db.FederationMoveSnapshotEvent(ev)
+	if moved && len(ev.Payload) == 0 {
+		return nil, nil
+	}
 	var created struct {
 		Links []payloadLink `json:"links"`
 	}
