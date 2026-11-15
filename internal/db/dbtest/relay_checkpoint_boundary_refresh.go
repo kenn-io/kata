@@ -69,7 +69,7 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	require.NoError(t, err)
 	issueUID, err := uid.New()
 	require.NoError(t, err)
-	payload := jsontext.Value(`{"uid":"` + issueUID + `","title":"Later legacy creation","body":"","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"` + private.UID + `","author":"member"}]}`)
+	payload := jsontext.Value(`{"uid":"` + issueUID + `","title":"Later legacy creation","body":"","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"` + private.UID + `","author":"member"},{"type":"related","to_issue_uid":"` + private.UID + `","author":"member"},{"type":"parent","to_issue_uid":"` + private.UID + `","author":"member"}]}`)
 	event := newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "member", legacyUID, 600, payload)
 	seedHistory(t, fixture.project, event)
 	issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
@@ -83,14 +83,14 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	require.NoError(t, err)
 	links, err := store.LinksByIssue(ctx, issue.ID)
 	require.NoError(t, err)
-	require.Len(t, links, 1)
+	require.Len(t, links, 3)
 	_, err = resetter.CreateRelayReset(ctx, bindingUID, fixture.signer)
 	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "a live private link must be refused before signing shared current state")
-	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID), "a refused reset must preserve the owner's private link")
-	_, err = store.DeleteLinkAndEvent(writeCtx, links[0], db.LinkEventParams{
-		EventType: "issue.unlinked", EventIssueID: issue.ID, Actor: "member",
-		FromUID: issue.UID, ToUID: private.UID, FromShortID: issue.ShortID, ToShortID: private.ShortID,
-	})
+	require.Len(t, linkTargetUIDs(t, store, issue.ID), 3, "a refused reset must preserve the owner's private links")
+	_, err = store.EditIssueAtomic(writeCtx, db.EditIssueAtomicParams{IssueID: issue.ID, Actor: "member", RemoveBlocks: []int64{private.ID}, RemoveRelated: []int64{private.ID}, SetParent: &original.ID})
+	require.NoError(t, err)
+	require.Equal(t, []string{original.UID}, linkTargetUIDs(t, store, issue.ID))
+	_, err = store.EditIssueAtomic(writeCtx, db.EditIssueAtomicParams{IssueID: issue.ID, Actor: "member", RemoveParent: &original.ID})
 	require.NoError(t, err)
 	require.Empty(t, linkTargetUIDs(t, store, issue.ID), "remove the live boundary without rewriting private history")
 

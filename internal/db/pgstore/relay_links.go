@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 
@@ -73,6 +74,7 @@ type relayOriginClassifier struct {
 	instanceUID string
 	relaySpokes map[string]struct{}
 	receipts    map[string]struct{}
+	accepted    map[string]bool
 }
 
 func (c relayOriginClassifier) relaySourced(event db.FoldEvent) bool {
@@ -87,7 +89,7 @@ func (c relayOriginClassifier) relaySourced(event db.FoldEvent) bool {
 }
 
 func loadRelayOriginClassifier(ctx context.Context, tx *sql.Tx, projectIDs []int64) (relayOriginClassifier, error) {
-	c := relayOriginClassifier{relaySpokes: map[string]struct{}{}, receipts: map[string]struct{}{}}
+	c := relayOriginClassifier{relaySpokes: map[string]struct{}{}, receipts: map[string]struct{}{}, accepted: map[string]bool{}}
 	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&c.instanceUID); err != nil {
 		return c, mapSQLError(err, nil)
 	}
@@ -115,6 +117,31 @@ func loadRelayOriginClassifier(ctx context.Context, tx *sql.Tx, projectIDs []int
 	}
 	if err := scanRelayClassifierKeys(receiptRows, c.receipts, 2); err != nil {
 		return c, mapSQLError(err, nil)
+	}
+	checkpointRows, err := tx.QueryContext(ctx, fmt.Sprintf(`SELECT p.uid,m.value FROM projects p JOIN meta m ON m.key=$%d || p.uid WHERE p.id IN (%s)`, extra, placeholders), append(append([]any(nil), args...), db.RelayResetMetadataPrefix)...)
+	if err != nil {
+		return c, mapSQLError(err, nil)
+	}
+	defer func() { _ = checkpointRows.Close() }()
+	for checkpointRows.Next() {
+		var project, raw string
+		if err := checkpointRows.Scan(&project, &raw); err != nil {
+			return c, err
+		}
+		var checkpoint db.RelayResetCheckpoint
+		if err := json.Unmarshal([]byte(raw), &checkpoint); err != nil {
+			return c, err
+		}
+		accepted, err := db.RelayResetLegacySources(checkpoint.Snapshot)
+		if err != nil {
+			return c, err
+		}
+		for event := range accepted {
+			c.accepted[project+"\x00"+event] = true
+		}
+	}
+	if err := checkpointRows.Err(); err != nil {
+		return c, err
 	}
 	return c, nil
 }
@@ -180,7 +207,9 @@ func filterRelayCrossProjectLinkEvents(
 			filtered = append(filtered, event)
 			continue
 		}
-		stripped, keep, err := db.StripCrossProjectLinkAdditions(event, authority.Policy(event))
+		policy := authority.Policy(event)
+		policy.AcceptedRemoval = classifier.accepted[event.ProjectUID+"\x00"+event.UID]
+		stripped, keep, err := db.StripCrossProjectLinkAdditions(event, policy)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -238,7 +267,7 @@ func relayLinkEndpointProjects(ctx context.Context, tx *sql.Tx, events []db.Fold
 
 // relayFoldAuthorityTx loads live project membership for relay link folding.
 func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]string, instance string) (db.RelayFoldAuthority, error) {
-	a := db.RelayFoldAuthority{Projects: owners, Roots: map[string]string{}, Groups: map[string]map[string]bool{}}
+	a := db.RelayFoldAuthority{Projects: owners, Roots: map[string]string{}, Groups: map[string]map[string]bool{}, Relayed: map[string]bool{}}
 	ids := map[string]int64{}
 	uids := map[int64]string{}
 	for _, uid := range owners {
@@ -259,6 +288,11 @@ func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]str
 		ids[uid], uids[id] = id, uid
 	}
 	for uid, id := range ids {
+		var relayed bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id=$1 AND (b.relay_config IS NOT NULL OR EXISTS(SELECT 1 FROM federation_enrollments e WHERE e.project_id=b.project_id AND e.relay_protocol_version=1)))`, id).Scan(&relayed); err != nil {
+			return a, err
+		}
+		a.Relayed[uid] = relayed
 		binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, id))
 		if errors.Is(err, db.ErrNotFound) {
 			continue

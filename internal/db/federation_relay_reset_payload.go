@@ -17,6 +17,33 @@ type RootResetProvenance struct {
 	Entities []EntityProvenance   `json:"entities"`
 }
 
+// RelayResetLegacySources identifies direct-peer history in a verified checkpoint.
+func RelayResetLegacySources(snapshot RootResetSnapshot) (map[string]bool, error) {
+	var sources [][]byte
+	var provenance RootResetProvenance
+	if err := json.Unmarshal(snapshot.Events, &sources); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(snapshot.Provenance, &provenance); err != nil {
+		return nil, err
+	}
+	receipts := make(map[string]bool, len(provenance.Receipts))
+	for _, receipt := range provenance.Receipts {
+		receipts[receipt.EventUID] = true
+	}
+	legacy := make(map[string]bool)
+	for _, raw := range sources {
+		event, err := DecodeRelaySourceEvent(raw)
+		if err != nil {
+			return nil, err
+		}
+		if !receipts[event.EventUID] {
+			legacy[event.EventUID] = true
+		}
+	}
+	return legacy, nil
+}
+
 // DecodeRootResetPayload validates committed contents before native replacement.
 // Event bodies retain the original payload bytes, including across compaction.
 func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]RemoteEvent, RootResetProvenance, error) {

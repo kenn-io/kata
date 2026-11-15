@@ -1,14 +1,40 @@
 package dbtest
 
 import (
+	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 )
+
+// RunDirectParentConflict keeps ordinary direct peers on last-writer-wins folding.
+func RunDirectParentConflict(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	fixture := newRelayLinkBoundaryFixture(t, store, "direct-parent-conflict")
+	_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: fixture.sibling.ID, Role: db.FederationRoleHub, HubProjectID: fixture.sibling.ID, HubProjectUID: fixture.sibling.UID, Enabled: true})
+	require.NoError(t, err)
+	public := fixture.signer.PrivateKey.Public().(ed25519.PublicKey)
+	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: fixture.sibling.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
+	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Child", Author: "member"})
+	require.NoError(t, err)
+	foreign, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Foreign parent", Author: "member"})
+	require.NoError(t, err)
+	local, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Local parent", Author: "member"})
+	require.NoError(t, err)
+	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: foreign.ID, Type: "parent", Author: "member"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, Actor: "member", FromUID: child.UID, ToUID: foreign.UID, FromShortID: child.ShortID, ToShortID: foreign.ShortID})
+	require.NoError(t, err)
+	spoke, err := uid.New()
+	require.NoError(t, err)
+	event := newRemoteEvent(t, fixture.project, &child.UID, "issue.links_changed", "member", spoke, time.Now().UnixMilli()+10, jsontext.Value(`{"parent_set_uid":"`+local.UID+`","parent_removed_uid":"`+foreign.UID+`"}`))
+	_, err = store.IngestFederationEvents(db.WithAuthorizedProjects(ctx, []string{fixture.project.UID, fixture.sibling.UID}), db.FederationIngestParams{ProjectID: fixture.project.ID, SpokeInstanceUID: spoke, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}})
+	require.NoError(t, err)
+	require.Equal(t, []string{local.UID}, linkTargetUIDs(t, store, child.ID))
+}
 
 // RunRelayOffersLegacyIngestedEvents covers a direct spoke's creation followed
 // by a root-local notification. The relay must receive the introduction first,

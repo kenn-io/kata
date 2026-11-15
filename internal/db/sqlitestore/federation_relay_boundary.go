@@ -240,22 +240,44 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 		refs = append(refs, *event.IssueUID)
 	}
 	rootLink := false
+	legacyCleanup := false
 	if db.FederationEventAffectsLinks(event.Type) {
 		pin, pinErr := rootPinTx(ctx, tx, event.ProjectUID, "")
 		if pinErr != nil && !errors.Is(pinErr, db.ErrNotFound) {
 			return false, pinErr
 		}
 		rootLink = pinErr == nil && pin.AuthorityUID == event.OriginInstanceUID
+		if !rootLink {
+			var receipt bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_event_provenance WHERE project_uid=? AND event_uid=?)`, event.ProjectUID, event.EventUID).Scan(&receipt); err != nil {
+				return false, err
+			}
+			if !receipt {
+				crosses := func(ctx context.Context, peer string) (bool, error) {
+					var own bool
+					err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=? AND project_id=?)`, peer, projectID).Scan(&own)
+					return !own, err
+				}
+				err := db.ValidateLegacyRelayAdmission(ctx, event, crosses, func(context.Context, string) (bool, error) { return false, nil }, func(context.Context, string) (bool, error) { return false, nil })
+				if err != nil && !errors.Is(err, db.ErrFederationCrossProjectBoundary) {
+					return false, err
+				}
+				legacyCleanup = err == nil
+			}
+		}
 	}
 	for _, ref := range refs {
 		if ref == "" {
 			continue
 		}
-		if rootLink && (event.IssueUID == nil || ref != *event.IssueUID) {
+		if (rootLink || legacyCleanup) && (event.IssueUID == nil || ref != *event.IssueUID) {
 			var peerID int64
 			err := tx.QueryRowContext(ctx, `SELECT project_id FROM issues WHERE uid=?`, ref).Scan(&peerID)
-			if errors.Is(err, sql.ErrNoRows) {
+			if errors.Is(err, sql.ErrNoRows) && rootLink {
 				continue
+			}
+			if errors.Is(err, sql.ErrNoRows) {
+				return true, nil
 			}
 			if err != nil {
 				return false, err

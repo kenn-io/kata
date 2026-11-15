@@ -620,8 +620,12 @@ func (p *FoldProjection) applyLinksChanged(e FoldEvent, payload map[string]jsont
 		return
 	}
 	defer p.touchIssue(base, issueUpdatedAt(e, payload))
-	p.applyUIDList(base, payload["parent_set_uid"], "parent", true, false, clockOf(e), e.Actor)
-	p.applyUIDList(base, payload["parent_removed_uid"], "parent", false, false, clockOf(e), e.Actor)
+	accepted := p.applyUIDList(base, payload["parent_set_uid"], "parent", true, false, clockOf(e), e.Actor)
+	removed, _ := stringValue(payload["parent_removed_uid"])
+	parent := p.Links[FoldLinkKey{FromUID: base, ToUID: removed, Type: "parent"}]
+	if accepted || !parent.Present || p.parentRemovalCheck == nil || p.parentRemovalCheck(base, removed, parent.Clock, clockOf(e)) {
+		p.applyUIDList(base, payload["parent_removed_uid"], "parent", false, false, clockOf(e), e.Actor)
+	}
 	for _, uid := range stringSlice(payload["blocks_added_uids"]) {
 		p.setLink(base, uid, "blocks", true, clockOf(e), e.Actor, "")
 	}
@@ -711,28 +715,29 @@ func (p *FoldProjection) applyAuthorRewritten(e FoldEvent, payload map[string]js
 	}
 }
 
-func (p *FoldProjection) applyUIDList(base string, raw jsontext.Value, typ string, present, incoming bool, clock FoldClock, author string) {
+func (p *FoldProjection) applyUIDList(base string, raw jsontext.Value, typ string, present, incoming bool, clock FoldClock, author string) bool {
 	uid, ok := stringValue(raw)
 	if !ok || uid == "" {
-		return
+		return true
 	}
 	from, to := base, uid
 	if incoming {
 		from, to = to, from
 	}
-	p.setLink(from, to, typ, present, clock, author, "")
+	return p.setLink(from, to, typ, present, clock, author, "")
 }
 
-func (p *FoldProjection) setLink(from, to, typ string, present bool, clock FoldClock, author, createdAt string) {
+func (p *FoldProjection) setLink(from, to, typ string, present bool, clock FoldClock, author, createdAt string) bool {
 	if typ == "related" && from > to {
 		from, to = to, from
 	}
 	if typ == "parent" && present {
 		if !p.clearOlderParents(from, to, clock) {
-			return
+			return false
 		}
 	}
 	p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}] = FoldElementState{Present: present, Clock: clock, Author: author, CreatedAt: createdAt}
+	return true
 }
 
 func (p *FoldProjection) clearOlderParents(childUID, keepParentUID string, clock FoldClock) bool {

@@ -279,7 +279,7 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 				if lerr != nil {
 					return changed, lerr
 				}
-				if err := ensureRelayLinkBoundaryTx(ctx, tx, existing.FromIssueID, existing.ToIssueID); err != nil {
+				if err := ensureRelayLinkRemovalBoundaryTx(ctx, tx, existing, issue); err != nil {
 					return changed, err
 				}
 				res, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, existing.ID)
@@ -348,7 +348,7 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 		if err := checkLinkEndpointsProjectAccessTx(ctx, tx, issue.ID, parentIssue.ID); err != nil {
 			return changed, err
 		}
-		if err := ensureRelayLinkBoundaryTx(ctx, tx, existing.FromIssueID, existing.ToIssueID); err != nil {
+		if err := ensureRelayLinkRemovalBoundaryTx(ctx, tx, existing, issue); err != nil {
 			return changed, err
 		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, existing.ID)
@@ -569,7 +569,7 @@ func removeEdgeTx(ctx context.Context, tx *sql.Tx, urlIssue db.Issue, targetID i
 	if err != nil {
 		return false, db.PeerIdentity{}, err
 	}
-	if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+	if err := ensureRelayLinkRemovalBoundaryTx(ctx, tx, link, urlIssue); err != nil {
 		return false, db.PeerIdentity{}, err
 	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, link.ID)

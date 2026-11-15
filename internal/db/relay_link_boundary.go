@@ -9,9 +9,10 @@ import (
 
 // RelayLinkPolicy decides which cross-project link mutations may be folded.
 type RelayLinkPolicy struct {
-	RootOrigin   bool
-	SameRoot     func(string) bool
-	CrossProject func(string) bool
+	RootOrigin      bool
+	AcceptedRemoval bool
+	SameRoot        func(string) bool
+	CrossProject    func(string) bool
 }
 
 // StripCrossProjectLinkAdditions excludes links outside the relay's authority.
@@ -20,7 +21,7 @@ func StripCrossProjectLinkAdditions(event FoldEvent, policy RelayLinkPolicy) (Fo
 		return policy.CrossProject(peer) && (!policy.RootOrigin || !policy.SameRoot(peer))
 	}
 	blockedRemoval := func(peer string) bool {
-		return !policy.RootOrigin && policy.CrossProject(peer)
+		return !policy.RootOrigin && !policy.AcceptedRemoval && policy.CrossProject(peer)
 	}
 	switch event.Type {
 	case "issue.linked", "issue.unlinked":
@@ -195,6 +196,7 @@ type RelayFoldAuthority struct {
 	Projects map[string]string
 	Roots    map[string]string
 	Groups   map[string]map[string]bool
+	Relayed  map[string]bool
 }
 
 // Policy filters one relay event using the endpoint's current membership.
@@ -213,5 +215,5 @@ func (a RelayFoldAuthority) Policy(event FoldEvent) RelayLinkPolicy {
 func (a RelayFoldAuthority) AllowParentRemoval(child, parent string, previous, next FoldClock) bool {
 	project, peer := a.Projects[child], a.Projects[parent]
 	root := a.Roots[project]
-	return project == "" || peer == "" || project == peer || root == "" || a.Roots[peer] != root || !a.Groups[project][peer] || previous.OriginInstanceUID != root || next.OriginInstanceUID == root
+	return (!a.Relayed[project] && !a.Relayed[peer]) || project == "" || peer == "" || project == peer || root == "" || a.Roots[peer] != root || !a.Groups[project][peer] || previous.OriginInstanceUID != root || next.OriginInstanceUID == root
 }

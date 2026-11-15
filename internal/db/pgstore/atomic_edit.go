@@ -281,7 +281,7 @@ func (s *Store) applyAtomicLinkDeltaTx(
 				if identityErr != nil {
 					return changed, identityErr
 				}
-				deleted, deleteErr := deleteAtomicLinkTx(ctx, tx, existing.ID)
+				deleted, deleteErr := deleteAtomicLinkTx(ctx, tx, existing.ID, issue)
 				if deleteErr != nil {
 					return changed, deleteErr
 				}
@@ -325,7 +325,7 @@ func (s *Store) applyAtomicLinkDeltaTx(
 		if err != nil {
 			return changed, err
 		}
-		deleted, err := deleteAtomicLinkTx(ctx, tx, existing.ID)
+		deleted, err := deleteAtomicLinkTx(ctx, tx, existing.ID, issue)
 		if err != nil {
 			return changed, err
 		}
@@ -509,7 +509,7 @@ func atomicRemoveEdgeTx(
 	if err != nil {
 		return false, db.PeerIdentity{}, err
 	}
-	deleted, err := deleteAtomicLinkTx(ctx, tx, link.ID)
+	deleted, err := deleteAtomicLinkTx(ctx, tx, link.ID, issue)
 	if err != nil || !deleted {
 		return false, db.PeerIdentity{}, err
 	}
@@ -542,12 +542,12 @@ func atomicLinkByEndpointsTx(
 		fromID, toID, linkType))
 }
 
-func deleteAtomicLinkTx(ctx context.Context, tx *sql.Tx, linkID int64) (bool, error) {
+func deleteAtomicLinkTx(ctx context.Context, tx *sql.Tx, linkID int64, issue db.Issue) (bool, error) {
 	link, err := scanLink(tx.QueryRowContext(ctx, linkSelect+` WHERE id=$1`, linkID))
 	if err != nil {
 		return false, err
 	}
-	if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+	if err := ensureRelayLinkRemovalBoundaryTx(ctx, tx, link, issue); err != nil {
 		return false, err
 	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = $1`, linkID)

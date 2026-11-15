@@ -2,10 +2,13 @@ package dbtest
 
 import (
 	"crypto/ed25519"
+	"encoding/json/jsontext"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // RunRelayCrossLinkResetHistory checks feature gating for cached and forwarded reset history.
@@ -53,11 +56,16 @@ func RunRelayCrossLinkResetHistory(t *testing.T, root db.Storage, backend Backen
 		require.NoError(t, err)
 	}
 	params := db.CreateLinkParams{FromIssueID: issues[0].ID, ToIssueID: issues[1].ID, Type: "blocks", Author: "root-member"}
-	link, _, err := root.CreateLinkAndEvent(db.WithRootAttribution(ctx, signer, "root-member"), params, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: "root-member", FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
-	require.NoError(t, err)
-	_, err = root.DeleteLinkAndEvent(db.WithRootAttribution(ctx, signer, "root-member"), link, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: issues[0].ID, Actor: "root-member", FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
+	_, _, err = root.CreateLinkAndEvent(db.WithRootAttribution(ctx, signer, "root-member"), params, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issues[0].ID, Actor: "root-member", FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
 	require.NoError(t, err)
 	binding := enroll(root, hub, projects[0], "reset-hub", true)
+	peerBinding := enroll(root, hub, projects[1], "reset-peer-hub", false)
+	spoke, err := uid.New()
+	require.NoError(t, err)
+	removed := newRemoteEvent(t, projects[0], &issues[0].UID, "issue.links_changed", "member", spoke, time.Now().UnixMilli()+10, jsontext.Value(`{"blocks_removed_uids":["`+issues[1].UID+`"]}`))
+	_, err = root.IngestFederationEvents(db.WithAuthorizedProjects(ctx, []string{projects[0].UID, projects[1].UID}), db.FederationIngestParams{ProjectID: projects[0].ID, SpokeInstanceUID: spoke, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: removed}}})
+	require.NoError(t, err)
+	require.Empty(t, linkTargetUIDs(t, root, issues[0].ID))
 	rootResets := root.(db.RelayResetStore)
 	relayState := func(store db.Storage) []db.ImportRecord {
 		var records []db.ImportRecord
@@ -87,6 +95,12 @@ func RunRelayCrossLinkResetHistory(t *testing.T, root db.Storage, backend Backen
 	require.Equal(t, checkpoint, retry)
 	hubResets := hub.(db.RelayResetStore)
 	require.NoError(t, hubResets.InstallRelayReset(ctx, binding, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation))
+	peerCheckpoint, err := rootResets.CreateRelayReset(features, peerBinding, signer)
+	require.NoError(t, err)
+	require.NoError(t, hubResets.InstallRelayReset(ctx, peerBinding, peerCheckpoint.Manifest, peerCheckpoint.Snapshot, peerCheckpoint.Translation))
+	hubIssue, err := hub.IssueByUID(ctx, issues[0].UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	require.Empty(t, linkTargetUIDs(t, hub, hubIssue.ID))
 	hubProject, err := hub.ProjectByUID(ctx, projects[0].UID)
 	require.NoError(t, err)
 	downstream := enroll(hub, leaf, hubProject, "reset-leaf", false)

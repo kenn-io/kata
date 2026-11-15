@@ -251,6 +251,11 @@ func (p RelayResetProtocol) applyReset(ctx context.Context, install relayResetIn
 			return err
 		}
 	}
+	// The fold reads this verified checkpoint when deciding which direct-peer
+	// removals the root accepted. Keep it in the same transaction as the reset.
+	if err := p.Backend.PutMeta(ctx, RelayResetMetadataPrefix+install.projectUID, install.rawCheckpoint); err != nil {
+		return err
+	}
 	if err := p.Backend.MaterializeFederatedProject(ctx, install.projectID); err != nil {
 		return err
 	}
@@ -302,9 +307,6 @@ func (p RelayResetProtocol) installEpoch(ctx context.Context, install relayReset
 		if err := p.Backend.InsertRelayCursor(ctx, seed); err != nil {
 			return err
 		}
-	}
-	if err := p.Backend.PutMeta(ctx, RelayResetMetadataPrefix+install.projectUID, install.rawCheckpoint); err != nil {
-		return err
 	}
 	if err := p.Backend.ReserveAttributionUIReset(ctx, install.projectUID); err != nil {
 		return err
