@@ -82,7 +82,7 @@ func RelayResetForwardTranslation(checkpoint RelayResetCheckpoint, grant Federat
 	return checkpoint
 }
 
-// prepareForwardedCheckpoint translates the relay's durably installed root
+// PrepareForwardedCheckpoint translates the relay's durably installed root
 // checkpoint for one downstream grant and seeds that grant's next epoch.
 // Only the immediate-hop translation changes; accepted post-checkpoint
 // deliveries are carried into the child's new epoch.
@@ -91,73 +91,72 @@ func RelayResetForwardTranslation(checkpoint RelayResetCheckpoint, grant Federat
 // credential: a child whose parent token expired or was revoked must not stop
 // its relay from installing a root reset, and keeps recoverable state if the
 // credential returns. Disclosure is authorized separately, by
-// authorizeCheckpointDownload and by the enrollment fence that guards
+// AuthorizeCheckpointDownload and by the enrollment fence that guards
 // activation of the prepared epoch.
-func (p RelayResetProtocol) prepareForwardedCheckpoint(ctx context.Context, grant FederationEnrollment, pin RootKeyPin) (RelayResetCheckpoint, []RemoteEvent, error) {
+func (p RelayResetProtocol) PrepareForwardedCheckpoint(ctx context.Context, grant FederationEnrollment, pin RootKeyPin) (RelayResetCheckpoint, error) {
 	binding, err := p.Backend.RelayServingBinding(ctx, *grant.ProjectID)
 	if err != nil {
-		return RelayResetCheckpoint{}, nil, err
+		return RelayResetCheckpoint{}, err
 	}
 	if binding.RelayConfig == nil {
-		return RelayResetCheckpoint{}, nil, ErrNotFound
+		return RelayResetCheckpoint{}, ErrNotFound
 	}
 	upstream, err := p.Backend.UpstreamRelayGrant(ctx, binding.RelayConfig.BindingUID)
 	if err != nil {
-		return RelayResetCheckpoint{}, nil, err
+		return RelayResetCheckpoint{}, err
 	}
 	raw, found, err := p.Backend.Meta(ctx, RelayResetMetadataPrefix+pin.ProjectUID)
 	if err != nil {
-		return RelayResetCheckpoint{}, nil, err
+		return RelayResetCheckpoint{}, err
 	}
 	if !found {
-		return RelayResetCheckpoint{}, nil, fmt.Errorf("relay has no installed root checkpoint to forward: %w", sql.ErrNoRows)
+		return RelayResetCheckpoint{}, fmt.Errorf("relay has no installed root checkpoint to forward: %w", sql.ErrNoRows)
 	}
 	var checkpoint RelayResetCheckpoint
 	if err := json.Unmarshal([]byte(raw), &checkpoint, json.RejectUnknownMembers(true)); err != nil {
-		return RelayResetCheckpoint{}, nil, err
+		return RelayResetCheckpoint{}, err
 	}
 	historical, err := p.Backend.RootPin(ctx, pin.ProjectUID, checkpoint.Manifest.KeyID)
 	if err != nil {
-		return RelayResetCheckpoint{}, nil, err
+		return RelayResetCheckpoint{}, err
 	}
 	if historical.AuthorityUID != pin.AuthorityUID {
-		return RelayResetCheckpoint{}, nil, errors.New("forwarded reset changes root authority")
+		return RelayResetCheckpoint{}, errors.New("forwarded reset changes root authority")
 	}
 	if err := VerifyRootResetManifest(historical, checkpoint.Manifest, checkpoint.Snapshot); err != nil {
-		return RelayResetCheckpoint{}, nil, err
+		return RelayResetCheckpoint{}, err
 	}
 	authority := RelayHopAuthority{BindingUID: binding.RelayConfig.BindingUID, ProjectUID: pin.ProjectUID, AuthorityUID: pin.AuthorityUID, SenderInstanceUID: upstream.SpokeInstanceUID, ReceiverInstanceUID: p.InstanceUID, Epoch: upstream.RelayResetEpoch}
 	if err := ValidateRelayResetTranslation(authority, checkpoint.Manifest, checkpoint.Translation); err != nil {
-		return RelayResetCheckpoint{}, nil, err
+		return RelayResetCheckpoint{}, err
 	}
-	events, _, err := DecodeRootResetPayload(historical, checkpoint.Snapshot)
-	if err != nil {
-		return RelayResetCheckpoint{}, nil, err
+	if _, _, err := DecodeRootResetPayload(historical, checkpoint.Snapshot); err != nil {
+		return RelayResetCheckpoint{}, err
 	}
 	source := relayForwardSource{BindingUID: binding.RelayConfig.BindingUID, Grant: upstream, Baselines: checkpoint.Translation.HopBaselines}
 	checkpoint = RelayResetForwardTranslation(checkpoint, grant, pin, p.InstanceUID)
 	encoded, err := json.Marshal(checkpoint)
 	if err != nil {
-		return RelayResetCheckpoint{}, nil, err
+		return RelayResetCheckpoint{}, err
 	}
 	if err := p.Backend.PutMeta(ctx, RelayResetMetadataPrefix+pin.ProjectUID+"."+grant.RelayBindingUID, string(encoded)); err != nil {
-		return RelayResetCheckpoint{}, nil, err
+		return RelayResetCheckpoint{}, err
 	}
 	grant.RelayResetEpoch = checkpoint.Translation.Authority.Epoch
 	if err := p.Backend.SeedRelayArtifactManifests(ctx, grant, pin.ProjectUID); err != nil {
-		return RelayResetCheckpoint{}, nil, err
+		return RelayResetCheckpoint{}, err
 	}
 	if err := p.seedPostCheckpointDeliveries(ctx, grant, source, pin); err != nil {
-		return RelayResetCheckpoint{}, nil, err
+		return RelayResetCheckpoint{}, err
 	}
-	return checkpoint, events, nil
+	return checkpoint, nil
 }
 
-// authorizeCheckpointDownload rechecks the requesting enrollment's live
+// AuthorizeCheckpointDownload rechecks the requesting enrollment's live
 // authority (enrollment, parent credential, project access) immediately
 // before a prepared or retained checkpoint is disclosed to it. It is the only
 // authorization step of a checkpoint download; preparation never performs it.
-func (p RelayResetProtocol) authorizeCheckpointDownload(ctx context.Context, bindingUID string, checkpoint RelayResetCheckpoint, events []RemoteEvent) (RelayResetCheckpoint, error) {
+func (p RelayResetProtocol) AuthorizeCheckpointDownload(ctx context.Context, bindingUID string, checkpoint RelayResetCheckpoint) (RelayResetCheckpoint, error) {
 	if _, err := p.Backend.RelayGrant(ctx, bindingUID, "pull"); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
@@ -165,11 +164,9 @@ func (p RelayResetProtocol) authorizeCheckpointDownload(ctx context.Context, bin
 	if err != nil {
 		return RelayResetCheckpoint{}, err
 	}
-	if events == nil {
-		events, _, err = DecodeRootResetPayload(pin, checkpoint.Snapshot)
-		if err != nil {
-			return RelayResetCheckpoint{}, err
-		}
+	events, _, err := DecodeRootResetPayload(pin, checkpoint.Snapshot)
+	if err != nil {
+		return RelayResetCheckpoint{}, err
 	}
 	known := map[string]bool{}
 	for _, event := range events {

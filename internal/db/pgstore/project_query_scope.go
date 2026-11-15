@@ -27,22 +27,22 @@ func relayEventIssueLookup(ctx context.Context, query eventQueryRower) *db.Event
 			return db.Issue{}, db.ErrNotFound
 		}
 		return db.Issue{ProjectUID: projectUID.String}, err
-	})
+	}, nil)
 }
 
 // eventIssueLookup memoizes the event reference lookups below for one read.
 func eventIssueLookup(ctx context.Context, query eventQueryRower) *db.EventIssueLookup {
 	return eventIssueLookupWithUID(ctx, query, func(uid string) (db.Issue, error) {
 		return eventIssueByUID(ctx, query, uid)
+	}, func(projectUID, ref string) (db.Issue, error) {
+		return eventIssueByRef(ctx, query, projectUID, ref)
 	})
 }
 
-func eventIssueLookupWithUID(ctx context.Context, query eventQueryRower, byUID func(string) (db.Issue, error)) *db.EventIssueLookup {
+func eventIssueLookupWithUID(ctx context.Context, query eventQueryRower, byUID func(string) (db.Issue, error), byRef func(string, string) (db.Issue, error)) *db.EventIssueLookup {
 	return db.NewEventIssueLookup(
 		byUID,
-		func(projectUID, ref string) (db.Issue, error) {
-			return eventIssueByRef(ctx, query, projectUID, ref)
-		},
+		byRef,
 		func(uid string) (db.Issue, error) {
 			args := []any{uid}
 			return scanIssue(ctx, query.QueryRowContext(ctx,

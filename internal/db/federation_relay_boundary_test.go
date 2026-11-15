@@ -11,14 +11,8 @@ import (
 
 func TestRelayCloseEvidenceReusedProjectName(t *testing.T) {
 	event := RemoteEvent{ProjectUID: "own", Type: "issue.closed", Payload: jsontext.Value(`{"evidence":[{"type":"duplicate-of","issue_ref":"reused#1234"}]}`)}
-	lookup := NewEventIssueLookup(nil, func(_, ref string) (Issue, error) {
-		require.Equal(t, "reused#1234", ref)
-		return Issue{ProjectUID: "replacement"}, nil
-	}, nil)
-	ctx := WithProjectAccessTransactionCheck(t.Context(), func(_ context.Context, _ Transaction, projectUID string) error {
-		require.Equal(t, "replacement", projectUID)
-		return nil
-	})
+	lookup := NewEventIssueLookup(nil, nil, nil)
+	ctx := t.Context()
 	err := AuthorizeRelayRelease(ctx, nil, lookup, "own", []RemoteEvent{event})
 	require.ErrorIs(t, err, ErrRelayReferenceUnprovable)
 }
@@ -61,6 +55,7 @@ func TestRelayCommentReplyRelease(t *testing.T) {
 }
 
 func TestRelayEventPeerProjects(t *testing.T) {
+	require.Equal(t, "issue.restated", RepeatedImportEventType)
 	const issueUID = "00000000000000000000000001"
 	const commentUID = "00000000000000000000000002"
 	peer := Issue{ProjectUID: "peer"}
@@ -100,7 +95,7 @@ func TestRelayEventPeerProjects(t *testing.T) {
 		{"missing qualified evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"other#1234"}]}`, nil, false, true},
 		{"missing UID evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"00000000000000000000000003"}]}`, nil, false, true},
 		{"purged issue", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"gone"}]}`, nil, false, false},
-		{"short parent", "issue.closed", `{"parent_short_id":"peer#1"}`, nil, false, true},
+		{"short parent", "issue.closed", `{"parent_short_id":"1234"}`, nil, false, false},
 		{"metadata notification", "issue.created", `{"metadata":{"notify.recipient":{"re":"` + commentUID + `"}}}`, nil, true, false},
 		{"diff notification", "issue.metadata_updated", `{"diff":{"notify.recipient":{"from":{"re":"` + commentUID + `"},"to":{"re":"` + commentUID + `"}}}}`, nil, true, false},
 		{"deleted comment", "issue.created", `{"metadata":{"notify.recipient":{"re":"00000000000000000000000003"}}}`, nil, false, true},
