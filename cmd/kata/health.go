@@ -57,7 +57,7 @@ func newHealthCmd() *cobra.Command {
 			}
 			if a.resolved.ConfiguredRemote() {
 				selected.Kind = "remote"
-				selected.Endpoint = safeDaemonOrigin(a.baseURL)
+				selected.Endpoint = safeResolvedDaemonEndpoint(a.resolved)
 			}
 			if profile := a.resolved.LocalProfile; profile != nil {
 				selected.Kind = "local_profile"
