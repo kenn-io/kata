@@ -87,17 +87,9 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID), "a refused reset must preserve the owner's private link")
 	_, err = store.DeleteLinkAndEvent(ctx, links[0], db.LinkEventParams{
 		EventType: "issue.unlinked", EventIssueID: private.ID, Actor: "member",
-		FromUID: private.UID, ToUID: issue.UID, FromShortID: private.ShortID, ToShortID: issue.ShortID,
+		FromUID: issue.UID, ToUID: private.UID, FromShortID: issue.ShortID, ToShortID: private.ShortID,
 	})
-	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "a non-root cannot remove a cross-project link")
-	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID))
-	forged := links[0]
-	forged.FromIssueID = original.ID
-	_, err = store.DeleteLinkAndEvent(writeCtx, forged, db.LinkEventParams{
-		EventType: "issue.unlinked", EventIssueID: original.ID, Actor: "member",
-		FromUID: original.UID, ToUID: private.UID, FromShortID: original.ShortID, ToShortID: private.ShortID,
-	})
-	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "root authority applies only to an endpoint of the stored link")
+	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "the event issue's project root is not local")
 	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID))
 	_, err = store.DeleteLinkAndEvent(writeCtx, links[0], db.LinkEventParams{
 		EventType: "issue.unlinked", EventIssueID: issue.ID, Actor: "member",

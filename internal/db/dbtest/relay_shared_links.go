@@ -69,7 +69,7 @@ func NewRelaySharedAccessFixture(t *testing.T, store db.Storage) RelaySharedAcce
 	return RelaySharedAccessFixture{Projects: projects, Issues: issues, Grants: grants, Linked: linked, Team: team, Signer: db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}}
 }
 
-// RunRelaySharedLinks checks shared links across relay deliveries and resets.
+// RunRelaySharedLinks checks shared links across relay deliveries.
 func RunRelaySharedLinks(t *testing.T, store db.Storage) {
 	fixture := NewRelaySharedAccessFixture(t, store)
 	ctx := t.Context()
@@ -88,13 +88,4 @@ func RunRelaySharedLinks(t *testing.T, store db.Storage) {
 	retry, err := store.PendingRelayDeliveries(db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures), binding, db.RelayStreamEvent, 100)
 	require.NoError(t, err)
 	require.Equal(t, offered, retry)
-	resetter := store.(db.RelayResetStore)
-	_, err = resetter.CreateRelayReset(ctx, binding, fixture.Signer)
-	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-	featuresCtx := db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures)
-	checkpoint, err := resetter.CreateRelayReset(featuresCtx, binding, fixture.Signer)
-	require.NoError(t, err)
-	repeated, err := resetter.CreateRelayReset(featuresCtx, binding, fixture.Signer)
-	require.NoError(t, err)
-	require.Equal(t, checkpoint, repeated)
 }

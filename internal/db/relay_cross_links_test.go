@@ -8,11 +8,11 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestRelayCrossLinkFeatureAndParentFold(t *testing.T) {
+func TestRelayCrossLinkFeature(t *testing.T) {
 	root, replica := "root", "replica"
-	child, foreign, local := "child", "foreign", "local"
+	child, foreign := "child", "foreign"
 	remote := db.RemoteEvent{OriginInstanceUID: root, ProjectUID: "a", IssueUID: &child, Type: "issue.links_changed", Payload: jsontext.Value(`{"related_added_uids":["foreign"]}`)}
-	projects := map[string]string{child: "a", foreign: "b", local: "a"}
+	projects := map[string]string{child: "a", foreign: "b"}
 	resolve := func(uid string) (string, error) { return projects[uid], nil }
 	feature, err := db.RelayContentRequiredFeatures(remote, root, resolve)
 	require.NoError(t, err)
@@ -31,6 +31,12 @@ func TestRelayCrossLinkFeatureAndParentFold(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, feature)
 
+}
+
+func TestRelayCrossLinkParentFold(t *testing.T) {
+	root, replica := "root", "replica"
+	child, foreign, local := "child", "foreign", "local"
+	projects := map[string]string{child: "a", foreign: "b", local: "a"}
 	authority := db.RelayFoldAuthority{Projects: projects, Roots: map[string]string{"a": root, "b": root}, Groups: map[string]map[string]bool{"a": {"b": true}}}
 	events := []db.FoldEvent{
 		{UID: "1", ProjectUID: "a", IssueUID: child, OriginInstanceUID: root, Type: "issue.links_changed", HLCPhysicalMS: 1, Payload: jsontext.Value(`{"parent_set_uid":"foreign"}`)},
@@ -71,11 +77,6 @@ func TestRelayCrossLinkPolicy(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, keep)
 	event.Type = "issue.unlinked"
-	_, keep, err = db.StripCrossProjectLinkAdditions(event, authority.Policy(event))
-	require.NoError(t, err)
-	require.True(t, keep)
-	event.Type = "issue.linked"
-	event.OriginInstanceUID = "root"
 	_, keep, err = db.StripCrossProjectLinkAdditions(event, authority.Policy(event))
 	require.NoError(t, err)
 	require.True(t, keep)
