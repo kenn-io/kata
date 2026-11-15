@@ -1,7 +1,9 @@
 package federation_test
 
 import (
+	"context"
 	"crypto/ed25519"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,6 +35,10 @@ func TestRelayCrossLinkResetHistory(t *testing.T) {
 			require.NoError(t, err)
 			_, err = root.store.DeleteLinkAndEvent(db.WithRootAttribution(ctx, root.signer, root.account), link, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
 			require.NoError(t, err)
+			root.project = projects[1]
+			peerHub := &relayMatrixNode{store: hub.store, http: hub.http, signer: hub.signer, userToken: hub.userToken, account: hub.account, credentials: hub.credentials}
+			enrollRelayMatrixReplica(t, root, peerHub, "reset-peer-hub", true)
+			syncRelayMatrixNode(t, peerHub)
 			root.project = projects[0]
 			enrollRelayMatrixReplica(t, root, hub, "reset-hub", true)
 			binding, err := hub.store.FederationBindingByProject(ctx, hub.project.ID)
@@ -85,6 +91,17 @@ func TestRelayCrossLinkResetHistory(t *testing.T) {
 			require.Equal(t, checkpoint.Snapshot, forwarded.Snapshot)
 			_, err = hubResets.CreateRelayReset(ctx, downstream.RelayConfig.BindingUID, db.RootAttributionSigner{})
 			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+			denied := errors.New("peer denied")
+			rejectPeer := db.WithProjectAccessTransactionCheck(features, func(_ context.Context, _ db.Transaction, uid string) error {
+				if uid == projects[1].UID {
+					return denied
+				}
+				return nil
+			})
+			before = relayState(hub.store)
+			_, err = hubResets.CreateRelayReset(rejectPeer, downstream.RelayConfig.BindingUID, db.RootAttributionSigner{})
+			require.ErrorIs(t, err, denied)
+			require.Equal(t, before, relayState(hub.store))
 			retry, err = hubResets.CreateRelayReset(features, downstream.RelayConfig.BindingUID, db.RootAttributionSigner{})
 			require.NoError(t, err)
 			require.Equal(t, forwarded, retry)

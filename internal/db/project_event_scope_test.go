@@ -36,7 +36,9 @@ func TestProjectScopePreservesPayloadOnlyReferences(t *testing.T) {
 		{ProjectUID: "own", Type: "issue.unlinked", Payload: `{"from_uid":"00000000000000000000000001","to_uid":"00000000000000000000000002"}`},
 	} {
 		t.Run(event.Type, func(t *testing.T) {
-			reset, err := EventRequiresProjectScopeReset(ctx, event, nil, nil, nil)
+			issue := func(string) (Issue, error) { return Issue{ProjectUID: "peer"}, nil }
+			ref := func(string, string) (Issue, error) { return Issue{ProjectUID: "peer"}, nil }
+			reset, err := EventRequiresProjectScopeReset(ctx, event, issue, ref, issue)
 			require.NoError(t, err)
 			require.False(t, reset)
 		})
