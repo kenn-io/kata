@@ -95,7 +95,7 @@ func (p RelayResetProtocol) CreateReset(ctx context.Context, bindingUID string, 
 			return RelayResetCheckpoint{}, err
 		}
 		if !refresh {
-			return p.AuthorizeCheckpointDownload(ctx, bindingUID, result)
+			return p.authorizeCheckpointDownload(ctx, bindingUID, result, nil)
 		}
 	}
 	if pin.AuthorityUID == p.InstanceUID {
@@ -115,11 +115,11 @@ func (p RelayResetProtocol) CreateReset(ctx context.Context, bindingUID string, 
 	if err := RelayDownstreamOwesRootWork(grant, deliveries, nil); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
-	prepared, err := p.PrepareForwardedCheckpoint(ctx, grant, pin)
+	prepared, events, err := p.prepareForwardedCheckpoint(ctx, grant, pin)
 	if err != nil {
 		return RelayResetCheckpoint{}, err
 	}
-	return p.AuthorizeCheckpointDownload(ctx, bindingUID, prepared)
+	return p.authorizeCheckpointDownload(ctx, bindingUID, prepared, events)
 }
 
 // retainedCheckpoint verifies the checkpoint retained for the enrollment and
@@ -197,7 +197,8 @@ func (p RelayResetProtocol) captureRootCheckpoint(ctx context.Context, create re
 	if err := size.CapacityError(project.UID); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
-	if _, _, err := DecodeRootResetPayload(pin, snapshot); err != nil {
+	events, _, err := DecodeRootResetPayload(pin, snapshot)
+	if err != nil {
 		return RelayResetCheckpoint{}, err
 	}
 	retained, err := p.Backend.MetaValuesWithPrefix(ctx, RelayResetMetadataPrefix+project.UID+".")
@@ -259,5 +260,5 @@ func (p RelayResetProtocol) captureRootCheckpoint(ctx context.Context, create re
 	if err := p.Backend.SeedRelayArtifactManifests(ctx, grant, project.UID); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
-	return p.AuthorizeCheckpointDownload(ctx, create.bindingUID, result)
+	return p.authorizeCheckpointDownload(ctx, create.bindingUID, result, events)
 }
