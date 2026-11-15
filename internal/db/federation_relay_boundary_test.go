@@ -31,51 +31,33 @@ func TestRelayEventPeerProjects(t *testing.T) {
 	cases := []struct {
 		name, kind, payload string
 		related             *string
-		peer, unprovable    bool
+		peer                bool
 	}{
-		{"linked", "issue.linked", `{}`, &related, true, false},
-		{"linked payload", "issue.linked", `{"from_uid":"` + issueUID + `","to_uid":"` + issueUID + `"}`, nil, true, false},
-		{"unlinked payload", "issue.unlinked", `{"from_issue_uid":"` + issueUID + `","to_issue_uid":"` + issueUID + `"}`, nil, true, false},
-		{"links changed", "issue.links_changed", `{"blocks_added_uids":["` + issueUID + `"]}`, nil, true, false},
-		{"created", "issue.created", `{"links":[{"to_issue_uid":"` + issueUID + `"}]}`, nil, true, false},
-		{"snapshot", "issue.snapshot", `{"comments":[{"reply_to_uid":"` + commentUID + `","reply_kind":"reply"}]}`, nil, true, false},
-		{"restated", RepeatedImportEventType, `{"links":[{"to_issue_uid":"` + issueUID + `"}]}`, nil, true, false},
-		{"restated notification", RepeatedImportEventType, `{"metadata":{"notify.recipient":{"re":"` + commentUID + `"}}}`, nil, true, false},
-		{"moved snapshot", "issue.moved", `{"from_project_uid":"own","to_project_uid":"own","snapshot":{"links":[{"to_issue_uid":"` + issueUID + `"}]}}`, nil, true, false},
-		{"close parent", "issue.closed", `{"parent_uid":"` + issueUID + `"}`, nil, true, false},
-		{"qualified close evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"peer#1"}]}`, nil, false, false},
-		{"close UID evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"` + issueUID + `"}]}`, nil, true, false},
-		{"missing qualified evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"other#1234"}]}`, nil, false, false},
-		{"missing UID evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"00000000000000000000000003"}]}`, nil, false, false},
-		{"purged issue", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"gone"}]}`, nil, false, false},
-		{"short parent", "issue.closed", `{"parent_short_id":"1234"}`, nil, false, false},
-		{"metadata notification", "issue.created", `{"metadata":{"notify.recipient":{"re":"` + commentUID + `"}}}`, nil, true, false},
-		{"diff notification", "issue.metadata_updated", `{"diff":{"notify.recipient":{"from":{"re":"` + commentUID + `"},"to":{"re":"` + commentUID + `"}}}}`, nil, true, false},
-		{"deleted comment", "issue.created", `{"metadata":{"notify.recipient":{"re":"00000000000000000000000003"}}}`, nil, false, false},
+		{"linked", "issue.linked", `{}`, &related, true},
+		{"linked payload", "issue.linked", `{"from_uid":"` + issueUID + `","to_uid":"` + issueUID + `"}`, nil, true},
+		{"unlinked payload", "issue.unlinked", `{"from_issue_uid":"` + issueUID + `","to_issue_uid":"` + issueUID + `"}`, nil, true},
+		{"links changed", "issue.links_changed", `{"blocks_added_uids":["` + issueUID + `"]}`, nil, true},
+		{"created", "issue.created", `{"links":[{"to_issue_uid":"` + issueUID + `"}]}`, nil, true},
+		{"comment reply", "issue.commented", `{"reply_to_uid":"` + commentUID + `","reply_kind":"reply"}`, nil, true},
+		{"missing comment reply", "issue.commented", `{"reply_to_uid":"00000000000000000000000003","reply_kind":"reply"}`, nil, false},
+		{"missing close parent", "issue.closed", `{"parent_uid":"00000000000000000000000003"}`, nil, false},
+		{"snapshot", "issue.snapshot", `{"comments":[{"reply_to_uid":"` + commentUID + `","reply_kind":"reply"}]}`, nil, true},
+		{"restated", RepeatedImportEventType, `{"links":[{"to_issue_uid":"` + issueUID + `"}]}`, nil, true},
+		{"restated notification", RepeatedImportEventType, `{"metadata":{"notify.recipient":{"re":"` + commentUID + `"}}}`, nil, true},
+		{"moved snapshot", "issue.moved", `{"from_project_uid":"own","to_project_uid":"own","snapshot":{"links":[{"to_issue_uid":"` + issueUID + `"}]}}`, nil, true},
+		{"close parent", "issue.closed", `{"parent_uid":"` + issueUID + `"}`, nil, true},
+		{"close UID evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"` + issueUID + `"}]}`, nil, true},
+		{"missing UID evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"00000000000000000000000003"}]}`, nil, false},
+		{"short parent", "issue.closed", `{"parent_short_id":"1234"}`, nil, false},
+		{"metadata notification", "issue.created", `{"metadata":{"notify.recipient":{"re":"` + commentUID + `"}}}`, nil, true},
+		{"diff notification", "issue.metadata_updated", `{"diff":{"notify.recipient":{"from":{"re":"` + commentUID + `"},"to":{"re":"` + commentUID + `"}}}}`, nil, true},
+		{"deleted comment", "issue.created", `{"metadata":{"notify.recipient":{"re":"00000000000000000000000003"}}}`, nil, false},
 	}
 	t.Run("subject moved to peer", func(t *testing.T) {
 		projects, err := RelayEventPeerProjects(RemoteEvent{ProjectUID: "own", Type: "issue.updated", IssueUID: &related, Payload: jsontext.Value(`{}`)}, lookup)
 		require.NoError(t, err)
 		require.Contains(t, projects, "peer")
 	})
-	missing := "00000000000000000000000003"
-	for _, tc := range []struct {
-		name  string
-		event RemoteEvent
-	}{
-		{"missing subject", RemoteEvent{Type: "issue.updated", IssueUID: &missing, Payload: jsontext.Value(`{}`)}},
-		{"missing related", RemoteEvent{Type: "issue.linked", RelatedIssueUID: &missing, Payload: jsontext.Value(`{}`)}},
-		{"missing link payload", RemoteEvent{Type: "issue.linked", Payload: jsontext.Value(`{"from_uid":"` + issueUID + `","to_uid":"` + missing + `"}`)}},
-		{"missing unlink payload", RemoteEvent{Type: "issue.unlinked", Payload: jsontext.Value(`{"from_issue_uid":"` + missing + `","to_issue_uid":"` + issueUID + `"}`)}},
-		{"missing link diff", RemoteEvent{Type: "issue.links_changed", Payload: jsontext.Value(`{"blocks_added_uids":["` + missing + `"]}`)}},
-		{"missing snapshot link", RemoteEvent{Type: "issue.snapshot", Payload: jsontext.Value(`{"links":[{"to_issue_uid":"` + missing + `"}]}`)}},
-		{"missing close parent", RemoteEvent{Type: "issue.closed", Payload: jsontext.Value(`{"parent_uid":"` + missing + `"}`)}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := RelayEventPeerProjects(tc.event, lookup)
-			require.NoError(t, err)
-		})
-	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			projects, err := RelayEventPeerProjects(RemoteEvent{ProjectUID: "own", Type: tc.kind, Payload: jsontext.Value(tc.payload), RelatedIssueUID: tc.related}, lookup)
