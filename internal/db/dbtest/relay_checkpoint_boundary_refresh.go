@@ -85,10 +85,25 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	_, err = resetter.CreateRelayReset(ctx, bindingUID, fixture.signer)
 	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "a live private link must be refused before signing shared current state")
 	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID), "a refused reset must preserve the owner's private link")
-	// A legacy peer can remove its own previously accepted crossing history.
-	unlinkPayload := jsontext.Value(`{"from_uid":"` + issue.UID + `","to_uid":"` + private.UID + `","link_from_uid":"` + issue.UID + `","link_to_uid":"` + private.UID + `","type":"blocks"}`)
-	unlink := newRemoteEvent(t, fixture.project, &issueUID, "issue.unlinked", "member", legacyUID, 601, unlinkPayload)
-	seedHistory(t, fixture.project, unlink)
+	_, err = store.DeleteLinkAndEvent(ctx, links[0], db.LinkEventParams{
+		EventType: "issue.unlinked", EventIssueID: private.ID, Actor: "member",
+		FromUID: private.UID, ToUID: issue.UID, FromShortID: private.ShortID, ToShortID: issue.ShortID,
+	})
+	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "a non-root cannot remove a cross-project link")
+	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID))
+	forged := links[0]
+	forged.FromIssueID = original.ID
+	_, err = store.DeleteLinkAndEvent(writeCtx, forged, db.LinkEventParams{
+		EventType: "issue.unlinked", EventIssueID: original.ID, Actor: "member",
+		FromUID: original.UID, ToUID: private.UID, FromShortID: original.ShortID, ToShortID: private.ShortID,
+	})
+	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "root authority applies only to an endpoint of the stored link")
+	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID))
+	_, err = store.DeleteLinkAndEvent(writeCtx, links[0], db.LinkEventParams{
+		EventType: "issue.unlinked", EventIssueID: issue.ID, Actor: "member",
+		FromUID: issue.UID, ToUID: private.UID, FromShortID: issue.ShortID, ToShortID: private.ShortID,
+	})
+	require.NoError(t, err, "the root can remove a non-shared legacy link")
 
 	require.Empty(t, linkTargetUIDs(t, store, issue.ID), "remove the live boundary without rewriting private history")
 
@@ -97,7 +112,8 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	// Model an already-rejected pull using the authentic metadata envelope
 	// whose issue introduction the old feed withheld. Retain the complete
 	// old offer to check that checkpoint recovery covers every row.
-	batch, err := store.PendingRelayDeliveries(ctx, bindingUID, db.RelayStreamEvent, 100)
+	featuresCtx := db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures)
+	batch, err := store.PendingRelayDeliveries(featuresCtx, bindingUID, db.RelayStreamEvent, 100)
 	require.NoError(t, err)
 	require.NotEmpty(t, batch)
 	var rejectedBatch []db.RelayEnvelope
@@ -125,7 +141,7 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	required, err = bootstrap.RelayEnrollmentNeedsReset(ctx, bindingUID)
 	require.NoError(t, err)
 	require.True(t, required, "a retained checkpoint cannot hide a later private creation boundary")
-	replayed, err := store.PendingRelayDeliveries(ctx, bindingUID, db.RelayStreamEvent, 100)
+	replayed, err := store.PendingRelayDeliveries(featuresCtx, bindingUID, db.RelayStreamEvent, 100)
 	require.NoError(t, err)
 	require.Equal(t, batch, replayed, "the rejected batch retains its original emitted source identities")
 	refreshed, err := resetter.CreateRelayReset(ctx, bindingUID, fixture.signer)

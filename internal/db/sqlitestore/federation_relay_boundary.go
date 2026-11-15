@@ -40,6 +40,28 @@ func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int
 	return nil
 }
 
+func ensureRelayLinkRemovalBoundaryTx(ctx context.Context, tx *sql.Tx, link db.Link, eventIssue db.Issue) error {
+	err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID)
+	if !errors.Is(err, db.ErrFederationCrossProjectBoundary) || (eventIssue.ID != link.FromIssueID && eventIssue.ID != link.ToIssueID) {
+		return err
+	}
+	var exists bool
+	if queryErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM links WHERE id=? AND from_issue_id=? AND to_issue_id=?)`, link.ID, link.FromIssueID, link.ToIssueID).Scan(&exists); queryErr != nil {
+		return queryErr
+	}
+	if !exists {
+		return err
+	}
+	root, rootErr := relaySharedProjectsTx(ctx, tx, eventIssue.ProjectID, eventIssue.ProjectID, true)
+	if rootErr != nil {
+		return rootErr
+	}
+	if root {
+		return nil
+	}
+	return err
+}
+
 func relayProjectsActiveTx(ctx context.Context, tx *sql.Tx, fromProject, toProject int64) (bool, error) {
 	var relayed bool
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id IN(?,?) AND (b.relay_config IS NOT NULL OR EXISTS(SELECT 1 FROM federation_enrollments e WHERE e.project_id=b.project_id AND e.relay_protocol_version=1 AND e.revoked_at IS NULL)))`, fromProject, toProject).Scan(&relayed)

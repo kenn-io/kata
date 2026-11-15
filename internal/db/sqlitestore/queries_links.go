@@ -558,7 +558,7 @@ func (d *Store) deleteLinkAndEvent(ctx context.Context, link db.Link, ev db.Link
 	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
 		return db.Event{}, err
 	}
-	if err := ensureRelayLinkBoundaryTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+	if err := ensureRelayLinkRemovalBoundaryTx(ctx, tx, link, eventIssue); err != nil {
 		return db.Event{}, err
 	}
 
