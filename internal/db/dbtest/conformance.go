@@ -144,15 +144,23 @@ var storageScenarios = []scenario{
 		RunRelayUnrelatedCheckpointCache(t, backend)
 		return nil
 	}},
-	{name: "relay peer release", run: func(t *testing.T, store db.Storage) error { RunRelayPeerRelease(t, store); return nil }},
+	{name: "relay named evidence cache", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "InsertRemoteEvents", "PinRootAuthority", "RenameProject", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayNamedEvidenceCache(t, store, backend)
+		return nil
+	}},
+	{name: "relay peer release", run: func(t *testing.T, store db.Storage) error { RunRelayPeerRelease(t, store, false); return nil }},
 	{name: "relay same project evidence reset", run: func(t *testing.T, store db.Storage) error {
 		RunRelaySameProjectNamedEvidenceReset(t, store)
 		return nil
 	}},
-	{name: "relay comment reply release", run: func(t *testing.T, store db.Storage) error { RunRelayCommentReplyRelease(t, store, false); return nil }},
-	{name: "relay missing reply release", run: func(t *testing.T, store db.Storage) error { RunRelayCommentReplyRelease(t, store, true); return nil }},
-	{name: "relay purged peer", run: func(t *testing.T, store db.Storage) error { RunRelayPurgedPeer(t, store); return nil }},
-	{name: "relay deleted notification", run: func(t *testing.T, store db.Storage) error { RunRelayMissingNotification(t, store); return nil }},
+	{name: "relay comment references", runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayCommentReplyRelease(t, store)
+		other := backend.Open(t)
+		t.Cleanup(func() { require.NoError(t, other.Close()) })
+		RunRelayMissingNotification(t, other)
+		return nil
+	}},
+	{name: "relay purged peer", run: func(t *testing.T, store db.Storage) error { RunRelayPeerRelease(t, store, true); return nil }},
 	{name: "relay reset purged peer", run: func(t *testing.T, store db.Storage) error { RunSignedRelayResetPurgedPeer(t, store); return nil }},
 	{name: "relay ingest returns local issue ids", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "IssueByUID", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayIngestReturnsLocalIssueIDs(t, store)

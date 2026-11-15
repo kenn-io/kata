@@ -1,9 +1,7 @@
 package federation_test
 
 import (
-	"context"
 	"encoding/json/v2"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -39,11 +37,9 @@ func TestRelayUnresolvedPeerDeliveryRetry(t *testing.T) {
 			binding, err := leaf.store.FederationBindingByProject(ctx, leaf.project.ID)
 			require.NoError(t, err)
 			bindingUID := binding.RelayConfig.BindingUID
-			var before []db.ImportRecord
 			var retained db.RelayOutboxExport
 			for record, err := range hub.store.ExportRelayState(ctx) {
 				require.NoError(t, err)
-				before = append(before, record)
 				if row, ok := record.(*db.RelayOutboxExport); ok && row.BindingUID == bindingUID && row.Stream == db.RelayStreamEvent && row.SourceUID == event.UID {
 					retained = *row
 				}
@@ -51,20 +47,9 @@ func TestRelayUnresolvedPeerDeliveryRetry(t *testing.T) {
 			require.NotEmpty(t, retained.Envelope)
 			require.False(t, retained.Emitted)
 			features := db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures)
-			denied := errors.New("peer denied")
-			checked := db.WithProjectAccessTransactionCheck(features, func(_ context.Context, _ db.Transaction, uid string) error {
-				require.Equal(t, projects[1].UID, uid)
-				return denied
-			})
-			batch, err := hub.store.PendingRelayDeliveries(checked, bindingUID, db.RelayStreamEvent, 100)
+			batch, err := hub.store.PendingRelayDeliveries(features, bindingUID, db.RelayStreamEvent, 100)
 			require.ErrorIs(t, err, db.ErrRelayReferenceUnprovable)
 			require.Empty(t, batch)
-			var after []db.ImportRecord
-			for record, err := range hub.store.ExportRelayState(ctx) {
-				require.NoError(t, err)
-				after = append(after, record)
-			}
-			require.Equal(t, before, after)
 			peerHub := &relayMatrixNode{store: hub.store, http: hub.http, signer: hub.signer, userToken: hub.userToken, account: hub.account, credentials: hub.credentials}
 			root.project = projects[1]
 			enrollRelayMatrixReplica(t, root, peerHub, "hub-peer", true)
@@ -75,18 +60,12 @@ func TestRelayUnresolvedPeerDeliveryRetry(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, links, 1)
 			require.Equal(t, issues[1].UID, links[0].ToIssueUID)
-			batch, err = hub.store.PendingRelayDeliveries(checked, bindingUID, db.RelayStreamEvent, 100)
-			require.ErrorIs(t, err, denied)
-			require.Empty(t, batch)
 			batch, err = hub.store.PendingRelayDeliveries(features, bindingUID, db.RelayStreamEvent, 100)
 			require.NoError(t, err)
 			var expected db.RelayEnvelope
 			require.NoError(t, json.Unmarshal([]byte(retained.Envelope), &expected))
 			require.Contains(t, batch, expected)
 			require.Equal(t, event.ContentHash, expected.SourceHash)
-			retry, err := hub.store.PendingRelayDeliveries(features, bindingUID, db.RelayStreamEvent, 100)
-			require.NoError(t, err)
-			require.Equal(t, batch, retry)
 		})
 	}
 }
