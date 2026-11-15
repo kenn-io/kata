@@ -280,6 +280,10 @@ func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]str
 		}
 		ids[uid], uids[id] = id, uid
 	}
+	var instance string
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&instance); err != nil {
+		return a, err
+	}
 	for uid, id := range ids {
 		binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=?`, id))
 		if errors.Is(err, db.ErrNotFound) {
@@ -291,7 +295,7 @@ func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]str
 		if !binding.Enabled {
 			continue
 		}
-		root, err := relayProjectRootTx(ctx, tx, uid, binding)
+		root, err := relayProjectRootTx(ctx, tx, uid, binding, instance)
 		if err != nil {
 			return a, err
 		}

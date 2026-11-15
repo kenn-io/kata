@@ -157,7 +157,7 @@ func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID in
 			}
 			return "", err
 		}
-		return relayProjectRootTx(ctx, tx, uid, binding)
+		return relayProjectRootTx(ctx, tx, uid, binding, instance)
 	}
 	first, err := root(projectID, binding)
 	if err != nil {
@@ -170,13 +170,11 @@ func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID in
 	return first != "" && first == second && (!localWrite || first == instance), nil
 }
 
-func relayProjectRootTx(ctx context.Context, tx *sql.Tx, projectUID string, binding db.FederationBinding) (string, error) {
+func relayProjectRootTx(ctx context.Context, tx *sql.Tx, projectUID string, binding db.FederationBinding, instance string) (string, error) {
 	pin, err := rootPinTx(ctx, tx, projectUID, "")
 	if errors.Is(err, db.ErrNotFound) {
 		if binding.Enabled && binding.Role == db.FederationRoleHub {
-			var instance string
-			err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&instance)
-			return instance, err
+			return instance, nil
 		}
 		return "", nil
 	}

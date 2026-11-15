@@ -30,7 +30,7 @@ func (d *Store) RelayMetadataRequiresCrossLinks(ctx context.Context, projectID i
 		if err != nil {
 			return false, err
 		}
-		pin.AuthorityUID, err = relayProjectRootTx(ctx, tx, project.UID, binding)
+		pin.AuthorityUID, err = relayProjectRootTx(ctx, tx, project.UID, binding, d.InstanceUID())
 		if err != nil {
 			return false, err
 		}
