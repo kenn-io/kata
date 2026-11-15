@@ -7,6 +7,9 @@ import (
 	"strings"
 )
 
+// RepeatedImportEventType identifies a restated issue snapshot.
+const RepeatedImportEventType = "issue.restated"
+
 // References returns comment UIDs named by a notification slot or diff.
 func References(raw jsontext.Value) []string {
 	var object map[string]jsontext.Value
@@ -49,7 +52,7 @@ func WalkSlots(slots map[string]jsontext.Value, keep func(jsontext.Value) (bool,
 
 // WalkEventPayload visits notification slots in a supported event payload.
 func WalkEventPayload(raw jsontext.Value, eventType string, keep func(jsontext.Value) (bool, error)) (jsontext.Value, error) {
-	if eventType != "issue.metadata_updated" && eventType != "issue.created" && eventType != "issue.snapshot" && eventType != "issue.restated" {
+	if eventType != "issue.metadata_updated" && eventType != "issue.created" && eventType != "issue.snapshot" && eventType != RepeatedImportEventType {
 		return raw, nil
 	}
 	raw = bytes.TrimSpace(raw)
