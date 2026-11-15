@@ -8,6 +8,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// RunRelayCrossLinkResetHistory checks feature gating for cached and forwarded reset history.
 func RunRelayCrossLinkResetHistory(t *testing.T, root db.Storage, backend Backend) {
 	ctx := t.Context()
 	hub := backend.Open(t)
