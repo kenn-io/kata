@@ -2,6 +2,7 @@ package sqlitestore
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"fmt"
 	"strconv"
@@ -248,9 +249,11 @@ func TestFullPulledMaterializationRetriesChanges(t *testing.T) {
 			linkEvent := incrementalRemoteEvent(t, p, issue.UID, "issue.linked", fmt.Sprintf(`{"from_uid":%q,"to_uid":%q,"type":"related"}`, issue.UID, peerUID), 9_000_000_000_001)
 			_, err = d.InsertRemoteEvents(ctx, p.ID, []db.RemoteEvent{projectEvent, linkEvent})
 			require.NoError(t, err)
-			_, err = d.ExecContext(ctx, `INSERT INTO federation_root_keys(project_uid,authority_uid,key_id,public_key) VALUES(?,?,?,?)`, p.UID, "authority", "key", "public")
+			public, _, err := ed25519.GenerateKey(nil)
 			require.NoError(t, err)
-			_, err = d.ExecContext(ctx, `INSERT INTO federation_event_provenance(project_uid,event_uid,content_hash,reset_epoch,sequence,key_id,receipt) VALUES(?,?,?,?,?,?,?)`, p.UID, linkEvent.EventUID, linkEvent.ContentHash, 1, 1, "key", `{"ingress_instance_uid":"remote"}`)
+			keyID := db.RootPublicKeyID(public)
+			require.NoError(t, d.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: p.UID, AuthorityUID: "01HZNQ7VFPK1XGD8R5MABC0003", KeyID: keyID, PublicKey: public}))
+			_, err = d.ExecContext(ctx, `INSERT INTO federation_event_provenance(project_uid,event_uid,content_hash,reset_epoch,sequence,key_id,receipt) VALUES(?,?,?,?,?,?,?)`, p.UID, linkEvent.EventUID, linkEvent.ContentHash, 1, 1, keyID, `{"ingress_instance_uid":"remote"}`)
 			require.NoError(t, err)
 			other, err := Open(ctx, d.Path())
 			require.NoError(t, err)
