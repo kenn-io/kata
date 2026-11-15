@@ -17,36 +17,21 @@ type RootResetProvenance struct {
 	Entities []EntityProvenance   `json:"entities"`
 }
 
-func visitRelayResetSources(snapshot RootResetSnapshot, visit func(int, RemoteEvent) error) error {
-	for section, raw := range [][]byte{snapshot.Events, snapshot.Entities} {
-		var bodies [][]byte
-		if err := json.Unmarshal(raw, &bodies, json.RejectUnknownMembers(true)); err != nil {
-			return err
-		}
-		if bodies == nil {
-			return errors.New("reset payload omits an authoritative collection")
-		}
-		for _, body := range bodies {
-			event, err := DecodeRelaySourceEvent(body)
-			if err != nil {
-				return err
-			}
-			if err := visit(section, event); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 // DecodeRootResetPayload validates committed contents before native replacement.
 // Event bodies retain the original payload bytes, including across compaction.
 func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]RemoteEvent, RootResetProvenance, error) {
+	var sources, entities [][]byte
 	var provenance RootResetProvenance
+	if err := json.Unmarshal(snapshot.Events, &sources, json.RejectUnknownMembers(true)); err != nil {
+		return nil, provenance, err
+	}
+	if err := json.Unmarshal(snapshot.Entities, &entities, json.RejectUnknownMembers(true)); err != nil {
+		return nil, provenance, err
+	}
 	if err := json.Unmarshal(snapshot.Provenance, &provenance, json.RejectUnknownMembers(true)); err != nil {
 		return nil, provenance, err
 	}
-	if provenance.Keys == nil || provenance.Receipts == nil || provenance.Entities == nil {
+	if sources == nil || entities == nil || provenance.Keys == nil || provenance.Receipts == nil || provenance.Entities == nil {
 		return nil, provenance, errors.New("reset payload omits an authoritative collection")
 	}
 	var artifacts []embedding.ArtifactManifest
@@ -79,28 +64,30 @@ func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]Remot
 	if active != 1 {
 		return nil, provenance, errors.New("reset requires the existing active root pin")
 	}
-	events := make([]RemoteEvent, 0)
+	events := make([]RemoteEvent, 0, len(sources)+len(entities))
 	byUID := map[string]RemoteEvent{}
-	if err := visitRelayResetSources(snapshot, func(section int, event RemoteEvent) error {
-		if event.ProjectUID != pin.ProjectUID || !uid.Valid(event.EventUID) || !uid.Valid(event.OriginInstanceUID) {
-			return errors.New("invalid reset source identity or event type")
+	for section, bodies := range [][][]byte{sources, entities} {
+		for _, body := range bodies {
+			event, err := DecodeRelaySourceEvent(body)
+			if err != nil {
+				return nil, provenance, err
+			}
+			if event.ProjectUID != pin.ProjectUID || !uid.Valid(event.EventUID) || !uid.Valid(event.OriginInstanceUID) {
+				return nil, provenance, errors.New("invalid reset source identity or event type")
+			}
+			if section == 1 && (event.OriginInstanceUID != pin.AuthorityUID || (!IsFederationSnapshotEvent(event.Type) && event.Type != "project.metadata_updated")) {
+				return nil, provenance, errors.New("reset entity section requires root snapshot records")
+			}
+			if err := ValidateFederationEntries(event.Type, event.EventUID, event.Payload); err != nil {
+				return nil, provenance, err
+			}
+			if _, exists := byUID[event.EventUID]; exists {
+				return nil, provenance, errors.New("duplicate reset event")
+			}
+			byUID[event.EventUID] = event
+			events = append(events, event)
 		}
-		if section == 1 && (event.OriginInstanceUID != pin.AuthorityUID || (!IsFederationSnapshotEvent(event.Type) && event.Type != "project.metadata_updated")) {
-			return errors.New("reset entity section requires root snapshot records")
-		}
-		if err := ValidateFederationEntries(event.Type, event.EventUID, event.Payload); err != nil {
-			return err
-		}
-		if _, exists := byUID[event.EventUID]; exists {
-			return errors.New("duplicate reset event")
-		}
-		byUID[event.EventUID] = event
-		events = append(events, event)
-		return nil
-	}); err != nil {
-		return nil, provenance, err
 	}
-
 	receipts := map[string]AttributionReceipt{}
 	sequences := map[string]bool{}
 	for _, receipt := range provenance.Receipts {

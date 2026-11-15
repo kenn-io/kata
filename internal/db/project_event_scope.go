@@ -93,11 +93,11 @@ func EventRequiresProjectScopeReset(
 		return false, nil
 	}
 	projectIsPrivate := func(uid string) (bool, error) { _, visible := allowed[uid]; return !visible, nil }
-	return walkEventProjectReferences(event, issueIsPrivate, refIsPrivate, commentIsPrivate, projectIsPrivate, false)
+	return walkEventProjectReferences(event, issueIsPrivate, refIsPrivate, commentIsPrivate, projectIsPrivate)
 }
 
 // walkEventProjectReferences visits structured references without selecting a visibility policy.
-func walkEventProjectReferences(event Event, issueIsPrivate func(string) (bool, error), refIsPrivate func(string) (bool, error), commentIsPrivate func(string, string) (bool, error), projectIsPrivate func(string) (bool, error), relayRelease bool) (bool, error) {
+func walkEventProjectReferences(event Event, issueIsPrivate func(string) (bool, error), refIsPrivate func(string) (bool, error), commentIsPrivate func(string, string) (bool, error), projectIsPrivate func(string) (bool, error)) (bool, error) {
 	for _, relatedUID := range []*string{event.RelatedIssueUID} {
 		if relatedUID == nil {
 			continue
@@ -172,41 +172,6 @@ func walkEventProjectReferences(event Event, issueIsPrivate func(string) (bool, 
 	}
 
 	switch event.Type {
-	case "issue.commented":
-		if !relayRelease {
-			return false, nil
-		}
-		var payload struct {
-			ReplyToUID string `json:"reply_to_uid"`
-			ReplyKind  string `json:"reply_kind"`
-		}
-		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-			return true, nil
-		}
-		if payload.ReplyToUID == "" && payload.ReplyKind == "" {
-			return false, nil
-		}
-		return commentIsPrivate(payload.ReplyToUID, payload.ReplyKind)
-	case "issue.linked", "issue.unlinked":
-		if !relayRelease {
-			return false, nil
-		}
-		var payload map[string]jsontext.Value
-		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
-			return true, nil
-		}
-		for _, key := range []string{"from_uid", "to_uid", "from_issue_uid", "to_issue_uid"} {
-			if raw, found := payload[key]; found {
-				uid, ok := StringValue(raw)
-				if !ok || uid == "" {
-					return true, nil
-				}
-				if private, err := issueIsPrivate(uid); private || err != nil {
-					return private, err
-				}
-			}
-		}
-		return false, nil
 	case "issue.moved":
 		var payload map[string]jsontext.Value
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {

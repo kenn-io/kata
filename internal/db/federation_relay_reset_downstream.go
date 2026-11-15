@@ -91,7 +91,7 @@ func (p RelayResetProtocol) ForwardToDownstream(ctx context.Context, grant Feder
 	if err := p.Backend.DeleteUnemittedRelayOutbox(ctx, grant.RelayBindingUID, grant.RelayResetEpoch+1); err != nil {
 		return fmt.Errorf("discard superseded forward seed: %w", err)
 	}
-	checkpoint, _, err := p.prepareForwardedCheckpoint(ctx, grant, pin)
+	checkpoint, err := p.PrepareForwardedCheckpoint(ctx, grant, pin)
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"strings"
 
@@ -41,8 +42,8 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 		if strings.Contains(ref, "#") {
 			return true, nil
 		}
-		issue, err := lookup.IssueByRef(event.ProjectUID, ref)
-		return add(issue, err, false)
+		projects[event.ProjectUID] = true
+		return false, nil
 	}
 	comment := func(uid, kind string) (bool, error) {
 		if len(uid) != 26 || !ValidCommentReplyKind(kind) {
@@ -61,7 +62,69 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 			return nil, ErrRelayReferenceUnprovable
 		}
 	}
-	unprovable, err := walkEventProjectReferences(Event{ProjectUID: event.ProjectUID, RelatedIssueUID: event.RelatedIssueUID, Type: event.Type, Payload: string(event.Payload)}, issueUID, issueRef, comment, project, true)
+	scopedEvent := event
+	// Relay release checks reply and link targets that scoped readers handle elsewhere.
+	switch event.Type {
+	case "issue.commented":
+		var payload struct {
+			ReplyToUID string `json:"reply_to_uid"`
+			ReplyKind  string `json:"reply_kind"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return nil, ErrRelayReferenceUnprovable
+		}
+		if payload.ReplyToUID != "" || payload.ReplyKind != "" {
+			unprovable, err := comment(payload.ReplyToUID, payload.ReplyKind)
+			if err != nil {
+				return nil, err
+			}
+			if unprovable {
+				return nil, ErrRelayReferenceUnprovable
+			}
+		}
+	case "issue.linked", "issue.unlinked":
+		var payload map[string]jsontext.Value
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return nil, ErrRelayReferenceUnprovable
+		}
+		for _, key := range []string{"from_uid", "to_uid", "from_issue_uid", "to_issue_uid"} {
+			if raw, found := payload[key]; found {
+				uid, ok := StringValue(raw)
+				if !ok || uid == "" {
+					return nil, ErrRelayReferenceUnprovable
+				}
+				unprovable, err := issueUID(uid)
+				if err != nil {
+					return nil, err
+				}
+				if unprovable {
+					return nil, ErrRelayReferenceUnprovable
+				}
+			}
+		}
+	case "issue.closed":
+		// Legacy short-only parents refer to this event's own project.
+		var payload map[string]jsontext.Value
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return nil, ErrRelayReferenceUnprovable
+		}
+		var parent struct {
+			ParentUID     *string `json:"parent_uid"`
+			ParentShortID *string `json:"parent_short_id"`
+		}
+		if err := json.Unmarshal(event.Payload, &parent); err != nil {
+			return nil, ErrRelayReferenceUnprovable
+		}
+		if (parent.ParentUID == nil || *parent.ParentUID == "") && parent.ParentShortID != nil && *parent.ParentShortID != "" {
+			delete(payload, "parent_short_id")
+			encoded, err := json.Marshal(payload)
+			if err != nil {
+				return nil, err
+			}
+			scopedEvent.Payload = encoded
+		}
+	}
+	unprovable, err := walkEventProjectReferences(Event{ProjectUID: scopedEvent.ProjectUID, RelatedIssueUID: scopedEvent.RelatedIssueUID, Type: scopedEvent.Type, Payload: string(scopedEvent.Payload)}, issueUID, issueRef, comment, project)
 	if err != nil {
 		return nil, err
 	}
