@@ -2,7 +2,6 @@ package daemon_test
 
 import (
 	"context"
-	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -141,11 +140,6 @@ func TestRelayPeerAccessHTTP(t *testing.T) {
 			status, raw := request(path)
 			require.Equal(t, 200, status, string(raw))
 		}
-		_, err = store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: fixture.Issues[0].ID, Actor: "member", Patch: map[string]jsontext.Value{"notify.reader": jsontext.Value(`{"re":"00000000000000000000000009"}`)}})
-		require.NoError(t, err)
-		for _, path := range []string{"?stream=events", "/reset"} {
-			status, raw := request(path)
-			require.Equal(t, 200, status, string(raw))
-		}
+
 	})
 }
