@@ -18,30 +18,33 @@ type RootResetProvenance struct {
 }
 
 // RelayResetLegacySources identifies direct-peer history in a verified checkpoint.
-func RelayResetLegacySources(snapshot RootResetSnapshot) (map[string]bool, error) {
+func RelayResetLegacySources(accepted map[string]bool, project, raw string) error {
+	var checkpoint RelayResetCheckpoint
+	if err := json.Unmarshal([]byte(raw), &checkpoint); err != nil {
+		return err
+	}
 	var sources [][]byte
 	var provenance RootResetProvenance
-	if err := json.Unmarshal(snapshot.Events, &sources); err != nil {
-		return nil, err
+	if err := json.Unmarshal(checkpoint.Snapshot.Events, &sources); err != nil {
+		return err
 	}
-	if err := json.Unmarshal(snapshot.Provenance, &provenance); err != nil {
-		return nil, err
+	if err := json.Unmarshal(checkpoint.Snapshot.Provenance, &provenance); err != nil {
+		return err
 	}
 	receipts := make(map[string]bool, len(provenance.Receipts))
 	for _, receipt := range provenance.Receipts {
 		receipts[receipt.EventUID] = true
 	}
-	legacy := make(map[string]bool)
 	for _, raw := range sources {
 		event, err := DecodeRelaySourceEvent(raw)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if !receipts[event.EventUID] {
-			legacy[event.EventUID] = true
+			accepted[project+"\x00"+event.EventUID] = true
 		}
 	}
-	return legacy, nil
+	return nil
 }
 
 // DecodeRootResetPayload validates committed contents before native replacement.

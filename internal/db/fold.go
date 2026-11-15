@@ -10,15 +10,11 @@ import (
 // FoldEvents applies events in deterministic HLC order and returns the resulting
 // replay projection.
 func FoldEvents(events []FoldEvent) FoldProjection {
-	return foldEvents(events, nil)
+	return FoldRelayLinkEvents(events, nil)
 }
 
 // FoldRelayLinkEvents preserves root parent links while folding relay history.
 func FoldRelayLinkEvents(events []FoldEvent, removalCheck FoldParentRemovalCheck) FoldProjection {
-	return foldEvents(events, removalCheck)
-}
-
-func foldEvents(events []FoldEvent, removalCheck FoldParentRemovalCheck) FoldProjection {
 	p := FoldProjection{
 		CronRuns:        map[string]FoldCronRun{},
 		CronJobs:        map[string]FoldCronJob{},

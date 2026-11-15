@@ -158,6 +158,7 @@ var storageScenarios = []scenario{
 		return nil
 	}},
 	{name: "direct parent conflict", run: func(t *testing.T, store db.Storage) error { RunDirectParentConflict(t, store); return nil }},
+	{name: "relay shared links", run: func(t *testing.T, store db.Storage) error { RunRelaySharedLinks(t, store); return nil }},
 	{name: "relay offers legacy ingested events", methods: []string{"IngestFederationEvents", "PendingRelayDeliveries", "PatchIssueMetadata"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayOffersLegacyIngestedEvents(t, store)
 		return nil

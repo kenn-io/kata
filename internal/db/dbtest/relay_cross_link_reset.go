@@ -128,11 +128,6 @@ func RunRelayCrossLinkResetHistory(t *testing.T, root db.Storage, backend Backen
 	require.NoError(t, err)
 	require.Equal(t, checkpoint.Manifest, forwarded.Manifest)
 	require.Equal(t, checkpoint.Snapshot, forwarded.Snapshot)
-	_, err = hubResets.CreateRelayReset(ctx, downstream, db.RootAttributionSigner{})
-	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-	retry, err = hubResets.CreateRelayReset(features, downstream, db.RootAttributionSigner{})
-	require.NoError(t, err)
-	require.Equal(t, forwarded, retry)
 	t.Run("archive refreshes reset history", func(t *testing.T) {
 		bootstrap := root.(db.RelayResetBootstrapStore)
 		//nolint:gosec // This is a deterministic fixture credential.

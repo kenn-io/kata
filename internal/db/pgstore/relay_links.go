@@ -3,7 +3,6 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 
@@ -128,16 +127,8 @@ func loadRelayOriginClassifier(ctx context.Context, tx *sql.Tx, projectIDs []int
 		if err := checkpointRows.Scan(&project, &raw); err != nil {
 			return c, err
 		}
-		var checkpoint db.RelayResetCheckpoint
-		if err := json.Unmarshal([]byte(raw), &checkpoint); err != nil {
+		if err := db.RelayResetLegacySources(c.accepted, project, raw); err != nil {
 			return c, err
-		}
-		accepted, err := db.RelayResetLegacySources(checkpoint.Snapshot)
-		if err != nil {
-			return c, err
-		}
-		for event := range accepted {
-			c.accepted[project+"\x00"+event] = true
 		}
 	}
 	if err := checkpointRows.Err(); err != nil {
