@@ -1070,7 +1070,7 @@ func effectiveCloseEventForShow(ctx context.Context, store db.Storage, issue db.
 	var latestReset *db.FoldClock
 	query := db.EventsAfterParams{
 		IssueUID: issue.UID,
-		Types:    []string{"issue.created", "issue.snapshot", "issue.updated", "issue.closed", "issue.reopened"},
+		Types:    []string{"issue.created", "issue.snapshot", "issue.updated", db.RepeatedImportEventType, "issue.closed", "issue.reopened"},
 		Limit:    100,
 	}
 	for {
@@ -1120,7 +1120,8 @@ func effectiveCloseEventForShow(ctx context.Context, store db.Storage, issue db.
 	if latestReset != nil && !foldClockAfter(eventFoldClock(event), *latestReset) {
 		return nil, nil
 	}
-	return &event, nil
+	resolved := attachResolvedIssueID(issue, []db.Event{event})
+	return &resolved[0], nil
 }
 
 // foldClockAfter matches FoldEvents' deterministic HLC ordering.

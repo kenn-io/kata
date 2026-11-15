@@ -114,12 +114,12 @@ func TestFileEvidenceRechecksProjectScopeAfterIO(t *testing.T) {
 			done <- outcome{err: err}
 			return
 		}
-		defer response.Body.Close()
+		defer func() { _ = response.Body.Close() }()
 		raw, err := io.ReadAll(response.Body)
 		done <- outcome{status: response.StatusCode, body: raw, err: err}
 	}()
-	defer os.WriteFile(filepath.Join(barrier, "release"), nil, 0600)
-	require.Eventually(t, func() bool { _, err := os.Stat(filepath.Join(barrier, "started")); return err == nil }, 3*time.Second, time.Millisecond)
+	defer func() { require.NoError(t, os.WriteFile(filepath.Join(barrier, "release"), nil, 0600)) }()
+	require.Eventually(t, func() bool { _, err := os.Stat(filepath.Join(barrier, "started")); return err == nil }, 3*time.Second, time.Millisecond) //nolint:kennlint // sleeptest: the barrier belongs to a separate OS process that cannot share a synctest clock.
 	_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: id, FromProjectID: pid, ToProjectID: destination.ID, IfMatchRev: closed.Revision, Actor: "worker"})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(barrier, "release"), nil, 0600))
@@ -129,7 +129,7 @@ func TestFileEvidenceRechecksProjectScopeAfterIO(t *testing.T) {
 	require.NotContains(t, string(result.body), "Zml4dHVyZQ==")
 }
 
-func TestFileReadBarrierResolver(t *testing.T) {
+func TestFileReadBarrierResolver(_ *testing.T) {
 	marker := -1
 	for i, arg := range os.Args {
 		if arg == "--" {
@@ -150,18 +150,18 @@ func TestFileReadBarrierResolver(t *testing.T) {
 	if err != nil || json.Unmarshal(raw, &request) != nil {
 		os.Exit(2)
 	}
-	if os.WriteFile(filepath.Join(root, "started"), nil, 0600) != nil {
+	if os.WriteFile(filepath.Join(root, "started"), nil, 0600) != nil { //nolint:gosec // The parent test supplies its disposable barrier directory as argv.
 		os.Exit(2)
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if _, err := os.Stat(filepath.Join(root, "release")); err == nil {
+		if _, err := os.Stat(filepath.Join(root, "release")); err == nil { //nolint:gosec // The parent test supplies its disposable barrier directory as argv.
 			break
 		}
 		if time.Now().After(deadline) {
 			os.Exit(2)
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(time.Millisecond) //nolint:kennlint // sleeptest: poll the parent test’s filesystem barrier from a separate OS process.
 	}
 	response := map[string]any{"version": 1, "source": request.Source, "path": request.Path, "status": "ok", "content_base64": "Zml4dHVyZQ=="}
 	encoded, _ := json.Marshal(response)

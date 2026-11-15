@@ -46,6 +46,8 @@ func closeRefusalHint(ctx context.Context, store db.Storage, issue db.Issue, bod
 			for _, e := range body.Evidence {
 				values := []string{}
 				switch e.Type {
+				case api.EvidenceAttachment:
+					values = []string{e.AttachmentID}
 				case api.EvidenceFile:
 					if e.File != nil {
 						kind := "file"

@@ -12,11 +12,12 @@ import (
 	"strings"
 )
 
+// MaxBytes limits each complete resolved file.
 const MaxBytes = 16 << 20
 
 var aliasPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
-// Reference's source and origin identify a dataset, not a client mount path.
+// Reference identifies a dataset and relative file, not a client mount path.
 // CaptureSHA256 is request-only; all other provenance is daemon-produced.
 type Reference struct {
 	provenanceSupplied bool

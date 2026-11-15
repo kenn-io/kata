@@ -141,7 +141,7 @@ func readLocal(root, name string) ([]byte, string, string) {
 	if err != nil {
 		return nil, "", "unreachable"
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	// Reject observed symlinks and nonregular final nodes before opening (FIFO).
 	parts := strings.Split(name, "/")
 	for i := range parts {
@@ -157,7 +157,7 @@ func readLocal(root, name string) ([]byte, string, string) {
 	if err != nil {
 		return nil, "", localStatus(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	before, err := f.Stat()
 	if err != nil || !before.Mode().IsRegular() || before.Size() > MaxBytes {
 		return nil, "", "invalid-file"
@@ -255,7 +255,7 @@ func (s Source) readAdapter(parent context.Context, r Reference, historical bool
 	if err != nil {
 		return nil, "", "unreachable"
 	}
-	defer tree.Close()
+	defer func() { _ = tree.Close() }()
 	if ctx.Err() != nil || tree.Start() != nil {
 		return nil, "", "unreachable"
 	}

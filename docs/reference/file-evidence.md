@@ -186,5 +186,8 @@ stored event payloads remain portable without a database migration.
 
 MCP's closing section provides `kata.file_evidence` with the same selectors.
 `kata.close` accepts `{"type":"file","file":{"source":"notes","path":"results/report.md","capture_sha256":true}}`.
-MCP show/audit include the retained file reference. Existing startup scope still
+MCP show/audit include the retained file reference. For complete large-file content,
+configure the MCP client to accept up to 64 MiB JSON responses (Go SDK
+`IOTransport.MaxLineLength`). Clients with smaller fixed limits can compare
+metadata through MCP and retrieve content through HTTP or CLI. Existing startup scope still
 limits which issues and events can be read.

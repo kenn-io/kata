@@ -8,6 +8,7 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
+// FileEvidenceInput selects a retained issue-scoped file reference.
 type FileEvidenceInput struct {
 	Ref        string `json:"ref" jsonschema:"Issue reference"`
 	EventUID   string `json:"event_uid,omitempty" jsonschema:"Close event UID; default effective current close"`

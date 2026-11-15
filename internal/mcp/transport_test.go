@@ -249,7 +249,7 @@ func TestStdioConnectionReplacesOversizeResponseWithCorrelatedError(t *testing.T
 	const maximum = 256
 	var output bytes.Buffer
 	transport := NewStdioTransport(io.NopCloser(strings.NewReader("")), &output)
-	transport.maxMessageBytes = maximum
+	transport.maxResponseBytes = maximum
 	conn, err := transport.Connect(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })

@@ -15,16 +15,23 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.kenn.io/kata/internal/fileevidence"
 )
 
 const defaultMaxMessageBytes = 8 << 20
 
+// The SDK may encode file content in both structured and text results. Allow
+// two base64 copies of a complete file plus the JSON envelope, without raising
+// the independent request bound.
+const defaultMaxResponseBytes = 4 * fileevidence.MaxBytes
+
 // StdioTransport carries one compact JSON-RPC message per line. It enforces
 // Kata's input and output bounds while leaving protocol negotiation to the SDK.
 type StdioTransport struct {
-	reader          io.ReadCloser
-	writer          io.Writer
-	maxMessageBytes int
+	reader           io.ReadCloser
+	writer           io.Writer
+	maxMessageBytes  int
+	maxResponseBytes int
 }
 
 // NewStdioTransport creates a bounded stdio transport. A writer that implements
@@ -32,9 +39,10 @@ type StdioTransport struct {
 // protocol stream.
 func NewStdioTransport(reader io.ReadCloser, writer io.Writer) *StdioTransport {
 	return &StdioTransport{
-		reader:          reader,
-		writer:          writer,
-		maxMessageBytes: defaultMaxMessageBytes,
+		reader:           reader,
+		writer:           writer,
+		maxMessageBytes:  defaultMaxMessageBytes,
+		maxResponseBytes: defaultMaxResponseBytes,
 	}
 }
 
@@ -47,13 +55,13 @@ func (t *StdioTransport) Connect(context.Context) (sdkmcp.Connection, error) {
 		return nil, errors.New("MCP stdio writer is required")
 	}
 	conn := &stdioConnection{
-		reader:          t.reader,
-		writer:          t.writer,
-		reads:           make(chan readResult, 1),
-		closed:          make(chan struct{}),
-		active:          make(map[requestIDKey]struct{}),
-		cancelled:       make(map[requestIDKey]struct{}),
-		maxMessageBytes: t.maxMessageBytes,
+		reader:           t.reader,
+		writer:           t.writer,
+		reads:            make(chan readResult, 1),
+		closed:           make(chan struct{}),
+		active:           make(map[requestIDKey]struct{}),
+		cancelled:        make(map[requestIDKey]struct{}),
+		maxResponseBytes: t.maxResponseBytes,
 	}
 	if closer, ok := t.writer.(io.Closer); ok && !sameResource(t.reader, closer) {
 		conn.writerCloser = closer
@@ -74,14 +82,14 @@ type stdioConnection struct {
 	reads        chan readResult
 	closed       chan struct{}
 
-	writeMu         sync.Mutex
-	writeWaiting    atomic.Int64
-	stateMu         sync.Mutex
-	closeMu         sync.Mutex
-	isClosed        bool
-	active          map[requestIDKey]struct{}
-	cancelled       map[requestIDKey]struct{}
-	maxMessageBytes int
+	writeMu          sync.Mutex
+	writeWaiting     atomic.Int64
+	stateMu          sync.Mutex
+	closeMu          sync.Mutex
+	isClosed         bool
+	active           map[requestIDKey]struct{}
+	cancelled        map[requestIDKey]struct{}
+	maxResponseBytes int
 }
 
 type requestIDKey struct {
@@ -193,7 +201,7 @@ func (c *stdioConnection) Write(ctx context.Context, message jsonrpc.Message) er
 	if err != nil {
 		return fmt.Errorf("encode MCP message: %w", err)
 	}
-	if c.maxMessageBytes > 0 && len(encoded) > c.maxMessageBytes {
+	if c.maxResponseBytes > 0 && len(encoded) > c.maxResponseBytes {
 		response, ok := message.(*jsonrpc.Response)
 		if !ok {
 			return errors.New("encoded MCP message exceeds maximum message size")
@@ -208,7 +216,7 @@ func (c *stdioConnection) Write(ctx context.Context, message jsonrpc.Message) er
 		if err != nil {
 			return fmt.Errorf("encode oversized MCP response error: %w", err)
 		}
-		if len(encoded) > c.maxMessageBytes {
+		if len(encoded) > c.maxResponseBytes {
 			return errors.New("encoded MCP response error exceeds maximum message size")
 		}
 	}

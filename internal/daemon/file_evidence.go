@@ -51,7 +51,10 @@ type FileEvidenceRequest struct {
 	Content    bool   `query:"content,omitempty"`
 }
 
+// FileEvidenceResponse wraps a retained reference and its resolution result.
 type FileEvidenceResponse struct{ Body FileEvidenceBody }
+
+// FileEvidenceBody identifies the selected receipt and file-only index.
 type FileEvidenceBody struct {
 	EventUID string `json:"event_uid"`
 	Index    int    `json:"index"`
@@ -77,8 +80,8 @@ func registerFileEvidenceHandlers(humaAPI huma.API, cfg ServerConfig) {
 				}
 				for _, e := range events {
 					if e.UID == in.EventUID && e.Type == "issue.closed" && e.IssueUID != nil && *e.IssueUID == issue.UID {
-						copy := e
-						event = &copy
+						selected := e
+						event = &selected
 					}
 				}
 				if event != nil || len(events) < query.Limit {
@@ -91,6 +94,8 @@ func registerFileEvidenceHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if event != nil {
+			resolved := attachResolvedIssueID(issue, []db.Event{*event})
+			event = &resolved[0]
 			event, err = scopedMutationEvent(ctx, cfg.DB, event)
 			if err != nil {
 				return nil, err

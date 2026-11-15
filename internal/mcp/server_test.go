@@ -1367,8 +1367,9 @@ func connectServerSession(t *testing.T, server *sdkmcp.Server, clientOptions *sd
 		Version: "1",
 	}, clientOptions)
 	session, err := client.Connect(ctx, &sdkmcp.IOTransport{
-		Reader: clientConn,
-		Writer: clientConn,
+		Reader:        clientConn,
+		Writer:        clientConn,
+		MaxLineLength: defaultMaxResponseBytes,
 	}, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() {

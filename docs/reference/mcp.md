@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-10
+last_edited: 2026-11-15
 ---
 
 # Model Context Protocol server
@@ -776,8 +776,9 @@ clients can use `server/discover`; session clients can use `initialize` and
 `notifications/initialized`. Stdio accepts both. The standalone and
 daemon-mounted HTTP endpoints route MCP 2026-07-28 requests to a stateless JSON
 server with Events. Legacy clients retain sessions and tool-list changes,
-without Events. JSON-RPC batches are rejected. Each compact JSON message is
-limited to 8 MiB.
+without Events. JSON-RPC batches are rejected. Each compact stdio request is limited to 8 MiB. Responses are limited to
+64 MiB so a complete 16 MiB file can fit its base64 content in the SDK’s text
+and structured result representations.
 
 Kata advertises tools, including tool-list changes, and the webhook Events
 capability described in [Native inbox events](#native-inbox-events). It does

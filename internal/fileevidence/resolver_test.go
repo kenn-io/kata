@@ -114,7 +114,7 @@ func TestResolverProcess(t *testing.T) {
 	case "environment":
 		response["content_base64"] = base64.StdEncoding.EncodeToString([]byte(os.Getenv("KATA_FILE_EVIDENCE_SYNTHETIC_SECRET")))
 	case "wait":
-		time.Sleep(time.Hour)
+		<-t.Context().Done()
 	case "missing", "history-unavailable", "unreachable":
 		response["status"] = request.Path
 	case "mismatch":
@@ -195,12 +195,12 @@ func TestRequestedContentProperty(t *testing.T) {
 
 func TestAdapterCallerCancellation(t *testing.T) {
 	cfg := Config{Sources: map[string]Source{"remote": {Command: []string{os.Args[0], "-test.run=^TestResolverProcess$"}}}}
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	start := time.Now()
 	_, err := cfg.Capture(ctx, Reference{Source: "remote", Path: "wait"}, "origin")
 	require.ErrorContains(t, err, "unreachable")
-	require.Less(t, time.Since(start), 2*time.Second)
+	require.Less(t, time.Since(start), 3*time.Second)
 }
 
 func TestFileReferenceRoundTripProperty(t *testing.T) {
@@ -273,7 +273,7 @@ func TestAdapterDoesNotInheritMissingRuntimeEnv(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestAdapterDoesNotInheritMissingRuntimeEnv$")
+	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestAdapterDoesNotInheritMissingRuntimeEnv$") //nolint:gosec // This subprocess reruns this exact synthetic test binary.
 	command.Env = []string{"KATA_FILE_EVIDENCE_EMPTY_ENV_TEST=inner", "KATA_FILE_EVIDENCE_SYNTHETIC_SECRET=not-allowed"}
 	output, err := command.CombinedOutput()
 	require.NoError(t, err, string(output))

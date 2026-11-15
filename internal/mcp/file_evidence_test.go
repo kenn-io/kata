@@ -1,6 +1,8 @@
 package mcpserver
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
@@ -46,13 +48,13 @@ func TestFileEvidenceMCPUsesLongOperationTransport(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/file-evidence") || strings.HasSuffix(r.URL.Path, "/actions/close") {
-			time.Sleep(300 * time.Millisecond)
+			time.Sleep(300 * time.Millisecond) //nolint:kennlint // sleeptest: deliberately exceed the short HTTP transport budget to verify selection of the long client.
 		}
 		server.Handler().ServeHTTP(w, r)
 	}))
 	t.Cleanup(httpServer.Close)
 	shortHTTP := *httpServer.Client()
-	shortHTTP.Timeout = 100 * time.Millisecond
+	shortHTTP.Timeout = 100 * time.Millisecond //nolint:kennlint // deadlinetest: deliberately shorter than the synthetic adapter latency; the successful call must use the separate long transport.
 	short, err := kataclient.NewWithHTTPClient(httpServer.URL, &shortHTTP)
 	require.NoError(t, err)
 	long, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
@@ -75,4 +77,39 @@ func TestFileEvidenceMCPUsesLongOperationTransport(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"sha256"`)
 	require.Contains(t, string(raw), `"close_event_uid"`)
+}
+
+func TestFileEvidenceMCPMaximumContent(t *testing.T) {
+	root := t.TempDir()
+	want := bytes.Repeat([]byte{0xff}, fileevidence.MaxBytes)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "large.bin"), want, 0600))
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "fixture.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Author: "worker", Title: "Large file proof"})
+	require.NoError(t, err)
+	cfg := fileevidence.Config{Sources: map[string]fileevidence.Source{"notes": {Root: root, SHA256: true}}}
+	ref, err := cfg.Capture(t.Context(), fileevidence.Reference{Source: "notes", Path: "large.bin"}, store.InstanceUID())
+	require.NoError(t, err)
+	_, _, _, err = store.CloseIssueGuarded(t.Context(), db.CloseIssueParams{IssueID: issue.ID, ExpectedProjectID: project.ID, Actor: "worker", Reason: "done", Message: "Completed the requested change and retained its complete large file.", Evidence: []db.Evidence{{Type: "file", File: &ref}}})
+	require.NoError(t, err)
+	server := daemon.NewServer(daemon.ServerConfig{DB: store, FileEvidence: cfg})
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
+	require.NoError(t, err)
+	session := connectTestServerWithOptionsAsProvided(t, Options{Client: client, ProjectID: project.ID, ProjectName: project.Name, Actor: "worker", Version: "test-version"})
+	read, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.file_evidence", Arguments: map[string]any{"ref": issue.ShortID, "content": true}})
+	require.NoError(t, err)
+	require.False(t, read.IsError, "a maximum-sized file must fit the MCP response")
+	fields, ok := read.StructuredContent.(map[string]any)
+	require.True(t, ok)
+	content, ok := fields["content"].(string)
+	require.True(t, ok)
+	got, err := base64.StdEncoding.DecodeString(content)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(want, got), "complete raw bytes must survive MCP transport")
 }
