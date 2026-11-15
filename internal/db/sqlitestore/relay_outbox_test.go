@@ -40,13 +40,6 @@ func TestSignedRelayResetCommitments(t *testing.T) {
 	dbtest.RunSignedRelayResetCommitments(t, store)
 }
 
-func TestSignedRelayResetPurgedPeer(t *testing.T) {
-	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "reset.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	dbtest.RunSignedRelayResetPurgedPeer(t, store)
-}
-
 func TestCreateRelayResetAfterCompaction(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)

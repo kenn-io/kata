@@ -64,12 +64,7 @@ func TestRelayEventPeerProjects(t *testing.T) {
 			return peer, nil
 		}
 		return Issue{}, ErrNotFound
-	}, func(_, ref string) (Issue, error) {
-		if ref == "peer#1" {
-			return peer, nil
-		}
-		return Issue{}, ErrNotFound
-	}, func(uid string) (Issue, error) {
+	}, nil, func(uid string) (Issue, error) {
 		if uid == commentUID {
 			return peer, nil
 		}

@@ -18,9 +18,9 @@ var ErrRelayReferenceUnprovable = errors.New("relay reference owner cannot be pr
 // The lookup must use an unrestricted project context on the held transaction.
 func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]string, error) {
 	projects := map[string]bool{}
-	add := func(issue Issue, err error, required bool) (bool, error) {
+	add := func(issue Issue, err error) (bool, error) {
 		if errors.Is(err, ErrNotFound) {
-			return required, nil
+			return true, nil
 		}
 		if err != nil {
 			return false, err
@@ -28,7 +28,7 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 		projects[issue.ProjectUID] = true
 		return false, nil
 	}
-	issueUID := func(uid string) (bool, error) { issue, err := lookup.IssueByUID(uid); return add(issue, err, true) }
+	issueUID := func(uid string) (bool, error) { issue, err := lookup.IssueByUID(uid); return add(issue, err) }
 	issueRef := func(ref string) (bool, error) {
 		if parsed, err := shortid.Parse(ref); err == nil {
 			if parsed.ULID != "" {
@@ -50,7 +50,7 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 			return true, nil
 		}
 		issue, err := lookup.CommentIssueByUID(uid)
-		return add(issue, err, true)
+		return add(issue, err)
 	}
 	project := func(uid string) (bool, error) { projects[uid] = true; return false, nil }
 	if event.IssueUID != nil {
@@ -108,14 +108,9 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 		if err := json.Unmarshal(event.Payload, &payload); err != nil {
 			return nil, ErrRelayReferenceUnprovable
 		}
-		var parent struct {
-			ParentUID     *string `json:"parent_uid"`
-			ParentShortID *string `json:"parent_short_id"`
-		}
-		if err := json.Unmarshal(event.Payload, &parent); err != nil {
-			return nil, ErrRelayReferenceUnprovable
-		}
-		if (parent.ParentUID == nil || *parent.ParentUID == "") && parent.ParentShortID != nil && *parent.ParentShortID != "" {
+		parentUID, _ := StringValue(payload["parent_uid"])
+		parentShortID, _ := StringValue(payload["parent_short_id"])
+		if parentUID == "" && parentShortID != "" {
 			delete(payload, "parent_short_id")
 			encoded, err := json.Marshal(payload)
 			if err != nil {
@@ -134,7 +129,7 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 	_, err = notification.WalkEventPayload(jsontext.Value(event.Payload), event.Type, func(slot jsontext.Value) (bool, error) {
 		for _, uid := range notification.References(slot) {
 			issue, err := lookup.CommentIssueByUID(uid)
-			unprovable, err := add(issue, err, true)
+			unprovable, err := add(issue, err)
 			if err != nil {
 				return false, err
 			}
