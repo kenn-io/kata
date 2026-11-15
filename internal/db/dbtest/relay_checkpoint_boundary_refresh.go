@@ -85,11 +85,15 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	require.NoError(t, err)
 	require.Len(t, links, 1)
 	_, err = resetter.CreateRelayReset(ctx, bindingUID, fixture.signer)
-	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
-	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID))
-	_, err = store.DeleteLinkAndEvent(writeCtx, links[0], db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: issue.ID, Actor: "member", FromUID: issue.UID, ToUID: private.UID, FromShortID: issue.ShortID, ToShortID: private.ShortID})
+	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "a live private link must be refused before signing shared current state")
+	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID), "a refused reset must preserve the owner's private link")
+	_, err = store.DeleteLinkAndEvent(writeCtx, links[0], db.LinkEventParams{
+		EventType: "issue.unlinked", EventIssueID: issue.ID, Actor: "member",
+		FromUID: issue.UID, ToUID: private.UID, FromShortID: issue.ShortID, ToShortID: private.ShortID,
+	})
 	require.NoError(t, err)
-	require.Empty(t, linkTargetUIDs(t, store, issue.ID))
+	require.Empty(t, linkTargetUIDs(t, store, issue.ID), "remove the live boundary without rewriting private history")
+
 	later, _, err := store.CreateIssue(writeCtx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Later ordinary issue", Author: "member"})
 	require.NoError(t, err)
 	// Model an already-rejected pull using the authentic metadata envelope

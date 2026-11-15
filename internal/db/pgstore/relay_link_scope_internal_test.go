@@ -21,7 +21,9 @@ func TestRelayLinkEndpointProjectsScopesReferences(t *testing.T) {
 	require.NoError(t, err)
 	source, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Source", Author: "tester"})
 	require.NoError(t, err)
-	peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Referenced", Author: "tester"})
+	peerProject, err := store.CreateProject(ctx, "peer-project")
+	require.NoError(t, err)
+	peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: peerProject.ID, Title: "Referenced", Author: "tester"})
 	require.NoError(t, err)
 	unrelated, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Unrelated", Author: "tester"})
 	require.NoError(t, err)
@@ -35,6 +37,6 @@ func TestRelayLinkEndpointProjectsScopesReferences(t *testing.T) {
 	owners, err := relayLinkEndpointProjects(ctx, tx, events)
 	require.NoError(t, err)
 	require.Equal(t, project.UID, owners[source.UID])
-	require.Equal(t, project.UID, owners[peer.UID])
+	require.Equal(t, peerProject.UID, owners[peer.UID])
 	require.NotContains(t, owners, unrelated.UID)
 }
