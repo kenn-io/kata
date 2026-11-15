@@ -1638,15 +1638,45 @@ func TestDaemonFederationConfigUnavailableHubDoesNotDelayReadiness(t *testing.T)
 const daemonFederationHubProjectUID = "01HZNQ7VFPK1XGD8R5MABCD4EZ"
 
 func TestDaemonFederationConfigRetriesWhenHubAppearsAndConverges(t *testing.T) {
-	address := unusedLoopbackAddress(t)
-	var lateServer *http.Server
-	t.Cleanup(func() {
-		if lateServer != nil {
-			_ = lateServer.Close()
+	var catalogRequests atomic.Int32
+	var hubAvailable atomic.Bool
+	// Keep the port bound so another test daemon cannot answer the hub requests.
+	// HTTP 503 exercises the same unavailable-hub retry as a refused connection.
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer catalog-bearer" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
 		}
-	})
+		if !hubAvailable.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		catalogRequests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"project": map[string]any{
+					"id": 42, "uid": daemonFederationHubProjectUID, "name": "hub-project",
+				},
+			})
+		case "/api/v1/projects/42/federation/enable":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"project_id": 42, "project_uid": daemonFederationHubProjectUID,
+				"project_name": "hub-project", "replay_horizon_event_id": 9,
+				"baseline_through_event_id": 6,
+			})
+		case "/api/v1/federation/enrollments":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 71, "actor": "identity-user",
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(hub.Close)
 	baseURL := startDaemonWithFederationConfig(t, federationDaemonConfig(
-		"http://"+address, `token = "catalog-bearer"`,
+		hub.URL, `token = "catalog-bearer"`,
 	))
 
 	require.Eventually(t, func() bool {
@@ -1655,42 +1685,7 @@ func TestDaemonFederationConfigRetriesWhenHubAppearsAndConverges(t *testing.T) {
 			health.FederationConfig.LastErrorCategory == "hub_unavailable"
 	}, 3*time.Second, 20*time.Millisecond)
 
-	var catalogRequests atomic.Int32
-	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", address)
-	require.NoError(t, err)
-	lateServer = &http.Server{ //nolint:gosec // loopback-only test server
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Header.Get("Authorization") != "Bearer catalog-bearer" {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			catalogRequests.Add(1)
-			w.Header().Set("Content-Type", "application/json")
-			switch r.URL.Path {
-			case "/api/v1/projects/resolve":
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"project": map[string]any{
-						"id": 42, "uid": daemonFederationHubProjectUID, "name": "hub-project",
-					},
-				})
-			case "/api/v1/projects/42/federation/enable":
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"project_id": 42, "project_uid": daemonFederationHubProjectUID,
-					"project_name": "hub-project", "replay_horizon_event_id": 9,
-					"baseline_through_event_id": 6,
-				})
-			case "/api/v1/federation/enrollments":
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"id": 71, "actor": "identity-user",
-				})
-			default:
-				w.WriteHeader(http.StatusNotFound)
-			}
-		}),
-	}
-	go func() {
-		_ = lateServer.Serve(listener)
-	}()
+	hubAvailable.Store(true)
 
 	require.Eventually(t, func() bool {
 		health := readDaemonFederationHealth(t, baseURL)
@@ -1879,15 +1874,6 @@ spoke_project = "spoke-project"
 hub_project = "hub-project"
 actor = "user-a"
 `, hubURL, authLine)
-}
-
-func unusedLoopbackAddress(t *testing.T) string {
-	t.Helper()
-	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	address := listener.Addr().String()
-	require.NoError(t, listener.Close())
-	return address
 }
 
 func TestDaemonReload_AgentReportsReloadedPID(t *testing.T) {
