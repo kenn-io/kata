@@ -19,8 +19,14 @@ func StripCrossProjectLinkAdditions(event FoldEvent, policy RelayLinkPolicy) (Fo
 	blocked := func(peer string) bool {
 		return policy.CrossProject(peer) && (!policy.RootOrigin || !policy.SameRoot(peer))
 	}
+	blockedRemoval := func(peer string) bool {
+		return !policy.RootOrigin && policy.CrossProject(peer)
+	}
 	switch event.Type {
-	case "issue.linked":
+	case "issue.linked", "issue.unlinked":
+		if event.Type == "issue.unlinked" {
+			blocked = blockedRemoval
+		}
 		payload := PayloadMap(event.Payload)
 		for _, key := range []string{"from_uid", "to_uid", "from_issue_uid", "to_issue_uid"} {
 			if peer, ok := StringValue(payload[key]); ok && blocked(peer) {
@@ -34,7 +40,7 @@ func StripCrossProjectLinkAdditions(event FoldEvent, policy RelayLinkPolicy) (Fo
 	case "issue.created", "issue.snapshot":
 		return stripCreationLinks(event, blocked)
 	case "issue.links_changed":
-		return stripLinksChangedAdditions(event, blocked)
+		return stripLinksChangedAdditions(event, blocked, blockedRemoval)
 	}
 	return event, true, nil
 }
@@ -68,18 +74,29 @@ func stripCreationLinks(event FoldEvent, crossProject func(string) bool) (FoldEv
 	return rewritePayload(event, payload, "links", kept)
 }
 
-func stripLinksChangedAdditions(event FoldEvent, crossProject func(string) bool) (FoldEvent, bool, error) {
+func stripLinksChangedAdditions(event FoldEvent, crossProject, blockedRemoval func(string) bool) (FoldEvent, bool, error) {
 	payload := PayloadMap(event.Payload)
 	changed := false
 	if parent, ok := StringValue(payload["parent_set_uid"]); ok && crossProject(parent) {
 		delete(payload, "parent_set_uid")
 		changed = true
 	}
-	for _, key := range []string{"blocks_added_uids", "blocked_by_added_uids", "related_added_uids"} {
+	if parent, ok := StringValue(payload["parent_removed_uid"]); ok && blockedRemoval(parent) {
+		delete(payload, "parent_removed_uid")
+		changed = true
+	}
+	for _, entry := range []struct {
+		key     string
+		blocked func(string) bool
+	}{
+		{"blocks_added_uids", crossProject}, {"blocked_by_added_uids", crossProject}, {"related_added_uids", crossProject},
+		{"blocks_removed_uids", blockedRemoval}, {"blocked_by_removed_uids", blockedRemoval}, {"related_removed_uids", blockedRemoval},
+	} {
+		key := entry.key
 		added := StringSlice(payload[key])
 		kept := make([]string, 0, len(added))
 		for _, peer := range added {
-			if !crossProject(peer) {
+			if !entry.blocked(peer) {
 				kept = append(kept, peer)
 			}
 		}
@@ -132,7 +149,8 @@ func ValidateLegacyRelayAdmission(ctx context.Context, event RemoteEvent, uidCro
 	switch event.Type {
 	case "issue.linked", "issue.links_changed", "issue.created", "issue.snapshot":
 		fold := FoldEvent{UID: event.EventUID, Type: event.Type, Payload: event.Payload}
-		if _, _, err := StripCrossProjectLinkAdditions(fold, RelayLinkPolicy{CrossProject: checkUID, SameRoot: func(string) bool { return false }}); err != nil {
+		// Admission inspects additions only; direct-spoke removals remain valid.
+		if _, _, err := StripCrossProjectLinkAdditions(fold, RelayLinkPolicy{RootOrigin: true, CrossProject: checkUID, SameRoot: func(string) bool { return false }}); err != nil {
 			return err
 		}
 	case "issue.closed":

@@ -149,7 +149,7 @@ func scanRelayClassifierKeys(rows *sql.Rows, keys map[string]struct{}, columns i
 // filterRelayCrossProjectLinkEvents keeps deferred relay link additions from
 // resolving against issues in another local project during a later group
 // materialization. Only the crossing additions are removed; a composite
-// event keeps its same-project effects and every removal is applied.
+// event keeps its same-project effects and root-authored removals.
 func filterRelayCrossProjectLinkEvents(
 	ctx context.Context,
 	tx *sql.Tx,

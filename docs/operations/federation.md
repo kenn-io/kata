@@ -154,7 +154,7 @@ unsupported relay,
 provenance or embedding artifact protocols and local project-name collisions
 before enrollment.
 
-The common root can link issues in projects that share a relay binding group and root authority. Preflight and connect return `409 relay_cross_project_links` for links outside that group. The root authors crossing links and relays forward them; a missing endpoint stays deferred until it arrives.
+The common root can link issues in projects that share a relay binding group and root authority. Preflight and connect return `409 relay_cross_project_links` for links outside that group. The root authors crossing links and relays forward them; a missing endpoint stays deferred until it arrives. An older peer receives the events before a crossing, then the stream pauses until the peer is upgraded.
 
 Fresh direct-spoke pushes also reject additions, close parents, and
 duplicate or superseded evidence that name a stored sibling issue when either

@@ -36,6 +36,7 @@ func TestRelayDeferredLinkDifferentRoot(t *testing.T) {
 			for _, node := range []*relayMatrixNode{hub, leaf} {
 				syncRelayMatrixNode(t, node)
 			}
+			// A UID collision across roots exercises the stored root and group lookup.
 			other := newRelayMatrixNode(t, backend, "other-member")
 			public := other.signer.PrivateKey.Public().(ed25519.PublicKey)
 			for _, node := range []*relayMatrixNode{hub, leaf} {

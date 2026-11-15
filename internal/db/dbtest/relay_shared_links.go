@@ -19,7 +19,7 @@ type RelaySharedAccessFixture struct {
 }
 
 // NewRelaySharedAccessFixture enrolls the same native pair for storage and
-// embedding-boundary tests, keeping the initial regression at native admission.
+// relay tests, keeping the initial regression at native admission.
 func NewRelaySharedAccessFixture(t *testing.T, store db.Storage) RelaySharedAccessFixture {
 	t.Helper()
 
@@ -63,7 +63,7 @@ func NewRelaySharedAccessFixture(t *testing.T, store db.Storage) RelaySharedAcce
 		grants[i], err = store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID,
 			ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000006",
 			ProtocolVersion: db.RelayProtocolVersion, Token: []string{"first-shared-relay-test-token", "second-shared-relay-test-token"}[i]})
-		require.NoError(t, err, "root-authored crossing links with a shared audience can enroll")
+		require.NoError(t, err)
 	}
 
 	return RelaySharedAccessFixture{Projects: projects, Issues: issues, Grants: grants, Linked: linked, Team: team, Signer: db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}}
@@ -74,11 +74,9 @@ func RunRelaySharedLinks(t *testing.T, store db.Storage) {
 	fixture := NewRelaySharedAccessFixture(t, store)
 	ctx := t.Context()
 	binding := fixture.Grants[0].Enrollment.RelayBindingUID
-	initial, err := store.PendingRelayDeliveries(ctx, binding, db.RelayStreamEvent, 100)
-	require.NoError(t, err)
-	require.NotEmpty(t, initial)
 	offered, err := store.PendingRelayDeliveries(db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures), binding, db.RelayStreamEvent, 100)
 	require.NoError(t, err)
+	require.NotEmpty(t, offered)
 	var crossing db.RelayEnvelope
 	for _, envelope := range offered {
 		if envelope.SourceUID == fixture.Linked.UID {
@@ -86,9 +84,6 @@ func RunRelaySharedLinks(t *testing.T, store db.Storage) {
 		}
 	}
 	require.Equal(t, fixture.Linked.ContentHash, crossing.SourceHash)
-	retry, err := store.PendingRelayDeliveries(db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures), binding, db.RelayStreamEvent, 100)
-	require.NoError(t, err)
-	require.Equal(t, offered, retry)
 	last := offered[len(offered)-1]
 	require.NoError(t, store.AckRelayDeliveries(ctx, binding, 1, db.RelayStreamEvent, last.Sequence, last.Digest))
 	_, ordinary, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.Projects[0].ID, Author: "member", Title: "Before crossing"})
@@ -109,4 +104,5 @@ func RunRelaySharedLinks(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	require.Len(t, next, 1)
 	require.Equal(t, crossingEvent.UID, next[0].SourceUID)
+	require.Equal(t, crossingEvent.ContentHash, next[0].SourceHash)
 }

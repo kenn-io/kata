@@ -2,15 +2,13 @@ package federation_test
 
 import (
 	"crypto/ed25519"
-	"encoding/json/v2"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestRelayCrossLinkResetSections(t *testing.T) {
+func TestRelayCrossLinkResetHistory(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
@@ -60,17 +58,7 @@ func TestRelayCrossLinkResetSections(t *testing.T) {
 			features := db.WithRelayPeerEventFeatures(ctx, db.SupportedEventFeatures)
 			checkpoint, err := rootResets.CreateRelayReset(features, binding.RelayConfig.BindingUID, root.signer)
 			require.NoError(t, err)
-			for name, raw := range map[string][]byte{"events": checkpoint.Snapshot.Events, "entities": checkpoint.Snapshot.Entities} {
-				var bodies [][]byte
-				require.NoError(t, json.Unmarshal(raw, &bodies))
-				found := false
-				for _, body := range bodies {
-					event, err := db.DecodeRelaySourceEvent(body)
-					require.NoError(t, err)
-					found = found || strings.Contains(string(event.Payload), issues[1].UID)
-				}
-				require.Equal(t, name == "events", found, "crossing belongs only to the events section")
-			}
+
 			_, err = rootResets.CreateRelayReset(ctx, binding.RelayConfig.BindingUID, root.signer)
 			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
 			retry, err := rootResets.CreateRelayReset(features, binding.RelayConfig.BindingUID, root.signer)

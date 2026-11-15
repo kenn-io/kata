@@ -28,7 +28,7 @@ func TestRelayLinkEndpointProjectsScopesReferences(t *testing.T) {
 	require.NoError(t, err)
 	refs := make([]string, 0, 502)
 	for i := range 501 {
-		refs = append(refs, fmt.Sprintf("missing-%03d", i))
+		refs = append(refs, fmt.Sprintf("000-missing-%03d", i))
 	}
 	refs = append(refs, peer.UID)
 	payload, err := json.Marshal(map[string]any{"related_added_uids": refs})
@@ -41,7 +41,7 @@ func TestRelayLinkEndpointProjectsScopesReferences(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, project.UID, owners[source.UID])
 	require.Equal(t, project.UID, owners[peer.UID])
-	require.Contains(t, owners, "missing-500")
-	require.Empty(t, owners["missing-500"])
+	require.Contains(t, owners, "000-missing-500")
+	require.Empty(t, owners["000-missing-500"])
 	require.NotContains(t, owners, unrelated.UID)
 }

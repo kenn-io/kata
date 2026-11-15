@@ -30,7 +30,6 @@ func TestRelayCrossLinkFeature(t *testing.T) {
 	feature, err = db.RelayContentRequiredFeatures(remote, root, resolve)
 	require.NoError(t, err)
 	require.Empty(t, feature)
-
 }
 
 func TestRelayCrossLinkParentFold(t *testing.T) {
@@ -77,6 +76,10 @@ func TestRelayCrossLinkPolicy(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, keep)
 	event.Type = "issue.unlinked"
+	_, keep, err = db.StripCrossProjectLinkAdditions(event, authority.Policy(event))
+	require.NoError(t, err)
+	require.False(t, keep)
+	event.OriginInstanceUID = "root"
 	_, keep, err = db.StripCrossProjectLinkAdditions(event, authority.Policy(event))
 	require.NoError(t, err)
 	require.True(t, keep)

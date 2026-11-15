@@ -9,7 +9,7 @@ import (
 )
 
 // A relay-sourced issue.links_changed folds without its crossing additions and
-// with removals over links the project already had.
+// while retaining same-project removals.
 func TestStripCrossProjectLinkAdditionsFoldsMixedLinksChanged(t *testing.T) {
 	const (
 		project       = "00000000000000000000000001"
@@ -36,12 +36,14 @@ func TestStripCrossProjectLinkAdditionsFoldsMixedLinksChanged(t *testing.T) {
 		event("00000000000000000000000031", "issue.linked", 100, `{"issue_uid":"`+base+`","from_uid":"`+base+`","to_uid":"`+sameOld+`","type":"blocks"}`),
 		event("00000000000000000000000032", "issue.linked", 101, `{"issue_uid":"`+base+`","from_uid":"`+base+`","to_uid":"`+foreignOld+`","type":"blocks"}`),
 		event("00000000000000000000000033", "issue.linked", 102, `{"issue_uid":"`+base+`","from_uid":"`+base+`","to_uid":"`+foreignParent+`","type":"parent"}`),
+		event("00000000000000000000000035", "issue.linked", 103, `{"issue_uid":"`+base+`","from_uid":"`+foreignBlkBy+`","to_uid":"`+base+`","type":"blocks"}`),
+		event("00000000000000000000000036", "issue.linked", 104, `{"issue_uid":"`+base+`","from_uid":"`+base+`","to_uid":"`+foreignRel+`","type":"related"}`),
 	}
 	changed := event("00000000000000000000000034", "issue.links_changed", 200, `{"issue_uid":"`+base+`",`+
 		`"parent_set_uid":"`+foreignNew+`","parent_removed_uid":"`+foreignParent+`",`+
 		`"blocks_added_uids":["`+sameBlocks+`","`+foreignBlocks+`"],"blocks_removed_uids":["`+sameOld+`","`+foreignOld+`"],`+
-		`"blocked_by_added_uids":["`+sameBlockedBy+`","`+foreignBlkBy+`"],`+
-		`"related_added_uids":["`+sameRelated+`","`+foreignRel+`"]}`)
+		`"blocked_by_added_uids":["`+sameBlockedBy+`","`+foreignBlkBy+`"],"blocked_by_removed_uids":["`+foreignBlkBy+`"],`+
+		`"related_added_uids":["`+sameRelated+`","`+foreignRel+`"],"related_removed_uids":["`+foreignRel+`"]}`)
 
 	stripped, keep, err := db.StripCrossProjectLinkAdditions(changed, db.RelayLinkPolicy{CrossProject: crossProject, SameRoot: func(string) bool { return false }})
 	require.NoError(t, err)
@@ -54,10 +56,12 @@ func TestStripCrossProjectLinkAdditionsFoldsMixedLinksChanged(t *testing.T) {
 	}
 	require.Equal(t, map[db.FoldLinkKey]bool{
 		{FromUID: base, ToUID: sameOld, Type: "blocks"}:       false,
-		{FromUID: base, ToUID: foreignOld, Type: "blocks"}:    false,
-		{FromUID: base, ToUID: foreignParent, Type: "parent"}: false,
+		{FromUID: base, ToUID: foreignOld, Type: "blocks"}:    true,
+		{FromUID: base, ToUID: foreignParent, Type: "parent"}: true,
+		{FromUID: foreignBlkBy, ToUID: base, Type: "blocks"}:  true,
+		{FromUID: base, ToUID: foreignRel, Type: "related"}:   true,
 		{FromUID: base, ToUID: sameBlocks, Type: "blocks"}:    true,
 		{FromUID: sameBlockedBy, ToUID: base, Type: "blocks"}: true,
 		{FromUID: base, ToUID: sameRelated, Type: "related"}:  true,
-	}, present, "crossing additions are stripped; removals apply")
+	}, present, "crossing additions and removals are stripped")
 }

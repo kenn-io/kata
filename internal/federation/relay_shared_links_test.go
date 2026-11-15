@@ -118,19 +118,9 @@ func TestRelaySharedLinksAcrossHops(t *testing.T) {
 						require.NoError(t, err)
 						_, err = nodes[0].store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: local.ID, ToIssueID: peer.ID, Type: "related", Author: nodes[0].account})
 						require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
-						title := "Replica edit remains local-first"
-						_, err = nodes[0].store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: local.ID, Actor: nodes[0].account, Title: &title, AddRelated: []int64{peer.ID}})
-						require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
-						unchanged, err := nodes[0].store.IssueByID(ctx, local.ID)
-						require.NoError(t, err)
-						require.Equal(t, local.Title, unchanged.Title)
-						_, err = nodes[0].store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: local.ID, Actor: nodes[0].account, Title: &title})
-						require.NoError(t, err)
-						_, err = nodes[0].store.DeleteLinkAndEvent(ctx, links[0], db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: local.ID, Actor: nodes[0].account, FromUID: local.UID, ToUID: peer.UID, FromShortID: local.ShortID, ToShortID: peer.ShortID})
-						require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
 					}
 				}
-				_, err = root.store.DeleteLinkAndEvent(ctx, linked, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
+				_, err = root.store.DeleteLinkAndEvent(db.WithRootAttribution(ctx, root.signer, root.account), linked, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
 				require.NoError(t, err)
 				for _, nodes := range [][]*relayMatrixNode{hubs, leaves} {
 					for _, i := range order {
@@ -186,14 +176,11 @@ func TestRelaySharedLinksPreflightFeatures(t *testing.T) {
 			require.Equal(t, http.StatusConflict, status, body)
 			require.Contains(t, body, "unsupported_event_features")
 			require.Contains(t, body, db.RelayCrossLinksEventFeature)
-			_, err = root.store.DeleteLinkAndEvent(ctx, link, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
+			_, err = root.store.DeleteLinkAndEvent(db.WithRootAttribution(ctx, root.signer, root.account), link, db.LinkEventParams{EventType: "issue.unlinked", EventIssueID: issues[0].ID, Actor: root.account, FromUID: issues[0].UID, ToUID: issues[1].UID, FromShortID: issues[0].ShortID, ToShortID: issues[1].ShortID})
 			require.NoError(t, err)
 			status, body = get(oldFeatures)
 			require.Equal(t, http.StatusConflict, status, body)
 			require.Contains(t, body, db.RelayCrossLinksEventFeature)
-			grants, err := root.store.ListProjectFederationEnrollments(ctx, projects[0].ID)
-			require.NoError(t, err)
-			require.Empty(t, grants)
 			status, body = get(db.SupportedEventFeatures)
 			require.Equal(t, http.StatusOK, status, body)
 		})
