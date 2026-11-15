@@ -115,6 +115,9 @@ func parseCronDefinitionEvent(e FoldEvent) (CronDefinitionEvent, CronDefinition,
 func (p *FoldProjection) applyCronDefinition(e FoldEvent) {
 	in, value, err := parseCronDefinitionEvent(e)
 	if err != nil {
+		if workflowDefinitionEvent(e.Type) && cronUID(e.ProjectUID) {
+			p.blockCronProject(e.ProjectUID, err)
+		}
 		p.Warnings = append(p.Warnings, fmt.Sprintf("invalid cron event %s: %v", e.UID, err))
 		return
 	}
@@ -133,15 +136,29 @@ func (p *FoldProjection) applyCronDefinition(e FoldEvent) {
 			p.CronJobs[in.UID] = current
 		}
 	} else {
-		definition, err := cron.DecodeWorkflow(in.Definition)
+		definition, err := cron.DecodeHistoricalWorkflow(in.Definition)
 		if err != nil {
+			if cronUID(e.ProjectUID) {
+				p.blockCronProject(e.ProjectUID, err)
+			}
 			p.Warnings = append(p.Warnings, err.Error())
 			return
+		}
+		// Historical decoding accepts null and missing or non-v1 versions,
+		// but neither store can represent them in a workflow row.
+		if definition.Version != 1 && cronUID(e.ProjectUID) {
+			p.blockCronProject(e.ProjectUID, fmt.Errorf("workflow definition cannot be represented in storage"))
 		}
 		value.Author = p.cronDefinitionAuthor("workflow:"+in.UID, e, value)
 		current, exists := p.CronWorkflows[in.UID]
 		if !exists || compareClock(cronDefinitionClock(value), cronDefinitionClock(current.CronDefinition)) > 0 {
-			p.CronWorkflows[in.UID] = FoldCronWorkflow{CronDefinition: value, Definition: definition, ProjectUID: in.ProjectUID}
+			var workflow FoldCronWorkflow
+			workflow.ProjectUID = in.ProjectUID
+			workflow.CronWorkflow = CronWorkflow{CronDefinition: value, Definition: definition}
+			if _, err := cron.DecodeWorkflow(in.Definition); err != nil {
+				workflow.RawDefinition = append(jsontext.Value(nil), in.Definition...)
+			}
+			p.CronWorkflows[in.UID] = workflow
 		} else {
 			current.Author = value.Author
 			p.CronWorkflows[in.UID] = current
@@ -149,11 +166,18 @@ func (p *FoldProjection) applyCronDefinition(e FoldEvent) {
 	}
 }
 
+func (p *FoldProjection) blockCronProject(projectUID string, err error) {
+	if p.cronBlockedProjects == nil {
+		p.cronBlockedProjects = make(map[string]error)
+	}
+	p.cronBlockedProjects[projectUID] = err
+}
+
 // ValidateCronFederationEvent checks a cron event a spoke pushes to its hub:
 // the envelope, a strict decode, and today's rules for a live definition.
 // Referenced definitions may be historical and are materialized separately.
 func ValidateCronFederationEvent(event RemoteEvent) error {
-	return validateCronEvent(event, true)
+	return validateCronEvent(event, true, false)
 }
 
 // ValidateAcceptedCronEvent checks cron history that a hub or a backup already
@@ -161,10 +185,10 @@ func ValidateCronFederationEvent(event RemoteEvent) error {
 // rules to documents written under older ones. A pull or a restore must not
 // fail because a rule was tightened after the history was written.
 func ValidateAcceptedCronEvent(event RemoteEvent) error {
-	return validateCronEvent(event, false)
+	return validateCronEvent(event, false, false)
 }
 
-func validateCronEvent(event RemoteEvent, applyRules bool) error {
+func validateCronEvent(event RemoteEvent, applyRules, historical bool) error {
 	if !cronUID(event.EventUID) || !cronUID(event.OriginInstanceUID) || !cronUID(event.ProjectUID) || strings.TrimSpace(event.Actor) == "" || event.HLCPhysicalMS <= 0 || event.HLCCounter < 0 {
 		return fmt.Errorf("%w: invalid cron envelope", ErrFederationIngestValidation)
 	}
@@ -180,7 +204,9 @@ func validateCronEvent(event RemoteEvent, applyRules bool) error {
 		return fmt.Errorf("%w: unsupported cron event %s", ErrFederationIngestValidation, event.Type)
 	}
 	in, _, err := parseCronDefinitionEvent(FoldEvent{UID: event.EventUID, ProjectUID: event.ProjectUID, OriginInstanceUID: event.OriginInstanceUID, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, Payload: event.Payload, Type: event.Type})
-	if err == nil {
+	if err == nil && historical && strings.HasPrefix(event.Type, "cron.workflow.") {
+		_, err = cron.DecodeHistoricalWorkflow(in.Definition)
+	} else if err == nil {
 		err = validateCronDefinitionDocument(strings.HasPrefix(event.Type, "cron.job."), in.DeletedAt != nil || !applyRules, in.Definition)
 	}
 	if err != nil {
@@ -190,9 +216,9 @@ func validateCronEvent(event RemoteEvent, applyRules bool) error {
 }
 
 // validateCronDefinitionDocument applies the current rules to a document
-// unless decodeOnly is set. A tombstone keeps whatever document it had, so the
-// deletion of an older definition that today's rules reject still propagates;
-// it only has to decode.
+// unless decodeOnly is set. A tombstone keeps its older document and need not
+// satisfy today's authoring rules. It still must decode: reserved argv workflow
+// kinds and null workflow shapes are rejected, including in tombstones.
 func validateCronDefinitionDocument(job, decodeOnly bool, document []byte) error {
 	var err error
 	switch {

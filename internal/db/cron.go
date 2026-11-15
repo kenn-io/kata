@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"time"
 
@@ -39,7 +40,8 @@ type CronJob struct {
 // CronWorkflow combines durable document provenance with a portable workflow.
 type CronWorkflow struct {
 	CronDefinition
-	Definition cron.WorkflowDefinition `json:"definition"`
+	Definition    cron.WorkflowDefinition `json:"definition"`
+	RawDefinition jsontext.Value          `json:"-"`
 }
 
 // PutCronJob replaces a complete definition. Empty UID allocates an

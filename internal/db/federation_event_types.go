@@ -91,7 +91,8 @@ const commentReplyWireVersion = 32
 
 // FederationEventPayloadWireVersion is FederationEventWireVersion raised to
 // commentReplyWireVersion when a comment or issue document carries a reply
-// link, so hubs that predate replies refuse the push as schema skew.
+// link, so hubs that predate replies refuse the push as schema skew. Workflow
+// payloads may also require an additional feature without a wire version bump.
 func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int, string, error) {
 	version, feature, err := FederationEventWireVersion(kind)
 	if err != nil {
@@ -99,6 +100,13 @@ func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int
 	}
 	if payloadCarriesCommentReply(kind, payload) {
 		version = max(version, commentReplyWireVersion)
+	}
+	if workflowDefinitionEvent(kind) {
+		required, err := PayloadRequiredFeatures(kind, string(payload))
+		if err != nil {
+			return 0, "", err
+		}
+		feature = MergeEventFeatures(feature, required)
 	}
 	return version, feature, nil
 }

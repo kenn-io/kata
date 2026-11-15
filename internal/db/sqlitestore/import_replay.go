@@ -47,6 +47,9 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	if err := db.ValidateImportReplay(recs, opts); err != nil {
 		return err
 	}
+	if !opts.MergeProject {
+		recs = db.ReconcileOwnerCronWorkflowReplay(recs)
+	}
 
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {

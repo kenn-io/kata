@@ -22,6 +22,9 @@ func (s *Store) ImportReplay(ctx context.Context, records []db.ImportRecord, opt
 	if err := db.ValidateImportReplay(records, opts); err != nil {
 		return err
 	}
+	if !opts.MergeProject {
+		records = db.ReconcileOwnerCronWorkflowReplay(records)
+	}
 	var finalInstanceUID string
 	err := s.withTx(ctx, sql.LevelReadCommitted, func(tx *sql.Tx) error {
 		if err := s.importReplayTx(ctx, tx, db.OrderImportRecords(records), opts); err != nil {

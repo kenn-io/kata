@@ -51,9 +51,17 @@ func MergeEventFeatures(values ...string) string {
 	return strings.Join(parts, ",")
 }
 
-// PayloadRequiredFeatures supplements type classification with native delivery state.
+// PayloadRequiredFeatures supplements type classification with native delivery
+// state and reserved workflow formats. Required formats need not be supported.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	required := EventRequiredFeatures(kind)
+	argv, err := payloadHasArgvWorkflow(kind, payload)
+	if err != nil {
+		return "", err
+	}
+	if argv {
+		required = MergeEventFeatures(required, CronWorkflowArgvEventFeature)
+	}
 	native, err := payloadHasNativeRecurringState(kind, payload)
 	if err != nil {
 		return "", err

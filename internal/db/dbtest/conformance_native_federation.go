@@ -84,8 +84,9 @@ func checkNativeCronFederation(t *testing.T, hub db.Storage, backend Backend) er
 				require.NoError(t, err, "unresolved jobs stay visible")
 				query := peer.(interface {
 					QueryRowContext(context.Context, string, ...any) *sql.Row
+					QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 				})
-				dependencyErr := db.CheckCronDependencies(ctx, query, local.ID, visible.Definition)
+				dependencyErr := db.CheckCronDependencies(ctx, query, backend.Name == "postgres", local.ID, visible.Definition)
 				if event.Type == "cron.job.snapshot" {
 					require.ErrorContains(t, dependencyErr, "missing workflow dependency")
 				} else {
@@ -123,7 +124,8 @@ func checkNativeCronFederation(t *testing.T, hub db.Storage, backend Backend) er
 			require.NoError(t, err)
 			require.ErrorContains(t, db.CheckCronDependencies(ctx, peer.(interface {
 				QueryRowContext(context.Context, string, ...any) *sql.Row
-			}), local.ID, visible.Definition), "tombstoned workflow dependency")
+				QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+			}), backend.Name == "postgres", local.ID, visible.Definition), "tombstoned workflow dependency")
 			require.NoError(t, peer.ResetFederatedProject(ctx, local.ID, adopted.Binding.ReplayHorizonEventID, adopted.Binding.PullCursorEventID))
 			_, err = peer.CronJob(ctx, local.ID, job.UID)
 			require.ErrorIs(t, err, db.ErrNotFound)
