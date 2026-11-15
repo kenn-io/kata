@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -230,38 +229,21 @@ func relayLinkEndpointProjects(ctx context.Context, tx *sql.Tx, events []db.Fold
 	for id := range refs {
 		ids = append(ids, id)
 	}
-	slices.Sort(ids)
 	owners := make(map[string]string, len(ids))
-	for _, id := range ids {
-		owners[id] = ""
+	rows, err := tx.QueryContext(ctx, `SELECT i.uid,p.uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid = ANY($1::text[])`, ids)
+	if err != nil {
+		return nil, err
 	}
-	for len(ids) > 0 {
-		n := min(500, len(ids))
-		parts, args := make([]string, n), make([]any, n)
-		for i, id := range ids[:n] {
-			parts[i] = fmt.Sprintf("$%d", i+1)
-			args[i] = id
-		}
-		//nolint:gosec // Placeholders are generated from the batch size; UIDs remain bound parameters.
-		rows, err := tx.QueryContext(ctx, `SELECT i.uid,p.uid FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid IN (`+strings.Join(parts, ",")+`)`, args...)
-		if err != nil {
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var issue, project string
+		if err := rows.Scan(&issue, &project); err != nil {
 			return nil, err
 		}
-		for rows.Next() {
-			var issue, project string
-			if err = rows.Scan(&issue, &project); err != nil {
-				break
-			}
-			owners[issue] = project
-		}
-		if err == nil {
-			err = rows.Err()
-		}
-		_ = rows.Close()
-		if err != nil {
-			return nil, err
-		}
-		ids = ids[n:]
+		owners[issue] = project
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return owners, nil
 }
@@ -288,10 +270,6 @@ func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]str
 		}
 		ids[uid], uids[id] = id, uid
 	}
-	var instance string
-	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&instance); err != nil {
-		return a, err
-	}
 	for uid, id := range ids {
 		binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, id))
 		if errors.Is(err, db.ErrNotFound) {
@@ -303,16 +281,14 @@ func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]str
 		if !binding.Enabled {
 			continue
 		}
-		pin, err := rootPinTx(ctx, tx, uid, "")
-		if errors.Is(err, db.ErrNotFound) && binding.Role == db.FederationRoleHub {
-			a.Roots[uid] = instance
-		} else if errors.Is(err, db.ErrNotFound) {
-			continue
-		} else if err != nil {
+		root, err := relayProjectRootTx(ctx, tx, uid, binding)
+		if err != nil {
 			return a, err
-		} else {
-			a.Roots[uid] = pin.AuthorityUID
 		}
+		if root == "" {
+			continue
+		}
+		a.Roots[uid] = root
 		group, err := federationBindingGroupProjectIDsUnlocked(ctx, tx, binding)
 		if err != nil {
 			return a, err

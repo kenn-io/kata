@@ -30,10 +30,13 @@ func (d *Store) RelayMetadataRequiresCrossLinks(ctx context.Context, projectID i
 		if err != nil {
 			return false, err
 		}
-		if binding.Role != db.FederationRoleHub || !binding.Enabled {
+		pin.AuthorityUID, err = relayProjectRootTx(ctx, tx, project.UID, binding)
+		if err != nil {
+			return false, err
+		}
+		if pin.AuthorityUID == "" {
 			return false, db.ErrNotFound
 		}
-		pin.AuthorityUID = d.InstanceUID()
 	}
 	required := func(event db.RemoteEvent) (bool, error) {
 		feature, err := db.RelayContentRequiredFeatures(event, pin.AuthorityUID, func(uid string) (string, error) {

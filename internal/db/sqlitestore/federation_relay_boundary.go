@@ -157,17 +157,7 @@ func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID in
 			}
 			return "", err
 		}
-		pin, err := rootPinTx(ctx, tx, uid, "")
-		if errors.Is(err, db.ErrNotFound) && binding.Role == db.FederationRoleHub {
-			return instance, nil
-		}
-		if errors.Is(err, db.ErrNotFound) {
-			return "", nil
-		}
-		if err != nil {
-			return "", err
-		}
-		return pin.AuthorityUID, nil
+		return relayProjectRootTx(ctx, tx, uid, binding)
 	}
 	first, err := root(projectID, binding)
 	if err != nil {
@@ -178,6 +168,22 @@ func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID in
 		return false, err
 	}
 	return first != "" && first == second && (!localWrite || first == instance), nil
+}
+
+func relayProjectRootTx(ctx context.Context, tx *sql.Tx, projectUID string, binding db.FederationBinding) (string, error) {
+	pin, err := rootPinTx(ctx, tx, projectUID, "")
+	if errors.Is(err, db.ErrNotFound) {
+		if binding.Enabled && binding.Role == db.FederationRoleHub {
+			var instance string
+			err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&instance)
+			return instance, err
+		}
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return pin.AuthorityUID, nil
 }
 
 // Enrollment retains links only when their projects share a root and group.
