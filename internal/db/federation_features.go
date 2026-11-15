@@ -394,41 +394,28 @@ func RelayContentRequiredFeatures(event RemoteEvent, root string, resolve func(s
 	if event.OriginInstanceUID != root || !FederationEventAffectsLinks(event.Type) {
 		return "", nil
 	}
-	payload := PayloadMap(event.Payload)
-	var refs []string
+	fold := FoldEvent{UID: event.EventUID, Type: event.Type, Payload: event.Payload}
 	if event.RelatedIssueUID != nil {
-		refs = append(refs, *event.RelatedIssueUID)
+		fold.RelatedIssueUID = *event.RelatedIssueUID
 	}
-	for _, key := range []string{"from_uid", "to_uid", "from_issue_uid", "to_issue_uid", "parent_set_uid", "parent_removed_uid"} {
-		if uid, ok := StringValue(payload[key]); ok {
-			refs = append(refs, uid)
+	var lookupErr error
+	crossing := false
+	_, _, err := StripCrossProjectLinkAdditions(fold, RelayLinkPolicy{CrossProject: func(uid string) bool {
+		if uid != "" && (event.IssueUID == nil || uid != *event.IssueUID) && lookupErr == nil && !crossing {
+			var project string
+			project, lookupErr = resolve(uid)
+			crossing = crossing || project != event.ProjectUID
 		}
+		return false
+	}})
+	if err != nil {
+		return "", err
 	}
-	for _, key := range []string{"blocks_added_uids", "blocks_removed_uids", "blocked_by_added_uids", "blocked_by_removed_uids", "related_added_uids", "related_removed_uids"} {
-		refs = append(refs, StringSlice(payload[key])...)
+	if lookupErr != nil {
+		return "", lookupErr
 	}
-	if raw := payload["links"]; len(raw) > 0 && string(raw) != "null" {
-		var links []struct {
-			ToIssueUID string `json:"to_issue_uid"`
-		}
-		if err := json.Unmarshal(raw, &links); err != nil {
-			return "", err
-		}
-		for _, link := range links {
-			refs = append(refs, link.ToIssueUID)
-		}
-	}
-	for _, ref := range refs {
-		if ref == "" || (event.IssueUID != nil && ref == *event.IssueUID) {
-			continue
-		}
-		project, err := resolve(ref)
-		if err != nil {
-			return "", err
-		}
-		if project != event.ProjectUID {
-			return RelayCrossLinksEventFeature, nil
-		}
+	if crossing {
+		return RelayCrossLinksEventFeature, nil
 	}
 	return "", nil
 }

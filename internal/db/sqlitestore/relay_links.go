@@ -176,7 +176,7 @@ func filterRelayLinkEvents(ctx context.Context, tx *sql.Tx, events []db.FoldEven
 			issueProjects[event.IssueUID] = event.ProjectUID
 		}
 	}
-	authority, err := relayFoldAuthorityTx(ctx, tx, issueProjects)
+	authority, err := relayFoldAuthorityTx(ctx, tx, issueProjects, classifier.instanceUID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -194,10 +194,7 @@ func filterRelayLinkEvents(ctx context.Context, tx *sql.Tx, events []db.FoldEven
 			filtered = append(filtered, stripped)
 		}
 	}
-	// Direct and relay edits both preserve root-owned crossing parents.
-	return filtered, func(child, parent string, previous, next db.FoldClock) bool {
-		return authority.AllowParentRemoval(child, parent, previous, next)
-	}, nil
+	return filtered, authority.AllowParentRemoval, nil
 }
 
 // relayLinkEndpointProjects resolves only issue UIDs referenced by this fold.
@@ -250,7 +247,7 @@ func relayLinkEndpointProjects(ctx context.Context, tx *sql.Tx, events []db.Fold
 }
 
 // relayFoldAuthorityTx loads live project membership for relay link folding.
-func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]string) (db.RelayFoldAuthority, error) {
+func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]string, instance string) (db.RelayFoldAuthority, error) {
 	a := db.RelayFoldAuthority{Projects: owners, Roots: map[string]string{}, Groups: map[string]map[string]bool{}}
 	ids := map[string]int64{}
 	uids := map[int64]string{}
@@ -270,10 +267,6 @@ func relayFoldAuthorityTx(ctx context.Context, tx *sql.Tx, owners map[string]str
 			return a, err
 		}
 		ids[uid], uids[id] = id, uid
-	}
-	var instance string
-	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&instance); err != nil {
-		return a, err
 	}
 	for uid, id := range ids {
 		binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=?`, id))

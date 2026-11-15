@@ -138,7 +138,7 @@ func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID in
 	if !peer.Enabled || (localWrite && peer.Role != db.FederationRoleHub) {
 		return false, nil
 	}
-	group, err := federationBindingGroupProjectIDsUnlocked(ctx, tx, binding)
+	group, err := federationBindingGroupProjectIDsWithLock(ctx, tx, binding, false)
 	if err != nil {
 		return false, err
 	}

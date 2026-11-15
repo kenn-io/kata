@@ -114,10 +114,6 @@ func federationBindingGroupProjectIDs(
 	return federationBindingGroupProjectIDsWithLock(ctx, tx, current, true)
 }
 
-func federationBindingGroupProjectIDsUnlocked(ctx context.Context, tx *sql.Tx, current db.FederationBinding) ([]int64, error) {
-	return federationBindingGroupProjectIDsWithLock(ctx, tx, current, false)
-}
-
 func federationBindingGroupProjectIDsWithLock(ctx context.Context, tx *sql.Tx, current db.FederationBinding, lock bool) ([]int64, error) {
 	switch current.Role {
 	case db.FederationRoleHub:
