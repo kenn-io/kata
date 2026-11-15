@@ -23,6 +23,17 @@ func TestRelayCloseEvidenceReusedProjectName(t *testing.T) {
 	require.ErrorIs(t, err, ErrRelayReferenceUnprovable)
 }
 
+func TestRelayCloseEvidenceUsesEventProject(t *testing.T) {
+	event := RemoteEvent{ProjectUID: "original", ProjectName: "reused", Type: "issue.closed", Payload: jsontext.Value(`{"evidence":[{"type":"duplicate-of","issue_ref":"reused#1234"}]}`)}
+	lookup := NewEventIssueLookup(nil, func(_, _ string) (Issue, error) {
+		t.Fatal("the current project name must not replace the event's project")
+		return Issue{}, nil
+	}, nil)
+	projects, err := RelayEventPeerProjects(event, lookup)
+	require.NoError(t, err)
+	require.Equal(t, []string{"original"}, projects)
+}
+
 func TestRelayCommentReplyRelease(t *testing.T) {
 	const commentUID = "00000000000000000000000002"
 	event := RemoteEvent{ProjectUID: "own", Type: "issue.commented", Payload: jsontext.Value(`{"reply_to_uid":"` + commentUID + `","reply_kind":"reply"}`)}

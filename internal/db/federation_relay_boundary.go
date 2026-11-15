@@ -29,8 +29,14 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 	}
 	issueUID := func(uid string) (bool, error) { issue, err := lookup.IssueByUID(uid); return add(issue, err, true) }
 	issueRef := func(ref string) (bool, error) {
-		if parsed, err := shortid.Parse(ref); err == nil && parsed.ULID != "" {
-			return issueUID(parsed.ULID)
+		if parsed, err := shortid.Parse(ref); err == nil {
+			if parsed.ULID != "" {
+				return issueUID(parsed.ULID)
+			}
+			if parsed.Project != "" && parsed.Project == event.ProjectName {
+				projects[event.ProjectUID] = true
+				return false, nil
+			}
 		}
 		if strings.Contains(ref, "#") {
 			return true, nil
@@ -55,7 +61,7 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 			return nil, ErrRelayReferenceUnprovable
 		}
 	}
-	unprovable, err := walkEventProjectReferences(Event{ProjectUID: event.ProjectUID, RelatedIssueUID: event.RelatedIssueUID, Type: event.Type, Payload: string(event.Payload)}, issueUID, issueRef, comment, project)
+	unprovable, err := walkEventProjectReferences(Event{ProjectUID: event.ProjectUID, RelatedIssueUID: event.RelatedIssueUID, Type: event.Type, Payload: string(event.Payload)}, issueUID, issueRef, comment, project, true)
 	if err != nil {
 		return nil, err
 	}

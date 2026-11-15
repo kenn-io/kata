@@ -93,11 +93,11 @@ func EventRequiresProjectScopeReset(
 		return false, nil
 	}
 	projectIsPrivate := func(uid string) (bool, error) { _, visible := allowed[uid]; return !visible, nil }
-	return walkEventProjectReferences(event, issueIsPrivate, refIsPrivate, commentIsPrivate, projectIsPrivate)
+	return walkEventProjectReferences(event, issueIsPrivate, refIsPrivate, commentIsPrivate, projectIsPrivate, false)
 }
 
 // walkEventProjectReferences visits structured references without selecting a visibility policy.
-func walkEventProjectReferences(event Event, issueIsPrivate func(string) (bool, error), refIsPrivate func(string) (bool, error), commentIsPrivate func(string, string) (bool, error), projectIsPrivate func(string) (bool, error)) (bool, error) {
+func walkEventProjectReferences(event Event, issueIsPrivate func(string) (bool, error), refIsPrivate func(string) (bool, error), commentIsPrivate func(string, string) (bool, error), projectIsPrivate func(string) (bool, error), relayRelease bool) (bool, error) {
 	for _, relatedUID := range []*string{event.RelatedIssueUID} {
 		if relatedUID == nil {
 			continue
@@ -173,6 +173,9 @@ func walkEventProjectReferences(event Event, issueIsPrivate func(string) (bool, 
 
 	switch event.Type {
 	case "issue.commented":
+		if !relayRelease {
+			return false, nil
+		}
 		var payload struct {
 			ReplyToUID string `json:"reply_to_uid"`
 			ReplyKind  string `json:"reply_kind"`
@@ -185,6 +188,9 @@ func walkEventProjectReferences(event Event, issueIsPrivate func(string) (bool, 
 		}
 		return commentIsPrivate(payload.ReplyToUID, payload.ReplyKind)
 	case "issue.linked", "issue.unlinked":
+		if !relayRelease {
+			return false, nil
+		}
 		var payload map[string]jsontext.Value
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
 			return true, nil

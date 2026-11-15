@@ -1,6 +1,7 @@
 package dbtest
 
 import (
+	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"fmt"
 	"testing"
@@ -9,6 +10,31 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 )
+
+// RunRelaySameProjectNamedEvidenceReset checks retained local close evidence.
+func RunRelaySameProjectNamedEvidenceReset(t *testing.T, store db.Storage) {
+	ctx := t.Context()
+	fixture := newRelayLinkBoundaryFixture(t, store, "local-evidence")
+	project := fixture.project
+	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Evidence target", Author: "member"})
+	require.NoError(t, err)
+	closed, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Legacy close", Author: "member"})
+	require.NoError(t, err)
+	event := newRemoteEvent(t, project, &closed.UID, "issue.closed", "member", store.InstanceUID(), 600,
+		jsontext.Value(fmt.Sprintf(`{"reason":"duplicate","evidence":[{"type":"duplicate-of","issue_ref":%q}]}`, project.Name+"#"+target.ShortID)))
+	_, err = store.InsertRemoteEvents(ctx, project.ID, []db.RemoteEvent{event})
+	require.NoError(t, err)
+	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID, ParentTokenID: fixture.parentTokenID,
+		SpokeInstanceUID: "00000000000000000000000008", ProtocolVersion: db.RelayProtocolVersion})
+	require.NoError(t, err)
+	checkpoint, err := store.(db.RelayResetStore).CreateRelayReset(ctx, grant.Enrollment.RelayBindingUID, fixture.signer)
+	require.NoError(t, err)
+	public := fixture.signer.PrivateKey.Public().(ed25519.PublicKey)
+	pin := db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: fixture.signer.AuthorityUID, KeyID: db.RootPublicKeyID(public), PublicKey: public}
+	events, _, err := db.DecodeRootResetPayload(pin, checkpoint.Snapshot)
+	require.NoError(t, err)
+	require.Contains(t, events, event)
+}
 
 // RunRelayNamedEvidenceCache verifies cached history validation follows project name resolution changes.
 func RunRelayNamedEvidenceCache(t *testing.T, store db.Storage, backend Backend) {
