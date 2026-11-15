@@ -33,7 +33,7 @@ comment --reply, --confirm, --refute, or --supersede clears the request and
 tells you on this issue, so wait --until reply here wakes.
 --broadcast replaces --to: it asks this issue's participants and those of
 its open children (at most 50); --teammates adds their teammate inboxes.
---follow-up sets this issue's shared scheduled_on atomically with the request.
+--follow-up saves the request and shared follow-up date together.
 It accepts the same dates as kata schedule, including past dates: YYYY-MM-DD,
 local YYYY-MM-DDTHH:MM[:SS], or RFC 3339 UTC ending in Z. Relative words are
 rejected. A future date hides the issue from ready/next until its gate opens.
