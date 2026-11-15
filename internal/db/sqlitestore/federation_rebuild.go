@@ -150,30 +150,28 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		m := &p.materialization
 		events := p.linkEvents
 		var check db.FoldParentRemovalCheck
-		if slices.ContainsFunc(p.linkEvents, m.relayOrigins.relaySourced) {
-			owners, err := relayLinkEndpointProjects(ctx, tx, p.linkEvents)
-			if err != nil {
-				return preparedFederationRebuild{}, err
+		owners, err := relayLinkEndpointProjects(ctx, tx, p.linkEvents)
+		if err != nil {
+			return preparedFederationRebuild{}, err
+		}
+		for _, other := range result.projects {
+			for uid := range other.materialization.staleIssues {
+				delete(owners, uid)
 			}
-			for _, other := range result.projects {
-				for uid := range other.materialization.staleIssues {
-					delete(owners, uid)
-				}
-				if !slices.Contains(m.linkProjects, other.id) {
-					continue
-				}
-				for uid := range other.projection.Issues {
-					owners[uid] = other.uid
-				}
-				for uid := range other.moved.Issues {
-					owners[uid] = other.uid
-				}
+			if !slices.Contains(m.linkProjects, other.id) {
+				continue
 			}
-			maps.Copy(owners, moveOwners)
-			events, check, err = filterRelayLinkEvents(ctx, tx, events, m.relayOrigins, owners)
-			if err != nil {
-				return preparedFederationRebuild{}, err
+			for uid := range other.projection.Issues {
+				owners[uid] = other.uid
 			}
+			for uid := range other.moved.Issues {
+				owners[uid] = other.uid
+			}
+		}
+		maps.Copy(owners, moveOwners)
+		events, check, err = filterRelayLinkEvents(ctx, tx, events, m.relayOrigins, owners)
+		if err != nil {
+			return preparedFederationRebuild{}, err
 		}
 		m.links = db.FoldRelayLinkEvents(events, check)
 		if _, err := federationGroupIssueIDs(ctx, tx, m.linkProjects, 0, nil, nil, m.rowHasher); err != nil {

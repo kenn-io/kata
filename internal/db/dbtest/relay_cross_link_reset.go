@@ -128,8 +128,10 @@ func RunRelayCrossLinkResetHistory(t *testing.T, root db.Storage, backend Backen
 		retry, err = rootResets.CreateRelayReset(features, binding, signer)
 		require.NoError(t, err)
 		require.Equal(t, afterArchive, retry)
+		//nolint:gosec // This is a deterministic fixture credential.
 		parent, _, err := root.CreateAPIToken(ctx, db.CreateAPITokenParams{Actor: "member", AdminActor: "admin", PlaintextToken: "archived-peer-parent-test-token"})
 		require.NoError(t, err)
+		//nolint:gosec // This is a deterministic fixture credential.
 		newGrant, err := root.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: projects[0].ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000006", ProtocolVersion: db.RelayProtocolVersion, Token: "archived-peer-relay-test-token"})
 		require.NoError(t, err)
 		newReset, err := rootResets.CreateRelayReset(features, newGrant.Enrollment.RelayBindingUID, signer)

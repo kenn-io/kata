@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -161,9 +160,6 @@ func filterRelayCrossProjectLinkEvents(
 	if err != nil {
 		return nil, nil, err
 	}
-	if !slices.ContainsFunc(events, classifier.relaySourced) {
-		return events, nil, nil
-	}
 	issueProjects, err := relayLinkEndpointProjects(ctx, tx, events)
 	if err != nil {
 		return nil, nil, err
@@ -179,17 +175,11 @@ func filterRelayCrossProjectLinkEvents(
 		return nil, nil, err
 	}
 	filtered := make([]db.FoldEvent, 0, len(events))
-	relayEvents := make(map[string]bool)
 	for _, event := range events {
-		// Local edits on a relay spoke must also respect root-owned parents.
-		if _, relaySpoke := classifier.relaySpokes[event.ProjectUID]; relaySpoke {
-			relayEvents[event.UID] = true
-		}
 		if !classifier.relaySourced(event) {
 			filtered = append(filtered, event)
 			continue
 		}
-		relayEvents[event.UID] = true
 		stripped, keep, err := db.StripCrossProjectLinkAdditions(event, authority.Policy(event))
 		if err != nil {
 			return nil, nil, err
@@ -198,8 +188,9 @@ func filterRelayCrossProjectLinkEvents(
 			filtered = append(filtered, stripped)
 		}
 	}
+	// Direct and relay edits both preserve root-owned crossing parents.
 	return filtered, func(child, parent string, previous, next db.FoldClock) bool {
-		return !relayEvents[next.EventUID] || authority.AllowParentRemoval(child, parent, previous, next)
+		return authority.AllowParentRemoval(child, parent, previous, next)
 	}, nil
 }
 
