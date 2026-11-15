@@ -1059,93 +1059,13 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 	return out, nil
 }
 
-// effectiveCloseEventForShow returns the explicit close event whose status
-// intent still supplies the issue's current closed state. A later reopen or
-// imported status transition can leave the issue closed without carrying any
-// close receipt. A project-scope reset invalidates receipts at or before its
-// redacted event clock, while a later visible close can establish a new one.
+// effectiveCloseEventForShow reuses the history owner's full status selection
+// and visibility checks rather than folding the reader's redacted history.
 func effectiveCloseEventForShow(ctx context.Context, store db.Storage, issue db.Issue) (*db.Event, error) {
-	var foldEvents []db.FoldEvent
-	closeEvents := map[string]db.Event{}
-	var latestReset *db.FoldClock
-	query := db.EventsAfterParams{
-		IssueUID: issue.UID,
-		Types:    []string{"issue.created", "issue.snapshot", "issue.updated", db.RepeatedImportEventType, "issue.closed", "issue.reopened"},
-		Limit:    100,
-	}
-	for {
-		page, err := store.EventsAfter(ctx, query)
-		if err != nil {
-			return nil, err
-		}
-		if len(page) == 0 {
-			break
-		}
-		for _, event := range page {
-			if event.Type == db.ProjectScopeResetEventType {
-				if event.EffectiveOrder.EventUID == "" {
-					return nil, nil
-				}
-				if latestReset == nil || foldClockAfter(event.EffectiveOrder, *latestReset) {
-					reset := event.EffectiveOrder
-					latestReset = &reset
-				}
-				continue
-			}
-			foldEvents = append(foldEvents, db.FoldEvent{
-				UID: event.UID, OriginInstanceUID: event.OriginInstanceUID,
-				ProjectUID: event.ProjectUID, IssueUID: issue.UID,
-				Type: event.Type, Actor: event.Actor,
-				HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter,
-				CreatedAt: event.CreatedAt.UTC().Format(db.EventTimestampFormat),
-				Payload:   jsontext.Value(event.Payload),
-			})
-			if event.Type == "issue.closed" {
-				closeEvents[event.UID] = event
-			}
-		}
-		query.AfterID = page[len(page)-1].ID
-		if len(page) < query.Limit {
-			break
-		}
-	}
-	folded, ok := db.FoldEvents(foldEvents).Issues[issue.UID]
-	if !ok || folded.Status != issue.Status || folded.Status != "closed" || folded.StatusIntentUID == "" {
+	if issue.Status != "closed" {
 		return nil, nil
 	}
-	event, ok := closeEvents[folded.StatusIntentUID]
-	if !ok {
-		return nil, nil
-	}
-	if latestReset != nil && !foldClockAfter(eventFoldClock(event), *latestReset) {
-		return nil, nil
-	}
-	resolved := attachResolvedIssueID(issue, []db.Event{event})
-	return &resolved[0], nil
-}
-
-// foldClockAfter matches FoldEvents' deterministic HLC ordering.
-func foldClockAfter(candidate, current db.FoldClock) bool {
-	switch {
-	case candidate.HLCPhysicalMS != current.HLCPhysicalMS:
-		return candidate.HLCPhysicalMS > current.HLCPhysicalMS
-	case candidate.HLCCounter != current.HLCCounter:
-		return candidate.HLCCounter > current.HLCCounter
-	case candidate.OriginInstanceUID != current.OriginInstanceUID:
-		return candidate.OriginInstanceUID > current.OriginInstanceUID
-	default:
-		return candidate.EventUID > current.EventUID
-	}
-}
-
-func eventFoldClock(event db.Event) db.FoldClock {
-	if event.EffectiveOrder.EventUID != "" {
-		return event.EffectiveOrder
-	}
-	return db.FoldClock{
-		HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter,
-		OriginInstanceUID: event.OriginInstanceUID, EventUID: event.UID,
-	}
+	return effectiveIssueCloseEvent(ctx, store, issue)
 }
 
 func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool, selectors ...commentref.Options) (*api.ShowIssueResponse, error) {

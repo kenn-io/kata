@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/fileevidence"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -263,7 +264,8 @@ func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 		require.NoError(t, err)
 		issue := createScopedHTTPTestIssue(t, env, visible.ID, "Moved close evidence", nil)
 		newScopedTokens(t, env, visible, issue)
-		_, closedEvents, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Closed before moving.", nil)
+		size := int64(0)
+		_, closedEvents, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Closed before moving.", []db.Evidence{{Type: "file", File: &fileevidence.Reference{Source: "notes", Path: "report.md", Origin: env.DB.InstanceUID(), Size: &size}}})
 		require.NoError(t, err)
 		require.True(t, changed)
 		require.Len(t, closedEvents, 1)
@@ -302,6 +304,18 @@ func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 		_, hasEffectiveClose := raw["effective_close_event_uid"]
 		require.False(t, hasEffectiveClose, string(body))
 		require.NotContains(t, string(body), hiddenCloseUID)
+		showPath := scopedProjectPath(visible.ID, "issues/"+issue.UID)
+		resp, body = envDoRaw(t, env, http.MethodGet, showPath, nil, map[string]string{"Authorization": "Bearer worker-token"})
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		var shown struct {
+			CloseEventUID string        `json:"close_event_uid"`
+			CloseEvidence []db.Evidence `json:"close_evidence"`
+		}
+		require.NoError(t, json.Unmarshal(body, &shown))
+		require.Empty(t, shown.CloseEventUID, "show must agree with history's effective close selection")
+		require.Empty(t, shown.CloseEvidence)
+		resp, body = envDoRaw(t, env, http.MethodGet, showPath+"/file-evidence", nil, map[string]string{"Authorization": "Bearer worker-token"})
+		require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
 	})
 }
 

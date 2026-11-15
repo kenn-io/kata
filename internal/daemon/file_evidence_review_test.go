@@ -49,7 +49,7 @@ func TestRestatedStatusClearsDefaultFileEvidence(t *testing.T) {
 	resp, raw = envDoRaw(t, env, http.MethodGet, issuePath(pid, id, "file-evidence"), nil, nil)
 	require.Equal(t, http.StatusNotFound, resp.StatusCode, string(raw))
 	resp, raw = envDoRaw(t, env, http.MethodGet, issuePath(pid, id, "file-evidence")+"?event_uid="+closes[0].UID, nil, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, "explicit historical close evidence remains accessible")
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 }
 
 func TestScopedPulledFileEvidence(t *testing.T) {
@@ -80,4 +80,27 @@ func TestScopedPulledFileEvidence(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestFileEvidenceRejectsForgedOrigin(t *testing.T) {
+	barrier := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(barrier, "release"), nil, 0600))
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.FileEvidence = fileevidence.Config{Sources: map[string]fileevidence.Source{"notes": {Command: []string{os.Args[0], "-test.run=^TestFileReadBarrierResolver$", "--", barrier}}}}
+	})
+	pid := initLocalWorkspace(t, env, "example-workspace")
+	id := createIssueViaHTTP(t, env, pid, "Imported file proof")
+	issue, closed, _, err := env.DB.CloseIssueWithEvents(t.Context(), id, "done", "worker", "Closed before receiving an imported file receipt.", nil)
+	require.NoError(t, err)
+	require.Len(t, closed, 1)
+	project, err := env.DB.ProjectByID(t.Context(), pid)
+	require.NoError(t, err)
+	payload := fmt.Sprintf(`{"reason":"done","evidence":[{"type":"file","file":{"source":"notes","path":"report.md","origin":%q,"size":7}}]}`, env.DB.InstanceUID())
+	insertRemoteIssueHistoryEvent(t, env, project, issue, "00000000000000000000000001", "7ZZZZZZZZZZZZZZZZZZZZZZZZZ", "issue.closed", closed[0].HLCPhysicalMS+1, 0, payload, closed[0].CreatedAt)
+	resp, raw := envDoRaw(t, env, http.MethodGet, issuePath(pid, id, "file-evidence")+"?content=true", nil, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	_, err = os.Stat(filepath.Join(barrier, "started"))
+	require.ErrorIs(t, err, os.ErrNotExist, "a foreign close cannot grant access to a local resolver by forging file.origin")
+	require.Contains(t, string(raw), `"status":"invalid"`)
+	require.NotContains(t, string(raw), "Zml4dHVyZQ==")
 }

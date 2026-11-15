@@ -31,7 +31,8 @@ env = ["EXAMPLE_ADAPTER_TOKEN_FILE"]
 Choose exactly one absolute `root` or command argv per alias. There is no shell
 expansion. Aliases are stable dataset identities: never repoint an existing
 alias to another dataset. An origin instance UID and alias together distinguish
-sources. The root belongs to the daemon, including when the client runs on
+sources. A reference whose origin differs from its close event is invalid and
+never invokes a resolver. The root belongs to the daemon, including when the client runs on
 another machine; client mount paths have no meaning here.
 
 Configuring a source is a daemon-wide publication grant to eligible closers.
@@ -103,6 +104,8 @@ the canonical close payload without reading any source.
 | `history-unavailable` | The source cannot supply the requested historical bytes. Local roots do not retain history. |
 | `foreign-origin` | Contact the original instance UID through its existing authorized route. No local alias is invoked and no credentials are forwarded. |
 | `invalid` / `invalid-response` | Retained metadata or the adapter protocol is inconsistent. |
+| `invalid-file` / `too-large` | The local path is not an allowed regular file or exceeds the byte limit. |
+| `changed-during-read` | Local file identity, size or modification checks changed during the read; no bytes are returned. |
 
 Historical reads supply the recorded revision and/or digest. With neither,
 Kata returns `history-unavailable`. A revision is an opaque locator, not content

@@ -93,7 +93,11 @@ func registerFileEvidenceHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		canonicalOrigin := ""
 		if event != nil {
+			// Scoped projection redacts envelope identity; validate provenance
+			// against the canonical header, never its response projection.
+			canonicalOrigin = event.OriginInstanceUID
 			resolved := attachResolvedIssueID(issue, []db.Event{*event})
 			event = &resolved[0]
 			event, err = scopedMutationEvent(ctx, cfg.DB, event)
@@ -124,7 +128,13 @@ func registerFileEvidenceHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		// activeIssueByRef and scopedMutationEvent register scope targets. Middleware
 		// revalidates them after resolver I/O before releasing this response.
-		result := cfg.FileEvidence.Read(ctx, files[in.Index], cfg.DB.InstanceUID(), in.Historical)
+		ref := files[in.Index]
+		result := fileevidence.Result{Status: "invalid", Reference: ref}
+		// Capture stamps the closing daemon's identity. A replayed descriptor
+		// cannot claim this daemon's local aliases on a foreign event's behalf.
+		if ref.Origin == canonicalOrigin {
+			result = cfg.FileEvidence.Read(ctx, ref, cfg.DB.InstanceUID(), in.Historical)
+		}
 		if !in.Content {
 			result.Content = nil
 		}
