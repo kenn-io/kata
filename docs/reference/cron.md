@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-13
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -181,8 +181,8 @@ Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 
 A `cron` expression has five fields: minute, hour, day of month, month, and day
 of week. It may instead be a descriptor such as `@hourly`, `@daily`, `@weekly`,
-`@monthly`, or `@yearly`. Kata does not accept seconds, years, `L`, `W`, `#`,
-or `H` syntax. Kata keeps the expression exactly as written.
+`@monthly`, or `@yearly`. Kata does not accept `@reboot`, seconds, years,
+`L`, `W`, `#`, or `H` syntax. Kata keeps the expression exactly as written.
 
 - Day of week accepts `0` or `7` for Sunday, and names such as `MON`.
   `0 9 * * 7` runs on Sundays, `5-7` means Friday through Sunday, and `5-7/2`
@@ -195,6 +195,12 @@ or `H` syntax. Kata keeps the expression exactly as written.
   and `*/60 * * * *`; write `@daily` or `@hourly` instead.
 - A step that starts at one weekday continues through 7, which is Sunday.
   `0 9 * * 5/2` runs on Fridays and Sundays.
+
+A rejected expression's error says why. For `L`, `W`, `#`, or `H` syntax, it
+names the unsupported feature. Otherwise it shows the parser's message, with a
+note on the five-field format, `@reboot`, or `@every` when one applies.
+Adapter jobs accept `@every`; native jobs use an interval trigger, as described
+in [Recurring child issues](#recurring-child-issues).
 
 Schedules follow the trigger timezone's daylight-saving transitions:
 

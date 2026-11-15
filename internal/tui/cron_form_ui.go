@@ -458,6 +458,18 @@ func renderCronForm(m Model) string {
 	case f.general != "":
 		footer = append(footer, termtext.Wrap(errorStyle.Render(sanitizeForLine(f.general)), max(m.width, 1))...)
 	}
+	footerBudget := max(m.height-len(body)-helpLines(help, m.width)-cronNoticeRows(m)-1, 1)
+	if len(footer) > footerBudget {
+		head := max(footerBudget-2, 0)
+		footer = append(footer[:head], footer[len(footer)-min(footerBudget, 2):]...)
+		// Mark the cut where it happens: after the kept head, or before the
+		// tail when no head fits.
+		if head > 0 {
+			footer[head-1] = ansi.Truncate(footer[head-1], max(m.width-1, 0), "") + "…"
+		} else {
+			footer[0] = ansi.TruncateLeft(footer[0], 1, "…")
+		}
+	}
 	budget := max(m.height-len(body)-max(len(footer), 1)-helpLines(help, m.width)-cronNoticeRows(m), 1)
 	start, end := windowBounds(len(lines), cursor, budget)
 	body = append(body, lines[start:end]...)
