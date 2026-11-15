@@ -15,9 +15,8 @@ type eventQueryRower interface {
 
 // relayEventIssueLookup also resolves purged issue ownership for release checks.
 func relayEventIssueLookup(ctx context.Context, query eventQueryRower) *db.EventIssueLookup {
-	live := eventIssueLookup(ctx, query)
-	return db.NewEventIssueLookup(func(uid string) (db.Issue, error) {
-		issue, err := live.IssueByUID(uid)
+	return eventIssueLookupWithUID(ctx, query, func(uid string) (db.Issue, error) {
+		issue, err := eventIssueByUID(ctx, query, uid)
 		if !errors.Is(err, db.ErrNotFound) {
 			return issue, err
 		}
@@ -27,13 +26,19 @@ func relayEventIssueLookup(ctx context.Context, query eventQueryRower) *db.Event
 			return db.Issue{}, db.ErrNotFound
 		}
 		return db.Issue{ProjectUID: projectUID.String}, err
-	}, live.IssueByRef, live.CommentIssueByUID)
+	})
 }
 
 // eventIssueLookup memoizes the event reference lookups below for one read.
 func eventIssueLookup(ctx context.Context, query eventQueryRower) *db.EventIssueLookup {
+	return eventIssueLookupWithUID(ctx, query, func(uid string) (db.Issue, error) {
+		return eventIssueByUID(ctx, query, uid)
+	})
+}
+
+func eventIssueLookupWithUID(ctx context.Context, query eventQueryRower, byUID func(string) (db.Issue, error)) *db.EventIssueLookup {
 	return db.NewEventIssueLookup(
-		func(uid string) (db.Issue, error) { return eventIssueByUID(ctx, query, uid) },
+		byUID,
 		func(projectUID, ref string) (db.Issue, error) {
 			return eventIssueByRef(ctx, query, projectUID, ref)
 		},

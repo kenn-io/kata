@@ -32,8 +32,11 @@ func RelayEventPeerProjects(event RemoteEvent, lookup *EventIssueLookup) ([]stri
 		if parsed, err := shortid.Parse(ref); err == nil && parsed.ULID != "" {
 			return issueUID(parsed.ULID)
 		}
+		if strings.Contains(ref, "#") {
+			return true, nil
+		}
 		issue, err := lookup.IssueByRef(event.ProjectUID, ref)
-		return add(issue, err, strings.Contains(ref, "#"))
+		return add(issue, err, false)
 	}
 	comment := func(uid, kind string) (bool, error) {
 		if len(uid) != 26 || !ValidCommentReplyKind(kind) {

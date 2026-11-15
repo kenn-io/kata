@@ -9,6 +9,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRelayCloseEvidenceReusedProjectName(t *testing.T) {
+	event := RemoteEvent{ProjectUID: "own", Type: "issue.closed", Payload: jsontext.Value(`{"evidence":[{"type":"duplicate-of","issue_ref":"reused#1234"}]}`)}
+	lookup := NewEventIssueLookup(nil, func(_, ref string) (Issue, error) {
+		require.Equal(t, "reused#1234", ref)
+		return Issue{ProjectUID: "replacement"}, nil
+	}, nil)
+	ctx := WithProjectAccessTransactionCheck(t.Context(), func(_ context.Context, _ Transaction, projectUID string) error {
+		require.Equal(t, "replacement", projectUID)
+		return nil
+	})
+	err := AuthorizeRelayRelease(ctx, nil, lookup, "own", []RemoteEvent{event})
+	require.ErrorIs(t, err, ErrRelayReferenceUnprovable)
+}
+
 func TestRelayCommentReplyRelease(t *testing.T) {
 	const commentUID = "00000000000000000000000002"
 	event := RemoteEvent{ProjectUID: "own", Type: "issue.commented", Payload: jsontext.Value(`{"reply_to_uid":"` + commentUID + `","reply_kind":"reply"}`)}
@@ -70,7 +84,7 @@ func TestRelayEventPeerProjects(t *testing.T) {
 		{"restated", RepeatedImportEventType, `{"links":[{"to_issue_uid":"` + issueUID + `"}]}`, nil, true, false},
 		{"moved snapshot", "issue.moved", `{"from_project_uid":"own","to_project_uid":"own","snapshot":{"links":[{"to_issue_uid":"` + issueUID + `"}]}}`, nil, true, false},
 		{"close parent", "issue.closed", `{"parent_uid":"` + issueUID + `"}`, nil, true, false},
-		{"close evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"peer#1"}]}`, nil, true, false},
+		{"qualified close evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"peer#1"}]}`, nil, false, true},
 		{"close UID evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"` + issueUID + `"}]}`, nil, true, false},
 		{"missing qualified evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"other#1234"}]}`, nil, false, true},
 		{"missing UID evidence", "issue.closed", `{"evidence":[{"type":"duplicate-of","issue_ref":"00000000000000000000000003"}]}`, nil, false, true},
