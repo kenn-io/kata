@@ -9,7 +9,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Read a soft-deleted issue's history, including who deleted it and when, from `GET /api/v1/projects/{project_id}/events?issue={ref}`. Callers who may restore the issue can read it; everyone else still gets `issue_not_found`.
+- Read a soft-deleted issue's history, including who deleted it and when, from
+  `GET /api/v1/projects/{project_id}/events?issue={ref}`. Name the actor you
+  would restore as in the new `actor` query parameter. Callers who may restore
+  the issue can read it; everyone else still gets `issue_not_found`.
 
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
 

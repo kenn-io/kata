@@ -13,4 +13,8 @@ export type PollProjectEventsParams = {
    * Include the effective native close event UID in issue history when available.
    */
   include_effective_close_event_uid?: boolean
+  /**
+   * Actor the caller acts as. A soft-deleted issue's history is readable when restore would accept this actor; an authenticated principal's own actor takes precedence.
+   */
+  actor?: string
 }

@@ -62,10 +62,8 @@ func registerEventsHandlers(humaAPI huma.API, mux *http.ServeMux, cfg ServerConf
 				return nil, err
 			}
 			if issue.DeletedAt != nil {
-				// A soft-deleted issue's history is for whoever may restore it.
-				// Anyone else sees the same 404 an unknown ref gets.
-				if err := requireRestorePermission(ctx, cfg, issue, actorFor(ctx, "")); err != nil {
-					return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
+				if err := requireDeletedHistoryAccess(ctx, cfg, in.ProjectID, issue, in.Actor); err != nil {
+					return nil, err
 				}
 			}
 			return pollIssueHistory(ctx, cfg.DB, in.AfterID, in.Limit, issue, in.IncludeEffectiveCloseEventUID)
@@ -1276,4 +1274,27 @@ func sseFrameBytes(id int64, eventType string, data []byte) []byte {
 	buf.Write(data)
 	buf.WriteString("\n\n")
 	return buf.Bytes()
+}
+
+// requireDeletedHistoryAccess lets a soft-deleted issue's history be read by
+// whoever the restore action would accept: the same attributed-actor and claim
+// checks restore runs, with requestActor standing in for restore's body actor.
+// An insecure-readonly caller is anonymous, and restore refuses it before any
+// handler runs, so it is refused here too. A refusal answers with the
+// issue_not_found an unknown ref gets; any other failure keeps its own status.
+func requireDeletedHistoryAccess(ctx context.Context, cfg ServerConfig, projectID int64, issue db.Issue, requestActor string) error {
+	notFound := api.NewError(404, "issue_not_found", "issue not found", "", nil)
+	if insecureReadonlyRequest(ctx) {
+		return notFound
+	}
+	actor, err := attributedActor(ctx, requestActor)
+	if err != nil {
+		return notFound
+	}
+	err = requireFederatedIssueClaim(ctx, cfg, projectID, issue, actor)
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) && (apiErr.Code == "claim_denied" || apiErr.Code == "auth_required") {
+		return notFound
+	}
+	return err
 }

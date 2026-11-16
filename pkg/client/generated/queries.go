@@ -194,6 +194,9 @@ type PollProjectEventsQuery struct {
 
 	// IncludeEffectiveCloseEventUID Include the effective native close event UID in issue history when available.
 	IncludeEffectiveCloseEventUID *bool `json:"include_effective_close_event_uid,omitempty"`
+
+	// Actor Actor the caller acts as. A soft-deleted issue's history is readable when restore would accept this actor; an authenticated principal's own actor takes precedence.
+	Actor *string `json:"actor,omitempty"`
 }
 
 type GetProjectFederationQuery struct {

@@ -258,10 +258,14 @@ can access those projects. Scoped credentials receive the same authorized
 history projection as issue detail.
 
 A soft-deleted issue's history, including its `issue.soft_deleted` event, is
-readable by callers the restore action would accept, under the same attributed
-write and claim checks. Any other caller gets the `issue_not_found` response an
-unknown ref gets. This needs no API version change: the request and response
-shapes are unchanged.
+readable by callers the restore action would accept. Send the actor you would
+restore as in the `actor` query parameter; an authenticated principal's own
+actor takes precedence, as it does for restore. The same attributed write and
+claim checks apply, so on a federated project only the claim holder reads it
+while another actor's claim is live. Any other caller, including an anonymous
+`--insecure-readonly` caller, gets the `issue_not_found` response an unknown ref
+gets; failures that are not refusals keep their own status. Active issues ignore
+`actor`.
 
 Clients that need close evidence can set
 `include_effective_close_event_uid=true`. The response includes
@@ -283,6 +287,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.52.0` | `GET /api/v1/projects/{project_id}/events` accepts `actor` so callers who may restore a soft-deleted issue can read its history. |
 | `0.51.0` | Signed federation requests return `503 signing_warming` with `Retry-After: 5` while replay protection warms up. |
 | `0.50.0` | A hub that requires signing and the restricted ingress answer requests without signature headers with `428 hub_signing_required` instead of `401 signature_invalid`. A request with only a digest follows the unsigned path, including when signing is optional. |
 | `0.49.0` | `GET /api/v1/projects/resolve` resolves a project by name for readers. Project federation status accepts `omit_errors=true` to withhold diagnostic error text. |
