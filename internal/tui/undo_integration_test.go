@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -333,4 +334,34 @@ func TestClientEditBodyRefusesStaleContentRevision(t *testing.T) {
 	current, err = env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, "unguarded text", current.Body)
+}
+
+// Against a daemon older than 0.52.0 the body save carries no
+// expected_content_revision (the daemon would reject the unknown field) and
+// succeeds as it did before the field existed.
+func TestClientEditBodyOmitsContentRevisionForOlderDaemon(t *testing.T) {
+	revision := int64(3)
+	for _, tc := range []struct {
+		version string
+		sent    bool
+	}{{"0.51.0", false}, {"0.52.0", true}} {
+		t.Run(tc.version, func(t *testing.T) {
+			var raw map[string]any
+			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/health" {
+					respondJSON(t, w, map[string]any{"ok": true, "api_schema_version": tc.version})
+					return
+				}
+				require.Equal(t, http.MethodPatch, r.Method)
+				require.NoError(t, json.UnmarshalRead(r.Body, &raw))
+				respondJSON(t, w, map[string]any{"issue": map[string]any{"uid": "u"}, "changed": true})
+			})
+			resp, err := c.EditBody(t.Context(), 7, "abc4", "new body", "alice", &revision)
+			require.NoError(t, err)
+			require.True(t, resp.Changed)
+			require.Equal(t, "new body", raw["body"])
+			_, sent := raw["expected_content_revision"]
+			require.Equal(t, tc.sent, sent)
+		})
+	}
 }

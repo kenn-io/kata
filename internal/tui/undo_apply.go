@@ -177,6 +177,11 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, opts undoOptions
 			return out
 		}
 		out.resp, out.err = c.KataAPI.EditBody(ctx, entry.projectID, entry.uid, entry.before.Body, entry.actor, &current.ContentRevision)
+		if isRevisionConflict(out.err) {
+			out.err = nil
+			out.conflict = "issue body changed since the action"
+			return out
+		}
 	case "dates":
 		keys := changedDateKeys(&entry.before, &entry.after)
 		if sameDates(current, &entry.before, keys) {

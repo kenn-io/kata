@@ -10,8 +10,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Stop `kata tui` from overwriting a body that someone else changed while you
-  were editing it. The editor now sends the issue's `content_revision` with the
-  save, and the daemon refuses a stale save and writes nothing. Edit requests
+  were editing it. Against a daemon on API 0.52.0 or newer, the editor sends the issue's
+  `content_revision` with the save, and the daemon refuses a stale save and writes nothing. Edit requests
   can send `expected_content_revision` for the same check; see the
   [HTTP API reference](reference/http-api.md#editing-an-issue-safely).
 
@@ -429,7 +429,7 @@ the [federation procedure](operations/federation.md#compatibility-and-rolling-up
   Forwarding native recurring jobs from a spoke also requires an upgraded hub.
 - New client features require their corresponding daemon API. Kata 0.21.0
   includes API `0.40.0`; release and API versions are separate. See the
-  [API version history](reference/http-api.md#editing-an-issue-safely).
+  [API version history](reference/http-api.md#version-history).
 - Search ranking can change. Issue text and each comment are now scored as
   separate documents, and SQLite phrases no longer match across two comments.
 - New recurrences need an explicit time zone such as `America/New_York` or
@@ -642,7 +642,7 @@ the [federation procedure](operations/federation.md#compatibility-and-rolling-up
   require coordinated upgrades for ordinary issue synchronization.
 - New client features require their corresponding daemon API. Kata 0.20.0
   includes API `0.31.0`; release and API versions are separate. See the
-  [API version history](reference/http-api.md#editing-an-issue-safely).
+  [API version history](reference/http-api.md#version-history).
 - Source builds require Go 1.27.3 or later.
 
 **New features**
@@ -825,7 +825,7 @@ procedure. This release also requires these changes:
   daemon API `0.28.0`; timed claims require `0.22.0`, `move --dry` previews
   `0.23.0`, close session references `0.26.0`, paginated lists `0.27.0`, and
   comment replies `0.28.0`. See the
-  [API version history](reference/http-api.md#editing-an-issue-safely).
+  [API version history](reference/http-api.md#version-history).
 - PostgreSQL operators should stop the daemon and run
   `kata storage postgres migrate` with schema-owner credentials. Follow the
   [upgrade procedure](operations/postgres.md#upgrade-ceremony).
@@ -1015,7 +1015,7 @@ by status or age and receive inbox requests when planning dates arrive.
 - Upgrade remote daemons alongside the CLI and MCP server. Status-filtered
   search requires daemon API `0.20.0`; oldest-first lists require `0.21.0`.
   Kata 0.18.0 includes API `0.21.0`. Release and API versions are separate;
-  see the [HTTP API version history](reference/http-api.md#editing-an-issue-safely).
+  see the [HTTP API version history](reference/http-api.md#version-history).
 - Issue-scoped credentials require
   [token identity mode](operations/remote-daemon.md#identity-tokens) and must
   be created on the authoritative daemon, not a spoke replica.
@@ -1147,7 +1147,7 @@ URL path.
   project names in the write request; older daemons reject that form.
 - Update custom API clients for empty collections (`[]` and `{}`),
   case-sensitive request field names, and rejection of `null` arrays. See the
-  [HTTP API contract](reference/http-api.md#editing-an-issue-safely).
+  [HTTP API contract](reference/http-api.md#version-history).
 - The SQLite history fix prevents loss during future upgrades. It does not
   restore history lost during an earlier upgrade. Keep a
   [backup](operations/backup-restore.md) before upgrading.

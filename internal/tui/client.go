@@ -661,16 +661,24 @@ func (c *Client) RemoveLink(ctx context.Context, projectID int64, ref string, li
 	return &resp, nil
 }
 
+// contentRevisionAPIVersion is the first daemon API that accepts
+// expected_content_revision on an issue edit.
+const contentRevisionAPIVersion = "0.52.0"
+
 // EditBody replaces issue.body via PATCH. v1 only supports body edits
 // from the TUI; title edits would reuse the same endpoint. A non-nil
 // expectedContentRevision is the content_revision the caller read the body
 // at; the daemon refuses the write with 412 revision_conflict when a title
-// or body edit has landed since. nil writes unconditionally.
+// or body edit has landed since. nil writes unconditionally, and so does a
+// daemon older than contentRevisionAPIVersion, which would reject the field.
 func (c *Client) EditBody(ctx context.Context, projectID int64, ref, body, actor string, expectedContentRevision *int64) (*MutationResp, error) {
 
 	apiClient, err := c.generatedClient()
 	if err != nil {
 		return nil, err
+	}
+	if expectedContentRevision != nil && requireAPIVersion(ctx, apiClient, contentRevisionAPIVersion, "guarded body edits require daemon API "+contentRevisionAPIVersion+" or newer") != nil {
+		expectedContentRevision = nil
 	}
 	wire, callErr := apiClient.EditIssueWithResponse(ctx, &generated.EditIssueRequestOptions{PathParams: &generated.EditIssuePath{ProjectID: fmt.Sprint(projectID), Ref: ref}, Body: &generated.EditIssueBody{Actor: &actor, Body: &body, ExpectedContentRevision: expectedContentRevision}})
 	if wire == nil {
