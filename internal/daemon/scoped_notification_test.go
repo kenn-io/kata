@@ -51,7 +51,7 @@ func TestScopedNotificationProjectionIsDeterministic(t *testing.T) {
 // route sits behind the same allowlist as sending one.
 func TestScopedTokenClearsNotificationIfFrom(t *testing.T) {
 	env, p, source, _, _ := scopedReplyFixture(t, false)
-	key := notification.MetadataKey("reader")
+	key := "notify.cmVhZGVy"
 	_, e := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: source.ID, Actor: "coordinator", Patch: map[string]jsontext.Value{
 		key: jsontext.Value(`{"from":"worker","message":"look"}`),
 	}})
