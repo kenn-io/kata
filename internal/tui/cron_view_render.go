@@ -337,9 +337,9 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 	return cronTabNames[ref.kind] + " / " + sanitizeForLine(name), "", d.lines
 }
 
-// cronDefinitionLink names a definition by the name the run recorded, so a
-// deleted job or workflow still reads by name; the loaded definition and then
-// the bare UID are the fallbacks.
+// cronDefinitionLink names a definition as currently loaded, else by the name
+// the run recorded, so a deleted job or workflow still reads by name, else by
+// its bare UID.
 func cronDefinitionLink(d *cronDoc, p cronData, uid, recordedName, revision string, workflow bool) {
 	if uid == "" {
 		return
@@ -371,6 +371,7 @@ func cronDefinitionLink(d *cronDoc, p cronData, uid, recordedName, revision stri
 	}
 	d.text(label, cronRef{kind, uid})
 }
+
 func cronHistory(d *cronDoc, p cronData, ref cronRef) {
 	d.section("Run history from the latest 100 project runs")
 	if p.runsErr != nil {
