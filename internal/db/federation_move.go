@@ -402,8 +402,9 @@ func IndexFederatedMoveEvents(events []FoldEvent) FederatedMoveIndex {
 // PlanFederatedMovedIssues reads move decisions without changing any rows.
 // projectID names the project being materialized; snapshotGroup lists the
 // same-hub projects whose snapshots may relocate issues between them. A refused
-// snapshot relocation keeps the issue in projectID when that project holds it,
-// and fails otherwise.
+// snapshot relocation keeps the issue where it is when projectID holds it or
+// when this is a pass that follows moves into a destination, and fails for the
+// destination's own pull.
 func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMoveIndex, p FoldProjection, projectID int64, snapshotGroup []int64) ([]FederatedMoveDecision, []int64, error) {
 	type issueLocation struct {
 		id, source            int64
@@ -481,6 +482,9 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMo
 			decision.Park = target.placeholder && !decision.Joined && !standalone
 		}
 		if decision.Snapshot && decision.Joined && decision.Exists && decision.SourceID != decision.TargetID {
+			// The source's pull, including the destination pass it follows into,
+			// keeps a refused issue. Only the destination's own pull reports it.
+			keepRefused := decision.SourceID == projectID || FollowingMovedProjects(ctx)
 			var refusal error
 			if !slices.Contains(snapshotGroup, decision.SourceID) || !slices.Contains(snapshotGroup, decision.TargetID) {
 				// A later baseline does not retire an already verified move to
@@ -496,10 +500,10 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMo
 				refusal = ErrNotFound
 			} else if decision.RecurrenceID.Valid {
 				refusal = fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
-			} else if decision.SourceID == projectID {
+			} else if keepRefused {
 				// Rehoming refuses an import mapping the destination already holds.
 				// Keep the issue in the source so its sync continues; the
-				// destination pull still reports the collision when it rehomes.
+				// destination's own pull still reports the collision when it rehomes.
 				var collides bool
 				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM import_mappings s
  JOIN import_mappings t ON t.project_id=$1 AND t.source=s.source
@@ -512,7 +516,7 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMo
 				}
 			}
 			if refusal != nil {
-				if decision.SourceID != projectID {
+				if !keepRefused {
 					return nil, nil, refusal
 				}
 				decision.Kept, decision.TargetID = true, decision.SourceID

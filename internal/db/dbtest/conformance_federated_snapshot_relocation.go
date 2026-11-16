@@ -316,6 +316,17 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 			require.NoError(t, err)
 			before, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
+			var companion db.Issue
+			if kind == "recurrence" || kind == "import-mapping-collision" {
+				// A second issue moving to the same destination makes the source pull
+				// follow into the destination, which must keep the refused issue too.
+				var created db.Event
+				companion, created, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "relocates alongside", Author: "worker"})
+				require.NoError(t, err)
+				companionSnapshot := newRemoteEvent(t, target, &companion.UID, "issue.snapshot", "worker", move.OriginInstanceUID, created.HLCPhysicalMS+1, relocationSnapshotDocument(t, companion))
+				_, err = store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{companionSnapshot})
+				require.NoError(t, err)
+			}
 			if kind == "archived-destination" {
 				// The spoke archives the destination before its snapshot applies.
 				acknowledgeFederatedRehomeSourceEvents(t, store, target)
@@ -386,6 +397,11 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 				require.Equal(t, source.ID, got.ProjectID, "the source keeps the issue it could not relocate")
 				if kind == "different-hub" {
 					require.Equal(t, before, got, "another hub's snapshot must not reach the source")
+				} else {
+					moved, err := store.IssueByUID(ctx, companion.UID, db.IncludeDeletedNo)
+					require.NoError(t, err)
+					require.Equal(t, companion.ID, moved.ID)
+					require.Equal(t, target.ID, moved.ProjectID, "the other issue still relocates")
 				}
 				edit := newRemoteEvent(t, source, &issue.UID, "issue.updated", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+5, jsontext.Value(`{"title":"later source edit"}`))
 				_, err = store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{edit})
