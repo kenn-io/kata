@@ -1064,7 +1064,7 @@ func TestEnsureFederationReplicaRetainedProjectDoesNotSnapshotLocalComments(t *t
 			require.NoError(t, err)
 			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "moved issue", Author: "worker"})
 			require.NoError(t, err)
-			_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "held local edit"})
+			_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "local edit"})
 			require.NoError(t, err)
 			_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker", Force: true})
 			require.NoError(t, err)

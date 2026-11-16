@@ -1834,7 +1834,7 @@ func adoptExistingReplica(
 			if event != nil && p.ProjectEventSink != nil {
 				p.ProjectEventSink(*event)
 			}
-			// Bind before restore clears the marker, so retries keep held edits local.
+			// Restore clears the placeholder marker only once the project is bound.
 			return db.AdoptProjectIntoFederationResult{Project: project, Binding: ensured.Binding}, true, nil
 		}
 		binding, bindErr := store.FederationBindingByProject(ctx, project.ID)
