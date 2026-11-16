@@ -357,7 +357,10 @@ type FederatedMoveDecision struct {
 	IssueUID, SourceUID, SourceName, SourceShortID string
 	IssueID, SourceID, TargetID                    int64
 	RecurrenceID                                   sql.NullInt64
-	Active, Joined, Exists, SourceStandalone       bool
+	Active, Joined, Exists                         bool
+	// Park moves the issue into the retained placeholder for a destination
+	// this spoke has not joined, so it leaves the joined source's lists.
+	Park bool
 }
 
 // IndexFederatedMoveEvents selects the latest move for each issue.
@@ -382,7 +385,8 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 			continue
 		}
 		decision := FederatedMoveDecision{IssueUID: issue.UID}
-		if err := tx.QueryRowContext(ctx, `SELECT id,deleted_at IS NULL FROM projects WHERE uid=$1`, issue.ProjectUID).Scan(&decision.TargetID, &decision.Active); err != nil {
+		var placeholder bool
+		if err := tx.QueryRowContext(ctx, `SELECT id,deleted_at IS NULL,EXISTS(SELECT 1 FROM meta WHERE key=$2) FROM projects WHERE uid=$1`, issue.ProjectUID, FederationRetainedProjectPrefix+issue.ProjectUID).Scan(&decision.TargetID, &decision.Active, &placeholder); err != nil {
 			return nil, nil, err
 		}
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, decision.TargetID).Scan(&decision.Joined); err != nil {
@@ -395,7 +399,9 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 			return nil, nil, err
 		}
 		decision.Exists = err == nil
-		decision.SourceStandalone = unbound && (active || !retained.Valid) && !decision.Joined
+		// An issue held in a standalone project keeps its local copy.
+		standalone := unbound && (active || !retained.Valid)
+		decision.Park = placeholder && !decision.Joined && decision.Exists && !standalone
 		if decision.Joined && decision.Active {
 			projects[decision.TargetID] = true
 		}
@@ -411,13 +417,11 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 		issue := p.Issues[decision.IssueUID]
 		winner := moved[issue.UID]
 		target, active := decision.TargetID, decision.Active
-		if decision.SourceStandalone {
-			delete(p.Issues, issue.UID)
-			continue
-		}
+		// A detached destination retains standalone data. Its former streams
+		// may keep syncing, but cannot reconcile that destination's projection.
 		if !decision.Joined {
 			delete(p.Issues, issue.UID)
-			if !decision.Exists {
+			if !decision.Park {
 				continue
 			}
 		}
@@ -441,14 +445,14 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 			continue
 		}
 		if source == target {
-			if !decision.Joined && !active {
+			if decision.Park && !active {
 				if err := applyUnjoined(target, issue, p); err != nil {
 					return err
 				}
 			}
 			continue
 		}
-		if decision.Joined && !active {
+		if !decision.Park && !active {
 			return ErrNotFound
 		}
 		// Move ingress has already checked its authority and endpoints. Replaying
@@ -491,7 +495,7 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 				return err
 			}
 		}
-		if !decision.Joined {
+		if decision.Park {
 			if err := applyUnjoined(target, issue, p); err != nil {
 				return err
 			}

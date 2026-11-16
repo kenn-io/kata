@@ -110,7 +110,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		p.moved.Labels = maps.Clone(p.projection.Labels)
 		db.RestrictFoldProjectWhere(&p.projection, projectUID, func(uid string) bool {
 			decision, ok := result.moved[uid]
-			return !ok || (!decision.SourceStandalone && decision.Joined && (decision.Active || decision.Exists) && !isFederationRehome(decision))
+			return !ok || (decision.Joined && (decision.Active || decision.Exists) && !isFederationRehome(decision))
 		})
 		db.RestrictFoldProjectWhere(&p.moved, projectUID, func(uid string) bool {
 			decision, ok := result.moved[uid]
@@ -280,5 +280,5 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 }
 
 func isFederationRehome(decision db.FederatedMoveDecision) bool {
-	return decision.Exists && !decision.SourceStandalone && decision.SourceID != decision.TargetID && (!decision.Joined || decision.Active)
+	return decision.Exists && decision.SourceID != decision.TargetID && (decision.Park || decision.Joined && decision.Active)
 }
