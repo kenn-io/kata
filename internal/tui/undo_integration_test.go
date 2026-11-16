@@ -101,9 +101,12 @@ func TestTypedReplyPreflightFailurePreservesUndo(t *testing.T) {
 				transport = http.DefaultTransport
 			}
 			var commentPosts atomic.Int32
+			// Only the reply's preflight sees the broken health probe; the
+			// later undo is a guarded save and needs a readable version.
+			var healthBroken atomic.Bool
 			transportErr := errors.New("request transport failed")
 			hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if r.URL.Path == "/api/v1/health" {
+				if r.URL.Path == "/api/v1/health" && (failure == "old daemon" || healthBroken.Load()) {
 					switch failure {
 					case "old daemon":
 						return &http.Response{StatusCode: http.StatusOK, Request: r,
@@ -131,7 +134,9 @@ func TestTypedReplyPreflightFailurePreservesUndo(t *testing.T) {
 			require.NoError(t, err)
 			updated, _ := m.Update(mutationDoneMsg{resp: edited})
 			m = updated.(Model)
+			healthBroken.Store(true)
 			response, err := client.AddCommentReply(ctx, project.ID, issue.UID, "Reply", "alice", "c:abcdef", "reply", false, "reply-key")
+			healthBroken.Store(false)
 			require.Error(t, err)
 			if failure == "health transport" || failure == "comment transport" {
 				require.ErrorIs(t, err, transportErr)

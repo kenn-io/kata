@@ -74,6 +74,11 @@ func captureCreateIssue(t *testing.T) (*Client, *string) {
 	t.Helper()
 	var gotPath string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			// A guarded body save reads the daemon version first.
+			respondJSON(t, w, map[string]any{"ok": true, "api_schema_version": contentRevisionAPIVersion})
+			return
+		}
 		gotPath = r.URL.Path
 		respondJSON(t, w, map[string]any{
 			"issue":   map[string]any{"number": 1, "title": "hi", "status": "open"},
