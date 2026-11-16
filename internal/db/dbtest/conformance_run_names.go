@@ -44,7 +44,7 @@ func checkRunNames(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 
 	type names struct{ job, workflow, issue string }
-	of := func(r db.CronRun) names {
+	of := func(r db.CronRunView) names {
 		v := func(s *string) string {
 			if s == nil {
 				return ""

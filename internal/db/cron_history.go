@@ -28,8 +28,14 @@ type CronRun struct {
 	StartedAt                  *time.Time   `json:"started_at,omitempty"`
 	EndedAt                    *time.Time   `json:"ended_at,omitempty"`
 	UpdatedAt                  time.Time    `json:"updated_at"`
-	// The names resolve at read time from the referenced rows, deleted ones
-	// included. They are not stored, exported or replayed.
+}
+
+// CronRunView is a run as the API reads it: the stored observation plus the
+// names its references resolve to at read time, deleted referents included.
+// The names are not stored, so only this type carries them; CronRun, exports
+// and federated payloads cannot.
+type CronRunView struct {
+	CronRun
 	JobName      *string `json:"job_name,omitempty"`
 	WorkflowName *string `json:"workflow_name,omitempty"`
 	IssueShortID *string `json:"issue_short_id,omitempty"`
@@ -58,7 +64,7 @@ type ObserveCronRun struct {
 
 // CronRunObservationResult retains the row and exact events of one write.
 type CronRunObservationResult struct {
-	Run      CronRun `json:"run"`
+	Run      CronRunView `json:"run"`
 	Events   []Event `json:"events"`
 	Replayed bool    `json:"replayed"`
 }

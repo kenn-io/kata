@@ -80,12 +80,12 @@ func validateCronRun(value CronRun) error {
 }
 
 // Run reads an independent observation through its project-scoped UID.
-func (a CronSQL) Run(ctx context.Context, projectID int64, id string) (CronRun, error) {
+func (a CronSQL) Run(ctx context.Context, projectID int64, id string) (CronRunView, error) {
 	value, err := scanCronRunNamedRow(a.Query.QueryRowContext(ctx, "SELECT "+cronRunReadColumns+" FROM cron_runs WHERE project_id=$1 AND uid=$2", projectID, strings.ToUpper(id)))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
-	return CronRun(value), err
+	return value, err
 }
 
 // CronRunCreatedAtFormat stores run creation instants in UTC at a fixed
@@ -94,7 +94,7 @@ func (a CronSQL) Run(ctx context.Context, projectID int64, id string) (CronRun, 
 const CronRunCreatedAtFormat = "2006-01-02T15:04:05.000000000Z"
 
 // Runs reads a bounded creation-time and UID-ordered project history page.
-func (a CronSQL) Runs(ctx context.Context, in CronRunList) ([]CronRun, error) {
+func (a CronSQL) Runs(ctx context.Context, in CronRunList) ([]CronRunView, error) {
 	if in.Limit < 0 {
 		return nil, fmt.Errorf("%w: negative limit", cron.ErrInvalid)
 	}
@@ -130,13 +130,13 @@ func (a CronSQL) Runs(ctx context.Context, in CronRunList) ([]CronRun, error) {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	result := []CronRun{}
+	result := []CronRunView{}
 	for rows.Next() {
 		value, err := scanCronRunNamedRow(rows)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, CronRun(value))
+		result = append(result, value)
 	}
 	return result, rows.Err()
 }
@@ -175,7 +175,7 @@ func (a CronSQL) observeRunTx(ctx context.Context, tx *sql.Tx, in ObserveCronRun
 	}
 	requestedActor := value.Actor
 	value.Actor = effectiveActor
-	prior, err := scanCronRunNamedRow(tx.QueryRowContext(ctx, "SELECT "+cronRunReadColumns+" FROM cron_runs WHERE uid=$1", in.UID))
+	prior, err := scanCronRunRow(tx.QueryRowContext(ctx, "SELECT "+cronRunColumns+" FROM cron_runs WHERE uid=$1", in.UID))
 	fresh := errors.Is(err, sql.ErrNoRows)
 	if err != nil && !fresh {
 		return result, err
@@ -193,7 +193,12 @@ func (a CronSQL) observeRunTx(ctx context.Context, tx *sql.Tx, in ObserveCronRun
 		current := CronRun(prior)
 		replayed, err := continueCronRun(&value, current, in, requestedActor, effectiveActor)
 		if err != nil || replayed {
-			result.Run, result.Replayed = current, replayed
+			if replayed {
+				if result.Run, err = a.runView(ctx, tx, current.UID); err != nil {
+					return result, err
+				}
+			}
+			result.Replayed = replayed
 			return result, err
 		}
 	}
@@ -204,13 +209,16 @@ func (a CronSQL) observeRunTx(ctx context.Context, tx *sql.Tx, in ObserveCronRun
 	if err := writeCronRunRow(ctx, tx, value, fresh, in.ExpectedRevision, now); err != nil {
 		return result, err
 	}
-	saved, err := scanCronRunNamedRow(tx.QueryRowContext(ctx, "SELECT "+cronRunReadColumns+" FROM cron_runs WHERE uid=$1", in.UID))
-	if err != nil {
+	if result.Run, err = a.runView(ctx, tx, in.UID); err != nil {
 		return result, err
 	}
-	result.Run = CronRun(saved)
 	result.Events = []Event{event}
 	return result, nil
+}
+
+// runView reads a run with its resolved names inside tx.
+func (a CronSQL) runView(ctx context.Context, tx *sql.Tx, uid string) (CronRunView, error) {
+	return scanCronRunNamedRow(tx.QueryRowContext(ctx, "SELECT "+cronRunReadColumns+" FROM cron_runs WHERE uid=$1", uid))
 }
 
 // continueCronRun prepares value as the next revision of current. It reports

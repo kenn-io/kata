@@ -116,9 +116,12 @@ const cronRunNameColumns = `(SELECT name FROM cron_jobs WHERE cron_jobs.uid=cron
 const cronRunReadColumns = cronRunColumns + "," + cronRunNameColumns
 
 // scanCronRunNamedRow reads a row selected with cronRunReadColumns.
-func scanCronRunNamedRow(row interface{ Scan(...any) error }) (CronRunExport, error) {
-	var value CronRunExport
-	return value, scanCronRunInto(row, &value, &value.JobName, &value.WorkflowName, &value.IssueShortID)
+func scanCronRunNamedRow(row interface{ Scan(...any) error }) (CronRunView, error) {
+	var export CronRunExport
+	var view CronRunView
+	err := scanCronRunInto(row, &export, &view.JobName, &view.WorkflowName, &view.IssueShortID)
+	view.CronRun = CronRun(export)
+	return view, err
 }
 
 // scanCronRunInto scans the cronRunColumns fields, then any extra columns.
