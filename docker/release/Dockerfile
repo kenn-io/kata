@@ -1,7 +1,7 @@
 FROM --platform=$BUILDPLATFORM oven/bun:1.4.4 AS bun
 
 # The web bundle is platform-independent, so build it once on the builder.
-FROM --platform=$BUILDPLATFORM node:26.12.1-bookworm AS web
+FROM --platform=$BUILDPLATFORM node:26.13.0-bookworm AS web
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /src
