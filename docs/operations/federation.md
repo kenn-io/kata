@@ -97,7 +97,10 @@ them only after the spoke joins the destination project; until then it refuses
 the push, which also holds back the project's other unsent changes.
 To subscribe later, run `kata projects restore <local-name>`, optionally run
 `kata projects rename <local-name> <chosen-name>`, then rerun the enrollment's
-join command using `--project <current-local-name>`.
+join command using `--project <current-local-name>`. A configured mapping can
+name the placeholder's project directly. A mapping with `credential_provider`
+cannot: restore the placeholder and rename it to the mapping's `spoke_project`
+before you add the mapping.
 Upgrade both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
 move history instead of applying a payload they cannot understand. Moves preserve
 stable UIDs, nesting, state, comments, and links. Established author and

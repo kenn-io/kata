@@ -1016,8 +1016,20 @@ func TestReconcileMappingAdoptsExistingStandaloneWorkWithSnapshot(t *testing.T) 
 }
 
 func TestReconcileMappingAdoptsRetainedProject(t *testing.T) {
-	for _, name := range []string{"federation-01hznq7vfpk1xgd8r5mabcd4ex", "spoke-project"} {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		restored bool
+	}{
+		{name: "federation-01hznq7vfpk1xgd8r5mabcd4ex"},
+		{name: "spoke-project"},
+		{name: "federation-01hznq7vfpk1xgd8r5mabcd4ex", restored: true},
+	} {
+		label := tc.name
+		if tc.restored {
+			label += " restored"
+		}
+		t.Run(label, func(t *testing.T) {
+			name := tc.name
 			store := openReconcileStore(t)
 			ctx := t.Context()
 			project, err := store.CreateProjectWithUID(ctx, name, hubProjectUID)
@@ -1026,6 +1038,10 @@ func TestReconcileMappingAdoptsRetainedProject(t *testing.T) {
 			require.NoError(t, err)
 			_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FederationRetainedProjectPrefix+hubProjectUID)
 			require.NoError(t, err)
+			if tc.restored {
+				_, _, _, err = store.RestoreProject(ctx, project.ID, "worker")
+				require.NoError(t, err)
+			}
 			err = federation.ReconcileMapping(ctx, store, newFakeCredentialStore(), newFakeHub(), testCatalog(), testMapping(), nil)
 			require.NoError(t, err)
 			adopted, err := store.ProjectByName(ctx, "spoke-project")

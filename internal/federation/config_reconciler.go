@@ -1308,7 +1308,8 @@ func retainedMappingProject(ctx context.Context, store db.Storage, uid, name str
 	if err != nil {
 		return db.Project{}, reconcileError(ErrLocalStorage, "check retained federation project")
 	}
-	if project.DeletedAt != nil && retained {
+	// The marker stays until the placeholder is bound, so it may be restored.
+	if retained {
 		return project, nil
 	}
 	return db.Project{}, reconcileError(ErrBindingConflict, "hub project UID belongs to another local project")
