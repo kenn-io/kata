@@ -10,6 +10,27 @@ import (
 // joined replica still needs after a reset removes its move events.
 const FederationProjectIdentityDependencyPrefix = "federation_identity_dependency."
 
+// FederationRetainedProjectPrefix marks identities created for absent projects
+// until they are both restored and bound to their hub.
+const FederationRetainedProjectPrefix = "federation_retained_project."
+
+// IsFederationRetainedProject reports whether the identity is a placeholder.
+func IsFederationRetainedProject(ctx context.Context, queryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, uid string) (bool, error) {
+	var found bool
+	err := queryer.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key=$1)`, FederationRetainedProjectPrefix+uid).Scan(&found)
+	return found, err
+}
+
+// ClearFederationRetainedProject retires placeholder ownership on deletion.
+func ClearFederationRetainedProject(ctx context.Context, tx interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, uid string) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, FederationRetainedProjectPrefix+uid)
+	return err
+}
+
 // CheckFederationProjectIdentityRetirement protects only former identities
 // still referenced by another joined project's portable issue history. Archive
 // and leave retain the identity; purge and merge must wait for those streams to

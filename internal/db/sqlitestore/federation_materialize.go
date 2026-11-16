@@ -8,6 +8,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"hash"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -454,6 +455,37 @@ func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, proje
 type federatedShortIDCheck struct {
 	uid, preferred, resolved string
 	row                      federatedIssueRow
+}
+
+func applyUnjoinedMovedIssue(ctx context.Context, tx *sql.Tx, projectID int64, issue db.FoldIssue, projection db.FoldProjection) error {
+	view := projection
+	view.Issues = map[string]db.FoldIssue{issue.UID: issue}
+	view.Comments = maps.Clone(projection.Comments)
+	view.Labels = maps.Clone(projection.Labels)
+	db.RestrictFoldProject(&view, issue.ProjectUID)
+	m := federationMaterialization{projection: view}
+	if err := m.prepareRows(ctx, tx, projectID, []string{issue.UID}); err != nil {
+		return err
+	}
+	for uid := range m.commentRows {
+		if _, ok := m.projection.Comments[uid]; !ok {
+			delete(m.commentRows, uid)
+		}
+	}
+	for key := range m.labelRows {
+		if _, ok := projection.Labels[db.FoldLabelKey{IssueUID: issue.UID, Label: key.label}]; !ok {
+			delete(m.labelRows, key)
+		}
+	}
+	changed, err := reconcileFederatedIssuesFromRows(ctx, tx, projectID, m.projection, m.issueRows)
+	if err != nil {
+		return err
+	}
+	maps.Copy(m.issueIDs, changed)
+	if err := reconcileFederatedCommentsFromRows(ctx, tx, m.issueIDs, m.projection, m.commentRows); err != nil {
+		return err
+	}
+	return reconcileFederatedLabelsFromRows(ctx, tx, m.issueIDs, m.projection, m.labelRows)
 }
 
 // prepareRows compares against persisted values, rather than a previous fold:

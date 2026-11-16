@@ -1051,6 +1051,53 @@ func TestEnsureFederationReplicaAdoptsStandaloneProjectWithSnapshot(t *testing.T
 	assert.Equal(t, "sync-agent", events[0].Actor)
 }
 
+func TestEnsureFederationReplicaRetainedProjectDoesNotSnapshotLocalComments(t *testing.T) {
+	for _, restored := range []bool{false, true} {
+		name := "archived"
+		if restored {
+			name = "restored"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			store := openReplicaServiceStore(t)
+			project, err := store.CreateProjectWithUID(ctx, "federation-01hznq7vfpk1xgd8r5mabcd4ex", replicaHubProjectUID)
+			require.NoError(t, err)
+			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "moved issue", Author: "worker"})
+			require.NoError(t, err)
+			_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "local edit"})
+			require.NoError(t, err)
+			_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "worker", Force: true})
+			require.NoError(t, err)
+			_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FederationRetainedProjectPrefix+project.UID)
+			require.NoError(t, err)
+			params := replicaServiceParams()
+			params.AdoptExisting = true
+			if restored {
+				_, _, _, err = store.RestoreProject(ctx, project.ID, "worker")
+				require.NoError(t, err)
+			}
+			credentials := newReplicaCredentialStore()
+			result, err := daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
+			require.NoError(t, err)
+			assert.Equal(t, project.ID, result.Project.ID)
+			assert.Equal(t, params.ProjectName, result.Project.Name)
+			assert.Nil(t, result.Project.DeletedAt)
+			binding, err := store.FederationBindingByProject(ctx, project.ID)
+			require.NoError(t, err)
+			assert.Equal(t, replicaHubProjectUID, binding.HubProjectUID)
+			retained, err := store.IsFederationRetainedProject(ctx, project.UID)
+			require.NoError(t, err)
+			assert.False(t, retained)
+			assert.Zero(t, result.AdoptionSnapshotCount)
+			events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 20})
+			require.NoError(t, err)
+			for _, event := range events {
+				assert.NotEqual(t, "issue.snapshot", event.Type)
+			}
+		})
+	}
+}
+
 func TestEnsureFederationReplicaRejectsDistinctCredentialAtAdoptionSource(t *testing.T) {
 	ctx := t.Context()
 	store := openReplicaServiceStore(t)
