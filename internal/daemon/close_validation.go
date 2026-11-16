@@ -202,7 +202,7 @@ func ValidateCloseInput(reason, message string, evidence []api.Evidence) error {
 			!has(api.EvidenceExternal) && !has(api.EvidenceConfirmed) && !has(api.EvidenceAttachment) && !has(api.EvidenceFile) {
 			return fmt.Errorf("evidence required for reason=done. " +
 				"Accepted: commit:<sha>, pr:<url>, test:<cmd>, reviewed-paths:<path>, " +
-				"external:<account>, confirmed:c:<comment>, attachment:<id>. " +
+				"external:<account>, confirmed:c:<comment>, attachment:<id>, file:<source>:<path>. " +
 				"If the work is not actually complete, do not close — use " +
 				"`kata label add <ref> needs-review --comment \"<what remains>\"`")
 		}

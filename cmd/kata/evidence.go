@@ -26,6 +26,9 @@ func newEvidenceCmd() *cobra.Command {
 		}
 		clone := *httpClient
 		clone.Timeout = envHTTPTimeout(30 * time.Second)
+		if err := requireDaemonAPIVersion(ctx, &clone, base, apiVersionFileEvidence, "file evidence"); err != nil {
+			return err
+		}
 		client, err := kataclient.NewWithHTTPClient(base, &clone)
 		if err != nil {
 			return err

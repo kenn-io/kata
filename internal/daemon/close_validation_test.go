@@ -19,6 +19,7 @@ func TestValidateCloseInput_DoneRequiresImplementationEvidence(t *testing.T) {
 		"Fixed the bug and ran tests on Safari and Chrome.", nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "evidence required")
+	assert.Contains(t, err.Error(), "file:<source>:<path>")
 	assert.Contains(t, err.Error(), `kata label add <ref> needs-review --comment "<what remains>"`)
 	assert.NotContains(t, err.Error(), "edit <ref> --label")
 }

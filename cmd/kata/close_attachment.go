@@ -18,10 +18,12 @@ const apiVersionDocbankLinkReuse = "0.39.0"
 // Full IDs bypass current metadata lookup so saved close receipts can replay.
 func prepareCloseAttachments(cmd *cobra.Command, raw, reason, message string, evidence []api.Evidence, files []string, dry bool) ([]api.Evidence, error) {
 	hasAttachment := false
+	hasFile := false
 	for _, e := range evidence {
 		hasAttachment = hasAttachment || e.Type == api.EvidenceAttachment
+		hasFile = hasFile || e.Type == api.EvidenceFile
 	}
-	if !hasAttachment && len(files) == 0 {
+	if !hasAttachment && !hasFile && len(files) == 0 {
 		return evidence, nil
 	}
 	if len(files) > 0 && (reason != "done" || dry || cmd.Flags().Changed("if-match") || cmd.Flags().Changed("idempotency-key")) {
@@ -55,7 +57,11 @@ func prepareCloseAttachments(cmd *cobra.Command, raw, reason, message string, ev
 	if err != nil {
 		return nil, err
 	}
-	if err := requireDaemonAPIVersion(ctx, hc, base, apiVersionDocbankLinkReuse, "attachment close evidence"); err != nil {
+	minimum, feature := apiVersionDocbankLinkReuse, "attachment close evidence"
+	if hasFile {
+		minimum, feature = apiVersionFileEvidence, "file evidence"
+	}
+	if err := requireDaemonAPIVersion(ctx, hc, base, minimum, feature); err != nil {
 		return nil, err
 	}
 	out := append([]api.Evidence(nil), evidence...)
