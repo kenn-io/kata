@@ -1887,27 +1887,27 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
 }
 
 func federationFoldEventsQuery(projectID int64, eventTypes, issueScope []string) (string, []any) {
+	// Issues whose events the project holds, or that now live in it.
+	const history = `SELECT h.issue_uid FROM events h WHERE h.project_id=?1
+   UNION SELECT uid FROM issues WHERE project_id=?1`
+	args := []any{projectID}
 	// Scan events once and collect moved subjects once. The unary + keeps
 	// SQLite from seeking every issue's history through its UID index.
 	selector := `(e.project_id=?1 OR +e.issue_uid IN (
-   SELECT m.issue_uid FROM events m WHERE m.type='issue.moved' AND m.issue_uid IN (
-     SELECT h.issue_uid FROM events h WHERE h.project_id=?1
-     UNION SELECT uid FROM issues WHERE project_id=?1)))`
-	args := []any{projectID}
+   SELECT m.issue_uid FROM events m WHERE m.type='issue.moved' AND m.issue_uid IN (` + history + `)))`
 	if len(issueScope) > 0 {
-		// Scoped pushes only check moves after narrowing to the touched issues.
-		selector = `(e.project_id=?1 OR (e.issue_uid IN (
-   SELECT h.issue_uid FROM events h WHERE h.project_id=?1
-   UNION SELECT uid FROM issues WHERE project_id=?1)
- AND e.issue_uid IN (SELECT m.issue_uid FROM events m WHERE m.type='issue.moved')))`
-		// Evaluate the scope before looking up moves.
+		// Scoped pushes narrow to project events and the touched issues first,
+		// then check moves only for those.
 		placeholders := make([]string, 0, len(issueScope))
 		for _, uid := range issueScope {
 			placeholders = append(placeholders, fmt.Sprintf("?%d", len(args)+1))
 			args = append(args, uid)
 		}
 		//nolint:gosec // G202: generated placeholders only; issue UIDs are bound separately.
-		selector = `CASE WHEN e.type LIKE 'project.%' OR e.issue_uid IN (` + strings.Join(placeholders, ",") + `) THEN ` + selector + ` ELSE 0 END`
+		selector = `CASE WHEN e.type LIKE 'project.%' OR e.issue_uid IN (` + strings.Join(placeholders, ",") + `)
+   THEN e.project_id=?1 OR (e.issue_uid IN (` + history + `)
+     AND e.issue_uid IN (SELECT m.issue_uid FROM events m WHERE m.type='issue.moved'))
+   ELSE 0 END`
 	}
 	query := `
 		SELECT e.uid, e.origin_instance_uid, p.uid, e.issue_uid, e.related_issue_uid,
