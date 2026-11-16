@@ -662,14 +662,17 @@ func (c *Client) RemoveLink(ctx context.Context, projectID int64, ref string, li
 }
 
 // EditBody replaces issue.body via PATCH. v1 only supports body edits
-// from the TUI; title edits would reuse the same endpoint.
-func (c *Client) EditBody(ctx context.Context, projectID int64, ref, body, actor string) (*MutationResp, error) {
+// from the TUI; title edits would reuse the same endpoint. A non-nil
+// expectedContentRevision is the content_revision the caller read the body
+// at; the daemon refuses the write with 412 revision_conflict when a title
+// or body edit has landed since. nil writes unconditionally.
+func (c *Client) EditBody(ctx context.Context, projectID int64, ref, body, actor string, expectedContentRevision *int64) (*MutationResp, error) {
 
 	apiClient, err := c.generatedClient()
 	if err != nil {
 		return nil, err
 	}
-	wire, callErr := apiClient.EditIssueWithResponse(ctx, &generated.EditIssueRequestOptions{PathParams: &generated.EditIssuePath{ProjectID: fmt.Sprint(projectID), Ref: ref}, Body: &generated.EditIssueBody{Actor: &actor, Body: &body}})
+	wire, callErr := apiClient.EditIssueWithResponse(ctx, &generated.EditIssueRequestOptions{PathParams: &generated.EditIssuePath{ProjectID: fmt.Sprint(projectID), Ref: ref}, Body: &generated.EditIssueBody{Actor: &actor, Body: &body, ExpectedContentRevision: expectedContentRevision}})
 	if wire == nil {
 		return nil, callErr
 	}

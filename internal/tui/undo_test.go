@@ -119,7 +119,7 @@ func (f *undoTestAPI) RemoveLabel(_ context.Context, _ int64, _, label, _ string
 	return f.completeResponse(f.writeResp), nil
 }
 
-func (f *undoTestAPI) EditBody(_ context.Context, _ int64, _, body, _ string) (*MutationResp, error) {
+func (f *undoTestAPI) EditBody(_ context.Context, _ int64, _, body, _ string, _ *int64) (*MutationResp, error) {
 	f.writes = append(f.writes, "body "+body)
 	return f.completeResponse(f.writeResp), nil
 }
@@ -245,7 +245,7 @@ func TestUndoClientRecordsSupportedFieldChanges(t *testing.T) {
 			return c.RemoveLabel(t.Context(), 7, "abc4", "urgent", "bob")
 		}},
 		{"body", Issue{Status: "open", Body: "before"}, Issue{Status: "open", Body: "after"}, "body.edit", func(c *undoClient) (*MutationResp, error) {
-			return c.EditBody(t.Context(), 7, "abc4", "after", "bob")
+			return c.EditBody(t.Context(), 7, "abc4", "after", "bob", nil)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

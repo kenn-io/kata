@@ -444,6 +444,50 @@ func TestIssues_PatchEditTitleAndBody(t *testing.T) {
 	assert.Contains(t, string(bs), `"title":"new"`)
 }
 
+func TestEditIssue_ExpectedContentRevision(t *testing.T) {
+	env := testenv.New(t)
+	projectID := mkProject(t, env, "github.com/test/expected-content-revision", "expected-content-revision")
+	created, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: projectID, Title: "title", Body: "opened body", Author: "tester",
+	})
+	require.NoError(t, err)
+	url := issueURLRef(projectID, created.ShortID, "")
+
+	getContentRevision := func() float64 {
+		resp, bs := envDoRaw(t, env, http.MethodGet, url, nil, nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
+		var out struct {
+			Issue map[string]any `json:"issue"`
+		}
+		require.NoError(t, json.Unmarshal(bs, &out), string(bs))
+		revision, ok := out.Issue["content_revision"].(float64)
+		require.True(t, ok, "issue reads carry content_revision: %s", string(bs))
+		return revision
+	}
+	opened := getContentRevision()
+
+	resp, bs := envDoRaw(t, env, http.MethodPatch, url,
+		map[string]any{"actor": "first", "body": "first editor's body", "expected_content_revision": opened}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
+	assert.Contains(t, string(bs), `"content_revision":1`)
+
+	resp, bs = envDoRaw(t, env, http.MethodPatch, url,
+		map[string]any{"actor": "second", "body": "second editor's body", "expected_content_revision": opened}, nil)
+	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusPreconditionFailed, "revision_conflict")
+	assert.Contains(t, envelope.Error.Message, "content revision is 1")
+	stored, err := env.DB.IssueByID(t.Context(), created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "first editor's body", stored.Body)
+
+	resp, bs = envDoRaw(t, env, http.MethodPatch, url,
+		map[string]any{"actor": "third", "body": "unguarded body"}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
+
+	resp, bs = envDoRaw(t, env, http.MethodPatch, url,
+		map[string]any{"actor": "third", "body": "x", "expected_content_revision": -1}, nil)
+	assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
+}
+
 func TestEditIssueExternalRootContentOwnedReturnsNeutralConflict(t *testing.T) {
 	env := testenv.New(t)
 	projectID := mkProject(t, env, "https://daemon.example/example-project", "example-project")

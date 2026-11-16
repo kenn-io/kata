@@ -1294,6 +1294,8 @@ func (m Model) openBodyEditForm() Model {
 		projectID:    m.detail.scopePID,
 		issueShortID: m.detail.issue.ShortID,
 		detailGen:    m.detail.gen,
+
+		contentRevision: m.detail.issue.ContentRevision,
 	}
 	m.nextFormGen++
 	form := newBodyEditForm(target, m.detail.issue.Body)
@@ -1878,6 +1880,9 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if mut.err != nil {
 		m.input.saving = false
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
+		if m.input.kind == inputBodyEditForm && isRevisionConflict(mut.err) {
+			m.input.err = bodyEditConflictMessage
+		}
 		if m.input.kind == inputRecurrenceForm {
 			m.input.err = fmt.Sprintf(successTemplates[mut.kind].failure, mut.err.Error())
 			if isRevisionConflict(mut.err) {
@@ -2374,16 +2379,21 @@ func dispatchFormAddComment(
 	}
 }
 
+// bodyEditConflictMessage is what the body editor shows when the daemon
+// refuses a save because the title or body changed after the editor opened.
+// The typed text stays in the form so it can be copied out.
+const bodyEditConflictMessage = "The title or body changed since you opened the editor; nothing was saved. Copy your text, press esc, and reopen to see the current body."
+
 // dispatchFormEditBody is the form-side EditBody dispatch. Same
 // shape as dispatchFormAddComment.
 func dispatchFormEditBody(
 	api detailAPI, target formTarget, body, actor string, formGen int64,
 ) tea.Cmd {
-	pid, ref := target.projectID, target.issueShortID
+	pid, ref, expected := target.projectID, target.issueShortID, target.contentRevision
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		resp, err := api.EditBody(ctx, pid, ref, body, actor)
+		resp, err := api.EditBody(ctx, pid, ref, body, actor, &expected)
 		return mutationDoneMsg{
 			origin: "form", kind: "form.body.edit", formGen: formGen,
 			resp: resp, err: err,

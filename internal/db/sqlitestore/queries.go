@@ -2092,7 +2092,7 @@ func lookupIssueForEvent(ctx context.Context, tx *sql.Tx, issueID int64) (db.Iss
 	var i db.Issue
 	var projectName string
 	err := tx.QueryRowContext(ctx, q, issueID).
-		Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView, &projectName)
+		Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.ContentRevision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView, &projectName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, "", db.ErrNotFound
 	}
@@ -2111,7 +2111,7 @@ func lookupIssueForEvent(ctx context.Context, tx *sql.Tx, issueID int64) (db.Iss
 	return i, projectName, nil
 }
 
-const issueColumns = `i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status, i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.recurrence_id, i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at, ` + issueAttributionColumn
+const issueColumns = `i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status, i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.content_revision, i.recurrence_id, i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at, ` + issueAttributionColumn
 
 const issueSelect = `SELECT ` + issueColumns + ` FROM issues i JOIN projects p ON p.id = i.project_id`
 
@@ -2122,7 +2122,7 @@ const scheduledIssueSelect = `SELECT ` + issueColumns + `, schedule_recurrence.t
 
 func scanIssue(ctx context.Context, r rowScanner) (db.Issue, error) {
 	var i db.Issue
-	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView)
+	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.ContentRevision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, db.ErrNotFound
 	}
@@ -2138,7 +2138,7 @@ func scanIssue(ctx context.Context, r rowScanner) (db.Issue, error) {
 func scanScheduledIssue(ctx context.Context, r rowScanner) (db.Issue, string, error) {
 	var i db.Issue
 	var recurrenceTimezone sql.NullString
-	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView, &recurrenceTimezone)
+	err := r.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status, &i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.ContentRevision, &i.RecurrenceID, &i.OccurrenceKey, &i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView, &recurrenceTimezone)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Issue{}, "", db.ErrNotFound
 	}
@@ -2596,7 +2596,7 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 			&r.ID, &r.UID, &r.ProjectID, &r.ProjectUID,
 			&r.ShortID, &r.Title, &r.Body, &r.Status,
 			&r.ClosedReason, &r.Owner, &r.AssignmentExpiresOn, &r.Priority, &r.Author,
-			&r.Metadata, &r.Revision, &r.RecurrenceID, &r.OccurrenceKey,
+			&r.Metadata, &r.Revision, &r.ContentRevision, &r.RecurrenceID, &r.OccurrenceKey,
 			&r.CreatedAt, &r.UpdatedAt, &r.ClosedAt, &r.DeletedAt, &r.AttributionView,
 			&r.ProjectName, &recurrenceTimezone,
 		); err != nil {

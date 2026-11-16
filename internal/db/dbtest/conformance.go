@@ -383,6 +383,11 @@ var storageScenarios = []scenario{
 		run:     checkIssueRevisionEdits,
 	},
 	{
+		name:    "edit expected content revision",
+		methods: []string{"CreateIssue", "CreateProject", "EditIssueAtomic", "EventsAfter", "IssueByID"},
+		run:     checkEditExpectedContentRevision,
+	},
+	{
 		name:    "issue revision status",
 		methods: []string{"CloseIssue", "CreateIssue", "CreateProject", "IssueByID", "PatchIssueMetadata", "ReopenIssue"},
 		run:     checkIssueRevisionStatus,

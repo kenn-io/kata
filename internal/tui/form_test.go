@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -360,6 +361,71 @@ func TestForm_CtrlO_OnEmptyBodyEdit_AllowedToCommit(t *testing.T) {
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("empty body edit must dispatch EditBody (clearing is legitimate)")
+	}
+}
+
+// bodyEditRecorder records the content revision each body save names.
+type bodyEditRecorder struct {
+	KataAPI
+	expected []*int64
+}
+
+func (r *bodyEditRecorder) EditBody(_ context.Context, _ int64, _, _, _ string, expected *int64) (*MutationResp, error) {
+	r.expected = append(r.expected, expected)
+	return &MutationResp{}, nil
+}
+
+// TestForm_BodyEdit_SendsContentRevisionItOpenedAt: the body editor
+// dispatches the save with the content_revision the detail pane held when
+// the form opened, including 0, so a title or body edit that lands while
+// the form is open is refused instead of overwritten.
+func TestForm_BodyEdit_SendsContentRevisionItOpenedAt(t *testing.T) {
+	for _, opened := range []int64{0, 4} {
+		m := formFixture()
+		api := &bodyEditRecorder{}
+		m.api = api
+		m.detail.issue.ContentRevision = opened
+		m = m.openBodyEditForm()
+		// Another editor moves the shown issue on while the form is open.
+		m.detail.issue.ContentRevision = opened + 3
+		_, cmd := m.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+		if cmd == nil {
+			t.Fatal("ctrl+o on the body form must dispatch EditBody")
+		}
+		cmd()
+		if len(api.expected) != 1 {
+			t.Fatalf("EditBody calls = %d, want 1", len(api.expected))
+		}
+		if api.expected[0] == nil || *api.expected[0] != opened {
+			t.Fatalf("expected content revision = %v, want %d", api.expected[0], opened)
+		}
+	}
+}
+
+// TestRouteFormMutation_BodyEditRefused_KeepsTextAndExplains: a 412 from the
+// daemon leaves the editor open with the typed text, says nothing was saved,
+// and re-enables the form.
+func TestRouteFormMutation_BodyEditRefused_KeepsTextAndExplains(t *testing.T) {
+	m := formFixture()
+	m.view = viewDetail
+	m = m.openBodyEditForm()
+	m.input.saving = true
+	out, _ := m.Update(mutationDoneMsg{
+		origin: "form", kind: "form.body.edit", formGen: m.input.formGen,
+		err: &APIError{Status: http.StatusPreconditionFailed, Code: "revision_conflict", Message: "issue content revision is 3"},
+	})
+	nm := out.(Model)
+	if nm.input.kind != inputBodyEditForm {
+		t.Fatalf("form closed on a refused save; kind = %v", nm.input.kind)
+	}
+	if nm.input.saving {
+		t.Fatal("saving still set after a refused save")
+	}
+	if nm.input.err != bodyEditConflictMessage {
+		t.Fatalf("err = %q, want %q", nm.input.err, bodyEditConflictMessage)
+	}
+	if got := nm.input.activeField().value(); got != "current body" {
+		t.Fatalf("typed text = %q, want it kept", got)
 	}
 }
 

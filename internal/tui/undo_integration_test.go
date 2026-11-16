@@ -41,7 +41,7 @@ func TestCommentFormPreventsUndoingEarlierEdit(t *testing.T) {
 			m.list.actor = "alice"
 			m.detail = detailModel{scopePID: project.ID, activeTab: tabComments,
 				issue: &Issue{UID: issue.UID, ShortID: issue.ShortID, Status: "open"}, comments: comments}
-			edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice")
+			edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice", nil)
 			require.NoError(t, err)
 			updated, _ := m.Update(mutationDoneMsg{resp: edited})
 			m = updated.(Model)
@@ -125,7 +125,7 @@ func TestTypedReplyPreflightFailurePreservesUndo(t *testing.T) {
 			m := initialModel(Options{})
 			m.api = client
 			m.view = viewList
-			edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice")
+			edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice", nil)
 			require.NoError(t, err)
 			updated, _ := m.Update(mutationDoneMsg{resp: edited})
 			m = updated.(Model)
@@ -252,12 +252,12 @@ func TestUndoClientRealDaemonBodyConflictWithoutRevisionChange(t *testing.T) {
 	require.NoError(t, err)
 	base := NewClient(env.URL, env.HTTP)
 	client := newConnectedUndoClient(t, base)
-	edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice")
+	edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice", nil)
 	require.NoError(t, err)
 	require.NotNil(t, edited.undo.entry)
 	entry := *edited.undo.entry
 	edited.undo.complete()
-	external, err := base.EditBody(ctx, project.ID, issue.UID, "someone else's text", "bob")
+	external, err := base.EditBody(ctx, project.ID, issue.UID, "someone else's text", "bob", nil)
 	require.NoError(t, err)
 	require.Equal(t, entry.revision, external.Issue.Revision)
 	outcome := client.undo(ctx, entry, undoOptions{})
@@ -297,4 +297,40 @@ func TestUndoClientRealDaemonDetectsStatusChangedAwayAndBack(t *testing.T) {
 	current, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, "closed", current.Status)
+}
+
+// A body save made against the content revision the editor opened at is
+// refused once another client has edited the body, writes nothing, and a
+// save that names no revision still goes through.
+func TestClientEditBodyRefusesStaleContentRevision(t *testing.T) {
+	ctx := t.Context()
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Example", Body: "before", Author: "alice"})
+	require.NoError(t, err)
+	client := NewClient(env.URL, env.HTTP)
+
+	opened, err := client.GetIssueDetail(ctx, project.ID, issue.UID)
+	require.NoError(t, err)
+	revision := opened.Issue.ContentRevision
+
+	_, err = client.EditBody(ctx, project.ID, issue.UID, "other client's text", "bob", &revision)
+	require.NoError(t, err)
+
+	_, err = client.EditBody(ctx, project.ID, issue.UID, "stale editor's text", "alice", &revision)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, http.StatusPreconditionFailed, apiErr.Status)
+	require.Equal(t, "revision_conflict", apiErr.Code)
+	current, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "other client's text", current.Body)
+
+	resp, err := client.EditBody(ctx, project.ID, issue.UID, "unguarded text", "alice", nil)
+	require.NoError(t, err)
+	require.True(t, resp.Changed)
+	current, err = env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "unguarded text", current.Body)
 }
