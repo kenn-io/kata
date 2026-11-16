@@ -1679,6 +1679,9 @@ func (d *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 				return err
 			}
 			if err := d.authorizeFederationAffectedProjectTx(ctx, tx, p, current, project.UID); err != nil {
+				if errors.Is(err, db.ErrFederationMoveSourceUnauthorized) {
+					return &db.FederationProjectNotEnrolledError{IssueUID: issueUID, ProjectUID: project.UID, ProjectName: project.Name, Err: err}
+				}
 				return err
 			}
 			checked[current] = true

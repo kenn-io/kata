@@ -1,0 +1,1 @@
+Pushed work for an issue whose current project the spoke has not joined returns 403 federation_project_not_enrolled instead of auth_invalid.

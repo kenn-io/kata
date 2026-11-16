@@ -66,7 +66,14 @@ func TestFederationFreshCurrentProjectHostAuthority(t *testing.T) {
 			headers[db.EventFeaturesHeader] = db.SupportedEventFeatures
 			response, raw := envDoRaw(t, env, http.MethodPost, projectPath(source.ID)+"/federation/events:ingest", body, headers)
 			require.Equalf(t, tc.status, response.StatusCode, "%s", raw)
-			if tc.mode != "missing-proof" {
+			if tc.mode == "missing-proof" {
+				// The route credential is valid; the spoke lacks the issue's
+				// current project, and the error says which one.
+				envelope := assertAPIError(t, response.StatusCode, raw, http.StatusForbidden, "federation_project_not_enrolled")
+				require.Contains(t, envelope.Error.Message, issue.UID)
+				require.Contains(t, envelope.Error.Message, target.Name)
+				require.NotContains(t, envelope.Error.Message, "credential is not currently authorized")
+			} else {
 				require.Positive(t, access.sourceChecks.Load())
 			}
 			if tc.mode == "fence-denied" {
