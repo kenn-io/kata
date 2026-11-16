@@ -1376,7 +1376,7 @@ func (d *Store) materializeFederatedProjectTxScoped(
 }
 
 func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]db.FoldEvent, projection db.FoldProjection, decisions []db.FederatedMoveDecision, acceptedEventUIDs []string) error {
-	return db.RehomeFederatedMovedIssues(ctx, tx, moved, projection, decisions, d.InstanceUID(), payloadReferencedIssueUIDs, func(pid int64, issue db.FoldIssue) (string, error) {
+	return db.RehomeFederatedMovedIssues(ctx, tx, moved, projection, decisions, func(pid int64, issue db.FoldIssue) (string, error) {
 		return resolveFederatedIssueShortID(ctx, tx, pid, issue.UID, issue.ShortID, nil)
 	}, func(id, source, target int64) error {
 		if err := lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil {

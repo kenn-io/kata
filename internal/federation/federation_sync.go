@@ -389,30 +389,24 @@ func syncDirectSpoke(
 	opts clientpkg.Opts,
 ) error {
 	runStartBinding := binding
-	var pushErr error
 	if pushThisTurn {
-		// A push awaiting history can finish after the pull. A moved issue may
-		// also reject its old project's credential before the move is pulled.
-		pushErr = pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts)
-		if errors.Is(pushErr, db.ErrFederationPushAwaitsPull) {
-			pushErr = nil
-		} else if pushErr != nil {
-			status, ok := errors.AsType[*HubStatusError](pushErr)
-			if !ok || status.StatusCode != http.StatusForbidden || !strings.HasSuffix(status.Path, "/federation/events:ingest") {
-				return pushErr
-			}
+		// A push that waits for the hub's history is finished by the pull
+		// below and the next cycle's push.
+		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts); err != nil &&
+			!errors.Is(err, db.ErrFederationPushAwaitsPull) {
+			return err
 		}
 	}
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
 	if err != nil {
-		return errors.Join(err, pushErr)
+		return err
 	}
 	recordPullError := func(pullErr error) error {
 		at := time.Now().UTC()
 		if at.Before(pullStartedAt) {
 			at = pullStartedAt
 		}
-		return errors.Join(recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at), pushErr)
+		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
 	}
 	body, err := client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
 	if err != nil {
@@ -650,7 +644,7 @@ func syncDirectSpoke(
 	if completedAt.Before(pullStartedAt) {
 		completedAt = pullStartedAt
 	}
-	return errors.Join(store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, completedAt), pushErr)
+	return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, completedAt)
 }
 
 func startFederationPull(ctx context.Context, store db.Storage, projectID int64) (bool, time.Time, error) {

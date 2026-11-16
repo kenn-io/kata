@@ -12,11 +12,6 @@ import (
 // EventTimestampFormat is the millisecond UTC representation covered by portable event hashes.
 const EventTimestampFormat = "2006-01-02T15:04:05.000Z"
 
-// FederationPushEligible excludes local events retained after an unjoined move.
-func FederationPushEligible(event string) string {
-	return `NOT EXISTS (SELECT 1 FROM meta WHERE key='federation_local_only_event.'||` + event + `.uid)`
-}
-
 // ProjectMetadataAdoptionPayload encodes existing project metadata as a
 // synthetic from-empty diff for a federation adoption baseline.
 func ProjectMetadataAdoptionPayload(metadata JSONBlob) (string, error) {

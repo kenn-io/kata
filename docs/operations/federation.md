@@ -89,9 +89,10 @@ preserving its comments and local state while removing it from the source
 project's lists. Find its UID and local name with `GET /api/v1/projects?include=archived`.
 The placeholder starts owner-only; restore it, then broaden its project access
 when others should see its issues. Restoring without joining does not subscribe
-to the project, but later moves can still place issues there. Offline edits made
-in the source before the move stay local even if the destination is later joined;
-they stay local if the issue returns to the original joined project.
+to the project, but later moves can still place issues there. Edits the spoke
+made to the issue before it pulled the move stay queued for push. The hub accepts
+them only after the spoke joins the destination project; until then it refuses
+the push, which also holds back the project's other unsent changes.
 To subscribe later, run `kata projects restore <local-name>`, optionally run
 `kata projects rename <local-name> <chosen-name>`, then rerun the enrollment's
 join command using `--project <current-local-name>`.

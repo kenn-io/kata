@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -87,7 +86,7 @@ func federationMoveSourceHasPendingEvents(
  WHERE e.project_id=$1 AND e.origin_instance_uid=$2`
 	var pending bool
 	if err := tx.QueryRowContext(ctx, movedIssueEvents+` AND e.id>b.push_cursor_event_id
- AND `+FederationPushEligible("e")+` AND e.type IN (`+FederationPushEventTypesSQL()+`))`,
+ AND e.type IN (`+FederationPushEventTypesSQL()+`))`,
 		projectID, originInstanceUID).Scan(&pending); err != nil {
 		return false, err
 	}
@@ -407,7 +406,7 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, origin string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error), assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, applyUnjoined func(int64, FoldIssue, FoldProjection) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) error {
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, applyUnjoined func(int64, FoldIssue, FoldProjection) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) error {
 	for _, decision := range decisions {
 		issue := p.Issues[decision.IssueUID]
 		winner := moved[issue.UID]
@@ -420,9 +419,6 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 			delete(p.Issues, issue.UID)
 			if !decision.Exists {
 				continue
-			}
-			if err := markLocalOnlyMoveEvents(ctx, tx, origin, issue.UID, references); err != nil {
-				return err
 			}
 		}
 		id, source := decision.IssueID, decision.SourceID
@@ -504,64 +500,6 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 	return nil
 }
 
-func markLocalOnlyMoveEvents(ctx context.Context, tx *sql.Tx, origin, issueUID string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) error {
-	rows, err := tx.QueryContext(ctx, `SELECT e.uid,e.issue_uid,e.related_issue_uid,e.type,e.payload FROM events e
- JOIN federation_bindings b ON b.project_id=e.project_id
- WHERE e.origin_instance_uid=$1 AND e.id>b.push_cursor_event_id`, origin)
-	if err != nil {
-		return err
-	}
-	marked, err := scanLocalMoveEvents(rows, issueUID, references)
-	if err != nil {
-		return err
-	}
-	for _, uid := range marked {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'v1:held') ON CONFLICT(key) DO NOTHING`, "federation_local_only_event."+uid); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func scanLocalMoveEvents(rows *sql.Rows, issueUID string, references func(RemoteEvent, map[string]jsontext.Value) ([]string, error)) ([]string, error) {
-	var candidates []string
-	for rows.Next() {
-		var event RemoteEvent
-		var issue, related sql.NullString
-		var payload string
-		if err := rows.Scan(&event.EventUID, &issue, &related, &event.Type, &payload); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		if issue.Valid {
-			event.IssueUID = &issue.String
-		}
-		if related.Valid {
-			event.RelatedIssueUID = &related.String
-		}
-		event.Payload = jsontext.Value(payload)
-		refs, err := references(event, PayloadMap(event.Payload))
-		if err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		if issue.Valid && issue.String != "" {
-			refs = append(refs, issue.String)
-		}
-		if slices.Contains(refs, issueUID) {
-			candidates = append(candidates, event.EventUID)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	return candidates, nil
-}
-
 type movedProjectPassKey struct{}
 
 // FollowingMovedProjects reports whether a destination reconciliation pass is running.
@@ -599,8 +537,8 @@ func RestrictFoldProjectWhere(p *FoldProjection, projectUID string, keep func(st
 	}
 }
 
-// ClearFederatedMovedIssueHistory clears contributing streams while retaining
-// local events that cannot be pushed after a remote move.
+// ClearFederatedMovedIssueHistory removes every contributing stream for issues
+// being reset. Keeping a former source baseline would recreate a purged issue.
 func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
 	// Only quarantines covering subject events being removed block this reset;
 	// unrelated quarantined work in a contributing stream remains independent.
@@ -660,7 +598,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
  JOIN federation_bindings b ON b.project_id=e.project_id
  WHERE e.project_id<>$1 AND e.origin_instance_uid=$2
  AND e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
- AND `+`e.id>b.push_cursor_event_id AND `+FederationPushEligible("e")+`
+ AND e.id>b.push_cursor_event_id
  AND e.type IN (`+FederationPushEventTypesSQL()+`))`, projectID, originInstanceUID).Scan(&pending); err != nil {
 		return err
 	}
@@ -670,9 +608,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	if err := PreserveFederationProjectIdentityDependencies(ctx, tx, projectID); err != nil {
 		return fmt.Errorf("preserve former project identity dependencies: %w", err)
 	}
-	//nolint:gosec // The eligibility expression is fixed SQL; values are bound.
-	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)
- AND NOT (e.origin_instance_uid=$2 AND NOT (`+FederationPushEligible("e")+`))`, projectID, originInstanceUID)
+	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.issue_uid IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
 	return err
 }
 
@@ -680,8 +616,7 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 // issues now owned elsewhere. A source reset cannot rewind those destinations.
 func ClearFederatedProjectEvents(ctx context.Context, tx *sql.Tx, projectID int64) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events AS e WHERE e.project_id=$1
- AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.uid=e.issue_uid AND i.project_id<>$1)
- AND `+FederationPushEligible("e"), projectID); err != nil {
+ AND NOT EXISTS(SELECT 1 FROM issues i WHERE i.uid=e.issue_uid AND i.project_id<>$1)`, projectID); err != nil {
 		return err
 	}
 	// Retained envelopes may still refer numerically to a peer being reset.
