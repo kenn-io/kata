@@ -22,6 +22,7 @@ type issueStatusProjection struct {
 	Actor               string     `json:"actor"`
 	ActorSource         string     `json:"actor_source"`
 	Auth                string     `json:"auth"`
+	ActorVerified       bool       `json:"actor_verified"`
 	Instance            string     `json:"instance"`
 	Owner               *string    `json:"owner,omitempty"`
 	AssignmentExpiresOn *time.Time `json:"assignment_expires_on,omitempty"`
@@ -36,8 +37,9 @@ type issueStatusProjection struct {
 type instanceStatusForCLI struct {
 	InstanceUID string `json:"instance_uid"`
 	Auth        struct {
-		Kind  string `json:"kind"`
-		Actor string `json:"actor"`
+		Kind          string `json:"kind"`
+		Actor         string `json:"actor"`
+		ActorVerified bool   `json:"actor_verified"`
 	} `json:"auth"`
 }
 
@@ -111,6 +113,7 @@ func runIssueStatus(cmd *cobra.Command, issueRef string) error {
 		Actor:               actor,
 		ActorSource:         source,
 		Auth:                authKind,
+		ActorVerified:       instance.Auth.ActorVerified,
 		Instance:            instance.InstanceUID,
 		Owner:               show.Issue.Owner,
 		AssignmentExpiresOn: show.Issue.AssignmentExpiresOn,
@@ -196,6 +199,7 @@ func printIssueStatusAgent(out io.Writer, status issueStatusProjection) error {
 		agentRowField("actor", status.Actor),
 		agentRowField("actor_source", status.ActorSource),
 		agentRowField("auth", status.Auth),
+		agentRowField("actor_verified", fmt.Sprint(status.ActorVerified)),
 		agentRowField("instance", status.Instance),
 		agentOptionalRowField("owner", status.Owner),
 	}
@@ -243,9 +247,13 @@ func printIssueStatusHuman(out io.Writer, status issueStatusProjection) error {
 		textsafe.Line(status.Issue), textsafe.Line(status.IssueStatus), status.Hold); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(out, "actor: %s (%s; auth=%s)\ninstance: %s\n",
+	trust := "unverified"
+	if status.ActorVerified {
+		trust = "verified"
+	}
+	if _, err := fmt.Fprintf(out, "actor: %s (%s; auth=%s; %s)\ninstance: %s\n",
 		textsafe.Line(status.Actor), textsafe.Line(status.ActorSource),
-		textsafe.Line(status.Auth), textsafe.Line(status.Instance)); err != nil {
+		textsafe.Line(status.Auth), trust, textsafe.Line(status.Instance)); err != nil {
 		return err
 	}
 	if status.Owner != nil && *status.Owner != "" {

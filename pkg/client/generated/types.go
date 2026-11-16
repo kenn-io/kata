@@ -265,7 +265,10 @@ func (a AuditClosesResponseBody) Validate() error {
 }
 
 type AuthInfoOut struct {
-	Actor                 *string        `json:"actor,omitempty"`
+	Actor *string `json:"actor,omitempty"`
+
+	// ActorVerified True when the daemon, not the request body, supplies the actor recorded for this credential's writes. It does not cover actor names stored inside values, such as a notification slot's from field.
+	ActorVerified         *bool          `json:"actor_verified,omitempty"`
 	AllowedActions        []string       `json:"allowed_actions,omitempty"`
 	CloseRequiresEvidence *bool          `json:"close_requires_evidence,omitempty"`
 	ExpiresAt             *time.Time     `json:"expires_at,omitempty"`

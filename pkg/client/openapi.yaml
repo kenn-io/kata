@@ -243,6 +243,9 @@ components:
       properties:
         actor:
           type: string
+        actor_verified:
+          description: True when the daemon, not the request body, supplies the actor recorded for this credential's writes. It does not cover actor names stored inside values, such as a notification slot's from field.
+          type: boolean
         allowed_actions:
           items:
             type: string
@@ -7336,7 +7339,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.51.0
+  version: 0.52.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:

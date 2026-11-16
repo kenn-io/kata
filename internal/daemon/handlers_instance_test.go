@@ -203,3 +203,49 @@ func TestInstanceEndpointIncludesScopedTokenGrant(t *testing.T) {
 	assert.WithinDuration(t, expiresAt, *out.Auth.ExpiresAt, time.Millisecond)
 	assert.NotContains(t, string(bs), "worker-token")
 }
+
+func instanceActorVerified(t *testing.T, env *testenv.Env, headers map[string]string) (bool, bool) {
+	t.Helper()
+	resp, bs := envDoRaw(t, env, http.MethodGet, "/api/v1/instance", nil, headers)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(bs))
+	var out struct {
+		Auth map[string]any `json:"auth"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &out))
+	v, present := out.Auth["actor_verified"]
+	if !present {
+		return false, false
+	}
+	b, ok := v.(bool)
+	require.True(t, ok, "actor_verified must be a boolean, got %T", v)
+	return b, true
+}
+
+func TestInstanceEndpointReportsActorVerified(t *testing.T) {
+	ctx := t.Context()
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	_, _, err := env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "operator-token", Actor: "operator", AdminActor: db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	verified, present := instanceActorVerified(t, env, map[string]string{"Authorization": "Bearer operator-token"})
+	assert.True(t, present)
+	assert.True(t, verified, "an identity-mode user token names the actor of its writes")
+
+	// The bootstrap token has no actor and cannot perform attributed writes.
+	verified, present = instanceActorVerified(t, env, map[string]string{"Authorization": "Bearer bootstrap-token"})
+	assert.True(t, present)
+	assert.False(t, verified)
+}
+
+func TestInstanceEndpointActorNotVerifiedOutsideIdentityMode(t *testing.T) {
+	env := testenv.New(t)
+	verified, present := instanceActorVerified(t, env, nil)
+	assert.True(t, present, "the field is always reported")
+	assert.False(t, verified, "the request body names the actor of a write")
+
+	env = testenv.New(t, testenv.WithAuthToken("static-token"))
+	verified, _ = instanceActorVerified(t, env, map[string]string{"Authorization": "Bearer static-token"})
+	assert.False(t, verified, "a static token does not attribute writes")
+}

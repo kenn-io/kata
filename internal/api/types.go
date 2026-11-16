@@ -95,6 +95,7 @@ type UISessionResponse struct {
 	AllowedActions        []string       `json:"allowed_actions,omitempty"`
 	CloseRequiresEvidence bool           `json:"close_requires_evidence,omitempty,omitzero"`
 	TokenAuditRead        bool           `json:"token_audit_read,omitempty,omitzero"`
+	ActorVerified bool `json:"actor_verified" required:"false" doc:"True when the daemon, not the request body, supplies the actor recorded for this credential's writes. It does not cover actor names stored inside values, such as a notification slot's from field."`
 }
 
 // DocbankHealth reports whether the daemon can resolve its Docbank API key.
@@ -176,6 +177,7 @@ type AuthInfoOut struct {
 	AllowedActions        []string       `json:"allowed_actions,omitempty"`
 	CloseRequiresEvidence bool           `json:"close_requires_evidence,omitempty,omitzero"`
 	TokenAuditRead        bool           `json:"token_audit_read,omitempty,omitzero"`
+	ActorVerified bool `json:"actor_verified" required:"false" doc:"True when the daemon, not the request body, supplies the actor recorded for this credential's writes. It does not cover actor names stored inside values, such as a notification slot's from field."`
 }
 
 // TokenScopeOut is the immutable, redacted native grant attached to a token.

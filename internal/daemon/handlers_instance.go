@@ -69,7 +69,18 @@ func instanceAuthInfo(ctx context.Context, cfg ServerConfig) api.AuthInfoOut {
 	}
 	out.CloseRequiresEvidence = closeRequiresEvidence(ctx)
 	out.TokenAuditRead = tokenAuditReadAllowed(ctx)
+	out.ActorVerified = principalSuppliesWriteActor(principal)
 	return out
+}
+
+// principalSuppliesWriteActor reports whether the daemon takes the actor of
+// this principal's writes from the credential instead of the request body.
+// The bootstrap and static tokens carry no actor, so they never qualify.
+func principalSuppliesWriteActor(p Principal) bool {
+	if p.Actor == "" {
+		return false
+	}
+	return p.Kind == PrincipalDBToken || p.Kind == PrincipalTrustedProxy
 }
 
 // requestAuthKind names how the current request authenticated so clients can

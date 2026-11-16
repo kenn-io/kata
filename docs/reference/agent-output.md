@@ -294,11 +294,11 @@ included when present. Their existing ordering and omission rules apply.
 lease state separate on one line:
 
 ```text
-OK status issue=abc4 project=example-project issue_status=open revision=4 actor=agent-a actor_source=daemon auth=db_token instance=01HZNQ7VFPK1XGD8R5MABCD4AB owner=agent-a assignment_expires_on=2026-09-02T12:30:00Z hold=assigned
+OK status issue=abc4 project=example-project issue_status=open revision=4 actor=agent-a actor_source=daemon auth=db_token actor_verified=true instance=01HZNQ7VFPK1XGD8R5MABCD4AB owner=agent-a assignment_expires_on=2026-09-02T12:30:00Z hold=assigned
 ```
 
 The fixed field order is `issue`, `project`, `issue_status`, `revision`,
-`actor`, `actor_source`, `auth`, `instance`, optional `owner`, optional
+`actor`, `actor_source`, `auth`, `actor_verified`, `instance`, optional `owner`, optional
 `assignment_expires_on`, and `hold`. An
 active or expired lease then appends optional `holder`, `holder_instance`,
 `lease_kind`, and `expires_at`; pending leases append `pending_leases`. Hold

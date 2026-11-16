@@ -778,7 +778,9 @@ results with `backlinks_truncated` in JSON and agent output. Human output states
 that more replies may be available.
 
 `kata status` reports the issue status and revision, daemon identity, effective
-actor, issue owner, and federation lease. Its `hold` value is `active`,
+actor, issue owner, and federation lease. `actor_verified` is `true` when the
+daemon supplies that actor from your credential, and `false` when the actor
+comes from `--as`, `KATA_AUTHOR`, or git and the daemon only records it. Its `hold` value is `active`,
 `expired`, `pending`, `assigned`, `unassigned`, or `closed`. `assigned` means
 the open issue has an owner without a live or pending lease, which is the
 state `kata claim` produces outside federation. A cached timed
