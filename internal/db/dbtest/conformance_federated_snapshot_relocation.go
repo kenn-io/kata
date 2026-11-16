@@ -3,15 +3,12 @@ package dbtest
 import (
 	"context"
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/uid"
 )
 
 // A late destination baseline must relocate an issue already held in the source,
@@ -20,8 +17,7 @@ func checkFederatedSnapshotRelocatesHeldIssue(t *testing.T, _ db.Storage, backen
 	for _, lifecycle := range []string{
 		"active replicas", "pausing the source retains discussion", "source paused before destination joins",
 		"source leave retains discussion", "destination leave preserves standalone issue",
-		"destination leave waits for pending initial link", "destination leave waits for pending cron observation",
-		"destination leave waits for archived source", "destination leave waits for snapshot-only source",
+		"archived source", "snapshot-only source",
 	} {
 		t.Run(lifecycle, func(t *testing.T) {
 			hub := backend.Open(t)
@@ -86,7 +82,7 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		require.NoError(t, spoke.MaterializeFederatedProject(ctx, local.ID), "a destination snapshot must reuse the issue held in the source")
 	}
 	localSource := join(source)
-	if lifecycle == "destination leave waits for snapshot-only source" {
+	if lifecycle == "snapshot-only source" {
 		// The spoke joins the source from a baseline, so the issue arrives
 		// only as a snapshot with no creation event.
 		sourceBaseline, refreshed, err := hub.RefreshProjectFederationBaseline(ctx, source.ID, "worker")
@@ -117,10 +113,7 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	baseline, refreshed, err := hub.RefreshProjectFederationBaseline(ctx, target.ID, "worker")
 	require.NoError(t, err)
 	require.True(t, refreshed)
-	if lifecycle == "destination leave waits for archived source" || lifecycle == "destination leave waits for snapshot-only source" {
-		acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
-	}
-	_, commentEvent, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: before.ID, Author: "worker", Body: "source-only newer discussion"})
+	_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: before.ID, Author: "worker", Body: "source-only newer discussion"})
 	require.NoError(t, err)
 	if lifecycle == "source paused before destination joins" {
 		binding, err := spoke.FederationBindingByProject(ctx, localSource.ID)
@@ -129,46 +122,10 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		_, err = spoke.UpsertFederationBinding(ctx, binding)
 		require.NoError(t, err)
 	}
-	var pending db.Event
-	switch lifecycle {
-	case "destination leave waits for archived source":
+	if lifecycle == "archived source" {
 		archived, _, err := spoke.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: localSource.ID, Actor: "worker", Force: true})
-		require.NoError(t, err, "the issue is still source-owned when the spoke archives it")
+		require.NoError(t, err)
 		require.NotNil(t, archived.DeletedAt)
-		binding, err := spoke.FederationBindingByProject(ctx, localSource.ID)
-		require.NoError(t, err, "archive retains the source enrollment")
-		require.Less(t, binding.PushCursorEventID, commentEvent.ID)
-	case "destination leave waits for pending initial link":
-		acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
-		var linked db.Issue
-		linked, pending, err = spoke.CreateIssue(ctx, db.CreateIssueParams{
-			ProjectID: localSource.ID, Title: "new issue with a link", Author: "worker",
-			Links: []db.InitialLink{{Type: "blocks", ToNumber: before.ID}},
-		})
-		require.NoError(t, err)
-		require.Equal(t, "issue.created", pending.Type)
-		require.Equal(t, &linked.UID, pending.IssueUID)
-		require.Nil(t, pending.RelatedIssueUID, "the initial link peer is present only in the payload")
-		require.Contains(t, pending.Payload, before.UID)
-	case "destination leave waits for pending cron observation":
-		job, _ := nativeFederationDefinitions(t, spoke, localSource)
-		acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
-		runUID, err := uid.New()
-		require.NoError(t, err)
-		observed, err := spoke.ObserveCronRun(ctx, db.ObserveCronRun{
-			ProjectID: localSource.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID,
-			IssueUID: &before.UID, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1},
-		})
-		require.NoError(t, err)
-		require.Len(t, observed.Events, 1)
-		pending = observed.Events[0]
-		require.Equal(t, "cron.run.observed", pending.Type)
-		require.Nil(t, pending.IssueUID, "the observation references the issue only in its payload")
-		var payload db.CronRunObservation
-		require.NoError(t, json.Unmarshal([]byte(pending.Payload), &payload))
-		require.Equal(t, runUID, payload.UID)
-		require.NotEqual(t, before.UID, payload.UID)
-		require.Equal(t, &before.UID, payload.IssueUID)
 	}
 	localTarget := join(target)
 	blocker, _, err := spoke.CreateIssue(ctx, db.CreateIssueParams{ProjectID: localTarget.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EX", Title: "local short ID reservation", Author: "worker"})
@@ -176,41 +133,6 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	seen, err := spoke.MaxEventID(ctx)
 	require.NoError(t, err)
 	pull(target, localTarget, baseline.ReplayHorizonEventID-1)
-	switch lifecycle {
-	case "destination leave waits for pending initial link", "destination leave waits for pending cron observation":
-		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
-		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
-		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
-			"the pending %s requires the current owner's enrollment", pending.Type)
-		require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, localSource.ID, pending.ID))
-		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
-		require.NoError(t, err, "acknowledging the pending event releases the destination enrollment")
-		return
-	case "destination leave waits for snapshot-only source":
-		moved, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		require.Equal(t, localTarget.ID, moved.ProjectID)
-		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
-		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
-		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
-			"the snapshot-only source's pending comment still requires the destination enrollment")
-		require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, localSource.ID, commentEvent.ID))
-		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
-		require.NoError(t, err)
-		return
-	case "destination leave waits for archived source":
-		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
-		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
-			"the archived source's pending comment still requires the destination enrollment")
-
-		require.NoError(t, spoke.AdvanceFederationPushCursor(ctx, localSource.ID, commentEvent.ID))
-		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
-		require.NoError(t, err, "acknowledging the archived source's comment releases the destination enrollment")
-		archived, err := spoke.ProjectByID(ctx, localSource.ID)
-		require.NoError(t, err)
-		require.NotNil(t, archived.DeletedAt)
-		return
-	}
 	for _, project := range []db.Project{localSource, localTarget} {
 		reset, err := spoke.PurgeResetCheck(ctx, seen, project.ID)
 		require.NoError(t, err)
@@ -233,15 +155,11 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.Empty(t, labels)
 	links, err := spoke.LinksByIssue(ctx, got.ID)
 	require.NoError(t, err)
-	if lifecycle == "destination leave waits for pending initial link" {
-		require.Len(t, links, 2)
-	} else {
-		require.Len(t, links, 1)
-	}
+	require.Len(t, links, 1)
 	cursor, err := spoke.MaxEventID(ctx)
 	require.NoError(t, err)
 	for range 2 {
-		if lifecycle != "source paused before destination joins" && lifecycle != "destination leave waits for archived source" {
+		if lifecycle != "source paused before destination joins" && lifecycle != "archived source" {
 			require.NoError(t, spoke.MaterializeFederatedProject(ctx, localSource.ID), "newer source discussion must not restore source ownership")
 		}
 		require.NoError(t, spoke.MaterializeFederatedProject(ctx, localTarget.ID))
@@ -330,9 +248,6 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	case "destination leave preserves standalone issue":
 		acknowledgeFederatedRehomeSourceEvents(t, spoke, localTarget)
 		_, err := spoke.LeaveFederationReplica(ctx, localTarget.ID)
-		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
-		acknowledgeFederatedRehomeSourceEvents(t, spoke, localSource)
-		_, err = spoke.LeaveFederationReplica(ctx, localTarget.ID)
 		require.NoError(t, err)
 		body := "standalone destination edit"
 		_, _, _, err = spoke.EditIssue(ctx, db.EditIssueParams{IssueID: got.ID, Body: &body, Actor: "worker"})
@@ -359,11 +274,11 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 
 // Snapshot relocation must retain the existing same-hub and recurrence gates.
 func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) error {
-	for _, kind := range []string{"different-hub", "recurrence", "recurrence-move", "retained-move-after-source-leave", "relocated-then-different-hub", "archived-destination"} {
+	for _, kind := range []string{"different-hub", "recurrence", "retained-move-after-source-leave", "relocated-then-different-hub", "archived-destination"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			source, target, issue, move := federatedRehomeFixture(t, store, "snapshot-guard-"+kind)
-			if kind == "recurrence" || kind == "recurrence-move" {
+			if kind == "recurrence" {
 				r, _, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{ProjectID: source.ID, Actor: "worker", Rule: "FREQ=WEEKLY", DTStart: "2026-10-12", Timezone: "UTC", Template: db.RecurrenceTemplate{Title: "pinned"}})
 				require.NoError(t, err)
 				next, err := store.MaterializeNext(ctx, r.ID, "2026-10-12", "worker")
@@ -385,28 +300,6 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 				require.NoError(t, err)
 				_, err = store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{move})
 				require.NoError(t, err)
-			}
-			if kind == "recurrence-move" {
-				raw, err := json.Marshal(map[string]any{"issue_uid": issue.UID, "from_project_uid": source.UID, "from_short_id": issue.ShortID, "to_project_uid": target.UID, "to_short_id": issue.ShortID,
-					"snapshot": relocationSnapshotDocument(t, issue)})
-				require.NoError(t, err)
-				refused := newRemoteEvent(t, target, &issue.UID, "issue.moved", "worker", move.OriginInstanceUID, move.HLCPhysicalMS, jsontext.Value(raw))
-				_, err = store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{refused})
-				require.NoError(t, err)
-				var pinned *db.RecurrencePinnedError
-				require.ErrorAs(t, store.MaterializeFederatedProject(ctx, target.ID), &pinned)
-				// The destination never held the issue, so its link is an ordinary
-				// cross-project reference and does not block the source leave.
-				acknowledgeFederatedRehomeSourceEvents(t, store, source)
-				acknowledgeFederatedRehomeSourceEvents(t, store, target)
-				_, pending, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "link to the refused issue", Author: "worker", Links: []db.InitialLink{{Type: "blocks", ToNumber: issue.ID}}})
-				require.NoError(t, err)
-				_, err = store.LeaveFederationReplica(ctx, source.ID)
-				require.NoError(t, err, "a refused move is not ownership")
-				binding, err := store.FederationBindingByProject(ctx, target.ID)
-				require.NoError(t, err)
-				require.Less(t, binding.PushCursorEventID, pending.ID)
-				return
 			}
 			document := relocationSnapshotDocument(t, issue)
 			snapshot := newRemoteEvent(t, target, &issue.UID, "issue.snapshot", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+1, document)
@@ -491,19 +384,6 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 				require.Equal(t, "later source edit", edited.Title, "the source keeps syncing the issue it kept")
 				require.Error(t, store.MaterializeFederatedProject(ctx, target.ID), "the destination still refuses the relocation")
 			}
-			if kind == "recurrence" {
-				// The destination never held the issue, so its link is an ordinary
-				// cross-project reference and does not block the source leave.
-				acknowledgeFederatedRehomeSourceEvents(t, store, source)
-				acknowledgeFederatedRehomeSourceEvents(t, store, target)
-				_, pending, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "link to the refused issue", Author: "worker", Links: []db.InitialLink{{Type: "blocks", ToNumber: issue.ID}}})
-				require.NoError(t, err)
-				_, err = store.LeaveFederationReplica(ctx, source.ID)
-				require.NoError(t, err, "a refused snapshot is not a former owner")
-				binding, err := store.FederationBindingByProject(ctx, target.ID)
-				require.NoError(t, err)
-				require.Less(t, binding.PushCursorEventID, pending.ID)
-			}
 		})
 	}
 	return nil
@@ -516,32 +396,4 @@ func relocationSnapshotDocument(t *testing.T, issue db.Issue) jsontext.Value {
 	fields["short_id"], fields["title"], fields["body"], fields["status"] = issue.ShortID, issue.Title, issue.Body, issue.Status
 	fields["created_at"] = issue.CreatedAt.UTC().Format(time.RFC3339Nano)
 	return marshalIssueDocument(t, fields)
-}
-
-// Only issues a sibling project once held keep a leaving project's enrollment.
-// An ordinary cross-project link from that sibling does not block the leave.
-func checkFederatedLeaveIgnoresSiblingLinks(t *testing.T, store db.Storage) error {
-	ctx := t.Context()
-	join := func(name string) db.Project {
-		t.Helper()
-		project, err := store.CreateProject(ctx, name)
-		require.NoError(t, err)
-		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
-		require.NoError(t, err)
-		return project
-	}
-	leaving, sibling := join("leaving-project"), join("sibling-project")
-	peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: leaving.ID, Title: "link peer", Author: "worker"})
-	require.NoError(t, err)
-	acknowledgeFederatedRehomeSourceEvents(t, store, leaving)
-	acknowledgeFederatedRehomeSourceEvents(t, store, sibling)
-	_, pending, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: sibling.ID, Title: "cross-project link", Author: "worker", Links: []db.InitialLink{{Type: "blocks", ToNumber: peer.ID}}})
-	require.NoError(t, err)
-	require.Contains(t, pending.Payload, peer.UID, "the sibling's unpushed event references the leaving project's issue")
-	_, err = store.LeaveFederationReplica(ctx, leaving.ID)
-	require.NoError(t, err)
-	binding, err := store.FederationBindingByProject(ctx, sibling.ID)
-	require.NoError(t, err)
-	require.Less(t, binding.PushCursorEventID, pending.ID, "the sibling still has the link to push")
-	return nil
 }

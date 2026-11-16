@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"go.kenn.io/kata/internal/httpurl"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -21,16 +19,13 @@ type moveQuery interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-// CheckFederationMoveSourceLifecycle keeps the native replicas joined while
-// pending moves or updates in another stream still need their credentials.
-func CheckFederationMoveSourceLifecycle(
-	ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string, postgres bool,
-	referencedIssues func(RemoteEvent, map[string]jsontext.Value) ([]string, error),
-) error {
-	var sourceUID, hubURL string
-	err := tx.QueryRowContext(ctx, `SELECT p.uid,b.hub_url FROM projects p
+// CheckFederationMoveSourceLifecycle keeps a native source joined while a
+// destination still owes a locally authored move that needs its credential.
+func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) error {
+	var sourceUID string
+	err := tx.QueryRowContext(ctx, `SELECT p.uid FROM projects p
  JOIN federation_bindings b ON b.project_id=p.id
- WHERE p.id=$1 AND b.role='spoke' AND b.relay_config IS NULL`, projectID).Scan(&sourceUID, &hubURL)
+ WHERE p.id=$1 AND b.role='spoke' AND b.relay_config IS NULL`, projectID).Scan(&sourceUID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -71,111 +66,6 @@ func CheckFederationMoveSourceLifecycle(
 	}
 	if pending {
 		return fmt.Errorf("%w: sync pending events for moved issues before source leave or archive", ErrFederationResetBlockedByPendingPush)
-	}
-	return checkFederationMoveDestinationLifecycle(ctx, tx, projectID, originInstanceUID, hubURL, postgres, referencedIssues)
-}
-
-// A source stream still needs the current owner's enrollment to push its
-// pending updates for issues it once held. Pausing sync or archiving the source
-// retains those updates. The source held an issue it created, moved away, or
-// gave up in a recorded relocation. A refused move or snapshot is not
-// ownership. Links to issues the source never held are ordinary cross-project
-// references and do not block the leave.
-func checkFederationMoveDestinationLifecycle(
-	ctx context.Context, tx *sql.Tx, projectID int64, instanceUID, hubURL string, postgres bool,
-	referencedIssues func(RemoteEvent, map[string]jsontext.Value) ([]string, error),
-) error {
-	origin, err := httpurl.CanonicalHTTPOrigin(hubURL)
-	if err != nil {
-		return nil
-	}
-	//nolint:gosec // G202: the event types come from a fixed list; runtime values are bound.
-	rows, err := tx.QueryContext(ctx, `SELECT e.project_id,b.hub_url,e.type,e.issue_uid,e.related_issue_uid,e.payload
- FROM events e
- JOIN federation_bindings b ON b.project_id=e.project_id
- WHERE e.project_id<>$1 AND e.origin_instance_uid=$2
- AND b.role='spoke' AND b.relay_config IS NULL AND e.id>b.push_cursor_event_id
- AND (e.type LIKE 'issue.%' OR e.type IN ('cron.run.observed','cron.run.snapshot'))
- AND e.type IN (`+FederationPushEventTypesSQL()+`)`, projectID, instanceUID)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-	type sourceIssue struct {
-		project int64
-		uid     string
-	}
-	candidates := map[int64][]string{}
-	seen := map[sourceIssue]bool{}
-	for rows.Next() {
-		var sourceProject int64
-		var candidate, payload string
-		var event RemoteEvent
-		if err := rows.Scan(&sourceProject, &candidate, &event.Type, &event.IssueUID, &event.RelatedIssueUID, &payload); err != nil {
-			return err
-		}
-		sourceOrigin, err := httpurl.CanonicalHTTPOrigin(candidate)
-		if err != nil || sourceOrigin != origin {
-			continue
-		}
-		event.Payload = jsontext.Value(payload)
-		var refs []string
-		if strings.HasPrefix(event.Type, "issue.") {
-			refs, err = referencedIssues(event, PayloadMap(event.Payload))
-			if err != nil {
-				return err
-			}
-			if event.IssueUID != nil {
-				refs = append(refs, *event.IssueUID)
-			}
-		} else {
-			var run CronRunObservation
-			if err := json.Unmarshal(event.Payload, &run); err != nil {
-				return err
-			}
-			if run.IssueUID != nil {
-				refs = append(refs, *run.IssueUID)
-			}
-		}
-		for _, uid := range refs {
-			if key := (sourceIssue{sourceProject, uid}); uid != "" && !seen[key] {
-				seen[key] = true
-				candidates[sourceProject] = append(candidates[sourceProject], uid)
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	movedFrom := "json_extract(m.payload,'$.from_project_uid')"
-	if postgres {
-		movedFrom = "m.payload::jsonb->>'from_project_uid'"
-	}
-	for sourceProject, uids := range candidates {
-		for chunk := range slices.Chunk(uids, 500) {
-			slots := make([]string, len(chunk))
-			args := make([]any, 2, len(chunk)+2)
-			args[0], args[1] = projectID, sourceProject
-			for i, uid := range chunk {
-				slots[i] = fmt.Sprintf("$%d", i+3)
-				args = append(args, uid)
-			}
-			var pending bool
-			//nolint:gosec // G202: only generated placeholders and a fixed JSON expression enter the SQL; values are bound.
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues i WHERE i.project_id=$1 AND i.uid IN (`+
-				strings.Join(slots, ",")+`) AND (EXISTS(SELECT 1 FROM events h WHERE h.project_id=$2 AND h.issue_uid=i.uid
- AND h.type IN ('issue.created','sync.reset_required'))
- OR EXISTS(SELECT 1 FROM events m JOIN projects sp ON sp.id=$2 WHERE m.type='issue.moved' AND m.issue_uid=i.uid
- AND `+movedFrom+`=sp.uid)))`, args...).Scan(&pending); err != nil {
-				return err
-			}
-			if pending {
-				return fmt.Errorf("%w: %w: restore any archived former project and sync pending updates for moved issues, then retry destination leave or archive", ErrFederationResetBlockedByPendingPush, ErrFederationMovedIssuePendingPush)
-			}
-		}
 	}
 	return nil
 }
