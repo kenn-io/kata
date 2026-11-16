@@ -28,6 +28,11 @@ type CronRun struct {
 	StartedAt                  *time.Time   `json:"started_at,omitempty"`
 	EndedAt                    *time.Time   `json:"ended_at,omitempty"`
 	UpdatedAt                  time.Time    `json:"updated_at"`
+	// The names resolve at read time from the referenced rows, deleted ones
+	// included. They are not stored, exported or replayed.
+	JobName      *string `json:"job_name,omitempty"`
+	WorkflowName *string `json:"workflow_name,omitempty"`
+	IssueShortID *string `json:"issue_short_id,omitempty"`
 }
 
 // ObserveCronRun replaces the mutable evidence of one immutable identity.

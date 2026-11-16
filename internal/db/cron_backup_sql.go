@@ -101,9 +101,29 @@ func ExportCronRunsSQL(ctx context.Context, query CronQuery, filter ExportFilter
 }
 func scanCronRun(row *sql.Rows) (CronRunExport, error) { return scanCronRunRow(row) }
 func scanCronRunRow(row interface{ Scan(...any) error }) (CronRunExport, error) {
+	return scanCronRunValues(row, false)
+}
+
+// cronRunNameColumns resolve a run's job, workflow and issue names at read
+// time. Definitions and issues stay readable after a soft delete, so a deleted
+// referent still names its runs. A cron_runs row must be in scope.
+const cronRunNameColumns = `(SELECT name FROM cron_jobs WHERE cron_jobs.uid=cron_runs.job_uid),(SELECT name FROM cron_workflows WHERE cron_workflows.uid=cron_runs.workflow_uid),(SELECT short_id FROM issues WHERE issues.uid=cron_runs.issue_uid)`
+
+// cronRunReadColumns is the run row with its resolved names appended.
+const cronRunReadColumns = cronRunColumns + "," + cronRunNameColumns
+
+func scanCronRunNamedRow(row interface{ Scan(...any) error }) (CronRunExport, error) {
+	return scanCronRunValues(row, true)
+}
+
+func scanCronRunValues(row interface{ Scan(...any) error }, named bool) (CronRunExport, error) {
 	var value CronRunExport
 	var summary string
-	if err := row.Scan(&value.ID, &value.UID, &value.ProjectID, &value.JobUID, &value.DefinitionEventUID, &value.WorkflowUID, &value.WorkflowDefinitionEventUID, &value.OccurrenceKey, &value.IssueUID, &value.Actor, &value.Teammate, &value.ExecutorLabel, &value.Status, &summary, &value.Revision, cronTime{&value.CreatedAt}, cronOptionalTime{&value.StartedAt}, cronOptionalTime{&value.EndedAt}, cronTime{&value.UpdatedAt}); err != nil {
+	dest := []any{&value.ID, &value.UID, &value.ProjectID, &value.JobUID, &value.DefinitionEventUID, &value.WorkflowUID, &value.WorkflowDefinitionEventUID, &value.OccurrenceKey, &value.IssueUID, &value.Actor, &value.Teammate, &value.ExecutorLabel, &value.Status, &summary, &value.Revision, cronTime{&value.CreatedAt}, cronOptionalTime{&value.StartedAt}, cronOptionalTime{&value.EndedAt}, cronTime{&value.UpdatedAt}}
+	if named {
+		dest = append(dest, &value.JobName, &value.WorkflowName, &value.IssueShortID)
+	}
+	if err := row.Scan(dest...); err != nil {
 		return value, err
 	}
 	var err error

@@ -35,6 +35,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   [HTTP API reference](reference/http-api.md#editing-an-issue-safely).
 - Add semantic and hybrid search to Postgres-backed Go services with `Config.Embeddings`; automatic search falls back to lexical results when pgvector is missing. See [semantic search](development/embedding.md#semantic-search).
 
+- Read the job, workflow and issue of a cron run from the run row itself: it
+  carries `job_name`, `workflow_name` and `issue_short_id`, deleted ones
+  included, so a client labels a page of runs without listing jobs, workflows
+  and issues. `kata tui` names runs this way.
+
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
 
 - Copy a project sync diagnostic for Bash/Zsh or PowerShell from the web summary.

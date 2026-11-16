@@ -81,7 +81,7 @@ func validateCronRun(value CronRun) error {
 
 // Run reads an independent observation through its project-scoped UID.
 func (a CronSQL) Run(ctx context.Context, projectID int64, id string) (CronRun, error) {
-	value, err := scanCronRunRow(a.Query.QueryRowContext(ctx, "SELECT "+cronRunColumns+" FROM cron_runs WHERE project_id=$1 AND uid=$2", projectID, strings.ToUpper(id)))
+	value, err := scanCronRunNamedRow(a.Query.QueryRowContext(ctx, "SELECT "+cronRunReadColumns+" FROM cron_runs WHERE project_id=$1 AND uid=$2", projectID, strings.ToUpper(id)))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -103,7 +103,7 @@ func (a CronSQL) Runs(ctx context.Context, in CronRunList) ([]CronRun, error) {
 	}
 	in.JobUID = strings.ToUpper(in.JobUID)
 	in.BeforeUID = strings.ToUpper(in.BeforeUID)
-	query := "SELECT " + cronRunColumns + " FROM cron_runs WHERE project_id=$1"
+	query := "SELECT " + cronRunReadColumns + " FROM cron_runs WHERE project_id=$1"
 	args := []any{in.ProjectID}
 	if in.JobUID != "" {
 		if !cronUID(in.JobUID) {
@@ -132,7 +132,7 @@ func (a CronSQL) Runs(ctx context.Context, in CronRunList) ([]CronRun, error) {
 	defer func() { _ = rows.Close() }()
 	result := []CronRun{}
 	for rows.Next() {
-		value, err := scanCronRunRow(rows)
+		value, err := scanCronRunNamedRow(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -175,7 +175,7 @@ func (a CronSQL) observeRunTx(ctx context.Context, tx *sql.Tx, in ObserveCronRun
 	}
 	requestedActor := value.Actor
 	value.Actor = effectiveActor
-	prior, err := scanCronRunRow(tx.QueryRowContext(ctx, "SELECT "+cronRunColumns+" FROM cron_runs WHERE uid=$1", in.UID))
+	prior, err := scanCronRunNamedRow(tx.QueryRowContext(ctx, "SELECT "+cronRunReadColumns+" FROM cron_runs WHERE uid=$1", in.UID))
 	fresh := errors.Is(err, sql.ErrNoRows)
 	if err != nil && !fresh {
 		return result, err
@@ -204,7 +204,7 @@ func (a CronSQL) observeRunTx(ctx context.Context, tx *sql.Tx, in ObserveCronRun
 	if err := writeCronRunRow(ctx, tx, value, fresh, in.ExpectedRevision, now); err != nil {
 		return result, err
 	}
-	saved, err := scanCronRunRow(tx.QueryRowContext(ctx, "SELECT "+cronRunColumns+" FROM cron_runs WHERE uid=$1", in.UID))
+	saved, err := scanCronRunNamedRow(tx.QueryRowContext(ctx, "SELECT "+cronRunReadColumns+" FROM cron_runs WHERE uid=$1", in.UID))
 	if err != nil {
 		return result, err
 	}

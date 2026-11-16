@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-13
+last_edited: 2026-11-16
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -734,7 +734,7 @@ issue's owner, dates, lease, status, or readiness.
 
 Responses contain `run`, the exact committed `events`, and `replayed`. Run
 listing is project-scoped, accepts `--job-uid` to list one job's runs, and
-orders by creation time and UID descending. Use `next_before_uid` with `--before-uid` for another
+orders by creation time and UID descending. Each run row also carries `job_name`, `workflow_name` and `issue_short_id`, resolved when the row is read from the current job, workflow and issue rows. A deleted job, workflow or issue still names its runs, and a name is omitted when the run has no such reference. The names are not stored, exported or federated. Use `next_before_uid` with `--before-uid` for another
 page. Ordinary federation publishes observations from spokes, folds evidence
 by original event provenance per run UID, and preserves independent runs in
 baselines and backup. Run identity conflicts fail rather than replacing a run.

@@ -53,6 +53,7 @@ func cronFixture(t *testing.T) Model {
 	}}
 	p.runs = []generated.CronRun{{
 		UID: "01ARZ3NDEKTSV4RRFFQ69G5FAY", ProjectID: 7, JobUID: new("01ARZ3NDEKTSV4RRFFQ69G5FAV"), WorkflowUID: new("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+		JobName: new("Daily summary"), WorkflowName: new("Summary flow"),
 		DefinitionEventUID: new("01ARZ3NDEKTSV4RRFFQ69G5FB1"), WorkflowDefinitionEventUID: new("01ARZ3NDEKTSV4RRFFQ69G5FB3"),
 		Status: "succeeded", Actor: "worker", ExecutorLabel: new("executor-a"),
 		ID: 1, Revision: 1, UpdatedAt: snapshotFixedNow.Add(-time.Hour),
@@ -99,6 +100,25 @@ func TestCronLinkFollows(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A run is named by the fields the daemon resolves, so a run whose job was
+// deleted still reads as its job and a deleted issue still shows its short ID.
+func TestCronRunNamesComeFromRunFields(t *testing.T) {
+	m := cronFixture(t)
+	p := m.cron.data
+	p.jobs = nil
+	p.workflows = nil
+	p.runs = slices.Clone(p.runs)
+	p.runs[0].IssueUID = new("01ARZ3NDEKTSV4RRFFQ69G5FAX")
+	p.runs[0].IssueShortID = new("a1b2")
+	m = sendRune(m, '3')
+	require.Contains(t, m.viewBody(), "Daily summary")
+	m = sendKey(m, tea.KeyEnter)
+	require.Contains(t, m.viewBody(), "#a1b2")
+
+	require.Equal(t, "workflow Summary flow", cronRunName(generated.CronRun{WorkflowName: new("Summary flow")}))
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAV", cronRunName(generated.CronRun{JobUID: new("01ARZ3NDEKTSV4RRFFQ69G5FAV")}))
 }
 
 func TestCronFreshness(t *testing.T) {

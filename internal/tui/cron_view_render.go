@@ -81,6 +81,27 @@ func cronAction(p cronData, j generated.CronJob) string {
 	}
 	return "prompt"
 }
+
+// cronRunName is the job a run belongs to, or its workflow when no job ran it.
+// The daemon names both at read time, deleted definitions included.
+func cronRunName(r generated.CronRun) string {
+	if name := deref(r.JobName); name != "" {
+		return name
+	}
+	if name := deref(r.WorkflowName); name != "" {
+		return "workflow " + name
+	}
+	return deref(r.JobUID)
+}
+
+// cronRunIssue is the run's issue as #short-id, even after the issue was
+// deleted, falling back to its UID.
+func cronRunIssue(r generated.CronRun) string {
+	if id := deref(r.IssueShortID); id != "" {
+		return "#" + id
+	}
+	return deref(r.IssueUID)
+}
 func cronTime(t *time.Time) string {
 	if t == nil {
 		return "—"
@@ -166,7 +187,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 			}
 		case cronRuns:
 			for _, r := range runs {
-				add(r.UID, []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
+				add(r.UID, []string{r.Status, cronRunName(r), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
 			}
 		case cronWorkflows:
 			for _, w := range p.workflows {
@@ -264,7 +285,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			d.field("Actor", r.Actor)
 			d.field("Executor", ownerText(r.ExecutorLabel))
 			d.field("Teammate", ownerText(r.Teammate))
-			d.field("Issue", deref(r.IssueUID))
+			d.field("Issue", cronRunIssue(r))
 			if r.Summary.InputTokens != nil || r.Summary.OutputTokens != nil {
 				d.field("Tokens", fmt.Sprintf("%d input, %d output", deref(r.Summary.InputTokens), deref(r.Summary.OutputTokens)))
 			}
