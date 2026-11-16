@@ -9,43 +9,22 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/processtree"
 )
 
-// Source is an operator-owned local root or read-only adapter command.
-type Source struct {
-	Root    string   `toml:"root"`
-	Command []string `toml:"command"`
-	SHA256  bool     `toml:"sha256"`
-	// Env names explicitly grant daemon environment variables to the adapter.
-	Env []string `toml:"env"`
-}
+// Source is an operator-owned local root or read-only adapter configuration.
+type Source = config.FileEvidenceSource
 
 // Config grants source publication and resolution authority to this daemon.
-type Config struct {
-	Sources map[string]Source `toml:"sources"`
-}
+type Config config.FileEvidenceConfig
 
 // Validate rejects incomplete source configuration without contacting providers.
 func (c Config) Validate() error {
-	for alias, s := range c.Sources {
-		if !aliasPattern.MatchString(alias) || (s.Root == "") == (len(s.Command) == 0) || (s.Root != "" && !filepath.IsAbs(s.Root)) {
-			return errors.New("file_evidence sources require valid aliases and exactly one absolute root or command argv")
-		}
-		if len(s.Command) > 0 && strings.TrimSpace(s.Command[0]) == "" {
-			return errors.New("file_evidence command must not be empty")
-		}
-		for _, name := range s.Env {
-			if name == "" || strings.ContainsAny(name, "=\x00") {
-				return errors.New("file_evidence env must contain variable names")
-			}
-		}
-	}
-	return nil
+	return config.FileEvidenceConfig(c).Validate()
 }
 
 // Result preserves the cited reference separately from the current read's bytes.
@@ -68,7 +47,7 @@ func (c Config) Capture(ctx context.Context, r Reference, origin string) (Refere
 	if !ok {
 		return Reference{}, errors.New("file evidence source is not configured")
 	}
-	raw, rev, status := source.read(ctx, r, false)
+	raw, rev, status := readSource(ctx, source, r, false)
 	if status != "ok" {
 		return Reference{}, errors.New("file evidence " + status)
 	}
@@ -106,7 +85,7 @@ func (c Config) Read(ctx context.Context, r Reference, origin string, historical
 		result.Status = "history-unavailable"
 		return result
 	}
-	raw, _, status := source.read(ctx, r, historical)
+	raw, _, status := readSource(ctx, source, r, historical)
 	result.Status = status
 	if status != "ok" {
 		return result
@@ -123,7 +102,7 @@ func (c Config) Read(ctx context.Context, r Reference, origin string, historical
 	return result
 }
 
-func (s Source) read(ctx context.Context, r Reference, historical bool) ([]byte, string, string) {
+func readSource(ctx context.Context, s Source, r Reference, historical bool) ([]byte, string, string) {
 	if ctx.Err() != nil {
 		return nil, "", "unreachable"
 	}
@@ -133,7 +112,7 @@ func (s Source) read(ctx context.Context, r Reference, historical bool) ([]byte,
 		}
 		return readLocal(s.Root, r.Path)
 	}
-	return s.readAdapter(ctx, r, historical)
+	return readAdapter(ctx, s, r, historical)
 }
 
 func readLocal(root, name string) ([]byte, string, string) {
@@ -221,7 +200,7 @@ func (b *boundedOutput) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func (s Source) readAdapter(parent context.Context, r Reference, historical bool) ([]byte, string, string) {
+func readAdapter(parent context.Context, s Source, r Reference, historical bool) ([]byte, string, string) {
 	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
 	request := resolverRequest{Version: 1, Source: r.Source, Path: r.Path, Mode: "current"}

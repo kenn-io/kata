@@ -11,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"go.kenn.io/kata/internal/fileevidence"
-
 	"go.kenn.io/kata/internal/httpurl"
 
 	"github.com/BurntSushi/toml"
@@ -26,7 +24,7 @@ import (
 // TUI preferences and the named daemon catalog. Workspace-local remote
 // overrides (KATA_SERVER, .kata.local.toml) live in their own resolution path.
 type DaemonConfig struct {
-	FileEvidence fileevidence.Config `toml:"file_evidence"`
+	FileEvidence FileEvidenceConfig `toml:"file_evidence"`
 	// Sources contains safe provenance labels, never secret contents.
 	Sources map[string]string `toml:"-"`
 	// Timezone is the IANA timezone used for civil issue schedules that do not

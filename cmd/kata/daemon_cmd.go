@@ -35,6 +35,7 @@ import (
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/federationsigning"
+	"go.kenn.io/kata/internal/fileevidence"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
@@ -1772,7 +1773,7 @@ func runDaemonProcess(
 		ExternalRootWake:       externalRootWake,
 		FederationPushPending:  federation.DirectSpokePushPending(store),
 		FederationHubClient:    federation.CredentialHTTPClient,
-		FileEvidence:           dcfg.FileEvidence,
+		FileEvidence:           fileevidence.Config(dcfg.FileEvidence),
 		CloseVerification:      dcfg.Close.Verification.Policy(),
 		CloseThrottle: daemon.CloseThrottlePolicy{
 			SiblingBurstEnabled: dcfg.Close.Throttle.ThrottleEnabled(),
