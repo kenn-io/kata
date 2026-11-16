@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"iter"
@@ -125,11 +125,11 @@ func (r *frameReader) next() (Event, error) {
 		oversized        bool
 	)
 	for {
-		n, line, err := r.readLine(&size)
+		n, line, kept, err := r.readLine(&size)
 		if err != nil {
 			return Event{}, err
 		}
-		if n > 0 && line == nil {
+		if n > 0 && !kept {
 			oversized = true
 			continue
 		}
@@ -177,29 +177,24 @@ func (r *frameReader) next() (Event, error) {
 
 // readLine returns one line without its terminator and its length, adding the
 // bytes read to *size. Once they pass the cap the line is consumed but not
-// kept: the returned slice is nil while the length stays positive.
-func (r *frameReader) readLine(size *int) (int, []byte, error) {
-	var (
-		line []byte
-		n    int
-	)
+// kept: kept is false and the slice is not meaningful while the length stays positive.
+func (r *frameReader) readLine(size *int) (n int, line []byte, kept bool, err error) {
+	line = []byte{}
 	for {
-		chunk, more, err := r.br.ReadLine()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return 0, nil, ErrEventStreamEnded
+		chunk, more, rerr := r.br.ReadLine()
+		if rerr != nil {
+			if errors.Is(rerr, io.EOF) {
+				return 0, line, false, ErrEventStreamEnded
 			}
-			return 0, nil, err
+			return 0, line, false, rerr
 		}
 		n += len(chunk)
 		*size += len(chunk) + 1
-		if *size > maxEventBytes {
-			line = nil
-		} else {
+		if *size <= maxEventBytes {
 			line = append(line, chunk...)
 		}
 		if !more {
-			return n, line, nil
+			return n, line, *size <= maxEventBytes, nil
 		}
 	}
 }
