@@ -702,7 +702,7 @@ func (d *Store) createIssueTx(ctx context.Context, tx *sql.Tx, p db.CreateIssueP
 		}
 	}
 
-	payload, err := buildIssueCreatedPayload(issueCreatedPayload{
+	payload, err := buildIssueCreatedPayload(db.IssueDocumentPayload{
 		UID:                    issueUID,
 		ShortID:                shortID,
 		Title:                  p.Title,
@@ -747,65 +747,17 @@ type createdLinkTarget struct {
 	ShortID string
 }
 
-type createdLinkOut struct {
-	Type       string `json:"type"`
-	ToShortID  string `json:"to_short_id,omitempty"`
-	ToIssueUID string `json:"to_issue_uid,omitempty"`
-	Incoming   bool   `json:"incoming,omitzero"`
-	Author     string `json:"author,omitempty"`
-	CreatedAt  string `json:"created_at,omitempty"`
-}
-
-type issueSnapshotComment struct {
-	ReplyToUID string `json:"reply_to_uid,omitempty"`
-	ReplyKind  string `json:"reply_kind,omitempty"`
-	EditedAt   string `json:"edited_at,omitempty"`
-	CommentUID string `json:"comment_uid"`
-	Author     string `json:"author"`
-	Teammate   string `json:"teammate,omitempty"`
-	Body       string `json:"body"`
-	CreatedAt  string `json:"created_at"`
-}
-
-type issueCreatedPayload struct {
-	UID                    string                 `json:"uid"`
-	ShortID                string                 `json:"short_id"`
-	Title                  string                 `json:"title"`
-	Body                   string                 `json:"body"`
-	Author                 string                 `json:"author"`
-	Owner                  *string                `json:"owner,omitempty"`
-	AssignmentExpiresOn    *string                `json:"assignment_expires_on,omitempty"`
-	Priority               *int64                 `json:"priority,omitempty"`
-	Status                 string                 `json:"status"`
-	ClosedReason           *string                `json:"closed_reason,omitempty"`
-	ClosedAt               *string                `json:"closed_at,omitempty"`
-	DeletedAt              *string                `json:"deleted_at,omitempty"`
-	Metadata               jsontext.Value         `json:"metadata"`
-	Labels                 []string               `json:"labels,omitempty"`
-	Links                  []createdLinkOut       `json:"links,omitempty"`
-	Comments               []issueSnapshotComment `json:"comments,omitempty"`
-	CreatedAt              string                 `json:"created_at"`
-	UpdatedAt              string                 `json:"updated_at,omitempty"`
-	Revision               int64                  `json:"revision,omitzero"`
-	IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
-	IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
-	RecurrenceUID          string                 `json:"recurrence_uid,omitempty"`
-	OccurrenceKey          string                 `json:"occurrence_key,omitempty"`
-	Source                 string                 `json:"source,omitempty"`
-	ExternalID             string                 `json:"external_id,omitempty"`
-}
-
-func createdLinkPayloads(links []db.InitialLink, targets []createdLinkTarget, author string) []createdLinkOut {
+func createdLinkPayloads(links []db.InitialLink, targets []createdLinkTarget, author string) []db.IssueDocumentLink {
 	if len(links) == 0 {
 		return nil
 	}
-	out := make([]createdLinkOut, 0, len(links))
+	out := make([]db.IssueDocumentLink, 0, len(links))
 	for i, l := range links {
 		var t createdLinkTarget
 		if i < len(targets) {
 			t = targets[i]
 		}
-		out = append(out, createdLinkOut{
+		out = append(out, db.IssueDocumentLink{
 			Type:       l.Type,
 			ToShortID:  t.ShortID,
 			ToIssueUID: t.UID,
@@ -816,7 +768,7 @@ func createdLinkPayloads(links []db.InitialLink, targets []createdLinkTarget, au
 	return out
 }
 
-func buildIssueCreatedPayload(p issueCreatedPayload) (string, error) {
+func buildIssueCreatedPayload(p db.IssueDocumentPayload) (string, error) {
 	if len(p.Metadata) == 0 {
 		p.Metadata = jsontext.Value(`{}`)
 	}

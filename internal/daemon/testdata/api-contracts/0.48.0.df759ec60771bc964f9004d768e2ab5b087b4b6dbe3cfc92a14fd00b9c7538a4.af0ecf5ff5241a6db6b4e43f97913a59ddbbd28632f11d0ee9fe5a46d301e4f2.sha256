@@ -1,0 +1,1 @@
+Project federation status accepts compact=true to omit relay checkpoint capacity measurement.

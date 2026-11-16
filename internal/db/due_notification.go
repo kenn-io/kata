@@ -111,7 +111,7 @@ func dueNotificationDelivered(history []Event, key string, desired jsontext.Valu
 			continue
 		}
 		switch event.Type {
-		case "issue.created", "issue.snapshot":
+		case "issue.created", "issue.snapshot", RepeatedImportEventType:
 			var values map[string]jsontext.Value
 			if json.Unmarshal(payload["metadata"], &values) == nil && equalNotificationValue(values[key], desired) {
 				return true

@@ -286,7 +286,7 @@ type projectsDebounceFireMsg struct{}
 // fetchProjectsWithStats (when viewProjects is still active) or no-ops.
 // Spec §6.3.
 func projectsDebounceCmd() tea.Cmd {
-	return tea.Tick(projectsRefetchDebounce, func(time.Time) tea.Msg {
+	return tickAfter(projectsRefetchDebounce, func(time.Time) tea.Msg {
 		return projectsDebounceFireMsg{}
 	})
 }

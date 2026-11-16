@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -150,16 +151,65 @@ func TestKitAgentHookHermesReplacementStart(t *testing.T) {
 }
 
 func TestKitAgentHookConfiguredRejectsConditionalHandlers(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-hook contract claude","async":true}]},{"enabled":false,"hooks":[{"command":"kata agent-hook attention-native claude start"}]}]}}`), 0600))
-	plan, err := planKitAgentHooks(nativeAgentHookOptions{Agent: "claude", ConfigPath: path}, true)
-	require.NoError(t, err)
-	require.False(t, plan.CurrentContract)
-	require.False(t, plan.CurrentAttentionStart)
-	plan, err = planKitAgentHooks(nativeAgentHookOptions{Agent: "claude", ConfigPath: path, Executable: "kata", Contract: true, Attention: true}, false)
-	require.NoError(t, err)
-	require.True(t, plan.Contract)
-	require.True(t, plan.AttentionStart)
+	for _, tc := range []struct {
+		name, foreign string
+	}{
+		{"owned only", ""},
+		{"mixed", `{"command":"foreign hook"},`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			data := `{"hooks":{"SessionStart":[{"hooks":[{"command":"kata agent-hook contract claude","async":true}]},{"enabled":false,"hooks":[` + tc.foreign + `{"command":"kata agent-hook attention-native claude start"}]}]}}`
+			require.NoError(t, os.WriteFile(path, []byte(data), 0600))
+			plan, err := planKitAgentHooks(nativeAgentHookOptions{Agent: "claude", ConfigPath: path}, true)
+			require.NoError(t, err)
+			require.False(t, plan.CurrentContract)
+			require.False(t, plan.CurrentAttentionStart)
+			plan, err = planKitAgentHooks(nativeAgentHookOptions{Agent: "claude", ConfigPath: path, Executable: "kata", Contract: true, Attention: true}, false)
+			require.NoError(t, err)
+			var document map[string]any
+			require.NoError(t, json.Unmarshal(plan.Changes[0].Content, &document))
+			groups := document["hooks"].(map[string]any)["SessionStart"].([]any)
+			var disabled []any
+			for _, raw := range groups {
+				group := raw.(map[string]any)
+				if group["enabled"] == false {
+					disabled = append(disabled, group)
+				}
+			}
+			if tc.foreign == "" {
+				require.Empty(t, disabled)
+			} else {
+				require.Equal(t, []any{map[string]any{"enabled": false, "hooks": []any{map[string]any{"command": "foreign hook"}}}}, disabled)
+			}
+			entries, err := parseAgentHookEntries(agenthook.AgentClaude, plan.Changes[0].Content)
+			require.NoError(t, err)
+			count := 0
+			for _, entry := range entries {
+				if entry.Kind == attentionStartHook {
+					count++
+					require.NotContains(t, entry.GroupFields, "enabled")
+				}
+			}
+			require.Equal(t, 1, count)
+		})
+	}
+
+	t.Run("codex keeps foreign group index", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "hooks.json")
+		require.NoError(t, os.WriteFile(path, []byte(`{"hooks":{"SessionStart":[{"if":"condition","hooks":[{"type":"command","command":"/old/kata agent-hook contract codex"},{"type":"command","command":"foreign-hook"}]}]}}`), 0600))
+		out, err := runHookSetup(t, "install", "codex", "--config", path, "--executable", os.Args[0])
+		require.NoError(t, err)
+		require.Contains(t, out, "Codex will ask to re-trust shifted hooks; open Codex and run /hooks.")
+		data, err := os.ReadFile(path) //nolint:gosec // Path is a config fixture under TempDir.
+		require.NoError(t, err)
+		var document map[string]any
+		require.NoError(t, json.Unmarshal(data, &document))
+		groups := document["hooks"].(map[string]any)["SessionStart"].([]any)
+		conditional := groups[0].(map[string]any)
+		require.Equal(t, "condition", conditional["if"])
+		require.Equal(t, "foreign-hook", conditional["hooks"].([]any)[0].(map[string]any)["command"])
+	})
 }
 
 func TestKitAgentHookConfiguredRejectsRestrictiveMatchers(t *testing.T) {

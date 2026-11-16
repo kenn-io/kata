@@ -32,11 +32,11 @@ func (failingKeyCheckStore) MCPEventsKeyCheck(context.Context) (string, bool, er
 	return "", false, errors.New("store unavailable")
 }
 
-func startMCPEventsForTest(t *testing.T, store db.Storage, enabled bool, keyPath string) (*mcpevents.Service, string, func()) {
+func startMCPEventsForTest(t *testing.T, store db.Storage, events config.MCPEventsConfig, keyPath string) (*mcpevents.Service, string, func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	workers := newDaemonWorkerGroup()
-	cfg := config.DaemonConfig{MCPEvents: config.MCPEventsConfig{Enabled: enabled}}
+	cfg := config.DaemonConfig{MCPEvents: events}
 	service, reason := startMCPEvents(ctx, workers, mcpEventsStartup{
 		Config: cfg, KeyPath: keyPath, Store: store,
 		Authority:   daemon.NewMCPEventsAuthority(daemon.ServerConfig{DB: store}),
@@ -86,12 +86,12 @@ func newMCPEventsStore(t *testing.T) *sqlitestore.Store {
 func TestStartMCPEventsRunsWhenEnabledAndStaysOffOtherwise(t *testing.T) {
 	store := newMCPEventsStore(t)
 
-	service, reason, _ := startMCPEventsForTest(t, store, false, filepath.Join(t.TempDir(), "mcp-events.key"))
+	service, reason, _ := startMCPEventsForTest(t, store, config.MCPEventsConfig{}, filepath.Join(t.TempDir(), "mcp-events.key"))
 	assert.Nil(t, service, "disabled in config starts nothing")
 	assert.Empty(t, reason)
 
 	keyPath := filepath.Join(t.TempDir(), "runtime", "mcp-events.key")
-	service, reason, stop := startMCPEventsForTest(t, store, true, keyPath)
+	service, reason, stop := startMCPEventsForTest(t, store, config.MCPEventsConfig{Enabled: true}, keyPath)
 	require.NotNil(t, service)
 	assert.Empty(t, reason)
 	assert.True(t, service.Availability().Enabled, service.Availability().Reason)
@@ -104,7 +104,7 @@ func TestMCPEventsFailuresDisableOnlyEvents(t *testing.T) {
 		store := newMCPEventsStore(t)
 		keyPath := filepath.Join(t.TempDir(), "mcp-events.key")
 		require.NoError(t, os.WriteFile(keyPath, []byte("short"), 0o600))
-		service, reason, _ := startMCPEventsForTest(t, store, true, keyPath)
+		service, reason, _ := startMCPEventsForTest(t, store, config.MCPEventsConfig{Enabled: true}, keyPath)
 		require.NotNil(t, service)
 		assert.Equal(t, mcpevents.ReasonKeyUnavailable, service.Availability().Reason)
 		requireDaemonServes(t, store, service, reason, mcpevents.ReasonKeyUnavailable)
@@ -117,11 +117,11 @@ func TestMCPEventsFailuresDisableOnlyEvents(t *testing.T) {
 		store := newMCPEventsStore(t)
 		// A first start under another key leaves the check behind, as a restored
 		// backup does.
-		first, _, stop := startMCPEventsForTest(t, store, true, filepath.Join(t.TempDir(), "other.key"))
+		first, _, stop := startMCPEventsForTest(t, store, config.MCPEventsConfig{Enabled: true}, filepath.Join(t.TempDir(), "other.key"))
 		require.True(t, first.Availability().Enabled)
 		stop()
 		keyPath := filepath.Join(t.TempDir(), "mcp-events.key")
-		service, reason, _ := startMCPEventsForTest(t, store, true, keyPath)
+		service, reason, _ := startMCPEventsForTest(t, store, config.MCPEventsConfig{Enabled: true}, keyPath)
 		require.NotNil(t, service)
 		assert.Equal(t, mcpevents.ReasonKeyUnavailable, service.Availability().Reason)
 		assert.NoFileExists(t, keyPath, "the key is never silently regenerated")
@@ -130,13 +130,13 @@ func TestMCPEventsFailuresDisableOnlyEvents(t *testing.T) {
 
 	t.Run("key mismatch", func(t *testing.T) {
 		store := newMCPEventsStore(t)
-		first, _, stop := startMCPEventsForTest(t, store, true, filepath.Join(t.TempDir(), "first.key"))
+		first, _, stop := startMCPEventsForTest(t, store, config.MCPEventsConfig{Enabled: true}, filepath.Join(t.TempDir(), "first.key"))
 		require.True(t, first.Availability().Enabled)
 		stop()
 		other := filepath.Join(t.TempDir(), "second.key")
 		_, err := mcpevents.NewFileKeyProvider(other).Create(t.Context())
 		require.NoError(t, err)
-		service, reason, _ := startMCPEventsForTest(t, store, true, other)
+		service, reason, _ := startMCPEventsForTest(t, store, config.MCPEventsConfig{Enabled: true}, other)
 		require.NotNil(t, service)
 		assert.Equal(t, mcpevents.ReasonKeyMismatch, service.Availability().Reason)
 		requireDaemonServes(t, store, service, reason, mcpevents.ReasonKeyMismatch)
@@ -145,9 +145,18 @@ func TestMCPEventsFailuresDisableOnlyEvents(t *testing.T) {
 	t.Run("service construction fails", func(t *testing.T) {
 		store := newMCPEventsStore(t)
 		failing := failingKeyCheckStore{Storage: store}
-		service, reason, _ := startMCPEventsForTest(t, failing, true, filepath.Join(t.TempDir(), "mcp-events.key"))
+		service, reason, _ := startMCPEventsForTest(t, failing, config.MCPEventsConfig{Enabled: true}, filepath.Join(t.TempDir(), "mcp-events.key"))
 		assert.Nil(t, service)
 		assert.Equal(t, mcpevents.ReasonStartFailed, reason)
 		requireDaemonServes(t, store, service, reason, mcpevents.ReasonStartFailed)
 	})
+}
+
+func TestMCPEventsTrustedCallbacksStartup(t *testing.T) {
+	store := newMCPEventsStore(t)
+	cfg := config.MCPEventsConfig{Enabled: true, TrustedCallbacks: []config.MCPEventsTrustedCallback{{Origin: "https://receiver.example/path", Addresses: []string{"100.64.0.1"}}}}
+	service, reason, _ := startMCPEventsForTest(t, store, cfg, filepath.Join(t.TempDir(), "key"))
+	require.Nil(t, service)
+	require.Equal(t, mcpevents.ReasonStartFailed, reason)
+	requireDaemonServes(t, store, service, reason, mcpevents.ReasonStartFailed)
 }

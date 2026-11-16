@@ -6,5 +6,6 @@ export interface FederationIngestEventsBody {
   accepted: number
   duplicates: number
   push_cursor_event_id: number
+  superseded_event_uids?: string[]
   [key: string]: unknown
 }

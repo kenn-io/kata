@@ -10,6 +10,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"net/url"
 	"sync"
 	"time"
 
@@ -229,6 +230,7 @@ type identity struct {
 	args      Arguments
 	canonical []byte
 	url       string
+	parsed    *url.URL
 	id        string
 }
 
@@ -290,11 +292,12 @@ func (s *Service) identify(p Principal, name string, args Arguments, callbackURL
 	if err != nil {
 		return identity{}, err
 	}
-	if err := ValidateWebhookCallback(callbackURL); err != nil {
+	parsed, err := parseWebhookCallback(callbackURL)
+	if err != nil {
 		return identity{}, invalidParams("invalid_callback")
 	}
 	canonical := canonicalArguments(args)
-	return identity{args: args, canonical: canonical, url: callbackURL, id: SubscriptionID(p.Key(), name, canonical, callbackURL)}, nil
+	return identity{args: args, canonical: canonical, url: callbackURL, parsed: parsed, id: SubscriptionID(p.Key(), name, canonical, callbackURL)}, nil
 }
 
 // checkForwarderScope enforces §5.2: every forwarder mode except all-projects
@@ -424,6 +427,9 @@ func (s *Service) Subscribe(ctx context.Context, p Principal, scope ForwarderSco
 			return SubscribeResult{}, authorityError(err)
 		}
 	}
+	if err := s.webhook.validateStaticCallback(ctx, ident.parsed); err != nil {
+		return SubscribeResult{}, callbackEndpoint(endpointCategory(err))
+	}
 	call := subscribeCall{p: p, ident: ident, req: req, auth: auth, projects: projects, resolvedAfter: resolvedAfter}
 	for range maxActivationAttempts {
 		result, retry, err := s.subscribeOnce(ctx, call)
@@ -464,6 +470,9 @@ func (s *Service) subscribeOnce(ctx context.Context, c subscribeCall) (result Su
 // refresh is the live-row path. It touches only the TTL, the actor and the
 // secret columns, so it never overwrites concurrent delivery progress.
 func (s *Service) refresh(ctx context.Context, c subscribeCall, row db.MCPEventSubscription, now time.Time) (SubscribeResult, bool, error) {
+	if err := s.webhook.validateCallback(ctx, c.ident.parsed); err != nil {
+		return SubscribeResult{}, false, callbackEndpoint(endpointCategory(err))
+	}
 	in := db.MCPEventRefresh{
 		ID: row.ID, Incarnation: row.Incarnation, Now: now, Actor: c.p.Actor, ExpectedSecretEnc: row.SecretEnc,
 		ExpiresAt: s.grantExpiry(now, c.req.TTLMS), ClearFailures: true,
@@ -587,17 +596,19 @@ func (s *Service) activate(ctx context.Context, c subscribeCall, prior *db.MCPEv
 		return SubscribeResult{}, false, unavailable("seal_failed")
 	}
 	row.SecretEnc = sealed
+	freshlyVerified := false
 	if consentAt != nil {
 		row.VerifiedAt = consentAt
 	} else {
-		if err := s.challenges.verify(ctx, principalKey, c.ident.url, func(ctx context.Context) error {
-			if err := s.webhook.Verify(ctx, c.ident.url, row.ID, c.req.Delivery.Secret); err != nil {
+		if err := s.challenges.verify(ctx, principalKey, c.ident.url, c.ident.parsed, func(ctx context.Context) error {
+			if err := s.webhook.Verify(ctx, c.ident.parsed, row.ID, c.req.Delivery.Secret); err != nil {
 				if ctx.Err() != nil {
 					// The caller gave up; the endpoint did not fail.
 					return ctx.Err()
 				}
 				return callbackEndpoint(endpointCategory(err))
 			}
+			freshlyVerified = true
 			return nil
 		}); err != nil {
 			if _, ok := errors.AsType[*Error](err); ok {
@@ -607,6 +618,14 @@ func (s *Service) activate(ctx context.Context, c subscribeCall, prior *db.MCPEv
 		}
 		t := s.now().UTC()
 		row.VerifiedAt = &t
+	}
+
+	// Durable, recent and coalesced consent can skip the dial. Recheck those
+	// destinations before writing, without resolving twice for a fresh challenge.
+	if !freshlyVerified {
+		if err := s.webhook.validateCallback(ctx, c.ident.parsed); err != nil {
+			return SubscribeResult{}, false, callbackEndpoint(endpointCategory(err))
+		}
 	}
 
 	s.catchUp(ctx)

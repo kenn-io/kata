@@ -65,6 +65,7 @@
   type ChildParent = { projectID: number; projectUID: string; issueUID: string }
 
   interface Props {
+    syncRefreshGeneration?: number
     route: AppRoute
     requestedRoute?: AppRoute | undefined
     snapshot: UISnapshot
@@ -137,6 +138,7 @@
   }
 
   let {
+    syncRefreshGeneration = 0,
     route: acceptedRoute,
     requestedRoute = undefined,
     snapshot,
@@ -363,7 +365,7 @@
     canMutate
       ? undefined
       : stale
-        ? 'Changes are paused while the snapshot may be out of date.'
+        ? 'Editing is paused while workspace data may be out of date.'
         : readOnly || !snapshot.capabilities.writable
           ? 'This credential is read-only.'
           : 'Changes are paused while Kata connects.',
@@ -707,7 +709,7 @@
       <span>Account: <strong>{connectionAccount}</strong></span>
       <span>Credential: <strong>{connectionStatus}</strong></span>
       {#if stale}
-        <span>Snapshot may be out of date. Changes are paused.</span>
+        <span>Workspace data may be out of date. Editing is paused.</span>
       {/if}
     </div>
   {/if}
@@ -789,7 +791,11 @@
   </TopBar>
   {#if selectedProject && !daemonRoute && !stale && !daemonSwitching && !reconnecting && !credentialExpired && !daemonError && !scopedAuthority && (!activeDaemonID || activeConnection?.local === true)}
     {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}:${selectedProject.uid}`}
-      <ProjectSyncStatus projectID={selectedProject.id} projectUID={selectedProject.uid} />
+      <ProjectSyncStatus
+        projectID={selectedProject.id}
+        projectUID={selectedProject.uid}
+        refreshGeneration={syncRefreshGeneration}
+      />
     {/key}
   {/if}
   <div class="kata-layout" aria-busy={loading}>
@@ -830,6 +836,7 @@
           <SearchSettings
             postFetch={searchSettingsPostFetch}
             {canAdministerDaemon}
+            originStable={snapshot.origin_stable}
             onback={onBackFromCredentials}
             remoteHost={settingsHost}
           />

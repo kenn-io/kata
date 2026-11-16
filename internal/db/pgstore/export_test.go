@@ -54,3 +54,7 @@ func SetStatementTimeoutForTest(t testing.TB, timeout string) {
 	statementTimeout = timeout
 	t.Cleanup(func() { statementTimeout = old })
 }
+
+// FederationFoldEventsQueryForTest returns the SQL and arguments that the
+// federation fold runs for projectID, so cost tests can EXPLAIN it.
+var FederationFoldEventsQueryForTest = federationFoldEventsQuery

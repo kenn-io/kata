@@ -685,6 +685,7 @@ func formatInitOutput(bs []byte, name, workspace string, projectCreated, changed
 			out.WriteString(textsafe.Line(result.Reason) + "\n")
 		}
 	}
+	out.WriteString("Run kata agent setup to connect Claude Code or Codex.\n")
 	return out.String(), nil
 }
 

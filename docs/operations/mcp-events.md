@@ -184,11 +184,19 @@ An MCP client supplies the ordinary protocol metadata and headers. The
 `for` is one exact recipient, including its teammate suffix. `issue_uid` is
 optional and narrows to one issue. Unknown arguments fail before any callback.
 
-The callback must use HTTPS and a publicly routable destination. Every
-connection validates all resolved addresses and dials a validated address with
-the original TLS hostname. Private, loopback, reserved, mixed-address, and
-redirect destinations are rejected. Requests carry no daemon bearer, browser
-credentials, or environment proxy. They use TLS 1.2 or newer and time out after
+The callback must use HTTPS. By default, every resolved address must be
+publicly routable. Operators can configure an [exact origin with static
+private pins](../reference/configuration.md#trusted-private-callbacks) for a
+private-network receiver. Trusted origins bypass DNS and use only those pins;
+TLS still validates the original callback hostname. Loopback, link-local,
+reserved and untrusted mixed-address destinations remain forbidden. Redirects
+are never followed. A policy refusal reports `destination_not_allowed`,
+including in delivery's `lastError`. A syntactically valid private callback
+without a grant returns `CallbackEndpointError` (`-32027`) with
+`destination_not_allowed`. Policy refusals do
+not spend the failed-challenge budget. A delivery refusal clears the prior
+receiver-failure run, so the next receiver failure starts a new run. Requests carry no
+daemon bearer, browser credentials, or environment proxy. They use TLS 1.2 or newer and time out after
 10 seconds.
 
 The response has `id`, `refreshBefore`, `cursor`, `truncated`, and
@@ -248,7 +256,8 @@ activated. The daemon sends a signed `{"type":"verification","challenge":"…"}`
 body. Return a 2xx JSON response that contains the same `challenge`.
 
 Changing the secret or the arguments does not trigger a new challenge when
-consent already exists. Failed challenges are rate limited to 10 per hour per
+consent already exists. Changing the pinned addresses for an origin also keeps
+existing consent without a new challenge. Failed challenges are rate limited to 10 per hour per
 destination host and 10 per hour per principal. Concurrent challenges for one
 principal and URL are coalesced.
 

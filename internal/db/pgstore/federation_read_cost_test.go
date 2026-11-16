@@ -96,6 +96,83 @@ func (p federationPagePlan) visitedEvents() float64 {
 	return rows
 }
 
+// A federation fold reads the project's history plus moved issues' history
+// from other projects. The plan scans the event table once and checks the
+// project's issues and the moves through hashed subplans. A plan that re-runs
+// either subquery per scanned row visits tens of times more event rows.
+func TestFederationFoldEventsBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := t.Context()
+	store, _ := openConformanceStore(t)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	// Keep autoanalyze from racing the explicit before/after statistics checks.
+	_, err := store.ExecContext(ctx, `ALTER TABLE events SET (autovacuum_enabled=false)`)
+	require.NoError(t, err)
+	hub, err := store.CreateProject(ctx, "hub-project")
+	require.NoError(t, err)
+	others := make([]db.Project, 3)
+	for i := range others {
+		others[i], err = store.CreateProject(ctx, fmt.Sprintf("other-project-%d", i))
+		require.NoError(t, err)
+	}
+	create := func(p db.Project, comments int) db.Issue {
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "work", Author: "tester"})
+		require.NoError(t, err)
+		for range comments {
+			_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Body: "note", Author: "tester"})
+			require.NoError(t, err)
+		}
+		return issue
+	}
+	move := func(issue db.Issue, from, to db.Project) {
+		current, err := store.IssueByID(ctx, issue.ID)
+		require.NoError(t, err)
+		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: from.ID, ToProjectID: to.ID, IfMatchRev: current.Revision, Actor: "tester", Single: true})
+		require.NoError(t, err)
+	}
+	hubIssues := make([]db.Issue, 40)
+	for i := range hubIssues {
+		hubIssues[i] = create(hub, 1)
+	}
+	otherIssues := make([]db.Issue, 300)
+	for i := range otherIssues {
+		otherIssues[i] = create(others[i%len(others)], 2)
+	}
+	// Moves out of the hub, into the hub, and between unrelated projects.
+	for i := 0; i < len(hubIssues); i += 10 {
+		move(hubIssues[i], hub, others[0])
+	}
+	for i := 0; i < len(otherIssues); i += 30 {
+		move(otherIssues[i], others[i%len(others)], hub)
+	}
+	for i := 1; i < len(otherIssues); i += 15 {
+		move(otherIssues[i], others[i%len(others)], others[(i+1)%len(others)])
+	}
+	var total float64
+	require.NoError(t, store.QueryRowContext(ctx, `SELECT count(*) FROM events`).Scan(&total))
+
+	for _, analyzed := range []bool{false, true} {
+		if analyzed {
+			_, err = store.ExecContext(ctx, `ANALYZE`)
+			require.NoError(t, err)
+		}
+		for _, types := range [][]string{nil, db.FederationLinkAffectingEventTypes()} {
+			t.Run(fmt.Sprintf("analyzed=%t/types=%d", analyzed, len(types)), func(t *testing.T) {
+				query, args := pgstore.FederationFoldEventsQueryForTest(hub.ID, types)
+				var raw []byte
+				require.NoError(t, store.QueryRowContext(ctx, `EXPLAIN (ANALYZE, FORMAT JSON) `+query, args...).Scan(&raw))
+				var plans []struct{ Plan federationPagePlan }
+				require.NoError(t, json.Unmarshal(raw, &plans))
+				visited := plans[0].Plan.visitedEvents()
+				t.Logf("%.0f event rows visited of %.0f", visited, total)
+				require.LessOrEqual(t, visited, 1.5*total, "the fold must scan event history about once")
+			})
+		}
+	}
+}
+
 func TestReadFederationBulkMovePageBudget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")

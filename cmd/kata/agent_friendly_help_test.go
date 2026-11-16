@@ -13,6 +13,7 @@ func TestAgentWorkflowHelpFollowsContract(t *testing.T) {
 	help := string(executeRoot(t, newRootCmd(), "--help"))
 	_, workflow, found := strings.Cut(help, "Agent workflow (add --agent to each command):\n")
 	require.True(t, found, "root help must include the agent workflow")
+	require.True(t, strings.HasPrefix(workflow, "  kata agent setup "))
 	workflow, _, found = strings.Cut(workflow, "Full agent contract:")
 	require.True(t, found, "the workflow must link to the full contract")
 
@@ -31,7 +32,9 @@ func TestAgentWorkflowHelpFollowsContract(t *testing.T) {
 		require.NoError(t, err)
 		cmd, _, err := newRootCmd().Find(argv[1:])
 		require.NoError(t, err)
-		assert.Contains(t, agentguide.Contract, cmd.CommandPath(), "workflow command must appear in the short contract")
+		if cmd.CommandPath() != "kata agent setup" {
+			assert.Contains(t, agentguide.Contract, cmd.CommandPath(), "workflow command must appear in the short contract")
+		}
 	}
 
 	// Prose can mention metadata without adding a command.

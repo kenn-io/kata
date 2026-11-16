@@ -7,6 +7,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIndexFederatedMoveEvents(t *testing.T) {
+	events := []FoldEvent{
+		{UID: "latest-b", IssueUID: "a", Type: "issue.moved", HLCPhysicalMS: 10, HLCCounter: 1, OriginInstanceUID: "b"},
+		{UID: "later-edit", IssueUID: "a", Type: "issue.updated", HLCPhysicalMS: 20},
+		{UID: "older", IssueUID: "a", Type: "issue.moved", HLCPhysicalMS: 9},
+		{UID: "latest-a", IssueUID: "a", Type: "issue.moved", HLCPhysicalMS: 10, HLCCounter: 1, OriginInstanceUID: "a"},
+		{UID: "second-issue", IssueUID: "b", Type: "issue.moved", HLCPhysicalMS: 2},
+	}
+	winners := IndexFederatedMoveEvents(events)
+	require.Len(t, winners, 2)
+	require.Equal(t, "latest-b", winners["a"].UID)
+	require.Equal(t, "second-issue", winners["b"].UID)
+}
+
 func TestFederationMoveBaselineUsesLatestApplicableSourceSnapshot(t *testing.T) {
 	events := []FoldEvent{
 		{UID: "creation", ProjectUID: "source", IssueUID: "issue", Type: "issue.created", HLCPhysicalMS: 1, Payload: jsontext.Value(`{"uid":"issue","author":"original-author","title":"original title"}`)},
@@ -86,4 +100,22 @@ func TestFederationMoveBaselineCoveredEditWithEqualTimestamp(t *testing.T) {
 	events = append(events, FoldEvent{UID: "later-skewed-edit", ProjectUID: "source", IssueUID: "issue", Type: "issue.comment_edited", HLCPhysicalMS: 2, HLCCounter: 2, Payload: jsontext.Value(`{"comment_uid":"comment","body":"later logical discussion","edited_at":"2026-01-01T00:30:00Z"}`)})
 	projection = FoldEvents(FederationMoveBaselineEvents(events))
 	require.Equal(t, "later logical discussion", projection.Comments["comment"].Body, "known coverage clock takes precedence over wall time")
+}
+
+// A whole copy that precedes the source baseline is part of what the baseline
+// covers. Its comment text must not come back over the baseline's.
+func TestFederationMoveBaselineCoversAnEarlierWholeCopy(t *testing.T) {
+	comment := func(body, editedAt string) string {
+		return `[{"comment_uid":"comment","author":"author","body":"` + body + `","created_at":"2026-01-01T00:00:00Z","edited_at":"` + editedAt + `"}]`
+	}
+	events := []FoldEvent{
+		{UID: "first", ProjectUID: "source", IssueUID: "issue", Type: "issue.snapshot", HLCPhysicalMS: 1, Payload: jsontext.Value(`{"uid":"issue","title":"first","comments":[{"comment_uid":"comment","author":"author","body":"first text","created_at":"2026-01-01T00:00:00Z"}]}`)},
+		{UID: "copy", ProjectUID: "source", IssueUID: "issue", Type: RepeatedImportEventType, HLCPhysicalMS: 2, CreatedAt: "2026-01-02T00:00:00Z", Payload: jsontext.Value(`{"title":"copy title","status":"open","updated_at":"2026-01-01T12:00:00Z","comments":` + comment("copy text", "2026-01-01T01:00:00Z") + `}`)},
+		{UID: "edit", ProjectUID: "source", IssueUID: "issue", Type: "issue.comment_edited", HLCPhysicalMS: 3, Payload: jsontext.Value(`{"comment_uid":"comment","body":"edited text","edited_at":"2026-01-03T00:00:00Z"}`)},
+		{UID: "baseline", ProjectUID: "source", IssueUID: "issue", Type: "issue.snapshot", HLCPhysicalMS: 4, Payload: jsontext.Value(`{"uid":"issue","title":"copy title","status":"open","updated_at":"2026-01-03T00:00:00Z","comments":` + comment("edited text", "2026-01-03T00:00:00Z") + `}`)},
+		{UID: "move", ProjectUID: "target", IssueUID: "issue", Type: "issue.moved", HLCPhysicalMS: 5, Payload: jsontext.Value(`{"from_project_uid":"source","to_project_uid":"target"}`)},
+	}
+	projection := FoldEvents(FederationMoveBaselineEvents(events))
+	require.Equal(t, "edited text", projection.Comments["comment"].Body)
+	require.Equal(t, "copy title", projection.Issues["issue"].Title)
 }

@@ -104,5 +104,5 @@ func registerServiceOperationPolicies(policies map[string]HostOperationPolicy) {
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationServiceMutation, Capability: hostCapabilityWrite,
 		Mutation: true, restricted: true,
-	}, "captureTelemetryEvent", "turnOnLocalEmbeddings")
+	}, "captureTelemetryEvent", "turnOnLocalEmbeddings", "restartLocalEmbeddings")
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"runtime"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -264,7 +265,15 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 	if !flags.Quiet && b.Complete != nil && !*b.Complete {
 		hint := "search results are incomplete"
 		if b.NextCursor != "" {
-			hint += "; next_cursor=" + b.NextCursor
+			commands, err := retryCommand(cmd, "search", []string{"--lexical", "--cursor", b.NextCursor}, []string{"status", "limit", "include-deleted", "label", "no-label"})
+			if err != nil {
+				return err
+			}
+			next := commands.POSIX
+			if runtime.GOOS == "windows" {
+				next = commands.PowerShell
+			}
+			hint += "; continue with " + next
 		}
 		if _, err := fmt.Fprintln(cmd.ErrOrStderr(), hint); err != nil {
 			return err

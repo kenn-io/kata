@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-13
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -65,6 +65,56 @@ process inside Kata.
 Secret references are names, and checkout keys are portable names. Credentials,
 host paths, and runtime handles are not part of this shared contract. Opaque
 option objects retain exact JSON numbers.
+
+### Create with typed flags
+
+For common per-run jobs, `kata cron job create` accepts typed flags instead of
+`--file`. Choose the job's
+enabled state and policies explicitly. This example stores a disabled native
+job; enabling it activates delivery by the owning daemon:
+
+```sh
+kata cron job create --name "Review" --title "Review check-in" \
+  --enabled=false --catchup latest --overlap allow \
+  --every 1h --notify --parent <parent-ref> --recipient worker --json
+```
+
+An adapter prompt job also requires an explicit adapter selector:
+
+```sh
+kata cron job create --name "Inspection" --title "Inspect" \
+  --enabled=false --catchup latest --overlap forbid \
+  --every 1h --prompt "Inspect the workspace" --adapter example-adapter --json
+```
+
+| Flags | Meaning |
+| --- | --- |
+| `--name`, `--title` | Required job name and per-run issue title. |
+| `--enabled` or `--enabled=false` | Required explicit enabled state. |
+| `--catchup`, `--overlap` | Required [job policies](#job-definitions); native jobs require `overlap=allow`. |
+| `--cron`, `--every`, `--once` | Exactly one trigger: cron expression, positive whole-second duration, or RFC 3339 instant. Native jobs accept cron or intervals of at least 60 seconds. |
+| `--timezone` | Required IANA timezone for `--cron`. Optional for interval and once triggers. `Local`, invalid names, and explicitly empty values are rejected. |
+| `--notify`, `--parent`, `--recipient` | Native recurring child job with an explicit parent ref and inbox recipient. |
+| `--prompt`, `--adapter` | Literal prompt and explicit `options.adapter` selector for an adapter job. |
+| `--body`, `--message` | Optional literal issue body and native inbox message. `--message` requires `--notify`. |
+| `--adapter-agent`, `--checkout-key` | Optional adapter agent selector and portable checkout key. Both require `--prompt`. |
+| `--grace`, `--timeout` | Optional nonnegative whole-second durations. Native `catchup=skip` needs positive grace; native jobs cannot carry an execution timeout. |
+
+For example, replace `--every 1h` with `--cron '0 9 * * 1-5' --timezone UTC`
+for weekday mornings, or use `--once 2026-12-01T09:00:00+05:30` on an adapter
+job. Typed `--cron` uses `--timezone` as its single timezone source; `TZ=` and
+`CRON_TZ=` directives remain available through `--file`. Use `--every` for an
+interval rather than the `@every` descriptor. An interval measures elapsed time;
+an omitted interval timezone does not
+choose the machine's local zone. Once requires an explicit offset or `Z`.
+Durations must be whole seconds. Digits beyond nanosecond precision are ignored.
+
+Prompt, body and message text stay literal. Kata neither parses shell words nor
+launches a process. `options.adapter` selects an adapter by convention; it does
+not confirm that the adapter is installed or ready. Typed creation saves a job;
+it does not preview occurrences or reserve execution.
+
+Reusing a name creates a separate job. Update requires a request file or the interactive editor.
 
 ### Edit in place
 
@@ -181,8 +231,8 @@ Every trigger has a `kind` and accepts an optional IANA `timezone`, such as
 
 A `cron` expression has five fields: minute, hour, day of month, month, and day
 of week. It may instead be a descriptor such as `@hourly`, `@daily`, `@weekly`,
-`@monthly`, or `@yearly`. Kata does not accept seconds, years, `L`, `W`, `#`,
-or `H` syntax. Kata keeps the expression exactly as written.
+`@monthly`, or `@yearly`. Kata does not accept `@reboot`, seconds, years,
+`L`, `W`, `#`, or `H` syntax. Kata keeps the expression exactly as written.
 
 - Day of week accepts `0` or `7` for Sunday, and names such as `MON`.
   `0 9 * * 7` runs on Sundays, `5-7` means Friday through Sunday, and `5-7/2`
@@ -195,6 +245,12 @@ or `H` syntax. Kata keeps the expression exactly as written.
   and `*/60 * * * *`; write `@daily` or `@hourly` instead.
 - A step that starts at one weekday continues through 7, which is Sunday.
   `0 9 * * 5/2` runs on Fridays and Sundays.
+
+A rejected expression's error says why. For `L`, `W`, `#`, or `H` syntax, it
+names the unsupported feature. Otherwise it shows the parser's message, with a
+note on the five-field format, `@reboot`, or `@every` when one applies.
+Adapter jobs accept `@every`; native jobs use an interval trigger, as described
+in [Recurring child issues](#recurring-child-issues).
 
 Schedules follow the trigger timezone's daylight-saving transitions:
 

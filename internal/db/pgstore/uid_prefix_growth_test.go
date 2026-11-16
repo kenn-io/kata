@@ -4,24 +4,24 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/pgstore"
-	"go.kenn.io/kit/growthtest"
 )
 
 func TestIssueUIDPrefixGrowth(t *testing.T) {
 	var large *pgstore.Store
+	var stores []*pgstore.Store
 	dbtest.RunIssueUIDPrefixGrowth(t, func(t *testing.T) db.Storage {
 		store, _ := openConformanceStore(t)
-		// Prepared statements belong to one session.
+		// Prepared statements and block counts belong to one session.
 		store.SetMaxOpenConns(1)
 		store.SetMaxIdleConns(1)
 		t.Cleanup(func() { _ = store.Close() })
+		stores = append(stores, store)
 		return store
 	}, func(t *testing.T, store db.Storage, size, offset int, prefix string, evenProject, oddProject int64) {
 		postgres := store.(*pgstore.Store)
@@ -33,7 +33,7 @@ SELECT $2||lpad(x::text,22,'0'),lpad(x::text,6,'0'),CASE x%2 WHEN 0 THEN $3::big
 		require.NoError(t, err)
 		_, err = postgres.ExecContext(t.Context(), `ANALYZE issues`)
 		require.NoError(t, err)
-	}, growthtest.Fastest(9), float64(32*time.Microsecond))
+	}, postgresBlockFetches(t, func() []*pgstore.Store { return stores }), 1)
 
 	ctx := t.Context()
 	project, err := large.ProjectByName(ctx, "example-project")

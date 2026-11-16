@@ -88,7 +88,7 @@
             </header>
             {#if link.target_edited}<p>Target edited after this reply</p>{/if}
             {#if link.body !== undefined}<Markdown source={link.body} />{:else}<p>
-                Open reply to read its evidence
+                Open the reply to read its text
               </p>{/if}
           </li>
         {/each}

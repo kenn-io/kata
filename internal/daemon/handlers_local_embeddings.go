@@ -19,6 +19,7 @@ var ErrLocalEmbeddingsConfigured = errors.New("search by meaning is already conf
 type LocalEmbeddings interface {
 	Status(context.Context) (api.LocalEmbeddingsStatus, error)
 	TurnOn(context.Context) error
+	Restart(context.Context) error
 }
 
 func localEmbeddingsAdministrator(ctx context.Context, insecureReadonly bool, sessions *WebSessionManager) bool {
@@ -29,6 +30,7 @@ func localEmbeddingsAdministrator(ctx context.Context, insecureReadonly bool, se
 // reserved for daemon administrators while keeping the active indexing state.
 func redactLocalEmbeddingsStatus(snapshot *api.LocalEmbeddingsStatus) {
 	snapshot.CanChange = false
+	snapshot.CanRestart = false
 	if snapshot.Job != nil && snapshot.Job.Error != "" {
 		snapshot.Job.Error = "Search by meaning could not be turned on. Ask a daemon administrator for details."
 	}
@@ -83,5 +85,20 @@ func registerLocalEmbeddingsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		return status(ctx)
+	})
+	huma.Register(humaAPI, huma.Operation{OperationID: "restartLocalEmbeddings", Method: http.MethodPost, Path: "/api/v1/embeddings/local/restart", DefaultStatus: http.StatusAccepted, Errors: []int{403, 404, 409}}, func(ctx context.Context, _ *struct{}) (*struct{}, error) {
+		if cfg.LocalEmbeddings == nil {
+			return nil, api.NewError(404, "not_found", "local embeddings setup is unavailable", "", nil)
+		}
+		if !localEmbeddingsAdministrator(ctx, cfg.InsecureReadonly, cfg.WebSessions) {
+			return nil, api.NewError(403, "forbidden", "local embeddings setup requires daemon administration", "", nil)
+		}
+		if err := cfg.LocalEmbeddings.Restart(ctx); err != nil {
+			if errors.Is(err, ErrLocalEmbeddingsBusy) {
+				return nil, api.NewError(409, "conflict", err.Error(), "", nil)
+			}
+			return nil, internalAPIError(err)
+		}
+		return &struct{}{}, nil
 	})
 }

@@ -223,7 +223,7 @@ reconciler re-embeds them.
 
 Cycle: wake on a debounced (~1–2s) post-commit nudge, on startup, and on a
 periodic safety sweep (~5m) that recovers anything missed across restarts.
-The embedding client still batches up to `batch_size` (default 64) inputs
+The embedding client batches up to `batch_size` (default 8 for the built-in server, 64 for configured endpoints) inputs
 per request; kit's `Fill` drives how many chunks go into a batch and upserts
 each chunk's coverage independently, so partial progress survives a crash or
 error mid-fill. Because `content_revision` moves only on real content

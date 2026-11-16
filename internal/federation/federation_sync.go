@@ -242,6 +242,7 @@ func pushDirectSpoke(
 	binding *db.FederationBinding,
 	hubProjectID int64,
 	client *Client,
+	onPulledEvents func(projectID int64, events []db.Event),
 	validateLease func(context.Context) error,
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
@@ -318,8 +319,23 @@ func pushDirectSpoke(
 				if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 					return err
 				}
-				if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, ack.PushCursorEventID); err != nil {
+				// The hub already held some of these issues and stored no
+				// snapshot for them. Those snapshots go, and the project is
+				// rebuilt, in the same transaction that moves the cursor.
+				ackCtx, resets := db.WithFederationMoveResetCapture(ctx)
+				if err := store.AcknowledgeFederationPush(ackCtx, binding.ProjectID, ack.PushCursorEventID, ack.SupersededEventUIDs); err != nil {
+					// A push that waits for the hub's history is finished by the
+					// next pull and the push after it. The reason is recorded
+					// like any other, so a wait that does not end is visible in
+					// the federation status.
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				// The rebuild changed rows without a pulled event. Open clients
+				// reload on the committed reset.
+				if onPulledEvents != nil {
+					for _, reset := range resets.Resets {
+						onPulledEvents(reset.ProjectID, []db.Event{{ID: reset.EventID, ProjectID: reset.ProjectID, Type: db.ProjectScopeResetEventType}})
+					}
 				}
 				binding.PushCursorEventID = ack.PushCursorEventID
 				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
@@ -335,7 +351,7 @@ func pushDirectSpoke(
 // PushDirectSpoke drains pending direct-spoke events without requiring pull authority.
 // The caller holds shared federation coordination for the complete operation.
 func PushDirectSpoke(ctx context.Context, store db.Storage, binding db.FederationBinding, hubProjectID int64, client *Client) error {
-	return pushDirectSpoke(ctx, store, &binding, hubProjectID, client, nil, config.DefaultFederationCredentialStore(), clientpkg.Opts{})
+	return pushDirectSpoke(ctx, store, &binding, hubProjectID, client, nil, nil, config.DefaultFederationCredentialStore(), clientpkg.Opts{})
 }
 
 // CredentialHTTPClient builds a bearer-pinned, signing-aware HTTP client for
@@ -374,7 +390,10 @@ func syncDirectSpoke(
 ) error {
 	runStartBinding := binding
 	if pushThisTurn {
-		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts); err != nil {
+		// A push that waits for the hub's history is finished by the pull
+		// below and the next cycle's push.
+		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts); err != nil &&
+			!errors.Is(err, db.ErrFederationPushAwaitsPull) {
 			return err
 		}
 	}
@@ -1073,6 +1092,26 @@ type Runner struct {
 	// is nil when the pass has no parent activity lease.
 	OnPulledEventsFrom func(projectID int64, events []db.Event, fork activity.Admission)
 	DrainAdmission     activity.WaitableAdmission
+	// refusalClock reads the time that schedules relay refusal retries. Nil
+	// means time.Now.
+	refusalClock func() time.Time
+	// debounceTimer starts the wait between a wake and the pass it causes. Nil
+	// means a real timer.
+	debounceTimer func(time.Duration) Timer
+}
+
+func (r *Runner) newDebounceTimer(delay time.Duration) Timer {
+	if r.debounceTimer != nil {
+		return r.debounceTimer(delay)
+	}
+	return wallTimer{timer: time.NewTimer(delay)}
+}
+
+func (r *Runner) refusalNow() time.Time {
+	if r.refusalClock != nil {
+		return r.refusalClock()
+	}
+	return time.Now()
 }
 
 type runnerLeaseStore interface {
@@ -1160,7 +1199,7 @@ func (r *Runner) runOnce(
 	}
 	var errs []error
 	for _, spoke := range spokes {
-		if refusals.blocked(spoke.binding, time.Now()) || (len(only) > 0 && !only[spoke.binding.ProjectID]) {
+		if refusals.blocked(spoke.binding, r.refusalNow()) || (len(only) > 0 && !only[spoke.binding.ProjectID]) {
 			continue
 		}
 		var drain *activity.Lease
@@ -1177,7 +1216,7 @@ func (r *Runner) runOnce(
 			}
 			return r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
 		}()
-		refusals.record(spoke.binding, spokeErr, r.effectiveInterval(), time.Now())
+		refusals.record(spoke.binding, spokeErr, r.effectiveInterval(), r.refusalNow())
 		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
 			return nil, false, nil, spokeErr
 		}
@@ -1622,12 +1661,12 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 			return ctx.Err()
 		case <-ticker.C:
 		case <-r.Wake:
-			timer := time.NewTimer(debounce)
+			timer := r.newDebounceTimer(debounce)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
 				return ctx.Err()
-			case <-timer.C:
+			case <-timer.C():
 			}
 		}
 	}

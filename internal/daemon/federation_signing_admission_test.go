@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationsigning"
@@ -21,9 +23,10 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
-	t.Setenv("TEST_INGRESS_POLICY_KEY", strings.Repeat("k", 64))
-	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_INGRESS_POLICY_KEY"}
+// Every listener authenticates enrollment and applies its signing policy.
+func TestFederationSigningAdmission(t *testing.T) {
+	t.Setenv("TEST_REQUIRED_POLICY_KEY", strings.Repeat("k", 64))
+	source := signingpolicy.Source{KeyID: "key-a", KeyEnv: "TEST_REQUIRED_POLICY_KEY"}
 	env := testenv.New(t)
 	project := createFederatedHubProject(t, env, "hub-project")
 	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
@@ -40,28 +43,56 @@ func TestFederationIngressAlwaysRequiresSigning(t *testing.T) {
 		require.NoError(t, err)
 		defer func() { require.NoError(t, v.Close()) }()
 		time.Sleep(federationsigning.Quarantine)
-		srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: v})
-		ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
-		require.NoError(t, err)
-		path := "https://hub.example" + projectPath(project.ID) + "/federation/metadata"
-		for _, tc := range []struct {
-			name    string
-			handler http.Handler
-			signed  bool
-			want    int
-		}{
-			{"private unsigned", srv.Handler(), false, http.StatusOK},
-			{"ingress unsigned", ingress, false, http.StatusUnauthorized},
-			{"ingress signed", ingress, true, http.StatusOK},
-		} {
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
-			req.Header.Set("Authorization", "Bearer "+enrollment.Token)
-			if tc.signed {
-				require.NoError(t, federationsigning.Sign(req, source))
+		const digest = "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:"
+		for _, required := range []bool{false, true} {
+			srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, Auth: config.AuthConfig{Token: "owner-bearer"}, FederationSigning: v, FederationSigningRequired: required})
+			main, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerSharedTCP, Origin: "https://hub.example"})
+			require.NoError(t, err)
+			ingress, err := srv.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
+			require.NoError(t, err)
+			for name, handler := range map[string]http.Handler{"main": main, "socket": srv.Handler(), "ingress": ingress} {
+				if !required && name == "main" {
+					continue
+				}
+				type admissionCase struct {
+					name, token, header, value, code string
+					signed                           bool
+					status                           int
+				}
+				cases := []admissionCase{
+					{"unsigned", enrollment.Token, "", "", "hub_signing_required", false, http.StatusPreconditionRequired},
+				}
+				if required {
+					cases = append(cases,
+						admissionCase{"digest only", enrollment.Token, "Content-Digest", digest, "hub_signing_required", false, http.StatusPreconditionRequired},
+						admissionCase{"unknown enrollment", "unknown-enrollment", "", "", "auth_invalid", false, http.StatusForbidden},
+					)
+				} else if name == "socket" {
+					cases[0].status, cases[0].code = http.StatusOK, ""
+					cases = append(cases, admissionCase{"digest only", enrollment.Token, "Content-Digest", digest, "", false, http.StatusOK})
+				} else {
+					cases = append(cases, admissionCase{"signed", enrollment.Token, "", "", "", true, http.StatusOK})
+				}
+				for _, tc := range cases {
+					path := "https://hub.example" + projectPath(project.ID) + "/federation/metadata"
+					req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+					req.Header.Set("Authorization", "Bearer "+tc.token)
+					if tc.signed {
+						require.NoError(t, federationsigning.Sign(req, source))
+					}
+					if tc.header != "" {
+						req.Header.Set(tc.header, tc.value)
+					}
+					w := httptest.NewRecorder()
+					handler.ServeHTTP(w, req)
+					require.Equal(t, tc.status, w.Code, "required=%t/%s/%s: %s", required, name, tc.name, w.Body.String())
+					if tc.code != "" {
+						var envelope api.ErrorEnvelope
+						require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
+						require.Equal(t, tc.code, envelope.Error.Code, "required=%t/%s/%s", required, name, tc.name)
+					}
+				}
 			}
-			w := httptest.NewRecorder()
-			tc.handler.ServeHTTP(w, req)
-			require.Equal(t, tc.want, w.Code, "%s: %s", tc.name, w.Body.String())
 		}
 	})
 }

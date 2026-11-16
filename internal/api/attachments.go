@@ -8,10 +8,11 @@ import (
 )
 
 type AddAttachmentRequest struct {
-	ProjectID int64  `path:"project_id"`
-	Ref       string `path:"ref"`
-	Name      string `query:"name" required:"true"`
-	Actor     string `query:"actor"`
+	ProjectID     int64  `path:"project_id"`
+	Ref           string `path:"ref"`
+	Name          string `query:"name" required:"true"`
+	Actor         string `query:"actor"`
+	ReuseExisting bool   `query:"reuse_existing"`
 }
 type AttachmentReadRequest struct {
 	ProjectID    int64  `path:"project_id"`

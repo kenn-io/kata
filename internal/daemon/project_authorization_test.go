@@ -30,6 +30,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testfix"
 )
 
 const projectAccessCanary = "relay-private-canary"
@@ -40,7 +41,7 @@ func projectAccessBackends(t *testing.T, check func(*testing.T, db.Storage)) {
 		t.Run(backend, func(t *testing.T) {
 			var store db.Storage
 			if backend == "sqlite" {
-				s, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+				s, err := testfix.OpenSQLite(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 				require.NoError(t, err)
 				store = s
 			} else {

@@ -18,8 +18,15 @@ const CronEventFeature = "cron_v1"
 // IssueMoveEventFeature identifies support for moving issues between projects.
 const IssueMoveEventFeature = "issue_move_v1"
 
+// RepeatedAdoptionEventFeature identifies a peer that understands a repeated
+// adoption. A spoke with it deletes its own adoption snapshot when the hub
+// already held the issue, and a hub accepts a repeated adoption snapshot only
+// from such a spoke. A reader with it replays the RepeatedImportEventType
+// event a hub writes for a winning copy.
+const RepeatedAdoptionEventFeature = "repeated_adoption_v1"
+
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -151,6 +158,9 @@ func RequireEventFeatures(supported, required string) error {
 func EventRequiredFeatures(kind string) string {
 	if kind == "issue.moved" {
 		return IssueMoveEventFeature
+	}
+	if kind == RepeatedImportEventType {
+		return RepeatedAdoptionEventFeature
 	}
 	if strings.HasPrefix(kind, "cron.") {
 		return CronEventFeature

@@ -143,6 +143,9 @@ func TestFederationBridgeSignedRelayAndSignatureRejection(t *testing.T) {
 		unsigned.Signing = nil
 		err = federation.SyncFederationOnce(t.Context(), f.localStore, binding, unsigned)
 		require.ErrorIs(t, err, federationsigning.ErrHubRejected)
+		var status *federation.HubStatusError
+		require.ErrorAs(t, err, &status)
+		require.Equal(t, http.StatusPreconditionRequired, status.HTTPStatus())
 		binding, err = f.localStore.FederationBindingByProject(t.Context(), project.ID)
 		require.NoError(t, err)
 		require.False(t, binding.RelayConfig.UpstreamRevoked, "a signature rejection is not a revoked grant")

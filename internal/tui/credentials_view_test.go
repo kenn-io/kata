@@ -32,7 +32,7 @@ func TestCredentialsViewCapabilityGateDoesNotFetchWhenUnavailable(t *testing.T) 
 	assert.Equal(t, viewCredentials, out.view)
 	assert.Nil(t, cmd)
 	assert.Zero(t, requests.Load())
-	assert.Contains(t, stripANSI(out.viewContent()), "credential audit unavailable")
+	assert.Contains(t, stripANSI(out.viewContent()), "0 credentials\n\nthis connection cannot view credentials")
 }
 
 func TestCredentialsViewLoadsThroughUndoClient(t *testing.T) {
@@ -72,7 +72,7 @@ func TestCredentialsViewStartsLoadingWhenCapabilityDiscoveryCompletes(t *testing
 	assert.Equal(t, viewCredentials, opened.view)
 	require.NotNil(t, cmd, "entering during discovery must ensure a capability request is in flight")
 	assert.Contains(t, stripANSI(opened.viewContent()), "loading credential inventory")
-	assert.NotContains(t, stripANSI(opened.viewContent()), "credential audit unavailable")
+	assert.NotContains(t, stripANSI(opened.viewContent()), "credentials unavailable")
 
 	ready, fetchCmd := updateModel(opened, authCapabilitiesMsg{
 		connGen: opened.connGen,
@@ -101,7 +101,7 @@ func TestCredentialsViewReportsCapabilityDiscoveryErrorAndRetries(t *testing.T) 
 
 	assert.Nil(t, cmd)
 	rendered := stripANSI(failed.viewContent())
-	assert.Contains(t, rendered, "failed to determine credential audit access")
+	assert.Contains(t, rendered, "couldn't check whether this connection can view credentials")
 	assert.Contains(t, rendered, "temporary capability failure")
 	assert.NotContains(t, rendered, "does not have token audit read capability")
 
