@@ -43,6 +43,7 @@ func TestFederationBridgeGeneratedTransportBounds(t *testing.T) {
 		{"oversized", 200, strings.Repeat("x", (1<<20)+1), "invalid_hub_response", 502},
 		{"unauthenticated", 401, `{}`, "hub_credential_rejected", 502},
 		{"forbidden", 403, `{}`, "hub_credential_rejected", 502},
+		{"signing required", 428, `{}`, "hub_credential_rejected", 502},
 		{"missing", 404, `{}`, "hub_request_rejected", 502},
 		{"conflict", 409, `{}`, "hub_request_rejected", 502},
 		{"oversized relay conflict", 409, fmt.Sprintf(`{"error":{"code":"relay_cross_project_links","message":"%s"}}`, strings.Repeat("x", (1<<20)+1)), "hub_request_rejected", 502},

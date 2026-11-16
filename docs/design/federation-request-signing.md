@@ -80,7 +80,8 @@ use the same signer and their existing pull or push capability. The same
 verifier protects all daemon listeners. A bridge's credential may select a
 signing source at connect or later through signing configuration; the hub
 registers the key by the bridge's enrollment ID after connect. A hub's
-`signature_invalid` or `signing_unavailable` answer is a signing configuration
+`signature_invalid`, `signing_unavailable`, or `428 hub_signing_required`
+answer is a signing configuration
 problem and never records the relay grant as revoked. A bridge whose hub is
 gone detaches with `kata federation bridge disconnect --local-only`, and the
 hub operator revokes the grant. Native connection, header, body, duration and

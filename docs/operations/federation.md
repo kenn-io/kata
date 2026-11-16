@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-11
+last_edited: 2026-11-13
 ---
 
 # Federation
@@ -227,10 +227,10 @@ explicit `allow_insecure` setting, and redirects are rejected. Preview and
 connect require daemon-owner authority; ordinary browser sessions and scoped
 user credentials cannot use this administrative operation. When the hub rejects
 a request, bridge connect and disconnect report it as an upstream failure with
-the hub's status in `data.hub_status`: a hub `401` or `403` returns `502` with
-code `hub_credential_rejected`, any other hub `3xx` or `4xx` returns `502` with
-code `hub_request_rejected`, and a hub `5xx` keeps that status. The local daemon
-accepted the caller; the hub refused what the daemon sent.
+the hub's status in `data.hub_status`: a hub `401`, `403`, or `428` returns
+`502` with code `hub_credential_rejected`, any other hub `3xx` or `4xx` returns
+`502` with code `hub_request_rejected`, and a hub `5xx` keeps that status. The
+local daemon accepted the caller; the hub refused what the daemon sent.
 
 Read one bridge's locally recorded state with
 `GET /api/v1/federation/bridges/{project_name}` using daemon-owner authority.
@@ -245,7 +245,8 @@ signature failure. It can clear after access returns. Explicit enrollment revoca
 enrollment.
 
 `signing_rejected` means the hub refused or could not verify this
-bridge's request signature; the grant is intact, so fix the signing source on
+bridge's request signature, including an unsigned request answered with `428
+hub_signing_required`. The grant is intact, so fix the signing source on
 this daemon or the key registration on the hub instead of reconnecting. Sync
 timestamps show how recent that observation is. An ambiguous pending project
 name returns a conflict instead of choosing a credential.
