@@ -9,7 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- See which issue is blocking a push when the hub refuses it because the issue now belongs to a project the spoke has not joined. The error names the issue and the missing enrollment, instead of reporting a credential failure.
+- See which issue is blocking a push when the hub refuses it because the issue now belongs to a project the spoke has not joined. The error names the issue and the missing enrollment, instead of reporting a credential failure, and the spoke keeps pulling hub changes while the push waits.
 
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
 
