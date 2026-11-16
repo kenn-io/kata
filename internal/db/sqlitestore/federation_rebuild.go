@@ -58,7 +58,7 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 			planCtx = db.WithMovedProjectPass(ctx)
 		}
 		moveEvents := db.IndexFederatedMoveEvents(events)
-		decisions, destinations, err := db.PlanFederatedMovedIssues(planCtx, tx, moveEvents, projection, id, snapshotGroup)
+		decisions, destinations, err := db.PlanFederatedMovedIssues(planCtx, tx, moveEvents, projection, id, snapshotGroup, federatedRelocationRefused(ctx, tx))
 		if err != nil {
 			return nil, err
 		}
@@ -228,7 +228,7 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 			if p.id != prepared.projects[0].id {
 				planCtx = db.WithMovedProjectPass(ctx)
 			}
-			decisions, _, err := db.PlanFederatedMovedIssues(planCtx, tx, p.moveEvents, p.moveProjection, p.id, snapshotGroup)
+			decisions, _, err := db.PlanFederatedMovedIssues(planCtx, tx, p.moveEvents, p.moveProjection, p.id, snapshotGroup, federatedRelocationRefused(ctx, tx))
 			if err != nil {
 				return err
 			}

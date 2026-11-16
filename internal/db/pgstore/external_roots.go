@@ -127,6 +127,18 @@ func lockAndRejectFreshExternalRootClaimsForConnectorTx(
 	return nil
 }
 
+// freshExternalRootClaimTx reports whether a bridge worker holds a live claim
+// on the issue's external root.
+func freshExternalRootClaimTx(ctx context.Context, tx *sql.Tx, issueID int64, staleBefore time.Time) (bool, error) {
+	var claimed bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM external_root_bindings
+ WHERE issue_id=$1 AND active=1 AND claim_token<>''
+   AND (claim_started_at IS NULL OR claim_started_at >= $2))`, issueID, formatStoredTime(staleBefore)).Scan(&claimed); err != nil {
+		return false, fmt.Errorf("check external root claims for issue relocation: %w", mapSQLError(err, nil))
+	}
+	return claimed, nil
+}
+
 func lockAndRejectFreshExternalRootClaimsForIssueTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -137,16 +149,12 @@ func lockAndRejectFreshExternalRootClaimsForIssueTx(
  SET claim_token=claim_token WHERE issue_id=$1 AND active=1`, issueID); err != nil {
 		return fmt.Errorf("lock external root claims for issue relocation: %w", mapSQLError(err, nil))
 	}
-	var bindingID int64
-	err := tx.QueryRowContext(ctx, `SELECT id FROM external_root_bindings
- WHERE issue_id=$1 AND active=1 AND claim_token<>''
-   AND (claim_started_at IS NULL OR claim_started_at >= $2)
- LIMIT 1`, issueID, formatStoredTime(staleBefore)).Scan(&bindingID)
-	if err == nil {
-		return db.ErrExternalRootClaimActive
+	claimed, err := freshExternalRootClaimTx(ctx, tx, issueID, staleBefore)
+	if err != nil {
+		return err
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("check external root claims for issue relocation: %w", mapSQLError(err, nil))
+	if claimed {
+		return db.ErrExternalRootClaimActive
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE external_root_bindings
  SET claim_token='', claim_started_at=NULL,

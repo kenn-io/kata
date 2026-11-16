@@ -3,6 +3,7 @@ package dbtest
 import (
 	"context"
 	"encoding/json/jsontext"
+	"strings"
 	"testing"
 	"time"
 
@@ -274,7 +275,7 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 
 // Snapshot relocation must retain the existing same-hub and recurrence gates.
 func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) error {
-	for _, kind := range []string{"different-hub", "recurrence", "import-mapping-collision", "retained-move-after-source-leave", "relocated-then-different-hub", "archived-destination", "refused-after-relocation"} {
+	for _, kind := range []string{"different-hub", "recurrence", "import-mapping-collision", "retained-move-after-source-leave", "relocated-then-different-hub", "archived-destination", "import-refused-after-relocation", "claim-refused-after-relocation", "ownership-refused-after-relocation"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			source, target, issue, move := federatedRehomeFixture(t, store, "snapshot-guard-"+kind)
@@ -339,33 +340,8 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 				require.Equal(t, source.ID, got.ProjectID, "the source keeps the issue the archived destination could not take")
 				return
 			}
-			if kind == "refused-after-relocation" {
-				require.NoError(t, store.MaterializeFederatedProject(ctx, target.ID))
-				// A later same-hub destination cannot take the relocated issue.
-				later, err := store.CreateProject(ctx, "snapshot-guard-later")
-				require.NoError(t, err)
-				_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: later.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: later.ID, HubProjectUID: later.UID, Actor: "worker", Enabled: true, PushEnabled: true})
-				require.NoError(t, err)
-				peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: later.ID, Title: "imported again", Author: "worker"})
-				require.NoError(t, err)
-				relocated, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-				require.NoError(t, err)
-				require.Equal(t, target.ID, relocated.ProjectID)
-				for _, mapped := range []db.Issue{relocated, peer} {
-					_, err := store.UpsertImportMapping(ctx, db.ImportMappingParams{ProjectID: mapped.ProjectID, Source: "connector", ExternalID: "same-task", ObjectType: "issue", IssueID: &mapped.ID})
-					require.NoError(t, err)
-				}
-				newer := newRemoteEvent(t, later, &issue.UID, "issue.snapshot", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+2, document)
-				_, err = store.InsertRemoteEvents(ctx, later.ID, []db.RemoteEvent{newer})
-				require.NoError(t, err)
-				for _, project := range []db.Project{source, target} {
-					require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID), "only the refusing destination reports its refusal")
-				}
-				got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
-				require.NoError(t, err)
-				require.Equal(t, target.ID, got.ProjectID, "the current owner keeps the issue")
-				var collision *db.ProjectMergeImportMappingCollisionError
-				require.ErrorAs(t, store.MaterializeFederatedProject(ctx, later.ID), &collision)
+			if reason, ok := strings.CutSuffix(kind, "-refused-after-relocation"); ok {
+				checkFederatedRefusalAfterRelocation(t, store, source, target, issue, move, document, reason)
 				return
 			}
 			cursor, err := store.MaxEventID(ctx)
@@ -445,6 +421,60 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 		})
 	}
 	return nil
+}
+
+// A later same-hub destination that cannot take a relocated issue reports the
+// refusal only from its own pull. The former source and the current owner keep
+// syncing, and the issue stays with its owner.
+func checkFederatedRefusalAfterRelocation(t *testing.T, store db.Storage, source, target db.Project, issue db.Issue, move db.RemoteEvent, document jsontext.Value, reason string) {
+	t.Helper()
+	ctx := t.Context()
+	require.NoError(t, store.MaterializeFederatedProject(ctx, target.ID))
+	later, err := store.CreateProject(ctx, "snapshot-guard-later-"+reason)
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: later.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: later.ID, HubProjectUID: later.UID, Actor: "worker", Enabled: true, PushEnabled: true})
+	require.NoError(t, err)
+	relocated, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, target.ID, relocated.ProjectID)
+	switch reason {
+	case "import":
+		peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: later.ID, Title: "imported again", Author: "worker"})
+		require.NoError(t, err)
+		for _, mapped := range []db.Issue{relocated, peer} {
+			_, err := store.UpsertImportMapping(ctx, db.ImportMappingParams{ProjectID: mapped.ProjectID, Source: "connector", ExternalID: "same-task", ObjectType: "issue", IssueID: &mapped.ID})
+			require.NoError(t, err)
+		}
+	case "claim", "ownership":
+		binding, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{ProjectID: target.ID, IssueID: relocated.ID, ConnectorInstance: "notes", ExternalRootKey: "root-key-" + reason, ExternalAccountKey: "account-key", Actor: "worker", ReceiveCommentsAfter: time.Now().UTC()})
+		require.NoError(t, err)
+		if reason == "claim" {
+			_, _, err = store.ClaimExternalRootBinding(ctx, binding.ID, "bridge-worker", time.Now().UTC(), time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter))
+			require.NoError(t, err)
+		} else {
+			_, err = store.UpsertImportMapping(ctx, db.ImportMappingParams{Source: "example-sync:move", ExternalID: "moving-root", ObjectType: "issue", ProjectID: target.ID, IssueID: &relocated.ID})
+			require.NoError(t, err)
+			// Only a paused replica can hold an issue sync binding. It keeps the
+			// snapshot it already pulled.
+			paused, err := store.FederationBindingByProject(ctx, later.ID)
+			require.NoError(t, err)
+			paused.Enabled = false
+			_, err = store.UpsertFederationBinding(ctx, paused)
+			require.NoError(t, err)
+			_, err = store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{ProjectID: later.ID, Provider: "example-sync", SourceKey: "example-sync:move", RemoteID: "move", DisplayName: "Later", Config: jsontext.Value(`{}`), IntervalSeconds: 300})
+			require.NoError(t, err)
+		}
+	}
+	newer := newRemoteEvent(t, later, &issue.UID, "issue.snapshot", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+2, document)
+	_, err = store.InsertRemoteEvents(ctx, later.ID, []db.RemoteEvent{newer})
+	require.NoError(t, err)
+	for _, project := range []db.Project{source, target} {
+		require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID), "only the refusing destination reports its refusal")
+	}
+	got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, target.ID, got.ProjectID, "the current owner keeps the issue")
+	require.Error(t, store.MaterializeFederatedProject(ctx, later.ID), "the refusing destination still reports it")
 }
 
 // relocationSnapshotDocument is a whole issue document for issue as it stands.

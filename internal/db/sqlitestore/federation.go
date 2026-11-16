@@ -1320,7 +1320,7 @@ func (d *Store) materializeFederatedProjectTxScoped(
 		return err
 	}
 	moved := db.IndexFederatedMoveEvents(events)
-	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID, snapshotGroup)
+	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID, snapshotGroup, federatedRelocationRefused(ctx, tx))
 	if err != nil {
 		return err
 	}
@@ -1377,6 +1377,32 @@ func (d *Store) materializeFederatedProjectTxScoped(
 		return err
 	}
 	return updateFederatedProjectMetadataTx(ctx, tx, projectID, projection.ProjectMetadata[binding.HubProjectUID])
+}
+
+// federatedRelocationRefused runs rehoming's refusal checks without the locks
+// and stale-claim cleanup rehoming takes, so planning can leave an issue with
+// its owner and let only the destination's own pull report the refusal.
+func federatedRelocationRefused(ctx context.Context, tx *sql.Tx) func(int64, int64, int64) (bool, error) {
+	return func(id, source, target int64) (bool, error) {
+		if collisions, err := issueMoveImportMappingCollisions(ctx, tx, id, source, target); err != nil || len(collisions) > 0 {
+			return len(collisions) > 0, err
+		}
+		if claimed, err := freshExternalRootClaimTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil || claimed {
+			return claimed, err
+		}
+		if owned, err := externalRootIssueSyncConflictTx(ctx, tx, id, source, target); err != nil || owned {
+			return owned, err
+		}
+		var issueUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM issues WHERE id=?`, id).Scan(&issueUID); err != nil {
+			return false, err
+		}
+		err := db.CheckNativeRecurringParentMove(ctx, tx, false, source, issueUID)
+		if _, pinned := errors.AsType[*db.NativeRecurringParentPinnedError](err); pinned {
+			return true, nil
+		}
+		return false, err
+	}
 }
 
 func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved db.FederatedMoveIndex, projection db.FoldProjection, decisions []db.FederatedMoveDecision, acceptedEventUIDs []string) error {

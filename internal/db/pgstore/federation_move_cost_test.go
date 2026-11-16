@@ -49,7 +49,7 @@ func TestRehomeSnapshotsCachesProjectBinding(t *testing.T) {
 	}
 	projection := db.FoldEvents(events)
 	before = countScans()
-	decisions, _, err := db.PlanFederatedMovedIssues(ctx, tx, db.IndexFederatedMoveEvents(events), projection, project.ID, []int64{project.ID})
+	decisions, _, err := db.PlanFederatedMovedIssues(ctx, tx, db.IndexFederatedMoveEvents(events), projection, project.ID, []int64{project.ID}, func(int64, int64, int64) (bool, error) { return false, nil })
 	require.NoError(t, err)
 	require.Len(t, decisions, len(events))
 	delta := countScans() - before

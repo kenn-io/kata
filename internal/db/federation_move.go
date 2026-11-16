@@ -403,8 +403,9 @@ func IndexFederatedMoveEvents(events []FoldEvent) FederatedMoveIndex {
 // projectID names the project being materialized; snapshotGroup lists the
 // same-hub projects whose snapshots may relocate issues between them. A refused
 // snapshot relocation fails the destination's own pull and otherwise leaves the
-// issue with its current owner.
-func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMoveIndex, p FoldProjection, projectID int64, snapshotGroup []int64) ([]FederatedMoveDecision, []int64, error) {
+// issue with its current owner. refused reports, without writing, whether
+// rehoming would refuse to move an issue between two local projects.
+func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMoveIndex, p FoldProjection, projectID int64, snapshotGroup []int64, refused func(issueID, sourceID, targetID int64) (bool, error)) ([]FederatedMoveDecision, []int64, error) {
 	type issueLocation struct {
 		id, source            int64
 		recurrence            sql.NullInt64
@@ -501,18 +502,15 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMo
 			} else if decision.RecurrenceID.Valid {
 				refusal = fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
 			} else if keepRefused {
-				// Rehoming refuses an import mapping the destination already holds.
-				// Keep the issue in the source so its sync continues; the
-				// destination's own pull still reports the collision when it rehomes.
-				var collides bool
-				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM import_mappings s
- JOIN import_mappings t ON t.project_id=$1 AND t.source=s.source
-  AND t.external_id=s.external_id AND t.object_type=s.object_type
- WHERE s.issue_id=$2 AND s.project_id=$3)`, decision.TargetID, decision.IssueID, decision.SourceID).Scan(&collides); err != nil {
+				// Rehoming also refuses moves that local state blocks, such as an
+				// import collision or a live external root claim. The destination's
+				// own pull reaches that check and reports why.
+				blocked, err := refused(decision.IssueID, decision.SourceID, decision.TargetID)
+				if err != nil {
 					return nil, nil, err
 				}
-				if collides {
-					refusal = &ProjectMergeImportMappingCollisionError{}
+				if blocked {
+					refusal = ErrFederatedMoveUnsupported
 				}
 			}
 			if refusal != nil {
