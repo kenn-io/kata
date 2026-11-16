@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"io"
@@ -364,4 +365,70 @@ func TestClientEditBodyOmitsContentRevisionForOlderDaemon(t *testing.T) {
 			require.Equal(t, tc.sent, sent)
 		})
 	}
+}
+
+// healthDownClient returns a client whose daemon answers the health probe
+// with status and fails the test when a PATCH reaches it.
+func healthDownClient(t *testing.T, healthBody map[string]any, status int) *Client {
+	t.Helper()
+	return newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			w.WriteHeader(status)
+			if healthBody != nil {
+				respondJSON(t, w, healthBody)
+			}
+			return
+		}
+		t.Errorf("unexpected %s %s: no write may follow a failed version check", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+}
+
+// When the daemon's version cannot be read, a guarded body save fails with
+// that error instead of going out without the guard.
+func TestClientEditBodyFailsWhenVersionUnknown(t *testing.T) {
+	revision := int64(3)
+	for name, c := range map[string]*Client{
+		"health fails":      healthDownClient(t, nil, http.StatusInternalServerError),
+		"no schema version": healthDownClient(t, map[string]any{"ok": true}, http.StatusOK),
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp, err := c.EditBody(t.Context(), 7, "abc4", "new body", "alice", &revision)
+			require.Error(t, err)
+			require.Nil(t, resp)
+			require.Contains(t, err.Error(), "daemon API "+contentRevisionAPIVersion)
+		})
+	}
+}
+
+// The body editor's save surfaces the failed version check and sends no write.
+func TestFormBodySaveFailsWhenVersionUnknown(t *testing.T) {
+	c := healthDownClient(t, nil, http.StatusInternalServerError)
+	msg := dispatchFormEditBody(c, formTarget{projectID: 7, issueShortID: "abc4", contentRevision: 3}, "new body", "alice", 1)().(mutationDoneMsg)
+	require.Error(t, msg.err)
+	require.Nil(t, msg.resp)
+}
+
+// healthDownUndoAPI routes the body write through a real client so the undo
+// meets the version check.
+type healthDownUndoAPI struct {
+	*undoTestAPI
+	client *Client
+}
+
+func (h *healthDownUndoAPI) EditBody(ctx context.Context, projectID int64, ref, body, actor string, expected *int64) (*MutationResp, error) {
+	return h.client.EditBody(ctx, projectID, ref, body, actor, expected)
+}
+
+// A body undo whose version check fails reports the error and writes nothing.
+func TestUndoClientBodyFailsWhenVersionUnknown(t *testing.T) {
+	uid := "01JZ0000000000000000000001"
+	current := Issue{UID: uid, ProjectID: 7, Body: "after", Revision: 4}
+	entry := undoEntry{kind: "body.edit", uid: uid, projectID: 7, revision: 4, instanceUID: "instance-1", actor: "bob",
+		before: Issue{Body: "before"}, after: Issue{Body: "after"}}
+	api := &healthDownUndoAPI{undoTestAPI: &undoTestAPI{issue: current}, client: healthDownClient(t, nil, http.StatusInternalServerError)}
+	outcome := newConnectedUndoClient(t, api).undo(t.Context(), entry, undoOptions{})
+	require.Error(t, outcome.err)
+	require.False(t, outcome.changed)
+	require.Empty(t, outcome.conflict)
 }
