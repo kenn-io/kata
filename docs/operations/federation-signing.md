@@ -94,6 +94,12 @@ environment sources must be available in the running daemon's environment.
 Expired keys do not require a source at startup. Key IDs are public selectors,
 not credentials.
 
+Each unexpired signing key needs its own secret. A shared key file, equal
+contents in separate files, or equal environment values stop daemon startup with
+an error naming both key IDs. `kata doctor` checks the sources available in
+its own environment and reports the same problem. Rotate the shared secret
+and give each key a distinct source value.
+
 ## Bridges
 
 A bridge created with `kata federation bridge connect` signs its relay

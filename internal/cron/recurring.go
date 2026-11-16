@@ -79,7 +79,7 @@ func recurringNext(t Trigger, anchor time.Time) (func(time.Time) time.Time, erro
 	}
 	schedule, err := ParseCron("CRON_TZ=" + zone + " " + expression)
 	if err != nil {
-		return nil, invalid("invalid native cron expression")
+		return nil, err
 	}
 	return schedule.Next, nil
 }
@@ -377,7 +377,7 @@ func adapterCronSchedule(t Trigger) (cronparser.Schedule, error) {
 	}
 	schedule, err := ParseCron(expression)
 	if err != nil {
-		return nil, invalid("invalid cron expression")
+		return nil, err
 	}
 	return schedule, nil
 }

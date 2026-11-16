@@ -23,6 +23,7 @@ const (
 	apiVersionDocbankAttachmentLink     = "0.38.0"
 	apiVersionDocbankAttachmentReuse    = "0.47.0"
 	apiVersionDocbankKeyHealth          = "0.44.0"
+	apiVersionFederationProjectLookup   = "0.49.0"
 	apiVersionEffectiveCloseEventUID    = "0.40.0"
 	apiVersionCommentLinks              = "0.28.0"
 	apiVersionReadyAndSearchFilters     = "0.8.0"

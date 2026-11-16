@@ -131,6 +131,15 @@ type ListProjectsQuery struct {
 	Include *string `json:"include,omitempty"`
 }
 
+type ReadProjectByNameQuery struct {
+	// Name project name
+	Name string `json:"name" validate:"required"`
+}
+
+func (r ReadProjectByNameQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type RemoveProjectQuery struct {
 	Actor string `json:"actor" validate:"required"`
 	Force *bool  `json:"force,omitempty"`
@@ -237,6 +246,14 @@ func (o OfferRelayDeliveriesQuery) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type GetProjectFederationStatusQuery struct {
+	// Compact Omit relay checkpoint capacity measurement. Error details are unchanged unless omit_errors is also set.
+	Compact *bool `json:"compact,omitempty"`
+
+	// OmitErrors Remove error text from the status: the sync error, held-back batch errors, the embedding producer error, and the relay checkpoint error. State, timestamps, and counts remain, and has_sync_error reports whether a sync error was removed.
+	OmitErrors *bool `json:"omit_errors,omitempty"`
 }
 
 type ListIssuesQuery struct {

@@ -1,7 +1,7 @@
 ---
 title: Remote daemon
 description: Serve Kata to trusted private-network clients with explicit authentication and transport settings.
-last_edited: 2026-10-22
+last_edited: 2026-11-10
 ---
 
 # Remote daemon
@@ -34,7 +34,10 @@ listener, so a host that should always use one TCP address only needs the config
 set once.
 
 Run the daemon under a process manager such as launchd, systemd, or a container
-runtime on the host that owns the SQLite database.
+runtime on the host that owns the SQLite database. Set top-level `autostart = false`
+in that home's `config.toml` so CLI commands wait up to 30 seconds during a
+restart instead of starting a competing daemon. Explicit `kata daemon start`
+remains available. During upgrades, restart the daemon through its service manager.
 
 ## Runtime profiling
 

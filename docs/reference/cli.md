@@ -1834,6 +1834,17 @@ after login. Kata never puts a remote token or another credential in the URL.
 
 ## Daemon and diagnostics
 
+Foreground daemons, including supervised launches, append daemon logger output
+to `<KATA_HOME>/runtime/<storage-hash>/daemon.log` as well as stderr. The log
+also retains startup errors after the log path is resolved and opened, plus
+fatal Go runtime diagnostics and goroutine dumps. On Linux and macOS, when
+stderr is the null device, Kata redirects it to the log, retaining direct stderr
+writes and inherited output across in-place restarts. With other stderr
+destinations, direct writes remain on stderr. Detached launches use the same
+file without duplicating entries. New log files are owner-only. Kata does not
+rotate them. If the log path cannot be resolved or opened, the daemon warns on
+stderr and continues with stderr diagnostics.
+
 `kata daemon stop`, `restart`, `reload`, and `kata update` skip daemon records from another PID namespace or with unverifiable identity. Each skipped record is printed on stderr with its PID and reason, for example `skipping daemon pid=54 (another PID namespace)`.
 
 ```sh
@@ -1940,7 +1951,8 @@ returns an error identifying the installed version and directs you to
 startup options. Run the start command in its original host shell or service
 environment. Remote daemons must be updated on their own hosts.
 
-Local commands auto-start the daemon when appropriate. When the running local
+Local commands auto-start the daemon when appropriate unless the selected
+home sets [`autostart = false`](configuration.md#daemon-config). When the running local
 daemon reports a different version and supports executable replacement, a local
 command asks it to restart in place using the current binary. Older daemons
 use stop-and-start replacement. It leaves the daemon running and fails in these
@@ -2482,7 +2494,7 @@ kata federation join --project <existing-project> --hub-url <url> \
 kata federation rebind <spoke-project> --hub <catalog-name>
 kata federation rebind --all --hub <catalog-name>
 kata federation root-key repin --project <project> [--preflight] [--previous-key-file <path>] [--strand-relays]
-kata federation status
+kata federation status [--project <project>]
 kata federation enrollments list
 kata federation enrollments name <spoke-instance-uid> <name>
 kata federation enrollments name <spoke-instance-uid> --clear
@@ -2495,6 +2507,12 @@ kata federation quarantine show <id>
 kata federation quarantine retry <id> --confirm "RETRY FEDERATION BATCH <id>" --reason <text>
 kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --reason <text>
 ```
+
+`kata federation status --project <project>` shows detailed sync status for one
+project using the selected daemon. Project readers need a CLI with scoped
+status support and daemon API 0.49.0 or later. Owners can use this command
+with older daemons. Without `--project`, status covers all bound projects and
+requires daemon-owner authority.
 
 `kata federation embedding-recipe` exports JSON for the exact document recipe
 in the selected local Kata home's configuration. It makes no daemon or provider

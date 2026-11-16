@@ -1,7 +1,7 @@
 ---
 title: Diagnosing setup
 description: Diagnose setup with kata doctor.
-last_edited: 2026-11-08
+last_edited: 2026-11-12
 ---
 
 # Diagnosing setup
@@ -54,6 +54,7 @@ files; remote process findings come from the selected daemon.
 | `config.daemon` | Local daemon/display config and environment overrides | Check spelling, types, URLs and supported fields in `<KATA_HOME>/config.toml`. |
 | `config.workspace` | Workspace path, project binding and local override syntax; ignored keys | Correct `.kata.toml`/`.kata.local.toml`, or supply `--project`. |
 | `config.hooks` | Local `hooks.toml` validation, including events that can fire | Correct events, commands, timeouts and tunable fields. |
+| `config.federation_signing` | No two available, unexpired federation signing keys share a secret | Give each key its own secret and rotate the shared secret. |
 | `daemon.connection` | Exact selected endpoint identifies as Kata | Check target selection; start a stopped local daemon to run the remaining checks. |
 | `daemon.health` | The daemon's storage schema is readable | Inspect daemon logs and storage/credential configuration on its host. |
 | `daemon.version` | CLI/daemon version and API contract | Align versions; explicitly restart an upgraded daemon. |
@@ -64,6 +65,10 @@ files; remote process findings come from the selected daemon.
 | `daemon.embeddings` | Existing reconciler error and backlog aggregate | Check model/provider credentials and daemon logs. |
 | `daemon.docbank` | The daemon can resolve its `[docbank]` API key; Docbank itself is not contacted, and `local = true` has no key source to check | Fix the key source the check names on the daemon host; see the [key file rules](../reference/configuration.md#credentials-and-batching). |
 | `daemon.federation` | Declarative mapping convergence | Resolve pending/conflicting mappings and credential origin problems. |
+
+For federation signing and ingress validation failures, `config.daemon` includes
+the reason in `details`. Other configuration errors, parser text, unknown key
+names and credentials remain omitted from reports.
 
 Doctor checks the same project name as ordinary commands: `--project`, then
 `[project].name` in `.kata.toml`. Project lookup uses an exact name and GET

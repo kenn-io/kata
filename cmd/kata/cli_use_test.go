@@ -73,6 +73,11 @@ func waitCLIUseMarker(t *testing.T, prefix string) {
 	target := cliUseTarget.Load()
 	require.NotNil(t, target)
 	marker := client.TelemetryDayMarkerPath(*target, prefix)
+	waitCLIUseMarkerPath(t, marker)
+}
+
+func waitCLIUseMarkerPath(t *testing.T, marker string) {
+	t.Helper()
 	day := cliUseNow().UTC().Format(time.DateOnly)
 	//nolint:kennlint // sleeptest: The daily marker signals that the real HTTP response was handled.
 	require.Eventually(t, func() bool { return client.ReadTelemetryDayMarker(marker) == day }, 5*time.Second, time.Millisecond)
@@ -609,6 +614,10 @@ func TestAgentUseFullDayProcess(t *testing.T) {
 			cmd.SetContext(context.WithValue(t.Context(), client.BaseURLKey{}, url))
 		}
 		reportCLIUse(cmd)
+		// Discovery does not store cliUseTarget. Wait for its daily receipt
+		// before this fixture process exits and kills the background worker.
+		marker := client.TelemetryDayMarkerPath(client.ResolvedDaemon{BaseURL: url}, "agent-full-")
+		waitCLIUseMarkerPath(t, marker)
 		return
 	}
 	reportCLIUseTo(t, url)
