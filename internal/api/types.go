@@ -162,7 +162,7 @@ type InstanceResponse struct {
 		IssueStatusSync                  bool           `json:"issue_status_sync"`
 		IssueSubtreeTokens               bool           `json:"issue_subtree_tokens"`
 		FederationSigningRequired        bool           `json:"federation_signing_required,omitempty" doc:"True when this daemon requires request signatures on its federation transport routes, so a bridge needs a signing source."`
-		WriteActorsVerified              bool           `json:"write_actors_verified" required:"false" doc:"True when this daemon derives the actor of every attributed write from a credential, so no write records an actor taken from the request body. It does not cover actor names stored inside values, such as a notification slot's from field."`
+		WriteActorsVerified              bool           `json:"write_actors_verified" required:"false" doc:"True when this daemon derives the actor of every attributed write made through its API from a credential, so no such write records an actor taken from the request body. It does not cover actor names stored inside values, such as a notification slot's from field, or actors on events imported by federation, which are only as trustworthy as the peer that recorded them."`
 		Auth                             AuthInfoOut    `json:"auth"`
 	}
 }

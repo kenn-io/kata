@@ -3300,7 +3300,7 @@ components:
         web_ui_contract_version:
           type: string
         write_actors_verified:
-          description: True when this daemon derives the actor of every attributed write from a credential, so no write records an actor taken from the request body. It does not cover actor names stored inside values, such as a notification slot's from field.
+          description: True when this daemon derives the actor of every attributed write made through its API from a credential, so no such write records an actor taken from the request body. It does not cover actor names stored inside values, such as a notification slot's from field, or actors on events imported by federation, which are only as trustworthy as the peer that recorded them.
           type: boolean
       required:
         - instance_uid

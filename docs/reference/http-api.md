@@ -535,14 +535,15 @@ and withhold it from output; see [token CLI usage](cli.md#remote-and-identity-to
 
 `GET /api/v1/instance` reports `write_actors_verified`, a property of the whole
 daemon rather than of the caller. It is `true` only in identity mode, where
-every attributed write takes its actor from a database token or a trusted-proxy
-header and the bootstrap token cannot write. Otherwise a write can record the
+every attributed write made through this daemon's API takes its actor from a
+database token or a trusted-proxy header and the bootstrap token cannot write. Otherwise a write can record the
 actor named in the request body, and the field is `false`. Every credential
 sees the same value, and a daemon that predates the field omits it. The field
 describes the event actor of a write. It does not make an actor name stored
 inside a value trustworthy: a notification slot's `from` is written by whoever
 may edit issue metadata, so a client must not treat it as verified even when
-`write_actors_verified` is `true`.
+`write_actors_verified` is `true`. Actors on events imported by federation are
+only as trustworthy as the peer that recorded them.
 
 The instance `auth` object defines caller authority. Browser session responses,
 UI snapshot capabilities, and UI reference capabilities carry the same fields:
