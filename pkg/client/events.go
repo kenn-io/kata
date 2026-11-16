@@ -14,9 +14,13 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-// DefaultMaxEventBytes bounds one event's frame when EventsOptions.MaxEventBytes
-// is zero.
-const DefaultMaxEventBytes = 8 << 20
+// maxEventBytes caps one frame, comments and field names included. The daemon
+// does not bound an event below any cap (imports take bodies up to 64 MiB), so
+// a frame over it is skipped and reported as Event.Oversized, never as a
+// failure of the whole stream.
+//
+// var (not const) so tests can lower it.
+var maxEventBytes = 8 << 20
 
 // resetRequiredType is the SSE event name of a cursor the daemon can no longer
 // resume from.
@@ -26,8 +30,6 @@ var (
 	// ErrEventStreamEnded ends Events when the daemon closes the stream. The
 	// last Event.ID is the cursor to reconnect from.
 	ErrEventStreamEnded = errors.New("event stream ended")
-	// ErrEventTooLarge ends Events when one frame exceeds the size cap.
-	ErrEventTooLarge = errors.New("event frame exceeds byte limit")
 )
 
 // EventsOptions selects what Events streams.
@@ -38,9 +40,6 @@ type EventsOptions struct {
 	// LastEventID resumes after that event id, sent as Last-Event-ID. Zero
 	// starts from the live end of the stream.
 	LastEventID int64
-	// MaxEventBytes caps one frame, comments and field names included. Zero
-	// means DefaultMaxEventBytes.
-	MaxEventBytes int
 }
 
 // Event is one frame of the event stream.
@@ -56,11 +55,14 @@ type Event struct {
 	// Reset is set only for sync.reset_required: the cursor fell behind a purge,
 	// so the caller must drop its cache and resume from Reset.ResetAfterID.
 	Reset *ResetRequired
+	// Oversized is set when the frame passed the size cap and was skipped. Only
+	// ID is filled in; the caller cannot read the event, so it should refetch
+	// what it caches and resume after ID.
+	Oversized bool
 }
 
 // ResetRequired is the payload of a sync.reset_required frame.
 type ResetRequired struct {
-	EventID      int64 `json:"event_id"`
 	ResetAfterID int64 `json:"reset_after_id"`
 }
 
@@ -69,10 +71,11 @@ type ResetRequired struct {
 // type and data are skipped. Break out of the loop, or cancel ctx, to close the
 // connection.
 //
-// A failure to connect, a read error, an oversized frame, or the daemon
-// closing the stream is yielded as the final error; the zero Event comes with
+// A failure to connect, a read error, or the daemon closing the stream is
+// yielded as the final error; the zero Event comes with
 // it. Events does not reconnect: pass the last Event.ID as LastEventID to
-// resume. After a reset frame the daemon ends the stream, and the next
+// resume. A frame over the size cap is skipped and yielded as an Oversized
+// event. After a reset frame the daemon ends the stream, and the next
 // connection should resume from Reset.ResetAfterID.
 func (c *Client) Events(ctx context.Context, opts EventsOptions) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
@@ -90,11 +93,7 @@ func (c *Client) Events(ctx context.Context, opts EventsOptions) iter.Seq2[Event
 		}
 		defer func() { _ = resp.Body.Close() }()
 
-		maxBytes := opts.MaxEventBytes
-		if maxBytes <= 0 {
-			maxBytes = DefaultMaxEventBytes
-		}
-		reader := frameReader{br: bufio.NewReader(resp.Body), maxBytes: maxBytes}
+		reader := frameReader{br: bufio.NewReader(resp.Body)}
 		for {
 			event, err := reader.next()
 			if err != nil {
@@ -112,8 +111,7 @@ func (c *Client) Events(ctx context.Context, opts EventsOptions) iter.Seq2[Event
 }
 
 type frameReader struct {
-	br       *bufio.Reader
-	maxBytes int
+	br *bufio.Reader
 }
 
 // next reads up to the next complete frame. A frame cut off by the end of the
@@ -124,13 +122,21 @@ func (r *frameReader) next() (Event, error) {
 		hasType, hasData bool
 		data             []byte
 		size             int
+		oversized        bool
 	)
 	for {
-		line, err := r.readLine(&size)
+		n, line, err := r.readLine(&size)
 		if err != nil {
 			return Event{}, err
 		}
-		if len(line) == 0 {
+		if n > 0 && line == nil {
+			oversized = true
+			continue
+		}
+		if n == 0 {
+			if oversized {
+				return Event{ID: event.ID, Oversized: true}, nil
+			}
 			if !hasType || !hasData {
 				event, hasType, hasData, data, size = Event{}, false, false, nil, 0
 				continue
@@ -144,7 +150,7 @@ func (r *frameReader) next() (Event, error) {
 			}
 			return event, nil
 		}
-		if line[0] == ':' {
+		if line[0] == ':' || oversized {
 			continue
 		}
 		name, value, _ := bytes.Cut(line, []byte{':'})
@@ -169,25 +175,31 @@ func (r *frameReader) next() (Event, error) {
 	}
 }
 
-// readLine returns one line without its terminator, adding the bytes read to
-// *size and failing once they pass the cap before the whole line is buffered.
-func (r *frameReader) readLine(size *int) ([]byte, error) {
-	var line []byte
+// readLine returns one line without its terminator and its length, adding the
+// bytes read to *size. Once they pass the cap the line is consumed but not
+// kept: the returned slice is nil while the length stays positive.
+func (r *frameReader) readLine(size *int) (int, []byte, error) {
+	var (
+		line []byte
+		n    int
+	)
 	for {
 		chunk, more, err := r.br.ReadLine()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return nil, ErrEventStreamEnded
+				return 0, nil, ErrEventStreamEnded
 			}
-			return nil, err
+			return 0, nil, err
 		}
+		n += len(chunk)
 		*size += len(chunk) + 1
-		if *size > r.maxBytes {
-			return nil, ErrEventTooLarge
+		if *size > maxEventBytes {
+			line = nil
+		} else {
+			line = append(line, chunk...)
 		}
-		line = append(line, chunk...)
 		if !more {
-			return line, nil
+			return n, line, nil
 		}
 	}
 }
@@ -197,7 +209,7 @@ func (r *frameReader) readLine(size *int) ([]byte, error) {
 func decodeReset(event Event) *ResetRequired {
 	var reset ResetRequired
 	if err := json.Unmarshal(event.Data, &reset); err != nil {
-		return &ResetRequired{EventID: event.ID, ResetAfterID: event.ID}
+		return &ResetRequired{ResetAfterID: event.ID}
 	}
 	return &reset
 }

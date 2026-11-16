@@ -33,9 +33,9 @@ type sseEventPayload struct {
 // new issue's own UID (the payload only carries to_issue_uid; the
 // from is implicit). issue.linked / issue.unlinked retain their
 // original single-link shape (link object directly on payload).
-func decodeEventReceived(f kataclient.Event) eventReceivedMsg {
+func decodeEventReceived(event kataclient.Event) eventReceivedMsg {
 	var p sseEventPayload
-	_ = json.Unmarshal(f.Data, &p)
+	_ = json.Unmarshal(event.Data, &p)
 	out := eventReceivedMsg{
 		eventType:       p.Type,
 		projectID:       p.ProjectID,

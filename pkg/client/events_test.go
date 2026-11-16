@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -79,7 +80,7 @@ func TestEventsSurfacesResetRequiredAsTypedValue(t *testing.T) {
 
 	require.Len(t, events, 1)
 	require.NotNil(t, events[0].Reset)
-	assert.Equal(t, ResetRequired{EventID: 42, ResetAfterID: 40}, *events[0].Reset)
+	assert.Equal(t, ResetRequired{ResetAfterID: 40}, *events[0].Reset)
 	assert.Equal(t, int64(42), events[0].ID, "the resume cursor stays the frame id")
 	assert.Equal(t, "sync.reset_required", events[0].Type)
 }
@@ -116,18 +117,31 @@ func TestEventsOmitsCursorAndScopeByDefault(t *testing.T) {
 	assert.False(t, req.URL.Query().Has("project_id"))
 }
 
-func TestEventsRejectsAnEventOverTheSizeCap(t *testing.T) {
+// lowerEventCap makes a frame of a few hundred bytes count as oversized.
+func lowerEventCap(t *testing.T) {
+	t.Helper()
+	old := maxEventBytes
+	maxEventBytes = 100
+	t.Cleanup(func() { maxEventBytes = old })
+}
+
+func TestEventsSkipsAnOversizedFrameAndKeepsReading(t *testing.T) {
+	lowerEventCap(t)
 	big := strings.Repeat("x", 200)
-	api, _ := eventsServer(t, "id: 1\nevent: a\ndata: ok\n\n"+"id: 2\nevent: b\ndata: "+big+"\n\n")
+	api, _ := eventsServer(t, "id: 1\nevent: a\ndata: ok\n\n"+"id: 2\nevent: b\ndata: "+big+"\n\n"+"id: 3\nevent: c\ndata: ok\n\n")
 
-	events, err := collectEvents(t, api, EventsOptions{MaxEventBytes: 100})
+	events, err := collectEvents(t, api, EventsOptions{})
 
-	require.ErrorIs(t, err, ErrEventTooLarge)
-	require.Len(t, events, 1, "the event before the oversized one still arrives")
-	assert.Equal(t, int64(1), events[0].ID)
+	require.ErrorIs(t, err, ErrEventStreamEnded)
+	require.Len(t, events, 3)
+	assert.False(t, events[0].Oversized)
+	assert.Equal(t, Event{ID: 2, Oversized: true}, events[1])
+	assert.Equal(t, int64(3), events[2].ID)
+	assert.Equal(t, "ok", string(events[2].Data))
 }
 
 func TestEventsSizeCapCoversManyDataLines(t *testing.T) {
+	lowerEventCap(t)
 	var body strings.Builder
 	body.WriteString("id: 1\nevent: a\n")
 	for range 50 {
@@ -136,22 +150,27 @@ func TestEventsSizeCapCoversManyDataLines(t *testing.T) {
 	body.WriteString("\n")
 	api, _ := eventsServer(t, body.String())
 
-	_, err := collectEvents(t, api, EventsOptions{MaxEventBytes: 100})
+	events, _ := collectEvents(t, api, EventsOptions{})
 
-	require.ErrorIs(t, err, ErrEventTooLarge)
+	require.Len(t, events, 1)
+	assert.True(t, events[0].Oversized)
 }
 
 func TestEventsSizeCapDoesNotBoundTheWholeStream(t *testing.T) {
+	lowerEventCap(t)
 	var body strings.Builder
 	for i := range 20 {
-		body.WriteString("id: " + string(rune('1'+i%9)) + "\nevent: a\ndata: 0123456789\n\n")
+		body.WriteString("id: " + strconv.Itoa(i+1) + "\nevent: a\ndata: 0123456789\n\n")
 	}
 	api, _ := eventsServer(t, body.String())
 
-	events, err := collectEvents(t, api, EventsOptions{MaxEventBytes: 100})
+	events, err := collectEvents(t, api, EventsOptions{})
 
 	require.ErrorIs(t, err, ErrEventStreamEnded)
 	assert.Len(t, events, 20)
+	for _, event := range events {
+		assert.False(t, event.Oversized)
+	}
 }
 
 func TestEventsStopsWhenTheCallerBreaks(t *testing.T) {

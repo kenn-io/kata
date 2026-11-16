@@ -484,29 +484,6 @@ func drainOne(t *testing.T, ch <-chan tea.Msg) tea.Msg {
 	return nil
 }
 
-// TestSSE_StreamRequest_AllProjectsOmitsQuery: nil projectID leaves the
-// URL clean.
-func TestSSE_StreamRequest_AllProjectsOmitsQuery(t *testing.T) {
-	var req *http.Request
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		req = r.Clone(r.Context())
-		w.Header().Set("Content-Type", "text/event-stream")
-	}))
-	defer server.Close()
-	var cursor int64
-	_, err := readSSEStream(t.Context(), server.Client(), server.URL, nil, 0, make(chan tea.Msg, 1), &cursor, nil)
-	if !errors.Is(err, kataclient.ErrEventStreamEnded) {
-		t.Fatalf("stream: %v", err)
-	}
-	if strings.Contains(req.URL.RawQuery, "project_id") {
-		t.Fatalf("URL = %s, must not include project_id in all-projects mode",
-			req.URL.String())
-	}
-	if got := req.Header.Get("Last-Event-ID"); got != "" {
-		t.Fatalf("Last-Event-ID = %q on first connect, want empty", got)
-	}
-}
-
 // TestSSE_StreamRequest_SingleProjectAddsQuery: project scope adds the
 // query param; lastID > 0 sets Last-Event-ID.
 func TestSSE_StreamRequest_SingleProjectAddsQuery(t *testing.T) {
@@ -527,6 +504,40 @@ func TestSSE_StreamRequest_SingleProjectAddsQuery(t *testing.T) {
 	}
 	if got := req.Header.Get("Last-Event-ID"); got != "9" {
 		t.Fatalf("Last-Event-ID = %q, want 9", got)
+	}
+}
+
+// TestSSE_OversizedFrameRefetchesAndResumesAfterIt: a frame over the client's
+// size cap must not end the stream at the same cursor, or the daemon replays it
+// forever. The TUI treats it like sync.reset_required and keeps reading.
+func TestSSE_OversizedFrameRefetchesAndResumesAfterIt(t *testing.T) {
+	huge := strings.Repeat("x", 9<<20)
+	srv := newSSEMockServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeSSEFrame(t, w, 1, "issue.created", `{"type":"issue.created","project_id":7}`)
+		writeSSEFrame(t, w, 2, "issue.created", `{"type":"issue.created","body":"`+huge+`"}`)
+		writeSSEFrame(t, w, 3, "issue.created", `{"type":"issue.created","project_id":9}`)
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	ch := make(chan tea.Msg, 8)
+	var lastID int64
+	_, err := readSSEStream(ctx, srv.Client(), srv.URL, nil, 0, ch, &lastID, nil)
+	if !errors.Is(err, kataclient.ErrEventStreamEnded) {
+		t.Fatalf("stream: %v, want the stream to end normally", err)
+	}
+	if lastID != 3 {
+		t.Fatalf("lastID = %d, want 3 (resume after the frames read, not at the oversized one)", lastID)
+	}
+	_ = drainOne(t, ch) // sseConnected
+	if ev, ok := drainOne(t, ch).(eventReceivedMsg); !ok || ev.projectID != 7 {
+		t.Fatalf("first frame not forwarded: %+v", ev)
+	}
+	if msg := drainOne(t, ch); msg != (resetRequiredMsg{}) {
+		t.Fatalf("oversized frame = %T, want resetRequiredMsg", msg)
+	}
+	if ev, ok := drainOne(t, ch).(eventReceivedMsg); !ok || ev.projectID != 9 {
+		t.Fatalf("frame after the oversized one not forwarded: %+v", ev)
 	}
 }
 

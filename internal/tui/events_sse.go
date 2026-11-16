@@ -193,16 +193,18 @@ func firstGen(gen []uint64) uint64 {
 // forwardFrame dispatches the event as the matching tea.Msg.
 // Returns false on ctx cancel so the caller exits the read loop.
 //
-// The reset's ResetAfterID is not threaded onto resetRequiredMsg:
-// the daemon's contract (internal/api/events.go EventReset.EventID ==
-// ResetAfterID) makes the event ID — which already feeds Last-Event-ID
-// — the authoritative resume checkpoint.
-func forwardFrame(ctx context.Context, sseCh chan<- tea.Msg, f kataclient.Event, gen ...uint64) bool {
+// A reset and an oversized frame (one the client skipped for passing its size
+// cap) both become resetRequiredMsg: the cache is refetched and the stream
+// resumes after the event's ID, which already feeds Last-Event-ID. The reset's
+// ResetAfterID is not threaded onto the message: the daemon's contract
+// (internal/api/events.go EventReset.EventID == ResetAfterID) makes the event
+// ID the authoritative resume checkpoint.
+func forwardFrame(ctx context.Context, sseCh chan<- tea.Msg, event kataclient.Event, gen ...uint64) bool {
 	var msg tea.Msg
-	if f.Reset != nil {
+	if event.Reset != nil || event.Oversized {
 		msg = resetRequiredMsg{gen: firstGen(gen)}
 	} else {
-		ev := decodeEventReceived(f)
+		ev := decodeEventReceived(event)
 		ev.gen = firstGen(gen)
 		msg = ev
 	}
