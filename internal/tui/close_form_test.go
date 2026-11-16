@@ -2,8 +2,8 @@ package tui
 
 import (
 	"encoding/json"
-	"strings"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
