@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,14 +39,14 @@ func TestNotifyGuardFlagsRejectOldDaemon(t *testing.T) {
 	target, err := url.Parse(env.URL)
 	require.NoError(t, err)
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	writes := 0
+	var writes atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/health" {
 			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.51.0"}`))
 			return
 		}
 		if r.Method == http.MethodPost && r.URL.Path != "/api/v1/projects/resolve" {
-			writes++
+			writes.Add(1)
 		}
 		proxy.ServeHTTP(w, r)
 	}))
@@ -59,7 +60,7 @@ func TestNotifyGuardFlagsRejectOldDaemon(t *testing.T) {
 		_, err := runCLICapture(t, &old, dir, append([]string{"notify", ref, "--to", "reviewer"}, args...)...)
 		require.ErrorContains(t, err, "requires daemon API 0.52.0")
 	}
-	assert.Zero(t, writes)
+	assert.Zero(t, writes.Load())
 }
 
 func TestNotifyGuardFlagValidation(t *testing.T) {

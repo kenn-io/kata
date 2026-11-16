@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/notification"
 )
 
 func TestScopedNotificationPointersHiddenAcrossReads(t *testing.T) {
@@ -44,4 +45,20 @@ func TestScopedNotificationProjectionIsDeterministic(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 		require.Equal(t, string(first), string(body))
 	}
+}
+
+// An issue-subtree credential can clear a held notification with if_from; the
+// route sits behind the same allowlist as sending one.
+func TestScopedTokenClearsNotificationIfFrom(t *testing.T) {
+	env, p, source, _, _ := scopedReplyFixture(t, false)
+	key := notification.MetadataKey("reader")
+	_, e := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: source.ID, Actor: "coordinator", Patch: map[string]jsontext.Value{
+		key: jsontext.Value(`{"from":"worker","message":"look"}`),
+	}})
+	require.NoError(t, e)
+	path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/notifications/clear", p.ID, source.ShortID)
+	body := map[string]any{"to": "reader", "if_from": "worker"}
+	resp, raw := envDoRaw(t, env, http.MethodPost, path, body, map[string]string{"Authorization": "Bearer worker-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.Equal(t, notification.Value{}, readNotifySlot(t, env.DB, source.ID, key))
 }
