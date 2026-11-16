@@ -1,0 +1,16 @@
+{
+  "generator": "docs/screenshots/generate.sh",
+  "source": "disposable synthetic daemons and browser sessions",
+  "screenshots": [
+    "tui/hero.svg",
+    "federation-tui/list.svg",
+    "federation-tui/select-hub.svg",
+    "federation-tui/select-hub-project.svg",
+    "federation-tui/preview.svg",
+    "federation-tui/result.svg",
+    "web-ui/workspace.png",
+    "web-ui/issue-detail.png",
+    "web-ui/relationships.png",
+    "web-ui/daemon-switcher.png"
+  ]
+}
