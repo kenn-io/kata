@@ -2045,10 +2045,11 @@ materializes the batch, and returns the advanced push cursor.
 
 An event can touch an issue that the hub now keeps in a project the spoke has
 not joined, for example after another peer moved the issue. The hub then
-rejects the batch with `403 federation_project_not_enrolled`, and the error
-names the issue and its current project. `auth_invalid` is reserved for a
-failure of the spoke's own credential. To send the event, join the named
-project with push access and the same actor, then sync again.
+rejects the batch with `403 federation_project_not_enrolled`. The error names
+the issue but not its current project, because the spoke has not joined that
+project. `auth_invalid` is reserved for a failure of the spoke's own
+credential. To send the event, ask the hub operator which project holds the
+issue, join it with push access and the same actor, then sync again.
 
 On SQLite, ordinary issue pushes fold the histories of touched issues and
 reconcile only their projection rows. Cron events add the project's complete

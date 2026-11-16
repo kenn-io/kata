@@ -422,17 +422,16 @@ var ErrIssueSyncBindingChanged = errors.New("issue sync binding changed during v
 // FederationProjectNotEnrolledError reports pushed work that touches an issue
 // whose current project has no matching push enrollment for this spoke and
 // actor. The route credential is valid; only the other project's grant is
-// missing, revoked, or bound to a different spoke or actor.
+// missing, revoked, or bound to a different spoke or actor. The error names
+// only the issue, which the spoke already holds, and not the project it has
+// not joined.
 type FederationProjectNotEnrolledError struct {
-	IssueUID    string
-	ProjectUID  string
-	ProjectName string
-	Err         error
+	IssueUID string
+	Err      error
 }
 
 func (e *FederationProjectNotEnrolledError) Error() string {
-	return fmt.Sprintf("issue %s now belongs to project %q (%s), and this spoke has no push enrollment for that project with the same actor",
-		e.IssueUID, e.ProjectName, e.ProjectUID)
+	return fmt.Sprintf("issue %s now belongs to a project where this spoke has no push enrollment with the same actor", e.IssueUID)
 }
 
 func (e *FederationProjectNotEnrolledError) Unwrap() error { return e.Err }

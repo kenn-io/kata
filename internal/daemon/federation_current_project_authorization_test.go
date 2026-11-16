@@ -68,10 +68,12 @@ func TestFederationFreshCurrentProjectHostAuthority(t *testing.T) {
 			require.Equalf(t, tc.status, response.StatusCode, "%s", raw)
 			if tc.mode == "missing-proof" {
 				// The route credential is valid; the spoke lacks the issue's
-				// current project, and the error says which one.
+				// current project. The error names only the issue, which the
+				// spoke already holds, and not the project it has not joined.
 				envelope := assertAPIError(t, response.StatusCode, raw, http.StatusForbidden, "federation_project_not_enrolled")
 				require.Contains(t, envelope.Error.Message, issue.UID)
-				require.Contains(t, envelope.Error.Message, target.Name)
+				require.NotContains(t, string(raw), target.Name)
+				require.NotContains(t, string(raw), target.UID)
 				require.NotContains(t, envelope.Error.Message, "credential is not currently authorized")
 			} else {
 				require.Positive(t, access.sourceChecks.Load())

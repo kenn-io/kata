@@ -94,13 +94,12 @@ func checkFederatedFreshCurrentProjectAuthority(t *testing.T, store db.Storage) 
 					require.True(t, currentHostChecked)
 				} else if kind != "actor-denied" {
 					// The route credential is valid, so a missing or unusable
-					// enrollment names the project the spoke needs instead of
-					// blaming the credential. Access policy denial is separate.
+					// enrollment for the issue's current project gets its own
+					// error instead of blaming the credential. Access policy
+					// denial is separate.
 					var notEnrolled *db.FederationProjectNotEnrolledError
 					require.ErrorAs(t, err, &notEnrolled)
 					require.Equal(t, issue.UID, notEnrolled.IssueUID)
-					require.Equal(t, target.UID, notEnrolled.ProjectUID)
-					require.Equal(t, target.Name, notEnrolled.ProjectName)
 				}
 				after, err := store.MaxEventID(ctx)
 				require.NoError(t, err)
