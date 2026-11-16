@@ -8,6 +8,13 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   ...svelte.configs.recommended,
   {
+    files: ['src/lib/api/generated/**/*.ts'],
+    rules: {
+      // Orval emits `any` in its distributive union helpers for read-only schemas.
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
+  {
     languageOptions: {
       globals: globals.browser,
     },
