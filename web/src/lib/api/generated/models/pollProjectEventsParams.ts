@@ -14,7 +14,7 @@ export type PollProjectEventsParams = {
    */
   include_effective_close_event_uid?: boolean
   /**
-   * Actor the caller acts as. A soft-deleted issue's history is readable when restore would accept this actor; an authenticated principal's own actor takes precedence.
+   * Actor the caller acts as. A soft-deleted issue's history is readable when restore would accept this actor; an authenticated principal's own actor takes precedence. Used only with issue= on a soft-deleted issue; ignored otherwise.
    */
   actor?: string
 }

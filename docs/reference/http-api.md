@@ -264,8 +264,8 @@ actor takes precedence, as it does for restore. The same attributed write and
 claim checks apply, so on a federated project only the claim holder reads it
 while another actor's claim is live. Any other caller, including an anonymous
 `--insecure-readonly` caller, gets the `issue_not_found` response an unknown ref
-gets; failures that are not refusals keep their own status. Active issues ignore
-`actor`.
+gets; server failures and `federation_offline` keep their status. `actor` is used
+only with `issue=` on a soft-deleted issue and is ignored otherwise.
 
 Clients that need close evidence can set
 `include_effective_close_event_uid=true`. The response includes

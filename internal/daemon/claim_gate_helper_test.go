@@ -510,3 +510,17 @@ func assertClaimGateHelperAPIError(t *testing.T, err error, status int, code str
 	assert.Equal(t, status, apiErr.Status)
 	assert.Equal(t, code, apiErr.Code)
 }
+
+// Every refusal of a soft-deleted issue's history read answers issue_not_found,
+// including federation refusals, so a caller restore would refuse cannot tell
+// the issue exists.
+func TestRequireDeletedHistoryAccessMapsEveryRefusalToNotFound(t *testing.T) {
+	ctx := t.Context()
+	store := openClaimGateHelperDB(t)
+	project, issue := createClaimGateHelperIssue(t, store)
+	enableClaimGateHelperSpokeWithPush(t, store, project, "http://127.0.0.1:1", 99, false)
+
+	err := requireDeletedHistoryAccess(ctx, ServerConfig{DB: store}, project.ID, issue, "agent")
+
+	assertClaimGateHelperAPIError(t, err, http.StatusNotFound, "issue_not_found")
+}
