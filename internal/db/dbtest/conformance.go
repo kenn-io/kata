@@ -41,6 +41,10 @@ type Backend struct {
 	// acknowledgement UPDATE matches from installation until remove runs.
 	InstallRelayAckRowCounter func(ctx context.Context, store db.Storage) (count func(context.Context) (int64, error), remove func() error, err error)
 	ExpectedFailures          map[string]error
+	// Parallel is how many scenarios may hold a store at once. Zero or one
+	// runs them one at a time. Each scenario uses its own database, so the
+	// limit protects shared resources such as a server's connection slots.
+	Parallel int
 }
 
 type scenario struct {
@@ -1305,8 +1309,18 @@ func RunStorageConformance(t *testing.T, backend Backend) {
 		assert.Error(t, want, "expected failure %q must name an error", name)
 	}
 
+	var slots chan struct{}
+	if backend.Parallel > 1 {
+		slots = make(chan struct{}, backend.Parallel)
+	}
 	for _, test := range storageScenarios {
 		t.Run(test.name, func(t *testing.T) {
+			if slots != nil {
+				t.Parallel()
+				slots <- struct{}{}
+				// Registered first, so it runs after the store's own cleanups.
+				t.Cleanup(func() { <-slots })
+			}
 			store := backend.Open(t)
 			require.NotNil(t, store)
 			t.Cleanup(func() {

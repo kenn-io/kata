@@ -369,7 +369,7 @@ func runStartupFixture() {
 	if os.Getenv("KATA_STARTUP_FIXTURE_MODE") == "owner-drain" {
 		newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
 		// The parent test kills this daemon through cutover-child.pid.
-		if err := runDaemonProcess(ctx, "", false, true, newDaemonRestart(os.Stderr)); err != nil {
+		if err := runDaemonProcess(ctx, "", false, true, newDaemonRestart(os.Stderr), os.Stderr); err != nil {
 			_, _ = os.Stderr.WriteString(err.Error())
 			os.Exit(1)
 		}

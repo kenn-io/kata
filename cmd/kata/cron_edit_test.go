@@ -253,6 +253,19 @@ func TestCronEditNeedsTerminalBeforeNetwork(t *testing.T) {
 	require.ErrorContains(t, err, "update --file")
 }
 
+func TestCronEditErrorEscapesDirectionControl(t *testing.T) {
+	job := cronCLIJob(t)
+	job.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "\u202e0 9 * *"}
+	request, err := json.Marshal(job)
+	require.NoError(t, err)
+	_, err = cronEditParse("job", request)
+	require.Error(t, err)
+	var diagnostic bytes.Buffer
+	emitHumanError(&diagnostic, err, true)
+	require.NotContains(t, diagnostic.String(), "\u202e")
+	require.Contains(t, diagnostic.String(), `\u202e`)
+}
+
 func TestCronEditValidationReopensAndStopsOrRepairs(t *testing.T) {
 	for _, repair := range []bool{false, true} {
 		t.Run(fmt.Sprint(repair), func(t *testing.T) {

@@ -1,18 +1,25 @@
 package client_test
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	kitdaemon "go.kenn.io/kit/daemon"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/version"
 	"go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/katatest"
 )
@@ -153,4 +160,70 @@ func TestDiscoverNeverStartsRemote(t *testing.T) {
 	assert.Nil(t, ranWith())
 	discovered, _ := api.Discovered()
 	assert.True(t, discovered.Remote)
+}
+
+func TestDiscoverStartWithRespectsDisabledAutostart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		home := isolateKataHome(t)
+		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0o600))
+		namespace, err := daemonruntime.NewNamespace()
+		require.NoError(t, err)
+		kata, ranWith := fakeKataStarts(t, namespace, "unix://"+filepath.Join(home, "unused.sock"))
+		t.Setenv("FAKE_KATA_OUTPUT", "unexpected start")
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+
+		_, err = client.Discover(ctx, client.DiscoverOptions{StartWith: kata})
+
+		require.ErrorIs(t, err, client.ErrDaemonUnavailable)
+		require.ErrorContains(t, err, "managed externally")
+		assert.Nil(t, ranWith())
+	})
+}
+
+// StartWith only affects a stopped daemon; an existing daemon remains usable
+// even when the embedding application's version differs from its version. The
+// first ping fails, as during a supervisor restart, so the wait must accept the
+// same daemon the first probe would have.
+func TestDiscoverStartWithUsesExistingSupervisedDaemon(t *testing.T) {
+	for _, profile := range []bool{false, true} {
+		t.Run(fmt.Sprintf("profile=%t", profile), func(t *testing.T) {
+			home := isolateKataHome(t)
+			t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+			uid := "01HZZZZZZZZZZZZZZZZZZZZZ01"
+			var pings atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/api/v1/instance":
+					_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, uid)
+				case pings.Add(1) == 1:
+					w.WriteHeader(http.StatusServiceUnavailable)
+				default:
+					_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version+"-other", os.Getpid())
+				}
+			}))
+			defer srv.Close()
+			options := client.DiscoverOptions{StartWith: "unused"}
+			var ns *daemonruntime.Namespace
+			var err error
+			if profile {
+				profileHome := t.TempDir()
+				require.NoError(t, os.WriteFile(filepath.Join(profileHome, "config.toml"), []byte("autostart = false\n"), 0600))
+				writeDaemonCatalog(t, home, fmt.Sprintf("[[daemon]]\nname = 'work'\nlocal = true\nhome = %q\ninstance_uid = %q\n", profileHome, uid))
+				selected, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: profileHome, InstanceUID: uid})
+				require.NoError(t, err)
+				ns, err = daemonruntime.NewNamespaceForHome(selected.Home, selected.StorageID)
+				require.NoError(t, err)
+				options.Daemon = "work"
+			} else {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("autostart = false\n"), 0600))
+				ns, err = daemonruntime.NewNamespace()
+				require.NoError(t, err)
+			}
+			publishRuntime(t, ns, srv.Listener.Addr().String(), nil)
+			_, err = client.Discover(t.Context(), options)
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, pings.Load(), int32(2))
+		})
+	}
 }
