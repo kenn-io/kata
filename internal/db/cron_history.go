@@ -65,8 +65,8 @@ type ObserveCronRun struct {
 // CronRunObservationResult retains the row and exact events of one write.
 type CronRunObservationResult struct {
 	Run      CronRunView `json:"run"`
-	Events   []Event `json:"events"`
-	Replayed bool    `json:"replayed"`
+	Events   []Event     `json:"events"`
+	Replayed bool        `json:"replayed"`
 }
 
 // CronRunList bounds and scopes ordinary run-history pagination.
