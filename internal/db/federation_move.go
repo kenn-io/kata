@@ -504,6 +504,76 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 	return nil
 }
 
+// ParkedFederatedMoveIssues lists issues parked in retained placeholders.
+func ParkedFederatedMoveIssues(decisions []FederatedMoveDecision) []string {
+	var uids []string
+	for _, decision := range decisions {
+		if decision.Park {
+			uids = append(uids, decision.IssueUID)
+		}
+	}
+	return uids
+}
+
+// FederatedLinkIssueIDs resolves the endpoints available to a scoped fold.
+func FederatedLinkIssueIDs(ctx context.Context, tx *sql.Tx, p FoldProjection, issueUID string) (map[string]int64, error) {
+	ids := map[string]int64{}
+	for _, edge := range p.PresentLinks() {
+		if edge.Key.FromUID != issueUID && edge.Key.ToUID != issueUID {
+			continue
+		}
+		for _, uid := range []string{edge.Key.FromUID, edge.Key.ToUID} {
+			if _, ok := ids[uid]; ok {
+				continue
+			}
+			var id int64
+			err := tx.QueryRowContext(ctx, `SELECT id FROM issues WHERE uid=$1`, uid).Scan(&id)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			ids[uid] = id
+		}
+	}
+	return ids, nil
+}
+
+// ScopedFederatedLinkGraph combines a moved issue's links with preserved parents.
+func ScopedFederatedLinkGraph[T any](ctx context.Context, tx *sql.Tx, p FoldProjection, scope []string, desired map[FoldLinkKey]T) (map[FoldLinkKey]T, error) {
+	graph := map[FoldLinkKey]T{}
+	hasParent := false
+	for key, row := range desired {
+		if slices.Contains(scope, key.FromUID) || slices.Contains(scope, key.ToUID) {
+			graph[key] = row
+			hasParent = hasParent || key.Type == "parent"
+		}
+	}
+	if !hasParent {
+		return graph, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT from_issue_uid,to_issue_uid FROM links WHERE type='parent'`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		key := FoldLinkKey{Type: "parent"}
+		if err := rows.Scan(&key.FromUID, &key.ToUID); err != nil {
+			return nil, err
+		}
+		if slices.Contains(scope, key.FromUID) || slices.Contains(scope, key.ToUID) {
+			if _, known := p.Links[key]; known {
+				continue
+			}
+		}
+		var empty T
+		graph[key] = empty
+	}
+	return graph, rows.Err()
+}
+
 type movedProjectPassKey struct{}
 
 // FollowingMovedProjects reports whether a destination reconciliation pass is running.

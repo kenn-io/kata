@@ -663,6 +663,9 @@ func (s *Store) materializeFederatedProjectTxScoped(
 			return err
 		}
 	}
+	if err := reconcileParkedIssueLinks(ctx, tx, projection, db.ParkedFederatedMoveIssues(decisions)); err != nil {
+		return err
+	}
 	if err := pruneFederatedIssues(ctx, tx, m, issueIDs); err != nil {
 		return err
 	}

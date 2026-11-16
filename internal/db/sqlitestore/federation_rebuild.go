@@ -271,6 +271,11 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 			}
 		}
 		for _, p := range prepared.projects {
+			if err := reconcileParkedIssueLinks(ctx, tx, p.moveProjection, db.ParkedFederatedMoveIssues(p.decisions)); err != nil {
+				return err
+			}
+		}
+		for _, p := range prepared.projects {
 			if err := deleteUnreferencedFederatedIssues(ctx, tx, p.materialization.staleIssues); err != nil {
 				return err
 			}

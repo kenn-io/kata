@@ -26,14 +26,23 @@ func checkFederatedParkedMoveRecovery(t *testing.T, _ db.Storage, backend Backen
 	require.NoError(t, err)
 	inbound, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: prior.ID, ToProjectID: source.ID, IfMatchRev: issue.Revision, Actor: "worker"})
 	require.NoError(t, err)
+	// The hub removes a link to the issue before moving it out.
+	blocker, blockerCreated, err := hub.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "blocker", Author: "worker"})
+	require.NoError(t, err)
+	linkParams := db.LinkEventParams{EventType: "issue.linked", EventIssueID: blocker.ID, FromShortID: blocker.ShortID, FromUID: blocker.UID, ToShortID: issue.ShortID, ToUID: issue.UID, Actor: "worker"}
+	link, linked, err := hub.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: blocker.ID, ToIssueID: issue.ID, Type: "blocks", Author: "worker"}, linkParams)
+	require.NoError(t, err)
+	linkParams.EventType = "issue.unlinked"
+	unlinked, err := hub.DeleteLinkAndEvent(ctx, link, linkParams)
+	require.NoError(t, err)
 	title := "Hub edit"
 	edited, editEvent, _, err := hub.EditIssue(ctx, db.EditIssueParams{IssueID: issue.ID, Actor: "worker", Title: &title})
 	require.NoError(t, err)
 	moved, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: edited.Revision, Actor: "worker"})
 	require.NoError(t, err)
 	u := issue.UID
-	creations := []db.RemoteEvent{portableNativeEvent(created), portableNativeEvent(*inbound.Event)}
-	moves := []db.RemoteEvent{portableNativeEvent(*editEvent), portableNativeEvent(*moved.Event)}
+	creations := []db.RemoteEvent{portableNativeEvent(created), portableNativeEvent(*inbound.Event), portableNativeEvent(blockerCreated), portableNativeEvent(linked)}
+	moves := []db.RemoteEvent{portableNativeEvent(unlinked), portableNativeEvent(*editEvent), portableNativeEvent(*moved.Event)}
 	spoke := backend.Open(t)
 	t.Cleanup(func() { require.NoError(t, spoke.Close()) })
 	route, err := spoke.CreateProjectWithUID(ctx, "source", source.UID)
@@ -54,6 +63,9 @@ func checkFederatedParkedMoveRecovery(t *testing.T, _ db.Storage, backend Backen
 		localU, err := spoke.IssueByUID(ctx, u, db.IncludeDeletedNo)
 		require.NoError(t, err)
 		require.Equal(t, route.ID, localU.ProjectID)
+		links, err := spoke.LinksByIssue(ctx, localU.ID)
+		require.NoError(t, err)
+		require.Len(t, links, 1)
 		t.Run("park", func(t *testing.T) {
 			// The spoke's comment reached the hub before the hub moved the issue.
 			_, comment, err := spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: localU.ID, Author: "worker", Body: "local comment"})
@@ -78,6 +90,9 @@ func checkFederatedParkedMoveRecovery(t *testing.T, _ db.Storage, backend Backen
 			require.Equal(t, localU.ID, retained.ID)
 			require.Equal(t, parked.ID, retained.ProjectID)
 			require.Equal(t, title, retained.Title)
+			links, err := spoke.LinksByIssue(ctx, retained.ID)
+			require.NoError(t, err)
+			require.Empty(t, links, "parking applies the hub's unlink")
 			moveHistory, err := spoke.EventsByUIDs(ctx, parked.ID, []string{moved.Event.UID})
 			require.NoError(t, err)
 			require.Len(t, moveHistory, 1)
