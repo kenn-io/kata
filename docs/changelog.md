@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
+
 - Copy a project sync diagnostic for Bash/Zsh or PowerShell from the web summary.
 
 - Watch project sync progress refresh every 30 seconds in a visible web tab and
@@ -23,6 +25,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Install user hooks for Claude Code and Codex with `kata agent setup`, and use `kata doctor` to find hooks that need review. Open Codex and run `/hooks` when prompted. See [agent setup](workflows/agents.md#contract-in-every-session).
 
 - Restart a local daemon from Settings after turning on search by meaning. Confirm the interruption for every project and client, then reopen `kata ui` if the browser address changes. The API reports the `restart` job state and `restart_in_progress` during the handoff.
+
+- A hub that requires signing now answers an enrolled spoke's unsigned request
+  with 428 `hub_signing_required`, so it is distinguishable from
+  `signature_invalid`. A request with only a content digest follows the unsigned
+  path, including when signing is optional. Relay bridges keep their grant on the
+  new response. See [federation signing](operations/federation-signing.md).
 
 - Use `kata daemon status` in scripts to check the selected daemon's readiness.
   It exits 0 only for a ready selected daemon. Stopped or unavailable

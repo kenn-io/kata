@@ -277,7 +277,8 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.50.0` | Signed federation requests return `503 signing_warming` with `Retry-After: 5` while replay protection warms up. |
+| `0.51.0` | Signed federation requests return `503 signing_warming` with `Retry-After: 5` while replay protection warms up. |
+| `0.50.0` | A hub that requires signing and the restricted ingress answer requests without signature headers with `428 hub_signing_required` instead of `401 signature_invalid`. A request with only a digest follows the unsigned path, including when signing is optional. |
 | `0.49.0` | `GET /api/v1/projects/resolve` resolves a project by name for readers. Project federation status accepts `omit_errors=true` to withhold diagnostic error text. |
 | `0.48.0` | Project federation status accepts `compact=true` to omit relay checkpoint capacity measurement. |
 | `0.47.0` | Attachment uploads accept `reuse_existing`. Reuse on uploads and links returns `attachment_invalid` when the daemon cannot read an existing reference. |
