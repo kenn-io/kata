@@ -703,3 +703,17 @@ func TestCronSearchClickGuards(t *testing.T) {
 		require.False(t, m.cron.filtering, state)
 	}
 }
+
+// A run of a deleted job or workflow names it in the detail the way the list
+// does, and still notes that the definition is gone.
+func TestCronRunDetailNamesDeletedDefinitions(t *testing.T) {
+	m := cronFixture(t)
+	p := m.cron.data
+	p.jobs, p.workflows = nil, nil
+	m = sendRune(m, '3')
+	m = sendKey(m, tea.KeyEnter)
+	body := m.viewBody()
+	require.Contains(t, body, "Job: Daily summary · no longer defined")
+	require.Contains(t, body, "Workflow: Summary flow · no longer defined")
+	require.NotContains(t, body, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+}

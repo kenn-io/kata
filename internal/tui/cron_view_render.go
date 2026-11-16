@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -255,7 +256,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			}
 			d.field("Action", cronAction(p, *j))
 			if uid := deref(j.Definition.Action.WorkflowUID); uid != "" {
-				cronDefinitionLink(&d, p, uid, "", true)
+				cronDefinitionLink(&d, p, uid, "", "", true)
 			}
 			def := j.Definition
 			if deref(def.Action.Prompt) != "" {
@@ -293,8 +294,8 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			d.section("Message")
 			d.text(deref(r.Summary.Message), cronRef{})
 			d.section("Recorded with")
-			cronDefinitionLink(&d, p, deref(r.JobUID), deref(r.DefinitionEventUID), false)
-			cronDefinitionLink(&d, p, deref(r.WorkflowUID), deref(r.WorkflowDefinitionEventUID), true)
+			cronDefinitionLink(&d, p, deref(r.JobUID), deref(r.JobName), deref(r.DefinitionEventUID), false)
+			cronDefinitionLink(&d, p, deref(r.WorkflowUID), deref(r.WorkflowName), deref(r.WorkflowDefinitionEventUID), true)
 		}
 	case cronWorkflows:
 		if w := p.workflow(ref.uid); w != nil {
@@ -335,11 +336,15 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 	}
 	return cronTabNames[ref.kind] + " / " + sanitizeForLine(name), "", d.lines
 }
-func cronDefinitionLink(d *cronDoc, p cronData, uid, revision string, workflow bool) {
+
+// cronDefinitionLink names a definition by the name the run recorded, so a
+// deleted job or workflow still reads by name; the loaded definition and then
+// the bare UID are the fallbacks.
+func cronDefinitionLink(d *cronDoc, p cronData, uid, recordedName, revision string, workflow bool) {
 	if uid == "" {
 		return
 	}
-	name, event, kind := uid, "", cronJobs
+	name, event, kind := cmp.Or(recordedName, uid), "", cronJobs
 	if workflow {
 		kind = cronWorkflows
 		if w := p.workflow(uid); w != nil {
