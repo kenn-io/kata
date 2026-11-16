@@ -77,7 +77,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+		if err := requireRestorePermission(ctx, cfg, issue, actor); err != nil {
 			return nil, err
 		}
 		updated, evt, changed, err := cfg.DB.RestoreIssue(ctx, issue.ID, actor)
@@ -194,4 +194,15 @@ func validateExactConfirm(got, expected string) error {
 			"expected "+expected, nil)
 	}
 	return nil
+}
+
+// requireRestorePermission is the check a caller must pass to restore issue:
+// an attributed write must be allowed for the principal and the federated
+// claim gate must accept the actor. Reading a soft-deleted issue's history
+// uses the same check.
+func requireRestorePermission(ctx context.Context, cfg ServerConfig, issue db.Issue, actor string) error {
+	if err := ensureAttributedWriteAllowed(ctx); err != nil {
+		return err
+	}
+	return requireFederatedIssueClaim(ctx, cfg, issue.ProjectID, issue, actor)
 }

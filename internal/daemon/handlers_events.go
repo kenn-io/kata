@@ -57,9 +57,16 @@ func registerEventsHandlers(humaAPI huma.API, mux *http.ServeMux, cfg ServerConf
 			return nil, err
 		}
 		if in.Issue != "" {
-			issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Issue, db.IncludeDeletedNo)
+			issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Issue, db.IncludeDeletedYes)
 			if err != nil {
 				return nil, err
+			}
+			if issue.DeletedAt != nil {
+				// A soft-deleted issue's history is for whoever may restore it.
+				// Anyone else sees the same 404 an unknown ref gets.
+				if err := requireRestorePermission(ctx, cfg, issue, actorFor(ctx, "")); err != nil {
+					return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
+				}
 			}
 			return pollIssueHistory(ctx, cfg.DB, in.AfterID, in.Limit, issue, in.IncludeEffectiveCloseEventUID)
 		}

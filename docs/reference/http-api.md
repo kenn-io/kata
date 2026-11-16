@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-13
+last_edited: 2026-11-16
 ---
 
 # HTTP API schema
@@ -256,6 +256,12 @@ name it, and events that name an issue the caller cannot see are omitted.
 History includes events from earlier projects after a move only when the caller
 can access those projects. Scoped credentials receive the same authorized
 history projection as issue detail.
+
+A soft-deleted issue's history, including its `issue.soft_deleted` event, is
+readable by callers the restore action would accept, under the same attributed
+write and claim checks. Any other caller gets the `issue_not_found` response an
+unknown ref gets. This needs no API version change: the request and response
+shapes are unchanged.
 
 Clients that need close evidence can set
 `include_effective_close_event_uid=true`. The response includes

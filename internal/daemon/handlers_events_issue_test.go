@@ -494,3 +494,58 @@ func TestPollProjectEventsMovedIssueRespectsHistoricalProjectAccess(t *testing.T
 		}
 	})
 }
+
+// A soft-deleted issue's history is readable by callers the restore action
+// would accept, and stays a 404 for callers it would refuse.
+func TestPollProjectEventsIssueReadsSoftDeletedHistoryForRestoreCaller(t *testing.T) {
+	deletedHistory := func(t *testing.T, env *testenv.Env, project db.Project, issue db.Issue, ref string) (int, []byte) {
+		t.Helper()
+		resp, body := envGetRaw(t, env, scopedProjectPath(project.ID, "events")+"?issue="+url.QueryEscape(ref))
+		return resp.StatusCode, body
+	}
+
+	t.Run("allowed caller reads history including the delete event", func(t *testing.T) {
+		env, project, issue := setupClaimGateIssue(t, false)
+		_, deleted, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
+		require.NoError(t, err)
+
+		for _, ref := range []string{issue.ShortID, issue.UID, project.Name + "#" + issue.ShortID} {
+			status, body := deletedHistory(t, env, project, issue, ref)
+			require.Equal(t, http.StatusOK, status, string(body))
+			var page api.PollEventsBody
+			require.NoError(t, json.Unmarshal(body, &page))
+			types := make([]string, 0, len(page.Events))
+			for _, event := range page.Events {
+				types = append(types, event.Type)
+			}
+			require.Equal(t, []string{"issue.created", "issue.soft_deleted"}, types)
+			require.Equal(t, deleted.ID, page.Events[1].EventID)
+			require.Equal(t, "tester", page.Events[1].Actor)
+		}
+	})
+
+	t.Run("caller the restore claim gate refuses still gets 404", func(t *testing.T) {
+		env, project, issue := setupClaimGateIssue(t, true)
+		acquireClaimGateIssue(t, env, project, issue, "other")
+		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "other")
+		require.NoError(t, err)
+
+		restore, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "actions/restore"),
+			map[string]string{"actor": "agent"}, nil)
+		assertAPIError(t, restore.StatusCode, raw, http.StatusConflict, "claim_denied")
+
+		status, body := deletedHistory(t, env, project, issue, issue.ShortID)
+		assertAPIError(t, status, body, http.StatusNotFound, "issue_not_found")
+	})
+
+	t.Run("restored issue keeps reading through the active path", func(t *testing.T) {
+		env, project, issue := setupClaimGateIssue(t, false)
+		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
+		require.NoError(t, err)
+		_, _, _, err = env.DB.RestoreIssue(t.Context(), issue.ID, "tester")
+		require.NoError(t, err)
+
+		status, body := deletedHistory(t, env, project, issue, issue.ShortID)
+		require.Equal(t, http.StatusOK, status, string(body))
+	})
+}
