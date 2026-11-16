@@ -274,7 +274,7 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 
 // Snapshot relocation must retain the existing same-hub and recurrence gates.
 func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) error {
-	for _, kind := range []string{"different-hub", "recurrence", "retained-move-after-source-leave", "relocated-then-different-hub", "archived-destination"} {
+	for _, kind := range []string{"different-hub", "recurrence", "import-mapping-collision", "retained-move-after-source-leave", "relocated-then-different-hub", "archived-destination"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			source, target, issue, move := federatedRehomeFixture(t, store, "snapshot-guard-"+kind)
@@ -293,6 +293,15 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 				binding.HubURL = "https://other-hub.example"
 				_, err = store.UpsertFederationBinding(ctx, binding)
 				require.NoError(t, err)
+			}
+			if kind == "import-mapping-collision" {
+				// The spoke imported the same external item into both projects.
+				peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "imported again", Author: "worker"})
+				require.NoError(t, err)
+				for _, mapped := range []db.Issue{issue, peer} {
+					_, err := store.UpsertImportMapping(ctx, db.ImportMappingParams{ProjectID: mapped.ProjectID, Source: "connector", ExternalID: "same-task", ObjectType: "issue", IssueID: &mapped.ID})
+					require.NoError(t, err)
+				}
 			}
 			if kind == "retained-move-after-source-leave" {
 				acknowledgeFederatedRehomeSourceEvents(t, store, source)
@@ -351,10 +360,14 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 				require.Equal(t, target.ID, got.ProjectID)
 				return
 			}
-			if kind == "recurrence" {
+			switch kind {
+			case "recurrence":
 				var pinned *db.RecurrencePinnedError
 				require.ErrorAs(t, err, &pinned)
-			} else {
+			case "import-mapping-collision":
+				var collision *db.ProjectMergeImportMappingCollisionError
+				require.ErrorAs(t, err, &collision)
+			default:
 				require.ErrorIs(t, err, db.ErrFederatedMoveUnsupported)
 			}
 			got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
@@ -363,7 +376,7 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 			after, err := store.MaxEventID(ctx)
 			require.NoError(t, err)
 			require.Equal(t, cursor, after)
-			if kind == "different-hub" || kind == "recurrence" {
+			if kind == "different-hub" || kind == "recurrence" || kind == "import-mapping-collision" {
 				// The refused destination snapshot stays in that journal. It must not
 				// leak into the source's history and retry the refused relocation.
 				require.NoError(t, store.MaterializeFederatedProject(ctx, source.ID), "the source must keep rebuilding after a refused relocation")

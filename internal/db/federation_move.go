@@ -496,6 +496,20 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMo
 				refusal = ErrNotFound
 			} else if decision.RecurrenceID.Valid {
 				refusal = fmt.Errorf("%w: %w", ErrFederationIngestValidation, &RecurrencePinnedError{})
+			} else if decision.SourceID == projectID {
+				// Rehoming refuses an import mapping the destination already holds.
+				// Keep the issue in the source so its sync continues; the
+				// destination pull still reports the collision when it rehomes.
+				var collides bool
+				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM import_mappings s
+ JOIN import_mappings t ON t.project_id=$1 AND t.source=s.source
+  AND t.external_id=s.external_id AND t.object_type=s.object_type
+ WHERE s.issue_id=$2 AND s.project_id=$3)`, decision.TargetID, decision.IssueID, decision.SourceID).Scan(&collides); err != nil {
+					return nil, nil, err
+				}
+				if collides {
+					refusal = &ProjectMergeImportMappingCollisionError{}
+				}
 			}
 			if refusal != nil {
 				if decision.SourceID != projectID {
