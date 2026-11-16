@@ -144,6 +144,8 @@ type PatchIssueMetadataBody = PatchIssueMetadataRequestBody
 
 type NotifyIssueBody = NotifyIssueRequestBody
 
+type ClearNotificationIfFromBody = ClearNotificationRequestBody
+
 type MergeProjectBody = MergeProjectRequestBody
 
 type PatchProjectMetadataBody = PatchProjectMetadataRequestBody

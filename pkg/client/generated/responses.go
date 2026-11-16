@@ -519,6 +519,10 @@ type NotifyIssueResponse = NotifyIssueResponseBody
 
 type NotifyIssueErrorResponse = ErrorEnvelope
 
+type ClearNotificationIfFromResponse = NotifyIssueResponseBody
+
+type ClearNotificationIfFromErrorResponse = ErrorEnvelope
+
 type IssuePlanningDatesResponse = IssuePlanningDates
 
 type IssuePlanningDatesErrorResponse = ErrorEnvelope
@@ -1779,6 +1783,19 @@ type NotifyIssueResp struct {
 	JSON200      *NotifyIssueResponse
 	Headers200   *NotifyIssueResp200Headers
 	JSONDefault  *NotifyIssueErrorResponse
+}
+
+type ClearNotificationIfFromResp200Headers struct {
+	XKataProjectName string `header:"X-Kata-Project-Name"`
+}
+
+type ClearNotificationIfFromResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ClearNotificationIfFromResponse
+	Headers200   *ClearNotificationIfFromResp200Headers
+	JSONDefault  *ClearNotificationIfFromErrorResponse
 }
 
 type IssuePlanningDatesResp struct {

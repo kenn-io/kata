@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -65,8 +67,11 @@ its open children (at most 50); --teammates adds their teammate inboxes.`,
 				return notificationValidationError("--clear cannot be combined with --re or --broadcast")
 			}
 
-			if ifFrom != "" && !clearRequest || cmd.Flags().Changed("if-from") && strings.TrimSpace(ifFrom) == "" {
-				return notificationValidationError("--if-from requires --clear and a nonblank actor")
+			if ifFrom != "" && !clearRequest {
+				return notificationValidationError("--if-from requires --clear")
+			}
+			if cmd.Flags().Changed("if-from") && strings.TrimSpace(ifFrom) == "" {
+				return notificationValidationError("--if-from must be a nonblank actor")
 			}
 			if noReplace && (clearRequest || broadcast) {
 				return notificationValidationError("--no-replace cannot be combined with --clear or --broadcast")
@@ -98,13 +103,19 @@ its open children (at most 50); --teammates adds their teammate inboxes.`,
 				return err
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			if broadcast || re != "" || noReplace || ifFrom != "" {
-				body := &generated.NotifyIssueBody{Actor: &actor, Teammate: &senderTeammate, To: &to, Re: &re, Broadcast: &broadcast, Teammates: &teammates}
-				if clearRequest {
-					body = &generated.NotifyIssueBody{Actor: &actor, To: &to, Clear: &clearRequest, IfFrom: &ifFrom}
-				} else {
-					body.Message = &message
+			if noReplace {
+				if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionNotifyGuards, "notify --no-replace"); err != nil {
+					return err
 				}
+			}
+			if ifFrom != "" {
+				if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionNotifyGuards, "notify --if-from"); err != nil {
+					return err
+				}
+				return clearNotificationIfFromCLI(ctx, cmd, client, baseURL, pid, ref, actor, to, ifFrom)
+			}
+			if broadcast || re != "" || noReplace {
+				body := &generated.NotifyIssueBody{Actor: &actor, Teammate: &senderTeammate, To: &to, Re: &re, Message: message, Broadcast: &broadcast, Teammates: &teammates}
 				if noReplace {
 					replace := false
 					body.Replace = &replace
@@ -128,18 +139,6 @@ its open children (at most 50); --teammates adds their teammate inboxes.`,
 				}
 				raw := response.Body
 				verb := "notified"
-				if clearRequest {
-					verb = "cleared"
-					var result struct {
-						Changed bool `json:"changed"`
-					}
-					if err := json.Unmarshal(raw, &result); err != nil {
-						return err
-					}
-					if !result.Changed {
-						verb = "left unchanged"
-					}
-				}
 				if broadcast {
 					verb = "broadcast"
 					var resolved struct {
@@ -208,12 +207,47 @@ its open children (at most 50); --teammates adds their teammate inboxes.`,
 	return cmd
 }
 
-// notificationAPIError names the held request when --no-replace was refused.
+// clearNotificationIfFromCLI clears the recipient's request only while its
+// stored sender is ifFrom, and says so when it left the request alone.
+func clearNotificationIfFromCLI(ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, pid int64, ref resolvedIssueRef, actor, to, ifFrom string) error {
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
+	if err != nil {
+		return err
+	}
+	response, callErr := apiClient.ClearNotificationIfFromWithResponse(ctx, &generated.ClearNotificationIfFromRequestOptions{
+		PathParams: &generated.ClearNotificationIfFromPath{ProjectID: fmt.Sprint(pid), Ref: ref.RefForAPI},
+		Body:       &generated.ClearNotificationIfFromBody{Actor: &actor, To: to, IfFrom: ifFrom},
+	})
+	if response == nil {
+		return callErr
+	}
+	if response.StatusCode >= 400 {
+		return apiErrFromBody(response.StatusCode, response.Body)
+	}
+	if callErr != nil {
+		return callErr
+	}
+	var result struct {
+		Changed bool `json:"changed"`
+	}
+	if err := json.Unmarshal(response.Body, &result); err != nil {
+		return err
+	}
+	verb := "cleared"
+	if !result.Changed {
+		verb = "left unchanged"
+	}
+	return printNotificationMutation(cmd, response.Body, verb, to, ref.ProjectName)
+}
+
+// notificationAPIError names the held request when --no-replace was refused
+// and words the hint for the flag rather than the HTTP option.
 func notificationAPIError(status int, body []byte) *cliError {
 	err := apiErrFromBody(status, body)
 	if err.Code != "notification_held" {
 		return err
 	}
+	err.Hint = "send without --no-replace to replace it, or wait for it to be cleared"
 	var held struct {
 		From    string `json:"from"`
 		Message string `json:"message"`

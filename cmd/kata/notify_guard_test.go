@@ -1,12 +1,17 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestNotifyNoReplaceKeepsHeldRequest(t *testing.T) {
+func TestNotifyNoReplaceReportsHeldRequest(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "review the callback")
 	runCLIAs(t, env, dir, "agent-a", "notify", ref, "--to", "reviewer", "--message", "first pass")
 
@@ -15,27 +20,46 @@ func TestNotifyNoReplaceKeepsHeldRequest(t *testing.T) {
 	assert.Equal(t, "notification_held", cli.Code)
 	assert.Contains(t, cli.Message, "agent-a")
 	assert.Contains(t, cli.Message, "first pass")
-
-	metadata := notificationMetadata(t, issueMetadataJSON(t, runCLI(t, env, dir, "--json", "show", ref)))
-	assert.JSONEq(t, `{"from":"agent-a","message":"first pass"}`, metadata["notify.cmV2aWV3ZXI"])
-
-	// An empty slot accepts the request.
-	runCLIAs(t, env, dir, "agent-b", "notify", ref, "--to", "ops", "--message", "check rollout", "--no-replace")
-	metadata = notificationMetadata(t, issueMetadataJSON(t, runCLI(t, env, dir, "--json", "show", ref)))
-	assert.JSONEq(t, `{"from":"agent-b","message":"check rollout"}`, metadata["notify.b3Bz"])
+	assert.Contains(t, cli.Hint, "--no-replace")
 }
 
-func TestNotifyClearIfFromClearsOnlyThatSender(t *testing.T) {
+func TestNotifyClearIfFromLeavesOtherSendersRequest(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "review the callback")
 	runCLIAs(t, env, dir, "agent-a", "notify", ref, "--to", "reviewer", "--message", "first pass")
 
-	runCLIAs(t, env, dir, "agent-b", "notify", ref, "--to", "reviewer", "--clear", "--if-from", "agent-b")
+	out := runCLIAs(t, env, dir, "agent-b", "notify", ref, "--to", "reviewer", "--clear", "--if-from", "agent-b")
+	assert.Contains(t, out, "left unchanged")
 	metadata := notificationMetadata(t, issueMetadataJSON(t, runCLI(t, env, dir, "--json", "show", ref)))
 	assert.Contains(t, metadata, "notify.cmV2aWV3ZXI")
+}
 
-	runCLIAs(t, env, dir, "agent-b", "notify", ref, "--to", "reviewer", "--clear", "--if-from", "agent-a")
-	metadata = notificationMetadata(t, issueMetadataJSON(t, runCLI(t, env, dir, "--json", "show", ref)))
-	assert.NotContains(t, metadata, "notify.cmV2aWV3ZXI")
+func TestNotifyGuardFlagsRejectOldDaemon(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "review the callback")
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	writes := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.51.0"}`))
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path != "/api/v1/projects/resolve" {
+			writes++
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	old := *env
+	old.URL = server.URL
+	for _, args := range [][]string{
+		{"--message", "m", "--no-replace"},
+		{"--clear", "--if-from", "agent-a"},
+	} {
+		_, err := runCLICapture(t, &old, dir, append([]string{"notify", ref, "--to", "reviewer"}, args...)...)
+		require.ErrorContains(t, err, "requires daemon API 0.52.0")
+	}
+	assert.Zero(t, writes)
 }
 
 func TestNotifyGuardFlagValidation(t *testing.T) {

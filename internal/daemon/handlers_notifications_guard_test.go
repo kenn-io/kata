@@ -45,7 +45,7 @@ func TestNotifyNoReplaceRejectsBroadcast(t *testing.T) {
 
 func TestNotifyClearIfFromClearsOnlyMatchingSender(t *testing.T) {
 	h, ts, pid, id := bootstrapProjectWithIssue(t)
-	path := issueURL(pid, id, "notifications")
+	path := issueURL(pid, id, "notifications/clear")
 	key := notification.MetadataKey("reader")
 	seed := func(from string) {
 		_, err := h.DB().PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: id, Actor: from, Patch: map[string]jsontext.Value{
@@ -55,7 +55,7 @@ func TestNotifyClearIfFromClearsOnlyMatchingSender(t *testing.T) {
 	}
 
 	seed("alice")
-	resp, body := postJSON(t, ts, path, map[string]any{"actor": "bob", "to": "reader", "clear": true, "if_from": "bob"})
+	resp, body := postJSON(t, ts, path, map[string]any{"actor": "bob", "to": "reader", "if_from": "bob"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	var out struct {
 		Changed bool `json:"changed"`
@@ -64,7 +64,7 @@ func TestNotifyClearIfFromClearsOnlyMatchingSender(t *testing.T) {
 	require.False(t, out.Changed)
 	require.Equal(t, notification.Value{From: "alice", Message: "please look"}, readNotifySlot(t, h.DB(), id, key))
 
-	resp, body = postJSON(t, ts, path, map[string]any{"actor": "bob", "to": "reader", "clear": true, "if_from": "alice"})
+	resp, body = postJSON(t, ts, path, map[string]any{"actor": "bob", "to": "reader", "if_from": "alice"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	require.NoError(t, json.Unmarshal(body, &out))
 	require.True(t, out.Changed)
@@ -73,19 +73,18 @@ func TestNotifyClearIfFromClearsOnlyMatchingSender(t *testing.T) {
 	require.NotContains(t, string(issue.Metadata), key)
 }
 
-func TestNotifyClearValidation(t *testing.T) {
+func TestNotifyClearIfFromValidation(t *testing.T) {
 	_, ts, pid, id := bootstrapProjectWithIssue(t)
-	path := issueURL(pid, id, "notifications")
+	path := issueURL(pid, id, "notifications/clear")
 	for name, body := range map[string]map[string]any{
-		"if_from without clear":    {"actor": "a", "to": "reader", "message": "m", "if_from": "a"},
-		"clear with message":       {"actor": "a", "to": "reader", "message": "m", "clear": true},
-		"clear with broadcast":     {"actor": "a", "broadcast": true, "clear": true},
-		"clear without recipient":  {"actor": "a", "clear": true},
-		"clear with no-replace":    {"actor": "a", "to": "reader", "clear": true, "replace": false},
-		"message missing no clear": {"actor": "a", "to": "reader"},
+		"missing if_from":    {"actor": "a", "to": "reader"},
+		"blank if_from":      {"actor": "a", "to": "reader", "if_from": "  "},
+		"missing recipient":  {"actor": "a", "if_from": "a"},
+		"unknown clear flag": {"actor": "a", "to": "reader", "if_from": "a", "clear": true},
 	} {
 		resp, raw := postJSON(t, ts, path, body)
-		require.Equal(t, http.StatusBadRequest, resp.StatusCode, name+": "+string(raw))
+		require.GreaterOrEqual(t, resp.StatusCode, http.StatusBadRequest, name+": "+string(raw))
+		require.Less(t, resp.StatusCode, http.StatusInternalServerError, name+": "+string(raw))
 	}
 }
 

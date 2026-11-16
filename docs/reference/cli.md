@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-12
+last_edited: 2026-11-16
 ---
 
 # CLI reference
@@ -1325,9 +1325,11 @@ field equals `<actor>`; otherwise it changes nothing and reports
 `left unchanged`. This compares the stored field and does not verify who wrote
 it: any actor allowed to write issue metadata can store a request with another
 actor's name in `from`. Both checks run inside the daemon's write, so they hold
-against concurrent senders. Over HTTP they are the `replace`, `clear` and
-`if_from` fields of the notifications endpoint; a refused `replace: false`
-answers 409 `notification_held` with `from` and `message` in `error.data`.
+against concurrent senders. Over HTTP, `--no-replace` is `replace: false` on
+the notifications endpoint, and a refusal answers 409 `notification_held` with
+`from` and `message` in `error.data`. `--clear --if-from` is `POST
+.../notifications/clear` with `to` and `if_from`. Both flags need a daemon
+that reports API 0.52.0 or newer; an older daemon gets an upgrade message.
 
 Use `--re <comment>` to ask the recipient to answer one visible comment. A
 typed reply clears the matching request and notifies the original requester on

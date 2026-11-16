@@ -7298,6 +7298,65 @@ func (c *Client) NotifyIssueWithResponse(ctx context.Context, options *NotifyIss
 	}
 }
 
+func (c *Client) ClearNotificationIfFromWithResponse(ctx context.Context, options *ClearNotificationIfFromRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ClearNotificationIfFromResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/notifications/clear",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/notifications/clear")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ClearNotificationIfFromResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ClearNotificationIfFromResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ClearNotificationIfFromResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		out.Headers200 = &ClearNotificationIfFromResp200Headers{
+			XKataProjectName: resp.Headers.Get("X-Kata-Project-Name"),
+		}
+		return out, nil
+	default:
+		if len(resp.Content) > 0 {
+			body := new(ClearNotificationIfFromErrorResponse)
+			if json.Unmarshal(resp.Content, body) == nil {
+				out.JSONDefault = body
+				if errTarget, ok := any(*body).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
 func (c *Client) IssuePlanningDatesWithResponse(ctx context.Context, options *IssuePlanningDatesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*IssuePlanningDatesResp, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{
