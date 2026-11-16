@@ -105,13 +105,23 @@ func renderCenteredForm(s inputState, width, height int, now time.Time) string {
 func renderCloseForm(s inputState, innerW, innerH int) string {
 	statusLine := renderFormStatus(s)
 	footer := renderFormFooter(s, innerW, s.activeFieldIs(fieldCloseMessage))
-	messageRows := max(innerH-10, 3)
+	// One attachment choice per line, counted out of the message rows so the
+	// footer keeps its row; without attachments the message keeps three rows.
+	attachmentRows, floor := 0, 3
+	if f := s.field(fieldCloseAttachment); f != nil {
+		attachmentRows, floor = len(f.radio.choices)+1, 1
+	}
+	messageRows := max(innerH-10-attachmentRows, floor)
 	if message := s.field(fieldCloseMessage); message != nil {
 		message.area.SetWidth(innerW - 2)
 		message.area.SetHeight(messageRows)
 	}
 	parts := []string{titleStyle.Render(s.title)}
 	for idx := range s.fields {
+		if s.fields[idx].id == fieldCloseAttachment {
+			parts = append(parts, renderAttachmentChoices(s, idx))
+			continue
+		}
 		parts = append(parts, renderNewIssueField(s, idx, innerW))
 	}
 	if statusLine != "" {
@@ -119,6 +129,26 @@ func renderCloseForm(s inputState, innerW, innerH int) string {
 	}
 	parts = append(parts, footer)
 	return modalBoxStyle.Width(innerW+2).Padding(0, 1).Render(strings.Join(parts, "\n"))
+}
+
+// renderAttachmentChoices lists the attachment radio one choice per line, so
+// the row count is len(choices)+1 whatever the names.
+func renderAttachmentChoices(s inputState, idx int) string {
+	f := &s.fields[idx]
+	label := subtleStyle.Render(f.label)
+	if idx == s.active {
+		label = titleStyle.Render(f.label)
+	}
+	filled, empty := radioGlyphs()
+	lines := []string{label}
+	for i, c := range f.radio.choices {
+		glyph := empty
+		if i == f.radio.index {
+			glyph = filled
+		}
+		lines = append(lines, glyph+" "+c)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderFilterForm lays out the four filter axes: Status (radio),

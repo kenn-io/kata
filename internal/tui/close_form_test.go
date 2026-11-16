@@ -414,6 +414,21 @@ func attachmentIssue(t *testing.T, name string) Issue {
 	return issue
 }
 
+// threeAttachmentIssue holds three attachments that share one long name.
+func threeAttachmentIssue(t *testing.T, name string) Issue {
+	t.Helper()
+	var issue Issue
+	raw := `{"project_id":7,"short_id":"abc4","title":"Ship it","status":"open","metadata":{`
+	for i, id := range []string{reportAttachmentID, "01KATTACH0000000000000AAAA", "01KATTACH0000000000000BBBB"} {
+		if i > 0 {
+			raw += ","
+		}
+		raw += `"attachment.` + id + `":{"name":"` + name + `","media_type":"application/pdf","size":2048,"docbank_version":"6f1c2e8a-2222-4222-8222-222222222222"}`
+	}
+	require.NoError(t, json.Unmarshal([]byte(raw+`}}`), &issue))
+	return issue
+}
+
 func TestEvidenceKeyOpensTheCloseFormWithoutRequiredEvidence(t *testing.T) {
 	m := initialModel(Options{})
 	m.view = viewList
@@ -431,6 +446,27 @@ func TestEvidenceKeyOpensTheCloseFormWithoutRequiredEvidence(t *testing.T) {
 	assert.Equal(t, inputNone, got.input.kind, "x keeps closing at once")
 }
 
+func TestOpeningTheCloseFormClearsThePriorityPrefix(t *testing.T) {
+	for _, key := range []rune{'V', 'x'} {
+		t.Run(string(key), func(t *testing.T) {
+			m := initialModel(Options{})
+			m.view = viewList
+			m.scope = scope{projectID: 7}
+			m.closeRequiresEvidence = true
+			m.list.issues = []Issue{attachmentIssue(t, "report.pdf")}
+			m, _ = stepModel(m, runeKey('!'))
+			require.True(t, m.list.pendingPriority)
+			require.NotEmpty(t, m.list.status)
+
+			m, _ = stepModel(m, runeKey(key))
+
+			require.Equal(t, inputCloseForm, m.input.kind)
+			assert.False(t, m.list.pendingPriority, "the form cancels the priority prompt")
+			assert.Empty(t, m.list.status, "and its status line")
+		})
+	}
+}
+
 func TestUndoCloseFormOffersTheIssuesAttachments(t *testing.T) {
 	m := initialModel(Options{})
 	m.undoHistory.entries = []undoEntry{{id: 1, uid: "01TEST-abc4", after: attachmentIssue(t, "report.pdf")}}
@@ -444,6 +480,7 @@ func TestUndoCloseFormOffersTheIssuesAttachments(t *testing.T) {
 func TestCloseFormWithAttachmentsFitsEverySize(t *testing.T) {
 	defer snapshotInit(t)()
 	longName := strings.Repeat("a", 251) + ".pdf" // 255 bytes, the longest stored name
+	longProject := strings.Repeat("p", 120)
 	for _, tc := range []struct {
 		name          string
 		width, height int
@@ -459,8 +496,8 @@ func TestCloseFormWithAttachmentsFitsEverySize(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := initialModel(Options{})
 			m.view = viewList
-			m.scope = scope{projectID: 7}
-			m.list.issues = []Issue{attachmentIssue(t, longName)}
+			m.scope = scope{projectID: 7, projectName: longProject}
+			m.list.issues = []Issue{threeAttachmentIssue(t, longName)}
 			m, _ = stepModel(m, tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
 			m, _ = stepModel(m, runeKey('V'))
 			require.Equal(t, inputCloseForm, m.input.kind)

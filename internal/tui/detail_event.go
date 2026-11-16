@@ -356,9 +356,11 @@ func formatEvidenceItem(m map[string]any, current map[string]metadata.Attachment
 }
 
 // attachmentEvidenceLabel renders a cited attachment as `kata show` does:
-// "attachment <id>: name · N bytes", with " (removed)" or " (changed)" when current, the
-// issue's attachment references, no longer matches what the close froze.
-// current is nil when the issue is not loaded, and then no state is shown.
+// "attachment <id>: name · N bytes". It appends " (removed)" or " (changed)"
+// when current, the issue's attachment references, no longer matches what the
+// close froze; current is nil while the issue is not loaded, and then no state
+// is shown. A frozen descriptor that fails metadata.Valid reads
+// "Invalid attachment details: <id>".
 func attachmentEvidenceLabel(m map[string]any, current map[string]metadata.Attachment) string {
 	id := stringField(m, "attachment_id")
 	live, isLive := current[id]
@@ -390,7 +392,7 @@ func attachmentEvidenceLabel(m map[string]any, current map[string]metadata.Attac
 			state = " (changed)"
 		}
 	}
-	return "attachment " + id + ": " + frozen.label(0) + state
+	return "attachment " + id + ": " + frozen.label() + state
 }
 
 // evidenceLabel joins a type tag with its payload value, dropping the

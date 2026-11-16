@@ -146,6 +146,11 @@ func (m Model) routeCloseKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	if withEvidence || m.closeRequiresEvidence {
+		if target.origin == "list" {
+			// Opening a form cancels the priority prompt, as reopen does.
+			m.list.pendingPriority = false
+			m.list.status = ""
+		}
 		return m.openCloseForm(target, issue.attachments()), nil, true
 	}
 	return m, dispatchLegacyClose(m.api, target, m.list.actor), true
@@ -196,7 +201,7 @@ func dispatchLegacyClose(apiClient KataAPI, target formTarget, actor string) tea
 }
 
 // closeAttachmentNameCells bounds an attachment name in the form's choice.
-const closeAttachmentNameCells = 40
+const closeAttachmentNameCells = 32
 
 // syncCloseAttachmentField keeps the Attachment radio in step with the
 // Reason radio: the close action accepts attachment evidence only for done,
@@ -212,7 +217,7 @@ func (s inputState) syncCloseAttachmentField() inputState {
 	case offered && idx < 0:
 		choices := []string{"none"}
 		for _, a := range s.attachments {
-			choices = append(choices, a.label(closeAttachmentNameCells))
+			choices = append(choices, a.labelCut(closeAttachmentNameCells))
 		}
 		s.fields = append(slices.Clone(s.fields), inputField{
 			id: fieldCloseAttachment, label: "Attachment evidence", kind: fieldRadio,
