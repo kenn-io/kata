@@ -79,7 +79,9 @@ func TestDaemonStatusReadinessExit(t *testing.T) {
 					args = append(args, "--"+mode)
 				}
 				stdout, stderr, err := executeRootCapture(t, t.Context(), args...)
+				state := "local_stopped"
 				if ready {
+					state = "ready"
 					require.NoError(t, err, "a ready selected remote does not require current-home processes")
 					assert.Empty(t, stderr)
 				} else {
@@ -89,25 +91,36 @@ func TestDaemonStatusReadinessExit(t *testing.T) {
 				switch mode {
 				case "json":
 					var status daemonStatusOutput
-					require.NoError(t, json.Unmarshal([]byte(stdout), &status))
-					if ready {
-						assert.Empty(t, status.Daemons)
-					}
+					require.NoError(t, json.Unmarshal([]byte(stdout), &status), "stdout stays one JSON document")
+					require.NotNil(t, status.Selected)
+					assert.Equal(t, state, status.Selected.State)
+					assert.Empty(t, status.Daemons)
 				case "agent":
-					if ready {
-						assert.True(t, strings.HasPrefix(stdout, "OK daemon status=stopped"), stdout)
-					}
+					assert.True(t, strings.HasPrefix(stdout, "OK daemon status=stopped selected_state="+state+" "), stdout)
 					if !ready {
-						assert.Contains(t, stderr, "ERR status daemon_unavailable:")
+						assert.Contains(t, stderr, "ERR status daemon_unavailable: local_stopped:")
 					}
 				default:
-					if ready {
-						assert.Contains(t, stdout, "No kata daemon is running in the current KATA_HOME.")
-					}
+					assert.Contains(t, stdout, "Selected daemon: "+state+" ")
+					assert.Contains(t, stdout, "No kata daemon is running in the current KATA_HOME.")
 				}
 			})
 		}
 	}
+}
+
+func TestDaemonStatusMalformedServerURLExitsInternal(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("KATA_SERVER", "ht!tp://daemon.example")
+
+	stdout, stderr, err := executeRootCapture(t, t.Context(), "--agent", "daemon", "status")
+
+	require.Error(t, err)
+	assert.Equal(t, ExitInternal, exitCodeForErr(err, true))
+	assert.Contains(t, stdout, "selected_state=selection_error ")
+	assert.Contains(t, stderr, "ERR status internal: KATA_SERVER")
 }
 
 func TestDaemonLocate_JSONReportsConfiguredRemoteWithoutSecrets(t *testing.T) {
@@ -1625,15 +1638,45 @@ func TestDaemonFederationConfigUnavailableHubDoesNotDelayReadiness(t *testing.T)
 const daemonFederationHubProjectUID = "01HZNQ7VFPK1XGD8R5MABCD4EZ"
 
 func TestDaemonFederationConfigRetriesWhenHubAppearsAndConverges(t *testing.T) {
-	address := unusedLoopbackAddress(t)
-	var lateServer *http.Server
-	t.Cleanup(func() {
-		if lateServer != nil {
-			_ = lateServer.Close()
+	var catalogRequests atomic.Int32
+	var hubAvailable atomic.Bool
+	// Keep the port bound so another test daemon cannot answer the hub requests.
+	// HTTP 503 exercises the same unavailable-hub retry as a refused connection.
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer catalog-bearer" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
 		}
-	})
+		if !hubAvailable.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		catalogRequests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"project": map[string]any{
+					"id": 42, "uid": daemonFederationHubProjectUID, "name": "hub-project",
+				},
+			})
+		case "/api/v1/projects/42/federation/enable":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"project_id": 42, "project_uid": daemonFederationHubProjectUID,
+				"project_name": "hub-project", "replay_horizon_event_id": 9,
+				"baseline_through_event_id": 6,
+			})
+		case "/api/v1/federation/enrollments":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 71, "actor": "identity-user",
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(hub.Close)
 	baseURL := startDaemonWithFederationConfig(t, federationDaemonConfig(
-		"http://"+address, `token = "catalog-bearer"`,
+		hub.URL, `token = "catalog-bearer"`,
 	))
 
 	require.Eventually(t, func() bool {
@@ -1642,42 +1685,7 @@ func TestDaemonFederationConfigRetriesWhenHubAppearsAndConverges(t *testing.T) {
 			health.FederationConfig.LastErrorCategory == "hub_unavailable"
 	}, 3*time.Second, 20*time.Millisecond)
 
-	var catalogRequests atomic.Int32
-	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", address)
-	require.NoError(t, err)
-	lateServer = &http.Server{ //nolint:gosec // loopback-only test server
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Header.Get("Authorization") != "Bearer catalog-bearer" {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			catalogRequests.Add(1)
-			w.Header().Set("Content-Type", "application/json")
-			switch r.URL.Path {
-			case "/api/v1/projects/resolve":
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"project": map[string]any{
-						"id": 42, "uid": daemonFederationHubProjectUID, "name": "hub-project",
-					},
-				})
-			case "/api/v1/projects/42/federation/enable":
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"project_id": 42, "project_uid": daemonFederationHubProjectUID,
-					"project_name": "hub-project", "replay_horizon_event_id": 9,
-					"baseline_through_event_id": 6,
-				})
-			case "/api/v1/federation/enrollments":
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"id": 71, "actor": "identity-user",
-				})
-			default:
-				w.WriteHeader(http.StatusNotFound)
-			}
-		}),
-	}
-	go func() {
-		_ = lateServer.Serve(listener)
-	}()
+	hubAvailable.Store(true)
 
 	require.Eventually(t, func() bool {
 		health := readDaemonFederationHealth(t, baseURL)
@@ -1796,6 +1804,11 @@ func startDaemonWithFederationConfig(t *testing.T, configBody string) string {
 		filepath.Join(home, "config.toml"), []byte(configBody), 0o600,
 	))
 
+	return launchDaemon(t)
+}
+
+func launchDaemon(t *testing.T) string {
+	t.Helper()
 	originalTelemetry := newTelemetryReporter
 	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
 		return &fakeTelemetryReporter{}
@@ -1814,7 +1827,7 @@ func startDaemonWithFederationConfig(t *testing.T, configBody string) string {
 			if err != nil && !errors.Is(err, context.Canceled) {
 				t.Errorf("daemon did not stop cleanly: %v", err)
 			}
-		case <-time.After(3 * time.Second):
+		case <-time.After(30 * time.Second):
 			t.Error("daemon did not stop after context cancellation")
 		}
 	})
@@ -1861,15 +1874,6 @@ spoke_project = "spoke-project"
 hub_project = "hub-project"
 actor = "user-a"
 `, hubURL, authLine)
-}
-
-func unusedLoopbackAddress(t *testing.T) string {
-	t.Helper()
-	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	address := listener.Addr().String()
-	require.NoError(t, listener.Close())
-	return address
 }
 
 func TestDaemonReload_AgentReportsReloadedPID(t *testing.T) {

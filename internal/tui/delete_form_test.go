@@ -29,6 +29,7 @@ type deleteHarness struct {
 
 func newDeleteHarness(t *testing.T, view viewID) *deleteHarness {
 	t.Helper()
+	useInstantTicks(t)
 	ctx := t.Context()
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(ctx, "example-project")

@@ -514,7 +514,7 @@ jobs:
   api-breaking:
     needs: changes
     if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
-    name: OpenAPI breaking changes
+    name: API and schema history
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

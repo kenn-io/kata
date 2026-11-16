@@ -851,6 +851,31 @@ describe('AppShell', () => {
     expect(calls.filter((call) => call.init?.method === 'GET').length).toBeGreaterThanOrEqual(2)
   })
 
+  test.each([false, true])('recovers a teams read failure, exhausted: %s', async (exhausted) => {
+    vi.useFakeTimers()
+    let reads = 0
+    setGeneratedFetch(async () => {
+      reads++
+      return reads <= (exhausted ? 4 : 1)
+        ? new Response('', { status: 503 })
+        : Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
+    })
+    render(AppShell, { props: accessProps(executeAccessMutation) })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(
+      (screen.getByRole('button', { name: 'Refresh teams' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    await vi.advanceTimersByTimeAsync(exhausted ? 7000 : 1000)
+    if (exhausted) {
+      expect(screen.getByText('Unable to read teams. Refresh to try again.')).not.toBeNull()
+      await fireEvent.click(screen.getByRole('button', { name: 'Refresh teams' }))
+      await vi.advanceTimersByTimeAsync(0)
+    }
+    expect(screen.getByRole('option', { name: 'Example team' })).not.toBeNull()
+    expect(screen.queryByText('Unable to read teams. Refresh to try again.')).toBeNull()
+    expect(reads).toBe(exhausted ? 5 : 2)
+  })
+
   test('manages selected team membership and deletion through owner mutation authority', async () => {
     const writes: { path: string; method: string }[] = []
     let members = ['existing-member']
@@ -890,6 +915,49 @@ describe('AppShell', () => {
       { path: '/api/v1/teams/team-one/members/existing-member', method: 'DELETE' },
       { path: '/api/v1/teams/team-one', method: 'DELETE' },
     ])
+  })
+
+  test('disables team actions during refresh and removes a deleted team', async () => {
+    vi.useFakeTimers()
+    let deletes = 0
+    let refreshFailed = false
+    setGeneratedFetch(async (input, init) => {
+      const path = new URL(String(input)).pathname
+      if (init?.method === 'DELETE') {
+        deletes++
+        return Response.json({ changed: true })
+      }
+      if (path === '/api/v1/teams') {
+        if (deletes || refreshFailed) return new Response('', { status: 503 })
+        return Response.json({ teams: [{ uid: 'team-one', name: 'Example team', revision: 1 }] })
+      }
+      return Response.json({
+        team: { uid: 'team-one', name: 'Example team', revision: 1 },
+        members: ['user-a'],
+      })
+    })
+    vi.stubGlobal('confirm', () => true)
+    render(AppShell, { props: accessProps(executeAccessMutation) })
+    await vi.advanceTimersByTimeAsync(0)
+    await fireEvent.change(screen.getByLabelText('Team'), { target: { value: 'team-one' } })
+    await vi.advanceTimersByTimeAsync(0)
+    refreshFailed = true
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh teams' }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(
+      (screen.getByRole('button', { name: 'Delete team' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    expect(
+      (screen.getByRole('button', { name: 'Remove user-a' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    refreshFailed = false
+    await vi.advanceTimersByTimeAsync(1000)
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete team' }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(deletes).toBe(1)
+    expect(screen.queryByRole('button', { name: 'Delete team' })).toBeNull()
+    await vi.advanceTimersByTimeAsync(7000)
+    expect(screen.queryByRole('option', { name: 'Example team' })).toBeNull()
   })
 
   test('reloads the selected project policy after deleting one of its teams', async () => {

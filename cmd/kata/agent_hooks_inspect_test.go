@@ -118,8 +118,11 @@ func TestAgentHooksInstallKitManagedProfiles(t *testing.T) {
 			}
 			// Kit uses the native form except for Copilot's explicitly POSIX bash field.
 			expected := commands.Native
-			if profile.Agent == agenthook.AgentCopilot {
+			if profile.Agent == agenthook.AgentCodex || profile.Agent == agenthook.AgentCopilot {
 				expected = commands.POSIX
+			}
+			if profile.Agent == agenthook.AgentCodex {
+				require.Equal(t, commands.PowerShell, owned["commandWindows"])
 			}
 			// Claude on Windows receives the executable and arguments separately.
 			if profile.Agent == agenthook.AgentClaude && runtime.GOOS == "windows" {
@@ -169,13 +172,14 @@ func TestAgentHooksInstallKitManagedProfiles(t *testing.T) {
 			require.NoError(t, err, stderr)
 			handlers = nativeContractHandlers(t, profile.Agent, path)
 			require.Len(t, handlers, 3)
-			markers := []string{"example-before", "example-after", "agent-hook contract"}
+			require.Contains(t, nativeHandlerCommandLine(handlers[0]), "example-before")
+			contractIndex, afterIndex := 2, 1
 			if profile.Agent == agenthook.AgentClaude || profile.Agent == agenthook.AgentCodex || profile.Agent == agenthook.AgentGemini || profile.Agent == agenthook.AgentQwen {
-				markers = []string{"example-before", "agent-hook contract", "example-after"}
+				contractIndex, afterIndex = 1, 2
 			}
-			for i, marker := range markers {
-				require.Contains(t, nativeHandlerCommandLine(handlers[i]), marker)
-			}
+			require.Contains(t, nativeHandlerCommandLine(handlers[contractIndex]), "agent-hook contract")
+			require.Contains(t, nativeHandlerCommandLine(handlers[contractIndex]), replacement)
+			require.Contains(t, nativeHandlerCommandLine(handlers[afterIndex]), "example-after")
 		})
 	}
 }

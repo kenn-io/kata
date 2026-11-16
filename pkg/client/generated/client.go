@@ -182,6 +182,9 @@ type ClientInterface interface {
 	TurnOnLocalEmbeddings(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*TurnOnLocalEmbeddingsResponse, error)
 	TurnOnLocalEmbeddingsWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*TurnOnLocalEmbeddingsResp, error)
 
+	RestartLocalEmbeddings(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*struct{}, error)
+	RestartLocalEmbeddingsWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*RestartLocalEmbeddingsResp, error)
+
 	PollEvents(ctx context.Context, options *PollEventsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PollEventsResponse, error)
 	PollEventsWithResponse(ctx context.Context, options *PollEventsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PollEventsResp, error)
 
@@ -278,6 +281,9 @@ type ClientInterface interface {
 
 	InitProject(ctx context.Context, options *InitProjectRequestOptions, reqEditors ...runtime.RequestEditorFn) (*InitProjectResponse, error)
 	InitProjectWithResponse(ctx context.Context, options *InitProjectRequestOptions, reqEditors ...runtime.RequestEditorFn) (*InitProjectResp, error)
+
+	ReadProjectByName(ctx context.Context, options *ReadProjectByNameRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadProjectByNameResponse, error)
+	ReadProjectByNameWithResponse(ctx context.Context, options *ReadProjectByNameRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadProjectByNameResp, error)
 
 	ResolveProject(ctx context.Context, options *ResolveProjectRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ResolveProjectResponse, error)
 	ResolveProjectWithResponse(ctx context.Context, options *ResolveProjectRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ResolveProjectResp, error)
@@ -1313,6 +1319,67 @@ func (c *Client) TurnOnLocalEmbeddings(ctx context.Context, reqEditors ...runtim
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/embeddings/local")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) RestartLocalEmbeddings(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*struct{}, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/embeddings/local/restart",
+		Method:     "POST",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*struct{}, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 202 {
+			target := new(RestartLocalEmbeddingsErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "RestartLocalEmbeddingsErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(struct{})
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "struct{}",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/embeddings/local/restart")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}
@@ -3080,6 +3147,73 @@ func (c *Client) InitProject(ctx context.Context, options *InitProjectRequestOpt
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) ReadProjectByName(ctx context.Context, options *ReadProjectByNameRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadProjectByNameResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"name": {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/resolve",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ReadProjectByNameResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(ReadProjectByNameErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "ReadProjectByNameErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ReadProjectByNameResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ReadProjectByNameResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/resolve")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}
@@ -5590,10 +5724,16 @@ func (c *Client) DisconnectRelayEnrollment(ctx context.Context, options *Disconn
 
 func (c *Client) GetProjectFederationStatus(ctx context.Context, options *GetProjectFederationStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetProjectFederationStatusResponse, error) {
 	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"compact":     {Style: "form", Explode: &[]bool{false}[0]},
+		"omit_errors": {Style: "form", Explode: &[]bool{false}[0]},
+	}
 	reqParams := runtime.RequestOptionsParameters{
-		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/status",
-		Method:     "GET",
-		Options:    options,
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/status",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
 	}
 
 	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
@@ -6871,8 +7011,9 @@ func (c *Client) AddAttachment(ctx context.Context, options *AddAttachmentReques
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"actor": {Style: "form", Explode: &[]bool{false}[0]},
-		"name":  {Style: "form", Explode: &[]bool{false}[0]},
+		"actor":          {Style: "form", Explode: &[]bool{false}[0]},
+		"name":           {Style: "form", Explode: &[]bool{false}[0]},
+		"reuse_existing": {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/attachments",

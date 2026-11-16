@@ -217,12 +217,12 @@ func TestVerifierRejectsDuplicateAvailableSecrets(t *testing.T) {
 	source := testSource(t)
 	other := source
 	other.KeyID = "other-key"
+	keys := []signingpolicy.Key{{Source: source, EnrollmentID: 7}, {Source: other, EnrollmentID: 8}}
 	state := filepath.Join(t.TempDir(), "replay.state")
 	require.NoError(t, InitializeReplayState(state))
-	_, err := NewVerifier("https://hub.example", []signingpolicy.Key{
-		{Source: source, EnrollmentID: 7}, {Source: other, EnrollmentID: 8},
-	}, state)
-	require.ErrorIs(t, err, signingpolicy.ErrKey)
+	_, err := NewVerifier("https://hub.example", keys, state)
+	require.ErrorIs(t, err, signingpolicy.ErrSharedSecret)
+	require.NotErrorIs(t, err, signingpolicy.ErrKey)
 }
 
 func signedWithoutKey(t *testing.T) *http.Request {

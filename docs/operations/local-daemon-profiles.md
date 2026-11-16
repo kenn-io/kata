@@ -1,7 +1,7 @@
 ---
 title: Local daemon profiles
 description: Keep personal and work spokes separate and recover a stopped spoke without changing its database identity.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # Local daemon profiles
@@ -70,6 +70,12 @@ override is ignored; a broader ancestor does not bypass workspace boundaries.
 Registration is opt-in. Kata does not convert loopback URLs into profiles,
 remove overrides, enroll a project, or merge same-named projects.
 
+A profile obeys top-level `autostart = false` in its selected home's
+`config.toml`: ordinary commands wait up to 30 seconds, or the caller's shorter
+deadline, for its service manager instead of starting a daemon. `kata daemon
+recover` first checks the existing storage, schema, and requested project; if
+those checks pass, it waits in the same way.
+
 ## Diagnose and recover
 
 Run these commands from the bound workspace:
@@ -119,7 +125,7 @@ them.
 | State | Action |
 | --- | --- |
 | `ready` | Continue using the selected daemon. |
-| `stopped_local_profile` | Run `daemon recover` to start that existing profile. |
+| `stopped_local_profile` | Run `daemon recover` to check and reach that existing profile. If autostart is disabled, start it through its service manager. |
 | `local_stopped` | Start the current home explicitly. It is not a pinned profile. |
 | `local_unreachable` | Inspect the selected process, transport, and credentials. |
 | `selection_error` | Repair routing with `daemon diagnose`; status retains the current-home process list. |
@@ -152,8 +158,9 @@ integrations, and idle settings. The client does not apply the parent home's
 `KATA_DSN`, PostgreSQL schema overrides, daemon tokens, proxies, or hosted
 `PORT` to that profile. Child processes receive an OS/toolchain allowlist,
 explicit safe credential references from the selected configuration, and the
-selected home/storage settings. Reserved daemon, PostgreSQL, proxy, and hosted
-variable names cannot be credential references. Other `KATA_` names, including
+selected home/storage settings. When Kata launches the profile, reserved daemon,
+PostgreSQL, proxy, and hosted variable names cannot be credential references.
+Other `KATA_` names, including
 `KATA_TEAM_HUB_TOKEN` and `KATA_SHARED_TOKEN`, are allowed. `SSL_CERT_FILE` and
 `SSL_CERT_DIR` pass through to child daemons so private certificate authorities
 remain available for HTTPS connections. `DOCBANK_HOME` passes through so a
@@ -162,9 +169,14 @@ profile daemon with `[docbank] local = true` finds the same Docbank vault as the
 
 The profile's own auth token is used for its API and identity checks. A catalog
 `token`, `token_file` or `token_env` can select a client credential for
-identity-token mode, in that order of precedence. It does not replace the
-selected daemon's configured auth. Use a neutral, non-reserved environment
-name for a referenced credential.
+identity-token mode, in that order of precedence. It does not change the
+daemon's configured auth. With `autostart = false`, Kata never launches the
+profile, so a catalog credential is used for the client's API and identity
+checks without resolving the daemon's own `auth.token_env`, which may exist only
+in the supervised process environment and may use a reserved name. Without a
+catalog credential, the client resolves the profile's own token. For a profile
+Kata launches, use a neutral, non-reserved environment name for a referenced
+credential.
 
 SQLite storage paths must be absolute. PostgreSQL profiles require a complete
 single-host URL with an explicit port, database, and user. Service routing,

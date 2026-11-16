@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/v2"
 	"errors"
@@ -74,6 +75,10 @@ const (
 // daemonOwnerLockWait lets a replaced daemon finish its drain, which outlasts
 // its runtime record, before startup refuses its store. A var for tests.
 var daemonOwnerLockWait = daemonRestartProcessWaitTimeout
+
+// daemonReadinessWait is the ordinary budget for a detached daemon that can
+// open its store to publish readiness. A var for tests.
+var daemonReadinessWait = 5 * time.Second
 
 var newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
 	return telemetry.NewReporterOrDisabled(opts)
@@ -505,7 +510,7 @@ func defaultLaunchDetachedDaemon(
 	var record kitdaemon.RuntimeRecord
 	adoptedConcurrentDaemon := false
 	// The child may first wait for a replaced daemon to release the store.
-	err = client.WaitForDaemonStartup(ctx, ownerLocks, daemonOwnerLockWait+5*time.Second, exited, func(context.Context) (bool, error) {
+	err = client.WaitForDaemonStartup(ctx, ownerLocks, daemonOwnerLockWait+daemonReadinessWait, exited, func(context.Context) (bool, error) {
 		var ok bool
 		record, ok = liveDaemonRecord(dataDir, pid)
 		if ok || !childExited.Load() {
@@ -900,6 +905,7 @@ func daemonRestartCmd() *cobra.Command {
 		listen           string
 		insecureReadonly bool
 		noAutoToken      bool
+		generation       string
 	)
 	cmd := &cobra.Command{
 		Use:   "restart",
@@ -912,11 +918,20 @@ func daemonRestartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			running, release, err := lockLiveDaemons(cmd.Context(), ns, cmd.ErrOrStderr())
+			lockCtx, cancel := restartLockContext(cmd.Context(), generation)
+			defer cancel()
+			running, release, err := lockLiveDaemons(lockCtx, ns, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
 			defer release()
+			if generation != "" {
+				record, err := selectRestartGeneration(running, generation)
+				if err != nil {
+					return err
+				}
+				running = []kitdaemon.RuntimeRecord{record}
+			}
 			if err := requireRestartable(running); err != nil {
 				return err
 			}
@@ -980,6 +995,8 @@ func daemonRestartCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noAutoToken, "no-auto-token", false, "disable creating a persisted daemon token; eligible existing tokens are still reused")
 	cmd.Flags().BoolVar(&insecureReadonly, "insecure-readonly", false,
 		"permit unauthenticated GETs on non-loopback TCP when no token is configured (DEV ONLY)")
+	cmd.Flags().StringVar(&generation, "generation", "", "restart only this daemon generation")
+	_ = cmd.Flags().MarkHidden("generation")
 	return cmd
 }
 
@@ -997,6 +1014,8 @@ type daemonStartupPreflight struct {
 	HookConfig     hooks.LoadedConfig
 	Embedder       *embedding.Client
 	VectorsPath    string
+	SavedEmbedding config.EmbeddingsConfig
+	ChoiceErr      error
 }
 
 func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartupPreflight, error) {
@@ -1087,7 +1106,17 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	if err != nil {
 		return daemonStartupPreflight{}, fmt.Errorf("hooks: %w", err)
 	}
+	savedEmbeddings := dcfg.Search.Embeddings
+	chosen, choiceErr := applySharedEmbeddingChoice(ctx, savedEmbeddings, dbPath)
+	if choiceErr == nil {
+		dcfg.Search.Embeddings = chosen
+	}
 	embedder, vectorsPath, err := preflightEmbeddingStartup(dcfg.Search.Embeddings, dbPath)
+	if err != nil && chosen != savedEmbeddings {
+		choiceErr = fmt.Errorf("preflight: %w", err)
+		dcfg.Search.Embeddings = savedEmbeddings
+		embedder, vectorsPath, err = preflightEmbeddingStartup(savedEmbeddings, dbPath)
+	}
 	if err != nil {
 		return daemonStartupPreflight{}, err
 	}
@@ -1105,6 +1134,8 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		HookConfig:     loadedHooks,
 		Embedder:       embedder,
 		VectorsPath:    vectorsPath,
+		SavedEmbedding: savedEmbeddings,
+		ChoiceErr:      choiceErr,
 	}, nil
 }
 
@@ -1261,15 +1292,25 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 // re-executes itself only after every listener and the runtime record have
 // been released.
 func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) error {
-	restart := newDaemonRestart(os.Stderr)
-	if err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, restart); err != nil {
-		return reportRestartFailure(startedForRestartReply, err)
+	reapRestartHelper()
+	diagnostics, errorFile, closeLog := startDaemonLogging(ctx)
+	// Keep crash output alive during panic unwinding; close only on normal return.
+	restart := newDaemonRestart(diagnostics)
+	err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, restart, diagnostics)
+	if err != nil {
+		err = reportRestartFailure(startedForRestartReply, err)
+	} else {
+		err = restart.exec(ctx)
 	}
-	return restart.exec(ctx)
+	if err != nil && errorFile != nil {
+		_, _ = fmt.Fprintln(errorFile, err)
+	}
+	closeLog()
+	return err
 }
 
 func runDaemonProcess(
-	ctx context.Context, listen string, insecureReadonly, noAutoToken bool, restart *daemonRestart,
+	ctx context.Context, listen string, insecureReadonly, noAutoToken bool, restart *daemonRestart, diagnostics io.Writer,
 ) (returnErr error) {
 	startup, err := preflightDaemonStartup(ctx, listen, insecureReadonly, noAutoToken)
 	if err != nil {
@@ -1280,10 +1321,10 @@ func runDaemonProcess(
 	ns := startup.Namespace
 	endpoint := startup.Endpoint
 	if msg, ok := daemon.TrustPrivateNetworkWarning(listen, dcfg.Auth); ok {
-		fmt.Fprintln(os.Stderr, msg)
+		_, _ = fmt.Fprintln(diagnostics, msg)
 	}
 	if msg, ok := daemon.UnauthenticatedPrivateNetworkWritesWarning(listen, dcfg.Auth); ok {
-		fmt.Fprintln(os.Stderr, msg)
+		_, _ = fmt.Fprintln(diagnostics, msg)
 	}
 	if err := ns.EnsureDirs(); err != nil {
 		return err
@@ -1361,7 +1402,7 @@ func runDaemonProcess(
 		return fmt.Errorf("check root attribution signing key: %w", err)
 	}
 	if rootSigningHealth != nil {
-		fmt.Fprintln(os.Stderr, "kata daemon: "+daemon.RootSigningWarning(*rootSigningHealth))
+		_, _ = fmt.Fprintln(diagnostics, "kata daemon: "+daemon.RootSigningWarning(*rootSigningHealth))
 	}
 
 	runtimeEndpoint := runtimeEndpointForListener(endpoint, listener)
@@ -1383,7 +1424,7 @@ func runDaemonProcess(
 		runtimeEndpoint,
 		webEndpoint,
 		func(timeout time.Duration) {
-			announceIdleShutdown(os.Stderr, timeout)
+			announceIdleShutdown(diagnostics, timeout)
 			shutdownTrigger.Call()
 		},
 	)
@@ -1391,7 +1432,7 @@ func runDaemonProcess(
 		return err
 	}
 	if idleIneligible {
-		fmt.Fprintln(os.Stderr,
+		_, _ = fmt.Fprintln(diagnostics,
 			"kata daemon: auto-start idle shutdown disabled because the daemon is not owner-local")
 	}
 	var acquireHookDrain hooks.AcquireActivity
@@ -1407,7 +1448,7 @@ func runDaemonProcess(
 
 	disp, daemonLog, err := setupHooks(
 		store, ns.DBHash, startup.KataHome, startup.HookConfig, acquireHookDrain,
-		withoutEnvironmentKey(os.Environ(), daemonruntime.AutoStartMarkerEnv),
+		withoutEnvironmentKey(os.Environ(), daemonruntime.AutoStartMarkerEnv), diagnostics,
 	)
 	if err != nil {
 		return err
@@ -1481,13 +1522,21 @@ func runDaemonProcess(
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
 	maps.Copy(rec.Metadata, restart.metadata())
 
+	if startup.ChoiceErr != nil {
+		daemonLog.Printf("shared embeddings choice: %v", startup.ChoiceErr)
+	}
+
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)
 	embedder, vectorIndex, reconcilerHealth, embeddingWake, err := startEmbeddingReconciler(
 		ctx, workers, waitableDrainAdmission, dcfg.Search.Embeddings, startup.Embedder, startup.VectorsPath, store, broadcaster, daemonLog, publisher,
 	)
 	if err != nil {
-		return err
+		if dcfg.Search.Embeddings == startup.SavedEmbedding {
+			return err
+		}
+		daemonLog.Printf("shared embeddings choice: %v", err)
+		dcfg.Search.Embeddings = startup.SavedEmbedding
 	}
 	defer func() {
 		if closeDependencies && vectorIndex != nil {
@@ -1505,7 +1554,7 @@ func runDaemonProcess(
 	sigs, reloadCleanup := installReloadSource(ctx, ns.DBHash)
 	workers.Go(func() {
 		runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog, func() {
-			if err := reloadEmbeddingCredentials(dcfg.Search.Embeddings, embedder, embeddingWake); err != nil {
+			if err := reloadEmbeddingCredentials(ctx, dcfg.Search.Embeddings, startup.DBPath, embedder, embeddingWake); err != nil {
 				daemonLog.Printf("embedding credential reload failed: %v", err)
 			}
 		})
@@ -1643,6 +1692,25 @@ func runDaemonProcess(
 	localSetup := &localEmbeddingsSetup{
 		embeddings: dcfg.Search.Embeddings, idle: idleAdmission,
 		start: func(work func(context.Context)) bool { return workers.Go(func() { work(ctx) }) },
+	}
+	if restart != nil {
+		localSetup.restart = func() error {
+			var output bytes.Buffer
+			// The helper acquires the start lock before replacing this daemon.
+			return kitdaemon.StartDetached(context.WithoutCancel(ctx), kitdaemon.StartDetachedOptions{
+				Executable: restart.executable,
+				Args:       []string{"daemon", "restart", "--generation", restartGeneration(rec)},
+				Env:        os.Environ(), Stdout: &output, Stderr: &output,
+				AfterStart: func(cmd *exec.Cmd) { restart.helperPID.Store(int64(cmd.Process.Pid)) },
+				Exited: func(err error) {
+					restart.helperPID.Store(0)
+					if err == nil {
+						return
+					}
+					localSetup.restartExited(fmt.Errorf("restart failed: %w: %s", err, strings.TrimSpace(output.String())))
+				},
+			})
+		}
 	}
 	if pg, ok := store.(*pgstore.Store); ok {
 		localSetup.vectorReady = func(ctx context.Context) error {
@@ -1813,13 +1881,13 @@ func runDaemonProcess(
 			}
 			runtimeFile = path
 			if federationIngressAddress != "" {
-				fmt.Fprintf(os.Stderr, "federation ingress listening at %s\n", federationIngressAddress)
+				_, _ = fmt.Fprintf(diagnostics, "federation ingress listening at %s\n", federationIngressAddress)
 			}
 			if idleController != nil {
 				idleController.Start()
 			}
 			if listen != "" {
-				fmt.Fprintf(os.Stderr, "kata daemon: listening on %s\n", rec.Endpoint().ConfigAddress())
+				_, _ = fmt.Fprintf(diagnostics, "kata daemon: listening on %s\n", rec.Endpoint().ConfigAddress())
 			}
 			return nil
 		})
@@ -1893,7 +1961,7 @@ func startExternalRootEventWake(
 		return
 	}
 	wakeTypes := map[string]bool{
-		"issue.commented": true, "issue.comment_edited": true, "issue.updated": true,
+		"issue.commented": true, "issue.comment_edited": true, "issue.updated": true, db.RepeatedImportEventType: true,
 		"issue.metadata_updated": true, "issue.closed": true, "issue.reopened": true,
 	}
 	sub := bcast.Subscribe(daemon.SubFilter{})
@@ -2123,6 +2191,24 @@ func preflightEmbeddingStartup(
 		return nil, "", nil
 	}
 	cfg := embeddingClientConfig(ec)
+	if ec.UsesLocal() {
+		cfg.Endpoint = func(ctx context.Context) (string, error) {
+			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
+				backend, err := storeopen.BackendForDSN(dbPath)
+				if err != nil {
+					return false, err
+				}
+				chosen := false
+				if backend == storeopen.BackendSQLite {
+					chosen, err = embedlocal.ChoiceRecorded()
+				}
+				if err == nil && !chosen {
+					err = errors.New("run kata daemon local-embeddings to approve the download")
+				}
+				return chosen, err
+			})
+		}
+	}
 	embedder, err := embedding.New(cfg)
 	if err != nil {
 		return nil, "", fmt.Errorf("embedding client: %w", err)
@@ -2162,11 +2248,6 @@ func embeddingClientConfig(ec config.EmbeddingsConfig) embedding.Config {
 		}
 		if cfg.Timeout == 0 {
 			cfg.Timeout = embedlocal.RequestTimeout
-		}
-		cfg.Endpoint = func(ctx context.Context) (string, error) {
-			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
-				return false, errors.New("run kata daemon local-embeddings to approve the download")
-			})
 		}
 	}
 	return cfg
@@ -2575,11 +2656,12 @@ func setupHooks(
 	loaded hooks.LoadedConfig,
 	acquireDrain hooks.AcquireActivity,
 	environment []string,
+	diagnostics io.Writer,
 ) (*hooks.Dispatcher, *log.Logger, error) {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return nil, nil, err
 	}
-	daemonLog := log.New(os.Stderr, "kata-daemon: ", log.LstdFlags)
+	daemonLog := log.New(diagnostics, "kata-daemon: ", log.LstdFlags)
 	deps := hooks.DispatcherDeps{
 		DBHash:          dbHash,
 		KataHome:        home,

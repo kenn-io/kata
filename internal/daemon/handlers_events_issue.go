@@ -188,19 +188,15 @@ func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db
 }
 
 // attachResolvedIssueID lets the scoped projection authorize federated history
-// rows whose identity may be payload-only and whose local issue_id is NULL.
-// The history query already filtered this exact subject; attach its resolved
-// envelope identity so clients and scoped projection can identify the issue.
+// rows, which name their issue by header UID and store a NULL local issue_id.
+// The history query already filtered this exact subject; attach its local ID
+// so clients and scoped projection can identify the issue.
 func attachResolvedIssueID(issue db.Issue, events []db.Event) []db.Event {
 	for index := range events {
 		event := &events[index]
-		if db.FederationEventIssueUID(event.IssueUID, event.Payload) == issue.UID {
-			issueUID := issue.UID
-			event.IssueUID = &issueUID
-			if event.IssueID == nil {
-				issueID := issue.ID
-				event.IssueID = &issueID
-			}
+		if event.IssueID == nil && db.EventIssueUID(event.IssueUID) == issue.UID {
+			issueID := issue.ID
+			event.IssueID = &issueID
 		}
 	}
 	return events

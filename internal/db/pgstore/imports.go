@@ -403,7 +403,7 @@ created_at,updated_at,closed_at,priority
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("insert imported issue: %w", mapSQLError(err, nil))
 	}
-	payload, err := json.Marshal(issueCreatedPayload{
+	payload, err := json.Marshal(db.IssueDocumentPayload{
 		UID: issueUID, ShortID: shortID, Title: item.Title, Body: item.Body,
 		Author: item.Author, Owner: db.NormalizeImportOwner(item.Owner), Priority: item.Priority,
 		Status: item.Status, ClosedReason: item.ClosedReason, ClosedAt: optionalStoredTime(item.ClosedAt),

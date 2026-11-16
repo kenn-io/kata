@@ -384,6 +384,21 @@ func (a *countingDetailAPI) ListLinks(context.Context, int64, string) ([]LinkEnt
 	return nil, nil
 }
 
+// useInstantTicks makes timer commands built during t deliver their message
+// without waiting, so helpers that run commands inline do not sit through
+// toast and debounce timers. The toast clock is untouched, so an expiry
+// message arrives before its toast is due and leaves the toast up. dayTick
+// re-arms itself: do not combine this with a helper that follows every
+// command.
+func useInstantTicks(t *testing.T) {
+	t.Helper()
+	prior := tickAfter
+	tickAfter = func(_ time.Duration, fn func(time.Time) tea.Msg) tea.Cmd {
+		return func() tea.Msg { return fn(time.Now()) }
+	}
+	t.Cleanup(func() { tickAfter = prior })
+}
+
 // runCmdTree runs cmd and every nested batch, returning the leaf messages.
 func runCmdTree(cmd tea.Cmd) []tea.Msg {
 	if cmd == nil {

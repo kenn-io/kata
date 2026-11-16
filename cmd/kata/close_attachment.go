@@ -12,7 +12,7 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-const apiVersionAttachmentEvidence = "0.39.0"
+const apiVersionDocbankLinkReuse = "0.39.0"
 
 // prepareCloseAttachments validates the entire local request before any link.
 // Full IDs bypass current metadata lookup so saved close receipts can replay.
@@ -55,7 +55,7 @@ func prepareCloseAttachments(cmd *cobra.Command, raw, reason, message string, ev
 	if err != nil {
 		return nil, err
 	}
-	if err := requireDaemonAPIVersion(ctx, hc, base, apiVersionAttachmentEvidence, "attachment close evidence"); err != nil {
+	if err := requireDaemonAPIVersion(ctx, hc, base, apiVersionDocbankLinkReuse, "attachment close evidence"); err != nil {
 		return nil, err
 	}
 	out := append([]api.Evidence(nil), evidence...)

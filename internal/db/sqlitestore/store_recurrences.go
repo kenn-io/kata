@@ -860,7 +860,7 @@ func (d *Store) materializeNextTx(
 	}
 
 	// Emit issue.created (with recurrence linkage) and recurrence.materialized.
-	issueCreatedPayload, err := buildIssueCreatedPayload(issueCreatedPayload{
+	issueCreatedPayload, err := buildIssueCreatedPayload(db.IssueDocumentPayload{
 		UID:           newUID,
 		ShortID:       newShortID,
 		Title:         r.TemplateTitle,

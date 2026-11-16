@@ -953,6 +953,7 @@ func TestInboxDesignationChangesApplyOnNextVisit(t *testing.T) {
 		{"stream reset", resetRequiredMsg{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			useInstantTicks(t)
 			first := ProjectSummary{ID: 7, Name: "example-project"}
 			first.Metadata.Role = jsontext.Value(`"inbox"`)
 			second := ProjectSummary{ID: 8, Name: "spoke-project"}

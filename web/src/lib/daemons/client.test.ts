@@ -138,7 +138,7 @@ describe('web daemon transport', () => {
       }),
     )
 
-    await expect(fetchWebDaemons(fetcher)).resolves.toEqual([
+    await expect(fetchWebDaemons(fetcher, new AbortController().signal)).resolves.toEqual([
       expect.objectContaining({ id: 'example-local', default: true, health: 'connected' }),
       expect.objectContaining({ id: 'example-remote', auth: 'token', health: 'auth_required' }),
       expect.objectContaining({ id: 'example-legacy', health: 'upgrade_required' }),
@@ -167,7 +167,7 @@ describe('web daemon transport', () => {
         ],
       }),
     )
-    const daemons = await fetchWebDaemons(fetcher)
+    const daemons = await fetchWebDaemons(fetcher, new AbortController().signal)
     expect(daemons[0]).toMatchObject({ local: true })
     expect(daemons[1]).toMatchObject({ local: false })
   })
@@ -175,6 +175,8 @@ describe('web daemon transport', () => {
   test('classifies authentication-required roster responses', async () => {
     const fetcher = vi.fn(async () => new Response('', { status: 401 }))
 
-    await expect(fetchWebDaemons(fetcher)).rejects.toBeInstanceOf(AuthenticationRequiredError)
+    await expect(fetchWebDaemons(fetcher, new AbortController().signal)).rejects.toBeInstanceOf(
+      AuthenticationRequiredError,
+    )
   })
 })

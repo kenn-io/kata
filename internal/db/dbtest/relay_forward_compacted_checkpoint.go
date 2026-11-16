@@ -35,7 +35,7 @@ func RunForwardCompactedRelayCheckpointPostCheckpointIngress(t *testing.T, store
 
 	issueUID, err := uid.New()
 	require.NoError(t, err)
-	initial := newRemoteEvent(t, project, &issueUID, "issue.created", "source-agent", rootUID, 300, jsontext.Value(`{"uid":"`+issueUID+`","title":"Checkpoint title","author":"source-agent","metadata":{}}`))
+	initial := newRemoteEvent(t, project, &issueUID, "issue.created", "source-agent", rootUID, 300, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"Checkpoint title","author":"source-agent","metadata":{}}`)))
 	initialBytes, err := db.EncodeRelaySourceEvent(initial)
 	require.NoError(t, err)
 	initialReceipt, err := db.SignRootReceipt(db.AttributionReceipt{Version: 1, ProjectUID: project.UID, EventUID: initial.EventUID, ContentHash: initial.ContentHash, AuthorityUID: rootUID, AccountableActor: "root-member", SourceActor: initial.Actor, IngressInstanceUID: rootUID, AcceptedAt: time.Now().UTC(), ResetEpoch: 1, Sequence: 1, KeyID: pin.KeyID}, rootPrivate)
@@ -72,7 +72,7 @@ func RunForwardCompactedRelayCheckpointPostCheckpointIngress(t *testing.T, store
 	postIssueUID, err := uid.New()
 	require.NoError(t, err)
 	updated := newRemoteEvent(t, project, &issueUID, "issue.updated", "root-editor", rootUID, 301, jsontext.Value(`{"title":"Synchronized update","updated_at":"2026-05-23T12:00:00.000Z"}`))
-	created := newRemoteEvent(t, project, &postIssueUID, "issue.created", "source-agent", rootUID, 302, jsontext.Value(`{"uid":"`+postIssueUID+`","title":"Synchronized creation","author":"source-agent","metadata":{}}`))
+	created := newRemoteEvent(t, project, &postIssueUID, "issue.created", "source-agent", rootUID, 302, IssueDocument(t, postIssueUID, jsontext.Value(`{"uid":"`+postIssueUID+`","title":"Synchronized creation","author":"source-agent","metadata":{}}`)))
 	sealEvent := func(source db.RemoteEvent, sequence int64) db.RelayEnvelope {
 		body, err := db.EncodeRelaySourceEvent(source)
 		require.NoError(t, err)
@@ -102,7 +102,7 @@ func RunForwardCompactedRelayCheckpointPostCheckpointIngress(t *testing.T, store
 	localSource := db.RemoteEventFromStored(localEvent)
 	downstreamIssueUID, err := uid.New()
 	require.NoError(t, err)
-	downstreamSource := newRemoteEvent(t, project, &downstreamIssueUID, "issue.created", "downstream-agent", downstreamUID, 303, jsontext.Value(`{"uid":"`+downstreamIssueUID+`","title":"Downstream ingress","author":"downstream-agent","metadata":{}}`))
+	downstreamSource := newRemoteEvent(t, project, &downstreamIssueUID, "issue.created", "downstream-agent", downstreamUID, 303, IssueDocument(t, downstreamIssueUID, jsontext.Value(`{"uid":"`+downstreamIssueUID+`","title":"Downstream ingress","author":"downstream-agent","metadata":{}}`)))
 	downstreamBody, err := db.EncodeRelaySourceEvent(downstreamSource)
 	require.NoError(t, err)
 	downstreamEnvelope, err := db.SealRelayEnvelope(db.RelayEnvelope{Version: db.RelayProtocolVersion, BindingUID: downstream.Enrollment.RelayBindingUID, ProjectUID: project.UID, AuthorityUID: rootUID, SenderInstanceUID: downstreamUID, ReceiverInstanceUID: store.InstanceUID(), Epoch: downstream.Enrollment.RelayResetEpoch, Sequence: 1, Stream: db.RelayStreamEvent, Path: []string{downstreamUID}, SourceUID: downstreamSource.EventUID, SourceHash: downstreamSource.ContentHash, Body: downstreamBody})

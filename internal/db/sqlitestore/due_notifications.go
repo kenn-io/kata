@@ -212,7 +212,7 @@ func issueMetadataHistoryTx(ctx context.Context, tx *sql.Tx, issueID int64, issu
 		SELECT uid, origin_instance_uid, type, payload, hlc_physical_ms, hlc_counter, created_at
 		  FROM events
 		 WHERE (issue_id = ? OR (issue_id IS NULL AND issue_uid = ?))
-		   AND type IN ('issue.created', 'issue.snapshot', 'issue.metadata_updated', 'issue.scheduled_reached', 'recurrence.materialized')
+		   AND type IN ('issue.created', 'issue.snapshot', 'issue.restated', 'issue.metadata_updated', 'issue.scheduled_reached', 'recurrence.materialized')
 		 ORDER BY hlc_physical_ms, hlc_counter, origin_instance_uid, uid`, issueID, issueUID)
 	if err != nil {
 		return nil, fmt.Errorf("read due notification history: %w", err)

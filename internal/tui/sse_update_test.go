@@ -629,6 +629,7 @@ func TestCommentArrivalMakesPendingReplyTargetNavigable(t *testing.T) {
 	}{
 		{"comment", 7, `{"type":"issue.commented","project_id":7,"issue_uid":"target-issue","payload":{"comment_uid":"target-comment"}}`},
 		{"snapshot", 7, `{"type":"issue.snapshot","project_id":7,"issue_uid":"target-issue","payload":{"uid":"target-issue","comments":[{"comment_uid":"target-comment","author":"worker","body":"Finding","created_at":"2026-10-07T11:00:00Z"}]}}`},
+		{"whole copy", 7, `{"type":"issue.restated","project_id":7,"issue_uid":"target-issue","payload":{"title":"t","status":"open","comments":[{"comment_uid":"target-comment","author":"worker","body":"Finding","created_at":"2026-10-07T11:00:00Z"}]}}`},
 		{"cross-project snapshot", 8, `{"type":"issue.snapshot","project_id":8,"issue_uid":"target-issue","payload":{"uid":"target-issue","comments":[{"comment_uid":"unrelated-comment"},{"comment_uid":"target-comment","author":"worker","body":"Finding","created_at":"2026-10-07T11:00:00Z"}]}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -868,6 +869,15 @@ func TestIssueLifecycleRefreshesDisplayedCommentEndpoints(t *testing.T) {
 			}}}},
 		},
 		{
+			// A whole copy can delete or restore an issue, and it need not
+			// carry the comment the open detail refers to.
+			name:      "whole copy of a reply target's issue",
+			eventType: "issue.restated", issueUID: "restored-target-issue",
+			comments: []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
+				UID: "target-comment", IssueUID: "restored-target-issue", Kind: "confirm",
+			}}},
+		},
+		{
 			name:      "restored reply target",
 			eventType: "issue.restored", issueUID: "restored-target-issue",
 			comments: []CommentEntry{{UID: "reply-comment", Reply: &commentref.Link{
@@ -1072,17 +1082,22 @@ func TestFederatedCommentEventIncomingReplyRefreshesDisplayedTarget(t *testing.T
 func TestFederatedSnapshotIncomingReplyRefreshesDisplayedTarget(t *testing.T) {
 	tests := []struct {
 		name        string
+		eventType   string
 		replyToUID  string
 		wantRefresh bool
 	}{
-		{name: "reply to displayed comment", replyToUID: "displayed-comment", wantRefresh: true},
-		{name: "reply to other comment", replyToUID: "other-comment"},
+		{name: "reply to displayed comment", eventType: "issue.snapshot", replyToUID: "displayed-comment", wantRefresh: true},
+		{name: "reply to other comment", eventType: "issue.snapshot", replyToUID: "other-comment"},
+		{name: "whole copy reply to displayed comment", eventType: "issue.restated", replyToUID: "displayed-comment", wantRefresh: true},
+		// A whole copy can also delete or restore its issue, so it always
+		// refreshes an open detail, as a restore does.
+		{name: "whole copy reply to other comment", eventType: "issue.restated", replyToUID: "other-comment", wantRefresh: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := sseDetailFixture(7, "source", "source-issue")
 			m.detail.comments = []CommentEntry{{UID: "displayed-comment"}}
-			msg := federatedCommentIdentityEvent(t, "issue.snapshot", "incoming-comment", tt.replyToUID)
+			msg := federatedCommentIdentityEvent(t, tt.eventType, "incoming-comment", tt.replyToUID)
 			cmd := m.maybeRefetchOpenDetail(msg)
 			if tt.wantRefresh {
 				assertDetailRefetchBatch(t, &m, cmd)
@@ -1104,7 +1119,7 @@ func federatedCommentIdentityEvent(t *testing.T, eventType, commentUID string, r
 		ReplyToUID string `json:"reply_to_uid,omitempty"`
 	}{CommentUID: commentUID, ReplyToUID: replyTarget}
 	var payload any = comment
-	if eventType == "issue.snapshot" || eventType == "issue.created" {
+	if eventType == "issue.snapshot" || eventType == "issue.created" || eventType == "issue.restated" {
 		payload = struct {
 			UID      string `json:"uid"`
 			Comments []struct {

@@ -233,7 +233,7 @@ type artifactReoffer struct {
 // identity, while retries of the same retention reuse it.
 func (o artifactReoffer) sourceUIDFor(ctx context.Context, tx db.Transaction) (string, error) {
 	var generation string
-	err := tx.QueryRowContext(ctx, `SELECT uid FROM events WHERE project_id=$1 AND issue_uid=$2 AND type IN ('issue.created','issue.snapshot','issue.updated','issue.restored') ORDER BY id DESC LIMIT 1`, o.projectID, o.issueUID).Scan(&generation)
+	err := tx.QueryRowContext(ctx, `SELECT uid FROM events WHERE project_id=$1 AND issue_uid=$2 AND type IN ('issue.created','issue.snapshot','issue.updated','issue.restated','issue.restored') ORDER BY id DESC LIMIT 1`, o.projectID, o.issueUID).Scan(&generation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return o.sourceUID, nil
 	}

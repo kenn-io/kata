@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { parseRoute } from '../router'
 import {
   createUISnapshotRequest,
+  projectUISnapshot,
   SnapshotController,
   snapshotIntentForRoute,
+  snapshotRequestIntent,
   type SnapshotRequest,
   type UISnapshot,
 } from './snapshot'
@@ -77,6 +79,16 @@ describe('SnapshotController', () => {
     expect(accepted.at(-1)).toBe(17)
   })
 
+  it('requests retries only before the first snapshot is accepted', async () => {
+    const request = vi
+      .fn<SnapshotRequest<TestIntent, TestSnapshot>>()
+      .mockResolvedValue({ status: 200, etag: '"ok"', snapshot: snapshot('safe', 4) })
+    const controller = new SnapshotController(request, (intent) => intent.key)
+    await controller.load({ key: 'same-route' })
+    await controller.load({ key: 'same-route' })
+    expect(request.mock.calls.map(([, options]) => options.retry)).toEqual([true, false])
+  })
+
   it('retains but stale-marks authority after a safe generic failure', async () => {
     const request = vi
       .fn<SnapshotRequest<TestIntent, TestSnapshot>>()
@@ -115,6 +127,45 @@ describe('SnapshotController', () => {
       canMutate: false,
       authenticationRequired: true,
     })
+  })
+
+  it('revalidates the accepted intent without withdrawing write authority', async () => {
+    const pending: Array<ReturnType<typeof deferredSnapshot>> = []
+    const request: SnapshotRequest<TestIntent, TestSnapshot> = () => {
+      const deferred = deferredSnapshot()
+      pending.push(deferred)
+      return deferred.promise
+    }
+    const controller = new SnapshotController(request, (intent) => intent.key)
+    const first = controller.load({ key: 'same-route' })
+    pending[0]?.resolve({ status: 200, etag: '"first"', snapshot: snapshot('first', 3) })
+    await first
+
+    const revalidation = controller.load({ key: 'same-route' })
+
+    expect(controller.state).toMatchObject({ loading: false, canMutate: true })
+    pending[1]?.resolve({ status: 200, etag: '"second"', snapshot: snapshot('second', 4) })
+    await revalidation
+    expect(controller.state.snapshot?.value).toBe('second')
+    expect(controller.state.canMutate).toBe(true)
+  })
+
+  it('withdraws write authority while a full reload or another intent loads', async () => {
+    const pending: Array<ReturnType<typeof deferredSnapshot>> = []
+    const request: SnapshotRequest<TestIntent, TestSnapshot> = () => {
+      const deferred = deferredSnapshot()
+      pending.push(deferred)
+      return deferred.promise
+    }
+    const controller = new SnapshotController(request, (intent) => intent.key)
+    const first = controller.load({ key: 'same-route' })
+    pending[0]?.resolve({ status: 200, etag: '"first"', snapshot: snapshot('first', 3) })
+    await first
+
+    void controller.load({ key: 'same-route' }, { full: true })
+    expect(controller.state).toMatchObject({ loading: true, canMutate: false })
+    void controller.load({ key: 'other-route' })
+    expect(controller.state).toMatchObject({ loading: true, canMutate: false })
   })
 
   it('clears accepted authority before changing daemon ownership', async () => {
@@ -205,6 +256,78 @@ describe('snapshotIntentForRoute', () => {
       })
     },
   )
+})
+
+describe('snapshotRequestIntent', () => {
+  it('requests every project, since the project list is filtered from it', () => {
+    expect(
+      snapshotRequestIntent({
+        view: 'all-open',
+        projectUID: '01J00000000000000000000002',
+        statuses: ['open'],
+        owners: ['user-a'],
+        labels: [],
+        relationships: [],
+        text: 'deploy',
+        includeGraph: false,
+        includeHistory: false,
+        timeZone: 'UTC',
+      }),
+    ).toEqual({
+      view: 'all-open',
+      statuses: ['open'],
+      owners: ['user-a'],
+      labels: [],
+      relationships: [],
+      text: 'deploy',
+      includeGraph: false,
+      includeHistory: false,
+      timeZone: 'UTC',
+    })
+  })
+})
+
+describe('projectUISnapshot', () => {
+  it('keeps one project and the links that touch it, like the daemon project view', () => {
+    const issue = (uid: string, projectUID: string) => ({
+      uid,
+      project_uid: projectUID,
+      title: uid,
+    })
+    const link = (from: string, to: string) => ({
+      from_issue_uid: from,
+      to_issue_uid: to,
+      type: 'blocks',
+    })
+    const all = {
+      contract_version: '2',
+      cursor: 41,
+      capabilities: { writable: true, updates: 'sse' },
+      origin: 'https://daemon.example',
+      origin_stable: true,
+      catalog: [{ project: { uid: 'project-a' } }, { project: { uid: 'project-b' } }],
+      collection: [
+        issue('issue-a1', 'project-a'),
+        issue('issue-b1', 'project-b'),
+        issue('issue-a2', 'project-a'),
+      ],
+      collection_links: [
+        link('issue-a1', 'issue-b1'),
+        link('issue-b1', 'issue-x9'),
+        link('issue-x8', 'issue-a2'),
+      ],
+    } as unknown as UISnapshot
+
+    const projected = projectUISnapshot(all, 'project-a')
+
+    expect(projected.cursor).toBe(41)
+    expect(projected.catalog).toBe(all.catalog)
+    expect(projected.collection.map(({ uid }) => uid)).toEqual(['issue-a1', 'issue-a2'])
+    expect(projected.collection_links).toEqual([
+      link('issue-a1', 'issue-b1'),
+      link('issue-x8', 'issue-a2'),
+    ])
+  })
 })
 
 describe('createUISnapshotRequest', () => {

@@ -21,9 +21,11 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/db/pgstore/pgstoretest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/testfix"
 )
 
 type relayMatrixNode struct {
@@ -67,16 +69,25 @@ func openRelayMatrixStore(t *testing.T, backend string, withVectors bool, opts .
 	t.Helper()
 	var store db.Storage
 	if backend == "sqlite" {
-		s, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"), opts...)
-		require.NoError(t, err)
-		store = s
+		path := filepath.Join(t.TempDir(), "kata.db")
+		if len(opts) == 0 {
+			// Most nodes take a copy of a schema-ready database instead of
+			// installing the schema again.
+			s, err := testfix.OpenSQLite(t.Context(), path)
+			require.NoError(t, err)
+			store = s
+		} else {
+			s, err := sqlitestore.Open(t.Context(), path, opts...)
+			require.NoError(t, err)
+			store = s
+		}
 	} else {
 		var dsn string
 		var cleanup func()
 		if withVectors {
 			dsn, cleanup = testenv.NewPostgresWithPgvectorContainer(t, t.Context())
 		} else {
-			dsn, cleanup = testenv.NewPostgresContainer(t, t.Context())
+			dsn, cleanup = pgstoretest.NewDatabase(t, t.Context())
 		}
 		t.Cleanup(cleanup)
 		s, err := pgstore.Open(t.Context(), dsn, opts...)

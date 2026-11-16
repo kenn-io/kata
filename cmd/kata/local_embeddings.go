@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net"
 	"net/url"
@@ -22,12 +23,14 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
+	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kit/atomicfile"
 	"go.kenn.io/kit/embedlocal"
 )
 
 var localEmbeddingsEndpoint = embedlocal.Endpoint
 var localEmbeddingsInstall = embedlocal.Install
+var localEmbeddingsInspect = embedlocal.Inspect
 
 func resolveLocalEmbeddings(ctx context.Context, confirm func(context.Context, int64) (bool, error)) (string, error) {
 	endpoint, err := localEmbeddingsEndpoint(ctx, embedlocal.Options{SkipOllama: true})
@@ -220,7 +223,48 @@ func enableLocalEmbeddings(ctx context.Context, run localEmbeddingsRun) (string,
 		}
 		return "", err
 	}
+	if next.Embeddings.UsesLocal() {
+		if err := embedlocal.RecordChoice(); err != nil {
+			slog.Warn("could not confirm that the shared search by meaning choice was saved", "err", err)
+		}
+	}
 	return index, nil
+}
+
+// applySharedEmbeddingChoice derives the active provider without changing the config file.
+func applySharedEmbeddingChoice(ctx context.Context, current config.EmbeddingsConfig, dsn string) (config.EmbeddingsConfig, error) {
+	if current.Enabled() {
+		return current, nil
+	}
+	backend, err := storeopen.BackendForDSN(dsn)
+	if err != nil {
+		return current, err
+	}
+	if backend != storeopen.BackendSQLite {
+		return current, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return current, err
+	}
+	chosen, err := embedlocal.ChoiceRecorded()
+	if err != nil || !chosen {
+		return current, err
+	}
+	next := current
+	next.Local = true
+	next.Model = "nomic-embed-text"
+	if localEmbeddingRecipeNeedsReset(current, current) {
+		next.Dims = 768
+		next.DocumentPrefix, next.DocumentSuffix = "", ""
+		next.QueryPrefix, next.QuerySuffix = "", ""
+		next.FingerprintSalt = ""
+		next.RequestDimensions = false
+	}
+	return next, nil
+}
+
+func localEmbeddingRecipeNeedsReset(written, current config.EmbeddingsConfig) bool {
+	return !written.LocalRecipeCompatible() || current.FingerprintSalt != "" && !current.UsesLocal()
 }
 
 type preparedLocalEmbeddingsConfig struct {
@@ -301,7 +345,7 @@ func localEmbeddingsConfig(data []byte, current config.EmbeddingsConfig, baseURL
 	previous := maps.Clone(fields)
 	delete(fields, "base_url")
 	// Environment overrides don't persist, so the written recipe must suit the built-in server.
-	if !written.Embeddings.LocalRecipeCompatible() || current.FingerprintSalt != "" && !current.UsesLocal() {
+	if localEmbeddingRecipeNeedsReset(written.Embeddings, current) {
 		for _, key := range []string{"model", "dims", "document_prefix", "document_suffix", "query_prefix", "query_suffix", "fingerprint_salt", "request_dimensions"} {
 			delete(fields, key)
 		}
@@ -464,8 +508,10 @@ type localEmbeddingsSetup struct {
 	idle        daemon.IdleForegroundAdmission
 	start       func(func(context.Context)) bool
 	vectorReady func(context.Context) error
+	restart     func() error
 	mu          sync.Mutex
 	job         *api.LocalEmbeddingsJob
+	restarting  bool
 }
 
 func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsStatus, error) {
@@ -482,7 +528,7 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 	}
 	// Only an unconfigured daemon depends on the shared installation files.
 	if status.Provider == "none" {
-		inspected, err := embedlocal.Inspect(ctx, embedlocal.Options{})
+		inspected, err := localEmbeddingsInspect(ctx, embedlocal.Options{})
 		if err != nil {
 			return status, err
 		}
@@ -493,9 +539,42 @@ func (s *localEmbeddingsSetup) Status(ctx context.Context) (api.LocalEmbeddingsS
 		job := *s.job
 		status.Job = &job
 	}
+	status.CanRestart, status.RestartInProgress = s.restart != nil && s.job != nil && s.job.State == "restart" && !s.restarting, s.restarting
 	s.mu.Unlock()
 	status.CanChange = status.Provider == "none" && (status.Job == nil || status.Job.State == "failed")
 	return status, nil
+}
+
+func (s *localEmbeddingsSetup) Restart(_ context.Context) error {
+	s.mu.Lock()
+	if s.restarting {
+		s.mu.Unlock()
+		return nil
+	}
+	if s.restart == nil || s.job == nil || s.job.State != "restart" {
+		s.mu.Unlock()
+		return daemon.ErrLocalEmbeddingsBusy
+	}
+	s.restarting, s.job.Error = true, ""
+	s.mu.Unlock()
+	if err := s.restart(); err != nil {
+		s.mu.Lock()
+		s.restarting, s.job.Error = false, err.Error()
+		s.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+func (s *localEmbeddingsSetup) restartExited(err error) {
+	if err == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.job != nil && s.restarting {
+		s.restarting, s.job.Error = false, err.Error()
+	}
 }
 
 func (s *localEmbeddingsSetup) TurnOn(_ context.Context) error {

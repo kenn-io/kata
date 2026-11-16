@@ -71,7 +71,7 @@ func daemonDiagnoseCmd() *cobra.Command {
 
 func daemonRecoverCmd() *cobra.Command {
 	var expected string
-	cmd := &cobra.Command{Use: "recover", Short: "start the selected existing local profile and verify its identity", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "recover", Short: "reach the selected existing local profile and verify its identity", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := validateExpectedProjectUID(expected); err != nil {
 			return err
 		}
@@ -79,7 +79,11 @@ func daemonRecoverCmd() *cobra.Command {
 		if selection.Profile == nil {
 			return &cliError{Message: "daemon recover requires a registered local profile with home and instance_uid; explicit URLs stay pinned", Kind: kindValidation, ExitCode: ExitValidation}
 		}
-		if result.State != "ready" && result.State != "stopped_local_profile" && result.State != "version_mismatch" {
+		// local_unreachable comes only from the live probe, after storage and
+		// project checks. A supervised profile can be mid-restart, so its wait
+		// retries that gap and still rejects credential or identity failures.
+		restartGap := result.State == "local_unreachable" && !selection.Profile.Config.AutostartEnabled()
+		if result.State != "ready" && result.State != "stopped_local_profile" && result.State != "version_mismatch" && !restartGap {
 			return diagnosisError(result)
 		}
 		if result.SchemaVersion != db.CurrentSchemaVersion() {
@@ -474,7 +478,7 @@ func withDiagnosisAction(result daemonDiagnosis) daemonDiagnosis {
 	case "unhealthy":
 		result.NextAction = "inspect the selected daemon's health report and logs"
 	case "stopped_local_profile":
-		result.NextAction = "run kata daemon recover to start this existing profile"
+		result.NextAction = "run kata daemon recover to check and reach this existing profile; if autostart is disabled, start it through its service manager"
 	case "local_stopped":
 		result.NextAction = "start the current home with kata daemon start"
 	case "unknown_loopback_endpoint":

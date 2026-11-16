@@ -153,19 +153,20 @@ and both authentication options.
 
 ## Load the contract in every session
 
-Load Kata's contract in every coding-agent session that starts inside a kata
-workspace on this machine. Sessions in other directories stay silent:
+In unreleased builds, load Kata's contract in Claude Code and Codex sessions that start inside a kata
+workspace on this machine. Setup selects whichever are installed. Sessions in other directories stay silent:
 
 ```sh
-kata agent-hook install
+kata agent setup
 ```
 
-For Codex, open Codex and run `/hooks` to trust the new hook. See
+The `agent-hook install` command and `--contract-only` require Kata 0.19.0 or later.
+For Codex, open Codex and run `/hooks` to trust the hooks. Run `kata agent setup --check` to check readiness in unreleased builds. See
 [Contract in every session](../workflows/agents.md#contract-in-every-session)
 for harness selection, Hermes's first-turn behavior, and additional Codex
-homes. Available attention hooks are included by default; use `--contract-only`
-to opt out, `--local` for this workspace, or `kata init --agent-hooks=codex,pi`
-when initializing it. These commands require Kata 0.19.0 or later.
+homes. Available attention hooks are included by default; use `kata agent-hook install --contract-only`
+to opt out, `kata agent-hook install --local` for this workspace, or `kata init --agent-hooks=codex,pi`
+when initializing it.
 
 ## External agents without session hooks
 

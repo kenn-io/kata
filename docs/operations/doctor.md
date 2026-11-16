@@ -1,7 +1,7 @@
 ---
 title: Diagnosing setup
-description: Read-only setup diagnostics with kata doctor.
-last_edited: 2026-11-08
+description: Diagnose setup with kata doctor.
+last_edited: 2026-11-12
 ---
 
 # Diagnosing setup
@@ -41,17 +41,20 @@ Doctor rejects redirects during discovery and diagnostic requests.
 
 Doctor does not start/restart daemons, create runtime directories, open a
 database, run migrations or hooks, call embedding providers or hubs, initialize
-projects, or repair files. Normal daemon authentication/access-log bookkeeping
-can still record requests. Local configuration findings describe this client's
+projects, or repair files. The agent check preserves hook configuration and
+trust, but can create Codex state. Normal daemon authentication/access-log
+bookkeeping can still record requests. Local configuration findings describe this client's
 files; remote process findings come from the selected daemon.
 
 ## Findings and fixes
 
 | Check ID | What it checks | Suggested next step |
 | --- | --- | --- |
+| `agent.claude`, `agent.codex` | User-scope hook configuration and readiness; project hooks from `kata init --agent-hooks` do not clear it | Run `kata agent setup`; for untrusted Codex hooks, open Codex and run `/hooks`. |
 | `config.daemon` | Local daemon/display config and environment overrides | Check spelling, types, URLs and supported fields in `<KATA_HOME>/config.toml`. |
 | `config.workspace` | Workspace path, project binding and local override syntax; ignored keys | Correct `.kata.toml`/`.kata.local.toml`, or supply `--project`. |
 | `config.hooks` | Local `hooks.toml` validation, including events that can fire | Correct events, commands, timeouts and tunable fields. |
+| `config.federation_signing` | No two available, unexpired federation signing keys share a secret | Give each key its own secret and rotate the shared secret. |
 | `daemon.connection` | Exact selected endpoint identifies as Kata | Check target selection; start a stopped local daemon to run the remaining checks. |
 | `daemon.health` | The daemon's storage schema is readable | Inspect daemon logs and storage/credential configuration on its host. |
 | `daemon.version` | CLI/daemon version and API contract | Align versions; explicitly restart an upgraded daemon. |
