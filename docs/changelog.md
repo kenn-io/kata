@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Follow the event stream from Go with [`api.Events`](reference/go-client.md#follow-the-event-stream), which frames events, caps their size, and reports a required reset as a typed value. `kata tui` reads its live updates through it.
+
 - See which issue is blocking a push when the hub refuses it because the issue now belongs to a project the spoke has not joined. The error names the issue and the missing enrollment, instead of reporting a credential failure, and the spoke keeps pulling hub changes while the push waits.
 
 - Start the Windows daemon again after a reboot, even when another account's

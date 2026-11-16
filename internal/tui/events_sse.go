@@ -1,19 +1,14 @@
 package tui
 
 import (
-	"bufio"
 	"context"
-	"errors"
-	"fmt"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/cenkalti/backoff/v7"
 	kataclient "go.kenn.io/kata/pkg/client"
-	"go.kenn.io/kata/pkg/client/generated"
 )
 
 // reconnectStatusGrace defers surfacing sseReconnecting to the UI for
@@ -143,10 +138,11 @@ func notifyStatus(ctx context.Context, sseCh chan<- tea.Msg, st sseConnState, ge
 	}
 }
 
-// readSSEStream issues GET /api/v1/events/stream and consumes frames
-// until disconnect. lastID rides Last-Event-ID for resume when >0.
+// readSSEStream follows /api/v1/events/stream through the client's Events
+// iterator until disconnect. lastID rides Last-Event-ID for resume when >0.
 // connected is true once at least one frame was emitted so callers
-// reset their backoff only on a productive connection.
+// reset their backoff only on a productive connection. A stream the
+// daemon closes returns kataclient.ErrEventStreamEnded.
 //
 // sseConnected is pushed exactly once per connection, on the first
 // successful frame — never optimistically before a frame lands. A
@@ -166,29 +162,10 @@ func readSSEStream(
 	if err != nil {
 		return false, err
 	}
-	options := &generated.StreamEventsRequestOptions{Query: &generated.StreamEventsQuery{ProjectID: projectID}}
-	resp, err := apiClient.StreamEventsRaw(ctx, options, func(_ context.Context, req *http.Request) error {
-		if lastID > 0 {
-			req.Header.Set("Last-Event-ID", strconv.FormatInt(lastID, 10))
-		}
-		return nil
-	})
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("sse: status %d", resp.StatusCode)
-	}
-	br := bufio.NewReader(resp.Body)
 	connected := false
-	for {
-		f, perr := readNextFrame(br)
-		if errors.Is(perr, errSSEEOF) {
-			return connected, errSSEEOF
-		}
-		if perr != nil {
-			return connected, perr
+	for e, err := range apiClient.Events(ctx, kataclient.EventsOptions{ProjectID: projectID, LastEventID: lastID}) {
+		if err != nil {
+			return connected, err
 		}
 		if !connected {
 			if onConnect != nil {
@@ -198,11 +175,12 @@ func readSSEStream(
 			}
 			connected = true
 		}
-		*updateLastID = f.id
-		if !forwardFrame(ctx, sseCh, f, firstGen(gen)) {
+		*updateLastID = e.ID
+		if !forwardFrame(ctx, sseCh, e, firstGen(gen)) {
 			return connected, ctx.Err()
 		}
 	}
+	return connected, nil
 }
 
 func firstGen(gen []uint64) uint64 {
@@ -212,16 +190,16 @@ func firstGen(gen []uint64) uint64 {
 	return gen[0]
 }
 
-// forwardFrame dispatches the parsed frame as the matching tea.Msg.
+// forwardFrame dispatches the event as the matching tea.Msg.
 // Returns false on ctx cancel so the caller exits the read loop.
 //
-// The reset_after_id payload field is not threaded onto resetRequiredMsg:
+// The reset's ResetAfterID is not threaded onto resetRequiredMsg:
 // the daemon's contract (internal/api/events.go EventReset.EventID ==
-// ResetAfterID) makes the SSE id: line — which already feeds Last-Event-ID
+// ResetAfterID) makes the event ID — which already feeds Last-Event-ID
 // — the authoritative resume checkpoint.
-func forwardFrame(ctx context.Context, sseCh chan<- tea.Msg, f frame, gen ...uint64) bool {
+func forwardFrame(ctx context.Context, sseCh chan<- tea.Msg, f kataclient.Event, gen ...uint64) bool {
 	var msg tea.Msg
-	if f.kind == frameReset {
+	if f.Reset != nil {
 		msg = resetRequiredMsg{gen: firstGen(gen)}
 	} else {
 		ev := decodeEventReceived(f)
