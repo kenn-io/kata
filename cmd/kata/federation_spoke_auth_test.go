@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -180,5 +181,49 @@ func TestFederationWorkspaceHTTPSpokeDoesNotInheritActiveCatalogToken(t *testing
 		require.Empty(t, values, "workspace URL selection is anonymous even if the active catalog URL matches")
 	default:
 		t.Fatal("selected HTTP spoke did not receive the request")
+	}
+}
+
+func TestFederationNamedSpokeTokenStaysWithResolvedEndpoint(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	authorizations := make(chan []string, 1)
+	selected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects" {
+			authorizations <- r.Header.Values("Authorization")
+		}
+		_, _ = fmt.Fprint(w, `{"ok":true,"service":"kata","version":"test"}`)
+	}))
+	t.Cleanup(selected.Close)
+	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
+	writeCatalog := func(url, token string) {
+		body := fmt.Sprintf("[[daemon]]\nname = \"spoke\"\nurl = %q\ntoken = %q\n", url, token)
+		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0600))
+	}
+	writeCatalog(selected.URL, "spoke-token")
+	flags.Daemon = "spoke"
+	resolved, err := ensureDaemonResolved(t.Context())
+	require.NoError(t, err)
+	// The entry moves to another daemon between resolution and the
+	// credential read. Its new token belongs to that daemon only.
+	writeCatalog("http://127.0.0.1:1", "moved-token")
+
+	auth, err := federationSpokeTargetAuth(t.Context(), resolved)
+	require.NoError(t, err)
+	resolved = resolved.WithTargetAuth(auth)
+	ctx := context.WithValue(t.Context(), resolvedDaemonContextKey{}, resolved)
+	hc, err := federationSpokeHTTPClient(ctx, resolved.BaseURL)
+	require.NoError(t, err)
+	t.Cleanup(hc.CloseIdleConnections)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, resolved.BaseURL+"/api/v1/projects", nil)
+	require.NoError(t, err)
+	response, err := hc.Do(request)
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	select {
+	case values := <-authorizations:
+		require.NotContains(t, values, "Bearer moved-token")
+	default:
+		t.Fatal("resolved spoke did not receive the request")
 	}
 }
