@@ -46,7 +46,6 @@ type HealthResponse struct {
 		StartedAt        time.Time               `json:"started_at"`
 		Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
 		Docbank          *DocbankHealth          `json:"docbank,omitempty"`
-		DocbankProbe     *DocbankProbe           `json:"docbank_probe,omitempty"`
 		FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
 		IdleShutdown     *IdleShutdownHealth     `json:"idle_shutdown,omitempty"`
 		RootSigning      *RootSigningHealth      `json:"root_signing,omitempty"`
@@ -108,18 +107,17 @@ type DocbankHealth struct {
 	CredentialReason string `json:"credential_reason,omitempty" doc:"Why the key source cannot supply a key."`
 }
 
-// HealthRequest selects the optional work a health request does.
-type HealthRequest struct {
-	ProbeDocbank bool `query:"probe_docbank" doc:"Make one authenticated read-only request to Docbank and report the outcome in docbank_probe. Without it, health never contacts Docbank."`
+// DocbankProbeResponse is the outcome of GET /api/v1/docbank/probe.
+type DocbankProbeResponse struct {
+	Body DocbankProbe
 }
 
-// DocbankProbe is the outcome of one authenticated read-only request to
-// Docbank. It is present only when probe_docbank is set, the daemon holds a
-// Docbank key, and the caller receives diagnostics.
+// DocbankProbe is the outcome of one authenticated read-only request the
+// daemon makes to Docbank.
 type DocbankProbe struct {
 	Reachable   bool `json:"reachable" doc:"Whether Docbank answered the request."`
-	KeyAccepted bool `json:"key_accepted" doc:"Whether Docbank accepted the daemon's key; false when it answered 401 or 403, or when it was not reached."`
-	HTTPStatus  int  `json:"http_status,omitempty" doc:"Docbank's HTTP status when it answered with an error."`
+	KeyAccepted bool `json:"key_accepted" doc:"Whether Docbank accepted the daemon's key; false when it answered with an error status or was not reached."`
+	HTTPStatus  int  `json:"http_status,omitempty,omitzero" doc:"Docbank's HTTP status when it answered with an error."`
 }
 
 // EmbeddingsHealth is the semantic-search reconciler's operator-visible state

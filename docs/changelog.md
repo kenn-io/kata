@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-13
+last_edited: 2026-11-16
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -11,10 +11,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - `kata doctor` now asks Docbank once, with a read-only request, whether it
   answers and accepts the daemon's API key, and reports the result in its
-  `daemon.docbank` check. Other callers opt in with `probe_docbank=true` on
-  `/api/v1/health`, which adds a `docbank_probe` block for daemon-owner and
-  owner-local callers when `[docbank]` names a key source that resolves. Plain
-  health never contacts Docbank, and `local = true` has no probe.
+  `daemon.docbank` check. The request is [`GET /api/v1/docbank/probe`](reference/http-api.md#docbank-probe),
+  open to the callers that see the `docbank` block in health, and sent only when
+  `[docbank]` names a key source that resolves. Health never contacts Docbank,
+  and `local = true` has no probe.
 
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
 

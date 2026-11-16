@@ -5,7 +5,7 @@
 export interface DocbankProbe {
   /** Docbank's HTTP status when it answered with an error. */
   http_status?: number
-  /** Whether Docbank accepted the daemon's key; false when it answered 401 or 403, or when it was not reached. */
+  /** Whether Docbank accepted the daemon's key; false when it answered with an error status or was not reached. */
   key_accepted: boolean
   /** Whether Docbank answered the request. */
   reachable: boolean

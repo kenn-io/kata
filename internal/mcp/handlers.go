@@ -66,7 +66,7 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		}
 		status = &value
 	}
-	health, err := h.options.Client.Health(ctx, nil)
+	health, err := h.options.Client.Health(ctx)
 	if err != nil {
 		return nil, SearchOutput{}, err
 	}
@@ -634,7 +634,7 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 		return nil, CommentOutput{}, err
 	}
 	if handle != "" {
-		health, err := h.options.Client.Health(ctx, nil)
+		health, err := h.options.Client.Health(ctx)
 		if err != nil {
 			return nil, CommentOutput{}, err
 		}
@@ -1703,7 +1703,7 @@ func formatOptionalTime(value *time.Time) *string {
 }
 
 func (h toolHandlers) requireCommentLinksAPI(ctx context.Context) error {
-	health, err := h.options.Client.Health(ctx, nil)
+	health, err := h.options.Client.Health(ctx)
 	if err != nil {
 		return err
 	}

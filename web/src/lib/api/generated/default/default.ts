@@ -86,6 +86,7 @@ import type {
   DisconnectRelayEnrollmentPathParameters,
   DisconnectRelayRequestBody,
   DisconnectRelayResponseBody,
+  DocbankProbe,
   DoctorResponseBody,
   EditCommentPathParameters,
   EditCommentRequestBody,
@@ -129,7 +130,6 @@ import type {
   GetProjectFederationStatusParams,
   GetProjectFederationStatusPathParameters,
   GetRelayResetPathParameters,
-  HealthParams,
   HealthResponseBody,
   ImportBatchResult,
   ImportIssuesPathParameters,
@@ -703,6 +703,55 @@ export const digestGlobal = async (
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<digestGlobalResponse> => {
   return orvalFetch<digestGlobalResponse>(getDigestGlobalUrl(params), {
+    ...options,
+    method: 'GET',
+  })
+}
+
+export type probeDocbankResponse200 = {
+  data: DocbankProbe
+  status: 200
+}
+
+export type probeDocbankResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type probeDocbankResponse409 = {
+  data: ErrorEnvelope
+  status: 409
+}
+
+export type probeDocbankResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type probeDocbankResponseSuccess = probeDocbankResponse200 & {
+  headers: Headers
+}
+export type probeDocbankResponseError = (
+  | probeDocbankResponse404
+  | probeDocbankResponse409
+  | probeDocbankResponse500
+) & {
+  headers: Headers
+}
+
+export type probeDocbankResponse = probeDocbankResponseSuccess | probeDocbankResponseError
+
+export const getProbeDocbankUrl = () => {
+  return `/api/v1/docbank/probe`
+}
+
+/**
+ * @summary Check that the daemon reaches Docbank and Docbank accepts its key
+ */
+export const probeDocbank = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<probeDocbankResponse> => {
+  return orvalFetch<probeDocbankResponse>(getProbeDocbankUrl(), {
     ...options,
     method: 'GET',
   })
@@ -1656,25 +1705,14 @@ export type healthResponseError = healthResponseDefault & {
 
 export type healthResponse = healthResponseSuccess | healthResponseError
 
-export const getHealthUrl = (params?: HealthParams) => {
-  const normalizedParams = new URLSearchParams()
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  })
-
-  const stringifiedParams = normalizedParams.toString()
-
-  return stringifiedParams.length > 0 ? `/api/v1/health?${stringifiedParams}` : `/api/v1/health`
+export const getHealthUrl = () => {
+  return `/api/v1/health`
 }
 
 export const health = async (
-  params?: HealthParams,
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<healthResponse> => {
-  return orvalFetch<healthResponse>(getHealthUrl(params), {
+  return orvalFetch<healthResponse>(getHealthUrl(), {
     ...options,
     method: 'GET',
   })

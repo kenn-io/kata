@@ -67,7 +67,7 @@ func requireDaemonAPIVersionHealth(
 	if err != nil {
 		return daemonAPIHealth{}, err
 	}
-	resp, callErr := apiClient.HealthWithResponse(ctx, nil)
+	resp, callErr := apiClient.HealthWithResponse(ctx)
 	if resp == nil {
 		return daemonAPIHealth{}, externalCLITransportError(resp, callErr)
 	}

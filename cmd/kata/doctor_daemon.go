@@ -30,8 +30,7 @@ func (s *doctorState) daemonChecks(ctx context.Context) {
 		if apiClient == nil {
 			return skippedDoctorCheck("Daemon connection could not be verified")
 		}
-		probeDocbank := true
-		response, err := apiClient.HealthWithResponse(ctx, &generated.HealthRequestOptions{Query: &generated.HealthQuery{ProbeDocbank: &probeDocbank}})
+		response, err := apiClient.HealthWithResponse(ctx)
 		status := 0
 		if response != nil {
 			status = response.StatusCode
@@ -88,7 +87,7 @@ func (s *doctorState) daemonChecks(ctx context.Context) {
 		if !healthOK {
 			return skippedDoctorCheck("Daemon health is unavailable")
 		}
-		return doctorDocbank(health)
+		return doctorDocbank(ctx, apiClient, health)
 	})
 	s.add("daemon.federation", "integration", func() diagnostics.Check {
 		if !healthOK {
@@ -215,7 +214,7 @@ func doctorEmbeddings(health *generated.HealthResponse) diagnostics.Check {
 	return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Embedding reconciler reports no provider error or backlog"}
 }
 
-func doctorDocbank(health *generated.HealthResponse) diagnostics.Check {
+func doctorDocbank(ctx context.Context, apiClient *kataapi.Client, health *generated.HealthResponse) diagnostics.Check {
 	h := health.Docbank
 	if h == nil && health.DBPath == nil {
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon did not provide Docbank health details; its attachment key state is unknown"}
@@ -231,7 +230,7 @@ func doctorDocbank(health *generated.HealthResponse) diagnostics.Check {
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon has no Docbank key source to check: Docbank is not configured, or it uses the Docbank on this machine"}
 	}
 	if h.Credential == "ok" {
-		return doctorDocbankProbe(health)
+		return doctorDocbankProbe(ctx, apiClient, health)
 	}
 	var details []string
 	if h.CredentialSource != nil {
@@ -248,20 +247,23 @@ func doctorDocbank(health *generated.HealthResponse) diagnostics.Check {
 	}
 }
 
-// doctorDocbankProbe reports the daemon's Docbank request once its key resolves.
-func doctorDocbankProbe(health *generated.HealthResponse) diagnostics.Check {
-	p := health.DocbankProbe
-	if p == nil {
-		check := diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Daemon resolves its Docbank API key"}
+// doctorDocbankProbe asks the daemon to make its read-only request to Docbank
+// once its key resolves. A daemon without the probe route, or one that cannot
+// answer it, keeps the key-resolves result.
+func doctorDocbankProbe(ctx context.Context, apiClient *kataapi.Client, health *generated.HealthResponse) diagnostics.Check {
+	resolved := diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Daemon resolves its Docbank API key"}
+	response, err := apiClient.ProbeDocbankWithResponse(ctx)
+	if err != nil || response == nil || response.JSON200 == nil {
 		reported := ""
 		if health.APISchemaVersion != nil {
 			reported = *health.APISchemaVersion
 		}
 		if current, _ := apiVersionAtLeast(reported, apiVersionDocbankProbe); !current {
-			check.Details = []string{daemonAPITooOldMessage("Docbank probe", apiVersionDocbankProbe, reported)}
+			resolved.Details = []string{daemonAPITooOldMessage("Docbank probe", apiVersionDocbankProbe, reported)}
 		}
-		return check
+		return resolved
 	}
+	p := response.JSON200
 	status := 0
 	if p.HTTPStatus != nil {
 		status = int(*p.HTTPStatus)

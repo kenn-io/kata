@@ -33,7 +33,7 @@ func newHealthCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, callErr := apiClient.HealthWithResponse(a.ctx, nil)
+			resp, callErr := apiClient.HealthWithResponse(a.ctx)
 			if err := externalCLITransportError(resp, callErr); err != nil {
 				return err
 			}

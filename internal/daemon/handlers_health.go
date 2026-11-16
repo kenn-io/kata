@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"time"
 
@@ -36,7 +37,7 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		OperationID: "health",
 		Method:      "GET",
 		Path:        "/api/v1/health",
-	}, func(ctx context.Context, in *api.HealthRequest) (*api.HealthResponse, error) {
+	}, func(ctx context.Context, _ *struct{}) (*api.HealthResponse, error) {
 		schema, err := cfg.DB.SchemaVersion(ctx)
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -83,9 +84,6 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if diagnostics && cfg.Docbank != nil {
 			if checked, err := cfg.Docbank.CheckKey(); checked {
 				out.Body.Docbank = docbankHealth(err)
-				if in.ProbeDocbank && err == nil {
-					out.Body.DocbankProbe = probeDocbank(ctx, cfg.Docbank)
-				}
 			}
 		}
 		if diagnostics && cfg.FederationConfigHealth != nil {
@@ -114,6 +112,27 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		return out, nil
 	})
+
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "probeDocbank",
+		Method:      "GET",
+		Path:        "/api/v1/docbank/probe",
+		Summary:     "Check that the daemon reaches Docbank and Docbank accepts its key",
+		Errors:      []int{404, 409},
+	}, func(ctx context.Context, _ *struct{}) (*api.DocbankProbeResponse, error) {
+		// Same callers and same configuration as health's docbank block.
+		if !projectDiagnosticOwnerAuthority(ctx) || cfg.Docbank == nil {
+			return nil, api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+		}
+		checked, err := cfg.Docbank.CheckKey()
+		if !checked {
+			return nil, api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+		}
+		if err != nil {
+			return nil, api.NewError(http.StatusConflict, "docbank_key_unavailable", "the daemon cannot resolve its Docbank API key", "", nil)
+		}
+		return &api.DocbankProbeResponse{Body: probeDocbank(ctx, cfg.Docbank)}, nil
+	})
 }
 
 func docbankHealth(err error) *api.DocbankHealth {
@@ -132,15 +151,15 @@ const docbankProbeTimeout = 5 * time.Second
 // probeDocbank reads Docbank's root folder. Only a 2xx answer shows that the
 // address is Docbank and that it accepts the key: a 404 could come from any
 // server at a wrong URL.
-func probeDocbank(ctx context.Context, c *docbank.Client) *api.DocbankProbe {
+func probeDocbank(ctx context.Context, c *docbank.Client) api.DocbankProbe {
 	ctx, cancel := context.WithTimeout(ctx, docbankProbeTimeout)
 	defer cancel()
 	_, err := c.ResolvePath(ctx, "/")
 	if err == nil {
-		return &api.DocbankProbe{Reachable: true, KeyAccepted: true}
+		return api.DocbankProbe{Reachable: true, KeyAccepted: true}
 	}
 	if e, ok := errors.AsType[*docbank.Error](err); ok && e.Status != 0 {
-		return &api.DocbankProbe{Reachable: true, HTTPStatus: e.Status}
+		return api.DocbankProbe{Reachable: true, HTTPStatus: e.Status}
 	}
-	return &api.DocbankProbe{}
+	return api.DocbankProbe{}
 }

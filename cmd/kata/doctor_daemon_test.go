@@ -213,19 +213,35 @@ func TestDoctorDocbankCheckFollowsHealth(t *testing.T) {
 func TestDoctorDocbankProbeFollowsDaemonReport(t *testing.T) {
 	const prefix = `{"ok":true,"schema_version":28,"db_path":"/data/kata.db","docbank":{"credential":"ok"},`
 	for _, tc := range []struct {
-		name, health, status, summary, detail string
+		name, apiVersion, probe string
+		probeStatus             int
+		status, summary, detail string
 	}{
-		{"answered with an error status", prefix + `"api_schema_version":"0.52.0","docbank_probe":{"reachable":true,"key_accepted":false,"http_status":500}}`, "warn", "Docbank answered the daemon with an error", "HTTP status: 500"},
-		{"daemon predates the probe", prefix + `"api_schema_version":"0.51.0"}`, "ok", "resolves its Docbank API key", "Docbank probe requires daemon API 0.52.0 or newer; this daemon reports 0.51.0; upgrade the daemon"},
+		{"answered with an error status", "0.52.0", `{"reachable":true,"key_accepted":false,"http_status":500}`, 0, "warn", "Docbank answered the daemon with an error", "HTTP status: 500"},
+		{"daemon predates the probe route", "0.51.0", "", http.StatusNotFound, "ok", "resolves its Docbank API key", "Docbank probe requires daemon API 0.52.0 or newer; this daemon reports 0.51.0; upgrade the daemon"},
+		{"probe route fails", "0.52.0", "", http.StatusConflict, "ok", "resolves its Docbank API key", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, workspace := doctorTestEnv(t)
 			flags = globalFlags{Workspace: workspace, Project: "example-project"}
-			ctx := doctorServerContext(t, map[string]string{"/api/v1/health": tc.health}, nil)
+			replies := map[string]string{"/api/v1/health": prefix + `"api_schema_version":"` + tc.apiVersion + `"}`}
+			statuses := map[string]int{}
+			if tc.probe != "" {
+				replies["/api/v1/docbank/probe"] = tc.probe
+			}
+			if tc.probeStatus != 0 {
+				replies["/api/v1/docbank/probe"] = `{"error":{"code":"x"}}`
+				statuses["/api/v1/docbank/probe"] = tc.probeStatus
+			}
+			ctx := doctorServerContext(t, replies, statuses)
 			finding := doctorFinding(t, collectDoctor(ctx), "daemon.docbank")
 			require.EqualValues(t, tc.status, finding.Status)
 			require.Contains(t, finding.Summary, tc.summary)
-			require.Contains(t, finding.Details, tc.detail)
+			if tc.detail != "" {
+				require.Contains(t, finding.Details, tc.detail)
+			} else {
+				require.Empty(t, finding.Details)
+			}
 		})
 	}
 }

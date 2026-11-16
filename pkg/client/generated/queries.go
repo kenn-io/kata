@@ -51,11 +51,6 @@ type GetFederationStatusQuery struct {
 	Include *string `json:"include,omitempty"`
 }
 
-type HealthQuery struct {
-	// ProbeDocbank Make one authenticated read-only request to Docbank and report the outcome in docbank_probe. Without it, health never contacts Docbank.
-	ProbeDocbank *bool `json:"probe_docbank,omitempty"`
-}
-
 type ListAllIssuesQuery struct {
 	// ProjectIds Restrict to these positive project IDs; mutually exclusive with project_id
 	ProjectIds []int64 `json:"project_ids,omitempty"`

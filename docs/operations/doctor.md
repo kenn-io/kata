@@ -1,7 +1,7 @@
 ---
 title: Diagnosing setup
 description: Diagnose setup with kata doctor.
-last_edited: 2026-11-12
+last_edited: 2026-11-16
 ---
 
 # Diagnosing setup

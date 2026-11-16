@@ -1677,7 +1677,7 @@ components:
           format: int64
           type: integer
         key_accepted:
-          description: Whether Docbank accepted the daemon's key; false when it answered 401 or 403, or when it was not reached.
+          description: Whether Docbank accepted the daemon's key; false when it answered with an error status or was not reached.
           type: boolean
         reachable:
           description: Whether Docbank answered the request.
@@ -3065,8 +3065,6 @@ components:
           type: string
         docbank:
           $ref: "#/components/schemas/DocbankHealth"
-        docbank_probe:
-          $ref: "#/components/schemas/DocbankProbe"
         embeddings:
           $ref: "#/components/schemas/EmbeddingsHealth"
         federation_config:
@@ -7820,6 +7818,35 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/docbank/probe:
+    get:
+      operationId: probeDocbank
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocbankProbe"
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Internal Server Error
+      summary: Check that the daemon reaches Docbank and Docbank accepts its key
   /api/v1/doctor:
     get:
       operationId: doctor
@@ -8373,14 +8400,6 @@ paths:
   /api/v1/health:
     get:
       operationId: health
-      parameters:
-        - description: Make one authenticated read-only request to Docbank and report the outcome in docbank_probe. Without it, health never contacts Docbank.
-          explode: false
-          in: query
-          name: probe_docbank
-          schema:
-            description: Make one authenticated read-only request to Docbank and report the outcome in docbank_probe. Without it, health never contacts Docbank.
-            type: boolean
       responses:
         "200":
           content:
