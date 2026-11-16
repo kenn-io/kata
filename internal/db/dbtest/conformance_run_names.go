@@ -11,7 +11,8 @@ import (
 
 // Run reads name their job, workflow and issue so a client needs no second
 // read to label a page. An issue deleted after the run still gives its short
-// ID, and a run without a workflow or issue leaves those names unset.
+// ID, a soft-deleted job or workflow still names its runs, and a run without a
+// workflow or issue leaves those names unset.
 func checkRunNames(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")
@@ -71,5 +72,15 @@ func checkRunNames(t *testing.T, store db.Storage) error {
 	byJob, err := store.ListCronRuns(ctx, db.CronRunList{ProjectID: project.ID, JobUID: job.UID})
 	require.NoError(t, err)
 	require.Len(t, byJob, 2)
+
+	_, _, err = store.PutCronJob(ctx, db.PutCronJob{UID: job.UID, ProjectID: project.ID, Name: job.Name, Definition: job.Definition, ExpectedEventUID: job.DefinitionEventUID, Actor: "worker", Deleted: true})
+	require.NoError(t, err)
+	_, _, err = store.PutCronWorkflow(ctx, db.PutCronWorkflow{UID: workflow.UID, ProjectID: project.ID, Name: workflow.Name, Definition: workflow.Definition, ExpectedEventUID: workflow.DefinitionEventUID, Actor: "worker", Deleted: true})
+	require.NoError(t, err)
+	for id, expected := range want {
+		run, err := store.CronRun(ctx, project.ID, id)
+		require.NoError(t, err)
+		require.Equal(t, expected, of(run), "show row after deleting definitions %s", id)
+	}
 	return nil
 }

@@ -117,8 +117,17 @@ func TestCronRunNamesComeFromRunFields(t *testing.T) {
 	m = sendKey(m, tea.KeyEnter)
 	require.Contains(t, m.viewBody(), "#a1b2")
 
-	require.Equal(t, "workflow Summary flow", cronRunName(generated.CronRun{WorkflowName: new("Summary flow")}))
-	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAV", cronRunName(generated.CronRun{JobUID: new("01ARZ3NDEKTSV4RRFFQ69G5FAV")}))
+	require.Equal(t, "workflow Summary flow", cronRunName(*p, generated.CronRun{WorkflowName: new("Summary flow")}))
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAV", cronRunName(*p, generated.CronRun{JobUID: new("01ARZ3NDEKTSV4RRFFQ69G5FAV")}))
+}
+
+// A daemon older than the run names sends none, so the job list still names
+// the job before the bare UID is shown.
+func TestCronRunNameFallsBackToJobList(t *testing.T) {
+	p := *cronFixture(t).cron.data
+	run := p.runs[0]
+	run.JobName, run.WorkflowName = nil, nil
+	require.Equal(t, "Daily summary", cronRunName(p, run))
 }
 
 func TestCronFreshness(t *testing.T) {

@@ -83,15 +83,16 @@ func cronAction(p cronData, j generated.CronJob) string {
 }
 
 // cronRunName is the job a run belongs to, or its workflow when no job ran it.
-// The daemon names both at read time, deleted definitions included.
-func cronRunName(r generated.CronRun) string {
+// The daemon names both at read time, deleted definitions included. An older
+// daemon sends no names, so the job list names the job, then the bare UID.
+func cronRunName(p cronData, r generated.CronRun) string {
 	if name := deref(r.JobName); name != "" {
 		return name
 	}
 	if name := deref(r.WorkflowName); name != "" {
 		return "workflow " + name
 	}
-	return deref(r.JobUID)
+	return cronDefinitionName(p, deref(r.JobUID), false)
 }
 
 // cronRunIssue is the run's issue as #short-id, even after the issue was
@@ -187,7 +188,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 			}
 		case cronRuns:
 			for _, r := range runs {
-				add(r.UID, []string{r.Status, cronRunName(r), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
+				add(r.UID, []string{r.Status, cronRunName(*p, r), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
 			}
 		case cronWorkflows:
 			for _, w := range p.workflows {

@@ -100,8 +100,11 @@ func ExportCronRunsSQL(ctx context.Context, query CronQuery, filter ExportFilter
 	return cronExport(ctx, query, filter, "cron_runs", cronRunColumns, false, scanCronRun)
 }
 func scanCronRun(row *sql.Rows) (CronRunExport, error) { return scanCronRunRow(row) }
+
+// scanCronRunRow reads a row selected with cronRunColumns.
 func scanCronRunRow(row interface{ Scan(...any) error }) (CronRunExport, error) {
-	return scanCronRunValues(row, false)
+	var value CronRunExport
+	return value, scanCronRunInto(row, &value)
 }
 
 // cronRunNameColumns resolve a run's job, workflow and issue names at read
@@ -112,23 +115,22 @@ const cronRunNameColumns = `(SELECT name FROM cron_jobs WHERE cron_jobs.uid=cron
 // cronRunReadColumns is the run row with its resolved names appended.
 const cronRunReadColumns = cronRunColumns + "," + cronRunNameColumns
 
+// scanCronRunNamedRow reads a row selected with cronRunReadColumns.
 func scanCronRunNamedRow(row interface{ Scan(...any) error }) (CronRunExport, error) {
-	return scanCronRunValues(row, true)
+	var value CronRunExport
+	return value, scanCronRunInto(row, &value, &value.JobName, &value.WorkflowName, &value.IssueShortID)
 }
 
-func scanCronRunValues(row interface{ Scan(...any) error }, named bool) (CronRunExport, error) {
-	var value CronRunExport
+// scanCronRunInto scans the cronRunColumns fields, then any extra columns.
+func scanCronRunInto(row interface{ Scan(...any) error }, value *CronRunExport, extra ...any) error {
 	var summary string
-	dest := []any{&value.ID, &value.UID, &value.ProjectID, &value.JobUID, &value.DefinitionEventUID, &value.WorkflowUID, &value.WorkflowDefinitionEventUID, &value.OccurrenceKey, &value.IssueUID, &value.Actor, &value.Teammate, &value.ExecutorLabel, &value.Status, &summary, &value.Revision, cronTime{&value.CreatedAt}, cronOptionalTime{&value.StartedAt}, cronOptionalTime{&value.EndedAt}, cronTime{&value.UpdatedAt}}
-	if named {
-		dest = append(dest, &value.JobName, &value.WorkflowName, &value.IssueShortID)
-	}
+	dest := append([]any{&value.ID, &value.UID, &value.ProjectID, &value.JobUID, &value.DefinitionEventUID, &value.WorkflowUID, &value.WorkflowDefinitionEventUID, &value.OccurrenceKey, &value.IssueUID, &value.Actor, &value.Teammate, &value.ExecutorLabel, &value.Status, &summary, &value.Revision, cronTime{&value.CreatedAt}, cronOptionalTime{&value.StartedAt}, cronOptionalTime{&value.EndedAt}, cronTime{&value.UpdatedAt}}, extra...)
 	if err := row.Scan(dest...); err != nil {
-		return value, err
+		return err
 	}
 	var err error
 	value.Summary, err = cron.ParseSummary([]byte(summary))
-	return value, err
+	return err
 }
 func replayCronRun(ctx context.Context, tx *sql.Tx, value *CronRunExport, postgres bool) error {
 	return insertCronRun(ctx, tx, CronRun(*value), postgres, true)
