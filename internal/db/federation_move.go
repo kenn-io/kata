@@ -515,11 +515,11 @@ func ParkedFederatedMoveIssues(decisions []FederatedMoveDecision) []string {
 	return uids
 }
 
-// FederatedLinkIssueIDs resolves the endpoints available to a scoped fold.
-func FederatedLinkIssueIDs(ctx context.Context, tx *sql.Tx, p FoldProjection, issueUID string) (map[string]int64, error) {
+// FederatedLinkIssueIDs resolves the local endpoints of links touching scope.
+func FederatedLinkIssueIDs(ctx context.Context, tx *sql.Tx, p FoldProjection, scope []string) (map[string]int64, error) {
 	ids := map[string]int64{}
 	for _, edge := range p.PresentLinks() {
-		if edge.Key.FromUID != issueUID && edge.Key.ToUID != issueUID {
+		if !slices.Contains(scope, edge.Key.FromUID) && !slices.Contains(scope, edge.Key.ToUID) {
 			continue
 		}
 		for _, uid := range []string{edge.Key.FromUID, edge.Key.ToUID} {

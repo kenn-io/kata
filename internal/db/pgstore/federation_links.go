@@ -176,18 +176,19 @@ func reconcileFederatedLinkGroup(
 	return reconcileFederatedLinkRows(ctx, tx, projection, issueIDs, existing)
 }
 
+// reconcileParkedIssueLinks applies the group's link history to issues parked
+// outside it. projection must be the binding group's link projection: a
+// link's events can live in either endpoint's project stream.
 func reconcileParkedIssueLinks(ctx context.Context, tx *sql.Tx, projection db.FoldProjection, issueUIDs []string) error {
 	if len(issueUIDs) == 0 {
 		return nil
 	}
-	ids := map[string]int64{}
+	ids, err := db.FederatedLinkIssueIDs(ctx, tx, projection, issueUIDs)
+	if err != nil {
+		return err
+	}
 	links := map[db.FoldLinkKey]federatedLinkRow{}
 	for _, issueUID := range issueUIDs {
-		issueIDs, err := db.FederatedLinkIssueIDs(ctx, tx, projection, issueUID)
-		if err != nil {
-			return err
-		}
-		maps.Copy(ids, issueIDs)
 		issueRows, err := federatedLinkRows(ctx, tx, nil, issueUID)
 		if err != nil {
 			return err

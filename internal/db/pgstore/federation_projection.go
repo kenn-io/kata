@@ -663,8 +663,21 @@ func (s *Store) materializeFederatedProjectTxScoped(
 			return err
 		}
 	}
-	if err := reconcileParkedIssueLinks(ctx, tx, projection, db.ParkedFederatedMoveIssues(decisions)); err != nil {
-		return err
+	if parked := db.ParkedFederatedMoveIssues(decisions); len(parked) > 0 {
+		if m.groupProjectIDs == nil {
+			if projectOnlyLinks {
+				m.groupProjectIDs = []int64{projectID}
+			} else if m.groupProjectIDs, err = federationBindingGroupProjectIDs(ctx, tx, m.binding); err != nil {
+				return err
+			}
+		}
+		links, err := federationGroupFoldProjection(ctx, tx, m)
+		if err != nil {
+			return err
+		}
+		if err := reconcileParkedIssueLinks(ctx, tx, links, parked); err != nil {
+			return err
+		}
 	}
 	if err := pruneFederatedIssues(ctx, tx, m, issueIDs); err != nil {
 		return err
