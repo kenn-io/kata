@@ -488,28 +488,6 @@ func applyUnjoinedMovedIssue(ctx context.Context, tx *sql.Tx, projectID int64, i
 	return reconcileFederatedLabelsFromRows(ctx, tx, m.issueIDs, m.projection, m.labelRows)
 }
 
-// reconcileParkedIssueLinks applies the group's link history to issues parked
-// outside it. links must be the binding group's link projection: a link's
-// events can live in either endpoint's project stream.
-func reconcileParkedIssueLinks(ctx context.Context, tx *sql.Tx, links db.FoldProjection, issueUIDs []string) error {
-	if len(issueUIDs) == 0 {
-		return nil
-	}
-	ids, err := db.FederatedLinkIssueIDs(ctx, tx, links, issueUIDs)
-	if err != nil {
-		return err
-	}
-	rows := map[db.FoldLinkKey]federatedLinkRow{}
-	for _, issueUID := range issueUIDs {
-		issueRows, err := federatedLinkRows(ctx, tx, nil, nil, issueUID)
-		if err != nil {
-			return err
-		}
-		maps.Copy(rows, issueRows)
-	}
-	return reconcileFederatedLinkRows(ctx, tx, links, ids, rows, issueUIDs...)
-}
-
 // prepareRows compares against persisted values, rather than a previous fold:
 // local writes and imports can leave values that a full rebuild would repair.
 func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx, projectID int64, issueScope []string) error {

@@ -86,7 +86,9 @@ pulling move history retains an archived, unbound identity for a missing
 counterpart without subscribing to that project. An issue already present on the
 spoke moves into the destination project with hub content as of the move,
 preserving its comments and local state while removing it from the source
-project's lists. Find its UID and local name with `GET /api/v1/projects?include=archived`.
+project's lists. Like any issue in a project the spoke has not joined, a parked
+issue has no links on the spoke; joining its project restores them from the
+hub's history. Find its UID and local name with `GET /api/v1/projects?include=archived`.
 The placeholder starts owner-only; restore it, then broaden its project access
 when others should see its issues. Restoring without joining does not subscribe
 to the project, but later moves can still place issues there. Edits the spoke
