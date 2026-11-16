@@ -276,7 +276,7 @@ func (m Model) undoNotice(message string, level toastLevel) (Model, tea.Cmd) {
 
 func (m Model) openUndoCloseForm() Model {
 	entry := m.undoHistory.entries[len(m.undoHistory.entries)-1]
-	m = m.openCloseForm(formTarget{projectID: entry.projectID, issueShortID: entry.uid, origin: "undo"}, nil)
+	m = m.openCloseForm(formTarget{projectID: entry.projectID, issueShortID: entry.uid, origin: "undo"}, entry.after.attachments())
 	m.undoCloseEntryID = entry.id
 	m.input.title = "undo reopen — complete as done"
 	for i := range m.input.fields {

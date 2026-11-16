@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-12
+last_edited: 2026-11-16
 ---
 
 # CLI reference
@@ -2144,6 +2144,11 @@ Esc or Backspace returns to the same request and message scroll
 position; `c` clears the selected request
 (daemon API `0.13.0` or newer, guarded against a concurrent replacement);
 `r` refreshes. Press `T` or Esc to return to the previous view.
+
+Press `x` in the issue list or detail view to close an issue at once. When the
+daemon requires evidence for a close (an issue-scoped credential), `x` opens the
+close form instead. Press `V` to open that form on any daemon, to cite evidence
+or one of the issue's [attachments](../guide/attachments.md#cite-a-document-when-closing-work).
 
 Press `r` in the issue list or detail view to reopen an issue. When the issue
 is the parent of native recurring jobs, the TUI first counts the children that

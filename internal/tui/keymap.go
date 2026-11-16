@@ -21,7 +21,7 @@ type keymap struct {
 	ExpandCollapse, Expand, Collapse, ExpandAll                  key
 	SortChildren                                                 key
 	FilterStatus, FilterForm, ClearFilters                       key
-	Close, Reopen, Undo                                          key
+	Close, CloseWithEvidence, Reopen, Undo                       key
 	SetDates, Delete, MoveIssue, SetRecurrence                   key
 	NextTab, PrevTab, JumpRef, Back                              key
 	EditBody, NewComment                                         key
@@ -93,6 +93,7 @@ func newKeymap() keymap {
 		// daemon LabelsByIssues hook + the Labels axis.
 		ClearFilters:    key{Keys: []string{"c"}, Help: "clear filters"},
 		Close:           key{Keys: []string{"x"}, Help: "close"},
+		CloseWithEvidence: key{Keys: []string{"V"}, Help: "close with evidence"},
 		Reopen:          key{Keys: []string{"r"}, Help: "reopen"},
 		Undo:            key{Keys: []string{"u"}, Help: "undo last issue action"},
 		SetDates:        key{Keys: []string{"d"}, Help: "set dates"},

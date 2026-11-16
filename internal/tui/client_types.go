@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-runewidth"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
@@ -92,40 +93,47 @@ func (m *issueMetadata) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// closeAttachment is one valid attachment reference an issue can cite as
-// close evidence. id is the reference's metadata key suffix, which the
-// close action accepts as attachment_id.
+// closeAttachment is one valid attachment reference. id is the reference's
+// metadata key suffix, which the close action accepts as attachment_id.
 type closeAttachment struct {
-	id   string
-	name string
-	size int64
+	id  string
+	ref metadata.Attachment
 }
 
-// attachments lists the issue's valid attachment references by ID. Invalid
+// label names the file as the CLI does, "report.pdf · 2048 bytes", for the
+// close form's choice and the events row. A positive maxName cuts a longer
+// name to that many cells so a 255-byte name cannot push the form's footer
+// off a short terminal.
+func (a closeAttachment) label(maxName int) string {
+	name := a.ref.Name
+	if maxName > 0 {
+		name = runewidth.Truncate(name, maxName, "…")
+	}
+	return fmt.Sprintf("%s · %d bytes", name, a.ref.Size)
+}
+
+// attachmentRefs maps the issue's valid attachment references by ID. Invalid
 // references are skipped, as the CLI does when it resolves attachment IDs.
-func (i Issue) attachments() []closeAttachment {
-	var out []closeAttachment
+// The map is never nil, so an issue without references reads as "none".
+func (i Issue) attachmentRefs() map[string]metadata.Attachment {
+	out := map[string]metadata.Attachment{}
 	for key, raw := range i.Metadata.Attachments {
 		id := strings.TrimPrefix(key, metadata.AttachmentPrefix)
 		if ref, ok := metadata.Valid(raw); ok && id != "" {
-			out = append(out, closeAttachment{id: id, name: ref.Name, size: ref.Size})
+			out[id] = ref
 		}
 	}
-	slices.SortFunc(out, func(a, b closeAttachment) int { return strings.Compare(a.id, b.id) })
 	return out
 }
 
-// formatAttachmentSize renders a byte count the way the close form and the
-// events tab show it: "12 B", "2.0 KB", "3.4 MB".
-func formatAttachmentSize(n int64) string {
-	switch {
-	case n < 1<<10:
-		return fmt.Sprintf("%d B", n)
-	case n < 1<<20:
-		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
-	default:
-		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+// attachments lists the valid references by ID.
+func (i Issue) attachments() []closeAttachment {
+	var out []closeAttachment
+	for id, ref := range i.attachmentRefs() {
+		out = append(out, closeAttachment{id: id, ref: ref})
 	}
+	slices.SortFunc(out, func(a, b closeAttachment) int { return strings.Compare(a.id, b.id) })
+	return out
 }
 
 // scheduledOn, deadlineOn and timezone are the raw stored values, "" when

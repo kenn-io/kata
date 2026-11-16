@@ -2,17 +2,21 @@ package tui
 
 import (
 	"encoding/json"
+	"strings"
 	"net/http"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
+	"uuid"
 )
 
 func TestClientCloseWithEvidenceSendsAuthenticatedCompletion(t *testing.T) {
@@ -290,8 +294,8 @@ const (
 
 func closeFormAttachments() []closeAttachment {
 	return []closeAttachment{
-		{id: reportAttachmentID, name: "report.pdf", size: 2048},
-		{id: logAttachmentID, name: "run.log", size: 12},
+		{id: reportAttachmentID, ref: metadata.Attachment{Name: "report.pdf", Size: 2048}},
+		{id: logAttachmentID, ref: metadata.Attachment{Name: "run.log", Size: 12}},
 	}
 }
 
@@ -305,22 +309,10 @@ func TestIssueDecodesAttachmentReferencesFromMetadata(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(raw), &issue))
 
 	assert.Equal(t, "2026-11-20", issue.scheduledOn())
-	assert.Equal(t, []closeAttachment{{id: reportAttachmentID, name: "report.pdf", size: 2048}}, issue.attachments())
-}
-
-func TestCloseFormOffersAttachmentsOnlyForDone(t *testing.T) {
-	s := newCloseForm(formTarget{projectID: 7, issueShortID: "abc4"}, closeFormAttachments())
-	require.NotNil(t, s.field(fieldCloseAttachment), "done is the default reason")
-	assert.Equal(t, []string{"none", "report.pdf (2.0 KB)", "run.log (12 B)"}, s.field(fieldCloseAttachment).radio.choices)
-
-	for _, reason := range []string{"wontfix", "duplicate", "superseded", "audit-no-change"} {
-		s.field(fieldCloseReason).radio.set(reason)
-		s = s.syncCloseAttachmentField()
-		assert.Nil(t, s.field(fieldCloseAttachment), reason)
-	}
-	s.field(fieldCloseReason).radio.set("done")
-	s = s.syncCloseAttachmentField()
-	require.NotNil(t, s.field(fieldCloseAttachment))
+	assert.Equal(t, []closeAttachment{{id: reportAttachmentID, ref: metadata.Attachment{
+		Name: "report.pdf", MediaType: "application/pdf", Size: 2048,
+		DocbankVersion: uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222"),
+	}}}, issue.attachments())
 }
 
 func TestCloseFormWithoutAttachmentsHasNoAttachmentField(t *testing.T) {
@@ -328,16 +320,22 @@ func TestCloseFormWithoutAttachmentsHasNoAttachmentField(t *testing.T) {
 	assert.Nil(t, s.field(fieldCloseAttachment))
 }
 
-func TestCloseFormReasonKeyTogglesAttachmentField(t *testing.T) {
+func TestCloseFormReasonKeysToggleAttachmentField(t *testing.T) {
 	s := newCloseForm(formTarget{projectID: 7, issueShortID: "abc4"}, closeFormAttachments())
+	require.NotNil(t, s.field(fieldCloseAttachment), "done is the default reason")
+	assert.Equal(t, []string{"none", "report.pdf · 2048 bytes", "run.log · 12 bytes"}, s.field(fieldCloseAttachment).radio.choices)
 	s.active = 0 // reason radio
 
-	s, handled := s.handleRadioKey(tea.KeyPressMsg{Code: tea.KeyRight})
-	require.True(t, handled)
-	assert.Equal(t, "wontfix", s.fieldValue(fieldCloseReason))
-	assert.Nil(t, s.field(fieldCloseAttachment))
-
-	s, _ = s.handleRadioKey(tea.KeyPressMsg{Code: tea.KeyLeft})
+	for _, reason := range []string{"wontfix", "duplicate", "superseded", "audit-no-change"} {
+		var handled bool
+		s, handled = s.handleRadioKey(tea.KeyPressMsg{Code: tea.KeyRight})
+		require.True(t, handled)
+		assert.Equal(t, reason, s.fieldValue(fieldCloseReason))
+		assert.Nil(t, s.field(fieldCloseAttachment), reason)
+	}
+	for range 4 {
+		s, _ = s.handleRadioKey(tea.KeyPressMsg{Code: tea.KeyLeft})
+	}
 	assert.Equal(t, "done", s.fieldValue(fieldCloseReason))
 	assert.NotNil(t, s.field(fieldCloseAttachment))
 }
@@ -345,7 +343,7 @@ func TestCloseFormReasonKeyTogglesAttachmentField(t *testing.T) {
 func TestCloseInputFromFormCitesChosenAttachment(t *testing.T) {
 	s := newCloseForm(formTarget{projectID: 7, issueShortID: "abc4"}, closeFormAttachments())
 	s.field(fieldCloseMessage).area.SetValue("Delivered the report and checked its final contents.")
-	s.field(fieldCloseAttachment).radio.set("run.log (12 B)")
+	s.field(fieldCloseAttachment).radio.set("run.log · 12 bytes")
 
 	got, err := closeInputFromForm(s, "worker-a")
 
@@ -359,7 +357,7 @@ func TestCloseInputFromFormCombinesAttachmentWithTypedEvidence(t *testing.T) {
 	s.field(fieldCloseMessage).area.SetValue("Delivered the report and checked its final contents.")
 	s.field(fieldEvidenceType).radio.set("commit")
 	s.field(fieldEvidenceValue).input.SetValue("abc1234")
-	s.field(fieldCloseAttachment).radio.set("report.pdf (2.0 KB)")
+	s.field(fieldCloseAttachment).radio.set("report.pdf · 2048 bytes")
 
 	got, err := closeInputFromForm(s, "worker-a")
 
@@ -372,7 +370,7 @@ func TestCloseInputFromFormCombinesAttachmentWithTypedEvidence(t *testing.T) {
 
 func TestCloseInputFromFormIgnoresAttachmentChoiceForOtherReasons(t *testing.T) {
 	s := newCloseForm(formTarget{projectID: 7, issueShortID: "abc4"}, closeFormAttachments())
-	s.field(fieldCloseAttachment).radio.set("run.log (12 B)")
+	s.field(fieldCloseAttachment).radio.set("run.log · 12 bytes")
 	s.field(fieldCloseReason).radio.set("wontfix") // no sync: the stale field must not leak
 	s.field(fieldCloseMessage).area.SetValue("This behavior is intentionally unsupported because it violates the authority boundary.")
 
@@ -404,5 +402,85 @@ func TestRouteCloseKeyOffersTheIssuesAttachments(t *testing.T) {
 
 	require.True(t, handled)
 	require.NotNil(t, got.input.field(fieldCloseAttachment))
-	assert.Equal(t, []string{"none", "report.pdf (2.0 KB)"}, got.input.field(fieldCloseAttachment).radio.choices)
+	assert.Equal(t, []string{"none", "report.pdf · 2048 bytes"}, got.input.field(fieldCloseAttachment).radio.choices)
+}
+
+func attachmentIssue(t *testing.T, name string) Issue {
+	t.Helper()
+	var issue Issue
+	raw := `{"project_id":7,"short_id":"abc4","title":"Ship it","status":"open","metadata":{"attachment.` + reportAttachmentID +
+		`":{"name":"` + name + `","media_type":"application/pdf","size":2048,"docbank_version":"6f1c2e8a-2222-4222-8222-222222222222"}}}`
+	require.NoError(t, json.Unmarshal([]byte(raw), &issue))
+	return issue
+}
+
+func TestEvidenceKeyOpensTheCloseFormWithoutRequiredEvidence(t *testing.T) {
+	m := initialModel(Options{})
+	m.view = viewList
+	m.scope = scope{projectID: 7}
+	m.list.issues = []Issue{attachmentIssue(t, "report.pdf")}
+
+	got, _, handled := m.routeCloseKey(runeKey('V'))
+
+	require.True(t, handled)
+	assert.Equal(t, inputCloseForm, got.input.kind)
+	require.NotNil(t, got.input.field(fieldCloseAttachment))
+
+	got, _, handled = m.routeCloseKey(runeKey('x'))
+	require.True(t, handled)
+	assert.Equal(t, inputNone, got.input.kind, "x keeps closing at once")
+}
+
+func TestUndoCloseFormOffersTheIssuesAttachments(t *testing.T) {
+	m := initialModel(Options{})
+	m.undoHistory.entries = []undoEntry{{id: 1, uid: "01TEST-abc4", after: attachmentIssue(t, "report.pdf")}}
+
+	got := m.openUndoCloseForm()
+
+	require.NotNil(t, got.input.field(fieldCloseAttachment))
+	assert.Equal(t, []string{"none", "report.pdf · 2048 bytes"}, got.input.field(fieldCloseAttachment).radio.choices)
+}
+
+func TestCloseFormWithAttachmentsFitsEverySize(t *testing.T) {
+	defer snapshotInit(t)()
+	longName := strings.Repeat("a", 251) + ".pdf" // 255 bytes, the longest stored name
+	for _, tc := range []struct {
+		name          string
+		width, height int
+		help          bool
+		fullForm      bool
+	}{
+		{"80x24", 80, 24, false, true},
+		{"80x12", 80, 12, false, false},
+		{"100x8", 100, 8, false, false},
+		{"split layout", 160, 40, false, true},
+		{"over help", 100, 24, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := initialModel(Options{})
+			m.view = viewList
+			m.scope = scope{projectID: 7}
+			m.list.issues = []Issue{attachmentIssue(t, longName)}
+			m, _ = stepModel(m, tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
+			m, _ = stepModel(m, runeKey('V'))
+			require.Equal(t, inputCloseForm, m.input.kind)
+			if tc.help {
+				m.view = viewHelp
+			}
+
+			rendered := stripANSI(m.View().Content)
+
+			for line := range strings.SplitSeq(rendered, "\n") {
+				assert.LessOrEqual(t, ansi.StringWidth(line), tc.width, "each line fits the terminal")
+			}
+			if tc.fullForm {
+				assert.Contains(t, rendered, "Attachment evidence", rendered)
+				assert.Contains(t, rendered, "ctrl+o save", "the form keeps its footer")
+				assert.Contains(t, rendered, "… · 2048 bytes", "the long name is shortened, the size stays")
+			}
+			if !tc.help {
+				assert.LessOrEqual(t, strings.Count(rendered, "\n")+1, tc.height, "the frame fits:\n%s", rendered)
+			}
+		})
+	}
 }

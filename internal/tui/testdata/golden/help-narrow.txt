@@ -30,6 +30,7 @@ n           new issue (form)
 v           toggle flat/nested view
 o           toggle graph order
 x           close
+V           close with evidence
 r           reopen
 d           set dates
 X           delete issue
