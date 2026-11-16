@@ -42,7 +42,7 @@ type ProbeDocbankErrorResponse = ErrorEnvelope
 
 type ProbeDocbankErrorResponseJSON = ErrorEnvelope
 
-type ProbeDocbankErrorResponseJSON500 = ErrorEnvelope
+type ProbeDocbankErrorResponseJSON503 = ErrorEnvelope
 
 type DoctorResponse = DoctorResponseBody
 
@@ -713,8 +713,8 @@ type ProbeDocbankResp struct {
 	StatusCode   int
 	JSON200      *ProbeDocbankResponse
 	JSON404      *ProbeDocbankErrorResponse
-	JSON409      *ProbeDocbankErrorResponseJSON
-	JSON500      *ProbeDocbankErrorResponseJSON500
+	JSON500      *ProbeDocbankErrorResponseJSON
+	JSON503      *ProbeDocbankErrorResponseJSON503
 }
 
 type DoctorResp struct {

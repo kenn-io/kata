@@ -393,6 +393,7 @@ func TestDocbankProbeReportsWhatDocbankAnswered(t *testing.T) {
 		{name: "key rejected", key: "other-key", want: api.DocbankProbe{Reachable: true, HTTPStatus: http.StatusUnauthorized}},
 		{name: "unexpected status", key: "test-key", setup: func(f *docbanktest.Fake) { f.Fault = "status:500" }, want: api.DocbankProbe{Reachable: true, HTTPStatus: http.StatusInternalServerError}},
 		{name: "unreachable", key: "test-key", setup: func(f *docbanktest.Fake) { f.Server.Close() }, want: api.DocbankProbe{}},
+		{name: "answers 200 with a body that is not Docbank's", key: "test-key", setup: func(f *docbanktest.Fake) { f.Fault = "status:200" }, want: api.DocbankProbe{Reachable: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := docbanktest.New(t)
@@ -416,7 +417,7 @@ func TestDocbankProbeSendsNoRequestWithoutResolvableKey(t *testing.T) {
 	d := openTestDB(t)
 	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, Docbank: docbank.NewClient(fake.Server.URL, func() (string, error) { return "", errors.New("unset") })})
 	resp, bs := getStatusBody(t, ts, docbankProbePath)
-	assert.Equal(t, http.StatusConflict, resp.StatusCode, string(bs))
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(bs))
 	assert.Contains(t, string(bs), "docbank_key_unavailable")
 	assert.Empty(t, fake.Requests())
 }

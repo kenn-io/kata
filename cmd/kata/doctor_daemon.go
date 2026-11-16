@@ -46,11 +46,7 @@ func (s *doctorState) daemonChecks(ctx context.Context) {
 		if !healthOK {
 			return skippedDoctorCheck("Daemon health is unavailable")
 		}
-		apiSchemaVersion := ""
-		if health.APISchemaVersion != nil {
-			apiSchemaVersion = *health.APISchemaVersion
-		}
-		if health.Version != version.Version || apiSchemaVersion != daemon.APISchemaVersion {
+		if health.Version != version.Version || reportedAPIVersion(health) != daemon.APISchemaVersion {
 			return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "CLI and daemon version or API contract differ", Fix: "Align the CLI and selected daemon versions; restart the daemon explicitly after upgrading it."}
 		}
 		return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "CLI and daemon version and API contract match"}
@@ -214,16 +210,22 @@ func doctorEmbeddings(health *generated.HealthResponse) diagnostics.Check {
 	return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Embedding reconciler reports no provider error or backlog"}
 }
 
+// reportedAPIVersion is the API version the daemon reports, or "" when it
+// reports none.
+func reportedAPIVersion(health *generated.HealthResponse) string {
+	if health.APISchemaVersion == nil {
+		return ""
+	}
+	return *health.APISchemaVersion
+}
+
 func doctorDocbank(ctx context.Context, apiClient *kataapi.Client, health *generated.HealthResponse) diagnostics.Check {
 	h := health.Docbank
 	if h == nil && health.DBPath == nil {
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon did not provide Docbank health details; its attachment key state is unknown"}
 	}
 	if h == nil {
-		reported := ""
-		if health.APISchemaVersion != nil {
-			reported = *health.APISchemaVersion
-		}
+		reported := reportedAPIVersion(health)
 		if current, _ := apiVersionAtLeast(reported, apiVersionDocbankKeyHealth); !current {
 			return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: daemonAPITooOldMessage("Docbank key health", apiVersionDocbankKeyHealth, reported)}
 		}
@@ -254,10 +256,7 @@ func doctorDocbankProbe(ctx context.Context, apiClient *kataapi.Client, health *
 	resolved := diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Daemon resolves its Docbank API key"}
 	response, err := apiClient.ProbeDocbankWithResponse(ctx)
 	if err != nil || response == nil || response.JSON200 == nil {
-		reported := ""
-		if health.APISchemaVersion != nil {
-			reported = *health.APISchemaVersion
-		}
+		reported := reportedAPIVersion(health)
 		if current, _ := apiVersionAtLeast(reported, apiVersionDocbankProbe); !current {
 			resolved.Details = []string{daemonAPITooOldMessage("Docbank probe", apiVersionDocbankProbe, reported)}
 		}

@@ -718,14 +718,14 @@ export type probeDocbankResponse404 = {
   status: 404
 }
 
-export type probeDocbankResponse409 = {
-  data: ErrorEnvelope
-  status: 409
-}
-
 export type probeDocbankResponse500 = {
   data: ErrorEnvelope
   status: 500
+}
+
+export type probeDocbankResponse503 = {
+  data: ErrorEnvelope
+  status: 503
 }
 
 export type probeDocbankResponseSuccess = probeDocbankResponse200 & {
@@ -733,8 +733,8 @@ export type probeDocbankResponseSuccess = probeDocbankResponse200 & {
 }
 export type probeDocbankResponseError = (
   | probeDocbankResponse404
-  | probeDocbankResponse409
   | probeDocbankResponse500
+  | probeDocbankResponse503
 ) & {
   headers: Headers
 }

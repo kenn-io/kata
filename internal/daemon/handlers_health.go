@@ -118,18 +118,19 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "GET",
 		Path:        "/api/v1/docbank/probe",
 		Summary:     "Check that the daemon reaches Docbank and Docbank accepts its key",
-		Errors:      []int{404, 409},
+		Errors:      []int{404, 503},
 	}, func(ctx context.Context, _ *struct{}) (*api.DocbankProbeResponse, error) {
 		// Same callers and same configuration as health's docbank block.
-		if !projectDiagnosticOwnerAuthority(ctx) || cfg.Docbank == nil {
-			return nil, api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+		var checked bool
+		var err error
+		if projectDiagnosticOwnerAuthority(ctx) && cfg.Docbank != nil {
+			checked, err = cfg.Docbank.CheckKey()
 		}
-		checked, err := cfg.Docbank.CheckKey()
 		if !checked {
 			return nil, api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
 		}
 		if err != nil {
-			return nil, api.NewError(http.StatusConflict, "docbank_key_unavailable", "the daemon cannot resolve its Docbank API key", "", nil)
+			return nil, docbankKeyUnavailable(err)
 		}
 		return &api.DocbankProbeResponse{Body: probeDocbank(ctx, cfg.Docbank)}, nil
 	})
@@ -149,8 +150,8 @@ func docbankHealth(err error) *api.DocbankHealth {
 const docbankProbeTimeout = 5 * time.Second
 
 // probeDocbank reads Docbank's root folder. Only a 2xx answer shows that the
-// address is Docbank and that it accepts the key: a 404 could come from any
-// server at a wrong URL.
+// address is Docbank and that it accepts the key: a 404, or a 2xx whose body
+// is not Docbank's, could come from any server at a wrong URL.
 func probeDocbank(ctx context.Context, c *docbank.Client) api.DocbankProbe {
 	ctx, cancel := context.WithTimeout(ctx, docbankProbeTimeout)
 	defer cancel()
@@ -158,7 +159,7 @@ func probeDocbank(ctx context.Context, c *docbank.Client) api.DocbankProbe {
 	if err == nil {
 		return api.DocbankProbe{Reachable: true, KeyAccepted: true}
 	}
-	if e, ok := errors.AsType[*docbank.Error](err); ok && e.Status != 0 {
+	if e, ok := errors.AsType[*docbank.Error](err); ok && (e.Status != 0 || e.Malformed) {
 		return api.DocbankProbe{Reachable: true, HTTPStatus: e.Status}
 	}
 	return api.DocbankProbe{}

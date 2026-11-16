@@ -11,8 +11,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - `kata doctor` now asks Docbank once, with a read-only request, whether it
   answers and accepts the daemon's API key, and reports the result in its
-  `daemon.docbank` check. The request is [`GET /api/v1/docbank/probe`](reference/http-api.md#docbank-probe),
-  open to the callers that see the `docbank` block in health, and sent only when
+  `daemon.docbank` check. The request is
+  [`GET /api/v1/docbank/probe`](reference/http-api.md#docbank-probe), open to
+  the callers that see the `docbank` block in health, and sent only when
   `[docbank]` names a key source that resolves. Health never contacts Docbank,
   and `local = true` has no probe.
 

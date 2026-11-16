@@ -517,11 +517,11 @@ func (c *Client) ProbeDocbankWithResponse(ctx context.Context, reqEditors ...run
 			}
 		}
 		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
-	case 409:
-		out.JSON409 = new(ProbeDocbankErrorResponseJSON)
+	case 500:
+		out.JSON500 = new(ProbeDocbankErrorResponseJSON)
 		bodyBytes := resp.Content
 		if len(bodyBytes) > 0 {
-			if err := json.Unmarshal(bodyBytes, out.JSON409); err != nil {
+			if err := json.Unmarshal(bodyBytes, out.JSON500); err != nil {
 				return out, &runtime.ResponseDecodeError{
 					StatusCode:    resp.StatusCode,
 					ContentType:   resp.Headers.Get("Content-Type"),
@@ -541,16 +541,16 @@ func (c *Client) ProbeDocbankWithResponse(ctx context.Context, reqEditors ...run
 			}
 		}
 		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
-	case 500:
-		out.JSON500 = new(ProbeDocbankErrorResponseJSON500)
+	case 503:
+		out.JSON503 = new(ProbeDocbankErrorResponseJSON503)
 		bodyBytes := resp.Content
 		if len(bodyBytes) > 0 {
-			if err := json.Unmarshal(bodyBytes, out.JSON500); err != nil {
+			if err := json.Unmarshal(bodyBytes, out.JSON503); err != nil {
 				return out, &runtime.ResponseDecodeError{
 					StatusCode:    resp.StatusCode,
 					ContentType:   resp.Headers.Get("Content-Type"),
 					ContentLength: len(bodyBytes),
-					TargetType:    "ProbeDocbankErrorResponseJSON500",
+					TargetType:    "ProbeDocbankErrorResponseJSON503",
 					Body:          bodyBytes,
 					Err:           err,
 				}

@@ -402,14 +402,15 @@ key that does not match the pin returns `409 root_signing_key_mismatch`. An
 request to Docbank and reports what came back. It answers the callers that
 receive the `docbank` block in health, and `404 not_found` to everyone else and
 when `[docbank]` has no key source (including `local = true`). When the key does
-not resolve it sends nothing and answers `409 docbank_key_unavailable`. The
-request times out after five seconds, and the result is advisory:
+not resolve it sends nothing and answers `503 docbank_key_unavailable`, as the
+attachment routes do. The request times out after five seconds, and the result
+is advisory:
 
 | Field | Meaning |
 | --- | --- |
 | `reachable` | Docbank answered. |
-| `key_accepted` | Docbank answered the request with success, so it accepted the key. `false` when it answered `401` or `403`, answered with another error, or was not reached. |
-| `http_status` | Docbank's status when it answered with an error; absent otherwise. |
+| `key_accepted` | Docbank answered the request with success, so it accepted the key. `false` when it answered `401` or `403`, answered with another error, answered with a body that is not Docbank's, or was not reached. |
+| `http_status` | Docbank's status when it answered with an error; absent otherwise, including when it answered `200` with a body that is not Docbank's. |
 
 ## Project access
 
