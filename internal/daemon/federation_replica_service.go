@@ -1089,11 +1089,13 @@ func prevalidateFederationReplicaReservation(
 		return fmt.Errorf("prevalidate federation credential reservation project: %w", err)
 	}
 	if project.DeletedAt != nil {
-		return federationReplicaError(
-			ErrFederationReplicaBindingConflict,
-			"local federation project changed before credential reservation",
-			"",
-		)
+		retained, err := store.IsFederationRetainedProject(ctx, project.UID)
+		if err != nil {
+			return fmt.Errorf("check retained federation project: %w", err)
+		}
+		if project.UID != p.HubProjectUID || !retained {
+			return federationReplicaError(ErrFederationReplicaBindingConflict, "local federation project changed before credential reservation", "")
+		}
 	}
 	binding, err := store.FederationBindingByProject(ctx, project.ID)
 	if errors.Is(err, db.ErrNotFound) {
@@ -1775,7 +1777,7 @@ func ensureReplicaBindingOrAdopt(
 			}, nil
 		}
 	}
-	ensured, err := ensureReplicaBinding(ctx, store, p)
+	ensured, err := ensureReplicaBinding(ctx, store, p, false)
 	if err != nil {
 		return EnsureFederationReplicaResult{
 			Project: ensured.Project, Binding: ensured.Binding, CreatedEvent: ensured.CreatedEvent,
@@ -1793,12 +1795,47 @@ func adoptExistingReplica(
 ) (db.AdoptProjectIntoFederationResult, bool, error) {
 	projectName := p.ProjectName
 	if project, err := store.ProjectByUID(ctx, p.HubProjectUID); err == nil {
-		if project.DeletedAt != nil {
-			return db.AdoptProjectIntoFederationResult{}, false, federationReplicaError(
-				errFederationReplicaProjectCollision,
-				"hub project UID belongs to an archived local project",
-				"",
-			)
+		retained, err := store.IsFederationRetainedProject(ctx, project.UID)
+		if err != nil {
+			return db.AdoptProjectIntoFederationResult{}, false, fmt.Errorf("check retained federation project: %w", err)
+		}
+		if project.DeletedAt != nil || retained {
+			if !retained {
+				return db.AdoptProjectIntoFederationResult{}, false, federationReplicaError(
+					errFederationReplicaProjectCollision,
+					"hub project UID belongs to an archived local project",
+					"",
+				)
+			}
+			if project.Name != projectName {
+				if _, err := store.ProjectByNameIncludingArchived(ctx, projectName); err == nil {
+					return db.AdoptProjectIntoFederationResult{}, false, federationReplicaError(errFederationReplicaProjectCollision, "local project name already exists", "")
+				} else if !errors.Is(err, db.ErrNotFound) {
+					return db.AdoptProjectIntoFederationResult{}, false, fmt.Errorf("lookup local project name: %w", err)
+				}
+				var event *db.Event
+				project, event, _, err = store.RenameProjectAndEvent(ctx, project.ID, projectName, p.Credential.Actor)
+				if err != nil {
+					return db.AdoptProjectIntoFederationResult{}, false, fmt.Errorf("rename retained federation project: %w", err)
+				}
+				if event != nil && p.ProjectEventSink != nil {
+					p.ProjectEventSink(*event)
+				}
+			}
+			ensured, err := ensureReplicaBinding(ctx, store, p, true)
+			if err != nil {
+				return db.AdoptProjectIntoFederationResult{}, false, err
+			}
+			var event *db.Event
+			project, event, _, err = store.RestoreProject(ctx, project.ID, p.Credential.Actor)
+			if err != nil {
+				return db.AdoptProjectIntoFederationResult{}, false, fmt.Errorf("restore retained federation project: %w", err)
+			}
+			if event != nil && p.ProjectEventSink != nil {
+				p.ProjectEventSink(*event)
+			}
+			// Restore clears the placeholder marker only once the project is bound.
+			return db.AdoptProjectIntoFederationResult{Project: project, Binding: ensured.Binding}, true, nil
 		}
 		binding, bindErr := store.FederationBindingByProject(ctx, project.ID)
 		if bindErr != nil {
@@ -1939,6 +1976,7 @@ func ensureReplicaBinding(
 	ctx context.Context,
 	store db.Storage,
 	p EnsureFederationReplicaParams,
+	allowRetained bool,
 ) (ensuredReplicaBinding, error) {
 	projectName := p.ProjectName
 	project, err := store.ProjectByUID(ctx, p.HubProjectUID)
@@ -1970,7 +2008,7 @@ func ensureReplicaBinding(
 	} else if err != nil {
 		return ensuredReplicaBinding{},
 			fmt.Errorf("lookup federation project UID: %w", err)
-	} else if project.DeletedAt != nil {
+	} else if project.DeletedAt != nil && !allowRetained {
 		return ensuredReplicaBinding{}, federationReplicaError(
 			errFederationReplicaProjectCollision,
 			fmt.Sprintf(
