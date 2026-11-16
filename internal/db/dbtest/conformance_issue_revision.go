@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"encoding/json/jsontext"
+	"errors"
 	"testing"
 	"time"
 
@@ -327,7 +328,9 @@ func checkEditExpectedContentRevision(t *testing.T, store db.Storage) error {
 		ExpectedContentRevision: &opened,
 	})
 	var conflict *db.ContentRevisionConflictError
-	require.ErrorAs(t, err, &conflict)
+	if !errors.As(err, &conflict) {
+		t.Fatalf("stale edit must fail with a content revision conflict, got %v", err)
+	}
 	require.Equal(t, opened+1, conflict.CurrentContentRevision)
 
 	stored, err := store.IssueByID(ctx, issue.ID)
