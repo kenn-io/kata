@@ -109,7 +109,7 @@ func (m *Model) scheduleDetailRefresh() tea.Cmd {
 	}
 	b.pending = true
 	tick := detailRefreshTickMsg{owner: b, floor: b.floor, gen: m.detail.gen, connGen: m.connGen}
-	return tea.Tick(detailFollowDebounce, func(time.Time) tea.Msg { return tick })
+	return tickAfter(detailFollowDebounce, func(time.Time) tea.Msg { return tick })
 }
 
 func (m Model) handleDetailRefreshTick(msg detailRefreshTickMsg) (Model, tea.Cmd) {

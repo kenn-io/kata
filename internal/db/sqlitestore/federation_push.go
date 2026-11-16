@@ -133,32 +133,78 @@ func federationPushEventTypeCondition(column string) string {
 	return column + " IN (" + db.FederationPushEventTypesSQL() + ")"
 }
 
+// AcknowledgeFederationPush advances the push cursor. When the hub named
+// adoption snapshots it did not store, the same transaction deletes them and
+// rebuilds the project, so an interruption leaves either the whole batch to
+// push again or the finished progress, and the home never shows rows built
+// from a snapshot it no longer holds.
+func (d *Store) AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error {
+	if len(supersededEventUIDs) == 0 {
+		return d.AdvanceFederationPushCursor(ctx, projectID, nextCursor)
+	}
+	return d.materializeFederatedProjectAfter(ctx, projectID, func(ctx context.Context, tx *sql.Tx) error {
+		deleted, err := db.AcknowledgeSupersededFederationSnapshots(ctx, tx, projectID, d.instanceUID, supersededEventUIDs)
+		if err != nil {
+			return err
+		}
+		if err := advanceFederationPushCursor(ctx, tx, projectID, nextCursor); err != nil {
+			return err
+		}
+		if deleted == 0 {
+			return nil
+		}
+		// The rebuild that follows changes visible rows without a new event of
+		// its own. A reset event moves every reader's cursor past the state
+		// built from the deleted snapshots.
+		var projectUID, projectName string
+		if err := tx.QueryRowContext(ctx, `SELECT uid, name FROM projects WHERE id=?`, projectID).Scan(&projectUID, &projectName); err != nil {
+			return fmt.Errorf("read project for federation push acknowledgement: %w", err)
+		}
+		reset, err := d.insertEventTx(ctx, tx, eventInsert{
+			ProjectID: projectID, ProjectUID: projectUID, ProjectName: projectName,
+			Type: db.ProjectScopeResetEventType, Actor: "system", Payload: "{}", SkipRelay: true,
+		})
+		if err != nil {
+			return err
+		}
+		// Open stream clients learn of the reset from the caller after commit,
+		// and from the stored cursor on their next heartbeat.
+		return db.RecordFederationProjectUIReset(ctx, tx, db.Project{ID: projectID, UID: projectUID, Name: projectName}, reset.ID)
+	})
+}
+
 // AdvanceFederationPushCursor records the highest local events.id accepted by
 // the hub for a spoke binding.
 func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	return d.RetryTransient(ctx, func() error {
-		res, err := d.ExecContext(ctx, `
-			UPDATE federation_bindings
-			   SET push_cursor_event_id = CASE
-			         WHEN push_cursor_event_id < ? THEN ?
-			         ELSE push_cursor_event_id
-			       END,
-			       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			 WHERE project_id = ?`,
-			nextCursor, nextCursor, projectID)
-		if err != nil {
-			return fmt.Errorf("advance federation push cursor: %w", err)
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("advance federation push cursor rows affected: %w", err)
-		}
-		if n == 0 {
-			return db.ErrNotFound
-		}
-		return nil
+		return advanceFederationPushCursor(ctx, d, projectID, nextCursor)
 	})
+}
+
+func advanceFederationPushCursor(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, projectID, nextCursor int64) error {
+	res, err := exec.ExecContext(ctx, `
+		UPDATE federation_bindings
+		   SET push_cursor_event_id = CASE
+		         WHEN push_cursor_event_id < ? THEN ?
+		         ELSE push_cursor_event_id
+		       END,
+		       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE project_id = ?`,
+		nextCursor, nextCursor, projectID)
+	if err != nil {
+		return fmt.Errorf("advance federation push cursor: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("advance federation push cursor rows affected: %w", err)
+	}
+	if n == 0 {
+		return db.ErrNotFound
+	}
+	return nil
 }
 
 // EnableFederationPush marks an existing spoke binding push-enabled and keeps
@@ -295,10 +341,10 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		}
 		return db.ErrFederationResetBlockedByPendingPush
 	}
-	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, false); err != nil {
+	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID); err != nil {
 		return fmt.Errorf("clear federated events: %w", err)
 	}
 	if err := clearFederatedProjection(ctx, tx, projectID); err != nil {

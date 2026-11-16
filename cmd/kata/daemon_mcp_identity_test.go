@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -9,8 +12,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -125,7 +131,7 @@ func TestDaemonMCPIdentityRequests(t *testing.T) {
 	})
 	callCtx, stop := context.WithTimeout(ctx, 15*time.Second)
 	defer stop()
-	session, err := newMCPHTTPTestClient().Connect(callCtx, transport, nil)
+	session, err := newMCPHTTPTestClient().Connect(callCtx, transport, &sdkmcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 	require.NoError(t, err)
 	defer func() { _ = session.Close() }()
 	require.Contains(t, session.InitializeResult().Instructions, "actor member-one.")
@@ -138,7 +144,7 @@ func TestDaemonMCPIdentityRequests(t *testing.T) {
 				clone.Header.Set("Authorization", "Bearer member-two-token")
 				return base.RoundTrip(clone)
 			})
-			active, err = newMCPHTTPTestClient().Connect(callCtx, other, nil)
+			active, err = newMCPHTTPTestClient().Connect(callCtx, other, &sdkmcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 			require.NoError(t, err)
 			defer func() { _ = active.Close() }()
 		}
@@ -175,13 +181,24 @@ func TestDaemonMCPIdentityRequests(t *testing.T) {
 			require.Equal(t, http.StatusForbidden, response.StatusCode, "%s with %s", method, token)
 		}
 	}
+	// A modern request ignores legacy session state and uses its verified
+	// credential, including another token for the same actor.
+	for _, grant := range []struct{ token, actor string }{
+		{"member-two-token", "member-two"}, {"same-actor-token", "member-one"},
+	} {
+		status, discovery := mcpRPCWithBearer(t, endpoint, grant.token, "server/discover", map[string]any{}, func(r *http.Request) { r.Header.Set("Mcp-Session-Id", sessionID.Load().(string)) })
+		require.Equal(t, http.StatusOK, status)
+		require.NotContains(t, discovery, "error", "%v", discovery)
+		result := discovery["result"].(map[string]any)
+		require.Contains(t, result["instructions"], "actor "+grant.actor+".")
+	}
 	other := newAuthenticatedMCPHTTPTestTransport(endpoint)
 	other.HTTPClient.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		clone := request.Clone(request.Context())
 		clone.Header.Set("Authorization", "Bearer scoped-token")
 		return base.RoundTrip(clone)
 	})
-	scoped, err := newMCPHTTPTestClient().Connect(callCtx, other, nil)
+	scoped, err := newMCPHTTPTestClient().Connect(callCtx, other, &sdkmcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 	require.NoError(t, err)
 	defer func() { _ = scoped.Close() }()
 	for _, tc := range []struct {
@@ -219,10 +236,10 @@ func TestDaemonMCPIdentityRequests(t *testing.T) {
 	}, authors)
 }
 
-// Contract: ending an identity session releases the connections its REST
-// clients opened to the daemon. The daemon's Unix listener never times out
-// idle connections, so anything a closed session keeps open stays open.
-func TestDaemonMCPIdentitySessionCloseReleasesDaemonConnections(t *testing.T) {
+// Contract: ending an identity session or modern request releases its REST
+// connections. The daemon's Unix listener never times out idle connections,
+// so anything cleanup keeps open stays open.
+func TestDaemonMCPIdentitySessionsAndRequestsReleaseDaemonConnections(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix sockets are not supported on Windows")
 	}
@@ -244,9 +261,15 @@ func TestDaemonMCPIdentitySessionCloseReleasesDaemonConnections(t *testing.T) {
 	socket := filepath.Join(dir, "d.sock")
 	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", socket)
 	require.NoError(t, err)
-	var open atomic.Int64
+	var open, issueReads atomic.Int64
+	listPath := fmt.Sprintf("/api/v1/projects/%d/issues", project.ID)
 	rest := &http.Server{
-		Handler: backend.Handler(), ReadHeaderTimeout: 10 * time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == listPath {
+				issueReads.Add(1)
+			}
+			backend.Handler().ServeHTTP(w, r)
+		}), ReadHeaderTimeout: 10 * time.Second,
 		ConnState: func(_ net.Conn, state http.ConnState) {
 			switch state {
 			case http.StateNew:
@@ -278,7 +301,7 @@ func TestDaemonMCPIdentitySessionCloseReleasesDaemonConnections(t *testing.T) {
 			clone.Header.Set("Authorization", "Bearer member-one-token")
 			return base.RoundTrip(clone)
 		})
-		session, err := newMCPHTTPTestClient().Connect(callCtx, transport, nil)
+		session, err := newMCPHTTPTestClient().Connect(callCtx, transport, &sdkmcp.ClientSessionOptions{ProtocolVersion: "2025-11-25"})
 		require.NoError(t, err)
 		listed, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "kata.list", Arguments: map[string]any{"project": project.Name}})
 		require.NoError(t, err)
@@ -286,7 +309,84 @@ func TestDaemonMCPIdentitySessionCloseReleasesDaemonConnections(t *testing.T) {
 		require.Positive(t, open.Load(), "the session's tool call reaches the daemon")
 		require.NoError(t, session.Close())
 	}
-	//nolint:kennlint // sleeptest: session teardown and connection close finish asynchronously after DELETE.
+	for range 4 {
+		before := issueReads.Load()
+		status, listed := mcpRPCWithBearer(t, gateway.URL+"/mcp", "member-one-token", "tools/call", map[string]any{"name": "kata.list", "arguments": map[string]any{"project": project.Name}})
+		require.Equal(t, http.StatusOK, status)
+		require.NotContains(t, listed, "error", "%v", listed)
+		require.NotEqual(t, true, listed["result"].(map[string]any)["isError"])
+		require.Greater(t, issueReads.Load(), before, "the modern tool call reached the REST backend")
+	}
+	//nolint:kennlint // sleeptest: session and request cleanup close REST sockets asynchronously.
 	require.Eventually(t, func() bool { return open.Load() == 0 }, 5*time.Second, 10*time.Millisecond,
-		"closed sessions left %d daemon connections open", open.Load())
+		"closed MCP sessions or requests left daemon connections open")
+}
+
+// A successful modern request must leave enough lifetime for its activity report.
+func TestDaemonMCPIdentityModernDrainsActivityAfterResponse(t *testing.T) {
+	t.Setenv("KATA_TELEMETRY_ENABLED", "1")
+	home := deploymentHome(t)
+	store := openKataTestDB(t, filepath.Join(home, "kata.db"))
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	_, _, err := store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "member-token", Actor: "example-agent", AdminActor: db.BootstrapActor})
+	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		capture := &cliUseTelemetry{}
+		auth := config.AuthConfig{Token: "bootstrap-token", RequireTokenIdentity: true}
+		backend := daemon.NewServer(daemon.ServerConfig{DB: store, Auth: auth, Telemetry: capture})
+		t.Cleanup(func() { require.NoError(t, backend.Close()) })
+		started, release := make(chan struct{}), make(chan struct{})
+		var once sync.Once
+		rest := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/v1/ui/telemetry":
+				// Consume the body so the server can observe a client disconnect.
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					return
+				}
+				r.Body = io.NopCloser(bytes.NewReader(body))
+				once.Do(func() { close(started) })
+				select {
+				case <-release:
+				case <-r.Context().Done():
+					return
+				}
+			case "/api/v1/projects":
+				select {
+				case <-started:
+				case <-r.Context().Done():
+					return
+				}
+			}
+			backend.Handler().ServeHTTP(w, r)
+		}))
+		original := http.DefaultTransport
+		http.DefaultTransport = rest.Client().Transport
+		defer func() { http.DefaultTransport = original }()
+		handler, err := newDaemonMCPHandler(t.Context(), store, config.MCPConfig{AllProjects: true, StartupSections: []string{"projects"}}, "", kitdaemon.Endpoint{Network: "tcp", Address: "127.0.0.1:7777"}, auth)
+		require.NoError(t, err)
+		callCtx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		request := httptest.NewRequestWithContext(callCtx, http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"kata.projects","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`))
+		request.Header.Set("Authorization", "Bearer member-token")
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json, text/event-stream")
+		request.Header.Set("Mcp-Protocol-Version", currentMCPProtocolVersion)
+		request.Header.Set("Mcp-Method", "tools/call")
+		request.Header.Set("Mcp-Name", "kata.projects")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		cancel() // net/http cancels the request context when ServeHTTP returns.
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		require.NotContains(t, response.Body.String(), `"isError":true`)
+		require.NotContains(t, response.Body.String(), `"error":`)
+		// Settle cancellation at both ends before allowing delayed delivery.
+		synctest.Wait()
+		close(release)
+		synctest.Wait()
+		capture.mu.Lock()
+		defer capture.mu.Unlock()
+		require.Equal(t, []string{"agent_active"}, capture.events)
+	})
 }

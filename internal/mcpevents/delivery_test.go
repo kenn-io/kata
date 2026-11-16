@@ -9,9 +9,11 @@ import (
 	"encoding/json/v2"
 	"maps"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -419,6 +421,54 @@ func TestDeliveryDeadEndpointAgesOutOnlyWithFailures(t *testing.T) {
 			assert.Equal(t, db.MCPEventStateActive, row.State)
 			assert.Zero(t, row.FailedAttempts)
 		})
+	})
+	t.Run("policy refusal restarts failure aging", func(t *testing.T) {
+		for _, priorAttempts := range []int{0, 4} {
+			t.Run(strconv.Itoa(priorAttempts+1), func(t *testing.T) {
+				forEachBackend(t, func(t *testing.T, store db.Storage) {
+					h, sk := newDelivery(t, store)
+					sk.respond = always(http.StatusInternalServerError)
+					var blocked atomic.Bool
+					h.recv.client.SetResolverForTest(func(context.Context, string, string) ([]netip.Addr, error) {
+						if blocked.Load() {
+							return []netip.Addr{netip.MustParseAddr("100.64.0.1")}, nil
+						}
+						return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+					})
+					req := h.request("example-user")
+					req.TTLMS = mcpevents.TTLNull()
+					result := h.mustSubscribe(req)
+					h.touch(result.ID)
+					for range priorAttempts {
+						h.drainDue()
+						h.clock.Advance(10 * time.Minute)
+					}
+					seed(t, h, result.ID, 8*24*time.Hour, 19)
+					blocked.Store(true)
+					h.drainDue()
+					row := h.row(result.ID)
+					assert.Equal(t, "destination_not_allowed", row.LastError)
+					assert.Equal(t, db.MCPEventStateActive, row.State)
+					assert.Zero(t, row.FailedAttempts)
+					assert.Nil(t, row.FailedSince)
+					if priorAttempts == 4 {
+						assert.Equal(t, 1, row.DeadLetterCount)
+						h.touch(result.ID)
+					} else {
+						require.NotNil(t, row.NextAttemptAt)
+					}
+					h.clock.Advance(8 * 24 * time.Hour)
+					blocked.Store(false)
+					h.drainDue()
+					row = h.row(result.ID)
+					assert.Equal(t, db.MCPEventStateActive, row.State)
+					assert.Equal(t, "http_5xx", row.LastError)
+					assert.Equal(t, 1, row.FailedAttempts)
+					require.NotNil(t, row.FailedSince)
+					assert.Equal(t, h.clock.Now(), *row.FailedSince)
+				})
+			})
+		}
 	})
 }
 

@@ -18,6 +18,67 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+func TestSearch_ContinuationCommandKeepsQueryAndFilters(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	for _, title := range []string{"inventory export first", "inventory export second", "inventory export third"} {
+		ref := createIssue(t, env, pid, title)
+		runCLI(t, env, dir, "label", "add", ref, "bug")
+		runCLI(t, env, dir, "label", "add", ref, "ui")
+		runCLI(t, env, dir, "label", "add", ref, "wont")
+	}
+	createIssue(t, env, pid, "inventory export distractor")
+	workspace := filepath.Join(t.TempDir(), "reader's workspace")
+	require.NoError(t, os.Mkdir(workspace, 0o700))
+	t.Chdir(t.TempDir())
+	ctx := contextWithBaseURL(t.Context(), env.URL)
+	out, stderr, err := executeRootCapture(t, ctx, "search", "--project", "kata", "--workspace", workspace, "--lexical", "--status", "open", "--limit", "1", "--include-deleted", "--label", "bug", "--label", "ui", "--no-label", `"wont,fix"`, "--no-label", ",excluded", "--", "inventory", "--export")
+	require.NoError(t, err, stderr)
+	assert.Contains(t, out, "inventory export first")
+	for _, title := range []string{"inventory export second", "inventory export third"} {
+		_, command, ok := strings.Cut(stderr, "search results are incomplete; continue with ")
+		require.True(t, ok, stderr)
+		command, _, _ = strings.Cut(command, "\n")
+		out, stderr, err = executeRootCapture(t, ctx, retryShellArgs(t, command)...)
+		require.NoError(t, err, stderr)
+		assert.Contains(t, out, title)
+		assert.NotContains(t, out, "distractor")
+		assert.Equal(t, 1, strings.Count(out, "inventory export"))
+	}
+}
+
+func TestSearch_ContinuationRendering(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mode    outputMode
+		quiet   bool
+		body    string
+		wantErr string
+		wantOut string
+	}{
+		{"complete", outputHuman, false, `{"complete":true,"results":[]}`, "", ""},
+		{"no cursor", outputHuman, false, `{"complete":false,"results":[]}`, "search results are incomplete\n", ""},
+		{"quiet", outputHuman, true, `{"complete":false,"next_cursor":"next","results":[]}`, "", ""},
+		{"json", outputJSON, false, `{"complete":false,"next_cursor":"next","results":[]}`, "", ""},
+		{"agent", outputAgent, false, `{"complete":false,"next_cursor":"next","results":[]}`, "", "next_cursor=next"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetFlags(t)
+			flags.Mode, flags.Quiet = tc.mode, tc.quiet
+			cmd := newSearchCmd()
+			var out, stderr bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&stderr)
+			require.NoError(t, printSearchResults(cmd, []byte(tc.body)))
+			assert.Equal(t, tc.wantErr, stderr.String())
+			if tc.quiet {
+				assert.Empty(t, out.String())
+			} else if tc.wantOut != "" {
+				assert.Contains(t, out.String(), tc.wantOut)
+			}
+		})
+	}
+}
+
 // renderSearch drives printSearchResults directly: it sets the active output
 // mode, feeds the raw response body, and returns captured stdout. It isolates
 // the rendering contract (header rule, score precision, agent field order) from

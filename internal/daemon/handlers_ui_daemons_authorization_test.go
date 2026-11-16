@@ -914,10 +914,11 @@ func TestWebDaemonGatewayStreamsEventsForTokenSessionOnLocalTarget(t *testing.T)
 func TestWebDaemonGatewayRestrictsEmbeddingsByViewer(t *testing.T) {
 	for _, administrator := range []bool{false, true} {
 		t.Run(fmt.Sprintf("viewer administrator=%t", administrator), func(t *testing.T) {
+			fixture := &localEmbeddingsFixture{}
 			targetDaemon := NewServer(ServerConfig{
 				DB: openAuthTestDB(t), StartedAt: time.Now().UTC(),
 				Auth:            config.AuthConfig{Token: "target-token"},
-				LocalEmbeddings: &localEmbeddingsFixture{},
+				LocalEmbeddings: fixture,
 				ReconcilerHealth: func() ReconcilerHealth {
 					return ReconcilerHealth{Configured: true, Embedded: 40, Backlog: 172, ETASeconds: new(int64(30))}
 				},
@@ -943,6 +944,12 @@ func TestWebDaemonGatewayRestrictsEmbeddingsByViewer(t *testing.T) {
 			var got api.LocalEmbeddingsStatus
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &got))
 			assert.False(t, got.CanChange)
+			fixture.restartable.Store(true)
+			response = authorizedGatewayRequest(t, handler, manager, issued, http.MethodGet, "/api/v1/embeddings/local", nil, "")
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var restartStatus api.LocalEmbeddingsStatus
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &restartStatus))
+			assert.False(t, restartStatus.CanRestart)
 			require.NotNil(t, got.Indexing)
 			if administrator {
 				assert.Equal(t, int64(212), got.Indexing.Total)

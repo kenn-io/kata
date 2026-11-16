@@ -101,15 +101,14 @@ func (p *moveSnapshotProof) addComment(comment moveSnapshotComment) {
 // Nested move snapshots and unvalidated batch baselines are never evidence.
 type FederationMoveSnapshotValidator struct {
 	tx            *sql.Tx
-	postgres      bool
 	proofs        map[string]*moveSnapshotProof
 	edits         map[string][]FoldEvent
 	commentOwners map[string]string
 }
 
 // NewFederationMoveSnapshotValidator creates one transaction's proof cache.
-func NewFederationMoveSnapshotValidator(tx *sql.Tx, postgres bool) *FederationMoveSnapshotValidator {
-	return &FederationMoveSnapshotValidator{tx: tx, postgres: postgres, proofs: map[string]*moveSnapshotProof{}, edits: map[string][]FoldEvent{}, commentOwners: map[string]string{}}
+func NewFederationMoveSnapshotValidator(tx *sql.Tx) *FederationMoveSnapshotValidator {
+	return &FederationMoveSnapshotValidator{tx: tx, proofs: map[string]*moveSnapshotProof{}, edits: map[string][]FoldEvent{}, commentOwners: map[string]string{}}
 }
 
 // ObservePrepared preserves earlier ordinary edit versions after envelope,
@@ -129,7 +128,7 @@ func (v *FederationMoveSnapshotValidator) ObservePrepared(event RemoteEvent) {
 }
 
 func moveSnapshotFoldEvent(event RemoteEvent) FoldEvent {
-	uid := FederationEventIssueUID(event.IssueUID, string(event.Payload))
+	uid := EventIssueUID(event.IssueUID)
 	return FoldEvent{UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: event.ProjectUID, IssueUID: uid, Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, CreatedAt: event.CreatedAt.UTC().Format(time.RFC3339Nano), Payload: event.Payload}
 }
 
@@ -154,7 +153,7 @@ func (v *FederationMoveSnapshotValidator) Validate(ctx context.Context, event Re
 	if author := strings.TrimSpace(snapshot.Author); !proof.authors[author] && (len(proof.authors) != 0 || author != actor) {
 		return fmt.Errorf("%w: unverified move snapshot author", ErrFederationIngestValidation)
 	}
-	uid := FederationEventIssueUID(event.IssueUID, string(event.Payload))
+	uid := EventIssueUID(event.IssueUID)
 	for _, comment := range snapshot.Comments {
 		comment = comment.normalized()
 		owner, known := v.commentOwners[comment.UID]
@@ -202,7 +201,7 @@ func (v *FederationMoveSnapshotValidator) UnprovenReferences(ctx context.Context
 	}
 	document := PayloadMap(event.Payload)
 	snapshot := PayloadMap(document["snapshot"])
-	uid := FederationEventIssueUID(event.IssueUID, string(event.Payload))
+	uid := EventIssueUID(event.IssueUID)
 	var links, comments, remaining []jsontext.Value
 	if err := json.Unmarshal(snapshot["links"], &links); err != nil && len(snapshot["links"]) != 0 {
 		return RemoteEvent{}, err
@@ -246,7 +245,7 @@ func (v *FederationMoveSnapshotValidator) UnprovenReferences(ctx context.Context
 }
 
 func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event RemoteEvent) (*moveSnapshotProof, error) {
-	uid := FederationEventIssueUID(event.IssueUID, string(event.Payload))
+	uid := EventIssueUID(event.IssueUID)
 	if proof, known := v.proofs[uid]; known {
 		return proof, nil
 	}
@@ -294,9 +293,7 @@ func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event Remot
 	if err := closeMoveSnapshotRows(rows); err != nil {
 		return nil, err
 	}
-	issueUIDExpr := FederationReadIssueUIDExpr(v.postgres)
-	//nolint:gosec // G202: issueUIDExpr is a fixed dialect expression; values are bound.
-	rows, err = v.tx.QueryContext(ctx, `SELECT e.uid,e.origin_instance_uid,p.uid,`+issueUIDExpr+`,COALESCE(e.related_issue_uid,''),e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at FROM events e JOIN projects p ON p.id=e.project_id WHERE `+issueUIDExpr+`=$1 OR e.related_issue_uid=$1`, uid)
+	rows, err = v.tx.QueryContext(ctx, `SELECT e.uid,e.origin_instance_uid,p.uid,COALESCE(e.issue_uid,''),COALESCE(e.related_issue_uid,''),e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at FROM events e JOIN projects p ON p.id=e.project_id WHERE e.issue_uid=$1 OR e.related_issue_uid=$1`, uid)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +306,6 @@ func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event Remot
 			return nil, err
 		}
 		retained.Payload = []byte(payload)
-		retained.IssueUID = FederationEventIssueUID(&retained.IssueUID, payload)
 		history = append(history, retained)
 	}
 	if err := closeMoveSnapshotRows(rows); err != nil {
@@ -335,6 +331,40 @@ func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event Remot
 		for key, state := range projection.Links {
 			if state.Present && (key.FromUID == uid || key.ToUID == uid) {
 				proof.links[snapshotLinkIdentity(key, state.Author)] = true
+			}
+		}
+	}
+	// A whole copy merges into the comments the issue holds. A comment it
+	// brought new is proven as written. For a comment the issue already had,
+	// the copy proves its text and edit time under the author and creation
+	// time that were kept, never under the ones the copy carried.
+	for _, retained := range history {
+		if retained.Type != RepeatedImportEventType || retained.IssueUID != uid {
+			continue
+		}
+		var copied struct {
+			Comments []moveSnapshotComment `json:"comments"`
+		}
+		if json.Unmarshal(retained.Payload, &copied) != nil {
+			continue
+		}
+		for _, comment := range copied.Comments {
+			comment = comment.normalized()
+			if comment.UID == "" || comment.Author == "" {
+				continue
+			}
+			if !proof.commentUIDs[comment.UID] {
+				proof.addComment(comment)
+				continue
+			}
+			if comment.EditedAt == "" {
+				continue
+			}
+			for identity := range proof.identities {
+				if identity.UID == comment.UID {
+					identity.Body, identity.EditedAt = comment.Body, comment.EditedAt
+					proof.comments[identity] = true
+				}
 			}
 		}
 	}

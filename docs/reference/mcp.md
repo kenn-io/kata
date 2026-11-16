@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-09
+last_edited: 2026-11-10
 ---
 
 # Model Context Protocol server
@@ -773,18 +773,23 @@ available through MCP.
 
 Kata delegates protocol negotiation to the official Go MCP SDK. Stateless
 clients can use `server/discover`; session clients can use `initialize` and
-`notifications/initialized`. Stdio accepts both. The Streamable HTTP listener
-keeps sessions so section loaders can send tool-list changes, so it answers
-other calls that carry 2026-07-28 per-request metadata with an
-unsupported-version error listing the session versions it accepts. JSON-RPC
-batches are rejected. Each compact JSON message is limited to 8 MiB.
+`notifications/initialized`. Stdio accepts both. The standalone and
+daemon-mounted HTTP endpoints route MCP 2026-07-28 requests to a stateless JSON
+server with Events. Legacy clients retain sessions and tool-list changes,
+without Events. JSON-RPC batches are rejected. Each compact JSON message is
+limited to 8 MiB.
 
 Kata advertises tools, including tool-list changes, and the webhook Events
 capability described in [Native inbox events](#native-inbox-events). It does
 not advertise prompts, resources, roots,
 logging, sampling, subscriptions, or server-to-client requests. Discovery uses
 a five-minute private cache hint. Tool execution allows 20 starts per second,
-a burst of 20, and at most eight concurrent daemon calls per server process.
+a burst of 20, and at most eight concurrent daemon calls. The standalone and
+static daemon mount share limits across protocol paths. Identity mounts retain
+per-session limits for legacy clients; modern requests share limits by exact
+token ID, independently of other tokens. Modern clients using the same token
+also share loaded tool-section selections until the token expires or the daemon
+restarts.
 
 Host process control stays outside MCP: daemon lifecycle, the TUI and Web UI,
 install/update, database migrations and cutovers, and raw internal replication
@@ -796,7 +801,13 @@ The daemon owns MCP Events. Turn it on with `[mcp_events] enabled = true` in the
 daemon configuration (see [MCP Events](configuration.md#mcp-events)). Then
 `kata mcp serve` forwards `events/list`, `events/subscribe`, and
 `events/unsubscribe` to the daemon and keeps no Events state of its own. It has
-no Events flag. A forwarder advertises Events on stdio and on the MCP
+no Events flag. The daemon-mounted `/mcp` endpoint offers the
+same Events methods with either static or identity tokens after both `[mcp]`
+and `[mcp_events]` are enabled and the daemon starts or restarts. Identity
+requests use the caller's exact token as subscription owner; static mounts use
+the daemon's backend credential. The daemon owns all subscription state.
+
+A forwarder advertises Events on stdio and on the MCP
 2026-07-28 HTTP path. It does not advertise or serve Events on legacy-session
 HTTP, where `events/*` gets the SDK's plain HTTP 400 "not handled" answer.
 

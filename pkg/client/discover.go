@@ -28,7 +28,8 @@ type DiscoverOptions struct {
 	// StartWith is the path of a kata executable. When it is set and the
 	// selected local daemon has no runtime, Discover runs `kata daemon start`,
 	// or `kata daemon recover` for a pinned local profile, then connects. Empty
-	// never starts a daemon, and a remote is never started.
+	// never starts a daemon, and a remote is never started. When the selected
+	// home disables autostart, Discover waits for its supervisor instead.
 	StartWith string
 }
 
@@ -70,7 +71,7 @@ func Discover(ctx context.Context, discover DiscoverOptions, opts ...Option) (*C
 		Name:           discover.Daemon,
 		StartWith:      discover.StartWith,
 	})
-	if errors.Is(err, internalclient.ErrLocalDaemonUnreachable) || errors.Is(err, internalclient.ErrDaemonStartFailed) {
+	if errors.Is(err, internalclient.ErrLocalDaemonUnreachable) || errors.Is(err, internalclient.ErrDaemonStartFailed) || errors.Is(err, internalclient.ErrDaemonManagedExternally) {
 		return nil, fmt.Errorf("%w: %w", ErrDaemonUnavailable, err)
 	}
 	if err != nil {

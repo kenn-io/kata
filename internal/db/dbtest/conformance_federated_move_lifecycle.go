@@ -147,75 +147,75 @@ func checkFederatedMovePurgeFormerStreams(t *testing.T, store db.Storage) error 
 		require.NoError(t, err)
 		require.Greater(t, metadata.Binding.ReplayHorizonEventID, read.ResetAfterID)
 	}
-	for _, identityField := range []string{"issue_uid", "uid"} {
-		t.Run("payload-only "+identityField+" history", func(t *testing.T) {
-			ctx := t.Context()
-			source, target, issue, _ := federatedRehomeFixture(t, store, "purge-payload-"+identityField)
-			lateStream, err := store.CreateProject(ctx, "rehome-late-stream-"+identityField)
-			require.NoError(t, err)
-			moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
-				IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID,
-				IfMatchRev: issue.Revision, Actor: "worker",
-			})
-			require.NoError(t, err)
-			origin, err := uid.New()
-			require.NoError(t, err)
-			payloadOnly := newRemoteEvent(t, source, nil, "issue.updated", "worker", origin,
-				time.Now().Add(time.Hour).UnixMilli(), jsontext.Value(`{"`+identityField+`":"`+issue.UID+`","title":"late source edit"}`))
-			_, err = store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{payloadOnly})
-			require.NoError(t, err)
-			latePayloadOnly := newRemoteEvent(t, lateStream, nil, "issue.updated", "worker", origin,
-				time.Now().Add(2*time.Hour).UnixMilli(), jsontext.Value(`{"`+identityField+`":"`+issue.UID+`","title":"late stream edit"}`))
-			_, err = store.InsertRemoteEvents(ctx, lateStream.ID, []db.RemoteEvent{latePayloadOnly})
-			require.NoError(t, err)
-			stored, err := store.EventsByUIDs(ctx, source.ID, []string{payloadOnly.EventUID})
-			require.NoError(t, err)
-			require.Len(t, stored, 1)
-			require.Nil(t, stored[0].IssueID, "late source history has no local issue row")
-			require.Nil(t, stored[0].IssueUID, "the source envelope keeps its payload-only identity")
-			stored, err = store.EventsByUIDs(ctx, lateStream.ID, []string{latePayloadOnly.EventUID})
-			require.NoError(t, err)
-			require.Len(t, stored, 1)
-			require.Nil(t, stored[0].IssueID)
-			require.Nil(t, stored[0].IssueUID)
-
-			_, _, _, err = store.SoftDeleteIssue(ctx, moved.Issue.ID, "worker")
-			require.NoError(t, err)
-			purged, err := store.PurgeIssue(ctx, moved.Issue.ID, "worker", nil)
-			require.NoError(t, err)
-			require.GreaterOrEqual(t, purged.EventCount, int64(6), "payload-only issue history belongs to the purge count")
-			require.Contains(t, purged.ResetProjectIDs, source.ID,
-				"purging payload-only source history must invalidate its project stream")
-			require.Contains(t, purged.ResetProjectIDs, lateStream.ID,
-				"payload-only issue history must invalidate its own project stream")
-			for _, event := range []struct {
-				projectID int64
-				uid       string
-			}{{source.ID, payloadOnly.EventUID}, {lateStream.ID, latePayloadOnly.EventUID}} {
-				remaining, err := store.EventsByUIDs(ctx, event.projectID, []string{event.uid})
-				require.ErrorIs(t, err, db.ErrNotFound)
-				require.Empty(t, remaining, "purge must remove payload-only issue history")
-			}
-
-			grant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
-				SpokeInstanceUID: origin, Capabilities: "push,pull", Actor: "worker",
-			})
-			require.NoError(t, err)
-			unrelatedUID, err := uid.New()
-			require.NoError(t, err)
-			unrelated := newRemoteEvent(t, source, &unrelatedUID, "issue.created", "worker", origin,
-				time.Now().Add(2*time.Hour).UnixMilli(), jsontext.Value(`{"uid":"`+unrelatedUID+`","title":"unrelated issue","author":"worker","status":"open","metadata":{}}`))
-			_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
-				ProjectID: source.ID, SpokeInstanceUID: origin, BoundActor: "worker",
-				FederationEnrollmentID: grant.Enrollment.ID, EventFeatures: db.SupportedEventFeatures,
-				Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: unrelated}},
-			})
-			require.NoError(t, err)
-			_, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
-			require.ErrorIs(t, err, db.ErrNotFound,
-				"an unrelated source push must not replay and recreate the purged issue")
+	// Late history arrives in streams that hold no local row for the issue,
+	// so only the header issue UID ties it to the purged issue.
+	t.Run("late history without a local issue row", func(t *testing.T) {
+		ctx := t.Context()
+		source, target, issue, _ := federatedRehomeFixture(t, store, "purge-late-history")
+		lateStream, err := store.CreateProject(ctx, "rehome-late-stream")
+		require.NoError(t, err)
+		moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+			IfMatchRev: issue.Revision, Actor: "worker",
 		})
-	}
+		require.NoError(t, err)
+		origin, err := uid.New()
+		require.NoError(t, err)
+		lateSource := newRemoteEvent(t, source, &issue.UID, "issue.updated", "worker", origin,
+			time.Now().Add(time.Hour).UnixMilli(), jsontext.Value(`{"title":"late source edit"}`))
+		_, err = store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{lateSource})
+		require.NoError(t, err)
+		lateOther := newRemoteEvent(t, lateStream, &issue.UID, "issue.updated", "worker", origin,
+			time.Now().Add(2*time.Hour).UnixMilli(), jsontext.Value(`{"title":"late stream edit"}`))
+		_, err = store.InsertRemoteEvents(ctx, lateStream.ID, []db.RemoteEvent{lateOther})
+		require.NoError(t, err)
+		stored, err := store.EventsByUIDs(ctx, source.ID, []string{lateSource.EventUID})
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		require.Nil(t, stored[0].IssueID, "late source history has no local issue row")
+		require.Equal(t, &issue.UID, stored[0].IssueUID)
+		stored, err = store.EventsByUIDs(ctx, lateStream.ID, []string{lateOther.EventUID})
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		require.Nil(t, stored[0].IssueID)
+		require.Equal(t, &issue.UID, stored[0].IssueUID)
+
+		_, _, _, err = store.SoftDeleteIssue(ctx, moved.Issue.ID, "worker")
+		require.NoError(t, err)
+		purged, err := store.PurgeIssue(ctx, moved.Issue.ID, "worker", nil)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, purged.EventCount, int64(6), "late issue history belongs to the purge count")
+		require.Contains(t, purged.ResetProjectIDs, source.ID,
+			"purging late source history must invalidate its project stream")
+		require.Contains(t, purged.ResetProjectIDs, lateStream.ID,
+			"late issue history must invalidate its own project stream")
+		for _, event := range []struct {
+			projectID int64
+			uid       string
+		}{{source.ID, lateSource.EventUID}, {lateStream.ID, lateOther.EventUID}} {
+			remaining, err := store.EventsByUIDs(ctx, event.projectID, []string{event.uid})
+			require.ErrorIs(t, err, db.ErrNotFound)
+			require.Empty(t, remaining, "purge must remove late issue history")
+		}
+
+		grant, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			SpokeInstanceUID: origin, Capabilities: "push,pull", Actor: "worker",
+		})
+		require.NoError(t, err)
+		unrelatedUID, err := uid.New()
+		require.NoError(t, err)
+		unrelated := newRemoteEvent(t, source, &unrelatedUID, "issue.created", "worker", origin,
+			time.Now().Add(2*time.Hour).UnixMilli(), IssueDocument(t, unrelatedUID, jsontext.Value(`{"uid":"`+unrelatedUID+`","title":"unrelated issue","author":"worker","status":"open","metadata":{}}`)))
+		_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID: source.ID, SpokeInstanceUID: origin, BoundActor: "worker",
+			FederationEnrollmentID: grant.Enrollment.ID, EventFeatures: db.SupportedEventFeatures,
+			Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: unrelated}},
+		})
+		require.NoError(t, err)
+		_, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+		require.ErrorIs(t, err, db.ErrNotFound,
+			"an unrelated source push must not replay and recreate the purged issue")
+	})
 	return nil
 }
 

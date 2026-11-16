@@ -43,6 +43,7 @@ type Client struct {
 	credential         config.EmbeddingCredential
 	credentialRevision uint64
 	credentialHealth   CredentialHealth
+	batchLimit         int
 }
 
 const (
@@ -159,6 +160,11 @@ func (c *Client) embed(ctx context.Context, role embedconfig.Role, texts []strin
 		return nil, err
 	}
 	options := c.options
+	c.mu.Lock()
+	if c.batchLimit > 0 {
+		options.Batch.Items = min(options.Batch.Items, c.batchLimit)
+	}
+	c.mu.Unlock()
 	if c.endpoint != nil {
 		options.Deployment.BaseURL, err = c.endpoint(ctx)
 		if err != nil {
@@ -181,6 +187,12 @@ func (c *Client) embed(ctx context.Context, role embedconfig.Role, texts []strin
 	}
 	vectors, err := provider.EmbedTexts(ctx, role, texts)
 	if err != nil {
+		// Start later built-in fills with single inputs after a timeout.
+		if transport, ok := errors.AsType[*embedclient.TransportError](err); c.endpoint != nil && ok && transport.Timeout() && ctx.Err() == nil {
+			c.mu.Lock()
+			c.batchLimit = 1
+			c.mu.Unlock()
+		}
 		if rejected, ok := errors.AsType[*embedclient.APIError](err); ok && rejected.CredentialsRejected() {
 			return nil, c.rejectCredential(credential, revision, rejected)
 		}

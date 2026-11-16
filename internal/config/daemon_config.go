@@ -37,6 +37,8 @@ type DaemonConfig struct {
 	// AutostartIdleTimeout stops implicitly auto-started local daemons after
 	// foreground inactivity. Empty or zero disables idle shutdown.
 	AutostartIdleTimeout string `toml:"autostart_idle_timeout"`
+	// Autostart permits implicit client starts; absent means enabled.
+	Autostart *bool `toml:"autostart"`
 	// ActiveDaemon names the daemon catalog entry selected by default.
 	// Empty preserves the legacy implicit endpoint resolution.
 	ActiveDaemon string `toml:"active_daemon"`
@@ -90,6 +92,24 @@ type MCPConfig struct {
 	StartupSections []string `toml:"startup_sections"`
 	TokenFile       string   `toml:"token_file"`
 	TokenEnv        string   `toml:"token_env"`
+}
+
+// AutostartEnabled reports whether clients may start this home's daemon.
+func (c DaemonConfig) AutostartEnabled() bool {
+	return c.Autostart == nil || *c.Autostart
+}
+
+// ReadAutostartEnabled reads only the home startup policy, without resolving
+// daemon credentials or applying the caller's deployment environment.
+func ReadAutostartEnabled() (bool, string, error) {
+	var file struct {
+		Autostart *bool `toml:"autostart"`
+	}
+	path, err := decodeConfigSection("autostart", &file)
+	if err != nil {
+		return false, path, err
+	}
+	return (DaemonConfig{Autostart: file.Autostart}).AutostartEnabled(), path, nil
 }
 
 // MinAutostartIdleTimeout leaves enough time for detached startup discovery
@@ -384,6 +404,16 @@ func (c CloseThrottleConfig) ThrottleWindow() (time.Duration, error) {
 	return d, nil
 }
 
+// SafeDiagnosticError marks a configuration error whose text contains no
+// credentials, file contents, or parser output. It may name a validated
+// address or field and is suitable for display in diagnostic reports.
+type SafeDiagnosticError struct {
+	err error
+}
+
+func (e *SafeDiagnosticError) Error() string { return e.err.Error() }
+func (e *SafeDiagnosticError) Unwrap() error { return e.err }
+
 // ReadDaemonConfig parses <KATA_HOME>/config.toml. Returns a zero-value
 // DaemonConfig and nil error when the file is absent — daemon startup
 // should not fail just because the file isn't there. Other I/O or parse
@@ -393,13 +423,13 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	return readDaemonConfig(path, true)
+	return readDaemonConfig(path, true, false)
 }
 
 // ReadDaemonConfigForHome reads a selected home's configuration without
 // applying the calling client's daemon environment overrides.
 func ReadDaemonConfigForHome(home string) (*DaemonConfig, error) {
-	return readDaemonConfig(filepath.Join(home, "config.toml"), false)
+	return readDaemonConfig(filepath.Join(home, "config.toml"), false, false)
 }
 
 // ReadDaemonCatalogAndAuthPolicy reads the selected daemon, catalog, and
@@ -449,7 +479,7 @@ func ReadDaemonCatalogAndAuthPolicy() (*DaemonConfig, error) {
 	return cfg, nil
 }
 
-func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
+func readDaemonConfig(path string, mergeEnv, skipSupervisedAuth bool) (*DaemonConfig, error) {
 	var cfg DaemonConfig
 	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
 	switch {
@@ -498,8 +528,10 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 			return nil, err
 		}
 	}
-	if err := resolveAuthCredential(&cfg.Auth); err != nil {
-		return nil, err
+	if !skipSupervisedAuth || cfg.AutostartEnabled() {
+		if err := resolveAuthCredential(&cfg.Auth); err != nil {
+			return nil, err
+		}
 	}
 	if cfg.Sources["auth"] != "KATA_AUTH_TOKEN" {
 		cfg.Sources["auth"], _, _ = strings.Cut(cfg.Auth.Source, ":")
@@ -578,8 +610,10 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 	if err := normalizeDaemonCatalog(&cfg); err != nil {
 		return nil, err
 	}
+	// SafeDiagnosticError shows these errors in kata doctor, so errors added to
+	// normalizeFederationSigning must not contain credentials, file contents, or parser output.
 	if err := normalizeFederationSigning(&cfg, filepath.Dir(path)); err != nil {
-		return nil, err
+		return nil, &SafeDiagnosticError{err: err}
 	}
 	if err := validateFederationConfig(&cfg); err != nil {
 		return nil, err

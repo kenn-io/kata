@@ -53,7 +53,9 @@ type Options struct {
 	// server must not serve Events.
 	Events bool
 	// Admission is shared across servers of one process; nil creates its own.
-	Admission         *ToolAdmission
+	Admission *ToolAdmission
+	// LoadedSections shares selected section IDs across servers; nil keeps selections local.
+	LoadedSections    *LoadedSections
 	Client            *kataclient.Client
 	LongRunningClient *kataclient.Client
 	Scope             *Scope

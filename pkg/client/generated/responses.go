@@ -56,6 +56,14 @@ type TurnOnLocalEmbeddingsErrorResponseJSON409 = ErrorEnvelope
 
 type TurnOnLocalEmbeddingsErrorResponseJSON500 = ErrorEnvelope
 
+type RestartLocalEmbeddingsErrorResponse = ErrorEnvelope
+
+type RestartLocalEmbeddingsErrorResponseJSON = ErrorEnvelope
+
+type RestartLocalEmbeddingsErrorResponseJSON409 = ErrorEnvelope
+
+type RestartLocalEmbeddingsErrorResponseJSON500 = ErrorEnvelope
+
 type PollEventsResponse = PollEventsBody
 
 type PollEventsErrorResponse = ErrorEnvelope
@@ -166,6 +174,10 @@ type ListProjectsErrorResponse = ErrorEnvelope
 type InitProjectResponse = InitProjectResponseBody
 
 type InitProjectErrorResponse = ErrorEnvelope
+
+type ReadProjectByNameResponse = ProjectResolveBody
+
+type ReadProjectByNameErrorResponse = ErrorEnvelope
 
 type ResolveProjectResponse = ProjectResolveBody
 
@@ -715,6 +727,16 @@ type TurnOnLocalEmbeddingsResp struct {
 	JSON500      *TurnOnLocalEmbeddingsErrorResponseJSON500
 }
 
+type RestartLocalEmbeddingsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON403      *RestartLocalEmbeddingsErrorResponse
+	JSON404      *RestartLocalEmbeddingsErrorResponseJSON
+	JSON409      *RestartLocalEmbeddingsErrorResponseJSON409
+	JSON500      *RestartLocalEmbeddingsErrorResponseJSON500
+}
+
 type PollEventsResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
 	XKataEventsIssueUID        string `header:"X-Kata-Events-Issue-UID"`
@@ -942,6 +964,14 @@ type InitProjectResp struct {
 	StatusCode   int
 	JSON200      *InitProjectResponse
 	JSONDefault  *InitProjectErrorResponse
+}
+
+type ReadProjectByNameResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ReadProjectByNameResponse
+	JSONDefault  *ReadProjectByNameErrorResponse
 }
 
 type ResolveProjectResp struct {

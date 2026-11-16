@@ -287,3 +287,17 @@ func TestCronDefinitionWritePolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestCronJobCreateExplainsUnsupportedCron(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "example-project")
+	definition := cronHTTPDefinition(t)
+	definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 L * *"}
+	status, raw := cronHTTP(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID), map[string]any{"actor": "operator", "name": "Periodic review", "definition": definition})
+	require.Equal(t, http.StatusBadRequest, status)
+	var response api.ErrorEnvelope
+	require.NoError(t, json.Unmarshal(raw, &response))
+	require.Equal(t, "validation", response.Error.Code)
+	require.Contains(t, response.Error.Message, "invalid cron expression")
+	require.Contains(t, response.Error.Message, "L, W, and # syntax is not supported")
+}

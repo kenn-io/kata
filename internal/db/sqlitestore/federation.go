@@ -787,6 +787,9 @@ func (d *Store) insertRemoteEvents(ctx context.Context, projectID int64, events 
 		if err != nil {
 			return nil, err
 		}
+		if _, err := db.RemoteEventIssueUID(ev); err != nil {
+			return nil, err
+		}
 		if err := db.ValidateFederationEntries(ev.Type, ev.EventUID, payload); err != nil {
 			return nil, err
 		}
@@ -1171,6 +1174,13 @@ func (d *Store) insertFederationBaselineEventsTx(
 // MaterializeFederatedProject rebuilds the local read model for a spoke project
 // from its stored remote events. Event rows are retained.
 func (d *Store) MaterializeFederatedProject(ctx context.Context, projectID int64) error {
+	return d.materializeFederatedProjectAfter(ctx, projectID, nil)
+}
+
+// materializeFederatedProjectAfter runs before in the transaction that then
+// rebuilds the project, so a change to the event log and the rows built from
+// it commit together.
+func (d *Store) materializeFederatedProjectAfter(ctx context.Context, projectID int64, before func(context.Context, *sql.Tx) error) error {
 	// Ownership can change while retained history is folded. Take the policy
 	// writer lock before request fences or project rows to avoid lock upgrades.
 	original := ctx
@@ -1180,12 +1190,40 @@ func (d *Store) MaterializeFederatedProject(ctx context.Context, projectID int64
 		}
 		return db.ApplyTransactionFence(original, tx)
 	})
-	return d.RetryTransient(ctx, func() error {
-		return d.materializeFederatedProject(ctx, projectID)
+	if before != nil {
+		// before changes the event log in the rebuild's transaction, so the
+		// fold cannot be prepared ahead of the writer.
+		return d.RetryTransient(ctx, func() error {
+			return d.withFederationMaterialization(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				if err := before(ctx, tx); err != nil {
+					return err
+				}
+				return d.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil)
+			})
+		})
+	}
+	return d.retryFederationPreparation(ctx, func(locked bool) error {
+		if locked {
+			return d.materializeFederatedProject(ctx, projectID)
+		}
+		prepared, err := d.prepareFederationRebuild(ctx, projectID)
+		if err != nil {
+			return err
+		}
+		if d.federationIngestPrepared != nil {
+			d.federationIngestPrepared()
+		}
+		return d.applyFederationRebuild(ctx, prepared)
 	})
 }
 
 func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64) error {
+	return d.withFederationMaterialization(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return d.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil)
+	})
+}
+
+func (d *Store) withFederationMaterialization(ctx context.Context, apply func(context.Context, *sql.Tx) error) error {
 	parent := ctx
 	ctx, resets := db.WithFederationMoveResetCapture(ctx)
 	tx, err := d.BeginTx(ctx, nil)
@@ -1193,7 +1231,7 @@ func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64
 		return fmt.Errorf("begin federated materialization: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := d.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil); err != nil {
+	if err := apply(ctx, tx); err != nil {
 		return err
 	}
 	if err := db.RecordFederationCurrentProjectResets(ctx, tx, db.FederationPulledEventUIDs(ctx), func(project db.Project) (int64, error) {
@@ -1274,47 +1312,12 @@ func (d *Store) materializeFederatedProjectTxScoped(
 		}
 	}
 	projection := db.FoldEvents(events)
-	destinations, err := db.RehomeFederatedMovedIssues(ctx, tx, events, projection, func(pid int64, issue db.FoldIssue) (string, error) {
-		return resolveFederatedIssueShortID(ctx, tx, pid, issue.UID, issue.ShortID, nil)
-	}, func(id, source, target int64) error {
-		if err := lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil {
-			return err
-		}
-		if err := rejectIssueMoveExternalRootIssueSyncTx(ctx, tx, id, source, target); err != nil {
-			return err
-		}
-		collisions, err := issueMoveImportMappingCollisions(ctx, tx, id, source, target)
-		if err != nil {
-			return err
-		}
-		if len(collisions) > 0 {
-			return &db.ProjectMergeImportMappingCollisionError{Mappings: collisions}
-		}
-		var issueUID string
-		if err := tx.QueryRowContext(ctx, `SELECT uid FROM issues WHERE id=$1`, id).Scan(&issueUID); err != nil {
-			return err
-		}
-		return db.CheckNativeRecurringParentMove(ctx, tx, false, source, issueUID)
-	}, func(issueUID, targetProjectUID string) error {
-		if err := bumpProjectAccess(ctx, tx); err != nil {
-			return err
-		}
-		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
-	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
-		payload := "{}"
-		var issueUID *string
-		if reference != nil {
-			encoded, err := json.Marshal(reference)
-			if err != nil {
-				return 0, err
-			}
-			payload = string(encoded)
-			issueUID = &reference.IssueUID
-		}
-		event, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, IssueUID: issueUID, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: payload, SkipRelay: true})
-		return event.ID, err
-	})
+	moved := db.IndexFederatedMoveEvents(events)
+	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection)
 	if err != nil {
+		return err
+	}
+	if err := d.rehomeFederatedMovedIssues(ctx, tx, moved, projection, decisions, acceptedEventUIDs); err != nil {
 		return err
 	}
 	if !db.FollowingMovedProjects(ctx) {
@@ -1369,6 +1372,49 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	return updateFederatedProjectMetadataTx(ctx, tx, projectID, projection.ProjectMetadata[binding.HubProjectUID])
 }
 
+func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]db.FoldEvent, projection db.FoldProjection, decisions []db.FederatedMoveDecision, acceptedEventUIDs []string) error {
+	return db.RehomeFederatedMovedIssues(ctx, tx, moved, projection, decisions, func(pid int64, issue db.FoldIssue) (string, error) {
+		return resolveFederatedIssueShortID(ctx, tx, pid, issue.UID, issue.ShortID, nil)
+	}, func(id, source, target int64) error {
+		if err := lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil {
+			return err
+		}
+		if err := rejectIssueMoveExternalRootIssueSyncTx(ctx, tx, id, source, target); err != nil {
+			return err
+		}
+		collisions, err := issueMoveImportMappingCollisions(ctx, tx, id, source, target)
+		if err != nil {
+			return err
+		}
+		if len(collisions) > 0 {
+			return &db.ProjectMergeImportMappingCollisionError{Mappings: collisions}
+		}
+		var issueUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM issues WHERE id=$1`, id).Scan(&issueUID); err != nil {
+			return err
+		}
+		return db.CheckNativeRecurringParentMove(ctx, tx, false, source, issueUID)
+	}, func(issueUID, targetProjectUID string) error {
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return err
+		}
+		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
+	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
+		payload := "{}"
+		var issueUID *string
+		if reference != nil {
+			encoded, err := json.Marshal(reference)
+			if err != nil {
+				return 0, err
+			}
+			payload = string(encoded)
+			issueUID = &reference.IssueUID
+		}
+		event, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, IssueUID: issueUID, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: payload, SkipRelay: true})
+		return event.ID, err
+	})
+}
+
 func updateFederatedProjectMetadataTx(ctx context.Context, tx *sql.Tx, projectID int64, raw jsontext.Value) error {
 	if len(raw) == 0 {
 		return nil
@@ -1400,10 +1446,10 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, false); err != nil {
+	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID); err != nil {
 		return fmt.Errorf("clear federated events: %w", err)
 	}
 	if err := clearFederatedProjection(ctx, tx, projectID); err != nil {
@@ -1688,7 +1734,7 @@ func (d *Store) federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, 
 	if issue.OccurrenceKey != nil {
 		occurrenceKey = *issue.OccurrenceKey
 	}
-	return buildIssueCreatedPayload(issueCreatedPayload{
+	return buildIssueCreatedPayload(db.IssueDocumentPayload{
 		UID:                 issue.UID,
 		ShortID:             issue.ShortID,
 		Title:               issue.Title,
@@ -1731,7 +1777,7 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 	return out, rows.Err()
 }
 
-func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]createdLinkOut, error) {
+func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueDocumentLink, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT l.type, peer.short_id, peer.uid, 0 AS incoming, l.author, l.created_at
 		  FROM links l
@@ -1750,9 +1796,9 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]cre
 		return nil, fmt.Errorf("list federation snapshot links: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []createdLinkOut
+	var out []db.IssueDocumentLink
 	for rows.Next() {
-		var link createdLinkOut
+		var link db.IssueDocumentLink
 		var createdAt time.Time
 		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Incoming, &link.Author, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan federation snapshot link: %w", err)
@@ -1763,7 +1809,7 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]cre
 	return out, rows.Err()
 }
 
-func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]issueSnapshotComment, error) {
+func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.IssueDocumentComment, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT uid, author, body, created_at, teammate, reply_to_uid, reply_kind, edited_at
 		  FROM comments
@@ -1773,10 +1819,10 @@ func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]
 		return nil, fmt.Errorf("list federation snapshot comments: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []issueSnapshotComment
+	var out []db.IssueDocumentComment
 	for rows.Next() {
 		var (
-			comment            issueSnapshotComment
+			comment            db.IssueDocumentComment
 			createdAt          sql.NullTime
 			teammate           sql.NullString
 			replyTo, replyKind sql.NullString
@@ -1832,20 +1878,17 @@ func federationFoldEventsForIssues(ctx context.Context, tx *sql.Tx, projectID in
 }
 
 func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes, issueScope []string) ([]db.FoldEvent, error) {
-	// Only issue events use payload fields as issue identity. Other event
-	// payloads can reference an issue without becoming part of its history.
-	eventIssueUID := `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),json_extract(e.payload,'$.issue_uid'),json_extract(e.payload,'$.uid')) ELSE NULLIF(e.issue_uid,'') END`
-	historyIssueUID := `CASE WHEN h.type LIKE 'issue.%' THEN COALESCE(NULLIF(h.issue_uid,''),json_extract(h.payload,'$.issue_uid'),json_extract(h.payload,'$.uid')) ELSE NULLIF(h.issue_uid,'') END`
-	moveIssueUID := `COALESCE(NULLIF(m.issue_uid,''),json_extract(m.payload,'$.issue_uid'),json_extract(m.payload,'$.uid'))`
+	// The unary + keeps the issue_uid indexes out of this plan: scanning events
+	// in ID order and checking moves through the issue.moved partial index
+	// costs less than seeking every issue's events and their moves.
 	query := `
 		SELECT e.uid, e.origin_instance_uid, p.uid, e.issue_uid, e.related_issue_uid,
 		       e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.created_at
 		  FROM events e JOIN projects p ON p.id=e.project_id
- WHERE (e.project_id=$1 OR (` + eventIssueUID + ` IN (
-   SELECT ` + historyIssueUID + ` FROM events h WHERE h.project_id=$1
+ WHERE (e.project_id=$1 OR (+e.issue_uid IN (
+   SELECT h.issue_uid FROM events h WHERE h.project_id=$1
    UNION SELECT uid FROM issues WHERE project_id=$1)
- AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND
-   ` + moveIssueUID + ` = ` + eventIssueUID + `)))`
+ AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND +m.issue_uid = e.issue_uid)))`
 	args := []any{projectID}
 	if len(eventTypes) > 0 {
 		placeholders := make([]string, 0, len(eventTypes))
@@ -1899,7 +1942,7 @@ func scanFederationFoldEvents(rows *sql.Rows, issueScope []string) ([]db.FoldEve
 		}
 		e.Payload = jsontext.Value(payload)
 		e.CreatedAt = createdAt.UTC().Format(sqliteTimeFormat)
-		if len(issueScope) > 0 && !strings.HasPrefix(e.Type, "project.") && !slices.Contains(issueScope, db.FederationEventIssueUID(&e.IssueUID, payload)) {
+		if len(issueScope) > 0 && !strings.HasPrefix(e.Type, "project.") && !slices.Contains(issueScope, e.IssueUID) {
 			continue
 		}
 		out = append(out, e)
@@ -1962,7 +2005,7 @@ func clearFederatedProjection(ctx context.Context, tx *sql.Tx, projectID int64) 
 func reconcileFederatedIssues(
 	ctx context.Context, tx *sql.Tx, projectID int64, projection db.FoldProjection,
 ) (map[string]int64, error) {
-	existing, err := federatedIssueRowsByUID(ctx, tx, projectID)
+	existing, err := federatedIssueRowsByUID(ctx, tx, projectID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -2136,12 +2179,15 @@ func federatedIssueValues(issue db.FoldIssue, shortID string, metadata jsontext.
 	return values, nil
 }
 
-func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, issueScope ...string) (map[string]federatedIssueRow, error) {
+func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, stamp *federationRowHasher, issueScope ...string) (map[string]federatedIssueRow, error) {
 	query := `SELECT uid, id, short_id, title, body, status, closed_reason, owner,
  CAST(assignment_expires_on AS TEXT), priority, author, CAST(created_at AS TEXT),
  CAST(updated_at AS TEXT), CAST(closed_at AS TEXT), CAST(deleted_at AS TEXT), metadata
  FROM issues WHERE project_id = ?`
 	query, args := scopedFederationRows(query, projectID, "uid", issueScope)
+	if stamp != nil {
+		query += " ORDER BY id"
+	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated issue rows: %w", err)
@@ -2160,7 +2206,12 @@ func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, i
 		row.deleted = deletedAt != nil
 		row.values = []any{row.shortID, row.title, row.body, status, closedReason, owner, assignmentExpiresOn,
 			priority, author, createdAt, updatedAt, closedAt, deletedAt, metadata}
-		out[uid] = row
+		if stamp != nil {
+			stamp.write(1, append([]any{uid, row.id}, row.values...)...)
+		}
+		if stamp == nil || !stamp.only {
+			out[uid] = row
+		}
 	}
 	return out, rows.Err()
 }
@@ -2168,7 +2219,7 @@ func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, i
 func reconcileFederatedComments(
 	ctx context.Context, tx *sql.Tx, projectID int64, issueIDs map[string]int64, projection db.FoldProjection,
 ) error {
-	existing, err := federatedCommentRowsByUID(ctx, tx, projectID)
+	existing, err := federatedCommentRowsByUID(ctx, tx, projectID, nil)
 	if err != nil {
 		return err
 	}
@@ -2205,7 +2256,7 @@ func reconcileFederatedCommentsFromRows(ctx context.Context, tx *sql.Tx, issueID
 		if row, ok := existing[uid]; ok {
 			if row.issueID == issueID && row.author == nonEmptyAuthor(comment.Author) &&
 				row.body == comment.Body && row.teammate == comment.Teammate &&
-				row.createdAt == nonEmptyTime(comment.CreatedAt) {
+				row.createdAt == nonEmptyTime(comment.CreatedAt) && row.sameEditTime(comment.EditedAt) {
 				continue
 			}
 			owned, err := federatedExternalCommentOwnedTx(ctx, tx, row.id)
@@ -2241,6 +2292,20 @@ type federatedCommentRow struct {
 	createdAt string
 	body      string
 	teammate  string
+	editedAt  string
+}
+
+// sameEditTime reports whether the stored edit time is the folded one. An
+// edit can change only this time, when a comment is saved again with the same
+// text, so the save paths must not treat equal text as an unchanged row.
+// Local writes and federation store the time in different text formats.
+func (r federatedCommentRow) sameEditTime(folded string) bool {
+	if r.editedAt == folded {
+		return true
+	}
+	stored, storedErr := time.Parse(time.RFC3339Nano, r.editedAt)
+	want, wantErr := time.Parse(time.RFC3339Nano, folded)
+	return storedErr == nil && wantErr == nil && stored.Equal(want)
 }
 
 func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID int64) (bool, error) {
@@ -2260,13 +2325,16 @@ func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID 
 	return owners > 0, nil
 }
 
-func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, issueScope ...string) (map[string]federatedCommentRow, error) {
+func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, stamp *federationRowHasher, issueScope ...string) (map[string]federatedCommentRow, error) {
 	query := `
-		SELECT c.uid, c.id, c.issue_id, c.author, CAST(c.created_at AS TEXT), c.body, c.teammate
+		SELECT c.uid, c.id, c.issue_id, c.author, CAST(c.created_at AS TEXT), c.body, c.teammate, CAST(c.edited_at AS TEXT)
 		  FROM comments c
 		  JOIN issues i ON i.id = c.issue_id
 		 WHERE i.project_id = ?`
 	query, args := scopedFederationRows(query, projectID, "i.uid", issueScope)
+	if stamp != nil {
+		query += " ORDER BY c.id"
+	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated comments: %w", err)
@@ -2276,12 +2344,17 @@ func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64,
 	for rows.Next() {
 		var uid string
 		var row federatedCommentRow
-		var teammate sql.NullString
-		if err := rows.Scan(&uid, &row.id, &row.issueID, &row.author, &row.createdAt, &row.body, &teammate); err != nil {
+		var teammate, editedAt sql.NullString
+		if err := rows.Scan(&uid, &row.id, &row.issueID, &row.author, &row.createdAt, &row.body, &teammate, &editedAt); err != nil {
 			return nil, fmt.Errorf("scan federated comment: %w", err)
 		}
-		row.teammate = teammate.String
-		out[uid] = row
+		row.teammate, row.editedAt = teammate.String, editedAt.String
+		if stamp != nil {
+			stamp.write(2, uid, row.id, row.issueID, row.author, row.createdAt, row.body, teammate, editedAt)
+		}
+		if stamp == nil || !stamp.only {
+			out[uid] = row
+		}
 	}
 	return out, rows.Err()
 }
@@ -2294,7 +2367,7 @@ type federatedLabelKey struct {
 func reconcileFederatedLabels(
 	ctx context.Context, tx *sql.Tx, projectID int64, issueIDs map[string]int64, projection db.FoldProjection,
 ) error {
-	existing, err := federatedLabelKeys(ctx, tx, projectID)
+	existing, err := federatedLabelKeys(ctx, tx, projectID, nil)
 	if err != nil {
 		return err
 	}
@@ -2332,13 +2405,16 @@ func reconcileFederatedLabelsFromRows(ctx context.Context, tx *sql.Tx, issueIDs 
 	return nil
 }
 
-func federatedLabelKeys(ctx context.Context, tx *sql.Tx, projectID int64, issueScope ...string) (map[federatedLabelKey]struct{}, error) {
+func federatedLabelKeys(ctx context.Context, tx *sql.Tx, projectID int64, stamp *federationRowHasher, issueScope ...string) (map[federatedLabelKey]struct{}, error) {
 	query := `
 		SELECT il.issue_id, il.label
 		  FROM issue_labels il
 		  JOIN issues i ON i.id = il.issue_id
 		 WHERE i.project_id = ?`
 	query, args := scopedFederationRows(query, projectID, "i.uid", issueScope)
+	if stamp != nil {
+		query += " ORDER BY il.issue_id,il.label"
+	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated labels: %w", err)
@@ -2350,7 +2426,12 @@ func federatedLabelKeys(ctx context.Context, tx *sql.Tx, projectID int64, issueS
 		if err := rows.Scan(&key.issueID, &key.label); err != nil {
 			return nil, fmt.Errorf("scan federated label: %w", err)
 		}
-		out[key] = struct{}{}
+		if stamp != nil {
+			stamp.write(3, key.issueID, key.label)
+		}
+		if stamp == nil || !stamp.only {
+			out[key] = struct{}{}
+		}
 	}
 	return out, rows.Err()
 }
@@ -2403,11 +2484,11 @@ func reconcileFederatedLinkProjection(
 	ctx context.Context, tx *sql.Tx, projection db.FoldProjection,
 	desiredProjectIDs, ownedProjectIDs []int64, currentProjectID int64, currentIssueIDs map[string]int64,
 ) error {
-	issueIDs, err := federationGroupIssueIDs(ctx, tx, desiredProjectIDs, currentProjectID, currentIssueIDs, nil)
+	issueIDs, err := federationGroupIssueIDs(ctx, tx, desiredProjectIDs, currentProjectID, currentIssueIDs, nil, nil)
 	if err != nil {
 		return err
 	}
-	existing, err := federatedLinkRows(ctx, tx, ownedProjectIDs)
+	existing, err := federatedLinkRows(ctx, tx, ownedProjectIDs, nil)
 	if err != nil {
 		return err
 	}
@@ -2758,6 +2839,7 @@ func federationGroupIssueIDs(
 	currentProjectID int64,
 	currentIssueIDs map[string]int64,
 	currentIssueScope []string,
+	stamp *federationRowHasher,
 ) (map[string]int64, error) {
 	if len(projectIDs) == 0 {
 		return map[string]int64{}, nil
@@ -2783,6 +2865,12 @@ func federationGroupIssueIDs(
 		if err := rows.Scan(&uid, &issueID, &projectID); err != nil {
 			return nil, fmt.Errorf("scan federation group issue: %w", err)
 		}
+		if stamp != nil {
+			stamp.write(4, uid, issueID, projectID)
+		}
+		if stamp != nil && stamp.only {
+			continue
+		}
 		// A scoped fold only replaces endpoint resolution inside its scope.
 		// Untouched issues in this same project still resolve from persisted rows.
 		if projectID == currentProjectID && (len(currentIssueScope) == 0 || slices.Contains(currentIssueScope, uid)) {
@@ -2804,7 +2892,7 @@ func federationGroupIssueIDs(
 // group. A group cannot delete a link owned by an event stream that has not
 // joined it; binding transitions remove only the departing project's former
 // group boundaries through removeFederatedBoundaryLinksBetweenProjectAndGroup.
-func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map[db.FoldLinkKey]federatedLinkRow, error) {
+func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64, stamp *federationRowHasher) (map[db.FoldLinkKey]federatedLinkRow, error) {
 	if len(projectIDs) == 0 {
 		return map[db.FoldLinkKey]federatedLinkRow{}, nil
 	}
@@ -2813,13 +2901,17 @@ func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map
 	queryArgs = append(queryArgs, args...)
 	queryArgs = append(queryArgs, args...)
 	//nolint:gosec // IN values use generated ? placeholders with separately bound integer IDs.
-	rows, err := tx.QueryContext(ctx, `
+	query := `
 		SELECT l.id, l.from_issue_id, l.to_issue_id, l.from_issue_uid, l.to_issue_uid, l.type, l.author, CAST(l.created_at AS TEXT)
 		  FROM links l
 		  JOIN issues f ON f.id = l.from_issue_id
 		  JOIN issues t ON t.id = l.to_issue_id
-		 WHERE f.project_id IN (`+placeholders+`)
-		   AND t.project_id IN (`+placeholders+`)`, queryArgs...)
+		 WHERE f.project_id IN (` + placeholders + `)
+		   AND t.project_id IN (` + placeholders + `)`
+	if stamp != nil {
+		query += ` ORDER BY l.id`
+	}
+	rows, err := tx.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated links: %w", err)
 	}
@@ -2830,7 +2922,12 @@ func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map
 		if err := rows.Scan(&row.id, &row.fromID, &row.toID, &row.fromUID, &row.toUID, &row.typ, &row.author, &row.createdAt); err != nil {
 			return nil, fmt.Errorf("scan federated link: %w", err)
 		}
-		out[row.key()] = row
+		if stamp != nil {
+			stamp.write(5, row.id, row.fromID, row.toID, row.fromUID, row.toUID, row.typ, row.author, row.createdAt)
+		}
+		if stamp == nil || !stamp.only {
+			out[row.key()] = row
+		}
 	}
 	return out, rows.Err()
 }

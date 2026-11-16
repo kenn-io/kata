@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"iter"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,7 +114,7 @@ func TestOwnerBackupKeepsConcurrentRelayIngressOutsideItsSnapshot(t *testing.T) 
 			eventUID, err := uid.New()
 			require.NoError(t, err)
 			createdAt := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
-			payload := jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"Concurrent relay issue","body":"body","author":"source-assistant","status":"open","metadata":{},"created_at":"%s"}`, issueUID, createdAt.Format(db.EventTimestampFormat)))
+			payload := jsontext.Value(fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"Concurrent relay issue","body":"body","author":"source-assistant","status":"open","metadata":{},"created_at":"%s"}`, issueUID, strings.ToLower(issueUID[len(issueUID)-4:]), createdAt.Format(db.EventTimestampFormat)))
 			event := db.RemoteEvent{
 				EventUID: eventUID, OriginInstanceUID: "00000000000000000000000007",
 				ProjectUID: project.UID, ProjectName: project.Name, IssueUID: &issueUID,

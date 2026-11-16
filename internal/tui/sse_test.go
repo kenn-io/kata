@@ -286,64 +286,62 @@ func TestSSE_NoConnectedStatusBeforeFirstFrame(t *testing.T) {
 }
 
 // TestSSE_ReconnectSendsLastEventID drives startSSE through one frame,
-// closes the response, and verifies the second connection request
+// ends the response, and verifies the second connection request
 // carries Last-Event-ID matching the last frame seen on the first.
+// Fake time and in-memory streams run the real reconnect backoff without
+// waiting for it.
 func TestSSE_ReconnectSendsLastEventID(t *testing.T) {
-	var connects atomic.Int32
-	var secondHeader atomic.Value
-	secondConnected := make(chan struct{})
-	srv := newSSEMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-		n := connects.Add(1)
-		if n >= 2 {
-			secondHeader.Store(r.Header.Get("Last-Event-ID"))
-			if n == 2 {
-				close(secondConnected)
+	synctest.Test(t, func(t *testing.T) {
+		var connects int
+		secondHeader := make(chan string, 1)
+		hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			connects++
+			if connects == 1 {
+				// The body ends after one frame, which drops the connection.
+				frame := formatSSEFrame(5, "issue.created",
+					`{"type":"issue.created","project_id":7}`)
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(frame))}, nil
 			}
-			// Hold so the test has time to see the header.
-			<-r.Context().Done()
-			return
+			if connects == 2 {
+				secondHeader <- r.Header.Get("Last-Event-ID")
+			}
+			// Hold the stream open until the test cancels.
+			reader, writer := io.Pipe()
+			go func() {
+				<-r.Context().Done()
+				_ = writer.Close()
+			}()
+			return &http.Response{StatusCode: http.StatusOK, Body: reader}, nil
+		})}
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		ch := make(chan tea.Msg, 8)
+		done := make(chan struct{})
+		go func() {
+			startSSE(ctx, hc, "http://kata.invalid", nil, ch)
+			close(done)
+		}()
+
+		// Wait for the first event to arrive.
+		for {
+			if _, ok := drainOne(t, ch).(eventReceivedMsg); ok {
+				break
+			}
 		}
-		writeSSEFrame(t, w, 5, "issue.created",
-			`{"type":"issue.created","project_id":7}`)
-		// Close the connection by returning.
-	})
-
-	ctx, cancel := context.WithCancel(t.Context())
-	ch := make(chan tea.Msg, 8)
-	done := make(chan struct{})
-	go func() {
-		startSSE(ctx, srv.Client(), srv.URL, nil, ch)
-		close(done)
-	}()
-
-	// Wait for the first event to arrive.
-	deadline := time.After(2 * time.Second)
-	for {
+		// The second connect arrives after the reconnect backoff, which is
+		// 1s before jitter, and carries Last-Event-ID: 5.
 		select {
-		case <-deadline:
-			t.Fatal("never saw issue.created frame on first connect")
-		case msg := <-ch:
-			if _, ok := msg.(eventReceivedMsg); ok {
-				goto Reconnect
+		case <-time.After(4 * time.Second):
+			t.Fatal("second connect never arrived")
+		case hdr := <-secondHeader:
+			if hdr != "5" {
+				t.Fatalf("Last-Event-ID on reconnect = %q, want 5", hdr)
 			}
 		}
-	}
-Reconnect:
-	// Wait for the SSE goroutine to reconnect (second connect arrives
-	// after the 1s reconnect backoff). The test deadline must outlast
-	// that — we use 4s for slack.
-	select {
-	case <-time.After(4 * time.Second):
-		t.Fatal("second connect never arrived")
-	case <-secondConnected:
-	}
-	cancel()
-	<-done
-	// The second connect carries Last-Event-ID: 5.
-	hdr, _ := secondHeader.Load().(string)
-	if hdr != "5" {
-		t.Fatalf("Last-Event-ID on reconnect = %q, want 5", hdr)
-	}
+		cancel()
+		<-done
+	})
 }
 
 // A reconnect inside the grace period must suppress the reconnecting badge.
@@ -496,51 +494,58 @@ done:
 // TestSSE_GracePeriod_LongOutage_SurfacesBadge verifies that a sustained
 // outage (no productive reconnect within the grace window) does push
 // sseReconnecting to the channel, and that recovery pushes sseConnected.
-// The test shortens reconnectStatusGrace to keep the run fast.
+// Fake time and in-memory streams run the real grace period and reconnect
+// backoff without waiting for them.
 func TestSSE_GracePeriod_LongOutage_SurfacesBadge(t *testing.T) {
-	saved := reconnectStatusGrace
-	reconnectStatusGrace = 50 * time.Millisecond
-	t.Cleanup(func() { reconnectStatusGrace = saved })
+	synctest.Test(t, func(t *testing.T) {
+		var ready atomic.Bool
+		hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if !ready.Load() {
+				// An empty body ends the stream before any frame.
+				return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+			}
+			reader, writer := io.Pipe()
+			go func() {
+				defer func() { _ = writer.Close() }()
+				_, _ = io.WriteString(writer, formatSSEFrame(1, "issue.created",
+					`{"type":"issue.created","project_id":7}`))
+				<-r.Context().Done()
+			}()
+			return &http.Response{StatusCode: http.StatusOK, Body: reader}, nil
+		})}
 
-	var ready atomic.Bool
-	srv := newSSEMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if !ready.Load() {
-			return // empty body, close — readSSEStream sees EOF
-		}
-		writeSSEFrame(t, w, 1, "issue.created",
-			`{"type":"issue.created","project_id":7}`)
-		<-r.Context().Done()
-	})
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		ch := make(chan tea.Msg, 16)
+		done := make(chan struct{})
+		go func() {
+			startSSE(ctx, hc, "http://kata.invalid", nil, ch)
+			close(done)
+		}()
 
-	ctx, cancel := context.WithCancel(t.Context())
-	ch := make(chan tea.Msg, 16)
-	done := make(chan struct{})
-	go func() {
-		startSSE(ctx, srv.Client(), srv.URL, nil, ch)
-		close(done)
-	}()
-	t.Cleanup(func() { cancel(); <-done })
-
-	waitForState := func(want sseConnState) {
-		t.Helper()
-		deadline := time.After(5 * time.Second)
-		for {
-			select {
-			case <-deadline:
-				t.Fatalf("did not observe sseStatusMsg{%v}", want)
-			case msg := <-ch:
-				if st, ok := msg.(sseStatusMsg); ok && st.state == want {
-					return
+		waitForState := func(want sseConnState) {
+			t.Helper()
+			deadline := time.After(5 * time.Second)
+			for {
+				select {
+				case <-deadline:
+					t.Fatalf("did not observe sseStatusMsg{%v}", want)
+				case msg := <-ch:
+					if st, ok := msg.(sseStatusMsg); ok && st.state == want {
+						return
+					}
 				}
 			}
 		}
-	}
-	// First the badge should surface (grace fires, no productive reconnect yet).
-	waitForState(sseReconnecting)
-	// Flip the server to ready; the next reconnect produces a frame and
-	// pushes sseConnected.
-	ready.Store(true)
-	waitForState(sseConnected)
+		// First the badge should surface (grace fires, no productive reconnect yet).
+		waitForState(sseReconnecting)
+		// Flip the transport to ready; the next reconnect produces a frame and
+		// pushes sseConnected.
+		ready.Store(true)
+		waitForState(sseConnected)
+		cancel()
+		<-done
+	})
 }
 
 // drainOne reads the next message off ch with a deadline so a stuck

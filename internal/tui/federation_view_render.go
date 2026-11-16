@@ -235,7 +235,7 @@ func renderFederationAdoptConfirm(m Model) string {
 		fmt.Sprintf("federate local project %q INTO hub project %q?",
 			sanitizeForLine(emptyDash(draft.SpokeProjectName)),
 			sanitizeForLine(emptyDash(draft.HubProjectName))),
-		fmt.Sprintf("%q's issues will be adopted into the hub project and its local event history rewritten as snapshots",
+		fmt.Sprintf("%q's issues will be adopted into the hub project; its local event history will be replaced by a record of its current state",
 			sanitizeForLine(emptyDash(draft.SpokeProjectName))),
 		"",
 		fmt.Sprintf("type %q to confirm: %s",

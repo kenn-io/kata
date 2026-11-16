@@ -5,8 +5,19 @@ package main
 import (
 	"context"
 	"os"
+	"strconv"
 	"syscall"
 )
+
+var startedForRestartHelper = takeEnv(daemonRestartHelperEnv)
+
+func reapRestartHelper() {
+	pid, err := strconv.Atoi(startedForRestartHelper)
+	if err != nil || pid <= 0 {
+		return
+	}
+	go func() { _, _ = syscall.Wait4(pid, nil, 0, nil) }()
+}
 
 // reexecDaemon replaces the current process image, keeping its PID, so it
 // never reports a separate replacement process. It only returns on failure.

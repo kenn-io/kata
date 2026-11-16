@@ -1,7 +1,7 @@
 ---
 title: Share projects between hubs
 description: Connect a selected project to another Kata daemon, relay it to your devices, and understand sync and recovery.
-last_edited: 2026-11-10
+last_edited: 2026-11-11
 ---
 
 # Share projects between hubs
@@ -151,8 +151,9 @@ kata federation status --json
 Bridge status reads locally recorded state; `connected` is not a fresh hub
 health check. Inspect sync timestamps and pending work before treating the
 replicas as caught up. Use `--agent` for concise agent output, or `--json` when
-a script needs the full diagnostics. The web project's **Refresh sync** action
-also reads the recorded project state.
+a script needs the full diagnostics. The web project's sync summary refreshes
+its recorded state every 30 seconds while the tab is visible and when you return.
+Use **Refresh sync** to read it now.
 
 To bind a workspace to the replica after connection, run
 `kata init --project shared-replica` in that workspace. In identity mode, use an

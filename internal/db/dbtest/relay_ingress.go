@@ -40,7 +40,7 @@ func RunRelayIngressAtomicity(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	commentUID, err := uid.New()
 	require.NoError(t, err)
-	created := newRemoteEvent(t, project, &issueUID, "issue.created", "source-assistant", leaf, 300, jsontext.Value(`{"uid":"`+issueUID+`","title":"Relayed source task","body":"source body","author":"source-assistant","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+	created := newRemoteEvent(t, project, &issueUID, "issue.created", "source-assistant", leaf, 300, IssueDocument(t, issueUID, jsontext.Value(`{"uid":"`+issueUID+`","title":"Relayed source task","body":"source body","author":"source-assistant","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)))
 	commented := newRemoteEvent(t, project, &issueUID, "issue.commented", "comment-assistant", leaf, 301, jsontext.Value(`{"comment_uid":"`+commentUID+`","author":"comment-assistant","teammate":"reviewer","body":"Original comment","created_at":"2026-05-23T12:01:00.000Z"}`))
 	seal := func(event db.RemoteEvent, sequence int64) db.RelayEnvelope {
 		body, err := db.EncodeRelaySourceEvent(event)
@@ -116,7 +116,7 @@ func RunRelayIngressAtomicity(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	failedUID, err := uid.New()
 	require.NoError(t, err)
-	failed := newRemoteEvent(t, project, &failedUID, "issue.created", "assistant", leaf, 302, jsontext.Value(`{"uid":"`+failedUID+`","title":"Must roll back","author":"assistant","metadata":{}}`))
+	failed := newRemoteEvent(t, project, &failedUID, "issue.created", "assistant", leaf, 302, IssueDocument(t, failedUID, jsontext.Value(`{"uid":"`+failedUID+`","title":"Must roll back","author":"assistant","metadata":{}}`)))
 	failedBatch := db.RelayBatch{Stream: db.RelayStreamEvent, After: 40, Envelopes: []db.RelayEnvelope{seal(failed, 51)}}
 	_, err = store.AcceptRelayDeliveries(db.WithRootAttribution(ctx, db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: wrongPrivate}, "company-member"), grant.Enrollment.RelayBindingUID, failedBatch)
 	require.Error(t, err)
@@ -189,7 +189,7 @@ func RunRelayIngressRejectsCrossProjectLinks(t *testing.T, store db.Storage) {
 			if eventType == "issue.created" {
 				sourceUID, err = uid.New()
 				require.NoError(t, err)
-				payload = jsontext.Value(`{"uid":"` + sourceUID + `","title":"relayed issue","body":"","author":"relay-member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"` + peerUID + `","author":"relay-member"},{"type":"parent","to_issue_uid":"` + peerUID + `","author":"relay-member"},{"type":"related","to_issue_uid":"` + peerUID + `","author":"relay-member"}]}`)
+				payload = IssueDocument(t, sourceUID, jsontext.Value(`{"uid":"`+sourceUID+`","title":"relayed issue","body":"","author":"relay-member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"`+peerUID+`","author":"relay-member"},{"type":"parent","to_issue_uid":"`+peerUID+`","author":"relay-member"},{"type":"related","to_issue_uid":"`+peerUID+`","author":"relay-member"}]}`))
 			} else {
 				source, _, createErr := store.CreateIssue(ctx, db.CreateIssueParams{
 					ProjectID: project.ID, Title: "relayed issue", Author: "relay-member",

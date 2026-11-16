@@ -296,7 +296,7 @@ func scopedReportPayload(event db.Event, safePayload string, allowedUIDs map[str
 }
 
 // createdLinkPayload mirrors the digest-relevant subset of the stored
-// issue.created links array (see createdLinkOut in the storage layer).
+// issue.created links array (see db.IssueDocumentLink).
 type createdLinkPayload struct {
 	Type      string `json:"type"`
 	ToShortID string `json:"to_short_id,omitempty"`

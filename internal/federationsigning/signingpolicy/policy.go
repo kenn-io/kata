@@ -7,22 +7,26 @@ package signingpolicy
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"path"
 	"runtime"
 	"strings"
+	"time"
 
+	"go.kenn.io/kata/internal/credentialfile"
 	"go.kenn.io/kata/internal/httpurl"
 )
 
 // Policy validation and request admission share these errors. They never
 // include secret or body contents.
 var (
-	ErrInvalid     = errors.New("invalid federation request signature")
-	ErrKey         = errors.New("federation signing key unavailable")
-	ErrKeyRejected = errors.New("federation signing key rejected")
+	ErrInvalid      = errors.New("invalid federation request signature")
+	ErrKey          = errors.New("federation signing key unavailable")
+	ErrKeyRejected  = errors.New("federation signing key rejected")
+	ErrSharedSecret = errors.New("federation signing keys share one secret")
 )
 
 // Source references a separate secret; it never contains the secret itself.
@@ -56,7 +60,7 @@ func (s Source) Load() ([]byte, error) {
 		}
 		b = []byte(value)
 	} else {
-		f, err := os.Open(s.KeyFile) //nolint:gosec // G304: operator-configured secret source.
+		f, err := credentialfile.Open(s.KeyFile)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return nil, ErrKeyRejected
@@ -137,16 +141,30 @@ func ValidatePolicy(base string, keys []Key) error {
 	if err := ValidatePolicyShape(base, keys); err != nil {
 		return err
 	}
-	secrets := map[string]bool{}
 	for _, k := range keys {
-		key, err := k.Load()
-		if err != nil {
+		if _, err := k.Load(); err != nil {
 			return err
 		}
-		if secrets[string(key)] {
-			return ErrKey
+	}
+	return CheckDistinctSecrets(keys, time.Now())
+}
+
+// CheckDistinctSecrets rejects equal available secrets among unexpired keys.
+// Unavailable sources remain non-fatal at daemon startup.
+func CheckDistinctSecrets(keys []Key, now time.Time) error {
+	secrets := map[string]string{}
+	for _, k := range keys {
+		if k.NotAfter != 0 && now.Unix() >= k.NotAfter {
+			continue
 		}
-		secrets[string(key)] = true
+		secret, err := k.Load()
+		if err != nil {
+			continue
+		}
+		if first, ok := secrets[string(secret)]; ok {
+			return fmt.Errorf("%w: keys %q and %q; give each key its own key_file or key_env secret", ErrSharedSecret, first, k.KeyID)
+		}
+		secrets[string(secret)] = k.KeyID
 	}
 	return nil
 }

@@ -102,7 +102,9 @@ func ValidateFederationEntries(eventType, eventUID string, payloadJSON jsontext.
 		}
 		return validateFederationTeammate(payload["teammate"], eventUID, eventType)
 	}
-	if eventType != "issue.snapshot" && eventType != "issue.created" {
+	// A repeated import event carries a whole issue's comments, as a snapshot
+	// does.
+	if eventType != "issue.snapshot" && eventType != "issue.created" && eventType != RepeatedImportEventType {
 		return nil
 	}
 	var payload struct {

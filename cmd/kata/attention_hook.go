@@ -42,7 +42,11 @@ func newAttentionHookCmd() *cobra.Command {
 			if len(args) == 0 || (args[0] != "start" && args[0] != "end") {
 				return nil
 			}
-			if len(args) != 1 && !slices.Equal(args[1:], []string{"--source", legacyAttentionHookSource + args[0]}) {
+			validMarker := len(args) == 3 && slices.Equal(args[1:], []string{"--source", legacyAttentionHookSource + args[0]})
+			if len(args) == 3 && args[1] == "--ownership-marker" {
+				validMarker = isAgentHookOwnershipArg(agentHookKind(args[0]), args[1], args[2])
+			}
+			if len(args) != 1 && !validMarker {
 				return nil
 			}
 			runAttentionHook(cmd, args[0])

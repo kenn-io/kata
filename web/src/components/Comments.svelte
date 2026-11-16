@@ -279,7 +279,9 @@
         >
         <Button size="sm" label="Cancel reply" disabled={actionsDisabled} onclick={cancelReply} />
       </div>
-      {#if evidenceTooShort}<p>Confirm and refute need at least 40 characters of evidence.</p>{/if}
+      {#if evidenceTooShort}<p>
+          Confirm and refute replies need at least 40 characters of evidence.
+        </p>{/if}
     {/if}
     <MentionTextarea
       ariaLabel={replyDraft ? 'Reply evidence' : 'Comment'}

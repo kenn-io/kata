@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-11-07
+last_edited: 2026-11-13
 ---
 
 # Backup and restore
@@ -55,9 +55,10 @@ damaged database.
 
 ## Slow or interrupted upgrade startup
 
-SQLite in-place upgrades from schemas 41 through 49 to 50 add the missing
+SQLite in-place upgrades from schemas 41 through 50 to 51 add the missing
 indexes, and the empty MCP Events subscriptions table, inside the existing
-database in one transaction. Allow free space for the new indexes, their WAL
+database in one transaction. The step to 51 also drops the payload-derived
+issue history index. Allow free space for the new indexes, their WAL
 pages, and temporary sort files. These upgrades keep
 no `kata.db.bak.*` backup. An interrupted or failed transaction leaves the old
 schema version intact, and the next start retries. Take a backup before upgrading
@@ -70,7 +71,8 @@ migration is pending and report that progress on stderr. Cancelling detached
 startup stops waiting; the detached daemon keeps running. After a running-daemon restart
 starts, one Ctrl-C keeps the CLI waiting and holding the start lock until the
 restart completes or its readiness budget expires. That budget extends while an
-SQLite migration runs. Use `kata daemon logs` to inspect progress. A daemon
+SQLite migration runs. Inspect `daemon.log` for daemon diagnostics as described
+in [Daemon and diagnostics](../reference/cli.md#daemon-and-diagnostics). A daemon
 that exits before readiness reports its startup
 error rather than a readiness timeout.
 
@@ -89,8 +91,10 @@ If an interrupted import left `<database>.import.tmp.jsonl`,
 `<database>.import.tmp.db`, or the temporary database's WAL/SHM sidecars,
 the next cutover checks the original old-schema source, moves the partial files
 into a private `<database>.import.recovery-*` directory, and retries from that
-source. It prints the recovery directory in `kata daemon logs`. No hand deletion
-is needed. Preserve that directory until you have checked the upgraded data.
+source. It prints the recovery directory on stderr. Detached launches and
+Linux or macOS launches with null stderr retain it in `daemon.log`. No hand
+deletion is needed. Preserve that directory until you have checked the upgraded
+data.
 
 If the original source database is missing, startup refuses to create an empty
 database over an interrupted swap. Preserve the import temp files and all
@@ -372,13 +376,16 @@ to rows outside the export are removed, while issue UIDs retain the historical
 identity. Use a full backup when you need history from every project.
 
 Links may span projects, and a scoped export only contains the named project's
-issues. A fresh restore or project merge skips links whose peer is outside the
-snapshot, along with import-mapping records that reference those links, and
-prints an aggregate `note: skipped N link record(s)…` to stderr. A merge does
-not connect an imported issue to an existing project's issue, even when that
-peer is already in the target. This keeps the scoped import from changing
-another project's dependency graph. A full-database snapshot preserves links
-when it contains both endpoints.
+issues. A scoped export still contains every link that touches one of those
+issues, including links to issues in other projects.
+
+A fresh restore skips links whose peer is outside the snapshot, along with
+import-mapping records that reference those links, and prints an aggregate
+`note: skipped N link record(s)…` to stderr. A full-database snapshot preserves
+links when it contains both endpoints.
+
+A project merge creates such a link when the peer issue is already in the
+target; see [links between merged projects](#links-between-merged-projects).
 
 ## Merge a single-project snapshot
 
@@ -405,8 +412,45 @@ available suffix, such as `example-project-2`.
 The import is refused without mutation if an imported project or object UID
 already exists. As a result, re-importing the same snapshot is not an
 incremental refresh. Run one merge per scoped snapshot when restoring several
-projects; use a full-database export when cross-project links must also be
-restored.
+projects.
+
+### Links between merged projects
+
+Each scoped snapshot carries the links between its project and other projects.
+A merge creates such a link when its peer issue is already in the target,
+matched by issue UID:
+
+```sh
+kata import --merge --input backups/second-project.jsonl \
+  --target ~/.kata/kata.db
+```
+
+- The link keeps its original type, author, and created time.
+- A link whose peer is not in the target yet is skipped, and the merge prints
+  `note: skipped N link record(s)…`. The peer project's own snapshot carries
+  the same link, so merging that project creates it. The order of the merges
+  does not matter.
+- The merge adds the link to an issue of a project that is already in the
+  target. It changes nothing else in that project.
+
+A merge leaves out three kinds of link, prints a note with the count, and
+still merges the rest of the project:
+
+- A link that would join a project that Kata relays between hubs. A relay
+  cannot deliver a link between projects, so the ordinary link commands refuse
+  it too.
+- A parent link for an issue that already has a parent in the target. This
+  can happen when the snapshots were taken before and after the issue moved to
+  another parent. The target keeps the parent it holds. Change it afterwards
+  with `kata edit --parent`.
+- A parent link that would close a cycle with the parent links already in the
+  target. This can happen when the snapshots were taken at different times.
+  Set the parent on the target afterwards with `kata edit --parent`.
+
+To move linked projects to another hub one at a time, merge each project and
+then adopt it with `kata federation join --adopt-existing`. Adoption sends each
+issue's links in its snapshot, and the hub creates a link once both projects
+have arrived.
 
 Merge refuses snapshots containing hub-local teams, memberships or visibility
 policies. It also refuses root pins and verified provenance: a project merge

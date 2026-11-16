@@ -45,7 +45,9 @@ type FederationStatusRequest struct {
 // ProjectFederationStatusRequest reads status for one locally bound
 // federation project through the normal local/admin daemon auth surface.
 type ProjectFederationStatusRequest struct {
-	ProjectID int64 `path:"project_id"`
+	ProjectID  int64 `path:"project_id"`
+	Compact    bool  `query:"compact,omitempty" doc:"Omit relay checkpoint capacity measurement. Error details are unchanged unless omit_errors is also set."`
+	OmitErrors bool  `query:"omit_errors,omitempty" doc:"Remove error text from the status: the sync error, held-back batch errors, the embedding producer error, and the relay checkpoint error. State, timestamps, and counts remain, and has_sync_error reports whether a sync error was removed."`
 }
 
 // SkipFederationQuarantineRequest skips one quarantined federation batch
@@ -160,6 +162,7 @@ type FederationProjectStatus struct {
 	LastPushSuccessAt           *time.Time                    `json:"last_push_success_at,omitempty"`
 	LastErrorAt                 *time.Time                    `json:"last_error_at,omitempty"`
 	LastError                   *string                       `json:"last_error,omitempty"`
+	HasSyncError                bool                          `json:"has_sync_error,omitempty" doc:"True when a sync error was recorded and omit_errors removed its text."`
 	LastResetAt                 *time.Time                    `json:"last_reset_at,omitempty"`
 }
 
@@ -525,6 +528,10 @@ type FederationIngestEventsBody struct {
 	Accepted          int   `json:"accepted"`
 	Duplicates        int   `json:"duplicates"`
 	PushCursorEventID int64 `json:"push_cursor_event_id"`
+	// SupersededEventUIDs lists pushed adoption snapshots the hub did not
+	// store because its project already holds the issue. The spoke deletes
+	// them and takes the hub's state on its next pull.
+	SupersededEventUIDs []string `json:"superseded_event_uids,omitempty"`
 }
 
 // FederationIngestEventsResponse wraps FederationIngestEventsBody.

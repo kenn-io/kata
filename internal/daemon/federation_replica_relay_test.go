@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -143,10 +144,27 @@ func TestEnsureFederationReplicaRelayDrainsExistingSync(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("relay setup did not begin")
 		}
-		select {
-		case err := <-done:
-			require.FailNow(t, "relay setup completed while an existing sync was active", "%v", err)
-		case <-time.After(time.Second):
+		// A rebind that waits at the project gate turns new shared admissions
+		// away. This test still holds its own admission, so a busy probe means
+		// relay setup is parked behind the active sync.
+		key := federationcoord.Key(store.InstanceUID(), base.Project.ID)
+		parkLimit := time.After(5 * time.Second)
+		for parked := false; !parked; {
+			probe, err := federationcoord.TryBeginSync(t.Context(), key, store, base.Project.ID)
+			if errors.Is(err, federationcoord.ErrBusy) {
+				parked = true
+				continue
+			}
+			require.NoError(t, err)
+			probe()
+			select {
+			case err := <-done:
+				require.FailNow(t, "relay setup completed while an existing sync was active", "%v", err)
+			case <-parkLimit:
+				require.FailNow(t, "relay setup did not wait for the existing sync")
+			default:
+				runtime.Gosched()
+			}
 		}
 		binding, err := store.FederationBindingByProject(t.Context(), base.Project.ID)
 		require.NoError(t, err)

@@ -175,7 +175,7 @@ func decodeEventReceived(f frame) eventReceivedMsg {
 				out.replyToUIDs = append(out.replyToUIDs, payload.ReplyToUID)
 			}
 		}
-	case "issue.created", "issue.snapshot":
+	case "issue.created", "issue.snapshot", "issue.restated":
 		if len(p.Payload) == 0 {
 			break
 		}
