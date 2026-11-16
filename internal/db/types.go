@@ -4,6 +4,8 @@ import (
 	"encoding/json/jsontext"
 	"time"
 
+	"go.kenn.io/kata/internal/fileevidence"
+
 	"github.com/danielgtaylor/huma/v2"
 	"go.kenn.io/kata/internal/metadata"
 )
@@ -465,6 +467,11 @@ type Event struct {
 	HLCCounter          int64     `json:"hlc_counter"`
 	ContentHash         string    `json:"content_hash"`
 	CreatedAt           time.Time `json:"created_at"`
+	// Response-only dependencies rechecked before sending projected SSE frames.
+	VerificationIssueUIDs []string `json:"-"`
+	// EffectiveOrder retains a reset cursor's redacted source clock for internal
+	// ordering. Its json:"-" tag prevents releasing that clock.
+	EffectiveOrder FoldClock `json:"-"`
 }
 
 // RemoteEvent is the portable event shape accepted from a federation hub.
@@ -606,10 +613,12 @@ type CommentIdempotencyMatch struct {
 // the db layer validates attachment liveness and freezes its descriptor in
 // the close transaction before persisting the event JSON.
 type Evidence struct {
-	Type         string               `json:"type"`
-	AttachmentID string               `json:"attachment_id,omitempty"`
-	Attachment   *metadata.Attachment `json:"attachment,omitempty"`
+	File         *fileevidence.Reference `json:"file,omitempty"`
+	Type         string                  `json:"type"`
+	AttachmentID string                  `json:"attachment_id,omitempty"`
+	Attachment   *metadata.Attachment    `json:"attachment,omitempty"`
 
+	Comment   string   `json:"comment,omitempty"`   // confirmed
 	SHA       string   `json:"sha,omitempty"`       // commit
 	URL       string   `json:"url,omitempty"`       // pr
 	Command   string   `json:"command,omitempty"`   // test

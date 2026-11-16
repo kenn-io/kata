@@ -156,6 +156,16 @@
       "permanent": true
     },
     {
+      "source": "/reference/file-evidence/",
+      "destination": "/docs/reference/file-evidence/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/file-evidence.md",
+      "destination": "/docs/reference/file-evidence.md",
+      "permanent": true
+    },
+    {
       "source": "/reference/cron/",
       "destination": "/docs/reference/cron/",
       "permanent": true

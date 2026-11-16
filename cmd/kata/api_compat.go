@@ -25,6 +25,7 @@ const (
 	apiVersionDocbankKeyHealth          = "0.44.0"
 	apiVersionFederationProjectLookup   = "0.49.0"
 	apiVersionEffectiveCloseEventUID    = "0.40.0"
+	apiVersionFileEvidence              = "0.50.0"
 	apiVersionCommentLinks              = "0.28.0"
 	apiVersionReadyAndSearchFilters     = "0.8.0"
 	apiVersionReadyPrioritySort         = "0.41.0"

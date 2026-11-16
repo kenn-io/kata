@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-12
+last_edited: 2026-11-15
 ---
 
 # CLI reference
@@ -1056,6 +1056,8 @@ kata close <ref> --done --message <text> \
   [--pr <url>] \
   [--test <command>] \
   [--reviewed <path>] \
+  [--confirmed c:<claim>] \
+  [--overrule c:<refutation>] \
   [--docbank <node-id|/path>] \
   [--evidence <type:value>] \
   [--idempotency-key <key>] \
@@ -1063,7 +1065,8 @@ kata close <ref> --done --message <text> \
   [--dry]
 ```
 
-Repeat `--commit`, `--pr`, `--test`, `--reviewed`, or `--evidence` to record
+Repeat `--commit`, `--pr`, `--test`, `--reviewed`, `--confirmed`, `--refuted`,
+`--overrule`, or `--evidence` to record
 more than one item, for example a fix that landed in two pull requests.
 
 `--evidence attachment:<id-or-unique-suffix>` cites a live issue attachment
@@ -1104,11 +1107,28 @@ Evidence is validated against the close reason:
 
 | Reason | Evidence rule |
 | --- | --- |
-| `done` | One or more of `commit`, `pr`, `test`, `reviewed-paths`, `external`, or `attachment` |
-| `wontfix` | No evidence; any evidence item is rejected |
-| `duplicate` | Exactly one `duplicate-of` item |
-| `superseded` | Exactly one `superseded-by` item |
+| `done` | One or more of `commit`, `pr`, `test`, `reviewed-paths`, `external`, `attachment`, or `confirmed` |
+| `wontfix` | No evidence required; optional `refuted` evidence |
+| `duplicate` | Exactly one `duplicate-of` item, plus optional `refuted` evidence |
+| `superseded` | Exactly one `superseded-by` item, plus optional `refuted` evidence |
 | `audit-no-change` | Exactly one `no-change-audit` item; `reviewed-paths` is optional |
+
+`--confirmed c:<claim>` and `--refuted c:<claim>` cite a claim comment on this
+issue. Another author or teammate must have given it an unambiguous verdict;
+self-verdicts do not count. A superseded claim cannot be cited, a superseded
+confirmation is withdrawn, and a confirmation predating a body edit does not
+certify the new text. `confirmed` requires a confirmation and no open
+refutation; `refuted` requires an independent open refutation and no counting
+confirmation. A contested claim supports neither.
+
+When issue metadata `verify.required` is JSON `true`, `done` requires an
+explicit `confirmed` citation. Other values and close reasons are unaffected.
+`--overrule` names the open refutation, rather than the claim, and deliberately
+bypasses the [open-refutation policy](configuration.md#close-verification) on
+`done` or `audit-no-change`. It cannot make a contested claim valid evidence.
+The check reads a preflight snapshot; verdicts arriving after that read update
+live state, not the close decision. See [Verified claims](../workflows/agents.md#verified-claims)
+for the full workflow.
 
 Use `external:<account>` for completed work that has no repository artifact or
 command to cite. The value is a non-empty, free-text account of where and how
@@ -2706,3 +2726,9 @@ kata docbank setup --url URL --key-file PATH [--folder PATH] [--yes]
 Without `--url`, setup uses the Docbank on this machine. With `--url`, it uses a Docbank that runs elsewhere and reads its key from `--key-file`. Both ask once before writing (`--yes` skips the question), then restart running daemons. They reject `--daemon`.
 
 JSON output is `{"kata_api_version":1,"local":true,"folder":"/kata","changed":true}` for the local form and `{"kata_api_version":1,"local":false,"url":"https://docbank.example","folder":"/kata","key_file":"/abs/path","changed":true}` for the remote form. Agent output is `OK docbank-setup local=true folder=/kata changed=true` or `OK docbank-setup url=<url> folder=/kata changed=true`. See [Configure the daemon](../guide/attachments.md#configure-the-daemon) for what setup writes, when it refuses, and what a rerun does.
+
+## File evidence
+
+Use configured daemon-owned local roots or remote adapters with optional raw-byte SHA-256.
+See [File evidence](file-evidence.md) for configuration, commands, retrieval statuses,
+source publication grants, limits and the resolver protocol.

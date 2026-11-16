@@ -137,6 +137,181 @@ func TestCommentGraphResponseRejectsReparentedBacklink(t *testing.T) {
 	}
 }
 
+func TestVerificationSourceIssueReparentedDuringShowIsWithheld(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	root := createScopedAuthIssue(t, store, project.ID, "Root", nil)
+	container := createScopedAuthIssue(t, store, project.ID, "Container", &root)
+	nestedContainer := createScopedAuthIssue(t, store, project.ID, "Nested container", &container)
+	source := createScopedAuthIssue(t, store, project.ID, "Refutation", &nestedContainer)
+	claim, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: root.ID, Author: "worker", Body: "Completion claim",
+	})
+	require.NoError(t, err)
+	thread, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: root.ID, Author: "worker", Body: "Unrelated thread",
+	})
+	require.NoError(t, err)
+	refutation, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: source.ID, Author: "reviewer", Body: "Private refutation excerpt",
+		ReplyToUID: claim.UID, ReplyKind: "refute",
+	})
+	require.NoError(t, err)
+	parent, err := store.ParentOf(t.Context(), source.ID)
+	require.NoError(t, err)
+	ctx := withScopedAuthorizationTestPrincipal(t, store, project, root)
+	storeWithReparent := &reparentAfterCommentGraphReadStore{
+		Storage: store, parentLinkID: parent.ID, reparentAfter: 1,
+	}
+	handler := withScopedPrincipalRevalidation(storeWithReparent, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		out, err := hydrateShowIssueResponse(r.Context(), ServerConfig{DB: storeWithReparent, InsecureReadonly: true}, root, false,
+			commentref.Options{Thread: thread.UID})
+		require.NoError(t, err)
+		require.NotNil(t, out.Body.Verification)
+		require.Len(t, out.Body.Verification.OpenRefutations, 1)
+		require.Equal(t, "reviewer", out.Body.Verification.OpenRefutations[0].Author)
+		require.Equal(t, "Private refutation excerpt", out.Body.Verification.OpenRefutations[0].Summary)
+		body, err := json.Marshal(out.Body)
+		require.NoError(t, err)
+		_, err = w.Write(body)
+		require.NoError(t, err)
+	}))
+	response := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil).WithContext(ctx)
+	handler.ServeHTTP(response, request)
+	require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+	require.NotContains(t, response.Body.String(), refutation.Body)
+}
+
+func TestBlockedCloseRefusalRevalidatesRefutationSource(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	root := createScopedAuthIssue(t, store, project.ID, "Root", nil)
+	source := createScopedAuthIssue(t, store, project.ID, "Refutation", &root)
+	claim, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: root.ID, Author: "coordinator", Body: "Completion claim",
+	})
+	require.NoError(t, err)
+	refutation, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: source.ID, Author: "reviewer", Body: "Private refutation excerpt",
+		ReplyToUID: claim.UID, ReplyKind: "refute",
+	})
+	require.NoError(t, err)
+	parent, err := store.ParentOf(t.Context(), source.ID)
+	require.NoError(t, err)
+	ctx := withScopedAuthorizationTestPrincipal(t, store, project, root)
+	storeWithReparent := &reparentAfterCommentGraphReadStore{
+		Storage: store, parentLinkID: parent.ID, reparentAfter: 1,
+	}
+	server := NewServer(ServerConfig{DB: storeWithReparent, CloseVerification: "block"})
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	handler := withScopedPrincipalRevalidation(storeWithReparent, server.baseHandler)
+	body, err := json.Marshal(map[string]any{
+		"actor": "worker-a", "reason": "done",
+		"message":  "Completed the request and verified the focused checks.",
+		"evidence": []map[string]any{{"type": "test", "command": "go test ./example"}},
+	})
+	require.NoError(t, err)
+	path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", project.ID, root.ShortID)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request.WithContext(ctx))
+	require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+	require.NotContains(t, response.Body.String(), refutation.Body)
+}
+
+func TestScopedCloseCitationErrorRevalidatesVerificationEndpoints(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	root := createScopedAuthIssue(t, store, project.ID, "Root", nil)
+	source := createScopedAuthIssue(t, store, project.ID, "Refutation", &root)
+	claim, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: root.ID, Author: "coordinator", Body: "Completion claim",
+	})
+	require.NoError(t, err)
+	_, _, err = store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: root.ID, Author: "reviewer", Body: "Independent confirmation",
+		ReplyToUID: claim.UID, ReplyKind: "confirm",
+	})
+	require.NoError(t, err)
+	refutation, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: source.ID, Author: "reviewer", Body: "Private refutation excerpt",
+		ReplyToUID: claim.UID, ReplyKind: "refute",
+	})
+	require.NoError(t, err)
+	parent, err := store.ParentOf(t.Context(), source.ID)
+	require.NoError(t, err)
+	ctx := withScopedAuthorizationTestPrincipal(t, store, project, root)
+	storeWithReparent := &reparentAfterCommentGraphReadStore{
+		Storage: store, parentLinkID: parent.ID, reparentAfter: 1,
+	}
+	server := NewServer(ServerConfig{DB: storeWithReparent})
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	handler := withScopedPrincipalRevalidation(storeWithReparent, server.baseHandler)
+	body, err := json.Marshal(map[string]any{
+		"actor": "worker-a", "reason": "done",
+		"message":  "Completed the request and checked its focused tests.",
+		"evidence": []map[string]any{{"type": "confirmed", "comment": claim.UID}},
+	})
+	require.NoError(t, err)
+	path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", project.ID, root.ShortID)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request.WithContext(ctx))
+
+	require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+	require.NotContains(t, response.Body.String(), refutation.UID)
+	require.NotContains(t, response.Body.String(), refutation.Body)
+}
+
+func TestScopedCloseRejectsCitationAfterItsIssueLeavesScope(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	root := createScopedAuthIssue(t, store, project.ID, "Root", nil)
+	citedIssue := createScopedAuthIssue(t, store, project.ID, "Cited claim", &root)
+	claim, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: citedIssue.ID, Author: "worker", Body: "Completion claim",
+	})
+	require.NoError(t, err)
+	parent, err := store.ParentOf(t.Context(), citedIssue.ID)
+	require.NoError(t, err)
+	ctx := withScopedAuthorizationTestPrincipal(t, store, project, root)
+	storeWithReparent := &reparentAfterCommentGraphReadStore{
+		Storage: store, parentLinkID: parent.ID, reparentAfter: 1,
+	}
+	server := NewServer(ServerConfig{DB: storeWithReparent})
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	handler := withScopedPrincipalRevalidation(storeWithReparent, server.baseHandler)
+	body, err := json.Marshal(map[string]any{
+		"actor": "worker-a", "reason": "done",
+		"message":  "Completed the request and checked its focused tests.",
+		"evidence": []map[string]any{{"type": "confirmed", "comment": claim.UID}},
+	})
+	require.NoError(t, err)
+	path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", project.ID, root.ShortID)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request.WithContext(ctx))
+
+	require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+	require.NotContains(t, response.Body.String(), claim.UID)
+}
+
 func TestDuplicateReplyResponseRejectsReparentedExistingReply(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)

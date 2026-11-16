@@ -1,7 +1,7 @@
 ---
 title: Gated workflows
 description: "Coordinate agent steps and human approval with issue dependencies."
-last_edited: 2026-11-01
+last_edited: 2026-11-02
 ---
 
 # Gated workflows
@@ -125,8 +125,11 @@ Follow [Claim work](agents.md#claim-work) when taking a stage.
    ```
 
 A `--done` close requires a message of at least 40 characters and typed evidence:
-`commit:`, `pr:`, `test:`, `reviewed-paths:`, or `external:`. Shortcuts include
-`--commit`, `--pr`, `--test`, and `--reviewed`. Kata validates evidence structure;
+`commit:`, `pr:`, `test:`, `reviewed-paths:`, `external:`, or `confirmed:`.
+Shortcuts include `--commit`, `--pr`, `--test`, `--reviewed`, and `--confirmed`.
+See [Verified claims](agents.md#verified-claims) for a completion claim reviewed
+by another teammate and the [evidence matrix](../reference/cli.md#issue-lifecycle)
+for retirement evidence. Kata validates evidence structure;
 it does not run the recorded test or verify the artifact's contents. Record
 what you actually checked. See [closing issues](../reference/cli.md#issue-lifecycle).
 

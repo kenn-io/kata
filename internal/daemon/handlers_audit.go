@@ -79,6 +79,15 @@ func doAuditCloses(
 	if err != nil {
 		return nil, err
 	}
+	if issueScopeFromContext(ctx) == nil {
+		for i := range events {
+			projected, err := projectCloseEvent(ctx, cfg.DB, &events[i])
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			events[i] = *projected
+		}
+	}
 	rows, err := buildAuditRows(ctx, cfg, in, events)
 	if err != nil {
 		return nil, err
@@ -137,15 +146,13 @@ func parseAuditWindow(sinceIn, untilIn string) (since, until string, err error) 
 // fields" — the audit projection falls back to a live links lookup
 // only for that case; non-nil empty signals "no parent at close".
 type closeEventPayload struct {
-	Reason  string `json:"reason"`
-	Message string `json:"message,omitempty"`
-	// Audit consumes stored event evidence, including server-frozen descriptors,
-	// rather than the strict request-only api.Evidence shape.
-	Evidence []struct {
-		Type api.EvidenceType `json:"type"`
-	} `json:"evidence,omitempty"`
-	ParentUID     *string `json:"parent_uid,omitempty"`
-	ParentShortID *string `json:"parent_short_id,omitempty"`
+	Reason                       string            `json:"reason"`
+	Message                      string            `json:"message,omitempty"`
+	Evidence                     []db.Evidence     `json:"evidence,omitempty"`
+	OverruledRefutations         []string          `json:"overruled_refutations,omitempty"`
+	VerificationEndpointProjects map[string]string `json:"verification_endpoint_projects,omitempty"`
+	ParentUID                    *string           `json:"parent_uid,omitempty"`
+	ParentShortID                *string           `json:"parent_short_id,omitempty"`
 }
 
 // buildAuditRows projects close events into AuditCloseRow shape and
@@ -272,8 +279,16 @@ func buildAuditRows(
 		if parentFilter.has && !parentFilter.matches(row.Parent, p.ParentUID) {
 			continue
 		}
+		row.OverruledRefutations = p.OverruledRefutations
+		row.VerificationEndpointProjects = p.VerificationEndpointProjects
 		for _, e := range p.Evidence {
+			if e.Type == "file" {
+				row.FileEvidence = append(row.FileEvidence, api.RetainedEvidence(e))
+			}
 			row.EvidenceTypes = append(row.EvidenceTypes, string(e.Type))
+			if e.Type == string(api.EvidenceConfirmed) || e.Type == string(api.EvidenceRefuted) {
+				row.VerdictEvidence = append(row.VerdictEvidence, api.Evidence{Type: api.EvidenceType(e.Type), Comment: e.Comment})
+			}
 		}
 		// Spec §5: legacy / pre-v1 closes have no evidence and surface
 		// with flags=no-evidence. wontfix is the one reason where a

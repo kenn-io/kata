@@ -36,6 +36,7 @@ var kataCommandGroups = map[string]string{
 	"ready":               "find",
 	"next":                "find",
 	"show":                "find",
+	"evidence":            "find",
 	"status":              "find",
 	"inbox":               "find",
 	"labels":              "find",

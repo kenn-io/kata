@@ -100,10 +100,10 @@ func newTestHTTPHandler(t *testing.T, client *kataclient.Client, scope *Scope) h
 	options := Options{
 		Client: client, Scope: scope, Actor: "example-agent", Version: "test-version",
 	}
-	legacy, err := New(options)
+	legacy, err := New(t.Context(), options)
 	require.NoError(t, err)
 	options.Events = true
-	current, err := New(options)
+	current, err := New(t.Context(), options)
 	require.NoError(t, err)
 	return NewHTTPHandler(func(*http.Request) *sdkmcp.Server { return legacy }, func(*http.Request) *sdkmcp.Server { return current }, HTTPOptions{})
 }

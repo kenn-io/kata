@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"go.kenn.io/kata/internal/fileevidence"
+
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	"github.com/klauspost/compress/gzhttp"
@@ -47,6 +49,7 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
+	FileEvidence              fileevidence.Config
 	FederationSigning         *federationsigning.Verifier
 	FederationSigningRequired bool
 	DB                        db.Storage
@@ -129,6 +132,8 @@ type ServerConfig struct {
 	// CloseThrottle controls whether the opt-in sibling-burst and repeated-
 	// message guards run on close. Zero-value means "guards off".
 	CloseThrottle CloseThrottlePolicy
+	// CloseVerification selects block, warn (default), or off for disputes.
+	CloseVerification string
 
 	// Auth carries the bearer-token policy resolved at daemon start.
 	// Token == "" disables bearer auth (appropriate for Unix-socket and
@@ -791,6 +796,7 @@ func registerComments(humaAPI huma.API, cfg ServerConfig) {
 // registerActions registers close/reopen action routes.
 func registerActions(humaAPI huma.API, cfg ServerConfig) {
 	registerActionsHandlers(humaAPI, cfg)
+	registerFileEvidenceHandlers(humaAPI, cfg)
 }
 
 // registerLinks registers POST/DELETE /links routes.

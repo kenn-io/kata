@@ -78,6 +78,12 @@ func checkCommentGraphDeletedSource(t *testing.T, store db.Storage) error {
 		if record.Comment.IssueID == source.ID {
 			scopedReplies++
 			require.Empty(t, record.Comment.ReplyToUID, "out-of-scope endpoints must remain redacted")
+			if record.Comment.UID == removedReply.UID {
+				require.Empty(t, record.Comment.ReplyKind,
+					"out-of-scope verdict classification must stay redacted in the comment")
+				require.Equal(t, "confirm", record.OriginalReplyKind,
+					"verification must retain hidden verdict classification without exposing its target")
+			}
 		}
 	}
 	require.Equal(t, 2, scopedReplies, "an in-scope soft-deleted source remains readable")

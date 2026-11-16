@@ -48,7 +48,7 @@ require (
 	golang.org/x/text v0.44.0
 	golang.org/x/time v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
-	hegel.dev/go/hegel v0.9.29
+	hegel.dev/go/hegel v0.9.36
 	modernc.org/sqlite v1.61.1
 	pgregory.net/rapid v1.3.0
 )

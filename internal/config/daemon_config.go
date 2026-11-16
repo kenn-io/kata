@@ -24,6 +24,7 @@ import (
 // TUI preferences and the named daemon catalog. Workspace-local remote
 // overrides (KATA_SERVER, .kata.local.toml) live in their own resolution path.
 type DaemonConfig struct {
+	FileEvidence FileEvidenceConfig `toml:"file_evidence"`
 	// Sources contains safe provenance labels, never secret contents.
 	Sources map[string]string `toml:"-"`
 	// Timezone is the IANA timezone used for civil issue schedules that do not
@@ -360,8 +361,30 @@ type CatalogDaemonConfig struct {
 
 // CloseConfig is the [close] block of <KATA_HOME>/config.toml.
 type CloseConfig struct {
-	Throttle   CloseThrottleConfig   `toml:"throttle"`
-	Transcript CloseTranscriptConfig `toml:"transcript"`
+	Verification CloseVerificationConfig `toml:"verification"`
+	Throttle     CloseThrottleConfig     `toml:"throttle"`
+	Transcript   CloseTranscriptConfig   `toml:"transcript"`
+}
+
+// CloseVerificationConfig is the daemon-wide policy for unresolved disputes.
+type CloseVerificationConfig struct {
+	OpenRefutations string `toml:"open_refutations"`
+}
+
+// Policy defaults to warning so existing close outcomes are preserved.
+func (c CloseVerificationConfig) Policy() string {
+	if c.OpenRefutations == "" {
+		return "warn"
+	}
+	return c.OpenRefutations
+}
+
+func (c CloseVerificationConfig) validate() error {
+	switch c.Policy() {
+	case "block", "warn", "off":
+		return nil
+	}
+	return fmt.Errorf("close.verification.open_refutations must be block, warn, or off (got %q)", c.OpenRefutations)
 }
 
 const defaultCloseThrottleWindow = 60 * time.Second
@@ -558,6 +581,12 @@ func readDaemonConfig(path string, mergeEnv, skipSupervisedAuth bool) (*DaemonCo
 		return nil, err
 	}
 	if err := validateAuthProxy(cfg.Auth.Proxy); err != nil {
+		return nil, err
+	}
+	if err := cfg.FileEvidence.Validate(); err != nil {
+		return nil, err
+	}
+	if err := cfg.Close.Verification.validate(); err != nil {
 		return nil, err
 	}
 	if _, err := cfg.Close.Throttle.ThrottleWindow(); err != nil {

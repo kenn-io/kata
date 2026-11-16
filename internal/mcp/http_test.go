@@ -12,7 +12,7 @@ import (
 
 func TestHTTPHandlerHostPolicy(t *testing.T) {
 	_, client := newRecordingDaemon(t)
-	server, err := New(Options{Client: client, Scope: boundTestScope(t), Actor: "example-agent", Version: "test", Events: true})
+	server, err := New(t.Context(), Options{Client: client, Scope: boundTestScope(t), Actor: "example-agent", Version: "test", Events: true})
 	require.NoError(t, err)
 	selector := func(*http.Request) *sdkmcp.Server { return server }
 	for disable, want := range map[bool]int{false: http.StatusForbidden, true: http.StatusOK} {

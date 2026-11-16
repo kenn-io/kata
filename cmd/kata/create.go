@@ -858,7 +858,6 @@ func agentEvidenceSummaries(m agentIssueMutation) []string {
 	var payload struct {
 		Evidence []struct {
 			Type         string   `json:"type"`
-			AttachmentID string   `json:"attachment_id,omitempty"`
 			SHA          string   `json:"sha,omitempty"`
 			URL          string   `json:"url,omitempty"`
 			Command      string   `json:"command,omitempty"`
@@ -866,6 +865,8 @@ func agentEvidenceSummaries(m agentIssueMutation) []string {
 			Account      string   `json:"account,omitempty"`
 			Rationale    string   `json:"rationale,omitempty"`
 			IssueRef     string   `json:"issue_ref,omitempty"`
+			Comment      string   `json:"comment,omitempty"`
+			AttachmentID string   `json:"attachment_id,omitempty"`
 		} `json:"evidence,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(m.Event.Payload), &payload); err != nil {
@@ -874,6 +875,8 @@ func agentEvidenceSummaries(m agentIssueMutation) []string {
 	out := make([]string, 0, len(payload.Evidence))
 	for _, ev := range payload.Evidence {
 		switch ev.Type {
+		case "confirmed", "refuted":
+			out = append(out, ev.Type+" "+ev.Comment)
 		case "attachment":
 			out = append(out, "attachment:"+ev.AttachmentID)
 		case "commit":

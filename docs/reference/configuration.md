@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-11
+last_edited: 2026-11-15
 ---
 
 # Configuration
@@ -986,6 +986,33 @@ bootstrap token, browser sessions, trusted-proxy principals, insecure read-only
 requests, and unauthenticated private-network requests still cannot administer
 connectors.
 
+## Close verification
+
+Choose how the accepting daemon handles unresolved comment refutations when
+closing an issue as `done` or `audit-no-change`:
+
+```toml
+[close.verification]
+open_refutations = "warn"
+```
+
+| Value | Behavior |
+| --- | --- |
+| `"warn"` (default) | Close succeeds with CLI stderr warnings retained in the close event. |
+| `"block"` | Close returns `409 open_refutations` until each dispute is resolved or explicitly overruled. |
+| `"off"` | No refutation warning or refusal. |
+
+Invalid values prevent daemon startup. This policy is daemon-wide. Under
+`block`, repeat `--overrule c:<refutation>` for each open refutation you intend
+to overrule. An unknown or resolved handle is a validation error, even under
+`warn` or `off`. Overrules are recorded in the close event and audit output.
+
+Issue metadata `verify.required=true` independently requires a clean,
+explicitly cited `confirmed` evidence entry for `close --done`. An overrule
+cannot satisfy that check. See [Verified claims](../workflows/agents.md#verified-claims)
+for the workflow, independent teammate/author requirement, dispute resolution,
+current-project boundary, and preflight timing limit.
+
 ## Close throttle
 
 kata refuses structurally dangerous close patterns. The parent-completeness
@@ -1661,3 +1688,9 @@ A `url` in the file or `KATA_DOCBANK_URL` wins over `local`. With `local`,
 
 `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, and `KATA_DOCBANK_FOLDER`
 override their corresponding file settings.
+
+## File evidence sources
+
+Use configured daemon-owned local roots or remote adapters with optional raw-byte SHA-256.
+See [File evidence](file-evidence.md) for configuration, commands, retrieval statuses,
+source publication grants, limits and the resolver protocol.

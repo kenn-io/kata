@@ -155,7 +155,7 @@ func newMCPServeCmd() *cobra.Command {
 			// server never registers or advertises it.
 			admission := mcpserver.NewToolAdmission()
 			newServer := func(events bool) (*sdkmcp.Server, error) {
-				return mcpserver.New(mcpserver.Options{
+				return mcpserver.New(ctx, mcpserver.Options{
 					Events:            events,
 					Admission:         admission,
 					Client:            apiClient,

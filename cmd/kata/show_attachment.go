@@ -110,7 +110,19 @@ func effectiveCloseEvidence(events []generated.EventEnvelope, effectiveCloseEven
 }
 
 func printShowAttachmentEvidence(out io.Writer, b showResponseForCLI) error {
+	fileIndex := 0
 	for _, e := range b.CloseEvidence {
+		if e.Type == "file" && e.File != nil {
+			label := fmt.Sprintf("file[%d] %s:%s", fileIndex, e.File.Source, e.File.Path)
+			fileIndex++
+			if e.File.SHA256 != "" {
+				label += " sha256:" + e.File.SHA256
+			}
+			if _, err := fmt.Fprintln(out, "Evidence: "+textsafe.Line(label)); err != nil {
+				return err
+			}
+			continue
+		}
 		if e.Type != "attachment" {
 			continue
 		}

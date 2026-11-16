@@ -467,6 +467,10 @@ type EditCommentResponse = CommentResponseBody
 
 type EditCommentErrorResponse = ErrorEnvelope
 
+type ReadFileEvidenceResponse = FileEvidenceBody
+
+type ReadFileEvidenceErrorResponse = ErrorEnvelope
+
 type ReachableIssueGraphResponse = ReachableGraphResponseBody
 
 type ReachableIssueGraphErrorResponse = ErrorEnvelope
@@ -1650,6 +1654,14 @@ type EditCommentResp struct {
 	JSON200      *EditCommentResponse
 	Headers200   *EditCommentResp200Headers
 	JSONDefault  *EditCommentErrorResponse
+}
+
+type ReadFileEvidenceResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ReadFileEvidenceResponse
+	JSONDefault  *ReadFileEvidenceErrorResponse
 }
 
 type ReachableIssueGraphResp struct {

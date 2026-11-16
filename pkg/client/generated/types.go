@@ -226,20 +226,56 @@ func (a Attachment) Validate() error {
 }
 
 type AuditCloseRow struct {
-	Actor         string   `json:"actor" validate:"required"`
-	EventID       int64    `json:"event_id"`
-	EvidenceTypes []string `json:"evidence_types,omitempty"`
-	Flags         []string `json:"flags,omitempty"`
-	Issue         string   `json:"issue" validate:"required"`
-	Message       *string  `json:"message,omitempty"`
-	Parent        *string  `json:"parent,omitempty"`
-	ParentUID     *string  `json:"parent_uid,omitempty"`
-	Reason        string   `json:"reason" validate:"required"`
-	Time          string   `json:"time" validate:"required"`
+	Actor                string             `json:"actor" validate:"required"`
+	EventID              int64              `json:"event_id"`
+	EvidenceTypes        []string           `json:"evidence_types,omitempty"`
+	FileEvidence         []RetainedEvidence `json:"file_evidence,omitempty"`
+	Flags                []string           `json:"flags,omitempty"`
+	Issue                string             `json:"issue" validate:"required"`
+	Message              *string            `json:"message,omitempty"`
+	OverruledRefutations []string           `json:"overruled_refutations,omitempty"`
+	Parent               *string            `json:"parent,omitempty"`
+	ParentUID            *string            `json:"parent_uid,omitempty"`
+	Reason               string             `json:"reason" validate:"required"`
+	Time                 string             `json:"time" validate:"required"`
+	VerdictEvidence      []EvidenceResponse `json:"verdict_evidence,omitempty"`
+
+	// VerificationEndpointProjects Maps each rendered verification reference to its current owning project UID so clients can enforce fixed project scopes.
+	VerificationEndpointProjects map[string]string `json:"verification_endpoint_projects,omitempty"`
 }
 
 func (a AuditCloseRow) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(a))
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(a.Actor, "required"); err != nil {
+		errors = errors.Append("Actor", err)
+	}
+	for i, item := range a.FileEvidence {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("FileEvidence[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(a.Issue, "required"); err != nil {
+		errors = errors.Append("Issue", err)
+	}
+	if err := typesValidator.Var(a.Reason, "required"); err != nil {
+		errors = errors.Append("Reason", err)
+	}
+	if err := typesValidator.Var(a.Time, "required"); err != nil {
+		errors = errors.Append("Time", err)
+	}
+	for i, item := range a.VerdictEvidence {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("VerdictEvidence[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type AuditClosesResponseBody struct {
@@ -673,6 +709,7 @@ type CloseActionRequestBody struct {
 	DryRun        *bool                                `json:"dry_run,omitempty"`
 	Evidence      []Evidence                           `json:"evidence,omitempty"`
 	Message       *string                              `json:"message,omitempty"`
+	Overrule      []string                             `json:"overrule,omitempty"`
 	Reason        *CloseActionRequestBodyReason        `json:"reason,omitempty"`
 	RetryProtocol *CloseActionRequestBodyRetryProtocol `json:"retry_protocol,omitempty"`
 	Source        *CloseActionRequestBodySource        `json:"source,omitempty"`
@@ -921,6 +958,15 @@ type ConfigureFederationSigningRequestBody struct {
 }
 
 func (c ConfigureFederationSigningRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type ConfirmedClaim struct {
+	Comment       string `json:"comment" validate:"required"`
+	Confirmations int64  `json:"confirmations"`
+}
+
+func (c ConfirmedClaim) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
@@ -2324,19 +2370,67 @@ func (e EventEnvelope) Validate() error {
 }
 
 type Evidence struct {
-	Account      *string  `json:"account,omitempty"`
-	AttachmentID *string  `json:"attachment_id,omitempty"`
-	Command      *string  `json:"command,omitempty"`
-	IssueRef     *string  `json:"issue_ref,omitempty"`
-	Paths        []string `json:"paths,omitempty"`
-	Rationale    *string  `json:"rationale,omitempty"`
-	Sha          *string  `json:"sha,omitempty"`
-	Type         string   `json:"type" validate:"required"`
-	URL          *string  `json:"url,omitempty"`
+	Account      *string    `json:"account,omitempty"`
+	AttachmentID *string    `json:"attachment_id,omitempty"`
+	Command      *string    `json:"command,omitempty"`
+	Comment      *string    `json:"comment,omitempty"`
+	File         *Reference `json:"file,omitempty"`
+	IssueRef     *string    `json:"issue_ref,omitempty"`
+	Paths        []string   `json:"paths,omitempty"`
+	Rationale    *string    `json:"rationale,omitempty"`
+	Sha          *string    `json:"sha,omitempty"`
+	Type         string     `json:"type" validate:"required"`
+	URL          *string    `json:"url,omitempty"`
 }
 
 func (e Evidence) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(e))
+	var errors runtime.ValidationErrors
+	if e.File != nil {
+		if v, ok := any(e.File).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("File", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(e.Type, "required"); err != nil {
+		errors = errors.Append("Type", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type EvidenceResponse struct {
+	Account      *string            `json:"account,omitempty"`
+	AttachmentID *string            `json:"attachment_id,omitempty"`
+	Command      *string            `json:"command,omitempty"`
+	Comment      *string            `json:"comment,omitempty"`
+	File         *ReferenceResponse `json:"file,omitempty"`
+	IssueRef     *string            `json:"issue_ref,omitempty"`
+	Paths        []string           `json:"paths,omitempty"`
+	Rationale    *string            `json:"rationale,omitempty"`
+	Sha          *string            `json:"sha,omitempty"`
+	Type         string             `json:"type" validate:"required"`
+	URL          *string            `json:"url,omitempty"`
+}
+
+func (e EvidenceResponse) Validate() error {
+	var errors runtime.ValidationErrors
+	if e.File != nil {
+		if v, ok := any(e.File).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("File", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(e.Type, "required"); err != nil {
+		errors = errors.Append("Type", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type ExternalFieldCandidateOut struct {
@@ -3049,6 +3143,33 @@ type FieldDescriptor struct {
 
 func (f FieldDescriptor) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
+type FileEvidenceBody struct {
+	Content   *string           `json:"content,omitempty"`
+	EventUID  string            `json:"event_uid" validate:"required"`
+	Index     int64             `json:"index"`
+	Reference ReferenceResponse `json:"reference"`
+	Status    string            `json:"status" validate:"required"`
+}
+
+func (f FileEvidenceBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(f.EventUID, "required"); err != nil {
+		errors = errors.Append("EventUID", err)
+	}
+	if v, ok := any(f.Reference).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Reference", err)
+		}
+	}
+	if err := typesValidator.Var(f.Status, "required"); err != nil {
+		errors = errors.Append("Status", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type GetIssueMetadataResponseBody struct {
@@ -4920,6 +5041,10 @@ type MutationResponseBody struct {
 	Issue         Issue  `json:"issue"`
 	OriginalEvent *Event `json:"original_event,omitempty"`
 	Reused        *bool  `json:"reused,omitempty"`
+
+	// VerificationEndpointProjects Maps each rendered verification reference to its current owning project UID so clients can enforce fixed project scopes.
+	VerificationEndpointProjects map[string]string     `json:"verification_endpoint_projects,omitempty"`
+	Warnings                     []VerificationWarning `json:"warnings,omitempty"`
 }
 
 func (m MutationResponseBody) Validate() error {
@@ -4938,6 +5063,13 @@ func (m MutationResponseBody) Validate() error {
 		if v, ok := any(m.OriginalEvent).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("OriginalEvent", err)
+			}
+		}
+	}
+	for i, item := range m.Warnings {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Warnings[%d]", i), err)
 			}
 		}
 	}
@@ -5056,6 +5188,18 @@ func (o ObserveCronRunResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type OpenRefutation struct {
+	Author     string  `json:"author" validate:"required"`
+	Refutation string  `json:"refutation" validate:"required"`
+	Summary    *string `json:"summary,omitempty"`
+	Target     string  `json:"target" validate:"required"`
+	Teammate   *string `json:"teammate,omitempty"`
+}
+
+func (o OpenRefutation) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(o))
 }
 
 type PatchIssueMetadataRequestBody struct {
@@ -6048,6 +6192,34 @@ type RecurrenceTemplateUpdateInput struct {
 	Title         *string         `json:"title,omitempty"`
 }
 
+type Reference struct {
+	CaptureSha256 *bool   `json:"capture_sha256,omitempty"`
+	Origin        *string `json:"origin,omitempty"`
+	Path          string  `json:"path" validate:"required"`
+	Revision      *string `json:"revision,omitempty"`
+	Sha256        *string `json:"sha256,omitempty"`
+	Size          *int64  `json:"size,omitempty"`
+	Source        string  `json:"source" validate:"required"`
+}
+
+func (r Reference) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type ReferenceResponse struct {
+	CaptureSha256 *bool   `json:"capture_sha256,omitempty"`
+	Origin        *string `json:"origin,omitempty"`
+	Path          string  `json:"path" validate:"required"`
+	Revision      *string `json:"revision,omitempty"`
+	Sha256        *string `json:"sha256,omitempty"`
+	Size          *int64  `json:"size,omitempty"`
+	Source        string  `json:"source" validate:"required"`
+}
+
+func (r ReferenceResponse) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type RelayAcceptance struct {
 	Digest         string   `json:"digest" validate:"required"`
 	MissingDigests []string `json:"missing_digests,omitempty"`
@@ -6480,6 +6652,46 @@ func (r RestoreRequestBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
+type RetainedEvidence struct {
+	Account      *string            `json:"account,omitempty"`
+	Attachment   *Attachment        `json:"attachment,omitempty"`
+	AttachmentID *string            `json:"attachment_id,omitempty"`
+	Command      *string            `json:"command,omitempty"`
+	Comment      *string            `json:"comment,omitempty"`
+	File         *ReferenceResponse `json:"file,omitempty"`
+	IssueRef     *string            `json:"issue_ref,omitempty"`
+	Paths        []string           `json:"paths,omitempty"`
+	Rationale    *string            `json:"rationale,omitempty"`
+	Sha          *string            `json:"sha,omitempty"`
+	Type         string             `json:"type" validate:"required"`
+	URL          *string            `json:"url,omitempty"`
+}
+
+func (r RetainedEvidence) Validate() error {
+	var errors runtime.ValidationErrors
+	if r.Attachment != nil {
+		if v, ok := any(r.Attachment).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Attachment", err)
+			}
+		}
+	}
+	if r.File != nil {
+		if v, ok := any(r.File).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("File", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(r.Type, "required"); err != nil {
+		errors = errors.Append("Type", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type RetryFederationQuarantineRequestBody struct {
 	Actor  string  `json:"actor" validate:"required"`
 	Reason *string `json:"reason,omitempty"`
@@ -6879,6 +7091,8 @@ type ShowIssueResponseBody struct {
 	ClaimHubNow         *time.Time          `json:"claim_hub_now,omitempty"`
 	ClaimViolationCount *int64              `json:"claim_violation_count,omitempty"`
 	ClaimViolations     []ClaimViolationOut `json:"claim_violations,omitempty"`
+	CloseEventUID       *string             `json:"close_event_uid,omitempty"`
+	CloseEvidence       []RetainedEvidence  `json:"close_evidence,omitempty"`
 	Comments            []CommentOut        `json:"comments" validate:"required"`
 	CommentsTruncated   *bool               `json:"comments_truncated,omitempty"`
 	Issue               ShowIssueOut        `json:"issue"`
@@ -6891,6 +7105,7 @@ type ShowIssueResponseBody struct {
 	Parent              *IssueRef           `json:"parent,omitempty"`
 	PendingClaims       []PendingClaimOut   `json:"pending_claims,omitempty"`
 	PendingLeases       []PendingClaimOut   `json:"pending_leases,omitempty"`
+	Verification        *Verification       `json:"verification,omitempty"`
 
 	// WebURL Browser URL for this issue in the owning daemon.
 	WebURL *string `json:"web_url,omitempty"`
@@ -6916,6 +7131,13 @@ func (s ShowIssueResponseBody) Validate() error {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("ClaimViolations[%d]", i), err)
+			}
+		}
+	}
+	for i, item := range s.CloseEvidence {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("CloseEvidence[%d]", i), err)
 			}
 		}
 	}
@@ -6986,6 +7208,13 @@ func (s ShowIssueResponseBody) Validate() error {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("PendingLeases[%d]", i), err)
+			}
+		}
+	}
+	if s.Verification != nil {
+		if v, ok := any(s.Verification).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Verification", err)
 			}
 		}
 	}
@@ -7790,4 +8019,84 @@ func (u UISnapshotResponseBody) Validate() error {
 type UnassignRequestBody struct {
 	Actor         *string `json:"actor,omitempty"`
 	ExpectedOwner *string `json:"expected_owner,omitempty"`
+}
+
+type VerdictEvidence struct {
+	Comment string `json:"comment" validate:"required"`
+	Type    string `json:"type" validate:"required"`
+}
+
+func (v VerdictEvidence) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(v))
+}
+
+type Verification struct {
+	Confirmed       []ConfirmedClaim  `json:"confirmed" validate:"required"`
+	Evidence        []VerdictEvidence `json:"evidence,omitempty"`
+	Hint            *string           `json:"hint,omitempty"`
+	OpenRefutations []OpenRefutation  `json:"open_refutations" validate:"required"`
+	Redacted        int64             `json:"redacted"`
+	Required        bool              `json:"required"`
+}
+
+func (v Verification) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(v.Confirmed, "required"); err != nil {
+		errors = errors.Append("Confirmed", err)
+	}
+	for i, item := range v.Confirmed {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Confirmed[%d]", i), err)
+			}
+		}
+	}
+	for i, item := range v.Evidence {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Evidence[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(v.OpenRefutations, "required"); err != nil {
+		errors = errors.Append("OpenRefutations", err)
+	}
+	for i, item := range v.OpenRefutations {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("OpenRefutations[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type VerificationWarning struct {
+	Code        string           `json:"code" validate:"required"`
+	Hint        *string          `json:"hint,omitempty"`
+	Refutations []OpenRefutation `json:"refutations" validate:"required"`
+}
+
+func (v VerificationWarning) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(v.Code, "required"); err != nil {
+		errors = errors.Append("Code", err)
+	}
+	if err := typesValidator.Var(v.Refutations, "required"); err != nil {
+		errors = errors.Append("Refutations", err)
+	}
+	for i, item := range v.Refutations {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Refutations[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }

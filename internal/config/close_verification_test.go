@@ -1,0 +1,50 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strconv"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestCloseVerificationConfig(t *testing.T) {
+	for _, value := range []string{"", "block", "warn", "off", "invalid"} {
+		t.Run(value, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.verification]\nopen_refutations = \""+value+"\"\n"), 0600))
+			cfg, err := ReadDaemonConfig()
+			if value == "invalid" {
+				require.ErrorContains(t, err, "close.verification.open_refutations")
+				return
+			}
+			require.NoError(t, err)
+			want := value
+			if want == "" {
+				want = "warn"
+			}
+			require.Equal(t, want, cfg.Close.Verification.Policy())
+		})
+	}
+}
+
+func TestFileEvidenceSourceConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	root := t.TempDir()
+	body := `[file_evidence.sources.notes]
+root = ` + strconv.Quote(root) + `
+sha256 = true
+[file_evidence.sources.remote]
+command = ["example-adapter"]
+env = ["EXAMPLE_TOKEN_FILE"]
+`
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0600))
+	cfg, err := ReadDaemonConfig()
+	require.NoError(t, err)
+	require.Equal(t, root, cfg.FileEvidence.Sources["notes"].Root)
+	require.True(t, cfg.FileEvidence.Sources["notes"].SHA256)
+	require.Equal(t, []string{"example-adapter"}, cfg.FileEvidence.Sources["remote"].Command)
+}

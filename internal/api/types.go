@@ -528,11 +528,13 @@ type CreateInitialLinkBody struct {
 type MutationResponse struct {
 	ProjectNameHeader
 	Body struct {
-		Issue         db.Issue  `json:"issue"`
-		Event         *db.Event `json:"event"`
-		OriginalEvent *db.Event `json:"original_event,omitempty"`
-		Changed       bool      `json:"changed"`
-		Reused        bool      `json:"reused,omitzero"`
+		Issue                        db.Issue                 `json:"issue"`
+		Event                        *db.Event                `json:"event"`
+		OriginalEvent                *db.Event                `json:"original_event,omitempty"`
+		Changed                      bool                     `json:"changed"`
+		Reused                       bool                     `json:"reused,omitzero"`
+		Warnings                     []db.VerificationWarning `json:"warnings,omitempty"`
+		VerificationEndpointProjects map[string]string        `json:"verification_endpoint_projects,omitempty" doc:"Maps each rendered verification reference to its current owning project UID so clients can enforce fixed project scopes."`
 	}
 }
 
@@ -826,6 +828,9 @@ type ShowIssueResponse struct {
 // this component as "ShowIssueResponseBody", so renaming the Go type renames
 // the published component and breaks every generated client.
 type ShowIssueResponseBody struct {
+	CloseEvidence       []RetainedEvidence  `json:"close_evidence,omitzero"`
+	CloseEventUID       string              `json:"close_event_uid,omitempty"`
+	Verification        *db.Verification    `json:"verification,omitempty"`
 	WebURL              string              `json:"web_url,omitempty" doc:"Browser URL for this issue in the owning daemon."`
 	Issue               ShowIssueOut        `json:"issue"`
 	Comments            []CommentOut        `json:"comments"`
@@ -1018,6 +1023,7 @@ type CloseActionRequestBody struct {
 	ActionRequestBody
 	RetryProtocol string                 `json:"retry_protocol,omitempty" enum:"close-v1,"`
 	Transcript    *transcript.Transcript `json:"transcript,omitempty"`
+	Overrule      []string               `json:"overrule,omitempty"`
 }
 
 // ActionRequestBody is the shared JSON body for close and reopen actions.
@@ -1565,16 +1571,20 @@ type AuditClosesRequest struct {
 // the event recorded one, giving Parent's display ref immutable
 // provenance.
 type AuditCloseRow struct {
-	Time          string   `json:"time"`
-	Actor         string   `json:"actor"`
-	Issue         string   `json:"issue"`
-	Parent        string   `json:"parent,omitempty"`
-	ParentUID     string   `json:"parent_uid,omitempty"`
-	Reason        string   `json:"reason"`
-	EvidenceTypes []string `json:"evidence_types,omitempty"`
-	Flags         []string `json:"flags,omitempty"`
-	Message       string   `json:"message,omitempty"`
-	EventID       int64    `json:"event_id"`
+	FileEvidence                 []RetainedEvidence `json:"file_evidence,omitempty"`
+	VerdictEvidence              []Evidence         `json:"verdict_evidence,omitempty"`
+	OverruledRefutations         []string           `json:"overruled_refutations,omitempty"`
+	VerificationEndpointProjects map[string]string  `json:"verification_endpoint_projects,omitempty" doc:"Maps each rendered verification reference to its current owning project UID so clients can enforce fixed project scopes."`
+	Time                         string             `json:"time"`
+	Actor                        string             `json:"actor"`
+	Issue                        string             `json:"issue"`
+	Parent                       string             `json:"parent,omitempty"`
+	ParentUID                    string             `json:"parent_uid,omitempty"`
+	Reason                       string             `json:"reason"`
+	EvidenceTypes                []string           `json:"evidence_types,omitempty"`
+	Flags                        []string           `json:"flags,omitempty"`
+	Message                      string             `json:"message,omitempty"`
+	EventID                      int64              `json:"event_id"`
 }
 
 // AuditClosesResponse wraps the AuditCloseRow list. Rows is never nil

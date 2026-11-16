@@ -12,6 +12,7 @@ export interface CloseActionRequestBody {
   dry_run?: boolean
   evidence?: Evidence[]
   message?: string
+  overrule?: string[]
   reason?: CloseActionRequestBodyReason
   retry_protocol?: CloseActionRequestBodyRetryProtocol
   source?: CloseActionRequestBodySource

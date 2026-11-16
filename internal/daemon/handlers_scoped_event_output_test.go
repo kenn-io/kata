@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/testenv"
@@ -315,6 +316,124 @@ func requireScopedEnvelopeRedacted(t *testing.T, event scopedEnvelope) {
 	require.Empty(t, event.ContentHash, "scoped events must not carry content_hash")
 	require.Empty(t, event.OriginInstanceUID,
 		"scoped events must not carry origin_instance_uid (infrastructure identity)")
+}
+
+func TestScopedCloseReferencesSurvivePollAuditAndUISnapshot(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity(),
+		func(cfg *daemon.ServerConfig) { cfg.CloseVerification = "warn" })
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", nil)
+	closed := createScopedHTTPTestIssue(t, env, project.ID, "Closed work", &root)
+	review := createScopedHTTPTestIssue(t, env, project.ID, "Review", &root)
+	newScopedTokens(t, env, project, root)
+	claim, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: closed.ID, Author: "worker-a", Body: "The completed implementation meets the requested behavior.",
+	})
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: review.ID, Author: "reviewer", Body: "I confirmed the implementation.",
+		ReplyToUID: claim.UID, ReplyKind: "confirm",
+	})
+	require.NoError(t, err)
+	disputed, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: closed.ID, Author: "worker-a", Body: "This is a separate disputed claim.",
+	})
+	require.NoError(t, err)
+	overruled, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: review.ID, Author: "reviewer", Body: "This first review concern was explicitly overruled.",
+		ReplyToUID: disputed.UID, ReplyKind: "refute",
+	})
+	require.NoError(t, err)
+	open, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: review.ID, Author: "reviewer", Body: "This second review concern remains open.",
+		ReplyToUID: disputed.UID, ReplyKind: "refute",
+	})
+	require.NoError(t, err)
+
+	resp, body := envDoRaw(t, env, http.MethodPost,
+		scopedProjectPath(project.ID, "issues/"+closed.ShortID+"/actions/close"), map[string]any{
+			"actor": "coordinator", "reason": "done",
+			"message":  "Completed the requested work and reviewed the retained concerns.",
+			"evidence": []map[string]any{{"type": "confirmed", "comment": claim.UID}},
+			"overrule": []string{overruled.UID},
+		}, map[string]string{"Authorization": "Bearer coordinator-token"})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "%s", string(body))
+
+	worker := map[string]string{"Authorization": "Bearer worker-token"}
+	resp, body = envDoRaw(t, env, http.MethodGet, "/api/v1/events?after_id=0&limit=1000", nil, worker)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "%s", string(body))
+	var poll struct {
+		Events []scopedEnvelope `json:"events"`
+	}
+	require.NoError(t, json.Unmarshal(body, &poll))
+	var closeEvent *scopedEnvelope
+	for index := range poll.Events {
+		if poll.Events[index].Type == "issue.closed" && poll.Events[index].IssueUID != nil && *poll.Events[index].IssueUID == closed.UID {
+			closeEvent = &poll.Events[index]
+			break
+		}
+	}
+	require.NotNil(t, closeEvent)
+	var eventPayload struct {
+		Evidence         []db.Evidence            `json:"evidence"`
+		Warnings         []db.VerificationWarning `json:"verification_warnings"`
+		Overruled        []string                 `json:"overruled_refutations"`
+		EndpointProjects map[string]string        `json:"verification_endpoint_projects"`
+	}
+	require.NoError(t, json.Unmarshal(closeEvent.Payload, &eventPayload))
+	require.Len(t, eventPayload.Evidence, 1, "scoped polling must preserve authorized verdict evidence")
+	require.Contains(t, eventPayload.EndpointProjects, eventPayload.Evidence[0].Comment)
+	require.Len(t, eventPayload.Warnings, 1, "scoped polling must preserve authorized warning details")
+	require.Len(t, eventPayload.Warnings[0].Refutations, 1)
+	require.Equal(t, open.Body, eventPayload.Warnings[0].Refutations[0].Summary)
+	require.Len(t, eventPayload.Overruled, 1, "scoped polling must preserve authorized overrules")
+	require.Contains(t, eventPayload.EndpointProjects, eventPayload.Overruled[0])
+	require.Contains(t, eventPayload.EndpointProjects, eventPayload.Warnings[0].Refutations[0].Refutation)
+	require.Contains(t, eventPayload.EndpointProjects, eventPayload.Warnings[0].Refutations[0].Target)
+	require.Len(t, eventPayload.EndpointProjects, 4)
+	for _, endpointProject := range eventPayload.EndpointProjects {
+		require.Equal(t, project.UID, endpointProject)
+	}
+
+	resp, body = envDoRaw(t, env, http.MethodGet,
+		"/api/v1/audit/closes?project_id="+strconv.FormatInt(project.ID, 10), nil, worker)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "%s", string(body))
+	var audit struct {
+		Rows []api.AuditCloseRow `json:"rows"`
+	}
+	require.NoError(t, json.Unmarshal(body, &audit))
+	require.Len(t, audit.Rows, 1)
+	require.Len(t, audit.Rows[0].VerdictEvidence, 1, "scoped audit must preserve authorized verdict evidence")
+	require.Len(t, audit.Rows[0].OverruledRefutations, 1, "scoped audit must preserve authorized overrules")
+	require.Len(t, audit.Rows[0].VerificationEndpointProjects, 4)
+
+	resp, body = envDoRaw(t, env, http.MethodGet,
+		"/api/v1/ui/snapshot?view=all-open&selected_issue_uid="+closed.UID+"&include_history=true", nil, worker)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "%s", string(body))
+	var snapshot struct {
+		Selected struct {
+			History []db.Event `json:"history"`
+		} `json:"selected"`
+	}
+	require.NoError(t, json.Unmarshal(body, &snapshot))
+	var historyClose *db.Event
+	for index := range snapshot.Selected.History {
+		if snapshot.Selected.History[index].Type == "issue.closed" {
+			historyClose = &snapshot.Selected.History[index]
+			break
+		}
+	}
+	require.NotNil(t, historyClose)
+	var historyPayload struct {
+		Evidence  []db.Evidence            `json:"evidence"`
+		Warnings  []db.VerificationWarning `json:"verification_warnings"`
+		Overruled []string                 `json:"overruled_refutations"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(historyClose.Payload), &historyPayload))
+	require.Len(t, historyPayload.Evidence, 1, "scoped UI history must preserve authorized verdict evidence")
+	require.Len(t, historyPayload.Warnings, 1, "scoped UI history must preserve authorized warning details")
+	require.Len(t, historyPayload.Overruled, 1, "scoped UI history must preserve authorized overrules")
 }
 
 // Claim 1 + 3: catch-up and live scoped event output must both carry the

@@ -133,7 +133,12 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
 	}
-	if b.Issue.Status == "closed" {
+	var responseFields map[string]jsontext.Value
+	if err := json.Unmarshal(bs, &responseFields); err != nil {
+		return err
+	}
+	_, hasCloseEvidence := responseFields["close_evidence"]
+	if b.Issue.Status == "closed" && !hasCloseEvidence {
 		b.CloseEvidence, err = optionalCloseEvidenceForShow(ctx, client, baseURL, pid, b.Issue.UID)
 		if err != nil {
 			return err
@@ -201,6 +206,17 @@ func printShowHuman(
 			return err
 		}
 	}
+	if b.Verification != nil {
+		if _, err := fmt.Fprintln(out, "Verification: "+verificationSummary(*b.Verification)); err != nil {
+			return err
+		}
+		if b.Verification.Hint != "" {
+			if _, err := fmt.Fprintln(out, "Hint: "+selectedVerificationHint(b.Verification.Hint)); err != nil {
+				return err
+			}
+		}
+	}
+
 	if b.Issue.Body != "" {
 		if _, err := fmt.Fprintln(out); err != nil {
 			return err
@@ -338,7 +354,8 @@ func compactJSON(raw jsontext.Value) string {
 // response. It is shared by both the human and agent renderers; the
 // federation lease fields are zero when the issue is not federated.
 type showResponseForCLI struct {
-	CloseEvidence []db.Evidence `json:"-"`
+	Verification  *db.Verification `json:"verification"`
+	CloseEvidence []db.Evidence    `json:"close_evidence"`
 	Issue         struct {
 		ProjectID int64  `json:"project_id"`
 		ShortID   string `json:"short_id"`
@@ -571,6 +588,17 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 	if err := writeAgentField(w, "Revision", fmt.Sprint(b.Issue.Revision)); err != nil {
 		return err
 	}
+	if b.Verification != nil {
+		if _, err := fmt.Fprintln(w, "Verification: "+verificationSummary(*b.Verification)); err != nil {
+			return err
+		}
+		if b.Verification.Hint != "" {
+			if _, err := fmt.Fprintln(w, "Hint: "+firstLine(selectedVerificationHint(b.Verification.Hint))); err != nil {
+				return err
+			}
+		}
+	}
+
 	if len(b.Issue.Metadata) > 0 {
 		if _, err := fmt.Fprintln(w, "Metadata:"); err != nil {
 			return err
@@ -870,4 +898,43 @@ func linkLabelFromPOV(linkType, viewerUID, subjectProject string, from, to linkP
 	default:
 		return linkType, peerRefForDisplay(from, subjectProject)
 	}
+}
+
+func verificationSummary(v db.Verification) string {
+	parts := []string{}
+	if v.Required {
+		parts = append(parts, "required")
+	}
+	for _, e := range v.Evidence {
+		parts = append(parts, e.Type+" "+textsafe.Line(e.Comment))
+	}
+	if len(v.Confirmed) > 0 {
+		handles := []string{}
+		for _, c := range v.Confirmed {
+			handles = append(handles, c.Comment)
+		}
+		noun := "confirmed claim"
+		if len(handles) != 1 {
+			noun += "s"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s (%s)", len(handles), noun, textsafe.Line(strings.Join(handles, ", "))))
+	}
+	if len(v.OpenRefutations) > 0 {
+		handles := []string{}
+		for _, r := range v.OpenRefutations {
+			handles = append(handles, r.Refutation+" → "+r.Target)
+		}
+		noun := "open refutation"
+		if len(handles) != 1 {
+			noun += "s"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s (%s)", len(handles), noun, textsafe.Line(strings.Join(handles, ", "))))
+	}
+	if v.Redacted > 0 {
+		parts = append(parts, fmt.Sprintf("%d redacted", v.Redacted))
+	}
+	if len(parts) == 0 {
+		return "no confirmed claims or open refutations"
+	}
+	return strings.Join(parts, "; ")
 }

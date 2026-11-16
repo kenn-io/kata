@@ -4,6 +4,9 @@ package api
 import (
 	"encoding/json/v2"
 	"fmt"
+
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/fileevidence"
 )
 
 // EvidenceType is one of the typed-union tags carried on a close action.
@@ -14,6 +17,9 @@ type EvidenceType string
 // action's evidence array. See spec §3.3 and the per-reason validation
 // matrix in §3.5.
 const (
+	EvidenceFile          EvidenceType = "file"
+	EvidenceRefuted       EvidenceType = "refuted"
+	EvidenceConfirmed     EvidenceType = "confirmed"
 	EvidenceAttachment    EvidenceType = "attachment"
 	EvidenceCommit        EvidenceType = "commit"
 	EvidencePR            EvidenceType = "pr"
@@ -29,9 +35,10 @@ const (
 // Only the fields appropriate to Type are populated; per-reason validation
 // in internal/daemon/close_validation.go enforces shape.
 type Evidence struct {
-	Type EvidenceType `json:"type"`
+	Type EvidenceType            `json:"type"`
+	File *fileevidence.Reference `json:"file,omitempty"`
 
-	AttachmentID string   `json:"attachment_id,omitempty"` // attachment
+	Comment      string   `json:"comment,omitempty"`       // confirmed
 	SHA          string   `json:"sha,omitempty"`           // commit
 	URL          string   `json:"url,omitempty"`           // pr
 	Command      string   `json:"command,omitempty"`       // test
@@ -39,11 +46,15 @@ type Evidence struct {
 	Account      string   `json:"account,omitempty"`       // external
 	Rationale    string   `json:"rationale,omitempty"`     // no-change-audit
 	IssueRef     string   `json:"issue_ref,omitempty"`     // duplicate-of, superseded-by
+	AttachmentID string   `json:"attachment_id,omitempty"` // attachment
 }
 
 var validEvidenceTypes = map[EvidenceType]struct{}{
+	EvidenceFile:          {},
 	EvidenceAttachment:    {},
 	EvidenceCommit:        {},
+	EvidenceConfirmed:     {},
+	EvidenceRefuted:       {},
 	EvidencePR:            {},
 	EvidenceTest:          {},
 	EvidenceReviewedPaths: {},
@@ -64,7 +75,7 @@ func (e *Evidence) UnmarshalJSON(bs []byte) error {
 	if _, ok := validEvidenceTypes[r.Type]; !ok {
 		return fmt.Errorf("evidence: unknown type %q", r.Type)
 	}
-	if r.Type == EvidenceAttachment {
+	if r.Type == EvidenceAttachment || r.Type == EvidenceFile {
 		if err := json.Unmarshal(bs, &r, json.RejectUnknownMembers(true)); err != nil {
 			return err
 		}
@@ -72,3 +83,6 @@ func (e *Evidence) UnmarshalJSON(bs []byte) error {
 	*e = Evidence(r)
 	return nil
 }
+
+// RetainedEvidence includes daemon-frozen descriptors in read responses.
+type RetainedEvidence db.Evidence

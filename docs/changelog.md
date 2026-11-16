@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-13
+last_edited: 2026-11-15
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,25 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Cite configured local or remote files when closing an issue, optionally record
+  SHA-256 of their complete raw bytes, and retrieve or compare the retained
+  reference through CLI and MCP. Sources stay on their owning daemon; a digest
+  detects changes but does not retain old bytes. See [File evidence](reference/file-evidence.md).
+
+- Require a reviewed completion claim before closing selected issues with
+  `verify.required=true` and `close --confirmed c:<claim>`. Configure
+  `[close.verification] open_refutations` to warn (the default), block, or
+  ignore unresolved refutations; deliberate overrules appear in audit closes.
+  `show` and MCP show include verification state. Older daemons reject the new
+  `confirmed` and `refuted` evidence types. Refuted claim evidence is optional
+  on retirement; edited or withdrawn confirmations cannot certify replacement
+  text. See [Verified claims](workflows/agents.md#verified-claims).
+
+- Manage cron jobs, workflows and run evidence from MCP: load `kata.load_cron`
+  for 17 tools over the daemon's existing cron API. Native notification jobs
+  use the daemon scheduler; recording a run never starts work or changes who
+  owns an issue. See [MCP](reference/mcp.md#native-cron-through-mcp). Thanks to
+  [Rusty Shackleford](https://github.com/salmonumbrella).
 - Copy a project sync diagnostic for Bash/Zsh or PowerShell from the web summary.
 
 - Watch project sync progress refresh every 30 seconds in a visible web tab and

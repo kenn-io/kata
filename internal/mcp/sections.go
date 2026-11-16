@@ -181,8 +181,8 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 		},
 		{
 			loader: "kata.load_issue_lifecycle", section: "issue_lifecycle", title: "Load issue lifecycle tools",
-			description: "Load typed close, reopen, delete, restore, purge, wait, and close-audit tools, then refresh the MCP tool list.",
-			tools:       []string{"kata.audit_closes", "kata.close", "kata.delete", "kata.purge", "kata.reopen", "kata.restore", "kata.wait"},
+			description: "Load typed close, reopen, delete, restore, purge, wait, close-audit, and file-evidence tools, then refresh the MCP tool list.",
+			tools:       []string{"kata.file_evidence", "kata.audit_closes", "kata.close", "kata.delete", "kata.purge", "kata.reopen", "kata.restore", "kata.wait"},
 			available:   true, register: registerIssueLifecycleTools,
 		},
 		{

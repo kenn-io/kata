@@ -404,6 +404,9 @@ func (s *Store) closeIssueWithEvents(
 		if err != nil {
 			return err
 		}
+		if err := db.ValidateFileEvidence(evidence); err != nil {
+			return err
+		}
 		closedAt := mutationTimestamp()
 		if _, err := tx.ExecContext(ctx, `UPDATE issues SET status = 'closed', revision = revision + 1, closed_reason = $1,
 		  assignment_expires_on = NULL, closed_at = $2, updated_at = $2 WHERE id = $3`, p.Reason, closedAt, current.ID); err != nil {
@@ -421,19 +424,23 @@ func (s *Store) closeIssueWithEvents(
 			return mapSQLError(parentErr, nil)
 		}
 		body, err := json.Marshal(struct {
-			Reason                 string                 `json:"reason"`
-			ClosedAt               string                 `json:"closed_at"`
-			Message                string                 `json:"message,omitempty"`
-			Evidence               []db.Evidence          `json:"evidence,omitempty"`
-			Transcript             *transcript.Transcript `json:"transcript,omitempty"`
-			ParentUID              *string                `json:"parent_uid,omitzero"`
-			ParentShortID          *string                `json:"parent_short_id,omitzero"`
-			IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
-			IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
+			Reason                 string                   `json:"reason"`
+			ClosedAt               string                   `json:"closed_at"`
+			Message                string                   `json:"message,omitempty"`
+			Evidence               []db.Evidence            `json:"evidence,omitempty"`
+			VerificationIssueUIDs  []string                 `json:"verification_issue_uids,omitempty"`
+			VerificationWarnings   []db.VerificationWarning `json:"verification_warnings,omitempty"`
+			OverruledRefutations   []string                 `json:"overruled_refutations,omitempty"`
+			Transcript             *transcript.Transcript   `json:"transcript,omitempty"`
+			ParentUID              *string                  `json:"parent_uid,omitzero"`
+			ParentShortID          *string                  `json:"parent_short_id,omitzero"`
+			IdempotencyKey         string                   `json:"idempotency_key,omitempty"`
+			IdempotencyFingerprint string                   `json:"idempotency_fingerprint,omitempty"`
 		}{
 			Reason: p.Reason, ClosedAt: closedAt, Message: p.Message, Evidence: evidence,
-			Transcript: p.Transcript,
-			ParentUID:  parentUID, ParentShortID: parentShortID,
+			Transcript:            p.Transcript,
+			VerificationIssueUIDs: p.VerificationIssueUIDs, VerificationWarnings: p.VerificationWarnings, OverruledRefutations: p.OverruledRefutations,
+			ParentUID: parentUID, ParentShortID: parentShortID,
 			IdempotencyKey: p.IdempotencyKey, IdempotencyFingerprint: p.IdempotencyFingerprint,
 		})
 		if err != nil {

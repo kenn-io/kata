@@ -82,6 +82,18 @@ func projectNotificationJSON(ctx context.Context, store db.Storage, raw jsontext
 }
 
 func projectNotificationEventPayload(ctx context.Context, store db.Storage, event db.Event) (jsontext.Value, error) {
+	projected, err := projectCloseEvent(ctx, store, &event)
+	if err != nil {
+		return nil, err
+	}
+	return projectNotificationsInEventPayload(ctx, store, *projected)
+}
+
+// projectNotificationsInEventPayload filters notification references after
+// any event-specific projection has already run. Close projection renders
+// canonical comment UIDs as display handles, so feeding that payload through
+// projectCloseEvent again would treat rendered handles as canonical UIDs.
+func projectNotificationsInEventPayload(ctx context.Context, store db.Storage, event db.Event) (jsontext.Value, error) {
 	return projectNotificationJSONWithWalker(ctx, store, jsontext.Value(event.Payload), func(
 		raw jsontext.Value, keep func(jsontext.Value) (bool, error),
 	) (jsontext.Value, error) {

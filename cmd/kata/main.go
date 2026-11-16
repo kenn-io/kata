@@ -15,6 +15,8 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+
+	"go.kenn.io/kata/internal/textsafe"
 )
 
 // globalFlags carries the universal flags applied on every command. Sel is the
@@ -134,6 +136,7 @@ func newRootCmd() *cobra.Command {
 		newMoveCmd(),
 		newCommentCmd(),
 		newCloseCmd(),
+		newEvidenceCmd(),
 		newReopenCmd(),
 		newDeleteCmd(),
 		newRestoreCmd(),
@@ -332,9 +335,14 @@ func emitHumanError(w io.Writer, err error, runEReached bool) {
 	if cli.Code == "duplicate_candidates" {
 		message = appendCreateConflictRefs(message, cli)
 	}
+	hint := cli.Hint
+	if cli.Code == "open_refutations" {
+		message = textsafe.Block(message)
+		hint = textsafe.Block(hint)
+	}
 	_, _ = fmt.Fprintln(w, "kata:", message) //nolint:gosec // G705: CLI stderr error text, not HTML.
-	if cli.Hint != "" {
-		_, _ = fmt.Fprintln(w, "hint:", cli.Hint)
+	if hint != "" {
+		_, _ = fmt.Fprintln(w, "hint:", hint)
 	}
 }
 

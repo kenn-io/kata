@@ -62,7 +62,7 @@ func newCoordinationSession(t *testing.T) (*sdkmcp.ClientSession, *sqlitestore.S
 	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
 	require.NoError(t, err)
 	session := connectTestServerWithOptions(t, Options{
-		Client: client, ProjectID: project.ID, ProjectName: project.Name,
+		Client: client, Scope: testBoundScopeForProject(t, project),
 		Actor: "example-agent", Version: "test-version",
 	})
 	return session, store

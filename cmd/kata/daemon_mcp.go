@@ -60,7 +60,7 @@ func newDaemonMCPHandler(ctx context.Context, store db.Storage, cfg config.MCPCo
 	// Token administration remains an explicit sidecar-only capability.
 	admission := mcpserver.NewToolAdmission()
 	newServer := func(events bool) (*sdkmcp.Server, error) {
-		return mcpserver.New(mcpserver.Options{
+		return mcpserver.New(ctx, mcpserver.Options{
 			Client: apiClient, LongRunningClient: longRunningClient,
 			Scope: scope, Actor: cfg.Actor, Version: version.Version,
 			StartupSections: cfg.StartupSections, ObserveToolCall: observe,

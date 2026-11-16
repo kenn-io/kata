@@ -1,11 +1,13 @@
 package mcpserver
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"hegel.dev/go/hegel"
 
 	kataclient "go.kenn.io/kata/pkg/client"
 )
@@ -49,6 +51,50 @@ func TestResolveBoundScopeRetainsAuthorityByUIDAfterRename(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "renamed-project", project.Name)
 	require.Equal(t, "01HAAAAAAAAAAAAAAAAAAAAAAA", project.UID)
+}
+
+func TestBoundScopeAuthorityFollowsResolvedUIDAcrossCatalogChurn(t *testing.T) {
+	const (
+		originalUID    = "01HAAAAAAAAAAAAAAAAAAAAAAA"
+		replacementUID = "01HBBBBBBBBBBBBBBBBBBBBBBB"
+	)
+	initial := projectCatalogClient(t, `{"projects":[{"id":1,"uid":"`+originalUID+`","name":"spoke-project","metadata":{},"revision":1,"created_at":"2026-08-11T00:00:00Z"}]}`)
+	scope, err := ResolveBoundScope(t.Context(), initial, ProjectIdentity{ID: 1, Name: "spoke-project"})
+	require.NoError(t, err)
+	hegel.Test(t, func(ht *hegel.T) {
+		retained := hegel.Draw(ht, hegel.Booleans())
+		reuseID := hegel.Draw(ht, hegel.Booleans())
+		reuseName := hegel.Draw(ht, hegel.Booleans())
+		reverse := hegel.Draw(ht, hegel.Booleans())
+		currentID := hegel.Draw(ht, hegel.Integers[int64](2, 1<<63-2))
+		currentName := "renamed:" + hegel.Draw(ht, hegel.Text())
+		replacementName := "replacement:" + hegel.Draw(ht, hegel.Text())
+
+		foreign := ProjectIdentity{ID: currentID + 1, UID: replacementUID, Name: replacementName}
+		if reuseID {
+			foreign.ID = 1
+		}
+		if reuseName {
+			foreign.Name = "spoke-project"
+		}
+		catalog := []ProjectIdentity{foreign}
+		current := ProjectIdentity{ID: currentID, UID: originalUID, Name: currentName}
+		if retained {
+			catalog = append(catalog, current)
+		}
+		if reverse && len(catalog) > 1 {
+			catalog[0], catalog[1] = catalog[1], catalog[0]
+		}
+		client := projectCatalogClientFor(t, catalog...)
+		projects, err := scope.Projects(t.Context(), client, false)
+		if !retained {
+			require.EqualError(ht, err, "no projects in the MCP startup scope are available")
+			require.Empty(ht, projects)
+			return
+		}
+		require.NoError(ht, err)
+		require.Equal(ht, []ProjectIdentity{current}, projects)
+	}, hegel.WithTestCases(64), hegel.WithDatabase(t.TempDir()))
 }
 
 func TestResolveAllowlistScopeSelection(t *testing.T) {
@@ -130,4 +176,18 @@ func projectCatalogClient(t *testing.T, response string) *kataclient.Client {
 	client, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
 	require.NoError(t, err)
 	return client
+}
+
+func projectCatalogClientFor(t *testing.T, projects ...ProjectIdentity) *kataclient.Client {
+	t.Helper()
+	entries := make([]map[string]any, 0, len(projects))
+	for _, project := range projects {
+		entries = append(entries, map[string]any{
+			"id": project.ID, "uid": project.UID, "name": project.Name,
+			"metadata": map[string]any{}, "revision": 1, "created_at": "2026-08-11T00:00:00Z",
+		})
+	}
+	response, err := json.Marshal(map[string]any{"projects": entries})
+	require.NoError(t, err)
+	return projectCatalogClient(t, string(response))
 }

@@ -84,7 +84,7 @@ func newDaemonMCPIdentityHandler(ctx context.Context, store db.Storage, cfg conf
 			httpClient.CloseIdleConnections()
 			longRunningHTTPClient.CloseIdleConnections()
 		}
-		server, err := mcpserver.New(mcpserver.Options{
+		server, err := mcpserver.New(ctx, mcpserver.Options{
 			Client: apiClient, LongRunningClient: longRunningClient,
 			Scope: scope, Actor: actor, Version: version.Version,
 			StartupSections: cfg.StartupSections,

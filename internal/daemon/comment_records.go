@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"net/http"
 	"slices"
 
 	"go.kenn.io/kata/internal/api"
@@ -20,7 +21,11 @@ func commentReferenceError(err error) error {
 	return api.NewError(400, "validation", err.Error(), "", nil)
 }
 func graphRecord(r db.CommentGraphRecord) commentref.Record {
-	return commentref.Record{Comment: r.Comment, IssueUID: r.IssueUID, IssueShortID: r.IssueShortID, ProjectUID: r.ProjectUID, ProjectID: r.ProjectID, ProjectName: r.ProjectName}
+	return commentref.Record{
+		Comment: r.Comment, IssueUID: r.IssueUID, IssueShortID: r.IssueShortID,
+		ProjectUID: r.ProjectUID, ProjectID: r.ProjectID, ProjectName: r.ProjectName,
+		OriginalReplyKind: r.OriginalReplyKind,
+	}
 }
 
 // Endpoint authorization uses an isolated host decision so an invisible moved
@@ -146,4 +151,23 @@ func recordCommentResponseScope(ctx context.Context, records, selected []comment
 			}
 		}
 	}
+}
+
+// Verification excerpts may come from a reply on an issue unrelated to the
+// selected thread. Fence those source issues independently of comment selection.
+func recordVerificationResponseScope(ctx context.Context, records []commentref.Record, issueUID string, verification db.Verification) error {
+	project := projectNameForRecords(records, issueUID)
+	for _, refutation := range verification.OpenRefutations {
+		for _, handle := range []string{refutation.Refutation, refutation.Target} {
+			if handle == "" {
+				continue
+			}
+			record, err := commentref.Resolve(records, issueUID, handle, project)
+			if err != nil {
+				return api.NewError(http.StatusInternalServerError, "internal", "verification references could not be revalidated", "", nil)
+			}
+			db.RecordIssueScopeTarget(ctx, record.IssueID)
+		}
+	}
+	return nil
 }

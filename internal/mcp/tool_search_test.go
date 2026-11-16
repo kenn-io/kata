@@ -58,9 +58,7 @@ func searchToolSession(t *testing.T, session *sdkmcp.ClientSession, query string
 	return output
 }
 
-func discoveryOptions(t *testing.T) Options {
-	return Options{Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test-version"}
-}
+func discoveryOptions(t *testing.T) Options { return defaultCatalogOptions(inertTestClient(t)) }
 
 // Product contract: a transient failure building the private metadata catalog
 // must not disable task discovery for the rest of the server's lifetime.

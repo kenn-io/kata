@@ -36,6 +36,13 @@ func projectIssueScopedEvents(
 		if !ok {
 			continue
 		}
+		if event.Type == "issue.closed" {
+			closed, err := projectCloseEvent(ctx, store, &projection)
+			if err != nil {
+				return nil, nil, err
+			}
+			projection = *closed
+		}
 		projected[index] = projection
 		visible[index] = true
 		if event.Type != "issue.commented" {

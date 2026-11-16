@@ -135,7 +135,7 @@ func TestForwarderScopeFollowsTheScopeMode(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			daemon, client := newRecordingDaemon(t)
 			options := Options{Client: client, Scope: tc.scope, Actor: "example-agent", Version: "test", Events: true}
-			server, err := New(options)
+			server, err := New(t.Context(), options)
 			require.NoError(t, err)
 			handler := NewHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, func(*http.Request) *sdkmcp.Server { return server }, HTTPOptions{})
 			recorder, _ := serve(handler, currentRequest("events/subscribe", testEventName, eventsRPC("events/subscribe", eventsParams(""))))
@@ -258,7 +258,7 @@ func TestDaemonErrorsMapToTheWireTable(t *testing.T) {
 
 func TestServerWithoutEventsAnswersMethodNotFound(t *testing.T) {
 	daemon, client := newRecordingDaemon(t)
-	server, err := New(Options{Client: client, Scope: boundTestScope(t), Actor: "example-agent", Version: "test"})
+	server, err := New(t.Context(), Options{Client: client, Scope: boundTestScope(t), Actor: "example-agent", Version: "test"})
 	require.NoError(t, err)
 	handler := NewHTTPHandler(func(*http.Request) *sdkmcp.Server { return server }, func(*http.Request) *sdkmcp.Server { return server }, HTTPOptions{})
 	result := discover(t, handler)
@@ -401,7 +401,7 @@ func TestSubscribeOutlivesTheOrdinaryRequestTimeout(t *testing.T) {
 	t.Cleanup(server.Close)
 	longRunning, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
 	require.NoError(t, err)
-	current, err := New(Options{
+	current, err := New(t.Context(), Options{
 		Events: true, Client: inertTestClient(t), LongRunningClient: longRunning, Scope: boundTestScope(t), Actor: "example-agent", Version: "test-version",
 	})
 	require.NoError(t, err)

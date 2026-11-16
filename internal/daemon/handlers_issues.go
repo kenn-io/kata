@@ -1030,8 +1030,42 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 	if err != nil {
 		return nil, err
 	}
+	out.Body.CloseEvidence = []api.RetainedEvidence{}
+	if issue.Status == "closed" {
+		event, err := effectiveCloseEventForShow(ctx, cfg.DB, issue)
+		if err != nil {
+			return nil, err
+		}
+		if event != nil {
+			event, err = scopedMutationEvent(ctx, cfg.DB, event)
+			if err != nil {
+				return nil, err
+			}
+			if event != nil {
+				var payload struct {
+					Evidence []db.Evidence `json:"evidence"`
+				}
+				if err = json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+					return nil, err
+				}
+				for _, e := range payload.Evidence {
+					out.Body.CloseEvidence = append(out.Body.CloseEvidence, api.RetainedEvidence(e))
+				}
+				out.Body.CloseEventUID = event.UID
+			}
+		}
+	}
 	out.Body.MirrorDeprecatedClaimFields()
 	return out, nil
+}
+
+// effectiveCloseEventForShow reuses the history owner's full status selection
+// and visibility checks rather than folding the reader's redacted history.
+func effectiveCloseEventForShow(ctx context.Context, store db.Storage, issue db.Issue) (*db.Event, error) {
+	if issue.Status != "closed" {
+		return nil, nil
+	}
+	return effectiveIssueCloseEvent(ctx, store, issue)
 }
 
 func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool, selectors ...commentref.Options) (*api.ShowIssueResponse, error) {
@@ -1091,17 +1125,76 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	if len(selectors) > 0 {
 		opts = selectors[0]
 	}
-	query := db.CommentGraphQuery{ProjectID: issue.ProjectID, IncludeDeletedSourceIssueID: includeDeletedSourceIssueID}
+	query := db.CommentGraphQuery{ProjectID: issue.ProjectID, IncludeDeletedSourceIssueID: includeDeletedSourceIssueID, VerificationIssueID: issue.ID, IssueScope: issueScopeFromContext(ctx)}
 	if opts.Thread == "" && opts.Inbound == "" && opts.Since == "" {
 		query.SelectedIssueID = issue.ID
 	}
-	records, err := readCommentRecords(ctx, cfg.DB, query)
+	data, err := cfg.DB.ReadCommentGraph(ctx, query)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	records, err := projectCommentGraph(ctx, data)
 	if err != nil {
 		return nil, err
+	}
+	verificationRecords := records
+	v := commentref.Evaluate(records, issue.UID, nil)
+	v.Required = verificationRequired(issue)
+	v.Redacted += data.Redacted
+	if v.Activity && query.SelectedIssueID > 0 {
+		verificationRecords, v, err = readVerification(ctx, cfg.DB, issue)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if issue.Status == "closed" {
+		var latest *db.Event
+		effective, err := effectiveCloseEventForShow(ctx, cfg.DB, issue)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		if effective != nil {
+			latest, err = scopedMutationEvent(ctx, cfg.DB, effective)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		if latest != nil {
+			var payload struct {
+				Evidence []db.Evidence `json:"evidence"`
+			}
+			if err := json.Unmarshal([]byte(latest.Payload), &payload); err != nil {
+				return nil, internalAPIError(err)
+			}
+
+			for _, e := range payload.Evidence {
+				if e.Type == "confirmed" || e.Type == "refuted" {
+					v.Evidence = append(v.Evidence, db.VerdictEvidence{Type: e.Type, Comment: e.Comment})
+				}
+			}
+		}
+	}
+	if v.Activity || v.Required || v.Redacted > 0 || len(v.Evidence) > 0 {
+		if v.Required && len(v.Confirmed) == 0 {
+			v.Hint, err = closeShowCommand(ctx, cfg.DB, issue)
+			if err != nil {
+				return nil, err
+			}
+			if issue.Status == "open" {
+				v.Hint += "\nPost a completion claim comment and ask another teammate or author to confirm it, then close --done with --confirmed."
+			} else {
+				v.Hint += "\nVerification describes current comments; the recorded close keeps its original cited evidence."
+			}
+		}
+		out.Body.Verification = &v
 	}
 	selected, err := commentref.Select(records, issue.UID, opts)
 	if err != nil {
 		return nil, commentReferenceError(err)
+	}
+	if err := recordVerificationResponseScope(ctx, verificationRecords, issue.UID, v); err != nil {
+		return nil, err
 	}
 	recordCommentResponseScope(ctx, records, selected.Comments)
 	out.Body.Comments = selected.Comments

@@ -107,8 +107,15 @@ const fragClosing = `2. Closing an issue asserts that the work is complete. If t
         --commit <sha>
 
    Typed --evidence accepts commit:<sha>, pr:<url>, test:<cmd>,
-   reviewed-paths:<path>, or external:<account>. Shortcuts are --commit,
-   --pr, --test, and --reviewed.
+   reviewed-paths:<path>, external:<account>, confirmed:c:<claim>, or
+   refuted:c:<claim>. Shortcuts are --commit, --pr, --test, --reviewed,
+   --confirmed and --refuted; verdict types follow the reason pairings below.
+
+   --confirmed c:<claim> cites a completion claim that another teammate
+   confirmed (kata comment --confirm); required on done when
+   verify.required=true. --refuted c:<claim> cites an independent
+   refutation on --wontfix/--duplicate-of/--superseded-by.
+   Refused closes print the next command to run.
 
    Close each issue as soon as its work is verified, not in a batch or a
    single "close everything" pass at the end. By default the daemon permits

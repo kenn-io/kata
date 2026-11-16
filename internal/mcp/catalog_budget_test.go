@@ -91,7 +91,7 @@ func TestToolCatalogBudgetUsesWireEncoding(t *testing.T) {
 func TestToolCatalogBudgetFailsOneByteOver(t *testing.T) {
 	fixture := toolSections(false, false)[1]
 	catalog := func(padding int) *sdkmcp.ListToolsResult {
-		server, err := New(defaultCatalogOptions(inertTestClient(t)))
+		server, err := New(t.Context(), withTestBoundScope(t, defaultCatalogOptions(inertTestClient(t))))
 		require.NoError(t, err)
 		// Extend an existing loader so the real catalog can use its full budget.
 		addTool(server, fixture.loader, fixture.title, fixture.description+strings.Repeat("x", padding), toolHints(true, false, false),

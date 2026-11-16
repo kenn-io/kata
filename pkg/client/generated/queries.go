@@ -346,6 +346,17 @@ type GetExternalRootBridgeQuery struct {
 	Actor *string `json:"actor,omitempty"`
 }
 
+type ReadFileEvidenceQuery struct {
+	EventUID   *string `json:"event_uid,omitempty"`
+	Index      *int64  `json:"index,omitempty" validate:"omitempty,gte=0"`
+	Historical *bool   `json:"historical,omitempty"`
+	Content    *bool   `json:"content,omitempty"`
+}
+
+func (r ReadFileEvidenceQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type ReachableIssueGraphQuery struct {
 	// Depth full or a bounded hop count such as 1, 2, or 3
 	Depth    *string `json:"depth,omitempty"`

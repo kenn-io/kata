@@ -131,7 +131,7 @@ func TestServerRejectsInvalidStartupSections(t *testing.T) {
 		{name: "teams disabled", sections: []string{"teams"}, want: `MCP startup section "teams" is unavailable`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			server, err := New(Options{
+			server, err := New(t.Context(), Options{
 				Client: inertTestClient(t), Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
 				StartupSections: tt.sections,
 			})
@@ -169,11 +169,12 @@ func TestSectionLoaderActivatesOnlyItsTypedToolsAndIsIdempotent(t *testing.T) {
 
 	t.Run("preloaded sections", func(t *testing.T) {
 		changed := make(chan struct{}, 1)
-		session := connectRawTestServerWithClientOptions(t, Options{
+		options := withTestBoundScope(t, Options{
 			Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
 			Actor: "example-agent", Version: "test-version",
 			StartupSections: []string{"issue_discovery", "issue_mutation", "coordination", "issue_lifecycle", "projects", "docs"},
-		}, &sdkmcp.ClientOptions{ToolListChangedHandler: func(context.Context, *sdkmcp.ToolListChangedRequest) {
+		})
+		session := connectRawTestServerWithClientOptions(t, options, &sdkmcp.ClientOptions{ToolListChangedHandler: func(context.Context, *sdkmcp.ToolListChangedRequest) {
 			select {
 			case changed <- struct{}{}:
 			default:
@@ -287,6 +288,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 
 	wantNames := []string{
 		"kata.assign",
+		"kata.file_evidence",
 		"kata.audit_closes",
 		"kata.bridge_bind",
 		"kata.bridge_pause",
@@ -463,6 +465,7 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	require.NoError(t, err)
 
 	readOnly := map[string]bool{
+		"kata.file_evidence":  true,
 		"kata.cron_workflows": true, "kata.cron_workflow": true, "kata.cron_runs": true, "kata.cron_run": true,
 		"kata.cron_capabilities": true, "kata.cron_jobs": true, "kata.cron_job": true, "kata.cron_new_uid": true,
 		"kata.skills":                   true,
@@ -647,7 +650,8 @@ func TestCreateAndCommentRequireIdempotencyKeys(t *testing.T) {
 	closeProperties := schemaObject(t, byName["kata.close"].InputSchema)["properties"].(map[string]any)
 	require.ElementsMatch(t, []any{"done", "wontfix", "duplicate", "superseded", "audit-no-change"}, closeProperties["reason"].(map[string]any)["enum"])
 	evidenceItems := closeProperties["evidence"].(map[string]any)["items"].(map[string]any)
-	require.Len(t, evidenceItems["oneOf"], 9)
+	require.Len(t, evidenceItems["oneOf"], 12)
+	require.Contains(t, closeProperties, "overrule")
 	require.Contains(t, schemaObject(t, byName["kata.close"].InputSchema), "if")
 
 	require.Contains(t, schemaObject(t, byName["kata.list"].InputSchema), "not")
@@ -848,6 +852,11 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 				require.Equal(t, http.MethodGet, resolution.Method)
 				require.Equal(t, "/api/v1/projects/42/issues/def2", resolution.Path)
 			}
+			if tt.tool == "kata.close" {
+				preflight := <-requests
+				require.Equal(t, http.MethodGet, preflight.Method)
+				require.Equal(t, "/api/v1/projects/42/issues/abc1", preflight.Path)
+			}
 			request := <-requests
 			require.Equal(t, tt.wantMethod, request.Method)
 			require.Equal(t, tt.wantPath, request.Path)
@@ -907,7 +916,7 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 	apiClient, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
 	require.NoError(t, err)
 	session := connectTestServerWithOptions(t, Options{
-		Client: apiClient, ProjectID: project.ID, ProjectName: project.Name,
+		Client: apiClient, Scope: testBoundScopeForProject(t, project),
 		Actor: "example-agent", Version: "test-version",
 	})
 
@@ -1271,11 +1280,20 @@ func connectTestServer(t *testing.T) *sdkmcp.ClientSession {
 
 func connectTestServerWithClient(t *testing.T, apiClient *kataclient.Client) *sdkmcp.ClientSession {
 	t.Helper()
-	return connectTestServerWithOptions(t, defaultCatalogOptions(apiClient))
+	// Request fixtures model the legacy bound scope without a live project catalog.
+	// Catalog-only fixtures use defaultCatalogOptions with an explicit immutable UID.
+	return connectTestServerWithOptions(t, Options{
+		Client: apiClient, ProjectID: 42, ProjectName: "spoke-project",
+		Actor: "example-agent", Version: "test-version",
+	})
 }
 
 func defaultCatalogOptions(apiClient *kataclient.Client) Options {
-	return Options{
+	scope, err := NewBoundScope(ProjectIdentity{ID: 42, UID: testProjectUID, Name: "spoke-project"})
+	if err != nil {
+		panic(err)
+	}
+	return Options{Scope: scope,
 		Client: apiClient, ProjectID: 42, ProjectName: "spoke-project",
 		Actor: "example-agent", Version: "test-version",
 	}
@@ -1283,7 +1301,14 @@ func defaultCatalogOptions(apiClient *kataclient.Client) Options {
 
 func connectTestServerWithOptions(t *testing.T, options Options) *sdkmcp.ClientSession {
 	t.Helper()
-	session := connectRawTestServerWithOptions(t, options)
+	return connectTestServerWithOptionsAsProvided(t, withTestBoundScope(t, options))
+}
+
+// connectTestServerWithOptionsAsProvided leaves Scope unset so the test can
+// exercise New's startup project resolution from the legacy ID/name options.
+func connectTestServerWithOptionsAsProvided(t *testing.T, options Options) *sdkmcp.ClientSession {
+	t.Helper()
+	session := connectRawTestServerWithClientOptions(t, options, nil)
 	for _, name := range sectionLoaderNames {
 		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: name, Arguments: map[string]any{}})
 		require.NoError(t, err)
@@ -1294,12 +1319,32 @@ func connectTestServerWithOptions(t *testing.T, options Options) *sdkmcp.ClientS
 
 func connectRawTestServerWithOptions(t *testing.T, options Options) *sdkmcp.ClientSession {
 	t.Helper()
-	return connectRawTestServerWithClientOptions(t, options, nil)
+	return connectRawTestServerWithClientOptions(t, withTestBoundScope(t, options), nil)
+}
+
+func withTestBoundScope(t *testing.T, options Options) Options {
+	t.Helper()
+	if options.Scope != nil || options.ProjectID == 0 || options.ProjectName == "" {
+		return options
+	}
+	scope, err := NewBoundScope(ProjectIdentity{
+		ID: options.ProjectID, Name: options.ProjectName,
+	})
+	require.NoError(t, err)
+	options.Scope = scope
+	return options
+}
+
+func testBoundScopeForProject(t *testing.T, project db.Project) *Scope {
+	t.Helper()
+	scope, err := NewBoundScope(ProjectIdentity{ID: project.ID, UID: project.UID, Name: project.Name})
+	require.NoError(t, err)
+	return scope
 }
 
 func connectRawTestServerWithClientOptions(t *testing.T, options Options, clientOptions *sdkmcp.ClientOptions) *sdkmcp.ClientSession {
 	t.Helper()
-	server, err := New(options)
+	server, err := New(t.Context(), options)
 	require.NoError(t, err)
 	return connectServerSession(t, server, clientOptions, nil)
 }
@@ -1322,8 +1367,9 @@ func connectServerSession(t *testing.T, server *sdkmcp.Server, clientOptions *sd
 		Version: "1",
 	}, clientOptions)
 	session, err := client.Connect(ctx, &sdkmcp.IOTransport{
-		Reader: clientConn,
-		Writer: clientConn,
+		Reader:        clientConn,
+		Writer:        clientConn,
+		MaxLineLength: defaultMaxResponseBytes,
 	}, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() {
