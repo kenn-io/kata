@@ -402,9 +402,8 @@ func IndexFederatedMoveEvents(events []FoldEvent) FederatedMoveIndex {
 // PlanFederatedMovedIssues reads move decisions without changing any rows.
 // projectID names the project being materialized; snapshotGroup lists the
 // same-hub projects whose snapshots may relocate issues between them. A refused
-// snapshot relocation keeps the issue where it is when projectID holds it or
-// when this is a pass that follows moves into a destination, and fails for the
-// destination's own pull.
+// snapshot relocation fails the destination's own pull and otherwise leaves the
+// issue with its current owner.
 func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMoveIndex, p FoldProjection, projectID int64, snapshotGroup []int64) ([]FederatedMoveDecision, []int64, error) {
 	type issueLocation struct {
 		id, source            int64
@@ -482,9 +481,10 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMo
 			decision.Park = target.placeholder && !decision.Joined && !standalone
 		}
 		if decision.Snapshot && decision.Joined && decision.Exists && decision.SourceID != decision.TargetID {
-			// The source's pull, including the destination pass it follows into,
-			// keeps a refused issue. Only the destination's own pull reports it.
-			keepRefused := decision.SourceID == projectID || FollowingMovedProjects(ctx)
+			// Only the destination's own pull reports a refused relocation. Every
+			// other pass, including one that follows moves into the destination,
+			// leaves the issue with its current owner.
+			keepRefused := decision.TargetID != projectID || FollowingMovedProjects(ctx)
 			var refusal error
 			if !slices.Contains(snapshotGroup, decision.SourceID) || !slices.Contains(snapshotGroup, decision.TargetID) {
 				// A later baseline does not retire an already verified move to
