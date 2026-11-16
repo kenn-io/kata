@@ -262,10 +262,10 @@ readable by callers the restore action would accept. Send the actor you would
 restore as in the `actor` query parameter; an authenticated principal's own
 actor takes precedence, as it does for restore. The same attributed write and
 claim checks apply, so on a federated project only the claim holder reads it
-while another actor's claim is live. Any other caller, including an anonymous
-`--insecure-readonly` caller, gets the `issue_not_found` response an unknown ref
-gets; server failures and `federation_offline` keep their status. `actor` is used
-only with `issue=` on a soft-deleted issue and is ignored otherwise.
+while another actor's claim is live. Every refusal (an API error below 500
+other than a hub error), including an anonymous `--insecure-readonly` caller,
+answers `issue_not_found`; 5xx, `federation_offline` and `hub_claim_failed` keep
+their status. `actor` is used only with `issue=` on a soft-deleted issue and is ignored otherwise.
 
 Clients that need close evidence can set
 `include_effective_close_event_uid=true`. The response includes
