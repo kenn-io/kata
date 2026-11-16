@@ -139,6 +139,7 @@ func hydrateRefWithQualified(ctx context.Context, baseURL string, pid int64, ref
 	if err := json.Unmarshal(bs, &out); err != nil {
 		return ref, err
 	}
+	ref.CurrentProjectID = out.Issue.ProjectID
 	// Former short IDs and ULIDs can resolve to an issue that moved out of
 	// the route's project. Confirmation must name its current project.
 	if out.Issue.ProjectID != 0 && out.Issue.ProjectID != pid {
