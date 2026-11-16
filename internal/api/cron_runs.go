@@ -10,7 +10,8 @@ import (
 // CronRun is flat, bounded, independently attributed public evidence.
 type CronRun db.CronRunView
 
-// CronRunFrom maps a persisted observation to its public representation.
+// CronRunFrom maps a run as read, with its read-time names, to its public
+// representation.
 func CronRunFrom(value db.CronRunView) CronRun { return CronRun(value) }
 
 // CronProjectRequest scopes a cron operation to one project.
