@@ -50,4 +50,3 @@ func TestNotifyGuardFlagValidation(t *testing.T) {
 		_ = requireCLIError(t, err, ExitValidation)
 	}
 }
-
