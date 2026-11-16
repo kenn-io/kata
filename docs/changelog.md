@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Send a [request without replacing one](reference/cli.md#teammate-requests) the recipient still holds with `kata notify --no-replace`, and clear only a given sender's request with `kata notify --clear --if-from <actor>`.
+
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
 
 - Copy a project sync diagnostic for Bash/Zsh or PowerShell from the web summary.

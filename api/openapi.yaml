@@ -4819,18 +4819,26 @@ components:
           type: string
         broadcast:
           type: boolean
+        clear:
+          description: Remove the recipient's request instead of sending one; requires to
+          type: boolean
+        if_from:
+          description: "With clear: remove the request only while its stored from field equals this actor. A stored-field check, not proof of who wrote it"
+          type: string
         message:
+          description: Required unless clear is set
           type: string
         re:
           type: string
+        replace:
+          description: false answers 409 notification_held instead of replacing the recipient's held request; absent means true
+          type: boolean
         teammate:
           type: string
         teammates:
           type: boolean
         to:
           type: string
-      required:
-        - message
       type: object
     NotifyIssueResponseBody:
       additionalProperties: true
@@ -7556,7 +7564,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.51.0
+  version: 0.52.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:

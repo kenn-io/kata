@@ -19,15 +19,19 @@ const notificationMessageMaxBytes = notification.MessageMaxBytes
 type notificationValue = notification.Value
 
 func newNotifyCmd() *cobra.Command {
-	var recipient, message, re string
-	var broadcast, teammates bool
+	var recipient, message, re, ifFrom string
+	var broadcast, teammates, noReplace bool
 	var clearRequest bool
 	cmd := &cobra.Command{
 		Use:   "notify <issue-ref>",
 		Short: "ask an actor or teammate to look at an issue (or --clear)",
 		Long: `Put a request in the recipient's inbox. --to takes an address: <actor> or
 <actor>/<teammate>. --message is required unless --clear. One request per
-issue and recipient; a new one replaces the old. Clear it after handling.
+issue and recipient; a new one replaces the old unless --no-replace, which
+fails with a conflict naming the held request's sender and message and leaves
+it in place. Clear it after handling; --clear --if-from <actor> clears only
+while the stored sender is that actor (a check of the request's from field,
+not of who wrote it).
 --re <comment> asks the recipient to answer that comment. Their answer with
 comment --reply, --confirm, --refute, or --supersede clears the request and
 tells you on this issue, so wait --until reply here wakes.
@@ -37,7 +41,9 @@ its open children (at most 50); --teammates adds their teammate inboxes.`,
   kata notify abc4 --to coordinator/teammate-1 --message "Please re-run the tests" --agent
   kata notify abc4 --to reviewer/teammate-2 --re c:abc123 --message "Please confirm or refute this finding" --agent
   kata notify abc4 --broadcast --message "Schema changed; re-check your branches" --agent
-  kata notify abc4 --to coordinator/teammate-1 --clear --agent`,
+  kata notify abc4 --to coordinator/teammate-1 --clear --agent
+  kata notify abc4 --to coordinator --message "Second ask" --no-replace --agent
+  kata notify abc4 --to coordinator --clear --if-from worker --agent`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			to := ""
@@ -59,6 +65,12 @@ its open children (at most 50); --teammates adds their teammate inboxes.`,
 				return notificationValidationError("--clear cannot be combined with --re or --broadcast")
 			}
 
+			if ifFrom != "" && !clearRequest || cmd.Flags().Changed("if-from") && strings.TrimSpace(ifFrom) == "" {
+				return notificationValidationError("--if-from requires --clear and a nonblank actor")
+			}
+			if noReplace && (clearRequest || broadcast) {
+				return notificationValidationError("--no-replace cannot be combined with --clear or --broadcast")
+			}
 			if clearRequest && cmd.Flags().Changed("message") {
 				return notificationValidationError("--message and --clear are mutually exclusive")
 			}
@@ -86,26 +98,48 @@ its open children (at most 50); --teammates adds their teammate inboxes.`,
 				return err
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			if broadcast || re != "" {
+			if broadcast || re != "" || noReplace || ifFrom != "" {
+				body := &generated.NotifyIssueBody{Actor: &actor, Teammate: &senderTeammate, To: &to, Re: &re, Broadcast: &broadcast, Teammates: &teammates}
+				if clearRequest {
+					body = &generated.NotifyIssueBody{Actor: &actor, To: &to, Clear: &clearRequest, IfFrom: &ifFrom}
+				} else {
+					body.Message = &message
+				}
+				if noReplace {
+					replace := false
+					body.Replace = &replace
+				}
 				apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 				if err != nil {
 					return err
 				}
 				response, callErr := apiClient.NotifyIssueWithResponse(ctx, &generated.NotifyIssueRequestOptions{
 					PathParams: &generated.NotifyIssuePath{ProjectID: fmt.Sprint(pid), Ref: ref.RefForAPI},
-					Body:       &generated.NotifyIssueBody{Actor: &actor, Teammate: &senderTeammate, To: &to, Re: &re, Message: message, Broadcast: &broadcast, Teammates: &teammates},
+					Body:       body,
 				})
 				if response == nil {
 					return callErr
 				}
 				if response.StatusCode >= 400 {
-					return apiErrFromBody(response.StatusCode, response.Body)
+					return notificationAPIError(response.StatusCode, response.Body)
 				}
 				if callErr != nil {
 					return callErr
 				}
 				raw := response.Body
 				verb := "notified"
+				if clearRequest {
+					verb = "cleared"
+					var result struct {
+						Changed bool `json:"changed"`
+					}
+					if err := json.Unmarshal(raw, &result); err != nil {
+						return err
+					}
+					if !result.Changed {
+						verb = "left unchanged"
+					}
+				}
 				if broadcast {
 					verb = "broadcast"
 					var resolved struct {
@@ -169,7 +203,25 @@ its open children (at most 50); --teammates adds their teammate inboxes.`,
 	cmd.Flags().StringVar(&recipient, "to", "", "recipient: <actor> or <actor>/<teammate> (required unless --broadcast)")
 	cmd.Flags().StringVar(&message, "message", "", "why their attention is needed (required unless --clear; max 1024 bytes)")
 	cmd.Flags().BoolVar(&clearRequest, "clear", false, "remove this teammate's request")
+	cmd.Flags().BoolVar(&noReplace, "no-replace", false, "fail with a conflict instead of replacing the recipient's held request")
+	cmd.Flags().StringVar(&ifFrom, "if-from", "", "with --clear: clear only while the request's stored sender is this actor")
 	return cmd
+}
+
+// notificationAPIError names the held request when --no-replace was refused.
+func notificationAPIError(status int, body []byte) *cliError {
+	err := apiErrFromBody(status, body)
+	if err.Code != "notification_held" {
+		return err
+	}
+	var held struct {
+		From    string `json:"from"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(err.Data, &held) == nil && held.From != "" {
+		err.Message = fmt.Sprintf("%s: from %s: %s", err.Message, textsafe.Line(held.From), textsafe.Line(held.Message))
+	}
+	return err
 }
 
 func normalizeNotificationRecipient(raw string) (string, error) {

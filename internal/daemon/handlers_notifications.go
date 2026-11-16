@@ -29,7 +29,17 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
-		if strings.TrimSpace(in.Body.Message) == "" || !utf8.ValidString(in.Body.Message) || len(in.Body.Message) > notification.MessageMaxBytes {
+		noReplace := in.Body.Replace != nil && !*in.Body.Replace
+		switch {
+		case in.Body.Clear && (in.Body.Message != "" || in.Body.Broadcast || in.Body.Teammates || in.Body.Re != "" || noReplace):
+			return nil, api.NewError(400, "validation", "clear cannot be combined with message, re, broadcast, teammates or replace", "", nil)
+		case in.Body.IfFrom != "" && !in.Body.Clear:
+			return nil, api.NewError(400, "validation", "if_from requires clear", "", nil)
+		case noReplace && in.Body.Broadcast:
+			return nil, api.NewError(400, "validation", "replace=false cannot be combined with broadcast", "", nil)
+		case in.Body.Clear && in.Body.To == "":
+			return nil, api.NewError(400, "validation", "clear requires to", "", nil)
+		case !in.Body.Clear && (strings.TrimSpace(in.Body.Message) == "" || !utf8.ValidString(in.Body.Message) || len(in.Body.Message) > notification.MessageMaxBytes):
 			return nil, api.NewError(400, "validation", "message must be nonblank valid UTF-8 and at most 1024 bytes", "", nil)
 		}
 		if in.Body.Broadcast && in.Body.To != "" {
@@ -66,8 +76,17 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
+			if in.Body.Clear {
+				recipients = []string{to}
+				return clearNotificationSlot(current, to, in.Body.IfFrom)
+			}
 			if current.Status != "open" {
 				return nil, api.NewError(400, "validation", "cannot notify on a closed issue", "", nil)
+			}
+			if noReplace {
+				if held, ok := heldNotification(current, to); ok {
+					return nil, api.NewError(409, "notification_held", "recipient already has an unanswered request on this issue", "send without --no-replace to replace it, or wait for it to be cleared", map[string]any{"from": held.From, "message": held.Message})
+				}
 			}
 			allowed, err := notificationAllowedTx(ctx, tx)
 			if err != nil {
@@ -235,4 +254,33 @@ func resolveNotificationComment(ctx context.Context, store db.Storage, issue db.
 		return "", err
 	}
 	return target.UID, nil
+}
+
+// heldNotification returns the request stored for recipient, if the slot
+// holds a usable one. A malformed slot is invisible to the inbox, so it does
+// not block a new request.
+func heldNotification(issue db.Issue, recipient string) (notification.Value, bool) {
+	var slots map[string]jsontext.Value
+	if issue.Metadata == "" || json.Unmarshal([]byte(issue.Metadata), &slots) != nil {
+		return notification.Value{}, false
+	}
+	raw, ok := slots[notification.MetadataKey(recipient)]
+	if !ok {
+		return notification.Value{}, false
+	}
+	value, _, err := notification.DecodeValue(raw)
+	return value, err == nil
+}
+
+// clearNotificationSlot removes recipient's request. With ifFrom set it
+// leaves the slot alone unless the stored from field equals ifFrom; that is a
+// comparison of stored data, not a check of who wrote the request.
+func clearNotificationSlot(issue db.Issue, recipient, ifFrom string) (map[string]jsontext.Value, error) {
+	if ifFrom != "" {
+		held, ok := heldNotification(issue, recipient)
+		if !ok || held.From != ifFrom {
+			return map[string]jsontext.Value{}, nil
+		}
+	}
+	return map[string]jsontext.Value{notification.MetadataKey(recipient): jsontext.Value("null")}, nil
 }

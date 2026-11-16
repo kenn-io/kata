@@ -11,9 +11,12 @@ type NotifyIssueRequest struct {
 		Teammate  string `json:"teammate,omitempty"`
 		To        string `json:"to,omitempty"`
 		Re        string `json:"re,omitempty"`
-		Message   string `json:"message" required:"true"`
+		Message   string `json:"message,omitempty" doc:"Required unless clear is set"`
 		Broadcast bool   `json:"broadcast,omitzero"`
 		Teammates bool   `json:"teammates,omitzero"`
+		Replace   *bool  `json:"replace,omitempty" doc:"false answers 409 notification_held instead of replacing the recipient's held request; absent means true"`
+		Clear     bool   `json:"clear,omitzero" doc:"Remove the recipient's request instead of sending one; requires to"`
+		IfFrom    string `json:"if_from,omitempty" doc:"With clear: remove the request only while its stored from field equals this actor. A stored-field check, not proof of who wrote it"`
 	}
 }
 

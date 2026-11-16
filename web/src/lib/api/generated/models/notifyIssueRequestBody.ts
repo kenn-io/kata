@@ -5,8 +5,15 @@
 export interface NotifyIssueRequestBody {
   actor?: string
   broadcast?: boolean
-  message: string
+  /** Remove the recipient's request instead of sending one; requires to */
+  clear?: boolean
+  /** With clear: remove the request only while its stored from field equals this actor. A stored-field check, not proof of who wrote it */
+  if_from?: string
+  /** Required unless clear is set */
+  message?: string
   re?: string
+  /** false answers 409 notification_held instead of replacing the recipient's held request; absent means true */
+  replace?: boolean
   teammate?: string
   teammates?: boolean
   to?: string
