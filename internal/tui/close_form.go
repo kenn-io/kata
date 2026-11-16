@@ -200,9 +200,6 @@ func dispatchLegacyClose(apiClient KataAPI, target formTarget, actor string) tea
 	}
 }
 
-// closeAttachmentNameCells bounds an attachment name in the form's choice.
-const closeAttachmentNameCells = 32
-
 // syncCloseAttachmentField keeps the Attachment radio in step with the
 // Reason radio: the close action accepts attachment evidence only for done,
 // so any other reason hides the field and a return to done offers it again
@@ -217,7 +214,7 @@ func (s inputState) syncCloseAttachmentField() inputState {
 	case offered && idx < 0:
 		choices := []string{"none"}
 		for _, a := range s.attachments {
-			choices = append(choices, a.labelCut(closeAttachmentNameCells))
+			choices = append(choices, a.label())
 		}
 		s.fields = append(slices.Clone(s.fields), inputField{
 			id: fieldCloseAttachment, label: "Attachment evidence", kind: fieldRadio,

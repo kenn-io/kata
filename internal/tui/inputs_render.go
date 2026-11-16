@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
 	"go.kenn.io/kit/tui/termtext"
 )
 
@@ -105,13 +107,14 @@ func renderCenteredForm(s inputState, width, height int, now time.Time) string {
 func renderCloseForm(s inputState, innerW, innerH int) string {
 	statusLine := renderFormStatus(s)
 	footer := renderFormFooter(s, innerW, s.activeFieldIs(fieldCloseMessage))
-	// One attachment choice per line, counted out of the message rows so the
-	// footer keeps its row; without attachments the message keeps three rows.
-	attachmentRows, floor := 0, 3
-	if f := s.field(fieldCloseAttachment); f != nil {
-		attachmentRows, floor = len(f.radio.choices)+1, 1
+	// The attachment selector is always a label and one row, so it costs a
+	// constant; the message box gives up those rows to keep the footer.
+	// Without attachments the message keeps three rows.
+	reserved, floor := closeFormFixedRows, 3
+	if s.field(fieldCloseAttachment) != nil {
+		reserved, floor = closeFormFixedRows+closeAttachmentRows, 1
 	}
-	messageRows := max(innerH-10-attachmentRows, floor)
+	messageRows := max(innerH-reserved, floor)
 	if message := s.field(fieldCloseMessage); message != nil {
 		message.area.SetWidth(innerW - 2)
 		message.area.SetHeight(messageRows)
@@ -119,7 +122,7 @@ func renderCloseForm(s inputState, innerW, innerH int) string {
 	parts := []string{titleStyle.Render(s.title)}
 	for idx := range s.fields {
 		if s.fields[idx].id == fieldCloseAttachment {
-			parts = append(parts, renderAttachmentChoices(s, idx))
+			parts = append(parts, renderAttachmentSelector(s, idx, innerW))
 			continue
 		}
 		parts = append(parts, renderNewIssueField(s, idx, innerW))
@@ -131,24 +134,32 @@ func renderCloseForm(s inputState, innerW, innerH int) string {
 	return modalBoxStyle.Width(innerW+2).Padding(0, 1).Render(strings.Join(parts, "\n"))
 }
 
-// renderAttachmentChoices lists the attachment radio one choice per line, so
-// the row count is len(choices)+1 whatever the names.
-func renderAttachmentChoices(s inputState, idx int) string {
+// closeFormFixedRows is what the close form spends outside the message
+// box: border, title, the other fields' labels and rows, the status line and
+// the footer. closeAttachmentRows is the attachment selector's label and row.
+const (
+	closeFormFixedRows  = 10
+	closeAttachmentRows = 2
+)
+
+// renderAttachmentSelector shows the attachment evidence field as one row:
+// "none", or the chosen attachment as "name · N bytes (k of n)" with the name
+// cut so the row fits the form whatever the name's length.
+func renderAttachmentSelector(s inputState, idx, innerW int) string {
 	f := &s.fields[idx]
 	label := subtleStyle.Render(f.label)
 	if idx == s.active {
 		label = titleStyle.Render(f.label)
 	}
-	filled, empty := radioGlyphs()
-	lines := []string{label}
-	for i, c := range f.radio.choices {
-		glyph := empty
-		if i == f.radio.index {
-			glyph = filled
-		}
-		lines = append(lines, glyph+" "+c)
+	// The box's border and padding leave innerW-2 cells, as the message box uses.
+	rowW := innerW - 2
+	row := "none"
+	if i := f.radio.index; i > 0 && i <= len(s.attachments) {
+		a := s.attachments[i-1]
+		tail := fmt.Sprintf(" · %d bytes (%d of %d)", a.ref.Size, i, len(s.attachments))
+		row = runewidth.Truncate(a.ref.Name, max(rowW-runewidth.StringWidth(tail), 1), "…") + tail
 	}
-	return strings.Join(lines, "\n")
+	return label + "\n" + runewidth.Truncate(row, rowW, "…")
 }
 
 // renderFilterForm lays out the four filter axes: Status (radio),

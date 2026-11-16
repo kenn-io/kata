@@ -2,7 +2,9 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -414,19 +416,27 @@ func attachmentIssue(t *testing.T, name string) Issue {
 	return issue
 }
 
-// threeAttachmentIssue holds three attachments that share one long name.
-func threeAttachmentIssue(t *testing.T, name string) Issue {
+// manyAttachmentIssue holds n attachments that share one long name.
+func manyAttachmentIssue(t *testing.T, name string, n int) Issue {
 	t.Helper()
 	var issue Issue
 	raw := `{"project_id":7,"short_id":"abc4","title":"Ship it","status":"open","metadata":{`
-	for i, id := range []string{reportAttachmentID, "01KATTACH0000000000000AAAA", "01KATTACH0000000000000BBBB"} {
+	for i := range n {
 		if i > 0 {
 			raw += ","
 		}
-		raw += `"attachment.` + id + `":{"name":"` + name + `","media_type":"application/pdf","size":2048,"docbank_version":"6f1c2e8a-2222-4222-8222-222222222222"}`
+		raw += fmt.Sprintf(`"attachment.01KATTACH%016d":{"name":"%s","media_type":"application/pdf","size":2048,"docbank_version":"6f1c2e8a-2222-4222-8222-222222222222"}`, i, name)
 	}
 	require.NoError(t, json.Unmarshal([]byte(raw+`}}`), &issue))
 	return issue
+}
+
+// focusCloseAttachment moves focus to the attachment selector.
+func focusCloseAttachment(t *testing.T, m Model) Model {
+	t.Helper()
+	m.input.active = slices.IndexFunc(m.input.fields, func(f inputField) bool { return f.id == fieldCloseAttachment })
+	require.GreaterOrEqual(t, m.input.active, 0)
+	return m
 }
 
 func TestEvidenceKeyOpensTheCloseFormWithoutRequiredEvidence(t *testing.T) {
@@ -488,6 +498,7 @@ func TestCloseFormWithAttachmentsFitsEverySize(t *testing.T) {
 		fullForm      bool
 	}{
 		{"80x24", 80, 24, false, true},
+		{"60x24", 60, 24, false, true},
 		{"80x12", 80, 12, false, false},
 		{"100x8", 100, 8, false, false},
 		{"split layout", 160, 40, false, true},
@@ -497,7 +508,7 @@ func TestCloseFormWithAttachmentsFitsEverySize(t *testing.T) {
 			m := initialModel(Options{})
 			m.view = viewList
 			m.scope = scope{projectID: 7, projectName: longProject}
-			m.list.issues = []Issue{threeAttachmentIssue(t, longName)}
+			m.list.issues = []Issue{manyAttachmentIssue(t, longName, 10)}
 			m, _ = stepModel(m, tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
 			m, _ = stepModel(m, runeKey('V'))
 			require.Equal(t, inputCloseForm, m.input.kind)
@@ -505,6 +516,8 @@ func TestCloseFormWithAttachmentsFitsEverySize(t *testing.T) {
 				m.view = viewHelp
 			}
 
+			m = focusCloseAttachment(t, m)
+			m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyRight})
 			rendered := stripANSI(m.View().Content)
 
 			for line := range strings.SplitSeq(rendered, "\n") {
@@ -513,11 +526,35 @@ func TestCloseFormWithAttachmentsFitsEverySize(t *testing.T) {
 			if tc.fullForm {
 				assert.Contains(t, rendered, "Attachment evidence", rendered)
 				assert.Contains(t, rendered, "ctrl+o save", "the form keeps its footer")
-				assert.Contains(t, rendered, "… · 2048 bytes", "the long name is shortened, the size stays")
+				assert.Contains(t, rendered, "… · 2048 bytes (1 of 10)", "the long name is shortened, the size and position stay")
 			}
 			if !tc.help {
 				assert.LessOrEqual(t, strings.Count(rendered, "\n")+1, tc.height, "the frame fits:\n%s", rendered)
 			}
 		})
 	}
+}
+
+func TestCloseFormAttachmentSelectorCyclesThroughEveryAttachment(t *testing.T) {
+	defer snapshotInit(t)()
+	m := initialModel(Options{})
+	m.view = viewList
+	m.scope = scope{projectID: 7}
+	m.list.issues = []Issue{manyAttachmentIssue(t, "report.pdf", 3)}
+	m, _ = stepModel(m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m, _ = stepModel(m, runeKey('V'))
+	m = focusCloseAttachment(t, m)
+
+	view := func() string { return stripANSI(m.View().Content) }
+	assert.Contains(t, view(), "none")
+	assert.NotContains(t, view(), "report.pdf")
+	for _, want := range []string{"(1 of 3)", "(2 of 3)", "(3 of 3)"} {
+		m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyRight})
+		assert.Contains(t, view(), "report.pdf · 2048 bytes "+want)
+	}
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyRight})
+	assert.Equal(t, 0, m.input.field(fieldCloseAttachment).radio.index, "right from the last attachment wraps to none")
+	assert.NotContains(t, view(), "report.pdf")
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyLeft})
+	assert.Contains(t, view(), "report.pdf · 2048 bytes (3 of 3)", "left from none wraps to the last attachment")
 }

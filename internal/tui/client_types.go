@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattn/go-runewidth"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
@@ -103,12 +102,6 @@ type closeAttachment struct {
 // label names the file as the CLI does, "report.pdf · 2048 bytes".
 func (a closeAttachment) label() string {
 	return fmt.Sprintf("%s · %d bytes", a.ref.Name, a.ref.Size)
-}
-
-// labelCut is label with the name cut to maxName cells, so a 255-byte name
-// cannot push the close form's footer off a short terminal.
-func (a closeAttachment) labelCut(maxName int) string {
-	return fmt.Sprintf("%s · %d bytes", runewidth.Truncate(a.ref.Name, maxName, "…"), a.ref.Size)
 }
 
 // attachmentRefs maps the issue's valid attachment references by ID. Invalid

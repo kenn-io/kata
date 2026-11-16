@@ -139,9 +139,10 @@ the list or detail view to open the form on any daemon. `x` closes at once and
 shows the form only when the daemon requires evidence for a close (for example
 with an issue-scoped credential). Undoing a reopen and completing it as `done`
 opens the same form. While the reason is `done` and the issue has valid
-attachment references, an Attachment evidence choice lists them by name and
-size in bytes. The chosen file is cited next to any typed evidence, or alone
-when the evidence value is left empty. Other reasons do not show the choice.
+attachment references, an Attachment evidence row starts at `none`; left and
+right step through the attachments, showing the name and size in bytes. The
+chosen file is cited next to any typed evidence, or alone when the evidence
+value is left empty. Other reasons do not show the choice.
 The events tab names the cited file in the close row, with `(removed)` or
 `(changed)` when the issue's reference no longer matches the file the close
 froze.
