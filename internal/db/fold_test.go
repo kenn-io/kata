@@ -418,12 +418,16 @@ func TestFoldSnapshotAppliesNewerCommentEdit(t *testing.T) {
 		name, author, originalEdit, incomingEdit, wantBody, wantEdit string
 		incomingCreated                                              string
 		local                                                        bool
+		localClock                                                   int64
+		localEditAt                                                  string
 		wantWarnings                                                 []string
 	}{
 		{name: "new snapshot edit", author: "agent", incomingEdit: snapshotEdit, wantBody: "snapshot edit", wantEdit: snapshotEdit},
 		{name: "equivalent creation timestamp", author: "agent", incomingCreated: "2026-05-23T12:00:01.123000000Z", incomingEdit: snapshotEdit, wantBody: "snapshot edit", wantEdit: snapshotEdit},
 		{name: "different creation timestamp", author: "agent", incomingCreated: "2026-05-23T12:00:01.124Z", incomingEdit: snapshotEdit, wantBody: "first", wantWarnings: conflictWarnings},
 		{name: "newer local edit", author: "agent", incomingEdit: snapshotEdit, wantBody: "local edit", wantEdit: localEdit, local: true, wantWarnings: conflictWarnings},
+		// Event order, not the edit timestamp, decides a later local edit.
+		{name: "later local edit with an earlier timestamp", author: "agent", incomingEdit: localEdit, wantBody: "local edit", wantEdit: snapshotEdit, local: true, localClock: 5, localEditAt: snapshotEdit},
 		{name: "same edit time", author: "agent", originalEdit: snapshotEdit, incomingEdit: snapshotEdit, wantBody: "first", wantEdit: snapshotEdit, wantWarnings: conflictWarnings},
 		{name: "different author", author: "other", incomingEdit: snapshotEdit, wantBody: "first", wantWarnings: conflictWarnings},
 		{name: "invalid edit time", author: "agent", incomingEdit: "invalid", wantBody: "first", wantWarnings: conflictWarnings},
@@ -437,7 +441,11 @@ func TestFoldSnapshotAppliesNewerCommentEdit(t *testing.T) {
 			snapshot := testEvent("issue.snapshot", 4, fmt.Sprintf(`{"uid":"issue-1","comments":[{"comment_uid":"comment-1","author":%q,"body":"snapshot edit","created_at":%q,"edited_at":%q}]}`, tc.author, incomingCreated, tc.incomingEdit))
 			events := []FoldEvent{snapshot, creation}
 			if tc.local {
-				events = append(events, testEvent("issue.comment_edited", 3, fmt.Sprintf(`{"comment_uid":"comment-1","body":"local edit","edited_at":%q}`, localEdit)))
+				clock, editedAt := int64(3), localEdit
+				if tc.localClock != 0 {
+					clock, editedAt = tc.localClock, tc.localEditAt
+				}
+				events = append(events, testEvent("issue.comment_edited", clock, fmt.Sprintf(`{"comment_uid":"comment-1","body":"local edit","edited_at":%q}`, editedAt)))
 			}
 			got := FoldEvents(events)
 			comment := got.Comments["comment-1"]
