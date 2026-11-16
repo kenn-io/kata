@@ -118,6 +118,7 @@ const (
 	fieldCloseMessage
 	fieldEvidenceType
 	fieldEvidenceValue
+	fieldCloseAttachment
 	fieldScheduled
 	fieldDeadline
 	fieldConfirm
@@ -348,6 +349,7 @@ type inputState struct {
 	preSplitDetailCaptured bool
 	target                 formTarget
 	formGen                int64
+	attachments            []closeAttachment // close form: the issue's attachments, in radio order after "none"
 	dates                  datesFormState
 	del                    deleteFormState
 	recurrence             recurrenceFormState
@@ -635,7 +637,7 @@ func (s inputState) handleRadioKey(msg tea.KeyPressMsg) (inputState, bool) {
 		return s, false
 	}
 	s.fields[s.active] = *f
-	return s, true
+	return s.syncCloseAttachmentField(), true
 }
 
 func (s inputState) handleLockedFieldKey(msg tea.KeyPressMsg) (inputState, bool) {
@@ -879,7 +881,7 @@ var closeEvidenceTypeChoices = []string{
 	"no-change-audit", "duplicate-of", "superseded-by",
 }
 
-func newCloseForm(target formTarget) inputState {
+func newCloseForm(target formTarget, attachments []closeAttachment) inputState {
 	message := newFormTextarea(fieldCloseMessage, "")
 	message.label = "Completion message"
 	message.required = true
@@ -902,8 +904,9 @@ func newCloseForm(target formTarget) inputState {
 			evidenceType,
 			{id: fieldEvidenceValue, label: "Evidence value", kind: fieldSingleLine, input: evidenceValue, required: true},
 		},
-		target: target,
-	}
+		target:      target,
+		attachments: attachments,
+	}.syncCloseAttachmentField()
 }
 
 // newFormTextarea builds the bubbles textarea backing a centered

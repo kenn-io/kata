@@ -330,6 +330,8 @@ func closeEvidenceSummaries(e EventLogEntry) []string {
 func formatEvidenceItem(m map[string]any) string {
 	t, _ := m["type"].(string)
 	switch t {
+	case "attachment":
+		return evidenceLabel(t, attachmentEvidenceValue(m))
 	case "commit":
 		return evidenceLabel(t, stringField(m, "sha"))
 	case "pr":
@@ -349,6 +351,21 @@ func formatEvidenceItem(m map[string]any) string {
 		return "?"
 	}
 	return t
+}
+
+// attachmentEvidenceValue names the file a close cited from the descriptor
+// the daemon froze into the event, "report.pdf (2.0 KB)", and falls back to
+// the attachment ID when the event carries no usable descriptor.
+func attachmentEvidenceValue(m map[string]any) string {
+	if frozen, ok := m["attachment"].(map[string]any); ok {
+		if name := stringField(frozen, "name"); name != "" {
+			if size, ok := frozen["size"].(float64); ok && size >= 0 {
+				return fmt.Sprintf("%s (%s)", name, formatAttachmentSize(int64(size)))
+			}
+			return name
+		}
+	}
+	return stringField(m, "attachment_id")
 }
 
 // evidenceLabel joins a type tag with its payload value, dropping the

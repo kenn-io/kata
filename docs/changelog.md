@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Cite an issue's attachment as `done` evidence from the `kata tui` close form, and see the cited file named in the events tab. See [cite a document when closing work](guide/attachments.md#cite-a-document-when-closing-work).
+
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
 
 - Copy a project sync diagnostic for Bash/Zsh or PowerShell from the web summary.

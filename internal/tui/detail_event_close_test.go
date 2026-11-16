@@ -96,6 +96,23 @@ func TestEventChunkLines_CloseDetail(t *testing.T) {
 			},
 		},
 		{
+			name: "attachment_names_the_frozen_file",
+			payload: map[string]any{
+				"reason": "done",
+				"evidence": []any{
+					map[string]any{
+						"type": "attachment", "attachment_id": "01KATTACH0000000000000REPT",
+						"attachment": map[string]any{"name": "report.pdf", "media_type": "application/pdf", "size": float64(2048)},
+					},
+					map[string]any{"type": "attachment", "attachment_id": "01KATTACH0000000000000LOGS"},
+				},
+			},
+			want: []string{
+				"  evidence: attachment report.pdf (2.0 KB)",
+				"  evidence: attachment 01KATTACH0000000000000LOGS",
+			},
+		},
+		{
 			name: "malformed_evidence_array_dropped",
 			payload: map[string]any{
 				"reason":   "done",

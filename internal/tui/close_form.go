@@ -138,12 +138,12 @@ func (m Model) routeCloseKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.keymap.Close.matches(msg) {
 		return m, nil, false
 	}
-	target, _, ok := m.activeIssueTarget()
+	target, issue, ok := m.activeIssueTarget()
 	if !ok {
 		return m, nil, true
 	}
 	if m.closeRequiresEvidence {
-		return m.openCloseForm(target), nil, true
+		return m.openCloseForm(target, issue.attachments()), nil, true
 	}
 	return m, dispatchLegacyClose(m.api, target, m.list.actor), true
 }
@@ -173,9 +173,9 @@ func (m Model) activeIssueTarget() (formTarget, Issue, bool) {
 	}, issue, true
 }
 
-func (m Model) openCloseForm(target formTarget) Model {
+func (m Model) openCloseForm(target formTarget, attachments []closeAttachment) Model {
 	m.nextFormGen++
-	form := newCloseForm(target)
+	form := newCloseForm(target, attachments)
 	form.formGen = m.nextFormGen
 	m.input = form
 	return m
@@ -192,6 +192,43 @@ func dispatchLegacyClose(apiClient KataAPI, target formTarget, actor string) tea
 	}
 }
 
+// syncCloseAttachmentField keeps the Attachment radio in step with the
+// Reason radio: the close action accepts attachment evidence only for done,
+// so any other reason hides the field and a return to done offers it again
+// with no choice made.
+func (s inputState) syncCloseAttachmentField() inputState {
+	if s.kind != inputCloseForm || len(s.attachments) == 0 {
+		return s
+	}
+	offered := s.fieldValue(fieldCloseReason) == "done"
+	idx := slices.IndexFunc(s.fields, func(f inputField) bool { return f.id == fieldCloseAttachment })
+	switch {
+	case offered && idx < 0:
+		choices := []string{"none"}
+		for _, a := range s.attachments {
+			choices = append(choices, fmt.Sprintf("%s (%s)", a.name, formatAttachmentSize(a.size)))
+		}
+		s.fields = append(slices.Clone(s.fields), inputField{
+			id: fieldCloseAttachment, label: "Attachment evidence", kind: fieldRadio,
+			radio: radioField{choices: choices},
+		})
+	case !offered && idx >= 0:
+		s.fields = slices.Delete(slices.Clone(s.fields), idx, idx+1)
+		s.active = min(s.active, len(s.fields)-1)
+	}
+	return s
+}
+
+// closeAttachmentChoice is the attachment picked on the form, if any. Only
+// done offers the field; a reason change drops it via syncCloseAttachmentField.
+func closeAttachmentChoice(form inputState, reason string) (closeAttachment, bool) {
+	f := form.field(fieldCloseAttachment)
+	if reason != "done" || f == nil || f.radio.index <= 0 || f.radio.index > len(form.attachments) {
+		return closeAttachment{}, false
+	}
+	return form.attachments[f.radio.index-1], true
+}
+
 func closeInputFromForm(form inputState, actor string) (CloseInput, error) {
 	reason := strings.TrimSpace(form.fieldValue(fieldCloseReason))
 	message := strings.TrimSpace(form.fieldValue(fieldCloseMessage))
@@ -201,6 +238,11 @@ func closeInputFromForm(form inputState, actor string) (CloseInput, error) {
 	value := strings.TrimSpace(form.fieldValue(fieldEvidenceValue))
 	if reason == "wontfix" && value == "" {
 		return CloseInput{Actor: actor, Reason: reason, Message: message}, nil
+	}
+	cited, hasCited := closeAttachmentChoice(form, reason)
+	citedEvidence := api.Evidence{Type: api.EvidenceAttachment, AttachmentID: cited.id}
+	if value == "" && hasCited {
+		return CloseInput{Actor: actor, Reason: reason, Message: message, Evidence: []api.Evidence{citedEvidence}}, nil
 	}
 	if value == "" {
 		return CloseInput{}, fmt.Errorf("evidence value is required")
@@ -232,9 +274,11 @@ func closeInputFromForm(form inputState, actor string) (CloseInput, error) {
 	default:
 		return CloseInput{}, fmt.Errorf("unsupported evidence type %q", typ)
 	}
-	return CloseInput{
-		Actor: actor, Reason: reason, Message: message, Evidence: []api.Evidence{evidence},
-	}, nil
+	items := []api.Evidence{evidence}
+	if hasCited {
+		items = append(items, citedEvidence)
+	}
+	return CloseInput{Actor: actor, Reason: reason, Message: message, Evidence: items}, nil
 }
 
 func dispatchFormClose(

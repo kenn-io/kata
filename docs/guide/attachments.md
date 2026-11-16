@@ -128,10 +128,19 @@ kata close abc4 --done -m "Delivered the report and checked its final contents."
 ```
 
 `attachment:<id-or-unique-suffix>` requires a valid reference on the issue.
+
 The close checks it inside the same transaction and needs no Docbank connection.
 A successful keyed retry accepts the original full ID even after its reference
 is removed. Resolve suffixes before removal. `--docbank` cannot combine with
 `--dry`, `--if-match`, or `--idempotency-key`, and is only available for `done`.
+
+`kata tui` offers the same citation in its close form, which opens when the
+daemon requires evidence for a close (for example with an issue-scoped
+credential). While the reason is `done` and the issue has valid attachment
+references, an Attachment evidence choice lists them by name and size. The
+chosen file is cited next to any typed evidence, or alone when the evidence
+value is left empty. Other reasons do not show the choice. The events tab names
+the cited file in the close row.
 
 Close history freezes the name, media type, size and content version. The web
 links to the attachment panel only while the current reference still names
