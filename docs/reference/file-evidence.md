@@ -6,11 +6,11 @@ last_edited: 2026-11-15
 
 # File evidence
 
-Close an issue with a portable file reference, then retrieve or compare its bytes
-later. The daemon records the source alias, relative path, its origin instance
-UID, byte count, optional SHA-256, and an optional source revision in the close
-event. File content stays with the source. A digest detects changes; it does not
-retain old bytes or replace the independent confirmation required by
+File evidence requires daemon API 0.50.0 or newer. Close an issue with a
+portable file reference, then retrieve or compare its bytes later. The daemon
+records the source alias, relative path, its origin instance UID, byte count,
+optional SHA-256, and an optional source revision in the close event. File
+content stays with the source. A digest detects changes; it does not retain old bytes or replace the independent confirmation required by
 `verify.required=true`.
 
 ## Configure a source on its owning daemon
