@@ -16,6 +16,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Watch project sync progress refresh every 30 seconds in a visible web tab and
   when you return.
 
+- Select a closing transcript target per project, including for moved issues.
+  See [closing-session transcripts](reference/configuration.md#closing-session-transcripts).
+  This partially addresses [#972](https://github.com/kenn-io/kata/issues/972);
+  transcript upload remains outstanding.
 - Upgrade to schema 51, which reads issue history through an index on each
   event's header issue UID instead of one built from event payloads. PostgreSQL
   needs `kata storage postgres migrate` with the daemon stopped while the index
