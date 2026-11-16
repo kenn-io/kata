@@ -30,7 +30,8 @@ func (s *doctorState) daemonChecks(ctx context.Context) {
 		if apiClient == nil {
 			return skippedDoctorCheck("Daemon connection could not be verified")
 		}
-		response, err := apiClient.HealthWithResponse(ctx)
+		probeDocbank := true
+		response, err := apiClient.HealthWithResponse(ctx, &generated.HealthRequestOptions{Query: &generated.HealthQuery{ProbeDocbank: &probeDocbank}})
 		status := 0
 		if response != nil {
 			status = response.StatusCode
@@ -230,7 +231,7 @@ func doctorDocbank(health *generated.HealthResponse) diagnostics.Check {
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon has no Docbank key source to check: Docbank is not configured, or it uses the Docbank on this machine"}
 	}
 	if h.Credential == "ok" {
-		return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Daemon resolves its Docbank API key"}
+		return doctorDocbankProbe(health)
 	}
 	var details []string
 	if h.CredentialSource != nil {
@@ -244,6 +245,36 @@ func doctorDocbank(health *generated.HealthResponse) diagnostics.Check {
 		Summary: "Daemon cannot resolve its Docbank API key; attachments fail without contacting Docbank",
 		Details: details,
 		Fix:     `Fix the [docbank] key source on the daemon host. A key file must be private to the daemon user: chmod 600 on Unix; on Windows, in PowerShell, icacls <file> /inheritance:r /grant:r "${env:USERNAME}:R". An api_key_env variable must be set in the daemon's environment.`,
+	}
+}
+
+// doctorDocbankProbe reports the daemon's Docbank request once its key resolves.
+func doctorDocbankProbe(health *generated.HealthResponse) diagnostics.Check {
+	p := health.DocbankProbe
+	if p == nil {
+		check := diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Daemon resolves its Docbank API key"}
+		reported := ""
+		if health.APISchemaVersion != nil {
+			reported = *health.APISchemaVersion
+		}
+		if current, _ := apiVersionAtLeast(reported, apiVersionDocbankProbe); !current {
+			check.Details = []string{daemonAPITooOldMessage("Docbank probe", apiVersionDocbankProbe, reported)}
+		}
+		return check
+	}
+	status := 0
+	if p.HTTPStatus != nil {
+		status = int(*p.HTTPStatus)
+	}
+	switch {
+	case p.Reachable && p.KeyAccepted:
+		return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Docbank answered and accepted the daemon's API key"}
+	case !p.Reachable:
+		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Daemon cannot reach Docbank; attachments fail with docbank_unreachable", Fix: "Check the [docbank] url in the daemon's config, that Docbank is running, and the network path between them."}
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Docbank rejected the daemon's API key; attachments fail with docbank_unauthorized", Details: doctorHTTPStatus(status), Fix: "Set the key Docbank issued for this daemon in the [docbank] key source, then restart the daemon."}
+	default:
+		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Docbank answered the daemon with an error; attachments may fail", Details: doctorHTTPStatus(status), Fix: "Check that the [docbank] url points at Docbank, and Docbank's own logs."}
 	}
 }
 

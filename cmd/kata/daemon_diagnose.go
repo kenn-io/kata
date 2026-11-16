@@ -439,7 +439,7 @@ func liveRootSigningHealth(ctx context.Context, resolved client.ResolvedDaemon) 
 	if err != nil {
 		return nil
 	}
-	resp, err := apiClient.HealthWithResponse(ctx)
+	resp, err := apiClient.HealthWithResponse(ctx, nil)
 	if err != nil || resp == nil || resp.JSON200 == nil {
 		return nil
 	}

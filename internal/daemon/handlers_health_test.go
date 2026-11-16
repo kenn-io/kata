@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"errors"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
+	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/embedding"
 )
 
@@ -376,4 +378,59 @@ func TestHealthSerializesSanitizedEmbeddingRejection(t *testing.T) {
 	assert.Equal(t, "rejected", body.Embeddings.Credential)
 	require.NotNil(t, body.Embeddings.LastErrorAt)
 	assert.Equal(t, http.StatusUnauthorized, body.Embeddings.LastErrorStatus)
+}
+
+func TestHealthProbesDocbankOnRequest(t *testing.T) {
+	status500 := func(f *docbanktest.Fake) { f.Fault = "status:500" }
+	for _, tc := range []struct {
+		name   string
+		key    string
+		setup  func(*docbanktest.Fake)
+		want   api.DocbankProbe
+	}{
+		{name: "reachable and key accepted", key: "test-key", want: api.DocbankProbe{Reachable: true, KeyAccepted: true}},
+		{name: "key rejected", key: "other-key", want: api.DocbankProbe{Reachable: true, HTTPStatus: http.StatusUnauthorized}},
+		{name: "unexpected status", key: "test-key", setup: status500, want: api.DocbankProbe{Reachable: true, HTTPStatus: http.StatusInternalServerError}},
+		{name: "unreachable", key: "test-key", setup: func(f *docbanktest.Fake) { f.Server.Close() }, want: api.DocbankProbe{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := docbanktest.New(t)
+			if tc.setup != nil {
+				tc.setup(fake)
+			}
+			d := openTestDB(t)
+			ts := startTestServer(t, daemon.ServerConfig{
+				DB: d.db, StartedAt: d.now,
+				Docbank: docbank.NewClient(fake.Server.URL, func() (string, error) { return tc.key, nil }),
+			})
+			var body struct {
+				OK            bool              `json:"ok"`
+				DocbankProbe *api.DocbankProbe `json:"docbank_probe"`
+			}
+			getAndUnmarshal(t, ts, "/api/v1/health?probe_docbank=true", http.StatusOK, &body)
+			require.True(t, body.OK, "a Docbank problem is advisory")
+			require.NotNil(t, body.DocbankProbe)
+			assert.Equal(t, tc.want, *body.DocbankProbe)
+		})
+	}
+}
+
+func TestHealthDoesNotContactDocbankUnlessAsked(t *testing.T) {
+	fake := docbanktest.New(t)
+	d := openTestDB(t)
+	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, Docbank: docbank.NewClient(fake.Server.URL, func() (string, error) { return "test-key", nil })})
+	var body map[string]jsontext.Value
+	getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
+	assert.NotContains(t, body, "docbank_probe")
+	assert.Empty(t, fake.Requests())
+}
+
+func TestHealthProbeSkipsDocbankWithoutResolvableKey(t *testing.T) {
+	fake := docbanktest.New(t)
+	d := openTestDB(t)
+	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, Docbank: docbank.NewClient(fake.Server.URL, func() (string, error) { return "", errors.New("unset") })})
+	var body map[string]jsontext.Value
+	getAndUnmarshal(t, ts, "/api/v1/health?probe_docbank=true", http.StatusOK, &body)
+	assert.NotContains(t, body, "docbank_probe", "the docbank block already names the key problem")
+	assert.Empty(t, fake.Requests(), "no request is sent without a key")
 }

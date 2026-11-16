@@ -129,6 +129,7 @@ import type {
   GetProjectFederationStatusParams,
   GetProjectFederationStatusPathParameters,
   GetRelayResetPathParameters,
+  HealthParams,
   HealthResponseBody,
   ImportBatchResult,
   ImportIssuesPathParameters,
@@ -1655,14 +1656,25 @@ export type healthResponseError = healthResponseDefault & {
 
 export type healthResponse = healthResponseSuccess | healthResponseError
 
-export const getHealthUrl = () => {
-  return `/api/v1/health`
+export const getHealthUrl = (params?: HealthParams) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0 ? `/api/v1/health?${stringifiedParams}` : `/api/v1/health`
 }
 
 export const health = async (
+  params?: HealthParams,
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<healthResponse> => {
-  return orvalFetch<healthResponse>(getHealthUrl(), {
+  return orvalFetch<healthResponse>(getHealthUrl(params), {
     ...options,
     method: 'GET',
   })

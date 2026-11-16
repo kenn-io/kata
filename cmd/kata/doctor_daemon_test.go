@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/docbank"
+	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -203,6 +204,55 @@ func TestDoctorDocbankCheckFollowsHealth(t *testing.T) {
 			flags = globalFlags{Workspace: workspace, Project: "example-project"}
 			ctx := doctorServerContext(t, map[string]string{"/api/v1/health": tc.health}, nil)
 			finding := doctorFinding(t, collectDoctor(ctx), "daemon.docbank")
+			require.EqualValues(t, tc.status, finding.Status)
+			require.Contains(t, finding.Summary, tc.summary)
+		})
+	}
+}
+
+func TestDoctorDocbankProbeFollowsDaemonReport(t *testing.T) {
+	const prefix = `{"ok":true,"schema_version":28,"db_path":"/data/kata.db","docbank":{"credential":"ok"},`
+	for _, tc := range []struct {
+		name, health, status, summary, detail string
+	}{
+		{"answered with an error status", prefix + `"api_schema_version":"0.52.0","docbank_probe":{"reachable":true,"key_accepted":false,"http_status":500}}`, "warn", "Docbank answered the daemon with an error", "HTTP status: 500"},
+		{"daemon predates the probe", prefix + `"api_schema_version":"0.51.0"}`, "ok", "resolves its Docbank API key", "Docbank probe requires daemon API 0.52.0 or newer; this daemon reports 0.51.0; upgrade the daemon"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, workspace := doctorTestEnv(t)
+			flags = globalFlags{Workspace: workspace, Project: "example-project"}
+			ctx := doctorServerContext(t, map[string]string{"/api/v1/health": tc.health}, nil)
+			finding := doctorFinding(t, collectDoctor(ctx), "daemon.docbank")
+			require.EqualValues(t, tc.status, finding.Status)
+			require.Contains(t, finding.Summary, tc.summary)
+			require.Contains(t, finding.Details, tc.detail)
+		})
+	}
+}
+
+func TestDoctorProbesDocbankByDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name, key, status, summary string
+		stop                       bool
+	}{
+		{name: "reachable and key accepted", key: "test-key", status: "ok", summary: "Docbank answered and accepted the daemon's API key"},
+		{name: "key rejected", key: "other-key", status: "warn", summary: "Docbank rejected the daemon's API key"},
+		{name: "unreachable", key: "test-key", stop: true, status: "warn", summary: "Daemon cannot reach Docbank"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, workspace := doctorTestEnv(t)
+			fake := docbanktest.New(t)
+			if tc.stop {
+				fake.Server.Close()
+			}
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+				cfg.Docbank = docbank.NewClient(fake.Server.URL, func() (string, error) { return tc.key, nil })
+			})
+			ctx := context.WithValue(t.Context(), client.BaseURLKey{}, env.URL)
+			flags = globalFlags{Workspace: workspace}
+
+			finding := doctorFinding(t, collectDoctor(ctx), "daemon.docbank")
+
 			require.EqualValues(t, tc.status, finding.Status)
 			require.Contains(t, finding.Summary, tc.summary)
 		})

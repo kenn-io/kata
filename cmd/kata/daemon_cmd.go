@@ -438,7 +438,7 @@ func daemonRecordAdvertisesIdleShutdown(ctx context.Context, rec kitdaemon.Runti
 	if err != nil {
 		return false
 	}
-	resp, err := apiClient.HealthWithResponse(ctx)
+	resp, err := apiClient.HealthWithResponse(ctx, nil)
 	if err != nil || resp == nil || resp.StatusCode >= http.StatusBadRequest {
 		return false
 	}

@@ -1383,7 +1383,7 @@ func (c *Client) CheckDateFilter(ctx context.Context) error {
 }
 
 func requireAPIVersion(ctx context.Context, apiClient *generated.Client, minimum, requirement string) error {
-	health, err := apiClient.Health(ctx)
+	health, err := apiClient.Health(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("%s: %w", requirement, err)
 	}

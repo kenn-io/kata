@@ -23,6 +23,7 @@ const (
 	apiVersionDocbankAttachmentLink     = "0.38.0"
 	apiVersionDocbankAttachmentReuse    = "0.47.0"
 	apiVersionDocbankKeyHealth          = "0.44.0"
+	apiVersionDocbankProbe              = "0.52.0"
 	apiVersionFederationProjectLookup   = "0.49.0"
 	apiVersionEffectiveCloseEventUID    = "0.40.0"
 	apiVersionCommentLinks              = "0.28.0"
@@ -66,7 +67,7 @@ func requireDaemonAPIVersionHealth(
 	if err != nil {
 		return daemonAPIHealth{}, err
 	}
-	resp, callErr := apiClient.HealthWithResponse(ctx)
+	resp, callErr := apiClient.HealthWithResponse(ctx, nil)
 	if resp == nil {
 		return daemonAPIHealth{}, externalCLITransportError(resp, callErr)
 	}

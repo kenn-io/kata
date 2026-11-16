@@ -1622,6 +1622,22 @@ components:
       required:
         - credential
       type: object
+    DocbankProbe:
+      properties:
+        http_status:
+          description: Docbank's HTTP status when it answered with an error.
+          format: int64
+          type: integer
+        key_accepted:
+          description: Whether Docbank accepted the daemon's key; false when it answered 401 or 403, or when it was not reached.
+          type: boolean
+        reachable:
+          description: Whether Docbank answered the request.
+          type: boolean
+      required:
+        - reachable
+        - key_accepted
+      type: object
     DoctorResponseBody:
       properties:
         hooks:
@@ -2970,6 +2986,8 @@ components:
           type: string
         docbank:
           $ref: "#/components/schemas/DocbankHealth"
+        docbank_probe:
+          $ref: "#/components/schemas/DocbankProbe"
         embeddings:
           $ref: "#/components/schemas/EmbeddingsHealth"
         federation_config:
@@ -7336,7 +7354,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.51.0
+  version: 0.52.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -8134,6 +8152,14 @@ paths:
   /api/v1/health:
     get:
       operationId: health
+      parameters:
+        - description: Make one authenticated read-only request to Docbank and report the outcome in docbank_probe. Without it, health never contacts Docbank.
+          explode: false
+          in: query
+          name: probe_docbank
+          schema:
+            description: Make one authenticated read-only request to Docbank and report the outcome in docbank_probe. Without it, health never contacts Docbank.
+            type: boolean
       responses:
         "200":
           content:

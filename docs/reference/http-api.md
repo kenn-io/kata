@@ -277,6 +277,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.52.0` | `GET /api/v1/health` accepts `probe_docbank=true` and adds a `docbank_probe` block to health diagnostics. |
 | `0.51.0` | Signed federation requests return `503 signing_warming` with `Retry-After: 5` while replay protection warms up. |
 | `0.50.0` | A hub that requires signing and the restricted ingress answer requests without signature headers with `428 hub_signing_required` instead of `401 signature_invalid`. A request with only a digest follows the unsigned path, including when signing is optional. |
 | `0.49.0` | `GET /api/v1/projects/resolve` resolves a project by name for readers. Project federation status accepts `omit_errors=true` to withhold diagnostic error text. |
@@ -356,14 +357,25 @@ hub project it roots:
 
 `docbank` appears when `[docbank]` names a key source. With `local = true` and
 no `url`, the key comes from the local Docbank's runtime record and the block
-is absent. The daemon resolves its key source for each health request without
-contacting Docbank:
+is absent. The daemon resolves its key source for each health request and does
+not contact Docbank unless `probe_docbank=true` is set:
 
 | Field | Meaning |
 | --- | --- |
 | `credential` | `ok` when the key resolves, otherwise `missing`. |
 | `credential_source` | The source that failed, `file:<path>` or `env:<NAME>`; absent when `ok`. |
 | `credential_reason` | Why that source cannot supply a key; absent when `ok`. |
+
+With `probe_docbank=true` (API 0.52.0), health makes one authenticated
+read-only request to Docbank and adds `docbank_probe`, after the key resolves
+and for the same callers as `docbank`. The request times out after five
+seconds; the result is advisory and does not change `ok`:
+
+| Field | Meaning |
+| --- | --- |
+| `reachable` | Docbank answered. |
+| `key_accepted` | Docbank answered the request with success, so it accepted the key. `false` when it answered `401` or `403`, answered with another error, or was not reached. |
+| `http_status` | Docbank's status when it answered with an error; absent otherwise. |
 
 `GET /api/v1/federation/status` adds `root_signing_key` (`available` or
 `unavailable`) to each hub project this daemon roots, and

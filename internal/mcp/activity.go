@@ -1249,7 +1249,7 @@ func (h toolHandlers) daemonSupportsSubtreeMoves(ctx context.Context) (bool, err
 
 // Recheck each call: a long-lived MCP client can outlive a daemon replacement.
 func (h toolHandlers) daemonSupportsAPIVersion(ctx context.Context, required string) (bool, error) {
-	health, err := h.options.Client.Health(ctx)
+	health, err := h.options.Client.Health(ctx, nil)
 	if err != nil {
 		return false, err
 	}

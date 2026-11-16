@@ -245,8 +245,8 @@ type ClientInterface interface {
 	GetFederationStatus(ctx context.Context, options *GetFederationStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetFederationStatusResponse, error)
 	GetFederationStatusWithResponse(ctx context.Context, options *GetFederationStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetFederationStatusResp, error)
 
-	Health(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*HealthResponse, error)
-	HealthWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*HealthResp, error)
+	Health(ctx context.Context, options *HealthRequestOptions, reqEditors ...runtime.RequestEditorFn) (*HealthResponse, error)
+	HealthWithResponse(ctx context.Context, options *HealthRequestOptions, reqEditors ...runtime.RequestEditorFn) (*HealthResp, error)
 
 	Instance(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*InstanceResponse, error)
 	InstanceWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*InstanceResp, error)
@@ -2440,11 +2440,17 @@ func (c *Client) GetFederationStatus(ctx context.Context, options *GetFederation
 	return responseParser(ctx, resp)
 }
 
-func (c *Client) Health(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*HealthResponse, error) {
+func (c *Client) Health(ctx context.Context, options *HealthRequestOptions, reqEditors ...runtime.RequestEditorFn) (*HealthResponse, error) {
 	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"probe_docbank": {Style: "form", Explode: &[]bool{false}[0]},
+	}
 	reqParams := runtime.RequestOptionsParameters{
-		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/health",
-		Method:     "GET",
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/health",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
 	}
 
 	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)

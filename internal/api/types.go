@@ -46,6 +46,7 @@ type HealthResponse struct {
 		StartedAt        time.Time               `json:"started_at"`
 		Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
 		Docbank          *DocbankHealth          `json:"docbank,omitempty"`
+		DocbankProbe     *DocbankProbe           `json:"docbank_probe,omitempty"`
 		FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
 		IdleShutdown     *IdleShutdownHealth     `json:"idle_shutdown,omitempty"`
 		RootSigning      *RootSigningHealth      `json:"root_signing,omitempty"`
@@ -105,6 +106,20 @@ type DocbankHealth struct {
 	Credential       string `json:"credential" doc:"Docbank API key state, ok or missing; an advisory warning that does not change health.ok."`
 	CredentialSource string `json:"credential_source,omitempty" doc:"Key source that failed: file:<path> or env:<NAME>; never the key value."`
 	CredentialReason string `json:"credential_reason,omitempty" doc:"Why the key source cannot supply a key."`
+}
+
+// HealthRequest selects the optional work a health request does.
+type HealthRequest struct {
+	ProbeDocbank bool `query:"probe_docbank" doc:"Make one authenticated read-only request to Docbank and report the outcome in docbank_probe. Without it, health never contacts Docbank."`
+}
+
+// DocbankProbe is the outcome of one authenticated read-only request to
+// Docbank. It is present only when probe_docbank is set, the daemon holds a
+// Docbank key, and the caller receives diagnostics.
+type DocbankProbe struct {
+	Reachable   bool `json:"reachable" doc:"Whether Docbank answered the request."`
+	KeyAccepted bool `json:"key_accepted" doc:"Whether Docbank accepted the daemon's key; false when it answered 401 or 403, or when it was not reached."`
+	HTTPStatus  int  `json:"http_status,omitempty" doc:"Docbank's HTTP status when it answered with an error."`
 }
 
 // EmbeddingsHealth is the semantic-search reconciler's operator-visible state

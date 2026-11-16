@@ -1821,11 +1821,12 @@ func (c *Client) GetFederationStatusWithResponse(ctx context.Context, options *G
 	}
 }
 
-func (c *Client) HealthWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*HealthResp, error) {
+func (c *Client) HealthWithResponse(ctx context.Context, options *HealthRequestOptions, reqEditors ...runtime.RequestEditorFn) (*HealthResp, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/health",
 		Method:     "GET",
+		Options:    options,
 	}
 
 	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)

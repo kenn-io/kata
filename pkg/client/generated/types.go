@@ -1948,6 +1948,17 @@ func (d DocbankHealth) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(d))
 }
 
+type DocbankProbe struct {
+	// HTTPStatus Docbank's HTTP status when it answered with an error.
+	HTTPStatus *int64 `json:"http_status,omitempty"`
+
+	// KeyAccepted Whether Docbank accepted the daemon's key; false when it answered 401 or 403, or when it was not reached.
+	KeyAccepted bool `json:"key_accepted"`
+
+	// Reachable Whether Docbank answered the request.
+	Reachable bool `json:"reachable"`
+}
+
 type DoctorResponseBody struct {
 	Hooks Hooks `json:"hooks"`
 }
@@ -3083,6 +3094,7 @@ type HealthResponseBody struct {
 	APISchemaVersion *string                 `json:"api_schema_version,omitempty"`
 	DBPath           *string                 `json:"db_path,omitempty"`
 	Docbank          *DocbankHealth          `json:"docbank,omitempty"`
+	DocbankProbe     *DocbankProbe           `json:"docbank_probe,omitempty"`
 	Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
 	FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
 	IdleShutdown     *IdleShutdownHealth     `json:"idle_shutdown,omitempty"`
@@ -3100,6 +3112,13 @@ func (h HealthResponseBody) Validate() error {
 		if v, ok := any(h.Docbank).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Docbank", err)
+			}
+		}
+	}
+	if h.DocbankProbe != nil {
+		if v, ok := any(h.DocbankProbe).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("DocbankProbe", err)
 			}
 		}
 	}
