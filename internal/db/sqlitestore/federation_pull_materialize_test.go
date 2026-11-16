@@ -522,6 +522,19 @@ func TestPulledSnapshotRelocationFallsBackToFullReplay(t *testing.T) {
 			} else {
 				require.Equal(t, target.ID, got.ProjectID)
 				require.Equal(t, "relocated snapshot", got.Title)
+				// A later full pull of the former source folds the destination's
+				// snapshot too. It must leave the issue with the destination.
+				later := []db.RemoteEvent{
+					incrementalRemoteEvent(t, source, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_010),
+					incrementalRemoteEvent(t, source, issue.UID, "issue.updated", fmt.Sprintf(`{"issue_uid":%q,"title":"stale source edit"}`, issue.UID), 9_000_000_000_011),
+				}
+				_, err = d.InsertRemoteEvents(ctx, source.ID, later)
+				require.NoError(t, err)
+				require.NoError(t, d.MaterializeFederatedEvents(ctx, source.ID, []string{later[0].EventUID, later[1].EventUID}))
+				after, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				require.Equal(t, issue.ID, after.ID)
+				require.Equal(t, target.ID, after.ProjectID, "the former source's pull keeps the issue in the destination")
 			}
 		})
 	}

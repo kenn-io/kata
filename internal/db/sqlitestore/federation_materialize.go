@@ -32,9 +32,10 @@ type federationMaterialization struct {
 	linkReadProjects []int64
 	maxEventID       int64
 	moveIssueUIDs    map[string]struct{}
-	// placedIssueUIDs lists the issues the fold places in this project. Apply
-	// rechecks that no other project holds one, which only a relocation needs.
-	placedIssueUIDs []string
+	// foldedIssueUIDs lists the issues in this project's own fold, without
+	// those read only for links. If another project holds one, only a full
+	// replay can reconcile it, so apply rechecks them under the writer.
+	foldedIssueUIDs []string
 	relayOrigins    relayOriginClassifier
 	projection      db.FoldProjection
 	cronAffected    bool
@@ -158,16 +159,10 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		}
 	}
 	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
-	projectUID, err := projectUIDTx(ctx, tx, projectID)
-	if err != nil {
-		return federationMaterialization{}, err
+	for uid := range m.projection.Issues {
+		m.foldedIssueUIDs = append(m.foldedIssueUIDs, uid)
 	}
-	for uid, issue := range m.projection.Issues {
-		if issue.ProjectUID == projectUID {
-			m.placedIssueUIDs = append(m.placedIssueUIDs, uid)
-		}
-	}
-	rehome, err := federationIssuesHeldElsewhere(ctx, tx, projectID, m.placedIssueUIDs)
+	rehome, err := federationIssuesHeldElsewhere(ctx, tx, projectID, m.foldedIssueUIDs)
 	if err != nil {
 		return federationMaterialization{}, err
 	}

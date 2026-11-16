@@ -146,7 +146,7 @@ func (d *Store) applyFullPull(ctx context.Context, projectID int64, eventUIDs []
 	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
 		return err
 	}
-	rehome, err := federationIssuesHeldElsewhere(ctx, tx, projectID, m.placedIssueUIDs)
+	rehome, err := federationIssuesHeldElsewhere(ctx, tx, projectID, m.foldedIssueUIDs)
 	if err != nil {
 		return err
 	}
