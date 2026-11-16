@@ -42,7 +42,29 @@ func TestFederationSigningAdmission(t *testing.T) {
 		}, state)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, v.Close()) }()
+		path := "https://hub.example" + projectPath(project.ID) + "/federation/metadata"
+		ingress, err := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: v}).HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
+		require.NoError(t, err)
+		signedRequest := func(digest string) *httptest.ResponseRecorder {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+			req.Header.Set("Authorization", "Bearer "+enrollment.Token)
+			require.NoError(t, federationsigning.Sign(req, source))
+			if digest != "" {
+				req.Header.Set("Content-Digest", digest)
+			}
+			w := httptest.NewRecorder()
+			ingress.ServeHTTP(w, req)
+			return w
+		}
+		// During replay warm-up a signed request is told to retry
+		// instead of being reported as a bad signature.
+		w := signedRequest("")
+		assertAPIError(t, w.Code, w.Body.Bytes(), http.StatusServiceUnavailable, "signing_warming")
+		require.Equal(t, "5", w.Header().Get("Retry-After"))
 		time.Sleep(federationsigning.Quarantine)
+		w = signedRequest("sha-256=:" + strings.Repeat("A", 43) + "=:")
+		assertAPIError(t, w.Code, w.Body.Bytes(), http.StatusUnauthorized, "signature_invalid")
+		require.Empty(t, w.Header().Get("Retry-After"))
 		const digest = "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:"
 		for _, required := range []bool{false, true} {
 			srv := daemon.NewServer(daemon.ServerConfig{DB: env.DB, Auth: config.AuthConfig{Token: "owner-bearer"}, FederationSigning: v, FederationSigningRequired: required})
