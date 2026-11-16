@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-13
+last_edited: 2026-11-16
 ---
 
 # HTTP API schema
@@ -277,7 +277,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.52.0` | The instance `auth` object reports `actor_verified`. |
+| `0.52.0` | `GET /api/v1/instance` reports `write_actors_verified`. |
 | `0.51.0` | Signed federation requests return `503 signing_warming` with `Retry-After: 5` while replay protection warms up. |
 | `0.50.0` | A hub that requires signing and the restricted ingress answer requests without signature headers with `428 hub_signing_required` instead of `401 signature_invalid`. A request with only a digest follows the unsigned path, including when signing is optional. |
 | `0.49.0` | `GET /api/v1/projects/resolve` resolves a project by name for readers. Project federation status accepts `omit_errors=true` to withhold diagnostic error text. |
@@ -533,6 +533,17 @@ unsupported. Token creation returns one-time `plaintext` and redacted token
 metadata. CLI and MCP provisioners write scoped plaintext to a protected file
 and withhold it from output; see [token CLI usage](cli.md#remote-and-identity-tokens).
 
+`GET /api/v1/instance` reports `write_actors_verified`, a property of the whole
+daemon rather than of the caller. It is `true` only in identity mode, where
+every attributed write takes its actor from a database token or a trusted-proxy
+header and the bootstrap token cannot write. Otherwise a write can record the
+actor named in the request body, and the field is `false`. Every credential
+sees the same value, and a daemon that predates the field omits it. The field
+describes the event actor of a write. It does not make an actor name stored
+inside a value trustworthy: a notification slot's `from` is written by whoever
+may edit issue metadata, so a client must not treat it as verified even when
+`write_actors_verified` is `true`.
+
 The instance `auth` object defines caller authority. Browser session responses,
 UI snapshot capabilities, and UI reference capabilities carry the same fields:
 
@@ -543,12 +554,6 @@ UI snapshot capabilities, and UI reference capabilities carry the same fields:
 | `allowed_actions` | A fixed set derived from daemon policy; callers cannot select individual permissions. |
 | `close_requires_evidence` | Requires the normal close message and typed evidence contract, including for TUI requests. |
 | `token_audit_read` | Allows the redacted token inventory, independently of ordinary issue write access. |
-| `actor_verified` | `true` when the daemon takes the actor of this credential's writes from the credential itself: an identity-mode user token or a trusted-proxy actor header. `false` for the bootstrap token, a static token, and a daemon outside identity mode, where the request body names the actor. Always present. |
-
-`actor_verified` describes the event actor of a write. It does not make an actor
-name stored inside a value trustworthy: a notification slot's `from` is written
-by whoever may edit issue metadata, so a client must not treat it as verified
-even when `actor_verified` is `true`.
 
 Writable scoped credentials receive `issue.read`, `issue.create_child`,
 `issue.edit`, `issue.comment`, `issue.labels`, `issue.metadata`, `issue.assign`,

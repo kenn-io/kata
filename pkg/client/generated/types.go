@@ -265,10 +265,7 @@ func (a AuditClosesResponseBody) Validate() error {
 }
 
 type AuthInfoOut struct {
-	Actor *string `json:"actor,omitempty"`
-
-	// ActorVerified True when the daemon, not the request body, supplies the actor recorded for this credential's writes. It does not cover actor names stored inside values, such as a notification slot's from field.
-	ActorVerified         *bool          `json:"actor_verified,omitempty"`
+	Actor                 *string        `json:"actor,omitempty"`
 	AllowedActions        []string       `json:"allowed_actions,omitempty"`
 	CloseRequiresEvidence *bool          `json:"close_requires_evidence,omitempty"`
 	ExpiresAt             *time.Time     `json:"expires_at,omitempty"`
@@ -3455,6 +3452,9 @@ type InstanceResponseBody struct {
 	Version                   string         `json:"version" validate:"required"`
 	WebUICapabilities         UICapabilities `json:"web_ui_capabilities"`
 	WebUIContractVersion      *string        `json:"web_ui_contract_version,omitempty"`
+
+	// WriteActorsVerified True when this daemon derives the actor of every attributed write from a credential, so no write records an actor taken from the request body. It does not cover actor names stored inside values, such as a notification slot's from field.
+	WriteActorsVerified *bool `json:"write_actors_verified,omitempty"`
 }
 
 func (i InstanceResponseBody) Validate() error {

@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-13
+last_edited: 2026-11-16
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,7 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Tell clients whether the daemon verifies the actor of their writes: `GET /api/v1/instance` reports `auth.actor_verified`, and `kata status` shows it.
+- Tell clients whether the daemon verifies the actor of every write: `GET /api/v1/instance` reports `write_actors_verified`, and `kata status` shows it.
 
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
 

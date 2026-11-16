@@ -18,5 +18,7 @@ export interface InstanceResponseBody {
   version: string
   web_ui_capabilities: UICapabilities
   web_ui_contract_version?: string
+  /** True when this daemon derives the actor of every attributed write from a credential, so no write records an actor taken from the request body. It does not cover actor names stored inside values, such as a notification slot's from field. */
+  write_actors_verified?: boolean
   [key: string]: unknown
 }

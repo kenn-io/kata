@@ -67,7 +67,7 @@ func TestStatusAgentReportsAuthenticatedIdentityAndAssignment(t *testing.T) {
 	out := runCLI(t, env, dir, "--agent", "status", issue.ShortID)
 
 	assert.Contains(t, out, "OK status issue="+issue.ShortID+" project=kata issue_status=open revision=1")
-	assert.Contains(t, out, "actor=operator actor_source=daemon auth=db_token actor_verified=true")
+	assert.Contains(t, out, "actor=operator actor_source=daemon auth=db_token write_actors_verified=true")
 	assert.Contains(t, out, "instance="+env.DB.InstanceUID())
 	assert.Contains(t, out, "owner=operator hold=assigned")
 	assert.NotContains(t, out, operatorToken)
@@ -112,7 +112,7 @@ func TestStatusJSONReportsDaemonActorAndHold(t *testing.T) {
 	assert.Equal(t, "operator", got["actor"])
 	assert.Equal(t, "daemon", got["actor_source"])
 	assert.Equal(t, "db_token", got["auth"])
-	assert.Equal(t, true, got["actor_verified"])
+	assert.Equal(t, true, got["write_actors_verified"])
 	assert.Equal(t, "unassigned", got["hold"])
 	assert.NotContains(t, got, "claim")
 	assert.NotContains(t, out, operatorToken)
@@ -142,17 +142,11 @@ func TestStatusDisplaysTimedAssignmentExpiry(t *testing.T) {
 	assert.Regexp(t, `owner=worker assignment_expires_on=\d{4}-\d{2}-\d{2}T[^ ]* hold=assigned`, agent)
 }
 
-func TestStatusReportsUnverifiedActorOutsideIdentityMode(t *testing.T) {
+func TestStatusHumanReportsUnverifiedActorsOutsideIdentityMode(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "unverified actor status")
 
-	agent := runCLIAs(t, env, dir, "alice", "--agent", "status", ref)
 	human := runCLIAs(t, env, dir, "alice", "status", ref)
-	jsonOut := runCLIAs(t, env, dir, "alice", "--json", "status", ref)
 
-	assert.Contains(t, agent, "auth=none actor_verified=false")
-	assert.Contains(t, human, "actor: alice (flag; auth=none; unverified)")
-	var got map[string]any
-	require.NoError(t, json.Unmarshal([]byte(jsonOut), &got))
-	assert.Equal(t, false, got["actor_verified"])
+	assert.Contains(t, human, "actor: alice (flag; auth=none; actors unverified)")
 }

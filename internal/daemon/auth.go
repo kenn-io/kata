@@ -47,6 +47,15 @@ type authPolicy struct {
 	SelfAuthenticatedRoutes selfAuthenticatedRouteMatcher
 }
 
+// verifiesWriteActors reports whether every attributed write takes its actor
+// from a credential. Identity mode admits only database tokens, which carry
+// an actor, and the bootstrap token, which cannot write (see actorFor and
+// ensureAttributedWriteAllowed). Every other mode lets some route record the
+// actor named in the request body, even when one listener maps a proxy header.
+func (p authPolicy) verifiesWriteActors() bool {
+	return p.RequireTokenIdentity
+}
+
 // requireBearer returns an HTTP middleware that enforces bearer-token auth
 // per the spec matrix:
 //
@@ -109,7 +118,7 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 				next.ServeHTTP(w, r)
 				return
 			}
-			if p.RequireTokenIdentity {
+			if p.verifiesWriteActors() {
 				requireIdentityBearer(w, r, next, p, tokenStore)
 				return
 			}

@@ -5,8 +5,6 @@ import type { TokenScopeOut } from './tokenScopeOut.ts'
 
 export interface AuthInfoOut {
   actor?: string
-  /** True when the daemon, not the request body, supplies the actor recorded for this credential's writes. It does not cover actor names stored inside values, such as a notification slot's from field. */
-  actor_verified?: boolean
   allowed_actions?: string[]
   close_requires_evidence?: boolean
   expires_at?: string

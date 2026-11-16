@@ -1,7 +1,7 @@
 ---
 title: Agent output format
 description: Reference Kata's compact, stable agent output format and its command-specific response contracts.
-last_edited: 2026-11-11
+last_edited: 2026-11-16
 ---
 
 # Agent output format
@@ -294,12 +294,12 @@ included when present. Their existing ordering and omission rules apply.
 lease state separate on one line:
 
 ```text
-OK status issue=abc4 project=example-project issue_status=open revision=4 actor=agent-a actor_source=daemon auth=db_token actor_verified=true instance=01HZNQ7VFPK1XGD8R5MABCD4AB owner=agent-a assignment_expires_on=2026-09-02T12:30:00Z hold=assigned
+OK status issue=abc4 project=example-project issue_status=open revision=4 actor=agent-a actor_source=daemon auth=db_token write_actors_verified=true instance=01HZNQ7VFPK1XGD8R5MABCD4AB owner=agent-a assignment_expires_on=2026-09-02T12:30:00Z hold=assigned
 ```
 
 The fixed field order is `issue`, `project`, `issue_status`, `revision`,
-`actor`, `actor_source`, `auth`, `actor_verified`, `instance`, optional `owner`, optional
-`assignment_expires_on`, and `hold`. An
+`actor`, `actor_source`, `auth`, `write_actors_verified`, `instance`, optional
+`owner`, optional `assignment_expires_on`, and `hold`. An
 active or expired lease then appends optional `holder`, `holder_instance`,
 `lease_kind`, and `expires_at`; pending leases append `pending_leases`. Hold
 state is one of `active`, `expired`, `pending`, `assigned`, `unassigned`, or
