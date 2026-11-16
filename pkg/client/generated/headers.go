@@ -41,10 +41,8 @@ type PollFederationProjectEventsHeaders struct {
 }
 
 type IngestFederationProjectEventsHeaders struct {
-	// XKataFederationEventRejections Set to 1 to acknowledge per-event missing-enrollment rejections while accepting independent events.
-	XKataFederationEventRejections *string `json:"X-Kata-Federation-Event-Rejections,omitempty"`
-	XKataEventFeatures             *string `json:"X-Kata-Event-Features,omitempty"`
-	Authorization                  *string `json:"Authorization,omitempty"`
+	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
+	Authorization      *string `json:"Authorization,omitempty"`
 }
 
 type GetFederationProjectMetadataHeaders struct {

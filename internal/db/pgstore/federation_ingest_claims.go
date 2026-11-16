@@ -87,7 +87,7 @@ func federationIngestClaimAuditIssueUIDs(
 	}
 	if (claimWorkMutationRequiresClaim(event.Type) && !attentionOnlyMetadataEvent(event.Type, event.Payload)) ||
 		event.Type == "issue.snapshot" {
-		issueUID, err := db.FederationPayloadIssueUID(event, payload)
+		issueUID, err := payloadIssueUID(event, payload)
 		if err != nil {
 			return nil, err
 		}
@@ -95,7 +95,7 @@ func federationIngestClaimAuditIssueUIDs(
 	}
 	if event.Type == "issue.created" || event.Type == "issue.snapshot" ||
 		claimWorkMutationRequiresPeerClaim(event.Type) {
-		references, err := db.FederationPayloadReferencedIssueUIDs(event, payload)
+		references, err := payloadReferencedIssueUIDs(event, payload)
 		if err != nil {
 			return nil, err
 		}

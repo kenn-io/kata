@@ -1255,7 +1255,7 @@ func federationIngestClaimAuditIssueUIDs(ev db.RemoteEvent) ([]federationIngestC
 			issueUID = *ev.IssueUID
 		}
 		if issueUID == "" {
-			uid, err := db.FederationPayloadIssueUID(ev, payload)
+			uid, err := payloadIssueUID(ev, payload)
 			if err != nil {
 				return nil, err
 			}
@@ -1269,7 +1269,7 @@ func federationIngestClaimAuditIssueUIDs(ev db.RemoteEvent) ([]federationIngestC
 			issueUID = *ev.IssueUID
 		}
 		if issueUID == "" {
-			uid, err := db.FederationPayloadIssueUID(ev, payload)
+			uid, err := payloadIssueUID(ev, payload)
 			if err != nil {
 				return nil, err
 			}
@@ -1278,7 +1278,7 @@ func federationIngestClaimAuditIssueUIDs(ev db.RemoteEvent) ([]federationIngestC
 		add(federationIngestClaimAuditIssue{UID: issueUID, RequireClaim: true})
 	}
 	if ev.Type == "issue.created" || ev.Type == "issue.snapshot" || claimWorkMutationRequiresPeerClaim(ev.Type) {
-		refs, err := db.FederationPayloadReferencedIssueUIDs(ev, payload)
+		refs, err := payloadReferencedIssueUIDs(ev, payload)
 		if err != nil {
 			return nil, err
 		}

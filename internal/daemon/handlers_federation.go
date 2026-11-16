@@ -993,7 +993,6 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
 			MoveSourceEnrollmentIDs: moveSources,
-			AllowEventRejections:    in.EventRejections == "1",
 			AuthorizeMove: func(ctx context.Context, transaction db.Transaction, sourceGrant db.FederationEnrollment, source db.Project) error {
 				return authorizeFederationMoveSource(ctx, cfg, transaction, sourceGrant, source)
 			},
@@ -1018,7 +1017,6 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		cfg.Publish().EventsByProject(result.Events)
 		return &api.FederationIngestEventsResponse{EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: result.RequiredEventFeatures, Body: api.FederationIngestEventsBody{
-			RejectedEvents:    result.RejectedEvents,
 			Accepted:          result.Accepted,
 			Duplicates:        result.Duplicates,
 			PushCursorEventID: result.PushCursorEventID,
@@ -1091,8 +1089,6 @@ func federationIngestError(err error) error {
 	switch {
 	case errors.Is(err, db.ErrTransactionFinalizationFailed):
 		return internalAPIError(err)
-	case errors.As(err, new(*db.FederationProjectNotEnrolledError)):
-		return api.NewError(http.StatusForbidden, db.FederationProjectNotEnrolledCode, err.Error(), "", nil)
 	case errors.Is(err, db.ErrFederationMoveSourceUnauthorized):
 		return federationCredentialDenied()
 	case errors.Is(err, ErrHostAccessDenied):
