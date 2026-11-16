@@ -526,3 +526,32 @@ func TestPulledSnapshotRelocationFallsBackToFullReplay(t *testing.T) {
 		})
 	}
 }
+
+// Issues another project holds for ordinary reasons, such as a linked issue,
+// are not relocations. A full pull must apply its first preparation.
+func TestFullPulledMaterializationIgnoresIssuesHeldElsewhere(t *testing.T) {
+	ctx := t.Context()
+	d, source, issue := incrementalTestStore(t)
+	other, err := d.CreateProject(ctx, "linked-project")
+	require.NoError(t, err)
+	for _, project := range []db.Project{source, other} {
+		_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
+		require.NoError(t, err)
+	}
+	_, _, err = d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "linked elsewhere", Author: "tester", Links: []db.InitialLink{{Type: "blocks", ToNumber: issue.ID}}})
+	require.NoError(t, err)
+	// A baseline page touches links, so the full pull folds both projects' link history.
+	page := []db.RemoteEvent{
+		incrementalRemoteEvent(t, source, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000),
+		incrementalRemoteEvent(t, source, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"baseline","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00Z"}`, issue.UID, issue.ShortID), 9_000_000_000_001),
+	}
+	_, err = d.InsertRemoteEvents(ctx, source.ID, page)
+	require.NoError(t, err)
+	attempts := 0
+	d.federationIngestPrepared = func() { attempts++ }
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, source.ID, []string{page[0].EventUID, page[1].EventUID}))
+	require.Equal(t, 1, attempts, "the first full-pull preparation applies")
+	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "baseline", got.Title)
+}

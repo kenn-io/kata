@@ -32,20 +32,23 @@ type federationMaterialization struct {
 	linkReadProjects []int64
 	maxEventID       int64
 	moveIssueUIDs    map[string]struct{}
-	relayOrigins     relayOriginClassifier
-	projection       db.FoldProjection
-	cronAffected     bool
-	status           []federatedStatusIntentUpdate
-	binding          db.FederationBinding
-	linkProjects     []int64
-	links            db.FoldProjection
-	issueRows        map[string]federatedIssueRow
-	issueIDs         map[string]int64
-	commentRows      map[string]federatedCommentRow
-	labelRows        map[federatedLabelKey]struct{}
-	staleIssues      map[string]int64
-	linkIDs          map[string]int64
-	linkRows         map[db.FoldLinkKey]federatedLinkRow
+	// placedIssueUIDs lists the issues the fold places in this project. Apply
+	// rechecks that no other project holds one, which only a relocation needs.
+	placedIssueUIDs []string
+	relayOrigins    relayOriginClassifier
+	projection      db.FoldProjection
+	cronAffected    bool
+	status          []federatedStatusIntentUpdate
+	binding         db.FederationBinding
+	linkProjects    []int64
+	links           db.FoldProjection
+	issueRows       map[string]federatedIssueRow
+	issueIDs        map[string]int64
+	commentRows     map[string]federatedCommentRow
+	labelRows       map[federatedLabelKey]struct{}
+	staleIssues     map[string]int64
+	linkIDs         map[string]int64
+	linkRows        map[db.FoldLinkKey]federatedLinkRow
 }
 
 // Large issue sets keep the established complete queries. This bounds SQL
@@ -155,11 +158,16 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		}
 	}
 	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
-	var projectedUIDs []string
-	for uid := range m.projection.Issues {
-		projectedUIDs = append(projectedUIDs, uid)
+	projectUID, err := projectUIDTx(ctx, tx, projectID)
+	if err != nil {
+		return federationMaterialization{}, err
 	}
-	rehome, err := federationIssuesHeldElsewhere(ctx, tx, projectID, projectedUIDs)
+	for uid, issue := range m.projection.Issues {
+		if issue.ProjectUID == projectUID {
+			m.placedIssueUIDs = append(m.placedIssueUIDs, uid)
+		}
+	}
+	rehome, err := federationIssuesHeldElsewhere(ctx, tx, projectID, m.placedIssueUIDs)
 	if err != nil {
 		return federationMaterialization{}, err
 	}
