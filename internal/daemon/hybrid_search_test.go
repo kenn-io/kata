@@ -1372,6 +1372,15 @@ func TestSearchReportsEmbeddingUnavailableReason(t *testing.T) {
 			srv.Handler().ServeHTTP(res, req)
 			require.Equal(t, tc.status, res.Code)
 			require.Contains(t, res.Body.String(), tc.contains)
+			if tc.mode == "auto" {
+				var body struct {
+					Complete  bool `json:"complete"`
+					Truncated bool `json:"truncated"`
+				}
+				require.NoError(t, json.Unmarshal(res.Body.Bytes(), &body))
+				require.False(t, body.Complete)
+				require.True(t, body.Truncated)
+			}
 		})
 	}
 }

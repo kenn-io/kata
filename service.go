@@ -321,6 +321,9 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 			return nil, fmt.Errorf("kata: default timezone %q is not a valid IANA timezone: %w", cfg.DefaultTimezone, err)
 		}
 	}
+	if cfg.Embeddings.UsesLocal() && strings.TrimSpace(cfg.Embeddings.Model) == "" {
+		cfg.Embeddings.Model = embedlocal.TextModel
+	}
 	if err := config.ValidateEmbeddings(cfg.Embeddings); err != nil {
 		return nil, fmt.Errorf("kata: embeddings: %w", err)
 	}
@@ -403,9 +406,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	if cfg.Embeddings.Enabled() {
 		ec := embedding.ClientConfig(cfg.Embeddings)
 		if cfg.Embeddings.UsesLocal() {
-			ec.Endpoint = func(ctx context.Context) (string, error) {
-				return embedlocal.Endpoint(ctx, embedlocal.Options{SkipOllama: true})
-			}
+			ec.Endpoint = embedding.LocalEndpoint
 		}
 		embedder, err = embedding.New(ec)
 		if err == nil {
@@ -620,6 +621,14 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		HostFederationAccess:      hostFederationAccess,
 		EmbeddingProfile:          daemon.EmbeddingProfile(cfg.Profile),
 		Logger:                    logger,
+	}
+	if reconciler != nil {
+		serverConfig.ReconcilerHealth = reconciler.Health
+		serverConfig.EmbeddingWake = reconciler.RetryNow
+	} else if unavailable != "" {
+		serverConfig.ReconcilerHealth = func() daemon.ReconcilerHealth {
+			return daemon.ReconcilerHealth{Configured: true, LastError: unavailable}
+		}
 	}
 	mcpEventsService := newMCPEventsService(ctx, cfg.MCPEvents, serverConfig, broadcaster, deps.mcpEventsWebhook, logger)
 	serverConfig.MCPEvents = mcpEventsService

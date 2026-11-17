@@ -78,6 +78,9 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 					out.Body.Embeddings.LastErrorStatus = c.LastErrorStatus
 				}
 			}
+			if cfg.EmbeddingUnavailableReason != "" {
+				out.Body.Embeddings.LastError = cfg.EmbeddingUnavailableReason
+			}
 		}
 		if diagnostics && cfg.Docbank != nil {
 			if checked, err := cfg.Docbank.CheckKey(); checked {

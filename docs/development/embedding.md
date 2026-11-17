@@ -24,7 +24,8 @@ A Postgres-backed service can enable semantic and hybrid issue search with
 `Local` to use an already installed local model server. Kata does not install
 or download a model for the host. Call `Run` to build and update issue vectors.
 The Postgres database needs the pgvector extension. Without it, lexical search
-remains available and semantic search reports the missing extension.
+remains available and semantic search reports the missing extension. Restart the
+service after installing pgvector.
 
 ## Browser host boundary
 

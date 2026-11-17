@@ -161,3 +161,92 @@ func TestServicePostgresWithoutPgvector(t *testing.T) {
 	}
 	require.Zero(t, calls.Load())
 }
+
+func TestServiceEmbedsIssueCreatedWhileRunning(t *testing.T) {
+	ctx := t.Context()
+	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
+	t.Cleanup(cleanup)
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		data := make([]map[string]any, len(request.Input))
+		for i := range request.Input {
+			data[i] = map[string]any{"embedding": []float32{1, 0}, "index": i}
+		}
+		if err := json.NewEncoder(w).Encode(map[string]any{"data": data}); err != nil {
+			t.Error(err)
+		}
+	}))
+	t.Cleanup(endpoint.Close)
+	service, err := kata.New(ctx, kata.Config{DSN: dsn, Auth: kata.AuthConfig{TrustCallerAuthentication: true}, Embeddings: kata.EmbeddingsConfig{BaseURL: endpoint.URL, Model: "test-model", Dims: 2, TrustPrivateNetwork: true}})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	server := httptest.NewServer(service.Handler())
+	t.Cleanup(server.Close)
+	project := createProject(t, server.URL, "event-test")
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- service.Run(runCtx) }()
+	t.Cleanup(func() { cancel(); require.NoError(t, <-done) })
+	query := fmt.Sprintf("%s/api/v1/projects/%d/search?q=matching&mode=semantic", server.URL, project.Project.ID)
+	//nolint:kennlint // sleeptest: Postgres and HTTP worker progress requires real I/O.
+	require.Eventually(t, func() bool {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, query, nil)
+		if err != nil {
+			return false
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return false
+		}
+		defer func() { _ = resp.Body.Close() }()
+		return resp.StatusCode == http.StatusOK
+	}, 10*time.Second, 100*time.Millisecond)
+	healthReq, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/health", nil)
+	require.NoError(t, err)
+	healthResp, err := http.DefaultClient.Do(healthReq)
+	require.NoError(t, err)
+	var health struct {
+		Embeddings *struct {
+			Configured    bool       `json:"configured"`
+			LastSuccessAt *time.Time `json:"last_success_at"`
+		} `json:"embeddings"`
+	}
+	require.NoError(t, json.NewDecoder(healthResp.Body).Decode(&health))
+	require.NoError(t, healthResp.Body.Close())
+	require.NotNil(t, health.Embeddings)
+	require.True(t, health.Embeddings.Configured)
+	require.NotNil(t, health.Embeddings.LastSuccessAt)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues", server.URL, project.Project.ID), strings.NewReader(`{"title":"new issue after startup","actor":"user-a"}`))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
+	//nolint:kennlint // sleeptest: Postgres and HTTP worker progress requires real I/O.
+	require.Eventually(t, func() bool {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, query, nil)
+		if err != nil {
+			return false
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return false
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var body struct {
+			Results []struct {
+				Issue struct {
+					Title string `json:"title"`
+				} `json:"issue"`
+			} `json:"results"`
+		}
+		return resp.StatusCode == http.StatusOK && json.NewDecoder(resp.Body).Decode(&body) == nil && len(body.Results) == 1 && body.Results[0].Issue.Title == "new issue after startup"
+	}, 10*time.Second, 100*time.Millisecond)
+}
