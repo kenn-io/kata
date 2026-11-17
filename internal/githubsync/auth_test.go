@@ -100,38 +100,29 @@ func appTestSession(ctx context.Context, resolver *CredentialResolver, base http
 }
 
 func TestCredentialResolverAppReusesTokenAcrossSessions(t *testing.T) {
-	resolver, _ := appTestResolver(t)
-	base := &appTestTransport{expiry: time.Hour}
-	for range 2 {
-		_, err := appTestSession(t.Context(), resolver, base)
-		require.NoError(t, err)
-	}
-	assert.Equal(t, 1, base.mints)
-	assert.Equal(t, []string{"token token-1", "token token-1"}, base.tokens)
-}
-
-func TestCredentialResolverAppConcurrentSessionsMintOnce(t *testing.T) {
-	resolver, _ := appTestResolver(t)
-	base := &appTestTransport{expiry: time.Hour}
-	var wg sync.WaitGroup
-	for range 8 {
-		wg.Go(func() {
+	t.Run("sequential", func(t *testing.T) {
+		resolver, _ := appTestResolver(t)
+		base := &appTestTransport{expiry: time.Hour}
+		for range 2 {
 			_, err := appTestSession(t.Context(), resolver, base)
-			assert.NoError(t, err)
-		})
-	}
-	wg.Wait()
-	assert.Equal(t, 1, base.mints)
-}
-
-func TestCredentialResolverAppRemintsNearExpiry(t *testing.T) {
-	resolver, _ := appTestResolver(t)
-	base := &appTestTransport{expiry: 30 * time.Second}
-	for range 2 {
-		_, err := appTestSession(t.Context(), resolver, base)
-		require.NoError(t, err)
-	}
-	assert.Equal(t, []string{"token token-1", "token token-2"}, base.tokens)
+			require.NoError(t, err)
+		}
+		assert.Equal(t, 1, base.mints)
+		assert.Equal(t, []string{"token token-1", "token token-1"}, base.tokens)
+	})
+	t.Run("concurrent", func(t *testing.T) {
+		resolver, _ := appTestResolver(t)
+		base := &appTestTransport{expiry: time.Hour}
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Go(func() {
+				_, err := appTestSession(t.Context(), resolver, base)
+				assert.NoError(t, err)
+			})
+		}
+		wg.Wait()
+		assert.Equal(t, 1, base.mints)
+	})
 }
 
 func TestCredentialResolverAppEvictsRejectedToken(t *testing.T) {
