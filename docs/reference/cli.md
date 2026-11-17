@@ -780,13 +780,11 @@ that more replies may be available.
 `kata status` reports the issue status and revision, daemon identity, effective
 actor, issue owner, and federation lease. `write_actors_verified` is `true` when
 the daemon takes the actor of every write made through its API with a
-non-bootstrap credential from that credential, which only identity mode does.
-Owner-only administration with the bootstrap token, such as creating a
-federation replica, records the actor the request names, and actors on events
-imported by federation are only as trustworthy as the peer that recorded them.
-It is
-`false` when a write can record the actor from `--as`, `KATA_AUTHOR`, or git,
-and the human line then says `actors unverified`. Its `hold` value is `active`,
+non-bootstrap credential from that credential, which only identity mode does;
+the [exceptions](http-api.md#issue-scoped-credentials) are listed in the HTTP
+API reference. It is `false` when a write can record the actor from `--as`,
+`KATA_AUTHOR`, or git, and the human line then says `actors unverified`. Its
+`hold` value is `active`,
 `expired`, `pending`, `assigned`, `unassigned`, or `closed`. `assigned` means
 the open issue has an owner without a live or pending lease, which is the
 state `kata claim` produces outside federation. A cached timed

@@ -545,10 +545,10 @@ and withhold it from output; see [token CLI usage](cli.md#remote-and-identity-to
 `GET /api/v1/instance` reports `write_actors_verified`, a property of the whole
 daemon rather than of the caller. It is `true` only in identity mode, where
 every attributed write made through this daemon's API with a non-bootstrap
-credential takes its actor from a database token or a trusted-proxy header and
-the bootstrap token cannot make attributed writes. Owner-only administration
-with the bootstrap token is outside that promise: creating a federation replica
-records the actor the request names. Otherwise a write can record the actor
+credential takes its actor from a database token or a trusted-proxy header. The
+bootstrap token makes no attributed writes except owner-only administration
+such as creating a federation replica, which records the actor the request
+names. Otherwise a write can record the actor
 named in the request body, and the field is `false`. Every credential
 sees the same value, and a daemon that predates the field omits it. The field
 describes the event actor of a write. It does not make an actor name stored
