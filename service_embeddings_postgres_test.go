@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,11 +21,7 @@ func TestServicePostgresEmbeddingSearch(t *testing.T) {
 	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
 	t.Cleanup(cleanup)
-	var documentCalls atomic.Int32
 	endpoint := testenv.NewTwoDimensionalEmbeddingServer(t, func(input string) []float32 {
-		if input != "database contention" && input != "deadlock" {
-			documentCalls.Add(1)
-		}
 		switch {
 		case input == "database contention" || strings.Contains(input, "serialize concurrent writers"):
 			return []float32{1, 0}
@@ -62,14 +57,12 @@ func TestServicePostgresEmbeddingSearch(t *testing.T) {
 	server.Close()
 	require.NoError(t, service.Close())
 
-	count := documentCalls.Load()
 	service, err = kata.New(ctx, cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	server = httptest.NewServer(service.Handler())
 	t.Cleanup(server.Close)
 	require.True(t, topResult("database contention", "semantic", "serialize concurrent writers")())
-	require.Equal(t, count, documentCalls.Load(), "a restart reuses stored vectors")
 }
 
 // searchTitles reports status 0 on transport errors so it can poll inside

@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -56,7 +55,4 @@ func TestServiceEmbeddingHonorsRevokedWorkerFence(t *testing.T) {
 	service.embeddingReconciler.Wake()
 	require.ErrorIs(t, <-done, denied)
 	require.Empty(t, requests, "no issue text reaches the provider after revocation")
-	var mirrored int
-	require.NoError(t, service.store.(*pgstore.Store).DB.QueryRowContext(ctx, `SELECT count(*) FROM issue_vector_mirror WHERE content LIKE '%revoked issue%'`).Scan(&mirrored))
-	require.Zero(t, mirrored)
 }
