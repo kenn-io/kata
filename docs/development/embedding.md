@@ -131,12 +131,13 @@ func main() {
 `Run` does not open a listener. It blocks while federation, scheduled GitHub
 sync, timed-claim, due-notification, assignment-expiry, and (when enabled) MCP
 Events delivery workers are active, then returns when its context is canceled
-or `Close` begins, and it may return an error from any background worker. Treat
-any `Run` or `RunSemanticIndex` return as service termination: stop accepting
-HTTP traffic, cancel the shared context, and inspect the error after both the
-workers and server stop. Only one `Run` or `RunSemanticIndex` call may be active
-for a service. `RunSemanticIndex` requires the same worker transaction fence
-when `Access` is set. If embeddings are disabled or pgvector is missing, it
+or `Close` begins, and it may return an error from any background worker.
+`RunSemanticIndex` runs only the embeddings worker. Treat any `Run` or
+`RunSemanticIndex` return as service termination: stop accepting HTTP traffic,
+cancel the shared context, and inspect the error after both the workers and
+server stop. Only one `Run` or `RunSemanticIndex` call may be active for a
+service. `RunSemanticIndex` requires the same worker transaction fence when
+`Access` is set. If embeddings are disabled or pgvector is missing, it
 waits without an indexer until cancellation or `Close`. `Close` cancels active
 work and requests, waits for them to stop, and closes the owned storage handle.
 It is safe to call more than once.
