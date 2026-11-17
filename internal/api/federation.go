@@ -8,6 +8,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// FederationSearchRequest searches a shared project on its hub.
 type FederationSearchRequest struct {
 	ProjectID     int64    `path:"project_id"`
 	Authorization string   `header:"Authorization"`
@@ -18,11 +19,13 @@ type FederationSearchRequest struct {
 	ExcludeLabels []string `query:"exclude_label,explode"`
 }
 
+// FederationSearchHit contains a ranked issue from a hub search.
 type FederationSearchHit struct {
 	Issue db.Issue `json:"issue"`
 	Score float64  `json:"score"`
 }
 
+// FederationSearchResponse contains the hub's ranked issues and search bound.
 type FederationSearchResponse struct {
 	Body struct {
 		Hits    []FederationSearchHit `json:"hits"`

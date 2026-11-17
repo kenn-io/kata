@@ -91,7 +91,7 @@ func TestDirectSpokeSearchPostgresWithoutPgvector(t *testing.T) {
 	require.NoError(t, err)
 	resp, err := server.Client().Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	t.Cleanup(func() { require.NoError(t, resp.Body.Close()) })
 	raw, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
