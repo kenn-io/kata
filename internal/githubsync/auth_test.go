@@ -2,17 +2,163 @@ package githubsync
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/config"
 )
+
+type appTestTransport struct {
+	mu     sync.Mutex
+	mints  int
+	tokens []string
+	jwt    []string
+	expiry time.Duration
+}
+
+func (rt *appTestTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if req.URL.Path == "/app/installations/456/access_tokens" && req.Method == http.MethodPost {
+		rt.mints++
+		rt.jwt = append(rt.jwt, strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "))
+		body := fmt.Sprintf(`{"token":"token-%d","expires_at":%q}`, rt.mints, time.Now().Add(rt.expiry).UTC().Format(time.RFC3339))
+		return &http.Response{StatusCode: http.StatusCreated, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+	}
+	rt.tokens = append(rt.tokens, req.Header.Get("Authorization"))
+	return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
+}
+
+type appTestRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f appTestRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func writeAppTestKey(t *testing.T, path string) *rsa.PrivateKey {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0600))
+	return key
+}
+
+func appTestResolver(t *testing.T) (*CredentialResolver, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "app.pem")
+	writeAppTestKey(t, path)
+	return NewCredentialResolver(config.GitHubSyncConfig{Apps: []config.GitHubAppConfig{{Owner: "example-owner", AppID: 123, InstallationID: 456, PrivateKeyPath: path}}}, nil), path
+}
+
+func appTestRequest(t *testing.T, resolver *CredentialResolver, base http.RoundTripper, repo string) {
+	t.Helper()
+	binding := Binding{Host: "github.com", Owner: "example-owner", Repo: repo}
+	transport, err := resolver.Transport(t.Context(), binding, base)
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://api.github.com/repos/example-owner/"+repo+"/issues", nil)
+	require.NoError(t, err)
+	resp, err := transport.RoundTrip(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+}
+
+func TestCredentialResolverAppTokenReuse(t *testing.T) {
+	resolver, _ := appTestResolver(t)
+	base := &appTestTransport{expiry: time.Hour}
+	appTestRequest(t, resolver, base, "first")
+	appTestRequest(t, resolver, base, "first")
+	appTestRequest(t, resolver, base, "second")
+	assert.Equal(t, 1, base.mints)
+	assert.Equal(t, []string{"token token-1", "token token-1", "token token-1"}, base.tokens)
+}
+
+func TestCredentialResolverAppConcurrentReuse(t *testing.T) {
+	resolver, _ := appTestResolver(t)
+	base := &appTestTransport{expiry: time.Hour}
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Go(func() {
+			binding := Binding{Host: "github.com", Owner: "example-owner", Repo: "first"}
+			transport, err := resolver.Transport(t.Context(), binding, base)
+			if err != nil {
+				errs <- err
+				return
+			}
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://api.github.com/repos/example-owner/first/issues", nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			resp, err := transport.RoundTrip(req)
+			if err != nil {
+				errs <- err
+				return
+			}
+			errs <- resp.Body.Close()
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	assert.Equal(t, 1, base.mints)
+	assert.Equal(t, []string{"token token-1", "token token-1", "token token-1", "token token-1", "token token-1", "token token-1", "token token-1", "token token-1"}, base.tokens)
+}
+
+func TestCredentialResolverAppTokenNearExpiry(t *testing.T) {
+	resolver, _ := appTestResolver(t)
+	base := &appTestTransport{expiry: 30 * time.Second}
+	appTestRequest(t, resolver, base, "first")
+	appTestRequest(t, resolver, base, "first")
+	assert.Equal(t, 2, base.mints)
+	assert.Equal(t, []string{"token token-1", "token token-2"}, base.tokens)
+}
+
+func TestCredentialResolverAppKeyRotation(t *testing.T) {
+	resolver, path := appTestResolver(t)
+	base := &appTestTransport{expiry: time.Hour}
+	appTestRequest(t, resolver, base, "first")
+	key := writeAppTestKey(t, path)
+	appTestRequest(t, resolver, base, "first")
+	require.Equal(t, 2, base.mints)
+	assert.Equal(t, []string{"token token-1", "token token-2"}, base.tokens)
+	parts := strings.Split(base.jwt[1], ".")
+	require.Len(t, parts, 3)
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	require.NoError(t, err)
+	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+	require.NoError(t, rsa.VerifyPKCS1v15(&key.PublicKey, crypto.SHA256, digest[:], signature))
+}
+
+func TestCredentialResolverAppSuppliedBases(t *testing.T) {
+	resolver, _ := appTestResolver(t)
+	first := &appTestTransport{expiry: time.Hour}
+	second := &appTestTransport{expiry: time.Hour}
+	appTestRequest(t, resolver, first, "first")
+	appTestRequest(t, resolver, second, "first")
+	assert.Equal(t, 1, first.mints)
+	assert.Equal(t, 1, second.mints)
+	appTestRequest(t, resolver, appTestRoundTripFunc(first.RoundTrip), "first")
+	assert.Equal(t, 2, first.mints)
+}
 
 func TestCredentialResolverPrefersAppOverEnvAndGH(t *testing.T) {
 	allowGitHubEnterpriseHost(t, "github.example")

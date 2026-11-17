@@ -3,6 +3,7 @@ package githubsync
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -11,7 +12,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
+	"sync"
 	"unicode"
 
 	ghinstallation "github.com/bradleyfalzon/ghinstallation/v2"
@@ -38,6 +41,18 @@ type CredentialResolver struct {
 	cfg           config.GitHubSyncConfig
 	runner        CommandRunner
 	baseTransport http.RoundTripper
+	appMu         sync.Mutex
+	appTransports map[appTransportKey]appTransportEntry
+}
+
+type appTransportKey struct {
+	app  config.GitHubAppConfig
+	base http.RoundTripper
+}
+
+type appTransportEntry struct {
+	transport *ghinstallation.Transport
+	digest    [sha256.Size]byte
 }
 
 // NewCredentialResolver returns a resolver using cfg and runner. A nil runner
@@ -81,16 +96,10 @@ func (r *CredentialResolver) credentialTransport(ctx context.Context, binding Bi
 	base = nextRoundTripper(base)
 	switch credential.kind {
 	case CredentialKindApp:
-		tr, err := ghinstallation.NewKeyFromFile(
-			base,
-			credential.app.AppID,
-			credential.app.InstallationID,
-			credential.app.PrivateKeyPath,
-		)
+		tr, err := r.appTransport(credential.app, credential.binding, base)
 		if err != nil {
 			return nil, "", fmt.Errorf("create GitHub App transport: %w", err)
 		}
-		tr.BaseURL = githubRESTBaseURL(credential.binding)
 		return newOriginGuardTransport(credential.binding, tr), credential.kind, nil
 	case CredentialKindEnv, CredentialKindGH:
 		return newOriginGuardTransport(credential.binding, &staticBearerTransport{
@@ -100,6 +109,34 @@ func (r *CredentialResolver) credentialTransport(ctx context.Context, binding Bi
 	default:
 		return nil, "", fmt.Errorf("unsupported GitHub credential kind %q", credential.kind)
 	}
+}
+
+func (r *CredentialResolver) appTransport(app config.GitHubAppConfig, binding Binding, base http.RoundTripper) (*ghinstallation.Transport, error) {
+	keyBytes, err := os.ReadFile(app.PrivateKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("could not read private key: %s", err)
+	}
+	digest := sha256.Sum256(keyBytes)
+	cacheable := reflect.ValueOf(base).Comparable()
+	if cacheable {
+		r.appMu.Lock()
+		defer r.appMu.Unlock()
+		if entry, ok := r.appTransports[appTransportKey{app: app, base: base}]; ok && entry.digest == digest {
+			return entry.transport, nil
+		}
+	}
+	tr, err := ghinstallation.New(base, app.AppID, app.InstallationID, keyBytes)
+	if err != nil {
+		return nil, err
+	}
+	tr.BaseURL = githubRESTBaseURL(binding)
+	if cacheable {
+		if r.appTransports == nil {
+			r.appTransports = make(map[appTransportKey]appTransportEntry)
+		}
+		r.appTransports[appTransportKey{app: app, base: base}] = appTransportEntry{transport: tr, digest: digest}
+	}
+	return tr, nil
 }
 
 type resolvedCredential struct {
