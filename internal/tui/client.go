@@ -1221,17 +1221,15 @@ func (c *Client) setLocalHTTPClientRefresh(fn func(context.Context) (*http.Clien
 func (c *Client) localHTTPClientRefresh() func(context.Context) (*http.Client, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if c.refreshLocalHTTPClient == nil {
-		return refreshLocalHTTPClientForTUI
-	}
 	return c.refreshLocalHTTPClient
 }
 
 func (c *Client) retryLocalTransportFailure(ctx context.Context, original *http.Request, err error) (*http.Response, error) {
 	method, path := original.Method, original.URL.RequestURI()
+	refresh := c.localHTTPClientRefresh()
 	canReplay := canRetryLocalTransport(method, map[string]string{"Idempotency-Key": original.Header.Get("Idempotency-Key")})
 	phase := "request failed"
-	if c.base == clientpkg.UnixBase && ctx.Err() == nil {
+	if c.base == clientpkg.UnixBase && refresh != nil && ctx.Err() == nil {
 		if canReplay {
 			phase = "request failed; retrying local daemon"
 		} else {
@@ -1239,10 +1237,10 @@ func (c *Client) retryLocalTransportFailure(ctx context.Context, original *http.
 		}
 	}
 	logTUIClientTransport(phase, method, path, c.base, err)
-	if c.base != clientpkg.UnixBase || ctx.Err() != nil {
+	if c.base != clientpkg.UnixBase || refresh == nil || ctx.Err() != nil {
 		return nil, transportError(method, path, c.base, err)
 	}
-	hc, refreshErr := c.localHTTPClientRefresh()(ctx)
+	hc, refreshErr := refresh(ctx)
 	if refreshErr != nil {
 		logTUIClientTransport("retry refresh failed", method, path, c.base, refreshErr)
 		return nil, transportError(method, path, c.base, err)

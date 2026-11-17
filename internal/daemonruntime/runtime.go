@@ -23,6 +23,9 @@ const RuntimeRestartReplyKey = "restart_reply"
 // RuntimeRestartFromKey names the daemon generation a replacement replaced.
 const RuntimeRestartFromKey = "restart_from"
 
+// RuntimeSocketActivationKey identifies the manager owning this API listener.
+const RuntimeSocketActivationKey = "socket_activation"
+
 // RuntimeAutoStartKey marks a runtime record whose daemon was started with
 // AutoStartMarkerEnv. Records without it have an unknown startup origin.
 const RuntimeAutoStartKey = "autostart"
@@ -91,5 +94,5 @@ func RuntimeRecordBlocksStart(record kitdaemon.RuntimeRecord) bool {
 // RuntimeRecordRestartable reports whether the record's daemon handles the
 // restart signal sent by SignalDaemonRestart.
 func RuntimeRecordRestartable(record kitdaemon.RuntimeRecord) bool {
-	return record.Metadata[RuntimeRestartMetadataKey] == "1"
+	return record.Metadata[RuntimeSocketActivationKey] == "" && record.Metadata[RuntimeRestartMetadataKey] == "1"
 }

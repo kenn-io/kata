@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,6 +65,68 @@ func TestResolveWebUIHostTargetUsesLocalGatewayDespiteRemoteOverride(t *testing.
 	assert.Equal(t, "http://127.0.0.1:27123", resolved.BaseURL)
 	assert.False(t, resolved.ConfiguredRemote())
 	assert.False(t, resolved.AllowInsecure)
+}
+
+func TestUnixConsumerWebUIRejectsSelectedSocketBeforeLocalGateway(t *testing.T) {
+	testUnixConsumerWebUIRejectsSelectedSocket(t, "environment")
+}
+
+func testUnixConsumerWebUIRejectsSelectedSocket(t *testing.T, selection string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix sockets are unsupported on Windows")
+	}
+	t.Run(selection, func(t *testing.T) {
+		home := setupKataEnv(t)
+		t.Setenv("KATA_SERVER", "")
+		t.Setenv("KATA_AUTH_TOKEN", "")
+		// Keep the test-owned socket below the Unix path limit even on macOS.
+		socketDir, err := os.MkdirTemp("/tmp", "kata-web-")
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, os.RemoveAll(socketDir)) })
+		socket := filepath.Join(socketDir, "api.sock")
+		listener, err := new(net.ListenConfig).Listen(t.Context(), "unix", socket)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = listener.Close() })
+		var requests atomic.Int32
+		server := &http.Server{
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":%q,"pid":%d}`, version.Version, os.Getpid())
+			}),
+			ReadHeaderTimeout: time.Second,
+		}
+		go func() { _ = server.Serve(listener) }()
+		t.Cleanup(func() { _ = server.Close() })
+
+		root := t.TempDir()
+		writeNeutralWorkspaceMarker(t, root)
+		socketURL := "unix://" + socket
+		body := fmt.Sprintf("[[daemon]]\nname = \"socket\"\nurl = %q\n", socketURL)
+		opts := PrepareWebUIOptions{WorkspaceStart: root}
+		switch selection {
+		case "environment":
+			t.Setenv("KATA_SERVER", socketURL)
+		case "named":
+			opts.DaemonName = "socket"
+		case "active":
+			body = "active_daemon = \"socket\"\n" + body
+		default:
+			t.Fatalf("unknown selection %q", selection)
+		}
+		require.NoError(t, writeRawConfig(home, body))
+		// An injected local gateway must not bypass the selected Unix policy.
+		ctx := context.WithValue(t.Context(), BaseURLKey{}, "http://127.0.0.1:27123")
+		_, err = resolveWebUIHostTarget(ctx, opts)
+
+		assert.Zero(t, requests.Load(), "browser policy must refuse before contacting the Unix API")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "browser access")
+		assert.Contains(t, err.Error(), "Unix API socket")
+		assert.Contains(t, err.Error(), "not supported")
+		assert.Contains(t, err.Error(), "HTTP(S) browser listener")
+	})
 }
 
 // TestPrepareWebUIBuildsAnonymousClientWithResolvedPolicy covers the actual
