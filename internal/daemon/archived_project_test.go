@@ -16,10 +16,8 @@ import (
 type denyProjectHost struct{ deniedID int64 }
 
 func (h denyProjectHost) Authorize(_ context.Context, request HostAccessRequest) (HostAccessDecision, error) {
-	for _, id := range request.Operation.ProjectIDs {
-		if id == h.deniedID {
-			return HostAccessDecision{}, ErrHostAccessDenied
-		}
+	if slices.Contains(request.Operation.ProjectIDs, h.deniedID) {
+		return HostAccessDecision{}, ErrHostAccessDenied
 	}
 	return HostAccessDecision{}, nil
 }
