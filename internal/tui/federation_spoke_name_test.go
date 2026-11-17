@@ -330,9 +330,9 @@ func TestFederationEnrollWithNameRefusesOlderHubBeforeAnyHubWrite(t *testing.T) 
 	assert.Contains(t, stripANSI(renderFederation(out)), "naming a spoke requires daemon API 0.38.0 or newer")
 }
 
-// longSpokeNameError is a daemon error spanning several lines, one of them
+// errLongSpokeName is a daemon error spanning several lines, one of them
 // longer than the narrowest supported terminal.
-var longSpokeNameError = errors.New("federation_spoke_name_conflict: \"build-box\" is held by spoke 01HZNQ7VFPK1XGD8R5MABCD4EB\n" +
+var errLongSpokeName = errors.New("federation_spoke_name_conflict: \"build-box\" is held by spoke 01HZNQ7VFPK1XGD8R5MABCD4EB\n" +
 	"rename that spoke first: kata federation enrollments name 01HZNQ7VFPK1XGD8R5MABCD4EB other-name\n" +
 	"or choose another name here")
 
@@ -373,7 +373,7 @@ func TestFederationNameScreensFitShortTerminals(t *testing.T) {
 			}
 			t.Run(screen.name+" "+size.name, func(t *testing.T) {
 				m := screen.model(t)
-				m.federation.op.err = longSpokeNameError
+				m.federation.op.err = errLongSpokeName
 				if size.manyLines {
 					m.federation.op.err = errors.New(strings.TrimSpace(strings.Repeat("daemon detail line\n", 12)))
 				}
@@ -407,7 +407,7 @@ func TestFederationNameScreensFitShortTerminals(t *testing.T) {
 					assert.Contains(t, flat, strings.Join(strings.Fields(w), " "))
 				}
 				if screen.name == "prompt" {
-					for _, line := range strings.Split(rendered, "\n") {
+					for line := range strings.SplitSeq(rendered, "\n") {
 						assert.LessOrEqual(t, ansi.StringWidth(line), size.width, "no line overflows:\n%s", rendered)
 					}
 				}
@@ -423,7 +423,7 @@ func TestFederationListFooterWrapsToTheTerminalWidth(t *testing.T) {
 	rendered := stripANSI(renderFederation(m))
 
 	var hints []string
-	for _, line := range strings.Split(rendered, "\n") {
+	for line := range strings.SplitSeq(rendered, "\n") {
 		if strings.HasPrefix(line, "[") {
 			assert.LessOrEqual(t, ansi.StringWidth(line), 80, "hint row overflows: %q", line)
 			hints = append(hints, line)
