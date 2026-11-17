@@ -1,6 +1,7 @@
 package embedding
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -23,7 +24,9 @@ func TestEmbeddingDefaults(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := ClientConfig(tc.config)
-			cfg.BaseURL = "http://127.0.0.1:1234/v1"
+			if tc.config.UsesLocal() {
+				cfg.Endpoint = func(context.Context) (string, error) { return "http://127.0.0.1:1234/v1", nil }
+			}
 			client, err := New(cfg)
 			require.NoError(t, err)
 			require.Equal(t, tc.batch, client.BatchSize())

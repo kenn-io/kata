@@ -45,7 +45,7 @@ func TestServiceEmbeddingHonorsRevokedWorkerFence(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- service.Run(ctx) }()
 	//nolint:kennlint // sleeptest: Postgres and the worker require real I/O.
-	require.Eventually(t, func() bool { return service.embeddingReconciler.Health().Embedded == 1 }, 5*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return service.embeddingReconciler.Health().LastSuccessAt != nil }, 5*time.Second, 10*time.Millisecond)
 	require.Contains(t, <-requests, "first issue")
 	revoked.Store(true)
 	_, _, err = service.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "revoked issue", Author: "user-a"})

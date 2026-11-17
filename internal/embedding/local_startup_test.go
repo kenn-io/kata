@@ -3,27 +3,38 @@ package embedding
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/embedlocal"
 )
 
-func TestResolveLocalStopsAfterInstallFailure(t *testing.T) {
-	installErr := errors.New("install refused")
+func TestResolveLocalDoesNotDownloadWithoutConfirmation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	dir, err := embedlocal.DefaultDir()
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
 	endpointCalls := 0
-	installCalls := 0
 	got, err := ResolveLocal(t.Context(), func(context.Context, embedlocal.Options) (string, error) {
 		endpointCalls++
 		return "", embedlocal.ErrNotFound
-	}, func(_ context.Context, _ embedlocal.InstallOptions) (embedlocal.Installation, error) {
-		installCalls++
-		return embedlocal.Installation{}, installErr
-	}, nil)
+	}, embedlocal.Install, nil)
 	require.Empty(t, got)
-	require.ErrorIs(t, err, installErr)
+	require.Error(t, err)
+	require.False(t, errors.Is(err, embedlocal.ErrNotFound))
+	require.ErrorContains(t, err, "provide Confirm")
 	require.Equal(t, 1, endpointCalls)
-	require.Equal(t, 1, installCalls)
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		info, err := entry.Info()
+		require.NoError(t, err)
+		require.False(t, info.IsDir())
+		require.Zero(t, info.Size())
+	}
 }
 
 func TestInstallLocalCallbacks(t *testing.T) {

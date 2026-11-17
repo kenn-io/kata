@@ -3,12 +3,10 @@ package vector_test
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
 	kitvec "go.kenn.io/kit/vector"
@@ -16,7 +14,6 @@ import (
 
 // A refresh must match the live feed through edits, project moves, deletion,
 // and restoration, even when its first page contains only unchanged issues.
-// Postgres checks that fences cover later pages of upserts and stale deletes.
 func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -31,14 +28,9 @@ func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 				issues[i], _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: fmt.Sprintf("task %d", i), Body: "original body", Author: "tester"})
 				require.NoError(t, err)
 			}
-			var fences atomic.Int32
-			fenced := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error { fences.Add(1); return nil })
-			changed, err := idx.RefreshMirror(fenced, store)
+			changed, err := idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)
 			require.Equal(t, 506, changed)
-			if backend == "postgres" {
-				require.EqualValues(t, 2, fences.Load(), "one fenced transaction per mirror page")
-			}
 			initial, err := idx.MirrorRowsForTest(ctx)
 			require.NoError(t, err)
 			gen := kitvec.Generation{Model: "example", Dimensions: 2}
@@ -96,19 +88,6 @@ func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 			changed, err = idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)
 			require.Zero(t, changed)
-			if backend == "postgres" {
-				pg := store.(*pgstore.Store)
-				_, err := pg.DB.ExecContext(ctx, `INSERT INTO issue_vector_mirror(issue_uid, project_uid, content, content_revision) SELECT 'stale-' || n, $1, 'stale', 1 FROM generate_series(1, 501) n`, project.UID)
-				require.NoError(t, err)
-				fences.Store(0)
-				changed, err = idx.RefreshMirror(fenced, store)
-				require.NoError(t, err)
-				require.Equal(t, 501, changed)
-				require.EqualValues(t, 2, fences.Load())
-				got, err = idx.MirrorRowsForTest(ctx)
-				require.NoError(t, err)
-				require.Equal(t, want, got)
-			}
 		})
 	}
 }

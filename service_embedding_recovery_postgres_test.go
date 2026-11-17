@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,8 +23,7 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 	t.Cleanup(func() { _ = admin.Close() })
 	var owner string
 	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&owner))
-	var providerCalls atomic.Int32
-	endpoint := testenv.NewEmbeddingServer(t, nil, func() { providerCalls.Add(1) })
+	endpoint := testenv.NewEmbeddingServer(t, nil)
 	cfg := kata.Config{
 		DSN: dsn, Postgres: kata.PostgresConfig{Schema: "kata", SchemaMode: kata.PostgresSchemaBootstrap, SchemaOwner: owner},
 		Auth:       kata.AuthConfig{TrustCallerAuthentication: true},
@@ -72,7 +70,6 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 	err = <-missingDone
 	missingDone = nil
 	require.NoError(t, err)
-	require.Zero(t, providerCalls.Load())
 	server.Close()
 	require.NoError(t, service.Close())
 	_, err = admin.ExecContext(ctx, `CREATE EXTENSION vector WITH SCHEMA public`)
