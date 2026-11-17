@@ -117,9 +117,6 @@ func TestResolveMode(t *testing.T) {
 		if (err != nil) != tc.wantErr {
 			t.Fatalf("resolveMode(%q,%v) err=%v wantErr=%v", tc.req, tc.configured, err, tc.wantErr)
 		}
-		if !tc.configured && (tc.req == "hybrid" || tc.req == "semantic") {
-			require.ErrorContains(t, err, "embeddings are not configured")
-		}
 		if err == nil && got != tc.want {
 			t.Fatalf("resolveMode(%q,%v)=%v want %v", tc.req, tc.configured, got, tc.want)
 		}

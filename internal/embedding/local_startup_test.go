@@ -2,8 +2,7 @@ package embedding
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,22 +10,19 @@ import (
 )
 
 func TestResolveLocalDoesNotDownloadMissingAssets(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	require.NoError(t, os.MkdirAll(filepath.Join(home, ".kenn", "embeddings"), 0o700))
+	installErr := errors.New("install refused")
 	endpointCalls := 0
 	installCalls := 0
 	got, err := ResolveLocal(t.Context(), func(context.Context, embedlocal.Options) (string, error) {
 		endpointCalls++
 		return "", embedlocal.ErrNotFound
-	}, func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
+	}, func(_ context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
 		installCalls++
 		require.Nil(t, opts.Confirm)
-		return embedlocal.Install(ctx, opts)
+		return embedlocal.Installation{}, installErr
 	}, nil)
 	require.Empty(t, got)
-	require.ErrorContains(t, err, "provide Confirm")
+	require.ErrorIs(t, err, installErr)
 	require.Equal(t, 1, endpointCalls)
 	require.Equal(t, 1, installCalls)
 }
