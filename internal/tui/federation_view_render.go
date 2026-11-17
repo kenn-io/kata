@@ -924,7 +924,17 @@ func renderFederationNamePrompt(m Model) string {
 		subtleStyle.Render(truncate(emptyNote, width)),
 		"",
 	}
-	tail := append([]string{label + shown + "▏"}, federationErrorLines(m.federation.op.err, width)...)
-	tail = append(tail, strings.Split(renderAuxiliaryFooter(m, action), "\n")...)
+	footer := strings.Split(renderAuxiliaryFooter(m, action), "\n")
+	errLines := federationErrorLines(m.federation.op.err, width)
+	// An error taller than the rows left after the prompt and hints keeps its
+	// first lines and ends in an ellipsis, so the prompt row is never pushed off.
+	if room := m.height - 1 - len(footer); m.height > 0 && len(errLines) > room {
+		errLines = errLines[:max(room, 0)]
+		if room > 0 {
+			errLines[room-1] = errorStyle.Render("…")
+		}
+	}
+	tail := append([]string{label + shown + "▏"}, errLines...)
+	tail = append(tail, footer...)
 	return strings.Join(fitFederationLines(append(head, tail...), m.height, len(tail)), "\n")
 }

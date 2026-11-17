@@ -360,15 +360,23 @@ func TestFederationNameScreensFitShortTerminals(t *testing.T) {
 			name          string
 			width, height int
 			split, help   bool
+			manyLines     bool
 		}{
-			{"80x12", 80, 12, false, false},
-			{"100x8", 100, 8, false, false},
-			{"split 160x40", 160, 40, true, false},
-			{"80x12 over help", 80, 12, false, true},
+			{"80x12", 80, 12, false, false, false},
+			{"100x8", 100, 8, false, false, false},
+			{"split 160x40", 160, 40, true, false, false},
+			{"80x12 over help", 80, 12, false, true, false},
+			{"100x8 with a twelve-line error", 100, 8, false, false, true},
 		} {
+			if size.manyLines && screen.name != "prompt" {
+				continue // the preview has no error cap; only the prompt guarantees its row
+			}
 			t.Run(screen.name+" "+size.name, func(t *testing.T) {
 				m := screen.model(t)
 				m.federation.op.err = longSpokeNameError
+				if size.manyLines {
+					m.federation.op.err = errors.New(strings.TrimSpace(strings.Repeat("daemon detail line\n", 12)))
+				}
 				m.width, m.height = size.width, size.height
 				if size.split {
 					m.layout = splitlayout.Split
@@ -387,8 +395,14 @@ func TestFederationNameScreensFitShortTerminals(t *testing.T) {
 
 				assert.LessOrEqual(t, len(strings.Split(rendered, "\n")), size.height, "every row fits:\n%s", rendered)
 				flat := strings.Join(strings.Fields(rendered), " ")
-				assert.Contains(t, flat, "federation_spoke_name_conflict")
-				assert.Contains(t, flat, "or choose another name here", "the whole error stays")
+				if size.manyLines {
+					// Too tall to show whole: the error gives way, not the prompt.
+					assert.Contains(t, flat, "daemon detail line")
+					assert.Contains(t, flat, "…")
+				} else {
+					assert.Contains(t, flat, "federation_spoke_name_conflict")
+					assert.Contains(t, flat, "or choose another name here", "the whole error stays")
+				}
 				for _, w := range want {
 					assert.Contains(t, flat, strings.Join(strings.Fields(w), " "))
 				}
