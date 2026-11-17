@@ -131,13 +131,13 @@ func main() {
 sync, timed-claim, due-notification, assignment-expiry, and (when enabled) MCP
 Events delivery workers are active, then returns when its context is canceled
 or `Close` begins, and it may return an error from any background worker. Treat
-any `Run` or `RunSemanticIndex` return as service termination: stop accepting HTTP traffic, cancel
-the shared context, and inspect the error after both the workers and server
-stop. Only one `Run` or `RunSemanticIndex` call may be active for a service.
-`RunSemanticIndex` requires the same worker transaction fence when `Access` is
-set and waits for cancellation or `Close` if pgvector is missing. `Close` cancels
-active work and requests, waits for them to stop, and closes the owned storage handle.
-It is safe to call more than once.
+any `Run` or `RunSemanticIndex` return as service termination: stop accepting
+HTTP traffic, cancel the shared context, and inspect the error after both the
+workers and server stop. Only one `Run` or `RunSemanticIndex` call may be active
+for a service. `RunSemanticIndex` requires the same worker transaction fence
+when `Access` is set and waits for cancellation or `Close` if pgvector is
+missing. `Close` cancels active work and requests, waits for them to stop, and
+closes the owned storage handle. It is safe to call more than once.
 
 ## Authentication is explicit
 

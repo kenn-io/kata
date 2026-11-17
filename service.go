@@ -905,7 +905,7 @@ func (a hostAccessControllerAdapter) Authorize(
 // Close is called. Run does not start a listener and may be called only once
 // at a time. To run only semantic indexing, use RunSemanticIndex.
 func (s *Service) Run(ctx context.Context) error {
-	return s.runWorkers(ctx, true)
+	return s.runWorkers(ctx, allWorkers)
 }
 
 // RunSemanticIndex runs only the reconciler configured by Config.Embeddings.
@@ -913,10 +913,17 @@ func (s *Service) Run(ctx context.Context) error {
 // If embeddings are disabled or pgvector is missing, it waits until ctx is
 // canceled or Close is called. Its return follows the same contract as Run.
 func (s *Service) RunSemanticIndex(ctx context.Context) error {
-	return s.runWorkers(ctx, false)
+	return s.runWorkers(ctx, semanticIndexOnly)
 }
 
-func (s *Service) runWorkers(ctx context.Context, full bool) error {
+type workerSelection bool
+
+const (
+	semanticIndexOnly workerSelection = false
+	allWorkers        workerSelection = true
+)
+
+func (s *Service) runWorkers(ctx context.Context, selection workerSelection) error {
 	if ctx == nil {
 		return errors.New("kata: run context is required")
 	}
@@ -985,7 +992,7 @@ func (s *Service) runWorkers(ctx context.Context, full bool) error {
 	}()
 
 	var workers []namedWorker
-	if full {
+	if selection == allWorkers {
 		workers = s.serviceWorkers()
 	}
 	if s.embeddingReconciler != nil {
