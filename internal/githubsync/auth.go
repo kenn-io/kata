@@ -3,7 +3,6 @@ package githubsync
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -12,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"reflect"
 	"strings"
 	"sync"
 	"unicode"
@@ -42,17 +40,7 @@ type CredentialResolver struct {
 	runner        CommandRunner
 	baseTransport http.RoundTripper
 	appMu         sync.Mutex
-	appTransports map[appTransportKey]appTransportEntry
-}
-
-type appTransportKey struct {
-	app  config.GitHubAppConfig
-	base http.RoundTripper
-}
-
-type appTransportEntry struct {
-	transport *ghinstallation.Transport
-	digest    [sha256.Size]byte
+	apps          map[config.GitHubAppConfig]*ghinstallation.Transport
 }
 
 // NewCredentialResolver returns a resolver using cfg and runner. A nil runner
@@ -100,7 +88,11 @@ func (r *CredentialResolver) credentialTransport(ctx context.Context, binding Bi
 		if err != nil {
 			return nil, "", fmt.Errorf("create GitHub App transport: %w", err)
 		}
-		return newOriginGuardTransport(credential.binding, &appResponseTransport{next: tr, resolver: r, app: credential.app, base: base}), credential.kind, nil
+		return newOriginGuardTransport(credential.binding, &evictOnFailTransport{
+			next:     tr,
+			resolver: r,
+			app:      credential.app,
+		}), credential.kind, nil
 	case CredentialKindEnv, CredentialKindGH:
 		return newOriginGuardTransport(credential.binding, &staticBearerTransport{
 			token: credential.token,
@@ -111,52 +103,44 @@ func (r *CredentialResolver) credentialTransport(ctx context.Context, binding Bi
 	}
 }
 
-type appResponseTransport struct {
-	next     *ghinstallation.Transport
-	resolver *CredentialResolver
-	app      config.GitHubAppConfig
-	base     http.RoundTripper
-}
-
-func (t *appResponseTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	resp, err := t.next.RoundTrip(req)
-	if err == nil && resp.StatusCode == http.StatusUnauthorized && reflect.ValueOf(t.base).Comparable() {
-		t.resolver.appMu.Lock()
-		key := appTransportKey{app: t.app, base: t.base}
-		if t.resolver.appTransports[key].transport == t.next {
-			delete(t.resolver.appTransports, key)
-		}
-		t.resolver.appMu.Unlock()
-	}
-	return resp, err
-}
-
+// appTransport returns the App's cached transport so sessions reuse its
+// installation token until it nears expiry. The first caller's base wins.
 func (r *CredentialResolver) appTransport(app config.GitHubAppConfig, binding Binding, base http.RoundTripper) (*ghinstallation.Transport, error) {
-	keyBytes, err := os.ReadFile(app.PrivateKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("could not read private key: %s", err)
+	r.appMu.Lock()
+	defer r.appMu.Unlock()
+	if tr, ok := r.apps[app]; ok {
+		return tr, nil
 	}
-	digest := sha256.Sum256(keyBytes)
-	cacheable := reflect.ValueOf(base).Comparable()
-	if cacheable {
-		r.appMu.Lock()
-		defer r.appMu.Unlock()
-		if entry, ok := r.appTransports[appTransportKey{app: app, base: base}]; ok && entry.digest == digest {
-			return entry.transport, nil
-		}
-	}
-	tr, err := ghinstallation.New(base, app.AppID, app.InstallationID, keyBytes)
+	tr, err := ghinstallation.NewKeyFromFile(base, app.AppID, app.InstallationID, app.PrivateKeyPath)
 	if err != nil {
 		return nil, err
 	}
 	tr.BaseURL = githubRESTBaseURL(binding)
-	if cacheable {
-		if r.appTransports == nil {
-			r.appTransports = make(map[appTransportKey]appTransportEntry)
-		}
-		r.appTransports[appTransportKey{app: app, base: base}] = appTransportEntry{transport: tr, digest: digest}
+	if r.apps == nil {
+		r.apps = make(map[config.GitHubAppConfig]*ghinstallation.Transport)
 	}
+	r.apps[app] = tr
 	return tr, nil
+}
+
+// evictOnFailTransport drops a cached App transport after an error or a 401,
+// so a revoked token or rotated key heals on the next session.
+type evictOnFailTransport struct {
+	next     *ghinstallation.Transport
+	resolver *CredentialResolver
+	app      config.GitHubAppConfig
+}
+
+func (t *evictOnFailTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.next.RoundTrip(req)
+	if err != nil || resp.StatusCode == http.StatusUnauthorized {
+		t.resolver.appMu.Lock()
+		if t.resolver.apps[t.app] == t.next {
+			delete(t.resolver.apps, t.app)
+		}
+		t.resolver.appMu.Unlock()
+	}
+	return resp, err
 }
 
 type resolvedCredential struct {
