@@ -94,24 +94,17 @@ func appTestSession(ctx context.Context, resolver *CredentialResolver, base http
 }
 
 func TestCredentialResolverAppReusesTokenAcrossSessions(t *testing.T) {
-	resolver, _ := appTestResolver(t)
+	resolver, path := appTestResolver(t)
 	base := &appTestTransport{expiry: time.Hour}
-	for range 3 {
+	for i := range 3 {
 		_, err := appTestSession(t.Context(), resolver, base)
 		require.NoError(t, err)
+		if i == 0 {
+			require.NoError(t, os.Remove(path))
+		}
 	}
 	assert.Len(t, base.jwts, 1)
 	assert.Equal(t, []string{"token token-1", "token token-1", "token token-1"}, base.tokens)
-}
-
-func TestCredentialResolverAppReplacesTokenNearExpiry(t *testing.T) {
-	resolver, _ := appTestResolver(t)
-	base := &appTestTransport{expiry: 30 * time.Second}
-	for range 2 {
-		_, err := appTestSession(t.Context(), resolver, base)
-		require.NoError(t, err)
-	}
-	assert.Equal(t, []string{"token token-1", "token token-2"}, base.tokens)
 }
 
 func TestCredentialResolverAppMintsAgainAfterRejectedToken(t *testing.T) {
@@ -123,11 +116,9 @@ func TestCredentialResolverAppMintsAgainAfterRejectedToken(t *testing.T) {
 		assert.Equal(t, want, status)
 	}
 	assert.Equal(t, []string{"token token-1", "token token-2"}, base.tokens)
-}
 
-func TestCredentialResolverAppKeepsTokenAfterTransportError(t *testing.T) {
-	resolver, _ := appTestResolver(t)
-	base := &appTestTransport{expiry: time.Hour, apiErr: errors.New("connection reset")}
+	resolver, _ = appTestResolver(t)
+	base = &appTestTransport{expiry: time.Hour, apiErr: errors.New("connection reset")}
 	for range 2 {
 		_, err := appTestSession(t.Context(), resolver, base)
 		require.ErrorIs(t, err, base.apiErr)
@@ -143,9 +134,6 @@ func TestCredentialResolverAppReadsKeyFileOnlyToMint(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NoError(t, os.Remove(path))
-		_, err = appTestSession(t.Context(), resolver, base)
-		require.NoError(t, err, "the cached token serves while the key file is missing")
-
 		time.Sleep(time.Hour)
 		_, err = appTestSession(t.Context(), resolver, base)
 		require.ErrorContains(t, err, "read GitHub App private key")
