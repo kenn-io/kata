@@ -122,10 +122,11 @@ func (r *CredentialResolver) appTransport(app config.GitHubAppConfig, binding Bi
 			return &evictOnUnauthorizedTransport{next: tr, resolver: r, key: key}, nil
 		}
 	}
-	if _, err := readAppKey(app.PrivateKeyPath); err != nil {
+	signer := keyFileSigner{path: app.PrivateKeyPath}
+	if _, err := signer.readKey(); err != nil {
 		return nil, err
 	}
-	atr, err := ghinstallation.NewAppsTransportWithOptions(base, app.AppID, ghinstallation.WithSigner(keyFileSigner{path: app.PrivateKeyPath}))
+	atr, err := ghinstallation.NewAppsTransportWithOptions(base, app.AppID, ghinstallation.WithSigner(signer))
 	if err != nil {
 		return nil, err
 	}
@@ -146,15 +147,15 @@ type keyFileSigner struct {
 }
 
 func (s keyFileSigner) Sign(claims jwt.Claims) (string, error) {
-	key, err := readAppKey(s.path)
+	key, err := s.readKey()
 	if err != nil {
 		return "", err
 	}
 	return ghinstallation.NewRSASigner(jwt.SigningMethodRS256, key).Sign(claims)
 }
 
-func readAppKey(path string) (*rsa.PrivateKey, error) {
-	pemBytes, err := os.ReadFile(path)
+func (s keyFileSigner) readKey() (*rsa.PrivateKey, error) {
+	pemBytes, err := os.ReadFile(s.path)
 	if err != nil {
 		return nil, fmt.Errorf("read GitHub App private key: %w", err)
 	}
