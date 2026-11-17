@@ -267,6 +267,7 @@ var alreadyImplemented = map[string]bool{
 	"IngestFederationEvents":               true, // federation_ingest.go
 	"InsertRemoteEvent":                    true, // federation_events.go
 	"InsertRemoteEvents":                   true, // federation_events.go
+	"IsFederationRetainedProject":          true, // projects.go
 	"IssueByID":                            true, // issues.go
 	"IssueByShortID":                       true, // issues.go
 	"IssueByUID":                           true, // issues.go

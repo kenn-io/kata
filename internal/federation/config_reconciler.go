@@ -861,7 +861,32 @@ func preflightMapping(
 	preflight.allowInsecure = allowInsecure
 	preflight.capabilities = capabilities
 
-	localProject, createdEvent, err := resolveOrCreateLocalProject(ctx, store, mapping.SpokeProject)
+	localProject, err := store.ProjectByName(ctx, mapping.SpokeProject)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return preflight, reconcileError(ErrLocalStorage, "resolve local federation project")
+	}
+	var resolvedHubProject HubProject
+	var resolveErr error
+	hubResolved := localProject.ID == 0
+	if hubResolved {
+		resolvedHubProject, resolveErr = hub.ResolveProject(ctx, mapping.HubProject)
+		if resolveErr != nil && !hubProjectNotFound(resolveErr) {
+			return preflight, safeHubError(resolveErr)
+		}
+		if resolveErr == nil {
+			if err := validateResolvedHubProject(resolvedHubProject); err != nil {
+				return preflight, err
+			}
+			localProject, err = retainedMappingProject(ctx, store, resolvedHubProject.UID, mapping.SpokeProject)
+			if err != nil {
+				return preflight, err
+			}
+		}
+	}
+	var createdEvent *db.Event
+	if localProject.ID == 0 {
+		localProject, createdEvent, err = resolveOrCreateLocalProject(ctx, store, mapping.SpokeProject)
+	}
 	if err != nil {
 		return preflight, err
 	}
@@ -890,13 +915,15 @@ func preflightMapping(
 	preflight.managedReservation = managedReservation
 	preflight.hasReservation = hasManagedReservation
 
-	resolvedHubProject, resolveErr := hub.ResolveProject(ctx, mapping.HubProject)
+	if !hubResolved {
+		resolvedHubProject, resolveErr = hub.ResolveProject(ctx, mapping.HubProject)
+	}
 	hubProjectExists := resolveErr == nil
-	var credentialState credentialLookup
-	credentialStateRead := false
 	if resolveErr != nil && !hubProjectNotFound(resolveErr) {
 		return preflight, safeHubError(resolveErr)
 	}
+	var credentialState credentialLookup
+	credentialStateRead := false
 	if !hubProjectExists {
 		if hasBinding {
 			return preflight,
@@ -1260,6 +1287,32 @@ func reserveManagedFederationCredential(
 	default:
 		return reconcileError(ErrLocalStorage, "reserve federation enrollment credential")
 	}
+}
+
+func retainedMappingProject(ctx context.Context, store db.Storage, uid, name string) (db.Project, error) {
+	named, err := store.ProjectByNameIncludingArchived(ctx, name)
+	if err == nil && named.UID != uid {
+		return db.Project{}, nil
+	}
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return db.Project{}, reconcileError(ErrLocalStorage, "resolve local federation project")
+	}
+	project, err := store.ProjectByUID(ctx, uid)
+	if errors.Is(err, db.ErrNotFound) {
+		return db.Project{}, nil
+	}
+	if err != nil {
+		return db.Project{}, reconcileError(ErrLocalStorage, "check local federation project UID ownership")
+	}
+	retained, err := store.IsFederationRetainedProject(ctx, uid)
+	if err != nil {
+		return db.Project{}, reconcileError(ErrLocalStorage, "check retained federation project")
+	}
+	// The marker stays until the placeholder is bound, so it may be restored.
+	if retained {
+		return project, nil
+	}
+	return db.Project{}, reconcileError(ErrBindingConflict, "hub project UID belongs to another local project")
 }
 
 func resolveOrCreateLocalProject(

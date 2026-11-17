@@ -19,6 +19,7 @@ const (
 	apiVersionMoveDryRun                = "0.23.0"
 	apiVersionMoveSubtree               = "0.35.0"
 	apiVersionCloseTranscript           = "0.26.0"
+	apiVersionTranscriptSelection       = "0.52.0"
 	apiVersionOtherAgentCloseTranscript = "0.34.0"
 	apiVersionDocbankAttachmentLink     = "0.38.0"
 	apiVersionDocbankAttachmentReuse    = "0.47.0"
