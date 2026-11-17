@@ -116,7 +116,6 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 	})
 }
 
-// convertEnvelopes converts each envelope and releases its raw payload after decoding.
 func convertEnvelopes(envs []Envelope, exportVersion int, localInstanceUID string, projectUIDByID map[int64]string, asStandalone bool) ([]db.ImportRecord, error) {
 	recs := make([]db.ImportRecord, 0, len(envs))
 	for i, env := range envs {
