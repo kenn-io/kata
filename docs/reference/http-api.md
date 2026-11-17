@@ -79,18 +79,26 @@ message names it:
 The CLI preserves the hint in human, agent, and JSON errors. See
 [agent output](agent-output.md#errors) for its stderr format.
 
-On a route with `{project_id}` in its path, or a `project_id` query
-parameter, an id that does not exist answers `404 not_found`. An archived
-project the caller may read answers `404 project_not_found` with a hint naming
-`kata projects restore <name>`, so `error.code` tells the two apart:
+On a route with `{project_id}` in its path, or a `project_id` query parameter,
+an id that does not exist answers `404 not_found`. An archived project the
+caller may read answers `404 project_not_found` with a hint naming
+`kata projects restore <name>`; the hint marks an archived project, so branch
+on `error.code`, not on the hint text.
 
 ```json
 {"error":{"code":"project_not_found","message":"project not found","hint":"project docs is archived; run 'kata projects restore docs' to bring it back"}}
 ```
 
-A caller who may not read the project gets `404 not_found`, as for a missing
-id. An issue-scoped credential gets `project_not_found` without the hint.
-Branch on `error.code`, not on the hint text.
+`project_not_found` without a hint also comes back in these cases:
+
+- An issue-scoped credential asks for an archived project.
+- A caller without a principal on a lease, claim or cron-job write route (the
+  local socket, or a token on TCP) asks for a missing id, because those routes
+  authenticate in the handler.
+
+A caller the project access policy denies gets `404 not_found`, as for a
+missing id. A caller a host access controller denies gets `not_found` on most
+routes and never gets the hint.
 
 ## Editing an issue safely
 

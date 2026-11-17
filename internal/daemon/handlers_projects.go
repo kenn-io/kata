@@ -48,7 +48,7 @@ func archivedProjectError(ctx context.Context, p db.Project) error {
 		return plain
 	}
 	// An issue-scoped credential reads only its subtree, and issue routes
-	// resolve the project before they check containment, so the flag would
+	// resolve the project before they check containment, so the hint would
 	// confirm that an out-of-subtree issue exists.
 	if issueScopeFromContext(ctx) != nil {
 		return plain

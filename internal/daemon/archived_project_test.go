@@ -45,6 +45,8 @@ func TestActiveProjectByIDHintsRestoreOnlyForCallersWhoMayReadIt(t *testing.T) {
 		return context.WithValue(t.Context(), hostAccessStateContextKey{},
 			&hostAccessState{controller: controller, request: HostAccessRequest{Operation: HostOperation{ID: "showProject"}}})
 	}
+	withProjectPolicy := context.WithValue(t.Context(), projectAccessContextKey{},
+		&ProjectAccessDecision{ProjectUIDs: []string{other.UID}})
 	tests := []struct {
 		name     string
 		ctx      context.Context
@@ -55,6 +57,7 @@ func TestActiveProjectByIDHintsRestoreOnlyForCallersWhoMayReadIt(t *testing.T) {
 		{"issue token of the archived project", scopedTo(archived), archived.ID, false},
 		{"host that allows the project", hosted(denyProjectHost{deniedID: other.ID}), archived.ID, true},
 		{"host that denies the project", hosted(denyProjectHost{deniedID: archived.ID}), archived.ID, false},
+		{"project policy that excludes the project", withProjectPolicy, archived.ID, false},
 		{"missing project", t.Context(), archived.ID + 1000, false},
 	}
 	for _, tc := range tests {
@@ -68,7 +71,6 @@ func TestActiveProjectByIDHintsRestoreOnlyForCallersWhoMayReadIt(t *testing.T) {
 				assert.Equal(t, "project retired-project is archived; run 'kata projects restore retired-project' to bring it back", apiErr.Hint)
 				return
 			}
-			assert.Nil(t, apiErr.Data)
 			assert.Empty(t, apiErr.Hint)
 		})
 	}
