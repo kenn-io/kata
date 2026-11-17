@@ -328,7 +328,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	if cfg.Embeddings.Enabled() {
 		backend, err := storeopen.BackendForDSN(cfg.DSN)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("kata: open storage: %w", err)
 		}
 		if backend != storeopen.BackendPostgres {
 			return nil, errors.New("kata: embeddings require Postgres")

@@ -67,6 +67,9 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 
 	_, err = admin.ExecContext(ctx, `CREATE EXTENSION vector WITH SCHEMA public`)
 	require.NoError(t, err)
+	service, err = kata.New(ctx, cfg)
+	require.Nil(t, service)
+	require.ErrorContains(t, err, "semantic-search tables are not installed")
 	cfg.Postgres.SchemaMode = kata.PostgresSchemaBootstrap
 	service, err = kata.New(ctx, cfg)
 	require.NoError(t, err)
