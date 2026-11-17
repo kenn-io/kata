@@ -205,6 +205,14 @@ chat. Its `agent` and `session_id` participate in retry identity; `url` does
 not. The object is preserved in scoped responses and history. Automatic capture is a [CLI client preference](configuration.md#closing-session-transcripts),
 not daemon-side session discovery. See that reference for AgentsView compatibility.
 
+API `0.52.0` accepts `transcript_selection` with `project_id` and required
+`record`. A recorded selection requires a candidate `transcript`; an opt-out
+can omit it. When supplied, the candidate's agent and session identify keyed
+retries even when `record` is false. A positive project
+ID binds the policy to that project. A changed project returns `issue_moved`
+before a fresh close commits. Use project ID zero for an unknown target and
+omit the candidate URL. Selection and URL do not change retry identity.
+
 Guarded close requests use a request-local compatibility check instead of a
 separate health probe. A request that sends `Idempotency-Key` or `If-Match`
 also sends `retry_protocol: "close-v1"`. Current daemons require the marker;
@@ -277,7 +285,9 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.52.0` | `GET /api/v1/instance` reports `write_actors_verified`. |
+| `0.53.0` | `GET /api/v1/instance` reports `write_actors_verified`. |
+| `0.52.0` | Close requests accept project-bound transcript selection and retain candidate session identity for keyed retries. |
+
 | `0.51.0` | Signed federation requests return `503 signing_warming` with `Retry-After: 5` while replay protection warms up. |
 | `0.50.0` | A hub that requires signing and the restricted ingress answer requests without signature headers with `428 hub_signing_required` instead of `401 signature_invalid`. A request with only a digest follows the unsigned path, including when signing is optional. |
 | `0.49.0` | `GET /api/v1/projects/resolve` resolves a project by name for readers. Project federation status accepts `omit_errors=true` to withhold diagnostic error text. |

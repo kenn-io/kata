@@ -566,6 +566,9 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if err := reconcileFederationBindingTransitionLinks(ctx, tx, previous, binding); err != nil {
 		return db.FederationBinding{}, err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key = ? || (SELECT uid FROM projects WHERE id = ? AND deleted_at IS NULL)`, db.FederationRetainedProjectPrefix, b.ProjectID); err != nil {
+		return db.FederationBinding{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return db.FederationBinding{}, err
 	}
@@ -1399,6 +1402,8 @@ func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, move
 			return err
 		}
 		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
+	}, func(projectID int64, issue db.FoldIssue, projection db.FoldProjection) error {
+		return applyUnjoinedMovedIssue(ctx, tx, projectID, issue, projection)
 	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
 		payload := "{}"
 		var issueUID *string
