@@ -594,7 +594,9 @@ func TestPollProjectEventsIssueDeletedHistoryRequiresHostRestorePermission(t *te
 	t.Cleanup(ts.Close)
 
 	get := func(ref string) (int, []byte) {
-		resp, err := http.Get(ts.URL + scopedProjectPath(project.ID, "events") + "?issue=" + url.QueryEscape(ref) + "&actor=agent")
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+scopedProjectPath(project.ID, "events")+"?issue="+url.QueryEscape(ref)+"&actor=agent", nil)
+		require.NoError(t, err)
+		resp, err := ts.Client().Do(req)
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
 		body, err := io.ReadAll(resp.Body)
