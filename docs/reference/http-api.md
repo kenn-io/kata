@@ -79,19 +79,18 @@ message names it:
 The CLI preserves the hint in human, agent, and JSON errors. See
 [agent output](agent-output.md#errors) for its stderr format.
 
-A project route answers `404 project_not_found` both for a project that does
-not exist and for one that is archived. When the caller could read the project
-if it were active, the archived answer also carries `data.archived: true` and a
-hint naming `kata projects restore <name>`:
+On a route with `{project_id}` in its path, or a `project_id` query
+parameter, an id that does not exist answers `404 not_found`. An archived
+project the caller may read answers `404 project_not_found` with a hint naming
+`kata projects restore <name>`, so `error.code` tells the two apart:
 
 ```json
-{"error":{"code":"project_not_found","message":"project not found","hint":"project docs is archived; run 'kata projects restore docs' to bring it back","data":{"archived":true}}}
+{"error":{"code":"project_not_found","message":"project not found","hint":"project docs is archived; run 'kata projects restore docs' to bring it back"}}
 ```
 
-Every other caller gets the plain answer without `data` or a hint, so the
-response never reveals which projects exist. That includes callers the project
-access policy or a host access controller excludes, and issue-scoped
-credentials. Branch on `data.archived`, not on the hint text.
+A caller who may not read the project gets `404 not_found`, as for a missing
+id. An issue-scoped credential gets `project_not_found` without the hint.
+Branch on `error.code`, not on the hint text.
 
 ## Editing an issue safely
 

@@ -24,7 +24,7 @@ func (h denyProjectHost) Authorize(_ context.Context, request HostAccessRequest)
 	return HostAccessDecision{}, nil
 }
 
-func TestActiveProjectByIDFlagsArchivedOnlyForCallersWhoMayReadIt(t *testing.T) {
+func TestActiveProjectByIDHintsRestoreOnlyForCallersWhoMayReadIt(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
@@ -65,8 +65,7 @@ func TestActiveProjectByIDFlagsArchivedOnlyForCallersWhoMayReadIt(t *testing.T) 
 			assert.Equal(t, 404, apiErr.Status)
 			assert.Equal(t, "project_not_found", apiErr.Code)
 			if tc.archived {
-				assert.Equal(t, map[string]any{"archived": true}, apiErr.Data)
-				assert.Contains(t, apiErr.Hint, "kata projects restore retired-project")
+				assert.Equal(t, "project retired-project is archived; run 'kata projects restore retired-project' to bring it back", apiErr.Hint)
 				return
 			}
 			assert.Nil(t, apiErr.Data)

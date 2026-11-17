@@ -206,7 +206,6 @@ func TestProjectsShowArchivedProjectCarriesRestoreHint(t *testing.T) {
 	ce := requireCLIError(t, err, ExitNotFound)
 	assert.Equal(t, "project_not_found", ce.Code)
 	assert.Contains(t, ce.Hint, "kata projects restore retired-project")
-	assert.JSONEq(t, `{"archived":true}`, string(ce.Data))
 }
 
 func TestProjects_ShowAgentUsesReadShape(t *testing.T) {
