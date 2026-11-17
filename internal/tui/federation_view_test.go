@@ -1706,6 +1706,11 @@ type federationExecutionServerOptions struct {
 	metadataStatus int
 	joinStatus     int
 	hubProjectName string
+	// hubAPIVersion is what the hub's health route reports; empty leaves the
+	// route unregistered, for flows that must not probe the hub's version.
+	hubAPIVersion string
+	// enrollmentBody, when set, receives the enrollment request body.
+	enrollmentBody *map[string]any
 }
 
 func setupFederationExecutionPreview(
@@ -1732,7 +1737,7 @@ func setupFederationExecutionPreview(
 			})
 		},
 	})
-	hub := mockDaemon(t, map[string]http.HandlerFunc{
+	hubRoutes := map[string]http.HandlerFunc{
 		"/api/v1/projects": func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodPost {
 				respondJSON(t, w, map[string]any{"project": map[string]any{"id": 42, "name": hubProjectName}})
@@ -1743,7 +1748,10 @@ func setupFederationExecutionPreview(
 		"/api/v1/projects/42/federation/enable": func(w http.ResponseWriter, _ *http.Request) {
 			respondJSON(t, w, federationMetadataBody(hubProjectName))
 		},
-		"/api/v1/federation/enrollments": func(w http.ResponseWriter, _ *http.Request) {
+		"/api/v1/federation/enrollments": func(w http.ResponseWriter, r *http.Request) {
+			if opts.enrollmentBody != nil {
+				require.NoError(t, json.NewDecoder(r.Body).Decode(opts.enrollmentBody))
+			}
 			projectID := int64(42)
 			respondJSON(t, w, api.FederationEnrollmentOut{
 				ID:               7,
@@ -1762,7 +1770,13 @@ func setupFederationExecutionPreview(
 			}
 			respondJSON(t, w, federationMetadataBody(hubProjectName))
 		},
-	})
+	}
+	if opts.hubAPIVersion != "" {
+		hubRoutes["/api/v1/health"] = func(w http.ResponseWriter, _ *http.Request) {
+			respondJSON(t, w, map[string]any{"ok": true, "api_schema_version": opts.hubAPIVersion})
+		}
+	}
+	hub := mockDaemon(t, hubRoutes)
 	m := setupFederationHubProjectSelection()
 	m.api = NewClient(spoke.URL, spoke.Client())
 	m.activeDaemon = daemonTarget{Name: "spoke", URL: spoke.URL}
@@ -1805,6 +1819,30 @@ type recordingFederationHubAdmin struct {
 	createEnrollmentCalls int
 	listEnrollmentsCalls  int
 	revokedEnrollmentIDs  []int64
+
+	// calls lists the writes and checks in the order they happened.
+	calls                  []string
+	createEnrollmentInputs []CreateFederationEnrollmentInput
+	spokeNameWrites        []spokeNameWrite
+	// spokeNameCheckErr and spokeNameWriteErr make the matching call fail.
+	spokeNameCheckErr error
+	spokeNameWriteErr error
+}
+
+type spokeNameWrite struct{ uid, name string }
+
+func (h *recordingFederationHubAdmin) CheckFederationSpokeNames(_ context.Context) error {
+	h.calls = append(h.calls, "check-spoke-names")
+	return h.spokeNameCheckErr
+}
+
+func (h *recordingFederationHubAdmin) SetFederationSpokeName(_ context.Context, uid, name string) error {
+	h.calls = append(h.calls, "set-spoke-name")
+	if h.spokeNameWriteErr != nil {
+		return h.spokeNameWriteErr
+	}
+	h.spokeNameWrites = append(h.spokeNameWrites, spokeNameWrite{uid: uid, name: name})
+	return nil
 }
 
 func (h *recordingFederationHubAdmin) GetInstance(_ context.Context) (InstanceInfo, error) {
@@ -1822,6 +1860,7 @@ func (h *recordingFederationHubAdmin) EnsureProject(
 	name, _ string,
 ) (ProjectSummary, error) {
 	h.ensureProjectCalls++
+	h.calls = append(h.calls, "ensure-project")
 	return ProjectSummary{ID: 99, Name: name}, nil
 }
 
@@ -1831,14 +1870,17 @@ func (h *recordingFederationHubAdmin) EnableFederation(
 	_ string,
 ) (ProjectFederationMetadata, error) {
 	h.enableFederationCalls++
+	h.calls = append(h.calls, "enable-federation")
 	return ProjectFederationMetadata{ProjectID: projectID}, nil
 }
 
 func (h *recordingFederationHubAdmin) CreateFederationEnrollment(
 	_ context.Context,
-	_ CreateFederationEnrollmentInput,
+	in CreateFederationEnrollmentInput,
 ) (FederationEnrollment, error) {
 	h.createEnrollmentCalls++
+	h.calls = append(h.calls, "create-enrollment")
+	h.createEnrollmentInputs = append(h.createEnrollmentInputs, in)
 	return FederationEnrollment{Token: enrollmentSecret()}, nil
 }
 

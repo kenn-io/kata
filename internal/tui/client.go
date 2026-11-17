@@ -992,6 +992,57 @@ func (c *Client) CreateFederationEnrollment(ctx context.Context, body CreateFede
 	return resp, nil
 }
 
+// federationSpokeNameAPIVersion is the first daemon API guaranteed to carry
+// the spoke name routes and the spoke_name enrollment field. The routes landed
+// without a version bump, so daemons that report 0.37.0 may or may not have
+// them; 0.38.0 is the first bump after they merged.
+const federationSpokeNameAPIVersion = "0.38.0"
+
+// CheckFederationSpokeNames refuses a daemon that cannot name spokes, so a
+// caller can stop before it writes anything else to that daemon.
+func (c *Client) CheckFederationSpokeNames(ctx context.Context) error {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return &mutationPreflightError{err}
+	}
+	if err := requireAPIVersion(ctx, apiClient, federationSpokeNameAPIVersion,
+		"naming a spoke requires daemon API "+federationSpokeNameAPIVersion+" or newer"); err != nil {
+		return &mutationPreflightError{err}
+	}
+	return nil
+}
+
+// SetFederationSpokeName sets the hub-local name of an enrolled spoke instance,
+// or clears it when name is empty. It mirrors `kata federation enrollments
+// name`. A failure before the request is sent is a mutationPreflightError; the
+// daemon's own refusal comes back as an *APIError.
+func (c *Client) SetFederationSpokeName(ctx context.Context, spokeInstanceUID, name string) error {
+	if err := c.CheckFederationSpokeNames(ctx); err != nil {
+		return err
+	}
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return &mutationPreflightError{err}
+	}
+	if name == "" {
+		wire, callErr := apiClient.ClearFederationSpokeNameWithResponse(ctx, &generated.ClearFederationSpokeNameRequestOptions{
+			PathParams: &generated.ClearFederationSpokeNamePath{SpokeInstanceUID: spokeInstanceUID},
+		})
+		if wire == nil {
+			return callErr
+		}
+		return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
+	}
+	wire, callErr := apiClient.SetFederationSpokeNameWithResponse(ctx, &generated.SetFederationSpokeNameRequestOptions{
+		PathParams: &generated.SetFederationSpokeNamePath{SpokeInstanceUID: spokeInstanceUID},
+		Body:       &generated.SetFederationSpokeNameBody{Name: name},
+	})
+	if wire == nil {
+		return callErr
+	}
+	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
+}
+
 // CreateFederationReplica joins or adopts a local project as a spoke.
 func (c *Client) CreateFederationReplica(ctx context.Context, body CreateFederationReplicaInput) (FederationReplicaResult, error) {
 	var resp FederationReplicaResult

@@ -38,14 +38,24 @@ func renderFederation(m Model) string {
 		return renderFederationAdoptConfirm(m)
 	case federationModeLeavePreview:
 		return renderFederationLeavePreview(m)
+	case federationModeNamePrompt:
+		return renderFederationNamePrompt(m)
 	case federationModeResult:
 		return renderFederationResult(m)
 	case federationModeRecovery:
 		return renderFederationRecovery(m)
 	}
+	cursorHasRow := cursor >= 0 && cursor < len(rows)
+	hints := []string{"[↑/↓ k/j] move", "[enter] detail", "[esc] back", "[r] refresh", "[n] enroll", "[x] leave"}
+	if cursorHasRow {
+		hints = append(hints, "[N] name")
+	}
+	hints = append(hints, "[b] browse hubs", "[C] credentials", "[?] help")
+	footer := federationFooterLines(m, hints...)
 	rowBudget := len(rows)
 	if m.height > 0 {
-		rowBudget = max(m.height-federationViewChromeRows, 1)
+		// The chrome counts a one-row footer; a wrapped one takes more.
+		rowBudget = max(m.height-federationViewChromeRows-(len(footer)-1), 1)
 	}
 	visible := clipFederationRows(rows, cursor, rowBudget)
 	body := []string{
@@ -69,13 +79,16 @@ func renderFederation(m Model) string {
 		}
 	}
 	body = append(body, "")
-	if cursor >= 0 && cursor < len(rows) {
+	if cursorHasRow {
 		body = append(body, subtleStyle.Render(federationFooter(rows[cursor], m.width)))
 	}
-	body = append(body, "")
-	body = append(body, renderAuxiliaryFooter(m,
-		"[↑/↓ k/j] move  [enter] detail  [esc] back  [r] refresh  [n] enroll  [x] leave  [b] browse hubs  [C] credentials  [?] help"))
-	return strings.Join(body, "\n")
+	// The notice takes the blank line above the hints, so it costs no row. On
+	// a short terminal the blank line itself goes before the rows do.
+	notice := federationNoticeLine(m)
+	if notice != "" || m.height <= 0 || len(body)+1+len(footer) <= m.height {
+		body = append(body, notice)
+	}
+	return strings.Join(append(body, footer...), "\n")
 }
 
 func renderFederationSelectLocalProject(m Model) string {
@@ -190,6 +203,7 @@ func renderFederationPreview(m Model) string {
 		"hub auth: "+sanitizeForLine(federationAuthDisplay(draft.HubTarget, draft.HubInstance.Auth)),
 		"hub project: "+sanitizeForLine(federationHubProjectBehavior(draft)),
 		"requested actor: "+sanitizeForLine(emptyDash(draft.RequestedActor)),
+		"spoke name: "+sanitizeForLine(emptyDash(draft.SpokeName)),
 		"capabilities: "+sanitizeForLine(draft.DisplayCapabilities),
 		fmt.Sprintf("push enabled: %t", draft.PushEnabled),
 		fmt.Sprintf("allow_insecure: %t", draft.AllowInsecure),
@@ -220,9 +234,14 @@ func renderFederationPreview(m Model) string {
 	if draft.BlockedReason != "" {
 		body = append(body, "", errorStyle.Render("Blocked: "+sanitizeForLine(draft.BlockedReason)))
 	}
-	body = appendFederationOpErr(body, m)
-	body = append(body, "", renderAuxiliaryFooter(m, "[enter] confirm  [esc] back"))
-	return strings.Join(body, "\n")
+	// The daemon's error and the hints keep their rows on a short terminal;
+	// the details above them are elided first.
+	var tail []string
+	if errLines := federationErrorLines(m.federation.op.err, m.width); len(errLines) > 0 {
+		tail = append(append(tail, ""), errLines...)
+	}
+	tail = append(append(tail, ""), federationFooterLines(m, "[enter] confirm", "[N] name", "[esc] back")...)
+	return strings.Join(fitFederationLines(append(body, tail...), m.height, len(tail)), "\n")
 }
 
 // renderFederationAdoptConfirm is the typed-confirmation gate for adoption:
@@ -729,7 +748,10 @@ func renderFederationDetail(m Model, rows []FederationProjectStatus, cursor int)
 		if m.modal != modalNone {
 			body = append(body, "", renderAuxiliaryFooter(m, ""))
 		}
-		return strings.Join(fitFederationLines(body, m.height), "\n")
+		return strings.Join(fitFederationLines(body, m.height, 1), "\n")
+	}
+	if m.federation.notice != "" {
+		body = append(body, sanitizeForLine(m.federation.notice))
 	}
 	row := rows[cursor]
 	if row.Embedding != nil {
@@ -774,9 +796,9 @@ func renderFederationDetail(m Model, rows []FederationProjectStatus, cursor int)
 		"last sync success: "+formatOptionalTime(row.LastSuccessfulSyncAt),
 		"last error: "+formatOptionalError(row),
 		"",
-		renderAuxiliaryFooter(m, "[esc] back  [r] refresh  [q] quit  [?] help"),
 	)
-	return strings.Join(fitFederationLines(body, m.height), "\n")
+	footer := federationFooterLines(m, "[esc] back", "[r] refresh", "[N] name", "[q] quit", "[?] help")
+	return strings.Join(fitFederationLines(append(body, footer...), m.height, len(footer)), "\n")
 }
 
 func federationEmbeddingLines(status *api.FederationEmbeddingStatus, width int) []string {
@@ -787,17 +809,20 @@ func federationEmbeddingLines(status *api.FederationEmbeddingStatus, width int) 
 	return lines
 }
 
-func fitFederationLines(lines []string, height int) []string {
+// fitFederationLines elides the middle of lines to fit height, always keeping
+// the last tail lines (the footer's rows) and the head.
+func fitFederationLines(lines []string, height, tail int) []string {
 	if height <= 0 || len(lines) <= height {
 		return lines
 	}
-	if height == 1 {
-		return []string{lines[len(lines)-1]}
+	tail = min(tail, len(lines))
+	if height <= tail+1 {
+		return lines[len(lines)-min(height, tail):]
 	}
 	out := make([]string, 0, height)
-	out = append(out, lines[:height-2]...)
+	out = append(out, lines[:height-1-tail]...)
 	out = append(out, subtleStyle.Render("..."))
-	out = append(out, lines[len(lines)-1])
+	out = append(out, lines[len(lines)-tail:]...)
 	return out
 }
 

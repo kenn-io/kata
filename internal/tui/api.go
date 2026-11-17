@@ -44,6 +44,8 @@ type federationHubAdminAPI interface {
 	CreateFederationEnrollment(ctx context.Context, body CreateFederationEnrollmentInput) (FederationEnrollment, error)
 	ListFederationEnrollments(ctx context.Context) ([]FederationEnrollment, error)
 	RevokeFederationEnrollment(ctx context.Context, enrollmentID int64) error
+	CheckFederationSpokeNames(ctx context.Context) error
+	SetFederationSpokeName(ctx context.Context, spokeInstanceUID, name string) error
 }
 
 type federationEnrollmentAPI interface {

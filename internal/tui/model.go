@@ -594,6 +594,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		next, cmd := m.handleFederationLeaveResult(flr)
 		return next, cmd
 	}
+	if fnr, ok := msg.(federationNameResultMsg); ok {
+		return m.handleFederationNameResult(fnr)
+	}
 	if _, ok := msg.(projectsDebounceFireMsg); ok {
 		m.projectsRefetchPending = false
 		if m.view == viewProjects && m.projectsStale {
@@ -880,6 +883,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 	case tea.PasteMsg:
+		if m.federationNamePromptOpen() && m.modal == modalNone {
+			return m.pasteIntoFederationName(msg), nil, true
+		}
 		if m.view == viewCron && m.cron.filtering && m.modal == modalNone {
 			return m.cronFilter(m.cron.lists[m.cron.tab].query + msg.Content), nil, true
 		}
@@ -940,6 +946,12 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		}
 		if m.input.kind != inputNone {
 			next, cmd := m.routeInputKey(msg)
+			return next, cmd, true
+		}
+		if m.federationNamePromptOpen() {
+			// Names are lowercase letters: quit, undo and the global view
+			// keys must reach the field as text, not act.
+			next, cmd := m.routeFederationViewKey(msg)
 			return next, cmd, true
 		}
 		if next, cmd, ok := m.routeGlobalKey(msg); ok {

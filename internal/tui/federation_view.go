@@ -10,7 +10,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	clientpkg "go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/db"
 	hubfederation "go.kenn.io/kata/internal/federation"
+	katauid "go.kenn.io/kata/internal/uid"
 )
 
 type federationMode int
@@ -30,6 +32,10 @@ const (
 	// enroll preview and execution for adoption operations, which rewrite the
 	// local project's event history.
 	federationModeAdoptConfirm
+	// federationModeNamePrompt is the one-field prompt that names a spoke. It
+	// owns the keyboard (names are lowercase letters, which include keys the
+	// TUI reserves) and returns to nameDraft.Return.
+	federationModeNamePrompt
 )
 
 type federationOperation string
@@ -60,6 +66,41 @@ type federationDraft struct {
 	AllowInsecure        bool
 	AdoptExisting        bool
 	BlockedReason        string
+	// SpokeName is the hub-local name sent with the enrollment, as
+	// `kata federation enroll --spoke-name` sends it. Empty sends none.
+	SpokeName string
+}
+
+// federationNameDraft is the spoke name prompt's target and text. It is
+// captured when the prompt opens, so a refresh or cursor move behind the
+// prompt cannot retarget the save. Return is the screen Esc and a successful
+// save go back to; a prompt opened from the enroll preview only edits the
+// enrollment's draft and sends nothing.
+type federationNameDraft struct {
+	Return        federationMode
+	ProjectName   string
+	HubURL        string
+	AllowInsecure bool
+	InstanceUID   string
+	Input         string
+}
+
+func (d federationNameDraft) forEnrollment() bool { return d.Return == federationModePreview }
+
+// validate applies the daemon's own name rules (the ones `kata federation
+// enrollments name` checks before sending). Clearing needs only a known
+// instance; an enrollment draft with no name needs nothing.
+func (d federationNameDraft) validate() error {
+	if d.Input == "" && d.forEnrollment() {
+		return nil
+	}
+	if !katauid.Valid(d.InstanceUID) {
+		return errors.New("spoke instance UID is not loaded; refresh federation status before naming")
+	}
+	if d.Input == "" {
+		return nil
+	}
+	return db.ValidateFederationSpokeName(d.InstanceUID, d.Input)
 }
 
 type federationEnrollResult struct {
@@ -115,6 +156,7 @@ const (
 	federationOpNone federationOpKind = iota
 	federationOpEnroll
 	federationOpLeave
+	federationOpName
 )
 
 // federationOp is the single in-flight-or-last federation mutation.
@@ -161,7 +203,11 @@ type federationState struct {
 	adoptConfirmInput   string
 	recovery            federationRecovery
 	leaveDraft          federationLeaveDraft
-	op                  federationOp
+	nameDraft           federationNameDraft
+	// notice confirms the last completed name change on the list or detail.
+	// Any key dismisses it.
+	notice string
+	op     federationOp
 }
 
 // federationOpOutcome is the flow-independent shape of a completed
@@ -240,6 +286,8 @@ func (m Model) transitionToFederation() (Model, tea.Cmd) {
 	m.view = viewFederation
 	m.federation.mode = federationModeList
 	m.federation.draft = federationDraft{}
+	m.federation.nameDraft = federationNameDraft{}
+	m.federation.notice = ""
 	m.federation.loading = true
 	m.federation.err = nil
 	m.federation.gen++
@@ -373,11 +421,14 @@ func (m Model) routeFederationViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.routeFederationAdoptConfirmKey(msg)
 	case federationModeLeavePreview:
 		return m.routeFederationLeavePreviewKey(msg)
+	case federationModeNamePrompt:
+		return m.routeFederationNamePromptKey(msg)
 	case federationModeRecovery:
 		return m.routeFederationRecoveryKey(msg)
 	case federationModeResult:
 		return m.routeFederationResultKey(msg)
 	}
+	m.federation.notice = ""
 	if next, ok := m.cursorMoveFederation(msg, rows); ok {
 		return next, nil
 	}
@@ -386,6 +437,11 @@ func (m Model) routeFederationViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.escFromFederationView()
 	case "n":
 		return m.startFederationEnrollment()
+	case "N":
+		if m.federation.cursor < 0 || m.federation.cursor >= len(rows) {
+			return m, nil
+		}
+		return m.startFederationName(rows[m.federation.cursor]), nil
 	case "r":
 		m.federation.loading = true
 		m.federation.err = nil
@@ -409,6 +465,7 @@ func (m Model) routeFederationViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) routeFederationDetailKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	m.federation.notice = ""
 	switch msg.String() {
 	case "esc", "backspace":
 		m.federation.mode = federationModeList
@@ -425,6 +482,13 @@ func (m Model) routeFederationDetailKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.startFederationLeave(rows[cursor])
+	case "N":
+		rows := federationSpokeStatuses(m.federation.statuses)
+		cursor := clampFederationCursor(m.federation.cursor, rows)
+		if cursor < 0 || cursor >= len(rows) {
+			return m, nil
+		}
+		return m.startFederationName(rows[cursor]), nil
 	}
 	return m, nil
 }
@@ -534,6 +598,11 @@ func (m Model) routeFederationPreviewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case "esc", "backspace":
 		m.federation.mode = federationModeSelectHubProject
 		return m, nil
+	case "N":
+		if m.federation.op.running {
+			return m, nil
+		}
+		return m.startFederationEnrollmentName(), nil
 	case "enter":
 		if m.federation.draft.BlockedReason != "" || m.federation.op.running {
 			return m, nil
@@ -1271,6 +1340,14 @@ func runFederationEnrollment(
 	if err != nil {
 		return result, err
 	}
+	if draft.SpokeName != "" {
+		// Before the first hub write: a hub that cannot name spokes would
+		// otherwise reject or ignore the name after the project and the
+		// enrollment already exist.
+		if err := hubAdmin.CheckFederationSpokeNames(ctx); err != nil {
+			return result, err
+		}
+	}
 	draft.HubTarget = resolvedHub
 	result.Draft = draft
 	hubURL := federationDaemonEndpoint(resolvedHub)
@@ -1285,6 +1362,7 @@ func runFederationEnrollment(
 	}
 	enrollment, err := hubAdmin.CreateFederationEnrollment(ctx, CreateFederationEnrollmentInput{
 		SpokeInstanceUID:             instanceUID,
+		SpokeName:                    draft.SpokeName,
 		ProjectID:                    &hubProject.ID,
 		Capabilities:                 draft.APICapabilities,
 		Actor:                        draft.RequestedActor,

@@ -318,6 +318,14 @@ type federationEnrollResultMsg struct {
 	err     error
 }
 
+// federationNameResultMsg answers a spoke name save. err is nil once the hub
+// stored (or cleared) the name.
+type federationNameResultMsg struct {
+	connGen uint64
+	attempt uint64
+	err     error
+}
+
 type federationLeaveResultMsg struct {
 	connGen uint64
 	attempt uint64

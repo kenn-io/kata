@@ -1,13 +1,20 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-16
+last_edited: 2026-11-17
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Name or rename a federation spoke in `kata tui`: press `N` on a spoke in the
+  federation list or its detail, or in the enroll preview to send the name with
+  the enrollment. An empty name clears it, and the hub's own refusal, such as a
+  name another spoke holds, stays on screen with what you typed. This needs a
+  hub on API 0.38.0 or newer. See
+  [Federation](operations/federation.md#operator-commands).
 
 - `kata doctor` now asks Docbank once, with a read-only request, whether it
   answers and accepts the daemon's API key, and reports the result in its
