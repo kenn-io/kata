@@ -29,12 +29,38 @@ func activeProjectByID(ctx context.Context, store db.Storage, id int64) (db.Proj
 		return db.Project{}, internalAPIError(err)
 	}
 	if p.DeletedAt != nil {
-		return db.Project{}, api.NewError(404, "project_not_found", "project not found", "", nil)
+		return db.Project{}, archivedProjectError(ctx, p)
 	}
 	if err := authorizeIssueScopedProject(ctx, p); err != nil {
 		return db.Project{}, err
 	}
 	return p, nil
+}
+
+// archivedProjectError is the 404 for an archived project. A caller who could
+// read the project while it was active (project access policy, host access
+// controller) also learns that it is archived and how
+// to restore it; every other caller gets the plain project_not_found a missing
+// project gets, so the answer never reveals which projects exist.
+func archivedProjectError(ctx context.Context, p db.Project) error {
+	plain := api.NewError(404, "project_not_found", "project not found", "", nil)
+	if authorizeProjectTarget(ctx, p.UID) != nil {
+		return plain
+	}
+	// An issue-scoped credential reads only its subtree, and issue routes
+	// resolve the project before they check containment, so the flag would
+	// confirm that an out-of-subtree issue exists.
+	if issueScopeFromContext(ctx) != nil {
+		return plain
+	}
+	if hostAccessGoverns(ctx) {
+		if _, err := authorizeHostProjectScope(ctx, []int64{p.ID}, nil, false); err != nil {
+			return plain
+		}
+	}
+	return api.NewError(404, "project_not_found", "project not found",
+		"project "+p.Name+" is archived; run 'kata projects restore "+p.Name+"' to bring it back",
+		map[string]any{"archived": true})
 }
 
 // dbProjectToOut maps a db.Project (internal row) to the API-shape

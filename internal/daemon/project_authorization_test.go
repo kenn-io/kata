@@ -1618,6 +1618,26 @@ func TestProjectAccessArchivedProjectNameDoesNotExposeExistence(t *testing.T) {
 	})
 }
 
+// A project route says "archived" only to a caller who could read the project
+// while it was active; everyone else keeps the plain project_not_found.
+func TestProjectAccessArchivedProjectFlagFollowsReadAccess(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		_, _, err := store.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: f.private.ID, Actor: "admin", Force: true})
+		require.NoError(t, err)
+		path := fmt.Sprintf("/api/v1/projects/%d", f.private.ID)
+
+		status, _, body := f.request(t, http.MethodGet, path, "member", nil, nil)
+		assert.Equal(t, http.StatusNotFound, status, string(body))
+		assert.Contains(t, string(body), `"archived":true`)
+
+		status, _, body = f.request(t, http.MethodGet, path, "nonmember", nil, nil)
+		assert.Equal(t, http.StatusNotFound, status, string(body))
+		assert.NotContains(t, string(body), "archived")
+		assert.NotContains(t, string(body), f.private.Name)
+	})
+}
+
 func TestProjectAccessCrossProjectLinksAndEvents(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		f := newProjectAccessFixture(t, store)

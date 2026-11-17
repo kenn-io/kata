@@ -194,6 +194,21 @@ func TestProjectsCreatePreservesArchivedNameConflict(t *testing.T) {
 	assert.Contains(t, ce.Message, "archived")
 }
 
+func TestProjectsShowArchivedProjectCarriesRestoreHint(t *testing.T) {
+	env := testenv.New(t)
+	p, err := env.DB.CreateProject(t.Context(), "retired-project")
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.NoError(t, err)
+
+	_, err = runCmdOutput(t, env, "projects", "show", itoa(p.ID))
+
+	ce := requireCLIError(t, err, ExitNotFound)
+	assert.Equal(t, "project_not_found", ce.Code)
+	assert.Contains(t, ce.Hint, "kata projects restore retired-project")
+	assert.JSONEq(t, `{"archived":true}`, string(ce.Data))
+}
+
 func TestProjects_ShowAgentUsesReadShape(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()
