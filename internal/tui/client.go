@@ -661,15 +661,36 @@ func (c *Client) RemoveLink(ctx context.Context, projectID int64, ref string, li
 	return &resp, nil
 }
 
+// contentRevisionAPIVersion is the first daemon API that accepts
+// expected_content_revision on an issue edit.
+const contentRevisionAPIVersion = "0.53.0"
+
 // EditBody replaces issue.body via PATCH. v1 only supports body edits
-// from the TUI; title edits would reuse the same endpoint.
-func (c *Client) EditBody(ctx context.Context, projectID int64, ref, body, actor string) (*MutationResp, error) {
+// from the TUI; title edits would reuse the same endpoint. A non-nil
+// expectedContentRevision is the content_revision the caller read the body
+// at; the daemon refuses the write with 412 revision_conflict when a title
+// or body edit has landed since. nil writes unconditionally, and so does a
+// daemon older than contentRevisionAPIVersion, which would reject the field.
+// A daemon whose version cannot be read fails the save with a
+// mutationPreflightError: the write is never sent without a guard the caller
+// asked for, and nothing was written.
+func (c *Client) EditBody(ctx context.Context, projectID int64, ref, body, actor string, expectedContentRevision *int64) (*MutationResp, error) {
 
 	apiClient, err := c.generatedClient()
 	if err != nil {
-		return nil, err
+		return nil, &mutationPreflightError{err}
 	}
-	wire, callErr := apiClient.EditIssueWithResponse(ctx, &generated.EditIssueRequestOptions{PathParams: &generated.EditIssuePath{ProjectID: fmt.Sprint(projectID), Ref: ref}, Body: &generated.EditIssueBody{Actor: &actor, Body: &body}})
+	if expectedContentRevision != nil {
+		requirement := "guarded body edits require daemon API " + contentRevisionAPIVersion + " or newer"
+		reported, err := daemonAPIVersion(ctx, apiClient, requirement)
+		if err != nil {
+			return nil, &mutationPreflightError{err}
+		}
+		if semver.Compare(reported, "v"+contentRevisionAPIVersion) < 0 {
+			expectedContentRevision = nil
+		}
+	}
+	wire, callErr := apiClient.EditIssueWithResponse(ctx, &generated.EditIssueRequestOptions{PathParams: &generated.EditIssuePath{ProjectID: fmt.Sprint(projectID), Ref: ref}, Body: &generated.EditIssueBody{Actor: &actor, Body: &body, ExpectedContentRevision: expectedContentRevision}})
 	if wire == nil {
 		return nil, callErr
 	}
@@ -1383,18 +1404,32 @@ func (c *Client) CheckDateFilter(ctx context.Context) error {
 }
 
 func requireAPIVersion(ctx context.Context, apiClient *generated.Client, minimum, requirement string) error {
+	reported, err := daemonAPIVersion(ctx, apiClient, requirement)
+	if err != nil {
+		return err
+	}
+	if semver.Compare(reported, "v"+minimum) < 0 {
+		return fmt.Errorf("%s; upgrade the daemon", requirement)
+	}
+	return nil
+}
+
+// daemonAPIVersion returns the daemon's API schema version as a semver
+// string with the "v" prefix. It errors, naming requirement, when the health
+// probe fails or reports no valid version.
+func daemonAPIVersion(ctx context.Context, apiClient *generated.Client, requirement string) (string, error) {
 	health, err := apiClient.Health(ctx)
 	if err != nil {
-		return fmt.Errorf("%s: %w", requirement, err)
+		return "", fmt.Errorf("%s: %w", requirement, err)
 	}
 	reported := ""
 	if health.APISchemaVersion != nil {
 		reported = *health.APISchemaVersion
 	}
-	if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v"+minimum) < 0 {
-		return fmt.Errorf("%s; upgrade the daemon", requirement)
+	if !semver.IsValid("v" + reported) {
+		return "", fmt.Errorf("%s; upgrade the daemon", requirement)
 	}
-	return nil
+	return "v" + reported, nil
 }
 
 // AddCommentReply sends an attributed typed reply with a retry-stable key.

@@ -362,7 +362,7 @@
         return
       }
       mode = authority?.snapshot ? 'ready' : 'loading'
-      loadRoute(next)
+      loadRoute()
     }
     document.addEventListener('visibilitychange', visibility)
     window.addEventListener('focus', focus)
@@ -466,21 +466,24 @@
     route = next
     if (activeDaemonID) saveDaemonRoute(activeDaemonID, serializeRoute(next))
     mode = authority?.snapshot ? 'ready' : 'loading'
-    loadRoute(next)
+    loadRoute()
   }
 
   // Shows a list the accepted snapshot already holds, such as another project,
   // in the same frame. Live updates keep that snapshot current; a polled daemon
   // is asked again in the background. Any other route waits for its snapshot.
-  function loadRoute(next: AppRoute): void {
+  function loadRoute(): void {
+    // The $state proxy of the route, which refreshSnapshot accepts again after
+    // a revalidation. Accepting the same object keeps shellSnapshot, so an
+    // unchanged revalidation does not normalize and render the list again.
+    const next = route
+    if (next.kind === 'route-error') return
     if (!showsFromAcceptedSnapshot(next)) {
       void startAuthority()
       return
     }
     acceptedRoute = next
-    // $state stores a proxy of next; keep that proxy so shellSnapshot's
-    // identity check matches.
-    listFromLoadedSnapshot = acceptedRoute
+    listFromLoadedSnapshot = next
     mode = 'ready'
     if (authority?.snapshot?.capabilities.updates === 'poll') invalidations.refresh()
   }

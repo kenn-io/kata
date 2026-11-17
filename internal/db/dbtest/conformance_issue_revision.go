@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"encoding/json/jsontext"
+	"errors"
 	"testing"
 	"time"
 
@@ -291,5 +292,81 @@ func checkIssueRevisionAuthorRewrite(t *testing.T, store db.Storage) error {
 	unchanged, err := store.IssueByID(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, stored.Revision, unchanged.Revision)
+	return nil
+}
+
+// An edit that names the content revision it was drafted against is refused
+// when a title or body edit has landed since, and a refused edit writes
+// nothing: not the body, not the priority or link changes sent with it.
+func checkEditExpectedContentRevision(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "original", Body: "first body", Author: "worker-a",
+	})
+	require.NoError(t, err)
+	opened := issue.ContentRevision
+	require.Zero(t, opened, "a created issue starts at content revision 0, so the guard must tell 0 from absent")
+
+	first := "first editor's body"
+	result, err := store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID: issue.ID, Actor: "worker-a", Body: &first, ExpectedContentRevision: &opened,
+	})
+	require.NoError(t, err)
+	require.True(t, result.AnyChange)
+	require.Equal(t, opened+1, result.Issue.ContentRevision)
+
+	eventsBefore, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+	require.NoError(t, err)
+
+	second := "second editor's body"
+	priority, other := int64(1), "worker-b"
+	_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID: issue.ID, Actor: "worker-b", Body: &second, Owner: &other, SetPriority: &priority,
+		ExpectedContentRevision: &opened,
+	})
+	var conflict *db.ContentRevisionConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("stale edit must fail with a content revision conflict, got %v", err)
+	}
+	require.Equal(t, opened+1, conflict.CurrentContentRevision)
+
+	stored, err := store.IssueByID(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, first, stored.Body)
+	require.Nil(t, stored.Priority)
+	require.Nil(t, stored.Owner)
+	require.Equal(t, result.Issue.Revision, stored.Revision)
+	require.Equal(t, opened+1, stored.ContentRevision)
+	eventsAfter, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+	require.NoError(t, err)
+	require.Len(t, eventsAfter, len(eventsBefore), "a refused edit appends no event")
+
+	// A stale value also refuses an edit that touches no title or body.
+	_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID: issue.ID, Actor: "worker-b", SetPriority: &priority, ExpectedContentRevision: &opened,
+	})
+	require.ErrorAs(t, err, &conflict)
+
+	// Owner and priority edits leave the content revision alone, so the
+	// current value keeps working across them.
+	current := opened + 1
+	result, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID: issue.ID, Actor: "worker-b", Owner: &other, SetPriority: &priority,
+		ExpectedContentRevision: &current,
+	})
+	require.NoError(t, err)
+	require.Equal(t, current, result.Issue.ContentRevision)
+
+	// An edit that names no revision stays unconditional.
+	third := "third editor's body"
+	result, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID: issue.ID, Actor: "worker-c", Body: &third,
+	})
+	require.NoError(t, err)
+	require.Equal(t, third, result.Issue.Body)
+	require.Equal(t, current+1, result.Issue.ContentRevision)
 	return nil
 }

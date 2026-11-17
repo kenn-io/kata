@@ -886,6 +886,10 @@ type EditIssueRequest struct {
 		SetPriority   *int64      `json:"set_priority,omitempty"`
 		ClearPriority bool        `json:"clear_priority,omitempty,omitzero"`
 		LinksDelta    *LinksDelta `json:"links_delta,omitempty"`
+		// ExpectedContentRevision is the issue's content_revision the caller
+		// read before drafting the edit. A stale value answers 412
+		// revision_conflict and writes nothing; absent means unconditional.
+		ExpectedContentRevision *int64 `json:"expected_content_revision,omitempty" minimum:"0" doc:"Current content_revision of the issue; a title or body edit since then returns 412 revision_conflict and writes nothing."`
 	}
 }
 
