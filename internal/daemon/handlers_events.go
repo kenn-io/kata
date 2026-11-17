@@ -1290,7 +1290,7 @@ func requireDeletedHistoryAccess(ctx context.Context, cfg ServerConfig, projectI
 		return notFound
 	}
 	if hostAccessGoverns(ctx) {
-		if _, err := authorizeAdditionalHostOperation(ctx, "restoreIssue"); err != nil {
+		if _, err := authorizeAdditionalHostOperation(ctx, "restoreIssue", projectID, issue.ShortID); err != nil {
 			return refuseDeletedHistory(err, notFound)
 		}
 	}

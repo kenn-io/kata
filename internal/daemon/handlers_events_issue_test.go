@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -570,6 +572,59 @@ func (restoreDeniedHostAccess) Authorize(_ context.Context, request daemon.HostA
 	return daemon.HostAccessDecision{
 		TransactionFence: func(context.Context, db.Transaction) error { return nil },
 	}, nil
+}
+
+// restoreRouteOnlyHostAccess allows reads anywhere and allows a write only when
+// it is the restore route scoped to projectID, as an embedding app granting
+// global reads and project-only restores would.
+type restoreRouteOnlyHostAccess struct{ projectID int64 }
+
+func (c restoreRouteOnlyHostAccess) Authorize(_ context.Context, request daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
+	operation := request.Operation
+	allowed := operation.Policy.Capability == "read"
+	if operation.ID == "restoreIssue" {
+		_, hasRef := operation.PathParams["ref"]
+		allowed = operation.Method == http.MethodPost &&
+			operation.Path == "/api/v1/projects/{project_id}/issues/{ref}/actions/restore" &&
+			operation.PathParams["project_id"] == strconv.FormatInt(c.projectID, 10) &&
+			hasRef && !operation.AllProjects &&
+			slices.Equal(operation.ProjectIDs, []int64{c.projectID})
+	}
+	if !allowed {
+		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
+	}
+	return daemon.HostAccessDecision{
+		TransactionFence: func(context.Context, db.Transaction) error { return nil },
+	}, nil
+}
+
+func TestPollProjectEventsIssueDeletedHistoryAsksHostAboutTheRestoreRoute(t *testing.T) {
+	dbh := openTestDB(t)
+	project, err := dbh.db.CreateProject(t.Context(), "host-route")
+	require.NoError(t, err)
+	deleted, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "deleted", Author: "agent"})
+	require.NoError(t, err)
+	_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), deleted.ID, "agent")
+	require.NoError(t, err)
+
+	server := daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now, HostAccess: restoreRouteOnlyHostAccess{projectID: project.ID}})
+	t.Cleanup(func() { _ = server.Close() })
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{
+			Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "agent",
+		})
+		server.Handler().ServeHTTP(w, r.WithContext(ctx))
+	}))
+	t.Cleanup(ts.Close)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+scopedProjectPath(project.ID, "events")+"?issue="+url.QueryEscape(deleted.ShortID)+"&actor=agent", nil)
+	require.NoError(t, err)
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 }
 
 func TestPollProjectEventsIssueDeletedHistoryRequiresHostRestorePermission(t *testing.T) {

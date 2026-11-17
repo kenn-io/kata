@@ -201,7 +201,13 @@ func hostAccessGoverns(ctx context.Context) bool {
 	return ok && state != nil && state.controller != nil
 }
 
-func authorizeAdditionalHostOperation(ctx context.Context, operationID string) (context.Context, error) {
+// authorizeAdditionalHostOperation asks the host controller about a second
+// operation the current request performs on the caller's behalf. The override
+// for each operation describes the request the middleware would build for it,
+// so a controller deciding by route, path params or project scope sees the real
+// operation rather than the current request relabelled. issueRef names the
+// issue for operations routed by {ref}.
+func authorizeAdditionalHostOperation(ctx context.Context, operationID string, projectID int64, issueRef string) (context.Context, error) {
 	state, ok := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState)
 	if !ok || state == nil || !state.authorized || state.controller == nil {
 		return ctx, projectAccessDenied()
@@ -217,6 +223,17 @@ func authorizeAdditionalHostOperation(ctx context.Context, operationID string) (
 	if operationID == "removeProject" {
 		operation.Method = http.MethodDelete
 		operation.Path = "/api/v1/projects/{project_id}"
+	}
+	if operationID == "restoreIssue" {
+		operation.Method = http.MethodPost
+		operation.Path = "/api/v1/projects/{project_id}/issues/{ref}/actions/restore"
+		operation.PathParams = map[string]string{
+			"project_id": strconv.FormatInt(projectID, 10),
+			"ref":        issueRef,
+		}
+		operation.ProjectIDs = []int64{projectID}
+		operation.ProjectUIDs = nil
+		operation.AllProjects = false
 	}
 	decision, err := state.controller.Authorize(ctx, HostAccessRequest{
 		Subject:   state.request.Subject,
