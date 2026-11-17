@@ -406,6 +406,16 @@ func (e *RevisionConflictError) Error() string {
 	return fmt.Sprintf("revision conflict: current revision is %d", e.CurrentRevision)
 }
 
+// ContentRevisionConflictError reports that a caller's expected content
+// revision does not match the issue's current title/body revision.
+type ContentRevisionConflictError struct {
+	CurrentContentRevision int64
+}
+
+func (e *ContentRevisionConflictError) Error() string {
+	return fmt.Sprintf("content revision conflict: current content revision is %d", e.CurrentContentRevision)
+}
+
 // MetadataGuardConflictError reports that a per-key metadata condition did
 // not match the value read inside the mutation transaction.
 type MetadataGuardConflictError struct {

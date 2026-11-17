@@ -72,7 +72,7 @@ type detailAPI interface {
 		ctx context.Context, projectID int64, ref string, body LinkBody, actor string,
 	) (*MutationResp, error)
 	EditBody(
-		ctx context.Context, projectID int64, ref, body, actor string,
+		ctx context.Context, projectID int64, ref, body, actor string, expectedContentRevision *int64,
 	) (*MutationResp, error)
 	AddComment(
 		ctx context.Context, projectID int64, ref, body, actor string,

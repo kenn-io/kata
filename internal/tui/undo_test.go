@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -29,6 +30,7 @@ type undoTestAPI struct {
 	reopenCalls   int
 	reopenAfter   *Issue
 	reopenErr     error
+	bodyErr       error
 	links         []LinkEntry
 	removedLinkID int64
 	writes        []string
@@ -119,9 +121,9 @@ func (f *undoTestAPI) RemoveLabel(_ context.Context, _ int64, _, label, _ string
 	return f.completeResponse(f.writeResp), nil
 }
 
-func (f *undoTestAPI) EditBody(_ context.Context, _ int64, _, body, _ string) (*MutationResp, error) {
+func (f *undoTestAPI) EditBody(_ context.Context, _ int64, _, body, _ string, _ *int64) (*MutationResp, error) {
 	f.writes = append(f.writes, "body "+body)
-	return f.completeResponse(f.writeResp), nil
+	return f.completeResponse(f.writeResp), f.bodyErr
 }
 
 func (f *undoTestAPI) CloseWithEvidence(_ context.Context, _ int64, _ string, _ CloseInput) (*MutationResp, error) {
@@ -245,7 +247,7 @@ func TestUndoClientRecordsSupportedFieldChanges(t *testing.T) {
 			return c.RemoveLabel(t.Context(), 7, "abc4", "urgent", "bob")
 		}},
 		{"body", Issue{Status: "open", Body: "before"}, Issue{Status: "open", Body: "after"}, "body.edit", func(c *undoClient) (*MutationResp, error) {
-			return c.EditBody(t.Context(), 7, "abc4", "after", "bob")
+			return c.EditBody(t.Context(), 7, "abc4", "after", "bob", nil)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -899,4 +901,18 @@ func TestUndoClientPreservesWaitingWriteOrder(t *testing.T) {
 		require.NoError(t, <-results)
 		require.Equal(t, []*int64{new(int64(1)), new(int64(2)), new(int64(3))}, f.priorities)
 	})
+}
+
+// A body undo the daemon refuses because another client edited the body in
+// the meantime is reported as a changed body, not as a raw API error.
+func TestUndoClientBodyRefusedByContentRevisionSaysBodyChanged(t *testing.T) {
+	uid := "01JZ0000000000000000000001"
+	current := Issue{UID: uid, ProjectID: 7, Body: "after", Revision: 4}
+	entry := undoEntry{kind: "body.edit", uid: uid, projectID: 7, revision: 4, instanceUID: "instance-1", actor: "bob",
+		before: Issue{Body: "before"}, after: Issue{Body: "after"}}
+	f := &undoTestAPI{issue: current, bodyErr: &APIError{Status: http.StatusPreconditionFailed, Code: "revision_conflict"}}
+	outcome := newConnectedUndoClient(t, f).undo(t.Context(), entry, undoOptions{})
+	require.NoError(t, outcome.err)
+	require.False(t, outcome.changed)
+	require.Equal(t, "issue body changed since the action", outcome.conflict)
 }
