@@ -83,10 +83,14 @@ func (s *doctorState) connectDoctorDaemon(ctx context.Context) (*kataapi.Client,
 	hc.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
 	probeHC := *hc
 	probeHC.Timeout = doctorDocbankProbeTimeout
-	probeClient, probeErr := newDoctorAPIClient(resolved.BaseURL, &probeHC)
+	constructFailure := diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Cannot construct a client for the selected daemon", Fix: "Check the selected daemon's credential and transport configuration."}
+	probeClient, err := newDoctorAPIClient(resolved.BaseURL, &probeHC)
+	if err != nil {
+		return nil, false, constructFailure
+	}
 	apiClient, err := newDoctorAPIClient(resolved.BaseURL, hc)
-	if err = errors.Join(err, probeErr); err != nil {
-		return nil, false, diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Cannot construct a client for the selected daemon", Fix: "Check the selected daemon's credential and transport configuration."}
+	if err != nil {
+		return nil, false, constructFailure
 	}
 	s.probeClient = probeClient
 	ping, err := apiClient.PingWithResponse(probe)
