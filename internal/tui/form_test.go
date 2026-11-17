@@ -414,6 +414,9 @@ func TestRouteFormMutation_BodyEditRefused_KeepsTextAndExplains(t *testing.T) {
 	m := formFixture()
 	m.view = viewDetail
 	m = m.openBodyEditForm()
+	const draft = "my unsaved draft, distinct from the stored body"
+	m.input.activeField().setValue(draft)
+	m.input.fields[m.input.active] = *m.input.activeField()
 	m.input.saving = true
 	out, _ := m.Update(mutationDoneMsg{
 		origin: "form", kind: "form.body.edit", formGen: m.input.formGen,
@@ -429,8 +432,8 @@ func TestRouteFormMutation_BodyEditRefused_KeepsTextAndExplains(t *testing.T) {
 	if nm.input.err != bodyEditConflictMessage {
 		t.Fatalf("err = %q, want %q", nm.input.err, bodyEditConflictMessage)
 	}
-	if got := nm.input.activeField().value(); got != "current body" {
-		t.Fatalf("typed text = %q, want it kept", got)
+	if got := nm.input.activeField().value(); got != draft {
+		t.Fatalf("typed text = %q, want the draft %q kept", got, draft)
 	}
 }
 

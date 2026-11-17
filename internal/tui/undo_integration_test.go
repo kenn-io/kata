@@ -402,6 +402,9 @@ func TestClientEditBodyFailsWhenVersionUnknown(t *testing.T) {
 			require.Error(t, err)
 			require.Nil(t, resp)
 			require.Contains(t, err.Error(), "daemon API "+contentRevisionAPIVersion)
+			var preflight *mutationPreflightError
+			require.ErrorAs(t, err, &preflight)
+			require.False(t, ambiguousWriteError(err))
 		})
 	}
 }
@@ -436,4 +439,19 @@ func TestUndoClientBodyFailsWhenVersionUnknown(t *testing.T) {
 	require.Error(t, outcome.err)
 	require.False(t, outcome.changed)
 	require.Empty(t, outcome.conflict)
+	require.NotNil(t, outcome.attempt)
+	require.False(t, outcome.attempt.unknown, "no write was sent, so the outcome is known")
+}
+
+// A body save whose version check fails is not an uncertain write: the undo
+// attempt stays known, so history is kept and the save can be retried.
+func TestUndoClientBodySaveVersionCheckFailureKeepsHistory(t *testing.T) {
+	uid := "01JZ0000000000000000000001"
+	api := &healthDownUndoAPI{undoTestAPI: &undoTestAPI{issue: Issue{UID: uid, ProjectID: 7, Body: "after", Revision: 4}}, client: healthDownClient(t, nil, http.StatusInternalServerError)}
+	revision := int64(3)
+	resp, err := newConnectedUndoClient(t, api).EditBody(t.Context(), 7, uid, "new body", "bob", &revision)
+	require.Error(t, err)
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.undo)
+	require.False(t, resp.undo.unknown, "no write was sent, so the outcome is known")
 }

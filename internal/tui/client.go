@@ -671,19 +671,20 @@ const contentRevisionAPIVersion = "0.52.0"
 // at; the daemon refuses the write with 412 revision_conflict when a title
 // or body edit has landed since. nil writes unconditionally, and so does a
 // daemon older than contentRevisionAPIVersion, which would reject the field.
-// A daemon whose version cannot be read fails the save: the write is never
-// sent without a guard the caller asked for.
+// A daemon whose version cannot be read fails the save with a
+// mutationPreflightError: the write is never sent without a guard the caller
+// asked for, and nothing was written.
 func (c *Client) EditBody(ctx context.Context, projectID int64, ref, body, actor string, expectedContentRevision *int64) (*MutationResp, error) {
 
 	apiClient, err := c.generatedClient()
 	if err != nil {
-		return nil, err
+		return nil, &mutationPreflightError{err}
 	}
 	if expectedContentRevision != nil {
 		requirement := "guarded body edits require daemon API " + contentRevisionAPIVersion + " or newer"
 		reported, err := daemonAPIVersion(ctx, apiClient, requirement)
 		if err != nil {
-			return nil, err
+			return nil, &mutationPreflightError{err}
 		}
 		if semver.Compare(reported, "v"+contentRevisionAPIVersion) < 0 {
 			expectedContentRevision = nil
