@@ -291,4 +291,6 @@ func TestServiceRunRequiresWorkerFenceWithHostAccess(t *testing.T) {
 
 	err = service.Run(t.Context())
 	assert.EqualError(t, err, "kata: worker transaction fence is required with host access")
+	err = service.RunSemanticIndex(t.Context())
+	assert.EqualError(t, err, "kata: worker transaction fence is required with host access")
 }

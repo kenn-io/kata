@@ -903,8 +903,20 @@ func (a hostAccessControllerAdapter) Authorize(
 // due-notification, and assignment-expiry workers, and MCP Events delivery
 // when Config.MCPEvents can deliver, until ctx is canceled or
 // Close is called. Run does not start a listener and may be called only once
-// at a time.
+// at a time. To run only semantic indexing, use RunSemanticIndex.
 func (s *Service) Run(ctx context.Context) error {
+	return s.runWorkers(ctx, true)
+}
+
+// RunSemanticIndex runs only the reconciler configured by Config.Embeddings.
+// It shares Run's single-run rule and worker transaction fence requirement.
+// If embeddings are disabled or pgvector is missing, it waits until ctx is
+// canceled or Close is called. Its return follows the same contract as Run.
+func (s *Service) RunSemanticIndex(ctx context.Context) error {
+	return s.runWorkers(ctx, false)
+}
+
+func (s *Service) runWorkers(ctx context.Context, full bool) error {
 	if ctx == nil {
 		return errors.New("kata: run context is required")
 	}
@@ -972,6 +984,49 @@ func (s *Service) Run(ctx context.Context) error {
 		federationSub.Unsub()
 	}()
 
+	var workers []namedWorker
+	if full {
+		workers = s.serviceWorkers()
+	}
+	if s.embeddingReconciler != nil {
+		workers = append(workers, namedWorker{name: "embeddings", run: s.embeddingReconciler.Run})
+	}
+	workerErrs := make(chan error, len(workers))
+	for _, worker := range workers {
+		go func() {
+			err := worker.run(runCtx)
+			workerErrs <- worker.result(err, runCtx.Err())
+		}()
+	}
+
+	var stop runStop
+	workerResults := make([]error, 0, len(workers))
+	select {
+	case <-runCtx.Done():
+		stop = runStop{reason: stopContextDone, err: runCtx.Err()}
+	case err := <-workerErrs:
+		stop = runStop{reason: stopWorkerExit, err: err}
+		workerResults = append(workerResults, err)
+	}
+	// Sampled here, next to the stop it qualifies: a Close that lands later
+	// must not retroactively change what an already-recorded error means.
+	callerStop := ctx.Err()
+	if callerStop == nil && s.isClosed() {
+		callerStop = context.Canceled
+	}
+	fence.beginUnwind()
+	for len(workerResults) < len(workers) {
+		workerResults = append(workerResults, <-workerErrs)
+	}
+	// A fence rejection cancels the run, so the select above sees it as
+	// stopContextDone. The recorder holds the real reason.
+	if fenceErr := fence.first(); fenceErr != nil {
+		stop = runStop{reason: stopFenceFailure, err: fenceErr}
+	}
+	return runResult(stop, workerResults, callerStop)
+}
+
+func (s *Service) serviceWorkers() []namedWorker {
 	runner := &federation.Runner{
 		DB:          s.store,
 		Credentials: s.federationCredentials,
@@ -1093,47 +1148,12 @@ func (s *Service) Run(ctx context.Context) error {
 		{name: "due-notification", run: dueNotificationSweeper.Run},
 		{name: "assignment-expiry", run: assignmentSweeper.Run},
 	}
-	if s.embeddingReconciler != nil {
-		workers = append(workers, namedWorker{name: "embeddings", run: s.embeddingReconciler.Run})
-	}
 	// A disabled Events service has nothing to run, and a worker that returns
 	// early would end Run, so it joins the list only when it can deliver.
 	if s.mcpEvents != nil && s.mcpEvents.Availability().Enabled {
 		workers = append(workers, namedWorker{name: "mcp-events", run: s.mcpEvents.Run})
 	}
-	workerErrs := make(chan error, len(workers))
-	for _, worker := range workers {
-		go func() {
-			err := worker.run(runCtx)
-			workerErrs <- worker.result(err, runCtx.Err())
-		}()
-	}
-
-	var stop runStop
-	workerResults := make([]error, 0, len(workers))
-	select {
-	case <-runCtx.Done():
-		stop = runStop{reason: stopContextDone, err: runCtx.Err()}
-	case err := <-workerErrs:
-		stop = runStop{reason: stopWorkerExit, err: err}
-		workerResults = append(workerResults, err)
-	}
-	// Sampled here, next to the stop it qualifies: a Close that lands later
-	// must not retroactively change what an already-recorded error means.
-	callerStop := ctx.Err()
-	if callerStop == nil && s.isClosed() {
-		callerStop = context.Canceled
-	}
-	fence.beginUnwind()
-	for len(workerResults) < len(workers) {
-		workerResults = append(workerResults, <-workerErrs)
-	}
-	// A fence rejection cancels the run, so the select above sees it as
-	// stopContextDone. The recorder holds the real reason.
-	if fenceErr := fence.first(); fenceErr != nil {
-		stop = runStop{reason: stopFenceFailure, err: fenceErr}
-	}
-	return runResult(stop, workerResults, callerStop)
+	return workers
 }
 
 // publishWorkerEvents fans a background worker's events out to both event

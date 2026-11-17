@@ -39,7 +39,7 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 	service := open(kata.PostgresSchemaValidate)
 	missingCtx, cancelMissing := context.WithCancel(ctx)
 	missingDone := make(chan error, 1)
-	go func() { missingDone <- service.Run(missingCtx) }()
+	go func() { missingDone <- service.RunSemanticIndex(missingCtx) }()
 	t.Cleanup(func() {
 		cancelMissing()
 		if missingDone != nil {
