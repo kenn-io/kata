@@ -16,6 +16,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   cannot be read, the save or undo fails and writes nothing. Edit requests can
   send `expected_content_revision` for the same check; see the
   [HTTP API reference](reference/http-api.md#editing-an-issue-safely).
+
 - Send a [request without replacing one](reference/cli.md#teammate-requests)
   the recipient still holds with `kata notify --no-replace`, and clear a
   request only while its stored `from` field is a given actor with
