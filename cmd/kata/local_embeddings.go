@@ -24,6 +24,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/storeopen"
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kit/atomicfile"
 	"go.kenn.io/kit/embedlocal"
 )
@@ -33,15 +34,7 @@ var localEmbeddingsInstall = embedlocal.Install
 var localEmbeddingsInspect = embedlocal.Inspect
 
 func resolveLocalEmbeddings(ctx context.Context, confirm func(context.Context, int64) (bool, error)) (string, error) {
-	endpoint, err := localEmbeddingsEndpoint(ctx, embedlocal.Options{SkipOllama: true})
-	if !errors.Is(err, embedlocal.ErrNotFound) {
-		return endpoint, err
-	}
-	installed, err := installLocalEmbeddings(ctx, confirm, nil)
-	if err != nil {
-		return "", err
-	}
-	return localEmbeddingsEndpoint(ctx, embedlocal.Options{SkipOllama: true, Executable: installed.Executable})
+	return embedding.ResolveLocal(ctx, localEmbeddingsEndpoint, localEmbeddingsInstall, confirm)
 }
 
 func installLocalEmbeddings(ctx context.Context, confirm func(context.Context, int64) (bool, error), progress func(int64, int64)) (embedlocal.Installation, error) {

@@ -23,6 +23,7 @@ A Postgres-backed service can enable semantic and hybrid issue search with
 `Config.Embeddings`. Set `BaseURL` and `Model` for an embedding server, or set
 `Local` to use an already installed local model server. Kata does not install
 or download a model for the host. Call `Run` to build and update issue vectors.
+A host worker fence stops the embedding worker when it rejects a transaction.
 The Postgres database needs the pgvector extension. Without it, lexical search
 remains available and semantic search reports the missing extension. Restart the
 service after installing pgvector.

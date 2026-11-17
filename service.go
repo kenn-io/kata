@@ -406,7 +406,9 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	if cfg.Embeddings.Enabled() {
 		ec := embedding.ClientConfig(cfg.Embeddings)
 		if cfg.Embeddings.UsesLocal() {
-			ec.Endpoint = embedding.LocalEndpoint
+			ec.Endpoint = func(ctx context.Context) (string, error) {
+				return embedding.ResolveLocal(ctx, embedlocal.Endpoint, embedlocal.Install, nil)
+			}
 		}
 		embedder, err = embedding.New(ec)
 		if err == nil {

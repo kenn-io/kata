@@ -83,7 +83,14 @@ func (p *postgresIndex) beginReconcilerTx(ctx context.Context) (*sql.Tx, error) 
 	if err != nil {
 		return nil, err
 	}
-	return conn.BeginTx(ctx, nil)
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.ApplyTransactionFence(ctx, tx); err != nil {
+		return nil, db.FinishTransactionRollback(ctx, err, tx.Rollback())
+	}
+	return tx, nil
 }
 
 // ErrPgvectorMissing reports that the pgvector extension is unavailable.
@@ -301,11 +308,12 @@ func (p *postgresIndex) ensureBuilding(ctx context.Context, key string, gen kitv
 	if gen.Dimensions > maxPostgresHalfvecDimensions {
 		return fmt.Errorf("vector: postgres halfvec dimensions must not exceed 4,000 (got %d)", gen.Dimensions)
 	}
-	executor, err := p.reconcilerExecutor()
+	tx, err := p.beginReconcilerTx(ctx)
 	if err != nil {
 		return fmt.Errorf("vector: ensure postgres generation %s: %w", key, err)
 	}
-	if _, err := executor.ExecContext(ctx, `
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO issue_vector_generations(gen_key, model, dimensions, state)
 		VALUES($1, $2, $3, 'building')
 		ON CONFLICT(gen_key) DO UPDATE SET state = 'building'
@@ -316,12 +324,15 @@ func (p *postgresIndex) ensureBuilding(ctx context.Context, key string, gen kitv
 	}
 	var model string
 	var dimensions int
-	if err := executor.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(ctx,
 		`SELECT model, dimensions FROM issue_vector_generations WHERE gen_key = $1`, key).Scan(&model, &dimensions); err != nil {
 		return fmt.Errorf("vector: validate postgres generation %s: %w", key, err)
 	}
 	if model != gen.Model || dimensions != gen.Dimensions {
 		return fmt.Errorf("vector: generation %s metadata does not match its fingerprint", key)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("vector: commit postgres generation %s: %w", key, err)
 	}
 	return nil
 }
@@ -417,7 +428,12 @@ func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (in
 		return 0, fmt.Errorf("vector: scan postgres mirror keys: %w", err)
 	}
 	changed, stale, err := syncMirror(ctx, store, known, func(issue db.IssueContent) (int, error) {
-		result, err := executor.ExecContext(ctx, `
+		tx, err := p.beginReconcilerTx(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("vector: begin postgres mirror upsert: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		result, err := tx.ExecContext(ctx, `
 			INSERT INTO issue_vector_mirror(issue_uid, project_uid, content, content_revision)
 			VALUES($1, $2, $3, $4)
 			ON CONFLICT(issue_uid) DO UPDATE SET
@@ -428,6 +444,9 @@ func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (in
 		if err != nil {
 			return 0, fmt.Errorf("vector: upsert postgres mirror row %s: %w", issue.UID, err)
 		}
+		if err := tx.Commit(); err != nil {
+			return 0, fmt.Errorf("vector: commit postgres mirror upsert: %w", err)
+		}
 		if affected, err := result.RowsAffected(); err == nil {
 			return int(affected), nil
 		}
@@ -437,9 +456,17 @@ func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (in
 		return changed, err
 	}
 	for _, uid := range stale {
-		if _, err := executor.ExecContext(ctx,
-			`DELETE FROM issue_vector_mirror WHERE issue_uid = $1`, uid); err != nil {
+		tx, err := p.beginReconcilerTx(ctx)
+		if err != nil {
+			return changed, fmt.Errorf("vector: begin postgres mirror delete: %w", err)
+		}
+		_, err = tx.ExecContext(ctx, `DELETE FROM issue_vector_mirror WHERE issue_uid = $1`, uid)
+		if err != nil {
+			_ = tx.Rollback()
 			return changed, fmt.Errorf("vector: delete postgres mirror row %s: %w", uid, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return changed, fmt.Errorf("vector: commit postgres mirror delete: %w", err)
 		}
 		changed++
 	}
