@@ -123,7 +123,7 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 				},
 			})
 			searches[index] = projectSearch{response: response, err: searchErr}
-			if searchErr != nil {
+			if searchErr != nil && !missingSearchEmbeddings(searchErr, input.Mode) {
 				return fmt.Errorf("search project %q: %w", projects[index].Name, searchErr)
 			}
 			return nil
@@ -139,9 +139,16 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	ranked := make([]rankedHit, 0)
 	truncated := false
 	degraded := false
+	failed := 0
 	degradedReasons := make([]string, 0)
 	effectiveMode := ""
 	for index, search := range searches {
+		if search.err != nil {
+			failed++
+			degraded = true
+			degradedReasons = append(degradedReasons, projects[index].Name+": embeddings are not configured")
+			continue
+		}
 		response := search.response
 		switch {
 		case effectiveMode == "":
@@ -169,6 +176,9 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		if response.DegradedReason != nil && *response.DegradedReason != "" {
 			degradedReasons = append(degradedReasons, projects[index].Name+": "+*response.DegradedReason)
 		}
+	}
+	if failed == len(searches) && failed > 0 {
+		return nil, SearchOutput{}, fmt.Errorf("search project %q: %w", projects[0].Name, searches[0].err)
 	}
 	// Scores from independent per-project searches are request-local
 	// (hybrid uses reciprocal-rank values and auto can fall back per
@@ -214,6 +224,11 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 			return nil
 		}(),
 	}, nil
+}
+
+func missingSearchEmbeddings(err error, mode string) bool {
+	envelope, ok := errors.AsType[generated.ErrorEnvelope](err)
+	return (mode == "semantic" || mode == "hybrid") && ok && isHTTPStatus(err, http.StatusBadRequest) && envelope.Status == http.StatusBadRequest && envelope.ErrorData.Code == "validation" && envelope.ErrorData.Message == fmt.Sprintf("mode %q is unavailable: embeddings are not configured", mode)
 }
 
 func (h toolHandlers) ready(ctx context.Context, _ *sdkmcp.CallToolRequest, input ReadyInput) (*sdkmcp.CallToolResult, IssueListOutput, error) {

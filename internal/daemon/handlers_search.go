@@ -5,12 +5,14 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/pagination"
+	kitvec "go.kenn.io/kit/vector"
 )
 
 // registerSearchHandlers installs GET /api/v1/projects/{id}/search. Returns the
@@ -40,7 +42,12 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			limit = 20
 		}
 		mode := in.Mode
-		if insecureReadonlyRequest(ctx) && cfg.Embedder != nil {
+		binding, bindingErr := cfg.DB.FederationBindingByProject(ctx, in.ProjectID)
+		if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
+			return nil, internalAPIError(bindingErr)
+		}
+		direct := bindingErr == nil && binding.IsDirectSpoke()
+		if insecureReadonlyRequest(ctx) && (cfg.Embedder != nil || direct) {
 			switch mode {
 			case "hybrid", "semantic":
 				return nil, api.NewError(401, "auth_required",
@@ -50,7 +57,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 
-		if cfg.EmbeddingUnavailableReason != "" && (mode == "semantic" || mode == "hybrid") {
+		if !direct && cfg.EmbeddingUnavailableReason != "" && (mode == "semantic" || mode == "hybrid") {
 			return nil, api.NewError(503, "unavailable", cfg.EmbeddingUnavailableReason, "", nil)
 		}
 		stable := in.Sort == "oldest"
@@ -80,12 +87,24 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			res.Hits, err = cfg.DB.SearchFTS(ctx, params)
 			res.Mode = modeLexical
 		} else {
-			res, err = hybridSearch(ctx, cfg.DB, cfg.VectorIndex, cfg.Embedder, hybridParams{
+			params := hybridParams{
 				ProjectID: in.ProjectID, Query: in.Query, Limit: limit, ProbeLimit: probeLimit,
 				IncludeDeleted: in.IncludeDeleted, Requested: mode,
 				Labels: in.Labels, ExcludeLabels: in.ExcludeLabels, Status: in.Status,
 				IssueScope: issueScopeFromContext(ctx),
-			})
+			}
+			if direct {
+				params.Hub = func(ctx context.Context, p hybridParams, fetch int) ([]kitvec.Hit[string], bool, error) {
+					ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+					defer cancel()
+					client, cred, err := claimForwardClient(ctx, cfg, binding)
+					if err != nil {
+						return nil, false, err
+					}
+					return client.SearchShared(ctx, cred.HubProjectID, p, fetch)
+				}
+			}
+			res, err = hybridSearch(ctx, cfg.DB, cfg.VectorIndex, cfg.Embedder, params)
 		}
 		if err != nil {
 			if me, ok := errors.AsType[*modeError](err); ok {
@@ -97,7 +116,9 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return nil, internalAPIError(err)
 		}
-		markEmbeddingUnavailable(&res, cfg.EmbeddingUnavailableReason, mode)
+		if !direct {
+			markEmbeddingUnavailable(&res, cfg.EmbeddingUnavailableReason, mode)
+		}
 		more := len(res.Hits) > limit
 		page := api.PageMetadata{Complete: !more, Truncated: more}
 		if !stable && (res.Mode != modeLexical || res.Degraded || len(res.Hits) >= 200) {
@@ -111,7 +132,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 				page.NextCursor = pagination.Encode(pagination.Position{CreatedAt: last.CreatedAt, ID: last.ID}, hash)
 			}
 		}
-		out := &api.SearchResponse{EmbeddingsConfigured: strconv.FormatBool(cfg.Embedder != nil)}
+		out := &api.SearchResponse{EmbeddingsConfigured: strconv.FormatBool(cfg.Embedder != nil || direct)}
 		out.Body.PageMetadata = page
 		out.Body.Query = in.Query
 		out.Body.Mode = string(res.Mode)

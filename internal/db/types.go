@@ -153,6 +153,11 @@ type FederationBinding struct {
 	LastSyncAt    *time.Time
 }
 
+// IsDirectSpoke reports whether the binding is a spoke without a relay.
+func (b FederationBinding) IsDirectSpoke() bool {
+	return b.Role == FederationRoleSpoke && b.RelayConfig == nil
+}
+
 // RebindFederationBindingParams conditionally moves one spoke binding to a
 // replacement endpoint without changing its hub identity or sync state.
 type RebindFederationBindingParams struct {
@@ -575,6 +580,10 @@ type SearchCandidate struct {
 	Issue     Issue    `json:"issue"`
 	Score     float64  `json:"score"` // Backend-native lexical relevance; higher is better.
 	MatchedIn []string `json:"matched_in"`
+	Remote    bool     `json:"-"`
+	Hub       bool     `json:"-"`
+	Oversized bool     `json:"-"`
+	WebURL    string   `json:"-"`
 }
 
 // IdempotencyMatch is a previously committed issue mutation matched through

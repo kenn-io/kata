@@ -260,8 +260,14 @@ That is the consent boundary. For sensitive projects, prefer a local endpoint
 (such as Ollama on loopback) so issue text never leaves the host. The embedding
 API key is only ever sent to the configured `base_url` origin.
 
-Embeddings are local derived state and **do not federate**: each daemon embeds
-only what it stores, and no vectors are sent to or pulled from federated hubs.
+Embeddings are local derived state and **do not federate**. A direct spoke
+searches shared projects by meaning through its hub and embeds only its local
+projects. A hub match appears after the issue is pulled to the spoke. Upgrade
+the hub before its direct spokes. If the hub is unavailable or too old,
+automatic search returns word matches with a reason; explicit semantic or
+hybrid search returns an error. Relay spokes retain their existing behavior.
+An all-project MCP semantic or hybrid search returns available results and
+names local projects without embeddings.
 SQLite keeps them in a sidecar database; PostgreSQL keeps them in pgvector
 tables in its selected Kata schema when that optional extension is installed.
 They are not included in JSONL

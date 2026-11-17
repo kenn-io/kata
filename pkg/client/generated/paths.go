@@ -321,6 +321,10 @@ type DisconnectRelayEnrollmentPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type SearchFederationProjectPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type GetProjectFederationStatusPath struct {
 	ProjectID int64 `json:"project_id"`
 }

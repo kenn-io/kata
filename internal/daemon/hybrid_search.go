@@ -25,6 +25,7 @@ type hybridParams struct {
 	ExcludeLabels   []string
 	AllowedIssueIDs []int64
 	IssueScope      *db.APITokenScope
+	Hub             func(context.Context, hybridParams, int) ([]kitvec.Hit[string], bool, error)
 }
 
 type hybridResult struct {
@@ -76,7 +77,7 @@ const knnDeepLimit = 1000
 func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb *embedding.Client, p hybridParams) (hybridResult, error) {
 	// Credential failures must be explained even before an index is ready.
 	// Otherwise retain the existing absent-index lexical-only contract.
-	configured := emb != nil && (idx != nil || emb.CredentialHealth().Credential != "ok")
+	configured := p.Hub != nil || emb != nil && (idx != nil || emb.CredentialHealth().Credential != "ok")
 	mode, err := resolveMode(p.Requested, configured)
 	if err != nil {
 		return hybridResult{}, &modeError{status: 400, msg: err.Error()}
@@ -205,6 +206,14 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	// The vector index ranks only the searched project's chunks, so another
 	// project's closer chunks cannot starve this one out of the window.
 	ctx = db.WithAuthorizedProjects(ctx, []string{project.UID})
+	if p.Hub != nil {
+		hits, bounded, err := p.Hub(ctx, p, fetch)
+		if err != nil {
+			return nil, false, err
+		}
+		candidates, err := hydrateVectorHits(ctx, store, hits, p, fetch, newLabelFilter(p.Labels, p.ExcludeLabels))
+		return candidates, bounded, err
+	}
 	if err := emb.MissingCredentialError(); err != nil {
 		return nil, false, err
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"go.kenn.io/kata/pkg/client/generated"
 	kitdaemon "go.kenn.io/kit/daemon"
+	kitvec "go.kenn.io/kit/vector"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
@@ -821,6 +822,35 @@ type claimHubClient struct {
 	baseURL      string
 	client       *http.Client
 	transportErr error
+}
+
+func (c *claimHubClient) SearchShared(ctx context.Context, projectID int64, p hybridParams, limit int) ([]kitvec.Hit[string], bool, error) {
+	if c.transportErr != nil {
+		return nil, false, c.transportErr
+	}
+	client, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(claimHubDoer{client: c.client}))
+	if err != nil {
+		return nil, false, err
+	}
+	count := int64(limit)
+	query := &generated.SearchFederationProjectQuery{Q: p.Query, Limit: &count, Label: p.Labels, ExcludeLabel: p.ExcludeLabels}
+	if p.Status != "" {
+		status := generated.SearchFederationProjectQueryStatus(p.Status)
+		query.Status = &status
+	}
+	response, err := client.SearchFederationProjectWithResponse(ctx, &generated.SearchFederationProjectRequestOptions{PathParams: &generated.SearchFederationProjectPath{ProjectID: projectID}, Query: query})
+	if err != nil {
+		return nil, false, err
+	}
+	var body api.FederationSearchResponse
+	if err := json.Unmarshal(response.Body, &body.Body); err != nil {
+		return nil, false, err
+	}
+	hits := make([]kitvec.Hit[string], 0, len(body.Body.Hits))
+	for _, hit := range body.Body.Hits {
+		hits = append(hits, kitvec.Hit[string]{Doc: hit.UID, Score: float32(hit.Score)})
+	}
+	return hits, body.Body.Bounded, nil
 }
 
 type claimHubStatusError struct {

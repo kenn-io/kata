@@ -120,6 +120,37 @@ func rejectRelayCredentialOnLegacyEvents(principal federationPrincipal) error {
 }
 
 func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
+	huma.Register(humaAPI, huma.Operation{OperationID: "searchFederationProject", Method: http.MethodGet, Path: "/api/v1/projects/{project_id}/federation/search"}, func(ctx context.Context, in *api.FederationSearchRequest) (*api.FederationSearchResponse, error) {
+		ctx, principal, err := authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull", federationTransportOperation("searchFederationProject"))
+		if err != nil {
+			return nil, err
+		}
+		if err := rejectRelayCredentialOnLegacyEvents(principal); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(in.Query) == "" {
+			return nil, api.NewError(400, "validation", "query parameter q must be non-empty", "", nil)
+		}
+		limit := in.Limit
+		if limit <= 0 {
+			limit = 20
+		}
+		limit = min(limit, fetchCap)
+		res, err := hybridSearch(ctx, cfg.DB, cfg.VectorIndex, cfg.Embedder, hybridParams{ProjectID: in.ProjectID, Query: in.Query, ProbeLimit: limit, Requested: "semantic", Status: in.Status, Labels: in.Labels, ExcludeLabels: in.ExcludeLabels})
+		if err != nil {
+			if me, ok := errors.AsType[*modeError](err); ok {
+				return nil, api.NewError(me.Status(), "unavailable", me.Error(), "", nil)
+			}
+			return nil, internalAPIError(err)
+		}
+		out := &api.FederationSearchResponse{}
+		out.Body.Hits = make([]api.FederationSearchHit, 0, len(res.Hits))
+		for _, hit := range res.Hits {
+			out.Body.Hits = append(out.Body.Hits, api.FederationSearchHit{UID: hit.Issue.UID, Score: hit.Score})
+		}
+		out.Body.Bounded = res.Degraded
+		return out, nil
+	})
 	registerFederationSigningHandlers(humaAPI, cfg)
 	registerRelayHandlers(humaAPI, cfg)
 	registerFederationBridgeConnect(humaAPI, cfg)

@@ -110,6 +110,7 @@ import type {
   FederationIngestEventsRequestBody,
   FederationQuarantineSummary,
   FederationRootKeyRepinResult,
+  FederationSearchResponseBody,
   FederationSpokeNameOut,
   FederationStatusBody,
   ForceReleaseIssueLeasePathParameters,
@@ -288,6 +289,8 @@ import type {
   RunIssueSyncOncePathParameters,
   RunIssueSyncOnceRequestBody,
   RunIssueSyncOnceResponseBody,
+  SearchFederationProjectParams,
+  SearchFederationProjectPathParameters,
   SearchIssuesParams,
   SearchIssuesPathParameters,
   SearchResponseBody,
@@ -3986,6 +3989,69 @@ export const disconnectRelayEnrollment = async (
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
       body: JSON.stringify(disconnectRelayRequestBody),
+    },
+  )
+}
+
+export type searchFederationProjectResponse200 = {
+  data: FederationSearchResponseBody
+  status: 200
+}
+
+export type searchFederationProjectResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type searchFederationProjectResponseSuccess = searchFederationProjectResponse200 & {
+  headers: Headers
+}
+export type searchFederationProjectResponseError = searchFederationProjectResponseDefault & {
+  headers: Headers
+}
+
+export type searchFederationProjectResponse =
+  | searchFederationProjectResponseSuccess
+  | searchFederationProjectResponseError
+
+export const getSearchFederationProjectUrl = (
+  { projectId }: SearchFederationProjectPathParameters,
+  params: SearchFederationProjectParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    const explodeParameters = ['label', 'exclude_label']
+
+    if (Array.isArray(value) && explodeParameters.includes(key)) {
+      value.forEach((v) => {
+        normalizedParams.append(key, v === null ? 'null' : String(v))
+      })
+      return
+    }
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/search?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/federation/search`
+}
+
+export const searchFederationProject = async (
+  { projectId }: SearchFederationProjectPathParameters,
+  params: SearchFederationProjectParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<searchFederationProjectResponse> => {
+  return orvalFetch<searchFederationProjectResponse>(
+    getSearchFederationProjectUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'GET',
     },
   )
 }

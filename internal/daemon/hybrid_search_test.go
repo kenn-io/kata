@@ -17,7 +17,32 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
+	kitvec "go.kenn.io/kit/vector"
 )
+
+func TestHybridSearchHubFiltersAndCeiling(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "shared")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "login", Author: "tester"})
+	require.NoError(t, err)
+	_, err = store.AddLabel(ctx, issue.ID, "bug", "tester")
+	require.NoError(t, err)
+	params := hybridParams{ProjectID: project.ID, Query: "login", Limit: 2, Requested: "semantic", Labels: []string{"bug"}, Hub: func(_ context.Context, p hybridParams, _ int) ([]kitvec.Hit[string], bool, error) {
+		require.Equal(t, []string{"bug"}, p.Labels)
+		return []kitvec.Hit[string]{{Doc: issue.UID, Score: 0.9}}, true, nil
+	}}
+	_, err = hybridSearch(ctx, store, nil, nil, params)
+	require.ErrorContains(t, err, filterCeilingReason)
+	params.Requested = "auto"
+	result, err := hybridSearch(ctx, store, nil, nil, params)
+	require.NoError(t, err)
+	require.True(t, result.Degraded)
+	require.Equal(t, filterCeilingReason, result.DegradedReason)
+	require.Len(t, result.Hits, 1)
+	require.Equal(t, issue.UID, result.Hits[0].Issue.UID)
+}
 
 func TestHybridSearchLexicalWhenUnconfigured(t *testing.T) {
 	ctx := t.Context()
