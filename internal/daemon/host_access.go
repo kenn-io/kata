@@ -201,16 +201,18 @@ func hostAccessGoverns(ctx context.Context) bool {
 	return ok && state != nil && state.controller != nil
 }
 
-// authorizeAdditionalHostOperation asks the host controller about a second
-// operation the current request performs on the caller's behalf. The override
-// for each operation describes the request the middleware would build for it,
-// so a controller deciding by route, path params or project scope sees the real
-// operation rather than the current request relabelled. issueRef names the
-// issue for operations routed by {ref}.
-func authorizeAdditionalHostOperation(ctx context.Context, operationID string, projectID int64, issueRef string) (context.Context, error) {
+func authorizedHostState(ctx context.Context) (*hostAccessState, error) {
 	state, ok := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState)
 	if !ok || state == nil || !state.authorized || state.controller == nil {
-		return ctx, projectAccessDenied()
+		return nil, projectAccessDenied()
+	}
+	return state, nil
+}
+
+func authorizeAdditionalHostOperation(ctx context.Context, operationID string) (context.Context, error) {
+	state, err := authorizedHostState(ctx)
+	if err != nil {
+		return ctx, err
 	}
 	policy, ok := hostOperationPolicy(operationID)
 	if !ok {
@@ -224,23 +226,44 @@ func authorizeAdditionalHostOperation(ctx context.Context, operationID string, p
 		operation.Method = http.MethodDelete
 		operation.Path = "/api/v1/projects/{project_id}"
 	}
-	if operationID == "restoreIssue" {
-		operation.Method = http.MethodPost
-		operation.Path = "/api/v1/projects/{project_id}/issues/{ref}/actions/restore"
-		operation.PathParams = map[string]string{
-			"project_id": strconv.FormatInt(projectID, 10),
-			"ref":        issueRef,
-		}
-		operation.ProjectIDs = []int64{projectID}
-		operation.ProjectUIDs = nil
-		operation.AllProjects = false
+	return authorizeHostOperation(ctx, state, operation)
+}
+
+// authorizeHostRestore asks the host controller about the restoreIssue request
+// the middleware would build for POST .../issues/{ref}/actions/restore on
+// urlProjectID with the caller's ref and the given project scope.
+func authorizeHostRestore(ctx context.Context, urlProjectID int64, ref string, projectIDs []int64) (context.Context, error) {
+	state, err := authorizedHostState(ctx)
+	if err != nil {
+		return ctx, err
 	}
-	request := HostAccessRequest{
+	policy, ok := hostOperationPolicy("restoreIssue")
+	if !ok {
+		return ctx, api.NewError(http.StatusServiceUnavailable,
+			"access_unavailable", "access decision unavailable", "", nil)
+	}
+	return authorizeHostOperation(ctx, state, HostOperation{
+		ID:     "restoreIssue",
+		Method: http.MethodPost,
+		Path:   "/api/v1/projects/{project_id}/issues/{ref}/actions/restore",
+		PathParams: map[string]string{
+			"project_id": strconv.FormatInt(urlProjectID, 10),
+			"ref":        ref,
+		},
+		ProjectIDs: projectIDs,
+		Policy:     policy,
+	})
+}
+
+// authorizeHostOperation asks the controller about operation on behalf of the
+// current request's subject and actor and fences the caller's transaction on
+// the decision.
+func authorizeHostOperation(ctx context.Context, state *hostAccessState, operation HostOperation) (context.Context, error) {
+	decision, err := state.controller.Authorize(ctx, HostAccessRequest{
 		Subject:   state.request.Subject,
 		Actor:     state.request.Actor,
 		Operation: operation,
-	}
-	decision, err := state.controller.Authorize(ctx, request)
+	})
 	if errors.Is(err, ErrHostAccessDenied) {
 		return ctx, projectAccessDenied()
 	}
@@ -248,18 +271,11 @@ func authorizeAdditionalHostOperation(ctx context.Context, operationID string, p
 		return ctx, api.NewError(http.StatusServiceUnavailable,
 			"access_unavailable", "transaction access decision unavailable", "", nil)
 	}
-	// The returned context carries the additional operation as its host
-	// request, so scope checks that follow (authorizeHostProjectScope) widen
-	// and re-authorize that operation, never the one the middleware ran.
-	additional := &hostAccessState{
-		controller: state.controller, request: request, decision: decision, authorized: true,
-	}
-	ctx = context.WithValue(ctx, hostAccessStateContextKey{}, additional)
 	ctx = db.WithAdditionalTransactionFence(ctx, func(
 		fenceCtx context.Context,
 		transaction db.Transaction,
 	) error {
-		if err := additional.decision.TransactionFence(fenceCtx, transaction); err != nil {
+		if err := decision.TransactionFence(fenceCtx, transaction); err != nil {
 			if errors.Is(err, ErrHostAccessDenied) {
 				return errors.Join(api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil), err)
 			}

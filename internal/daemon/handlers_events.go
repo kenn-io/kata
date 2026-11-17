@@ -1281,8 +1281,10 @@ func sseFrameBytes(id int64, eventType string, data []byte) []byte {
 // checks restore runs, with requestActor standing in for restore's body actor.
 // An insecure-readonly caller is anonymous, and restore refuses it before any
 // handler runs, so it is refused here too. A host access controller must
-// also allow restoreIssue for issueRef, the ref the caller used, and for the
-// issue's current project when it moved. Every refusal (an API error below 500
+// also allow the two restoreIssue decisions the restore route makes for the
+// caller's ref: the middleware's, scoped to the URL project, and, only when the
+// issue moved, the one scoped to the URL project and the issue's current
+// project, which activeIssueByRef widens to before re-authorizing. Every refusal (an API error below 500
 // other than a hub error) answers issue_not_found; 5xx, federation_offline and
 // hub_claim_failed keep their status.
 func requireDeletedHistoryAccess(ctx context.Context, cfg ServerConfig, projectID int64, issue db.Issue, issueRef, requestActor string) error {
@@ -1291,15 +1293,12 @@ func requireDeletedHistoryAccess(ctx context.Context, cfg ServerConfig, projectI
 		return notFound
 	}
 	if hostAccessGoverns(ctx) {
-		// Run the decisions the restore route makes: restoreIssue for the URL
-		// project with the caller's ref, then, for an issue that moved, the
-		// same destination scope check activeIssueByRef runs.
-		restoreCtx, err := authorizeAdditionalHostOperation(ctx, "restoreIssue", projectID, issueRef)
-		if err != nil {
+		if _, err := authorizeHostRestore(ctx, projectID, issueRef, []int64{projectID}); err != nil {
 			return refuseDeletedHistory(err, notFound)
 		}
 		if issue.ProjectID != projectID {
-			if _, err := authorizeHostProjectScope(restoreCtx, []int64{issue.ProjectID}, nil, false); err != nil {
+			scope := []int64{projectID, issue.ProjectID}
+			if _, err := authorizeHostRestore(ctx, projectID, issueRef, scope); err != nil {
 				return refuseDeletedHistory(err, notFound)
 			}
 		}

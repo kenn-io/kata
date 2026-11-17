@@ -690,7 +690,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if disposition == "archive" && !projectOwnerAuthority(ctx) {
 			if hostAccessGoverns(ctx) {
-				authorizedContext, authErr := authorizeAdditionalHostOperation(ctx, "removeProject", in.ProjectID, "")
+				authorizedContext, authErr := authorizeAdditionalHostOperation(ctx, "removeProject")
 				if authErr != nil {
 					return nil, authErr
 				}
