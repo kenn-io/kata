@@ -11,11 +11,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"unicode"
 
 	ghinstallation "github.com/bradleyfalzon/ghinstallation/v2"
+	"github.com/golang-jwt/jwt/v4"
 
 	"go.kenn.io/kata/internal/config"
 )
@@ -40,7 +42,12 @@ type CredentialResolver struct {
 	runner        CommandRunner
 	baseTransport http.RoundTripper
 	appMu         sync.Mutex
-	apps          map[config.GitHubAppConfig]*ghinstallation.Transport
+	apps          map[appTransportKey]*ghinstallation.Transport
+}
+
+type appTransportKey struct {
+	app  config.GitHubAppConfig
+	base http.RoundTripper
 }
 
 // NewCredentialResolver returns a resolver using cfg and runner. A nil runner
@@ -84,14 +91,17 @@ func (r *CredentialResolver) credentialTransport(ctx context.Context, binding Bi
 	base = nextRoundTripper(base)
 	switch credential.kind {
 	case CredentialKindApp:
-		tr, err := r.appTransport(credential.app, credential.binding, base)
+		tr, cached, err := r.appTransport(credential.app, credential.binding, base)
 		if err != nil {
 			return nil, "", fmt.Errorf("create GitHub App transport: %w", err)
 		}
-		return newOriginGuardTransport(credential.binding, &evictOnFailTransport{
+		if !cached {
+			return newOriginGuardTransport(credential.binding, tr), credential.kind, nil
+		}
+		return newOriginGuardTransport(credential.binding, &evictOnUnauthorizedTransport{
 			next:     tr,
 			resolver: r,
-			app:      credential.app,
+			key:      appTransportKey{app: credential.app, base: base},
 		}), credential.kind, nil
 	case CredentialKindEnv, CredentialKindGH:
 		return newOriginGuardTransport(credential.binding, &staticBearerTransport{
@@ -103,40 +113,68 @@ func (r *CredentialResolver) credentialTransport(ctx context.Context, binding Bi
 	}
 }
 
-// appTransport returns the App's cached transport so sessions reuse its
-// installation token until it nears expiry. The first caller's base wins.
-func (r *CredentialResolver) appTransport(app config.GitHubAppConfig, binding Binding, base http.RoundTripper) (*ghinstallation.Transport, error) {
-	r.appMu.Lock()
-	defer r.appMu.Unlock()
-	if tr, ok := r.apps[app]; ok {
-		return tr, nil
+// appTransport returns the cached transport for app and base, so sessions
+// reuse its installation token until it nears expiry. A base that cannot be a
+// map key gets a transport of its own, and cached reports false.
+func (r *CredentialResolver) appTransport(app config.GitHubAppConfig, binding Binding, base http.RoundTripper) (tr *ghinstallation.Transport, cached bool, err error) {
+	key := appTransportKey{app: app, base: base}
+	cacheable := reflect.ValueOf(base).Comparable()
+	if cacheable {
+		r.appMu.Lock()
+		defer r.appMu.Unlock()
+		if tr, ok := r.apps[key]; ok {
+			return tr, true, nil
+		}
 	}
-	tr, err := ghinstallation.NewKeyFromFile(base, app.AppID, app.InstallationID, app.PrivateKeyPath)
+	atr, err := ghinstallation.NewAppsTransportWithOptions(base, app.AppID, ghinstallation.WithSigner(keyFileSigner{path: app.PrivateKeyPath}))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
+	tr = ghinstallation.NewFromAppsTransport(atr, app.InstallationID)
 	tr.BaseURL = githubRESTBaseURL(binding)
-	if r.apps == nil {
-		r.apps = make(map[config.GitHubAppConfig]*ghinstallation.Transport)
+	if cacheable {
+		if r.apps == nil {
+			r.apps = make(map[appTransportKey]*ghinstallation.Transport)
+		}
+		r.apps[key] = tr
 	}
-	r.apps[app] = tr
-	return tr, nil
+	return tr, cacheable, nil
 }
 
-// evictOnFailTransport drops a cached App transport after an error or a 401,
-// so a revoked token or rotated key heals on the next session.
-type evictOnFailTransport struct {
+// keyFileSigner reads the App's private key each time a token is minted, so a
+// replaced key file takes effect at the next mint without a restart, and a
+// missing file does not fail sessions that a cached token still serves.
+type keyFileSigner struct {
+	path string
+}
+
+func (s keyFileSigner) Sign(claims jwt.Claims) (string, error) {
+	pemBytes, err := os.ReadFile(s.path)
+	if err != nil {
+		return "", fmt.Errorf("read GitHub App private key: %w", err)
+	}
+	key, err := jwt.ParseRSAPrivateKeyFromPEM(pemBytes)
+	if err != nil {
+		return "", fmt.Errorf("parse GitHub App private key: %w", err)
+	}
+	return ghinstallation.NewRSASigner(jwt.SigningMethodRS256, key).Sign(claims)
+}
+
+// evictOnUnauthorizedTransport drops a cached App transport when GitHub answers
+// 401, so the next session mints a replacement for a revoked token. The
+// rejected request is not replayed.
+type evictOnUnauthorizedTransport struct {
 	next     *ghinstallation.Transport
 	resolver *CredentialResolver
-	app      config.GitHubAppConfig
+	key      appTransportKey
 }
 
-func (t *evictOnFailTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *evictOnUnauthorizedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.next.RoundTrip(req)
-	if err != nil || resp.StatusCode == http.StatusUnauthorized {
+	if err == nil && resp.StatusCode == http.StatusUnauthorized {
 		t.resolver.appMu.Lock()
-		if t.resolver.apps[t.app] == t.next {
-			delete(t.resolver.apps, t.app)
+		if t.resolver.apps[t.key] == t.next {
+			delete(t.resolver.apps, t.key)
 		}
 		t.resolver.appMu.Unlock()
 	}

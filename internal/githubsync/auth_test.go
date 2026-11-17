@@ -2,14 +2,12 @@ package githubsync
 
 import (
 	"context"
-	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,8 +16,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -27,15 +27,15 @@ import (
 )
 
 // appTestTransport fakes GitHub's token endpoint and API. It counts mints,
-// records API tokens, rejects token requests not signed by key when set, and
-// answers 401 to the rejected token.
+// keeps each mint's JWT and each API request's Authorization header, answers
+// 401 to the rejected token, and fails API requests with apiErr when set.
 type appTestTransport struct {
 	mu       sync.Mutex
-	mints    int
-	tokens   []string
 	expiry   time.Duration
-	key      *rsa.PublicKey
 	rejected string
+	apiErr   error
+	jwts     []string
+	tokens   []string
 }
 
 func (rt *appTestTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -43,28 +43,26 @@ func (rt *appTestTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	defer rt.mu.Unlock()
 	auth := req.Header.Get("Authorization")
 	status, body := http.StatusNoContent, ""
-	switch {
-	case req.URL.Path != "/app/installations/456/access_tokens":
+	if req.URL.Path == "/app/installations/456/access_tokens" {
+		rt.jwts = append(rt.jwts, strings.TrimPrefix(auth, "Bearer "))
+		status = http.StatusCreated
+		body = fmt.Sprintf(`{"token":"token-%d","expires_at":%q}`, len(rt.jwts), time.Now().Add(rt.expiry).UTC().Format(time.RFC3339))
+	} else {
 		rt.tokens = append(rt.tokens, auth)
+		if rt.apiErr != nil {
+			return nil, rt.apiErr
+		}
 		if auth == rt.rejected {
 			status = http.StatusUnauthorized
 		}
-	case rt.key != nil && !appTestSignedBy(rt.key, strings.TrimPrefix(auth, "Bearer ")):
-		status = http.StatusUnauthorized
-	default:
-		rt.mints++
-		status = http.StatusCreated
-		body = fmt.Sprintf(`{"token":"token-%d","expires_at":%q}`, rt.mints, time.Now().Add(rt.expiry).UTC().Format(time.RFC3339))
 	}
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 }
 
-func appTestSignedBy(key *rsa.PublicKey, jwt string) bool {
-	parts := strings.Split(jwt, ".")
-	signature, err := base64.RawURLEncoding.DecodeString(parts[len(parts)-1])
-	digest := sha256.Sum256([]byte(strings.Join(parts[:len(parts)-1], ".")))
-	return err == nil && rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature) == nil
-}
+// appTestFuncTransport is a RoundTripper whose dynamic type cannot be a map key.
+type appTestFuncTransport func(*http.Request) (*http.Response, error)
+
+func (f appTestFuncTransport) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func writeAppTestKey(t *testing.T, path string) *rsa.PrivateKey {
 	t.Helper()
@@ -82,7 +80,7 @@ func appTestResolver(t *testing.T) (*CredentialResolver, string) {
 }
 
 // appTestSession opens one session of the binding, as a refresh does, and
-// makes one API request.
+// makes one REST read.
 func appTestSession(ctx context.Context, resolver *CredentialResolver, base http.RoundTripper) (int, error) {
 	transport, err := resolver.Transport(ctx, Binding{Host: "github.com", Owner: "example-owner", Repo: "first"}, base)
 	if err != nil {
@@ -100,32 +98,27 @@ func appTestSession(ctx context.Context, resolver *CredentialResolver, base http
 }
 
 func TestCredentialResolverAppReusesTokenAcrossSessions(t *testing.T) {
-	t.Run("sequential", func(t *testing.T) {
-		resolver, _ := appTestResolver(t)
-		base := &appTestTransport{expiry: time.Hour}
-		for range 2 {
-			_, err := appTestSession(t.Context(), resolver, base)
-			require.NoError(t, err)
-		}
-		assert.Equal(t, 1, base.mints)
-		assert.Equal(t, []string{"token token-1", "token token-1"}, base.tokens)
-	})
-	t.Run("concurrent", func(t *testing.T) {
-		resolver, _ := appTestResolver(t)
-		base := &appTestTransport{expiry: time.Hour}
-		var wg sync.WaitGroup
-		for range 8 {
-			wg.Go(func() {
-				_, err := appTestSession(t.Context(), resolver, base)
-				assert.NoError(t, err)
-			})
-		}
-		wg.Wait()
-		assert.Equal(t, 1, base.mints)
-	})
+	resolver, _ := appTestResolver(t)
+	base := &appTestTransport{expiry: time.Hour}
+	for range 3 {
+		_, err := appTestSession(t.Context(), resolver, base)
+		require.NoError(t, err)
+	}
+	assert.Len(t, base.jwts, 1)
+	assert.Equal(t, []string{"token token-1", "token token-1", "token token-1"}, base.tokens)
 }
 
-func TestCredentialResolverAppEvictsRejectedToken(t *testing.T) {
+func TestCredentialResolverAppReplacesTokenNearExpiry(t *testing.T) {
+	resolver, _ := appTestResolver(t)
+	base := &appTestTransport{expiry: 30 * time.Second}
+	for range 2 {
+		_, err := appTestSession(t.Context(), resolver, base)
+		require.NoError(t, err)
+	}
+	assert.Equal(t, []string{"token token-1", "token token-2"}, base.tokens)
+}
+
+func TestCredentialResolverAppMintsAgainAfterRejectedToken(t *testing.T) {
 	resolver, _ := appTestResolver(t)
 	base := &appTestTransport{expiry: time.Hour, rejected: "token token-1"}
 	for _, want := range []int{http.StatusUnauthorized, http.StatusNoContent} {
@@ -133,19 +126,61 @@ func TestCredentialResolverAppEvictsRejectedToken(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, want, status)
 	}
-	assert.Equal(t, 2, base.mints)
+	assert.Equal(t, []string{"token token-1", "token token-2"}, base.tokens)
 }
 
-func TestCredentialResolverAppReadsRotatedKeyAfterFailedMint(t *testing.T) {
-	resolver, path := appTestResolver(t)
-	rotated := filepath.Join(t.TempDir(), "rotated.pem")
-	base := &appTestTransport{expiry: time.Hour, key: &writeAppTestKey(t, rotated).PublicKey}
-	_, err := appTestSession(t.Context(), resolver, base)
-	require.Error(t, err)
-	require.NoError(t, os.Rename(rotated, path))
-	_, err = appTestSession(t.Context(), resolver, base)
-	require.NoError(t, err)
-	assert.Equal(t, 1, base.mints)
+func TestCredentialResolverAppKeepsTokenAfterTransportError(t *testing.T) {
+	resolver, _ := appTestResolver(t)
+	base := &appTestTransport{expiry: time.Hour, apiErr: errors.New("connection reset")}
+	for range 2 {
+		_, err := appTestSession(t.Context(), resolver, base)
+		require.ErrorIs(t, err, base.apiErr)
+	}
+	assert.Len(t, base.jwts, 1)
+}
+
+func TestCredentialResolverAppReadsKeyFileOnlyToMint(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		resolver, path := appTestResolver(t)
+		base := &appTestTransport{expiry: time.Hour}
+		_, err := appTestSession(t.Context(), resolver, base)
+		require.NoError(t, err)
+
+		require.NoError(t, os.Remove(path))
+		_, err = appTestSession(t.Context(), resolver, base)
+		require.NoError(t, err, "the cached token serves while the key file is missing")
+
+		time.Sleep(time.Hour)
+		_, err = appTestSession(t.Context(), resolver, base)
+		require.ErrorContains(t, err, "read GitHub App private key")
+
+		rotated := writeAppTestKey(t, path)
+		_, err = appTestSession(t.Context(), resolver, base)
+		require.NoError(t, err)
+		require.Len(t, base.jwts, 2)
+		_, err = jwt.Parse(base.jwts[1], func(*jwt.Token) (any, error) { return &rotated.PublicKey, nil })
+		require.NoError(t, err, "the new mint is signed with the replaced key")
+	})
+}
+
+func TestCredentialResolverAppUsesEachSuppliedBase(t *testing.T) {
+	resolver, _ := appTestResolver(t)
+	first := &appTestTransport{expiry: time.Hour}
+	second := &appTestTransport{expiry: time.Hour}
+	for _, base := range []*appTestTransport{first, second, first, second} {
+		_, err := appTestSession(t.Context(), resolver, base)
+		require.NoError(t, err)
+	}
+	assert.Equal(t, []string{"token token-1", "token token-1"}, first.tokens)
+	assert.Equal(t, []string{"token token-1", "token token-1"}, second.tokens)
+
+	inner := &appTestTransport{expiry: time.Hour, rejected: "token token-1"}
+	for _, want := range []int{http.StatusUnauthorized, http.StatusNoContent} {
+		status, err := appTestSession(t.Context(), resolver, appTestFuncTransport(inner.RoundTrip))
+		require.NoError(t, err)
+		assert.Equal(t, want, status)
+	}
+	assert.Equal(t, []string{"token token-1", "token token-2"}, inner.tokens, "an uncomparable base is not cached")
 }
 
 func TestCredentialResolverPrefersAppOverEnvAndGH(t *testing.T) {
