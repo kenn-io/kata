@@ -280,6 +280,8 @@ func doctorDocbankProbe(ctx context.Context, apiClient *kataapi.Client, health *
 		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Daemon cannot reach Docbank; attachments fail with docbank_unreachable", Fix: "Check the [docbank] url in the daemon's config, that Docbank is running, and the network path between them."}
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Docbank rejected the daemon's API key; attachments fail with docbank_unauthorized", Details: doctorHTTPStatus(status), Fix: "Set the key Docbank issued for this daemon in the [docbank] key source, then restart the daemon."}
+	case status == 0:
+		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Something answered at the [docbank] url, but not as Docbank; attachments may fail", Fix: "Check that the [docbank] url points at Docbank."}
 	default:
 		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Docbank answered the daemon with an error; attachments may fail", Details: doctorHTTPStatus(status), Fix: "Check that the [docbank] url points at Docbank, and Docbank's own logs."}
 	}

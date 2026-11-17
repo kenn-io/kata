@@ -224,7 +224,7 @@ func TestDoctorDocbankProbeFollowsDaemonReport(t *testing.T) {
 		{"rejected the key", "0.53.0", `{"reachable":true,"key_accepted":false,"http_status":401}`, 0, "warn", "Docbank rejected the daemon's API key", "HTTP status: 401"},
 		{"forbade the key", "0.53.0", `{"reachable":true,"key_accepted":false,"http_status":403}`, 0, "warn", "Docbank rejected the daemon's API key", "HTTP status: 403"},
 		{"answered with an error status", "0.53.0", `{"reachable":true,"key_accepted":false,"http_status":500}`, 0, "warn", "Docbank answered the daemon with an error", "HTTP status: 500"},
-		{"answered with a body that is not Docbank's", "0.53.0", `{"reachable":true,"key_accepted":false}`, 0, "warn", "Docbank answered the daemon with an error", ""},
+		{"answered with a body that is not Docbank's", "0.53.0", `{"reachable":true,"key_accepted":false}`, 0, "warn", "Something answered at the [docbank] url, but not as Docbank", ""},
 		{"not reached", "0.53.0", `{"reachable":false,"key_accepted":false}`, 0, "warn", "Daemon cannot reach Docbank", ""},
 		{"daemon predates the probe route", "0.52.0", noRoute, http.StatusNotFound, "ok", "resolves its Docbank API key", "Docbank probe requires daemon API 0.53.0 or newer; this daemon reports 0.52.0; upgrade the daemon"},
 		{"key stopped resolving after health", "0.53.0", keyUnavailable, http.StatusServiceUnavailable, "warn", "probe did not return a result", "HTTP status: 503"},
@@ -264,7 +264,8 @@ func TestDoctorProbeOutlastsDaemonDocbankTimeout(t *testing.T) {
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/docbank/probe" {
 			select {
-			case <-time.After(doctorRequestTimeout + 500*time.Millisecond):
+			// Longer than the daemon's own five-second Docbank limit.
+			case <-time.After(5500 * time.Millisecond):
 			case <-r.Context().Done():
 				return
 			}

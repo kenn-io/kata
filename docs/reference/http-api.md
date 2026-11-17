@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-16
+last_edited: 2026-11-17
 ---
 
 # HTTP API schema
@@ -418,7 +418,7 @@ is advisory:
 | Field | Meaning |
 | --- | --- |
 | `reachable` | Docbank answered. |
-| `key_accepted` | Docbank answered the request with success, so it accepted the key. `false` when it answered `401` or `403`, answered with another error, answered with a body that is not Docbank's, or was not reached. |
+| `key_accepted` | Docbank answered with a 2xx whose body is a folder with an id and directory type, so it accepted the key. `false` when it answered `401` or `403`, answered with another error, answered with a body that is not Docbank's, or was not reached. |
 | `http_status` | Docbank's status when it answered with an error; absent otherwise, including when it answered `200` with a body that is not Docbank's. |
 
 ## Project access

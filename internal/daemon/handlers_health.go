@@ -157,7 +157,6 @@ func probeDocbank(ctx context.Context, c *docbank.Client) api.DocbankProbe {
 	defer cancel()
 	root, err := c.ResolvePath(ctx, "/")
 	if err == nil {
-		// A 2xx that decodes but is not a folder is not Docbank's answer.
 		return api.DocbankProbe{Reachable: true, KeyAccepted: root.ID > 0 && root.Kind == "dir"}
 	}
 	if e, ok := errors.AsType[*docbank.Error](err); ok && (e.Status != 0 || e.Malformed) {
