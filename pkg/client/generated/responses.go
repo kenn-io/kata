@@ -36,6 +36,14 @@ type DigestGlobalResponse = DigestResponseBody
 
 type DigestGlobalErrorResponse = ErrorEnvelope
 
+type ProbeDocbankResponse = DocbankProbe
+
+type ProbeDocbankErrorResponse = ErrorEnvelope
+
+type ProbeDocbankErrorResponseJSON = ErrorEnvelope
+
+type ProbeDocbankErrorResponseJSON503 = ErrorEnvelope
+
 type DoctorResponse = DoctorResponseBody
 
 type DoctorErrorResponse = ErrorEnvelope
@@ -701,6 +709,16 @@ type DigestGlobalResp struct {
 	StatusCode   int
 	JSON200      *DigestGlobalResponse
 	JSONDefault  *DigestGlobalErrorResponse
+}
+
+type ProbeDocbankResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ProbeDocbankResponse
+	JSON404      *ProbeDocbankErrorResponse
+	JSON500      *ProbeDocbankErrorResponseJSON
+	JSON503      *ProbeDocbankErrorResponseJSON503
 }
 
 type DoctorResp struct {

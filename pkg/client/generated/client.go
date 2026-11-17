@@ -173,6 +173,10 @@ type ClientInterface interface {
 	DigestGlobal(ctx context.Context, options *DigestGlobalRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DigestGlobalResponse, error)
 	DigestGlobalWithResponse(ctx context.Context, options *DigestGlobalRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DigestGlobalResp, error)
 
+	// ProbeDocbank Check that the daemon reaches Docbank and Docbank accepts its key
+	ProbeDocbank(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*ProbeDocbankResponse, error)
+	ProbeDocbankWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*ProbeDocbankResp, error)
+
 	Doctor(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*DoctorResponse, error)
 	DoctorWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*DoctorResp, error)
 
@@ -1139,6 +1143,68 @@ func (c *Client) DigestGlobal(ctx context.Context, options *DigestGlobalRequestO
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/digest")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+// ProbeDocbank Check that the daemon reaches Docbank and Docbank accepts its key
+func (c *Client) ProbeDocbank(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*ProbeDocbankResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/docbank/probe",
+		Method:     "GET",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ProbeDocbankResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(ProbeDocbankErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "ProbeDocbankErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ProbeDocbankResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ProbeDocbankResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/docbank/probe")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

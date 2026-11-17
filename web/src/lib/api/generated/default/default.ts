@@ -88,6 +88,7 @@ import type {
   DisconnectRelayEnrollmentPathParameters,
   DisconnectRelayRequestBody,
   DisconnectRelayResponseBody,
+  DocbankProbe,
   DoctorResponseBody,
   EditCommentPathParameters,
   EditCommentRequestBody,
@@ -704,6 +705,55 @@ export const digestGlobal = async (
   options?: Parameters<typeof orvalFetch>[1],
 ): Promise<digestGlobalResponse> => {
   return orvalFetch<digestGlobalResponse>(getDigestGlobalUrl(params), {
+    ...options,
+    method: 'GET',
+  })
+}
+
+export type probeDocbankResponse200 = {
+  data: DocbankProbe
+  status: 200
+}
+
+export type probeDocbankResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type probeDocbankResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type probeDocbankResponse503 = {
+  data: ErrorEnvelope
+  status: 503
+}
+
+export type probeDocbankResponseSuccess = probeDocbankResponse200 & {
+  headers: Headers
+}
+export type probeDocbankResponseError = (
+  | probeDocbankResponse404
+  | probeDocbankResponse500
+  | probeDocbankResponse503
+) & {
+  headers: Headers
+}
+
+export type probeDocbankResponse = probeDocbankResponseSuccess | probeDocbankResponseError
+
+export const getProbeDocbankUrl = () => {
+  return `/api/v1/docbank/probe`
+}
+
+/**
+ * @summary Check that the daemon reaches Docbank and Docbank accepts its key
+ */
+export const probeDocbank = async (
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<probeDocbankResponse> => {
+  return orvalFetch<probeDocbankResponse>(getProbeDocbankUrl(), {
     ...options,
     method: 'GET',
   })
