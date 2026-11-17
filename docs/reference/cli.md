@@ -1334,7 +1334,7 @@ the notifications endpoint, and a refusal answers 409 `notification_held` with
 `from` and `message` in `error.data` only when the caller could read the held
 request through ordinary reads; otherwise `error.data` is empty.
 `--clear --if-from` is `POST .../notifications/clear` with `to` and `if_from`.
-Both flags need a daemon that reports API 0.53.0 or newer; an older daemon
+Both flags need a daemon that reports API 0.54.0 or newer; an older daemon
 gets an upgrade message.
 
 Use `--re <comment>` to ask the recipient to answer one visible comment. A
