@@ -300,22 +300,21 @@ func listProjects(t *testing.T, baseURL string) projectsResponse {
 }
 
 func TestServiceRejectsInvalidEmbeddingConfig(t *testing.T) {
-	_, err := kata.New(t.Context(), kata.Config{
-		DSN:        filepath.Join(t.TempDir(), "service.db"),
-		Auth:       kata.AuthConfig{TrustCallerAuthentication: true},
-		Embeddings: kata.EmbeddingsConfig{BaseURL: "http://127.0.0.1:1234"},
-	})
-	require.ErrorContains(t, err, "base_url and model must both be set")
-}
-
-func TestServiceRejectsSQLiteEmbeddingsBeforeOpeningDatabase(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "service.db")
-	service, err := kata.New(t.Context(), kata.Config{
-		DSN: path, Auth: kata.AuthConfig{TrustCallerAuthentication: true},
-		Embeddings: kata.EmbeddingsConfig{BaseURL: "http://127.0.0.1:1234", Model: "test", Dims: 2},
-	})
-	require.Nil(t, service)
-	require.ErrorContains(t, err, "embeddings require Postgres")
-	_, err = os.Stat(path)
-	require.True(t, os.IsNotExist(err), "database should not be created")
+	for _, tc := range []struct {
+		name       string
+		embeddings kata.EmbeddingsConfig
+		want       string
+	}{
+		{"partial", kata.EmbeddingsConfig{BaseURL: "http://127.0.0.1:1234"}, "kata: embeddings:"},
+		{"sqlite", kata.EmbeddingsConfig{BaseURL: "http://127.0.0.1:1234", Model: "test", Dims: 2}, "embeddings require Postgres"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "service.db")
+			service, err := kata.New(t.Context(), kata.Config{DSN: path, Auth: kata.AuthConfig{TrustCallerAuthentication: true}, Embeddings: tc.embeddings})
+			require.Nil(t, service)
+			require.ErrorContains(t, err, tc.want)
+			_, err = os.Stat(path)
+			require.True(t, os.IsNotExist(err), "database should not be created")
+		})
+	}
 }

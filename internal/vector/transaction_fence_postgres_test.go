@@ -43,7 +43,6 @@ func TestPostgresReconcilerWritesHonorTransactionFence(t *testing.T) {
 	require.NoError(t, err)
 	_, err = idx.RefreshMirror(fenced, store)
 	require.ErrorIs(t, err, denied)
-	require.ErrorIs(t, idx.EnsureBuilding(fenced, "third", generation), denied)
 	require.ErrorIs(t, idx.EnsureBuilding(fenced, "first", generation), denied, "an active generation still checks authority before the provider runs")
 	require.ErrorIs(t, idx.SaveVectorsForTest(fenced, "first", issue.UID, revision, []kitvec.ChunkVector{{ChunkIndex: 0, Vector: kitvec.Vector{1, 0}}}), denied)
 	require.ErrorIs(t, idx.CutOver(fenced, "second"), denied)

@@ -15,9 +15,20 @@ func TestResolveLocalDoesNotDownloadMissingAssets(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".kenn", "embeddings"), 0o700))
-	got, err := ResolveLocal(t.Context(), func(context.Context, embedlocal.Options) (string, error) { return "", embedlocal.ErrNotFound }, embedlocal.Install, nil)
+	endpointCalls := 0
+	installCalls := 0
+	got, err := ResolveLocal(t.Context(), func(context.Context, embedlocal.Options) (string, error) {
+		endpointCalls++
+		return "", embedlocal.ErrNotFound
+	}, func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
+		installCalls++
+		require.Nil(t, opts.Confirm)
+		return embedlocal.Install(ctx, opts)
+	}, nil)
 	require.Empty(t, got)
 	require.ErrorContains(t, err, "provide Confirm")
+	require.Equal(t, 1, endpointCalls)
+	require.Equal(t, 1, installCalls)
 }
 
 func TestInstallLocalCallbacks(t *testing.T) {

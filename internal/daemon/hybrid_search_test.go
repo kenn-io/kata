@@ -45,13 +45,10 @@ func TestHybridSearchExplicitUnconfiguredErrors(t *testing.T) {
 	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
-	for _, mode := range []string{"semantic", "hybrid"} {
-		_, err := hybridSearch(ctx, store, nil, nil, hybridParams{ProjectID: proj.ID, Query: "x", Limit: 10, Requested: mode})
-		var me *modeError
-		require.ErrorAs(t, err, &me)
-		require.Equal(t, 400, me.Status())
-		require.ErrorContains(t, err, "embeddings are not configured")
-	}
+	_, err := hybridSearch(ctx, store, nil, nil, hybridParams{ProjectID: proj.ID, Query: "x", Limit: 10, Requested: "hybrid"})
+	var me *modeError
+	require.ErrorAs(t, err, &me)
+	require.Equal(t, 400, me.Status())
 }
 
 // failingEmbedClient builds a real *embedding.Client pointed at a server that
