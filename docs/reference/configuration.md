@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-11
+last_edited: 2026-11-16
 ---
 
 # Configuration
@@ -1679,7 +1679,8 @@ A configured URL requires a key source. If the selected source cannot supply a
 key, Kata does not fall back to another source and sends nothing to Docbank;
 attachment requests fail with `docbank_key_unavailable` (see
 [attachment endpoints](http-api.md#attachment-endpoints)). `kata doctor`
-(`daemon.docbank`) shows the failing source. Keys are resolved on each request.
+(`daemon.docbank`) shows the failing source, and asks Docbank once whether it
+answers and accepts the key. Keys are resolved on each request.
 
 A `url` in the file or `KATA_DOCBANK_URL` wins over `local`. With `local`,
 `api_key`, `api_key_file`, and `api_key_env` are unused. `folder` still applies.

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
@@ -21,6 +22,7 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/docbank"
+	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -207,6 +209,95 @@ func TestDoctorDocbankCheckFollowsHealth(t *testing.T) {
 			require.Contains(t, finding.Summary, tc.summary)
 		})
 	}
+}
+
+func TestDoctorDocbankProbeFollowsDaemonReport(t *testing.T) {
+	const prefix = `{"ok":true,"schema_version":28,"db_path":"/data/kata.db","docbank":{"credential":"ok"},`
+	const keyUnavailable = `{"status":503,"error":{"code":"docbank_key_unavailable","message":"Docbank API key unavailable","hint":"Run kata doctor on the daemon host to see which [docbank] key source failed."}}`
+	const noRoute = "404 page not found\n"
+	for _, tc := range []struct {
+		name, apiVersion, probe string
+		probeStatus             int
+		status, summary, detail string
+	}{
+		{"answered and accepted the key", "0.54.0", `{"reachable":true,"key_accepted":true}`, 0, "ok", "Docbank answered and accepted the daemon's API key", ""},
+		{"rejected the key", "0.54.0", `{"reachable":true,"key_accepted":false,"http_status":401}`, 0, "warn", "Docbank rejected the daemon's API key", "HTTP status: 401"},
+		{"forbade the key", "0.54.0", `{"reachable":true,"key_accepted":false,"http_status":403}`, 0, "warn", "Docbank rejected the daemon's API key", "HTTP status: 403"},
+		{"answered with an error status", "0.54.0", `{"reachable":true,"key_accepted":false,"http_status":500}`, 0, "warn", "Docbank answered the daemon with an error", "HTTP status: 500"},
+		{"answered with a body that is not Docbank's", "0.54.0", `{"reachable":true,"key_accepted":false}`, 0, "warn", "Something answered at the [docbank] url, but not as Docbank", ""},
+		{"not reached", "0.54.0", `{"reachable":false,"key_accepted":false}`, 0, "warn", "Daemon cannot reach Docbank", ""},
+		{"daemon predates the probe route", "0.52.0", noRoute, http.StatusNotFound, "ok", "resolves its Docbank API key", "Docbank probe requires daemon API 0.54.0 or newer; this daemon reports 0.52.0; upgrade the daemon"},
+		{"key stopped resolving after health", "0.54.0", keyUnavailable, http.StatusServiceUnavailable, "warn", "probe did not return a result", "HTTP status: 503"},
+		{"daemon with the route cannot answer it", "0.54.0", `not json`, 0, "warn", "probe did not return a result", "HTTP status: 200"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, workspace := doctorTestEnv(t)
+			flags = globalFlags{Workspace: workspace, Project: "example-project"}
+			replies := map[string]string{
+				"/api/v1/health":        prefix + `"api_schema_version":"` + tc.apiVersion + `"}`,
+				"/api/v1/docbank/probe": tc.probe,
+			}
+			statuses := map[string]int{}
+			if tc.probeStatus != 0 {
+				statuses["/api/v1/docbank/probe"] = tc.probeStatus
+			}
+			ctx := doctorServerContext(t, replies, statuses)
+			finding := doctorFinding(t, collectDoctor(ctx), "daemon.docbank")
+			require.EqualValues(t, tc.status, finding.Status)
+			require.Contains(t, finding.Summary, tc.summary)
+			if tc.detail != "" {
+				require.Contains(t, finding.Details, tc.detail)
+			} else {
+				require.Empty(t, finding.Details)
+			}
+		})
+	}
+}
+
+// A Docbank that withholds headers makes the daemon answer "unreachable" after
+// its own five-second timeout; doctor must still be waiting for that answer.
+func TestDoctorProbeOutlastsDaemonDocbankTimeout(t *testing.T) {
+	_, workspace := doctorTestEnv(t)
+	flags = globalFlags{Workspace: workspace, Project: "example-project"}
+	health := `{"ok":true,"schema_version":28,"db_path":"/data/kata.db","docbank":{"credential":"ok"},"api_schema_version":"0.54.0"}`
+	ts := doctorTestServer(t, map[string]string{"/api/v1/health": health}, nil)
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/docbank/probe" {
+			select {
+			// Longer than the daemon's own five-second Docbank limit.
+			case <-time.After(5500 * time.Millisecond):
+			case <-r.Context().Done():
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"reachable":false,"key_accepted":false}`)
+			return
+		}
+		ts.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(slow.Close)
+	ctx := context.WithValue(t.Context(), client.BaseURLKey{}, slow.URL)
+
+	finding := doctorFinding(t, collectDoctor(ctx), "daemon.docbank")
+
+	require.EqualValues(t, "warn", finding.Status)
+	require.Contains(t, finding.Summary, "Daemon cannot reach Docbank")
+}
+
+// One pass-through case against a real daemon; the daemon tests own the
+// outcomes of the probe.
+func TestDoctorProbesDocbankByDefault(t *testing.T) {
+	_, workspace := doctorTestEnv(t)
+	fake := docbanktest.New(t)
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.Docbank = docbank.NewClient(fake.Server.URL, func() (string, error) { return "other-key", nil })
+	})
+	ctx := context.WithValue(t.Context(), client.BaseURLKey{}, env.URL)
+	flags = globalFlags{Workspace: workspace}
+
+	finding := doctorFinding(t, collectDoctor(ctx), "daemon.docbank")
+
+	require.EqualValues(t, "warn", finding.Status)
+	require.Contains(t, finding.Summary, "Docbank rejected the daemon's API key")
 }
 
 func TestDoctorStripsTerminalControlsFromReportedAPIVersion(t *testing.T) {

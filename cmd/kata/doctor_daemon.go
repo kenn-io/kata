@@ -46,11 +46,7 @@ func (s *doctorState) daemonChecks(ctx context.Context) {
 		if !healthOK {
 			return skippedDoctorCheck("Daemon health is unavailable")
 		}
-		apiSchemaVersion := ""
-		if health.APISchemaVersion != nil {
-			apiSchemaVersion = *health.APISchemaVersion
-		}
-		if health.Version != version.Version || apiSchemaVersion != daemon.APISchemaVersion {
+		if health.Version != version.Version || reportedAPIVersion(health) != daemon.APISchemaVersion {
 			return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "CLI and daemon version or API contract differ", Fix: "Align the CLI and selected daemon versions; restart the daemon explicitly after upgrading it."}
 		}
 		return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "CLI and daemon version and API contract match"}
@@ -87,7 +83,7 @@ func (s *doctorState) daemonChecks(ctx context.Context) {
 		if !healthOK {
 			return skippedDoctorCheck("Daemon health is unavailable")
 		}
-		return doctorDocbank(health)
+		return doctorDocbank(ctx, s.probeClient, health)
 	})
 	s.add("daemon.federation", "integration", func() diagnostics.Check {
 		if !healthOK {
@@ -214,23 +210,29 @@ func doctorEmbeddings(health *generated.HealthResponse) diagnostics.Check {
 	return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Embedding reconciler reports no provider error or backlog"}
 }
 
-func doctorDocbank(health *generated.HealthResponse) diagnostics.Check {
+// reportedAPIVersion is the API version the daemon reports, or "" when it
+// reports none.
+func reportedAPIVersion(health *generated.HealthResponse) string {
+	if health.APISchemaVersion == nil {
+		return ""
+	}
+	return *health.APISchemaVersion
+}
+
+func doctorDocbank(ctx context.Context, apiClient *kataapi.Client, health *generated.HealthResponse) diagnostics.Check {
 	h := health.Docbank
 	if h == nil && health.DBPath == nil {
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon did not provide Docbank health details; its attachment key state is unknown"}
 	}
 	if h == nil {
-		reported := ""
-		if health.APISchemaVersion != nil {
-			reported = *health.APISchemaVersion
-		}
+		reported := reportedAPIVersion(health)
 		if current, _ := apiVersionAtLeast(reported, apiVersionDocbankKeyHealth); !current {
 			return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: daemonAPITooOldMessage("Docbank key health", apiVersionDocbankKeyHealth, reported)}
 		}
 		return diagnostics.Check{Status: diagnostics.StatusInfo, Summary: "Selected daemon has no Docbank key source to check: Docbank is not configured, or it uses the Docbank on this machine"}
 	}
 	if h.Credential == "ok" {
-		return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Daemon resolves its Docbank API key"}
+		return doctorDocbankProbe(ctx, apiClient, health)
 	}
 	var details []string
 	if h.CredentialSource != nil {
@@ -244,6 +246,44 @@ func doctorDocbank(health *generated.HealthResponse) diagnostics.Check {
 		Summary: "Daemon cannot resolve its Docbank API key; attachments fail without contacting Docbank",
 		Details: details,
 		Fix:     `Fix the [docbank] key source on the daemon host. A key file must be private to the daemon user: chmod 600 on Unix; on Windows, in PowerShell, icacls <file> /inheritance:r /grant:r "${env:USERNAME}:R". An api_key_env variable must be set in the daemon's environment.`,
+	}
+}
+
+// doctorDocbankProbe asks the daemon to make its read-only request to Docbank
+// once its key resolves. A daemon older than the probe route keeps the
+// key-resolves result; a daemon that has the route but whose probe call fails
+// gets a warning.
+func doctorDocbankProbe(ctx context.Context, apiClient *kataapi.Client, health *generated.HealthResponse) diagnostics.Check {
+	resolved := diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Daemon resolves its Docbank API key"}
+	response, err := apiClient.ProbeDocbankWithResponse(ctx)
+	if err != nil || response == nil || response.JSON200 == nil {
+		reported := reportedAPIVersion(health)
+		if current, _ := apiVersionAtLeast(reported, apiVersionDocbankProbe); !current {
+			resolved.Details = []string{daemonAPITooOldMessage("Docbank probe", apiVersionDocbankProbe, reported)}
+			return resolved
+		}
+		var details []string
+		if response != nil {
+			details = doctorHTTPStatus(response.StatusCode)
+		}
+		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Daemon resolves its Docbank API key, but its Docbank probe did not return a result", Details: details, Fix: "Check kata daemon logs on the daemon host and that Docbank is responding; then rerun kata doctor."}
+	}
+	p := response.JSON200
+	status := 0
+	if p.HTTPStatus != nil {
+		status = int(*p.HTTPStatus)
+	}
+	switch {
+	case p.Reachable && p.KeyAccepted:
+		return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Docbank answered and accepted the daemon's API key"}
+	case !p.Reachable:
+		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Daemon cannot reach Docbank; attachments fail with docbank_unreachable", Fix: "Check the [docbank] url in the daemon's config, that Docbank is running, and the network path between them."}
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Docbank rejected the daemon's API key; attachments fail with docbank_unauthorized", Details: doctorHTTPStatus(status), Fix: "Set the key Docbank issued for this daemon in the [docbank] key source, then restart the daemon."}
+	case status == 0:
+		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Something answered at the [docbank] url, but not as Docbank; attachments may fail", Fix: "Check that the [docbank] url points at Docbank."}
+	default:
+		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Docbank answered the daemon with an error; attachments may fail", Details: doctorHTTPStatus(status), Fix: "Check that the [docbank] url points at Docbank, and Docbank's own logs."}
 	}
 }
 

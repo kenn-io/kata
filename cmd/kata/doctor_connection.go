@@ -81,10 +81,18 @@ func (s *doctorState) connectDoctorDaemon(ctx context.Context) (*kataapi.Client,
 	}
 	// Diagnostics follow no redirects even for uncredentialed requests.
 	hc.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	probeHC := *hc
+	probeHC.Timeout = doctorDocbankProbeTimeout
+	constructFailure := diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Cannot construct a client for the selected daemon", Fix: "Check the selected daemon's credential and transport configuration."}
+	probeClient, err := newDoctorAPIClient(resolved.BaseURL, &probeHC)
+	if err != nil {
+		return nil, false, constructFailure
+	}
 	apiClient, err := newDoctorAPIClient(resolved.BaseURL, hc)
 	if err != nil {
-		return nil, false, diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Cannot construct a client for the selected daemon", Fix: "Check the selected daemon's credential and transport configuration."}
+		return nil, false, constructFailure
 	}
+	s.probeClient = probeClient
 	ping, err := apiClient.PingWithResponse(probe)
 	if err != nil || ping == nil || ping.StatusCode != http.StatusOK || ping.JSON200 == nil || !ping.JSON200.Ok || ping.JSON200.Service != "kata" {
 		return nil, false, diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Selected endpoint did not identify a healthy Kata service", Fix: "Confirm the configured URL or local runtime record belongs to a Kata daemon."}

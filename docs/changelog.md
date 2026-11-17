@@ -9,6 +9,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- `kata doctor` now asks Docbank once, with a read-only request, whether it
+  answers and accepts the daemon's API key, and reports the result in its
+  `daemon.docbank` check. The request is
+  [`GET /api/v1/docbank/probe`](reference/http-api.md#docbank-probe), open to
+  the callers that see the `docbank` block in health, and sent only when
+  `[docbank]` names a key source that resolves. Health never contacts Docbank,
+  and `local = true` has no probe.
+
 - Stop `kata tui` from overwriting a body that someone else changed while you
   were editing it. Against a daemon on API 0.53.0 or newer, the editor and
   undo of a body edit send the issue's `content_revision` with the save, and
