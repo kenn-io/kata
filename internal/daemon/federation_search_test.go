@@ -263,10 +263,12 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 	}))
 	t.Cleanup(slow.Close)
 	setClaimBindingHubURL(t, spoke, replica.ID, slow.URL)
-	resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	for _, mode := range []string{"semantic", "hybrid"} {
+		resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=%s", replica.ID, mode))
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	}
 	setClaimBindingHubURL(t, spoke, replica.ID, hub.URL)
-	resp, body = envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
+	resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
 	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(body))
 	require.Contains(t, string(body), `"code":"hub_search_failed"`)
 	require.NotContains(t, string(body), "hub unreachable")
@@ -312,6 +314,27 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 	for _, hubURL := range []string{"http://127.0.0.1:1", older.URL} {
 		setClaimBindingHubURL(t, spoke, replica.ID, hubURL)
 		checkSearch()
+	}
+}
+
+func TestDirectSpokeAutoSearchFallsBackBeforeSlowHub(t *testing.T) {
+	hub, spoke, hubProject, replica, _, token := createClaimForwardingPair(t, "pull")
+	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: hubProject.ID, Token: token, Actor: "tester", Capabilities: "pull"}))
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(2 * time.Second):
+			_, _ = w.Write([]byte(`{"hits":[],"bounded":false}`))
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(slow.Close)
+	setClaimBindingHubURL(t, spoke, replica.ID, slow.URL)
+	for _, mode := range []string{"", "&mode=auto"} {
+		resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim%s", replica.ID, mode))
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		require.Contains(t, string(body), `"mode":"lexical"`)
+		require.Contains(t, string(body), `"degraded":true`)
+		require.Contains(t, string(body), "claim target")
 	}
 }
 

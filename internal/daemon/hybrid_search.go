@@ -166,17 +166,6 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	case modeSemantic:
 		res = hybridResult{Mode: modeSemantic, Hits: truncate(vector, probeLimit)}
 	default: // hybrid
-		if p.Hub != nil {
-			byUID := make(map[string]db.Issue, len(vector))
-			for _, candidate := range vector {
-				byUID[candidate.Issue.UID] = candidate.Issue
-			}
-			for i := range lexical {
-				if issue, ok := byUID[lexical[i].Issue.UID]; ok {
-					lexical[i].Issue = issue
-				}
-			}
-		}
 		hits, err := mergeRRF(lexical, vector, probeLimit)
 		if err != nil {
 			return hybridResult{}, err
@@ -238,10 +227,14 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 			if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return nil, false, err
 			}
+			if err == nil && (local.DeletedAt != nil || local.ProjectID != p.ProjectID) {
+				continue
+			}
 			issue := hit.Issue
 			issue.ID, issue.ProjectID = 0, p.ProjectID
-			if err == nil && local.DeletedAt == nil && local.ProjectID == p.ProjectID {
+			if err == nil {
 				issue.ID = local.ID
+				issue.ShortID = local.ShortID
 			}
 			candidates = append(candidates, db.SearchCandidate{Issue: issue, Score: hit.Score, MatchedIn: []string{"semantic"}})
 		}

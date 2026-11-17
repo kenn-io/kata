@@ -114,7 +114,11 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			if direct {
 				params.Hub = func(ctx context.Context, p hybridParams, fetch int) ([]api.FederationSearchHit, bool, error) {
-					ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+					timeout := 5 * time.Second
+					if p.Requested == "" || p.Requested == "auto" {
+						timeout = time.Second
+					}
+					ctx, cancel := context.WithTimeout(ctx, timeout)
 					defer cancel()
 					client, cred, err := claimForwardClient(ctx, cfg, binding)
 					if err != nil {
