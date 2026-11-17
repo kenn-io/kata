@@ -56,7 +56,6 @@ func TestServicePostgresEmbeddingSearch(t *testing.T) {
 	require.NoError(t, <-done)
 	server.Close()
 	require.NoError(t, service.Close())
-
 	service, err = kata.New(ctx, cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })

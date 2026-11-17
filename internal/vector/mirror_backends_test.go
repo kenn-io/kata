@@ -16,6 +16,7 @@ import (
 
 // A refresh must match the live feed through edits, project moves, deletion,
 // and restoration, even when its first page contains only unchanged issues.
+// Postgres also checks that each 500-row page uses one fenced transaction.
 func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

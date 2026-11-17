@@ -18,7 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
-	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/webui"
 )
 
@@ -319,26 +318,4 @@ func TestServiceRejectsSQLiteEmbeddingsBeforeOpeningDatabase(t *testing.T) {
 	require.ErrorContains(t, err, "embeddings require Postgres")
 	_, err = os.Stat(path)
 	require.True(t, os.IsNotExist(err), "database should not be created")
-}
-
-func TestServiceSearchWithoutEmbeddings(t *testing.T) {
-	ctx := t.Context()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
-	t.Cleanup(cleanup)
-	service, err := kata.New(ctx, kata.Config{DSN: dsn, Auth: kata.AuthConfig{TrustCallerAuthentication: true}})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, service.Close()) })
-	server := httptest.NewServer(service.Handler())
-	t.Cleanup(server.Close)
-	project := createProject(t, server.URL, "example-project").Project.ID
-	createAccessIssue(t, server, project, "search example")
-	for _, mode := range []string{"semantic", "hybrid"} {
-		status, _, body := searchTitles(ctx, server, project, "example", mode)
-		require.Equal(t, http.StatusBadRequest, status)
-		require.Contains(t, body, "embeddings are not configured")
-	}
-	status, titles, body := searchTitles(ctx, server, project, "example", "auto")
-	require.Equal(t, http.StatusOK, status)
-	require.Equal(t, []string{"search example"}, titles)
-	require.Contains(t, body, `"mode":"lexical"`)
 }

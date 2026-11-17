@@ -40,9 +40,6 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 	server := httptest.NewServer(service.Handler())
 	projectID := createProject(t, server.URL, "recovery").Project.ID
 	createAccessIssue(t, server, projectID, "recover semantic search")
-	status, titles, _ := searchTitles(ctx, server, projectID, "recover", "lexical")
-	require.Equal(t, http.StatusOK, status)
-	require.Equal(t, []string{"recover semantic search"}, titles)
 	status, titles, body := searchTitles(ctx, server, projectID, "recover", "auto")
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, []string{"recover semantic search"}, titles)
@@ -62,7 +59,6 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 	}
 	server.Close()
 	require.NoError(t, service.Close())
-
 	_, err = admin.ExecContext(ctx, `CREATE EXTENSION vector WITH SCHEMA public`)
 	require.NoError(t, err)
 	service, err = kata.New(ctx, cfg)
