@@ -1,7 +1,7 @@
 package testenv
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,7 +15,7 @@ func NewEmbeddingServer(t *testing.T, embed func(string) []float32) *httptest.Se
 		var request struct {
 			Input []string `json:"input"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		if err := json.UnmarshalRead(r.Body, &request); err != nil {
 			t.Error(err)
 			return
 		}
@@ -27,7 +27,7 @@ func NewEmbeddingServer(t *testing.T, embed func(string) []float32) *httptest.Se
 			}
 			data[i] = map[string]any{"embedding": vector, "index": i}
 		}
-		if err := json.NewEncoder(w).Encode(map[string]any{"data": data}); err != nil {
+		if err := json.MarshalWrite(w, map[string]any{"data": data}); err != nil {
 			t.Error(err)
 		}
 	}))

@@ -436,7 +436,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	hookSink := hooks.NewNoop()
 	publisher := daemon.NewEventPublisher(broadcaster, hookSink)
 	var reconciler *daemon.Reconciler
-	if index != nil {
+	if index != nil && embedder != nil {
 		reconciler = daemon.NewConfiguredEmbeddingReconciler(store, index, embedder, cfg.Embeddings, publisher, nil, federationCredentials, federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized)
 	}
 	federationWake := make(chan struct{}, 1)
