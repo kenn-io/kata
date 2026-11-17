@@ -234,6 +234,58 @@ describe('App', () => {
     expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
   })
 
+  it('keeps the normalized project list when the revalidation after a project click returns unchanged', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    history.replaceState(null, '', '/kata?view=all-open')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let releaseRevalidation: (() => void) | undefined
+    const revalidated = new Promise<void>((resolve) => {
+      releaseRevalidation = resolve
+    })
+    const revalidations: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (request.headers.get('If-None-Match') === '"snapshot-1"') {
+          revalidations.push(request)
+          await revalidated
+          return new Response(null, { status: 304 })
+        }
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+    render(App)
+    await screen.findByRole('button', { name: /Example issue/ })
+
+    const projectButton = [
+      ...document.querySelectorAll<HTMLButtonElement>('.project-select-button'),
+    ].find((button) => button.textContent?.includes('example-project'))!
+    await fireEvent.click(projectButton)
+    expect(screen.getByRole('heading', { name: 'example-project' })).not.toBeNull()
+    await waitFor(() => expect(revalidations).toHaveLength(1))
+    await tick()
+    const normalizations = vi.mocked(normalizeKataUISnapshot).mock.calls.length
+
+    releaseRevalidation!()
+    await revalidated
+    // Let the 304 reach the snapshot store and the shell before counting.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await tick()
+
+    expect(screen.getByRole('heading', { name: 'example-project' })).not.toBeNull()
+    expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations)
+  })
+
   it.each([
     { pending: false, future: false, changed: false },
     { pending: true, future: false, changed: false },
