@@ -124,7 +124,7 @@ func convertEnvelopes(envs []Envelope, exportVersion int, localInstanceUID strin
 		if err != nil {
 			return nil, err
 		}
-		// Release the raw payload after decoding to reduce peak memory.
+		// Clear the payload from the input envs slice after decoding to reduce peak memory.
 		envs[i].Data = nil
 		if asStandalone {
 			switch record := rec.(type) {
