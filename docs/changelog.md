@@ -16,6 +16,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   cannot be read, the save or undo fails and writes nothing. Edit requests can
   send `expected_content_revision` for the same check; see the
   [HTTP API reference](reference/http-api.md#editing-an-issue-safely).
+
 - Read a soft-deleted issue's history, including who deleted it and when, from
   `GET /api/v1/projects/{project_id}/events?issue={ref}`. Name the actor you
   would restore as in the new `actor` query parameter. Callers who may restore
