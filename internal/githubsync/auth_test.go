@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -30,7 +29,6 @@ import (
 // keeps each mint's JWT and each API request's Authorization header, answers
 // 401 to the rejected token, and fails API requests with apiErr when set.
 type appTestTransport struct {
-	mu       sync.Mutex
 	expiry   time.Duration
 	rejected string
 	apiErr   error
@@ -39,8 +37,6 @@ type appTestTransport struct {
 }
 
 func (rt *appTestTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
 	auth := req.Header.Get("Authorization")
 	status, body := http.StatusNoContent, ""
 	if req.URL.Path == "/app/installations/456/access_tokens" {
@@ -174,13 +170,12 @@ func TestCredentialResolverAppUsesEachSuppliedBase(t *testing.T) {
 	assert.Equal(t, []string{"token token-1", "token token-1"}, first.tokens)
 	assert.Equal(t, []string{"token token-1", "token token-1"}, second.tokens)
 
-	inner := &appTestTransport{expiry: time.Hour, rejected: "token token-1"}
-	for _, want := range []int{http.StatusUnauthorized, http.StatusNoContent} {
-		status, err := appTestSession(t.Context(), resolver, appTestFuncTransport(inner.RoundTrip))
+	inner := &appTestTransport{expiry: time.Hour}
+	for range 2 {
+		_, err := appTestSession(t.Context(), resolver, appTestFuncTransport(inner.RoundTrip))
 		require.NoError(t, err)
-		assert.Equal(t, want, status)
 	}
-	assert.Equal(t, []string{"token token-1", "token token-2"}, inner.tokens, "an uncomparable base is not cached")
+	assert.Len(t, inner.jwts, 2, "an uncomparable base is not cached")
 }
 
 func TestCredentialResolverPrefersAppOverEnvAndGH(t *testing.T) {
