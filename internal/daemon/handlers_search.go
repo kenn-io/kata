@@ -20,7 +20,7 @@ import (
 func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "searchIssues",
-		Description: "Explicit semantic/hybrid modes return a validation error (400) when a configured embedding credential source is unusable or the provider rejects authentication or access. Default search returns lexical results with degraded_reason instead. Transient vector failures return unavailable (503) in explicit modes.",
+		Description: "Explicit semantic/hybrid modes return a validation error (400) when a configured embedding credential source is unusable or the provider rejects authentication or access. Default search returns lexical results with degraded_reason instead. Unavailable vector search returns 503 in explicit modes.",
 		Errors:      []int{400, 401, 403, 404, 503},
 		Responses: map[string]*huma.Response{
 			"default": {Description: "Error"},
@@ -50,6 +50,9 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 
+		if cfg.EmbeddingUnavailableReason != "" && (mode == "semantic" || mode == "hybrid") {
+			return nil, api.NewError(503, "unavailable", cfg.EmbeddingUnavailableReason, "", nil)
+		}
 		stable := in.Sort == "oldest"
 		if (stable && in.Mode != "lexical") || (in.Cursor != "" && !stable) {
 			return nil, api.NewError(400, "validation", "cursor pagination requires mode=lexical and sort=oldest", "", nil)
@@ -115,6 +118,10 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Mode = string(res.Mode)
 		out.Body.Degraded = res.Degraded
 		out.Body.DegradedReason = res.DegradedReason
+		if cfg.EmbeddingUnavailableReason != "" && (mode == "" || mode == "auto") {
+			out.Body.Degraded = true
+			out.Body.DegradedReason = cfg.EmbeddingUnavailableReason
+		}
 		out.Body.Results = make([]api.SearchHit, 0, len(res.Hits))
 		for _, c := range res.Hits {
 			out.Body.Results = append(out.Body.Results, api.SearchHit{

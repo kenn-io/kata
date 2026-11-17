@@ -86,6 +86,9 @@ func (p *postgresIndex) beginReconcilerTx(ctx context.Context) (*sql.Tx, error) 
 	return conn.BeginTx(ctx, nil)
 }
 
+// ErrPgvectorMissing reports that the pgvector extension is unavailable.
+var ErrPgvectorMissing = errors.New("vector: pgvector is not installed; semantic search is unavailable")
+
 func (p *postgresIndex) validate(ctx context.Context) error {
 	var halfvecAvailable bool
 	if err := p.db.QueryRowContext(ctx,
@@ -93,7 +96,7 @@ func (p *postgresIndex) validate(ctx context.Context) error {
 		return fmt.Errorf("vector: validate pgvector: %w", err)
 	}
 	if !halfvecAvailable {
-		return errors.New("vector: pgvector is not installed; semantic search is unavailable")
+		return ErrPgvectorMissing
 	}
 	var tablesReady bool
 	if err := p.db.QueryRowContext(ctx, `SELECT

@@ -12419,7 +12419,7 @@ paths:
           description: Error
   /api/v1/projects/{project_id}/search:
     get:
-      description: Explicit semantic/hybrid modes return a validation error (400) when a configured embedding credential source is unusable or the provider rejects authentication or access. Default search returns lexical results with degraded_reason instead. Transient vector failures return unavailable (503) in explicit modes.
+      description: Explicit semantic/hybrid modes return a validation error (400) when a configured embedding credential source is unusable or the provider rejects authentication or access. Default search returns lexical results with degraded_reason instead. Unavailable vector search returns 503 in explicit modes.
       operationId: searchIssues
       parameters:
         - description: Continuation for explicit lexical search with sort=oldest

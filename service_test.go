@@ -297,3 +297,41 @@ func listProjects(t *testing.T, baseURL string) projectsResponse {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
 	return out
 }
+
+func TestServiceRejectsInvalidEmbeddingConfig(t *testing.T) {
+	for _, embeddings := range []kata.EmbeddingsConfig{
+		{BaseURL: "http://127.0.0.1:1234"},
+		{BaseURL: "http://127.0.0.1:1234", Model: "test", Dims: 2},
+	} {
+		_, err := kata.New(t.Context(), kata.Config{
+			DSN:        filepath.Join(t.TempDir(), "service.db"),
+			Auth:       kata.AuthConfig{TrustCallerAuthentication: true},
+			Embeddings: embeddings,
+		})
+		require.Error(t, err)
+	}
+}
+
+func TestServiceSearchWithoutEmbeddings(t *testing.T) {
+	service, err := kata.New(t.Context(), kata.Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: kata.AuthConfig{TrustCallerAuthentication: true}})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	server := httptest.NewServer(service.Handler())
+	t.Cleanup(server.Close)
+	project := createProject(t, server.URL, "example-project")
+	for _, tc := range []struct {
+		mode     string
+		status   int
+		contains string
+	}{{"semantic", 400, "requires"}, {"auto", 200, `"mode":"lexical"`}} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/search?q=example&mode=%s", server.URL, project.Project.ID, tc.mode), nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, tc.status, resp.StatusCode)
+		require.Contains(t, string(body), tc.contains)
+	}
+}

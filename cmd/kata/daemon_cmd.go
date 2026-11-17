@@ -2190,7 +2190,7 @@ func preflightEmbeddingStartup(
 	if !ec.Enabled() {
 		return nil, "", nil
 	}
-	cfg := embeddingClientConfig(ec)
+	cfg := embedding.ClientConfig(ec)
 	if ec.UsesLocal() {
 		cfg.Endpoint = func(ctx context.Context) (string, error) {
 			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
@@ -2213,7 +2213,7 @@ func preflightEmbeddingStartup(
 	if err != nil {
 		return nil, "", fmt.Errorf("embedding client: %w", err)
 	}
-	batchOptions := embeddingBatchOptions(ec, embedder.BatchSize())
+	batchOptions := embedding.BatchOptions(ec, embedder.BatchSize())
 	if _, err := kitvec.EncodeBatched(
 		context.Background(), embedder.EncodeFunc(), nil, batchOptions...,
 	); err != nil {
@@ -2224,42 +2224,6 @@ func preflightEmbeddingStartup(
 		return nil, "", fmt.Errorf("embedding index: %w", err)
 	}
 	return embedder, vectorsPath, nil
-}
-
-func embeddingClientConfig(ec config.EmbeddingsConfig) embedding.Config {
-	cfg := embedding.Config{
-		BaseURL:             ec.BaseURL,
-		Model:               ec.Model,
-		Credential:          ec.ResolveCredential(),
-		Salt:                ec.FingerprintSalt,
-		DocumentPrefix:      ec.DocumentPrefix,
-		DocumentSuffix:      ec.DocumentSuffix,
-		QueryPrefix:         ec.QueryPrefix,
-		QuerySuffix:         ec.QuerySuffix,
-		RequestDimensions:   ec.RequestDimensions,
-		Dims:                ec.Dims,
-		BatchSize:           ec.BatchSize,
-		Timeout:             time.Duration(ec.TimeoutSeconds) * time.Second,
-		TrustPrivateNetwork: ec.TrustPrivateNetwork,
-	}
-	if ec.UsesLocal() {
-		if cfg.BatchSize == 0 {
-			cfg.BatchSize = embedlocal.BatchItems
-		}
-		if cfg.Timeout == 0 {
-			cfg.Timeout = embedlocal.RequestTimeout
-		}
-	}
-	return cfg
-}
-
-func embeddingBatchOptions(ec config.EmbeddingsConfig, batchSize int) []kitvec.BatchOption {
-	options := []kitvec.BatchOption{kitvec.WithBatchSize(batchSize)}
-	if ec.MaxBatchTokens != 0 || ec.ModelContextTokens != 0 {
-		options = append(options,
-			kitvec.WithBatchTokenBudget(ec.MaxBatchTokens, ec.ModelContextTokens))
-	}
-	return options
 }
 
 // startEmbeddingReconciler opens the sidecar vector index for the embedding
@@ -2295,7 +2259,7 @@ func startEmbeddingReconciler(
 	}
 	reconciler := daemon.NewReconciler(store, idx, embedder, daemon.ReconcilerConfig{
 		BatchSize:      ec.BatchSize,
-		BatchOptions:   embeddingBatchOptions(ec, embedder.BatchSize()),
+		BatchOptions:   embedding.BatchOptions(ec, embedder.BatchSize()),
 		DrainAdmission: drainAdmission,
 		OnProjectEvent: func(event db.Event, fork activity.Admission) { publisher.EventFrom(event.ProjectID, event, fork) },
 		FederationProducerAllowed: func(ctx context.Context, projectUID string, recipe embedding.ArtifactIdentity, _ activity.Admission, syncArtifacts bool) (bool, error) {

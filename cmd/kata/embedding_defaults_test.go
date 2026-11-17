@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/embedding"
 )
 
 func TestEmbeddingDefaults(t *testing.T) {
@@ -22,7 +23,7 @@ func TestEmbeddingDefaults(t *testing.T) {
 		{"timeout override", config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", TimeoutSeconds: 42}, 8, 42 * time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := embeddingClientConfig(tc.config)
+			cfg := embedding.ClientConfig(tc.config)
 			client, _, err := preflightEmbeddingStartup(tc.config, "example.db")
 			require.NoError(t, err)
 			require.Equal(t, tc.batch, client.BatchSize())
