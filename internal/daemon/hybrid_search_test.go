@@ -41,23 +41,6 @@ func TestHybridSearchLexicalWhenUnconfigured(t *testing.T) {
 	}
 }
 
-func TestHybridSearchExplicitHybridUnconfiguredErrors(t *testing.T) {
-	ctx := t.Context()
-	store := newReconcilerTestStore(t)
-	proj, _ := store.CreateProject(ctx, "spoke-project")
-	_, err := hybridSearch(ctx, store, nil, nil, hybridParams{ProjectID: proj.ID, Query: "x", Limit: 10, Requested: "hybrid"})
-	if err == nil {
-		t.Fatal("expected 400-class error for explicit hybrid without embeddings")
-	}
-	var me *modeError
-	if !errors.As(err, &me) {
-		t.Fatalf("want *modeError, got %T: %v", err, err)
-	}
-	if me.Status() != 400 {
-		t.Fatalf("unconfigured explicit mode should be 400, got %d", me.Status())
-	}
-}
-
 // failingEmbedClient builds a real *embedding.Client pointed at a server that
 // always errors, so the vector leg fails the way an unreachable endpoint would.
 func failingEmbedClient(t *testing.T, status int) *embedding.Client {

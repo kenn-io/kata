@@ -27,22 +27,25 @@ func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage) (int, erro
 	if err != nil {
 		return 0, fmt.Errorf("vector: scan mirror keys: %w", err)
 	}
-	changed, stale, err := syncMirror(ctx, store, known, func(ic db.IssueContent) (int, error) {
-		res, err := ix.db.ExecContext(ctx, `
+	changed, stale, err := syncMirror(ctx, store, known, func(page []db.IssueContent) (int, error) {
+		changed := 0
+		for _, ic := range page {
+			res, err := ix.db.ExecContext(ctx, `
 			INSERT INTO issue_mirror (issue_uid, project_uid, content, content_revision)
 			VALUES (?, ?, ?, ?)
 			ON CONFLICT(issue_uid) DO UPDATE SET
 			  project_uid = excluded.project_uid,
 			  content = excluded.content,
 			  content_revision = excluded.content_revision`,
-			ic.UID, ic.ProjectUID, embedding.EmbedText(ic.Title, ic.Body), ic.ContentRevision)
-		if err != nil {
-			return 0, fmt.Errorf("vector: upsert mirror row %s: %w", ic.UID, err)
+				ic.UID, ic.ProjectUID, embedding.EmbedText(ic.Title, ic.Body), ic.ContentRevision)
+			if err != nil {
+				return changed, fmt.Errorf("vector: upsert mirror row %s: %w", ic.UID, err)
+			}
+			if n, err := res.RowsAffected(); err == nil {
+				changed += int(n)
+			}
 		}
-		if n, err := res.RowsAffected(); err == nil {
-			return int(n), nil
-		}
-		return 0, nil
+		return changed, nil
 	})
 	if err != nil {
 		return changed, err
@@ -96,7 +99,7 @@ func loadMirrorKeys(ctx context.Context, queryer mirrorQuerier, query string) (m
 
 // syncMirror consumes known as it pages the live feed. Leftovers are safe to
 // remove only after every page has been read successfully.
-func syncMirror(ctx context.Context, store db.Storage, known map[string]mirrorKey, upsert func(db.IssueContent) (int, error)) (changed int, leftovers []string, err error) {
+func syncMirror(ctx context.Context, store db.Storage, known map[string]mirrorKey, upsert func([]db.IssueContent) (int, error)) (changed int, leftovers []string, err error) {
 	var afterID int64
 	for {
 		page, err := store.ListIssueContent(ctx, afterID, mirrorPageSize)
@@ -106,6 +109,7 @@ func syncMirror(ctx context.Context, store db.Storage, known map[string]mirrorKe
 		if len(page) == 0 {
 			break
 		}
+		var updates []db.IssueContent
 		for _, issue := range page {
 			afterID = issue.ID
 			key, exists := known[issue.UID]
@@ -113,11 +117,14 @@ func syncMirror(ctx context.Context, store db.Storage, known map[string]mirrorKe
 			if exists && key.revision == issue.ContentRevision && key.projectUID == issue.ProjectUID {
 				continue
 			}
-			n, err := upsert(issue)
+			updates = append(updates, issue)
+		}
+		if len(updates) > 0 {
+			n, err := upsert(updates)
+			changed += n
 			if err != nil {
 				return changed, nil, err
 			}
-			changed += n
 		}
 	}
 	for uid := range known {
