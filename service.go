@@ -381,6 +381,23 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	}
 	federationCredentials := serviceCredentialStoreAdapter{store: publicFederationCredentials}
 
+	var embedder *embedding.Client
+	if cfg.Embeddings.Enabled() {
+		ec := embedding.ClientConfig(cfg.Embeddings)
+		if cfg.Embeddings.UsesLocal() {
+			ec.Endpoint = func(ctx context.Context) (string, error) {
+				return embedding.ResolveLocal(ctx, embedlocal.Endpoint, embedlocal.Install, nil)
+			}
+		}
+		embedder, err = embedding.New(ec)
+		if err != nil {
+			return nil, fmt.Errorf("kata: embedding client: %w", err)
+		}
+		if err := embedding.ValidateBatching(ctx, cfg.Embeddings, embedder); err != nil {
+			return nil, fmt.Errorf("kata: embedding batching: %w", err)
+		}
+	}
+
 	openCfg := storeopen.DefaultConfig()
 	pgCfg := cfg.Postgres
 	openCfg.Postgres = pgstore.ConfigFromValues(
@@ -394,30 +411,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		return nil, fmt.Errorf("kata: open storage: %w", err)
 	}
 
-	var embedder *embedding.Client
 	var index *vector.Index
 	var unavailable string
 	if cfg.Embeddings.Enabled() {
-		ec := embedding.ClientConfig(cfg.Embeddings)
-		if cfg.Embeddings.UsesLocal() {
-			ec.Endpoint = func(ctx context.Context) (string, error) {
-				return embedding.ResolveLocal(ctx, embedlocal.Endpoint, embedlocal.Install, nil)
-			}
-		}
-		pg, ok := store.(*pgstore.Store)
-		if !ok {
-			_ = store.Close()
-			return nil, errors.New("kata: embeddings require Postgres")
-		}
-		embedder, err = embedding.New(ec)
-		if err != nil {
-			_ = store.Close()
-			return nil, fmt.Errorf("kata: embedding client: %w", err)
-		}
-		if err := embedding.ValidateBatching(ctx, cfg.Embeddings, embedder); err != nil {
-			_ = store.Close()
-			return nil, fmt.Errorf("kata: embedding batching: %w", err)
-		}
+		pg := store.(*pgstore.Store)
 		index, err = vector.OpenPostgres(ctx, pg.DB)
 		if errors.Is(err, vector.ErrPgvectorMissing) {
 			unavailable = err.Error()

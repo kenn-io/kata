@@ -18,7 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
-	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/webui"
 )
 
@@ -319,10 +318,8 @@ func TestServiceRejectsInvalidEmbeddingConfig(t *testing.T) {
 		})
 	}
 	t.Run("invalid batch budget", func(t *testing.T) {
-		dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
-		t.Cleanup(cleanup)
 		service, err := kata.New(t.Context(), kata.Config{
-			DSN: dsn, Auth: kata.AuthConfig{TrustCallerAuthentication: true},
+			DSN: "postgres://kata@127.0.0.1:1/kata?sslmode=disable", Auth: kata.AuthConfig{TrustCallerAuthentication: true},
 			Embeddings: kata.EmbeddingsConfig{BaseURL: "http://127.0.0.1:1234", Model: "test", Dims: 2, MaxBatchTokens: 100},
 		})
 		if service != nil {
