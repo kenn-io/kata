@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -225,5 +226,28 @@ func TestFederationNamedSpokeTokenStaysWithResolvedEndpoint(t *testing.T) {
 		require.NotContains(t, values, "Bearer moved-token")
 	default:
 		t.Fatal("resolved spoke did not receive the request")
+	}
+}
+
+func TestFederationNamedLocalSpokeTokenRequiresUnchangedHome(t *testing.T) {
+	for _, tc := range []struct {
+		name, entry, token string
+	}{
+		{"current home", "", "spoke-token"},
+		{"moved to another home", fmt.Sprintf("home = %q\ninstance_uid = \"01HZZZZZZZZZZZZZZZZZZZZZ09\"\n", filepath.Join(t.TempDir(), "other-home")), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetFlags(t)
+			home := setupKataEnv(t)
+			t.Setenv("KATA_AUTH_TOKEN", "hub-token")
+			// Resolution chose the current home's daemon for this local entry.
+			resolved := clientpkg.ResolvedDaemon{Source: clientpkg.DaemonSourceNamedCatalog, Name: "spoke"}
+			body := "[[daemon]]\nname = \"spoke\"\nlocal = true\ntoken = \"spoke-token\"\n" + tc.entry
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0600))
+
+			auth, err := federationSpokeTargetAuth(t.Context(), resolved)
+			require.NoError(t, err)
+			assert.Equal(t, tc.token, auth.Token)
+		})
 	}
 }

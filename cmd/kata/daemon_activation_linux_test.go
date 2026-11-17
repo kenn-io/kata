@@ -33,7 +33,7 @@ func TestSocketActivationInheritedProcess(t *testing.T) {
 	}
 	ctx, cancel := signal.NotifyContext(t.Context(), syscall.SIGTERM)
 	defer cancel()
-	if err := runDaemonProcess(ctx, "", false, true, nil); err != nil {
+	if err := runDaemonProcess(ctx, "", false, true, nil, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

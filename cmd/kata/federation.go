@@ -447,7 +447,8 @@ func federationSpokeTargetAuth(ctx context.Context, resolved clientpkg.ResolvedD
 
 func catalogEntryNamesEndpoint(entry *config.CatalogDaemonConfig, resolved clientpkg.ResolvedDaemon) (bool, error) {
 	if entry.Local || !resolved.ConfiguredRemote() {
-		return entry.Local && !resolved.ConfiguredRemote(), nil
+		// Without a profile home, a local entry names the current home's daemon.
+		return entry.Local && entry.Home == "" && !resolved.ConfiguredRemote(), nil
 	}
 	if socket, unix, err := clientpkg.UnixSocketPath(entry.URL); err != nil || unix {
 		return err == nil && socket == resolved.UnixSocket, err
