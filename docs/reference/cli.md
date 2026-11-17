@@ -784,8 +784,8 @@ non-bootstrap credential from that credential, which only identity mode does;
 the [exceptions](http-api.md#issue-scoped-credentials) are listed in the HTTP
 API reference. It is `false` when a write can record the actor from `--as`,
 `KATA_AUTHOR`, or git, and the human line then says `actors unverified`. Its
-`hold` value is `active`,
-`expired`, `pending`, `assigned`, `unassigned`, or `closed`. `assigned` means
+`hold` value is `active`, `expired`, `pending`, `assigned`, `unassigned`, or
+`closed`. `assigned` means
 the open issue has an owner without a live or pending lease, which is the
 state `kata claim` produces outside federation. A cached timed
 lease can report `expired` while its hub is unavailable or before the hub's

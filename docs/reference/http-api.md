@@ -548,9 +548,9 @@ every attributed write made through this daemon's API with a non-bootstrap
 credential takes its actor from a database token or a trusted-proxy header. The
 bootstrap token makes no attributed writes except owner-only administration
 such as creating a federation replica, which records the actor the request
-names. Otherwise a write can record the actor
-named in the request body, and the field is `false`. Every credential
-sees the same value, and a daemon that predates the field omits it. The field
+names. Otherwise a write can record the actor named in the request body, and
+the field is `false`. Every credential sees the same value, and a daemon that
+predates the field omits it. The field
 describes the event actor of a write. It does not make an actor name stored
 inside a value trustworthy: a notification slot's `from` is written by whoever
 may edit issue metadata, so a client must not treat it as verified even when
