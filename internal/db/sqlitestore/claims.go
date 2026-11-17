@@ -722,7 +722,7 @@ func resolveClaimGateIssueTx(ctx context.Context, tx claimStore, projectID int64
 	const q = `
 		SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
 		       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author,
-		       i.metadata, i.revision,
+		       i.metadata, i.revision, i.content_revision,
 		       i.recurrence_id, i.occurrence_key,
 		       i.created_at, i.updated_at, i.closed_at, i.deleted_at
 		  FROM issues i
@@ -734,7 +734,7 @@ func resolveClaimGateIssueTx(ctx context.Context, tx claimStore, projectID int64
 		&issue.ID, &issue.UID, &issue.ProjectID, &issue.ProjectUID, &issue.ShortID,
 		&issue.Title, &issue.Body, &issue.Status, &issue.ClosedReason, &issue.Owner,
 		&issue.AssignmentExpiresOn, &issue.Priority, &issue.Author, &issue.Metadata,
-		&issue.Revision,
+		&issue.Revision, &issue.ContentRevision,
 		&issue.RecurrenceID, &issue.OccurrenceKey, &issue.CreatedAt, &issue.UpdatedAt,
 		&issue.ClosedAt, &issue.DeletedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1746,7 +1746,7 @@ func resolveClaimIssueTx(ctx context.Context, tx claimStore, projectID int64, is
 	const q = `
 		SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
 		       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author,
-		       i.metadata, i.revision,
+		       i.metadata, i.revision, i.content_revision,
 		       i.recurrence_id, i.occurrence_key,
 		       i.created_at, i.updated_at, i.closed_at, i.deleted_at, p.name
 		  FROM issues i
@@ -1759,7 +1759,7 @@ func resolveClaimIssueTx(ctx context.Context, tx claimStore, projectID int64, is
 		&issue.ID, &issue.UID, &issue.ProjectID, &issue.ProjectUID, &issue.ShortID,
 		&issue.Title, &issue.Body, &issue.Status, &issue.ClosedReason, &issue.Owner,
 		&issue.AssignmentExpiresOn, &issue.Priority, &issue.Author, &issue.Metadata,
-		&issue.Revision,
+		&issue.Revision, &issue.ContentRevision,
 		&issue.RecurrenceID, &issue.OccurrenceKey, &issue.CreatedAt, &issue.UpdatedAt,
 		&issue.ClosedAt, &issue.DeletedAt, &projectName)
 	if errors.Is(err, sql.ErrNoRows) {

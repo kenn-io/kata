@@ -1716,6 +1716,11 @@ components:
           type: string
         clear_priority:
           type: boolean
+        expected_content_revision:
+          description: Current content_revision of the issue; a title or body edit since then returns 412 revision_conflict and writes nothing.
+          format: int64
+          minimum: 0
+          type: integer
         links_delta:
           $ref: "#/components/schemas/LinksDelta"
         owner:
@@ -3431,6 +3436,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -3493,6 +3501,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
@@ -3612,6 +3621,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -3699,6 +3711,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
@@ -4251,6 +4264,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -4341,6 +4357,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
@@ -5564,6 +5581,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -5629,6 +5649,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
@@ -5716,6 +5737,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -5806,6 +5830,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
@@ -6762,6 +6787,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -6835,6 +6863,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
@@ -7275,6 +7304,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -7352,6 +7384,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
