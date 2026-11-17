@@ -48,9 +48,11 @@ type authPolicy struct {
 }
 
 // verifiesWriteActors reports whether every attributed write made through this
-// daemon's API takes its actor from a credential. Events imported by
-// federation keep the actor their peer recorded. Identity mode admits only database tokens, which carry
-// an actor, and the bootstrap token, which cannot write (see actorFor and
+// daemon's API with a non-bootstrap credential takes its actor from that
+// credential. Events imported by federation keep the actor their peer recorded,
+// and createFederationReplica records the actor a bootstrap-token request names.
+// Identity mode admits only database tokens, which carry an actor, and the
+// bootstrap token, which cannot make attributed writes (see actorFor and
 // ensureAttributedWriteAllowed). Every other mode lets some route record the
 // actor named in the request body, even when one listener maps a proxy header.
 func (p authPolicy) verifiesWriteActors() bool {

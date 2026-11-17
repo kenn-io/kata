@@ -3461,7 +3461,7 @@ type InstanceResponseBody struct {
 	WebUICapabilities         UICapabilities `json:"web_ui_capabilities"`
 	WebUIContractVersion      *string        `json:"web_ui_contract_version,omitempty"`
 
-	// WriteActorsVerified True when this daemon derives the actor of every attributed write made through its API from a credential, so no such write records an actor taken from the request body. It does not cover actor names stored inside values, such as a notification slot's from field, or actors on events imported by federation, which are only as trustworthy as the peer that recorded them.
+	// WriteActorsVerified True when this daemon derives the actor of every attributed write made through its API with a non-bootstrap credential from that credential, so no such write records an actor taken from the request body. It does not cover owner-only administration with the bootstrap token, which records the actor the request names (creating a federation replica), actor names stored inside values, such as a notification slot's from field, or actors on events imported by federation, which are only as trustworthy as the peer that recorded them.
 	WriteActorsVerified *bool `json:"write_actors_verified,omitempty"`
 }
 
