@@ -29,7 +29,8 @@ The Postgres database needs the pgvector extension. Without it, lexical search
 remains available and semantic search reports the missing extension. After
 installing pgvector, have the schema owner open the service once with
 `PostgresSchemaBootstrap` to create the optional vector tables. Then restart
-the service with `PostgresSchemaValidate`.
+the service with `PostgresSchemaValidate`. Validation-mode startup fails until
+the optional vector tables are bootstrapped.
 
 ## Browser host boundary
 

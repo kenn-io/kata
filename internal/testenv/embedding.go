@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// NewTwoDimensionalEmbeddingServer starts an embedding provider for service
-// tests. embed maps each input to its vector; nil embeds every input as {1, 0}.
-func NewTwoDimensionalEmbeddingServer(t *testing.T, embed func(string) []float32) *httptest.Server {
+// NewEmbeddingServer starts a test provider. embed maps each input to its
+// vector; nil embeds every input as {1, 0}.
+func NewEmbeddingServer(t *testing.T, embed func(string) []float32) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {

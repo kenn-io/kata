@@ -87,7 +87,6 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 				IssueScope: issueScopeFromContext(ctx),
 			})
 		}
-
 		if err != nil {
 			if me, ok := errors.AsType[*modeError](err); ok {
 				kind := "validation"
@@ -98,7 +97,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return nil, internalAPIError(err)
 		}
-
+		markEmbeddingUnavailable(&res, cfg.EmbeddingUnavailableReason, mode)
 		more := len(res.Hits) > limit
 		page := api.PageMetadata{Complete: !more, Truncated: more}
 		if !stable && (res.Mode != modeLexical || res.Degraded || len(res.Hits) >= 200) {
@@ -129,4 +128,13 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		return out, nil
 	})
+}
+
+// markEmbeddingUnavailable labels an auto search that ran lexically because
+// the embedding index cannot be opened. Explicit modes are rejected earlier.
+func markEmbeddingUnavailable(res *hybridResult, reason, mode string) {
+	if reason != "" && (mode == "" || mode == "auto") {
+		res.Degraded = true
+		res.DegradedReason = reason
+	}
 }

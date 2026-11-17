@@ -16,6 +16,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   cannot be read, the save or undo fails and writes nothing. Edit requests can
   send `expected_content_revision` for the same check; see the
   [HTTP API reference](reference/http-api.md#editing-an-issue-safely).
+- Add semantic and hybrid search to Postgres-backed Go services with `Config.Embeddings`; automatic search falls back to lexical results when pgvector is missing. See [semantic search](development/embedding.md#semantic-search).
 
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
 

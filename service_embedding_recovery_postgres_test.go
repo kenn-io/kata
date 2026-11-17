@@ -3,6 +3,7 @@ package kata_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -22,7 +23,7 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 	t.Cleanup(func() { _ = admin.Close() })
 	var owner string
 	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&owner))
-	endpoint := testenv.NewTwoDimensionalEmbeddingServer(t, nil)
+	endpoint := testenv.NewEmbeddingServer(t, nil)
 	cfg := kata.Config{
 		DSN: dsn, Postgres: kata.PostgresConfig{Schema: "kata", SchemaMode: kata.PostgresSchemaBootstrap, SchemaOwner: owner},
 		Auth:       kata.AuthConfig{TrustCallerAuthentication: true},
@@ -42,6 +43,18 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 	status, titles, _ := searchTitles(ctx, server, projectID, "recover", "lexical")
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, []string{"recover semantic search"}, titles)
+	status, titles, body := searchTitles(ctx, server, projectID, "recover", "auto")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, []string{"recover semantic search"}, titles)
+	var auto struct {
+		Mode           string `json:"mode"`
+		Degraded       bool   `json:"degraded"`
+		DegradedReason string `json:"degraded_reason"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &auto))
+	require.Equal(t, "lexical", auto.Mode)
+	require.True(t, auto.Degraded)
+	require.Contains(t, auto.DegradedReason, "pgvector")
 	for _, mode := range []string{"semantic", "hybrid"} {
 		status, _, body := searchTitles(ctx, server, projectID, "recover", mode)
 		require.Equal(t, http.StatusServiceUnavailable, status)

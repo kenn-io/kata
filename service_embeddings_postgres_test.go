@@ -21,7 +21,7 @@ func TestServicePostgresEmbeddingSearch(t *testing.T) {
 	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
 	t.Cleanup(cleanup)
-	endpoint := testenv.NewTwoDimensionalEmbeddingServer(t, func(input string) []float32 {
+	endpoint := testenv.NewEmbeddingServer(t, func(input string) []float32 {
 		switch {
 		case input == "database contention" || strings.Contains(input, "serialize concurrent writers"):
 			return []float32{1, 0}

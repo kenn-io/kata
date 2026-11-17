@@ -19,7 +19,7 @@ func TestServiceEmbeddingHonorsRevokedWorkerFence(t *testing.T) {
 	t.Cleanup(cleanup)
 	revoked := atomic.Bool{}
 	requests := make(chan string, 4)
-	endpoint := testenv.NewTwoDimensionalEmbeddingServer(t, func(input string) []float32 {
+	endpoint := testenv.NewEmbeddingServer(t, func(input string) []float32 {
 		requests <- input
 		return []float32{1, 0}
 	})

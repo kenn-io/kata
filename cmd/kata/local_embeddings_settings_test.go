@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,20 +148,11 @@ func TestLocalEmbeddingsSetupSavesUntilManualRestart(t *testing.T) {
 			oldTelemetry := newTelemetryReporter
 			newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
 			t.Cleanup(func() { newTelemetryReporter = oldTelemetry })
-			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var input struct {
-					Input []string `json:"input"`
-				}
-				require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
-				vectors := make([]map[string]any, len(input.Input))
-				for i := range input.Input {
-					v := make([]float64, 768)
-					v[0] = 1
-					vectors[i] = map[string]any{"embedding": v, "index": i}
-				}
-				require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": vectors}))
-			}))
-			t.Cleanup(provider.Close)
+			provider := testenv.NewEmbeddingServer(t, func(string) []float32 {
+				v := make([]float32, 768)
+				v[0] = 1
+				return v
+			})
 			oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
 			t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
 			var installs atomic.Int32
@@ -318,20 +308,11 @@ func TestSharedChoiceDaemonStartup(t *testing.T) {
 				require.ErrorContains(t, err, "embedding batching")
 			}
 			if scenario == "enabled" {
-				provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					var input struct {
-						Input []string `json:"input"`
-					}
-					require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
-					vectors := make([]map[string]any, len(input.Input))
-					for i := range input.Input {
-						v := make([]float64, 768)
-						v[0] = 1
-						vectors[i] = map[string]any{"embedding": v, "index": i}
-					}
-					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": vectors}))
-				}))
-				t.Cleanup(provider.Close)
+				provider := testenv.NewEmbeddingServer(t, func(string) []float32 {
+					v := make([]float32, 768)
+					v[0] = 1
+					return v
+				})
 				oldEndpoint := localEmbeddingsEndpoint
 				t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
 				localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return provider.URL, nil }
