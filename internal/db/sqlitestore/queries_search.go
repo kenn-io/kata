@@ -324,7 +324,7 @@ func searchCandidates(ctx context.Context, q readQuerier, query string, args ...
 			inComments bool
 		)
 		if err := rows.Scan(&i.ID, &i.UID, &i.ProjectID, &i.ProjectUID, &i.ShortID, &i.Title, &i.Body, &i.Status,
-			&i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision,
+			&i.ClosedReason, &i.Owner, &i.AssignmentExpiresOn, &i.Priority, &i.Author, &i.Metadata, &i.Revision, &i.ContentRevision,
 			&i.RecurrenceID, &i.OccurrenceKey,
 			&i.CreatedAt, &i.UpdatedAt, &i.ClosedAt, &i.DeletedAt, &i.AttributionView,
 			&score, &inComments); err != nil {

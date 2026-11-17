@@ -260,9 +260,9 @@ func (c *undoClient) RemoveLabel(ctx context.Context, projectID int64, ref, labe
 	return resp, err
 }
 
-func (c *undoClient) EditBody(ctx context.Context, projectID int64, ref, body, actor string) (*MutationResp, error) {
+func (c *undoClient) EditBody(ctx context.Context, projectID int64, ref, body, actor string, expectedContentRevision *int64) (*MutationResp, error) {
 	return c.edit(ctx, projectID, ref, actor, "body.edit", func(uid string) (*MutationResp, error) {
-		return c.KataAPI.EditBody(ctx, projectID, uid, body, actor)
+		return c.KataAPI.EditBody(ctx, projectID, uid, body, actor, expectedContentRevision)
 	})
 }
 

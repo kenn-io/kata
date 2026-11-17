@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-13
+last_edited: 2026-11-16
 ---
 
 # HTTP API schema
@@ -78,6 +78,18 @@ message names it:
 
 The CLI preserves the hint in human, agent, and JSON errors. See
 [agent output](agent-output.md#errors) for its stderr format.
+
+## Editing an issue safely
+
+Issue edits take their precondition in the request body, not `If-Match`,
+because `If-Match` names the issue `revision`, which a title or body edit does
+not move. Send the `content_revision` you read as `expected_content_revision`
+on `PATCH /projects/{project_id}/issues/{ref}`. The daemon compares it with the
+stored value in the same transaction as the write, so a title or body edit made
+in between returns HTTP 412 with code `revision_conflict` and nothing from the
+request is written, including priority, owner, and link changes sent with it.
+Omit the field for an unconditional edit. A new issue starts at `content_revision`
+`0`, so send `0` rather than leaving the field out.
 
 ## Recurrence timezones
 
@@ -285,6 +297,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.53.0` | Issue responses carry `content_revision`, which moves when a title or body edit changes the text. `PATCH /projects/{project_id}/issues/{ref}` accepts `expected_content_revision`; a different current value returns 412 `revision_conflict` and writes nothing. Older daemons reject the unknown field. |
 | `0.52.0` | Close requests accept project-bound transcript selection and retain candidate session identity for keyed retries. |
 | `0.51.0` | Signed federation requests return `503 signing_warming` with `Retry-After: 5` while replay protection warms up. |
 | `0.50.0` | A hub that requires signing and the restricted ingress answer requests without signature headers with `428 hub_signing_required` instead of `401 signature_invalid`. A request with only a digest follows the unsigned path, including when signing is optional. |
