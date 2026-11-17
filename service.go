@@ -26,6 +26,7 @@ import (
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/docbank"
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
@@ -37,6 +38,8 @@ import (
 	"go.kenn.io/kata/internal/tickticksync"
 	"go.kenn.io/kata/internal/todoistsync"
 	"go.kenn.io/kata/internal/twentysync"
+	"go.kenn.io/kata/internal/vector"
+	"go.kenn.io/kit/embedlocal"
 )
 
 // PostgresSchemaMode controls how a PostgreSQL-backed service treats its
@@ -131,6 +134,9 @@ type GitHubAppConfig struct {
 	PrivateKeyPath string
 }
 
+// EmbeddingsConfig selects the embedding provider for semantic search. Its fields follow the standalone daemon's embedding configuration.
+type EmbeddingsConfig = config.EmbeddingsConfig
+
 // DocbankConfig selects the vault used by issue attachments.
 type DocbankConfig = config.DocbankConfig
 
@@ -195,6 +201,7 @@ type Config struct {
 	TodoistSync  TodoistSyncConfig
 	TickTickSync TickTickSyncConfig
 	Docbank      DocbankConfig
+	Embeddings   EmbeddingsConfig
 	// WebHandler optionally serves public, data-free browser assets alongside
 	// the API. Non-API paths bypass Kata's bearer check. Nil keeps the service
 	// API-only. Import go.kenn.io/kata/webui to opt into the bundled application.
@@ -247,6 +254,7 @@ type serviceDeps struct {
 // Service is a mountable Kata HTTP application and its owned lifecycle.
 type Service struct {
 	store                  db.Storage
+	embeddingReconciler    *daemon.Reconciler
 	server                 *daemon.Server
 	broadcaster            *daemon.EventBroadcaster
 	publish                daemon.EventPublisher
@@ -310,6 +318,18 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 			return nil, fmt.Errorf("kata: default timezone %q is not a valid IANA timezone: %w", cfg.DefaultTimezone, err)
 		}
 	}
+	if err := config.ValidateEmbeddings(cfg.Embeddings); err != nil {
+		return nil, fmt.Errorf("kata: embeddings: %w", err)
+	}
+	if cfg.Embeddings.Enabled() {
+		backend, err := storeopen.BackendForDSN(cfg.DSN)
+		if err != nil {
+			return nil, fmt.Errorf("kata: open storage: %w", err)
+		}
+		if backend != storeopen.BackendPostgres {
+			return nil, errors.New("kata: embeddings require Postgres")
+		}
+	}
 	usesAccess := cfg.Access != nil
 	usesToken := strings.TrimSpace(cfg.Auth.Token) != ""
 	usesTrustedCaller := cfg.Auth.TrustCallerAuthentication
@@ -361,6 +381,23 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	}
 	federationCredentials := serviceCredentialStoreAdapter{store: publicFederationCredentials}
 
+	var embedder *embedding.Client
+	if cfg.Embeddings.Enabled() {
+		ec := embedding.ClientConfig(cfg.Embeddings)
+		if cfg.Embeddings.UsesLocal() {
+			ec.Endpoint = func(ctx context.Context) (string, error) {
+				return embedding.ResolveLocal(ctx, embedlocal.Endpoint, embedlocal.Install, nil)
+			}
+		}
+		embedder, err = embedding.New(ec)
+		if err != nil {
+			return nil, fmt.Errorf("kata: embedding client: %w", err)
+		}
+		if err := embedding.ValidateBatching(ctx, cfg.Embeddings, embedder); err != nil {
+			return nil, fmt.Errorf("kata: embedding batching: %w", err)
+		}
+	}
+
 	openCfg := storeopen.DefaultConfig()
 	pgCfg := cfg.Postgres
 	openCfg.Postgres = pgstore.ConfigFromValues(
@@ -374,6 +411,18 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		return nil, fmt.Errorf("kata: open storage: %w", err)
 	}
 
+	var index *vector.Index
+	var unavailable string
+	if cfg.Embeddings.Enabled() {
+		pg := store.(*pgstore.Store)
+		index, err = vector.OpenPostgres(ctx, pg.DB)
+		if errors.Is(err, vector.ErrPgvectorMissing) {
+			unavailable = err.Error()
+		} else if err != nil {
+			_ = store.Close()
+			return nil, fmt.Errorf("kata: embedding index: %w", err)
+		}
+	}
 	startedAt := cfg.StartedAt
 	if startedAt.IsZero() {
 		startedAt = time.Now().UTC()
@@ -387,6 +436,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	broadcaster := daemon.NewEventBroadcaster()
 	hookSink := hooks.NewNoop()
 	publisher := daemon.NewEventPublisher(broadcaster, hookSink)
+	var reconciler *daemon.Reconciler
+	if index != nil && embedder != nil {
+		reconciler = daemon.NewConfiguredEmbeddingReconciler(store, index, embedder, cfg.Embeddings, publisher, nil, federationCredentials, federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized)
+	}
 	federationWake := make(chan struct{}, 1)
 	wakeFederation := func() {
 		select {
@@ -503,7 +556,8 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		}
 	}
 	serverConfig := daemon.ServerConfig{
-		DB:              store,
+		DB:       store,
+		Embedder: embedder, VectorIndex: index, EmbeddingUnavailableReason: unavailable,
 		Docbank:         docbankClient,
 		DocbankFolder:   docbankConfig.Folder,
 		WebHandler:      cfg.WebHandler,
@@ -554,6 +608,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		EmbeddingProfile:          daemon.EmbeddingProfile(cfg.Profile),
 		Logger:                    logger,
 	}
+	if reconciler != nil {
+		serverConfig.ReconcilerHealth = reconciler.Health
+		serverConfig.EmbeddingWake = reconciler.RetryNow
+	}
 	mcpEventsService := newMCPEventsService(ctx, cfg.MCPEvents, serverConfig, broadcaster, deps.mcpEventsWebhook, logger)
 	serverConfig.MCPEvents = mcpEventsService
 	if cfg.MCPEvents.Enabled && mcpEventsService == nil {
@@ -563,6 +621,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 
 	return &Service{
 		store:                  store,
+		embeddingReconciler:    reconciler,
 		server:                 server,
 		broadcaster:            broadcaster,
 		publish:                publisher,
@@ -900,6 +959,9 @@ func (s *Service) Run(ctx context.Context) error {
 				}
 				if msg.Kind == daemon.StreamKindEvent {
 					signalWake(s.federationWake)
+					if s.embeddingReconciler != nil {
+						s.embeddingReconciler.Wake()
+					}
 				}
 			}
 		}
@@ -1030,6 +1092,9 @@ func (s *Service) Run(ctx context.Context) error {
 		{name: "timed-claim", run: sweeper.Run},
 		{name: "due-notification", run: dueNotificationSweeper.Run},
 		{name: "assignment-expiry", run: assignmentSweeper.Run},
+	}
+	if s.embeddingReconciler != nil {
+		workers = append(workers, namedWorker{name: "embeddings", run: s.embeddingReconciler.Run})
 	}
 	// A disabled Events service has nothing to run, and a worker that returns
 	// early would end Run, so it joins the list only when it can deliver.
