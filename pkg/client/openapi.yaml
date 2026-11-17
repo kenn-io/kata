@@ -1833,7 +1833,7 @@ components:
           format: int64
           type: integer
         last_error:
-          description: Sanitized credential rejection, built-in server setup failure, or unavailable index. Credential and server errors clear after a successful embedding call.
+          description: Sanitized credential rejection or built-in server setup failure; cleared after the next successful embedding call.
           type: string
         last_error_at:
           description: Time of the credential rejection or built-in server setup failure; cleared after the next successful embedding call.
@@ -12199,7 +12199,7 @@ paths:
           description: Error
   /api/v1/projects/{project_id}/search:
     get:
-      description: Explicit semantic/hybrid modes return a validation error (400) when a configured embedding credential source is unusable or the provider rejects authentication or access. Default search returns lexical results with degraded_reason instead. Unavailable indexes and transient vector failures return 503 in explicit modes.
+      description: Explicit semantic/hybrid modes return a validation error (400) when a configured embedding credential source is unusable or the provider rejects authentication or access. Default search returns lexical results with degraded_reason instead. Transient vector failures return unavailable (503) in explicit modes.
       operationId: searchIssues
       parameters:
         - description: Continuation for explicit lexical search with sort=oldest

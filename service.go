@@ -40,7 +40,6 @@ import (
 	"go.kenn.io/kata/internal/twentysync"
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kit/embedlocal"
-	kitvec "go.kenn.io/kit/vector"
 )
 
 // PostgresSchemaMode controls how a PostgreSQL-backed service treats its
@@ -319,9 +318,6 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 			return nil, fmt.Errorf("kata: default timezone %q is not a valid IANA timezone: %w", cfg.DefaultTimezone, err)
 		}
 	}
-	if cfg.Embeddings.UsesLocal() && strings.TrimSpace(cfg.Embeddings.Model) == "" {
-		cfg.Embeddings.Model = embedlocal.TextModel
-	}
 	if err := config.ValidateEmbeddings(cfg.Embeddings); err != nil {
 		return nil, fmt.Errorf("kata: embeddings: %w", err)
 	}
@@ -408,15 +404,17 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 				return embedding.ResolveLocal(ctx, embedlocal.Endpoint, embedlocal.Install, nil)
 			}
 		}
-		embedder, err = embedding.New(ec)
-		if err == nil {
-			_, err = kitvec.EncodeBatched(ctx, embedder.EncodeFunc(), nil, embedding.BatchOptions(cfg.Embeddings, embedder.BatchSize())...)
+		pg, ok := store.(*pgstore.Store)
+		if !ok {
+			_ = store.Close()
+			return nil, errors.New("kata: embeddings require Postgres")
 		}
+		embedder, err = embedding.New(ec)
 		if err != nil {
 			_ = store.Close()
 			return nil, fmt.Errorf("kata: embedding client: %w", err)
 		}
-		index, err = vector.OpenPostgres(ctx, store.(*pgstore.Store).DB)
+		index, err = vector.OpenPostgres(ctx, pg.DB)
 		if errors.Is(err, vector.ErrPgvectorMissing) {
 			unavailable = err.Error()
 		} else if err != nil {
@@ -1095,7 +1093,6 @@ func (s *Service) Run(ctx context.Context) error {
 		{name: "assignment-expiry", run: assignmentSweeper.Run},
 	}
 	if s.embeddingReconciler != nil {
-		s.embeddingReconciler.Wake()
 		workers = append(workers, namedWorker{name: "embeddings", run: s.embeddingReconciler.Run})
 	}
 	// A disabled Events service has nothing to run, and a worker that returns

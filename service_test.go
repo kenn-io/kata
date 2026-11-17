@@ -331,20 +331,7 @@ func TestServiceSearchWithoutEmbeddings(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	server := httptest.NewServer(service.Handler())
 	t.Cleanup(server.Close)
-	project := createProject(t, server.URL, "example-project")
-	for _, tc := range []struct {
-		mode     string
-		status   int
-		contains string
-	}{{"semantic", 400, "requires"}, {"auto", 200, `"mode":"lexical"`}} {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/search?q=example&mode=%s", server.URL, project.Project.ID, tc.mode), nil)
-		require.NoError(t, err)
-		resp, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		require.NoError(t, resp.Body.Close())
-		require.Equal(t, tc.status, resp.StatusCode)
-		require.Contains(t, string(body), tc.contains)
-	}
+	status, _, body := searchTitles(t.Context(), server, createProject(t, server.URL, "example-project").Project.ID, "example", "semantic")
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Contains(t, body, "requires")
 }

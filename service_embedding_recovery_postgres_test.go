@@ -3,12 +3,8 @@ package kata_test
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -32,35 +28,24 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 		Auth:       kata.AuthConfig{TrustCallerAuthentication: true},
 		Embeddings: kata.EmbeddingsConfig{BaseURL: endpoint.URL, Model: "test", Dims: 2, TrustPrivateNetwork: true},
 	}
-	service, err := kata.New(ctx, cfg)
-	require.NoError(t, err)
-	require.NoError(t, service.Close())
-	cfg.Postgres.SchemaMode = kata.PostgresSchemaValidate
-	service, err = kata.New(ctx, cfg)
-	require.NoError(t, err)
+	open := func(mode kata.PostgresSchemaMode) *kata.Service {
+		cfg.Postgres.SchemaMode = mode
+		service, err := kata.New(ctx, cfg)
+		require.NoError(t, err)
+		return service
+	}
+	require.NoError(t, open(kata.PostgresSchemaBootstrap).Close())
+	service := open(kata.PostgresSchemaValidate)
 	server := httptest.NewServer(service.Handler())
-	project := createProject(t, server.URL, "recovery")
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues", server.URL, project.Project.ID), strings.NewReader(`{"title":"recover semantic search","actor":"user-a"}`))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.NoError(t, resp.Body.Close())
-	query := fmt.Sprintf("/api/v1/projects/%d/search?q=recover&mode=", project.Project.ID)
-	for mode, expected := range map[string]struct {
-		status int
-		text   string
-	}{"lexical": {http.StatusOK, "recover semantic search"}, "semantic": {http.StatusServiceUnavailable, "pgvector"}} {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+query+mode, nil)
-		require.NoError(t, err)
-		resp, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
-		require.Equal(t, expected.status, resp.StatusCode)
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		require.Contains(t, string(body), expected.text)
-		require.NoError(t, resp.Body.Close())
+	projectID := createProject(t, server.URL, "recovery").Project.ID
+	createAccessIssue(t, server, projectID, "recover semantic search")
+	status, titles, _ := searchTitles(ctx, server, projectID, "recover", "lexical")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, []string{"recover semantic search"}, titles)
+	for _, mode := range []string{"semantic", "hybrid"} {
+		status, _, body := searchTitles(ctx, server, projectID, "recover", mode)
+		require.Equal(t, http.StatusServiceUnavailable, status)
+		require.Contains(t, body, "pgvector")
 	}
 	server.Close()
 	require.NoError(t, service.Close())
@@ -70,13 +55,8 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 	service, err = kata.New(ctx, cfg)
 	require.Nil(t, service)
 	require.ErrorContains(t, err, "semantic-search tables are not installed")
-	cfg.Postgres.SchemaMode = kata.PostgresSchemaBootstrap
-	service, err = kata.New(ctx, cfg)
-	require.NoError(t, err)
-	require.NoError(t, service.Close())
-	cfg.Postgres.SchemaMode = kata.PostgresSchemaValidate
-	service, err = kata.New(ctx, cfg)
-	require.NoError(t, err)
+	require.NoError(t, open(kata.PostgresSchemaBootstrap).Close())
+	service = open(kata.PostgresSchemaValidate)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	server = httptest.NewServer(service.Handler())
 	t.Cleanup(server.Close)
@@ -86,22 +66,7 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 	t.Cleanup(func() { cancel(); require.NoError(t, <-done) })
 	//nolint:kennlint // sleeptest: Postgres and the worker require real I/O.
 	require.Eventually(t, func() bool {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+query+"semantic", nil)
-		if err != nil {
-			return false
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return false
-		}
-		defer func() { _ = resp.Body.Close() }()
-		var result struct {
-			Results []struct {
-				Issue struct {
-					Title string `json:"title"`
-				} `json:"issue"`
-			} `json:"results"`
-		}
-		return resp.StatusCode == http.StatusOK && json.NewDecoder(resp.Body).Decode(&result) == nil && len(result.Results) == 1 && result.Results[0].Issue.Title == "recover semantic search"
+		status, titles, _ := searchTitles(ctx, server, projectID, "recover", "semantic")
+		return status == http.StatusOK && len(titles) == 1 && titles[0] == "recover semantic search"
 	}, 15*time.Second, 100*time.Millisecond)
 }

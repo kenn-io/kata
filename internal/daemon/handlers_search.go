@@ -20,7 +20,7 @@ import (
 func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "searchIssues",
-		Description: "Explicit semantic/hybrid modes return a validation error (400) when a configured embedding credential source is unusable or the provider rejects authentication or access. Default search returns lexical results with degraded_reason instead. Unavailable indexes and transient vector failures return 503 in explicit modes.",
+		Description: "Explicit semantic/hybrid modes return a validation error (400) when a configured embedding credential source is unusable or the provider rejects authentication or access. Default search returns lexical results with degraded_reason instead. Transient vector failures return unavailable (503) in explicit modes.",
 		Errors:      []int{400, 401, 403, 404, 503},
 		Responses: map[string]*huma.Response{
 			"default": {Description: "Error"},
@@ -99,10 +99,6 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 
-		if cfg.EmbeddingUnavailableReason != "" && (mode == "" || mode == "auto") {
-			res.Degraded = true
-			res.DegradedReason = cfg.EmbeddingUnavailableReason
-		}
 		more := len(res.Hits) > limit
 		page := api.PageMetadata{Complete: !more, Truncated: more}
 		if !stable && (res.Mode != modeLexical || res.Degraded || len(res.Hits) >= 200) {

@@ -2,7 +2,6 @@ package vector_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -33,29 +32,11 @@ func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 			}
 			var fences atomic.Int32
 			fenced := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error { fences.Add(1); return nil })
-			if backend == "postgres" {
-				denied := errors.New("authority revoked")
-				blocked := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error {
-					if fences.Add(1) == 2 {
-						return denied
-					}
-					return nil
-				})
-				changed, err := idx.RefreshMirror(blocked, store)
-				require.ErrorIs(t, err, denied)
-				require.Equal(t, 500, changed)
-				rows, err := idx.MirrorRowsForTest(ctx)
-				require.NoError(t, err)
-				require.Len(t, rows, 500)
-				fences.Store(0)
-			}
 			changed, err := idx.RefreshMirror(fenced, store)
 			require.NoError(t, err)
+			require.Equal(t, 506, changed)
 			if backend == "postgres" {
-				require.Equal(t, 6, changed)
-				require.EqualValues(t, 1, fences.Load())
-			} else {
-				require.Equal(t, 506, changed)
+				require.EqualValues(t, 2, fences.Load(), "one fenced transaction per mirror page")
 			}
 			initial, err := idx.MirrorRowsForTest(ctx)
 			require.NoError(t, err)

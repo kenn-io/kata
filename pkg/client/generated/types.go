@@ -2197,7 +2197,7 @@ type EmbeddingsHealth struct {
 	ErrorPresent     *bool   `json:"error_present,omitempty"`
 	EtaSeconds       *int64  `json:"eta_seconds,omitempty"`
 
-	// LastError Sanitized credential rejection, built-in server setup failure, or unavailable index. Credential and server errors clear after a successful embedding call.
+	// LastError Sanitized credential rejection or built-in server setup failure; cleared after the next successful embedding call.
 	LastError *string `json:"last_error,omitempty"`
 
 	// LastErrorAt Time of the credential rejection or built-in server setup failure; cleared after the next successful embedding call.
