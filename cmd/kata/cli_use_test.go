@@ -531,6 +531,55 @@ func TestCLIUseBoundsExitWait(t *testing.T) {
 	}
 }
 
+func TestAgentUseExitWaitsForTheReportToBeWritten(t *testing.T) {
+	// A slow dial stands in for a busy machine where the report has not left
+	// the hook process when the exit wait ends.
+	for _, test := range []struct {
+		name        string
+		dial, after time.Duration
+		posts       int32
+	}{
+		{"dial ends after the exit wait", 70 * time.Millisecond, 70 * time.Millisecond, 1},
+		{"dial outlasts the report timeout", 300 * time.Millisecond, agentUseReportTimeout, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			t.Setenv("KATA_AUTH_TOKEN", "")
+			t.Setenv(hooks.HookVersionEnv, "1")
+			stubIsTTY(t, true)
+			synctest.Test(t, func(t *testing.T) {
+				var posts atomic.Int32
+				release := make(chan struct{})
+				server := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					posts.Add(1)
+					<-release
+					w.WriteHeader(http.StatusAccepted)
+				}))
+				transport, ok := server.Client().Transport.(*http.Transport)
+				require.True(t, ok)
+				transport = transport.Clone()
+				dial := transport.DialContext
+				transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+					time.Sleep(test.dial)
+					return dial(ctx, network, addr)
+				}
+				saved := http.DefaultTransport
+				http.DefaultTransport = transport
+				defer func() { http.DefaultTransport = saved }()
+				start := time.Now()
+				reportCLIUseTo(t, "http://127.0.0.1:7777")
+				assert.Equal(t, test.after, time.Since(start), "the hook waits for its report to be written, never for the reply")
+				synctest.Wait()
+				assert.Equal(t, test.posts, posts.Load())
+				close(release)
+				// Let the background report get its reply or reach its timeout.
+				time.Sleep(time.Second)
+				synctest.Wait()
+			})
+		})
+	}
+}
+
 func TestCLIUseSkipsOutputThatIsNotATerminal(t *testing.T) {
 	t.Setenv(hooks.HookVersionEnv, "")
 	stubIsTTY(t, false)

@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"net/http/httptrace"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,7 +26,8 @@ import (
 // var so tests can shorten it.
 var cliUseReportTimeout = time.Second
 
-// agentUseReportTimeout bounds hook requests if the process outlives the exit wait.
+// agentUseReportTimeout bounds hook requests and how long a hook waits for its
+// report to be written.
 var agentUseReportTimeout = 100 * time.Millisecond
 
 // cliUseNow picks the UTC day a report counts for; var so tests can move it.
@@ -144,8 +147,15 @@ func sendCLIEvent(cmd *cobra.Command, body *generated.CaptureTelemetryEventBody,
 	if parent == nil {
 		parent = context.Background()
 	}
+	start := time.Now()
+	finished, written := make(chan struct{}), make(chan struct{})
+	var wrote sync.Once
+	trace := &httptrace.ClientTrace{WroteRequest: func(httptrace.WroteRequestInfo) {
+		wrote.Do(func() { close(written) })
+	}}
 	var sends posthog.SendGroup
 	sends.Go(func() {
+		defer close(finished)
 		target := target
 		// Detached so a command that ends by cancelling its own context still reports.
 		timeout := cliUseReportTimeout
@@ -180,10 +190,27 @@ func sendCLIEvent(cmd *cobra.Command, body *generated.CaptureTelemetryEventBody,
 			if err != nil {
 				return nil, err
 			}
-			return apiClient.CaptureTelemetryEvent(ctx, &generated.CaptureTelemetryEventRequestOptions{Body: body})
+			return apiClient.CaptureTelemetryEvent(httptrace.WithClientTrace(ctx, trace), &generated.CaptureTelemetryEventRequestOptions{Body: body})
 		})
 	})
 	sends.Wait(telemetry.ExitWait)
+	if agent {
+		awaitAgentUseWrite(start, finished, written)
+	}
+}
+
+// awaitAgentUseWrite keeps a hook alive past the exit wait until its report
+// is written. On a busy machine the exit wait alone can end the process before
+// the request leaves it, which drops agent activity. The hook never waits for
+// the daemon's reply, and agentUseReportTimeout caps the wait.
+func awaitAgentUseWrite(start time.Time, finished, written <-chan struct{}) {
+	timer := time.NewTimer(agentUseReportTimeout - time.Since(start))
+	defer timer.Stop()
+	select {
+	case <-finished:
+	case <-written:
+	case <-timer.C:
+	}
 }
 
 // beginCLIClaim picks the marker that ends repeat reports of event.
