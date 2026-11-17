@@ -197,18 +197,7 @@ func countedEmbedder(t *testing.T, model string, calls *atomic.Int64) *embedding
 
 func mappedEmbedder(t *testing.T, vectorFor func(string) []float32) *embedding.Client {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Input []string `json:"input"`
-		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
-		data := make([]map[string]any, len(request.Input))
-		for i, input := range request.Input {
-			data[i] = map[string]any{"embedding": vectorFor(input)}
-		}
-		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": data}))
-	}))
-	t.Cleanup(server.Close)
+	server := testenv.NewEmbeddingServer(t, vectorFor)
 	client, err := embedding.New(embedding.Config{BaseURL: server.URL, Model: "pgvector-e2e", Dims: 2})
 	require.NoError(t, err)
 	return client

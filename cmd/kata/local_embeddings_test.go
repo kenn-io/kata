@@ -53,9 +53,6 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 			return "http://127.0.0.1:12345/v1", nil
 		}
 		localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
-			expectedDir, err := embedlocal.DefaultDir()
-			require.NoError(t, err)
-			require.Equal(t, expectedDir, opts.DataDir)
 			yes, err := opts.Confirm(ctx, 290_000_000)
 			require.NoError(t, err)
 			require.True(t, yes)

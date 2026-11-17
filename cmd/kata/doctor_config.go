@@ -15,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/diagnostics"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/hooks"
+	kataapi "go.kenn.io/kata/pkg/client"
 )
 
 type doctorState struct {
@@ -22,6 +23,8 @@ type doctorState struct {
 	workspace      string
 	project        string
 	workspaceValid bool
+	// probeClient talks to the selected daemon with the longer Docbank probe timeout.
+	probeClient *kataapi.Client
 }
 
 func (s *doctorState) add(id, category string, fn func() diagnostics.Check) {

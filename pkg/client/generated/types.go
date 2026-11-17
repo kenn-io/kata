@@ -1956,6 +1956,17 @@ func (d DocbankHealth) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(d))
 }
 
+type DocbankProbe struct {
+	// HTTPStatus Docbank's HTTP status when it answered with an error.
+	HTTPStatus *int64 `json:"http_status,omitempty"`
+
+	// KeyAccepted Whether Docbank accepted the daemon's key; false when it answered with an error status or was not reached.
+	KeyAccepted bool `json:"key_accepted"`
+
+	// Reachable Whether Docbank answered the request.
+	Reachable bool `json:"reachable"`
+}
+
 type DoctorResponseBody struct {
 	Hooks Hooks `json:"hooks"`
 }
