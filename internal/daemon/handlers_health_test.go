@@ -394,6 +394,8 @@ func TestDocbankProbeReportsWhatDocbankAnswered(t *testing.T) {
 		{name: "unexpected status", key: "test-key", setup: func(f *docbanktest.Fake) { f.Fault = "status:500" }, want: api.DocbankProbe{Reachable: true, HTTPStatus: http.StatusInternalServerError}},
 		{name: "unreachable", key: "test-key", setup: func(f *docbanktest.Fake) { f.Server.Close() }, want: api.DocbankProbe{}},
 		{name: "answers 200 with a body that is not Docbank's", key: "test-key", setup: func(f *docbanktest.Fake) { f.Fault = "status:200" }, want: api.DocbankProbe{Reachable: true}},
+		{name: "answers 200 with a folder that has no identity", key: "test-key", setup: func(f *docbanktest.Fake) { f.Seed("/", docbank.Node{Kind: "dir"}, nil) }, want: api.DocbankProbe{Reachable: true}},
+		{name: "answers 200 with a node that is not a directory", key: "test-key", setup: func(f *docbanktest.Fake) { f.Seed("/", docbank.Node{ID: 7, Kind: "file"}, nil) }, want: api.DocbankProbe{Reachable: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := docbanktest.New(t)

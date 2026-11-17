@@ -83,7 +83,7 @@ func (s *doctorState) daemonChecks(ctx context.Context) {
 		if !healthOK {
 			return skippedDoctorCheck("Daemon health is unavailable")
 		}
-		return doctorDocbank(ctx, apiClient, health)
+		return doctorDocbank(ctx, s.probeClient, health)
 	})
 	s.add("daemon.federation", "integration", func() diagnostics.Check {
 		if !healthOK {
@@ -250,8 +250,9 @@ func doctorDocbank(ctx context.Context, apiClient *kataapi.Client, health *gener
 }
 
 // doctorDocbankProbe asks the daemon to make its read-only request to Docbank
-// once its key resolves. A daemon without the probe route, or one that cannot
-// answer it, keeps the key-resolves result.
+// once its key resolves. A daemon older than the probe route keeps the
+// key-resolves result; a daemon that has the route but whose probe call fails
+// gets a warning.
 func doctorDocbankProbe(ctx context.Context, apiClient *kataapi.Client, health *generated.HealthResponse) diagnostics.Check {
 	resolved := diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Daemon resolves its Docbank API key"}
 	response, err := apiClient.ProbeDocbankWithResponse(ctx)
@@ -259,8 +260,13 @@ func doctorDocbankProbe(ctx context.Context, apiClient *kataapi.Client, health *
 		reported := reportedAPIVersion(health)
 		if current, _ := apiVersionAtLeast(reported, apiVersionDocbankProbe); !current {
 			resolved.Details = []string{daemonAPITooOldMessage("Docbank probe", apiVersionDocbankProbe, reported)}
+			return resolved
 		}
-		return resolved
+		var details []string
+		if response != nil {
+			details = doctorHTTPStatus(response.StatusCode)
+		}
+		return diagnostics.Check{Status: diagnostics.StatusWarn, Summary: "Daemon resolves its Docbank API key, but its Docbank probe did not return a result", Details: details, Fix: "Check kata daemon logs on the daemon host and that Docbank is responding; then rerun kata doctor."}
 	}
 	p := response.JSON200
 	status := 0

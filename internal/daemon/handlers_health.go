@@ -151,13 +151,14 @@ const docbankProbeTimeout = 5 * time.Second
 
 // probeDocbank reads Docbank's root folder. Only a 2xx answer shows that the
 // address is Docbank and that it accepts the key: a 404, or a 2xx whose body
-// is not Docbank's, could come from any server at a wrong URL.
+// is not a folder, could come from any server at a wrong URL.
 func probeDocbank(ctx context.Context, c *docbank.Client) api.DocbankProbe {
 	ctx, cancel := context.WithTimeout(ctx, docbankProbeTimeout)
 	defer cancel()
-	_, err := c.ResolvePath(ctx, "/")
+	root, err := c.ResolvePath(ctx, "/")
 	if err == nil {
-		return api.DocbankProbe{Reachable: true, KeyAccepted: true}
+		// A 2xx that decodes but is not a folder is not Docbank's answer.
+		return api.DocbankProbe{Reachable: true, KeyAccepted: root.ID > 0 && root.Kind == "dir"}
 	}
 	if e, ok := errors.AsType[*docbank.Error](err); ok && (e.Status != 0 || e.Malformed) {
 		return api.DocbankProbe{Reachable: true, HTTPStatus: e.Status}

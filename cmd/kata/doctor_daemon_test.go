@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
@@ -226,7 +227,8 @@ func TestDoctorDocbankProbeFollowsDaemonReport(t *testing.T) {
 		{"answered with a body that is not Docbank's", "0.52.0", `{"reachable":true,"key_accepted":false}`, 0, "warn", "Docbank answered the daemon with an error", ""},
 		{"not reached", "0.52.0", `{"reachable":false,"key_accepted":false}`, 0, "warn", "Daemon cannot reach Docbank", ""},
 		{"daemon predates the probe route", "0.51.0", noRoute, http.StatusNotFound, "ok", "resolves its Docbank API key", "Docbank probe requires daemon API 0.52.0 or newer; this daemon reports 0.51.0; upgrade the daemon"},
-		{"key stopped resolving after health", "0.52.0", keyUnavailable, http.StatusServiceUnavailable, "ok", "resolves its Docbank API key", ""},
+		{"key stopped resolving after health", "0.52.0", keyUnavailable, http.StatusServiceUnavailable, "warn", "probe did not return a result", "HTTP status: 503"},
+		{"daemon with the route cannot answer it", "0.52.0", `not json`, 0, "warn", "probe did not return a result", "HTTP status: 200"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, workspace := doctorTestEnv(t)
@@ -250,6 +252,34 @@ func TestDoctorDocbankProbeFollowsDaemonReport(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A Docbank that withholds headers makes the daemon answer "unreachable" after
+// its own five-second timeout; doctor must still be waiting for that answer.
+func TestDoctorProbeOutlastsDaemonDocbankTimeout(t *testing.T) {
+	_, workspace := doctorTestEnv(t)
+	flags = globalFlags{Workspace: workspace, Project: "example-project"}
+	health := `{"ok":true,"schema_version":28,"db_path":"/data/kata.db","docbank":{"credential":"ok"},"api_schema_version":"0.52.0"}`
+	ts := doctorTestServer(t, map[string]string{"/api/v1/health": health}, nil)
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/docbank/probe" {
+			select {
+			case <-time.After(doctorRequestTimeout + 500*time.Millisecond):
+			case <-r.Context().Done():
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"reachable":false,"key_accepted":false}`)
+			return
+		}
+		ts.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(slow.Close)
+	ctx := context.WithValue(t.Context(), client.BaseURLKey{}, slow.URL)
+
+	finding := doctorFinding(t, collectDoctor(ctx), "daemon.docbank")
+
+	require.EqualValues(t, "warn", finding.Status)
+	require.Contains(t, finding.Summary, "Daemon cannot reach Docbank")
 }
 
 // One pass-through case against a real daemon; the daemon tests own the
