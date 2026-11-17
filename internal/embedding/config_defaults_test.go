@@ -1,6 +1,7 @@
-package main
+package embedding
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -22,8 +23,11 @@ func TestEmbeddingDefaults(t *testing.T) {
 		{"timeout override", config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text", TimeoutSeconds: 42}, 8, 42 * time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := embeddingClientConfig(tc.config)
-			client, _, err := preflightEmbeddingStartup(tc.config, "example.db")
+			cfg := ClientConfig(tc.config)
+			if tc.config.UsesLocal() {
+				cfg.Endpoint = func(context.Context) (string, error) { return "http://127.0.0.1:1234/v1", nil }
+			}
+			client, err := New(cfg)
 			require.NoError(t, err)
 			require.Equal(t, tc.batch, client.BatchSize())
 			require.Equal(t, tc.timeout, cfg.Timeout)

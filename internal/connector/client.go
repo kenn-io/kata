@@ -427,6 +427,11 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 	if runErr != nil {
 		_ = processTree.Close()
 		closed = true
+		if errors.Is(runErr, exec.ErrWaitDelay) {
+			if err := receivedProtocolViolation(stdout, request.ID, method, result, redactions); err != nil {
+				return err
+			}
+		}
 		return newCallFailure(ErrProcessFailure, runErr)
 	}
 	if err := processTree.Close(); err != nil {
@@ -434,6 +439,30 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 		return newCallFailure(ErrProcessFailure, err)
 	}
 	closed = true
+	return decodeResponse(stdout, request.ID, method, result, redactions)
+}
+
+// receivedProtocolViolation returns the protocol violation in the output a
+// connector wrote before WaitDelay closed its pipes. The connector exited
+// successfully, but its output did not reach end of file in time, so stdout
+// holds only a prefix of the stream. Once that prefix contains a complete
+// first response, every protocol check has a final verdict: later bytes can
+// only add trailing data, which is itself a violation. A shorter prefix may be
+// truncated rather than malformed, so it proves nothing and the caller reports
+// the process failure.
+func receivedProtocolViolation(stdout *cappedBuffer, requestID, method string, result any, redactions []string) error {
+	if !stdout.exceeded {
+		if _, err := jsontext.NewDecoder(bytes.NewReader(stdout.Bytes())).ReadValue(); err != nil {
+			return nil
+		}
+	}
+	if err := decodeResponse(stdout, requestID, method, result, redactions); errors.Is(err, ErrProtocolFailure) {
+		return err
+	}
+	return nil
+}
+
+func decodeResponse(stdout *cappedBuffer, requestID, method string, result any, redactions []string) error {
 	if stdout.exceeded {
 		return newCallFailure(ErrProtocolFailure, errResponseTooLarge)
 	}
@@ -455,7 +484,7 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 	if response.Protocol != protocol.ProtocolVersion {
 		return newCallFailure(ErrProtocolFailure, errors.New("connector response has unsupported protocol"))
 	}
-	if response.ID != request.ID {
+	if response.ID != requestID {
 		return newCallFailure(ErrProtocolFailure, errors.New("connector response ID does not match request"))
 	}
 	if (len(response.Result) == 0) == (response.Error == nil) {

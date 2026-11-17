@@ -566,7 +566,7 @@ func readDaemonConfig(path string, mergeEnv, skipSupervisedAuth bool) (*DaemonCo
 	if err := normalizeDocbank(&cfg.Docbank); err != nil {
 		return nil, err
 	}
-	if err := validateEmbeddings(cfg.Search.Embeddings); err != nil {
+	if err := ValidateEmbeddings(cfg.Search.Embeddings); err != nil {
 		return nil, err
 	}
 	if err := validateGitHubSync(cfg.GitHubSync); err != nil {
@@ -690,7 +690,7 @@ func resolveSearchConfig(search SearchConfig) (SearchConfig, error) {
 	if err := applyDeploymentEnv(&cfg); err != nil {
 		return SearchConfig{}, err
 	}
-	if err := validateEmbeddings(cfg.Search.Embeddings); err != nil {
+	if err := ValidateEmbeddings(cfg.Search.Embeddings); err != nil {
 		return SearchConfig{}, err
 	}
 	return cfg.Search, nil
@@ -970,12 +970,12 @@ func validateAuthProxy(p ProxyConfig) error {
 	return nil
 }
 
-// validateEmbeddings rejects partial or contradictory [search.embeddings]
+// ValidateEmbeddings rejects partial or contradictory [search.embeddings]
 // config. base_url and model must both be set or both omitted (a half-set
 // section is an operator mistake, not a usable default). Credential precedence
 // is documented; multiple credential sources are allowed.
 // The numeric knobs are sizes/durations, so negatives are invalid.
-func validateEmbeddings(e EmbeddingsConfig) error {
+func ValidateEmbeddings(e EmbeddingsConfig) error {
 	hasBase := strings.TrimSpace(e.BaseURL) != ""
 	hasModel := strings.TrimSpace(e.Model) != ""
 	if e.UsesLocal() {

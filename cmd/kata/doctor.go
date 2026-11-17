@@ -13,6 +13,12 @@ import (
 
 const doctorRequestTimeout = 5 * time.Second
 
+// doctorDocbankProbeTimeout covers the daemon's own five-second request to
+// Docbank plus the time to receive its answer. The probe call must outlast
+// the daemon's, or a Docbank that withholds headers hides the daemon's
+// unreachable result.
+const doctorDocbankProbeTimeout = 10 * time.Second
+
 func newDoctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "doctor", Short: "diagnose setup problems without starting or changing the daemon",
