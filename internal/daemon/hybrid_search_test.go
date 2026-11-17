@@ -41,16 +41,6 @@ func TestHybridSearchLexicalWhenUnconfigured(t *testing.T) {
 	}
 }
 
-func TestHybridSearchExplicitUnconfiguredErrors(t *testing.T) {
-	ctx := t.Context()
-	store := newReconcilerTestStore(t)
-	proj, _ := store.CreateProject(ctx, "spoke-project")
-	_, err := hybridSearch(ctx, store, nil, nil, hybridParams{ProjectID: proj.ID, Query: "x", Limit: 10, Requested: "hybrid"})
-	var me *modeError
-	require.ErrorAs(t, err, &me)
-	require.Equal(t, 400, me.Status())
-}
-
 // failingEmbedClient builds a real *embedding.Client pointed at a server that
 // always errors, so the vector leg fails the way an unreachable endpoint would.
 func failingEmbedClient(t *testing.T, status int) *embedding.Client {

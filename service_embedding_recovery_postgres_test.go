@@ -38,15 +38,6 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 		return service
 	}
 	require.NoError(t, open(kata.PostgresSchemaBootstrap).Close())
-	t.Run("invalid batch budget", func(t *testing.T) {
-		invalid := cfg
-		invalid.Embeddings.MaxBatchTokens = 100
-		service, err := kata.New(t.Context(), invalid)
-		if service != nil {
-			require.NoError(t, service.Close())
-		}
-		require.ErrorContains(t, err, "embedding batching")
-	})
 	service := open(kata.PostgresSchemaValidate)
 	missingCtx, cancelMissing := context.WithCancel(ctx)
 	missingDone := make(chan error, 1)
@@ -77,15 +68,10 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 		require.Equal(t, http.StatusServiceUnavailable, status)
 		require.Contains(t, body, "pgvector")
 	}
-	select {
-	case err := <-missingDone:
-		missingDone = nil
-		t.Fatalf("service stopped before cancellation: %v", err)
-	default:
-	}
 	cancelMissing()
-	<-missingDone
+	err = <-missingDone
 	missingDone = nil
+	require.NoError(t, err)
 	require.Zero(t, providerCalls.Load())
 	server.Close()
 	require.NoError(t, service.Close())

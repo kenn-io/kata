@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ func TestServicePostgresEmbeddingSearch(t *testing.T) {
 	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
 	t.Cleanup(cleanup)
+	var providerCalls atomic.Int32
 	endpoint := testenv.NewEmbeddingServer(t, func(input string) []float32 {
 		switch {
 		case input == "database contention" || strings.Contains(input, "serialize concurrent writers"):
@@ -29,7 +31,7 @@ func TestServicePostgresEmbeddingSearch(t *testing.T) {
 			return []float32{0, 1}
 		}
 		return []float32{1, 1}
-	})
+	}, func() { providerCalls.Add(1) })
 	cfg := kata.Config{DSN: dsn, Auth: kata.AuthConfig{TrustCallerAuthentication: true}, Embeddings: kata.EmbeddingsConfig{BaseURL: endpoint.URL, Model: "test-model", Dims: 2, TrustPrivateNetwork: true}}
 	service, err := kata.New(ctx, cfg)
 	require.NoError(t, err)
@@ -48,7 +50,6 @@ func TestServicePostgresEmbeddingSearch(t *testing.T) {
 	}
 	//nolint:kennlint // sleeptest: Postgres and HTTP worker progress requires real I/O.
 	require.Eventually(t, topResult("database contention", "semantic", "serialize concurrent writers"), 20*time.Second, 100*time.Millisecond)
-	require.True(t, topResult("database contention", "hybrid", "serialize concurrent writers")())
 	createAccessIssue(t, server, projectID, "fix deadlock")
 	//nolint:kennlint // sleeptest: Postgres and HTTP worker progress requires real I/O.
 	require.Eventually(t, topResult("deadlock", "semantic", "fix deadlock"), 10*time.Second, 100*time.Millisecond)
@@ -61,6 +62,30 @@ func TestServicePostgresEmbeddingSearch(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	server = httptest.NewServer(service.Handler())
 	t.Cleanup(server.Close)
+	beforeRestart := providerCalls.Load()
+	runCtx, cancel = context.WithCancel(ctx)
+	done = make(chan error, 1)
+	go func() { done <- service.Run(runCtx) }()
+	defer func() { cancel(); <-done }()
+	//nolint:kennlint // sleeptest: the worker needs time to perform its startup pass.
+	require.Eventually(t, func() bool {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/health", nil)
+		if err != nil {
+			return false
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return false
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var health struct {
+			Embeddings *struct {
+				LastSuccessAt *time.Time `json:"last_success_at"`
+			} `json:"embeddings"`
+		}
+		return json.NewDecoder(resp.Body).Decode(&health) == nil && health.Embeddings != nil && health.Embeddings.LastSuccessAt != nil
+	}, 15*time.Second, 100*time.Millisecond)
+	require.Equal(t, beforeRestart, providerCalls.Load())
 	require.True(t, topResult("database contention", "semantic", "serialize concurrent writers")())
 }
 

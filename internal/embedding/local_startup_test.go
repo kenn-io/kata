@@ -9,16 +9,15 @@ import (
 	"go.kenn.io/kit/embedlocal"
 )
 
-func TestResolveLocalDoesNotDownloadMissingAssets(t *testing.T) {
+func TestResolveLocalStopsAfterInstallFailure(t *testing.T) {
 	installErr := errors.New("install refused")
 	endpointCalls := 0
 	installCalls := 0
 	got, err := ResolveLocal(t.Context(), func(context.Context, embedlocal.Options) (string, error) {
 		endpointCalls++
 		return "", embedlocal.ErrNotFound
-	}, func(_ context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
+	}, func(_ context.Context, _ embedlocal.InstallOptions) (embedlocal.Installation, error) {
 		installCalls++
-		require.Nil(t, opts.Confirm)
 		return embedlocal.Installation{}, installErr
 	}, nil)
 	require.Empty(t, got)

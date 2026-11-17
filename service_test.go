@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
+	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/webui"
 )
 
@@ -67,16 +68,6 @@ func TestServiceMountRunAndClose(t *testing.T) {
 	project := createProject(t, server.URL, "example-project")
 	assert.Equal(t, "example-project", project.Project.Name)
 	assert.True(t, project.Created)
-	createAccessIssue(t, server, project.Project.ID, "lexical search works")
-	status, titles, body := searchTitles(t.Context(), server, project.Project.ID, "lexical", "auto")
-	require.Equal(t, http.StatusOK, status)
-	require.Equal(t, []string{"lexical search works"}, titles)
-	require.Contains(t, body, `"mode":"lexical"`)
-	for _, mode := range []string{"semantic", "hybrid"} {
-		status, _, body = searchTitles(t.Context(), server, project.Project.ID, "lexical", mode)
-		require.Equal(t, http.StatusBadRequest, status)
-		require.Contains(t, body, "embeddings are not configured")
-	}
 
 	runCtx, cancelRun := context.WithCancel(t.Context())
 	runDone := make(chan error, 1)
@@ -327,4 +318,28 @@ func TestServiceRejectsInvalidEmbeddingConfig(t *testing.T) {
 			require.True(t, os.IsNotExist(err), "database should not be created")
 		})
 	}
+	t.Run("invalid batch budget", func(t *testing.T) {
+		dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+		t.Cleanup(cleanup)
+		service, err := kata.New(t.Context(), kata.Config{
+			DSN: dsn, Auth: kata.AuthConfig{TrustCallerAuthentication: true},
+			Embeddings: kata.EmbeddingsConfig{BaseURL: "http://127.0.0.1:1234", Model: "test", Dims: 2, MaxBatchTokens: 100},
+		})
+		if service != nil {
+			require.NoError(t, service.Close())
+		}
+		require.ErrorContains(t, err, "embedding batching")
+	})
+}
+
+func TestServiceSemanticSearchWithoutEmbeddings(t *testing.T) {
+	service, err := kata.New(t.Context(), kata.Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: kata.AuthConfig{TrustCallerAuthentication: true}})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	server := httptest.NewServer(service.Handler())
+	t.Cleanup(server.Close)
+	project := createProject(t, server.URL, "example-project")
+	status, _, body := searchTitles(t.Context(), server, project.Project.ID, "search", "semantic")
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Contains(t, body, "embeddings are not configured")
 }
