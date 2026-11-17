@@ -1,16 +1,20 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -549,7 +553,57 @@ func TestPollProjectEventsIssueReadsSoftDeletedHistoryForRestoreCaller(t *testin
 		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
 		require.NoError(t, err)
 
-		status, body := deletedHistory(t, env, project, issue.ShortID, "")
+		// Naming an actor keeps actor validation from refusing on its own, so
+		// only the read-only refusal can answer 404 here.
+		status, body := deletedHistory(t, env, project, issue.ShortID, "&actor=tester")
 		assertAPIError(t, status, body, http.StatusNotFound, "issue_not_found")
 	})
+}
+
+// restoreDeniedHostAccess lets a host principal read but refuses restoreIssue.
+type restoreDeniedHostAccess struct{}
+
+func (restoreDeniedHostAccess) Authorize(_ context.Context, request daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
+	if request.Operation.ID == "restoreIssue" {
+		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
+	}
+	return daemon.HostAccessDecision{
+		TransactionFence: func(context.Context, db.Transaction) error { return nil },
+	}, nil
+}
+
+func TestPollProjectEventsIssueDeletedHistoryRequiresHostRestorePermission(t *testing.T) {
+	dbh := openTestDB(t)
+	project, err := dbh.db.CreateProject(t.Context(), "host-history")
+	require.NoError(t, err)
+	active, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "active", Author: "agent"})
+	require.NoError(t, err)
+	deleted, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "deleted", Author: "agent"})
+	require.NoError(t, err)
+	_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), deleted.ID, "agent")
+	require.NoError(t, err)
+
+	server := daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now, HostAccess: restoreDeniedHostAccess{}})
+	t.Cleanup(func() { _ = server.Close() })
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{
+			Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "agent",
+		})
+		server.Handler().ServeHTTP(w, r.WithContext(ctx))
+	}))
+	t.Cleanup(ts.Close)
+
+	get := func(ref string) (int, []byte) {
+		resp, err := http.Get(ts.URL + scopedProjectPath(project.ID, "events") + "?issue=" + url.QueryEscape(ref) + "&actor=agent")
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		return resp.StatusCode, body
+	}
+
+	status, body := get(active.ShortID)
+	require.Equal(t, http.StatusOK, status, string(body))
+	status, body = get(deleted.ShortID)
+	assertAPIError(t, status, body, http.StatusNotFound, "issue_not_found")
 }

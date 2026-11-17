@@ -1280,7 +1280,8 @@ func sseFrameBytes(id int64, eventType string, data []byte) []byte {
 // whoever the restore action would accept: the same attributed-actor and claim
 // checks restore runs, with requestActor standing in for restore's body actor.
 // An insecure-readonly caller is anonymous, and restore refuses it before any
-// handler runs, so it is refused here too. Every refusal (an API error below 500
+// handler runs, so it is refused here too. A host access controller must
+// also allow restoreIssue. Every refusal (an API error below 500
 // other than a hub error) answers issue_not_found; 5xx, federation_offline and
 // hub_claim_failed keep their status.
 func requireDeletedHistoryAccess(ctx context.Context, cfg ServerConfig, projectID int64, issue db.Issue, requestActor string) error {
@@ -1288,11 +1289,22 @@ func requireDeletedHistoryAccess(ctx context.Context, cfg ServerConfig, projectI
 	if insecureReadonlyRequest(ctx) {
 		return notFound
 	}
+	if hostAccessGoverns(ctx) {
+		if _, err := authorizeAdditionalHostOperation(ctx, "restoreIssue"); err != nil {
+			return refuseDeletedHistory(err, notFound)
+		}
+	}
 	actor, err := attributedActor(ctx, requestActor)
 	if err != nil {
 		return notFound
 	}
 	err = requireFederatedIssueClaim(ctx, cfg, projectID, issue, actor)
+	return refuseDeletedHistory(err, notFound)
+}
+
+// refuseDeletedHistory maps an API error below 500 (other than a hub error) to
+// notFound and passes every other error, including nil, through.
+func refuseDeletedHistory(err, notFound error) error {
 	var apiErr *api.APIError
 	if errors.As(err, &apiErr) && apiErr.Status < http.StatusInternalServerError &&
 		apiErr.Code != "hub_claim_failed" {
