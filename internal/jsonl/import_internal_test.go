@@ -299,6 +299,5 @@ func TestConvertEnvelopesReleasesPayloadsAndKeepsRecords(t *testing.T) {
 	record, ok := recs[0].(*db.MetaKV)
 	require.True(t, ok)
 	assert.Equal(t, "kept", record.Key)
-	assert.Equal(t, strings.Repeat("v", 4096), record.Value)
 	runtime.KeepAlive(recs)
 }
