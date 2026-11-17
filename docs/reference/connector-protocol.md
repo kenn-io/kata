@@ -25,6 +25,14 @@ JSON response on standard output. Extra JSON, malformed responses, mismatched
 request IDs, an unsupported protocol version, or output beyond the bounded
 response limit fail the call. Diagnostic output is not part of the protocol.
 
+Kata reads standard output until it closes, then judges the response. Don't
+leave child processes holding standard output when the connector exits. If a
+child is still running and has not closed standard output shortly after the
+connector exits, Kata ends the connector's process tree and fails the call. A
+process that left the tree, such as a Unix process in its own process group,
+keeps the call waiting until it closes standard output or the connector
+timeout ends the call.
+
 Every request contains:
 
 ```json

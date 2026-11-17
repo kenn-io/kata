@@ -5,6 +5,7 @@ package connector
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -57,4 +58,10 @@ func requireProcessClientHelperGone(t *testing.T, observed processClientHelperOb
 
 func processClientHelperReadyFilePending(err error) bool {
 	return errors.Is(err, windows.ERROR_SHARING_VIOLATION)
+}
+
+// escapeConnectorTree has no Windows equivalent: the connector job does not
+// allow breakaway, so every descendant stays in the contained tree.
+func escapeConnectorTree(*exec.Cmd) {
+	os.Exit(19)
 }

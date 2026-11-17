@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -820,6 +821,45 @@ func TestAwaitCommandOutcomeReapWaitIsBounded(t *testing.T) {
 	})
 }
 
+func TestAwaitConnectorOutputWaitsWhenDescendantExitsDuringGrace(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		drained := make(chan struct{})
+		var descendantAlive atomic.Bool
+		descendantAlive.Store(true)
+		done := make(chan struct{})
+		var held bool
+		var contextCause error
+		go func() {
+			defer close(done)
+			held, contextCause = awaitConnectorOutput(t.Context(), drained, descendantAlive.Load)
+		}()
+
+		synctest.Wait()
+		descendantAlive.Store(false)
+		time.Sleep(connectorProcessCleanupGrace)
+		synctest.Wait()
+		select {
+		case <-done:
+			t.Fatal("output wait ended before stdout reached end of file")
+		default:
+		}
+		close(drained)
+		<-done
+
+		assert.False(t, held)
+		assert.NoError(t, contextCause)
+	})
+}
+
+func TestAwaitConnectorOutputReportsDescendantHoldingStdoutPastGrace(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		held, contextCause := awaitConnectorOutput(t.Context(), make(chan struct{}), func() bool { return true })
+
+		assert.True(t, held)
+		assert.NoError(t, contextCause)
+	})
+}
+
 func TestConnectorContextErrorKeepsChildTimeoutAfterParentEnds(t *testing.T) {
 	parent, cancelParent := context.WithCancel(t.Context())
 	commandCtx, cancelCommand := context.WithTimeoutCause( //nolint:kennlint // deadlinetest: the deadline is the expected result; the test waits on commandCtx.Done for it
@@ -1334,16 +1374,16 @@ func serveProcessClientHelper() {
 		time.Sleep(time.Second)
 		return
 	}
-	if os.Getenv("MODE") == "spawn-stdout-holder" ||
-		os.Getenv("MODE") == "spawn-stdout-holder-and-exit" ||
-		os.Getenv("MODE") == "wrong-id-stdout-holder-and-exit" ||
-		os.Getenv("MODE") == "spawn-background-holder" {
+	if stdoutHolderModes[os.Getenv("MODE")] {
 		// This helper process entry point has no caller context.
 		child := exec.CommandContext(context.Background(), // #nosec G204,G702 -- the test starts its own fixed executable and helper arguments.
 			os.Args[0], "-test.run=^TestProcessClientStdoutHolderHelper$", "--", "--connector-stdout-holder",
 		)
 		if os.Getenv("MODE") != "spawn-background-holder" {
 			child.Stdout = os.Stdout
+		}
+		if strings.Contains(os.Getenv("MODE"), "escaped-stdout-holder") {
+			escapeConnectorTree(child)
 		}
 		if err := child.Start(); err != nil {
 			os.Exit(8)
@@ -1481,7 +1521,7 @@ func serveProcessClientHelper() {
 			ObservedAt: time.Date(2026, 8, 22, 12, 0, 1, 0, time.UTC),
 		}
 		response.Result = mustJSON(root)
-	case "mismatched-root":
+	case "mismatched-root", "mismatched-root-escaped-stdout-holder-and-exit":
 		response.Result = mustJSON(protocol.Root{
 			Key: "other-root", IdentityKey: "account", Title: "Title", State: "open", Revision: "revision",
 			UpdatedAt:  time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC),
@@ -1605,6 +1645,18 @@ func observedEnvironment() []string {
 	return observed
 }
 
+// stdoutHolderModes start a long-running helper descendant before the
+// connector responds. Every mode except spawn-background-holder hands the
+// descendant the connector's stdout.
+var stdoutHolderModes = map[string]bool{
+	"spawn-stdout-holder":                            true,
+	"spawn-stdout-holder-and-exit":                   true,
+	"wrong-id-stdout-holder-and-exit":                true,
+	"spawn-background-holder":                        true,
+	"escaped-stdout-holder-and-exit":                 true,
+	"mismatched-root-escaped-stdout-holder-and-exit": true,
+}
+
 func expectedEnvironment(mode string) []string {
 	if mode == "structured-secret" || mode == "encoded-structured-secret" || mode == "solidus-escaped-environment-secret" || mode == "html-unescaped-json-token" || mode == "embedded-encoded-environment-secret" || mode == "unicode-solidus-json-tokens" {
 		return []string{"TOKEN", "MODE"}
@@ -1615,7 +1667,7 @@ func expectedEnvironment(mode string) []string {
 	if mode == "raw-result" || mode == "publication-result" || mode == "write-raw-result" {
 		return []string{"MODE", "RESULT"}
 	}
-	if mode == "spawn-stdout-holder" || mode == "spawn-stdout-holder-and-exit" || mode == "wrong-id-stdout-holder-and-exit" || mode == "spawn-background-holder" || mode == "launch-marker" || mode == "conditional-fields-unsupported" || mode == "conditional-fields-supported" {
+	if stdoutHolderModes[mode] || mode == "launch-marker" || mode == "conditional-fields-unsupported" || mode == "conditional-fields-supported" {
 		return []string{"MODE", "SYNC"}
 	}
 	if mode != "" {
