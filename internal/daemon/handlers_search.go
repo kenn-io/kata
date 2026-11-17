@@ -14,6 +14,11 @@ import (
 	"go.kenn.io/kata/internal/pagination"
 )
 
+type hubSearchError struct{ err error }
+
+func (e *hubSearchError) Error() string { return "hub unreachable: " + e.err.Error() }
+func (e *hubSearchError) Unwrap() error { return e.err }
+
 // registerSearchHandlers installs GET /api/v1/projects/{id}/search. Returns the
 // spec §4.10 envelope: query echo, effective mode, optional degraded fields,
 // and ranked results with mode-scoped score + matched_in. The lexical and
@@ -98,9 +103,13 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 					defer cancel()
 					client, cred, err := claimForwardClient(ctx, cfg, binding)
 					if err != nil {
-						return nil, false, err
+						return nil, false, &hubSearchError{err}
 					}
-					return client.SearchShared(ctx, cred.HubProjectID, p, fetch)
+					hits, bounded, err := client.SearchShared(ctx, cred.HubProjectID, p, fetch)
+					if err != nil {
+						return nil, false, &hubSearchError{err}
+					}
+					return hits, bounded, nil
 				}
 			}
 			res, err = hybridSearch(ctx, cfg.DB, cfg.VectorIndex, cfg.Embedder, params)
@@ -110,6 +119,9 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 				kind := "validation"
 				if me.Status() == 503 {
 					kind = "unavailable"
+				}
+				if me.code != "" {
+					kind = me.code
 				}
 				return nil, api.NewError(me.Status(), kind, me.Error(), "", nil)
 			}

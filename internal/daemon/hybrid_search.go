@@ -137,7 +137,12 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 			if _, ok := errors.AsType[*embedding.CredentialError](vecErr); ok {
 				status = 400
 			}
-			return hybridResult{}, &modeError{status: status, msg: vecErr.Error()}
+			code := ""
+			if _, ok := errors.AsType[*hubSearchError](vecErr); ok {
+				status = 503
+				code = "hub_unreachable"
+			}
+			return hybridResult{}, &modeError{status: status, msg: vecErr.Error(), code: code}
 		}
 		return hybridResult{
 			Mode: modeLexical, Degraded: true, DegradedReason: vecErr.Error(),
@@ -206,6 +211,7 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	}
 	// The vector index ranks only the searched project's chunks, so another
 	// project's closer chunks cannot starve this one out of the window.
+	lookupCtx := db.WithAuthorizedProjects(ctx, nil)
 	ctx = db.WithAuthorizedProjects(ctx, []string{project.UID})
 	if p.Hub != nil {
 		hits, bounded, err := p.Hub(ctx, p, fetch)
@@ -213,15 +219,24 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 			return nil, false, err
 		}
 		candidates := make([]db.SearchCandidate, 0, len(hits))
+		labels := newLabelFilter(p.Labels, p.ExcludeLabels)
 		for _, hit := range hits {
-			issue, err := store.IssueByUID(ctx, hit.Issue.UID, db.IncludeDeletedYes)
+			issue, err := store.IssueByUID(lookupCtx, hit.Issue.UID, db.IncludeDeletedYes)
 			if errors.Is(err, db.ErrNotFound) {
 				issue = hit.Issue
 				issue.ID, issue.ProjectID = 0, p.ProjectID
 			} else if err != nil {
 				return nil, false, err
-			} else if issue.DeletedAt != nil {
+			} else if issue.DeletedAt != nil || issue.ProjectID != p.ProjectID || (p.Status != "" && issue.Status != p.Status) {
 				continue
+			} else if !labels.empty() {
+				byIssue, err := store.LabelsByIssues(ctx, p.ProjectID, []int64{issue.ID})
+				if err != nil {
+					return nil, false, err
+				}
+				if !labels.matches(byIssue[issue.ID]) {
+					continue
+				}
 			}
 			candidates = append(candidates, db.SearchCandidate{Issue: issue, Score: hit.Score, MatchedIn: []string{"semantic"}})
 		}
@@ -443,6 +458,7 @@ func truncate(c []db.SearchCandidate, limit int) []db.SearchCandidate {
 type modeError struct {
 	status int
 	msg    string
+	code   string
 }
 
 func (e *modeError) Error() string { return e.msg }

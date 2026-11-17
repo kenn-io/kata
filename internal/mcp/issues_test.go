@@ -119,7 +119,7 @@ func TestSearchFanoutReturnsNoPartialResultWhenOneProjectFails(t *testing.T) {
 		}
 		if strings.Contains(request.URL.Path, "/projects/2/") {
 			writer.WriteHeader(http.StatusServiceUnavailable)
-			writeJSON(writer, map[string]any{"status": 503, "error": map[string]any{"code": "unavailable", "message": "search unavailable"}})
+			writeJSON(writer, map[string]any{"status": 503, "error": map[string]any{"code": "hub_unreachable", "message": "hub unreachable: search unavailable"}})
 			return true
 		}
 		writeJSON(writer, map[string]any{
@@ -146,6 +146,8 @@ func TestSearchFanoutWhenOneProjectFails(t *testing.T) {
 		retained bool
 		empty    bool
 	}{
+		{name: "local unavailable", status: 503, code: "unavailable", message: "vector index unavailable", retained: true},
+		{name: "hub unavailable", status: 503, code: "hub_unreachable", message: "hub unreachable: connection refused"},
 		{name: "retained semantic", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, retained: true},
 		{name: "retained hybrid", status: 400, message: `mode "hybrid" is unavailable: embeddings are not configured`, retained: true},
 		{name: "empty successful project", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, retained: true, empty: true},
@@ -203,7 +205,7 @@ func TestSearchFanoutWhenOneProjectFails(t *testing.T) {
 			}
 			require.Equal(t, true, output["degraded"])
 			require.Equal(t, false, output["complete"])
-			require.Equal(t, "hub-project: embeddings are not configured", output["degraded_reason"])
+			require.Equal(t, "hub-project: "+tc.message, output["degraded_reason"])
 		})
 	}
 }

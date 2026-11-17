@@ -58,7 +58,7 @@ func TestHybridSearchHubUsesLiveLocalAndUnpulledIssues(t *testing.T) {
 	unpulled := db.Issue{ID: live.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EX", Title: "hub only", Status: "open"}
 	hubCopy := live
 	hubCopy.Title = "hub title"
-	params := hybridParams{ProjectID: project.ID, Query: "test", Limit: 10, Requested: "semantic", Status: "closed", Labels: []string{"absent-locally"}, Hub: func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error) {
+	params := hybridParams{ProjectID: project.ID, Query: "test", Limit: 10, Requested: "semantic", Hub: func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error) {
 		return []api.FederationSearchHit{{Issue: hubCopy, Score: 0.9}, {Issue: deleted, Score: 0.8}, {Issue: unpulled, Score: 0.7}}, false, nil
 	}}
 	result, err := hybridSearch(ctx, store, nil, nil, params)
@@ -69,6 +69,36 @@ func TestHybridSearchHubUsesLiveLocalAndUnpulledIssues(t *testing.T) {
 	require.Equal(t, unpulled.UID, result.Hits[1].Issue.UID)
 	require.Zero(t, result.Hits[1].Issue.ID)
 	require.Equal(t, project.ID, result.Hits[1].Issue.ProjectID)
+	params.Labels = []string{"absent-locally"}
+	result, err = hybridSearch(ctx, store, nil, nil, params)
+	require.NoError(t, err)
+	require.Len(t, result.Hits, 1)
+	require.Equal(t, unpulled.UID, result.Hits[0].Issue.UID)
+}
+
+func TestHybridSearchHubHonorsLocalChanges(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "shared")
+	require.NoError(t, err)
+	other, err := store.CreateProject(ctx, "other")
+	require.NoError(t, err)
+	closed, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "closed locally", Author: "tester"})
+	require.NoError(t, err)
+	moved, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "moved locally", Author: "tester"})
+	require.NoError(t, err)
+	_, _, _, err = store.CloseIssue(ctx, closed.ID, "done", "tester", "completed", nil)
+	require.NoError(t, err)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: moved.ID, FromProjectID: project.ID, ToProjectID: other.ID, IfMatchRev: moved.Revision, Actor: "tester"})
+	require.NoError(t, err)
+	unpulled := db.Issue{UID: "01HZNQ7VFPK1XGD8R5MABXD4EX", Title: "hub only", Status: "open"}
+	params := hybridParams{ProjectID: project.ID, Query: "test", Limit: 10, Requested: "semantic", Status: "open", Hub: func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error) {
+		return []api.FederationSearchHit{{Issue: closed, Score: 0.9}, {Issue: moved, Score: 0.8}, {Issue: unpulled, Score: 0.7}}, false, nil
+	}}
+	result, err := hybridSearch(ctx, store, nil, nil, params)
+	require.NoError(t, err)
+	require.Len(t, result.Hits, 1)
+	require.Equal(t, unpulled.UID, result.Hits[0].Issue.UID)
 }
 
 func TestHybridSearchLexicalWhenUnconfigured(t *testing.T) {

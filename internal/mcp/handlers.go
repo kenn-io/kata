@@ -123,7 +123,7 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 				},
 			})
 			searches[index] = projectSearch{response: response, err: searchErr}
-			if searchErr != nil && !missingSearchEmbeddings(searchErr, input.Mode) {
+			if searchErr != nil && !localSearchUnavailable(searchErr, input.Mode) {
 				return fmt.Errorf("search project %q: %w", projects[index].Name, searchErr)
 			}
 			return nil
@@ -146,7 +146,8 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		if search.err != nil {
 			failed++
 			degraded = true
-			degradedReasons = append(degradedReasons, projects[index].Name+": embeddings are not configured")
+			envelope, _ := errors.AsType[generated.ErrorEnvelope](search.err)
+			degradedReasons = append(degradedReasons, projects[index].Name+": "+envelope.ErrorData.Message)
 			continue
 		}
 		response := search.response
@@ -226,9 +227,15 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	}, nil
 }
 
-func missingSearchEmbeddings(err error, mode string) bool {
+func localSearchUnavailable(err error, mode string) bool {
 	envelope, ok := errors.AsType[generated.ErrorEnvelope](err)
-	return (mode == "semantic" || mode == "hybrid") && ok && isHTTPStatus(err, http.StatusBadRequest) && envelope.Status == http.StatusBadRequest && envelope.ErrorData.Code == "validation" && envelope.ErrorData.Message == fmt.Sprintf("mode %q is unavailable: embeddings are not configured", mode)
+	if !ok {
+		return false
+	}
+	if isHTTPStatus(err, http.StatusServiceUnavailable) && envelope.Status == http.StatusServiceUnavailable && envelope.ErrorData.Code == "unavailable" {
+		return true
+	}
+	return (mode == "semantic" || mode == "hybrid") && isHTTPStatus(err, http.StatusBadRequest) && envelope.Status == http.StatusBadRequest && envelope.ErrorData.Code == "validation" && envelope.ErrorData.Message == fmt.Sprintf("mode %q is unavailable: embeddings are not configured", mode)
 }
 
 func (h toolHandlers) ready(ctx context.Context, _ *sdkmcp.CallToolRequest, input ReadyInput) (*sdkmcp.CallToolResult, IssueListOutput, error) {
