@@ -62,12 +62,6 @@ func (c *cliUseTelemetry) recorded() []map[string]any {
 	return append([]map[string]any(nil), c.captured...)
 }
 
-func (c *cliUseTelemetry) waitForCapture(t *testing.T) {
-	t.Helper()
-	//nolint:kennlint // sleeptest: Real daemon delivery can finish after the command's exit wait.
-	require.Eventually(t, func() bool { return len(c.recorded()) > 0 }, 5*time.Second, time.Millisecond)
-}
-
 func waitCLIUseMarker(t *testing.T, prefix string) {
 	t.Helper()
 	target := cliUseTarget.Load()
@@ -83,7 +77,10 @@ func waitCLIUseMarkerPath(t *testing.T, marker string) {
 	require.Eventually(t, func() bool { return client.ReadTelemetryDayMarker(marker) == day }, 5*time.Second, time.Millisecond)
 }
 
-// settledCLIUse waits for command-owned report workers before negative assertions.
+// settledCLIUse waits for command-owned report workers before assertions. Inside
+// the bubble a report's deadline runs on the bubble's clock, which stays still
+// while the request is on the network, so a loaded machine cannot expire the
+// short hook deadline before the daemon receives the event.
 func settledCLIUse(t *testing.T, run func(*testing.T)) {
 	t.Helper()
 	saved := http.DefaultTransport
@@ -168,7 +165,6 @@ func TestCLIUseSkipsAgentCallers(t *testing.T) {
 				})
 				require.NotNil(t, cliUseTarget.Load(), "the command resolved a daemon")
 				if test.hook != "" {
-					capture.waitForCapture(t)
 					assert.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 				} else {
 					assert.Empty(t, capture.recorded())
@@ -209,10 +205,11 @@ func TestCLIUseSkipsAgentCallers(t *testing.T) {
 			}
 			t.Setenv("KATA_REF", createIssue(t, env, pid, "launcher-tracked work"))
 
-			require.NoError(t, runAttnHook(t, env, dir, args...))
+			settledCLIUse(t, func(t *testing.T) {
+				require.NoError(t, runAttnHook(t, env, dir, args...))
+			})
 
 			require.NotNil(t, cliUseTarget.Load(), "the hook resolved a daemon")
-			capture.waitForCapture(t)
 			assert.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 		})
 	}
@@ -547,11 +544,13 @@ func TestAgentContractUsePreservesOutput(t *testing.T) {
 	require.NoError(t, err)
 	capture := &cliUseTelemetry{}
 	env := newCLIUseEnv(t, capture)
-	output, stderr, err := runCmdCapture(t, env, "agent-contract-hook")
+	var output, stderr string
+	settledCLIUse(t, func(t *testing.T) {
+		output, stderr, err = runCmdCapture(t, env, "agent-contract-hook")
+	})
 	require.NoError(t, err)
 	require.Equal(t, baseline, output)
 	require.Empty(t, stderr)
-	capture.waitForCapture(t)
 	require.Equal(t, []map[string]any{{"call_count_bucket": "1-10"}}, capture.recorded())
 }
 
@@ -745,8 +744,6 @@ func TestOutcomesEmptySearchCLI(t *testing.T) {
 					recordCLIUseTarget(client.ResolvedDaemon{BaseURL: env.URL})
 					sendCLIEvent(cmd, cliOutcomeBody("app_opened", ""), false, "")
 				}
-				capture.waitForCapture(t)
-				synctest.Wait()
 			})
 			capture.mu.Lock()
 			defer capture.mu.Unlock()

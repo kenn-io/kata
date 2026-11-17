@@ -125,6 +125,11 @@ func (s *Store) ProjectByNameIncludingArchived(ctx context.Context, name string)
 	return visibleProject(scanProject(s.QueryRowContext(ctx, projectSelect+` WHERE name = $1`, name)))
 }
 
+// IsFederationRetainedProject reports whether a project is a retained placeholder.
+func (s *Store) IsFederationRetainedProject(ctx context.Context, uid string) (bool, error) {
+	return db.IsFederationRetainedProject(ctx, s, uid)
+}
+
 // ProjectByUID returns active or archived projects by stable identity.
 func (s *Store) ProjectByUID(ctx context.Context, uid string) (db.Project, error) {
 	return visibleProject(scanProject(s.QueryRowContext(ctx, projectSelect+` WHERE uid = $1`, uid)))

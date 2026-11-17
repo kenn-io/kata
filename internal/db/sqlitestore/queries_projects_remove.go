@@ -171,6 +171,10 @@ func (d *Store) restoreProject(ctx context.Context, projectID int64, actor strin
 		return updated, nil, false, nil
 	}
 
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key = ? AND EXISTS (SELECT 1 FROM federation_bindings WHERE project_id = ?)`, db.FederationRetainedProjectPrefix+project.UID, project.ID); err != nil {
+		return db.Project{}, nil, false, err
+	}
+
 	evt, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   project.ID,
 		ProjectName: project.Name,

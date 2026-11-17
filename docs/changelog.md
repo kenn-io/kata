@@ -9,11 +9,17 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
+
 - Copy a project sync diagnostic for Bash/Zsh or PowerShell from the web summary.
 
 - Watch project sync progress refresh every 30 seconds in a visible web tab and
   when you return.
 
+- Select a closing transcript target per project, including for moved issues.
+  See [closing-session transcripts](reference/configuration.md#closing-session-transcripts).
+  This partially addresses [#972](https://github.com/kenn-io/kata/issues/972);
+  transcript upload remains outstanding.
 - Upgrade to schema 51, which reads issue history through an index on each
   event's header issue UID instead of one built from event payloads. PostgreSQL
   needs `kata storage postgres migrate` with the daemon stopped while the index
@@ -23,6 +29,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Install user hooks for Claude Code and Codex with `kata agent setup`, and use `kata doctor` to find hooks that need review. Open Codex and run `/hooks` when prompted. See [agent setup](workflows/agents.md#contract-in-every-session).
 
 - Restart a local daemon from Settings after turning on search by meaning. Confirm the interruption for every project and client, then reopen `kata ui` if the browser address changes. The API reports the `restart` job state and `restart_in_progress` during the handoff.
+
+- A hub that requires signing now answers an enrolled spoke's unsigned request
+  with 428 `hub_signing_required`, so it is distinguishable from
+  `signature_invalid`. A request with only a content digest follows the unsigned
+  path, including when signing is optional. Relay bridges keep their grant on the
+  new response. See [federation signing](operations/federation-signing.md).
 
 - Use `kata daemon status` in scripts to check the selected daemon's readiness.
   It exits 0 only for a ready selected daemon. Stopped or unavailable
@@ -63,6 +75,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   carries it there. Before, a merge skipped every such link. See
   [links between merged projects](operations/backup-restore.md#links-between-merged-projects).
 
+- Tell a hub that is still warming up from one that rejects your signature.
+  While replay protection warms up after start or restart, signed federation
+  requests get HTTP 503 `signing_warming` with `Retry-After: 5` instead of
+  `signature_invalid`, so spoke operators retry instead of checking keys and
+  clocks. See [federation request signing](operations/federation-signing.md).
+
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 - Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot confirm the shared choice was saved, setup succeeds and Kata logs the failure; other apps may miss the choice if it wasn't saved. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).
 
@@ -71,6 +89,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   build finishes, and an opener waiting for another opener's migration keeps
   waiting. Ordinary queries keep the 30-second limit. See
   [PostgreSQL operations](operations/postgres.md).
+
+- Keep syncing a joined project when issue history references projects the spoke
+  has not joined. Issues moved out keep their folded hub content and local state
+  in the retained counterpart; restore it and join with its local name to subscribe.
 
 - Keep a daemon catalog credential in an owner-only device file with
   `token_file`. Catalog entries use `token` > `token_file` > `token_env` and

@@ -1095,7 +1095,9 @@ after the original close advanced the issue state.
 
 An opt-in [closing-session transcript setting](configuration.md#closing-session-transcripts)
 records the current session ID and optional AgentsView link alongside the
-close evidence. The setting maps each additional agent name to its session
+close evidence. Project settings select the target from the issue's current
+project. If the issue moves before the close commits, retry the conflict with
+the same key. The setting maps each additional agent name to its session
 variable. See the configuration reference for session ID requirements, agent names,
 and daemon API compatibility.
 Session provenance supplies no completion evidence on its own.
@@ -1834,6 +1836,17 @@ after login. Kata never puts a remote token or another credential in the URL.
 
 ## Daemon and diagnostics
 
+Foreground daemons, including supervised launches, append daemon logger output
+to `<KATA_HOME>/runtime/<storage-hash>/daemon.log` as well as stderr. The log
+also retains startup errors after the log path is resolved and opened, plus
+fatal Go runtime diagnostics and goroutine dumps. On Linux and macOS, when
+stderr is the null device, Kata redirects it to the log, retaining direct stderr
+writes and inherited output across in-place restarts. With other stderr
+destinations, direct writes remain on stderr. Detached launches use the same
+file without duplicating entries. New log files are owner-only. Kata does not
+rotate them. If the log path cannot be resolved or opened, the daemon warns on
+stderr and continues with stderr diagnostics.
+
 `kata daemon stop`, `restart`, `reload`, and `kata update` skip daemon records from another PID namespace or with unverifiable identity. Each skipped record is printed on stderr with its PID and reason, for example `skipping daemon pid=54 (another PID namespace)`.
 
 ```sh
@@ -2432,7 +2445,11 @@ to inject its value into the consuming process. Revoke the token during teardown
 
 `kata cron` stores shared jobs, workflows and independent attributed run evidence.
 Commands return JSON; external adapters schedule and launch their own work.
-See [Cron](cron.md) for bounded documents and retry semantics.
+See [Cron](cron.md) for bounded documents and retry semantics. For common native
+child jobs and adapter prompt jobs, use [typed creation flags](cron.md#create-with-typed-flags)
+instead of a JSON file. Explicit `--enabled`, `--catchup`, `--overlap`, schedule,
+and action choices are required. Advanced definitions and all updates retain
+the JSON file route.
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json

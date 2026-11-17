@@ -566,6 +566,9 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if err := reconcileFederationBindingTransitionLinks(ctx, tx, previous, binding); err != nil {
 		return db.FederationBinding{}, err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key = ? || (SELECT uid FROM projects WHERE id = ? AND deleted_at IS NULL)`, db.FederationRetainedProjectPrefix, b.ProjectID); err != nil {
+		return db.FederationBinding{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return db.FederationBinding{}, err
 	}
@@ -1399,6 +1402,8 @@ func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, move
 			return err
 		}
 		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
+	}, func(projectID int64, issue db.FoldIssue, projection db.FoldProjection) error {
+		return applyUnjoinedMovedIssue(ctx, tx, projectID, issue, projection)
 	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
 		payload := "{}"
 		var issueUID *string
@@ -1878,45 +1883,56 @@ func federationFoldEventsForIssues(ctx context.Context, tx *sql.Tx, projectID in
 }
 
 func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes, issueScope []string) ([]db.FoldEvent, error) {
-	// The unary + keeps the issue_uid indexes out of this plan: scanning events
-	// in ID order and checking moves through the issue.moved partial index
-	// costs less than seeking every issue's events and their moves.
+	query, args := federationFoldEventsQuery(projectID, eventTypes, issueScope)
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list federated events: %w", err)
+	}
+	return scanFederationFoldEvents(rows)
+}
+
+func federationFoldEventsQuery(projectID int64, eventTypes, issueScope []string) (string, []any) {
+	// Issues whose events the project holds, or that now live in it.
+	const history = `SELECT h.issue_uid FROM events h WHERE h.project_id=?1
+   UNION SELECT uid FROM issues WHERE project_id=?1`
+	args := []any{projectID}
+	// Scan events once and collect moved subjects once. The unary + keeps
+	// SQLite from seeking every issue's history through its UID index.
+	selector := `(e.project_id=?1 OR +e.issue_uid IN (
+   SELECT m.issue_uid FROM events m WHERE m.type='issue.moved' AND m.issue_uid IN (` + history + `)))`
+	if len(issueScope) > 0 {
+		// Scoped pushes narrow to project events and the touched issues first,
+		// then check moves only for those.
+		placeholders := make([]string, 0, len(issueScope))
+		for _, uid := range issueScope {
+			placeholders = append(placeholders, fmt.Sprintf("?%d", len(args)+1))
+			args = append(args, uid)
+		}
+		//nolint:gosec // G202: generated placeholders only; issue UIDs are bound separately.
+		selector = `CASE WHEN e.type LIKE 'project.%' OR e.issue_uid IN (` + strings.Join(placeholders, ",") + `)
+   THEN e.project_id=?1 OR (e.issue_uid IN (` + history + `)
+     AND e.issue_uid IN (SELECT m.issue_uid FROM events m WHERE m.type='issue.moved'))
+   ELSE 0 END`
+	}
 	query := `
 		SELECT e.uid, e.origin_instance_uid, p.uid, e.issue_uid, e.related_issue_uid,
 		       e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.created_at
 		  FROM events e JOIN projects p ON p.id=e.project_id
- WHERE (e.project_id=$1 OR (+e.issue_uid IN (
-   SELECT h.issue_uid FROM events h WHERE h.project_id=$1
-   UNION SELECT uid FROM issues WHERE project_id=$1)
- AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND +m.issue_uid = e.issue_uid)))`
-	args := []any{projectID}
+ WHERE ` + selector
 	if len(eventTypes) > 0 {
 		placeholders := make([]string, 0, len(eventTypes))
 		for _, eventType := range eventTypes {
-			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)+1))
+			placeholders = append(placeholders, fmt.Sprintf("?%d", len(args)+1))
 			args = append(args, eventType)
 		}
 		//nolint:gosec // G202: generated ? placeholders only; values are bound separately.
 		query += " AND e.type IN (" + strings.Join(placeholders, ",") + ")"
 	}
-	if len(issueScope) > 0 {
-		// NULL envelopes may carry issue identity in payloads. Historical project
-		// events (notably author rewrites) also participate in each issue's fold.
-		//nolint:gosec // G202: generated ? placeholders only; issue UIDs are bound separately.
-		query += " AND (e.issue_uid IN (?" + strings.Repeat(",?", len(issueScope)-1) + ") OR e.issue_uid IS NULL OR e.issue_uid = '' OR e.type LIKE 'project.%')"
-		for _, uid := range issueScope {
-			args = append(args, uid)
-		}
-	}
 	query += " ORDER BY e.id ASC"
-	rows, err := tx.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list federated events: %w", err)
-	}
-	return scanFederationFoldEvents(rows, issueScope)
+	return query, args
 }
 
-func scanFederationFoldEvents(rows *sql.Rows, issueScope []string) ([]db.FoldEvent, error) {
+func scanFederationFoldEvents(rows *sql.Rows) ([]db.FoldEvent, error) {
 	defer func() { _ = rows.Close() }()
 	var out []db.FoldEvent
 	for rows.Next() {
@@ -1942,9 +1958,6 @@ func scanFederationFoldEvents(rows *sql.Rows, issueScope []string) ([]db.FoldEve
 		}
 		e.Payload = jsontext.Value(payload)
 		e.CreatedAt = createdAt.UTC().Format(sqliteTimeFormat)
-		if len(issueScope) > 0 && !strings.HasPrefix(e.Type, "project.") && !slices.Contains(issueScope, e.IssueUID) {
-			continue
-		}
 		out = append(out, e)
 	}
 	return db.FederationMoveBaselineEvents(out), rows.Err()

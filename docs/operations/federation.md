@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-11
+last_edited: 2026-11-13
 ---
 
 # Federation
@@ -81,9 +81,27 @@ checks the whole tree without changing issues, claims, or cursors. Use `--single
 to move only the selected issue. The [CLI reference](../reference/cli.md) owns
 the per-issue restrictions.
 
-Spokes must join both projects before applying a move. Sync refuses the batch
-without partial writes when a project is missing; join it and retry sync. Upgrade
-both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
+To author a federated move, a spoke must join both projects. A direct spoke
+pulling move history retains an archived, unbound identity for a missing
+counterpart without subscribing to that project. An issue already present on the
+spoke moves into the destination project with hub content as of the move,
+preserving its comments and local state while removing it from the source
+project's lists. Like any issue in a project the spoke has not joined, a parked
+issue has no links on the spoke; joining its project restores them from the
+hub's history. Find its UID and local name with `GET /api/v1/projects?include=archived`.
+The placeholder starts owner-only; restore it, then broaden its project access
+when others should see its issues. Restoring without joining does not subscribe
+to the project, but later moves can still place issues there. Edits the spoke
+made to the issue before it pulled the move stay queued for push. The hub accepts
+them only after the spoke joins the destination project; until then it refuses
+the push, which also holds back the project's other unsent changes.
+To subscribe later, run `kata projects restore <local-name>`, optionally run
+`kata projects rename <local-name> <chosen-name>`, then rerun the enrollment's
+join command using `--project <current-local-name>`. A configured mapping can
+name the placeholder's project directly. A mapping with `credential_provider`
+cannot: restore the placeholder and rename it to the mapping's `spoke_project`
+before you add the mapping.
+Upgrade both hub and spokes for the `issue_move_v1` event feature. Older peers refuse
 move history instead of applying a payload they cannot understand. Moves preserve
 stable UIDs, nesting, state, comments, and links. Established author and
 teammate attribution must match trusted history, and a spoke cannot change
@@ -227,10 +245,10 @@ explicit `allow_insecure` setting, and redirects are rejected. Preview and
 connect require daemon-owner authority; ordinary browser sessions and scoped
 user credentials cannot use this administrative operation. When the hub rejects
 a request, bridge connect and disconnect report it as an upstream failure with
-the hub's status in `data.hub_status`: a hub `401` or `403` returns `502` with
-code `hub_credential_rejected`, any other hub `3xx` or `4xx` returns `502` with
-code `hub_request_rejected`, and a hub `5xx` keeps that status. The local daemon
-accepted the caller; the hub refused what the daemon sent.
+the hub's status in `data.hub_status`: a hub `401`, `403`, or `428` returns
+`502` with code `hub_credential_rejected`, any other hub `3xx` or `4xx` returns
+`502` with code `hub_request_rejected`, and a hub `5xx` keeps that status. The
+local daemon accepted the caller; the hub refused what the daemon sent.
 
 Read one bridge's locally recorded state with
 `GET /api/v1/federation/bridges/{project_name}` using daemon-owner authority.
@@ -245,7 +263,8 @@ signature failure. It can clear after access returns. Explicit enrollment revoca
 enrollment.
 
 `signing_rejected` means the hub refused or could not verify this
-bridge's request signature; the grant is intact, so fix the signing source on
+bridge's request signature, including an unsigned request answered with `428
+hub_signing_required`. The grant is intact, so fix the signing source on
 this daemon or the key registration on the hub instead of reconnecting. Sync
 timestamps show how recent that observation is. An ambiguous pending project
 name returns a conflict instead of choosing a credential.
