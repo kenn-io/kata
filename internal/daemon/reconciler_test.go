@@ -188,6 +188,37 @@ func TestReconcileOnceEmbedsAndActivates(t *testing.T) {
 	}
 }
 
+type bindingTransitionStore struct {
+	*sqlitestore.Store
+	binding db.FederationBinding
+}
+
+func (s *bindingTransitionStore) ListIssueContent(ctx context.Context, afterID int64, limit int) ([]db.IssueContent, error) {
+	page, err := s.Store.ListIssueContent(ctx, afterID, limit)
+	if err != nil || len(page) == 0 {
+		return page, err
+	}
+	_, err = s.UpsertFederationBinding(ctx, s.binding)
+	return page, err
+}
+
+func TestReviewJoiningDuringFillDoesNotEmbedShared(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "shared search target", Author: "member"})
+	require.NoError(t, err)
+	emb := newReconcilerArtifactEmbedder(t, "example-model")
+	transition := &bindingTransitionStore{Store: store, binding: db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "member", Enabled: true, PushEnabled: true}}
+	r := NewReconciler(transition, openTestVectorIndex(t), emb, ReconcilerConfig{FederationProducerAllowed: func(context.Context, string, embedding.ArtifactIdentity, activity.Admission, bool) (bool, error) {
+		return true, nil
+	}})
+	require.NoError(t, r.reconcileOnce(ctx))
+	require.Empty(t, emb.inputs(), "direct spokes leave generation to their hub")
+	require.EqualValues(t, 1, r.Health().Backlog, "the mirrored issue remains pending")
+}
+
 // TestReconcileOnceColdStartActivatesBeforeFill pins the cold-start contract:
 // with no previously active generation (fresh sidecar or first upgrade), the
 // new generation is activated immediately after EnsureBuilding — before the

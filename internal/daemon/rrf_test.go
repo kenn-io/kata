@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -10,7 +11,7 @@ import (
 )
 
 func cand(id int64, score float64, matched ...string) db.SearchCandidate {
-	return db.SearchCandidate{Issue: db.Issue{ID: id}, Score: score, MatchedIn: matched}
+	return db.SearchCandidate{Issue: db.Issue{ID: id, UID: fmt.Sprint(id)}, Score: score, MatchedIn: matched}
 }
 
 func TestMergeRRFCombinesAndDedupes(t *testing.T) {
@@ -44,6 +45,17 @@ func TestMergeRRFEmptyLegs(t *testing.T) {
 	if len(got) != 1 || got[0].Issue.ID != 1 {
 		t.Fatalf("lexical-only passthrough failed: %#v", got)
 	}
+}
+
+func TestMergeRRFKeepsUnpulledIssuesDistinct(t *testing.T) {
+	lex := []db.SearchCandidate{{Issue: db.Issue{ID: 1, UID: "local"}, MatchedIn: []string{"title"}}}
+	vec := []db.SearchCandidate{
+		{Issue: db.Issue{ID: 0, UID: "remote-a"}, MatchedIn: []string{"semantic"}},
+		{Issue: db.Issue{ID: 0, UID: "remote-b"}, MatchedIn: []string{"semantic"}},
+	}
+	merged, err := mergeRRF(lex, vec, 10)
+	require.NoError(t, err)
+	require.Len(t, merged, 3)
 }
 
 func TestMergeRRFRespectsLimit(t *testing.T) {
@@ -84,8 +96,8 @@ func TestMergeRRFTieBreaksByMostRecentlyUpdated(t *testing.T) {
 	// lose under the id-asc final tiebreak). Fails if updated_at is ignored.
 	older := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	newer := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	lex := []db.SearchCandidate{{Issue: db.Issue{ID: 1, UpdatedAt: older}, MatchedIn: []string{"title"}}}
-	vec := []db.SearchCandidate{{Issue: db.Issue{ID: 2, UpdatedAt: newer}, MatchedIn: []string{"semantic"}}}
+	lex := []db.SearchCandidate{{Issue: db.Issue{ID: 1, UID: "1", UpdatedAt: older}, MatchedIn: []string{"title"}}}
+	vec := []db.SearchCandidate{{Issue: db.Issue{ID: 2, UID: "2", UpdatedAt: newer}, MatchedIn: []string{"semantic"}}}
 	merged, err := mergeRRF(lex, vec, 10)
 	require.NoError(t, err)
 

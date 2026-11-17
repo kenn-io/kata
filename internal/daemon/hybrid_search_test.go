@@ -13,11 +13,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
-	kitvec "go.kenn.io/kit/vector"
 )
 
 func TestHybridSearchHubFiltersAndCeiling(t *testing.T) {
@@ -29,9 +29,9 @@ func TestHybridSearchHubFiltersAndCeiling(t *testing.T) {
 	require.NoError(t, err)
 	_, err = store.AddLabel(ctx, issue.ID, "bug", "tester")
 	require.NoError(t, err)
-	params := hybridParams{ProjectID: project.ID, Query: "login", Limit: 2, Requested: "semantic", Labels: []string{"bug"}, Hub: func(_ context.Context, p hybridParams, _ int) ([]kitvec.Hit[string], bool, error) {
+	params := hybridParams{ProjectID: project.ID, Query: "login", Limit: 2, Requested: "semantic", Labels: []string{"bug"}, Hub: func(_ context.Context, p hybridParams, _ int) ([]api.FederationSearchHit, bool, error) {
 		require.Equal(t, []string{"bug"}, p.Labels)
-		return []kitvec.Hit[string]{{Doc: issue.UID, Score: 0.9}}, true, nil
+		return []api.FederationSearchHit{{Issue: issue, Score: 0.9}}, true, nil
 	}}
 	_, err = hybridSearch(ctx, store, nil, nil, params)
 	require.ErrorContains(t, err, filterCeilingReason)
@@ -42,6 +42,33 @@ func TestHybridSearchHubFiltersAndCeiling(t *testing.T) {
 	require.Equal(t, filterCeilingReason, result.DegradedReason)
 	require.Len(t, result.Hits, 1)
 	require.Equal(t, issue.UID, result.Hits[0].Issue.UID)
+}
+
+func TestHybridSearchHubUsesLiveLocalAndUnpulledIssues(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "shared")
+	require.NoError(t, err)
+	live, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local title", Author: "tester"})
+	require.NoError(t, err)
+	deleted, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "deleted locally", Author: "tester"})
+	require.NoError(t, err)
+	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "tester")
+	require.NoError(t, err)
+	unpulled := db.Issue{ID: live.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EX", Title: "hub only", Status: "open"}
+	hubCopy := live
+	hubCopy.Title = "hub title"
+	params := hybridParams{ProjectID: project.ID, Query: "test", Limit: 10, Requested: "semantic", Status: "closed", Labels: []string{"absent-locally"}, Hub: func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error) {
+		return []api.FederationSearchHit{{Issue: hubCopy, Score: 0.9}, {Issue: deleted, Score: 0.8}, {Issue: unpulled, Score: 0.7}}, false, nil
+	}}
+	result, err := hybridSearch(ctx, store, nil, nil, params)
+	require.NoError(t, err)
+	require.Len(t, result.Hits, 2)
+	require.Equal(t, live.ID, result.Hits[0].Issue.ID)
+	require.Equal(t, "local title", result.Hits[0].Issue.Title)
+	require.Equal(t, unpulled.UID, result.Hits[1].Issue.UID)
+	require.Zero(t, result.Hits[1].Issue.ID)
+	require.Equal(t, project.ID, result.Hits[1].Issue.ProjectID)
 }
 
 func TestHybridSearchLexicalWhenUnconfigured(t *testing.T) {

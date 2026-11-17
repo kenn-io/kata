@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
@@ -25,7 +26,7 @@ type hybridParams struct {
 	ExcludeLabels   []string
 	AllowedIssueIDs []int64
 	IssueScope      *db.APITokenScope
-	Hub             func(context.Context, hybridParams, int) ([]kitvec.Hit[string], bool, error)
+	Hub             func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error)
 }
 
 type hybridResult struct {
@@ -211,8 +212,20 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		if err != nil {
 			return nil, false, err
 		}
-		candidates, err := hydrateVectorHits(ctx, store, hits, p, fetch, newLabelFilter(p.Labels, p.ExcludeLabels))
-		return candidates, bounded, err
+		candidates := make([]db.SearchCandidate, 0, len(hits))
+		for _, hit := range hits {
+			issue, err := store.IssueByUID(ctx, hit.Issue.UID, db.IncludeDeletedYes)
+			if errors.Is(err, db.ErrNotFound) {
+				issue = hit.Issue
+				issue.ID, issue.ProjectID = 0, p.ProjectID
+			} else if err != nil {
+				return nil, false, err
+			} else if issue.DeletedAt != nil {
+				continue
+			}
+			candidates = append(candidates, db.SearchCandidate{Issue: issue, Score: hit.Score, MatchedIn: []string{"semantic"}})
+		}
+		return candidates, bounded, nil
 	}
 	if err := emb.MissingCredentialError(); err != nil {
 		return nil, false, err

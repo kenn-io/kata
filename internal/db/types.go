@@ -580,10 +580,6 @@ type SearchCandidate struct {
 	Issue     Issue    `json:"issue"`
 	Score     float64  `json:"score"` // Backend-native lexical relevance; higher is better.
 	MatchedIn []string `json:"matched_in"`
-	Remote    bool     `json:"-"`
-	Hub       bool     `json:"-"`
-	Oversized bool     `json:"-"`
-	WebURL    string   `json:"-"`
 }
 
 // IdempotencyMatch is a previously committed issue mutation matched through

@@ -12,7 +12,6 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/pagination"
-	kitvec "go.kenn.io/kit/vector"
 )
 
 // registerSearchHandlers installs GET /api/v1/projects/{id}/search. Returns the
@@ -94,7 +93,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 				IssueScope: issueScopeFromContext(ctx),
 			}
 			if direct {
-				params.Hub = func(ctx context.Context, p hybridParams, fetch int) ([]kitvec.Hit[string], bool, error) {
+				params.Hub = func(ctx context.Context, p hybridParams, fetch int) ([]api.FederationSearchHit, bool, error) {
 					ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 					defer cancel()
 					client, cred, err := claimForwardClient(ctx, cfg, binding)
@@ -140,9 +139,13 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.DegradedReason = res.DegradedReason
 		out.Body.Results = make([]api.SearchHit, 0, len(res.Hits))
 		for _, c := range res.Hits {
+			webURL := ""
+			if c.Issue.ID != 0 {
+				webURL = issueWebURL(cfg, c.Issue.UID)
+			}
 			out.Body.Results = append(out.Body.Results, api.SearchHit{
 				Issue:     c.Issue,
-				WebURL:    issueWebURL(cfg, c.Issue.UID),
+				WebURL:    webURL,
 				Score:     c.Score,
 				MatchedIn: c.MatchedIn,
 			})

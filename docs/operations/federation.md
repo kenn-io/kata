@@ -2666,7 +2666,7 @@ Use a shared daemon when those trade-offs are unacceptable.
 
 Upgrade hubs before direct spokes. A direct spoke searches shared projects by
 meaning through its hub and removes earlier shared-project vectors from its
-local index. A hub match appears after the spoke pulls the issue. An older or
-unavailable hub leaves automatic search with word matches and a reason;
+local index. An older or unavailable hub leaves automatic search with word
+matches and a reason;
 explicit semantic or hybrid search returns 503. Relay spokes retain their
 existing behavior.

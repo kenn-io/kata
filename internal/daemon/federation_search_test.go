@@ -131,13 +131,22 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	var body struct {
 		Results []struct {
-			Issue db.Issue `json:"issue"`
+			Issue  db.Issue `json:"issue"`
+			WebURL string   `json:"web_url"`
 		} `json:"results"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &body))
-	require.Len(t, body.Results, 1)
-	require.Equal(t, issue.UID, body.Results[0].Issue.UID)
-	require.NotEqual(t, unpulled.UID, body.Results[0].Issue.UID)
+	require.Len(t, body.Results, 2)
+	seen := make(map[string]bool)
+	for _, hit := range body.Results {
+		seen[hit.Issue.UID] = true
+		if hit.Issue.UID == unpulled.UID {
+			require.Zero(t, hit.Issue.ID)
+			require.Empty(t, hit.WebURL)
+		}
+	}
+	require.True(t, seen[issue.UID])
+	require.True(t, seen[unpulled.UID])
 	resp, raw = envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=concept&mode=semantic&status=closed", replica.ID))
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	require.NoError(t, json.Unmarshal(raw, &body))
@@ -173,8 +182,7 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	require.Equal(t, true, output["degraded"])
 	require.Contains(t, output["degraded_reason"], "local-only: embeddings are not configured")
 	hits := output["results"].([]any)
-	require.Len(t, hits, 1)
-	require.Equal(t, issue.UID, hits[0].(map[string]any)["issue"].(map[string]any)["uid"])
+	require.Len(t, hits, 2)
 	localIssue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: localProject.ID, Title: "local concept", Author: "tester"})
 	require.NoError(t, err)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -224,12 +232,13 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, result.IsError, "%+v", result.Content)
 	hits = result.StructuredContent.(map[string]any)["results"].([]any)
-	require.Len(t, hits, 2)
+	require.Len(t, hits, 3)
 	foundUIDs := make(map[string]bool)
 	for _, hit := range hits {
 		foundUIDs[hit.(map[string]any)["issue"].(map[string]any)["uid"].(string)] = true
 	}
 	require.True(t, foundUIDs[issue.UID])
+	require.True(t, foundUIDs[unpulled.UID])
 	require.True(t, foundUIDs[localIssue.UID])
 }
 

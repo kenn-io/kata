@@ -2889,13 +2889,13 @@ components:
       type: object
     FederationSearchHit:
       properties:
+        issue:
+          $ref: "#/components/schemas/Issue"
         score:
           format: double
           type: number
-        uid:
-          type: string
       required:
-        - uid
+        - issue
         - score
       type: object
     FederationSearchResponseBody:

@@ -18,7 +18,6 @@ import (
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"go.kenn.io/kata/pkg/client/generated"
 	kitdaemon "go.kenn.io/kit/daemon"
-	kitvec "go.kenn.io/kit/vector"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
@@ -824,7 +823,7 @@ type claimHubClient struct {
 	transportErr error
 }
 
-func (c *claimHubClient) SearchShared(ctx context.Context, projectID int64, p hybridParams, limit int) ([]kitvec.Hit[string], bool, error) {
+func (c *claimHubClient) SearchShared(ctx context.Context, projectID int64, p hybridParams, limit int) ([]api.FederationSearchHit, bool, error) {
 	if c.transportErr != nil {
 		return nil, false, c.transportErr
 	}
@@ -846,11 +845,7 @@ func (c *claimHubClient) SearchShared(ctx context.Context, projectID int64, p hy
 	if err := json.Unmarshal(response.Body, &body.Body); err != nil {
 		return nil, false, err
 	}
-	hits := make([]kitvec.Hit[string], 0, len(body.Body.Hits))
-	for _, hit := range body.Body.Hits {
-		hits = append(hits, kitvec.Hit[string]{Doc: hit.UID, Score: float32(hit.Score)})
-	}
-	return hits, body.Body.Bounded, nil
+	return body.Body.Hits, body.Body.Bounded, nil
 }
 
 type claimHubStatusError struct {

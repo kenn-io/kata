@@ -3018,12 +3018,21 @@ func (f FederationRootKeyRepinResult) Validate() error {
 }
 
 type FederationSearchHit struct {
+	Issue Issue   `json:"issue"`
 	Score float64 `json:"score"`
-	UID   string  `json:"uid" validate:"required"`
 }
 
 func (f FederationSearchHit) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+	var errors runtime.ValidationErrors
+	if v, ok := any(f.Issue).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Issue", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type FederationSearchResponseBody struct {
