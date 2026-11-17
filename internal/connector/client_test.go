@@ -978,6 +978,55 @@ func TestProcessClientWaitDelayCleansDescendantHoldingStdout(t *testing.T) {
 	requireProcessClientHelperGone(t, descendant)
 }
 
+func TestProcessClientReportsProtocolViolationWhenDescendantHoldsStdout(t *testing.T) {
+	readyPath := filepath.Join(t.TempDir(), "ready")
+	t.Setenv("HELPER_MODE", "wrong-id-stdout-holder-and-exit")
+	t.Setenv("HELPER_SYNC", readyPath)
+	client := newHelperClient(t, config.ConnectorConfig{
+		ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"}, TimeoutSeconds: 5,
+		Env: map[string]string{"MODE": "HELPER_MODE", "SYNC": "HELPER_SYNC"},
+	})
+
+	_, err := client.Describe(t.Context())
+	require.ErrorIs(t, err, ErrProtocolFailure)
+	assert.NotErrorIs(t, err, ErrProcessFailure)
+	assert.EqualError(t, err, "external connector protocol failed")
+	pid := waitForProcessClientHelperPID(t, readyPath)
+	descendant := observeProcessClientHelper(t, pid)
+	t.Cleanup(func() { killProcessClientHelper(pid) })
+	requireProcessClientHelperGone(t, descendant)
+}
+
+func TestReceivedProtocolViolationOnlyTrustsCompleteResponses(t *testing.T) {
+	const wrongID = `{"protocol":"kata.connector.v1","id":"other","result":{"connector_id":"fake.connector"}}`
+	const valid = `{"protocol":"kata.connector.v1","id":"request-1","result":{"connector_id":"fake.connector","display_name":"Fake","protocol":"kata.connector.v1","capabilities":[],"account_identity":"account-1"}}`
+	for _, tt := range []struct {
+		name          string
+		output        string
+		exceeded      bool
+		wantViolation bool
+	}{
+		{name: "complete response with wrong ID", output: wrongID, wantViolation: true},
+		{name: "truncated response", output: wrongID[:40]},
+		{name: "complete valid response", output: valid + "\n"},
+		{name: "valid response followed by partial data", output: valid + `{"pro`, wantViolation: true},
+		{name: "output over the limit", output: wrongID[:40], exceeded: true, wantViolation: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout := &cappedBuffer{limit: maxResponseBytes, exceeded: tt.exceeded}
+			_, err := stdout.Write([]byte(tt.output))
+			require.NoError(t, err)
+			var result protocol.Description
+			err = receivedProtocolViolation(stdout, "request-1", "describe", &result, nil)
+			if tt.wantViolation {
+				require.ErrorIs(t, err, ErrProtocolFailure)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestProcessClientRejectsMissingEnvironmentSourceWithoutValue(t *testing.T) {
 	const privateSource = "MISSING_CONNECTOR_SECRET"
 	client := newHelperClient(t, config.ConnectorConfig{
@@ -1287,12 +1336,13 @@ func serveProcessClientHelper() {
 	}
 	if os.Getenv("MODE") == "spawn-stdout-holder" ||
 		os.Getenv("MODE") == "spawn-stdout-holder-and-exit" ||
+		os.Getenv("MODE") == "wrong-id-stdout-holder-and-exit" ||
 		os.Getenv("MODE") == "spawn-background-holder" {
 		// This helper process entry point has no caller context.
 		child := exec.CommandContext(context.Background(), // #nosec G204,G702 -- the test starts its own fixed executable and helper arguments.
 			os.Args[0], "-test.run=^TestProcessClientStdoutHolderHelper$", "--", "--connector-stdout-holder",
 		)
-		if os.Getenv("MODE") == "spawn-stdout-holder" || os.Getenv("MODE") == "spawn-stdout-holder-and-exit" {
+		if os.Getenv("MODE") != "spawn-background-holder" {
 			child.Stdout = os.Stdout
 		}
 		if err := child.Start(); err != nil {
@@ -1352,7 +1402,7 @@ func serveProcessClientHelper() {
 	case "write-raw-result":
 		response.Result = jsontext.Value(os.Getenv("RESULT"))
 	case "write-empty-result":
-	case "wrong-id":
+	case "wrong-id", "wrong-id-stdout-holder-and-exit":
 		response.ID = "other"
 	case "unsupported-version":
 		response.Protocol = "unsupported.connector.protocol"
@@ -1565,7 +1615,7 @@ func expectedEnvironment(mode string) []string {
 	if mode == "raw-result" || mode == "publication-result" || mode == "write-raw-result" {
 		return []string{"MODE", "RESULT"}
 	}
-	if mode == "spawn-stdout-holder" || mode == "spawn-stdout-holder-and-exit" || mode == "spawn-background-holder" || mode == "launch-marker" || mode == "conditional-fields-unsupported" || mode == "conditional-fields-supported" {
+	if mode == "spawn-stdout-holder" || mode == "spawn-stdout-holder-and-exit" || mode == "wrong-id-stdout-holder-and-exit" || mode == "spawn-background-holder" || mode == "launch-marker" || mode == "conditional-fields-unsupported" || mode == "conditional-fields-supported" {
 		return []string{"MODE", "SYNC"}
 	}
 	if mode != "" {

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/version"
 )
 
@@ -110,6 +112,28 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		return out, nil
 	})
+
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "probeDocbank",
+		Method:      "GET",
+		Path:        "/api/v1/docbank/probe",
+		Summary:     "Check that the daemon reaches Docbank and Docbank accepts its key",
+		Errors:      []int{404, 503},
+	}, func(ctx context.Context, _ *struct{}) (*api.DocbankProbeResponse, error) {
+		// Same callers and same configuration as health's docbank block.
+		var checked bool
+		var err error
+		if projectDiagnosticOwnerAuthority(ctx) && cfg.Docbank != nil {
+			checked, err = cfg.Docbank.CheckKey()
+		}
+		if !checked {
+			return nil, api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+		}
+		if err != nil {
+			return nil, docbankKeyUnavailable(err)
+		}
+		return &api.DocbankProbeResponse{Body: probeDocbank(ctx, cfg.Docbank)}, nil
+	})
 }
 
 func docbankHealth(err error) *api.DocbankHealth {
@@ -121,4 +145,22 @@ func docbankHealth(err error) *api.DocbankHealth {
 		h.CredentialSource, h.CredentialReason = e.Source, e.Reason
 	}
 	return h
+}
+
+const docbankProbeTimeout = 5 * time.Second
+
+// probeDocbank reads Docbank's root folder. Only a 2xx answer shows that the
+// address is Docbank and that it accepts the key: a 404, or a 2xx whose body
+// is not a folder, could come from any server at a wrong URL.
+func probeDocbank(ctx context.Context, c *docbank.Client) api.DocbankProbe {
+	ctx, cancel := context.WithTimeout(ctx, docbankProbeTimeout)
+	defer cancel()
+	root, err := c.ResolvePath(ctx, "/")
+	if err == nil {
+		return api.DocbankProbe{Reachable: true, KeyAccepted: root.ID > 0 && root.Kind == "dir"}
+	}
+	if e, ok := errors.AsType[*docbank.Error](err); ok && (e.Status != 0 || e.Malformed) {
+		return api.DocbankProbe{Reachable: true, HTTPStatus: e.Status}
+	}
+	return api.DocbankProbe{}
 }

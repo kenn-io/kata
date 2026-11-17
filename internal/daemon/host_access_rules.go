@@ -63,7 +63,7 @@ func buildHostAccessRules() map[string]hostAccessRule {
 		"importIssues", "pollProjectEvents", "streamEvents", "auditCloses",
 		"digestProject", "deleteLink", "rewriteAuthorIdentity", "mcpEventsSubscribe")
 	registerHostAccessRules(rules, hostAccessRule{NoProjectData: true},
-		"ping", "health", "instance", "captureTelemetryEvent", "doctor",
+		"ping", "health", "probeDocbank", "instance", "captureTelemetryEvent", "doctor",
 		"mcpEventsList", "mcpEventsUnsubscribe", "mcpEventSubscriptions")
 	return rules
 }
