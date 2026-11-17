@@ -105,8 +105,17 @@ test('local project readers see native sync status with bounded embedding summar
       fullPage: true,
     })
   }
+  // The embedding fixture ends here, so the last read comes from the daemon.
+  await page.unrouteAll({ behavior: 'wait' })
   kata.clearSyncDiagnosticError()
+  const clearedRead = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === statusPath,
+  )
   await region.getByRole('button', { name: 'Refresh sync' }).click()
+  // The attention block also disappears while the read is pending, so wait for
+  // the read and the status it renders.
+  expect((await clearedRead).ok()).toBe(true)
+  await expect(region.getByText('Sync disabled', { exact: true })).toBeVisible()
   await expect(region.getByText('Sync needs attention')).toHaveCount(0)
   await expect(region.getByRole('button', { name: /Copy .* sync status command/ })).toHaveCount(0)
 })

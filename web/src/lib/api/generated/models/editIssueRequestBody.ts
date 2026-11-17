@@ -7,6 +7,11 @@ export interface EditIssueRequestBody {
   actor?: string
   body?: string
   clear_priority?: boolean
+  /**
+   * Current content_revision of the issue; a title or body edit since then returns 412 revision_conflict and writes nothing.
+   * @minimum 0
+   */
+  expected_content_revision?: number
   links_delta?: LinksDelta
   owner?: string
   set_priority?: number

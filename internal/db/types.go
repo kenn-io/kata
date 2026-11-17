@@ -397,6 +397,7 @@ type Issue struct {
 	Author              string     `json:"author"`
 	Metadata            JSONBlob   `json:"metadata"`
 	Revision            int64      `json:"revision"`
+	ContentRevision     int64      `json:"content_revision"`
 	RecurrenceID        *int64     `json:"recurrence_id,omitempty"`
 	OccurrenceKey       *string    `json:"occurrence_key,omitempty"`
 	CreatedAt           time.Time  `json:"created_at"`

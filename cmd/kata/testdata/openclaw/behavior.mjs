@@ -25,7 +25,10 @@ assert.equal(start.cwd,workspace);assert.equal(start.recipient,'actor/worker');
 assert.deepEqual(calls().find(c=>c.args[0]==='agent-contract-hook').args,['agent-contract-hook','--source','prompt with spaces;literal.txt']);
 assert.deepEqual(calls().find(c=>c.args[0]==='inbox').args,['inbox','--for','actor/worker','--context']);
 process.env.KATA_REF='changed';fs.writeFileSync(path.join(root,'contract'),'second');fs.writeFileSync(path.join(root,'inbox'),'');
-if(process.env.OPENCLAW_TEST_PLATFORM==='native')fs.writeFileSync(path.join(root,'slow-contract'),'');
+// The contract call finishes 750ms after this prompt starts, past the 500ms
+// attention budget and inside the 1200ms contract budget, however long the
+// recorder takes to start.
+if(process.env.OPENCLAW_TEST_PLATFORM==='native')fs.writeFileSync(path.join(root,'slow-contract'),String(Date.now()+750));
 let second=await registrations.get('before_prompt_build')({prompt:'next',messages:[]},ctx);assert.equal(second.prependSystemContext,'contract:second');assert.equal(second.prependContext,'');
 try{fs.rmSync(path.join(root,'slow-contract'))}catch{}
 assert.equal(calls().filter(c=>c.args[3]==='start').length,1);

@@ -52,6 +52,7 @@ type Issue struct {
 	Related             []LinkPeer    `json:"related,omitempty"`
 	Priority            *int64        `json:"priority,omitempty"`
 	Revision            int64         `json:"revision"`
+	ContentRevision     int64         `json:"content_revision"`
 	RecurrenceID        *int64        `json:"recurrence_id,omitempty"`
 	Metadata            issueMetadata `json:"metadata,omitzero"`
 	// Resolved YYYY-MM-DD planning dates from the daemon.

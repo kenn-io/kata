@@ -10,6 +10,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Press `V` in `kata tui` to open the close form on any daemon and cite an issue's attachment as `done` evidence, alone or with typed evidence. `x` still closes at once and opens the form only when the daemon requires evidence; other close reasons do not offer the choice. The events tab names the cited file, and marks it removed or changed. See [cite a document when closing work](guide/attachments.md#cite-a-document-when-closing-work).
+- Stop `kata tui` from overwriting a body that someone else changed while you
+  were editing it. Against a daemon on API 0.53.0 or newer, the editor and
+  undo of a body edit send the issue's `content_revision` with the save, and
+  the daemon refuses a stale save and writes nothing. If the daemon's version
+  cannot be read, the save or undo fails and writes nothing. Edit requests can
+  send `expected_content_revision` for the same check; see the
+  [HTTP API reference](reference/http-api.md#editing-an-issue-safely).
 
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
 
