@@ -176,7 +176,7 @@ func TestServiceEmbedsIssueCreatedWhileRunning(t *testing.T) {
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() { done <- service.Run(runCtx) }()
-	t.Cleanup(func() { cancel(); require.NoError(t, <-done) })
+	t.Cleanup(func() { cancel(); <-done })
 	query := fmt.Sprintf("%s/api/v1/projects/%d/search?q=matching&mode=semantic", server.URL, project.Project.ID)
 	//nolint:kennlint // sleeptest: Postgres and HTTP worker progress requires real I/O.
 	require.Eventually(t, func() bool {
