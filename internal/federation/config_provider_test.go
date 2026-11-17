@@ -555,3 +555,52 @@ func TestReconcilerRetriesWaitingProviderDecisions(t *testing.T) {
 		})
 	}
 }
+
+// A provider mapping joins a placeholder the operator restored and renamed to
+// the mapping's spoke project, keeping the issues parked in it.
+func TestReconcileProviderJoinsRestoredPlaceholder(t *testing.T) {
+	for _, intent := range []federationprovider.Intent{"collaborate", "migrate"} {
+		t.Run(string(intent), func(t *testing.T) {
+			t.Setenv("KATA_HOME", t.TempDir())
+			t.Setenv("KATA_TEST_RECONCILE_PROVIDER", "1")
+			t.Setenv("KATA_TEST_PROVIDER_DECISION", "ready")
+			store := openReconcileStore(t)
+			ctx := t.Context()
+			project, err := store.CreateProjectWithUID(ctx, "spoke-project", hubProjectUID)
+			require.NoError(t, err)
+			parked, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "parked", Author: "worker"})
+			require.NoError(t, err)
+			_, err = store.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES(?, '1')`, db.FederationRetainedProjectPrefix+hubProjectUID)
+			require.NoError(t, err)
+			credentials := config.DefaultFederationCredentialStore()
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				assert.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+					"project_id": 42, "project_uid": hubProjectUID, "project_name": "hub-project",
+					"replay_horizon_event_id": 9, "baseline_through_event_id": 12,
+				}))
+			}))
+			t.Cleanup(server.Close)
+			previousTransport := http.DefaultTransport
+			http.DefaultTransport = server.Client().Transport
+			t.Cleanup(func() { http.DefaultTransport = previousTransport })
+			executable, err := os.Executable()
+			require.NoError(t, err)
+			catalog := config.CatalogDaemonConfig{Name: "team-hub", URL: server.URL + "/tasks"}
+			mapping := config.FederationProjectConfig{
+				Hub: catalog.Name, SpokeProject: "spoke-project", HubProject: "hub-project", Intent: intent,
+				CredentialProvider: []string{executable, "-test.run=^TestReconcileProviderProcess$"},
+			}
+
+			require.NoError(t, federation.ReconcileMapping(ctx, store, credentials, newFakeHub(), catalog, mapping, nil))
+
+			joined, err := store.ProjectByName(ctx, mapping.SpokeProject)
+			require.NoError(t, err)
+			assert.Equal(t, project.ID, joined.ID)
+			_, err = store.FederationBindingByProject(ctx, joined.ID)
+			require.NoError(t, err)
+			got, err := store.IssueByUID(ctx, parked.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			assert.Equal(t, joined.ID, got.ProjectID)
+		})
+	}
+}

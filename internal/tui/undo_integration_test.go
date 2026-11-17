@@ -342,7 +342,7 @@ func TestClientEditBodyRefusesStaleContentRevision(t *testing.T) {
 	require.Equal(t, "unguarded text", current.Body)
 }
 
-// Against a daemon older than 0.52.0 the body save carries no
+// Against a daemon older than 0.53.0 the body save carries no
 // expected_content_revision (the daemon would reject the unknown field) and
 // succeeds as it did before the field existed.
 func TestClientEditBodyOmitsContentRevisionForOlderDaemon(t *testing.T) {
@@ -350,7 +350,7 @@ func TestClientEditBodyOmitsContentRevisionForOlderDaemon(t *testing.T) {
 	for _, tc := range []struct {
 		version string
 		sent    bool
-	}{{"0.51.0", false}, {"0.52.0", true}} {
+	}{{"0.52.0", false}, {"0.53.0", true}} {
 		t.Run(tc.version, func(t *testing.T) {
 			var raw map[string]any
 			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {

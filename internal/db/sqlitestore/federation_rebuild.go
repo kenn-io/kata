@@ -53,7 +53,10 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		if err != nil {
 			return nil, err
 		}
-		moveProjection := db.FoldProjection{Issues: make(map[string]db.FoldIssue, len(decisions))}
+		moveProjection := projection
+		moveProjection.Issues = make(map[string]db.FoldIssue, len(decisions))
+		moveProjection.Comments = maps.Clone(projection.Comments)
+		moveProjection.Labels = maps.Clone(projection.Labels)
 		for _, decision := range decisions {
 			result.moved[decision.IssueUID] = decision
 			moveOwners[decision.IssueUID] = projection.Issues[decision.IssueUID].ProjectUID
@@ -277,5 +280,5 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 }
 
 func isFederationRehome(decision db.FederatedMoveDecision) bool {
-	return decision.Joined && decision.Active && decision.Exists && decision.SourceID != decision.TargetID
+	return decision.Exists && decision.SourceID != decision.TargetID && (decision.Park || decision.Joined && decision.Active)
 }

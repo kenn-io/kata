@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -240,6 +241,9 @@ func federationMoveProjects(ctx context.Context, tx *sql.Tx, routeID int64, e Re
 			query += ` AND deleted_at IS NULL`
 		}
 		err := tx.QueryRowContext(ctx, query, uid).Scan(&id)
+		if historical && errors.Is(err, sql.ErrNoRows) {
+			return retainFederationProject(ctx, tx, uid)
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, fmt.Errorf("%w: move project %s is not joined; join it and retry sync", ErrFederationIngestValidation, uid)
 		}
@@ -269,21 +273,24 @@ func federationMoveProjects(ctx context.Context, tx *sql.Tx, routeID int64, e Re
 // destination, including a page that precedes the move itself.
 func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e RemoteEvent) (int64, error) {
 	var project int64
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1`, e.ProjectUID).Scan(&project); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 0, fmt.Errorf("%w: event project is not joined", ErrFederationIngestValidation)
-		}
+	err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1`, e.ProjectUID).Scan(&project)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
-	if e.Type == "issue.moved" || project != route {
+	missing := errors.Is(err, sql.ErrNoRows)
+	if missing || e.Type == "issue.moved" || project != route {
 		// Native pull trusts the joined hub with this stream's issue history.
 		// A retained historical project identity needs no live credential or
 		// binding after leave. Local authoring and hub push remain strict.
 		var role string
 		var enabled int
 		var relay bool
-		if err := tx.QueryRowContext(ctx, `SELECT role,enabled,relay_config IS NOT NULL
- FROM federation_bindings WHERE project_id=$1`, route).Scan(&role, &enabled, &relay); err != nil {
+		err := tx.QueryRowContext(ctx, `SELECT role,enabled,relay_config IS NOT NULL
+ FROM federation_bindings WHERE project_id=$1`, route).Scan(&role, &enabled, &relay)
+		if missing && (errors.Is(err, sql.ErrNoRows) || err == nil && (role != string(FederationRoleSpoke) || enabled != 1 || relay)) {
+			return 0, fmt.Errorf("%w: event project is not joined", ErrFederationIngestValidation)
+		}
+		if err != nil {
 			return 0, err
 		}
 		if role != string(FederationRoleSpoke) || enabled != 1 || relay {
@@ -291,16 +298,57 @@ func RemoteIssueEventProject(ctx context.Context, tx *sql.Tx, route int64, e Rem
 		}
 	}
 	if e.Type == "issue.moved" {
-		if _, _, err := federationMoveProjects(ctx, tx, route, e, true); err != nil {
+		_, destination, err := federationMoveProjects(ctx, tx, route, e, true)
+		if err != nil {
 			return 0, err
 		}
+		project, missing = destination, false
 	}
-	if project != route {
+	if missing || project != route {
 		if EventIssueUID(e.IssueUID) == "" {
 			return 0, fmt.Errorf("%w: project event outside requested stream", ErrFederationIngestValidation)
 		}
 	}
+	if missing {
+		if !katauid.Valid(e.ProjectUID) {
+			return 0, fmt.Errorf("%w: invalid project UID", ErrFederationIngestValidation)
+		}
+		return retainFederationProject(ctx, tx, e.ProjectUID)
+	}
 	return project, nil
+}
+
+// retainFederationProject keeps the envelope's UID without reserving its hub name.
+func retainFederationProject(ctx context.Context, tx *sql.Tx, uid string) (int64, error) {
+	for suffix := 0; ; suffix++ {
+		name := "federation-" + strings.ToLower(uid)
+		if suffix > 0 {
+			name = fmt.Sprintf("%s-%d", name, suffix)
+		}
+		var id int64
+		err := tx.QueryRowContext(ctx, `INSERT INTO projects(uid,name,deleted_at) VALUES($1,$2,$3)
+ ON CONFLICT DO NOTHING RETURNING id`, uid, name, time.Now().UTC().Format(EventTimestampFormat)).Scan(&id)
+		if err == nil {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO project_access_policies(project_uid,visibility) VALUES($1,'teams')`, uid); err != nil {
+				return 0, err
+			}
+			if _, err = tx.ExecContext(ctx, `UPDATE meta SET value=CAST(CAST(value AS BIGINT)+1 AS TEXT) WHERE key='project_access_revision'`); err != nil {
+				return 0, err
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'1') ON CONFLICT(key) DO NOTHING`, FederationRetainedProjectPrefix+uid)
+			return id, err
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return 0, err
+		}
+		err = tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1`, uid).Scan(&id)
+		if err == nil {
+			return id, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return 0, err
+		}
+	}
 }
 
 // FederatedMoveDecision records the state used to decide whether to rehome an
@@ -310,6 +358,9 @@ type FederatedMoveDecision struct {
 	IssueID, SourceID, TargetID                    int64
 	RecurrenceID                                   sql.NullInt64
 	Active, Joined, Exists                         bool
+	// Park moves the issue into the retained placeholder for a destination
+	// this spoke has not joined, so it leaves the joined source's lists.
+	Park bool
 }
 
 // IndexFederatedMoveEvents selects the latest move for each issue.
@@ -334,21 +385,25 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 			continue
 		}
 		decision := FederatedMoveDecision{IssueUID: issue.UID}
-		if err := tx.QueryRowContext(ctx, `SELECT id,deleted_at IS NULL FROM projects WHERE uid=$1`, issue.ProjectUID).Scan(&decision.TargetID, &decision.Active); err != nil {
+		var placeholder bool
+		if err := tx.QueryRowContext(ctx, `SELECT id,deleted_at IS NULL,EXISTS(SELECT 1 FROM meta WHERE key=$2) FROM projects WHERE uid=$1`, issue.ProjectUID, FederationRetainedProjectPrefix+issue.ProjectUID).Scan(&decision.TargetID, &decision.Active, &placeholder); err != nil {
 			return nil, nil, err
 		}
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, decision.TargetID).Scan(&decision.Joined); err != nil {
 			return nil, nil, err
 		}
-		if decision.Joined {
-			err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id FROM issues i JOIN projects p ON p.id=i.project_id WHERE i.uid=$1`, issue.UID).Scan(&decision.IssueID, &decision.SourceID, &decision.RecurrenceID, &decision.SourceUID, &decision.SourceName, &decision.SourceShortID)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return nil, nil, err
-			}
-			decision.Exists = err == nil
-			if decision.Active {
-				projects[decision.TargetID] = true
-			}
+		var retained sql.NullString
+		var unbound, active bool
+		err := tx.QueryRowContext(ctx, `SELECT i.id,i.project_id,i.recurrence_id,p.uid,p.name,i.short_id,b.project_id IS NULL,p.deleted_at IS NULL,m.value FROM issues i JOIN projects p ON p.id=i.project_id LEFT JOIN federation_bindings b ON b.project_id=p.id LEFT JOIN meta m ON m.key='federation_retained_project.' || p.uid WHERE i.uid=$1`, issue.UID).Scan(&decision.IssueID, &decision.SourceID, &decision.RecurrenceID, &decision.SourceUID, &decision.SourceName, &decision.SourceShortID, &unbound, &active, &retained)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, err
+		}
+		decision.Exists = err == nil
+		// An issue held in a standalone project keeps its local copy.
+		standalone := unbound && (active || !retained.Valid)
+		decision.Park = placeholder && !decision.Joined && decision.Exists && !standalone
+		if decision.Joined && decision.Active {
+			projects[decision.TargetID] = true
 		}
 		decisions = append(decisions, decision)
 	}
@@ -357,7 +412,7 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]
 
 // RehomeFederatedMovedIssues preserves local row identities and connector/claim
 // state before the existing per-project reconciliation writes the folded view.
-func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) error {
+func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]FoldEvent, p FoldProjection, decisions []FederatedMoveDecision, assign func(int64, FoldIssue) (string, error), validate func(int64, int64, int64) error, afterRehome func(string, string) error, applyUnjoined func(int64, FoldIssue, FoldProjection) error, acceptedEventUIDs []string, insertResetControl func(Project, *FederationMovedReference) (int64, error)) error {
 	for _, decision := range decisions {
 		issue := p.Issues[decision.IssueUID]
 		winner := moved[issue.UID]
@@ -366,7 +421,9 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 		// may keep syncing, but cannot reconcile that destination's projection.
 		if !decision.Joined {
 			delete(p.Issues, issue.UID)
-			continue
+			if !decision.Park {
+				continue
+			}
 		}
 		id, source := decision.IssueID, decision.SourceID
 		sourceProject := Project{UID: decision.SourceUID, Name: decision.SourceName}
@@ -388,9 +445,14 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 			continue
 		}
 		if source == target {
+			if decision.Park && !active {
+				if err := applyUnjoined(target, issue, p); err != nil {
+					return err
+				}
+			}
 			continue
 		}
-		if !active {
+		if !decision.Park && !active {
 			return ErrNotFound
 		}
 		// Move ingress has already checked its authority and endpoints. Replaying
@@ -430,6 +492,16 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[strin
 			`UPDATE external_root_bindings SET project_id=$1 WHERE issue_id=$2`,
 		} {
 			if _, err := tx.ExecContext(ctx, query, target, id); err != nil {
+				return err
+			}
+		}
+		if decision.Park {
+			// Like any issue outside the joined projects, a parked issue keeps
+			// no links. Joining its project restores them from history.
+			if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE from_issue_id=$1 OR to_issue_id=$1`, id); err != nil {
+				return err
+			}
+			if err := applyUnjoined(target, issue, p); err != nil {
 				return err
 			}
 		}

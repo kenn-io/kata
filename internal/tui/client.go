@@ -663,7 +663,7 @@ func (c *Client) RemoveLink(ctx context.Context, projectID int64, ref string, li
 
 // contentRevisionAPIVersion is the first daemon API that accepts
 // expected_content_revision on an issue edit.
-const contentRevisionAPIVersion = "0.52.0"
+const contentRevisionAPIVersion = "0.53.0"
 
 // EditBody replaces issue.body via PATCH. v1 only supports body edits
 // from the TUI; title edits would reuse the same endpoint. A non-nil

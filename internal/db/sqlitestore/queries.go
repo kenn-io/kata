@@ -189,6 +189,11 @@ func (d *Store) HardDeleteProject(ctx context.Context, id int64) (int64, error) 
 	return resetID, err
 }
 
+// IsFederationRetainedProject reports whether a project is a retained placeholder.
+func (d *Store) IsFederationRetainedProject(ctx context.Context, uid string) (bool, error) {
+	return db.IsFederationRetainedProject(ctx, d, uid)
+}
+
 // RenameProject updates a project's canonical name without changing aliases or
 // issue numbering.
 func (d *Store) RenameProject(ctx context.Context, id int64, name string) (db.Project, error) {
