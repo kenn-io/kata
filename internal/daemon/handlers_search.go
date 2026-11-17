@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -14,10 +15,23 @@ import (
 	"go.kenn.io/kata/internal/pagination"
 )
 
-type hubSearchError struct{ err error }
+type hubSearchError struct {
+	err         error
+	unreachable bool
+}
 
-func (e *hubSearchError) Error() string { return "hub unreachable: " + e.err.Error() }
+func (e *hubSearchError) Error() string {
+	if e.unreachable {
+		return "hub unreachable: " + e.err.Error()
+	}
+	return "hub search failed: " + e.err.Error()
+}
 func (e *hubSearchError) Unwrap() error { return e.err }
+
+func wrapHubSearchError(err error) error {
+	_, transport := errors.AsType[*url.Error](err)
+	return &hubSearchError{err: err, unreachable: transport || errors.Is(err, errClaimHubTransportUnavailable)}
+}
 
 // registerSearchHandlers installs GET /api/v1/projects/{id}/search. Returns the
 // spec §4.10 envelope: query echo, effective mode, optional degraded fields,
@@ -104,11 +118,11 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 					defer cancel()
 					client, cred, err := claimForwardClient(ctx, cfg, binding)
 					if err != nil {
-						return nil, false, &hubSearchError{err}
+						return nil, false, wrapHubSearchError(err)
 					}
 					hits, bounded, err := client.SearchShared(ctx, cred.HubProjectID, p, fetch)
 					if err != nil {
-						return nil, false, &hubSearchError{err}
+						return nil, false, wrapHubSearchError(err)
 					}
 					for _, hit := range hits {
 						remoteURLs[hit.Issue.UID] = hit.WebURL

@@ -138,9 +138,12 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 				status = 400
 			}
 			code := ""
-			if _, ok := errors.AsType[*hubSearchError](vecErr); ok {
+			if hubErr, ok := errors.AsType[*hubSearchError](vecErr); ok {
 				status = 503
-				code = "hub_unreachable"
+				code = "hub_search_failed"
+				if hubErr.unreachable {
+					code = "hub_unreachable"
+				}
 			}
 			return hybridResult{}, &modeError{status: status, msg: vecErr.Error(), code: code}
 		}
@@ -163,6 +166,17 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	case modeSemantic:
 		res = hybridResult{Mode: modeSemantic, Hits: truncate(vector, probeLimit)}
 	default: // hybrid
+		if p.Hub != nil {
+			byUID := make(map[string]db.Issue, len(vector))
+			for _, candidate := range vector {
+				byUID[candidate.Issue.UID] = candidate.Issue
+			}
+			for i := range lexical {
+				if issue, ok := byUID[lexical[i].Issue.UID]; ok {
+					lexical[i].Issue = issue
+				}
+			}
+		}
 		hits, err := mergeRRF(lexical, vector, probeLimit)
 		if err != nil {
 			return hybridResult{}, err
@@ -219,24 +233,15 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 			return nil, false, err
 		}
 		candidates := make([]db.SearchCandidate, 0, len(hits))
-		labels := newLabelFilter(p.Labels, p.ExcludeLabels)
 		for _, hit := range hits {
-			issue, err := store.IssueByUID(lookupCtx, hit.Issue.UID, db.IncludeDeletedYes)
-			if errors.Is(err, db.ErrNotFound) {
-				issue = hit.Issue
-				issue.ID, issue.ProjectID = 0, p.ProjectID
-			} else if err != nil {
+			local, err := store.IssueByUID(lookupCtx, hit.Issue.UID, db.IncludeDeletedYes)
+			if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return nil, false, err
-			} else if issue.DeletedAt != nil || issue.ProjectID != p.ProjectID || (p.Status != "" && issue.Status != p.Status) {
-				continue
-			} else if !labels.empty() {
-				byIssue, err := store.LabelsByIssues(ctx, p.ProjectID, []int64{issue.ID})
-				if err != nil {
-					return nil, false, err
-				}
-				if !labels.matches(byIssue[issue.ID]) {
-					continue
-				}
+			}
+			issue := hit.Issue
+			issue.ID, issue.ProjectID = 0, p.ProjectID
+			if err == nil && local.DeletedAt == nil && local.ProjectID == p.ProjectID {
+				issue.ID = local.ID
 			}
 			candidates = append(candidates, db.SearchCandidate{Issue: issue, Score: hit.Score, MatchedIn: []string{"semantic"}})
 		}

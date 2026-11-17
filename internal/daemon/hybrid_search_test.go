@@ -63,17 +63,28 @@ func TestHybridSearchHubUsesLiveLocalAndUnpulledIssues(t *testing.T) {
 	}}
 	result, err := hybridSearch(ctx, store, nil, nil, params)
 	require.NoError(t, err)
-	require.Len(t, result.Hits, 2)
+	require.Len(t, result.Hits, 3)
 	require.Equal(t, live.ID, result.Hits[0].Issue.ID)
-	require.Equal(t, "local title", result.Hits[0].Issue.Title)
-	require.Equal(t, unpulled.UID, result.Hits[1].Issue.UID)
+	require.Equal(t, "hub title", result.Hits[0].Issue.Title)
+	require.Equal(t, deleted.UID, result.Hits[1].Issue.UID)
+	require.Zero(t, result.Hits[2].Issue.ID)
+	require.Equal(t, unpulled.UID, result.Hits[2].Issue.UID)
 	require.Zero(t, result.Hits[1].Issue.ID)
-	require.Equal(t, project.ID, result.Hits[1].Issue.ProjectID)
+	require.Equal(t, project.ID, result.Hits[2].Issue.ProjectID)
 	params.Labels = []string{"absent-locally"}
 	result, err = hybridSearch(ctx, store, nil, nil, params)
 	require.NoError(t, err)
-	require.Len(t, result.Hits, 1)
-	require.Equal(t, unpulled.UID, result.Hits[0].Issue.UID)
+	require.Len(t, result.Hits, 3)
+	require.Equal(t, live.UID, result.Hits[0].Issue.UID)
+	require.Equal(t, deleted.UID, result.Hits[1].Issue.UID)
+	require.Zero(t, result.Hits[1].Issue.ID)
+	require.Equal(t, unpulled.UID, result.Hits[2].Issue.UID)
+	params.Labels = nil
+	params.Requested, params.Query = "hybrid", "local"
+	result, err = hybridSearch(ctx, store, nil, nil, params)
+	require.NoError(t, err)
+	require.Equal(t, live.UID, result.Hits[0].Issue.UID)
+	require.Equal(t, "hub title", result.Hits[0].Issue.Title)
 }
 
 func TestHybridSearchHubHonorsLocalChanges(t *testing.T) {
@@ -97,8 +108,12 @@ func TestHybridSearchHubHonorsLocalChanges(t *testing.T) {
 	}}
 	result, err := hybridSearch(ctx, store, nil, nil, params)
 	require.NoError(t, err)
-	require.Len(t, result.Hits, 1)
-	require.Equal(t, unpulled.UID, result.Hits[0].Issue.UID)
+	require.Len(t, result.Hits, 3)
+	require.Equal(t, closed.UID, result.Hits[0].Issue.UID)
+	require.Equal(t, "open", result.Hits[0].Issue.Status)
+	require.Equal(t, moved.UID, result.Hits[1].Issue.UID)
+	require.Zero(t, result.Hits[1].Issue.ID)
+	require.Equal(t, unpulled.UID, result.Hits[2].Issue.UID)
 }
 
 func TestHybridSearchLexicalWhenUnconfigured(t *testing.T) {

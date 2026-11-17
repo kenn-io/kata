@@ -268,8 +268,8 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 	setClaimBindingHubURL(t, spoke, replica.ID, hub.URL)
 	resp, body = envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
 	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(body))
-	require.Contains(t, string(body), "hub unreachable: ")
-	require.Contains(t, string(body), `"code":"hub_unreachable"`)
+	require.Contains(t, string(body), `"code":"hub_search_failed"`)
+	require.NotContains(t, string(body), "hub unreachable")
 	require.Contains(t, string(body), "embeddings are not configured")
 	for _, invalid := range []string{`{}`, `{"hits":[]}`, `{"hits":[],"bounded":null}`, `{"hits":null,"bounded":false}`} {
 		malformed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(invalid)) }))
@@ -277,7 +277,9 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 		setClaimBindingHubURL(t, spoke, replica.ID, malformed.URL)
 		resp, body = envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
 		require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(body), invalid)
-		require.Contains(t, string(body), "hub unreachable: invalid hub search response", invalid)
+		require.Contains(t, string(body), `"code":"hub_search_failed"`, invalid)
+		require.Contains(t, string(body), "invalid hub search response", invalid)
+		require.NotContains(t, string(body), "hub unreachable", invalid)
 	}
 	stalled := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	t.Cleanup(stalled.Close)
@@ -292,6 +294,7 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 	body, err = io.ReadAll(response.Body)
 	require.NoError(t, errors.Join(err, response.Body.Close()))
 	require.Equal(t, http.StatusServiceUnavailable, response.StatusCode, string(body))
+	require.Contains(t, string(body), `"code":"hub_unreachable"`)
 	older := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(older.Close)
 	checkSearch := func() {
