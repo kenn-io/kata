@@ -100,7 +100,7 @@ func (r *CredentialResolver) credentialTransport(ctx context.Context, binding Bi
 		if err != nil {
 			return nil, "", fmt.Errorf("create GitHub App transport: %w", err)
 		}
-		return newOriginGuardTransport(credential.binding, tr), credential.kind, nil
+		return newOriginGuardTransport(credential.binding, &appResponseTransport{next: tr, resolver: r, app: credential.app, base: base}), credential.kind, nil
 	case CredentialKindEnv, CredentialKindGH:
 		return newOriginGuardTransport(credential.binding, &staticBearerTransport{
 			token: credential.token,
@@ -109,6 +109,26 @@ func (r *CredentialResolver) credentialTransport(ctx context.Context, binding Bi
 	default:
 		return nil, "", fmt.Errorf("unsupported GitHub credential kind %q", credential.kind)
 	}
+}
+
+type appResponseTransport struct {
+	next     *ghinstallation.Transport
+	resolver *CredentialResolver
+	app      config.GitHubAppConfig
+	base     http.RoundTripper
+}
+
+func (t *appResponseTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.next.RoundTrip(req)
+	if err == nil && resp.StatusCode == http.StatusUnauthorized && reflect.ValueOf(t.base).Comparable() {
+		t.resolver.appMu.Lock()
+		key := appTransportKey{app: t.app, base: t.base}
+		if t.resolver.appTransports[key].transport == t.next {
+			delete(t.resolver.appTransports, key)
+		}
+		t.resolver.appMu.Unlock()
+	}
+	return resp, err
 }
 
 func (r *CredentialResolver) appTransport(app config.GitHubAppConfig, binding Binding, base http.RoundTripper) (*ghinstallation.Transport, error) {

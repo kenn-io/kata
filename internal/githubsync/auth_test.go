@@ -27,11 +27,12 @@ import (
 )
 
 type appTestTransport struct {
-	mu     sync.Mutex
-	mints  int
-	tokens []string
-	jwt    []string
-	expiry time.Duration
+	mu            sync.Mutex
+	mints         int
+	tokens        []string
+	jwt           []string
+	expiry        time.Duration
+	rejectedToken string
 }
 
 func (rt *appTestTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -44,6 +45,9 @@ func (rt *appTestTransport) RoundTrip(req *http.Request) (*http.Response, error)
 		return &http.Response{StatusCode: http.StatusCreated, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 	}
 	rt.tokens = append(rt.tokens, req.Header.Get("Authorization"))
+	if req.Header.Get("Authorization") == rt.rejectedToken && rt.rejectedToken != "" {
+		return &http.Response{StatusCode: http.StatusUnauthorized, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
+	}
 	return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: req}, nil
 }
 
@@ -130,6 +134,23 @@ func TestCredentialResolverAppTokenNearExpiry(t *testing.T) {
 	appTestRequest(t, resolver, base, "first")
 	assert.Equal(t, 2, base.mints)
 	assert.Equal(t, []string{"token token-1", "token token-2"}, base.tokens)
+}
+
+func TestCredentialResolverAppRemintsRejectedToken(t *testing.T) {
+	resolver, _ := appTestResolver(t)
+	base := &appTestTransport{expiry: time.Hour, rejectedToken: "token token-1"}
+	binding := Binding{Host: "github.com", Owner: "example-owner", Repo: "first"}
+	for _, want := range []int{http.StatusUnauthorized, http.StatusNoContent} {
+		transport, err := resolver.Transport(t.Context(), binding, base)
+		require.NoError(t, err)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://api.github.com/repos/example-owner/first/issues", nil)
+		require.NoError(t, err)
+		resp, err := transport.RoundTrip(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, want, resp.StatusCode)
+	}
+	assert.Equal(t, 2, base.mints)
 }
 
 func TestCredentialResolverAppKeyRotation(t *testing.T) {
