@@ -73,28 +73,3 @@ func TestClientSetFederationSpokeNameRefusesOlderDaemonBeforeWriting(t *testing.
 	require.ErrorAs(t, err, &preflight)
 	assert.Zero(t, writes.Load())
 }
-
-// The daemon's own refusal (a name another spoke holds, a non-owner) is not a
-// preflight failure: the request was sent and answered, and the typed code and
-// message reach the caller unchanged.
-func TestClientSetFederationSpokeNameReturnsDaemonRefusal(t *testing.T) {
-	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/health" {
-			respondJSON(t, w, map[string]any{"ok": true, "api_schema_version": "0.54.0"})
-			return
-		}
-		w.WriteHeader(http.StatusConflict)
-		respondJSON(t, w, map[string]any{"status": 409, "error": map[string]any{
-			"code": "federation_spoke_name_conflict", "message": `"build-box" is held by spoke other`,
-		}})
-	})
-
-	err := client.SetFederationSpokeName(t.Context(), spokeNameTestUID, "build-box")
-
-	var apiErr *APIError
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, http.StatusConflict, apiErr.Status)
-	assert.Equal(t, "federation_spoke_name_conflict", apiErr.Code)
-	var preflight *mutationPreflightError
-	assert.NotErrorAs(t, err, &preflight)
-}

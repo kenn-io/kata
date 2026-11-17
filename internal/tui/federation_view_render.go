@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"go.kenn.io/kata/internal/api"
 	hubfederation "go.kenn.io/kata/internal/federation"
 )
@@ -51,11 +52,12 @@ func renderFederation(m Model) string {
 		hints = append(hints, "[N] name")
 	}
 	hints = append(hints, "[b] browse hubs", "[C] credentials", "[?] help")
-	footer := federationFooterLines(m, hints...)
+	footer := renderAuxiliaryFooter(m, strings.Join(hints, "  "))
+	footerRows := strings.Count(footer, "\n") + 1
 	rowBudget := len(rows)
 	if m.height > 0 {
 		// The chrome counts a one-row footer; a wrapped one takes more.
-		rowBudget = max(m.height-federationViewChromeRows-(len(footer)-1), 1)
+		rowBudget = max(m.height-federationViewChromeRows-(footerRows-1), 1)
 	}
 	visible := clipFederationRows(rows, cursor, rowBudget)
 	body := []string{
@@ -85,10 +87,10 @@ func renderFederation(m Model) string {
 	// The notice takes the blank line above the hints, so it costs no row. On
 	// a short terminal the blank line itself goes before the rows do.
 	notice := federationNoticeLine(m)
-	if notice != "" || m.height <= 0 || len(body)+1+len(footer) <= m.height {
+	if notice != "" || m.height <= 0 || len(body)+1+footerRows <= m.height {
 		body = append(body, notice)
 	}
-	return strings.Join(append(body, footer...), "\n")
+	return strings.Join(append(body, footer), "\n")
 }
 
 func renderFederationSelectLocalProject(m Model) string {
@@ -240,7 +242,8 @@ func renderFederationPreview(m Model) string {
 	if errLines := federationErrorLines(m.federation.op.err, m.width); len(errLines) > 0 {
 		tail = append(append(tail, ""), errLines...)
 	}
-	tail = append(append(tail, ""), federationFooterLines(m, "[enter] confirm", "[N] name", "[esc] back")...)
+	footer := renderAuxiliaryFooter(m, "[enter] confirm  [N] name  [esc] back")
+	tail = append(append(tail, ""), strings.Split(footer, "\n")...)
 	return strings.Join(fitFederationLines(append(body, tail...), m.height, len(tail)), "\n")
 }
 
@@ -797,7 +800,7 @@ func renderFederationDetail(m Model, rows []FederationProjectStatus, cursor int)
 		"last error: "+formatOptionalError(row),
 		"",
 	)
-	footer := federationFooterLines(m, "[esc] back", "[r] refresh", "[N] name", "[q] quit", "[?] help")
+	footer := strings.Split(renderAuxiliaryFooter(m, "[esc] back  [r] refresh  [N] name  [q] quit  [?] help"), "\n")
 	return strings.Join(fitFederationLines(append(body, footer...), m.height, len(footer)), "\n")
 }
 
@@ -859,4 +862,69 @@ func formatOptionalError(row FederationProjectStatus) string {
 		return sanitizeForLine(*row.LastError)
 	}
 	return row.LastErrorAt.UTC().Format("2006-01-02 15:04:05Z") + " " + sanitizeForLine(*row.LastError)
+}
+
+// federationNoticeLine is the one-line confirmation of the last name change,
+// or an empty line when there is none.
+func federationNoticeLine(m Model) string {
+	if m.federation.notice == "" {
+		return ""
+	}
+	return subtleStyle.Render(truncate(sanitizeForLine(m.federation.notice), m.width))
+}
+
+// federationErrorLines wraps a daemon error, keeping its own line breaks, so
+// nothing is clipped at the terminal's edge.
+func federationErrorLines(err error, width int) []string {
+	if err == nil {
+		return nil
+	}
+	if width <= 0 {
+		width = 80
+	}
+	var lines []string
+	for raw := range strings.SplitSeq(err.Error(), "\n") {
+		for _, wrapped := range wrapBody(sanitizeForLine(raw), width) {
+			lines = append(lines, errorStyle.Render(wrapped))
+		}
+	}
+	return lines
+}
+
+// renderFederationNamePrompt draws the one-field name prompt. The prompt row,
+// the daemon's error and the hints are the tail that keeps its rows; the
+// title, context and rules above them are elided first.
+func renderFederationNamePrompt(m Model) string {
+	d := m.federation.nameDraft
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	title, emptyNote := "Name this spoke on its hub", "An empty name clears the spoke's name."
+	context := "hub: " + federationHubDisplay(d.HubURL) + " · project: " + d.ProjectName
+	action := "[enter] save  [esc] cancel"
+	if d.forEnrollment() {
+		title, emptyNote = "Name this spoke for the enrollment", "An empty name sends no name with the enrollment."
+		context = "project: " + d.ProjectName
+		action = "[enter] keep  [esc] cancel"
+	}
+	if m.federation.op.running {
+		action = "saving the name on the hub..."
+	}
+	const label = "name: "
+	shown := sanitizeForLine(d.Input)
+	if over := ansi.StringWidth(shown) - (width - len(label) - 1); over > 0 && width > len(label)+2 {
+		shown = ansi.TruncateLeft(shown, over+1, "…")
+	}
+	head := []string{
+		titleStyle.Render(truncate(title, width)),
+		subtleStyle.Render(truncate(sanitizeForLine(context), width)),
+		"",
+		subtleStyle.Render(truncate("Lowercase letters, digits and hyphens, starting with a letter, up to 32.", width)),
+		subtleStyle.Render(truncate(emptyNote, width)),
+		"",
+	}
+	tail := append([]string{label + shown + "▏"}, federationErrorLines(m.federation.op.err, width)...)
+	tail = append(tail, strings.Split(renderAuxiliaryFooter(m, action), "\n")...)
+	return strings.Join(fitFederationLines(append(head, tail...), m.height, len(tail)), "\n")
 }

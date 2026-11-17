@@ -327,7 +327,32 @@ func renderAuxiliaryFooter(m Model, ordinary string) string {
 	if rows := modalFirstHelpRows(m.modal, nil); rows != nil {
 		return renderFooterHelpTable(rows, m.width)
 	}
+	if m.view == viewFederation && m.width > 0 {
+		return wrapFooterHints(ordinary, m.width)
+	}
 	return subtleStyle.Render(ordinary)
+}
+
+// wrapFooterHints breaks a "[key] action  [key] action" line between hints so
+// none is clipped at the terminal's edge.
+func wrapFooterHints(hints string, width int) string {
+	var lines []string
+	line := ""
+	for i, hint := range strings.Split(hints, "  [") {
+		if i > 0 {
+			hint = "[" + hint
+		}
+		switch {
+		case line == "":
+			line = hint
+		case lipgloss.Width(line)+2+lipgloss.Width(hint) > width:
+			lines = append(lines, subtleStyle.Render(line))
+			line = hint
+		default:
+			line += "  " + hint
+		}
+	}
+	return strings.Join(append(lines, subtleStyle.Render(line)), "\n")
 }
 
 func globalHelpRows() [][]helplayout.HelpItem {

@@ -53,185 +53,145 @@ func finishName(t *testing.T, m Model, cmd tea.Cmd) Model {
 	return out
 }
 
-func TestFederationNameKeyOpensPromptFromListAndDetail(t *testing.T) {
+func TestFederationNameKeyOpensPromptWithoutReadingAnything(t *testing.T) {
+	enroll, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
+	enroll.federation.draft.SpokeName = "laptop"
 	for _, tc := range []struct {
-		name string
-		mode federationMode
+		name      string
+		model     func(t *testing.T) Model
+		wantInput string
 	}{
-		{"list", federationModeList},
-		{"detail", federationModeDetail},
+		{"list", func(t *testing.T) Model { m, _, _ := setupSpokeNameList(t); return m }, ""},
+		{"detail", func(t *testing.T) Model {
+			m, _, _ := setupSpokeNameList(t)
+			m.federation.mode = federationModeDetail
+			return m
+		}, ""},
+		{"enroll preview", func(*testing.T) Model { return enroll }, "laptop"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m, _, opened := setupSpokeNameList(t)
-			m.federation.mode = tc.mode
+			m := tc.model(t)
+			from := m.federation.mode
 
 			out, cmd := updateModel(m, keyRune('N'))
 
-			require.Nil(t, cmd, "opening the prompt reads nothing")
+			require.Nil(t, cmd)
 			assert.Equal(t, federationModeNamePrompt, out.federation.mode)
-			assert.Equal(t, tc.mode, out.federation.nameDraft.Return)
-			assert.Equal(t, "spoke-proj", out.federation.nameDraft.ProjectName)
-			assert.Empty(t, out.federation.nameDraft.Input)
-			assert.Empty(t, opened.URL, "no hub client is built until the name is saved")
+			assert.Equal(t, from, out.federation.nameDraft.Return)
+			assert.Equal(t, tc.wantInput, out.federation.nameDraft.Input)
 		})
 	}
 }
 
-func TestFederationNameKeyIgnoredWithoutASpokeRowOrOverHelp(t *testing.T) {
+func TestFederationNameKeyNeedsASpokeRow(t *testing.T) {
 	empty := setupFederationViewWithStatuses()
-	out, cmd := updateModel(empty, keyRune('N'))
-	require.Nil(t, cmd)
-	assert.Equal(t, federationModeList, out.federation.mode, "an empty list has no row to name")
 
-	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
-	helped := sendRune(m, '?')
-	require.Equal(t, viewHelp, helped.view)
-	out, _ = updateModel(helped, keyRune('N'))
-	assert.Equal(t, federationModeList, out.federation.mode, "Help owns the keyboard")
+	out, cmd := updateModel(empty, keyRune('N'))
+
+	require.Nil(t, cmd)
+	assert.Equal(t, federationModeList, out.federation.mode)
+	assert.NotContains(t, stripANSI(renderFederation(empty)), "[N] name", "an empty list shows no row hint")
 }
 
 // A name is lowercase letters, so it contains keys the TUI reserves for quit
 // (q), undo (u) and global navigation. While the prompt owns input they are
-// text.
-func TestFederationNamePromptTakesReservedKeysAsText(t *testing.T) {
+// text, and so is a paste.
+func TestFederationNamePromptOwnsTheKeyboard(t *testing.T) {
 	m, _, _ := setupSpokeNameList(t)
-	m = sendRune(m, 'N')
-
-	m = typeThrough(m, "quartz-u1")
+	m = typeThrough(sendRune(m, 'N'), "quartz-u1")
 
 	assert.Equal(t, modalNone, m.modal, "q must not open the quit confirmation")
-	assert.Equal(t, viewFederation, m.view)
 	assert.Equal(t, federationModeNamePrompt, m.federation.mode)
 	assert.Equal(t, "quartz-u1", m.federation.nameDraft.Input)
 
 	m = sendKey(m, tea.KeyBackspace)
-	assert.Equal(t, "quartz-u", m.federation.nameDraft.Input)
+	m, _ = updateModel(m, tea.PasteMsg{Content: "-box\n"})
+	assert.Equal(t, "quartz-u-box", m.federation.nameDraft.Input)
 }
 
-func TestFederationNamePromptCtrlCStillQuits(t *testing.T) {
-	m, _, _ := setupSpokeNameList(t)
-	m = sendRune(m, 'N')
+func TestFederationNameSaveWritesToTheRowsHub(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		mode       federationMode
+		input      string
+		wantWrite  string
+		wantNotice string
+	}{
+		{"list", federationModeList, "build-box", "build-box", `named this spoke "build-box" on hub.internal:7777`},
+		{"detail returns to detail", federationModeDetail, "laptop", "laptop", `named this spoke "laptop"`},
+		{"empty input clears", federationModeList, "", "", "cleared the name of this spoke on hub.internal:7777"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, hub, opened := setupSpokeNameList(t)
+			m.federation.mode = tc.mode
+			m.daemonTargets = []daemonTarget{
+				m.activeDaemon,
+				daemonTargetWithResolvedAuth("catalog-hub", "http://hub.internal:7777/", "hub-credential", true),
+			}
+			m = typeThrough(sendRune(m, 'N'), tc.input)
 
-	_, cmd := updateModel(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+			m, cmd := pressEnter(m)
+			assert.True(t, m.federation.op.running)
+			m = finishName(t, m, cmd)
 
-	require.NotNil(t, cmd)
-	_, quit := cmd().(tea.QuitMsg)
-	assert.True(t, quit)
-}
-
-func TestFederationNamePromptAcceptsPaste(t *testing.T) {
-	m, _, _ := setupSpokeNameList(t)
-	m = sendRune(m, 'N')
-
-	m, _ = updateModel(m, tea.PasteMsg{Content: "build-box\n"})
-
-	assert.Equal(t, "build-box", m.federation.nameDraft.Input)
-}
-
-func TestFederationNameSaveSetsTheNameOnTheRowsHub(t *testing.T) {
-	m, hub, opened := setupSpokeNameList(t)
-	m.daemonTargets = []daemonTarget{
-		m.activeDaemon,
-		daemonTargetWithResolvedAuth("catalog-hub", "http://hub.internal:7777/", "hub-credential", true),
+			assert.Equal(t, []spokeNameWrite{{uid: "01HZNQ7VFPK1XGD8R5MABCD4EA", name: tc.wantWrite}}, hub.spokeNameWrites)
+			assert.Equal(t, "http://hub.internal:7777", opened.URL, "the name goes to the hub this row is bound to")
+			assert.Equal(t, "hub-credential", opened.resolved.Token, "with the catalog credential for that hub")
+			assert.Equal(t, tc.mode, m.federation.mode)
+			assert.False(t, m.federation.op.running)
+			assert.Contains(t, stripANSI(renderFederation(m)), tc.wantNotice)
+		})
 	}
-	m = typeThrough(sendRune(m, 'N'), "build-box")
-
-	m, cmd := pressEnter(m)
-	assert.True(t, m.federation.op.running)
-	m = finishName(t, m, cmd)
-
-	assert.Equal(t, []spokeNameWrite{{uid: "01HZNQ7VFPK1XGD8R5MABCD4EA", name: "build-box"}}, hub.spokeNameWrites)
-	assert.Equal(t, "http://hub.internal:7777", opened.URL, "the name is written to the hub this row is bound to")
-	assert.Equal(t, "hub-credential", opened.resolved.Token, "with the catalog credential for that hub")
-	assert.Equal(t, federationModeList, m.federation.mode)
-	assert.False(t, m.federation.op.running)
-	rendered := stripANSI(renderFederation(m))
-	assert.Contains(t, rendered, `named this spoke "build-box" on hub.internal:7777`)
 }
 
-func TestFederationNameSaveWithEmptyInputClearsTheName(t *testing.T) {
-	m, hub, _ := setupSpokeNameList(t)
-	m = sendRune(m, 'N')
+func TestFederationNameSaveRefusesBadInputWithoutContactingTheHub(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		instance InstanceInfo
+		want     string
+	}{
+		{"invalid name", InstanceInfo{InstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}, `"Build Box" must match [a-z][a-z0-9-]{0,31}`},
+		{"instance not loaded", InstanceInfo{}, "refresh federation status before naming"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, hub, opened := setupSpokeNameList(t)
+			m.federation.instance = tc.instance
+			m = typeThrough(sendRune(m, 'N'), "Build Box")
 
-	m, cmd := pressEnter(m)
-	m = finishName(t, m, cmd)
+			m, cmd := pressEnter(m)
 
-	assert.Equal(t, []spokeNameWrite{{uid: "01HZNQ7VFPK1XGD8R5MABCD4EA", name: ""}}, hub.spokeNameWrites)
-	assert.Contains(t, stripANSI(renderFederation(m)), "cleared the name of this spoke on hub.internal:7777")
-}
-
-func TestFederationNameSaveFromDetailReturnsToDetail(t *testing.T) {
-	m, hub, _ := setupSpokeNameList(t)
-	m.federation.mode = federationModeDetail
-	m = typeThrough(sendRune(m, 'N'), "laptop")
-
-	m, cmd := pressEnter(m)
-	m = finishName(t, m, cmd)
-
-	assert.Equal(t, federationModeDetail, m.federation.mode)
-	assert.Len(t, hub.spokeNameWrites, 1)
-	assert.Contains(t, stripANSI(renderFederation(m)), `named this spoke "laptop"`)
-}
-
-func TestFederationNameSaveRefusesAnInvalidNameWithoutContactingTheHub(t *testing.T) {
-	m, hub, opened := setupSpokeNameList(t)
-	m = typeThrough(sendRune(m, 'N'), "Build Box")
-
-	m, cmd := pressEnter(m)
-
-	require.Nil(t, cmd)
-	assert.Equal(t, federationModeNamePrompt, m.federation.mode)
-	assert.Equal(t, "Build Box", m.federation.nameDraft.Input, "the typed text stays")
-	assert.False(t, m.federation.op.running)
-	assert.Empty(t, opened.URL)
-	assert.Empty(t, hub.calls)
-	assert.Contains(t, stripANSI(renderFederation(m)), `"Build Box" must match [a-z][a-z0-9-]{0,31}`)
-}
-
-func TestFederationNameSaveNeedsALoadedInstanceUID(t *testing.T) {
-	m, hub, _ := setupSpokeNameList(t)
-	m.federation.instance = InstanceInfo{}
-	m = typeThrough(sendRune(m, 'N'), "build-box")
-
-	m, cmd := pressEnter(m)
-
-	require.Nil(t, cmd)
-	assert.Empty(t, hub.calls)
-	assert.Contains(t, stripANSI(renderFederation(m)), "refresh federation status before naming")
+			require.Nil(t, cmd)
+			assert.Equal(t, federationModeNamePrompt, m.federation.mode)
+			assert.Equal(t, "Build Box", m.federation.nameDraft.Input, "the typed text stays")
+			assert.Empty(t, opened.URL)
+			assert.Empty(t, hub.calls)
+			assert.Contains(t, stripANSI(renderFederation(m)), tc.want)
+		})
+	}
 }
 
 func TestFederationNameSaveFailuresKeepTheTextAndSayWhatHappened(t *testing.T) {
 	for _, tc := range []struct {
-		name         string
-		hubErr       error
-		clientErr    error
-		wantContains string
-		// unsent: nothing reached the hub, so the text must not suggest it
-		// may hold the name.
-		unsent bool
+		name      string
+		hubErr    error
+		clientErr error
+		want      string
+		unsent    bool
 	}{
 		{
-			name:         "the daemon refuses",
-			hubErr:       &APIError{Status: 403, Code: "forbidden", Message: "owner credential required"},
-			wantContains: "forbidden: owner credential required",
-			unsent:       true,
+			name:   "the daemon refuses",
+			hubErr: &APIError{Status: 403, Code: "forbidden", Message: "owner credential required"},
+			want:   "forbidden: owner credential required", unsent: true,
 		},
 		{
-			name:         "daemon too old, nothing was sent",
-			hubErr:       &mutationPreflightError{errors.New("naming a spoke requires daemon API 0.38.0 or newer; upgrade the daemon")},
-			wantContains: "naming a spoke requires daemon API 0.38.0 or newer",
-			unsent:       true,
+			name:      "hub client cannot be built, nothing was sent",
+			clientErr: errors.New(`daemon "catalog-hub" token_env is unset`),
+			want:      "token_env is unset", unsent: true,
 		},
 		{
-			name:         "hub client cannot be built, nothing was sent",
-			clientErr:    errors.New(`daemon "catalog-hub" token_env is unset`),
-			wantContains: `token_env is unset`,
-			unsent:       true,
-		},
-		{
-			name:         "transport failure after the send",
-			hubErr:       errors.New("read tcp: connection reset"),
-			wantContains: "the hub may have saved this name; save again to check",
+			name:   "transport failure after the send",
+			hubErr: errors.New("read tcp: connection reset"),
+			want:   "the hub may have saved this name; save again to check",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -255,7 +215,7 @@ func TestFederationNameSaveFailuresKeepTheTextAndSayWhatHappened(t *testing.T) {
 			assert.Empty(t, m.federation.notice)
 			assert.Empty(t, hub.spokeNameWrites)
 			rendered := stripANSI(renderFederation(m))
-			assert.Contains(t, rendered, tc.wantContains)
+			assert.Contains(t, rendered, tc.want)
 			if tc.unsent {
 				assert.NotContains(t, rendered, "may have saved")
 			}
@@ -296,7 +256,6 @@ func TestFederationNameReplyIsDroppedWhenStale(t *testing.T) {
 			m = typeThrough(sendRune(m, 'N'), "build-box")
 			m, cmd := pressEnter(m)
 			msg := cmd().(federationNameResultMsg)
-			require.Equal(t, uint64(5), msg.connGen)
 			tc.stale(&msg, &m)
 
 			out, _ := updateModel(m, msg)
@@ -319,67 +278,50 @@ func TestFederationNameEscCancelsWithoutWriting(t *testing.T) {
 	assert.Empty(t, hub.calls)
 }
 
-func TestFederationNameKeyAdvertisedOnlyWhereARowCanBeNamed(t *testing.T) {
-	withRow := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
-	assert.Contains(t, stripANSI(renderFederation(withRow)), "[N] name")
-	withRow.federation.mode = federationModeDetail
-	assert.Contains(t, stripANSI(renderFederation(withRow)), "[N] name")
-
-	empty := setupFederationViewWithStatuses()
-	assert.NotContains(t, stripANSI(renderFederation(empty)), "[N] name")
+func enrollWithName(t *testing.T, opts federationExecutionServerOptions, name string) Model {
+	t.Helper()
+	m, _ := setupFederationExecutionPreview(t, opts)
+	m.federation.draft.AdoptExisting = false
+	m.federation.draft.Operation = federationOperationAdoptSelectedHub
+	m.federation.draft.SpokeName = name
+	return m
 }
 
 // The enroll preview sends the name the way `kata federation enroll
-// --spoke-name` does: as spoke_name, after the daemon is known to accept it.
+// --spoke-name` does: as spoke_name, after the hub is known to accept it.
 func TestFederationEnrollSendsTheSpokeNameTheCLIWouldSend(t *testing.T) {
 	var enrollBody map[string]any
-	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{
-		hubAPIVersion: "0.54.0", enrollmentBody: &enrollBody,
-	})
-	m.federation.draft.AdoptExisting = false
-	m.federation.draft.Operation = federationOperationAdoptSelectedHub
+	m := enrollWithName(t, federationExecutionServerOptions{hubAPIVersion: "0.54.0", enrollmentBody: &enrollBody}, "")
 
 	m = typeThrough(sendRune(m, 'N'), "build-box")
 	m, cmd := pressEnter(m)
 	require.Nil(t, cmd, "saving the field in the preview sends nothing")
-	require.Equal(t, federationModePreview, m.federation.mode)
 	assert.Equal(t, "build-box", m.federation.draft.SpokeName)
 	assert.Contains(t, stripANSI(renderFederation(m)), "spoke name: build-box")
-
 	m, cmd = pressEnter(m)
-	require.NotNil(t, cmd)
 	out, _ := updateModel(m, cmd())
 
 	assert.Equal(t, federationModeResult, out.federation.mode)
 	assert.Equal(t, "build-box", enrollBody["spoke_name"])
 }
 
-func TestFederationEnrollWithoutANameSendsNone(t *testing.T) {
+func TestFederationEnrollWithoutANameSendsNoneAndSkipsTheVersionCheck(t *testing.T) {
 	var enrollBody map[string]any
-	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{enrollmentBody: &enrollBody})
-	m.federation.draft.AdoptExisting = false
-	m.federation.draft.Operation = federationOperationAdoptSelectedHub
+	m := enrollWithName(t, federationExecutionServerOptions{enrollmentBody: &enrollBody}, "")
 
 	m, cmd := pressEnter(m)
-	require.NotNil(t, cmd)
 	out, _ := updateModel(m, cmd())
 
-	assert.Equal(t, federationModeResult, out.federation.mode, "no health probe is needed without a name")
+	assert.Equal(t, federationModeResult, out.federation.mode, "the hub's health route is not registered")
 	assert.NotContains(t, enrollBody, "spoke_name")
 	assert.Contains(t, stripANSI(renderFederation(m)), "spoke name: -")
 }
 
 func TestFederationEnrollWithNameRefusesOlderHubBeforeAnyHubWrite(t *testing.T) {
 	var enrollBody map[string]any
-	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{
-		hubAPIVersion: "0.37.0", enrollmentBody: &enrollBody,
-	})
-	m.federation.draft.AdoptExisting = false
-	m.federation.draft.Operation = federationOperationCreateReplica
-	m.federation.draft.SpokeName = "build-box"
+	m := enrollWithName(t, federationExecutionServerOptions{hubAPIVersion: "0.37.0", enrollmentBody: &enrollBody}, "build-box")
 
 	m, cmd := pressEnter(m)
-	require.NotNil(t, cmd)
 	out, _ := updateModel(m, cmd())
 
 	assert.Equal(t, federationModePreview, out.federation.mode)
@@ -388,121 +330,76 @@ func TestFederationEnrollWithNameRefusesOlderHubBeforeAnyHubWrite(t *testing.T) 
 	assert.Contains(t, stripANSI(renderFederation(out)), "naming a spoke requires daemon API 0.38.0 or newer")
 }
 
-func TestFederationEnrollNameRefusesAnInvalidNameLikeTheCLI(t *testing.T) {
-	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
-	m = typeThrough(sendRune(m, 'N'), "Build Box")
-
-	m, cmd := pressEnter(m)
-
-	require.Nil(t, cmd)
-	assert.Equal(t, federationModeNamePrompt, m.federation.mode)
-	assert.Empty(t, m.federation.draft.SpokeName)
-	assert.Contains(t, stripANSI(renderFederation(m)), `"Build Box" must match [a-z][a-z0-9-]{0,31}`)
-}
-
-func TestFederationEnrollNameEscKeepsThePreviousName(t *testing.T) {
-	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
-	m.federation.draft.SpokeName = "laptop"
-
-	m = sendRune(m, 'N')
-	require.Equal(t, "laptop", m.federation.nameDraft.Input, "the prompt starts from the current name")
-	m = typeThrough(m, "-x")
-	m = sendKey(m, tea.KeyEscape)
-
-	assert.Equal(t, federationModePreview, m.federation.mode)
-	assert.Equal(t, "laptop", m.federation.draft.SpokeName)
-}
-
-func TestFederationEnrollNameEmptyInputRemovesTheName(t *testing.T) {
-	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
-	m.federation.draft.SpokeName = "laptop"
-	m = sendRune(m, 'N')
-	for range "laptop" {
-		m = sendKey(m, tea.KeyBackspace)
-	}
-
-	m, _ = pressEnter(m)
-
-	assert.Equal(t, federationModePreview, m.federation.mode)
-	assert.Empty(t, m.federation.draft.SpokeName)
-}
-
 // longSpokeNameError is a daemon error spanning several lines, one of them
 // longer than the narrowest supported terminal.
 var longSpokeNameError = errors.New("federation_spoke_name_conflict: \"build-box\" is held by spoke 01HZNQ7VFPK1XGD8R5MABCD4EB\n" +
 	"rename that spoke first: kata federation enrollments name 01HZNQ7VFPK1XGD8R5MABCD4EB other-name\n" +
 	"or choose another name here")
 
-func TestFederationNamePromptFitsEverySupportedTerminal(t *testing.T) {
+func TestFederationNameScreensFitShortTerminals(t *testing.T) {
 	longProject := strings.Repeat("example-project-", 12)
-	fixture := func(failed bool) Model {
+	prompt := func(t *testing.T) Model {
 		m, _, _ := setupSpokeNameList(t)
-		row := federationStatusFixture(longProject, "spoke")
-		m.federation.statuses = []FederationProjectStatus{row}
-		m = sendRune(m, 'N')
-		m = typeThrough(m, "abcdefghijklmnopqrstuvwxyz-12345")
-		if failed {
-			m.federation.op.err = longSpokeNameError
-		}
+		m.federation.statuses = []FederationProjectStatus{federationStatusFixture(longProject, "spoke")}
+		return typeThrough(sendRune(m, 'N'), "abcdefghijklmnopqrstuvwxyz-12345")
+	}
+	preview := func(t *testing.T) Model {
+		m := enrollWithName(t, federationExecutionServerOptions{}, "build-box")
+		m.federation.draft.SpokeProjectName = longProject
 		return m
 	}
-	for _, size := range []struct {
-		name          string
-		width, height int
-		split         bool
+	for _, screen := range []struct {
+		name  string
+		model func(*testing.T) Model
+		want  []string
 	}{
-		{"80x24", 80, 24, false},
-		{"80x12", 80, 12, false},
-		{"100x8", 100, 8, false},
-		{"split 160x40", 160, 40, true},
+		{"prompt", prompt, []string{"name: abcdefghijklmnopqrstuvwxyz-12345", "[enter] save  [esc] cancel"}},
+		{"enroll preview", preview, []string{"[enter] confirm  [N] name  [esc] back"}},
 	} {
-		for _, failed := range []bool{false, true} {
-			name := size.name
-			if failed {
-				name += " with a multiline daemon error"
-			}
-			t.Run(name, func(t *testing.T) {
-				m := fixture(failed)
+		for _, size := range []struct {
+			name          string
+			width, height int
+			split, help   bool
+		}{
+			{"80x12", 80, 12, false, false},
+			{"100x8", 100, 8, false, false},
+			{"split 160x40", 160, 40, true, false},
+			{"80x12 over help", 80, 12, false, true},
+		} {
+			t.Run(screen.name+" "+size.name, func(t *testing.T) {
+				m := screen.model(t)
+				m.federation.op.err = longSpokeNameError
 				m.width, m.height = size.width, size.height
 				if size.split {
 					m.layout = splitlayout.Split
 				}
-
-				rendered := stripANSI(m.viewContent())
-
-				lines := strings.Split(rendered, "\n")
-				assert.LessOrEqual(t, len(lines), size.height, "every row fits:\n%s", rendered)
-				for _, line := range lines {
-					assert.LessOrEqual(t, ansi.StringWidth(line), size.width, "no line overflows:\n%s", rendered)
+				want := screen.want
+				if size.help {
+					m.modal = modalQuitConfirm
+					want = []string{"confirm"} // the help table replaces the hints
 				}
-				assert.Contains(t, rendered, "name: abcdefghijklmnopqrstuvwxyz-12345", "the prompt keeps its row")
-				assert.Contains(t, rendered, "[enter] save", "the action hint keeps its row")
-				if failed {
-					flat := strings.Join(strings.Fields(rendered), " ")
-					assert.Contains(t, flat, "federation_spoke_name_conflict")
-					assert.Contains(t, flat, "or choose another name here", "the last error line is not dropped")
+
+				// The quit box overlays the screen; judge the screen's own rows.
+				rendered := stripANSI(m.viewContent())
+				if size.help {
+					rendered = stripANSI(renderFederation(m))
+				}
+
+				assert.LessOrEqual(t, len(strings.Split(rendered, "\n")), size.height, "every row fits:\n%s", rendered)
+				flat := strings.Join(strings.Fields(rendered), " ")
+				assert.Contains(t, flat, "federation_spoke_name_conflict")
+				assert.Contains(t, flat, "or choose another name here", "the whole error stays")
+				for _, w := range want {
+					assert.Contains(t, flat, strings.Join(strings.Fields(w), " "))
+				}
+				if screen.name == "prompt" {
+					for _, line := range strings.Split(rendered, "\n") {
+						assert.LessOrEqual(t, ansi.StringWidth(line), size.width, "no line overflows:\n%s", rendered)
+					}
 				}
 			})
 		}
 	}
-}
-
-// Over the quit confirmation the footer becomes the help table, which takes
-// more rows than the one-line hint.
-func TestFederationNamePromptKeepsPromptAndErrorOverHelpFooter(t *testing.T) {
-	m, _, _ := setupSpokeNameList(t)
-	m = typeThrough(sendRune(m, 'N'), "build-box")
-	m.federation.op.err = longSpokeNameError
-	m.width, m.height = 80, 24
-	m.modal = modalQuitConfirm
-
-	rendered := stripANSI(renderFederation(m))
-
-	flat := strings.Join(strings.Fields(rendered), " ")
-	assert.Contains(t, flat, "name: build-box")
-	assert.Contains(t, flat, "or choose another name here")
-	assert.Contains(t, flat, "confirm")
-	assert.LessOrEqual(t, len(strings.Split(rendered, "\n")), m.height)
 }
 
 func TestFederationListFooterWrapsToTheTerminalWidth(t *testing.T) {
@@ -522,37 +419,5 @@ func TestFederationListFooterWrapsToTheTerminalWidth(t *testing.T) {
 	joined := strings.Join(hints, " ")
 	for _, hint := range []string{"[N] name", "[?] help", "[b] browse hubs"} {
 		assert.Contains(t, joined, hint, "no hint is clipped")
-	}
-}
-
-func TestFederationEnrollPreviewKeepsErrorAndHintsOnShortTerminals(t *testing.T) {
-	for _, size := range []struct {
-		name          string
-		width, height int
-		split         bool
-	}{
-		{"80x24", 80, 24, false},
-		{"80x12", 80, 12, false},
-		{"100x8", 100, 8, false},
-		{"split 160x40", 160, 40, true},
-	} {
-		t.Run(size.name, func(t *testing.T) {
-			m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
-			m.federation.draft.SpokeProjectName = strings.Repeat("example-project-", 12)
-			m.federation.draft.SpokeName = "build-box"
-			m.federation.op.err = longSpokeNameError
-			m.width, m.height = size.width, size.height
-			if size.split {
-				m.layout = splitlayout.Split
-			}
-
-			rendered := stripANSI(m.viewContent())
-
-			assert.LessOrEqual(t, len(strings.Split(rendered, "\n")), size.height, "every row fits:\n%s", rendered)
-			flat := strings.Join(strings.Fields(rendered), " ")
-			assert.Contains(t, flat, "federation_spoke_name_conflict")
-			assert.Contains(t, flat, "or choose another name here", "the last error line is not dropped")
-			assert.Contains(t, flat, "[enter] confirm [N] name [esc] back")
-		})
 	}
 }

@@ -41,7 +41,6 @@ func (m Model) startFederationEnrollmentName() Model {
 	m.federation.nameDraft = federationNameDraft{
 		Return:      federationModePreview,
 		ProjectName: draft.SpokeProjectName,
-		HubURL:      federationDaemonEndpoint(draft.HubTarget),
 		InstanceUID: strings.TrimSpace(m.federation.instance.InstanceUID),
 		Input:       draft.SpokeName,
 	}
@@ -65,17 +64,9 @@ func (m Model) routeFederationNamePromptKey(msg tea.KeyPressMsg) (Model, tea.Cmd
 		return m, nil
 	case "enter":
 		return m.submitFederationName()
-	case "backspace":
-		if r := []rune(m.federation.nameDraft.Input); len(r) > 0 {
-			m.federation.nameDraft.Input = string(r[:len(r)-1])
-		}
-		m.federation.op.err = nil
-		return m, nil
 	}
-	if msg.Text != "" {
-		m.federation.nameDraft.Input += msg.Text
-		m.federation.op.err = nil
-	}
+	m.federation.nameDraft.Input = editFederationText(m.federation.nameDraft.Input, msg)
+	m.federation.op.err = nil
 	return m, nil
 }
 

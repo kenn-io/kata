@@ -650,20 +650,23 @@ func (m Model) routeFederationAdoptConfirmKey(msg tea.KeyPressMsg) (Model, tea.C
 			running: true,
 		}
 		return m, m.executeFederationEnrollment(m.federation.op.attempt)
-	case "backspace":
-		if r := []rune(m.federation.adoptConfirmInput); len(r) > 0 {
-			m.federation.adoptConfirmInput = string(r[:len(r)-1])
-		}
-		return m, nil
 	}
-	// Printable input (including space) arrives with Text populated in
-	// Bubble Tea v2; anything else (arrows, function keys) leaves Text
-	// empty and falls through as a no-op.
-	if msg.Text != "" {
-		m.federation.adoptConfirmInput += msg.Text
-		return m, nil
-	}
+	m.federation.adoptConfirmInput = editFederationText(m.federation.adoptConfirmInput, msg)
 	return m, nil
+}
+
+// editFederationText applies one key to a single-line field: backspace drops
+// the last rune and printable input (including space, which arrives with Text
+// populated in Bubble Tea v2) appends. Arrows and function keys have no Text
+// and change nothing.
+func editFederationText(text string, msg tea.KeyPressMsg) string {
+	if msg.String() == "backspace" {
+		if r := []rune(text); len(r) > 0 {
+			return string(r[:len(r)-1])
+		}
+		return text
+	}
+	return text + msg.Text
 }
 
 func (m Model) routeFederationRecoveryKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
