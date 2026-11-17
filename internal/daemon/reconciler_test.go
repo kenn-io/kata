@@ -202,7 +202,7 @@ func (s *bindingTransitionStore) ListIssueContent(ctx context.Context, afterID i
 	return page, err
 }
 
-func TestReviewJoiningDuringFillDoesNotEmbedShared(t *testing.T) {
+func TestDirectSpokeBindingDuringFillDoesNotEmbedShared(t *testing.T) {
 	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	project, err := store.CreateProject(ctx, "spoke-project")

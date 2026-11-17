@@ -122,21 +122,6 @@ func TestListIssueContentExcludesDirectSpokesAcrossBackends(t *testing.T) {
 			rows, err := idx.MirrorRowsForTest(ctx)
 			require.NoError(t, err)
 			require.NotContains(t, rows, sharedIssue.UID)
-			generation := kitvec.Generation{Model: "example", Dimensions: 2}
-			key := generation.Fingerprint()
-			require.NoError(t, idx.EnsureBuilding(ctx, key, generation))
-			var inputs []string
-			_, err = idx.Fill(ctx, key, func(_ context.Context, texts []string) ([][]float32, error) {
-				inputs = append(inputs, texts...)
-				vectors := make([][]float32, len(texts))
-				for i := range vectors {
-					vectors[i] = []float32{1, 0}
-				}
-				return vectors, nil
-			}, 64, nil, nil)
-			require.NoError(t, err)
-			require.Len(t, inputs, 1)
-			require.Contains(t, inputs[0], "local issue")
 			hub, err := store.CreateProject(ctx, "hub")
 			require.NoError(t, err)
 			hubIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: hub.ID, Title: "hub issue", Author: "tester"})

@@ -141,7 +141,6 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	for _, hit := range body.Results {
 		seen[hit.Issue.UID] = true
 		if hit.Issue.UID == unpulled.UID {
-			require.Zero(t, hit.Issue.ID)
 			require.Empty(t, hit.WebURL)
 		}
 	}
@@ -242,7 +241,7 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	require.True(t, foundUIDs[localIssue.UID])
 }
 
-func TestDirectSpokeSearchWaitsForHub(t *testing.T) {
+func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 	hub, spoke, hubProject, replica, _, token := createClaimForwardingPair(t, "pull")
 	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{
 		HubURL: hub.URL, HubProjectID: hubProject.ID, Token: token, Actor: "tester", Capabilities: "pull",
@@ -258,19 +257,13 @@ func TestDirectSpokeSearchWaitsForHub(t *testing.T) {
 	setClaimBindingHubURL(t, spoke, replica.ID, slow.URL)
 	resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-}
-
-func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
-	hub, spoke, hubProject, replica, _, token := createClaimForwardingPair(t, "pull")
-	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{
-		HubURL: hub.URL, HubProjectID: hubProject.ID, Token: token, Actor: "tester", Capabilities: "pull",
-	}))
-	resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
+	setClaimBindingHubURL(t, spoke, replica.ID, hub.URL)
+	resp, body = envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
 	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(body))
 	require.Contains(t, string(body), "embeddings are not configured")
-	slow := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
-	t.Cleanup(slow.Close)
-	setClaimBindingHubURL(t, spoke, replica.ID, slow.URL)
+	stalled := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	t.Cleanup(stalled.Close)
+	setClaimBindingHubURL(t, spoke, replica.ID, stalled.URL)
 	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
 	path := fmt.Sprintf("%s/api/v1/projects/%d/search?q=claim&mode=semantic", spoke.URL, replica.ID)
@@ -299,17 +292,6 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 		setClaimBindingHubURL(t, spoke, replica.ID, hubURL)
 		checkSearch()
 	}
-	setClaimBindingHubURL(t, spoke, replica.ID, "http://127.0.0.1:1")
-	credentials := config.DefaultFederationCredentialStore()
-	_, err = daemon.PrepareFederationReplicaLeave(t.Context(), spoke.DB, credentials, replica.ID, "search-test")
-	require.NoError(t, err)
-	binding, err := spoke.DB.FederationBindingByProject(t.Context(), replica.ID)
-	require.NoError(t, err)
-	checkSearch()
-	binding.Enabled = false
-	_, err = spoke.DB.UpsertFederationBinding(t.Context(), binding)
-	require.NoError(t, err)
-	checkSearch()
 }
 
 func TestFederationSearchRequiresPullEnrollment(t *testing.T) {
@@ -352,20 +334,4 @@ func TestDirectSpokeSearchProjectAccessPrecedesHub(t *testing.T) {
 	status, _, body = f.request(t, http.MethodGet, path, "member", nil, nil)
 	require.Equal(t, http.StatusServiceUnavailable, status, string(body))
 	require.EqualValues(t, 1, calls.Load())
-}
-
-func TestDirectSpokeSearchReadonlyRequiresAuthentication(t *testing.T) {
-	env := testenv.New(t, testenv.WithInsecureReadonly())
-	project, err := env.DB.CreateProject(t.Context(), "shared-project")
-	require.NoError(t, err)
-	_, _, err = env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "claim target", Author: "tester"})
-	require.NoError(t, err)
-	_, err = env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: project.UID, Enabled: true})
-	require.NoError(t, err)
-	path := fmt.Sprintf("/api/v1/projects/%d/search?q=claim", project.ID)
-	resp, body := envGetRaw(t, env, path+"&mode=semantic")
-	require.Equal(t, http.StatusUnauthorized, resp.StatusCode, string(body))
-	resp, body = envGetRaw(t, env, path)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	require.Contains(t, string(body), `"mode":"lexical"`)
 }

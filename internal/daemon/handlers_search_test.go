@@ -100,6 +100,21 @@ func TestSearchEndpoint_InsecureReadonlyUnauthenticatedExplicitVectorModesRequir
 		assertAPIError(t, resp.StatusCode, bs, http.StatusUnauthorized, "auth_required")
 	}
 	assert.Equal(t, int32(0), embeddingCalls.Load(), "rejected semantic search must not call embedding provider")
+	t.Run("direct spoke without embedder", func(t *testing.T) {
+		spoke := testenv.New(t, testenv.WithInsecureReadonly())
+		shared, err := spoke.DB.CreateProject(t.Context(), "shared-project")
+		require.NoError(t, err)
+		_, _, err = spoke.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: shared.ID, Title: "claim target", Author: "tester"})
+		require.NoError(t, err)
+		_, err = spoke.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: shared.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 1, HubProjectUID: shared.UID, Enabled: true})
+		require.NoError(t, err)
+		path := projectPath(shared.ID) + "/search?q=claim"
+		resp, body := envGetRaw(t, spoke, path+"&mode=semantic")
+		require.Equal(t, http.StatusUnauthorized, resp.StatusCode, string(body))
+		resp, body = envGetRaw(t, spoke, path)
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		require.Contains(t, string(body), `"mode":"lexical"`)
+	})
 }
 
 func TestSearchEndpoint_EmptyQueryIsValidationError(t *testing.T) {

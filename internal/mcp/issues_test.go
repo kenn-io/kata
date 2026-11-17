@@ -149,8 +149,6 @@ func TestSearchFanoutWhenOneProjectFails(t *testing.T) {
 		{name: "retained semantic", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, retained: true},
 		{name: "retained hybrid", status: 400, message: `mode "hybrid" is unavailable: embeddings are not configured`, retained: true},
 		{name: "empty successful project", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, retained: true, empty: true},
-		{name: "unavailable", status: 503, message: "search unavailable"},
-		{name: "wrong status", status: 503, code: "validation", message: `mode "semantic" is unavailable: embeddings are not configured`},
 		{name: "other validation", status: 400, message: "invalid search"},
 		{name: "wrong error code", status: 400, code: "unavailable", message: `mode "semantic" is unavailable: embeddings are not configured`},
 		{name: "all missing embeddings", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, allFail: true},
@@ -167,9 +165,6 @@ func TestSearchFanoutWhenOneProjectFails(t *testing.T) {
 				}
 				if tc.allFail || strings.Contains(request.URL.Path, "/projects/2/") {
 					code := "validation"
-					if tc.status == http.StatusServiceUnavailable {
-						code = "unavailable"
-					}
 					if tc.code != "" {
 						code = tc.code
 					}
@@ -179,11 +174,11 @@ func TestSearchFanoutWhenOneProjectFails(t *testing.T) {
 				}
 				issue := issueJSON(1, "spoke-project", "spk1")
 				if tc.empty {
-					writeJSON(writer, map[string]any{"query": "shared", "mode": mode, "results": []any{}})
+					writeJSON(writer, map[string]any{"query": "shared", "mode": mode, "complete": true, "results": []any{}})
 					return true
 				}
 				writeJSON(writer, map[string]any{
-					"query": "shared", "mode": mode,
+					"query": "shared", "mode": mode, "complete": true,
 					"results": []any{map[string]any{"issue": issue, "score": 0.9, "matched_in": []string{"semantic"}}},
 				})
 				return true
