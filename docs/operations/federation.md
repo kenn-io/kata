@@ -2307,12 +2307,13 @@ Purging its last enrollment's project removes the name.
 
 In the TUI federation view, press `N` on a spoke row, in the list or its
 detail, to name or rename the spoke on the hub that row is bound to. An empty
-name clears it, where the CLI uses `--clear`. The TUI uses that hub's catalog credential, checks the name
-with the rules above before sending anything, and needs a hub on API 0.38.0 or
-newer. If the hub refuses, for example because another spoke holds the name or
-the credential is not the hub owner's, the prompt shows the hub's message and
-keeps what you typed. The enroll preview has the same prompt: press `N` there
-to set the name sent with the enrollment, as `--spoke-name` does.
+name clears it, where the CLI uses `--clear`. The TUI uses that hub's catalog
+credential, checks the name with the rules above before sending anything, and
+needs a hub on API 0.38.0 or newer. If the hub refuses, for example because
+another spoke holds the name or the credential is not the hub owner's, the
+prompt shows the hub's message and keeps what you typed. The enroll preview has
+the same prompt: press `N` there to set the name sent with the enrollment, as
+`--spoke-name` does.
 
 Naming requires the same hub administration authority as listing and revoking
 enrollments. For a relay enrolled through an account credential, ask the hub
