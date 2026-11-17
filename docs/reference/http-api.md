@@ -285,6 +285,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.53.0` | Notification requests accept `replace: false`, which refuses with `409 notification_held` while the recipient holds a request, and the clear endpoint accepts `if_from` to clear only a request from that sender. |
 | `0.52.0` | Close requests accept project-bound transcript selection and retain candidate session identity for keyed retries. |
 | `0.51.0` | Signed federation requests return `503 signing_warming` with `Retry-After: 5` while replay protection warms up. |
 | `0.50.0` | A hub that requires signing and the restricted ingress answer requests without signature headers with `428 hub_signing_required` instead of `401 signature_invalid`. A request with only a digest follows the unsigned path, including when signing is optional. |

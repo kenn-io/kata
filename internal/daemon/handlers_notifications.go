@@ -78,15 +78,20 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 			if noReplace {
-				if held, ok := heldNotification(current, to); ok {
+				if held, raw, ok := heldNotification(current, to); ok {
 					// Reads drop a request whose reference the caller cannot
 					// read; the conflict names it only under the same rule.
 					var details map[string]any
 					visible := true
-					if held.Re != "" && notificationReadRestricted(ctx) {
-						visible, err = notificationHistoryVisibleTx(ctx, tx, held.Re, allowed)
-						if err != nil {
-							return nil, err
+					if notificationReadRestricted(ctx) {
+						for _, ref := range notificationReferences(raw) {
+							visible, err = notificationHistoryVisibleTx(ctx, tx, ref, allowed)
+							if err != nil {
+								return nil, err
+							}
+							if !visible {
+								break
+							}
 						}
 					}
 					if visible {
@@ -296,24 +301,24 @@ func resolveNotificationComment(ctx context.Context, store db.Storage, issue db.
 // heldNotification returns the request stored for recipient, if the slot
 // holds a usable one. A malformed slot is invisible to the inbox, so it does
 // not block a new request.
-func heldNotification(issue db.Issue, recipient string) (notification.Value, bool) {
+func heldNotification(issue db.Issue, recipient string) (notification.Value, jsontext.Value, bool) {
 	var slots map[string]jsontext.Value
 	if issue.Metadata == "" || json.Unmarshal([]byte(issue.Metadata), &slots) != nil {
-		return notification.Value{}, false
+		return notification.Value{}, nil, false
 	}
 	raw, ok := slots[notification.MetadataKey(recipient)]
 	if !ok {
-		return notification.Value{}, false
+		return notification.Value{}, nil, false
 	}
 	value, _, err := notification.DecodeValue(raw)
-	return value, err == nil
+	return value, raw, err == nil
 }
 
 // clearNotificationIfFrom removes recipient's request only while its stored
 // from field equals ifFrom; that is a comparison of stored data, not a check
 // of who wrote the request. Otherwise it patches nothing.
 func clearNotificationIfFrom(issue db.Issue, recipient, ifFrom string) map[string]jsontext.Value {
-	held, ok := heldNotification(issue, recipient)
+	held, _, ok := heldNotification(issue, recipient)
 	if !ok || held.From != ifFrom {
 		return map[string]jsontext.Value{}
 	}

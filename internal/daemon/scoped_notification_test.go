@@ -99,3 +99,28 @@ func TestScopedNoReplaceConflictHidesRestrictedHeldRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestScopedNoReplaceConflictHidesHeldRequestWithUnusableReference(t *testing.T) {
+	for _, tc := range []struct{ name, slot string }{
+		{name: "number", slot: `{"from":"lead","message":"private","re":42}`},
+		{name: "empty string", slot: `{"from":"lead","message":"private","re":""}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, p, source, _, _ := scopedReplyFixture(t, false)
+			key := "notify.cmVhZGVy"
+			_, e := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: source.ID, Actor: "coordinator", Patch: map[string]jsontext.Value{key: jsontext.Value(tc.slot)}})
+			require.NoError(t, e)
+			before, e := env.DB.IssueByID(t.Context(), source.ID)
+			require.NoError(t, e)
+			path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/notifications", p.ID, source.ShortID)
+			resp, body := envDoRaw(t, env, http.MethodPost, path, map[string]any{"to": "reader", "message": "mine", "replace": false}, map[string]string{"Authorization": "Bearer worker-token"})
+			require.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
+			require.Contains(t, string(body), "notification_held")
+			require.NotContains(t, string(body), "private")
+			require.NotContains(t, string(body), "lead")
+			after, e := env.DB.IssueByID(t.Context(), source.ID)
+			require.NoError(t, e)
+			require.Equal(t, before.Metadata, after.Metadata)
+		})
+	}
+}
