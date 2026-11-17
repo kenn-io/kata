@@ -71,7 +71,7 @@ func TestServiceSemanticIndex(t *testing.T) {
 	require.NoError(t, <-runDone)
 }
 
-func TestServiceSemanticIndexDisabled(t *testing.T) {
+func TestServiceSemanticIndexDisabledWaitsAndSharesRunGuard(t *testing.T) {
 	service, err := New(t.Context(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
@@ -85,7 +85,7 @@ func TestServiceSemanticIndexDisabled(t *testing.T) {
 		defer service.mu.Unlock()
 		return service.running
 	}, time.Second, time.Millisecond)
-	require.ErrorContains(t, service.RunSemanticIndex(ctx), "already running")
+	require.ErrorContains(t, service.Run(ctx), "already running")
 	cancel()
 	require.NoError(t, <-done)
 }

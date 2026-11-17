@@ -281,7 +281,7 @@ func seedExpiredWorkerClaim(ctx context.Context, t *testing.T, service *Service)
 	return issue
 }
 
-func TestServiceRunRequiresWorkerFenceWithHostAccess(t *testing.T) {
+func TestServiceRunEntryPointsRequireWorkerFenceWithHostAccess(t *testing.T) {
 	service, err := New(t.Context(), Config{
 		DSN:    filepath.Join(t.TempDir(), "service.db"),
 		Access: allowWorkerFenceAccess{},
