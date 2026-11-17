@@ -569,44 +569,68 @@ func (allowAllHostAccess) Authorize(context.Context, daemon.HostAccessRequest) (
 	}, nil
 }
 
-// Under an embedded host access controller a soft-deleted issue's history stays
-// issue_not_found even when the controller allows everything, because the
-// daemon cannot reproduce the controller's restore decisions and their
-// transaction fences. An active issue's history still reads.
+// Under an embedded host access controller a soft-deleted issue's history is
+// exactly what main answers: issue_not_found, even when the controller allows
+// everything and even when the issue moved to a project that has since been
+// archived, whose own error would otherwise show the issue exists. An active issue's history still reads.
 func TestPollProjectEventsIssueDeletedHistoryIsNotFoundUnderHostAccess(t *testing.T) {
-	dbh := openTestDB(t)
-	project, err := dbh.db.CreateProject(t.Context(), "host-history")
-	require.NoError(t, err)
-	active, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "active", Author: "agent"})
-	require.NoError(t, err)
-	deleted, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "deleted", Author: "agent"})
-	require.NoError(t, err)
-	_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), deleted.ID, "agent")
-	require.NoError(t, err)
-
-	server := daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now, HostAccess: allowAllHostAccess{}})
-	t.Cleanup(func() { _ = server.Close() })
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{
-			Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "agent",
-		})
-		server.Handler().ServeHTTP(w, r.WithContext(ctx))
-	}))
-	t.Cleanup(ts.Close)
-
-	get := func(ref string) (int, []byte) {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+scopedProjectPath(project.ID, "events")+"?issue="+url.QueryEscape(ref)+"&actor=agent", nil)
-		require.NoError(t, err)
-		resp, err := ts.Client().Do(req)
-		require.NoError(t, err)
-		defer func() { _ = resp.Body.Close() }()
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		return resp.StatusCode, body
+	cases := []struct {
+		name          string
+		movedArchived bool
+	}{
+		{name: "controller allows everything"},
+		{name: "issue moved to an archived project", movedArchived: true},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dbh := openTestDB(t)
+			project, err := dbh.db.CreateProject(t.Context(), "host-history")
+			require.NoError(t, err)
+			target, err := dbh.db.CreateProject(t.Context(), "host-history-target")
+			require.NoError(t, err)
+			active, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "active", Author: "agent"})
+			require.NoError(t, err)
+			deleted, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "deleted", Author: "agent"})
+			require.NoError(t, err)
+			if tc.movedArchived {
+				_, err = dbh.db.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+					IssueID: deleted.ID, FromProjectID: project.ID, ToProjectID: target.ID,
+					IfMatchRev: deleted.Revision, Actor: "agent",
+				})
+				require.NoError(t, err)
+			}
+			_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), deleted.ID, "agent")
+			require.NoError(t, err)
+			if tc.movedArchived {
+				_, _, err = dbh.db.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: target.ID, Actor: "agent", Force: true})
+				require.NoError(t, err)
+			}
 
-	status, body := get(active.ShortID)
-	require.Equal(t, http.StatusOK, status, string(body))
-	status, body = get(deleted.ShortID)
-	assertAPIError(t, status, body, http.StatusNotFound, "issue_not_found")
+			server := daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now, HostAccess: allowAllHostAccess{}})
+			t.Cleanup(func() { _ = server.Close() })
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{
+					Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "agent",
+				})
+				server.Handler().ServeHTTP(w, r.WithContext(ctx))
+			}))
+			t.Cleanup(ts.Close)
+
+			get := func(ref string) (int, []byte) {
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+scopedProjectPath(project.ID, "events")+"?issue="+url.QueryEscape(ref)+"&actor=agent", nil)
+				require.NoError(t, err)
+				resp, err := ts.Client().Do(req)
+				require.NoError(t, err)
+				defer func() { _ = resp.Body.Close() }()
+				body, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				return resp.StatusCode, body
+			}
+
+			status, body := get(active.ShortID)
+			require.Equal(t, http.StatusOK, status, string(body))
+			status, body = get(deleted.ShortID)
+			assertAPIError(t, status, body, http.StatusNotFound, "issue_not_found")
+		})
+	}
 }

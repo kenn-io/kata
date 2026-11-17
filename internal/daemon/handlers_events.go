@@ -57,7 +57,14 @@ func registerEventsHandlers(humaAPI huma.API, mux *http.ServeMux, cfg ServerConf
 			return nil, err
 		}
 		if in.Issue != "" {
-			issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Issue, db.IncludeDeletedYes)
+			// Under a host access controller deleted history stays hidden, so
+			// resolve exactly as before deleted history was readable: a deleted
+			// issue is simply not found, and no other error can reveal it.
+			include := db.IncludeDeletedYes
+			if hostAccessGoverns(ctx) {
+				include = db.IncludeDeletedNo
+			}
+			issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Issue, include)
 			if err != nil {
 				return nil, err
 			}
@@ -1281,14 +1288,15 @@ func sseFrameBytes(id int64, eventType string, data []byte) []byte {
 // checks restore runs, with requestActor standing in for restore's body actor.
 // An insecure-readonly caller is anonymous, and restore refuses it before any
 // handler runs, so it is refused here too. Under a host access controller the
-// history stays hidden: its restore decisions carry transaction fences this
-// read cannot honor, so deleted history answers issue_not_found as it did
-// before this feature. Every refusal (an API error below 500 other than a hub
+// caller never reaches this function: its restore decisions carry transaction
+// fences this read cannot honor, so the handler resolves with deleted issues
+// excluded and deleted history answers issue_not_found as it did before this
+// feature. Every refusal (an API error below 500 other than a hub
 // error) answers issue_not_found; 5xx, federation_offline and hub_claim_failed
 // keep their status.
 func requireDeletedHistoryAccess(ctx context.Context, cfg ServerConfig, projectID int64, issue db.Issue, requestActor string) error {
 	notFound := api.NewError(404, "issue_not_found", "issue not found", "", nil)
-	if insecureReadonlyRequest(ctx) || hostAccessGoverns(ctx) {
+	if insecureReadonlyRequest(ctx) {
 		return notFound
 	}
 	actor, err := attributedActor(ctx, requestActor)
