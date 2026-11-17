@@ -541,7 +541,7 @@ func TestRequireDeletedHistoryAccessMapsRefusalsToNotFoundAndKeepsHubErrors(t *t
 				enableClaimGateHelperSpoke(t, store, project, hub.URL, 99)
 			}
 
-			err := requireDeletedHistoryAccess(ctx, ServerConfig{DB: store}, project.ID, issue, "agent")
+			err := requireDeletedHistoryAccess(ctx, ServerConfig{DB: store}, project.ID, issue, issue.ShortID, "agent")
 
 			assertClaimGateHelperAPIError(t, err, tt.wantStatus, tt.wantCode)
 		})

@@ -235,11 +235,12 @@ func authorizeAdditionalHostOperation(ctx context.Context, operationID string, p
 		operation.ProjectUIDs = nil
 		operation.AllProjects = false
 	}
-	decision, err := state.controller.Authorize(ctx, HostAccessRequest{
+	request := HostAccessRequest{
 		Subject:   state.request.Subject,
 		Actor:     state.request.Actor,
 		Operation: operation,
-	})
+	}
+	decision, err := state.controller.Authorize(ctx, request)
 	if errors.Is(err, ErrHostAccessDenied) {
 		return ctx, projectAccessDenied()
 	}
@@ -247,11 +248,18 @@ func authorizeAdditionalHostOperation(ctx context.Context, operationID string, p
 		return ctx, api.NewError(http.StatusServiceUnavailable,
 			"access_unavailable", "transaction access decision unavailable", "", nil)
 	}
+	// The returned context carries the additional operation as its host
+	// request, so scope checks that follow (authorizeHostProjectScope) widen
+	// and re-authorize that operation, never the one the middleware ran.
+	additional := &hostAccessState{
+		controller: state.controller, request: request, decision: decision, authorized: true,
+	}
+	ctx = context.WithValue(ctx, hostAccessStateContextKey{}, additional)
 	ctx = db.WithAdditionalTransactionFence(ctx, func(
 		fenceCtx context.Context,
 		transaction db.Transaction,
 	) error {
-		if err := decision.TransactionFence(fenceCtx, transaction); err != nil {
+		if err := additional.decision.TransactionFence(fenceCtx, transaction); err != nil {
 			if errors.Is(err, ErrHostAccessDenied) {
 				return errors.Join(api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil), err)
 			}

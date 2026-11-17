@@ -575,20 +575,26 @@ func (restoreDeniedHostAccess) Authorize(_ context.Context, request daemon.HostA
 }
 
 // restoreRouteOnlyHostAccess allows reads anywhere and allows a write only when
-// it is the restore route scoped to projectID, as an embedding app granting
-// global reads and project-only restores would.
-type restoreRouteOnlyHostAccess struct{ projectID int64 }
+// it is the restore route and every project in its scope is in projectIDs, as
+// an embedding app granting global reads and per-project restores would.
+type restoreRouteOnlyHostAccess struct{ projectIDs []int64 }
 
 func (c restoreRouteOnlyHostAccess) Authorize(_ context.Context, request daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
 	operation := request.Operation
 	allowed := operation.Policy.Capability == "read"
 	if operation.ID == "restoreIssue" {
 		_, hasRef := operation.PathParams["ref"]
-		allowed = operation.Method == http.MethodPost &&
+		urlProject, err := strconv.ParseInt(operation.PathParams["project_id"], 10, 64)
+		allowed = err == nil && hasRef &&
+			operation.Method == http.MethodPost &&
 			operation.Path == "/api/v1/projects/{project_id}/issues/{ref}/actions/restore" &&
-			operation.PathParams["project_id"] == strconv.FormatInt(c.projectID, 10) &&
-			hasRef && !operation.AllProjects &&
-			slices.Equal(operation.ProjectIDs, []int64{c.projectID})
+			!operation.AllProjects &&
+			slices.Contains(c.projectIDs, urlProject) &&
+			slices.Contains(operation.ProjectIDs, urlProject) &&
+			len(operation.ProjectUIDs) == 0
+		for _, id := range operation.ProjectIDs {
+			allowed = allowed && slices.Contains(c.projectIDs, id)
+		}
 	}
 	if !allowed {
 		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
@@ -599,22 +605,42 @@ func (c restoreRouteOnlyHostAccess) Authorize(_ context.Context, request daemon.
 }
 
 func TestPollProjectEventsIssueDeletedHistoryHostRestorePermission(t *testing.T) {
+	// source and target are the issue's original and destination projects; for
+	// an unmoved issue only source is used.
 	cases := []struct {
 		name       string
-		controller func(projectID int64) daemon.HostAccessController
+		moved      bool
+		controller func(source, target int64) daemon.HostAccessController
 		wantStatus int
 		wantCode   string
 	}{
 		{
 			name:       "restore denied",
-			controller: func(int64) daemon.HostAccessController { return restoreDeniedHostAccess{} },
+			controller: func(int64, int64) daemon.HostAccessController { return restoreDeniedHostAccess{} },
 			wantStatus: http.StatusNotFound,
 			wantCode:   "issue_not_found",
 		},
 		{
 			name: "restore allowed only on its own route",
-			controller: func(projectID int64) daemon.HostAccessController {
-				return restoreRouteOnlyHostAccess{projectID: projectID}
+			controller: func(source, _ int64) daemon.HostAccessController {
+				return restoreRouteOnlyHostAccess{projectIDs: []int64{source}}
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:  "moved issue through its old ref needs restore in the destination too",
+			moved: true,
+			controller: func(source, _ int64) daemon.HostAccessController {
+				return restoreRouteOnlyHostAccess{projectIDs: []int64{source}}
+			},
+			wantStatus: http.StatusNotFound,
+			wantCode:   "issue_not_found",
+		},
+		{
+			name:  "moved issue through its old ref with restore in both projects",
+			moved: true,
+			controller: func(source, target int64) daemon.HostAccessController {
+				return restoreRouteOnlyHostAccess{projectIDs: []int64{source, target}}
 			},
 			wantStatus: http.StatusOK,
 		},
@@ -624,14 +650,23 @@ func TestPollProjectEventsIssueDeletedHistoryHostRestorePermission(t *testing.T)
 			dbh := openTestDB(t)
 			project, err := dbh.db.CreateProject(t.Context(), "host-history")
 			require.NoError(t, err)
+			target, err := dbh.db.CreateProject(t.Context(), "host-history-target")
+			require.NoError(t, err)
 			active, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "active", Author: "agent"})
 			require.NoError(t, err)
 			deleted, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "deleted", Author: "agent"})
 			require.NoError(t, err)
+			if tc.moved {
+				_, err = dbh.db.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+					IssueID: deleted.ID, FromProjectID: project.ID, ToProjectID: target.ID,
+					IfMatchRev: deleted.Revision, Actor: "agent",
+				})
+				require.NoError(t, err)
+			}
 			_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), deleted.ID, "agent")
 			require.NoError(t, err)
 
-			server := daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now, HostAccess: tc.controller(project.ID)})
+			server := daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now, HostAccess: tc.controller(project.ID, target.ID)})
 			t.Cleanup(func() { _ = server.Close() })
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{
