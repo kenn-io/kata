@@ -93,21 +93,7 @@ func appTestSession(ctx context.Context, resolver *CredentialResolver, base http
 	return resp.StatusCode, resp.Body.Close()
 }
 
-func TestCredentialResolverAppReusesTokenAcrossSessions(t *testing.T) {
-	resolver, path := appTestResolver(t)
-	base := &appTestTransport{expiry: time.Hour}
-	for i := range 3 {
-		_, err := appTestSession(t.Context(), resolver, base)
-		require.NoError(t, err)
-		if i == 0 {
-			require.NoError(t, os.Remove(path))
-		}
-	}
-	assert.Len(t, base.jwts, 1)
-	assert.Equal(t, []string{"token token-1", "token token-1", "token token-1"}, base.tokens)
-}
-
-func TestCredentialResolverAppMintsAgainAfterRejectedToken(t *testing.T) {
+func TestCredentialResolverAppEvictsCachedTokenOnlyOnUnauthorized(t *testing.T) {
 	resolver, _ := appTestResolver(t)
 	base := &appTestTransport{expiry: time.Hour, rejected: "token token-1"}
 	for _, want := range []int{http.StatusUnauthorized, http.StatusNoContent} {
@@ -134,6 +120,12 @@ func TestCredentialResolverAppReadsKeyFileOnlyToMint(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NoError(t, os.Remove(path))
+		for range 2 {
+			_, err = appTestSession(t.Context(), resolver, base)
+			require.NoError(t, err)
+		}
+		assert.Len(t, base.jwts, 1)
+		assert.Equal(t, []string{"token token-1", "token token-1", "token token-1"}, base.tokens)
 		time.Sleep(time.Hour)
 		_, err = appTestSession(t.Context(), resolver, base)
 		require.ErrorContains(t, err, "read GitHub App private key")
