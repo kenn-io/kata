@@ -2435,3 +2435,30 @@ func TestFederationKeyRouteSwitchFromLeaveToEnrollCanDispatchEnrollment(t *testi
 	assert.True(t, out.federation.op.running)
 	assert.Greater(t, out.federation.op.attempt, leaveAttempt)
 }
+
+// With the hints wrapped onto two rows (80 columns) a scrolled list shows
+// fewer entries, and a click must pick the entry drawn on that screen row.
+func TestFederationView_MouseClickMatchesRowsWhenFooterWraps(t *testing.T) {
+	statuses := make([]FederationProjectStatus, 0, 12)
+	for i := range 12 {
+		statuses = append(statuses, federationStatusFixture("sp-"+strconv.Itoa(i), "spoke"))
+	}
+	m := setupFederationViewWithStatuses(statuses...)
+	m.width, m.height = 80, 16
+	m.federation.cursor = 9
+
+	lines := strings.Split(stripANSI(renderFederation(m)), "\n")
+	clicked := 0
+	for y, line := range lines {
+		name, ok := strings.CutPrefix(strings.TrimLeft(line, "▶ "), "sp-")
+		if !ok || y < federationFirstRowY {
+			continue
+		}
+		want, err := strconv.Atoi(strings.Fields(name)[0])
+		require.NoError(t, err)
+		out, _ := m.mouseFederationClick(y)
+		assert.Equal(t, want, out.federation.cursor, "click on screen row %d", y)
+		clicked++
+	}
+	assert.Greater(t, clicked, 1, "several rows are visible")
+}

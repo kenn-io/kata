@@ -47,18 +47,8 @@ func renderFederation(m Model) string {
 		return renderFederationRecovery(m)
 	}
 	cursorHasRow := cursor >= 0 && cursor < len(rows)
-	hints := []string{"[↑/↓ k/j] move", "[enter] detail", "[esc] back", "[r] refresh", "[n] enroll", "[x] leave"}
-	if cursorHasRow {
-		hints = append(hints, "[N] name")
-	}
-	hints = append(hints, "[b] browse hubs", "[C] credentials", "[?] help")
-	footer := renderAuxiliaryFooter(m, strings.Join(hints, "  "))
-	footerRows := strings.Count(footer, "\n") + 1
-	rowBudget := len(rows)
-	if m.height > 0 {
-		// The chrome counts a one-row footer; a wrapped one takes more.
-		rowBudget = max(m.height-federationViewChromeRows-(footerRows-1), 1)
-	}
+	footer, footerRows := federationListFooter(m, cursorHasRow)
+	rowBudget := federationListRowBudget(m, len(rows))
 	visible := clipFederationRows(rows, cursor, rowBudget)
 	body := []string{
 		titleStyle.Render("kata / federation"),
@@ -937,4 +927,28 @@ func renderFederationNamePrompt(m Model) string {
 	tail := append([]string{label + shown + "▏"}, errLines...)
 	tail = append(tail, footer...)
 	return strings.Join(fitFederationLines(append(head, tail...), m.height, len(tail)), "\n")
+}
+
+// federationListFooter draws the list's hints and reports how many rows they
+// take once wrapped.
+func federationListFooter(m Model, cursorHasRow bool) (string, int) {
+	hints := []string{"[↑/↓ k/j] move", "[enter] detail", "[esc] back", "[r] refresh", "[n] enroll", "[x] leave"}
+	if cursorHasRow {
+		hints = append(hints, "[N] name")
+	}
+	hints = append(hints, "[b] browse hubs", "[C] credentials", "[?] help")
+	footer := renderAuxiliaryFooter(m, strings.Join(hints, "  "))
+	return footer, strings.Count(footer, "\n") + 1
+}
+
+// federationListRowBudget is how many spoke rows the list draws. The renderer
+// and the mouse click both use it, so a wrapped footer moves them together.
+func federationListRowBudget(m Model, rowCount int) int {
+	if m.height <= 0 {
+		return rowCount
+	}
+	cursor := clampFederationCursor(m.federation.cursor, federationSpokeStatuses(m.federation.statuses))
+	_, footerRows := federationListFooter(m, cursor < rowCount)
+	// The chrome counts a one-row footer; a wrapped one takes more.
+	return max(m.height-federationViewChromeRows-(footerRows-1), 1)
 }

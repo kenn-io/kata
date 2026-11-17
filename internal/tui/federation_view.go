@@ -1718,18 +1718,15 @@ func (m *Model) moveFederationCursor(delta int) {
 
 func (m Model) mouseFederationClick(y int) (Model, tea.Cmd) {
 	row := y - federationFirstRowY
-	if row < 0 {
+	if row < 0 || m.federation.mode != federationModeList {
 		return m, nil
 	}
 	rows := federationSpokeStatuses(m.federation.statuses)
 	if len(rows) == 0 {
 		return m, nil
 	}
-	budget := len(rows)
-	if m.height > 0 {
-		budget = max(m.height-federationViewChromeRows, 1)
-	}
-	start, end := windowBounds(len(rows), m.federation.cursor, budget)
+	cursor := clampFederationCursor(m.federation.cursor, rows)
+	start, end := windowBounds(len(rows), cursor, federationListRowBudget(m, len(rows)))
 	idx := start + row
 	if idx < start || idx >= end || idx >= len(rows) {
 		return m, nil
