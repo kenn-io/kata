@@ -991,13 +991,7 @@ func (s *Service) runWorkers(ctx context.Context, selection workerSelection) err
 		federationSub.Unsub()
 	}()
 
-	var workers []namedWorker
-	if selection == allWorkers {
-		workers = s.serviceWorkers()
-	}
-	if s.embeddingReconciler != nil {
-		workers = append(workers, namedWorker{name: "embeddings", run: s.embeddingReconciler.Run})
-	}
+	workers := s.selectedWorkers(selection)
 	workerErrs := make(chan error, len(workers))
 	for _, worker := range workers {
 		go func() {
@@ -1031,6 +1025,17 @@ func (s *Service) runWorkers(ctx context.Context, selection workerSelection) err
 		stop = runStop{reason: stopFenceFailure, err: fenceErr}
 	}
 	return runResult(stop, workerResults, callerStop)
+}
+
+func (s *Service) selectedWorkers(selection workerSelection) []namedWorker {
+	var workers []namedWorker
+	if selection == allWorkers {
+		workers = s.serviceWorkers()
+	}
+	if s.embeddingReconciler != nil {
+		workers = append(workers, namedWorker{name: "embeddings", run: s.embeddingReconciler.Run})
+	}
+	return workers
 }
 
 func (s *Service) serviceWorkers() []namedWorker {
