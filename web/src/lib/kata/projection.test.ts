@@ -482,6 +482,7 @@ function issue(
     status: 'open',
     metadata: {},
     revision: 1,
+    content_revision: 0,
     author: 'user-a',
     labels: [],
     created_at: '2026-08-01T09:00:00.000Z',

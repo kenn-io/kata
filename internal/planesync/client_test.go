@@ -1,6 +1,7 @@
 package planesync
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/v2"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -247,35 +249,44 @@ func TestClientErrorsIdentifyWorkItem(t *testing.T) {
 }
 
 func TestClientSharesPacingBetweenConcurrentSessions(t *testing.T) {
-	var mu sync.Mutex
-	var times []time.Time
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		mu.Lock()
-		times = append(times, time.Now())
-		mu.Unlock()
-		sendPlaneJSON(t, w, map[string]string{"id": testProjectID, "identifier": "EX", "name": "Example"})
-	}))
-	defer server.Close()
-	c := testConfig()
-	c.APIOrigin = server.URL
-	client := NewClient(ClientConfig{Daemon: config.PlaneSyncConfig{APIOrigin: server.URL}, LookupEnv: func(string) (string, bool) { return "example-api-key", true }})
-	var wg sync.WaitGroup
-	for range 3 {
-		wg.Go(func() {
-			s, err := client.ForRun(t.Context(), c)
-			if err == nil {
-				_, err = s.Project(t.Context(), c)
-			}
-			if err != nil {
-				t.Error(err)
-			}
+	synctest.Test(t, func(t *testing.T) {
+		var mu sync.Mutex
+		var times []time.Time
+		c := testConfig()
+		// Record when each request leaves the client. A server-side clock would
+		// also count transport latency, such as only the first request dialing.
+		client := NewClient(ClientConfig{
+			Daemon:    config.PlaneSyncConfig{APIOrigin: c.APIOrigin},
+			LookupEnv: func(string) (string, bool) { return "example-api-key", true },
+			Transport: planeRoundTrip(func(*http.Request) (*http.Response, error) {
+				mu.Lock()
+				times = append(times, time.Now())
+				mu.Unlock()
+				body, err := json.Marshal(map[string]string{"id": testProjectID, "identifier": "EX", "name": "Example"})
+				if err != nil {
+					return nil, err
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body))}, nil
+			}),
 		})
-	}
-	wg.Wait()
-	require.Len(t, times, 3)
-	for i := 1; i < len(times); i++ {
-		require.GreaterOrEqual(t, times[i].Sub(times[i-1]), 950*time.Millisecond)
-	}
+		var wg sync.WaitGroup
+		for range 3 {
+			wg.Go(func() {
+				s, err := client.ForRun(t.Context(), c)
+				if err == nil {
+					_, err = s.Project(t.Context(), c)
+				}
+				if err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		wg.Wait()
+		require.Len(t, times, 3)
+		for i := 1; i < len(times); i++ {
+			require.Equal(t, time.Second, times[i].Sub(times[i-1]))
+		}
+	})
 }
 
 func TestClientRetryAndCancellation(t *testing.T) {

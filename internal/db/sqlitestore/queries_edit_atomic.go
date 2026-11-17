@@ -43,6 +43,9 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 	if err != nil {
 		return db.EditIssueAtomicResult{}, err
 	}
+	if p.ExpectedContentRevision != nil && *p.ExpectedContentRevision != issue.ContentRevision {
+		return db.EditIssueAtomicResult{}, &db.ContentRevisionConflictError{CurrentContentRevision: issue.ContentRevision}
+	}
 	if err := validateExpectedLinkProjectUIDsTx(ctx, tx, p.ExpectedLinkProjectUIDs); err != nil {
 		return db.EditIssueAtomicResult{}, err
 	}

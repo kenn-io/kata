@@ -1983,17 +1983,25 @@ func (e EditCommentRequestBody) Validate() error {
 }
 
 type EditIssueRequestBody struct {
-	Actor         *string     `json:"actor,omitempty"`
-	Body          *string     `json:"body,omitempty"`
-	ClearPriority *bool       `json:"clear_priority,omitempty"`
-	LinksDelta    *LinksDelta `json:"links_delta,omitempty"`
-	Owner         *string     `json:"owner,omitempty"`
-	SetPriority   *int64      `json:"set_priority,omitempty"`
-	Title         *string     `json:"title,omitempty"`
+	Actor         *string `json:"actor,omitempty"`
+	Body          *string `json:"body,omitempty"`
+	ClearPriority *bool   `json:"clear_priority,omitempty"`
+
+	// ExpectedContentRevision Current content_revision of the issue; a title or body edit since then returns 412 revision_conflict and writes nothing.
+	ExpectedContentRevision *int64      `json:"expected_content_revision,omitempty" validate:"omitempty,gte=0"`
+	LinksDelta              *LinksDelta `json:"links_delta,omitempty"`
+	Owner                   *string     `json:"owner,omitempty"`
+	SetPriority             *int64      `json:"set_priority,omitempty"`
+	Title                   *string     `json:"title,omitempty"`
 }
 
 func (e EditIssueRequestBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if e.ExpectedContentRevision != nil {
+		if err := typesValidator.Var(e.ExpectedContentRevision, "omitempty,gte=0"); err != nil {
+			errors = errors.Append("ExpectedContentRevision", err)
+		}
+	}
 	if e.LinksDelta != nil {
 		if v, ok := any(e.LinksDelta).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
@@ -3497,6 +3505,7 @@ type Issue struct {
 	Body                string             `json:"body" validate:"required"`
 	ClosedAt            *time.Time         `json:"closed_at,omitempty"`
 	ClosedReason        *string            `json:"closed_reason,omitempty"`
+	ContentRevision     int64              `json:"content_revision"`
 	CreatedAt           time.Time          `json:"created_at" validate:"required"`
 	DeletedAt           *time.Time         `json:"deleted_at,omitempty"`
 	ID                  int64              `json:"id"`
@@ -3611,6 +3620,7 @@ type IssueOut struct {
 	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
 	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
 	ClosedReason        *string      `json:"closed_reason,omitempty"`
+	ContentRevision     int64        `json:"content_revision"`
 	CreatedAt           time.Time    `json:"created_at" validate:"required"`
 
 	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
@@ -4270,6 +4280,7 @@ type ListGlobalIssueOut struct {
 	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
 	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
 	ClosedReason        *string      `json:"closed_reason,omitempty"`
+	ContentRevision     int64        `json:"content_revision"`
 	CreatedAt           time.Time    `json:"created_at" validate:"required"`
 
 	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
@@ -5642,6 +5653,7 @@ type ReachableGraphNode struct {
 	Body                string                          `json:"body" validate:"required"`
 	ClosedAt            *time.Time                      `json:"closed_at,omitempty"`
 	ClosedReason        *string                         `json:"closed_reason,omitempty"`
+	ContentRevision     int64                           `json:"content_revision"`
 	CreatedAt           time.Time                       `json:"created_at" validate:"required"`
 	DeletedAt           *time.Time                      `json:"deleted_at,omitempty"`
 	ID                  int64                           `json:"id"`
@@ -5802,6 +5814,7 @@ type ReadyGlobalIssueOut struct {
 	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
 	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
 	ClosedReason        *string      `json:"closed_reason,omitempty"`
+	ContentRevision     int64        `json:"content_revision"`
 	CreatedAt           time.Time    `json:"created_at" validate:"required"`
 
 	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
@@ -6814,6 +6827,7 @@ type ShowIssueOut struct {
 	Body                string     `json:"body" validate:"required"`
 	ClosedAt            *time.Time `json:"closed_at,omitempty"`
 	ClosedReason        *string    `json:"closed_reason,omitempty"`
+	ContentRevision     int64      `json:"content_revision"`
 	CreatedAt           time.Time  `json:"created_at" validate:"required"`
 
 	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
@@ -7420,6 +7434,7 @@ type UIIssue struct {
 	Body                string               `json:"body" validate:"required"`
 	ClosedAt            *time.Time           `json:"closed_at,omitempty"`
 	ClosedReason        *string              `json:"closed_reason,omitempty"`
+	ContentRevision     int64                `json:"content_revision"`
 	CreatedAt           time.Time            `json:"created_at" validate:"required"`
 	DeadlineOnDate      *string              `json:"deadline_on_date,omitempty"`
 	DeletedAt           *time.Time           `json:"deleted_at,omitempty"`

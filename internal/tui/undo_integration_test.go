@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -41,7 +43,7 @@ func TestCommentFormPreventsUndoingEarlierEdit(t *testing.T) {
 			m.list.actor = "alice"
 			m.detail = detailModel{scopePID: project.ID, activeTab: tabComments,
 				issue: &Issue{UID: issue.UID, ShortID: issue.ShortID, Status: "open"}, comments: comments}
-			edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice")
+			edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice", nil)
 			require.NoError(t, err)
 			updated, _ := m.Update(mutationDoneMsg{resp: edited})
 			m = updated.(Model)
@@ -99,9 +101,12 @@ func TestTypedReplyPreflightFailurePreservesUndo(t *testing.T) {
 				transport = http.DefaultTransport
 			}
 			var commentPosts atomic.Int32
+			// Only the reply's preflight sees the broken health probe; the
+			// later undo is a guarded save and needs a readable version.
+			var healthBroken atomic.Bool
 			transportErr := errors.New("request transport failed")
 			hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if r.URL.Path == "/api/v1/health" {
+				if r.URL.Path == "/api/v1/health" && (failure == "old daemon" || healthBroken.Load()) {
 					switch failure {
 					case "old daemon":
 						return &http.Response{StatusCode: http.StatusOK, Request: r,
@@ -125,11 +130,13 @@ func TestTypedReplyPreflightFailurePreservesUndo(t *testing.T) {
 			m := initialModel(Options{})
 			m.api = client
 			m.view = viewList
-			edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice")
+			edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice", nil)
 			require.NoError(t, err)
 			updated, _ := m.Update(mutationDoneMsg{resp: edited})
 			m = updated.(Model)
+			healthBroken.Store(true)
 			response, err := client.AddCommentReply(ctx, project.ID, issue.UID, "Reply", "alice", "c:abcdef", "reply", false, "reply-key")
+			healthBroken.Store(false)
 			require.Error(t, err)
 			if failure == "health transport" || failure == "comment transport" {
 				require.ErrorIs(t, err, transportErr)
@@ -252,12 +259,12 @@ func TestUndoClientRealDaemonBodyConflictWithoutRevisionChange(t *testing.T) {
 	require.NoError(t, err)
 	base := NewClient(env.URL, env.HTTP)
 	client := newConnectedUndoClient(t, base)
-	edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice")
+	edited, err := client.EditBody(ctx, project.ID, issue.UID, "after", "alice", nil)
 	require.NoError(t, err)
 	require.NotNil(t, edited.undo.entry)
 	entry := *edited.undo.entry
 	edited.undo.complete()
-	external, err := base.EditBody(ctx, project.ID, issue.UID, "someone else's text", "bob")
+	external, err := base.EditBody(ctx, project.ID, issue.UID, "someone else's text", "bob", nil)
 	require.NoError(t, err)
 	require.Equal(t, entry.revision, external.Issue.Revision)
 	outcome := client.undo(ctx, entry, undoOptions{})
@@ -297,4 +304,154 @@ func TestUndoClientRealDaemonDetectsStatusChangedAwayAndBack(t *testing.T) {
 	current, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, "closed", current.Status)
+}
+
+// A body save made against the content revision the editor opened at is
+// refused once another client has edited the body, writes nothing, and a
+// save that names no revision still goes through.
+func TestClientEditBodyRefusesStaleContentRevision(t *testing.T) {
+	ctx := t.Context()
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Example", Body: "before", Author: "alice"})
+	require.NoError(t, err)
+	client := NewClient(env.URL, env.HTTP)
+
+	opened, err := client.GetIssueDetail(ctx, project.ID, issue.UID)
+	require.NoError(t, err)
+	revision := opened.Issue.ContentRevision
+
+	_, err = client.EditBody(ctx, project.ID, issue.UID, "other client's text", "bob", &revision)
+	require.NoError(t, err)
+
+	_, err = client.EditBody(ctx, project.ID, issue.UID, "stale editor's text", "alice", &revision)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, http.StatusPreconditionFailed, apiErr.Status)
+	require.Equal(t, "revision_conflict", apiErr.Code)
+	current, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "other client's text", current.Body)
+
+	resp, err := client.EditBody(ctx, project.ID, issue.UID, "unguarded text", "alice", nil)
+	require.NoError(t, err)
+	require.True(t, resp.Changed)
+	current, err = env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "unguarded text", current.Body)
+}
+
+// Against a daemon older than 0.53.0 the body save carries no
+// expected_content_revision (the daemon would reject the unknown field) and
+// succeeds as it did before the field existed.
+func TestClientEditBodyOmitsContentRevisionForOlderDaemon(t *testing.T) {
+	revision := int64(3)
+	for _, tc := range []struct {
+		version string
+		sent    bool
+	}{{"0.52.0", false}, {"0.53.0", true}} {
+		t.Run(tc.version, func(t *testing.T) {
+			var raw map[string]any
+			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/health" {
+					respondJSON(t, w, map[string]any{"ok": true, "api_schema_version": tc.version})
+					return
+				}
+				require.Equal(t, http.MethodPatch, r.Method)
+				require.NoError(t, json.UnmarshalRead(r.Body, &raw))
+				respondJSON(t, w, map[string]any{"issue": map[string]any{"uid": "u"}, "changed": true})
+			})
+			resp, err := c.EditBody(t.Context(), 7, "abc4", "new body", "alice", &revision)
+			require.NoError(t, err)
+			require.True(t, resp.Changed)
+			require.Equal(t, "new body", raw["body"])
+			_, sent := raw["expected_content_revision"]
+			require.Equal(t, tc.sent, sent)
+		})
+	}
+}
+
+// healthDownClient returns a client whose daemon answers the health probe
+// with status and fails the test when a PATCH reaches it.
+func healthDownClient(t *testing.T, healthBody map[string]any, status int) *Client {
+	t.Helper()
+	return newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			w.WriteHeader(status)
+			if healthBody != nil {
+				respondJSON(t, w, healthBody)
+			}
+			return
+		}
+		t.Errorf("unexpected %s %s: no write may follow a failed version check", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+}
+
+// When the daemon's version cannot be read, a guarded body save fails with
+// that error instead of going out without the guard.
+func TestClientEditBodyFailsWhenVersionUnknown(t *testing.T) {
+	revision := int64(3)
+	for name, c := range map[string]*Client{
+		"health fails":      healthDownClient(t, nil, http.StatusInternalServerError),
+		"no schema version": healthDownClient(t, map[string]any{"ok": true}, http.StatusOK),
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp, err := c.EditBody(t.Context(), 7, "abc4", "new body", "alice", &revision)
+			require.Error(t, err)
+			require.Nil(t, resp)
+			require.Contains(t, err.Error(), "daemon API "+contentRevisionAPIVersion)
+			var preflight *mutationPreflightError
+			require.ErrorAs(t, err, &preflight)
+			require.False(t, ambiguousWriteError(err))
+		})
+	}
+}
+
+// The body editor's save surfaces the failed version check and sends no write.
+func TestFormBodySaveFailsWhenVersionUnknown(t *testing.T) {
+	c := healthDownClient(t, nil, http.StatusInternalServerError)
+	msg := dispatchFormEditBody(c, formTarget{projectID: 7, issueShortID: "abc4", contentRevision: 3}, "new body", "alice", 1)().(mutationDoneMsg)
+	require.Error(t, msg.err)
+	require.Nil(t, msg.resp)
+}
+
+// healthDownUndoAPI routes the body write through a real client so the undo
+// meets the version check.
+type healthDownUndoAPI struct {
+	*undoTestAPI
+	client *Client
+}
+
+func (h *healthDownUndoAPI) EditBody(ctx context.Context, projectID int64, ref, body, actor string, expected *int64) (*MutationResp, error) {
+	return h.client.EditBody(ctx, projectID, ref, body, actor, expected)
+}
+
+// A body undo whose version check fails reports the error and writes nothing.
+func TestUndoClientBodyFailsWhenVersionUnknown(t *testing.T) {
+	uid := "01JZ0000000000000000000001"
+	current := Issue{UID: uid, ProjectID: 7, Body: "after", Revision: 4}
+	entry := undoEntry{kind: "body.edit", uid: uid, projectID: 7, revision: 4, instanceUID: "instance-1", actor: "bob",
+		before: Issue{Body: "before"}, after: Issue{Body: "after"}}
+	api := &healthDownUndoAPI{undoTestAPI: &undoTestAPI{issue: current}, client: healthDownClient(t, nil, http.StatusInternalServerError)}
+	outcome := newConnectedUndoClient(t, api).undo(t.Context(), entry, undoOptions{})
+	require.Error(t, outcome.err)
+	require.False(t, outcome.changed)
+	require.Empty(t, outcome.conflict)
+	require.NotNil(t, outcome.attempt)
+	require.False(t, outcome.attempt.unknown, "no write was sent, so the outcome is known")
+}
+
+// A body save whose version check fails is not an uncertain write: the undo
+// attempt stays known, so history is kept and the save can be retried.
+func TestUndoClientBodySaveVersionCheckFailureKeepsHistory(t *testing.T) {
+	uid := "01JZ0000000000000000000001"
+	api := &healthDownUndoAPI{undoTestAPI: &undoTestAPI{issue: Issue{UID: uid, ProjectID: 7, Body: "after", Revision: 4}}, client: healthDownClient(t, nil, http.StatusInternalServerError)}
+	revision := int64(3)
+	resp, err := newConnectedUndoClient(t, api).EditBody(t.Context(), 7, uid, "new body", "bob", &revision)
+	require.Error(t, err)
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.undo)
+	require.False(t, resp.undo.unknown, "no write was sent, so the outcome is known")
 }

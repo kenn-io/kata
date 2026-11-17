@@ -18,6 +18,7 @@ export interface ListGlobalIssueOut {
   child_counts?: ChildCounts
   closed_at?: string
   closed_reason?: string
+  content_revision: number
   created_at: string
   /** deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable. */
   deadline_on_date?: string

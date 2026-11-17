@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -56,7 +57,17 @@ func openClawRecordNative(args []string) int {
 			return 1
 		}
 		if exists("slow-contract") {
-			time.Sleep(750 * time.Millisecond)
+			// The fixture writes the time this call must finish, so process
+			// startup counts toward the delay instead of adding to it.
+			deadline, err := os.ReadFile(filepath.Join(root, "slow-contract"))
+			if err != nil {
+				return 1
+			}
+			ms, err := strconv.ParseInt(string(deadline), 10, 64)
+			if err != nil {
+				return 1
+			}
+			time.Sleep(time.Until(time.UnixMilli(ms)))
 		}
 		if exists("no-contract-context") {
 			if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "SessionStart"}}); err != nil {
