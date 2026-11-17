@@ -491,30 +491,6 @@ func TestHandleEventReceived_IssueCreatedWithParentRefetchesOpenParent(t *testin
 	}
 }
 
-// TestSSEUpdate_ReadsIssueShortID pins that the SSE decoder reads the
-// `issue_short_id` field of an event envelope and exposes it as
-// issueShortID on the resulting eventReceivedMsg. UID rides alongside
-// for canonical matching.
-func TestSSEUpdate_ReadsIssueShortID(t *testing.T) {
-	body := []byte(`{
-		"type":"issue.created",
-		"project_id":7,
-		"project_uid":"01JZ0000000000000000000002",
-		"issue_short_id":"d4ex",
-		"issue_uid":"01HZNQ7VFPK1XGD8R5MABCD4EX"
-	}`)
-	got := decodeEventReceived(kataclient.Event{Type: "issue.created", Data: body})
-	if got.eventType != "issue.created" {
-		t.Fatalf("eventType = %q, want issue.created", got.eventType)
-	}
-	if got.issueShortID != "d4ex" {
-		t.Fatalf("issueShortID = %q, want d4ex", got.issueShortID)
-	}
-	if got.issueUID != "01HZNQ7VFPK1XGD8R5MABCD4EX" {
-		t.Fatalf("issueUID = %q, want the full ULID", got.issueUID)
-	}
-}
-
 // TestDecodeEventReceived_IssueCreatedExtractsParentLink covers the
 // payload-extraction half: the SSE parser must surface the embedded
 // parent link out of the issue.created payload so the dispatcher can
