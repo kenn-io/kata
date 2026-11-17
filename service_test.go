@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -310,6 +311,18 @@ func TestServiceRejectsInvalidEmbeddingConfig(t *testing.T) {
 		})
 		require.Error(t, err)
 	}
+}
+
+func TestServiceRejectsSQLiteEmbeddingsBeforeOpeningDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "service.db")
+	service, err := kata.New(t.Context(), kata.Config{
+		DSN: path, Auth: kata.AuthConfig{TrustCallerAuthentication: true},
+		Embeddings: kata.EmbeddingsConfig{BaseURL: "http://127.0.0.1:1234", Model: "test", Dims: 2},
+	})
+	require.Nil(t, service)
+	require.ErrorContains(t, err, "embeddings require Postgres")
+	_, err = os.Stat(path)
+	require.True(t, os.IsNotExist(err), "database should not be created")
 }
 
 func TestServiceSearchWithoutEmbeddings(t *testing.T) {
