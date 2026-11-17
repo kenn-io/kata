@@ -3,6 +3,7 @@ package githubsync
 import (
 	"bytes"
 	"context"
+	"crypto/rsa"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -46,8 +47,9 @@ type CredentialResolver struct {
 }
 
 type appTransportKey struct {
-	app  config.GitHubAppConfig
-	base http.RoundTripper
+	app     config.GitHubAppConfig
+	binding Binding
+	base    http.RoundTripper
 }
 
 // NewCredentialResolver returns a resolver using cfg and runner. A nil runner
@@ -107,11 +109,11 @@ func (r *CredentialResolver) credentialTransport(ctx context.Context, binding Bi
 	}
 }
 
-// appTransport returns the cached transport for app and base, so sessions
+// appTransport returns the cached transport for app, binding, and base, so sessions
 // reuse its installation token until it nears expiry. A base that cannot be a
 // map key gets a transport of its own.
 func (r *CredentialResolver) appTransport(app config.GitHubAppConfig, binding Binding, base http.RoundTripper) (http.RoundTripper, error) {
-	key := appTransportKey{app: app, base: base}
+	key := appTransportKey{app: app, binding: binding, base: base}
 	cacheable := reflect.ValueOf(base).Comparable()
 	if cacheable {
 		r.appMu.Lock()
@@ -119,6 +121,9 @@ func (r *CredentialResolver) appTransport(app config.GitHubAppConfig, binding Bi
 		if tr, ok := r.apps[key]; ok {
 			return &evictOnUnauthorizedTransport{next: tr, resolver: r, key: key}, nil
 		}
+	}
+	if _, err := readAppKey(app.PrivateKeyPath); err != nil {
+		return nil, err
 	}
 	atr, err := ghinstallation.NewAppsTransportWithOptions(base, app.AppID, ghinstallation.WithSigner(keyFileSigner{path: app.PrivateKeyPath}))
 	if err != nil {
@@ -141,15 +146,23 @@ type keyFileSigner struct {
 }
 
 func (s keyFileSigner) Sign(claims jwt.Claims) (string, error) {
-	pemBytes, err := os.ReadFile(s.path)
+	key, err := readAppKey(s.path)
 	if err != nil {
-		return "", fmt.Errorf("read GitHub App private key: %w", err)
+		return "", err
+	}
+	return ghinstallation.NewRSASigner(jwt.SigningMethodRS256, key).Sign(claims)
+}
+
+func readAppKey(path string) (*rsa.PrivateKey, error) {
+	pemBytes, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read GitHub App private key: %w", err)
 	}
 	key, err := jwt.ParseRSAPrivateKeyFromPEM(pemBytes)
 	if err != nil {
-		return "", fmt.Errorf("parse GitHub App private key: %w", err)
+		return nil, fmt.Errorf("parse GitHub App private key: %w", err)
 	}
-	return ghinstallation.NewRSASigner(jwt.SigningMethodRS256, key).Sign(claims)
+	return key, nil
 }
 
 // evictOnUnauthorizedTransport drops a cached App transport when GitHub answers

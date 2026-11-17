@@ -147,6 +147,73 @@ func TestCredentialResolverAppReadsKeyFileOnlyToMint(t *testing.T) {
 	})
 }
 
+func TestCredentialResolverAppRejectsBadKeyOnSetup(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		prepare func(*testing.T, string)
+		want    string
+	}{
+		{"missing", func(t *testing.T, path string) { require.NoError(t, os.Remove(path)) }, "read GitHub App private key"},
+		{"invalid", func(t *testing.T, path string) { require.NoError(t, os.WriteFile(path, []byte("invalid"), 0600)) }, "parse GitHub App private key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver, path := appTestResolver(t)
+			tc.prepare(t, path)
+			_, err := resolver.Transport(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "first"}, &appTestTransport{expiry: time.Hour})
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+type stalledAppTransport struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (rt *stalledAppTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	select {
+	case <-req.Context().Done():
+		return nil, req.Context().Err()
+	default:
+	}
+	close(rt.started)
+	<-rt.release
+	return nil, errors.New("mint stopped")
+}
+
+func TestCredentialResolverAppBindingsDoNotBlockEachOther(t *testing.T) {
+	resolver, _ := appTestResolver(t)
+	base := &stalledAppTransport{started: make(chan struct{}), release: make(chan struct{})}
+	first, err := resolver.Transport(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "first"}, base)
+	require.NoError(t, err)
+	second, err := resolver.Transport(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "second"}, base)
+	require.NoError(t, err)
+	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	request := func(ctx context.Context, tr http.RoundTripper, repo string, done chan<- error) {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/example-owner/"+repo+"/issues", nil)
+		_, err := tr.RoundTrip(req)
+		done <- err
+	}
+	go request(t.Context(), first, "first", firstDone)
+	<-base.started
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	go request(ctx, second, "second", secondDone)
+	completed := false
+	select {
+	case err := <-secondDone:
+		completed = true
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Error("canceled request blocked behind another binding's mint")
+	}
+	close(base.release)
+	<-firstDone
+	if !completed {
+		<-secondDone
+	}
+}
+
 func TestCredentialResolverAppUsesEachSuppliedBase(t *testing.T) {
 	resolver, _ := appTestResolver(t)
 	first := &appTestTransport{expiry: time.Hour}
