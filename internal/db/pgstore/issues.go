@@ -17,7 +17,7 @@ import (
 )
 
 const issueColumns = `i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
-       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.recurrence_id,
+       i.closed_reason, i.owner, i.assignment_expires_on, i.priority, i.author, i.metadata, i.revision, i.content_revision, i.recurrence_id,
        i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at, ` + issueAttributionColumn
 
 const issueSelect = `SELECT ` + issueColumns + `
@@ -658,7 +658,7 @@ func issueDestinations(issue *db.Issue, assignmentExpiresOn, closedAt, deletedAt
 	return []any{
 		&issue.ID, &issue.UID, &issue.ProjectID, &issue.ProjectUID, &issue.ShortID,
 		&issue.Title, &issue.Body, &issue.Status, &issue.ClosedReason, &issue.Owner, assignmentExpiresOn,
-		&issue.Priority, &issue.Author, &issue.Metadata, &issue.Revision, &issue.RecurrenceID,
+		&issue.Priority, &issue.Author, &issue.Metadata, &issue.Revision, &issue.ContentRevision, &issue.RecurrenceID,
 		&issue.OccurrenceKey, (*storedTime)(&issue.CreatedAt), (*storedTime)(&issue.UpdatedAt),
 		closedAt, deletedAt, &issue.AttributionView,
 	}

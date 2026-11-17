@@ -382,6 +382,9 @@ type formTarget struct {
 	issueShortID   string
 	detailGen      int64
 	origin         string
+	// contentRevision is the issue content_revision the body editor opened
+	// at; the save is refused if a title or body edit landed since.
+	contentRevision int64
 }
 
 // inputAction names what the caller should do after Update. Actions

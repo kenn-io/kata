@@ -1,0 +1,1 @@
+Issue reads carry content_revision; issue edit accepts expected_content_revision and refuses a stale one with 412 revision_conflict.

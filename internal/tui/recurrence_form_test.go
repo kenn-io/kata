@@ -253,7 +253,7 @@ func TestRecurrenceUndoBodyEditIgnoresScheduleList(t *testing.T) {
 	})})
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	resp, err := h.client.EditBody(ctx, h.issue.ProjectID, h.issue.UID, "revised body", "alice")
+	resp, err := h.client.EditBody(ctx, h.issue.ProjectID, h.issue.UID, "revised body", "alice", nil)
 	require.NoError(t, err)
 	require.NotNil(t, resp.undo.entry)
 	resp.undo.complete()

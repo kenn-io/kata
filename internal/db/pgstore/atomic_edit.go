@@ -32,6 +32,9 @@ func (s *Store) EditIssueAtomic(ctx context.Context, params db.EditIssueAtomicPa
 		if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
 			return err
 		}
+		if params.ExpectedContentRevision != nil && *params.ExpectedContentRevision != current.ContentRevision {
+			return &db.ContentRevisionConflictError{CurrentContentRevision: current.ContentRevision}
+		}
 		if err := validateExpectedLinkProjectUIDsTx(ctx, tx, params.ExpectedLinkProjectUIDs); err != nil {
 			return err
 		}

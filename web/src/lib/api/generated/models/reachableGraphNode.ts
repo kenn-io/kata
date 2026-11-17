@@ -12,6 +12,7 @@ export interface ReachableGraphNode {
   body: string
   closed_at?: string
   closed_reason?: string
+  content_revision: number
   created_at: string
   deleted_at?: string
   id: number

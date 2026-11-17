@@ -360,6 +360,11 @@ type EditIssueAtomicParams struct {
 	// identities inside the mutation transaction. Missing entries retain the
 	// legacy unrestricted behavior for non-scoped clients.
 	ExpectedLinkProjectUIDs map[int64]string
+
+	// ExpectedContentRevision, when non-nil, must equal the issue's current
+	// content_revision inside the mutation transaction or nothing is written
+	// and *ContentRevisionConflictError is returned. nil = unconditional.
+	ExpectedContentRevision *int64
 }
 
 // PeerIdentity is the stable identity of a link peer as captured inside
