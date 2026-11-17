@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // A late destination baseline must relocate an issue already held in the source,
@@ -468,6 +469,18 @@ func checkFederatedRefusalAfterRelocation(t *testing.T, store db.Storage, source
 	newer := newRemoteEvent(t, later, &issue.UID, "issue.snapshot", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+2, document)
 	_, err = store.InsertRemoteEvents(ctx, later.ID, []db.RemoteEvent{newer})
 	require.NoError(t, err)
+	// A delayed source comment reaches the current owner on the source's pull.
+	commentUID, err := uid.New()
+	require.NoError(t, err)
+	comment := newRemoteEvent(t, source, &issue.UID, "issue.commented", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+3,
+		jsontext.Value(`{"comment_uid":"`+commentUID+`","author":"worker","body":"delayed source comment","created_at":"2026-10-07T11:01:00Z"}`))
+	_, err = store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{comment})
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, source.ID))
+	comments, err := store.CommentsByIssue(ctx, relocated.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1, "the source's pull refreshes the issue's current owner")
+	require.Equal(t, "delayed source comment", comments[0].Body)
 	for _, project := range []db.Project{source, target} {
 		require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID), "only the refusing destination reports its refusal")
 	}

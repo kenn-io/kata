@@ -403,8 +403,9 @@ func IndexFederatedMoveEvents(events []FoldEvent) FederatedMoveIndex {
 // projectID names the project being materialized; snapshotGroup lists the
 // same-hub projects whose snapshots may relocate issues between them. A refused
 // snapshot relocation fails the destination's own pull and otherwise leaves the
-// issue with its current owner. refused reports, without writing, whether
-// rehoming would refuse to move an issue between two local projects.
+// issue with its current owner, which this pass then refreshes. refused
+// reports, without writing, whether rehoming would refuse to move an issue
+// between two local projects.
 func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMoveIndex, p FoldProjection, projectID int64, snapshotGroup []int64, refused func(issueID, sourceID, targetID int64) (bool, error)) ([]FederatedMoveDecision, []int64, error) {
 	type issueLocation struct {
 		id, source            int64
@@ -473,7 +474,9 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMo
 			facts[issue.ProjectUID] = target
 		}
 		decision := FederatedMoveDecision{IssueUID: issue.UID, TargetID: target.id, Active: target.active, Joined: target.joined, Snapshot: winner.Type == "issue.snapshot"}
+		var ownerSyncs bool
 		if l, ok := locations[issue.UID]; ok {
+			ownerSyncs = !l.unbound && l.active
 			decision.Exists = true
 			decision.IssueID, decision.SourceID, decision.RecurrenceID = l.id, l.source, l.recurrence
 			decision.SourceUID, decision.SourceName, decision.SourceShortID = l.sourceUID, l.sourceName, l.sourceShort
@@ -522,6 +525,10 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMo
 		}
 		if decision.Joined && decision.Active && !decision.Kept {
 			projects[decision.TargetID] = true
+		}
+		if decision.Kept && ownerSyncs {
+			// The owner keeps the issue, so it folds this pass's new history for it.
+			projects[decision.SourceID] = true
 		}
 		decisions = append(decisions, decision)
 	}
