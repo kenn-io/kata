@@ -3018,8 +3018,9 @@ func (f FederationRootKeyRepinResult) Validate() error {
 }
 
 type FederationSearchHit struct {
-	Issue Issue   `json:"issue"`
-	Score float64 `json:"score"`
+	Issue  Issue   `json:"issue"`
+	Score  float64 `json:"score"`
+	WebURL *string `json:"web_url,omitempty"`
 }
 
 func (f FederationSearchHit) Validate() error {

@@ -113,7 +113,12 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 		return vectors, nil
 	}, 64, nil, nil)
 	require.NoError(t, err)
-	spoke := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.EmbeddingUnavailableReason = "local vector index unavailable" })
+	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{Origin: "https://spoke.example", InstanceID: "spoke"})
+	require.NoError(t, err)
+	spoke := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.EmbeddingUnavailableReason = "local vector index unavailable"
+		cfg.WebSessions = manager
+	})
 	replica, err := spoke.DB.CreateProjectWithUID(ctx, project.Name, project.UID)
 	require.NoError(t, err)
 	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replica.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "tester", Enabled: true, PushEnabled: true})
@@ -141,7 +146,10 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	for _, hit := range body.Results {
 		seen[hit.Issue.UID] = true
 		if hit.Issue.UID == unpulled.UID {
-			require.Empty(t, hit.WebURL)
+			require.Empty(t, hit.Issue.Body)
+			require.Equal(t, "https://tasks.example/kata?issue="+unpulled.UID+"#direct=1", hit.WebURL)
+		} else {
+			require.Equal(t, "https://spoke.example/kata?issue="+issue.UID+"#direct=1", hit.WebURL)
 		}
 	}
 	require.True(t, seen[issue.UID])
@@ -263,6 +271,12 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 	require.Contains(t, string(body), "hub unreachable: ")
 	require.Contains(t, string(body), `"code":"hub_unreachable"`)
 	require.Contains(t, string(body), "embeddings are not configured")
+	malformed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) }))
+	t.Cleanup(malformed.Close)
+	setClaimBindingHubURL(t, spoke, replica.ID, malformed.URL)
+	resp, body = envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(body))
+	require.Contains(t, string(body), "hub unreachable: invalid hub search response")
 	stalled := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	t.Cleanup(stalled.Close)
 	setClaimBindingHubURL(t, spoke, replica.ID, stalled.URL)

@@ -6,5 +6,6 @@ import type { Issue } from './issue.ts'
 export interface FederationSearchHit {
   issue: Issue
   score: number
+  web_url?: string
   [key: string]: unknown
 }
