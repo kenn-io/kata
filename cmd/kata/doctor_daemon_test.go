@@ -220,15 +220,15 @@ func TestDoctorDocbankProbeFollowsDaemonReport(t *testing.T) {
 		probeStatus             int
 		status, summary, detail string
 	}{
-		{"answered and accepted the key", "0.53.0", `{"reachable":true,"key_accepted":true}`, 0, "ok", "Docbank answered and accepted the daemon's API key", ""},
-		{"rejected the key", "0.53.0", `{"reachable":true,"key_accepted":false,"http_status":401}`, 0, "warn", "Docbank rejected the daemon's API key", "HTTP status: 401"},
-		{"forbade the key", "0.53.0", `{"reachable":true,"key_accepted":false,"http_status":403}`, 0, "warn", "Docbank rejected the daemon's API key", "HTTP status: 403"},
-		{"answered with an error status", "0.53.0", `{"reachable":true,"key_accepted":false,"http_status":500}`, 0, "warn", "Docbank answered the daemon with an error", "HTTP status: 500"},
-		{"answered with a body that is not Docbank's", "0.53.0", `{"reachable":true,"key_accepted":false}`, 0, "warn", "Something answered at the [docbank] url, but not as Docbank", ""},
-		{"not reached", "0.53.0", `{"reachable":false,"key_accepted":false}`, 0, "warn", "Daemon cannot reach Docbank", ""},
-		{"daemon predates the probe route", "0.52.0", noRoute, http.StatusNotFound, "ok", "resolves its Docbank API key", "Docbank probe requires daemon API 0.53.0 or newer; this daemon reports 0.52.0; upgrade the daemon"},
-		{"key stopped resolving after health", "0.53.0", keyUnavailable, http.StatusServiceUnavailable, "warn", "probe did not return a result", "HTTP status: 503"},
-		{"daemon with the route cannot answer it", "0.53.0", `not json`, 0, "warn", "probe did not return a result", "HTTP status: 200"},
+		{"answered and accepted the key", "0.54.0", `{"reachable":true,"key_accepted":true}`, 0, "ok", "Docbank answered and accepted the daemon's API key", ""},
+		{"rejected the key", "0.54.0", `{"reachable":true,"key_accepted":false,"http_status":401}`, 0, "warn", "Docbank rejected the daemon's API key", "HTTP status: 401"},
+		{"forbade the key", "0.54.0", `{"reachable":true,"key_accepted":false,"http_status":403}`, 0, "warn", "Docbank rejected the daemon's API key", "HTTP status: 403"},
+		{"answered with an error status", "0.54.0", `{"reachable":true,"key_accepted":false,"http_status":500}`, 0, "warn", "Docbank answered the daemon with an error", "HTTP status: 500"},
+		{"answered with a body that is not Docbank's", "0.54.0", `{"reachable":true,"key_accepted":false}`, 0, "warn", "Something answered at the [docbank] url, but not as Docbank", ""},
+		{"not reached", "0.54.0", `{"reachable":false,"key_accepted":false}`, 0, "warn", "Daemon cannot reach Docbank", ""},
+		{"daemon predates the probe route", "0.52.0", noRoute, http.StatusNotFound, "ok", "resolves its Docbank API key", "Docbank probe requires daemon API 0.54.0 or newer; this daemon reports 0.52.0; upgrade the daemon"},
+		{"key stopped resolving after health", "0.54.0", keyUnavailable, http.StatusServiceUnavailable, "warn", "probe did not return a result", "HTTP status: 503"},
+		{"daemon with the route cannot answer it", "0.54.0", `not json`, 0, "warn", "probe did not return a result", "HTTP status: 200"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, workspace := doctorTestEnv(t)
@@ -259,7 +259,7 @@ func TestDoctorDocbankProbeFollowsDaemonReport(t *testing.T) {
 func TestDoctorProbeOutlastsDaemonDocbankTimeout(t *testing.T) {
 	_, workspace := doctorTestEnv(t)
 	flags = globalFlags{Workspace: workspace, Project: "example-project"}
-	health := `{"ok":true,"schema_version":28,"db_path":"/data/kata.db","docbank":{"credential":"ok"},"api_schema_version":"0.53.0"}`
+	health := `{"ok":true,"schema_version":28,"db_path":"/data/kata.db","docbank":{"credential":"ok"},"api_schema_version":"0.54.0"}`
 	ts := doctorTestServer(t, map[string]string{"/api/v1/health": health}, nil)
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/docbank/probe" {
