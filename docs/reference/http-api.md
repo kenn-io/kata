@@ -297,7 +297,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.53.0` | `GET /api/v1/instance` reports `write_actors_verified`. |
+| `0.54.0` | `GET /api/v1/instance` reports `write_actors_verified`. |
 | `0.53.0` | Issue responses carry `content_revision`, which moves when a title or body edit changes the text. `PATCH /projects/{project_id}/issues/{ref}` accepts `expected_content_revision`; a different current value returns 412 `revision_conflict` and writes nothing. Older daemons reject the unknown field. |
 | `0.52.0` | Close requests accept project-bound transcript selection and retain candidate session identity for keyed retries. |
 | `0.51.0` | Signed federation requests return `503 signing_warming` with `Retry-After: 5` while replay protection warms up. |
