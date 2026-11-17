@@ -2,7 +2,10 @@ package jsonl
 
 import (
 	"encoding/json/jsontext"
+	"runtime"
+	"strings"
 	"testing"
+	"weak"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -276,4 +279,26 @@ func recordAs[T any](t *testing.T, rec db.ImportRecord) *T {
 	require.True(t, ok, "record is %T, want *%T", rec, *new(T))
 	require.NotNil(t, got)
 	return got
+}
+
+func TestConvertEnvelopesReleasesPayloadsAndKeepsRecords(t *testing.T) {
+	envs := []Envelope{
+		{Kind: KindMeta, Data: jsontext.Value(`{"key":"kept","value":"` + strings.Repeat("v", 4096) + `"}`)},
+		{Kind: KindMeta, Data: jsontext.Value(`{"key":"` + db.FederationSpokeNamePrefix + `x","value":"` + strings.Repeat("v", 4096) + `"}`)},
+	}
+	kept := weak.Make(&envs[0].Data[0])
+	skipped := weak.Make(&envs[1].Data[0])
+
+	recs, err := convertEnvelopes(envs, 32, "", nil, true)
+	require.NoError(t, err)
+	runtime.GC()
+	assert.Nil(t, kept.Value())
+	assert.Nil(t, skipped.Value())
+	runtime.KeepAlive(envs)
+	require.Len(t, recs, 1)
+	record, ok := recs[0].(*db.MetaKV)
+	require.True(t, ok)
+	assert.Equal(t, "kept", record.Key)
+	assert.Equal(t, strings.Repeat("v", 4096), record.Value)
+	runtime.KeepAlive(recs)
 }
