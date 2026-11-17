@@ -552,6 +552,8 @@ components:
           type: string
         transcript:
           $ref: "#/components/schemas/Transcript"
+        transcript_selection:
+          $ref: "#/components/schemas/TranscriptSelection"
       type: object
     Comment:
       additionalProperties: true
@@ -7099,6 +7101,19 @@ components:
       required:
         - agent
         - session_id
+      type: object
+    TranscriptSelection:
+      additionalProperties: false
+      properties:
+        project_id:
+          format: int64
+          minimum: 0
+          type: integer
+        record:
+          type: boolean
+      required:
+        - project_id
+        - record
       type: object
     Trigger:
       additionalProperties: false

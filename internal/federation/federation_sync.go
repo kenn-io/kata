@@ -482,21 +482,25 @@ func syncDirectSpoke(
 		repairEcho := make([]bool, len(body.Events))
 		duplicate := make([]bool, len(body.Events))
 		pending := make([]int, 0, len(body.Events))
-		eventProjects := make([]int64, len(body.Events))
 		projectsByUID := map[string]int64{binding.HubProjectUID: binding.ProjectID}
+		projectID := func(ev api.EventEnvelope) (int64, error) {
+			if id := projectsByUID[ev.ProjectUID]; id != 0 {
+				return id, nil
+			}
+			project, err := store.ProjectByUID(ctx, ev.ProjectUID)
+			if err != nil {
+				return 0, err
+			}
+			projectsByUID[ev.ProjectUID] = project.ID
+			return project.ID, nil
+		}
 		for i, ev := range body.Events {
-			projectID, ok := projectsByUID[ev.ProjectUID]
-			if !ok {
-				project, err := store.ProjectByUID(ctx, ev.ProjectUID)
+			if ev.OriginInstanceUID == localInstanceUID {
+				id, err := projectID(ev)
 				if err != nil {
 					return err
 				}
-				projectID = project.ID
-				projectsByUID[ev.ProjectUID] = projectID
-			}
-			eventProjects[i] = projectID
-			if ev.OriginInstanceUID == localInstanceUID {
-				exists, err := store.ReconcileLocalFederationEcho(ctx, projectID, remoteEventFromEnvelope(ev))
+				exists, err := store.ReconcileLocalFederationEcho(ctx, id, remoteEventFromEnvelope(ev))
 				if err != nil {
 					return err
 				}
@@ -558,7 +562,10 @@ func syncDirectSpoke(
 				applyUIDs = append(applyUIDs, ev.EventUID)
 			}
 			if deliver[i] {
-				project := eventProjects[i]
+				project, err := projectID(ev)
+				if err != nil {
+					return err
+				}
 				if _, ok := deliverUIDs[project]; !ok {
 					deliverProjects = append(deliverProjects, project)
 				}
