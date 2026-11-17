@@ -62,3 +62,40 @@ func TestScopedTokenClearsNotificationIfFrom(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	require.Equal(t, notification.Value{}, readNotifySlot(t, env.DB, source.ID, key))
 }
+
+// A refused replace:false names the held request only to a caller who may read
+// what that request points at; reads drop such a request, so the conflict does
+// too. The refusal and the stored request stay the same either way.
+func TestScopedNoReplaceConflictHidesRestrictedHeldRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		outside     bool
+		wantDetails bool
+	}{
+		{name: "reference outside scope", outside: true, wantDetails: false},
+		{name: "reference inside scope", outside: false, wantDetails: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, p, source, target, _ := scopedReplyFixture(t, tc.outside)
+			key := "notify.cmVhZGVy"
+			_, e := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: source.ID, Actor: "coordinator", Patch: map[string]jsontext.Value{
+				key: jsontext.Value(fmt.Sprintf(`{"from":"lead","message":"private","re":%q}`, target.UID)),
+			}})
+			require.NoError(t, e)
+			held := readNotifySlot(t, env.DB, source.ID, key)
+			path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/notifications", p.ID, source.ShortID)
+			resp, body := envDoRaw(t, env, http.MethodPost, path, map[string]any{"to": "reader", "message": "mine", "replace": false}, map[string]string{"Authorization": "Bearer worker-token"})
+			require.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
+			require.Contains(t, string(body), "notification_held")
+			if tc.wantDetails {
+				require.Contains(t, string(body), "private")
+				require.Contains(t, string(body), "lead")
+			} else {
+				require.NotContains(t, string(body), "private")
+				require.NotContains(t, string(body), "lead")
+				require.NotContains(t, string(body), target.UID)
+			}
+			require.Equal(t, held, readNotifySlot(t, env.DB, source.ID, key))
+		})
+	}
+}

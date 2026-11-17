@@ -73,14 +73,27 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if current.Status != "open" {
 				return nil, api.NewError(400, "validation", "cannot notify on a closed issue", "", nil)
 			}
-			if noReplace {
-				if held, ok := heldNotification(current, to); ok {
-					return nil, api.NewError(409, "notification_held", "recipient already has an unanswered request on this issue", "send with replace omitted or true to replace it, or wait for it to be cleared", map[string]any{"from": held.From, "message": held.Message})
-				}
-			}
 			allowed, err := notificationAllowedTx(ctx, tx)
 			if err != nil {
 				return nil, err
+			}
+			if noReplace {
+				if held, ok := heldNotification(current, to); ok {
+					// Reads drop a request whose reference the caller cannot
+					// read; the conflict names it only under the same rule.
+					var details map[string]any
+					visible := true
+					if held.Re != "" && notificationReadRestricted(ctx) {
+						visible, err = notificationHistoryVisibleTx(ctx, tx, held.Re, allowed)
+						if err != nil {
+							return nil, err
+						}
+					}
+					if visible {
+						details = map[string]any{"from": held.From, "message": held.Message}
+					}
+					return nil, api.NewError(409, "notification_held", "recipient already has an unanswered request on this issue", "send with replace omitted or true to replace it, or wait for it to be cleared", details)
+				}
 			}
 			if re != "" {
 				if err := notificationCommentTx(ctx, tx, current, re, allowed); err != nil {
