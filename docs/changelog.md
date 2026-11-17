@@ -10,6 +10,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Press `V` in `kata tui` to open the close form on any daemon and cite an issue's attachment as `done` evidence, alone or with typed evidence. `x` still closes at once and opens the form only when the daemon requires evidence; other close reasons do not offer the choice. The events tab names the cited file, and marks it removed or changed. See [cite a document when closing work](guide/attachments.md#cite-a-document-when-closing-work).
+
 - Stop `kata tui` from overwriting a body that someone else changed while you
   were editing it. Against a daemon on API 0.53.0 or newer, the editor and
   undo of a body edit send the issue's `content_revision` with the save, and
