@@ -38,11 +38,7 @@ func resolveLocalEmbeddings(ctx context.Context, confirm func(context.Context, i
 }
 
 func installLocalEmbeddings(ctx context.Context, confirm func(context.Context, int64) (bool, error), progress func(int64, int64)) (embedlocal.Installation, error) {
-	dir, err := embedlocal.DefaultDir()
-	if err != nil {
-		return embedlocal.Installation{}, err
-	}
-	return localEmbeddingsInstall(ctx, embedlocal.InstallOptions{DataDir: dir, Confirm: confirm, Progress: progress})
+	return embedding.InstallLocal(ctx, localEmbeddingsInstall, confirm, progress)
 }
 
 func daemonLocalEmbeddingsCmd() *cobra.Command {

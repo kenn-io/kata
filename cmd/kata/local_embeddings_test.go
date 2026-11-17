@@ -36,6 +36,27 @@ func TestApplySharedEmbeddingChoice(t *testing.T) {
 	require.Equal(t, config.EmbeddingsConfig{}, got)
 }
 
+func TestLocalEmbeddingsInstallCallbacks(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	oldInstall := localEmbeddingsInstall
+	t.Cleanup(func() { localEmbeddingsInstall = oldInstall })
+	var downloaded, total int64
+	localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
+		approved, err := opts.Confirm(ctx, 200)
+		require.NoError(t, err)
+		require.True(t, approved)
+		opts.Progress(50, 200)
+		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
+	}
+	installed, err := installLocalEmbeddings(t.Context(), func(_ context.Context, size int64) (bool, error) {
+		return size == 200, nil
+	}, func(done, size int64) { downloaded, total = done, size })
+	require.NoError(t, err)
+	require.Equal(t, "/example/kennembed", installed.Executable)
+	require.EqualValues(t, 50, downloaded)
+	require.EqualValues(t, 200, total)
+}
+
 func TestLocalEmbeddingsSetup(t *testing.T) {
 	t.Run("recorded", func(t *testing.T) {
 		clearLocalEmbeddingsEnv(t)

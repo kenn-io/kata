@@ -26,23 +26,7 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 	t.Cleanup(func() { _ = admin.Close() })
 	var owner string
 	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&owner))
-	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Input []string `json:"input"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Error(err)
-			return
-		}
-		data := make([]map[string]any, len(request.Input))
-		for i := range request.Input {
-			data[i] = map[string]any{"embedding": []float32{1, 0}, "index": i}
-		}
-		if err := json.NewEncoder(w).Encode(map[string]any{"data": data}); err != nil {
-			t.Error(err)
-		}
-	}))
-	t.Cleanup(endpoint.Close)
+	endpoint := newTwoDimensionalEmbeddingServer(t)
 	cfg := kata.Config{
 		DSN: dsn, Postgres: kata.PostgresConfig{Schema: "kata", SchemaMode: kata.PostgresSchemaBootstrap, SchemaOwner: owner},
 		Auth:       kata.AuthConfig{TrustCallerAuthentication: true},
