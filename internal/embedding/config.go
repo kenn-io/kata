@@ -1,6 +1,7 @@
 package embedding
 
 import (
+	"context"
 	"time"
 
 	"go.kenn.io/kata/internal/config"
@@ -34,6 +35,12 @@ func ClientConfig(ec config.EmbeddingsConfig) Config {
 		}
 	}
 	return cfg
+}
+
+// ValidateBatching checks the configured limits without contacting the provider.
+func ValidateBatching(ctx context.Context, ec config.EmbeddingsConfig, client *Client) error {
+	_, err := kitvec.EncodeBatched(ctx, client.EncodeFunc(), nil, BatchOptions(ec, client.BatchSize())...)
+	return err
 }
 
 // BatchOptions applies the configured batch limits.

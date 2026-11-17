@@ -8,10 +8,13 @@ import (
 )
 
 // NewEmbeddingServer starts a test provider. embed maps each input to its
-// vector; nil embeds every input as {1, 0}.
-func NewEmbeddingServer(t *testing.T, embed func(string) []float32) *httptest.Server {
+// vector; nil embeds every input as {1, 0}. onRequest observes each request.
+func NewEmbeddingServer(t *testing.T, embed func(string) []float32, onRequest ...func()) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if len(onRequest) != 0 {
+			onRequest[0]()
+		}
 		var request struct {
 			Input []string `json:"input"`
 		}

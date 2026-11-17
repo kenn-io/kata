@@ -134,7 +134,7 @@ type GitHubAppConfig struct {
 	PrivateKeyPath string
 }
 
-// EmbeddingsConfig selects the embedding provider for semantic search.
+// EmbeddingsConfig selects the embedding provider for semantic search. Its fields follow the standalone daemon's embedding configuration.
 type EmbeddingsConfig = config.EmbeddingsConfig
 
 // DocbankConfig selects the vault used by issue attachments.
@@ -413,6 +413,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		if err != nil {
 			_ = store.Close()
 			return nil, fmt.Errorf("kata: embedding client: %w", err)
+		}
+		if err := embedding.ValidateBatching(ctx, cfg.Embeddings, embedder); err != nil {
+			_ = store.Close()
+			return nil, fmt.Errorf("kata: embedding batching: %w", err)
 		}
 		index, err = vector.OpenPostgres(ctx, pg.DB)
 		if errors.Is(err, vector.ErrPgvectorMissing) {

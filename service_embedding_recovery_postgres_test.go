@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,7 +24,8 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 	t.Cleanup(func() { _ = admin.Close() })
 	var owner string
 	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&owner))
-	endpoint := testenv.NewEmbeddingServer(t, nil)
+	var providerCalls atomic.Int32
+	endpoint := testenv.NewEmbeddingServer(t, nil, func() { providerCalls.Add(1) })
 	cfg := kata.Config{
 		DSN: dsn, Postgres: kata.PostgresConfig{Schema: "kata", SchemaMode: kata.PostgresSchemaBootstrap, SchemaOwner: owner},
 		Auth:       kata.AuthConfig{TrustCallerAuthentication: true},
@@ -36,7 +38,25 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 		return service
 	}
 	require.NoError(t, open(kata.PostgresSchemaBootstrap).Close())
+	t.Run("invalid batch budget", func(t *testing.T) {
+		invalid := cfg
+		invalid.Embeddings.MaxBatchTokens = 100
+		service, err := kata.New(t.Context(), invalid)
+		if service != nil {
+			require.NoError(t, service.Close())
+		}
+		require.ErrorContains(t, err, "embedding batching")
+	})
 	service := open(kata.PostgresSchemaValidate)
+	missingCtx, cancelMissing := context.WithCancel(ctx)
+	missingDone := make(chan error, 1)
+	go func() { missingDone <- service.Run(missingCtx) }()
+	t.Cleanup(func() {
+		cancelMissing()
+		if missingDone != nil {
+			<-missingDone
+		}
+	})
 	server := httptest.NewServer(service.Handler())
 	projectID := createProject(t, server.URL, "recovery").Project.ID
 	createAccessIssue(t, server, projectID, "recover semantic search")
@@ -57,6 +77,16 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 		require.Equal(t, http.StatusServiceUnavailable, status)
 		require.Contains(t, body, "pgvector")
 	}
+	select {
+	case err := <-missingDone:
+		missingDone = nil
+		t.Fatalf("service stopped before cancellation: %v", err)
+	default:
+	}
+	cancelMissing()
+	<-missingDone
+	missingDone = nil
+	require.Zero(t, providerCalls.Load())
 	server.Close()
 	require.NoError(t, service.Close())
 	_, err = admin.ExecContext(ctx, `CREATE EXTENSION vector WITH SCHEMA public`)

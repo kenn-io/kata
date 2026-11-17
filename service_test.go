@@ -67,6 +67,16 @@ func TestServiceMountRunAndClose(t *testing.T) {
 	project := createProject(t, server.URL, "example-project")
 	assert.Equal(t, "example-project", project.Project.Name)
 	assert.True(t, project.Created)
+	createAccessIssue(t, server, project.Project.ID, "lexical search works")
+	status, titles, body := searchTitles(t.Context(), server, project.Project.ID, "lexical", "auto")
+	require.Equal(t, http.StatusOK, status)
+	require.Equal(t, []string{"lexical search works"}, titles)
+	require.Contains(t, body, `"mode":"lexical"`)
+	for _, mode := range []string{"semantic", "hybrid"} {
+		status, _, body = searchTitles(t.Context(), server, project.Project.ID, "lexical", mode)
+		require.Equal(t, http.StatusBadRequest, status)
+		require.Contains(t, body, "embeddings are not configured")
+	}
 
 	runCtx, cancelRun := context.WithCancel(t.Context())
 	runDone := make(chan error, 1)

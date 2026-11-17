@@ -52,7 +52,6 @@ import (
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/embedlocal"
 	"go.kenn.io/kit/safefileio"
-	kitvec "go.kenn.io/kit/vector"
 )
 
 func newDaemonCmd() *cobra.Command {
@@ -2213,10 +2212,7 @@ func preflightEmbeddingStartup(
 	if err != nil {
 		return nil, "", fmt.Errorf("embedding client: %w", err)
 	}
-	batchOptions := embedding.BatchOptions(ec, embedder.BatchSize())
-	if _, err := kitvec.EncodeBatched(
-		context.Background(), embedder.EncodeFunc(), nil, batchOptions...,
-	); err != nil {
+	if err := embedding.ValidateBatching(context.Background(), ec, embedder); err != nil {
 		return nil, "", fmt.Errorf("embedding batching: %w", err)
 	}
 	vectorsPath, err := vectorsPathForDSN(dbPath)

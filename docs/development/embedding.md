@@ -24,6 +24,8 @@ A Postgres-backed service can enable semantic and hybrid issue search with
 `Local` with `Model: "nomic-embed-text"` to use an already installed local
 model server. Kata does not install or download a model for the host. Call
 `Run` to build and update issue vectors.
+Writes on another replica can wait until the next sweep, which defaults to
+five minutes, plus indexing time before they appear in semantic search.
 A host worker fence stops the embedding worker when it rejects a transaction.
 The Postgres database needs the pgvector extension. Without it, lexical search
 remains available and semantic search reports the missing extension. After
