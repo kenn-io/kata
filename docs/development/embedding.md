@@ -24,9 +24,10 @@ A Postgres-backed service can enable semantic and hybrid issue search with
 `Local` with `Model: "nomic-embed-text"` to use an already installed local
 model server. Kata does not install or download a model for the host. Call
 `Run` to build and update issue vectors. A host that runs its own workers can
-call `RunSemanticIndex` to run only the semantic index reconciler.
-Writes on another replica can wait until the next sweep, which defaults to
-five minutes, plus indexing time before they appear in semantic search.
+set `Config.Embeddings` and call `RunSemanticIndex` to run only the semantic
+index reconciler. Writes on another replica or from host-owned workers that
+write directly to storage can wait until the next sweep, which defaults to five
+minutes, plus indexing time before they appear in semantic search.
 A host worker fence stops the embedding worker when it rejects a transaction.
 The Postgres database needs the pgvector extension. Without it, lexical search
 remains available and semantic search reports the missing extension. After
@@ -135,9 +136,10 @@ any `Run` or `RunSemanticIndex` return as service termination: stop accepting
 HTTP traffic, cancel the shared context, and inspect the error after both the
 workers and server stop. Only one `Run` or `RunSemanticIndex` call may be active
 for a service. `RunSemanticIndex` requires the same worker transaction fence
-when `Access` is set and waits for cancellation or `Close` if pgvector is
-missing. `Close` cancels active work and requests, waits for them to stop, and
-closes the owned storage handle. It is safe to call more than once.
+when `Access` is set. If embeddings are disabled or pgvector is missing, it
+waits without an indexer until cancellation or `Close`. `Close` cancels active
+work and requests, waits for them to stop, and closes the owned storage handle.
+It is safe to call more than once.
 
 ## Authentication is explicit
 
