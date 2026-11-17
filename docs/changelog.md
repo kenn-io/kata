@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- External imports into a relayed project on PostgreSQL, such as
+  `kata import --source beads`, now record the import's actor and the source
+  authors, as they do on SQLite. They had recorded the relay connection's bound
+  actor on every issue, comment and event. A direct federation push connection
+  still records its bound actor on both stores.
+
 - `kata doctor` now asks Docbank once, with a read-only request, whether it
   answers and accepts the daemon's API key, and reports the result in its
   `daemon.docbank` check. The request is

@@ -315,6 +315,7 @@ var storageScenarios = []scenario{
 	{name: "external import status expiry after mode switch", methods: []string{"ClaimOwner", "CreateProject", "EventsAfter", "ExpireAssignments", "ImportBatch", "ImportMappingBySource", "IssueByID"}, run: checkImportStatusCloseClearsAssignmentExpiry},
 	{name: "external import status observation acknowledgement", methods: []string{"CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "ReopenIssue"}, run: checkImportStatusObservationAcknowledgement},
 	{name: "external import status keeps local closure", methods: []string{"CloseIssueWithEvents", "CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID"}, run: checkImportStatusKeepsLocalClosure},
+	{name: "external import keeps source actors in a relayed project", methods: []string{"CommentsByIssue", "CreateProject", "ImportBatch", "ImportMappingBySource", "IssueByID", "PinRootAuthority", "SetRelayBindingConfig", "UpsertFederationBinding"}, run: checkImportRelayActor},
 	{name: "issue status federation intent", methods: []string{"IngestFederationEvents", "MaterializeFederatedProject", "CreateIssue", "UpsertIssueSyncBinding"}, run: checkIssueStatusFederationIntent},
 	{name: "issue status native intent", methods: []string{"CloseIssueWithEvents", "ReopenIssue", "CreateIssue", "UpsertIssueSyncBinding"}, runWithBackend: checkIssueStatusNativeIntent},
 	{name: "issue status mapping reads", methods: []string{"CreateProject", "CreateIssue", "ClaimIssueSyncBinding", "UpsertIssueSyncBinding"}, run: checkIssueStatusMappingReads},
