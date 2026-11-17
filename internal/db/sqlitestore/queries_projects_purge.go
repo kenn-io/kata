@@ -71,6 +71,9 @@ func (d *Store) purgeProject(ctx context.Context, p db.PurgeProjectParams) (db.P
 			return db.ProjectPurgeLog{}, fmt.Errorf("retire hub federation binding: %w", err)
 		}
 	}
+	if err := db.ClearFederationRetainedProject(ctx, conn, project.UID); err != nil {
+		return db.ProjectPurgeLog{}, err
+	}
 	plID, err := purgeProjectCascade(ctx, conn, project, p.Actor, p.Reason, d.instanceUID)
 	if err != nil {
 		return db.ProjectPurgeLog{}, err
