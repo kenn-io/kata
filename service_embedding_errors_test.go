@@ -1,27 +1,37 @@
 package kata
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/testenv"
-	"go.kenn.io/kata/internal/vector"
 )
 
 func TestServiceRejectsEmbeddingIndexError(t *testing.T) {
 	ctx := t.Context()
-	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
-	indexErr := errors.New("index setup failed")
-	service, err := newService(ctx, Config{DSN: dsn, Auth: AuthConfig{TrustCallerAuthentication: true}, Embeddings: EmbeddingsConfig{BaseURL: "http://127.0.0.1:1234", Model: "test", Dims: 2}}, serviceDeps{openEmbeddingIndex: func(context.Context, *sql.DB) (*vector.Index, error) { return nil, indexErr }})
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	var owner string
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&owner))
+	cfg := Config{DSN: dsn, Postgres: PostgresConfig{Schema: "kata", SchemaMode: PostgresSchemaBootstrap, SchemaOwner: owner}, Auth: AuthConfig{TrustCallerAuthentication: true}}
+	service, err := New(ctx, cfg)
+	require.NoError(t, err)
+	require.NoError(t, service.Close())
+	_, err = admin.ExecContext(ctx, `CREATE EXTENSION vector WITH SCHEMA public`)
+	require.NoError(t, err)
+	cfg.Postgres.SchemaMode = PostgresSchemaValidate
+	cfg.Embeddings = EmbeddingsConfig{BaseURL: "http://127.0.0.1:1234", Model: "test", Dims: 2}
+	service, err = New(ctx, cfg)
 	require.Nil(t, service)
-	require.ErrorIs(t, err, indexErr)
+	require.ErrorContains(t, err, "embedding index")
+	require.ErrorContains(t, err, "semantic-search tables are not installed")
 }
 
 func TestServiceLocalEmbeddingsDefaultAndMissingIndexHealth(t *testing.T) {

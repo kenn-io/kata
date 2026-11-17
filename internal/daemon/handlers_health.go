@@ -51,8 +51,11 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if diagnostics {
 			out.Body.DBPath = cfg.DB.Path()
 		}
-		if diagnostics && cfg.ReconcilerHealth != nil {
-			h := cfg.ReconcilerHealth()
+		if diagnostics && (cfg.ReconcilerHealth != nil || cfg.EmbeddingUnavailableReason != "") {
+			h := ReconcilerHealth{Configured: true, LastError: cfg.EmbeddingUnavailableReason}
+			if cfg.ReconcilerHealth != nil {
+				h = cfg.ReconcilerHealth()
+			}
 			out.Body.Embeddings = &api.EmbeddingsHealth{
 				Configured:      h.Configured,
 				ErrorPresent:    h.LastError != "",

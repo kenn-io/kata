@@ -166,7 +166,7 @@ func TestServiceEmbedsIssueCreatedWhileRunning(t *testing.T) {
 	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
 	t.Cleanup(cleanup)
-	endpoint := newTwoDimensionalEmbeddingServer(t)
+	endpoint := testenv.NewTwoDimensionalEmbeddingServer(t, nil)
 	service, err := kata.New(ctx, kata.Config{DSN: dsn, Auth: kata.AuthConfig{TrustCallerAuthentication: true}, Embeddings: kata.EmbeddingsConfig{BaseURL: endpoint.URL, Model: "test-model", Dims: 2, TrustPrivateNetwork: true}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
@@ -233,26 +233,4 @@ func TestServiceEmbedsIssueCreatedWhileRunning(t *testing.T) {
 		}
 		return resp.StatusCode == http.StatusOK && json.NewDecoder(resp.Body).Decode(&body) == nil && len(body.Results) == 1 && body.Results[0].Issue.Title == "new issue after startup"
 	}, 10*time.Second, 100*time.Millisecond)
-}
-
-func newTwoDimensionalEmbeddingServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Input []string `json:"input"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Error(err)
-			return
-		}
-		data := make([]map[string]any, len(request.Input))
-		for i := range request.Input {
-			data[i] = map[string]any{"embedding": []float32{1, 0}, "index": i}
-		}
-		if err := json.NewEncoder(w).Encode(map[string]any{"data": data}); err != nil {
-			t.Error(err)
-		}
-	}))
-	t.Cleanup(server.Close)
-	return server
 }

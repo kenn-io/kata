@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/activity"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
@@ -93,6 +94,20 @@ type embeddingProgress struct {
 }
 
 const progressRateAlpha = 0.3
+
+// NewConfiguredEmbeddingReconciler shares the embedding producer policy across hosts.
+func NewConfiguredEmbeddingReconciler(store db.Storage, idx *vector.Index, emb *embedding.Client, cfg config.EmbeddingsConfig, publisher EventPublisher, admission activity.WaitableAdmission, credentials config.FederationCredentialStore, connected, authorized func(context.Context, db.Storage, config.FederationCredentialStore, string, embedding.ArtifactIdentity) (bool, error)) *Reconciler {
+	return NewReconciler(store, idx, emb, ReconcilerConfig{
+		BatchSize: cfg.BatchSize, BatchOptions: embedding.BatchOptions(cfg, emb.BatchSize()), DrainAdmission: admission,
+		OnProjectEvent: func(event db.Event, fork activity.Admission) { publisher.EventFrom(event.ProjectID, event, fork) },
+		FederationProducerAllowed: func(ctx context.Context, projectUID string, recipe embedding.ArtifactIdentity, _ activity.Admission, syncArtifacts bool) (bool, error) {
+			if syncArtifacts {
+				return connected(ctx, store, credentials, projectUID, recipe)
+			}
+			return authorized(ctx, store, credentials, projectUID, recipe)
+		},
+	})
+}
 
 // NewReconciler constructs a reconciler. It does no I/O.
 func NewReconciler(store db.Storage, idx *vector.Index, emb embedder, cfg ReconcilerConfig) *Reconciler {

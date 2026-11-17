@@ -2257,18 +2257,7 @@ func startEmbeddingReconciler(
 	if len(publishers) > 0 {
 		publisher = publishers[0]
 	}
-	reconciler := daemon.NewReconciler(store, idx, embedder, daemon.ReconcilerConfig{
-		BatchSize:      ec.BatchSize,
-		BatchOptions:   embedding.BatchOptions(ec, embedder.BatchSize()),
-		DrainAdmission: drainAdmission,
-		OnProjectEvent: func(event db.Event, fork activity.Admission) { publisher.EventFrom(event.ProjectID, event, fork) },
-		FederationProducerAllowed: func(ctx context.Context, projectUID string, recipe embedding.ArtifactIdentity, _ activity.Admission, syncArtifacts bool) (bool, error) {
-			if !syncArtifacts {
-				return federation.EmbeddingProducerAuthorized(ctx, store, config.DefaultFederationCredentialStore(), projectUID, recipe)
-			}
-			return federation.EmbeddingProducerConnected(ctx, store, config.DefaultFederationCredentialStore(), projectUID, recipe)
-		},
-	})
+	reconciler := daemon.NewConfiguredEmbeddingReconciler(store, idx, embedder, ec, publisher, drainAdmission, config.DefaultFederationCredentialStore(), federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized)
 	workers.Go(func() {
 		if err := reconciler.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			daemonLog.Printf("reconciler: %v", err)

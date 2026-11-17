@@ -26,7 +26,7 @@ func TestServicePgvectorRecoveryWithSchemaBootstrap(t *testing.T) {
 	t.Cleanup(func() { _ = admin.Close() })
 	var owner string
 	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&owner))
-	endpoint := newTwoDimensionalEmbeddingServer(t)
+	endpoint := testenv.NewTwoDimensionalEmbeddingServer(t, nil)
 	cfg := kata.Config{
 		DSN: dsn, Postgres: kata.PostgresConfig{Schema: "kata", SchemaMode: kata.PostgresSchemaBootstrap, SchemaOwner: owner},
 		Auth:       kata.AuthConfig{TrustCallerAuthentication: true},

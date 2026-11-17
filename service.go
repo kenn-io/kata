@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"go.kenn.io/kata/internal/activity"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -235,7 +234,6 @@ type Config struct {
 }
 
 type serviceDeps struct {
-	openEmbeddingIndex         func(context.Context, *sql.DB) (*vector.Index, error)
 	notionSyncFetcher          notionsync.Fetcher
 	notionSyncFetcherFactory   func(config.NotionSyncConfig) notionsync.Fetcher
 	planeSyncFetcher           planesync.Fetcher
@@ -418,11 +416,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 			_ = store.Close()
 			return nil, fmt.Errorf("kata: embedding client: %w", err)
 		}
-		openIndex := deps.openEmbeddingIndex
-		if openIndex == nil {
-			openIndex = vector.OpenPostgres
-		}
-		index, err = openIndex(ctx, store.(*pgstore.Store).DB)
+		index, err = vector.OpenPostgres(ctx, store.(*pgstore.Store).DB)
 		if errors.Is(err, vector.ErrPgvectorMissing) {
 			unavailable = err.Error()
 		} else if err != nil {
@@ -445,16 +439,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	publisher := daemon.NewEventPublisher(broadcaster, hookSink)
 	var reconciler *daemon.Reconciler
 	if index != nil {
-		reconciler = daemon.NewReconciler(store, index, embedder, daemon.ReconcilerConfig{
-			BatchSize: cfg.Embeddings.BatchSize, BatchOptions: embedding.BatchOptions(cfg.Embeddings, embedder.BatchSize()),
-			OnProjectEvent: func(event db.Event, fork activity.Admission) { publisher.EventFrom(event.ProjectID, event, fork) },
-			FederationProducerAllowed: func(ctx context.Context, projectUID string, recipe embedding.ArtifactIdentity, _ activity.Admission, syncArtifacts bool) (bool, error) {
-				if syncArtifacts {
-					return federation.EmbeddingProducerConnected(ctx, store, federationCredentials, projectUID, recipe)
-				}
-				return federation.EmbeddingProducerAuthorized(ctx, store, federationCredentials, projectUID, recipe)
-			},
-		})
+		reconciler = daemon.NewConfiguredEmbeddingReconciler(store, index, embedder, cfg.Embeddings, publisher, nil, federationCredentials, federation.EmbeddingProducerConnected, federation.EmbeddingProducerAuthorized)
 	}
 	federationWake := make(chan struct{}, 1)
 	wakeFederation := func() {
@@ -627,10 +612,6 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	if reconciler != nil {
 		serverConfig.ReconcilerHealth = reconciler.Health
 		serverConfig.EmbeddingWake = reconciler.RetryNow
-	} else if unavailable != "" {
-		serverConfig.ReconcilerHealth = func() daemon.ReconcilerHealth {
-			return daemon.ReconcilerHealth{Configured: true, LastError: unavailable}
-		}
 	}
 	mcpEventsService := newMCPEventsService(ctx, cfg.MCPEvents, serverConfig, broadcaster, deps.mcpEventsWebhook, logger)
 	serverConfig.MCPEvents = mcpEventsService

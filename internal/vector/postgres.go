@@ -427,48 +427,53 @@ func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (in
 	if err != nil {
 		return 0, fmt.Errorf("vector: scan postgres mirror keys: %w", err)
 	}
-	changed, stale, err := syncMirror(ctx, store, known, func(issue db.IssueContent) (int, error) {
+	changed, stale, err := syncMirror(ctx, store, known, func(page []db.IssueContent) (int, error) {
 		tx, err := p.beginReconcilerTx(ctx)
 		if err != nil {
 			return 0, fmt.Errorf("vector: begin postgres mirror upsert: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
-		result, err := tx.ExecContext(ctx, `
+		changed := 0
+		for _, issue := range page {
+			result, err := tx.ExecContext(ctx, `
 			INSERT INTO issue_vector_mirror(issue_uid, project_uid, content, content_revision)
 			VALUES($1, $2, $3, $4)
 			ON CONFLICT(issue_uid) DO UPDATE SET
 			  project_uid = EXCLUDED.project_uid,
 			  content = EXCLUDED.content,
 			  content_revision = EXCLUDED.content_revision`,
-			issue.UID, issue.ProjectUID, embedding.EmbedText(issue.Title, issue.Body), issue.ContentRevision)
-		if err != nil {
-			return 0, fmt.Errorf("vector: upsert postgres mirror row %s: %w", issue.UID, err)
+				issue.UID, issue.ProjectUID, embedding.EmbedText(issue.Title, issue.Body), issue.ContentRevision)
+			if err != nil {
+				return 0, fmt.Errorf("vector: upsert postgres mirror row %s: %w", issue.UID, err)
+			}
+			if affected, err := result.RowsAffected(); err == nil {
+				changed += int(affected)
+			}
 		}
 		if err := tx.Commit(); err != nil {
 			return 0, fmt.Errorf("vector: commit postgres mirror upsert: %w", err)
 		}
-		if affected, err := result.RowsAffected(); err == nil {
-			return int(affected), nil
-		}
-		return 0, nil
+		return changed, nil
 	})
 	if err != nil {
 		return changed, err
 	}
-	for _, uid := range stale {
+	for start := 0; start < len(stale); start += mirrorPageSize {
+		end := min(start+mirrorPageSize, len(stale))
 		tx, err := p.beginReconcilerTx(ctx)
 		if err != nil {
 			return changed, fmt.Errorf("vector: begin postgres mirror delete: %w", err)
 		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM issue_vector_mirror WHERE issue_uid = $1`, uid)
-		if err != nil {
-			_ = tx.Rollback()
-			return changed, fmt.Errorf("vector: delete postgres mirror row %s: %w", uid, err)
+		for _, uid := range stale[start:end] {
+			if _, err = tx.ExecContext(ctx, `DELETE FROM issue_vector_mirror WHERE issue_uid = $1`, uid); err != nil {
+				_ = tx.Rollback()
+				return changed, fmt.Errorf("vector: delete postgres mirror row %s: %w", uid, err)
+			}
 		}
 		if err := tx.Commit(); err != nil {
 			return changed, fmt.Errorf("vector: commit postgres mirror delete: %w", err)
 		}
-		changed++
+		changed += end - start
 	}
 	return changed, nil
 }

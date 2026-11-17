@@ -2,10 +2,7 @@ package kata
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -24,22 +21,7 @@ func TestServiceEmbeddingHonorsRevokedWorkerFence(t *testing.T) {
 	t.Cleanup(cleanup)
 	revoked := atomic.Bool{}
 	requests := make(chan []string, 4)
-	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var input struct {
-			Input []string `json:"input"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-			t.Error(err)
-			return
-		}
-		requests <- input.Input
-		data := make([]map[string]any, len(input.Input))
-		for i := range input.Input {
-			data[i] = map[string]any{"embedding": []float32{1, 0}, "index": i}
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
-	}))
-	t.Cleanup(endpoint.Close)
+	endpoint := testenv.NewTwoDimensionalEmbeddingServer(t, func(input []string) { requests <- input })
 	denied := errors.New("worker authority revoked")
 	service, err := New(ctx, Config{
 		DSN:      dsn,

@@ -29,6 +29,8 @@ remains available and semantic search reports the missing extension. After
 installing pgvector, have the schema owner open the service once with
 `PostgresSchemaBootstrap` to create the optional vector tables. Then restart
 the service with `PostgresSchemaValidate`.
+Issue-scoped credentials receive 503 for explicit semantic or hybrid search;
+automatic search falls back to lexical results.
 
 ## Browser host boundary
 
