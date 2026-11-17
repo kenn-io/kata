@@ -847,11 +847,17 @@ func (c *claimHubClient) SearchShared(ctx context.Context, projectID int64, p hy
 	if response.JSON200.Hits == nil {
 		return nil, false, errors.New("invalid hub search response: missing hits")
 	}
-	var body api.FederationSearchResponse
-	if err := json.Unmarshal(response.Body, &body.Body); err != nil {
+	var body struct {
+		Hits    []api.FederationSearchHit `json:"hits"`
+		Bounded *bool                     `json:"bounded"`
+	}
+	if err := json.Unmarshal(response.Body, &body); err != nil {
 		return nil, false, err
 	}
-	return body.Body.Hits, body.Body.Bounded, nil
+	if body.Bounded == nil {
+		return nil, false, errors.New("invalid hub search response: missing bounded")
+	}
+	return body.Hits, *body.Bounded, nil
 }
 
 type claimHubStatusError struct {
