@@ -855,6 +855,27 @@ jobs:
           key: golangci-lint-${{ runner.os }}-${{ hashFiles('.custom-gcl.yml', 'go.mod') }}-${{ github.sha }}
           restore-keys: golangci-lint-${{ runner.os }}-${{ hashFiles('.custom-gcl.yml', 'go.mod') }}-
 
+      # Each save starts from the previous one, so record what this run uses and save only that.
+      - name: Track lint cache use
+        if: &save-lint-cache github.event_name == 'push' && steps.restore-lint-cache.outputs.cache-hit != 'true'
+        run: |
+          lint_cache=.cache/golangci-lint
+          mkdir -p "$lint_cache" "$GOCACHE" "$GOMODCACHE/cache/download"
+          echo 'Restored lint cache sizes:'
+          du -sh "$lint_cache" "$GOCACHE" "$GOMODCACHE"
+          mv "$GOMODCACHE" "$RUNNER_TEMP/go-mod-cache"
+          mkdir -p "$GOMODCACHE/cache/download"
+          if [ -d "$RUNNER_TEMP/go-mod-cache/cache/download/sumdb" ]; then
+            cp -a "$RUNNER_TEMP/go-mod-cache/cache/download/sumdb" "$GOMODCACHE/cache/download/"
+          fi
+          printf 'GOPROXY=file://%s/go-mod-cache/cache/download|%s\n' "$RUNNER_TEMP" "$GOPROXY" >> "$GITHUB_ENV"
+          # Go and golangci-lint refresh entry mtimes at most hourly; age them so every use is recorded.
+          for cache in "$lint_cache" "$GOCACHE"; do
+            find "$cache" -mindepth 2 -maxdepth 2 -path "$cache/[0-9a-f][0-9a-f]/*" \( -name '*-a' -o -name '*-d' \) \
+              -exec touch -d '2 hours ago' -- {} +
+          done
+          touch "$RUNNER_TEMP/lint-cache-used-after"
+
       - name: Fetch Go checkers
         run: GOFLAGS="${GOFLAGS:+$GOFLAGS }-n" kit-retry 3 5 make lint-workflow-retries
 
@@ -877,8 +898,21 @@ jobs:
           GOOS: windows
         run: make vet
 
+      - name: Trim unused lint cache entries
+        if: *save-lint-cache
+        run: |
+          lint_cache=.cache/golangci-lint
+          echo 'Lint cache sizes before trimming:'
+          du -sh "$lint_cache" "$GOCACHE" "$GOMODCACHE"
+          for cache in "$lint_cache" "$GOCACHE"; do
+            find "$cache" -mindepth 2 -maxdepth 2 -path "$cache/[0-9a-f][0-9a-f]/*" \( -name '*-a' -o -name '*-d' \) \
+              ! -newer "$RUNNER_TEMP/lint-cache-used-after" -exec rm -rf -- {} +
+          done
+          echo 'Lint cache sizes after trimming:'
+          du -sh "$lint_cache" "$GOCACHE" "$GOMODCACHE"
+
       - name: Save lint caches
-        if: github.event_name == 'push' && steps.restore-lint-cache.outputs.cache-hit != 'true'
+        if: *save-lint-cache
         uses: actions/cache/save@v6.1.0
         with:
           path: |
