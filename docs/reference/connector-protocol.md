@@ -31,8 +31,10 @@ child is still running and has not closed standard output shortly after the
 connector exits, Kata ends the connector's process tree and fails the call. A
 process that left the tree, such as a Unix process in its own process group,
 keeps the call waiting until it closes standard output or the connector
-timeout ends the call. In that case the call fails with a timeout error even
-though the connector itself already exited.
+timeout ends the call. The call then fails with
+`external connector request timed out` even though the connector exited. If
+you see that error, look for a background process that kept standard output
+open.
 
 Every request contains:
 
