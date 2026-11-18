@@ -31,7 +31,7 @@ type scheduleMetadata struct {
 }
 
 // StampScheduleZones records the zone of each newly written civil date.
-// A patched timezone also rebinds the stored civil dates the patch omits.
+// A patched timezone also binds legacy unzoned dates the patch omits.
 func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone string) (map[string]jsontext.Value, error) {
 	old := map[string]jsontext.Value{}
 	if current != "" {
@@ -63,9 +63,6 @@ func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone st
 				continue
 			}
 			return nil, fmt.Errorf("%w: %v", ErrInvalidValue, err)
-		}
-		if rebind {
-			value, _ = SplitScheduleZone(value)
 		}
 		if _, explicit := SplitScheduleZone(value); kind == scheduledOnInstant || explicit != "" {
 			continue

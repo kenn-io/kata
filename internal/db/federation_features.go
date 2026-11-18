@@ -54,7 +54,7 @@ func MergeEventFeatures(values ...string) string {
 	return strings.Join(parts, ",")
 }
 
-// PayloadRequiredFeatures supplements type classification with native delivery state.
+// PayloadRequiredFeatures supplements type classification with payload features.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	required := EventRequiredFeatures(kind)
 	native, err := payloadHasNativeRecurringState(kind, payload)
@@ -63,6 +63,13 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	}
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
+	}
+	zoned, err := payloadHasZonedDate(kind, payload)
+	if err != nil {
+		return "", err
+	}
+	if zoned {
+		required = MergeEventFeatures(required, IssueDateZoneEventFeature)
 	}
 	return required, nil
 }

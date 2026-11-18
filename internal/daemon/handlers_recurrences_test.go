@@ -100,12 +100,13 @@ func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
 	assert.Equal(t, "2026-08-10", *created.OccurrenceKey)
 }
 
-func TestRecurrenceDeadlineUsesIssueOrDaemonTimezone(t *testing.T) {
+func TestRecurrenceDeadlineUsesIssueOrRecurrenceTimezone(t *testing.T) {
 	for _, tc := range []struct {
 		name, metadata, want string
 		patch                bool
 	}{
-		{"daemon default", `{"deadline_on":"2026-08-12T23:30"}`, "2026-08-12T23:30[America/New_York]", false},
+		{"recurrence timezone", `{"deadline_on":"2026-08-12T23:30"}`, "2026-08-12T23:30[Asia/Tokyo]", false},
+		{"patched recurrence timezone", `{"deadline_on":"2026-08-12T23:30"}`, "2026-08-12T23:30[Asia/Tokyo]", true},
 		{"template timezone", `{"deadline_on":"2026-08-12T23:30","timezone":"Europe/Paris"}`, "2026-08-12T23:30[Europe/Paris]", false},
 		{"template patch", `{"deadline_on":"2026-08-12T23:30","timezone":"Europe/Paris"}`, "2026-08-12T23:30[Europe/Paris]", true},
 	} {
@@ -155,7 +156,7 @@ func TestRecurrenceDeadlineUsesIssueOrDaemonTimezone(t *testing.T) {
 		require.NoError(t, err)
 		var metadata map[string]any
 		require.NoError(t, json.Unmarshal([]byte(next.Metadata), &metadata))
-		assert.Equal(t, "2026-08-12T23:30[America/New_York]", metadata["deadline_on"])
+		assert.Equal(t, "2026-08-12T23:30[Asia/Tokyo]", metadata["deadline_on"])
 	})
 }
 

@@ -246,6 +246,10 @@
     if (actionsDisabled) return
     const property = 'scheduled'
     scheduledDraft = value
+    if (value !== '' && value === scheduledDate()) {
+      resetDraft(property)
+      return
+    }
     const mutationUID = uid()
     const generation = draftResetGeneration
     const ok = await onPatchMetadata(mutationUID, { scheduled_on: value === '' ? null : value })

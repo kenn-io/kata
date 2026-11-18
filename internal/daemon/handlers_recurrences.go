@@ -153,7 +153,7 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 				Metadata: jsontext.Value(in.Body.Template.Metadata),
 			},
 		}
-		createInput.Template.Metadata, err = stampRecurrenceDeadline(createInput.Template.Metadata, cfg.DefaultTimezone)
+		createInput.Template.Metadata, err = stampRecurrenceDeadline(createInput.Template.Metadata, createInput.Timezone)
 		if err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
@@ -289,7 +289,11 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 			update.TemplateLabels = in.Body.Template.Labels
 			update.TemplateMetadata = (*jsontext.Value)(in.Body.Template.Metadata)
 			if update.TemplateMetadata != nil {
-				stamped, err := stampRecurrenceDeadline(*update.TemplateMetadata, cfg.DefaultTimezone)
+				zone := rec.Timezone
+				if update.Timezone != nil {
+					zone = *update.Timezone
+				}
+				stamped, err := stampRecurrenceDeadline(*update.TemplateMetadata, zone)
 				if err != nil {
 					return nil, api.NewError(400, "validation", err.Error(), "", nil)
 				}

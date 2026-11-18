@@ -40,7 +40,7 @@ func TestComposeRecurrenceIssueMetadataDefensivelyRejectsInvalidReservedValue(t 
 func TestRecurrenceDeadlineKeepsItsZone(t *testing.T) {
 	value, err := ComposeRecurrenceIssueMetadata(jsontext.Value(`{"deadline_on":"2026-06-01T09:00"}`), "2026-05-18", "Asia/Tokyo", "America/New_York")
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"scheduled_on":"2026-05-18[Asia/Tokyo]","timezone":"Asia/Tokyo","deadline_on":"2026-06-01T09:00[America/New_York]"}`, string(value))
+	assert.JSONEq(t, `{"scheduled_on":"2026-05-18[Asia/Tokyo]","timezone":"Asia/Tokyo","deadline_on":"2026-06-01T09:00[Asia/Tokyo]"}`, string(value))
 
 	value, err = ComposeExistingRecurrenceIssueMetadata(jsontext.Value(`{"deadline_on":"2026-06-01T09:00","timezone":"Europe/Paris"}`), "2026-05-18", "Asia/Tokyo", "UTC")
 	require.NoError(t, err)

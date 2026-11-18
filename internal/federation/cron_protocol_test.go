@@ -198,6 +198,31 @@ func TestCronReturnedPageRequiresFeaturesEvenWithoutLatch(t *testing.T) {
 	}
 }
 
+func TestOldPullerRejectsZonedDateEvent(t *testing.T) {
+	store := nativeStore(t, "sqlite")
+	server := nativeHTTP(t, store)
+	project, err := store.CreateProject(t.Context(), "hub-project")
+	require.NoError(t, err)
+	_, err = store.EnableProjectFederation(t.Context(), project.ID, "worker")
+	require.NoError(t, err)
+	origin, err := uid.New()
+	require.NoError(t, err)
+	grant, err := store.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &project.ID, Capabilities: "pull", Actor: "worker"})
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Scheduled work", Author: "worker"})
+	require.NoError(t, err)
+	_, err = store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-08-21[Asia/Tokyo]"`)}})
+	require.NoError(t, err)
+	path := fmt.Sprintf("%s/api/v1/projects/%d/federation/events?after_id=0", server.URL, project.ID)
+	resp, data := nativeRequest(t, path, grant.Token, db.CronEventFeature, http.MethodGet, nil)
+	require.Equal(t, http.StatusConflict, resp.StatusCode, string(data))
+	require.Contains(t, string(data), "unsupported_event_features")
+	require.NotContains(t, string(data), "2026-08-21")
+	resp, data = nativeRequest(t, path, grant.Token, db.SupportedEventFeatures, http.MethodGet, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(data))
+	require.Contains(t, string(data), "2026-08-21[Asia/Tokyo]")
+}
+
 func TestCronClientRejectsUnknownRequirementsBeforeReset(t *testing.T) {
 	for _, required := range []string{"future_v2", "cron_notify_children_v1"} {
 		t.Run(required, func(t *testing.T) {

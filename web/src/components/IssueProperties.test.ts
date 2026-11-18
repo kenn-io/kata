@@ -236,6 +236,21 @@ describe('IssueProperties', () => {
     expect(onPatchMetadata).not.toHaveBeenCalled()
   })
 
+  it('keeps a timed schedule when selecting its displayed day', async () => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2026-08-31',
+        metadata: { scheduled_on: '2026-09-01T09:00[Asia/Tokyo]' },
+      }),
+      onPatchMetadata,
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Aug 31, 2026/ }))
+    expect(onPatchMetadata).not.toHaveBeenCalled()
+  })
+
   it('patches scheduled and due dates and closes editors on accepted replacement', async () => {
     const onPatchMetadata = vi.fn(async () => true)
     const view = renderProperties({ onPatchMetadata, draftResetGeneration: 0 })
