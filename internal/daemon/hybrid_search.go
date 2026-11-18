@@ -216,26 +216,40 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	// project's closer chunks cannot starve this one out of the window.
 	ctx = db.WithAuthorizedProjects(ctx, []string{project.UID})
 	if p.Hub != nil {
-		hits, bounded, err := p.Hub(ctx, p, fetch)
+		hits, bounded, err := p.Hub(ctx, p, fetchCap)
 		if err != nil {
 			return nil, false, err
 		}
-		candidates := make([]db.SearchCandidate, 0, len(hits))
+		uids := make([]string, 0, len(hits))
 		for _, hit := range hits {
-			local, err := store.IssueByUID(ctx, hit.Issue.UID, db.IncludeDeletedNo)
-			if err != nil && !errors.Is(err, db.ErrNotFound) {
-				return nil, false, err
+			uids = append(uids, hit.Issue.UID)
+		}
+		localIssues, err := store.IssuesByUIDs(ctx, uids, db.IncludeDeletedYes)
+		if err != nil {
+			return nil, false, err
+		}
+		candidates := make([]db.SearchCandidate, 0, min(fetch, len(hits)))
+		deleted := false
+		for _, hit := range hits {
+			local, found := localIssues[hit.Issue.UID]
+			if found && local.DeletedAt != nil {
+				deleted = true
+				continue
 			}
 			issue := hit.Issue
 			issue.ID, issue.ProjectID = 0, p.ProjectID
-			if err == nil {
+			if found {
 				issue.ID = local.ID
 				issue.ShortID = local.ShortID
 			} else {
 				issue.ShortID = issue.UID
 			}
 			candidates = append(candidates, db.SearchCandidate{Issue: issue, Score: hit.Score, MatchedIn: []string{"semantic"}})
+			if len(candidates) == fetch {
+				break
+			}
 		}
+		bounded = bounded || (deleted && len(hits) == fetchCap && len(candidates) < p.retrievalLimit())
 		return candidates, bounded, nil
 	}
 	if err := emb.MissingCredentialError(); err != nil {
