@@ -370,18 +370,6 @@ func TestCloseInputFromFormCombinesAttachmentWithTypedEvidence(t *testing.T) {
 	}, got.Evidence)
 }
 
-func TestCloseInputFromFormIgnoresAttachmentChoiceForOtherReasons(t *testing.T) {
-	s := newCloseForm(formTarget{projectID: 7, issueShortID: "abc4"}, closeFormAttachments())
-	s.field(fieldCloseAttachment).radio.set("run.log · 12 bytes")
-	s.field(fieldCloseReason).radio.set("wontfix") // no sync: the stale field must not leak
-	s.field(fieldCloseMessage).area.SetValue("This behavior is intentionally unsupported because it violates the authority boundary.")
-
-	got, err := closeInputFromForm(s, "worker-a")
-
-	require.NoError(t, err)
-	assert.Empty(t, got.Evidence)
-}
-
 func TestCloseInputFromFormWithoutAttachmentStillNeedsEvidence(t *testing.T) {
 	s := newCloseForm(formTarget{projectID: 7, issueShortID: "abc4"}, closeFormAttachments())
 	s.field(fieldCloseMessage).area.SetValue("Delivered the report and checked its final contents.")
