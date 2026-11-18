@@ -186,10 +186,11 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	seen := make(map[string]bool)
 	for _, hit := range body.Results {
 		seen[hit.Issue.UID] = true
-		if hit.Issue.UID == unpulled.UID {
+		switch hit.Issue.UID {
+		case unpulled.UID:
 			require.Equal(t, unpulled.UID, hit.Issue.ShortID)
 			require.Equal(t, "https://tasks.example/kata?issue="+unpulled.UID+"#direct=1", hit.WebURL)
-		} else if hit.Issue.UID == issue.UID {
+		case issue.UID:
 			require.Equal(t, "https://spoke.example/kata?issue="+issue.UID+"#direct=1", hit.WebURL)
 		}
 	}
