@@ -20,13 +20,7 @@ type federationRunnerLeaseState struct {
 	// and release operation so the runner and its monitor never drive pgx on
 	// that session concurrently.
 	mu   sync.Mutex
-	conn leaseQueryer
-}
-
-type leaseQueryer interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-	Close() error
+	conn *sql.Conn
 }
 
 // AcquireFederationRunnerLease elects one federation runner for this
@@ -93,15 +87,15 @@ func (s *Store) AcquireFederationRunnerLease(ctx context.Context) (func() error,
 				if s.federationLease.conn == conn {
 					s.federationLease.conn = nil
 				}
-				// Unlock even after the acquiring context is canceled.
-				releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				_, unlockErr := conn.ExecContext(releaseCtx, `
-					SELECT pg_catalog.pg_advisory_unlock(
-						pg_catalog.hashtext(pg_catalog.current_database()),
-						pg_catalog.hashtext($1)
-					)`, lockName)
-				releaseErr = errors.Join(unlockErr, conn.Close())
+				// Discard the dedicated session to release its advisory lock. A
+				// canceled lock check can break the connection, so sending an
+				// unlock query here can fail during normal shutdown.
+				releaseErr = conn.Raw(func(any) error { return driver.ErrBadConn })
+				if errors.Is(releaseErr, driver.ErrBadConn) || errors.Is(releaseErr, sql.ErrConnDone) {
+					// ErrBadConn requests disposal; ErrConnDone means database/sql
+					// already disposed of the session after a failed query.
+					releaseErr = nil
+				}
 			})
 			return releaseErr
 		}, nil
