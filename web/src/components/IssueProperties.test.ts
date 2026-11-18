@@ -199,17 +199,42 @@ describe('IssueProperties', () => {
   })
 
   it.each([
-    ['scheduled', 'scheduled_on', 'scheduled_on_date', 'Edit scheduled', 'Scheduled'],
-    ['deadline', 'deadline_on', 'deadline_on_date', 'Edit due date', 'Due'],
+    [
+      'scheduled',
+      'scheduled_on',
+      'scheduled_on_date',
+      'Edit scheduled',
+      'Scheduled',
+      '2026-03-08T04:30:00Z',
+      '2026-03-09T03:30:00Z',
+    ],
+    [
+      'deadline',
+      'deadline_on',
+      'deadline_on_date',
+      'Edit due date',
+      'Due',
+      '2026-03-08T04:30:00Z',
+      '2026-03-09T03:30:00Z',
+    ],
+    [
+      'scheduled with fractional seconds',
+      'scheduled_on',
+      'scheduled_on_date',
+      'Edit scheduled',
+      'Scheduled',
+      '2026-03-08T04:30:00,123456789Z',
+      '2026-03-09T03:30:00,123456789Z',
+    ],
   ] as const)(
     'keeps the chosen %s calendar day across daylight saving',
-    async (_, key, projectedKey, edit, picker) => {
+    async (_, key, projectedKey, edit, picker, saved, expected) => {
       vi.stubEnv('TZ', 'America/New_York')
       const onPatchMetadata = vi.fn(async () => true)
       renderProperties({
         issue: makeIssue({
           [projectedKey]: '2026-03-07',
-          metadata: { [key]: '2026-03-08T04:30:00Z' },
+          metadata: { [key]: saved },
         }),
         onPatchMetadata,
       })
@@ -217,28 +242,10 @@ describe('IssueProperties', () => {
       await fireEvent.click(screen.getByRole('button', { name: new RegExp(`${picker}:`) }))
       await fireEvent.click(screen.getByRole('button', { name: /Mar 8, 2026/ }))
       expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
-        [key]: '2026-03-09T03:30:00Z',
+        [key]: expected,
       })
     },
   )
-
-  it('keeps fractional seconds when moving a UTC schedule', async () => {
-    vi.stubEnv('TZ', 'America/New_York')
-    const onPatchMetadata = vi.fn(async () => true)
-    renderProperties({
-      issue: makeIssue({
-        scheduled_on_date: '2026-03-07',
-        metadata: { scheduled_on: '2026-03-08T04:30:00,123456789Z' },
-      }),
-      onPatchMetadata,
-    })
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
-    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
-    await fireEvent.click(screen.getByRole('button', { name: /Mar 8, 2026/ }))
-    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
-      scheduled_on: '2026-03-09T03:30:00,123456789Z',
-    })
-  })
 
   it.each([
     ['scheduled', 'scheduled_on', 'scheduled_on_date', 'Edit scheduled', 'Scheduled'],
@@ -255,6 +262,7 @@ describe('IssueProperties', () => {
         }),
         onPatchMetadata,
       })
+      expect(screen.getByRole('button', { name: edit }).textContent).toContain('Mar 7')
       await fireEvent.click(screen.getByRole('button', { name: edit }))
       await fireEvent.click(screen.getByRole('button', { name: new RegExp(`${picker}:`) }))
       await fireEvent.click(screen.getByRole('button', { name: /Mar 8, 2026/ }))
@@ -269,35 +277,13 @@ describe('IssueProperties', () => {
     },
   )
 
-  it.each([
-    ['scheduled', 'scheduled_on', 'scheduled_on_date', 'Edit scheduled', 'Scheduled'],
-    ['deadline', 'deadline_on', 'deadline_on_date', 'Edit due date', 'Due'],
-  ] as const)(
-    'edits a zoned %s using its projected calendar date',
-    async (_, key, projectedKey, edit, picker) => {
-      vi.stubEnv('TZ', 'America/New_York')
-      const onPatchMetadata = vi.fn(async () => true)
-      renderProperties({
-        issue: makeIssue({
-          [projectedKey]: '2027-05-11',
-          metadata: { [key]: '2027-05-12T00:30[Asia/Tokyo]' },
-        }),
-        onPatchMetadata,
-      })
-      expect(screen.getByRole('button', { name: edit }).textContent).toContain('May 11')
-      await fireEvent.click(screen.getByRole('button', { name: edit }))
-      await fireEvent.click(screen.getByRole('button', { name: new RegExp(`${picker}:`) }))
-      await fireEvent.click(screen.getByRole('button', { name: /May 12, 2027/ }))
-      expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
-        [key]: '2027-05-13T00:30[Asia/Tokyo]',
-      })
-    },
-  )
-
   it('reopens and edits a date-only schedule with its saved zone', async () => {
     const onPatchMetadata = vi.fn(async () => true)
     renderProperties({
-      issue: makeIssue({ metadata: { scheduled_on: '2027-05-12[Europe/Paris]' } }),
+      issue: makeIssue({
+        scheduled_on_date: '2027-05-12',
+        metadata: { scheduled_on: '2027-05-12[Europe/Paris]' },
+      }),
       onPatchMetadata,
     })
     expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toContain('May 12')

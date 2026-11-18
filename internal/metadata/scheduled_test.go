@@ -27,7 +27,6 @@ func TestStampScheduleZonesChoices(t *testing.T) {
 		{"explicit date zone wins during rebinding", `{"timezone":"Asia/Tokyo","scheduled_on":"2026-01-17[America/New_York]"}`, `{"scheduled_on":"2026-01-15[Europe/Paris]","deadline_on":"2026-01-16[Europe/Paris]"}`, "UTC", `{"scheduled_on":"2026-01-17[America/New_York]","deadline_on":"2026-01-16[Asia/Tokyo]","timezone":"Asia/Tokyo"}`},
 		{"cleared timezone uses default", `{"scheduled_on":"2026-01-16","timezone":null}`, `{"scheduled_on":"2026-01-15[Europe/Paris]"}`, "UTC", `{"scheduled_on":"2026-01-16[UTC]","timezone":null}`},
 		{"cleared timezone uses default when no date zone", `{"scheduled_on":"2026-01-16","timezone":null}`, `{"scheduled_on":"2026-01-15","timezone":"Europe/Paris"}`, "Asia/Tokyo", `{"scheduled_on":"2026-01-16[Asia/Tokyo]","timezone":null}`},
-		{"date zone overrides patched timezone", `{"scheduled_on":"2026-01-16[Europe/Paris]","timezone":"Asia/Tokyo"}`, `{}`, "UTC", `{"scheduled_on":"2026-01-16[Europe/Paris]","timezone":"Asia/Tokyo"}`},
 		{"sibling uses issue zone", `{"deadline_on":"2026-01-16"}`, `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]","timezone":"Asia/Tokyo"}`, "UTC", `{"deadline_on":"2026-01-16[Asia/Tokyo]"}`},
 		{"local zone in patch", `{"scheduled_on":"2026-01-15","timezone":"Local"}`, `{}`, "UTC", `{"scheduled_on":"2026-01-15[Europe/Paris]","timezone":"Local"}`},
 		{"local zone in current metadata", `{"scheduled_on":"2026-01-15"}`, `{"timezone":"Local"}`, "UTC", `{"scheduled_on":"2026-01-15[Europe/Paris]"}`},

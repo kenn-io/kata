@@ -2,7 +2,6 @@ package db
 
 import (
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,18 +27,12 @@ func TestComposeRecurrenceIssueMetadataStampsScheduleTimezone(t *testing.T) {
 		input, want string
 	}{
 		{"template", ComposeRecurrenceIssueMetadata, `{"kind":"weekly","timezone":"Not/AZone","scheduled_on":"not-a-date"}`, `{"kind":"weekly","scheduled_on":"2026-05-18[America/New_York]","timezone":"America/New_York"}`},
-		{"existing issue", ComposeExistingRecurrenceIssueMetadata, `{}`, ""},
+		{"existing issue", ComposeExistingRecurrenceIssueMetadata, `{}`, `{"scheduled_on":"2026-05-18[America/New_York]","timezone":"America/New_York"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			value, err := tc.compose(jsontext.Value(tc.input), "2026-05-18", "America/New_York")
 			require.NoError(t, err)
-			if tc.want != "" {
-				assert.JSONEq(t, tc.want, string(value))
-				return
-			}
-			var fields map[string]jsontext.Value
-			require.NoError(t, json.Unmarshal(value, &fields))
-			assert.JSONEq(t, `"2026-05-18[America/New_York]"`, string(fields["scheduled_on"]))
+			assert.JSONEq(t, tc.want, string(value))
 		})
 	}
 }
