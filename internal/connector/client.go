@@ -39,6 +39,7 @@ var (
 	errResponseTooLarge      = errors.New("connector response exceeds 4 MiB")
 	errConnectorChildTimeout = errors.New("connector child timeout")
 	errConnectorCleanupWait  = errors.New("connector process cleanup timed out")
+	errConnectorOutputHeld   = errors.New("connector descendant kept stdout open after exit")
 	protocolErrorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 	// ErrProcessFailure marks connector executable startup, transport, or exit
@@ -383,11 +384,6 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 	//nolint:noctx // processtree below terminates the whole tree when commandCtx ends.
 	command := exec.Command(p.config.Command, p.config.Args...) // #nosec G204 -- executable and args are operator-controlled validated configuration.
 	command.Env = childEnv
-	command.Stdin = bytes.NewReader(input)
-	command.Stderr = io.Discard
-	stdout := &cappedBuffer{limit: maxResponseBytes}
-	command.Stdout = stdout
-	command.WaitDelay = connectorProcessCleanupGrace
 	consolewindow.Hide(command)
 	if commandCtx.Err() != nil {
 		return connectorContextError(ctx, context.Cause(commandCtx))
@@ -405,7 +401,16 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 	if commandCtx.Err() != nil {
 		return connectorContextError(ctx, context.Cause(commandCtx))
 	}
+	streams, err := openConnectorStreams(command)
+	if err != nil {
+		return newCallFailure(ErrProcessFailure, err)
+	}
+	// Close is idempotent; the error paths below discard stream state.
+	defer func() { _ = streams.close() }()
 	if err := processTree.Start(); err != nil {
+		return newCallFailure(ErrProcessFailure, err)
+	}
+	if err := streams.start(input); err != nil {
 		return newCallFailure(ErrProcessFailure, err)
 	}
 	waitResult := make(chan error, 1)
@@ -427,25 +432,173 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 	if runErr != nil {
 		_ = processTree.Close()
 		closed = true
-		if errors.Is(runErr, exec.ErrWaitDelay) {
-			if err := receivedProtocolViolation(stdout, request.ID, method, result, redactions); err != nil {
-				return err
-			}
-		}
 		return newCallFailure(ErrProcessFailure, runErr)
 	}
-	if err := processTree.Close(); err != nil {
+	held, contextCause := awaitConnectorOutput(commandCtx, streams.readDone, processTree.Alive)
+	if contextCause != nil {
+		_ = processTree.Close()
 		closed = true
-		return newCallFailure(ErrProcessFailure, err)
+		return connectorContextError(ctx, contextCause)
+	}
+	if held {
+		_ = processTree.Close()
+		closed = true
+		_ = streams.close()
+		if err := receivedProtocolViolation(&streams.output, request.ID, method, result, redactions); err != nil {
+			return err
+		}
+		return newCallFailure(ErrProcessFailure, errConnectorOutputHeld)
 	}
 	closed = true
-	return decodeResponse(stdout, request.ID, method, result, redactions)
+	if err := processTree.Close(); err != nil {
+		return newCallFailure(ErrProcessFailure, err)
+	}
+	if err := streams.close(); err != nil {
+		return newCallFailure(ErrProcessFailure, err)
+	}
+	return decodeResponse(&streams.output, request.ID, method, result, redactions)
+}
+
+// awaitConnectorOutput waits, after the connector exited successfully, for its
+// stdout to reach end of file. Once nothing in the contained tree is alive,
+// only a process that escaped containment can hold stdout open, so only the
+// request context bounds the wait. A live descendant gets the cleanup grace
+// to release stdout; held reports that it kept stdout open past the grace.
+func awaitConnectorOutput(ctx context.Context, drained <-chan struct{}, alive func() bool) (held bool, contextCause error) {
+	var grace <-chan time.Time
+	if alive() {
+		timer := time.NewTimer(connectorProcessCleanupGrace)
+		defer timer.Stop()
+		grace = timer.C
+	}
+	for {
+		select {
+		case <-drained:
+			return false, nil
+		case <-ctx.Done():
+			return false, outputContextCause(ctx, drained)
+		case <-grace:
+			if alive() {
+				return !channelClosed(drained), nil
+			}
+			grace = nil
+		}
+	}
+}
+
+func outputContextCause(ctx context.Context, drained <-chan struct{}) error {
+	if channelClosed(drained) {
+		return nil
+	}
+	return context.Cause(ctx)
+}
+
+// channelClosed reports whether done is already closed. select picks randomly among
+// ready cases, so callers recheck this before acting on another case.
+func channelClosed(done <-chan struct{}) bool {
+	select {
+	case <-done:
+		return true
+	default:
+		return false
+	}
+}
+
+// connectorStreams owns the pipes for a connector's stdin and stdout. The
+// command receives the child ends as files, so exec starts no copying
+// goroutines and Wait returns as soon as the connector exits. Reading stdout
+// to end of file is a separate step, which lets the caller check whether
+// anything in the connector's tree can still be writing. Stderr stays unset,
+// so exec discards it through the null device.
+type connectorStreams struct {
+	childStdin, stdin   *os.File
+	stdout, childStdout *os.File
+	output              cappedBuffer
+	started             bool
+	closed              bool
+	writeDone, readDone chan struct{}
+	writeErr            error
+}
+
+func openConnectorStreams(command *exec.Cmd) (*connectorStreams, error) {
+	childStdin, stdin, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	stdout, childStdout, err := os.Pipe()
+	if err != nil {
+		return nil, errors.Join(err, childStdin.Close(), stdin.Close())
+	}
+	command.Stdin = childStdin
+	command.Stdout = childStdout
+	return &connectorStreams{
+		childStdin:  childStdin,
+		stdin:       stdin,
+		stdout:      stdout,
+		childStdout: childStdout,
+		output:      cappedBuffer{limit: maxResponseBytes},
+		writeDone:   make(chan struct{}),
+		readDone:    make(chan struct{}),
+	}, nil
+}
+
+// start runs after the connector started. It closes this process's copies of
+// the child ends, so stdout reaches end of file once every process holding it
+// exits, then writes the request and reads the response concurrently.
+func (s *connectorStreams) start(input []byte) error {
+	if err := errors.Join(s.childStdin.Close(), s.childStdout.Close()); err != nil {
+		return err
+	}
+	s.started = true
+	go func() {
+		defer close(s.writeDone)
+		_, err := s.stdin.Write(input)
+		if brokenPipe(err) {
+			// The connector stopped reading its input; its exit status and
+			// response decide the call, as they do for os/exec.
+			err = nil
+		}
+		s.writeErr = errors.Join(err, s.stdin.Close())
+	}()
+	go func() {
+		defer close(s.readDone)
+		// Reads only end in EOF or in an error after close cancels them.
+		_, _ = io.Copy(&s.output, s.stdout)
+	}()
+	return nil
+}
+
+// close releases the pipes and waits for both copies to stop. It reports a
+// request write failure only when the write finished on its own; a write
+// still blocked on a process that kept stdin open is canceled because the
+// connector has already exited.
+func (s *connectorStreams) close() error {
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	if !s.started {
+		return errors.Join(s.childStdin.Close(), s.childStdout.Close(), s.stdin.Close(), s.stdout.Close())
+	}
+	var writeErr error
+	select {
+	case <-s.writeDone:
+		writeErr = s.writeErr
+	default:
+		if err := s.stdin.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			writeErr = err
+		}
+		<-s.writeDone
+	}
+	err := s.stdout.Close()
+	<-s.readDone
+	return errors.Join(writeErr, err)
 }
 
 // receivedProtocolViolation returns the protocol violation in the output a
-// connector wrote before WaitDelay closed its pipes. The connector exited
-// successfully, but its output did not reach end of file in time, so stdout
-// holds only a prefix of the stream. Once that prefix contains a complete
+// connector wrote before the client stopped reading. The connector exited
+// successfully, but a descendant kept its stdout open past the cleanup grace,
+// so stdout holds only a prefix of the stream. Once that prefix contains a complete
 // first response, every protocol check has a final verdict: later bytes can
 // only add trailing data, which is itself a violation. A shorter prefix may be
 // truncated rather than malformed, so it proves nothing and the caller reports
