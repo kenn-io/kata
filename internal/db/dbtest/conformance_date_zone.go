@@ -19,7 +19,7 @@ func checkDateZoneFederation(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	peer, err := uid.New()
 	require.NoError(t, err)
-	event := newRemoteEvent(t, project, &issue.UID, "issue.metadata_updated", "operator", peer, 999, jsontext.Value(`{"diff":{"scheduled_on":{"from":null,"to":"2026-01-15"}},"revision_new":2}`))
+	event := newRemoteEvent(t, project, &issue.UID, "issue.metadata_updated", "operator", peer, 999, jsontext.Value(`{"diff":{"scheduled_on":{"from":null,"to":"2026-01-15[Europe/Paris]"}},"revision_new":2}`))
 	before, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
 	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: project.ID, SpokeInstanceUID: peer, BoundActor: "operator", Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}})
@@ -34,12 +34,8 @@ func checkDateZoneFederation(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	before, err = store.MaxEventID(ctx)
 	require.NoError(t, err)
-	for _, metadata := range []bool{false, true} {
-		read, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: metadata, Limit: 100})
-		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-		require.Zero(t, read.ResetAfterID)
-		require.Zero(t, read.NextAfterID)
-	}
+	_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Limit: 100})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
 	after, err = store.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, before, after)

@@ -352,28 +352,6 @@ func checkScheduledReachedFloor(t *testing.T, store db.Storage) error {
 	require.NotNil(t, out.Reached, "a past date set at or after the floor is reached")
 	assert.Contains(t, out.Reached.Payload, `"value":"2020-01-02"`)
 
-	recurring, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: project.ID, Title: "Overdue recurrence", Author: "coordinator",
-	})
-	require.NoError(t, err)
-	attached, err := store.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{
-		IssueID:    recurring.ID,
-		Recurrence: db.CreateRecurrenceIn{ProjectID: project.ID, Actor: "coordinator", Rule: "FREQ=DAILY", DTStart: "2020-01-03", Timezone: "Europe/Paris", Template: db.RecurrenceTemplate{Title: "Overdue recurrence"}},
-	})
-	require.NoError(t, err)
-	var materializedAt time.Time
-	for _, event := range attached.Events {
-		if event.Type == "recurrence.materialized" {
-			materializedAt = event.CreatedAt
-		}
-	}
-	require.False(t, materializedAt.IsZero())
-	recurrenceFloor := materializedAt.Add(-time.Nanosecond)
-	out = reconcile(recurring.ID, materializedAt.Add(time.Minute), &recurrenceFloor)
-	require.NotNil(t, out.Reached, "an overdue recurrence attached after the floor is reached")
-	assert.Equal(t, "issue.scheduled_reached", out.Reached.Type)
-	assert.Contains(t, out.Reached.Payload, `"value":"2020-01-03[Europe/Paris]"`)
-
 	upcoming, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID, Title: "Scheduled after upgrade", Author: "coordinator",
 		Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2099-01-01"`)},

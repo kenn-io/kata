@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kit/tui/splitlayout"
 )
@@ -362,35 +361,27 @@ func TestDatesFormConflictRemovesRemotelyClosedIssueFromToday(t *testing.T) {
 }
 
 func TestDatesUndoWritesThePreviousDatesBack(t *testing.T) {
-	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-20"}, viewDetail)
-	h.openForm()
-	h.fill("tomorrow", "")
-	h.save()
-	require.Equal(t, map[string]string{"scheduled_on": "2026-11-03[UTC]"}, h.stored())
-	changed := h.revision()
-
-	h.undo()
-
-	assert.Equal(t, map[string]string{"scheduled_on": "2026-11-02[UTC]", "deadline_on": "2026-11-20[UTC]"}, h.stored())
-	assert.Equal(t, changed+1, h.revision(), "one patch")
-	assert.Empty(t, h.m.undoHistory.entries)
-}
-
-func TestDatesUndoRestoresSavedZone(t *testing.T) {
-	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02T09:00[Europe/Paris]", "timezone": "Asia/Tokyo"}, viewDetail)
-	h.openForm()
-	h.fill("", "")
-	h.save()
-	h.undo()
-	stored := h.stored()
-	require.Equal(t, "2026-11-02T09:00[Europe/Paris]", stored["scheduled_on"])
-	raw, err := json.Marshal(stored)
-	require.NoError(t, err)
-	_, zone, instant, present, err := metadata.ScheduleFieldInstant(string(raw), "scheduled_on", "UTC")
-	require.NoError(t, err)
-	require.True(t, present)
-	assert.Equal(t, "Europe/Paris", zone)
-	assert.Equal(t, time.Date(2026, 11, 2, 8, 0, 0, 0, time.UTC), instant)
+	for _, tc := range []struct {
+		name                     string
+		initial, after, restored map[string]string
+		scheduled, deadline      string
+	}{
+		{"dates", map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-20"}, map[string]string{"scheduled_on": "2026-11-03[UTC]"}, map[string]string{"scheduled_on": "2026-11-02[UTC]", "deadline_on": "2026-11-20[UTC]"}, "tomorrow", ""},
+		{"saved zone", map[string]string{"scheduled_on": "2026-11-02T09:00[Europe/Paris]", "timezone": "Asia/Tokyo"}, map[string]string{"timezone": "Asia/Tokyo"}, map[string]string{"scheduled_on": "2026-11-02T09:00[Europe/Paris]", "timezone": "Asia/Tokyo"}, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newDatesHarness(t, tc.initial, viewDetail)
+			h.openForm()
+			h.fill(tc.scheduled, tc.deadline)
+			h.save()
+			require.Equal(t, tc.after, h.stored())
+			changed := h.revision()
+			h.undo()
+			assert.Equal(t, tc.restored, h.stored())
+			assert.Equal(t, changed+1, h.revision(), "one patch")
+			assert.Empty(t, h.m.undoHistory.entries)
+		})
+	}
 }
 
 func TestDatesUndoRestoresDatesSetOnAnIssueWithNone(t *testing.T) {

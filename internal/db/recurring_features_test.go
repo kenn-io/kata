@@ -28,6 +28,9 @@ func TestRecurringPayloadFeatures(t *testing.T) {
 		{"cron.job.deleted", `{"definition":{"action":{"kind":"notify"},"issue":{"kind":"per-run"}}}`, "cron_v1"},
 		{"cron.job.created", `{"definition":{"action":{"kind":"execute"},"issue":{"kind":"per-run"}}}`, "cron_v1"},
 		{"issue.created", `{"metadata":{"description":"cron.occurrence"}}`, ""},
+		{"issue.created", `{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}`, "issue_date_zone_v1"},
+		{"issue.metadata_updated", `{"diff":{"deadline_on":{"to":"2026-01-15T10:00[Asia/Tokyo]"}}}`, "issue_date_zone_v1"},
+		{"issue.moved", `{"snapshot":{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}}`, "issue_date_zone_v1,issue_move_v1"},
 		{"project.metadata_updated", `{"diff":{"cron.progress.custom":{"to":"value"}}}`, ""},
 	} {
 		features, e := db.PayloadRequiredFeatures(tc.kind, tc.payload)
@@ -37,29 +40,9 @@ func TestRecurringPayloadFeatures(t *testing.T) {
 			require.ErrorIs(t, db.RequireEventFeatures("", features), db.ErrUnsupportedEventFeatures)
 		}
 	}
-}
-
-func TestZonedSchedulePayloadRequiresFeature(t *testing.T) {
-	for _, payload := range []string{
-		`{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}`,
-		`{"diff":{"deadline_on":{"to":"2026-01-15T10:00[Asia/Tokyo]"}}}`,
-	} {
-		features, err := db.PayloadRequiredFeatures("issue.metadata_updated", payload)
-		require.NoError(t, err)
-		require.ErrorIs(t, db.RequireEventFeatures("", features), db.ErrUnsupportedEventFeatures)
-	}
-}
-
-func TestZonedSchedulePushRequiresFeature(t *testing.T) {
 	_, required, err := db.FederationEventPayloadWireVersion("issue.created", jsontext.Value(`{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}`))
 	require.NoError(t, err)
-	require.ErrorIs(t, db.RequireEventFeatures("", required), db.ErrUnsupportedEventFeatures)
-}
-
-func TestMovedZonedScheduleRequiresFeature(t *testing.T) {
-	features, err := db.PayloadRequiredFeatures("issue.moved", `{"snapshot":{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}}`)
-	require.NoError(t, err)
-	require.ErrorIs(t, db.RequireEventFeatures(db.IssueMoveEventFeature, features), db.ErrUnsupportedEventFeatures)
+	require.Equal(t, "issue_date_zone_v1", required)
 }
 
 func TestRecurringFeaturesCachePositiveProject(t *testing.T) {
