@@ -90,12 +90,6 @@ func canonicalForMerge(value connector.FieldValue) connector.FieldValue {
 }
 
 func fieldValuesEqual(left, right connector.FieldValue) bool {
-	// A date-only connector cannot report a zone. Compare the shared date
-	// while preserving the zone in Kata; compare zones when both supply one.
-	if left.Kind == fieldKindDate && right.Kind == fieldKindDate && (left.Timezone == "" || right.Timezone == "") {
-		left.Timezone = ""
-		right.Timezone = ""
-	}
 	leftJSON, err := json.Marshal(left)
 	if err != nil {
 		return false

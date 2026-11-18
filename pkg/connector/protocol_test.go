@@ -18,9 +18,8 @@ func TestProtocolServeOneRejectsInvalidRequestFraming(t *testing.T) {
 		want  string
 	}{
 		{name: "unknown protocol", input: `{"protocol":"unknown","id":"1","method":"describe"}`, want: "unsupported protocol"},
-		{name: "previous protocol", input: `{"protocol":"kata.connector.v1","id":"1","method":"describe"}`, want: "unsupported protocol"},
-		{name: "unknown method", input: `{"protocol":"kata.connector.v2","id":"1","method":"unknown","instance":"notes","settings":{},"params":{}}`, want: "unknown method"},
-		{name: "trailing JSON", input: `{"protocol":"kata.connector.v2","id":"1","method":"describe"} {}`, want: "trailing JSON"},
+		{name: "unknown method", input: `{"protocol":"kata.connector.v1","id":"1","method":"unknown","instance":"notes","settings":{},"params":{}}`, want: "unknown method"},
+		{name: "trailing JSON", input: `{"protocol":"kata.connector.v1","id":"1","method":"describe"} {}`, want: "trailing JSON"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var output bytes.Buffer
@@ -33,14 +32,14 @@ func TestProtocolServeOneRejectsInvalidRequestFraming(t *testing.T) {
 
 func TestProtocolServeOneDispatchesDescribe(t *testing.T) {
 	var output bytes.Buffer
-	err := ServeOne(t.Context(), bytes.NewBufferString(`{"protocol":"kata.connector.v2","id":"request-1","method":"describe","instance":"notes","settings":{},"params":{}}`), &output, protocolTestHandler{})
+	err := ServeOne(t.Context(), bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"request-1","method":"describe","instance":"notes","settings":{},"params":{}}`), &output, protocolTestHandler{})
 	require.NoError(t, err)
 
 	var response Response
 	require.NoError(t, json.Unmarshal(output.Bytes(), &response))
 	assert.Equal(t, ProtocolVersion, response.Protocol)
 	assert.Equal(t, "request-1", response.ID)
-	assert.JSONEq(t, `{"connector_id":"example.connector","display_name":"Example","protocol":"kata.connector.v2","capabilities":[],"account_identity":"account-1"}`, string(response.Result))
+	assert.JSONEq(t, `{"connector_id":"example.connector","display_name":"Example","protocol":"kata.connector.v1","capabilities":[],"account_identity":"account-1"}`, string(response.Result))
 }
 
 func TestProtocolServeOneRejectsMalformedEnvelopeBeforeHandler(t *testing.T) {
@@ -60,7 +59,7 @@ func TestProtocolServeOneRejectsMalformedEnvelopeBeforeHandler(t *testing.T) {
 			var output bytes.Buffer
 			err := ServeOne(
 				t.Context(),
-				bytes.NewBufferString(`{"protocol":"kata.connector.v2","id":"request-1","method":"describe",`+test.envelope+`,"params":{}}`),
+				bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"request-1","method":"describe",`+test.envelope+`,"params":{}}`),
 				&output,
 				handler,
 			)
@@ -88,7 +87,7 @@ func TestProtocolServeOneRejectsMalformedParametersBeforeHandler(t *testing.T) {
 			var output bytes.Buffer
 			err := ServeOne(
 				t.Context(),
-				bytes.NewBufferString(`{"protocol":"kata.connector.v2","id":"request-1","method":"complete_root","instance":"notes","settings":{}`+test.params+`}`),
+				bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"request-1","method":"complete_root","instance":"notes","settings":{}`+test.params+`}`),
 				&output,
 				handler,
 			)
@@ -101,7 +100,7 @@ func TestProtocolServeOneRejectsMalformedParametersBeforeHandler(t *testing.T) {
 
 func TestProtocolServeOneRejectsInvalidUTF8BeforeHandler(t *testing.T) {
 	request := append(
-		[]byte(`{"protocol":"kata.connector.v2","id":"request-1","method":"complete_root","instance":"notes","settings":{},"params":{"root_key":"root-`),
+		[]byte(`{"protocol":"kata.connector.v1","id":"request-1","method":"complete_root","instance":"notes","settings":{},"params":{"root_key":"root-`),
 		0xff,
 	)
 	request = append(request, []byte(`"}}`)...)
@@ -133,7 +132,7 @@ func TestProtocolServeOneRejectsInvalidRequiredParameters(t *testing.T) {
 			var output bytes.Buffer
 			err := ServeOne(
 				t.Context(),
-				bytes.NewBufferString(`{"protocol":"kata.connector.v2","id":"request-1","method":"`+test.method+`","instance":"notes","settings":{},"params":`+test.params+`}`),
+				bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"request-1","method":"`+test.method+`","instance":"notes","settings":{},"params":`+test.params+`}`),
 				&output,
 				protocolTestHandler{},
 			)
@@ -159,7 +158,7 @@ func TestProtocolServeOneRejectsInvalidFieldValuesBeforeHandler(t *testing.T) {
 			var output bytes.Buffer
 			err := ServeOne(
 				t.Context(),
-				bytes.NewBufferString(`{"protocol":"kata.connector.v2","id":"request-1","method":"write_fields","instance":"notes","settings":{},"params":{"root_key":"root-1","fields":{"field-1":`+test.value+`}}}`),
+				bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"request-1","method":"write_fields","instance":"notes","settings":{},"params":{"root_key":"root-1","fields":{"field-1":`+test.value+`}}}`),
 				&output,
 				handler,
 			)
@@ -191,7 +190,7 @@ func TestProtocolServeOneRejectsMismatchedWriteFieldKeysBeforeHandler(t *testing
 			var output bytes.Buffer
 			err := ServeOne(
 				t.Context(),
-				bytes.NewBufferString(`{"protocol":"kata.connector.v2","id":"request-1","method":"write_fields","instance":"notes","settings":{},"params":`+test.params+`}`),
+				bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"request-1","method":"write_fields","instance":"notes","settings":{},"params":`+test.params+`}`),
 				&output,
 				handler,
 			)
@@ -216,7 +215,7 @@ func TestProtocolServeOneRequiresCanonicalPublicationOperationID(t *testing.T) {
 			var output bytes.Buffer
 			err := ServeOne(
 				t.Context(),
-				bytes.NewBufferString(`{"protocol":"kata.connector.v2","id":"request-1","method":"publish_comment","instance":"notes","settings":{},"params":`+test.params+`}`),
+				bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"request-1","method":"publish_comment","instance":"notes","settings":{},"params":`+test.params+`}`),
 				&output,
 				handler,
 			)
@@ -232,7 +231,7 @@ func TestProtocolServeOneDispatchesStablePublicationOperationID(t *testing.T) {
 	var output bytes.Buffer
 	require.NoError(t, ServeOne(
 		t.Context(),
-		bytes.NewBufferString(`{"protocol":"kata.connector.v2","id":"request-1","method":"publish_comment","instance":"notes","settings":{},"params":{"root_key":"root-1","body":"hello","operation_id":"publish-comment-1"}}`),
+		bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"request-1","method":"publish_comment","instance":"notes","settings":{},"params":{"root_key":"root-1","body":"hello","operation_id":"publish-comment-1"}}`),
 		&output,
 		handler,
 	))
@@ -245,8 +244,8 @@ func TestProtocolServeOneAttachesImmutableInvocation(t *testing.T) {
 	handler := &invocationTestHandler{}
 	settings := jsontext.Value(`{"enabled":true}`)
 	requests := []string{
-		`{"protocol":"kata.connector.v2","id":"request-1","method":"describe","instance":"notes","settings":{"enabled":true},"params":{}}`,
-		`{"protocol":"kata.connector.v2","id":"request-2","method":"read_root","instance":"notes","settings":{"enabled":true},"params":{"root_key":"root-1"}}`,
+		`{"protocol":"kata.connector.v1","id":"request-1","method":"describe","instance":"notes","settings":{"enabled":true},"params":{}}`,
+		`{"protocol":"kata.connector.v1","id":"request-2","method":"read_root","instance":"notes","settings":{"enabled":true},"params":{"root_key":"root-1"}}`,
 	}
 	for _, request := range requests {
 		var output bytes.Buffer
@@ -279,7 +278,7 @@ func TestProtocolServeOneKeepsInvocationStoragePrivateFromForwardingContext(t *t
 	var output bytes.Buffer
 	require.NoError(t, ServeOne(
 		t.Context(),
-		bytes.NewBufferString(`{"protocol":"kata.connector.v2","id":"request-1","method":"describe","instance":"notes","settings":{"enabled":true},"params":{}}`),
+		bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"request-1","method":"describe","instance":"notes","settings":{"enabled":true},"params":{}}`),
 		&output,
 		handler,
 	))

@@ -224,7 +224,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, err
 			}
 		}
-		stampedMetadata, err := metadata.StampScheduleZones(in.Body.Metadata, "", scheduleDefaultZone(cfg.DefaultTimezone))
+		stampedMetadata, err := metadata.StampScheduleZones(in.Body.Metadata, "", cfg.DefaultTimezone)
 		if err != nil {
 			return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
 		}

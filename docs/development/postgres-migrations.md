@@ -493,12 +493,3 @@ schemas 43 through 50 drop the old index, and schemas 41 and 42 never create it.
 Start the matching schema 51 binary after migration. Older binaries cannot open
 schema 51. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
-
-## Schema 52: issue date zone candidates
-
-The 51→52 migration adds a partial index on projects with zoned issue dates.
-Federation uses it to check peer compatibility before sending a reset.
-Creating the index scans issues and blocks issue writes. Stop all daemons,
-back up the database, and run `kata storage postgres migrate` with schema-owner
-credentials. Start only schema 52 daemons after migration. Existing grants are
-sufficient. Rollback requires the backup and the matching older binary.

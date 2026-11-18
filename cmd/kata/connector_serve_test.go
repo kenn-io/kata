@@ -70,9 +70,9 @@ func TestConnectorServeForgejoMissingCredentialsAndMalformedFraming(t *testing.T
 		name, input, errorContains string
 		invalid                    bool
 	}{
-		{name: "missing credentials", input: `{"protocol":"kata.connector.v2","id":"request-example","method":"describe","instance":"forgejo-example","settings":{"origin":"https://forge.example"},"params":{}}`},
+		{name: "missing credentials", input: `{"protocol":"kata.connector.v1","id":"request-example","method":"describe","instance":"forgejo-example","settings":{"origin":"https://forge.example"},"params":{}}`},
 		{name: "malformed", input: `not-json`, errorContains: "decode connector request:", invalid: true},
-		{name: "trailing", input: `{"protocol":"kata.connector.v2","id":"request-example","method":"describe","instance":"forgejo-example","settings":{"origin":"https://forge.example"},"params":{}} {}`, errorContains: "trailing JSON", invalid: true},
+		{name: "trailing", input: `{"protocol":"kata.connector.v1","id":"request-example","method":"describe","instance":"forgejo-example","settings":{"origin":"https://forge.example"},"params":{}} {}`, errorContains: "trailing JSON", invalid: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			resetFlags(t)

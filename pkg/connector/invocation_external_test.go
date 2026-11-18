@@ -16,7 +16,7 @@ func TestInvocationContextSettingsCannotBeMutatedThroughSafeReflection(t *testin
 	var output bytes.Buffer
 	require.NoError(t, connector.ServeOne(
 		t.Context(),
-		bytes.NewBufferString(`{"protocol":"kata.connector.v2","id":"request-1","method":"describe","instance":"notes","settings":{"enabled":true},"params":{}}`),
+		bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"request-1","method":"describe","instance":"notes","settings":{"enabled":true},"params":{}}`),
 		&output,
 		handler,
 	))

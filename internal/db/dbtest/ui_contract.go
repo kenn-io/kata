@@ -839,26 +839,6 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		}
 	})
 
-	t.Run("selected issues project scheduled dates", func(t *testing.T) {
-		store := open(t)
-		ctx := t.Context()
-		project := createCursorProject(ctx, t, store)
-		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
-			ProjectID: project.ID, Title: "Selected schedule", Author: "user-a",
-			Metadata: map[string]jsontext.Value{
-				"scheduled_on": jsontext.Value(`"2026-09-01T00:30[Asia/Tokyo]"`),
-			},
-		})
-		require.NoError(t, err)
-		snapshot, err := store.(db.UIStore).ReadUISnapshot(ctx, db.UISnapshotQuery{
-			ProjectUID: project.UID, View: "all-open", SelectedIssueUID: issue.UID,
-			TimeZone: "America/Los_Angeles", DefaultTimezone: "UTC",
-		})
-		require.NoError(t, err)
-		require.NotNil(t, snapshot.SelectedIssue)
-		require.Equal(t, "2026-08-31", snapshot.SelectedIssue.ScheduledOnDate)
-	})
-
 	t.Run("ready uses linked recurrence timezone for legacy issues", func(t *testing.T) {
 		store := open(t)
 		uiStore := store.(db.UIStore)

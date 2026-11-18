@@ -18,31 +18,6 @@ func TestScheduleCodecsAreRegistered(t *testing.T) {
 	}
 }
 
-func TestScheduleCodecRoundTripsDateZone(t *testing.T) {
-	codec := fieldCodecs["scheduled_on"]
-	issue := db.Issue{Metadata: db.JSONBlob(`{"scheduled_on":"2026-08-20[Europe/Paris]","timezone":"Asia/Tokyo"}`)}
-	value, err := codec.ReadKata(issue)
-	require.NoError(t, err)
-	assert.Equal(t, connector.FieldValue{Kind: "date", Value: "2026-08-20", Timezone: "Europe/Paris"}, value)
-	patch, err := codec.KataPatch(issue, value)
-	require.NoError(t, err)
-	assert.JSONEq(t, `"2026-08-20[Europe/Paris]"`, string(patch["scheduled_on"]))
-}
-
-func TestScheduleCodecAllowsDifferentSavedZones(t *testing.T) {
-	issue := db.Issue{Metadata: db.JSONBlob(`{"deadline_on":"2026-08-20T09:30[America/New_York]","timezone":"America/New_York"}`)}
-	patch, err := fieldCodecs["scheduled_on"].KataPatch(issue, connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "Asia/Tokyo"})
-	require.NoError(t, err)
-	assert.JSONEq(t, `"2026-08-20T09:30[Asia/Tokyo]"`, string(patch["scheduled_on"]))
-}
-
-func TestScheduleCodecAssignsZoneToDateWithoutOne(t *testing.T) {
-	issue := db.Issue{Metadata: db.JSONBlob(`{"timezone":"Asia/Tokyo"}`)}
-	patch, err := fieldCodecs["scheduled_on"].KataPatch(issue, connector.FieldValue{Kind: "date", Value: "2026-08-20"})
-	require.NoError(t, err)
-	assert.JSONEq(t, `"2026-08-20[Asia/Tokyo]"`, string(patch["scheduled_on"]))
-}
-
 func TestScheduleCodecReadKataCanonicalizesValues(t *testing.T) {
 	codec := fieldCodecs["scheduled_on"]
 	cases := []struct {
@@ -107,20 +82,18 @@ func TestScheduleCodecKataPatchPreservesCivilTimesAcrossDST(t *testing.T) {
 	} {
 		patch, err := codec.KataPatch(db.Issue{}, value)
 		require.NoError(t, err)
-		assert.JSONEq(t, `"`+value.Value+`[America/New_York]"`, string(patch["scheduled_on"]))
-		assert.NotContains(t, patch, "timezone")
+		assert.JSONEq(t, `"`+value.Value+`"`, string(patch["scheduled_on"]))
+		assert.JSONEq(t, `"America/New_York"`, string(patch["timezone"]))
 	}
 }
 
-func TestScheduleCodecKataPatchKeepsSiblingTimezone(t *testing.T) {
+func TestScheduleCodecKataPatchRejectsIncompatibleMappedLocalTimezone(t *testing.T) {
 	issue := db.Issue{Metadata: db.JSONBlob(`{"deadline_on":"2026-08-20T09:30","timezone":"America/New_York"}`)}
-	patch, err := fieldCodecs["scheduled_on"].KataPatch(issue, connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "America/Los_Angeles"})
-	require.NoError(t, err)
-	assert.JSONEq(t, `"2026-08-20T09:30[America/Los_Angeles]"`, string(patch["scheduled_on"]))
-	assert.NotContains(t, patch, "timezone")
+	_, err := fieldCodecs["scheduled_on"].KataPatch(issue, connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "America/Los_Angeles"})
+	require.Error(t, err)
 }
 
-func TestScheduleCodecKataPatchKeepsOtherDate(t *testing.T) {
+func TestScheduleCodecKataPatchRejectsIncompatibleTimezoneWithOtherDate(t *testing.T) {
 	cases := []struct {
 		name     string
 		codec    string
@@ -139,13 +112,11 @@ func TestScheduleCodecKataPatchKeepsOtherDate(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			patch, err := fieldCodecs[tc.codec].KataPatch(
+			_, err := fieldCodecs[tc.codec].KataPatch(
 				db.Issue{Metadata: db.JSONBlob(tc.metadata)},
 				connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "America/Los_Angeles"},
 			)
-			require.NoError(t, err)
-			assert.Len(t, patch, 1)
-			assert.Contains(t, patch, tc.codec)
+			require.Error(t, err)
 		})
 	}
 }
@@ -161,13 +132,13 @@ func TestScheduleCodecKataPatchAdoptsTimezoneWithOtherDateWithoutTimezone(t *tes
 			name:     "scheduled date permits first deadline local timezone",
 			codec:    "deadline_on",
 			metadata: `{"scheduled_on":"2026-08-20"}`,
-			want:     `{"deadline_on":"2026-08-20T09:30[America/Los_Angeles]"}`,
+			want:     `{"deadline_on":"2026-08-20T09:30","timezone":"America/Los_Angeles"}`,
 		},
 		{
 			name:     "deadline date permits first scheduled local timezone",
 			codec:    "scheduled_on",
 			metadata: `{"deadline_on":"2026-08-20"}`,
-			want:     `{"scheduled_on":"2026-08-20T09:30[America/Los_Angeles]"}`,
+			want:     `{"scheduled_on":"2026-08-20T09:30","timezone":"America/Los_Angeles"}`,
 		},
 	}
 	for _, tc := range cases {
@@ -184,7 +155,7 @@ func TestScheduleCodecKataPatchAdoptsTimezoneWithOtherDateWithoutTimezone(t *tes
 	}
 }
 
-func TestScheduleCodecKataPatchKeepsOtherLocal(t *testing.T) {
+func TestScheduleCodecKataPatchRejectsTimezoneWithOtherLocalWithoutTimezone(t *testing.T) {
 	cases := []struct {
 		name     string
 		codec    string
@@ -203,13 +174,11 @@ func TestScheduleCodecKataPatchKeepsOtherLocal(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			patch, err := fieldCodecs[tc.codec].KataPatch(
+			_, err := fieldCodecs[tc.codec].KataPatch(
 				db.Issue{Metadata: db.JSONBlob(tc.metadata)},
 				connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T10:30", Timezone: "America/Los_Angeles"},
 			)
-			require.NoError(t, err)
-			assert.Len(t, patch, 1)
-			assert.Contains(t, patch, tc.codec)
+			require.Error(t, err)
 		})
 	}
 }
@@ -221,7 +190,7 @@ func TestScheduleCodecKataPatchCanonicalizesAndClears(t *testing.T) {
 		value connector.FieldValue
 		want  string
 	}{
-		{"date", date("2026-08-20"), `{"deadline_on":"2026-08-20[UTC]"}`},
+		{"date", date("2026-08-20"), `{"deadline_on":"2026-08-20"}`},
 		{"instant", connector.FieldValue{Kind: "instant", Value: "2026-08-20T09:30:45.120000000Z"}, `{"deadline_on":"2026-08-20T09:30:45.12Z"}`},
 		{"clear", nullValue(), `{"deadline_on":null}`},
 	}

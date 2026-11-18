@@ -12,7 +12,7 @@ import (
 )
 
 // ProtocolVersion is the exact connector wire-protocol version.
-const ProtocolVersion = "kata.connector.v2"
+const ProtocolVersion = "kata.connector.v1"
 
 // Capability names an optional connector operation.
 type Capability string
@@ -189,13 +189,8 @@ func ValidateFieldValue(value FieldValue) error {
 		}
 	case "date":
 		parsed, err := time.Parse("2006-01-02", value.Value)
-		if err != nil || parsed.Format("2006-01-02") != value.Value {
+		if err != nil || parsed.Format("2006-01-02") != value.Value || value.Timezone != "" {
 			return errors.New("field value is not a canonical date")
-		}
-		if value.Timezone != "" {
-			if _, err := time.LoadLocation(value.Timezone); err != nil || value.Timezone == "Local" {
-				return errors.New("field value has an invalid timezone")
-			}
 		}
 	case "instant":
 		parsed, err := time.Parse(time.RFC3339Nano, value.Value)
@@ -312,7 +307,7 @@ type WriteFieldsParams struct {
 	// its kind; on any mismatch it returns an Error with
 	// ErrorCodeFieldConflict and must not mutate any field. Absent
 	// entries and an absent map mean the write is unconditional, which keeps
-	// protocol-v2 clients and connectors without the capability compatible.
+	// protocol-v1 clients and connectors without the capability compatible.
 	Expected map[string]FieldValue `json:"expected,omitempty"`
 }
 

@@ -95,7 +95,7 @@ func (d *Store) ingestFederationEventsOnce(
 	result := db.FederationIngestResult{RequiredEventFeatures: required}
 	ctx, resets := db.WithFederationMoveResetCapture(ctx)
 	for _, input := range p.Events {
-		feature, err := db.FederationWriteRequiredFeatures(input.Event.Type, string(input.Event.Payload))
+		feature, err := db.PayloadRequiredFeatures(input.Event.Type, string(input.Event.Payload))
 		if err != nil {
 			return db.FederationIngestResult{}, err
 		}

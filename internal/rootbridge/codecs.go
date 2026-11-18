@@ -91,26 +91,36 @@ func (c scheduleCodec) kataPatch(
 	if err != nil {
 		return nil, err
 	}
-	if canonical.Kind == fieldKindDate && canonical.Timezone == "" {
-		values, err := metadataObject(issue.Metadata)
+	patch := map[string]jsontext.Value{c.key: mustJSON(canonicalScheduleValue(canonical))}
+	if canonical.Kind != fieldKindLocalDateTime {
+		return patch, nil
+	}
+
+	values, err := metadataObject(issue.Metadata)
+	if err != nil {
+		return nil, err
+	}
+	otherKey := "scheduled_on"
+	if c.key == otherKey {
+		otherKey = "deadline_on"
+	}
+	if other, err := kataScheduleFieldValueFromMetadata(otherKey, values, c.defaultTimezone); err != nil {
+		return nil, err
+	} else if other.Kind == fieldKindLocalDateTime {
+		if other.Timezone != canonical.Timezone && coordinatedTimezone != canonical.Timezone {
+			return nil, fmt.Errorf("%s local timezone %q conflicts with %s timezone %q", c.key, canonical.Timezone, otherKey, other.Timezone)
+		}
+	} else if other.Kind == fieldKindDate {
+		timezone, present, err := optionalMetadataTimezone(values)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("read %s timezone: %w", otherKey, err)
 		}
-		var previous string
-		_ = json.Unmarshal(values[c.key], &previous)
-		if strings.HasSuffix(previous, "]") {
-			if i := strings.LastIndexByte(previous, '['); i >= 0 {
-				canonical.Timezone = previous[i+1 : len(previous)-1]
-			}
-		}
-		if canonical.Timezone == "" {
-			canonical.Timezone, err = metadataTimezone(values, c.defaultTimezone)
-			if err != nil {
-				return nil, err
-			}
+		if present && timezone != canonical.Timezone && coordinatedTimezone != canonical.Timezone {
+			return nil, fmt.Errorf("%s local timezone %q conflicts with %s timezone %q", c.key, canonical.Timezone, otherKey, timezone)
 		}
 	}
-	return map[string]jsontext.Value{c.key: mustJSON(canonicalScheduleValue(canonical))}, nil
+	patch["timezone"] = mustJSON(canonical.Timezone)
+	return patch, nil
 }
 
 func kataPatchWithCoordinatedTimezone(
@@ -184,7 +194,6 @@ func kataScheduleFieldValue(
 	switch scheduleKind(value) {
 	case fieldKindDate:
 		field.Kind = fieldKindDate
-		field.Timezone = zone
 	case fieldKindInstant:
 		field.Kind = fieldKindInstant
 	case fieldKindLocalDateTime:
@@ -263,15 +272,13 @@ func canonicalFieldValue(value connector.FieldValue) (connector.FieldValue, erro
 	switch value.Kind {
 	case fieldKindDate:
 		if value.Timezone != "" {
-			if _, err := time.LoadLocation(value.Timezone); err != nil || value.Timezone == "Local" {
-				return connector.FieldValue{}, fmt.Errorf("invalid date timezone %q", value.Timezone)
-			}
+			return connector.FieldValue{}, fmt.Errorf("date field value must not contain a timezone")
 		}
 		parsed, err := time.Parse(time.DateOnly, value.Value)
 		if err != nil || parsed.Format(time.DateOnly) != value.Value {
 			return connector.FieldValue{}, fmt.Errorf("date field value %q must use YYYY-MM-DD", value.Value)
 		}
-		return connector.FieldValue{Kind: fieldKindDate, Value: parsed.Format(time.DateOnly), Timezone: value.Timezone}, nil
+		return connector.FieldValue{Kind: fieldKindDate, Value: parsed.Format(time.DateOnly)}, nil
 	case fieldKindLocalDateTime:
 		layout := localScheduleLayout(value.Value)
 		if layout == "" {
@@ -328,9 +335,6 @@ func localScheduleLayout(value string) string {
 func canonicalScheduleValue(value connector.FieldValue) any {
 	if value.Kind == fieldKindNull {
 		return nil
-	}
-	if value.Timezone != "" && (value.Kind == fieldKindDate || value.Kind == fieldKindLocalDateTime) {
-		return value.Value + "[" + value.Timezone + "]"
 	}
 	return value.Value
 }

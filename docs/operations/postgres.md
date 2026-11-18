@@ -318,7 +318,7 @@ attacker. It is not the production private-network posture.
 ## Upgrade ceremony
 
 Until a release explicitly documents an online migration, treat every schema
-upgrade as an offline operation. For schema 52, upgrade every daemon sharing
+upgrade as an offline operation. Upgrade every daemon sharing
 the database before restarting any of them. Older daemons cannot read dates
 saved with a zone name.
 

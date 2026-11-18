@@ -1,4 +1,4 @@
-// Package fakeconnector provides a deterministic protocol-v2 implementation
+// Package fakeconnector provides a deterministic protocol-v1 implementation
 // for Kata's black-box connector tests.
 package fakeconnector
 

@@ -15,7 +15,6 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
-	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 // registerMetadataHandlers installs the metadata read and patch routes.
@@ -94,7 +93,7 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 			return nil, err
 		}
 		ctx = db.WithMetadataPatchHook(ctx, func(_ context.Context, _ *sql.Tx, issue db.Issue) (map[string]jsontext.Value, error) {
-			return metadata.StampScheduleZones(in.Body.Patch, string(issue.Metadata), scheduleDefaultZone(cfg.DefaultTimezone))
+			return metadata.StampScheduleZones(in.Body.Patch, string(issue.Metadata), cfg.DefaultTimezone)
 		})
 		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 			IssueID:    iss.ID,
@@ -139,15 +138,6 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		}
 		return out, nil
 	}
-}
-
-func scheduleDefaultZone(zone string) string {
-	if zone == "Local" {
-		if name := recurrenceclient.LocalZone("/etc/localtime"); name != "" {
-			return name
-		}
-	}
-	return zone
 }
 
 func parseMetadataPatchGuard(

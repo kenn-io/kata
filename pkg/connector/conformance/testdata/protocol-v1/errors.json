@@ -1,11 +1,11 @@
 {
   "schema": "kata.connector.conformance/v1",
-  "protocol": "kata.connector.v2",
+  "protocol": "kata.connector.v1",
   "name": "framing-and-errors",
   "steps": [
     {
       "name": "describe",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-error-describe", "method": "describe", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-describe", "method": "describe", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/describe/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/describe/exchange/decode_error"}, "expected": {"literal": false}},
@@ -21,7 +21,7 @@
     },
     {
       "name": "resolve-root-error",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-error-resolve", "method": "resolve_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"locator": "missing-external-root"}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-resolve", "method": "resolve_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"locator": "missing-external-root"}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/resolve-root-error/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/resolve-root-error/exchange/decode_error"}, "expected": {"literal": false}},
@@ -44,7 +44,7 @@
     },
     {
       "name": "read-root-error",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-error-read", "method": "read_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root"}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-read", "method": "read_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root"}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/read-root-error/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/read-root-error/exchange/decode_error"}, "expected": {"literal": false}},
@@ -67,7 +67,7 @@
     },
     {
       "name": "list-comments-error",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-error-comments", "method": "list_comments", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root"}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-comments", "method": "list_comments", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root"}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/list-comments-error/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/list-comments-error/exchange/decode_error"}, "expected": {"literal": false}},
@@ -90,7 +90,7 @@
     },
     {
       "name": "publish-comment-error",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-error-publish", "method": "publish_comment", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "body": "Example body", "operation_id": "conformance-publication-error"}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-publish", "method": "publish_comment", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "body": "Example body", "operation_id": "conformance-publication-error"}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/publish-comment-error/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/publish-comment-error/exchange/decode_error"}, "expected": {"literal": false}},
@@ -113,7 +113,7 @@
     },
     {
       "name": "complete-root-error",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-error-complete", "method": "complete_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root"}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-complete", "method": "complete_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root"}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/complete-root-error/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/complete-root-error/exchange/decode_error"}, "expected": {"literal": false}},
@@ -136,7 +136,7 @@
     },
     {
       "name": "read-fields-error",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-error-read-fields", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "field_ids": ["missing-field"]}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-read-fields", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "field_ids": ["missing-field"]}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
       ],
@@ -162,7 +162,7 @@
     },
     {
       "name": "write-fields-error",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-error-write-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"missing-field": {"kind": "null"}}, "expected": {"missing-field": {"kind": "null"}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-error-write-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"missing-field": {"kind": "null"}}, "expected": {"missing-field": {"kind": "null"}}}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
       ],
@@ -216,7 +216,7 @@
     },
     {
       "name": "malformed-set-unsorted-fields",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-set-unsorted-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string_set", "values": ["z", "a"]}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-unsorted-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string_set", "values": ["z", "a"]}}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/malformed-set-unsorted-fields/exchange/error"}, "expected": {"literal": true}},
         {"op": "empty", "actual": {"path": "/steps/malformed-set-unsorted-fields/exchange/output"}},
@@ -225,7 +225,7 @@
     },
     {
       "name": "malformed-set-unsorted-expected",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-set-unsorted-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string_set", "values": ["z", "a"]}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-unsorted-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string_set", "values": ["z", "a"]}}}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
       ],
@@ -237,7 +237,7 @@
     },
     {
       "name": "malformed-set-duplicate-fields",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-set-duplicate-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string_set", "values": ["a", "a"]}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-duplicate-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string_set", "values": ["a", "a"]}}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/malformed-set-duplicate-fields/exchange/error"}, "expected": {"literal": true}},
         {"op": "empty", "actual": {"path": "/steps/malformed-set-duplicate-fields/exchange/output"}},
@@ -246,7 +246,7 @@
     },
     {
       "name": "malformed-set-duplicate-expected",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-set-duplicate-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string_set", "values": ["a", "a"]}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-duplicate-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string_set", "values": ["a", "a"]}}}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
       ],
@@ -258,7 +258,7 @@
     },
     {
       "name": "malformed-set-scalar-fields",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-set-scalar-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string_set", "value": "a"}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-scalar-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string_set", "value": "a"}}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/malformed-set-scalar-fields/exchange/error"}, "expected": {"literal": true}},
         {"op": "empty", "actual": {"path": "/steps/malformed-set-scalar-fields/exchange/output"}},
@@ -267,7 +267,7 @@
     },
     {
       "name": "malformed-set-scalar-expected",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-set-scalar-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string_set", "value": "a"}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-scalar-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string_set", "value": "a"}}}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
       ],
@@ -279,7 +279,7 @@
     },
     {
       "name": "malformed-text-set-fields",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-text-set-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string", "values": ["a"]}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-text-set-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string", "values": ["a"]}}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/malformed-text-set-fields/exchange/error"}, "expected": {"literal": true}},
         {"op": "empty", "actual": {"path": "/steps/malformed-text-set-fields/exchange/output"}},
@@ -288,7 +288,7 @@
     },
     {
       "name": "malformed-text-set-expected",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-text-set-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string", "values": ["a"]}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-text-set-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string", "values": ["a"]}}}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
       ],
@@ -300,7 +300,7 @@
     },
     {
       "name": "malformed-text-timezone-fields",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-text-timezone-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string", "timezone": "UTC"}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-text-timezone-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string", "timezone": "UTC"}}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/malformed-text-timezone-fields/exchange/error"}, "expected": {"literal": true}},
         {"op": "empty", "actual": {"path": "/steps/malformed-text-timezone-fields/exchange/output"}},
@@ -309,7 +309,7 @@
     },
     {
       "name": "malformed-text-timezone-expected",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-text-timezone-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string", "timezone": "UTC"}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-text-timezone-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string", "timezone": "UTC"}}}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
       ],
@@ -321,7 +321,7 @@
     },
     {
       "name": "malformed-text-nul-fields",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-text-nul-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string", "value": "\u0000"}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-text-nul-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string", "value": "\u0000"}}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/malformed-text-nul-fields/exchange/error"}, "expected": {"literal": true}},
         {"op": "empty", "actual": {"path": "/steps/malformed-text-nul-fields/exchange/output"}},
@@ -330,7 +330,7 @@
     },
     {
       "name": "malformed-text-nul-expected",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-text-nul-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string", "value": "\u0000"}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-text-nul-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string", "value": "\u0000"}}}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
       ],
@@ -342,7 +342,7 @@
     },
     {
       "name": "malformed-set-nul-fields",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-set-nul-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string_set", "values": ["\u0000"]}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-nul-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string_set", "values": ["\u0000"]}}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/malformed-set-nul-fields/exchange/error"}, "expected": {"literal": true}},
         {"op": "empty", "actual": {"path": "/steps/malformed-set-nul-fields/exchange/output"}},
@@ -351,7 +351,7 @@
     },
     {
       "name": "malformed-set-nul-expected",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-set-nul-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string_set", "values": ["\u0000"]}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-set-nul-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "string_set", "values": ["\u0000"]}}}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
       ],
@@ -363,7 +363,7 @@
     },
     {
       "name": "malformed-unknown-kind-fields",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-unknown-kind-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "unknown"}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-unknown-kind-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "unknown"}}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/malformed-unknown-kind-fields/exchange/error"}, "expected": {"literal": true}},
         {"op": "empty", "actual": {"path": "/steps/malformed-unknown-kind-fields/exchange/output"}},
@@ -372,7 +372,7 @@
     },
     {
       "name": "malformed-unknown-kind-expected",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-unknown-kind-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "unknown"}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-unknown-kind-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "unknown"}}}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
       ],
@@ -384,7 +384,7 @@
     },
     {
       "name": "malformed-date-set-fields",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-date-set-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "date", "value": "2026-08-21", "values": ["a"]}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-date-set-fields", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "date", "value": "2026-08-21", "values": ["a"]}}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/malformed-date-set-fields/exchange/error"}, "expected": {"literal": true}},
         {"op": "empty", "actual": {"path": "/steps/malformed-date-set-fields/exchange/output"}},
@@ -393,7 +393,7 @@
     },
     {
       "name": "malformed-date-set-expected",
-      "request": {"protocol": "kata.connector.v2", "id": "malformed-date-set-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "date", "value": "2026-08-21", "values": ["a"]}}}},
+      "request": {"protocol": "kata.connector.v1", "id": "malformed-date-set-expected", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": "missing-external-root", "fields": {"field-1": {"kind": "string"}}, "expected": {"field-1": {"kind": "date", "value": "2026-08-21", "values": ["a"]}}}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}}
       ],

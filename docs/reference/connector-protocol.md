@@ -7,7 +7,7 @@ last_edited: 2026-11-18
 # Connector author contract
 
 Kata external-root connectors are executables that implement the versioned
-`kata.connector.v2` JSON protocol. Provider-specific credentials and APIs stay
+`kata.connector.v1` JSON protocol. Provider-specific credentials and APIs stay
 inside the connector.
 
 This page is the contract for connector authors: the wire protocol, the public
@@ -40,7 +40,7 @@ Every request contains:
 
 ```json
 {
-  "protocol": "kata.connector.v2",
+  "protocol": "kata.connector.v1",
   "id": "opaque-request-id",
   "method": "read_root",
   "instance": "notes",
@@ -54,7 +54,7 @@ or `error`:
 
 ```json
 {
-  "protocol": "kata.connector.v2",
+  "protocol": "kata.connector.v1",
   "id": "opaque-request-id",
   "error": {
     "code": "root_unavailable",
@@ -192,7 +192,7 @@ empty text values. Conditional-write cases run only for connectors advertising
 `conditional_fields`.
 
 The committed transcripts under
-`pkg/connector/conformance/testdata/protocol-v2/` are language-neutral. Other
+`pkg/connector/conformance/testdata/protocol-v1/` are language-neutral. Other
 languages should drive those JSON cases against their executable and preserve
 the same identity, mutation, error-safety, ordering, replay, and readback
 invariants. The publication case injects a process exit after the provider

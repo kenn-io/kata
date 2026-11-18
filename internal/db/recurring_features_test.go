@@ -62,17 +62,6 @@ func TestMovedZonedScheduleRequiresFeature(t *testing.T) {
 	require.ErrorIs(t, db.RequireEventFeatures(db.IssueMoveEventFeature, features), db.ErrUnsupportedEventFeatures)
 }
 
-func TestLegacyScheduleWriteRequiresFeature(t *testing.T) {
-	for _, payload := range []string{
-		`{"metadata":{"scheduled_on":"2026-01-15"}}`,
-		`{"diff":{"deadline_on":{"to":"2026-01-15T10:00"}}}`,
-	} {
-		required, err := db.FederationWriteRequiredFeatures("issue.metadata_updated", payload)
-		require.NoError(t, err)
-		require.ErrorIs(t, db.RequireEventFeatures("", required), db.ErrUnsupportedEventFeatures)
-	}
-}
-
 func TestRecurringFeaturesCachePositiveProject(t *testing.T) {
 	state := &featureProbeState{}
 	database := sql.OpenDB(featureProbeConnector{state: state})
@@ -87,10 +76,9 @@ func TestRecurringFeaturesCachePositiveProject(t *testing.T) {
 		require.Equal(t, db.CronEventFeature, features)
 	}
 	require.Equal(t, 1, state.probeQueries, "a retained native projection is scanned once per process")
-	require.Equal(t, 2, state.zoneQueries, "the indexed zone preflight runs for each request")
 }
 
-type featureProbeState struct{ probeQueries, zoneQueries int }
+type featureProbeState struct{ probeQueries int }
 
 type featureProbeConnector struct{ state *featureProbeState }
 
@@ -116,10 +104,6 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	if strings.Contains(query, "SELECT EXISTS") {
 		return &featureProbeRows{presence: true}, nil
 	}
-	if strings.Contains(query, "SELECT i.metadata") {
-		c.state.zoneQueries++
-		return &featureProbeRows{empty: true}, nil
-	}
 	if strings.Contains(query, "'projection.job'") {
 		c.state.probeQueries++
 		return &featureProbeRows{}, nil
@@ -127,7 +111,7 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	return nil, errors.New("unexpected feature probe query")
 }
 
-type featureProbeRows struct{ presence, seen, empty bool }
+type featureProbeRows struct{ presence, seen bool }
 
 func (r *featureProbeRows) Columns() []string {
 	if r.presence {
@@ -137,9 +121,6 @@ func (r *featureProbeRows) Columns() []string {
 }
 func (*featureProbeRows) Close() error { return nil }
 func (r *featureProbeRows) Next(values []driver.Value) error {
-	if r.empty {
-		return io.EOF
-	}
 	if r.seen {
 		if r.presence {
 			return io.EOF

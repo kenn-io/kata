@@ -1,6 +1,6 @@
 {
   "schema": "kata.connector.conformance/v1",
-  "protocol": "kata.connector.v2",
+  "protocol": "kata.connector.v1",
   "name": "required-methods",
   "steps": [
     {
@@ -17,7 +17,7 @@
     },
     {
       "name": "describe-1",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-required-describe-1", "method": "describe", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-required-describe-1", "method": "describe", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/describe-1/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/describe-1/exchange/decode_error"}, "expected": {"literal": false}},
@@ -64,7 +64,7 @@
     },
     {
       "name": "describe-2",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-required-describe-27", "method": "describe", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-required-describe-27", "method": "describe", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/describe-2/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/describe-2/exchange/decode_error"}, "expected": {"literal": false}},
@@ -78,7 +78,7 @@
     },
     {
       "name": "describe-3",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-required-describe-final", "method": "describe", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-required-describe-final", "method": "describe", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/describe-3/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/describe-3/exchange/decode_error"}, "expected": {"literal": false}},
@@ -92,7 +92,7 @@
     },
     {
       "name": "resolve-root-1",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-required-resolve-1", "method": "resolve_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"locator": {"$ref": "/fixture/root_locator"}}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-required-resolve-1", "method": "resolve_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"locator": {"$ref": "/fixture/root_locator"}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/resolve-root-1/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/resolve-root-1/exchange/decode_error"}, "expected": {"literal": false}},
@@ -122,7 +122,7 @@
     },
     {
       "name": "resolve-root-2",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-required-resolve-2", "method": "resolve_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"locator": {"$ref": "/fixture/root_locator"}}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-required-resolve-2", "method": "resolve_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"locator": {"$ref": "/fixture/root_locator"}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/resolve-root-2/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/resolve-root-2/exchange/decode_error"}, "expected": {"literal": false}},
@@ -140,7 +140,7 @@
     },
     {
       "name": "read-root",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-required-read", "method": "read_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-required-read", "method": "read_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/read-root/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/read-root/exchange/decode_error"}, "expected": {"literal": false}},
@@ -156,7 +156,7 @@
     },
     {
       "name": "list-comments-1",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-required-comments-1", "method": "list_comments", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-required-comments-1", "method": "list_comments", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/list-comments-1/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/list-comments-1/exchange/decode_error"}, "expected": {"literal": false}},
@@ -217,7 +217,7 @@
     },
     {
       "name": "list-comments-2",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-required-comments-2", "method": "list_comments", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-required-comments-2", "method": "list_comments", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/list-comments-2/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/list-comments-2/exchange/decode_error"}, "expected": {"literal": false}},
@@ -233,7 +233,7 @@
     },
     {
       "name": "list-comments-3",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-required-comments-3", "method": "list_comments", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-required-comments-3", "method": "list_comments", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/list-comments-3/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/list-comments-3/exchange/decode_error"}, "expected": {"literal": false}},
@@ -249,7 +249,7 @@
     },
     {
       "name": "complete-root-1",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-required-complete-1", "method": "complete_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-required-complete-1", "method": "complete_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/complete-root-1/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/complete-root-1/exchange/decode_error"}, "expected": {"literal": false}},
@@ -285,7 +285,7 @@
     },
     {
       "name": "complete-root-2",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-required-complete-2", "method": "complete_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-required-complete-2", "method": "complete_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/complete-root-2/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/complete-root-2/exchange/decode_error"}, "expected": {"literal": false}},
@@ -319,7 +319,7 @@
     },
     {
       "name": "read-completed-root",
-      "request": {"protocol": "kata.connector.v2", "id": "transcript-required-complete-readback", "method": "read_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
+      "request": {"protocol": "kata.connector.v1", "id": "transcript-required-complete-readback", "method": "read_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/read-completed-root/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/read-completed-root/exchange/decode_error"}, "expected": {"literal": false}},

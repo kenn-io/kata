@@ -200,44 +200,14 @@
     })
   }
 
-  const localDateTimePattern = /^(\d{4}-\d{2}-\d{2})(T\d{2}:\d{2}(?::\d{2})?(?:\[[^\]]+\])?)$/
-
-  function movedDate(saved: string | undefined, projected: string, picked: string): string {
-    const match = saved?.match(localDateTimePattern)
-    if (picked === '' || !match) return picked
-    const displayedDay = Date.parse(`${projected}T00:00:00Z`)
-    const pickedDay = Date.parse(`${picked}T00:00:00Z`)
-    const savedDay = Date.parse(`${match[1]}T00:00:00Z`)
-    if (![displayedDay, pickedDay, savedDay].every(Number.isFinite)) return picked
-    const movedDay = new Date(savedDay + pickedDay - displayedDay).toISOString().slice(0, 10)
-    return movedDay + match[2]
-  }
-
   function scheduledLabel(): string {
-    const value = scheduledDate()
-    return value ? planningLabel(value, issue.issue.metadata.scheduled_on) : 'When'
-  }
-
-  function scheduledDate(): string {
-    return issue.issue.scheduled_on_date ?? issue.issue.metadata.scheduled_on ?? ''
+    const value = issue.issue.metadata.scheduled_on
+    return value ? formatDate(value) : 'When'
   }
 
   function dueLabel(): string {
     const value = deadlineDate()
-    return value ? planningLabel(value, issue.issue.metadata.deadline_on) : 'No due date'
-  }
-
-  function planningLabel(date: string, saved: string | undefined): string {
-    const label = formatDate(date)
-    const dateZone = saved?.match(/^\d{4}-\d{2}-\d{2}\[([^\]]+)\]$/)
-    if (dateZone) return `${label} · ${dateZone[1]}`
-    const match = saved?.match(
-      /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(?:\[([^\]]+)\]|(Z))?$/,
-    )
-    if (!match) return label
-    const localDate = match[1] === date ? '' : `${formatDate(match[1]!)} `
-    const zone = match[3] ?? (match[4] ? 'UTC' : issue.issue.metadata.timezone)
-    return `${label} · ${localDate}${match[2]}${zone ? ` ${zone}` : ''}`
+    return value ? formatDate(value) : 'No due date'
   }
 
   function deadlineDate(): string {
@@ -253,7 +223,7 @@
     if (actionsDisabled) return
     activeProperty = property
     if (property === 'scheduled') {
-      scheduledDraft = scheduledDate()
+      scheduledDraft = issue.issue.metadata.scheduled_on ?? ''
     } else if (property === 'due') {
       dueDraft = deadlineDate()
     } else {
@@ -268,16 +238,9 @@
     if (actionsDisabled) return
     const property = 'scheduled'
     scheduledDraft = value
-    if (value !== '' && value === scheduledDate()) {
-      resetDraft(property)
-      return
-    }
     const mutationUID = uid()
     const generation = draftResetGeneration
-    const scheduledOn = movedDate(issue.issue.metadata.scheduled_on, scheduledDate(), value)
-    const ok = await onPatchMetadata(mutationUID, {
-      scheduled_on: scheduledOn === '' ? null : scheduledOn,
-    })
+    const ok = await onPatchMetadata(mutationUID, { scheduled_on: value === '' ? null : value })
     if (ok) scheduleAcceptedReset(property, mutationUID, generation)
   }
 
@@ -291,10 +254,7 @@
     }
     const mutationUID = uid()
     const generation = draftResetGeneration
-    const deadlineOn = movedDate(issue.issue.metadata.deadline_on, deadlineDate(), value)
-    const ok = await onPatchMetadata(mutationUID, {
-      deadline_on: deadlineOn === '' ? null : deadlineOn,
-    })
+    const ok = await onPatchMetadata(mutationUID, { deadline_on: value === '' ? null : value })
     if (ok) scheduleAcceptedReset(property, mutationUID, generation)
   }
 

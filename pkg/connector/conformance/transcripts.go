@@ -26,8 +26,8 @@ import (
 
 const protocolTranscriptSchema = "kata.connector.conformance/v1"
 
-//go:embed testdata/protocol-v2/*.json
-var protocolV2TranscriptFiles embed.FS
+//go:embed testdata/protocol-v1/*.json
+var protocolV1TranscriptFiles embed.FS
 
 type protocolTranscript struct {
 	Schema       string                   `json:"schema"`
@@ -98,7 +98,7 @@ func runProtocolV1Transcripts(ctx context.Context, t *testing.T, fixture Fixture
 	t.Helper()
 	transcripts, err := loadProtocolV1Transcripts()
 	if err != nil {
-		t.Fatalf("load protocol-v2 transcripts: %v", err)
+		t.Fatalf("load protocol-v1 transcripts: %v", err)
 	}
 	var baselineIdentity *transcriptIdentity
 	for _, transcript := range transcripts {
@@ -172,14 +172,14 @@ func (runtime *transcriptRuntime) identityString(path string) (string, error) {
 }
 
 func loadProtocolV1Transcripts() ([]protocolTranscript, error) {
-	paths, err := fs.Glob(protocolV2TranscriptFiles, "testdata/protocol-v2/*.json")
+	paths, err := fs.Glob(protocolV1TranscriptFiles, "testdata/protocol-v1/*.json")
 	if err != nil {
 		return nil, err
 	}
 	sort.Strings(paths)
 	transcripts := make([]protocolTranscript, 0, len(paths))
 	for _, path := range paths {
-		encoded, err := protocolV2TranscriptFiles.ReadFile(path)
+		encoded, err := protocolV1TranscriptFiles.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", path, err)
 		}
@@ -201,7 +201,7 @@ func loadProtocolV1Transcripts() ([]protocolTranscript, error) {
 		transcripts = append(transcripts, transcript)
 	}
 	if len(transcripts) < 3 {
-		return nil, fmt.Errorf("protocol-v2 transcript count = %d, want at least 3", len(transcripts))
+		return nil, fmt.Errorf("protocol-v1 transcript count = %d, want at least 3", len(transcripts))
 	}
 	return transcripts, nil
 }

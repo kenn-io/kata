@@ -1,5 +1,5 @@
 // Package conformance provides the provider-neutral behavioral contract for
-// protocol-v2 external root connector handlers. Adapters need advertise only
+// protocol-v1 external root connector handlers. Adapters need advertise only
 // the lossless field kinds they support; Kata rejects unsupported descriptor
 // kinds when operators configure field mappings.
 package conformance
@@ -76,7 +76,7 @@ type Mutation struct {
 	Params jsontext.Value `json:"params"`
 }
 
-// Run executes the protocol-v2 behavioral contract against a disposable
+// Run executes the protocol-v1 behavioral contract against a disposable
 // fixture. Maintained Go adapters should call Run from their own test suite.
 func Run(t *testing.T, fixture Fixture) {
 	t.Helper()

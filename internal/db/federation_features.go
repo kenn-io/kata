@@ -73,38 +73,6 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	return required, nil
 }
 
-// FederationWriteRequiredFeatures fences peers that cannot preserve date zones.
-func FederationWriteRequiredFeatures(kind, payload string) (string, error) {
-	required, err := PayloadRequiredFeatures(kind, payload)
-	if err != nil || (!strings.HasPrefix(kind, "issue.") && kind != "projection.issue") {
-		return required, err
-	}
-	if payload == "" {
-		payload = "{}"
-	}
-	var body struct {
-		Metadata map[string]jsontext.Value `json:"metadata"`
-		Diff     map[string]jsontext.Value `json:"diff"`
-		Snapshot jsontext.Value            `json:"snapshot"`
-	}
-	if err := json.Unmarshal([]byte(payload), &body); err != nil {
-		return "", err
-	}
-	if kind == "issue.moved" && len(body.Snapshot) > 0 {
-		inner, err := FederationWriteRequiredFeatures("issue.snapshot", string(body.Snapshot))
-		return MergeEventFeatures(required, inner), err
-	}
-	for _, key := range []string{"scheduled_on", "deadline_on"} {
-		if _, ok := body.Metadata[key]; ok {
-			return MergeEventFeatures(required, IssueDateZoneEventFeature), nil
-		}
-		if _, ok := body.Diff[key]; ok {
-			return MergeEventFeatures(required, IssueDateZoneEventFeature), nil
-		}
-	}
-	return required, nil
-}
-
 func payloadHasZonedDate(kind, payload string) (bool, error) {
 	if !strings.HasPrefix(kind, "issue.") && kind != "projection.issue" {
 		return false, nil
@@ -257,33 +225,6 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		return "", err
 	}
 	required := ""
-	rows, err := q.QueryContext(ctx, `SELECT i.metadata FROM issues i JOIN projects p ON p.id=i.project_id WHERE p.uid=$1 AND ((json(i.metadata) ->> 'scheduled_on') LIKE '%]' OR (json(i.metadata) ->> 'deadline_on') LIKE '%]')`, projectUID)
-	if err != nil {
-		return "", err
-	}
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			_ = rows.Close()
-			return "", err
-		}
-		zoned, err := payloadHasZonedDate("issue.created", `{"metadata":`+raw+`}`)
-		if err != nil {
-			_ = rows.Close()
-			return "", err
-		}
-		if zoned {
-			required = MergeEventFeatures(required, IssueDateZoneEventFeature)
-			break
-		}
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return "", err
-	}
-	if err := rows.Close(); err != nil {
-		return "", err
-	}
 	if issueMoved {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
 	}

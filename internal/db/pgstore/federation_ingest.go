@@ -65,7 +65,7 @@ func (s *Store) IngestFederationEvents(
 			return err
 		}
 		for _, input := range params.Events {
-			feature, err := db.FederationWriteRequiredFeatures(input.Event.Type, string(input.Event.Payload))
+			feature, err := db.PayloadRequiredFeatures(input.Event.Type, string(input.Event.Payload))
 			if err != nil {
 				return err
 			}

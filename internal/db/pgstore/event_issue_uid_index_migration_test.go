@@ -21,8 +21,6 @@ import (
 // once the schema 51 index is gone, so callers may repeat it.
 func restoreSchema50EventIndex(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
-	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_issues_zone_candidates`, schema)) // #nosec G201 -- fixed test schema.
-	require.NoError(t, err)
 	var present bool
 	require.NoError(t, admin.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_indexes WHERE schemaname=$1 AND indexname='idx_events_issue_uid_id')`, schema).Scan(&present))
 	if !present {
@@ -94,6 +92,7 @@ func TestEventIssueUIDIndexMigrationUpgradesVersion50(t *testing.T) {
 	t.Cleanup(func() { _ = upgraded.Close() })
 	version, err := upgraded.SchemaVersion(ctx)
 	require.NoError(t, err)
+	assert.Equal(t, 51, version)
 	assert.Equal(t, db.CurrentSchemaVersion(), version)
 	events, err := upgraded.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Limit: 10})
 	require.NoError(t, err)
