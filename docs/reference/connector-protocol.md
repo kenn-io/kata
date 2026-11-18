@@ -1,7 +1,7 @@
 ---
 title: Connector author contract
 description: Implement external-root connectors with the versioned JSON protocol, Go SDK, and conformance kit.
-last_edited: 2026-10-13
+last_edited: 2026-11-18
 ---
 
 # Connector author contract
@@ -31,7 +31,8 @@ child is still running and has not closed standard output shortly after the
 connector exits, Kata ends the connector's process tree and fails the call. A
 process that left the tree, such as a Unix process in its own process group,
 keeps the call waiting until it closes standard output or the connector
-timeout ends the call.
+timeout ends the call. In that case the call fails with a timeout error even
+though the connector itself already exited.
 
 Every request contains:
 

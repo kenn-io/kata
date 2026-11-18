@@ -465,25 +465,24 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 // request context bounds the wait. A live descendant gets the cleanup grace
 // to release stdout; held reports that it kept stdout open past the grace.
 func awaitConnectorOutput(ctx context.Context, drained <-chan struct{}, alive func() bool) (held bool, contextCause error) {
+	var grace <-chan time.Time
 	if alive() {
 		timer := time.NewTimer(connectorProcessCleanupGrace)
 		defer timer.Stop()
+		grace = timer.C
+	}
+	for {
 		select {
 		case <-drained:
 			return false, nil
 		case <-ctx.Done():
 			return false, outputContextCause(ctx, drained)
-		case <-timer.C:
+		case <-grace:
 			if alive() {
 				return true, nil
 			}
+			grace = nil
 		}
-	}
-	select {
-	case <-drained:
-		return false, nil
-	case <-ctx.Done():
-		return false, outputContextCause(ctx, drained)
 	}
 }
 

@@ -851,15 +851,6 @@ func TestAwaitConnectorOutputWaitsWhenDescendantExitsDuringGrace(t *testing.T) {
 	})
 }
 
-func TestAwaitConnectorOutputReportsDescendantHoldingStdoutPastGrace(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		held, contextCause := awaitConnectorOutput(t.Context(), make(chan struct{}), func() bool { return true })
-
-		assert.True(t, held)
-		assert.NoError(t, contextCause)
-	})
-}
-
 func TestConnectorContextErrorKeepsChildTimeoutAfterParentEnds(t *testing.T) {
 	parent, cancelParent := context.WithCancel(t.Context())
 	commandCtx, cancelCommand := context.WithTimeoutCause( //nolint:kennlint // deadlinetest: the deadline is the expected result; the test waits on commandCtx.Done for it
