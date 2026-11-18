@@ -595,7 +595,7 @@ func TestOutcomesShownFormErrors(t *testing.T) {
 			m.input = newNewIssueForm()
 			expected := "issue_created"
 			if kind == inputCloseForm {
-				m.input = newCloseForm(formTarget{issueUID: "01TEST-aaa1", issueShortID: "aaa1", projectID: 7, detailGen: 2, origin: "list"})
+				m.input = newCloseForm(formTarget{issueUID: "01TEST-aaa1", issueShortID: "aaa1", projectID: 7, detailGen: 2, origin: "list"}, nil)
 				expected = "issue_closed"
 			}
 			m, cmd := m.commitFormInput(kind)

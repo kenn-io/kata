@@ -1112,7 +1112,7 @@ func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool
 		// Issue-scoped credentials cannot delete or move, whatever else they
 		// may edit.
 		return false, true
-	case m.keymap.Close.matches(msg), m.keymap.Reopen.matches(msg), m.keymap.SetDates.matches(msg):
+	case m.keymap.Close.matches(msg), m.keymap.CloseWithEvidence.matches(msg), m.keymap.Reopen.matches(msg), m.keymap.SetDates.matches(msg):
 		return true, true
 	case !m.detailIsActive():
 		return false, false

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/metadata"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
@@ -18,6 +19,9 @@ type tabState struct {
 	commentLinkCursor int
 	loading           bool
 	err               error
+	// attachments is the issue's current attachment references by ID, nil
+	// while the issue is not loaded. The events tab compares closes with it.
+	attachments map[string]metadata.Attachment
 }
 
 // commentChunks builds the chunk slice for the comments tab. Each
@@ -119,7 +123,7 @@ func eventChunks(es []EventLogEntry, width, cursor int, ts tabState) []entryChun
 	}
 	chunks := make([]entryChunk, 0, len(es))
 	for i, e := range es {
-		chunks = append(chunks, entryChunk{lines: eventChunkLines(e, width, i == cursor)})
+		chunks = append(chunks, entryChunk{lines: eventChunkLines(e, width, i == cursor, ts.attachments)})
 	}
 	return chunks
 }
