@@ -3,6 +3,7 @@ package dbtest
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,6 +102,8 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.True(t, refreshed)
 	_, _, err = spoke.CreateComment(ctx, db.CreateCommentParams{IssueID: before.ID, Author: "worker", Body: "source-only newer discussion"})
 	require.NoError(t, err)
+	_, _, err = spoke.AddLabelAndEvent(ctx, before.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "spoke-only", Actor: "worker"})
+	require.NoError(t, err)
 	localTarget := join(target)
 	var blocker db.Issue
 	if lifecycle != "destination short ID taken" {
@@ -137,8 +140,11 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	require.Equal(t, "source-only newer discussion", comments[1].Body)
 	labels, err := spoke.LabelsByIssue(ctx, got.ID)
 	require.NoError(t, err)
-	require.Len(t, labels, 1)
-	require.Equal(t, "retained", labels[0].Label, "the issue's labels stay with it")
+	var names []string
+	for _, label := range labels {
+		names = append(names, label.Label)
+	}
+	require.ElementsMatch(t, []string{"retained", "spoke-only"}, names, "the issue's labels, including spoke-only ones, stay with it")
 	links, err := spoke.LinksByIssue(ctx, got.ID)
 	require.NoError(t, err)
 	require.Len(t, links, 1)
@@ -151,7 +157,7 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 	stable, err := spoke.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, got, stable)
-	// Later folds bring the source's history back through the recorded relocation.
+	// Later folds keep merging the source's history through the recorded relocation.
 	stableLabels, err := spoke.LabelsByIssue(ctx, got.ID)
 	require.NoError(t, err)
 	require.Equal(t, labels, stableLabels)
@@ -195,6 +201,7 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 		keptComments, err := spoke.CommentsByIssue(ctx, kept.ID)
 		require.NoError(t, err)
 		require.Equal(t, comments, keptComments, "a refused return must not drop the holder's discussion")
+		require.ErrorAs(t, spoke.MaterializeFederatedProject(ctx, localSource.ID), &collision, "the source's pull still reports the refusal")
 	}
 	if lifecycle == "active replicas" {
 		t.Run("source reference", func(t *testing.T) {
@@ -233,7 +240,7 @@ func checkFederatedSnapshotRelocationLifecycle(t *testing.T, hub db.Storage, bac
 
 // Snapshot relocation must retain the existing same-hub and recurrence gates.
 func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) error {
-	for _, kind := range []string{"different-hub", "recurrence", "import-mapping-collision", "retained-move-after-source-leave", "retained-move-to-third-project", "refused-after-relocation", "source snapshot discussion"} {
+	for _, kind := range []string{"different-hub", "recurrence", "import-mapping-collision", "retained-move-after-source-leave", "retained-move-to-third-project", "refused-after-relocation", "source snapshot discussion", "source snapshot discussion at equal clock", "refused return after two relocations"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			source, target, issue, move := federatedRehomeFixture(t, store, "snapshot-guard-"+kind)
@@ -297,8 +304,12 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 				checkFederatedRefusalAfterRelocation(t, store, source, target, issue, move)
 				return
 			}
-			if kind == "source snapshot discussion" {
-				checkFederatedRelocationKeepsSourceSnapshotDiscussion(t, store, source, target, issue, move)
+			if variant, ok := strings.CutPrefix(kind, "source snapshot discussion"); ok {
+				checkFederatedRelocationKeepsSourceSnapshotDiscussion(t, store, source, target, issue, move, variant)
+				return
+			}
+			if kind == "refused return after two relocations" {
+				checkFederatedRefusedReturnAfterTwoRelocations(t, store, target, issue, move)
 				return
 			}
 			if kind != "retained-move-after-source-leave" && kind != "retained-move-to-third-project" {
@@ -424,7 +435,7 @@ func checkFederatedRefusalAfterRelocation(t *testing.T, store db.Storage, source
 // A source snapshot can hold the only copy of spoke-local discussion, as after
 // an adoption. Relocating the issue keeps that discussion, on the relocation
 // pull and on later rebuilds of either project.
-func checkFederatedRelocationKeepsSourceSnapshotDiscussion(t *testing.T, store db.Storage, source, target db.Project, issue db.Issue, move db.RemoteEvent) {
+func checkFederatedRelocationKeepsSourceSnapshotDiscussion(t *testing.T, store db.Storage, source, target db.Project, issue db.Issue, move db.RemoteEvent, variant string) {
 	t.Helper()
 	ctx := t.Context()
 	fields := issueDocumentFields(issue.UID, issue.Author)
@@ -433,7 +444,19 @@ func checkFederatedRelocationKeepsSourceSnapshotDiscussion(t *testing.T, store d
 	commentUID, err := uid.New()
 	require.NoError(t, err)
 	fields["comments"] = []map[string]any{{"comment_uid": commentUID, "author": "worker", "body": "discussion only in the source snapshot", "created_at": "2026-10-07T11:00:00Z"}}
-	adopted := newRemoteEvent(t, source, &issue.UID, "issue.snapshot", "worker", move.OriginInstanceUID, move.HLCPhysicalMS-1, marshalIssueDocument(t, fields))
+	sourceOrigin, sourceAt := move.OriginInstanceUID, move.HLCPhysicalMS-1
+	destinationOrigin := move.OriginInstanceUID
+	if variant == " at equal clock" {
+		// Both snapshots share a physical time and counter; the source sorts
+		// first by origin, as the fold orders them.
+		first, err := uid.New()
+		require.NoError(t, err)
+		second, err := uid.New()
+		require.NoError(t, err)
+		sourceOrigin, destinationOrigin = min(first, second), max(first, second)
+		sourceAt = move.HLCPhysicalMS + 1
+	}
+	adopted := newRemoteEvent(t, source, &issue.UID, "issue.snapshot", "worker", sourceOrigin, sourceAt, marshalIssueDocument(t, fields))
 	_, err = store.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{adopted})
 	require.NoError(t, err)
 	require.NoError(t, store.MaterializeFederatedProject(ctx, source.ID))
@@ -442,18 +465,67 @@ func checkFederatedRelocationKeepsSourceSnapshotDiscussion(t *testing.T, store d
 	before, err := store.CommentsByIssue(ctx, held.ID)
 	require.NoError(t, err)
 	require.Len(t, before, 1)
-	destination := newRemoteEvent(t, target, &issue.UID, "issue.snapshot", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+1, relocationSnapshotDocument(t, issue))
+	destination := newRemoteEvent(t, target, &issue.UID, "issue.snapshot", "worker", destinationOrigin, move.HLCPhysicalMS+1, relocationSnapshotDocument(t, issue))
 	_, err = store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{destination})
 	require.NoError(t, err)
-	for _, project := range []db.Project{target, target, source} {
+	holder, projects := target, []db.Project{target, target, source}
+	for _, project := range projects {
 		require.NoError(t, store.MaterializeFederatedProject(ctx, project.ID))
 		got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 		require.NoError(t, err)
-		require.Equal(t, target.ID, got.ProjectID)
+		require.Equal(t, holder.ID, got.ProjectID)
 		after, err := store.CommentsByIssue(ctx, got.ID)
 		require.NoError(t, err)
 		require.Equal(t, before, after, "relocation keeps discussion that only a source snapshot holds")
 	}
+}
+
+// After relocations from source to target and from target to a third project,
+// a newer target snapshot that the spoke refuses stays out of the holder's
+// fold, so the holder keeps the issue's discussion.
+func checkFederatedRefusedReturnAfterTwoRelocations(t *testing.T, store db.Storage, target db.Project, issue db.Issue, move db.RemoteEvent) {
+	t.Helper()
+	ctx := t.Context()
+	_, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "discussion that travels"})
+	require.NoError(t, err)
+	third, err := store.CreateProject(ctx, "snapshot-guard-third-holder")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: third.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: third.ID, HubProjectUID: third.UID, Actor: "worker", Enabled: true, PushEnabled: true})
+	require.NoError(t, err)
+	document := relocationSnapshotDocument(t, issue)
+	first := newRemoteEvent(t, target, &issue.UID, "issue.snapshot", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+1, document)
+	_, err = store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{first})
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, target.ID))
+	second := newRemoteEvent(t, third, &issue.UID, "issue.snapshot", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+2, document)
+	_, err = store.InsertRemoteEvents(ctx, third.ID, []db.RemoteEvent{second})
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, third.ID))
+	held, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, third.ID, held.ProjectID)
+	before, err := store.CommentsByIssue(ctx, held.ID)
+	require.NoError(t, err)
+	require.Len(t, before, 1)
+	// The target cannot take the issue back: it maps the same imported item.
+	peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: target.ID, Title: "imported again", Author: "worker"})
+	require.NoError(t, err)
+	for _, mapped := range []db.Issue{held, peer} {
+		_, err := store.UpsertImportMapping(ctx, db.ImportMappingParams{ProjectID: mapped.ProjectID, Source: "connector", ExternalID: "same-task", ObjectType: "issue", IssueID: &mapped.ID})
+		require.NoError(t, err)
+	}
+	back := newRemoteEvent(t, target, &issue.UID, "issue.snapshot", "worker", move.OriginInstanceUID, move.HLCPhysicalMS+3, document)
+	_, err = store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{back})
+	require.NoError(t, err)
+	require.Error(t, store.MaterializeFederatedProject(ctx, target.ID), "the target's pull reports its refused return")
+	require.NoError(t, store.MaterializeFederatedProject(ctx, third.ID))
+	got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, third.ID, got.ProjectID)
+	after, err := store.CommentsByIssue(ctx, got.ID)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "a refused return must not drop the holder's discussion")
+	require.Error(t, store.MaterializeFederatedProject(ctx, target.ID), "the target's pull still reports the refusal")
 }
 
 // relocationSnapshotDocument is a whole issue document for issue as it stands.
