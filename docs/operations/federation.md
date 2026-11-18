@@ -116,10 +116,12 @@ A spoke that joins the destination after the hub moved an issue may receive
 only the destination's baseline, not the move. When that baseline places the
 issue in the destination while another project joined directly to the same hub
 still holds the local row, the destination's pull moves that row as an applied
-move would. The local issue ID, spoke-local discussion, and links stay with it.
-The destination's baseline sets the issue's current fields, labels, short ID,
-and the comments it carries. The former short ID keeps resolving in the source.
-Kata does not author a move for this.
+move would. The local issue ID, discussion, labels, and links stay with it, and
+the destination's baseline sets its current fields and short ID. The former
+short ID keeps resolving in the source. Kata does not author a move for this.
+A change the hub made before that baseline and never sent to the spoke, such as
+a removed label or link or an edited comment, may not show on the relocated
+issue until the hub changes it again.
 
 The destination's pull stops with an error, and leaves the issue where it is,
 when the two projects are not both joined directly to the same hub, or when the
