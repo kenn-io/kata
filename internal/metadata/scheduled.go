@@ -30,6 +30,29 @@ type scheduleMetadata struct {
 	Timezone    string  `json:"timezone"`
 }
 
+func schedulePatchWithReboundDates(patch, old map[string]jsontext.Value) map[string]jsontext.Value {
+	result := maps.Clone(patch)
+	if _, ok := patch["timezone"]; !ok {
+		return result
+	}
+	for _, key := range []string{"scheduled_on", "deadline_on"} {
+		if _, ok := patch[key]; ok {
+			continue
+		}
+		var value string
+		if json.Unmarshal(old[key], &value) != nil || value == "" {
+			continue
+		}
+		kind, _, _, err := classifyScheduledOn(value)
+		if err != nil || kind == scheduledOnInstant {
+			continue
+		}
+		value, _ = SplitScheduleZone(value)
+		result[key], _ = json.Marshal(value)
+	}
+	return result
+}
+
 // StampScheduleZones records the zone of each newly written civil date.
 func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone string) (map[string]jsontext.Value, error) {
 	old := map[string]jsontext.Value{}
@@ -38,8 +61,8 @@ func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone st
 			return nil, err
 		}
 	}
-	result := make(map[string]jsontext.Value, len(patch))
-	maps.Copy(result, patch)
+	patch = schedulePatchWithReboundDates(patch, old)
+	result := maps.Clone(patch)
 	var patchZone string
 	_ = json.Unmarshal(patch["timezone"], &patchZone)
 	for _, key := range []string{"scheduled_on", "deadline_on"} {
@@ -61,7 +84,7 @@ func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone st
 			continue
 		}
 		zone := patchZone
-		if zone == "" {
+		if _, timezonePatched := patch["timezone"]; zone == "" && !timezonePatched {
 			_, zone = SplitScheduleZone(previous)
 		}
 		if _, patched := patch["timezone"]; zone == "" && !patched {

@@ -61,6 +61,9 @@ wall-clock time. Add a zone name in brackets, such as
 `2026-11-15T09:00[Europe/Paris]`, to choose its zone. When you save a date
 without a zone, Kata uses the patch's `timezone`, the existing date's zone,
 the issue `timezone`, the daemon's top-level `timezone`, or UTC, in that order.
+Changing the issue `timezone` rebinds existing civil dates and times to the new
+zone while keeping their wall date and time. Clearing it uses the daemon timezone
+or UTC. A date supplied in the same patch keeps its explicit `[Zone]` suffix.
 Dates saved before this change keep using the issue timezone, daemon timezone, then UTC until
 edited. Kata resolves zone names using the installed timezone rules, so a
 local time stays at the same wall-clock time when those rules change.
