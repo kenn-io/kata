@@ -415,7 +415,7 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 	if err != nil {
 		return out, err
 	}
-	if in.Metadata || (reset.Int64 > 0 && in.IssueUID == "") {
+	if (in.Metadata || (reset.Int64 > 0 && in.IssueUID == "")) && RequireEventFeatures(in.Features, IssueDateZoneEventFeature) != nil {
 		required, err := ProjectSnapshotRequiredEventFeatures(ctx, tx, project.ID)
 		if err != nil {
 			return out, err

@@ -85,6 +85,7 @@ function renderProperties(
 describe('IssueProperties', () => {
   afterEach(() => {
     cleanup()
+    vi.unstubAllEnvs()
   })
 
   it('adds and removes labels', async () => {
@@ -195,6 +196,48 @@ describe('IssueProperties', () => {
     await fireEvent.click(screen.getByRole('option', { name: 'P1' }))
 
     expect(onSetPriority).toHaveBeenCalledWith('issue-1', 1)
+  })
+
+  it.each([
+    ['scheduled', 'scheduled_on', 'scheduled_on_date', 'Edit scheduled', 'Scheduled'],
+    ['deadline', 'deadline_on', 'deadline_on_date', 'Edit due date', 'Due'],
+  ] as const)(
+    'keeps the chosen %s calendar day across daylight saving',
+    async (_, key, projectedKey, edit, picker) => {
+      vi.stubEnv('TZ', 'America/New_York')
+      const onPatchMetadata = vi.fn(async () => true)
+      renderProperties({
+        issue: makeIssue({
+          [projectedKey]: '2026-03-07',
+          metadata: { [key]: '2026-03-08T04:30:00Z' },
+        }),
+        onPatchMetadata,
+      })
+      await fireEvent.click(screen.getByRole('button', { name: edit }))
+      await fireEvent.click(screen.getByRole('button', { name: new RegExp(`${picker}:`) }))
+      await fireEvent.click(screen.getByRole('button', { name: /Mar 8, 2026/ }))
+      expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
+        [key]: '2026-03-09T03:30:00Z',
+      })
+    },
+  )
+
+  it('keeps fractional seconds when moving a UTC schedule', async () => {
+    vi.stubEnv('TZ', 'America/New_York')
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2026-03-07',
+        metadata: { scheduled_on: '2026-03-08T04:30:00,123456789Z' },
+      }),
+      onPatchMetadata,
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Mar 8, 2026/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
+      scheduled_on: '2026-03-09T03:30:00,123456789Z',
+    })
   })
 
   it.each([

@@ -59,9 +59,9 @@ A date-only `scheduled_on` value becomes ready on that calendar day. A local
 date-time (`YYYY-MM-DDTHH:MM` or `YYYY-MM-DDTHH:MM:SS`) becomes ready at that
 wall-clock time. Add a zone name in brackets, such as
 `2026-11-15T09:00[Europe/Paris]`, to choose its zone. When you save a date
-without a zone, Kata stores the existing date's zone, the issue `timezone`,
-the daemon's top-level `timezone`, or UTC, in that order. Dates saved before
-this change keep using the issue timezone, daemon timezone, then UTC until
+without a zone, Kata uses the patch's `timezone`, the existing date's zone,
+the issue `timezone`, the daemon's top-level `timezone`, or UTC, in that order.
+Dates saved before this change keep using the issue timezone, daemon timezone, then UTC until
 edited. Kata resolves zone names using the installed timezone rules, so a
 local time stays at the same wall-clock time when those rules change.
 An RFC 3339 value ending in `Z` is an exact UTC instant

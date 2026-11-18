@@ -62,6 +62,42 @@ func TestReadFederationQuietPageBudget(t *testing.T) {
 	}
 }
 
+func TestReadFederationMetadataSupportedFeaturePageBudget(t *testing.T) {
+	d, path := openTestDBWithPath(t)
+	ctx := t.Context()
+	project := createProject(ctx, t, d, "history-project")
+	_, err := d.EnableProjectFederation(ctx, project.ID, "tester")
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000)
+ INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
+ SELECT printf('%026d',x),?,?,'history-project','issue.metadata_updated','tester','{"diff":{}}',1,0,? FROM n`, d.InstanceUID(), project.ID, strings.Repeat("a", 64))
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, "ANALYZE")
+	require.NoError(t, err)
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	raw.SetMaxOpenConns(1)
+	store := &sqlitestore.Store{DB: raw}
+	pageFetches := func(features string) int {
+		conn, err := raw.Conn(ctx)
+		require.NoError(t, err)
+		sqlitePageFetches(t, conn, true)
+		require.NoError(t, conn.Close())
+		_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: features})
+		require.NoError(t, err)
+		conn, err = raw.Conn(ctx)
+		require.NoError(t, err)
+		pages := sqlitePageFetches(t, conn, false)
+		require.NoError(t, conn.Close())
+		return pages
+	}
+	compatible := pageFetches(db.SupportedEventFeatures)
+	older := pageFetches(db.CronEventFeature + "," + db.IssueMoveEventFeature)
+	t.Logf("metadata page fetches: supported=%d, older=%d", compatible, older)
+	require.Greater(t, older, compatible+1000, "compatible peers do not need a history scan")
+}
+
 func TestReadFederationBulkMovePageBudget(t *testing.T) {
 	for _, interleaved := range []bool{false, true} {
 		t.Run(fmt.Sprintf("interleaved=%t", interleaved), func(t *testing.T) {

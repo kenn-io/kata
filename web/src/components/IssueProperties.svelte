@@ -214,6 +214,12 @@
     const match = saved?.match(/^(\d{4}-\d{2}-\d{2})(.*)$/)
     if (!match || !displayed) return value
     const day = 86_400_000
+    const delta = (Date.parse(`${value}T00:00:00Z`) - Date.parse(`${displayed}T00:00:00Z`)) / day
+    if (saved?.endsWith('Z')) {
+      const instant = new Date(saved.replace(',', '.'))
+      instant.setDate(instant.getDate() + delta)
+      return instant.toISOString().slice(0, 19) + (saved.match(/([.,]\d+)?Z$/)?.[0] ?? 'Z')
+    }
     const moved =
       Date.parse(`${match[1]}T00:00:00Z`) +
       Date.parse(`${value}T00:00:00Z`) -
