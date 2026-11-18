@@ -1813,3 +1813,47 @@ func containsEventType(events []db.Event, eventType string) bool {
 	}
 	return false
 }
+
+func TestFieldReconcileLegacyRecurrenceZone(t *testing.T) {
+	h := newReconcileHarness(t)
+	_, err := h.store.CreateRecurrenceForIssue(t.Context(), db.CreateRecurrenceForIssueIn{
+		IssueID: h.issue.ID, Recurrence: db.CreateRecurrenceIn{ProjectID: h.issue.ProjectID, Actor: "tester", Rule: "FREQ=WEEKLY", DTStart: "2026-08-20", Timezone: "America/Los_Angeles", Template: db.RecurrenceTemplate{Title: "Weekly"}},
+	})
+	require.NoError(t, err)
+	_, err = h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-08-20"`), "timezone": jsontext.Value(`null`)}})
+	require.NoError(t, err)
+	h.mapField(t, "scheduled_on", "start-date")
+	h.seedBaseline(t, "scheduled_on", date("2026-08-20"))
+	h.client.fieldValues["start-date"] = date("2026-08-21")
+	_, err = h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
+	require.NoError(t, err)
+	issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
+	require.NoError(t, err)
+	values, err := metadataObject(issue.Metadata)
+	require.NoError(t, err)
+	assert.JSONEq(t, `"2026-08-21[America/Los_Angeles]"`, string(values["scheduled_on"]))
+}
+
+func TestResolveFieldConflictLegacyRecurrenceZone(t *testing.T) {
+	h := newReconcileHarness(t)
+	_, err := h.store.CreateRecurrenceForIssue(t.Context(), db.CreateRecurrenceForIssueIn{
+		IssueID: h.issue.ID, Recurrence: db.CreateRecurrenceIn{ProjectID: h.issue.ProjectID, Actor: "tester", Rule: "FREQ=WEEKLY", DTStart: "2026-08-20", Timezone: "America/Los_Angeles", Template: db.RecurrenceTemplate{Title: "Weekly"}},
+	})
+	require.NoError(t, err)
+	h.mapField(t, "scheduled_on", "start-date")
+	h.seedBaseline(t, "scheduled_on", date("2026-08-20"))
+	_, err = h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-08-21"`), "timezone": jsontext.Value(`null`)}})
+	require.NoError(t, err)
+	h.client.fieldValues["start-date"] = date("2026-08-22")
+	result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.FieldConflicts)
+	service := NewService(h.store, h.registry, nil)
+	_, _, err = service.ResolveFieldConflict(t.Context(), h.issue.ID, "scheduled_on", "external", "operator")
+	require.NoError(t, err)
+	issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
+	require.NoError(t, err)
+	values, err := metadataObject(issue.Metadata)
+	require.NoError(t, err)
+	assert.JSONEq(t, `"2026-08-22[America/Los_Angeles]"`, string(values["scheduled_on"]))
+}

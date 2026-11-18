@@ -685,7 +685,7 @@ func (s *Service) ResolveFieldConflict(
 	}
 	projected := issue
 	if !fieldValuesEqual(kataValue, selected) {
-		patch, patchErr := codec.KataPatch(issue, selected)
+		patch, patchErr := schedulePatch(ctx, s.store, codec, issue, selected)
 		if patchErr != nil {
 			return resolved, events, patchErr
 		}

@@ -3,6 +3,7 @@
 package rootbridge
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -89,6 +90,19 @@ func (c scheduleCodec) KataPatch(issue db.Issue, value connector.FieldValue) (ma
 	}
 	patch := map[string]jsontext.Value{c.key: mustJSON(stored)}
 	return metadata.StampScheduleZones(patch, string(issue.Metadata), c.defaultTimezone)
+}
+
+// schedulePatch uses the recurrence's zone for legacy schedule values.
+func schedulePatch(ctx context.Context, store db.Storage, codec FieldCodec, issue db.Issue, value connector.FieldValue) (map[string]jsontext.Value, error) {
+	if schedule, ok := codec.(scheduleCodec); ok && schedule.key == "scheduled_on" && issue.RecurrenceID != nil {
+		recurrence, err := store.GetRecurrenceByID(ctx, *issue.RecurrenceID)
+		if err != nil {
+			return nil, err
+		}
+		schedule.defaultTimezone = recurrence.Timezone
+		codec = schedule
+	}
+	return codec.KataPatch(issue, value)
 }
 
 func (c scheduleCodec) ValidateExternalDescriptor(descriptor connector.FieldDescriptor) error {

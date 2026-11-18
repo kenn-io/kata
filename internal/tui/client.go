@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/telemetry"
@@ -573,6 +574,22 @@ func (c *Client) SetDates(ctx context.Context, projectID int64, ref string, in D
 		return nil, err
 	}
 	return &resp, nil
+}
+
+func (c *Client) issuePlanningDates(ctx context.Context, projectID int64, ref string) (db.IssuePlanningDates, error) {
+	var dates db.IssuePlanningDates
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return dates, err
+	}
+	wire, callErr := apiClient.IssuePlanningDatesWithResponse(ctx, &generated.IssuePlanningDatesRequestOptions{
+		PathParams: &generated.IssuePlanningDatesPath{ProjectID: projectID, Ref: ref},
+	})
+	if wire == nil {
+		return dates, callErr
+	}
+	err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &dates)
+	return dates, err
 }
 
 // moveSubtreeAPIVersion is the first daemon API that moves an issue together
