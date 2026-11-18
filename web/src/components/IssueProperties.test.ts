@@ -260,6 +260,7 @@ describe('IssueProperties', () => {
       await fireEvent.click(screen.getByRole('button', { name: /Mar 8, 2026/ }))
       expect(onPatchMetadata).not.toHaveBeenCalled()
       expect(screen.getByRole('alert').textContent).toMatch(/pick another day/i)
+      expect(screen.getByRole('button', { name: new RegExp(`${picker}: Mar 8`) })).toBeTruthy()
       await fireEvent.click(screen.getByRole('button', { name: new RegExp(`${picker}:`) }))
       await fireEvent.click(screen.getByRole('button', { name: /Mar 9, 2026/ }))
       expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {

@@ -328,12 +328,12 @@
       resetDraft(property)
       return
     }
+    scheduledDraft = value
     const moved = movedDate(value, scheduledDate(), issue.issue.metadata.scheduled_on)
     if (moved === '') {
       dateError = "That day can't keep the saved time and timezone. Pick another day."
       return
     }
-    scheduledDraft = value
     const mutationUID = uid()
     const generation = draftResetGeneration
     const ok = await onPatchMetadata(mutationUID, {
@@ -350,12 +350,12 @@
       resetDraft(property)
       return
     }
+    dueDraft = value
     const moved = movedDate(value, deadlineDate(), issue.issue.metadata.deadline_on)
     if (moved === '') {
       dateError = "That day can't keep the saved time and timezone. Pick another day."
       return
     }
-    dueDraft = value
     const mutationUID = uid()
     const generation = draftResetGeneration
     const ok = await onPatchMetadata(mutationUID, {
