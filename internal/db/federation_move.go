@@ -469,12 +469,10 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMo
 // spoke that joins after the hub moved an issue receives the destination's
 // snapshot but never the move, so the snapshot relocates the held row the way
 // an applied move would. Only the destination's own pull decides this, so a
-// refused relocation fails that pull and no other. Other projects see the
-// relocation only after it is recorded.
+// refused relocation fails that pull and no other. A pass that follows another
+// project's moves into this one leaves such issues out of its reconciliation.
+// Other projects see the relocation only after it is recorded.
 func planFederatedSnapshotRelocations(ctx context.Context, tx *sql.Tx, moves FederatedMoveIndex, p FoldProjection, projectID int64) (map[string]FederatedMoveDecision, error) {
-	if FollowingMovedProjects(ctx) {
-		return nil, nil
-	}
 	var projectUID string
 	var active bool
 	if err := tx.QueryRowContext(ctx, `SELECT uid,deleted_at IS NULL FROM projects WHERE id=$1`, projectID).Scan(&projectUID, &active); err != nil {
@@ -496,10 +494,6 @@ func planFederatedSnapshotRelocations(ctx context.Context, tx *sql.Tx, moves Fed
 	}
 	if len(uids) == 0 {
 		return nil, nil
-	}
-	origin, err := federationNativeHubOrigin(ctx, tx, projectID)
-	if err != nil {
-		return nil, err
 	}
 	relocations := map[string]FederatedMoveDecision{}
 	for chunk := range slices.Chunk(uids, 500) {
@@ -528,6 +522,16 @@ func planFederatedSnapshotRelocations(ctx context.Context, tx *sql.Tx, moves Fed
 		if err != nil {
 			return nil, err
 		}
+	}
+	if FollowingMovedProjects(ctx) {
+		for uid := range relocations {
+			delete(p.Issues, uid)
+		}
+		return nil, nil
+	}
+	origin, err := federationNativeHubOrigin(ctx, tx, projectID)
+	if err != nil {
+		return nil, err
 	}
 	for _, decision := range relocations {
 		// Only another replica of the same hub can hand its issue over.
@@ -565,7 +569,7 @@ func federationNativeHubOrigin(ctx context.Context, tx *sql.Tx, projectID int64)
 // issue a snapshot relocates. Until the relocation is recorded, the
 // destination's fold has only the hub snapshot, and reconciling from it alone
 // would drop the issue's spoke-local discussion. It reports whether any history
-// was added, in which case the caller refolds and plans again.
+// was added, in which case the caller folds and plans once more.
 func AppendFederatedRelocationHistory(events []FoldEvent, decisions []FederatedMoveDecision, sourceEvents func(sourceID int64, issueUIDs []string) ([]FoldEvent, error)) ([]FoldEvent, bool, error) {
 	relocated := map[int64]map[string]bool{}
 	for _, decision := range decisions {

@@ -1378,24 +1378,24 @@ func (d *Store) materializeFederatedProjectTxScoped(
 // into the fold, so the issue keeps its spoke-local discussion. It returns the
 // events it folded.
 func planFederatedMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, events []db.FoldEvent) ([]db.FoldEvent, db.FoldProjection, db.FederatedMoveIndex, []db.FederatedMoveDecision, []int64, error) {
-	for {
-		projection := db.FoldEvents(events)
-		moved := db.IndexFederatedMoveEvents(events)
-		decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID)
-		if err != nil {
-			return nil, db.FoldProjection{}, db.FederatedMoveIndex{}, nil, nil, err
-		}
-		var added bool
-		events, added, err = db.AppendFederatedRelocationHistory(events, decisions, func(sourceID int64, uids []string) ([]db.FoldEvent, error) {
-			return federationFoldEventsForIssues(ctx, tx, sourceID, uids)
-		})
-		if err != nil {
-			return nil, db.FoldProjection{}, db.FederatedMoveIndex{}, nil, nil, err
-		}
-		if !added {
-			return events, projection, moved, decisions, destinations, nil
-		}
+	projection := db.FoldEvents(events)
+	moved := db.IndexFederatedMoveEvents(events)
+	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID)
+	if err != nil {
+		return nil, db.FoldProjection{}, db.FederatedMoveIndex{}, nil, nil, err
 	}
+	events, added, err := db.AppendFederatedRelocationHistory(events, decisions, func(sourceID int64, uids []string) ([]db.FoldEvent, error) {
+		return federationFoldEventsForIssues(ctx, tx, sourceID, uids)
+	})
+	if err != nil || !added {
+		return events, projection, moved, decisions, destinations, err
+	}
+	// The added history covers only issues already being relocated, so one
+	// more plan settles the fold.
+	projection = db.FoldEvents(events)
+	moved = db.IndexFederatedMoveEvents(events)
+	decisions, destinations, err = db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID)
+	return events, projection, moved, decisions, destinations, err
 }
 
 func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved db.FederatedMoveIndex, projection db.FoldProjection, decisions []db.FederatedMoveDecision, acceptedEventUIDs []string) error {

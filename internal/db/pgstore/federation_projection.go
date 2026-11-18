@@ -540,28 +540,26 @@ func (s *Store) materializeFederatedProjectTxScoped(
 	}
 	// A snapshot relocation brings the holding project's history for the
 	// issue into the fold, so the issue keeps its spoke-local discussion.
-	var (
-		projection   db.FoldProjection
-		moved        db.FederatedMoveIndex
-		decisions    []db.FederatedMoveDecision
-		destinations []int64
-	)
-	for folded := events; ; {
+	projection := db.FoldEvents(events)
+	moved := db.IndexFederatedMoveEvents(events)
+	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID)
+	if err != nil {
+		return err
+	}
+	folded, added, err := db.AppendFederatedRelocationHistory(events, decisions, func(sourceID int64, _ []string) ([]db.FoldEvent, error) {
+		return federationFoldEvents(ctx, tx, sourceID)
+	})
+	if err != nil {
+		return err
+	}
+	if added {
+		// The added history covers only issues already being relocated, so one
+		// more plan settles the fold.
 		projection = db.FoldEvents(folded)
 		moved = db.IndexFederatedMoveEvents(folded)
 		decisions, destinations, err = db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID)
 		if err != nil {
 			return err
-		}
-		var added bool
-		folded, added, err = db.AppendFederatedRelocationHistory(folded, decisions, func(sourceID int64, _ []string) ([]db.FoldEvent, error) {
-			return federationFoldEvents(ctx, tx, sourceID)
-		})
-		if err != nil {
-			return err
-		}
-		if !added {
-			break
 		}
 	}
 	err = db.RehomeFederatedMovedIssues(ctx, tx, moved, projection, decisions, func(pid int64, issue db.FoldIssue) (string, error) {

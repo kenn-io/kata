@@ -270,6 +270,16 @@ func checkFederatedSnapshotRelocationBoundaries(t *testing.T, store db.Storage) 
 				require.NoError(t, err)
 				require.Equal(t, source.ID, edited.ProjectID)
 				require.Equal(t, "later source edit", edited.Title, "the source keeps syncing the issue it kept")
+				if kind == "recurrence" {
+					// Another issue's retained move makes the source's pull reconcile
+					// the destination too. That pass leaves the refused issue alone.
+					_, err = store.InsertRemoteEvents(ctx, target.ID, []db.RemoteEvent{move})
+					require.NoError(t, err)
+					require.NoError(t, store.MaterializeFederatedProject(ctx, source.ID), "a refused relocation must not stall the source's pull")
+					held, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+					require.NoError(t, err)
+					require.Equal(t, source.ID, held.ProjectID)
+				}
 				require.Error(t, store.MaterializeFederatedProject(ctx, target.ID), "the destination still refuses the relocation")
 			}
 		})
