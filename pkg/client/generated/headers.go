@@ -59,13 +59,11 @@ type SkipFederationQuarantineHeaders struct {
 }
 
 type OfferRelayDeliveriesHeaders struct {
-	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
-	Authorization      *string `json:"Authorization,omitempty"`
+	Authorization *string `json:"Authorization,omitempty"`
 }
 
 type GetRelayResetHeaders struct {
-	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
-	Authorization      *string `json:"Authorization,omitempty"`
+	Authorization *string `json:"Authorization,omitempty"`
 }
 
 type AcceptRelayDeliveriesHeaders struct {
@@ -73,8 +71,7 @@ type AcceptRelayDeliveriesHeaders struct {
 }
 
 type AckRelayDeliveriesHeaders struct {
-	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
-	Authorization      *string `json:"Authorization,omitempty"`
+	Authorization *string `json:"Authorization,omitempty"`
 }
 
 type DisconnectRelayEnrollmentHeaders struct {

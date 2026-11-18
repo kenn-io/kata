@@ -49,7 +49,7 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if cfg.RootSigning != nil {
 			signer = cfg.RootSigning.Signer()
 		}
-		checkpoint, err := store.CreateRelayReset(db.WithRelayPeerEventFeatures(ctx, in.EventFeatures), principal.RelayBindingUID, signer)
+		checkpoint, err := store.CreateRelayReset(ctx, principal.RelayBindingUID, signer)
 		if err != nil {
 			return nil, relayTransportError(err)
 		}
@@ -75,7 +75,6 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return &api.RelayOfferResponse{Body: db.RelayBatch{Stream: db.RelayStreamArtifact, Artifacts: artifacts}}, nil
 		}
 		ctx = db.WithRelayRequestedEpoch(ctx, in.Epoch)
-		ctx = db.WithRelayPeerEventFeatures(ctx, in.EventFeatures)
 		envelopes, err := cfg.DB.PendingRelayDeliveries(ctx, principal.RelayBindingUID, in.Stream, in.Limit)
 		if err != nil {
 			return nil, relayTransportError(err)
@@ -114,7 +113,7 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if err := cfg.DB.AckRelayDeliveries(db.WithRelayPeerEventFeatures(ctx, in.EventFeatures), principal.RelayBindingUID, in.Body.Epoch, in.Body.Stream, in.Body.Through, in.Body.Digest); err != nil {
+		if err := cfg.DB.AckRelayDeliveries(ctx, principal.RelayBindingUID, in.Body.Epoch, in.Body.Stream, in.Body.Through, in.Body.Digest); err != nil {
 			return nil, relayTransportError(err)
 		}
 		out := &api.RelayAckResponse{}
@@ -135,9 +134,6 @@ func authorizeRelayRequest(ctx context.Context, cfg ServerConfig, auth string, p
 }
 
 func relayTransportError(err error) error {
-	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
-		return federationFeatureError(err)
-	}
 	if apiErr := relayCrossProjectLinksAPIError(err); apiErr != nil {
 		return apiErr
 	}

@@ -28,9 +28,6 @@ func TestRecurringPayloadFeatures(t *testing.T) {
 		{"cron.job.deleted", `{"definition":{"action":{"kind":"notify"},"issue":{"kind":"per-run"}}}`, "cron_v1"},
 		{"cron.job.created", `{"definition":{"action":{"kind":"execute"},"issue":{"kind":"per-run"}}}`, "cron_v1"},
 		{"issue.created", `{"metadata":{"description":"cron.occurrence"}}`, ""},
-		{"issue.created", `{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}`, "issue_date_zone_v1"},
-		{"issue.metadata_updated", `{"diff":{"deadline_on":{"to":"2026-01-15T10:00[Asia/Tokyo]"}}}`, "issue_date_zone_v1"},
-		{"issue.moved", `{"snapshot":{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}}`, "issue_date_zone_v1,issue_move_v1"},
 		{"project.metadata_updated", `{"diff":{"cron.progress.custom":{"to":"value"}}}`, ""},
 	} {
 		features, e := db.PayloadRequiredFeatures(tc.kind, tc.payload)

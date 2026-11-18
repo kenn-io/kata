@@ -84,9 +84,6 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 		if err != nil {
 			return err
 		}
-		if err := db.RequireRelayEventFeatures(ctx, output); err != nil {
-			return err
-		}
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx, `UPDATE federation_relay_outbox SET emitted=1 WHERE id=?`, id); err != nil {
 				return err
@@ -159,9 +156,6 @@ func (d *Store) AckRelayDeliveries(ctx context.Context, bindingUID string, epoch
 		// Rows at or below the acknowledged cursor were settled earlier, and rows
 		// at or below the superseded boundary were never offered in this epoch.
 		settled := max(acknowledgedThrough, boundary)
-		if err := db.RequireRelayAckFeatures(ctx, tx, bindingUID, stream, epoch, acknowledgedThrough, through); err != nil {
-			return err
-		}
 		var count int
 		if err := tx.QueryRowContext(ctx, relayAckUnemittedCountSQL, bindingUID, stream, epoch, settled, through).Scan(&count); err != nil {
 			return err

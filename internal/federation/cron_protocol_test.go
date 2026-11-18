@@ -406,6 +406,27 @@ func TestCronFederationBackendPairs(t *testing.T) {
 	}
 }
 
+func TestZonedDatePublicationRequiresHubFeature(t *testing.T) {
+	posts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
+		if r.Method == http.MethodPost {
+			posts++
+			return
+		}
+		_, _ = w.Write([]byte(`{"project_id":1,"project_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","replay_horizon_event_id":1,"baseline_through_event_id":1}`))
+	}))
+	t.Cleanup(server.Close)
+	client, err := federation.NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
+	require.NoError(t, err)
+	_, err = client.IngestProjectEvents(t.Context(), 1, []api.FederationIngestEventEnvelope{{
+		EventID: 1, Type: "issue.created", Payload: jsontext.Value(`{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}`),
+	}})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	require.Zero(t, posts)
+}
+
 // Every required format must survive preflight, regardless of event order.
 func TestMixedMoveCronPublicationRequiresAllFeatures(t *testing.T) {
 	for _, first := range []string{"issue.moved", "cron.job.created"} {

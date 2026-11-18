@@ -16,9 +16,6 @@ func (d *Store) CreateRelayReset(ctx context.Context, bindingUID string, signer 
 		var err error
 		protocol := db.RelayResetProtocol{Backend: relayResetBackend{d: d, tx: tx, scanRelayHistory: scan}, InstanceUID: d.instanceUID}
 		result, err = protocol.CreateReset(ctx, bindingUID, signer)
-		if err == nil {
-			err = db.RequireRelaySnapshotFeatures(ctx, result.Snapshot)
-		}
 		return err
 	})
 	if err != nil {

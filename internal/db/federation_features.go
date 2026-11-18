@@ -64,13 +64,6 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
 	}
-	zoned, err := payloadHasZonedDate(kind, payload)
-	if err != nil {
-		return "", err
-	}
-	if zoned {
-		required = MergeEventFeatures(required, IssueDateZoneEventFeature)
-	}
 	return required, nil
 }
 
@@ -283,52 +276,6 @@ WHERE p.uid=$1 AND (i.metadata LIKE '%"cron.occurrence"%' OR i.metadata LIKE '%"
 	return nativeProjectionRequired(ctx, q, query, projectUID)
 }
 
-// ProjectSnapshotRequiredEventFeatures inspects the issue state a baseline emits.
-func ProjectSnapshotRequiredEventFeatures(ctx context.Context, tx *sql.Tx, projectID int64) (string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT metadata FROM issues WHERE project_id=$1 AND (metadata LIKE '%]%' OR metadata LIKE '%\u%' ESCAPE '!')`, projectID)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			return "", err
-		}
-		zoned, err := payloadHasZonedDate("projection.issue", `{"metadata":`+raw+`}`)
-		if err != nil {
-			return "", err
-		}
-		if zoned {
-			return IssueDateZoneEventFeature, nil
-		}
-	}
-	return "", rows.Err()
-}
-
-// ProjectBaselineRequiredEventFeatures checks retained events a new peer will replay.
-func ProjectBaselineRequiredEventFeatures(ctx context.Context, tx *sql.Tx, projectID, horizon int64) (string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT type,payload FROM events WHERE project_id=$1 AND id >= $2 AND type LIKE 'issue.%' AND (payload LIKE '%]%' OR payload LIKE '%\u%' ESCAPE '!')`, projectID, horizon)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var kind, payload string
-		if err := rows.Scan(&kind, &payload); err != nil {
-			return "", err
-		}
-		zoned, err := payloadHasZonedDate(kind, payload)
-		if err != nil {
-			return "", err
-		}
-		if zoned {
-			return IssueDateZoneEventFeature, nil
-		}
-	}
-	return "", rows.Err()
-}
-
 func nativeProjectionRequired(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, query, projectUID string) (bool, error) {
@@ -414,23 +361,6 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
  UNION ALL SELECT CAST(value AS BIGINT) AS cursor FROM meta WHERE key=$3 AND CAST(value AS BIGINT)>$2) resets`, project.ID, after, ProjectStreamResetMetadataPrefix+project.UID).Scan(&reset)
 	if err != nil {
 		return out, err
-	}
-	if (in.Metadata || (reset.Int64 > 0 && in.IssueUID == "")) && RequireEventFeatures(in.Features, IssueDateZoneEventFeature) != nil {
-		required, err := ProjectSnapshotRequiredEventFeatures(ctx, tx, project.ID)
-		if err != nil {
-			return out, err
-		}
-		if in.Metadata && reset.Int64 == 0 {
-			baseline, err := ProjectBaselineRequiredEventFeatures(ctx, tx, project.ID, binding.ReplayHorizonEventID)
-			if err != nil {
-				return out, err
-			}
-			required = MergeEventFeatures(required, baseline)
-		}
-		out.RequiredFeatures = MergeEventFeatures(out.RequiredFeatures, required)
-		if err := RequireEventFeatures(in.Features, required); err != nil {
-			return out, err
-		}
 	}
 	if in.Metadata {
 		if binding.Role != FederationRoleHub || !binding.Enabled {

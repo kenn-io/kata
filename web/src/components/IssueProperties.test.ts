@@ -1,7 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { KataTaskDetail } from '../lib/kata/types'
-import { createCredentialedFetch, setGeneratedFetch } from '../lib/api/client'
 
 import IssueProperties from './IssueProperties.svelte'
 
@@ -86,8 +85,6 @@ function renderProperties(
 describe('IssueProperties', () => {
   afterEach(() => {
     cleanup()
-    vi.unstubAllEnvs()
-    setGeneratedFetch(createCredentialedFetch())
   })
 
   it('adds and removes labels', async () => {
@@ -200,170 +197,22 @@ describe('IssueProperties', () => {
     expect(onSetPriority).toHaveBeenCalledWith('issue-1', 1)
   })
 
-  it.each([
-    [
-      'scheduled instant',
-      'scheduled_on',
-      'scheduled_on_date',
-      'Edit scheduled',
-      'Scheduled',
-      'America/New_York',
-      '2026-03-07',
-      'Mar 8, 2026',
-      '2026-03-08T04:30:00Z',
-      '2026-03-09T03:30:00Z',
-    ],
-    [
-      'fractional seconds',
-      'scheduled_on',
-      'scheduled_on_date',
-      'Edit scheduled',
-      'Scheduled',
-      'America/New_York',
-      '2026-03-07',
-      'Mar 8, 2026',
-      '2026-03-08T04:30:00,123456789Z',
-      '2026-03-09T03:30:00,123456789Z',
-    ],
-    [
-      'date-only zone',
-      'scheduled_on',
-      'scheduled_on_date',
-      'Edit scheduled',
-      'Scheduled',
-      'America/New_York',
-      '2027-05-12',
-      'May 13, 2027',
-      '2027-05-12[Europe/Paris]',
-      '2027-05-13[Europe/Paris]',
-    ],
-    [
-      'nearest saved day',
-      'scheduled_on',
-      'scheduled_on_date',
-      'Edit scheduled',
-      'Scheduled',
-      'America/Belize',
-      '2026-03-09',
-      'Mar 8, 2026',
-      '2026-03-10T01:30[America/New_York]',
-      '2026-03-09T01:30[America/New_York]',
-    ],
-    [
-      'source timezone gap',
-      'scheduled_on',
-      'scheduled_on_date',
-      'Edit scheduled',
-      'Scheduled',
-      'America/New_York',
-      '2026-03-07',
-      'Mar 8, 2026',
-      '2026-03-07T02:30[America/New_York]',
-      '2026-03-08T02:30[America/New_York]',
-    ],
-    [
-      'distant saved timezone',
-      'scheduled_on',
-      'scheduled_on_date',
-      'Edit scheduled',
-      'Scheduled',
-      'Etc/GMT+12',
-      '2026-01-14',
-      'Jan 15, 2026',
-      '2026-01-16T00:30[Pacific/Kiritimati]',
-      '2026-01-17T00:30[Pacific/Kiritimati]',
-    ],
-  ] as const)(
-    'keeps the selected viewer day for %s',
-    async (_, key, projectedKey, edit, picker, timezone, projected, selected, saved, expected) => {
-      vi.stubEnv('TZ', timezone)
-      const onPatchMetadata = vi.fn(async () => true)
-      renderProperties({
-        issue: makeIssue({ [projectedKey]: projected, metadata: { [key]: saved } }),
-        onPatchMetadata,
-      })
-      await fireEvent.click(screen.getByRole('button', { name: edit }))
-      await fireEvent.click(screen.getByRole('button', { name: new RegExp(`${picker}:`) }))
-      await fireEvent.click(screen.getByRole('button', { name: selected }))
-      expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { [key]: expected })
-    },
-  )
-
-  it.each([
-    ['scheduled', 'scheduled_on', 'scheduled_on_date', 'Edit scheduled', 'Scheduled'],
-    ['deadline', 'deadline_on', 'deadline_on_date', 'Edit due date', 'Due'],
-  ] as const)(
-    'rejects an unreachable viewer day for a zoned %s',
-    async (_, key, projectedKey, edit, picker) => {
-      vi.stubEnv('TZ', 'America/New_York')
-      const onPatchMetadata = vi.fn(async () => true)
-      renderProperties({
-        issue: makeIssue({
-          [projectedKey]: '2026-03-07',
-          metadata: { [key]: '2026-03-08T13:30[Asia/Tokyo]' },
-        }),
-        onPatchMetadata,
-      })
-      expect(screen.getByRole('button', { name: edit }).textContent).toContain('Mar 7')
-      await fireEvent.click(screen.getByRole('button', { name: edit }))
-      await fireEvent.click(screen.getByRole('button', { name: new RegExp(`${picker}:`) }))
-      await fireEvent.click(screen.getByRole('button', { name: /Mar 8, 2026/ }))
-      expect(onPatchMetadata).not.toHaveBeenCalled()
-      expect(screen.getByRole('alert').textContent).toMatch(/pick another day/i)
-      expect(screen.getByRole('button', { name: new RegExp(`${picker}: Mar 8`) })).toBeTruthy()
-      await fireEvent.click(screen.getByRole('button', { name: new RegExp(`${picker}:`) }))
-      await fireEvent.click(screen.getByRole('button', { name: /Mar 9, 2026/ }))
-      expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
-        [key]: '2026-03-09T13:30[Asia/Tokyo]',
-      })
-    },
-  )
-
-  it('keeps a legacy Tokyo schedule when the selected viewer day is unreachable', async () => {
-    vi.stubEnv('TZ', 'America/New_York')
-    const onPatchMetadata = vi.fn(async () => true)
+  it('shows zoned planning dates in their editors', async () => {
     renderProperties({
       issue: makeIssue({
-        scheduled_on_date: '2026-03-07',
-        metadata: { scheduled_on: '2026-03-08T13:30' },
+        scheduled_on_date: '2026-08-31',
+        deadline_on_date: '2026-09-02',
+        metadata: {
+          scheduled_on: '2026-09-01T09:00[Asia/Tokyo]',
+          deadline_on: '2026-09-02[Europe/Paris]',
+        },
       }),
-      onPatchMetadata,
     })
-    setGeneratedFetch(
-      vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({
-              issue_uid: 'issue-1',
-              project_id: 1,
-              revision: 1,
-              scheduled_on: {
-                field: 'scheduled_on',
-                value: '2026-03-08T13:30',
-                timezone: 'Asia/Tokyo',
-                instant: '2026-03-08T04:30:00Z',
-              },
-              deadline_on: null,
-            }),
-            {
-              status: 200,
-              headers: { 'Content-Type': 'application/json' },
-            },
-          ),
-      ),
-    )
+    expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toContain('Aug 31')
     await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
-    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
-    await fireEvent.click(screen.getByRole('button', { name: /Mar 8, 2026/ }))
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/pick another day/i))
-    expect(onPatchMetadata).not.toHaveBeenCalled()
-    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
-    await fireEvent.click(screen.getByRole('button', { name: /Mar 9, 2026/ }))
-    await waitFor(() =>
-      expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
-        scheduled_on: '2026-03-09T13:30',
-      }),
-    )
+    expect(screen.getByRole('button', { name: /Scheduled: Aug 31/ })).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit due date' }))
+    expect(screen.getByRole('button', { name: /Due: Sep 2/ })).toBeTruthy()
   })
 
   it.each([
