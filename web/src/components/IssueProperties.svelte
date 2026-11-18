@@ -215,7 +215,7 @@
 
   function scheduledLabel(): string {
     const value = scheduledDate()
-    return value ? formatDate(value) : 'When'
+    return value ? planningLabel(value, issue.issue.metadata.scheduled_on) : 'When'
   }
 
   function scheduledDate(): string {
@@ -224,7 +224,20 @@
 
   function dueLabel(): string {
     const value = deadlineDate()
-    return value ? formatDate(value) : 'No due date'
+    return value ? planningLabel(value, issue.issue.metadata.deadline_on) : 'No due date'
+  }
+
+  function planningLabel(date: string, saved: string | undefined): string {
+    const label = formatDate(date)
+    const dateZone = saved?.match(/^\d{4}-\d{2}-\d{2}\[([^\]]+)\]$/)
+    if (dateZone) return `${label} · ${dateZone[1]}`
+    const match = saved?.match(
+      /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(?:\[([^\]]+)\]|(Z))?$/,
+    )
+    if (!match) return label
+    const localDate = match[1] === date ? '' : `${formatDate(match[1]!)} `
+    const zone = match[3] ?? (match[4] ? 'UTC' : issue.issue.metadata.timezone)
+    return `${label} · ${localDate}${match[2]}${zone ? ` ${zone}` : ''}`
   }
 
   function deadlineDate(): string {

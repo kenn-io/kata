@@ -215,6 +215,49 @@ describe('IssueProperties', () => {
     })
   })
 
+  it('shows the saved time and zone for scheduled and due dates', () => {
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2027-05-12',
+        deadline_on_date: '2027-05-11',
+        metadata: {
+          scheduled_on: '2027-05-12T09:00[Europe/Paris]',
+          deadline_on: '2027-05-12T00:30[Asia/Tokyo]',
+        },
+      }),
+    })
+    expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toMatch(
+      /May 12(?:, 2027)? · 09:00 Europe\/Paris/,
+    )
+    expect(screen.getByRole('button', { name: 'Edit due date' }).textContent).toMatch(
+      /May 11(?:, 2027)? · May 12(?:, 2027)? 00:30 Asia\/Tokyo/,
+    )
+  })
+
+  it('shows the time and UTC zone for an instant', () => {
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2027-05-12',
+        metadata: { scheduled_on: '2027-05-12T09:00:00Z' },
+      }),
+    })
+    expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toMatch(
+      /May 12(?:, 2027)? · 09:00:00 UTC/,
+    )
+  })
+
+  it('shows the saved zone for a date without a time', () => {
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2027-05-12',
+        metadata: { scheduled_on: '2027-05-12[Europe/Paris]' },
+      }),
+    })
+    expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toMatch(
+      /May 12(?:, 2027)? · Europe\/Paris/,
+    )
+  })
+
   it('moves the scheduled local date by the change in the viewer date', async () => {
     const onPatchMetadata = vi.fn(async () => true)
     renderProperties({
