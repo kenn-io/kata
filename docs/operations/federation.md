@@ -2661,3 +2661,12 @@ disabled, so those spokes must re-run `kata federation join --actor <actor> --pu
 before local-origin work can sync to the hub again.
 
 Use a shared daemon when those trade-offs are unacceptable.
+
+## Semantic search on direct spokes
+
+Upgrade hubs before direct spokes. A direct spoke searches shared projects by
+meaning through its hub and removes earlier shared-project vectors from its
+local index. An older or unavailable hub leaves automatic search with word
+matches and a reason;
+explicit semantic or hybrid search returns 503. Relay spokes retain their
+existing behavior.

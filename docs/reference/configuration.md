@@ -1310,8 +1310,9 @@ Privacy: configuring an endpoint sends issue titles and bodies to it on every
 embed. That is the consent boundary: the operator who writes this section
 authorizes the data flow. For sensitive projects, prefer a local endpoint (for
 example Ollama on loopback) so issue text never leaves the host. Embeddings are
-local derived state and **do not federate**: each daemon embeds only what it
-stores, and no vectors are sent to or pulled from federated hubs.
+local derived state and **do not federate**. Direct spokes use their hub to
+search shared projects and do not embed those projects locally. No vectors are
+sent to or pulled from federated hubs.
 
 ### Index freshness
 
