@@ -36,7 +36,7 @@ func TestRelayOfferRejectsZonedDatesWithoutFeature(t *testing.T) {
 		req.Header.Set(db.EventFeaturesHeader, features)
 		resp, err := root.http.Client().Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { require.NoError(t, resp.Body.Close()) }()
 		raw, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
 		return resp.StatusCode, raw
@@ -62,7 +62,7 @@ func TestRelayOfferRejectsZonedDatesWithoutFeature(t *testing.T) {
 		req.Header.Set(db.EventFeaturesHeader, features)
 		resp, err := root.http.Client().Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { require.NoError(t, resp.Body.Close()) }()
 		raw, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
 		return resp.StatusCode, raw
@@ -99,7 +99,7 @@ func TestRelayResetRejectsZonedDatesWithoutChangingState(t *testing.T) {
 		req.Header.Set(db.EventFeaturesHeader, features)
 		resp, err := root.http.Client().Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { require.NoError(t, resp.Body.Close()) }()
 		raw, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
 		return resp.StatusCode, raw
@@ -155,7 +155,7 @@ func TestRelayAcceptRejectsZonedDatesWithoutChangingState(t *testing.T) {
 		req.Header.Set(db.EventFeaturesHeader, features)
 		resp, err := root.http.Client().Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { require.NoError(t, resp.Body.Close()) }()
 		raw, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
 		return resp.StatusCode, raw
