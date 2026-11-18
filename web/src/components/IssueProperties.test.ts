@@ -215,6 +215,40 @@ describe('IssueProperties', () => {
     })
   })
 
+  it('moves the scheduled local date by the change in the viewer date', async () => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2027-05-11',
+        metadata: { scheduled_on: '2027-05-12T00:30[Asia/Tokyo]' },
+      }),
+      onPatchMetadata,
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /May 12, 2027/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
+      scheduled_on: '2027-05-13T00:30[Asia/Tokyo]',
+    })
+  })
+
+  it('moves the due local date backward across a month boundary', async () => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({
+        deadline_on_date: '2027-05-01',
+        metadata: { deadline_on: '2027-05-02T00:30[Asia/Tokyo]' },
+      }),
+      onPatchMetadata,
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit due date' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Due:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Apr 30, 2027/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
+      deadline_on: '2027-05-01T00:30[Asia/Tokyo]',
+    })
+  })
+
   it('moves a zoned due date to the picked day at its saved time and zone', async () => {
     const onPatchMetadata = vi.fn(async () => true)
     renderProperties({

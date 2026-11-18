@@ -204,8 +204,13 @@
 
   function movedDate(saved: string | undefined, projected: string, picked: string): string {
     const match = saved?.match(localDateTimePattern)
-    if (picked === '' || !match || match[1] !== projected) return picked
-    return picked + match[2]
+    if (picked === '' || !match) return picked
+    const displayedDay = Date.parse(`${projected}T00:00:00Z`)
+    const pickedDay = Date.parse(`${picked}T00:00:00Z`)
+    const savedDay = Date.parse(`${match[1]}T00:00:00Z`)
+    if (![displayedDay, pickedDay, savedDay].every(Number.isFinite)) return picked
+    const movedDay = new Date(savedDay + pickedDay - displayedDay).toISOString().slice(0, 10)
+    return movedDay + match[2]
   }
 
   function scheduledLabel(): string {
