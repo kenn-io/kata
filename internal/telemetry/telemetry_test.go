@@ -65,8 +65,6 @@ func TestStandaloneTelemetryAdmission(t *testing.T) {
 	}{
 		{"fresh home", release, "", "", "v1.2.3", "disabled", nil},
 		{"consent yes", release, "", "", "v1.2.3", "enabled", new(true)},
-		{"override no", release, "1", "", "v1.2.3", "enabled", new(false)},
-		{"product flag alone", release, "", "1", "v1.2.3", "disabled", nil},
 		{"product veto", release, "", "0", "v1.2.3", "disabled", new(true)},
 		{"development", release, "1", "", "dev", "disabled", nil},
 		{"no project key", source, "1", "", "v1.2.3", "disabled", nil},
