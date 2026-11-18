@@ -30,6 +30,17 @@ type CronRun struct {
 	UpdatedAt                  time.Time    `json:"updated_at"`
 }
 
+// CronRunView is a run as the API reads it: the stored observation plus the
+// names its references resolve to at read time, deleted referents included.
+// The names are not stored, so only this type carries them; CronRun, exports
+// and federated payloads cannot.
+type CronRunView struct {
+	CronRun
+	JobName      *string `json:"job_name,omitempty"`
+	WorkflowName *string `json:"workflow_name,omitempty"`
+	IssueShortID *string `json:"issue_short_id,omitempty"`
+}
+
 // ObserveCronRun replaces the mutable evidence of one immutable identity.
 // ExpectedRevision is zero for creation; exact retries return the current row.
 type ObserveCronRun struct {
@@ -53,9 +64,9 @@ type ObserveCronRun struct {
 
 // CronRunObservationResult retains the row and exact events of one write.
 type CronRunObservationResult struct {
-	Run      CronRun `json:"run"`
-	Events   []Event `json:"events"`
-	Replayed bool    `json:"replayed"`
+	Run      CronRunView `json:"run"`
+	Events   []Event     `json:"events"`
+	Replayed bool        `json:"replayed"`
 }
 
 // CronRunList bounds and scopes ordinary run-history pagination.

@@ -387,14 +387,26 @@ func syncDirectSpoke(
 	validateLease func(context.Context) error,
 	credentials config.FederationCredentialStore,
 	opts clientpkg.Opts,
-) error {
+) (retErr error) {
 	runStartBinding := binding
+	var pushErr error
 	if pushThisTurn {
 		// A push that waits for the hub's history is finished by the pull
 		// below and the next cycle's push.
 		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts); err != nil &&
 			!errors.Is(err, db.ErrFederationPushAwaitsPull) {
-			return err
+			if !isFederationProjectNotEnrolledError(err) {
+				return err
+			}
+			// The hub moved an issue this push touches into a project the
+			// spoke has not joined. Pull anyway, so hub work keeps arriving
+			// and the move parks the issue. The refusal is still returned.
+			pushErr = err
+			defer func() {
+				if !errors.Is(retErr, pushErr) {
+					retErr = errors.Join(pushErr, retErr)
+				}
+			}()
 		}
 	}
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
@@ -405,6 +417,10 @@ func syncDirectSpoke(
 		at := time.Now().UTC()
 		if at.Before(pullStartedAt) {
 			at = pullStartedAt
+		}
+		if pushErr != nil {
+			// Keep the refused push visible in status when the pull fails too.
+			pullErr = errors.Join(pushErr, pullErr)
 		}
 		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
 	}
@@ -895,6 +911,11 @@ func isPoisonedFederationPushError(err error) bool {
 		return false
 	}
 	return statusErr.StatusCode == http.StatusBadRequest || statusErr.StatusCode == http.StatusConflict
+}
+
+func isFederationProjectNotEnrolledError(err error) bool {
+	statusErr, ok := errors.AsType[*HubStatusError](err)
+	return ok && statusErr.StatusCode == http.StatusForbidden && federationHubErrorCode(statusErr.Body) == db.FederationProjectNotEnrolledCode
 }
 
 func federationHubErrorCode(body string) string {
