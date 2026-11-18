@@ -252,9 +252,7 @@
     }
     const mutationUID = uid()
     const generation = draftResetGeneration
-    const ok = await onPatchMetadata(mutationUID, {
-      scheduled_on: value === '' ? null : value,
-    })
+    const ok = await onPatchMetadata(mutationUID, { scheduled_on: value === '' ? null : value })
     if (ok) scheduleAcceptedReset(property, mutationUID, generation)
   }
 
@@ -268,9 +266,7 @@
     }
     const mutationUID = uid()
     const generation = draftResetGeneration
-    const ok = await onPatchMetadata(mutationUID, {
-      deadline_on: value === '' ? null : value,
-    })
+    const ok = await onPatchMetadata(mutationUID, { deadline_on: value === '' ? null : value })
     if (ok) scheduleAcceptedReset(property, mutationUID, generation)
   }
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"go.kenn.io/kata/internal/recurrence"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 type scheduledOnKind int
@@ -75,15 +75,12 @@ func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone st
 			zone = "UTC"
 		}
 		if zone == "Local" {
-			zone = recurrence.LocalZone("/etc/localtime")
+			zone = recurrenceclient.LocalZone(recurrenceclient.DefaultLocaltimePath)
 			if zone == "" {
 				return nil, fmt.Errorf("%w: schedule timezone Local is not portable; set timezone to a named zone", ErrInvalidValue)
 			}
 		}
 		value += "[" + zone + "]"
-		if _, _, _, err := classifyScheduledOn(value); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidValue, err)
-		}
 		result[key], err = json.Marshal(value)
 		if err != nil {
 			return nil, err
