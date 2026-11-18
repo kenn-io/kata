@@ -1925,7 +1925,10 @@ func federationFoldEventsQuery(projectID int64, eventTypes, issueScope []string)
 	// projects, as a retained move does. A project's snapshot stays out when, in
 	// fold order, a relocation took the issue away from that project before it
 	// and no accepted relocation brought the issue back in between: only that
-	// project's own pull may accept it. The reset rows are read once per role.
+	// project's own pull may accept it. The reset rows are read separately for
+	// each role: membership, the departure, and the arrival back. An issue with
+	// a retained move already joins every project's history through the moved
+	// clause above, so this gate never applies to it.
 	const relocations = `FROM events reset
      JOIN events m ON m.uid = json_extract(reset.payload,'$.move_event_uid') AND m.type='issue.snapshot'
      WHERE reset.type='sync.reset_required'`
