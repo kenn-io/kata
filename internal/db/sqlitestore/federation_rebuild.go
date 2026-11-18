@@ -47,18 +47,12 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 				return nil, err
 			}
 		}
-		projection := db.FoldEvents(events)
-		snapshotGroup, err := federationSnapshotGroupProjectIDs(ctx, tx, id)
-		if err != nil {
-			return nil, err
-		}
 		planCtx := ctx
 		if id != projectID {
-			// Destinations followed from the rebuilt project keep refused issues.
+			// Only the rebuilt project's own pull relocates snapshot issues.
 			planCtx = db.WithMovedProjectPass(ctx)
 		}
-		moveEvents := db.IndexFederatedMoveEvents(events)
-		decisions, destinations, err := db.PlanFederatedMovedIssues(planCtx, tx, moveEvents, projection, id, snapshotGroup, federatedRelocationRefused(ctx, tx))
+		events, projection, moveEvents, decisions, destinations, err := planFederatedMaterialization(planCtx, tx, id, events)
 		if err != nil {
 			return nil, err
 		}
@@ -70,7 +64,6 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		for _, decision := range decisions {
 			moveProjection.Issues[decision.IssueUID] = projection.Issues[decision.IssueUID]
 		}
-		db.KeepRefusedFederatedRelocations(projection, decisions)
 		for _, decision := range decisions {
 			result.moved[decision.IssueUID] = decision
 			moveOwners[decision.IssueUID] = projection.Issues[decision.IssueUID].ProjectUID
@@ -220,15 +213,11 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 		// Earlier rehomes can change the source of a later decision.
 		changed := map[string]bool{}
 		for _, p := range prepared.projects {
-			snapshotGroup, err := federationSnapshotGroupProjectIDs(ctx, tx, p.id)
-			if err != nil {
-				return err
-			}
 			planCtx := ctx
 			if p.id != prepared.projects[0].id {
 				planCtx = db.WithMovedProjectPass(ctx)
 			}
-			decisions, _, err := db.PlanFederatedMovedIssues(planCtx, tx, p.moveEvents, p.moveProjection, p.id, snapshotGroup, federatedRelocationRefused(ctx, tx))
+			decisions, _, err := db.PlanFederatedMovedIssues(planCtx, tx, p.moveEvents, p.moveProjection, p.id)
 			if err != nil {
 				return err
 			}

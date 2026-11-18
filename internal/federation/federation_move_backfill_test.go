@@ -575,6 +575,7 @@ func TestSyncFederationMovedIssueLateEnrollment(t *testing.T) {
 	retained, err := spoke.env.DB.EventsByUIDs(ctx, local.ID, []string{move.Event.UID})
 	require.ErrorIs(t, err, db.ErrNotFound, "destination recovery did not depend on receiving the move")
 	require.Empty(t, retained)
+	require.NoError(t, spoke.sync(t, 0), "the source keeps syncing after the relocation")
 	got, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, before.ID, got.ID)

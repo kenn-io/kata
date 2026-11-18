@@ -538,15 +538,31 @@ func (s *Store) materializeFederatedProjectTxScoped(
 			return err
 		}
 	}
-	projection := db.FoldEvents(events)
-	snapshotGroup, err := federationSnapshotGroupProjectIDs(ctx, tx, projectID)
-	if err != nil {
-		return err
-	}
-	moved := db.IndexFederatedMoveEvents(events)
-	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID, snapshotGroup, federatedRelocationRefused(ctx, tx))
-	if err != nil {
-		return err
+	// A snapshot relocation brings the holding project's history for the
+	// issue into the fold, so the issue keeps its spoke-local discussion.
+	var (
+		projection   db.FoldProjection
+		moved        db.FederatedMoveIndex
+		decisions    []db.FederatedMoveDecision
+		destinations []int64
+	)
+	for folded := events; ; {
+		projection = db.FoldEvents(folded)
+		moved = db.IndexFederatedMoveEvents(folded)
+		decisions, destinations, err = db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID)
+		if err != nil {
+			return err
+		}
+		var added bool
+		folded, added, err = db.AppendFederatedRelocationHistory(folded, decisions, func(sourceID int64, _ []string) ([]db.FoldEvent, error) {
+			return federationFoldEvents(ctx, tx, sourceID)
+		})
+		if err != nil {
+			return err
+		}
+		if !added {
+			break
+		}
 	}
 	err = db.RehomeFederatedMovedIssues(ctx, tx, moved, projection, decisions, func(pid int64, issue db.FoldIssue) (string, error) {
 		return resolveFederatedIssueShortID(ctx, tx, pid, issue, federatedIssueRow{}, false)
@@ -1120,32 +1136,4 @@ func optionalFederationString(value *string) any {
 		return nil
 	}
 	return *value
-}
-
-// federatedRelocationRefused runs rehoming's refusal checks without the locks
-// and stale-claim cleanup rehoming takes, so planning can leave an issue with
-// its owner and let only the destination's own pull report the refusal.
-func federatedRelocationRefused(ctx context.Context, tx *sql.Tx) func(int64, int64, int64) (bool, error) {
-	return func(id, source, target int64) (bool, error) {
-		if collisions, err := issueMoveImportMappingCollisionsTx(ctx, tx, id, source, target); err != nil || len(collisions) > 0 {
-			return len(collisions) > 0, err
-		}
-		if claimed, err := freshExternalRootClaimTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil || claimed {
-			return claimed, err
-		}
-		if err := rejectIssueMoveExternalRootIssueSyncTx(ctx, tx, id, source, target); errors.Is(err, db.ErrExternalRootIssueSyncConflict) {
-			return true, nil
-		} else if err != nil {
-			return false, err
-		}
-		var issueUID string
-		if err := tx.QueryRowContext(ctx, `SELECT uid FROM issues WHERE id=$1`, id).Scan(&issueUID); err != nil {
-			return false, mapSQLError(err, nil)
-		}
-		err := db.CheckNativeRecurringParentMove(ctx, tx, true, source, issueUID)
-		if _, pinned := errors.AsType[*db.NativeRecurringParentPinnedError](err); pinned {
-			return true, nil
-		}
-		return false, err
-	}
 }
