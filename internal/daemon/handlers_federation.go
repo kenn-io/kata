@@ -1121,6 +1121,11 @@ func federationIngestError(err error) error {
 	switch {
 	case errors.Is(err, db.ErrTransactionFinalizationFailed):
 		return internalAPIError(err)
+	case errors.As(err, new(*db.FederationProjectNotEnrolledError)):
+		// Stays 403 so a spoke still pulls after the rejected push and learns
+		// where the issue went.
+		return api.NewError(http.StatusForbidden, db.FederationProjectNotEnrolledCode, err.Error(),
+			"ask the hub operator which project holds this issue, join it from this spoke with push access and the same actor, then sync again", nil)
 	case errors.Is(err, db.ErrFederationMoveSourceUnauthorized):
 		return federationCredentialDenied()
 	case errors.Is(err, ErrHostAccessDenied):

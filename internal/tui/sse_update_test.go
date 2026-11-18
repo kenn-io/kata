@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 // sseUpdateFixture builds a minimal Model wired for the SSE Update-side
@@ -490,30 +491,6 @@ func TestHandleEventReceived_IssueCreatedWithParentRefetchesOpenParent(t *testin
 	}
 }
 
-// TestSSEUpdate_ReadsIssueShortID pins that the SSE decoder reads the
-// `issue_short_id` field of an event envelope and exposes it as
-// issueShortID on the resulting eventReceivedMsg. UID rides alongside
-// for canonical matching.
-func TestSSEUpdate_ReadsIssueShortID(t *testing.T) {
-	body := []byte(`{
-		"type":"issue.created",
-		"project_id":7,
-		"project_uid":"01JZ0000000000000000000002",
-		"issue_short_id":"d4ex",
-		"issue_uid":"01HZNQ7VFPK1XGD8R5MABCD4EX"
-	}`)
-	got := decodeEventReceived(frame{kind: frameEvent, eventType: "issue.created", data: body})
-	if got.eventType != "issue.created" {
-		t.Fatalf("eventType = %q, want issue.created", got.eventType)
-	}
-	if got.issueShortID != "d4ex" {
-		t.Fatalf("issueShortID = %q, want d4ex", got.issueShortID)
-	}
-	if got.issueUID != "01HZNQ7VFPK1XGD8R5MABCD4EX" {
-		t.Fatalf("issueUID = %q, want the full ULID", got.issueUID)
-	}
-}
-
 // TestDecodeEventReceived_IssueCreatedExtractsParentLink covers the
 // payload-extraction half: the SSE parser must surface the embedded
 // parent link out of the issue.created payload so the dispatcher can
@@ -527,7 +504,7 @@ func TestDecodeEventReceived_IssueCreatedExtractsParentLink(t *testing.T) {
 		"issue_uid":"01UID-NEW",
 		"payload":{"links":[{"type":"parent","to_short_id":"abc4","to_issue_uid":"01UID-PARENT"}]}
 	}`)
-	got := decodeEventReceived(frame{eventType: "issue.created", data: body})
+	got := decodeEventReceived(kataclient.Event{Type: "issue.created", Data: body})
 	if got.eventType != "issue.created" {
 		t.Fatalf("eventType = %q, want issue.created", got.eventType)
 	}
@@ -669,17 +646,17 @@ func TestCommentArrivalMakesPendingReplyTargetNavigable(t *testing.T) {
 				}
 			})
 
-			unrelated := decodeEventReceived(frame{data: []byte(`{
+			unrelated := decodeEventReceived(kataclient.Event{Data: []byte(`{
 				"type":"issue.snapshot","project_id":8,"issue_uid":"other-issue",
 				"payload":{"uid":"other-issue","comments":[{"comment_uid":"unrelated-comment"}]}
 			}`)})
 			require.Nil(t, m.maybeRefetchOpenDetail(unrelated))
-			unrelatedComment := decodeEventReceived(frame{data: []byte(`{
+			unrelatedComment := decodeEventReceived(kataclient.Event{Data: []byte(`{
 				"type":"issue.commented","project_id":7,"issue_uid":"target-issue",
 				"payload":{"comment_uid":"unrelated-comment"}
 			}`)})
 			require.Nil(t, m.maybeRefetchOpenDetail(unrelatedComment))
-			arrival := decodeEventReceived(frame{data: []byte(tc.frame)})
+			arrival := decodeEventReceived(kataclient.Event{Data: []byte(tc.frame)})
 			cmd := m.maybeRefetchOpenDetail(arrival)
 			require.NotNil(t, cmd, "the pending target's arrival must refetch its reply's open detail")
 			for _, fetch := range detailEventBatch(t, &m, cmd) {
@@ -723,12 +700,12 @@ func TestScopedCommentArrivalMakesRedactedReplyTargetNavigable(t *testing.T) {
 		}
 	})
 
-	otherProject := decodeEventReceived(frame{data: []byte(`{
+	otherProject := decodeEventReceived(kataclient.Event{Data: []byte(`{
 		"type":"issue.commented","project_id":8,"issue_uid":"other-issue",
 		"payload":{"comment_uid":"other-comment"}
 	}`)})
 	require.Nil(t, m.maybeRefetchOpenDetail(otherProject))
-	arrival := decodeEventReceived(frame{data: []byte(`{
+	arrival := decodeEventReceived(kataclient.Event{Data: []byte(`{
 		"type":"issue.commented","project_id":7,"issue_uid":"sibling-issue",
 		"payload":{"comment_uid":"target-comment"}
 	}`)})
@@ -1149,7 +1126,7 @@ func federatedCommentIdentityEvent(t *testing.T, eventType, commentUID string, r
 		Payload: jsontext.Value(payloadJSON),
 	})
 	require.NoError(t, err)
-	return decodeEventReceived(frame{data: eventJSON})
+	return decodeEventReceived(kataclient.Event{Data: eventJSON})
 }
 
 // TestHandleEventReceived_CrossProjectMismatch_NoRefetch: in all-

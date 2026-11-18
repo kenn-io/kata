@@ -18,8 +18,8 @@ import (
 type Storage interface {
 	// Shared definitions, native recurring delivery and independently attributed execution evidence.
 	ObserveCronRun(context.Context, ObserveCronRun) (CronRunObservationResult, error)
-	CronRun(context.Context, int64, string) (CronRun, error)
-	ListCronRuns(context.Context, CronRunList) ([]CronRun, error)
+	CronRun(context.Context, int64, string) (CronRunView, error)
+	ListCronRuns(context.Context, CronRunList) ([]CronRunView, error)
 	PutCronJob(context.Context, PutCronJob) (CronJob, []Event, error)
 	PutCronWorkflow(context.Context, PutCronWorkflow) (CronWorkflow, Event, error)
 	CronJob(context.Context, int64, string) (CronJob, error)

@@ -12,11 +12,11 @@ func (s *Store) ObserveCronRun(ctx context.Context, in db.ObserveCronRun) (db.Cr
 }
 
 // CronRun reads one project-scoped independent observation.
-func (s *Store) CronRun(ctx context.Context, p int64, id string) (db.CronRun, error) {
+func (s *Store) CronRun(ctx context.Context, p int64, id string) (db.CronRunView, error) {
 	return s.cronSQL().Run(ctx, p, id)
 }
 
 // ListCronRuns returns a bounded ordinary history page.
-func (s *Store) ListCronRuns(ctx context.Context, in db.CronRunList) ([]db.CronRun, error) {
+func (s *Store) ListCronRuns(ctx context.Context, in db.CronRunList) ([]db.CronRunView, error) {
 	return s.cronSQL().Runs(ctx, in)
 }

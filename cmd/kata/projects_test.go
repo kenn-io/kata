@@ -194,6 +194,38 @@ func TestProjectsCreatePreservesArchivedNameConflict(t *testing.T) {
 	assert.Contains(t, ce.Message, "archived")
 }
 
+func TestProjectsShowArchivedProjectCarriesRestoreHint(t *testing.T) {
+	env := testenv.New(t)
+	p, err := env.DB.CreateProject(t.Context(), "retired-project")
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.NoError(t, err)
+
+	for _, selector := range []string{itoa(p.ID), "retired-project"} {
+		_, err = runCmdOutput(t, env, "projects", "show", selector)
+
+		ce := requireCLIError(t, err, ExitNotFound)
+		assert.Equal(t, "project_not_found", ce.Code, selector)
+		assert.Contains(t, ce.Hint, "kata projects restore retired-project", selector)
+	}
+}
+
+func TestProjectsShowActiveSuffixMatchIgnoresArchivedProjects(t *testing.T) {
+	env := testenv.New(t)
+	active, err := env.DB.CreateProject(t.Context(), "team/docs")
+	require.NoError(t, err)
+	archived, err := env.DB.CreateProject(t.Context(), "old/docs")
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: archived.ID, Actor: "tester"})
+	require.NoError(t, err)
+
+	out, err := runCmdOutput(t, env, "projects", "show", "docs", "--json")
+
+	require.NoError(t, err)
+	assert.Contains(t, out, `"name":"team/docs"`)
+	assert.Contains(t, out, `"id":`+itoa(active.ID))
+}
+
 func TestProjects_ShowAgentUsesReadShape(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()

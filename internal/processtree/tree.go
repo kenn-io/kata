@@ -35,6 +35,13 @@ func (t *Tree) Wait() error {
 	return t.cmd.Wait()
 }
 
+// Alive reports whether any process in the contained tree is still running,
+// including descendants that outlived the direct process. A process that
+// escaped containment does not count.
+func (t *Tree) Alive() bool {
+	return t.platform.alive(t.cmd)
+}
+
 // Close releases the platform containment resources. On platforms whose
 // containment is kill-on-close, any remaining descendants are terminated.
 func (t *Tree) Close() error {

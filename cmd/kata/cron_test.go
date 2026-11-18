@@ -501,7 +501,7 @@ type cronCLIState struct {
 	maxEventID int64
 	jobs       []db.CronJob
 	workflows  []db.CronWorkflow
-	runs       []db.CronRun
+	runs       []db.CronRunView
 }
 
 func readCronCLIState(t *testing.T, store db.Storage, projectID int64) cronCLIState {
