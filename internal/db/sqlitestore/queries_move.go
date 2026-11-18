@@ -273,29 +273,21 @@ func rejectIssueMoveExternalRootIssueSyncTx(
 	if _, err := tx.ExecContext(ctx, `UPDATE projects SET id=id WHERE id=?`, targetProjectID); err != nil {
 		return fmt.Errorf("lock issue move target project: %w", err)
 	}
-	owned, err := externalRootIssueSyncConflictTx(ctx, tx, issueID, sourceProjectID, targetProjectID)
-	if err != nil {
-		return err
-	}
-	if owned {
-		return db.ErrExternalRootIssueSyncConflict
-	}
-	return nil
-}
-
-// externalRootIssueSyncConflictTx reports whether the target's issue sync
-// already owns the content of the issue's external root.
-func externalRootIssueSyncConflictTx(ctx context.Context, tx *sql.Tx, issueID, sourceProjectID, targetProjectID int64) (bool, error) {
-	var owned bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1
+	var bindingID int64
+	err := tx.QueryRowContext(ctx, `SELECT b.id
 		FROM external_root_bindings b
 		JOIN import_mappings m ON m.issue_id=b.issue_id
 		JOIN issue_sync_bindings s ON s.project_id=? AND s.source_key=m.source
 		WHERE b.issue_id=? AND b.active=1
-		  AND m.project_id=? AND m.object_type='issue')`, targetProjectID, issueID, sourceProjectID).Scan(&owned); err != nil {
-		return false, fmt.Errorf("check issue move external root ownership: %w", err)
+		  AND m.project_id=? AND m.object_type='issue'
+		LIMIT 1`, targetProjectID, issueID, sourceProjectID).Scan(&bindingID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
 	}
-	return owned, nil
+	if err != nil {
+		return fmt.Errorf("check issue move external root ownership: %w", err)
+	}
+	return db.ErrExternalRootIssueSyncConflict
 }
 
 func issueMoveImportMappingCollisions(

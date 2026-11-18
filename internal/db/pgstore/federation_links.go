@@ -111,22 +111,6 @@ func federationBindingGroupProjectIDs(
 	tx *sql.Tx,
 	current db.FederationBinding,
 ) ([]int64, error) {
-	return federationBindingGroupProjectIDsScoped(ctx, tx, current, false)
-}
-
-// Snapshot ownership is shared by native replicas of one hub, including paused replicas.
-func federationSnapshotGroupProjectIDs(ctx context.Context, tx *sql.Tx, projectID int64) ([]int64, error) {
-	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, projectID))
-	if err != nil {
-		return nil, err
-	}
-	if binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil {
-		return nil, nil
-	}
-	return federationBindingGroupProjectIDsScoped(ctx, tx, binding, true)
-}
-
-func federationBindingGroupProjectIDsScoped(ctx context.Context, tx *sql.Tx, current db.FederationBinding, nativeSnapshots bool) ([]int64, error) {
 	switch current.Role {
 	case db.FederationRoleHub:
 	case db.FederationRoleSpoke:
@@ -141,15 +125,9 @@ func federationBindingGroupProjectIDsScoped(ctx context.Context, tx *sql.Tx, cur
 			return nil, err
 		}
 	}
-	query := federationBindingSelect + ` WHERE role=$1`
-	if !nativeSnapshots {
-		query += ` AND enabled=1`
-	}
-	query += ` ORDER BY project_id ASC`
-	if !nativeSnapshots {
-		query += ` FOR UPDATE`
-	}
-	rows, err := tx.QueryContext(ctx, query, string(current.Role))
+	rows, err := tx.QueryContext(ctx,
+		federationBindingSelect+` WHERE role=$1 AND enabled=1 ORDER BY project_id ASC FOR UPDATE`,
+		string(current.Role))
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
@@ -159,9 +137,6 @@ func federationBindingGroupProjectIDsScoped(ctx context.Context, tx *sql.Tx, cur
 		candidate, err := scanFederationBinding(rows)
 		if err != nil {
 			return nil, err
-		}
-		if nativeSnapshots && candidate.RelayConfig != nil {
-			continue
 		}
 		if current.Role == db.FederationRoleSpoke {
 			candidateOrigin, err := normalizedFederationHubOrigin(candidate.HubURL)
@@ -328,11 +303,7 @@ func federationFoldEventsOfTypes(
 	projectID int64,
 	eventTypes []string,
 ) ([]db.FoldEvent, error) {
-	group, err := federationSnapshotGroupProjectIDs(ctx, tx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	query, args := federationFoldEventsQuery(projectID, group, eventTypes)
+	query, args := federationFoldEventsQuery(projectID, eventTypes)
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
@@ -364,41 +335,19 @@ func federationFoldEventsOfTypes(
 // federationFoldEventsQuery builds the fold query. PostgreSQL scans events once
 // and checks both subqueries as hashed subplans, with or without statistics;
 // TestFederationFoldEventsBudget guards that plan.
-//
-// Other projects' events join an issue's history after a retained move, from
-// the two projects in a recorded snapshot relocation, or within a same-hub
-// snapshot group. A refused snapshot from another hub stays out, so it cannot
-// retry its relocation.
-func federationFoldEventsQuery(projectID int64, snapshotGroup []int64, eventTypes []string) (string, []any) {
+func federationFoldEventsQuery(projectID int64, eventTypes []string) (string, []any) {
 	query := `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
 e.related_issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at
 FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (e.issue_uid IN (
    SELECT h.issue_uid FROM events h WHERE h.project_id=$1
    UNION SELECT uid FROM issues WHERE project_id=$1)
- AND (EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND m.issue_uid = e.issue_uid)
- OR (e.issue_uid, e.project_id) IN (SELECT reset.issue_uid, rp.id FROM events reset
- JOIN events m ON m.uid = reset.payload::jsonb->>'move_event_uid' AND m.type='issue.snapshot'
- JOIN projects rp ON rp.id IN (reset.project_id, m.project_id)
- WHERE reset.type='sync.reset_required' AND reset.issue_uid IS NOT NULL)`
+ AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND m.issue_uid = e.issue_uid)))`
 	args := []any{projectID}
-	if len(snapshotGroup) > 1 {
-		placeholders := make([]string, 0, len(snapshotGroup))
-		for _, id := range snapshotGroup {
-			args = append(args, id)
-			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
-		}
-		groupSQL := strings.Join(placeholders, ",")
-		//nolint:gosec // Only generated placeholders enter SQL; project IDs are bound.
-		query += ` OR (e.project_id IN (` + groupSQL + `)
- AND e.issue_uid IN (SELECT m.issue_uid FROM events m WHERE m.type='issue.snapshot'
- AND m.project_id IN (` + groupSQL + `)))`
-	}
-	query += `)))`
 	if len(eventTypes) > 0 {
 		placeholders := make([]string, 0, len(eventTypes))
-		for _, eventType := range eventTypes {
+		for i, eventType := range eventTypes {
+			placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
 			args = append(args, eventType)
-			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
 		}
 		//nolint:gosec // G202: generated $N placeholders only; values are bound separately.
 		query += " AND e.type IN (" + strings.Join(placeholders, ",") + ")"

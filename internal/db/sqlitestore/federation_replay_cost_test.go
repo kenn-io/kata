@@ -42,8 +42,7 @@ func TestFederationReplayCostUnchangedIssues(t *testing.T) {
 		t.Logf("%d unchanged issues: %d page fetches", count+1, fetches)
 		fetchCounts = append(fetchCounts, fetches)
 	}
-	// Full replay still scans history and joins comments to issues, about 290
-	// pages for the 56 extra issues, varying by about 10 with random issue IDs.
-	// A per-issue update or comment ownership check adds at least 56 more.
-	require.LessOrEqual(t, fetchCounts[1], fetchCounts[0]+320)
+	// Full replay still scans history and joins comments to issues.
+	// Allow those reads while catching per-issue updates and comment ownership checks.
+	require.LessOrEqual(t, fetchCounts[1], fetchCounts[0]+300)
 }
