@@ -88,7 +88,6 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		var res hybridResult
 		hash := ""
-		remoteURLs := map[string]string{}
 		if stable {
 			params := db.SearchFTSParams{ProjectID: in.ProjectID, Query: in.Query, Status: in.Status, IncludeDeleted: in.IncludeDeleted, Labels: in.Labels, ExcludeLabels: in.ExcludeLabels, IssueScope: issueScopeFromContext(ctx), StableOrder: true}
 			normalized := params
@@ -127,9 +126,6 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 					hits, bounded, err := client.SearchShared(ctx, cred.HubProjectID, p, fetch)
 					if err != nil {
 						return nil, false, wrapHubSearchError(err)
-					}
-					for _, hit := range hits {
-						remoteURLs[hit.Issue.UID] = hit.WebURL
 					}
 					return hits, bounded, nil
 				}
@@ -173,7 +169,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.DegradedReason = res.DegradedReason
 		out.Body.Results = make([]api.SearchHit, 0, len(res.Hits))
 		for _, c := range res.Hits {
-			webURL := remoteURLs[c.Issue.UID]
+			webURL := ""
 			if c.Issue.ID != 0 {
 				webURL = issueWebURL(cfg, c.Issue.UID)
 			}

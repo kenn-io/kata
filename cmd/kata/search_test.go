@@ -95,15 +95,6 @@ func renderSearch(t *testing.T, mode outputMode, body string) string {
 	return buf.String()
 }
 
-func TestSearchShowsRemoteURL(t *testing.T) {
-	body := `{"query":"test","mode":"semantic","results":[{"issue":{"id":0,"short_id":"abc1","title":"remote","status":"open"},"web_url":"https://hub.example/kata?issue=abc1","score":0.9,"matched_in":["semantic"]},{"issue":{"id":2,"short_id":"abc2","title":"local","status":"open"},"web_url":"https://spoke.example/kata?issue=abc2","score":0.8,"matched_in":["semantic"]}]}`
-	for _, mode := range []outputMode{outputHuman, outputAgent} {
-		out := renderSearch(t, mode, body)
-		require.Contains(t, out, "https://hub.example/kata?issue=abc1")
-		require.NotContains(t, out, "https://spoke.example/kata?issue=abc2")
-	}
-}
-
 // TestSearch_OutputsShortIDNotNumber pins the JSON wire shape: each search
 // result's nested issue carries short_id; the legacy `number` field is gone.
 func TestSearch_OutputsShortIDNotNumber(t *testing.T) {
