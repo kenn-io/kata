@@ -841,9 +841,6 @@ func (c *claimHubClient) SearchShared(ctx context.Context, projectID int64, p hy
 	if err != nil {
 		return nil, false, err
 	}
-	if response.JSON200 == nil {
-		return nil, false, fmt.Errorf("unexpected hub search status: %d", response.StatusCode)
-	}
 	var body api.FederationSearchResponse
 	if err := json.Unmarshal(response.Body, &body.Body); err != nil {
 		return nil, false, err

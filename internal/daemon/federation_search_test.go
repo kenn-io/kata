@@ -231,6 +231,15 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	require.Contains(t, output["degraded_reason"], `local-only: mode "semantic" is unavailable: embeddings are not configured`)
 	hits := output["results"].([]any)
 	require.Len(t, hits, 2)
+	foundRemote := false
+	for _, hit := range hits {
+		resultIssue := hit.(map[string]any)["issue"].(map[string]any)
+		if resultIssue["uid"] == unpulled.UID {
+			foundRemote = true
+			require.Equal(t, "https://tasks.example/kata?issue="+unpulled.UID+"#direct=1", resultIssue["web_url"])
+		}
+	}
+	require.True(t, foundRemote)
 	localIssue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: localProject.ID, Title: "local concept", Author: "tester"})
 	require.NoError(t, err)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
