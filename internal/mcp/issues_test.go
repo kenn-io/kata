@@ -112,27 +112,79 @@ func TestSearchFanoutUsesStableGlobalOrdering(t *testing.T) {
 	}
 }
 
-func TestSearchFanoutReturnsNoPartialResultWhenOneProjectFails(t *testing.T) {
-	session, _ := connectMultiProjectServer(t, func(writer http.ResponseWriter, request *http.Request) bool {
-		if !strings.HasSuffix(request.URL.Path, "/search") {
-			return false
-		}
-		if strings.Contains(request.URL.Path, "/projects/2/") {
-			writer.WriteHeader(http.StatusServiceUnavailable)
-			writeJSON(writer, map[string]any{"status": 503, "error": map[string]any{"code": "unavailable", "message": "search unavailable"}})
-			return true
-		}
-		writeJSON(writer, map[string]any{
-			"query": "shared", "mode": "lexical",
-			"results": []any{map[string]any{"issue": issueJSON(1, "spoke-project", "spk1"), "score": 2.0, "matched_in": []string{"title"}}},
+func TestSearchFanoutWhenOneProjectFails(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		status   int
+		code     string
+		message  string
+		allFail  bool
+		project  string
+		retained bool
+		empty    bool
+	}{
+		{name: "local unavailable", status: 503, code: "unavailable", message: "vector index unavailable", retained: true},
+		{name: "hub search failed", status: 503, code: "hub_search_failed", message: "invalid hub search response", retained: true},
+		{name: "hub unavailable", status: 503, code: "hub_unreachable", message: "hub unreachable: connection refused", retained: true},
+		{name: "retained semantic", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, retained: true},
+		{name: "retained hybrid", status: 400, message: `mode "hybrid" is unavailable: embeddings are not configured`, retained: true},
+		{name: "empty successful project", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, retained: true, empty: true},
+		{name: "other validation", status: 400, message: "invalid search"},
+		{name: "all missing embeddings", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, allFail: true},
+		{name: "single project missing embeddings", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, project: "hub-project"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mode := "semantic"
+			if strings.Contains(tc.message, `mode "hybrid"`) {
+				mode = "hybrid"
+			}
+			session, _ := connectMultiProjectServer(t, func(writer http.ResponseWriter, request *http.Request) bool {
+				if !strings.HasSuffix(request.URL.Path, "/search") {
+					return false
+				}
+				if tc.allFail || strings.Contains(request.URL.Path, "/projects/2/") {
+					code := "validation"
+					if tc.code != "" {
+						code = tc.code
+					}
+					writer.WriteHeader(tc.status)
+					writeJSON(writer, map[string]any{"status": tc.status, "error": map[string]any{"code": code, "message": tc.message}})
+					return true
+				}
+				issue := issueJSON(1, "spoke-project", "spk1")
+				if tc.empty {
+					writeJSON(writer, map[string]any{"query": "shared", "mode": mode, "complete": true, "results": []any{}})
+					return true
+				}
+				writeJSON(writer, map[string]any{
+					"query": "shared", "mode": mode, "complete": true,
+					"results": []any{map[string]any{"issue": issue, "score": 0.9, "matched_in": []string{"semantic"}}},
+				})
+				return true
+			})
+			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.search", Arguments: map[string]any{"query": "shared", "mode": mode, "project": tc.project}})
+			require.NoError(t, err)
+			if !tc.retained {
+				require.True(t, result.IsError)
+				require.Nil(t, result.StructuredContent)
+				return
+			}
+			require.False(t, result.IsError, "%+v", result.Content)
+			output := result.StructuredContent.(map[string]any)
+			hits := output["results"].([]any)
+			if tc.empty {
+				require.Empty(t, hits)
+			} else {
+				require.Len(t, hits, 1)
+				hit := hits[0].(map[string]any)
+				issue := hit["issue"].(map[string]any)
+				require.Equal(t, "spoke-project#spk1", issue["qualified_ref"])
+			}
+			require.Equal(t, true, output["degraded"])
+			require.Equal(t, false, output["complete"])
+			require.Equal(t, "hub-project: "+tc.message, output["degraded_reason"])
 		})
-		return true
-	})
-
-	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.search", Arguments: map[string]any{"query": "shared"}})
-	require.NoError(t, err)
-	require.True(t, result.IsError)
-	require.Nil(t, result.StructuredContent)
+	}
 }
 
 func TestSchedulingAndForceInputsAreFirstClass(t *testing.T) {

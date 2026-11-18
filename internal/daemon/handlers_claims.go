@@ -823,6 +823,31 @@ type claimHubClient struct {
 	transportErr error
 }
 
+func (c *claimHubClient) SearchShared(ctx context.Context, projectID int64, p hybridParams, limit int) ([]api.FederationSearchHit, bool, error) {
+	if c.transportErr != nil {
+		return nil, false, c.transportErr
+	}
+	client, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(claimHubDoer{client: c.client}))
+	if err != nil {
+		return nil, false, err
+	}
+	count := int64(limit)
+	query := &generated.SearchFederationProjectQuery{Q: p.Query, Limit: &count, Label: p.Labels, ExcludeLabel: p.ExcludeLabels}
+	if p.Status != "" {
+		status := generated.SearchFederationProjectQueryStatus(p.Status)
+		query.Status = &status
+	}
+	response, err := client.SearchFederationProjectWithResponse(ctx, &generated.SearchFederationProjectRequestOptions{PathParams: &generated.SearchFederationProjectPath{ProjectID: projectID}, Query: query})
+	if err != nil {
+		return nil, false, err
+	}
+	var body api.FederationSearchResponse
+	if err := json.Unmarshal(response.Body, &body.Body); err != nil {
+		return nil, false, err
+	}
+	return body.Body.Hits, body.Body.Bounded, nil
+}
+
 type claimHubStatusError struct {
 	Path       string
 	StatusCode int

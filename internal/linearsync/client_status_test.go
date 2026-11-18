@@ -238,6 +238,13 @@ func TestStatusTargetsRequireLiveSelectedTypes(t *testing.T) {
 	require.Equal(t, "closed", status)
 	require.Equal(t, "done", *reason)
 	require.Equal(t, at, *closed)
+	// A closure stamped just after the last update (issue created directly as Done) is clamped.
+	late := i.UpdatedAt.Add(52 * time.Millisecond)
+	i.CompletedAt = &late
+	status, _, closed, err = issueStatus(i, "completed")
+	require.NoError(t, err)
+	require.Equal(t, "closed", status)
+	require.Equal(t, i.UpdatedAt.UTC().Truncate(time.Millisecond), *closed)
 }
 
 // The verification read after a write reuses the workflow just loaded instead

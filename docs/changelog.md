@@ -1,13 +1,20 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-16
+last_edited: 2026-11-17
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Start the Windows daemon again after a reboot, even when another account's
+  process now has the old daemon's PID. Kata used to treat that process as the
+  running daemon until you deleted `daemon.*.json` from the runtime directory.
+  Kata now reads the process start time from the Windows process list, so it
+  can tell that the PID belongs to a different process
+  ([#1194](https://github.com/kenn-io/kata/issues/1194)).
 
 - `kata doctor` now asks Docbank once, with a read-only request, whether it
   answers and accepts the daemon's API key, and reports the result in its

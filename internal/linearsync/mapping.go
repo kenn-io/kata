@@ -62,10 +62,15 @@ func issueStatus(i Issue, typ string) (string, *string, *time.Time, error) {
 		source = i.CanceledAt
 	}
 	if source != nil {
-		if !validTime(*source) || source.After(i.UpdatedAt) {
+		if !validTime(*source) {
 			return "", nil, nil, fmt.Errorf("invalid Linear closure timestamp")
 		}
+		// Linear can stamp completedAt/canceledAt a few ms after updatedAt (issues created
+		// directly in a closed state); clamp instead of failing the whole import.
 		at = *source
+		if at.After(i.UpdatedAt) {
+			at = i.UpdatedAt
+		}
 	}
 	at = at.UTC().Truncate(time.Millisecond)
 	return "closed", &reason, &at, nil

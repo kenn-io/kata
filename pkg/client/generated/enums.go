@@ -892,6 +892,23 @@ func (o OfferRelayDeliveriesQueryStream) Validate() error {
 	}
 }
 
+type SearchFederationProjectQueryStatus string
+
+const (
+	SearchFederationProjectQueryStatusClosed SearchFederationProjectQueryStatus = "closed"
+	SearchFederationProjectQueryStatusOpen   SearchFederationProjectQueryStatus = "open"
+)
+
+// Validate checks if the SearchFederationProjectQueryStatus value is valid
+func (s SearchFederationProjectQueryStatus) Validate() error {
+	switch s {
+	case SearchFederationProjectQueryStatusClosed, SearchFederationProjectQueryStatusOpen:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid SearchFederationProjectQueryStatus value, got: %v", s))
+	}
+}
+
 type ListIssuesQueryStatus string
 
 const (

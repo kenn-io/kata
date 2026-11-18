@@ -1038,6 +1038,36 @@ func (c *Client) ListFederationEnrollments(ctx context.Context) ([]FederationEnr
 	return resp.Enrollments, nil
 }
 
+// NameFederationSpoke sets a hub-local name, or clears it when name is empty.
+func (c *Client) NameFederationSpoke(ctx context.Context, instanceUID, name string) (string, error) {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return "", err
+	}
+	var result struct {
+		SpokeName string `json:"spoke_name"`
+	}
+	if name == "" {
+		wire, callErr := apiClient.ClearFederationSpokeNameWithResponse(ctx, &generated.ClearFederationSpokeNameRequestOptions{
+			PathParams: &generated.ClearFederationSpokeNamePath{SpokeInstanceUID: instanceUID},
+		})
+		if wire == nil {
+			return "", callErr
+		}
+		err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &result)
+	} else {
+		wire, callErr := apiClient.SetFederationSpokeNameWithResponse(ctx, &generated.SetFederationSpokeNameRequestOptions{
+			PathParams: &generated.SetFederationSpokeNamePath{SpokeInstanceUID: instanceUID},
+			Body:       &generated.SetFederationSpokeNameBody{Name: name},
+		})
+		if wire == nil {
+			return "", callErr
+		}
+		err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &result)
+	}
+	return result.SpokeName, err
+}
+
 // RevokeFederationEnrollment revokes one hub enrollment by ID. Revocation is
 // idempotent at the daemon; an already-revoked row still reports revoked.
 func (c *Client) RevokeFederationEnrollment(ctx context.Context, enrollmentID int64) error {
