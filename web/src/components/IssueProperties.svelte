@@ -222,102 +222,6 @@
     return calendarDate(issue.issue.deadline_on_date, issue.issue.metadata.deadline_on)
   }
 
-  function resolveTimedDate(wall: string, zone: string): number {
-    const target = Date.parse(`${wall}Z`)
-    const local = new Intl.DateTimeFormat('en-CA', {
-      timeZone: zone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hourCycle: 'h23',
-    })
-    function localTime(instant: number): number {
-      const parts = Object.fromEntries(
-        local.formatToParts(instant).map(({ type, value }) => [type, value]),
-      )
-      return Date.UTC(
-        Number(parts.year),
-        Number(parts.month) - 1,
-        Number(parts.day),
-        Number(parts.hour),
-        Number(parts.minute),
-        Number(parts.second),
-      )
-    }
-    const wholeTarget = Math.floor(target / 1000) * 1000
-    const offsets = [-36, 36].map((hours) => {
-      const sample = wholeTarget + hours * 3600000
-      return localTime(sample) - sample
-    })
-    const candidates = offsets.map((offset) => wholeTarget - offset).sort((a, b) => a - b)
-    let instant = candidates.find((candidate) => localTime(candidate) === wholeTarget)
-    if (instant === undefined) {
-      let before = Math.min(...candidates)
-      let after = Math.max(...candidates)
-      while (after - before > 1000) {
-        const middle = Math.floor((before + after) / 2000) * 1000
-        if (localTime(middle) < wholeTarget) before = middle
-        else after = middle
-      }
-      instant = after
-    }
-    return instant
-  }
-
-  function projectedTimedDate(wall: string, zone: string): string {
-    const viewer = new Intl.DateTimeFormat('en-CA', {
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    })
-    const parts = Object.fromEntries(
-      viewer.formatToParts(resolveTimedDate(wall, zone)).map(({ type, value }) => [type, value]),
-    )
-    return `${parts.year}-${parts.month}-${parts.day}`
-  }
-
-  function movedDate(saved: string | undefined, projected: string, picked: string): string {
-    const match = saved?.match(
-      /^(\d{4}-\d{2}-\d{2})((?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?(?:\[[^\]]+\]|Z)?)$/,
-    )
-    if (!match || !picked) return picked
-    const displayedDay = Date.parse(`${projected}T00:00:00Z`)
-    const pickedDay = Date.parse(`${picked}T00:00:00Z`)
-    const savedDay = Date.parse(`${match[1]}T00:00:00Z`)
-    if (![displayedDay, pickedDay, savedDay].every(Number.isFinite)) return picked
-    const estimated = savedDay + pickedDay - displayedDay
-    if (saved?.endsWith('Z')) {
-      const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone
-      const viewer = new Intl.DateTimeFormat('en-CA', {
-        timeZone: viewerZone,
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hourCycle: 'h23',
-      })
-      const parts = Object.fromEntries(
-        viewer.formatToParts(new Date(saved)).map(({ type, value }) => [type, value]),
-      )
-      const wall = `${picked}T${parts.hour}:${parts.minute}:${parts.second}`
-      const fraction = saved.match(/(\.\d+)Z$/)?.[1] ?? ''
-      return (
-        new Date(resolveTimedDate(wall, viewerZone)).toISOString().slice(0, 19) + fraction + 'Z'
-      )
-    }
-    const zoned = match[2]?.match(/^(T[^[]+)\[([^\]]+)\]$/)
-    if (zoned?.[1] && zoned[2]) {
-      for (const adjustment of [0, -1, 1]) {
-        const date = new Date(estimated + adjustment * 86400000).toISOString().slice(0, 10)
-        if (projectedTimedDate(date + zoned[1], zoned[2]) === picked) return date + match[2]
-      }
-    }
-    return new Date(estimated).toISOString().slice(0, 10) + match[2]
-  }
-
   function priorityLabel(): string {
     const priority = issue.issue.priority
     return priority === undefined || priority === null ? 'No priority' : `P${priority}`
@@ -348,9 +252,8 @@
     }
     const mutationUID = uid()
     const generation = draftResetGeneration
-    const scheduledOn = movedDate(issue.issue.metadata.scheduled_on, scheduledDate(), value)
     const ok = await onPatchMetadata(mutationUID, {
-      scheduled_on: scheduledOn === '' ? null : scheduledOn,
+      scheduled_on: value === '' ? null : value,
     })
     if (ok) scheduleAcceptedReset(property, mutationUID, generation)
   }
@@ -365,9 +268,8 @@
     }
     const mutationUID = uid()
     const generation = draftResetGeneration
-    const deadlineOn = movedDate(issue.issue.metadata.deadline_on, deadlineDate(), value)
     const ok = await onPatchMetadata(mutationUID, {
-      deadline_on: deadlineOn === '' ? null : deadlineOn,
+      deadline_on: value === '' ? null : value,
     })
     if (ok) scheduleAcceptedReset(property, mutationUID, generation)
   }

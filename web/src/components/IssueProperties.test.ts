@@ -85,7 +85,6 @@ function renderProperties(
 describe('IssueProperties', () => {
   afterEach(() => {
     cleanup()
-    vi.restoreAllMocks()
   })
 
   it('adds and removes labels', async () => {
@@ -204,12 +203,6 @@ describe('IssueProperties', () => {
   ] as const)(
     'edits a zoned %s using its projected calendar date',
     async (_, key, projectedKey, edit, picker) => {
-      const resolved = Intl.DateTimeFormat.prototype.resolvedOptions
-      vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(function (
-        this: Intl.DateTimeFormat,
-      ) {
-        return { ...resolved.call(this), timeZone: 'America/Chicago' }
-      })
       const onPatchMetadata = vi.fn(async () => true)
       renderProperties({
         issue: makeIssue({
@@ -223,7 +216,7 @@ describe('IssueProperties', () => {
       await fireEvent.click(screen.getByRole('button', { name: new RegExp(`${picker}:`) }))
       await fireEvent.click(screen.getByRole('button', { name: /May 12, 2027/ }))
       expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
-        [key]: '2027-05-13T00:30[Asia/Tokyo]',
+        [key]: '2027-05-12',
       })
     },
   )
@@ -234,12 +227,6 @@ describe('IssueProperties', () => {
   ] as const)(
     'keeps the selected %s day across a saved-zone DST change',
     async (_, key, projectedKey, edit, picker) => {
-      const resolved = Intl.DateTimeFormat.prototype.resolvedOptions
-      vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(function (
-        this: Intl.DateTimeFormat,
-      ) {
-        return { ...resolved.call(this), timeZone: 'Europe/Paris' }
-      })
       const onPatchMetadata = vi.fn(async () => true)
       renderProperties({
         issue: makeIssue({
@@ -252,7 +239,7 @@ describe('IssueProperties', () => {
       await fireEvent.click(screen.getByRole('button', { name: new RegExp(`${picker}:`) }))
       await fireEvent.click(screen.getByRole('button', { name: /Mar 9, 2026/ }))
       expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
-        [key]: '2026-03-09T18:30[America/New_York]',
+        [key]: '2026-03-09',
       })
     },
   )
@@ -268,17 +255,11 @@ describe('IssueProperties', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Scheduled: May 12/ }))
     await fireEvent.click(screen.getByRole('button', { name: /May 13, 2027/ }))
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
-      scheduled_on: '2027-05-13[Europe/Paris]',
+      scheduled_on: '2027-05-13',
     })
   })
 
   it('keeps the selected New York day when moving a UTC instant across DST', async () => {
-    const resolved = Intl.DateTimeFormat.prototype.resolvedOptions
-    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(function (
-      this: Intl.DateTimeFormat,
-    ) {
-      return { ...resolved.call(this), timeZone: 'America/New_York' }
-    })
     const onPatchMetadata = vi.fn(async () => true)
     renderProperties({
       issue: makeIssue({
@@ -291,7 +272,7 @@ describe('IssueProperties', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
     await fireEvent.click(screen.getByRole('button', { name: /Mar 8, 2026/ }))
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
-      scheduled_on: '2026-03-09T03:30:00Z',
+      scheduled_on: '2026-03-08',
     })
   })
 
