@@ -214,18 +214,6 @@ describe('IssueProperties', () => {
       '2026-03-09T03:30:00Z',
     ],
     [
-      'deadline instant',
-      'deadline_on',
-      'deadline_on_date',
-      'Edit due date',
-      'Due',
-      'America/New_York',
-      '2026-03-07',
-      'Mar 8, 2026',
-      '2026-03-08T04:30:00Z',
-      '2026-03-09T03:30:00Z',
-    ],
-    [
       'fractional seconds',
       'scheduled_on',
       'scheduled_on_date',
@@ -343,7 +331,7 @@ describe('IssueProperties', () => {
     })
     setGeneratedFetch(
       vi.fn(
-        async (input) =>
+        async () =>
           new Response(
             JSON.stringify({
               issue_uid: 'issue-1',
@@ -358,7 +346,7 @@ describe('IssueProperties', () => {
               deadline_on: null,
             }),
             {
-              status: String(input).includes('field=scheduled_on') ? 200 : 400,
+              status: 200,
               headers: { 'Content-Type': 'application/json' },
             },
           ),

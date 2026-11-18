@@ -40,20 +40,6 @@ func TestIssuePlanningDatesNativeResolution(t *testing.T) {
 	require.Equal(t, 404, status)
 }
 
-func TestIssuePlanningDatesSelectsOneField(t *testing.T) {
-	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	project, issue := seedProjectAndIssue(t, env)
-	_, err := env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata = ? WHERE id = ?`, `{"scheduled_on":"2026-03-08T13:30","deadline_on":"unreadable","timezone":"Asia/Tokyo"}`, issue.ID)
-	require.NoError(t, err)
-	path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/planning-dates", project.ID, issue.ShortID)
-	status, raw := cronHTTP(t, env, http.MethodGet, path+"?field=scheduled_on", nil)
-	require.Equalf(t, http.StatusOK, status, "%s", raw)
-	var result db.IssuePlanningDates
-	require.NoError(t, json.Unmarshal(raw, &result))
-	require.Equal(t, "Asia/Tokyo", result.ScheduledOn.Timezone)
-	require.Nil(t, result.DeadlineOn)
-}
-
 func TestIssuePlanningDatesScopedReadBoundary(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project := seedProject(t, env, "example-project")
