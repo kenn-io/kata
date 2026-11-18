@@ -437,9 +437,10 @@ func PlanFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves FederatedMo
 		}
 		decisions = append(decisions, decision)
 	}
-	// A recorded snapshot relocation brings the destination's snapshot into this
-	// fold. Refresh that destination as an applied move would, so history that
-	// arrives here for the issue reaches the project that now holds it.
+	// When this fold places an issue in another project through that project's
+	// own snapshot, which reaches this fold only through a recorded relocation,
+	// refresh that project as an applied move would. History that arrives here
+	// for the issue then reaches the project that holds it.
 	relocatedTo := map[string]bool{}
 	for uid, issue := range p.Issues {
 		if snapshot, ok := moves.Winners[uid]; ok && snapshot.Type == "issue.snapshot" && snapshot.ProjectUID == issue.ProjectUID {
@@ -599,10 +600,6 @@ func AppendFederatedRelocationHistory(events []FoldEvent, decisions []FederatedM
 				added = true
 			}
 		}
-	}
-	if added {
-		// The destination's snapshot covers the older history it carries.
-		events = FederationMoveBaselineEvents(events)
 	}
 	return events, added, nil
 }

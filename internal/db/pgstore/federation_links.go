@@ -337,7 +337,9 @@ func federationFoldEventsOfTypes(
 // TestFederationFoldEventsBudget guards that plan.
 //
 // A recorded snapshot relocation joins the issue's history in both of its
-// projects, as a retained move does.
+// projects, as a retained move does. A former holder's snapshot newer than the
+// relocating one stays out: it is a relocation only the former holder's own
+// pull may accept.
 func federationFoldEventsQuery(projectID int64, eventTypes []string) (string, []any) {
 	query := `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
 e.related_issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at
@@ -345,10 +347,13 @@ FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (e.
    SELECT h.issue_uid FROM events h WHERE h.project_id=$1
    UNION SELECT uid FROM issues WHERE project_id=$1)
  AND (EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND m.issue_uid = e.issue_uid)
- OR (e.issue_uid, e.project_id) IN (SELECT reset.issue_uid, rp.id FROM events reset
+ OR (e.issue_uid, e.project_id) IN (SELECT reset.issue_uid, m.project_id FROM events reset
  JOIN events m ON m.uid = reset.payload::jsonb->>'move_event_uid' AND m.type='issue.snapshot'
- JOIN projects rp ON rp.id IN (reset.project_id, m.project_id)
- WHERE reset.type='sync.reset_required' AND reset.issue_uid IS NOT NULL))))`
+ WHERE reset.type='sync.reset_required' AND reset.issue_uid IS NOT NULL)
+ OR EXISTS(SELECT 1 FROM events reset
+ JOIN events m ON m.uid = reset.payload::jsonb->>'move_event_uid' AND m.type='issue.snapshot'
+ WHERE reset.type='sync.reset_required' AND reset.issue_uid=e.issue_uid AND reset.project_id=e.project_id
+ AND (e.type<>'issue.snapshot' OR (e.hlc_physical_ms, e.hlc_counter) < (m.hlc_physical_ms, m.hlc_counter))))))`
 	args := []any{projectID}
 	if len(eventTypes) > 0 {
 		placeholders := make([]string, 0, len(eventTypes))

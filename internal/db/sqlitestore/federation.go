@@ -1922,11 +1922,17 @@ func federationFoldEventsQuery(projectID int64, eventTypes, issueScope []string)
    UNION SELECT uid FROM issues WHERE project_id=?1`
 	args := []any{projectID}
 	// A recorded snapshot relocation joins the issue's history in both of its
-	// projects, as a retained move does.
-	relocated := `(e.issue_uid, e.project_id) IN (SELECT reset.issue_uid, rp.id FROM events reset
+	// projects, as a retained move does. A former holder's snapshot newer than
+	// the relocating one stays out: it is a relocation only the former holder's
+	// own pull may accept.
+	relocated := `((e.issue_uid, e.project_id) IN (SELECT reset.issue_uid, m.project_id FROM events reset
      JOIN events m ON m.uid = json_extract(reset.payload,'$.move_event_uid') AND m.type='issue.snapshot'
-     JOIN projects rp ON rp.id IN (reset.project_id, m.project_id)
-     WHERE reset.type='sync.reset_required' AND +reset.issue_uid IS NOT NULL)`
+     WHERE reset.type='sync.reset_required' AND +reset.issue_uid IS NOT NULL)
+     OR EXISTS(SELECT 1 FROM events reset
+       JOIN events m ON m.uid = json_extract(reset.payload,'$.move_event_uid') AND m.type='issue.snapshot'
+       WHERE reset.type='sync.reset_required' AND reset.issue_uid=e.issue_uid AND reset.project_id=e.project_id
+       AND (e.type<>'issue.snapshot' OR e.hlc_physical_ms<m.hlc_physical_ms
+         OR (e.hlc_physical_ms=m.hlc_physical_ms AND e.hlc_counter<m.hlc_counter))))`
 	// Scan events once and collect moved subjects once. The unary + keeps
 	// SQLite from seeking every issue's history through its UID index.
 	selector := `(e.project_id=?1 OR +e.issue_uid IN (

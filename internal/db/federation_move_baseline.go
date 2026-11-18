@@ -33,28 +33,12 @@ func FederationMoveBaselineEvents(events []FoldEvent) []FoldEvent {
 			baselines[event.IssueUID] = event
 		}
 	}
-	relocations := federationRelocationBaselines(events)
-	if len(baselines) == 0 && len(relocations) == 0 {
+	if len(baselines) == 0 {
 		return events
 	}
 	comments := federationBaselineComments(events, baselines)
-	relocated := federationBaselineComments(events, relocations)
 	out := make([]FoldEvent, 0, len(events))
 	for _, event := range events {
-		if baseline, exists := relocations[event.IssueUID]; exists && event.ProjectUID != baseline.ProjectUID &&
-			compareClock(clockOf(event), clockOf(baseline)) < 0 {
-			switch event.Type {
-			case "issue.created", "issue.snapshot", RepeatedImportEventType, "issue.labeled", "issue.unlabeled":
-				// The relocating snapshot carries the issue's fields and labels.
-				continue
-			case "issue.commented", "issue.comment_edited":
-				uid, body, version := federationCommentEditVersion(event)
-				comment, covered := relocated[federationBaselineCommentKey{event.IssueUID, uid}]
-				if covered && (event.Type == "issue.commented" || comment.coversEdit(event, body, version)) {
-					continue
-				}
-			}
-		}
 		baseline, exists := baselines[event.IssueUID]
 		if exists && compareClock(clockOf(event), clockOf(baseline)) < 0 {
 			switch event.Type {
@@ -135,31 +119,4 @@ func federationBaselineComments(events []FoldEvent, baselines map[string]FoldEve
 		}
 	}
 	return comments
-}
-
-// federationRelocationBaselines returns, for each issue without retained move
-// history, its latest snapshot when other projects also hold events for it.
-// Those events reach a fold only through a snapshot relocation, and that
-// snapshot is the issue's state at its clock, so it covers the older ones.
-func federationRelocationBaselines(events []FoldEvent) map[string]FoldEvent {
-	moved := map[string]bool{}
-	latest := map[string]FoldEvent{}
-	for _, event := range events {
-		switch event.Type {
-		case "issue.moved":
-			moved[event.IssueUID] = true
-		case "issue.snapshot":
-			if previous, ok := latest[event.IssueUID]; !ok || compareClock(clockOf(event), clockOf(previous)) > 0 {
-				latest[event.IssueUID] = event
-			}
-		}
-	}
-	relocations := map[string]FoldEvent{}
-	for _, event := range events {
-		snapshot, ok := latest[event.IssueUID]
-		if ok && !moved[event.IssueUID] && event.ProjectUID != snapshot.ProjectUID {
-			relocations[event.IssueUID] = snapshot
-		}
-	}
-	return relocations
 }
