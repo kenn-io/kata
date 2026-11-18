@@ -2,17 +2,165 @@ package githubsync
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/config"
 )
+
+// appTestTransport fakes GitHub's token endpoint and API. It counts mints,
+// keeps each mint's JWT and each API request's Authorization header, answers
+// 401 to the rejected token, and fails API requests with apiErr when set.
+type appTestTransport struct {
+	expiry   time.Duration
+	rejected string
+	apiErr   error
+	jwts     []string
+	tokens   []string
+}
+
+func (rt *appTestTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	auth := req.Header.Get("Authorization")
+	status, body := http.StatusNoContent, ""
+	if req.URL.Path == "/app/installations/456/access_tokens" {
+		rt.jwts = append(rt.jwts, strings.TrimPrefix(auth, "Bearer "))
+		status = http.StatusCreated
+		body = fmt.Sprintf(`{"token":"token-%d","expires_at":%q}`, len(rt.jwts), time.Now().Add(rt.expiry).UTC().Format(time.RFC3339))
+	} else {
+		rt.tokens = append(rt.tokens, auth)
+		if rt.apiErr != nil {
+			return nil, rt.apiErr
+		}
+		if auth == rt.rejected {
+			status = http.StatusUnauthorized
+		}
+	}
+	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+}
+
+func writeAppTestKey(t *testing.T, path string) *rsa.PrivateKey {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0600))
+	return key
+}
+
+func appTestResolver(t *testing.T) (*CredentialResolver, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "app.pem")
+	writeAppTestKey(t, path)
+	return NewCredentialResolver(config.GitHubSyncConfig{Apps: []config.GitHubAppConfig{{Owner: "example-owner", AppID: 123, InstallationID: 456, PrivateKeyPath: path}}}, nil), path
+}
+
+// appTestSession opens one session of the repo's binding, as a refresh does,
+// and makes one REST read.
+func appTestSession(ctx context.Context, resolver *CredentialResolver, base http.RoundTripper, repo string) (int, error) {
+	transport, err := resolver.Transport(ctx, Binding{Host: "github.com", Owner: "example-owner", Repo: repo}, base)
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/example-owner/"+repo+"/issues", nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		return 0, err
+	}
+	return resp.StatusCode, resp.Body.Close()
+}
+
+func TestCredentialResolverAppEvictsCachedTokenOnlyOnUnauthorized(t *testing.T) {
+	resolver, _ := appTestResolver(t)
+	base := &appTestTransport{expiry: time.Hour, rejected: "token token-1"}
+	for _, want := range []int{http.StatusUnauthorized, http.StatusNoContent} {
+		status, err := appTestSession(t.Context(), resolver, base, "first")
+		require.NoError(t, err)
+		assert.Equal(t, want, status)
+	}
+	assert.Equal(t, []string{"token token-1", "token token-2"}, base.tokens)
+
+	resolver, _ = appTestResolver(t)
+	base = &appTestTransport{expiry: time.Hour, apiErr: errors.New("connection reset")}
+	for range 2 {
+		_, err := appTestSession(t.Context(), resolver, base, "first")
+		require.ErrorIs(t, err, base.apiErr)
+	}
+	assert.Len(t, base.jwts, 1)
+}
+
+func TestCredentialResolverAppReadsKeyFileOnlyToMint(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		resolver, path := appTestResolver(t)
+		base := &appTestTransport{expiry: time.Hour}
+		_, err := appTestSession(t.Context(), resolver, base, "first")
+		require.NoError(t, err)
+
+		require.NoError(t, os.Remove(path))
+		for range 2 {
+			_, err = appTestSession(t.Context(), resolver, base, "first")
+			require.NoError(t, err)
+		}
+		assert.Len(t, base.jwts, 1)
+		assert.Equal(t, []string{"token token-1", "token token-1", "token token-1"}, base.tokens)
+		time.Sleep(time.Hour)
+		_, err = appTestSession(t.Context(), resolver, base, "first")
+		require.ErrorContains(t, err, "read GitHub App private key")
+
+		rotated := writeAppTestKey(t, path)
+		_, err = appTestSession(t.Context(), resolver, base, "first")
+		require.NoError(t, err)
+		require.Len(t, base.jwts, 2)
+		_, err = jwt.Parse(base.jwts[1], func(*jwt.Token) (any, error) { return &rotated.PublicKey, nil })
+		require.NoError(t, err, "the new mint is signed with the replaced key")
+	})
+}
+
+func TestCredentialResolverAppRejectsBadKeyOnSetup(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		prepare func(*testing.T, string)
+		want    string
+	}{
+		{"missing", func(t *testing.T, path string) { require.NoError(t, os.Remove(path)) }, "read GitHub App private key"},
+		{"invalid", func(t *testing.T, path string) { require.NoError(t, os.WriteFile(path, []byte("invalid"), 0600)) }, "parse GitHub App private key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver, path := appTestResolver(t)
+			tc.prepare(t, path)
+			_, err := resolver.Transport(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "first"}, &appTestTransport{expiry: time.Hour})
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestCredentialResolverAppCachesTokenPerBinding(t *testing.T) {
+	resolver, _ := appTestResolver(t)
+	base := &appTestTransport{expiry: time.Hour}
+	for _, repo := range []string{"first", "second", "first", "second"} {
+		_, err := appTestSession(t.Context(), resolver, base, repo)
+		require.NoError(t, err)
+	}
+	assert.Equal(t, []string{"token token-1", "token token-2", "token token-1", "token token-2"}, base.tokens)
+}
 
 func TestCredentialResolverPrefersAppOverEnvAndGH(t *testing.T) {
 	allowGitHubEnterpriseHost(t, "github.example")

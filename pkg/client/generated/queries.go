@@ -248,6 +248,32 @@ func (o OfferRelayDeliveriesQuery) Validate() error {
 	return errors
 }
 
+type SearchFederationProjectQuery struct {
+	Q            string                              `json:"q" validate:"required"`
+	Limit        *int64                              `json:"limit,omitempty"`
+	Status       *SearchFederationProjectQueryStatus `json:"status,omitempty"`
+	Label        []string                            `json:"label,omitempty"`
+	ExcludeLabel []string                            `json:"exclude_label,omitempty"`
+}
+
+func (s SearchFederationProjectQuery) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(s.Q, "required"); err != nil {
+		errors = errors.Append("Q", err)
+	}
+	if s.Status != nil {
+		if v, ok := any(s.Status).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Status", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type GetProjectFederationStatusQuery struct {
 	// Compact Omit relay checkpoint capacity measurement. Error details are unchanged unless omit_errors is also set.
 	Compact *bool `json:"compact,omitempty"`

@@ -245,6 +245,7 @@ func (s *Store) ListIssueContent(ctx context.Context, afterID int64, limit int) 
   JOIN projects p ON p.id = i.project_id
  WHERE i.deleted_at IS NULL
    AND p.deleted_at IS NULL
+   AND NOT EXISTS (SELECT 1 FROM federation_bindings b WHERE b.project_id = p.id AND b.role = 'spoke' AND b.relay_config IS NULL)
    AND i.id > $1
  ORDER BY i.id ASC
  LIMIT $2`, afterID, limit)
