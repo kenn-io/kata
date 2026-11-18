@@ -254,9 +254,6 @@ func startMCPAgentUseReporter(ctx context.Context, apiClient *kataclient.Client,
 				if !ok || reportCtx.Err() != nil {
 					return
 				}
-				if !posthog.Eligible("KATA", version.Version) {
-					continue
-				}
 				day := cliUseNow().UTC().Format(time.DateOnly)
 				if fullDay == day {
 					continue
