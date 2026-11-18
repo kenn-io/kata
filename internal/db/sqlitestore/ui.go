@@ -81,7 +81,7 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 		}
 	}
 	if query.SelectedIssueUID != "" {
-		selected, err := readUIIssueByUID(ctx, tx, query.SelectedIssueUID, projectNames, query.AllowedIssueIDs)
+		selected, recurrenceTimezone, err := readUIIssueByUID(ctx, tx, query.SelectedIssueUID, projectNames, query.AllowedIssueIDs)
 		if err != nil {
 			if !errors.Is(err, db.ErrNotFound) {
 				return db.UISnapshotData{}, err
@@ -95,9 +95,9 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 				}
 			}
 		} else {
-			if err := db.ProjectUIDeadlineDate(&selected, query); err != nil {
+			if err := db.ProjectUIPlanningDates(&selected, query, scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone)); err != nil {
 				return db.UISnapshotData{}, fmt.Errorf(
-					"read UI selected issue %s deadline: %w", selected.UID, err,
+					"read UI selected issue %s planning dates: %w", selected.UID, err,
 				)
 			}
 			data.SelectedState = "available"
@@ -827,19 +827,19 @@ func uiSQLiteRelationshipPredicates(ctx context.Context, relationships []string,
 
 func readUIIssueByUID(
 	ctx context.Context, tx *sql.Tx, issueUID string, projectNames map[int64]string, allowedIssueIDs []int64,
-) (db.UIIssue, error) {
-	statement := issueSelect + ` WHERE i.uid = ? AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
+) (db.UIIssue, string, error) {
+	statement := scheduledIssueSelect + ` WHERE i.uid = ? AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
 	statement, args := appendUIReferenceIssueScopeSQLite(statement, []any{issueUID, db.SystemProjectName}, allowedIssueIDs)
 	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
-	issue, err := scanIssue(ctx, tx.QueryRowContext(ctx, statement, args...))
+	issue, recurrenceTimezone, err := scanScheduledIssue(ctx, tx.QueryRowContext(ctx, statement, args...))
 	if err != nil {
-		return db.UIIssue{}, err
+		return db.UIIssue{}, "", err
 	}
 	labels, err := readUILabelStrings(ctx, tx, issue.ID)
 	if err != nil {
-		return db.UIIssue{}, err
+		return db.UIIssue{}, "", err
 	}
-	return makeUIIssue(issue, projectNames[issue.ProjectID], labels), nil
+	return makeUIIssue(issue, projectNames[issue.ProjectID], labels), recurrenceTimezone, nil
 }
 
 func readUISelectedState(ctx context.Context, tx *sql.Tx, issueUID string) (string, error) {

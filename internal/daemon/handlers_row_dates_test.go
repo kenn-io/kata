@@ -72,6 +72,25 @@ type rowDates struct {
 	DeadlineOnDate  string `json:"deadline_on_date"`
 }
 
+func TestUISnapshotSelectedIssueProjectsScheduledDate(t *testing.T) {
+	f := newRowDatesFixture(t)
+	issue, _, err := f.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: f.project.ID, Title: "Zoned schedule", Author: "tester",
+		Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2027-05-12T09:00[Europe/Paris]"`)},
+	})
+	require.NoError(t, err)
+	status, raw := cronHTTP(t, f.env, http.MethodGet,
+		"/api/v1/ui/snapshot?view=all-open&time_zone=America%2FNew_York&selected_issue_uid="+issue.UID, nil)
+	require.Equalf(t, http.StatusOK, status, "%s", raw)
+	var body struct {
+		Selected struct {
+			Issue rowDates `json:"issue"`
+		} `json:"selected"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.Equal(t, "2027-05-12", body.Selected.Issue.ScheduledOnDate)
+}
+
 func (f rowDatesFixture) want() map[string]rowDates {
 	return map[string]rowDates{
 		"date only":       {ScheduledOnDate: "2026-10-29", DeadlineOnDate: "2026-11-02"},
