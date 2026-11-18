@@ -1314,9 +1314,7 @@ func (d *Store) materializeFederatedProjectTxScoped(
 			return err
 		}
 	}
-	projection := db.FoldEvents(events)
-	moved := db.IndexFederatedMoveEvents(events)
-	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection)
+	_, projection, moved, decisions, destinations, err := planFederatedMaterialization(ctx, tx, projectID, events)
 	if err != nil {
 		return err
 	}
@@ -1375,7 +1373,32 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	return updateFederatedProjectMetadataTx(ctx, tx, projectID, projection.ProjectMetadata[binding.HubProjectUID])
 }
 
-func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved map[string]db.FoldEvent, projection db.FoldProjection, decisions []db.FederatedMoveDecision, acceptedEventUIDs []string) error {
+// planFederatedMaterialization folds a project's events and plans its moves.
+// A snapshot relocation brings the holding project's history for the issue
+// into the fold, so the issue keeps its spoke-local discussion. It returns the
+// events it folded.
+func planFederatedMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, events []db.FoldEvent) ([]db.FoldEvent, db.FoldProjection, db.FederatedMoveIndex, []db.FederatedMoveDecision, []int64, error) {
+	projection := db.FoldEvents(events)
+	moved := db.IndexFederatedMoveEvents(events)
+	decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID)
+	if err != nil {
+		return nil, db.FoldProjection{}, db.FederatedMoveIndex{}, nil, nil, err
+	}
+	events, added, err := db.AppendFederatedRelocationHistory(events, decisions, func(sourceID int64, uids []string) ([]db.FoldEvent, error) {
+		return federationFoldEventsForIssues(ctx, tx, sourceID, uids)
+	})
+	if err != nil || !added {
+		return events, projection, moved, decisions, destinations, err
+	}
+	// The added history covers only issues already being relocated, so one
+	// more plan settles the fold.
+	projection = db.FoldEvents(events)
+	moved = db.IndexFederatedMoveEvents(events)
+	decisions, destinations, err = db.PlanFederatedMovedIssues(ctx, tx, moved, projection, projectID)
+	return events, projection, moved, decisions, destinations, err
+}
+
+func (d *Store) rehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moved db.FederatedMoveIndex, projection db.FoldProjection, decisions []db.FederatedMoveDecision, acceptedEventUIDs []string) error {
 	return db.RehomeFederatedMovedIssues(ctx, tx, moved, projection, decisions, func(pid int64, issue db.FoldIssue) (string, error) {
 		return resolveFederatedIssueShortID(ctx, tx, pid, issue.UID, issue.ShortID, nil)
 	}, func(id, source, target int64) error {
@@ -1891,15 +1914,40 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
 	return scanFederationFoldEvents(rows)
 }
 
+// federationFoldEventsQuery builds the fold query. Other projects' events join
+// an issue's history after a retained move or a recorded snapshot relocation.
 func federationFoldEventsQuery(projectID int64, eventTypes, issueScope []string) (string, []any) {
 	// Issues whose events the project holds, or that now live in it.
 	const history = `SELECT h.issue_uid FROM events h WHERE h.project_id=?1
    UNION SELECT uid FROM issues WHERE project_id=?1`
 	args := []any{projectID}
+	// A recorded snapshot relocation joins the issue's history in both of its
+	// projects, as a retained move does. A project's snapshot stays out when, in
+	// fold order, a relocation took the issue away from that project before it
+	// and no accepted relocation brought the issue back in between: only that
+	// project's own pull may accept it. The reset rows are read separately for
+	// each role: membership, the departure, and the arrival back. An issue with
+	// a retained move already joins every project's history through the moved
+	// clause above, so this gate never applies to it.
+	const relocations = `FROM events reset
+     JOIN events m ON m.uid = json_extract(reset.payload,'$.move_event_uid') AND m.type='issue.snapshot'
+     WHERE reset.type='sync.reset_required'`
+	const eventClock = `(e.hlc_physical_ms, e.hlc_counter, e.origin_instance_uid, e.uid)`
+	const departureClock = `(m.hlc_physical_ms, m.hlc_counter, m.origin_instance_uid, m.uid)`
+	const arrivalClock = `(bm.hlc_physical_ms, bm.hlc_counter, bm.origin_instance_uid, bm.uid)`
+	relocated := `((e.issue_uid, e.project_id) IN (SELECT reset.issue_uid, m.project_id ` + relocations + ` AND +reset.issue_uid IS NOT NULL
+       UNION ALL SELECT reset.issue_uid, reset.project_id ` + relocations + ` AND +reset.issue_uid IS NOT NULL)
+     AND NOT (e.type='issue.snapshot' AND EXISTS(SELECT 1 ` + relocations + `
+       AND reset.issue_uid=e.issue_uid AND reset.project_id=e.project_id AND ` + eventClock + ` > ` + departureClock + `
+       AND NOT EXISTS(SELECT 1 FROM events back
+         JOIN events bm ON bm.uid = json_extract(back.payload,'$.move_event_uid') AND bm.type='issue.snapshot'
+         WHERE back.type='sync.reset_required' AND back.issue_uid=e.issue_uid AND bm.project_id=e.project_id
+         AND ` + arrivalClock + ` > ` + departureClock + ` AND ` + arrivalClock + ` <= ` + eventClock + `))))`
 	// Scan events once and collect moved subjects once. The unary + keeps
 	// SQLite from seeking every issue's history through its UID index.
 	selector := `(e.project_id=?1 OR +e.issue_uid IN (
-   SELECT m.issue_uid FROM events m WHERE m.type='issue.moved' AND m.issue_uid IN (` + history + `)))`
+   SELECT m.issue_uid FROM events m WHERE m.type='issue.moved' AND m.issue_uid IN (` + history + `))
+   OR (+e.issue_uid IN (` + history + `) AND (` + relocated + `)))`
 	if len(issueScope) > 0 {
 		// Scoped pushes narrow to project events and the touched issues first,
 		// then check moves only for those.
@@ -1911,7 +1959,7 @@ func federationFoldEventsQuery(projectID int64, eventTypes, issueScope []string)
 		//nolint:gosec // G202: generated placeholders only; issue UIDs are bound separately.
 		selector = `CASE WHEN e.type LIKE 'project.%' OR e.issue_uid IN (` + strings.Join(placeholders, ",") + `)
    THEN e.project_id=?1 OR (e.issue_uid IN (` + history + `)
-     AND e.issue_uid IN (SELECT m.issue_uid FROM events m WHERE m.type='issue.moved'))
+     AND (e.issue_uid IN (SELECT m.issue_uid FROM events m WHERE m.type='issue.moved') OR ` + relocated + `))
    ELSE 0 END`
 	}
 	query := `

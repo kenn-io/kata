@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // Pulls must repair only their touched issue and agree with a complete fold,
@@ -456,4 +458,113 @@ func TestFullPulledMaterializationLockedFallback(t *testing.T) {
 	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	require.Equal(t, "new", got.Title)
+}
+
+func TestPulledSnapshotRelocationFallsBackToFullReplay(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		full bool
+	}{{"held in source", false}, {"appears after preparation", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			full := tc.full
+			ctx := t.Context()
+			d, source, issue := incrementalTestStore(t)
+			target, err := d.CreateProject(ctx, "snapshot-target")
+			require.NoError(t, err)
+			for _, project := range []db.Project{source, target} {
+				_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
+				require.NoError(t, err)
+			}
+			var concurrentProject db.Project
+			if full {
+				concurrentProject, err = d.CreateProject(ctx, "concurrent-standalone")
+				require.NoError(t, err)
+				issue.UID, err = uid.New()
+				require.NoError(t, err)
+				issue.ShortID, err = shortid.Derive(issue.UID, shortid.MinLength)
+				require.NoError(t, err)
+				issue.ID = 0
+			}
+			snapshot := incrementalRemoteEvent(t, target, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"relocated snapshot","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00Z"}`, issue.UID, issue.ShortID), 9_000_000_000_000)
+			page := []db.RemoteEvent{snapshot}
+			if full {
+				page = append(page, incrementalRemoteEvent(t, target, "", "project.updated", `{"name":"snapshot-target"}`, 9_000_000_000_001))
+			}
+			_, err = d.InsertRemoteEvents(ctx, target.ID, page)
+			require.NoError(t, err)
+			if full {
+				d.federationIngestPrepared = func() {
+					if issue.ID != 0 {
+						return
+					}
+					created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: concurrentProject.ID, UID: issue.UID, Title: "concurrent standalone issue", Author: "tester"})
+					require.NoError(t, err)
+					issue.ID = created.ID
+				}
+			}
+			var uids []string
+			for _, event := range page {
+				uids = append(uids, event.EventUID)
+			}
+			err = d.MaterializeFederatedEvents(ctx, target.ID, uids)
+			if full {
+				require.ErrorIs(t, err, db.ErrFederatedMoveUnsupported)
+			} else {
+				require.NoError(t, err)
+			}
+			require.NotZero(t, issue.ID)
+			got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Equal(t, issue.ID, got.ID)
+			if full {
+				require.Equal(t, concurrentProject.ID, got.ProjectID)
+				require.Equal(t, "concurrent standalone issue", got.Title)
+			} else {
+				require.Equal(t, target.ID, got.ProjectID)
+				require.Equal(t, "relocated snapshot", got.Title)
+				// A later full pull of the former source folds the destination's
+				// snapshot too. It must leave the issue with the destination.
+				later := []db.RemoteEvent{
+					incrementalRemoteEvent(t, source, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_010),
+					incrementalRemoteEvent(t, source, issue.UID, "issue.updated", fmt.Sprintf(`{"issue_uid":%q,"title":"stale source edit"}`, issue.UID), 9_000_000_000_011),
+				}
+				_, err = d.InsertRemoteEvents(ctx, source.ID, later)
+				require.NoError(t, err)
+				require.NoError(t, d.MaterializeFederatedEvents(ctx, source.ID, []string{later[0].EventUID, later[1].EventUID}))
+				after, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				require.Equal(t, issue.ID, after.ID)
+				require.Equal(t, target.ID, after.ProjectID, "the former source's pull keeps the issue in the destination")
+			}
+		})
+	}
+}
+
+// Issues another project holds for ordinary reasons, such as a linked issue,
+// are not relocations. A full pull must apply its first preparation.
+func TestFullPulledMaterializationIgnoresIssuesHeldElsewhere(t *testing.T) {
+	ctx := t.Context()
+	d, source, issue := incrementalTestStore(t)
+	other, err := d.CreateProject(ctx, "linked-project")
+	require.NoError(t, err)
+	for _, project := range []db.Project{source, other} {
+		_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "tester"})
+		require.NoError(t, err)
+	}
+	_, _, err = d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: other.ID, Title: "linked elsewhere", Author: "tester", Links: []db.InitialLink{{Type: "blocks", ToNumber: issue.ID}}})
+	require.NoError(t, err)
+	// A baseline page touches links, so the full pull folds both projects' link history.
+	page := []db.RemoteEvent{
+		incrementalRemoteEvent(t, source, "", "project.updated", `{"name":"hub-project"}`, 9_000_000_000_000),
+		incrementalRemoteEvent(t, source, issue.UID, "issue.snapshot", fmt.Sprintf(`{"uid":%q,"short_id":%q,"title":"baseline","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00Z"}`, issue.UID, issue.ShortID), 9_000_000_000_001),
+	}
+	_, err = d.InsertRemoteEvents(ctx, source.ID, page)
+	require.NoError(t, err)
+	attempts := 0
+	d.federationIngestPrepared = func() { attempts++ }
+	require.NoError(t, d.MaterializeFederatedEvents(ctx, source.ID, []string{page[0].EventUID, page[1].EventUID}))
+	require.Equal(t, 1, attempts, "the first full-pull preparation applies")
+	got, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "baseline", got.Title)
 }

@@ -215,9 +215,9 @@ func authorizeIssueMoveProjects(ctx context.Context, tx *sql.Tx, in MoveIssuePro
 	return nil
 }
 
-// MovedIssueUID resolves a historical short ID from the existing move journal.
+// MovedIssueUID resolves a historical short ID from retained moves and snapshots.
 // It follows the stable issue UID even after multiple moves. Compatibility is
-// history-scoped: purging move history or merging a former project can retire
+// history-scoped: purging that history or merging a former project can retire
 // these aliases. The move returns the current reference; stable UIDs do not change.
 // Local issues (including deleted ones) and purge tombstones take precedence over
 // history because an older allocator may have reused a moved issue's short ID.
@@ -262,7 +262,8 @@ func MovedIssueUID(ctx context.Context, q interface {
 	}
 	var uid string
 	// Move history uses the signed source and reference. A receiver-local reset
-	// uses its own source and reference, which may differ after a competing pull.
+	// uses its own source and reference, which may differ after a competing pull
+	// or a snapshot relocation.
 	// Check indexed move history first so ordinary references do not scan resets.
 	err = q.QueryRowContext(ctx, `SELECT e.issue_uid FROM events e
  WHERE e.type='issue.moved' AND `+fromProject+`=$3 AND `+moveMatch+`
@@ -278,7 +279,7 @@ func MovedIssueUID(ctx context.Context, q interface {
 	}
 	err = q.QueryRowContext(ctx, `SELECT reset.issue_uid FROM events reset
  JOIN events e ON `+resetMoveEvent+`=e.uid
-            AND e.type='issue.moved' AND e.issue_uid=reset.issue_uid
+            AND e.type IN ('issue.moved','issue.snapshot') AND e.issue_uid=reset.issue_uid
  WHERE reset.project_id=$1 AND reset.type='sync.reset_required'
  AND reset.issue_uid IS NOT NULL AND `+resetFromProject+`=$3 AND `+resetMatch+`
  AND EXISTS (SELECT 1 FROM issues WHERE uid=reset.issue_uid)

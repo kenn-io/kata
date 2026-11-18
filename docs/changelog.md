@@ -50,6 +50,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   and issues. `kata tui` names runs this way.
 
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
+- Keep syncing when a spoke joins a project after the hub moved an issue into it.
+  The destination's pull moves the spoke's existing copy, with its comments,
+  labels, and links, instead of failing with `UNIQUE constraint failed: issues.uid`.
 
 - Copy a project sync diagnostic for Bash/Zsh or PowerShell from the web summary.
 

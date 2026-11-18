@@ -13,7 +13,7 @@ type preparedFederationRebuildProject struct {
 	id              int64
 	uid             string
 	events          []db.FoldEvent
-	moveEvents      map[string]db.FoldEvent
+	moveEvents      db.FederatedMoveIndex
 	projection      db.FoldProjection
 	moveProjection  db.FoldProjection
 	moved           db.FoldProjection
@@ -47,9 +47,12 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 				return nil, err
 			}
 		}
-		projection := db.FoldEvents(events)
-		moveEvents := db.IndexFederatedMoveEvents(events)
-		decisions, destinations, err := db.PlanFederatedMovedIssues(ctx, tx, moveEvents, projection)
+		planCtx := ctx
+		if id != projectID {
+			// Only the rebuilt project's own pull relocates snapshot issues.
+			planCtx = db.WithMovedProjectPass(ctx)
+		}
+		events, projection, moveEvents, decisions, destinations, err := planFederatedMaterialization(planCtx, tx, id, events)
 		if err != nil {
 			return nil, err
 		}
@@ -207,7 +210,11 @@ func (d *Store) applyFederationRebuild(ctx context.Context, prepared preparedFed
 		// Earlier rehomes can change the source of a later decision.
 		changed := map[string]bool{}
 		for _, p := range prepared.projects {
-			decisions, _, err := db.PlanFederatedMovedIssues(ctx, tx, p.moveEvents, p.moveProjection)
+			planCtx := ctx
+			if p.id != prepared.projects[0].id {
+				planCtx = db.WithMovedProjectPass(ctx)
+			}
+			decisions, _, err := db.PlanFederatedMovedIssues(planCtx, tx, p.moveEvents, p.moveProjection, p.id)
 			if err != nil {
 				return err
 			}

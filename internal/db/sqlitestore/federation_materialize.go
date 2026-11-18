@@ -32,20 +32,24 @@ type federationMaterialization struct {
 	linkReadProjects []int64
 	maxEventID       int64
 	moveIssueUIDs    map[string]struct{}
-	relayOrigins     relayOriginClassifier
-	projection       db.FoldProjection
-	cronAffected     bool
-	status           []federatedStatusIntentUpdate
-	binding          db.FederationBinding
-	linkProjects     []int64
-	links            db.FoldProjection
-	issueRows        map[string]federatedIssueRow
-	issueIDs         map[string]int64
-	commentRows      map[string]federatedCommentRow
-	labelRows        map[federatedLabelKey]struct{}
-	staleIssues      map[string]int64
-	linkIDs          map[string]int64
-	linkRows         map[db.FoldLinkKey]federatedLinkRow
+	// foldedIssueUIDs lists the issues in this project's own fold, without
+	// those read only for links. If another project holds one, only a full
+	// replay can reconcile it, so apply rechecks them under the writer.
+	foldedIssueUIDs []string
+	relayOrigins    relayOriginClassifier
+	projection      db.FoldProjection
+	cronAffected    bool
+	status          []federatedStatusIntentUpdate
+	binding         db.FederationBinding
+	linkProjects    []int64
+	links           db.FoldProjection
+	issueRows       map[string]federatedIssueRow
+	issueIDs        map[string]int64
+	commentRows     map[string]federatedCommentRow
+	labelRows       map[federatedLabelKey]struct{}
+	staleIssues     map[string]int64
+	linkIDs         map[string]int64
+	linkRows        map[db.FoldLinkKey]federatedLinkRow
 }
 
 // Large issue sets keep the established complete queries. This bounds SQL
@@ -155,6 +159,16 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		}
 	}
 	m := federationMaterialization{binding: binding, projection: db.FoldEvents(events)}
+	for uid := range m.projection.Issues {
+		m.foldedIssueUIDs = append(m.foldedIssueUIDs, uid)
+	}
+	rehome, err := federationIssuesHeldElsewhere(ctx, tx, projectID, m.foldedIssueUIDs)
+	if err != nil {
+		return federationMaterialization{}, err
+	}
+	if rehome {
+		return federationMaterialization{fullReplay: true}, nil
+	}
 	if deferRows && len(issueScope) == 0 {
 		if err := m.prepareFullHistory(ctx, tx, projectID, events, linksAffected); err != nil {
 			return federationMaterialization{}, err
@@ -200,6 +214,27 @@ func foldFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID in
 		m.rowStamp = m.rowHasher.sum()
 	}
 	return m, nil
+}
+
+// Prepared inserts cannot reuse identities held in another project. Full replay
+// owns relocation, its guards, and invalidation of both project views.
+func federationIssuesHeldElsewhere(ctx context.Context, tx *sql.Tx, projectID int64, uids []string) (bool, error) {
+	for start := 0; start < len(uids); start += federationIngestIssueScopeLimit {
+		batch := uids[start:min(start+federationIngestIssueScopeLimit, len(uids))]
+		args := []any{projectID}
+		for _, uid := range batch {
+			args = append(args, uid)
+		}
+		var held bool
+		//nolint:gosec // Only generated placeholders enter SQL; UIDs are bound.
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE project_id<>? AND uid IN (?`+strings.Repeat(",?", len(batch)-1)+`))`, args...).Scan(&held); err != nil {
+			return false, err
+		}
+		if held {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (m *federationMaterialization) foldLinks(ctx context.Context, tx *sql.Tx, fresh []db.FoldEvent, alreadyStored bool, raw *[]db.FoldEvent) error {

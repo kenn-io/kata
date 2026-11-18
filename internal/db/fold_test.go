@@ -455,3 +455,14 @@ func TestFoldMovedHydratesPartialIssueBaseline(t *testing.T) {
 		})
 	}
 }
+
+// A snapshot merges with the project's own label history, so a spoke label the
+// hub had not yet received survives a baseline refresh.
+func TestFoldSnapshotKeepsUnsentSpokeLabel(t *testing.T) {
+	events := []FoldEvent{
+		testEvent("issue.created", 1, `{"uid":"issue-1","title":"title"}`),
+		testEvent("issue.labeled", 2, `{"label":"spoke-only"}`),
+		testEvent("issue.snapshot", 3, `{"uid":"issue-1","title":"title"}`),
+	}
+	require.True(t, FoldEvents(events).Labels[FoldLabelKey{IssueUID: "issue-1", Label: "spoke-only"}].Present)
+}
