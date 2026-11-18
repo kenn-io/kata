@@ -297,7 +297,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.55.0` | Notification requests accept `replace: false`, which refuses with `409 notification_held` while the recipient holds a request, and the clear endpoint accepts `if_from` to clear only a request from that sender. |
+| `0.56.0` | Notification requests accept `replace: false`, which refuses with `409 notification_held` while the recipient holds a request, and the clear endpoint accepts `if_from` to clear only a request from that sender. |
 | `0.55.0` | `GET /projects/{project_id}/federation/search` lets a direct spoke ask its hub to answer a search by meaning over a shared project. |
 | `0.54.0` | `GET /api/v1/docbank/probe` makes one read-only request to Docbank and reports whether it answered and accepted the daemon's key. |
 | `0.53.0` | Issue responses carry `content_revision`, which moves when a title or body edit changes the text. `PATCH /projects/{project_id}/issues/{ref}` accepts `expected_content_revision`; a different current value returns 412 `revision_conflict` and writes nothing. Older daemons reject the unknown field. |
