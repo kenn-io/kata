@@ -33,7 +33,7 @@ func resolveMode(requested string, configured bool) (searchMode, error) {
 		return modeLexical, nil
 	case "hybrid", "semantic":
 		if !configured {
-			return modeLexical, fmt.Errorf("mode %q requires [search.embeddings] to be configured", requested)
+			return modeLexical, fmt.Errorf("mode %q is unavailable: embeddings are not configured", requested)
 		}
 		return searchMode(requested), nil
 	default:

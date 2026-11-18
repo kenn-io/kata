@@ -1040,7 +1040,7 @@ func (f *fakeDetailAPI) AddLink(
 }
 
 func (f *fakeDetailAPI) EditBody(
-	_ context.Context, projectID int64, ref, body, actor string,
+	_ context.Context, projectID int64, ref, body, actor string, _ *int64,
 ) (*MutationResp, error) {
 	f.editBodyCalls++
 	f.lastProjectID = projectID

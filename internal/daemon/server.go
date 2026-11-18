@@ -173,7 +173,8 @@ type ServerConfig struct {
 
 	// VectorIndex is the semantic-search sidecar index. Nil means semantic and
 	// hybrid search are unavailable, exactly like a nil Embedder.
-	VectorIndex *vector.Index
+	VectorIndex                *vector.Index
+	EmbeddingUnavailableReason string
 
 	// ReconcilerHealth snapshots the embedding reconciler's operator-visible
 	// state for /health. Nil means semantic search is disabled, in which case

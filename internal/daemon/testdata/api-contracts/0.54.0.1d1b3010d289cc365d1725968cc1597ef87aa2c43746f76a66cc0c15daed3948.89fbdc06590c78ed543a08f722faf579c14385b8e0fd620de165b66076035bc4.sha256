@@ -1,0 +1,1 @@
+GET /api/v1/docbank/probe reports whether the daemon reaches Docbank and Docbank accepts its key.

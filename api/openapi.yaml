@@ -1671,6 +1671,23 @@ components:
       required:
         - credential
       type: object
+    DocbankProbe:
+      additionalProperties: true
+      properties:
+        http_status:
+          description: Docbank's HTTP status when it answered with an error.
+          format: int64
+          type: integer
+        key_accepted:
+          description: Whether Docbank accepted the daemon's key; false when it answered with an error status or was not reached.
+          type: boolean
+        reachable:
+          description: Whether Docbank answered the request.
+          type: boolean
+      required:
+        - reachable
+        - key_accepted
+      type: object
     DoctorResponseBody:
       additionalProperties: true
       properties:
@@ -1699,6 +1716,11 @@ components:
           type: string
         clear_priority:
           type: boolean
+        expected_content_revision:
+          description: Current content_revision of the issue; a title or body edit since then returns 412 revision_conflict and writes nothing.
+          format: int64
+          minimum: 0
+          type: integer
         links_delta:
           $ref: "#/components/schemas/LinksDelta"
         owner:
@@ -3414,6 +3436,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -3476,6 +3501,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
@@ -3595,6 +3621,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -3682,6 +3711,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
@@ -4234,6 +4264,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -4324,6 +4357,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
@@ -5547,6 +5581,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -5612,6 +5649,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
@@ -5699,6 +5737,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -5789,6 +5830,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
@@ -6745,6 +6787,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -6818,6 +6863,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
@@ -7258,6 +7304,9 @@ components:
           type: string
         closed_reason:
           type: string
+        content_revision:
+          format: int64
+          type: integer
         created_at:
           format: date-time
           type: string
@@ -7335,6 +7384,7 @@ components:
         - author
         - metadata
         - revision
+        - content_revision
         - created_at
         - updated_at
       type: object
@@ -7571,7 +7621,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.52.0
+  version: 0.54.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -7816,6 +7866,35 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/docbank/probe:
+    get:
+      operationId: probeDocbank
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocbankProbe"
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Service Unavailable
+      summary: Check that the daemon reaches Docbank and Docbank accepts its key
   /api/v1/doctor:
     get:
       operationId: doctor

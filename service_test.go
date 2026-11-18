@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -296,4 +297,46 @@ func listProjects(t *testing.T, baseURL string) projectsResponse {
 	var out projectsResponse
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
 	return out
+}
+
+func TestServiceRejectsInvalidEmbeddingConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		embeddings kata.EmbeddingsConfig
+		want       string
+	}{
+		{"partial", kata.EmbeddingsConfig{BaseURL: "http://127.0.0.1:1234"}, "kata: embeddings:"},
+		{"sqlite", kata.EmbeddingsConfig{BaseURL: "http://127.0.0.1:1234", Model: "test", Dims: 2}, "embeddings require Postgres"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "service.db")
+			service, err := kata.New(t.Context(), kata.Config{DSN: path, Auth: kata.AuthConfig{TrustCallerAuthentication: true}, Embeddings: tc.embeddings})
+			require.Nil(t, service)
+			require.ErrorContains(t, err, tc.want)
+			_, err = os.Stat(path)
+			require.True(t, os.IsNotExist(err), "database should not be created")
+		})
+	}
+	t.Run("invalid batch budget", func(t *testing.T) {
+		service, err := kata.New(t.Context(), kata.Config{
+			DSN: "postgres://kata@127.0.0.1:1/kata?sslmode=disable", Auth: kata.AuthConfig{TrustCallerAuthentication: true},
+			Embeddings: kata.EmbeddingsConfig{BaseURL: "http://127.0.0.1:1234", Model: "test", Dims: 2, MaxBatchTokens: 100},
+		})
+		if service != nil {
+			require.NoError(t, service.Close())
+		}
+		require.ErrorContains(t, err, "embedding batching")
+	})
+}
+
+func TestServiceSemanticSearchWithoutEmbeddings(t *testing.T) {
+	service, err := kata.New(t.Context(), kata.Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: kata.AuthConfig{TrustCallerAuthentication: true}})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	server := httptest.NewServer(service.Handler())
+	t.Cleanup(server.Close)
+	project := createProject(t, server.URL, "example-project")
+	status, _, body := searchTitles(t.Context(), server, project.Project.ID, "search", "semantic")
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Contains(t, body, "embeddings are not configured")
 }

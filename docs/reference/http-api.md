@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-13
+last_edited: 2026-11-17
 ---
 
 # HTTP API schema
@@ -78,6 +78,18 @@ message names it:
 
 The CLI preserves the hint in human, agent, and JSON errors. See
 [agent output](agent-output.md#errors) for its stderr format.
+
+## Editing an issue safely
+
+Issue edits take their precondition in the request body, not `If-Match`,
+because `If-Match` names the issue `revision`, which a title or body edit does
+not move. Send the `content_revision` you read as `expected_content_revision`
+on `PATCH /projects/{project_id}/issues/{ref}`. The daemon compares it with the
+stored value in the same transaction as the write, so a title or body edit made
+in between returns HTTP 412 with code `revision_conflict` and nothing from the
+request is written, including priority, owner, and link changes sent with it.
+Omit the field for an unconditional edit. A new issue starts at `content_revision`
+`0`, so send `0` rather than leaving the field out.
 
 ## Recurrence timezones
 
@@ -285,6 +297,8 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.54.0` | `GET /api/v1/docbank/probe` makes one read-only request to Docbank and reports whether it answered and accepted the daemon's key. |
+| `0.53.0` | Issue responses carry `content_revision`, which moves when a title or body edit changes the text. `PATCH /projects/{project_id}/issues/{ref}` accepts `expected_content_revision`; a different current value returns 412 `revision_conflict` and writes nothing. Older daemons reject the unknown field. |
 | `0.52.0` | Close requests accept project-bound transcript selection and retain candidate session identity for keyed retries. |
 | `0.51.0` | Signed federation requests return `503 signing_warming` with `Retry-After: 5` while replay protection warms up. |
 | `0.50.0` | A hub that requires signing and the restricted ingress answer requests without signature headers with `428 hub_signing_required` instead of `401 signature_invalid`. A request with only a digest follows the unsigned path, including when signing is optional. |
@@ -366,7 +380,7 @@ hub project it roots:
 `docbank` appears when `[docbank]` names a key source. With `local = true` and
 no `url`, the key comes from the local Docbank's runtime record and the block
 is absent. The daemon resolves its key source for each health request without
-contacting Docbank:
+contacting Docbank (the [Docbank probe](#docbank-probe) does that):
 
 | Field | Meaning |
 | --- | --- |
@@ -403,6 +417,22 @@ key that does not match the pin returns `409 root_signing_key_mismatch`. An
 `unsigned_repin` while `active_relay_enrollments` is above zero returns
 `409 root_repin_strands_relays` unless `strand_relays` is true. See
 [Root signing key](../operations/federation.md#root-signing-key).
+
+### Docbank probe
+
+`GET /api/v1/docbank/probe` (API 0.54.0) makes one authenticated read-only
+request to Docbank and reports what came back. It answers the callers that
+receive the `docbank` block in health, and `404 not_found` to everyone else and
+when `[docbank]` has no key source (including `local = true`). When the key does
+not resolve it sends nothing and answers `503 docbank_key_unavailable`, as the
+attachment routes do. The request times out after five seconds, and the result
+is advisory:
+
+| Field | Meaning |
+| --- | --- |
+| `reachable` | Docbank answered. |
+| `key_accepted` | Docbank answered with a 2xx whose body is a folder with an id and directory type, so it accepted the key. `false` when it answered `401` or `403`, answered with another error, answered with a body that is not Docbank's, or was not reached. |
+| `http_status` | Docbank's status when it answered with an error; absent otherwise, including when it answered `200` with a body that is not Docbank's. |
 
 ## Project access
 

@@ -18,6 +18,7 @@ func issueFromShow(shown generated.ShowIssueOut) generated.Issue {
 		Body:                shown.Body,
 		ClosedAt:            shown.ClosedAt,
 		ClosedReason:        shown.ClosedReason,
+		ContentRevision:     shown.ContentRevision,
 		CreatedAt:           shown.CreatedAt,
 		DeletedAt:           shown.DeletedAt,
 		ID:                  shown.ID,

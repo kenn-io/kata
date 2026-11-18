@@ -582,6 +582,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		next := m.handleFederationLoaded(fl)
 		return next, nil
 	}
+	if fs, ok := msg.(federationSpokesLoadedMsg); ok {
+		return m.handleFederationSpokesLoaded(fs), nil
+	}
+	if fn, ok := msg.(federationSpokeNamedMsg); ok {
+		return m.handleFederationSpokeNamed(fn), nil
+	}
 	if fhp, ok := msg.(federationHubProjectsLoadedMsg); ok {
 		next := m.handleFederationHubProjectsLoaded(fhp)
 		return next, nil
@@ -880,6 +886,12 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 	case tea.PasteMsg:
+		if m.view == viewFederation && m.federation.mode == federationModeSpokeName && m.modal == modalNone {
+			if !m.federation.spokes.saving {
+				m.federation.spokes.name, _ = m.federation.spokes.name.Update(msg)
+			}
+			return m, nil, true
+		}
 		if m.view == viewCron && m.cron.filtering && m.modal == modalNone {
 			return m.cronFilter(m.cron.lists[m.cron.tab].query + msg.Content), nil, true
 		}
@@ -1294,6 +1306,8 @@ func (m Model) openBodyEditForm() Model {
 		projectID:    m.detail.scopePID,
 		issueShortID: m.detail.issue.ShortID,
 		detailGen:    m.detail.gen,
+
+		contentRevision: m.detail.issue.ContentRevision,
 	}
 	m.nextFormGen++
 	form := newBodyEditForm(target, m.detail.issue.Body)
@@ -1878,6 +1892,9 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if mut.err != nil {
 		m.input.saving = false
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
+		if m.input.kind == inputBodyEditForm && isRevisionConflict(mut.err) {
+			m.input.err = bodyEditConflictMessage
+		}
 		if m.input.kind == inputRecurrenceForm {
 			m.input.err = fmt.Sprintf(successTemplates[mut.kind].failure, mut.err.Error())
 			if isRevisionConflict(mut.err) {
@@ -2374,16 +2391,21 @@ func dispatchFormAddComment(
 	}
 }
 
+// bodyEditConflictMessage is what the body editor shows when the daemon
+// refuses a save because the title or body changed after the editor opened.
+// The typed text stays in the form so it can be copied out.
+const bodyEditConflictMessage = "The title or body changed since you opened the editor; nothing was saved. Copy your text, press esc, and reopen to see the current body."
+
 // dispatchFormEditBody is the form-side EditBody dispatch. Same
 // shape as dispatchFormAddComment.
 func dispatchFormEditBody(
 	api detailAPI, target formTarget, body, actor string, formGen int64,
 ) tea.Cmd {
-	pid, ref := target.projectID, target.issueShortID
+	pid, ref, expected := target.projectID, target.issueShortID, target.contentRevision
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		resp, err := api.EditBody(ctx, pid, ref, body, actor)
+		resp, err := api.EditBody(ctx, pid, ref, body, actor, &expected)
 		return mutationDoneMsg{
 			origin: "form", kind: "form.body.edit", formGen: formGen,
 			resp: resp, err: err,
@@ -3234,6 +3256,9 @@ func toastExpireCmd(d time.Duration) tea.Cmd {
 // /forms) or a confirm modal (quit or draft discard) is open. Both
 // gates redirect global keys into the field instead of firing.
 func (m Model) canQuit() bool {
+	if m.view == viewFederation && m.federation.mode == federationModeSpokeName {
+		return false
+	}
 	if m.view == viewCron && (m.cron.filtering || m.cron.form != nil) {
 		return false
 	}

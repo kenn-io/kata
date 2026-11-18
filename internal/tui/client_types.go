@@ -50,6 +50,7 @@ type Issue struct {
 	Related             []LinkPeer    `json:"related,omitempty"`
 	Priority            *int64        `json:"priority,omitempty"`
 	Revision            int64         `json:"revision"`
+	ContentRevision     int64         `json:"content_revision"`
 	RecurrenceID        *int64        `json:"recurrence_id,omitempty"`
 	Metadata            issueMetadata `json:"metadata,omitzero"`
 	// Resolved YYYY-MM-DD planning dates from the daemon.
@@ -305,6 +306,7 @@ type CreateFederationReplicaInput struct {
 // CreateFederationEnrollmentInput is the hub enrollment creation request body.
 type CreateFederationEnrollmentInput struct {
 	SpokeInstanceUID             string `json:"spoke_instance_uid"`
+	SpokeName                    string `json:"spoke_name,omitempty"`
 	ProjectID                    *int64 `json:"project_id"`
 	Capabilities                 string `json:"capabilities"`
 	Token                        string `json:"token,omitempty"`

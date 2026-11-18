@@ -107,6 +107,19 @@ type DocbankHealth struct {
 	CredentialReason string `json:"credential_reason,omitempty" doc:"Why the key source cannot supply a key."`
 }
 
+// DocbankProbeResponse is the outcome of GET /api/v1/docbank/probe.
+type DocbankProbeResponse struct {
+	Body DocbankProbe
+}
+
+// DocbankProbe is the outcome of one authenticated read-only request the
+// daemon makes to Docbank.
+type DocbankProbe struct {
+	Reachable   bool `json:"reachable" doc:"Whether Docbank answered the request."`
+	KeyAccepted bool `json:"key_accepted" doc:"Whether Docbank accepted the daemon's key; false when it answered with an error status or was not reached."`
+	HTTPStatus  int  `json:"http_status,omitempty,omitzero" doc:"Docbank's HTTP status when it answered with an error."`
+}
+
 // EmbeddingsHealth is the semantic-search reconciler's operator-visible state
 // on the wire. It is present only when the daemon has embeddings configured;
 // an absent block means semantic search is disabled. It mirrors
@@ -886,6 +899,10 @@ type EditIssueRequest struct {
 		SetPriority   *int64      `json:"set_priority,omitempty"`
 		ClearPriority bool        `json:"clear_priority,omitempty,omitzero"`
 		LinksDelta    *LinksDelta `json:"links_delta,omitempty"`
+		// ExpectedContentRevision is the issue's content_revision the caller
+		// read before drafting the edit. A stale value answers 412
+		// revision_conflict and writes nothing; absent means unconditional.
+		ExpectedContentRevision *int64 `json:"expected_content_revision,omitempty" minimum:"0" doc:"Current content_revision of the issue; a title or body edit since then returns 412 revision_conflict and writes nothing."`
 	}
 }
 
