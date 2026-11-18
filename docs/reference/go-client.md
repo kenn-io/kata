@@ -1,7 +1,7 @@
 ---
 title: Go client
 description: Connect Go programs to a Kata daemon with the typed client, CLI-compatible daemon discovery, and an in-process test server.
-last_edited: 2026-11-16
+last_edited: 2026-11-18
 ---
 
 # Go client
@@ -12,7 +12,7 @@ daemon selection, transports, and bearer-token rules as the Kata CLI, so an
 integration does not have to reimplement them.
 
 Importing `pkg/client` does not link the daemon, its storage engines,
-telemetry, or sync connectors, so client-only programs stay small. The
+or sync connectors, so client-only programs stay small. The
 [test server](#test-against-a-real-daemon) in `pkg/katatest` runs a real
 daemon and links all of them; import it only from tests.
 

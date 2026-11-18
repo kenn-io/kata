@@ -324,7 +324,7 @@ func TestDaemonMCPIdentitySessionsAndRequestsReleaseDaemonConnections(t *testing
 
 // A successful modern request must leave enough lifetime for its activity report.
 func TestDaemonMCPIdentityModernDrainsActivityAfterResponse(t *testing.T) {
-	t.Setenv("KATA_TELEMETRY_ENABLED", "1")
+	t.Setenv("TELEMETRY_ENABLED", "1")
 	home := deploymentHome(t)
 	store := openKataTestDB(t, filepath.Join(home, "kata.db"))
 	t.Cleanup(func() { require.NoError(t, store.Close()) })

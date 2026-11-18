@@ -1,4 +1,5 @@
-// Package telemetry emits anonymous, opt-out daemon, web UI, TUI and CLI usage events.
+// Package telemetry emits anonymous daemon, web UI, TUI and CLI usage events
+// when Kenn's recorded answer is yes or TELEMETRY_ENABLED=1.
 package telemetry
 
 import (
@@ -16,7 +17,7 @@ const (
 
 	applicationName = "kata"
 	envPrefix       = "KATA"
-	// EnabledEnv controls anonymous telemetry; 0/false/no/off disable reporting.
+	// EnabledEnv can disable reporting with 0/false/no/off.
 	EnabledEnv      = "KATA_TELEMETRY_ENABLED"
 	postHogEndpoint = "https://us.i.posthog.com"
 )
@@ -37,7 +38,9 @@ type Client interface {
 }
 
 // Reporter sanitizes and submits anonymous telemetry events to PostHog.
-type Reporter = posthog.Reporter
+type Reporter struct {
+	*posthog.Reporter
+}
 
 // Options configures a telemetry reporter instance.
 type Options struct {
@@ -54,7 +57,8 @@ type Options struct {
 // allowlist when telemetry is opted out or the build has no PostHog project
 // key. Release builds set that key at link time.
 func NewReporter(opts Options) (*Reporter, error) {
-	return posthog.NewReporter(posthog.Options{
+	reporter, err := posthog.NewReporter(posthog.Options{
+		Logger:      slog.New(slog.DiscardHandler),
 		Endpoint:    postHogEndpoint,
 		Application: applicationName,
 		EnvPrefix:   envPrefix,
@@ -104,6 +108,10 @@ func NewReporter(opts Options) (*Reporter, error) {
 			posthog.AllowProperty("surface", screenSurfaces),
 		),
 	)
+	if err != nil {
+		return nil, err
+	}
+	return &Reporter{Reporter: reporter}, nil
 }
 
 // DurationBucket groups elapsed time without sending an exact duration.
@@ -164,14 +172,13 @@ func AppOpenedSurface(properties map[string]any) string {
 
 // DisabledReporter returns a reporter that drops events without network calls.
 func DisabledReporter() *Reporter {
-	return posthog.DisabledReporter()
+	return &Reporter{Reporter: posthog.DisabledReporter()}
 }
 
 // NewReporterOrDisabled builds a reporter and falls back to a disabled reporter on errors.
 func NewReporterOrDisabled(opts Options) *Reporter {
 	reporter, err := NewReporter(opts)
 	if err != nil {
-		slog.Warn("telemetry disabled", "err", err)
 		return DisabledReporter()
 	}
 	return reporter
