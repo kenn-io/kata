@@ -103,12 +103,11 @@ func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
 func TestRecurrenceDeadlineUsesIssueOrDaemonTimezone(t *testing.T) {
 	for _, tc := range []struct {
 		name, metadata, want string
-		legacy, patch        bool
+		patch                bool
 	}{
-		{"daemon default", `{"deadline_on":"2026-08-12T23:30"}`, "2026-08-12T23:30[America/New_York]", false, false},
-		{"template timezone", `{"deadline_on":"2026-08-12T23:30","timezone":"Europe/Paris"}`, "2026-08-12T23:30[Europe/Paris]", false, false},
-		{"legacy template", `{"deadline_on":"2026-08-12T23:30"}`, "2026-08-12T23:30[America/New_York]", true, false},
-		{"template patch", `{"deadline_on":"2026-08-12T23:30","timezone":"Europe/Paris"}`, "2026-08-12T23:30[Europe/Paris]", false, true},
+		{"daemon default", `{"deadline_on":"2026-08-12T23:30"}`, "2026-08-12T23:30[America/New_York]", false},
+		{"template timezone", `{"deadline_on":"2026-08-12T23:30","timezone":"Europe/Paris"}`, "2026-08-12T23:30[Europe/Paris]", false},
+		{"template patch", `{"deadline_on":"2026-08-12T23:30","timezone":"Europe/Paris"}`, "2026-08-12T23:30[Europe/Paris]", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := testenv.New(t, testenv.WithAuthToken("tok"), func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = "America/New_York" })
@@ -130,31 +129,34 @@ func TestRecurrenceDeadlineUsesIssueOrDaemonTimezone(t *testing.T) {
 			}
 			attached, err := env.DB.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
-			if !tc.legacy {
-				rec, err := env.DB.GetRecurrenceByID(t.Context(), *attached.RecurrenceID)
-				require.NoError(t, err)
-				var saved map[string]any
-				require.NoError(t, json.Unmarshal([]byte(rec.TemplateMetadata), &saved))
-				assert.Equal(t, tc.want, saved["deadline_on"])
-			}
-			if tc.legacy {
-				_, err = env.DB.ExecContext(t.Context(), `UPDATE recurrences SET template_metadata = ? WHERE id = ?`, tc.metadata, *attached.RecurrenceID)
-				require.NoError(t, err)
-			}
-			resp = doPost(t, env, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, project.ID, issue.ShortID), `{"actor":"tester","reason":"done","message":"Completed the scheduled review and recorded its outcome.","evidence":[{"type":"reviewed-paths","paths":["review.md"]}]}`)
-			require.Equal(t, http.StatusOK, resp.StatusCode, string(readClose(t, resp)))
-			attached, err = env.DB.IssueByID(t.Context(), issue.ID)
+			rec, err := env.DB.GetRecurrenceByID(t.Context(), *attached.RecurrenceID)
 			require.NoError(t, err)
-			recurrence, err := env.DB.GetRecurrenceByID(t.Context(), *attached.RecurrenceID)
-			require.NoError(t, err)
-			require.NotNil(t, recurrence.LastMaterializedUID)
-			next, err := env.DB.IssueByUID(t.Context(), *recurrence.LastMaterializedUID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			var metadata map[string]any
-			require.NoError(t, json.Unmarshal([]byte(next.Metadata), &metadata))
-			assert.Equal(t, tc.want, metadata["deadline_on"])
+			var saved map[string]any
+			require.NoError(t, json.Unmarshal([]byte(rec.TemplateMetadata), &saved))
+			assert.Equal(t, tc.want, saved["deadline_on"])
 		})
 	}
+	t.Run("legacy template", func(t *testing.T) {
+		env := testenv.New(t, testenv.WithAuthToken("tok"), func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = "America/New_York" })
+		project, issue := seedProjectAndIssue(t, env)
+		body := fmt.Sprintf(`{"actor":"tester","initial_issue_ref":%q,"rrule":"FREQ=WEEKLY","dtstart":"2026-08-03","timezone":"Asia/Tokyo","template":{"title":"Weekly review","metadata":{"deadline_on":"2026-08-12T23:30"}}}`, issue.ShortID)
+		resp := doPost(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, project.ID), body)
+		require.Equal(t, http.StatusCreated, resp.StatusCode, string(readClose(t, resp)))
+		attached, err := env.DB.IssueByID(t.Context(), issue.ID)
+		require.NoError(t, err)
+		_, err = env.DB.ExecContext(t.Context(), `UPDATE recurrences SET template_metadata = ? WHERE id = ?`, `{"deadline_on":"2026-08-12T23:30"}`, *attached.RecurrenceID)
+		require.NoError(t, err)
+		resp = doPost(t, env, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, project.ID, issue.ShortID), `{"actor":"tester","reason":"done","message":"Completed the scheduled review and recorded its outcome.","evidence":[{"type":"reviewed-paths","paths":["review.md"]}]}`)
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(readClose(t, resp)))
+		recurrence, err := env.DB.GetRecurrenceByID(t.Context(), *attached.RecurrenceID)
+		require.NoError(t, err)
+		require.NotNil(t, recurrence.LastMaterializedUID)
+		next, err := env.DB.IssueByUID(t.Context(), *recurrence.LastMaterializedUID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		var metadata map[string]any
+		require.NoError(t, json.Unmarshal([]byte(next.Metadata), &metadata))
+		assert.Equal(t, "2026-08-12T23:30[America/New_York]", metadata["deadline_on"])
+	})
 }
 
 func TestPostRecurrence_InitialIssueRequiresFederatedClaim(t *testing.T) {

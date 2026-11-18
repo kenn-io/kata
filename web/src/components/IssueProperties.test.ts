@@ -201,6 +201,7 @@ describe('IssueProperties', () => {
     renderProperties({
       issue: makeIssue({
         scheduled_on_date: '2026-08-31',
+        deadline_on_date: '2026-09-02',
         metadata: {
           scheduled_on: '2026-09-01T09:00[Asia/Tokyo]',
           deadline_on: '2026-09-02T09:00[Europe/Paris]',

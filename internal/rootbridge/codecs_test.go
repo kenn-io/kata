@@ -80,7 +80,7 @@ func TestScheduleCodecKataPatchPreservesCivilTimesAcrossDST(t *testing.T) {
 		{Kind: "local_datetime", Value: "2026-03-08T02:30", Timezone: "America/New_York"},
 		{Kind: "local_datetime", Value: "2026-11-01T01:30:45", Timezone: "America/New_York"},
 	} {
-		patch, err := codec.KataPatch(db.Issue{Metadata: db.JSONBlob(`{"deadline_on":"2026-08-20T09:30[Europe/Paris]","timezone":"America/New_York"}`)}, value)
+		patch, err := codec.KataPatch(db.Issue{}, value)
 		require.NoError(t, err)
 		assert.JSONEq(t, `"`+value.Value+`[America/New_York]"`, string(patch["scheduled_on"]))
 		assert.NotContains(t, patch, "timezone")

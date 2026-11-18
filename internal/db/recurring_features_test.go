@@ -40,9 +40,16 @@ func TestRecurringPayloadFeatures(t *testing.T) {
 }
 
 func TestZonedDatePayloadWireVersion(t *testing.T) {
-	_, required, err := db.FederationEventPayloadWireVersion("issue.metadata_updated", jsontext.Value(`{"diff":{"scheduled_on":{"to":"2026-01-15[Europe/Paris]"}}}`))
-	require.NoError(t, err)
-	require.Equal(t, "issue_date_zone_v1", required)
+	for _, tc := range []struct{ kind, payload string }{
+		{"issue.created", `{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}`},
+		{"issue.metadata_updated", `{"diff":{"scheduled_on":{"to":"2026-01-15[Europe/Paris]"}}}`},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			_, required, err := db.FederationEventPayloadWireVersion(tc.kind, jsontext.Value(tc.payload))
+			require.NoError(t, err)
+			require.Equal(t, "issue_date_zone_v1", required)
+		})
+	}
 }
 
 func TestRecurringFeaturesCachePositiveProject(t *testing.T) {
