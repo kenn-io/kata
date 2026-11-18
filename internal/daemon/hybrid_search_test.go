@@ -114,6 +114,32 @@ func TestHybridSearchHubReconcilesLocalIdentity(t *testing.T) {
 	require.Equal(t, unpulled.UID, result.Hits[2].Issue.UID)
 }
 
+func TestHybridSearchHubDeletedHitsExhaustCap(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "shared")
+	require.NoError(t, err)
+	hits := make([]api.FederationSearchHit, 0, 201)
+	for range 200 {
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "deleted locally", Author: "tester"})
+		require.NoError(t, err)
+		_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "tester")
+		require.NoError(t, err)
+		hits = append(hits, api.FederationSearchHit{Issue: issue, Score: 0.9})
+	}
+	live, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "live issue", Author: "tester"})
+	require.NoError(t, err)
+	hits = append(hits, api.FederationSearchHit{Issue: live, Score: 0.8})
+	params := hybridParams{ProjectID: project.ID, Query: "test", Limit: 1, Requested: "semantic", Hub: func(_ context.Context, _ hybridParams, fetch int) ([]api.FederationSearchHit, bool, error) {
+		return hits[:min(fetch, len(hits))], false, nil
+	}}
+	_, err = hybridSearch(ctx, store, nil, nil, params)
+	require.ErrorContains(t, err, filterCeilingReason)
+	var modeErr *modeError
+	require.ErrorAs(t, err, &modeErr)
+	require.Equal(t, http.StatusServiceUnavailable, modeErr.Status())
+}
+
 func TestHybridSearchHubPreservesLexicalTitle(t *testing.T) {
 	ctx := t.Context()
 	store := newReconcilerTestStore(t)
