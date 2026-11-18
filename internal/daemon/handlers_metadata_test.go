@@ -226,6 +226,11 @@ func TestPatchMetadataLegacyRecurrenceZone(t *testing.T) {
 	metadata, _ := decodeMetadataEnvelope(t, raw, "issue")
 	assert.Contains(t, metadata, `"scheduled_on":"2026-08-04T09:00[America/Los_Angeles]"`)
 	assert.Contains(t, metadata, `"deadline_on":"2026-08-05T09:00[UTC]"`)
+	resp = doPost(t, env, url, `{"actor":"tester","patch":{"scheduled_on":"2026-08-06T09:00","timezone":null}}`)
+	raw = readClose(t, resp)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
+	metadata, _ = decodeMetadataEnvelope(t, raw, "issue")
+	assert.Contains(t, metadata, `"scheduled_on":"2026-08-06T09:00[UTC]"`)
 }
 
 // TestPatchMetadata_PresentEmptyIfMatch_400 pins that a present-but-empty

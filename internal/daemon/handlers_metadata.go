@@ -142,15 +142,13 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 }
 
 func stampIssueMetadataPatch(ctx context.Context, tx *sql.Tx, issue db.Issue, patch map[string]jsontext.Value, defaultZone string) (map[string]jsontext.Value, error) {
-	if issue.RecurrenceID != nil && len(patch["scheduled_on"]) > 0 {
+	_, timezonePatched := patch["timezone"]
+	if issue.RecurrenceID != nil && len(patch["scheduled_on"]) > 0 && !timezonePatched {
 		var zone string
 		if err := tx.QueryRowContext(ctx, `SELECT timezone FROM recurrences WHERE id=$1 AND project_id=$2`, *issue.RecurrenceID, issue.ProjectID).Scan(&zone); err != nil {
 			return nil, err
 		}
 		schedule := map[string]jsontext.Value{"scheduled_on": patch["scheduled_on"]}
-		if timezone, ok := patch["timezone"]; ok {
-			schedule["timezone"] = timezone
-		}
 		stamped, err := metadata.StampScheduleZones(schedule, string(issue.Metadata), zone)
 		if err != nil {
 			return nil, err

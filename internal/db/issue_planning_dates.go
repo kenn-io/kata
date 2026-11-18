@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"time"
@@ -36,6 +38,7 @@ type IssuePlanningDatesIn struct {
 	IssueID         int64
 	IncludeDeleted  bool
 	DefaultTimezone string
+	Field           string
 }
 
 // ReadIssuePlanningDatesSQL captures identity, revision, both metadata fields
@@ -56,7 +59,26 @@ func ReadIssuePlanningDatesSQL(ctx context.Context, q interface {
 	if err != nil {
 		return out, err
 	}
+	if in.Field != "" {
+		var values map[string]jsontext.Value
+		if err := json.Unmarshal([]byte(raw), &values); err != nil {
+			return out, fmt.Errorf("%w: %v", ErrPlanningDatesInvalid, err)
+		}
+		if in.Field == "scheduled_on" {
+			delete(values, "deadline_on")
+		} else {
+			delete(values, "scheduled_on")
+		}
+		filtered, err := json.Marshal(values)
+		if err != nil {
+			return out, fmt.Errorf("%w: %v", ErrPlanningDatesInvalid, err)
+		}
+		raw = string(filtered)
+	}
 	for _, field := range []string{"scheduled_on", "deadline_on"} {
+		if in.Field != "" && in.Field != field {
+			continue
+		}
 		fallback := in.DefaultTimezone
 		if field == "scheduled_on" && recurrence.Valid && recurrence.String != "" {
 			fallback = recurrence.String

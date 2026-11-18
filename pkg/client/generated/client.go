@@ -8817,6 +8817,7 @@ func (c *Client) IssuePlanningDates(ctx context.Context, options *IssuePlanningD
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
+		"field":           {Style: "form", Explode: &[]bool{false}[0]},
 		"inbound":         {Style: "form", Explode: &[]bool{false}[0]},
 		"include_deleted": {Style: "form", Explode: &[]bool{false}[0]},
 		"kind":            {Style: "form", Explode: &[]bool{false}[0]},

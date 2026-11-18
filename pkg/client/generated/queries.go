@@ -399,6 +399,9 @@ type IssuePlanningDatesQuery struct {
 	Kind           *IssuePlanningDatesQueryKind `json:"kind,omitempty"`
 	Since          *string                      `json:"since,omitempty"`
 	IncludeDeleted *bool                        `json:"include_deleted,omitempty"`
+
+	// Field Resolve only this field; omit to resolve both.
+	Field *IssuePlanningDatesQueryField `json:"field,omitempty"`
 }
 
 func (i IssuePlanningDatesQuery) Validate() error {
@@ -407,6 +410,13 @@ func (i IssuePlanningDatesQuery) Validate() error {
 		if v, ok := any(i.Kind).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Kind", err)
+			}
+		}
+	}
+	if i.Field != nil {
+		if v, ok := any(i.Field).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Field", err)
 			}
 		}
 	}

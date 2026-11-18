@@ -984,6 +984,24 @@ func (i IssuePlanningDatesQueryKind) Validate() error {
 	}
 }
 
+// IssuePlanningDatesQueryField Resolve only this field; omit to resolve both.
+type IssuePlanningDatesQueryField string
+
+const (
+	DeadlineOn  IssuePlanningDatesQueryField = "deadline_on"
+	ScheduledOn IssuePlanningDatesQueryField = "scheduled_on"
+)
+
+// Validate checks if the IssuePlanningDatesQueryField value is valid
+func (i IssuePlanningDatesQueryField) Validate() error {
+	switch i {
+	case DeadlineOn, ScheduledOn:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid IssuePlanningDatesQueryField value, got: %v", i))
+	}
+}
+
 // ReadyIssuesQuerySort priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
 type ReadyIssuesQuerySort string
 

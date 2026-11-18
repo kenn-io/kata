@@ -219,7 +219,7 @@ func (s *Store) CreateRecurrenceForIssue(
 			return fmt.Errorf("walk after initial occurrence: %w", err)
 		}
 		updatedMetadata, err := db.ComposeExistingRecurrenceIssueMetadata(
-			jsontext.Value(issue.Metadata), *firstOccurrence, create.Timezone,
+			jsontext.Value(issue.Metadata), *firstOccurrence, create.Timezone, input.DefaultTimezone,
 		)
 		if err != nil {
 			return fmt.Errorf("compose initial recurrence issue metadata: %w", err)

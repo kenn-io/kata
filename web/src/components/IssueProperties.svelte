@@ -9,6 +9,7 @@
   import { Button, Chip, SelectDropdown } from '@kenn-io/kit-ui'
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
   import { SvelteDate } from 'svelte/reactivity'
+  import { issuePlanningDates } from '../lib/api/generated/default/default'
   import type { KataTaskDetail } from '../lib/kata/types'
   import DatePicker from './DatePicker.svelte'
 
@@ -211,7 +212,12 @@
     return projected ?? saved?.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? ''
   }
 
-  function movedDate(value: string, displayed: string, saved: string | undefined): string | null {
+  function movedDate(
+    value: string,
+    displayed: string,
+    saved: string | undefined,
+    effectiveZone = '',
+  ): string | null {
     if (!value) return null
     const match = saved?.match(/^(\d{4}-\d{2}-\d{2})(.*)$/)
     if (!match || !displayed) return value
@@ -224,11 +230,11 @@
     }
     const savedDate = match[1]!
     const suffix = match[2]!
-    const zoned = suffix.match(/^(T\d{2}:\d{2}(?::\d{2})?)\[([^\]]+)\]$/)
-    if (zoned) {
+    const zoned = suffix.match(/^(T\d{2}:\d{2}(?::\d{2})?)(?:\[([^\]]+)\])?$/)
+    if (zoned && (zoned[2] || effectiveZone)) {
       const time = zoned[1]!
       const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: zoned[2],
+        timeZone: zoned[2] || effectiveZone,
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -246,7 +252,7 @@
         )
       }
       const dayMillis = Date.parse(`${value}T00:00:00Z`)
-      const candidates = [-1, 0, 1].map((offset) =>
+      const candidates = [-2, -1, 0, 1, 2].map((offset) =>
         new Date(dayMillis + offset * day).toISOString().slice(0, 10),
       )
       candidates.sort(
@@ -285,6 +291,36 @@
       Date.parse(`${value}T00:00:00Z`) -
       Date.parse(`${displayed}T00:00:00Z`)
     return new Date(Math.round(moved / day) * day).toISOString().slice(0, 10) + match[2]
+  }
+
+  async function resolveMovedDate(
+    value: string,
+    displayed: string,
+    saved: string | undefined,
+    field: 'scheduled_on' | 'deadline_on',
+  ): Promise<string | null> {
+    if (!value || !saved?.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/)) {
+      return movedDate(value, displayed, saved)
+    }
+    const current = issue.issue
+    try {
+      const response = await issuePlanningDates(
+        { projectId: current.project_id, ref: current.short_id },
+        { field },
+      )
+      if (
+        response.status !== 200 ||
+        issue.issue.uid !== current.uid ||
+        issue.issue.revision !== current.revision ||
+        response.data.revision !== current.revision
+      )
+        return ''
+      const date = response.data[field]
+      if (!date || date.value !== saved) return ''
+      return movedDate(value, displayed, saved, date.timezone)
+    } catch {
+      return ''
+    }
   }
 
   function scheduledDate(): string {
@@ -330,13 +366,19 @@
       return
     }
     scheduledDraft = value
-    const moved = movedDate(value, scheduledDate(), issue.issue.metadata.scheduled_on)
+    const mutationUID = uid()
+    const generation = draftResetGeneration
+    const moved = await resolveMovedDate(
+      value,
+      scheduledDate(),
+      issue.issue.metadata.scheduled_on,
+      'scheduled_on',
+    )
+    if (uid() !== mutationUID || draftResetGeneration !== generation) return
     if (moved === '') {
       dateError = "That day can't keep the saved time and timezone. Pick another day."
       return
     }
-    const mutationUID = uid()
-    const generation = draftResetGeneration
     const ok = await onPatchMetadata(mutationUID, {
       scheduled_on: moved,
     })
@@ -352,13 +394,19 @@
       return
     }
     dueDraft = value
-    const moved = movedDate(value, deadlineDate(), issue.issue.metadata.deadline_on)
+    const mutationUID = uid()
+    const generation = draftResetGeneration
+    const moved = await resolveMovedDate(
+      value,
+      deadlineDate(),
+      issue.issue.metadata.deadline_on,
+      'deadline_on',
+    )
+    if (uid() !== mutationUID || draftResetGeneration !== generation) return
     if (moved === '') {
       dateError = "That day can't keep the saved time and timezone. Pick another day."
       return
     }
-    const mutationUID = uid()
-    const generation = draftResetGeneration
     const ok = await onPatchMetadata(mutationUID, {
       deadline_on: moved,
     })

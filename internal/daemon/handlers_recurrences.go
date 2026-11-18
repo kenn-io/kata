@@ -159,7 +159,7 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 				return nil, claimErr
 			}
 			created, createErr := cfg.DB.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{
-				IssueID: issue.ID, IfMatchRev: ifMatchRev, Recurrence: createInput,
+				IssueID: issue.ID, IfMatchRev: ifMatchRev, Recurrence: createInput, DefaultTimezone: cfg.DefaultTimezone,
 			})
 			if rce, ok := errors.AsType[*db.RevisionConflictError](createErr); ok {
 				return nil, api.NewError(412, "revision_conflict",

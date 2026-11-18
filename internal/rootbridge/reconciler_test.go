@@ -1090,6 +1090,41 @@ func TestFieldReconcileSavesScheduleZone(t *testing.T) {
 	}
 }
 
+func TestFieldReconcileDateInstantAndClearPreserveSibling(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value connector.FieldValue
+		want  string
+	}{
+		{"date", date("2026-08-21"), `"2026-08-21[America/New_York]"`},
+		{"instant", connector.FieldValue{Kind: fieldKindInstant, Value: "2026-08-21T10:30:00Z"}, `"2026-08-21T10:30:00Z"`},
+		{"clear", nullValue(), `null`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newReconcileHarness(t)
+			h.mapField(t, "scheduled_on", "start-date")
+			h.seedBaseline(t, "scheduled_on", date("2026-08-20"))
+			_, err := h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value(`"2026-08-20"`), "deadline_on": jsontext.Value(`"2026-08-22T09:00[Asia/Tokyo]"`), "timezone": jsontext.Value(`"America/New_York"`),
+			}})
+			require.NoError(t, err)
+			h.client.fieldValues["start-date"] = tc.value
+			_, err = h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
+			require.NoError(t, err)
+			issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
+			require.NoError(t, err)
+			values, err := metadataObject(issue.Metadata)
+			require.NoError(t, err)
+			if tc.want == `null` {
+				assert.NotContains(t, values, "scheduled_on")
+			} else {
+				assert.JSONEq(t, tc.want, string(values["scheduled_on"]))
+			}
+			assert.JSONEq(t, `"2026-08-22T09:00[Asia/Tokyo]"`, string(values["deadline_on"]))
+		})
+	}
+}
+
 func TestFieldReconcileIndependentLocalTimezones(t *testing.T) {
 	h := newReconcileHarness(t)
 	h.mapField(t, "scheduled_on", "start-date")

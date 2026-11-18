@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { KataTaskDetail } from '../lib/kata/types'
+import { createCredentialedFetch, setGeneratedFetch } from '../lib/api/client'
 
 import IssueProperties from './IssueProperties.svelte'
 
@@ -86,6 +87,7 @@ describe('IssueProperties', () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllEnvs()
+    setGeneratedFetch(createCredentialedFetch())
   })
 
   it('adds and removes labels', async () => {
@@ -271,6 +273,18 @@ describe('IssueProperties', () => {
       '2026-03-07T02:30[America/New_York]',
       '2026-03-08T02:30[America/New_York]',
     ],
+    [
+      'distant saved timezone',
+      'scheduled_on',
+      'scheduled_on_date',
+      'Edit scheduled',
+      'Scheduled',
+      'Etc/GMT+12',
+      '2026-01-14',
+      'Jan 15, 2026',
+      '2026-01-16T00:30[Pacific/Kiritimati]',
+      '2026-01-17T00:30[Pacific/Kiritimati]',
+    ],
   ] as const)(
     'keeps the selected viewer day for %s',
     async (_, key, projectedKey, edit, picker, timezone, projected, selected, saved, expected) => {
@@ -316,6 +330,53 @@ describe('IssueProperties', () => {
       })
     },
   )
+
+  it('keeps a legacy Tokyo schedule when the selected viewer day is unreachable', async () => {
+    vi.stubEnv('TZ', 'America/New_York')
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2026-03-07',
+        metadata: { scheduled_on: '2026-03-08T13:30' },
+      }),
+      onPatchMetadata,
+    })
+    setGeneratedFetch(
+      vi.fn(
+        async (input) =>
+          new Response(
+            JSON.stringify({
+              issue_uid: 'issue-1',
+              project_id: 1,
+              revision: 1,
+              scheduled_on: {
+                field: 'scheduled_on',
+                value: '2026-03-08T13:30',
+                timezone: 'Asia/Tokyo',
+                instant: '2026-03-08T04:30:00Z',
+              },
+              deadline_on: null,
+            }),
+            {
+              status: String(input).includes('field=scheduled_on') ? 200 : 400,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ),
+      ),
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Mar 8, 2026/ }))
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/pick another day/i))
+    expect(onPatchMetadata).not.toHaveBeenCalled()
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Mar 9, 2026/ }))
+    await waitFor(() =>
+      expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
+        scheduled_on: '2026-03-09T13:30',
+      }),
+    )
+  })
 
   it.each([
     ['UTC instant', '2026-09-01T00:30:00Z'],
