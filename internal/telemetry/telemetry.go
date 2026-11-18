@@ -39,25 +39,6 @@ type Client interface {
 // Reporter sanitizes and submits anonymous telemetry events to PostHog.
 type Reporter struct {
 	*posthog.Reporter
-	version string
-}
-
-func (r *Reporter) Enabled() bool {
-	return r.Reporter.Enabled() && posthog.Eligible(envPrefix, r.version)
-}
-
-func (r *Reporter) Capture(event string, properties map[string]any) error {
-	if !r.Enabled() {
-		return nil
-	}
-	return r.Reporter.Capture(event, properties)
-}
-
-func (r *Reporter) CaptureConfirmed(ctx context.Context, event string, properties map[string]any, delivery posthog.Delivery) (posthog.Status, error) {
-	if !r.Enabled() {
-		return posthog.StatusDisabled, nil
-	}
-	return r.Reporter.CaptureConfirmed(ctx, event, properties, delivery)
 }
 
 // Options configures a telemetry reporter instance.
@@ -128,7 +109,7 @@ func NewReporter(opts Options) (*Reporter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Reporter{Reporter: reporter, version: opts.Version}, nil
+	return &Reporter{Reporter: reporter}, nil
 }
 
 // DurationBucket groups elapsed time without sending an exact duration.
