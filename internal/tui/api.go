@@ -20,12 +20,18 @@ type KataAPI interface {
 	listAPI
 	detailAPI
 	federationSpokeAPI
+	federationHubSpokesAPI
 	readIssue(ctx context.Context, projectID int64, ref string) (*IssueDetail, error)
 
 	Reopen(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error)
 	ListProjectsWithStats(ctx context.Context) ([]ProjectSummaryWithStats, error)
 	ListLabels(ctx context.Context, projectID int64) ([]LabelCount, error)
 	ResolveProject(ctx context.Context, startPath string) (*ResolveResp, error)
+}
+
+type federationHubSpokesAPI interface {
+	ListFederationEnrollments(ctx context.Context) ([]FederationEnrollment, error)
+	NameFederationSpoke(ctx context.Context, instanceUID, name string) (string, error)
 }
 
 type federationSpokeAPI interface {

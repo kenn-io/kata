@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-13
+last_edited: 2026-11-17
 ---
 
 # Federation
@@ -1401,6 +1401,12 @@ enroll a spoke project into a hub from the daemon catalog. The hub browser uses
 catalog entries without switching the active daemon, so spoke and hub auth stay
 separate.
 
+On an active hub daemon, press `s` to list its enrolled spokes. Select a spoke
+and press `N` from the list or its detail to set or change its hub-local name.
+Submit a blank name to clear it. Names apply to that instance across all of its
+project enrollments. The daemon validates names and shows any refusal without
+changing the name.
+
 The screenshots in this section are generated from disposable simulated
 daemons, hosts, actors, and projects. Generate local preview assets with:
 
@@ -1435,7 +1441,9 @@ different hub project:
 
 The preview is the mutation boundary. Confirm the operation type, local spoke
 project, hub daemon, hub auth state, requested actor, capabilities, push
-setting, and `allow_insecure` value before pressing Enter:
+setting, and `allow_insecure` value before pressing Enter. Press `N` to enter an
+optional hub-local spoke name, equivalent to `kata federation enroll --spoke-name`.
+A blank value keeps any existing name:
 
 ![Previewing a simulated federation enrollment](/docs/assets/screenshots/federation-tui/preview.svg)
 
