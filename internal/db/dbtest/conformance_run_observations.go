@@ -200,7 +200,7 @@ func checkCronRunRevisionAfterRemoteWinner(t *testing.T, store db.Storage) error
 	require.NoError(t, err)
 	eventUID, err := uid.New()
 	require.NoError(t, err)
-	remoteRun := localUpdate.Run
+	remoteRun := localUpdate.Run.CronRun
 	remoteRun.Status = "failed"
 	remoteRun.Summary.Message = "peer evidence"
 	remoteRun.Revision = 2

@@ -2069,6 +2069,17 @@ belongs to the bound spoke origin and actor, verifies schema version,
 deduplicates same-hash retries, rejects same-UID/different-hash conflicts,
 materializes the batch, and returns the advanced push cursor.
 
+An event can touch an issue that the hub now keeps in a project the spoke has
+not joined, for example after another peer moved the issue. The hub then
+rejects the batch with `403 federation_project_not_enrolled`. The error names
+the issue but not its current project, because the spoke has not joined that
+project. `auth_invalid` is reserved for a failure of the spoke's own
+credential. The spoke still pulls, so hub changes keep arriving and the move
+takes the issue out of the joined project. Its other unsent changes in that
+project wait behind the refused event. To send them, ask the hub operator which
+project holds the issue, join it with push access and the same actor, then sync
+again.
+
 On SQLite, ordinary issue pushes fold the histories of touched issues and
 reconcile only their projection rows. Cron events add the project's complete
 cron history without widening that scope, so a cron-only push reconciles no

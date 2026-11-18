@@ -101,13 +101,31 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		return err
 	}
 
+	recs, err := convertEnvelopes(envs, exportVersion, localInstanceUID, projectUIDByID, opts.AsStandalone)
+	if err != nil {
+		return err
+	}
+	return store.ImportReplay(ctx, recs, db.ImportOptions{
+		RequireFreshTarget:                  opts.RequireFreshTarget,
+		NewInstance:                         opts.NewInstance,
+		DedupeLegacyActivePendingClaims:     exportVersion < 12,
+		RecomputeEventContentHash:           exportVersion < eventReplayFieldsSchemaVersion,
+		PreserveIssueSyncBindingEnabled:     opts.PreserveIssueSyncBindingEnabled,
+		PreserveExternalRootBindingsEnabled: opts.PreserveExternalRootBindingsEnabled,
+		MergeProject:                        opts.MergeProject,
+	})
+}
+
+func convertEnvelopes(envs []Envelope, exportVersion int, localInstanceUID string, projectUIDByID map[int64]string, asStandalone bool) ([]db.ImportRecord, error) {
 	recs := make([]db.ImportRecord, 0, len(envs))
-	for _, env := range envs {
+	for i, env := range envs {
 		rec, err := toImportRecord(env, exportVersion, localInstanceUID, projectUIDByID)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if opts.AsStandalone {
+		// Clear the payload from the input envs slice after decoding to reduce peak memory.
+		envs[i].Data = nil
+		if asStandalone {
 			switch record := rec.(type) {
 			case *db.FederationBindingExport, *db.FederationSyncStatusExport,
 				*db.FederationQuarantineExport, *db.FederationEnrollmentExport,
@@ -137,15 +155,7 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		}
 		recs = append(recs, rec)
 	}
-	return store.ImportReplay(ctx, recs, db.ImportOptions{
-		RequireFreshTarget:                  opts.RequireFreshTarget,
-		NewInstance:                         opts.NewInstance,
-		DedupeLegacyActivePendingClaims:     exportVersion < 12,
-		RecomputeEventContentHash:           exportVersion < eventReplayFieldsSchemaVersion,
-		PreserveIssueSyncBindingEnabled:     opts.PreserveIssueSyncBindingEnabled,
-		PreserveExternalRootBindingsEnabled: opts.PreserveExternalRootBindingsEnabled,
-		MergeProject:                        opts.MergeProject,
-	})
+	return recs, nil
 }
 
 // projectImport embeds the current-shape ProjectExport and adds the legacy
