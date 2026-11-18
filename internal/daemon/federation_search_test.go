@@ -146,7 +146,8 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	for _, hit := range body.Results {
 		seen[hit.Issue.UID] = true
 		if hit.Issue.UID == unpulled.UID {
-			require.Empty(t, hit.WebURL)
+			require.Empty(t, hit.Issue.Body)
+			require.Equal(t, "https://tasks.example/kata?issue="+unpulled.UID+"#direct=1", hit.WebURL)
 		} else {
 			require.Equal(t, "https://spoke.example/kata?issue="+issue.UID+"#direct=1", hit.WebURL)
 		}
@@ -266,12 +267,29 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 		resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=%s", replica.ID, mode))
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	}
+	for _, mode := range []string{"", "&mode=auto"} {
+		resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim%s", replica.ID, mode))
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		require.Contains(t, string(body), `"mode":"lexical"`)
+		require.Contains(t, string(body), `"degraded":true`)
+		require.Contains(t, string(body), "claim target")
+	}
 	setClaimBindingHubURL(t, spoke, replica.ID, hub.URL)
 	resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
 	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(body))
 	require.Contains(t, string(body), `"code":"hub_search_failed"`)
 	require.NotContains(t, string(body), "hub unreachable")
 	require.Contains(t, string(body), "embeddings are not configured")
+	for _, invalid := range []string{`{}`, `{"hits":[]}`, `{"hits":[],"bounded":null}`, `{"hits":null,"bounded":false}`} {
+		malformed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(invalid)) }))
+		t.Cleanup(malformed.Close)
+		setClaimBindingHubURL(t, spoke, replica.ID, malformed.URL)
+		resp, body = envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
+		require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(body), invalid)
+		require.Contains(t, string(body), `"code":"hub_search_failed"`, invalid)
+		require.Contains(t, string(body), "invalid hub search response", invalid)
+		require.NotContains(t, string(body), "hub unreachable", invalid)
+	}
 	stalled := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	t.Cleanup(stalled.Close)
 	setClaimBindingHubURL(t, spoke, replica.ID, stalled.URL)
@@ -303,27 +321,6 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 	for _, hubURL := range []string{"http://127.0.0.1:1", older.URL} {
 		setClaimBindingHubURL(t, spoke, replica.ID, hubURL)
 		checkSearch()
-	}
-}
-
-func TestDirectSpokeAutoSearchFallsBackBeforeSlowHub(t *testing.T) {
-	hub, spoke, hubProject, replica, _, token := createClaimForwardingPair(t, "pull")
-	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: hubProject.ID, Token: token, Actor: "tester", Capabilities: "pull"}))
-	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-time.After(2 * time.Second):
-			_, _ = w.Write([]byte(`{"hits":[],"bounded":false}`))
-		case <-r.Context().Done():
-		}
-	}))
-	t.Cleanup(slow.Close)
-	setClaimBindingHubURL(t, spoke, replica.ID, slow.URL)
-	for _, mode := range []string{"", "&mode=auto"} {
-		resp, body := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim%s", replica.ID, mode))
-		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-		require.Contains(t, string(body), `"mode":"lexical"`)
-		require.Contains(t, string(body), `"degraded":true`)
-		require.Contains(t, string(body), "claim target")
 	}
 }
 

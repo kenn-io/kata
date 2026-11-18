@@ -114,6 +114,7 @@ func TestSearchEndpoint_InsecureReadonlyUnauthenticatedExplicitVectorModesRequir
 		resp, body = envGetRaw(t, spoke, path)
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 		require.Contains(t, string(body), `"mode":"lexical"`)
+		require.NotContains(t, string(body), `"degraded":true`)
 	})
 }
 
