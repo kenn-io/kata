@@ -154,7 +154,12 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 		return vectors, nil
 	}, 64, nil, nil)
 	require.NoError(t, err)
-	spoke := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.EmbeddingUnavailableReason = "local vector index unavailable" })
+	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{Origin: "https://spoke.example", InstanceID: "spoke"})
+	require.NoError(t, err)
+	spoke := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.EmbeddingUnavailableReason = "local vector index unavailable"
+		cfg.WebSessions = manager
+	})
 	replica, err := spoke.DB.CreateProjectWithUID(ctx, project.Name, project.UID)
 	require.NoError(t, err)
 	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replica.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "tester", Enabled: true, PushEnabled: true})
@@ -184,6 +189,8 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 		if hit.Issue.UID == unpulled.UID {
 			require.Equal(t, unpulled.UID, hit.Issue.ShortID)
 			require.Equal(t, "https://tasks.example/kata?issue="+unpulled.UID+"#direct=1", hit.WebURL)
+		} else if hit.Issue.UID == issue.UID {
+			require.Equal(t, "https://spoke.example/kata?issue="+issue.UID+"#direct=1", hit.WebURL)
 		}
 	}
 	require.True(t, seen[issue.UID])
