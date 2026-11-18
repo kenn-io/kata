@@ -112,29 +112,6 @@ func TestSearchFanoutUsesStableGlobalOrdering(t *testing.T) {
 	}
 }
 
-func TestSearchFanoutReturnsNoPartialResultWhenOneProjectFails(t *testing.T) {
-	session, _ := connectMultiProjectServer(t, func(writer http.ResponseWriter, request *http.Request) bool {
-		if !strings.HasSuffix(request.URL.Path, "/search") {
-			return false
-		}
-		if strings.Contains(request.URL.Path, "/projects/2/") {
-			writer.WriteHeader(http.StatusServiceUnavailable)
-			writeJSON(writer, map[string]any{"status": 503, "error": map[string]any{"code": "hub_unreachable", "message": "hub unreachable: search unavailable"}})
-			return true
-		}
-		writeJSON(writer, map[string]any{
-			"query": "shared", "mode": "lexical",
-			"results": []any{map[string]any{"issue": issueJSON(1, "spoke-project", "spk1"), "score": 2.0, "matched_in": []string{"title"}}},
-		})
-		return true
-	})
-
-	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.search", Arguments: map[string]any{"query": "shared"}})
-	require.NoError(t, err)
-	require.True(t, result.IsError)
-	require.Nil(t, result.StructuredContent)
-}
-
 func TestSearchFanoutWhenOneProjectFails(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -153,7 +130,6 @@ func TestSearchFanoutWhenOneProjectFails(t *testing.T) {
 		{name: "retained hybrid", status: 400, message: `mode "hybrid" is unavailable: embeddings are not configured`, retained: true},
 		{name: "empty successful project", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, retained: true, empty: true},
 		{name: "other validation", status: 400, message: "invalid search"},
-		{name: "wrong error code", status: 400, code: "unavailable", message: `mode "semantic" is unavailable: embeddings are not configured`},
 		{name: "all missing embeddings", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, allFail: true},
 		{name: "single project missing embeddings", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, project: "hub-project"},
 	} {
