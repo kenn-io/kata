@@ -304,10 +304,10 @@
     }
     const current = issue.issue
     try {
-      const response = await issuePlanningDates(
-        { projectId: current.project_id, ref: current.short_id },
-        { field },
-      )
+      const response = await issuePlanningDates({
+        projectId: current.project_id,
+        ref: current.short_id,
+      })
       if (
         response.status !== 200 ||
         issue.issue.uid !== current.uid ||

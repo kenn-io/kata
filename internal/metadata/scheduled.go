@@ -84,11 +84,10 @@ func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone st
 			continue
 		}
 		zone := patchZone
-		if _, timezonePatched := patch["timezone"]; zone == "" && !timezonePatched {
-			_, zone = SplitScheduleZone(previous)
-		}
-		if _, patched := patch["timezone"]; zone == "" && !patched {
-			_ = json.Unmarshal(old["timezone"], &zone)
+		if _, patched := patch["timezone"]; !patched {
+			if _, zone = SplitScheduleZone(previous); zone == "" {
+				_ = json.Unmarshal(old["timezone"], &zone)
+			}
 		}
 		if zone == "" {
 			zone = defaultZone

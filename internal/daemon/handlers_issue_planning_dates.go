@@ -10,7 +10,7 @@ import (
 )
 
 func registerIssuePlanningDateHandlers(h huma.API, cfg ServerConfig) {
-	huma.Register(h, huma.Operation{OperationID: "issuePlanningDates", Method: "GET", Path: "/api/v1/projects/{project_id}/issues/{ref}/planning-dates"}, func(ctx context.Context, in *api.IssuePlanningDatesRequest) (*api.IssuePlanningDatesResponse, error) {
+	huma.Register(h, huma.Operation{OperationID: "issuePlanningDates", Method: "GET", Path: "/api/v1/projects/{project_id}/issues/{ref}/planning-dates"}, func(ctx context.Context, in *api.ShowIssueRequest) (*api.IssuePlanningDatesResponse, error) {
 		include := db.IncludeDeletedNo
 		if in.IncludeDeleted {
 			include = db.IncludeDeletedYes
@@ -19,7 +19,7 @@ func registerIssuePlanningDateHandlers(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		dates, err := cfg.DB.IssuePlanningDates(ctx, db.IssuePlanningDatesIn{ProjectID: issue.ProjectID, IssueID: issue.ID, IncludeDeleted: in.IncludeDeleted, DefaultTimezone: cfg.DefaultTimezone, Field: in.Field})
+		dates, err := cfg.DB.IssuePlanningDates(ctx, db.IssuePlanningDatesIn{ProjectID: issue.ProjectID, IssueID: issue.ID, IncludeDeleted: in.IncludeDeleted, DefaultTimezone: cfg.DefaultTimezone})
 		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
 				return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)

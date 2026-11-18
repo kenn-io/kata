@@ -12002,16 +12002,6 @@ paths:
           name: include_deleted
           schema:
             type: boolean
-        - description: Resolve only this field; omit to resolve both.
-          explode: false
-          in: query
-          name: field
-          schema:
-            description: Resolve only this field; omit to resolve both.
-            enum:
-              - scheduled_on
-              - deadline_on
-            type: string
       responses:
         "200":
           content:

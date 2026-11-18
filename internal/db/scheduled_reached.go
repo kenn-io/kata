@@ -7,7 +7,6 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"go.kenn.io/kata/internal/metadata"
@@ -119,8 +118,7 @@ func scheduledValueSetAt(history []Event, value string) time.Time {
 			occurrence := scheduledString(payload["occurrence_key"])
 			if occurrence != "" {
 				setValue, setAt = occurrence, event.CreatedAt
-				wall, _, _ := strings.Cut(value, "[")
-				if wall == occurrence {
+				if wall, _ := metadata.SplitScheduleZone(value); wall == occurrence {
 					setValue = value
 				}
 			}

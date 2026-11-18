@@ -7,14 +7,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-type IssuePlanningDatesRequest struct {
-	CommentSelectors
-	ProjectID      int64  `path:"project_id" required:"true"`
-	Ref            string `path:"ref" required:"true"`
-	IncludeDeleted bool   `query:"include_deleted,omitempty"`
-	Field          string `query:"field,omitempty" enum:"scheduled_on,deadline_on" doc:"Resolve only this field; omit to resolve both."`
-}
-
 // IssuePlanningDates exposes required nullable date objects on the read wire.
 type IssuePlanningDates db.IssuePlanningDates
 
