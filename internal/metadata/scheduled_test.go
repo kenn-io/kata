@@ -28,7 +28,7 @@ func TestStampScheduleZonesChoices(t *testing.T) {
 		{"local zone in current metadata", `{"scheduled_on":"2026-01-15"}`, `{"timezone":"Local"}`, "UTC", `{"scheduled_on":"2026-01-15[Europe/Paris]"}`},
 		{"UTC instant", `{"scheduled_on":"2026-01-15T10:00:00Z"}`, `{}`, "UTC", `{"scheduled_on":"2026-01-15T10:00:00Z"}`},
 		{"clear", `{"scheduled_on":null}`, `{}`, "Local", `{"scheduled_on":null}`},
-		{"unchanged legacy", `{"scheduled_on":"2026-01-15"}`, `{"scheduled_on":"2026-01-15"}`, "UTC", `{"scheduled_on":"2026-01-15"}`},
+		{"unchanged legacy", `{"scheduled_on":"2026-01-15"}`, `{"scheduled_on":"2026-01-15"}`, "UTC", `{"scheduled_on":"2026-01-15[UTC]"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var patch map[string]jsontext.Value

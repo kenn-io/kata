@@ -57,7 +57,7 @@ func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone st
 		}
 		_ = json.Unmarshal(old[key], &previous)
 		_, explicit := SplitScheduleZone(value)
-		if kind == scheduledOnInstant || explicit != "" || (value == previous && patchZone == "") {
+		if kind == scheduledOnInstant || explicit != "" {
 			continue
 		}
 		zone := patchZone
