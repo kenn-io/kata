@@ -123,3 +123,41 @@ func TestFederationMoveBaselineCoversAnEarlierWholeCopy(t *testing.T) {
 	require.Equal(t, "edited text", projection.Comments["comment"].Body)
 	require.Equal(t, "copy title", projection.Issues["issue"].Title)
 }
+
+// A destination snapshot that relocates an issue is its state at the
+// snapshot's clock. The holding project's older labels and the comments the
+// snapshot carries yield to it; spoke-local comments and newer changes stay.
+func TestFederationRelocationBaselineCoversOlderSourceHistory(t *testing.T) {
+	events := []FoldEvent{
+		{UID: "creation", ProjectUID: "source", IssueUID: "issue", Type: "issue.created", HLCPhysicalMS: 1, Payload: jsontext.Value(`{"uid":"issue","title":"original title","labels":["removed-on-hub"]}`)},
+		{UID: "old-label", ProjectUID: "source", IssueUID: "issue", Type: "issue.labeled", HLCPhysicalMS: 2, Payload: jsontext.Value(`{"label":"also-removed"}`)},
+		{UID: "old-comment", ProjectUID: "source", IssueUID: "issue", Type: "issue.commented", HLCPhysicalMS: 2, HLCCounter: 1, Payload: jsontext.Value(`{"comment_uid":"comment","author":"worker","body":"original discussion","created_at":"2026-01-01T00:00:00Z"}`)},
+		{UID: "local-comment", ProjectUID: "source", IssueUID: "issue", Type: "issue.commented", HLCPhysicalMS: 3, Payload: jsontext.Value(`{"comment_uid":"local","author":"worker","body":"spoke-only discussion","created_at":"2026-01-01T00:10:00Z"}`)},
+		{UID: "baseline", ProjectUID: "target", IssueUID: "issue", Type: "issue.snapshot", HLCPhysicalMS: 5, Payload: jsontext.Value(`{"uid":"issue","title":"baseline title","comments":[{"comment_uid":"comment","author":"worker","body":"edited on the hub","created_at":"2026-01-01T00:00:00Z","edited_at":"2026-01-01T01:00:00Z"}]}`)},
+		{UID: "newer-label", ProjectUID: "source", IssueUID: "issue", Type: "issue.labeled", HLCPhysicalMS: 6, Payload: jsontext.Value(`{"label":"newer"}`)},
+	}
+	projection := FoldEvents(FederationMoveBaselineEvents(events))
+	require.Equal(t, "target", projection.Issues["issue"].ProjectUID)
+	require.Equal(t, "baseline title", projection.Issues["issue"].Title)
+	require.Equal(t, "edited on the hub", projection.Comments["comment"].Body)
+	require.Equal(t, "spoke-only discussion", projection.Comments["local"].Body)
+	var present []string
+	for key, state := range projection.Labels {
+		if key.IssueUID == "issue" && state.Present {
+			present = append(present, key.Label)
+		}
+	}
+	require.Equal(t, []string{"newer"}, present)
+}
+
+// Within one project a snapshot merges with that project's own label history,
+// so a spoke label the hub had not yet received survives a baseline refresh.
+func TestFederationRelocationBaselineKeepsOwnProjectHistory(t *testing.T) {
+	events := []FoldEvent{
+		{UID: "creation", ProjectUID: "project", IssueUID: "issue", Type: "issue.created", HLCPhysicalMS: 1, Payload: jsontext.Value(`{"uid":"issue","title":"title"}`)},
+		{UID: "local-label", ProjectUID: "project", IssueUID: "issue", Type: "issue.labeled", HLCPhysicalMS: 2, Payload: jsontext.Value(`{"label":"spoke-only"}`)},
+		{UID: "baseline", ProjectUID: "project", IssueUID: "issue", Type: "issue.snapshot", HLCPhysicalMS: 3, Payload: jsontext.Value(`{"uid":"issue","title":"title"}`)},
+	}
+	projection := FoldEvents(FederationMoveBaselineEvents(events))
+	require.True(t, projection.Labels[FoldLabelKey{IssueUID: "issue", Label: "spoke-only"}].Present)
+}

@@ -56,17 +56,14 @@ func (d *Store) prepareFederationRebuild(ctx context.Context, projectID int64) (
 		if err != nil {
 			return nil, err
 		}
-		// The apply step plans again from the projection as folded.
 		moveProjection := projection
 		moveProjection.Issues = make(map[string]db.FoldIssue, len(decisions))
 		moveProjection.Comments = maps.Clone(projection.Comments)
 		moveProjection.Labels = maps.Clone(projection.Labels)
 		for _, decision := range decisions {
-			moveProjection.Issues[decision.IssueUID] = projection.Issues[decision.IssueUID]
-		}
-		for _, decision := range decisions {
 			result.moved[decision.IssueUID] = decision
 			moveOwners[decision.IssueUID] = projection.Issues[decision.IssueUID].ProjectUID
+			moveProjection.Issues[decision.IssueUID] = projection.Issues[decision.IssueUID]
 		}
 		result.projects = append(result.projects, preparedFederationRebuildProject{id: id, events: events, moveEvents: moveEvents, projection: projection, moveProjection: moveProjection, decisions: decisions})
 		return destinations, nil

@@ -1915,9 +1915,7 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
 }
 
 // federationFoldEventsQuery builds the fold query. Other projects' events join
-// an issue's history after a retained move, from the two projects in a
-// recorded snapshot relocation, or within a same-hub snapshot group. A refused
-// snapshot from another hub stays out, so it cannot retry its relocation.
+// an issue's history after a retained move or a recorded snapshot relocation.
 func federationFoldEventsQuery(projectID int64, eventTypes, issueScope []string) (string, []any) {
 	// Issues whose events the project holds, or that now live in it.
 	const history = `SELECT h.issue_uid FROM events h WHERE h.project_id=?1

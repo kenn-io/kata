@@ -56,13 +56,6 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 	for _, e := range ordered {
 		p.apply(e)
 	}
-	// Snapshots replace earlier membership, including older tombstones. Retire
-	// it once after replay rather than scanning every issue's labels per snapshot.
-	for key, state := range p.Labels {
-		if snapshot, ok := p.snapshotClocks[key.IssueUID]; ok && compareClock(state.Clock, snapshot) < 0 {
-			delete(p.Labels, key)
-		}
-	}
 	return p
 }
 
@@ -185,12 +178,6 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	p.Issues[uid] = issue
 	if len(in.Metadata) > 0 && string(in.Metadata) != "null" {
 		p.IssueMetadata[uid] = canonicalJSON(in.Metadata)
-	}
-	if e.Type == "issue.snapshot" {
-		if p.snapshotClocks == nil {
-			p.snapshotClocks = map[string]FoldClock{}
-		}
-		p.snapshotClocks[uid] = clockOf(e)
 	}
 	for _, label := range in.Labels {
 		p.Labels[FoldLabelKey{IssueUID: uid, Label: label}] = FoldElementState{Present: true, Clock: clockOf(e)}

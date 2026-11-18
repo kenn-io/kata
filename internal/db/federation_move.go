@@ -484,11 +484,10 @@ func planFederatedSnapshotRelocations(ctx context.Context, tx *sql.Tx, moves Fed
 		if !ok || snapshot.Type != "issue.snapshot" || snapshot.ProjectUID != projectUID || issue.ProjectUID != projectUID {
 			continue
 		}
-		// A retained move into this project already relocates the issue.
-		if move, ok := moves.Moves[uid]; ok {
-			if to, _ := StringValue(PayloadMap(move.Payload)["to_project_uid"]); to == projectUID {
-				continue
-			}
+		// An issue with a retained move is rehomed by its move decision, as it
+		// is without snapshots.
+		if _, ok := moves.Moves[uid]; ok {
+			continue
 		}
 		uids = append(uids, uid)
 	}
@@ -540,7 +539,7 @@ func planFederatedSnapshotRelocations(ctx context.Context, tx *sql.Tx, moves Fed
 			return nil, err
 		}
 		if origin == "" || source != origin {
-			return nil, fmt.Errorf("%w: issue %s is held in project %s, which is not joined to this hub", errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported), decision.IssueUID, decision.SourceName)
+			return nil, fmt.Errorf("%w: issue %s is held in project %s, and the two projects are not both joined directly to the same hub", errors.Join(ErrFederatedReadOnly, ErrFederatedMoveUnsupported), decision.IssueUID, decision.SourceName)
 		}
 	}
 	return relocations, nil
@@ -600,6 +599,10 @@ func AppendFederatedRelocationHistory(events []FoldEvent, decisions []FederatedM
 				added = true
 			}
 		}
+	}
+	if added {
+		// The destination's snapshot covers the older history it carries.
+		events = FederationMoveBaselineEvents(events)
 	}
 	return events, added, nil
 }
@@ -664,6 +667,14 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves Federated
 			return fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
 		}
 
+		if winner.Type == "issue.snapshot" {
+			// The fold keeps the source's short ID, but the destination's snapshot
+			// carries the one the hub assigned, as an applied move's to_short_id does.
+			if snapshotShort, _ := StringValue(PayloadMap(winner.Payload)["short_id"]); snapshotShort != "" {
+				issue.ShortID = snapshotShort
+				p.Issues[issue.UID] = issue
+			}
+		}
 		short, err := assign(target, issue)
 		if err != nil {
 			return err
