@@ -112,20 +112,18 @@ reference, and the stable issue UID stays unchanged. If a spoke previously
 assigned a longer short ID to avoid a local collision, that former reference
 also remains reserved while its move history remains.
 
-When a direct spoke joins the destination after the hub moved an issue, a
-destination baseline can relocate the existing source row without retained
-move history. Both replicas must use the same hub origin. The local issue ID,
-discussion, and links survive, while the destination baseline sets the issue's
-current fields and labels. Pausing or leaving the source preserves its retained
-discussion. Leaving the destination makes the issue standalone, and the source
-can continue to sync. Kata does not author another move during this recovery.
+A spoke that joins the destination after the hub moved an issue may receive
+only the destination's baseline, not the move. When that baseline places the
+issue in the destination while another project joined to the same hub still
+holds the local row, the destination's pull moves that row as an applied move
+would. The local issue ID, discussion, labels, and links stay with it, and the
+former short ID keeps resolving in the source. Kata does not author a move for
+this.
 
-The destination pull refuses relocation and stops with a move error when the
-replicas use different hub origins, when the issue belongs to a recurrence, or
-when the spoke left the source before joining the destination. The relocation
-also waits while the destination is archived. A source that is still joined
-keeps the issue and keeps syncing. A source the spoke already left
-is standalone, and Kata does not take its issue.
+The destination's pull stops with an error, and leaves the issue where it is,
+when the holding project is not joined to the same hub or when the move is one
+Kata refuses for an applied move, such as an issue in a recurrence or an
+import-mapping collision. Other projects keep syncing.
 
 Destination sync recovers retained source history even when its cursor has
 already passed those events. This preserves missed changes and comments without

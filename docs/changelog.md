@@ -51,7 +51,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
 - Keep syncing when a spoke joins a project after the hub moved an issue into it.
-  The destination baseline moves the spoke's existing copy, with its comments,
+  The destination's pull moves the spoke's existing copy, with its comments,
   labels, and links, instead of failing with `UNIQUE constraint failed: issues.uid`.
   A newer issue baseline now also replaces older label changes, as it already
   did for fields.
