@@ -170,4 +170,16 @@ func TestPlanScheduledReachedUsesOrderedScheduleProvenance(t *testing.T) {
 		require.NotNil(t, reached, "a recurrence attached after the floor assigns its first occurrence after the floor")
 		assert.Equal(t, "2026-09-01", reached.Value)
 	})
+
+	t.Run("zoned recurrence attached after floor", func(t *testing.T) {
+		history := []Event{
+			event("created", "issue.created", 100, floor.Add(-time.Hour), `{"metadata":{}}`),
+			event("materialized", "recurrence.materialized", 200, floor.Add(time.Minute), `{"occurrence_key":"2026-09-01"}`),
+		}
+		reached, err := PlanScheduledReached(json.RawMessage(`{"scheduled_on":"2026-09-01[Europe/Paris]"}`), now, floor, "UTC", history)
+		require.NoError(t, err)
+		require.NotNil(t, reached)
+		assert.Equal(t, "2026-09-01[Europe/Paris]", reached.Value)
+		assert.Equal(t, "Europe/Paris", reached.Timezone)
+	})
 }

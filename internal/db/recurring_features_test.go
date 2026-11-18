@@ -87,9 +87,10 @@ func TestRecurringFeaturesCachePositiveProject(t *testing.T) {
 		require.Equal(t, db.CronEventFeature, features)
 	}
 	require.Equal(t, 1, state.probeQueries, "a retained native projection is scanned once per process")
+	require.Equal(t, 2, state.zoneQueries, "the indexed zone preflight runs for each request")
 }
 
-type featureProbeState struct{ probeQueries int }
+type featureProbeState struct{ probeQueries, zoneQueries int }
 
 type featureProbeConnector struct{ state *featureProbeState }
 
@@ -116,6 +117,7 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 		return &featureProbeRows{presence: true}, nil
 	}
 	if strings.Contains(query, "SELECT i.metadata") {
+		c.state.zoneQueries++
 		return &featureProbeRows{empty: true}, nil
 	}
 	if strings.Contains(query, "'projection.job'") {

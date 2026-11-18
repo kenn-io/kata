@@ -1720,7 +1720,8 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		}
 		ingested, err := hub.IngestFederationEvents(ctx, db.FederationIngestParams{
 			ProjectID: hubProject.ID, SpokeInstanceUID: store.InstanceUID(), BoundActor: boundActor,
-			Events: transport,
+			EventFeatures: db.SupportedEventFeatures,
+			Events:        transport,
 		})
 		require.NoError(t, err)
 		assert.Equal(t, len(transport), ingested.Accepted)

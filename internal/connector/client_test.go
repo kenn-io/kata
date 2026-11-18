@@ -649,6 +649,7 @@ func TestValidFieldValuesRejectsMalformedCanonicalValues(t *testing.T) {
 	valid := []protocol.FieldValue{
 		{Kind: "null"},
 		{Kind: "date", Value: "2026-08-23"},
+		{Kind: "date", Value: "2026-08-23", Timezone: "UTC"},
 		{Kind: "local_datetime", Value: "2026-08-23T09:30", Timezone: "Europe/Paris"},
 		{Kind: "local_datetime", Value: "2026-08-23T09:30:45", Timezone: "UTC"},
 		{Kind: "instant", Value: "2026-08-23T07:30:45.123456Z"},
@@ -660,7 +661,8 @@ func TestValidFieldValuesRejectsMalformedCanonicalValues(t *testing.T) {
 	invalid := []protocol.FieldValue{
 		{Kind: "null", Value: "unexpected"},
 		{Kind: "date", Value: "2026-02-30"},
-		{Kind: "date", Value: "2026-08-23", Timezone: "UTC"},
+		{Kind: "date", Value: "2026-08-23", Timezone: "Local"},
+		{Kind: "date", Value: "2026-08-23", Timezone: "Invalid/Zone"},
 		{Kind: "local_datetime", Value: "2026-08-23T09:30"},
 		{Kind: "local_datetime", Value: "2026-08-23T09:30:45", Timezone: "Invalid/Zone"},
 		{Kind: "local_datetime", Value: "2026-08-23T25:00", Timezone: "UTC"},
