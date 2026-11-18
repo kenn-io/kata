@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,7 +20,7 @@ func setupDocbankEnv(t *testing.T) string {
 	t.Helper()
 	home := setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "")
-	for _, key := range []string{"KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER"} {
+	for _, key := range []string{"KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER", "KATA_DOCBANK_TRUST_PRIVATE_NETWORK"} {
 		t.Setenv(key, "")
 	}
 	return home
@@ -181,4 +184,28 @@ func TestDocbankSetupReportsMissingKeyFileBeforeAsking(t *testing.T) {
 
 	require.ErrorContains(t, err, "missing.key")
 	require.NotContains(t, stderr, "can read any file", "a key file that can't be read fails before the warning and question")
+}
+
+func TestDocbankSetupExistingTrustedSection(t *testing.T) {
+	home := setupDocbankEnv(t)
+	fake := docbanktest.New(t)
+	const docbankURL = "http://docbank:8485"
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, strings.TrimPrefix(fake.Server.URL, "http://"))
+	}
+	previous := http.DefaultTransport
+	http.DefaultTransport = transport
+	t.Cleanup(func() { http.DefaultTransport = previous; transport.CloseIdleConnections() })
+	keyFile := writeDocbankKey(t, "test-key")
+	path := filepath.Join(home, "config.toml")
+	original := "[docbank]\nurl = " + strconv.Quote(docbankURL) + "\napi_key_file = " + strconv.Quote(keyFile) + "\nfolder = \"/kata\"\ntrust_private_network = true\n"
+	require.NoError(t, os.WriteFile(path, []byte(original), 0o600))
+	out, stderr, err := executeRootCapture(t, t.Context(), "docbank", "setup", "--url", docbankURL, "--key-file", keyFile, "--yes")
+	require.NoError(t, err, stderr)
+	require.Contains(t, out, "already set up")
+	written, err := os.ReadFile(path) // #nosec G304 -- test-owned configuration
+	require.NoError(t, err)
+	require.Equal(t, original, string(written))
 }

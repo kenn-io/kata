@@ -43,7 +43,7 @@ func newDocbankSetupCmd() *cobra.Command {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
 			}
-			for _, key := range []string{"KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER"} {
+			for _, key := range []string{"KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER", "KATA_DOCBANK_TRUST_PRIVATE_NETWORK"} {
 				if strings.TrimSpace(os.Getenv(key)) != "" {
 					return fmt.Errorf("unset %s, then rerun; it would override the [docbank] section setup writes", key)
 				}
@@ -64,10 +64,6 @@ func newDocbankSetupCmd() *cobra.Command {
 					return err
 				}
 			}
-			want, err := config.NormalizeDocbankConfig(config.DocbankConfig{Local: local, URL: docbankURL, APIKeyFile: keyFile, Folder: folder})
-			if err != nil {
-				return &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
-			}
 			original, originalExists, err := readDaemonConfig(path)
 			if err != nil {
 				return err
@@ -75,6 +71,10 @@ func newDocbankSetupCmd() *cobra.Command {
 			have, err := config.ParseDocbankFile(original)
 			if err != nil {
 				return fmt.Errorf("read %s: %w", path, err)
+			}
+			want, err := config.NormalizeDocbankConfig(config.DocbankConfig{Local: local, URL: docbankURL, APIKeyFile: keyFile, Folder: folder, TrustPrivateNetwork: have.TrustPrivateNetwork})
+			if err != nil {
+				return &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
 			}
 			hasSection := have != config.DocbankConfig{}
 			if hasSection {

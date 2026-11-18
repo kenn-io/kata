@@ -75,6 +75,14 @@ func TestValidateImportRecordsAcceptsEveryPayloadType(t *testing.T) {
 	assert.NoError(t, db.ValidateImportRecords(records))
 }
 
+func TestValidateFormerInstanceUIDs(t *testing.T) {
+	malformed := []db.ImportRecord{&db.MetaKV{Key: db.FormerInstanceUIDMetaPrefix + "invalid"}}
+	require.Error(t, db.ValidateImportRecords(malformed))
+	source := []db.ImportRecord{&db.MetaKV{Key: "instance_uid", Value: "invalid"}}
+	require.NoError(t, db.ValidateImportReplay(source, db.ImportOptions{}))
+	require.Error(t, db.ValidateImportReplay(source, db.ImportOptions{NewInstance: true}))
+}
+
 // TestOrderImportRecordsPlacesDependenciesFirst pins the replay order the
 // backends rely on: meta and project rows must land before the issue rows
 // that reference them, and events after both.
