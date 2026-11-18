@@ -11,14 +11,15 @@ import (
 )
 
 type federationHubSpokesState struct {
-	enrollments []FederationEnrollment
-	cursor      int
-	gen         uint64
-	loading     bool
-	err         error
-	name        textinput.Model
-	returnMode  federationMode
-	saving      bool
+	enrollments     []FederationEnrollment
+	cursor          int
+	gen             uint64
+	loading         bool
+	err             error
+	name            textinput.Model
+	nameInstanceUID string
+	returnMode      federationMode
+	saving          bool
 }
 
 type federationSpokesLoadedMsg struct {
@@ -98,15 +99,17 @@ func (m Model) routeFederationSpokesKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.String() == "N" {
-			return m.startFederationSpokeName(rows[cursor].SpokeName)
+			row := rows[cursor]
+			return m.startFederationSpokeName(row.SpokeInstanceUID, row.SpokeName)
 		}
 		m.federation.mode = federationModeSpokeDetail
 	}
 	return m, nil
 }
 
-func (m Model) startFederationSpokeName(name string) (Model, tea.Cmd) {
+func (m Model) startFederationSpokeName(instanceUID, name string) (Model, tea.Cmd) {
 	m.federation.spokes.returnMode = m.federation.mode
+	m.federation.spokes.nameInstanceUID = instanceUID
 	m.federation.spokes.gen++
 	m.federation.spokes.err = nil
 	m.federation.spokes.saving = false
@@ -136,8 +139,7 @@ func (m Model) routeFederationSpokeNameKey(msg tea.KeyPressMsg) (Model, tea.Cmd)
 			m.federation.mode = federationModePreview
 			return m, nil
 		}
-		rows := m.federationHubSpokes()
-		uid := rows[m.federation.spokes.cursor].SpokeInstanceUID
+		uid := m.federation.spokes.nameInstanceUID
 		m.federation.spokes.saving = true
 		m.federation.spokes.err = nil
 		api := m.api
@@ -213,8 +215,7 @@ func renderFederationSpokeName(m Model) string {
 	if m.federation.spokes.returnMode == federationModePreview {
 		hint = "Optional. Blank keeps the current hub-local name."
 	} else {
-		rows := m.federationHubSpokes()
-		body = append(body, "instance: "+sanitizeForLine(rows[m.federation.spokes.cursor].SpokeInstanceUID))
+		body = append(body, "instance: "+sanitizeForLine(m.federation.spokes.nameInstanceUID))
 	}
 	body = append(body, m.federation.spokes.name.View(), subtleStyle.Render(hint))
 	if m.federation.spokes.saving {

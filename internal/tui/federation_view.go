@@ -548,7 +548,7 @@ func (m Model) routeFederationPreviewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if m.federation.op.running {
 			return m, nil
 		}
-		return m.startFederationSpokeName(m.federation.draft.SpokeName)
+		return m.startFederationSpokeName("", m.federation.draft.SpokeName)
 	case "esc", "backspace":
 		m.federation.mode = federationModeSelectHubProject
 		return m, nil
