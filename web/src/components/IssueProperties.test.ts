@@ -216,7 +216,7 @@ describe('IssueProperties', () => {
       await fireEvent.click(screen.getByRole('button', { name: new RegExp(`${picker}:`) }))
       await fireEvent.click(screen.getByRole('button', { name: /May 12, 2027/ }))
       expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
-        [key]: '2027-05-12',
+        [key]: '2027-05-13T00:30[Asia/Tokyo]',
       })
     },
   )
@@ -232,7 +232,7 @@ describe('IssueProperties', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Scheduled: May 12/ }))
     await fireEvent.click(screen.getByRole('button', { name: /May 13, 2027/ }))
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
-      scheduled_on: '2027-05-13',
+      scheduled_on: '2027-05-13[Europe/Paris]',
     })
   })
 

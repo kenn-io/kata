@@ -209,6 +209,18 @@
     return projected ?? saved?.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? ''
   }
 
+  function movedDate(value: string, displayed: string, saved: string | undefined): string | null {
+    if (!value) return null
+    const match = saved?.match(/^(\d{4}-\d{2}-\d{2})(.*)$/)
+    if (!match || !displayed) return value
+    const day = 86_400_000
+    const moved =
+      Date.parse(`${match[1]}T00:00:00Z`) +
+      Date.parse(`${value}T00:00:00Z`) -
+      Date.parse(`${displayed}T00:00:00Z`)
+    return new Date(Math.round(moved / day) * day).toISOString().slice(0, 10) + match[2]
+  }
+
   function scheduledDate(): string {
     return calendarDate(issue.issue.scheduled_on_date, issue.issue.metadata.scheduled_on)
   }
@@ -252,7 +264,9 @@
     }
     const mutationUID = uid()
     const generation = draftResetGeneration
-    const ok = await onPatchMetadata(mutationUID, { scheduled_on: value === '' ? null : value })
+    const ok = await onPatchMetadata(mutationUID, {
+      scheduled_on: movedDate(value, scheduledDate(), issue.issue.metadata.scheduled_on),
+    })
     if (ok) scheduleAcceptedReset(property, mutationUID, generation)
   }
 
@@ -266,7 +280,9 @@
     }
     const mutationUID = uid()
     const generation = draftResetGeneration
-    const ok = await onPatchMetadata(mutationUID, { deadline_on: value === '' ? null : value })
+    const ok = await onPatchMetadata(mutationUID, {
+      deadline_on: movedDate(value, deadlineDate(), issue.issue.metadata.deadline_on),
+    })
     if (ok) scheduleAcceptedReset(property, mutationUID, generation)
   }
 
