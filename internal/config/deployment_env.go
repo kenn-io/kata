@@ -46,8 +46,9 @@ func applyDeploymentEnv(cfg *DaemonConfig) error {
 		cfg.Sources["mcp_startup_sections"] = "KATA_MCP_STARTUP_SECTIONS"
 	}
 	for name, field := range map[string]*bool{
-		"KATA_MCP_ENABLED":      &cfg.MCP.Enabled,
-		"KATA_MCP_ALL_PROJECTS": &cfg.MCP.AllProjects,
+		"KATA_DOCBANK_TRUST_PRIVATE_NETWORK": &cfg.Docbank.TrustPrivateNetwork,
+		"KATA_MCP_ENABLED":                   &cfg.MCP.Enabled,
+		"KATA_MCP_ALL_PROJECTS":              &cfg.MCP.AllProjects,
 	} {
 		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
 			parsed, err := strconv.ParseBool(value)

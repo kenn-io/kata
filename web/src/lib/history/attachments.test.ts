@@ -19,6 +19,42 @@ function closeEvent(evidence: Record<string, unknown>): KataTaskEvent {
 }
 
 describe('closingAttachments', () => {
+  test('marks evidence changed when its origin differs', () => {
+    const withoutOrigin = {
+      name: 'report.pdf',
+      media_type: 'application/pdf',
+      size: 5,
+      docbank_version: '00000000-0000-4000-8000-000000000001',
+    }
+    const frozen = { ...withoutOrigin, origin: '01ARZ3NDEKTSV4RRFFQ69G5FAV' }
+    const event = closeEvent({
+      type: 'attachment',
+      attachment_id: 'attachment-1',
+      attachment: frozen,
+    })
+
+    expect(
+      closingAttachments(event, {
+        'attachment.attachment-1': { ...frozen, origin: '01ARZ3NDEKTSV4RRFFQ69G5FAW' },
+      }),
+    ).toEqual([{ label: 'report.pdf · 5 bytes (changed)' }])
+
+    expect(closingAttachments(event, { 'attachment.attachment-1': withoutOrigin })).toEqual([
+      { label: 'report.pdf · 5 bytes (changed)' },
+    ])
+    const legacyEvent = closeEvent({
+      type: 'attachment',
+      attachment_id: 'attachment-1',
+      attachment: withoutOrigin,
+    })
+    expect(closingAttachments(legacyEvent, { 'attachment.attachment-1': frozen })).toEqual([
+      { label: 'report.pdf · 5 bytes (changed)' },
+    ])
+    expect(closingAttachments(legacyEvent, { 'attachment.attachment-1': withoutOrigin })).toEqual([
+      { label: 'report.pdf · 5 bytes', href: '#kata-attachment-attachment-1' },
+    ])
+  })
+
   test('uses a plain label for invalid frozen attachment details', () => {
     const event = closeEvent({
       type: 'attachment',
