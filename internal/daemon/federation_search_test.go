@@ -346,22 +346,17 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 	require.Contains(t, string(body), `"code":"hub_unreachable"`)
 	older := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(older.Close)
-	checkSearch := func() {
-		path := fmt.Sprintf("/api/v1/projects/%d/search?q=claim", replica.ID)
-		for _, mode := range []string{"semantic", "hybrid"} {
-			resp, body := envGetRaw(t, spoke, path+"&mode="+mode)
-			require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(body))
-		}
-		resp, body := envGetRaw(t, spoke, path)
-		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-		require.Contains(t, string(body), `"mode":"lexical"`)
-		require.Contains(t, string(body), `"degraded":true`)
-		require.Contains(t, string(body), "claim target")
+	setClaimBindingHubURL(t, spoke, replica.ID, older.URL)
+	path = fmt.Sprintf("/api/v1/projects/%d/search?q=claim", replica.ID)
+	for _, mode := range []string{"semantic", "hybrid"} {
+		resp, body = envGetRaw(t, spoke, path+"&mode="+mode)
+		require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(body))
 	}
-	for _, hubURL := range []string{"http://127.0.0.1:1", older.URL} {
-		setClaimBindingHubURL(t, spoke, replica.ID, hubURL)
-		checkSearch()
-	}
+	resp, body = envGetRaw(t, spoke, path)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.Contains(t, string(body), `"mode":"lexical"`)
+	require.Contains(t, string(body), `"degraded":true`)
+	require.Contains(t, string(body), "claim target")
 }
 
 func TestFederationSearchRequiresPullEnrollment(t *testing.T) {
