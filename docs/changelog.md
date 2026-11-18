@@ -9,6 +9,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Learn from the CLI that a project is archived and how to restore it. When a
+  project route finds an archived project you could read, its
+  `project_not_found` error now carries a hint to run `kata projects restore
+  <name>`. The [HTTP API reference](reference/http-api.md#errors) explains how
+  to tell an archived project from a missing one. Callers who may not read the
+  project, and issue-scoped credentials, still get no hint.
+
 - Follow the event stream from Go with [`api.Events`](reference/go-client.md#follow-the-event-stream), which frames events, skips any over 8 MiB as an oversized event, and reports a required reset as a typed value. `kata tui` reads its live updates through it: an event over 8 MiB now refetches the view like a sync reset instead of being parsed, and `id:`, `event:` and `data:` lines with no space after the colon are now accepted.
 
 - See which issue is blocking a push when the hub refuses it because the issue now belongs to a project the spoke has not joined. The error names the issue and the missing enrollment, instead of reporting a credential failure, and the spoke keeps pulling hub changes while the push waits.

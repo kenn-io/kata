@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-17
+last_edited: 2026-11-18
 ---
 
 # HTTP API schema
@@ -78,6 +78,33 @@ message names it:
 
 The CLI preserves the hint in human, agent, and JSON errors. See
 [agent output](agent-output.md#errors) for its stderr format.
+
+On a route with `{project_id}` in its path, or a `project_id` query parameter,
+an id that does not exist answers `404 not_found`. An archived project the
+caller may read answers `404 project_not_found` with a hint naming
+`kata projects restore <name>`. A `project_not_found` with a hint means the
+project is archived; check that a hint is present, not what it says.
+
+```json
+{"error":{"code":"project_not_found","message":"project not found","hint":"project docs is archived; run 'kata projects restore docs' to bring it back"}}
+```
+
+`project_not_found` without a hint also comes back in these cases:
+
+- An issue-scoped credential asks for an archived project.
+- A caller without a principal on a lease, claim or cron-job write route (the
+  local socket, or the daemon's own `[auth].token` on TCP) asks for a missing
+  id, because those routes authenticate in the handler.
+
+A caller the project access policy denies gets `404 not_found`, as for a
+missing id. A caller a host access controller denies gets `not_found` on most
+routes and never gets the hint.
+
+The `/federation/` routes a peer calls with its enrollment token check the
+token against the project first, so a missing or archived project answers
+`403 auth_invalid` there, without the hint. `federation/relay:disconnect`
+differs: it revokes the presented relay token whenever the token matches, even
+in an archived project, and otherwise answers `404 not_found`.
 
 ## Editing an issue safely
 
