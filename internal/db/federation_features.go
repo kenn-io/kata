@@ -18,6 +18,7 @@ const CronEventFeature = "cron_v1"
 // IssueMoveEventFeature identifies support for moving issues between projects.
 const IssueMoveEventFeature = "issue_move_v1"
 
+// IssueDateZoneEventFeature identifies support for dates carrying zone names.
 const IssueDateZoneEventFeature = "issue_date_zone_v1"
 
 // RepeatedAdoptionEventFeature identifies a peer that understands a repeated

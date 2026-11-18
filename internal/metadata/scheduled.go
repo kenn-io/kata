@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -38,9 +39,7 @@ func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone st
 		}
 	}
 	result := make(map[string]jsontext.Value, len(patch))
-	for key, value := range patch {
-		result[key] = value
-	}
+	maps.Copy(result, patch)
 	var patchZone string
 	_ = json.Unmarshal(patch["timezone"], &patchZone)
 	for _, key := range []string{"scheduled_on", "deadline_on"} {
