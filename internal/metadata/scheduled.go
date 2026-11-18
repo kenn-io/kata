@@ -41,6 +41,8 @@ func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone st
 	for key, value := range patch {
 		result[key] = value
 	}
+	var patchZone string
+	_ = json.Unmarshal(patch["timezone"], &patchZone)
 	for _, key := range []string{"scheduled_on", "deadline_on"} {
 		raw, ok := patch[key]
 		if !ok || string(raw) == "null" {
@@ -56,12 +58,12 @@ func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone st
 		}
 		_ = json.Unmarshal(old[key], &previous)
 		_, explicit := splitScheduleZone(value)
-		if kind == scheduledOnInstant || explicit != "" || value == previous {
+		if kind == scheduledOnInstant || explicit != "" || (value == previous && patchZone == "") {
 			continue
 		}
-		_, zone := splitScheduleZone(previous)
+		zone := patchZone
 		if zone == "" {
-			_ = json.Unmarshal(patch["timezone"], &zone)
+			_, zone = splitScheduleZone(previous)
 		}
 		if zone == "" {
 			_ = json.Unmarshal(old["timezone"], &zone)
