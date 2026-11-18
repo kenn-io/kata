@@ -1,7 +1,7 @@
 ---
 title: Go client
 description: Connect Go programs to a Kata daemon with the typed client, CLI-compatible daemon discovery, and an in-process test server.
-last_edited: 2026-11-10
+last_edited: 2026-11-16
 ---
 
 # Go client
@@ -194,6 +194,38 @@ loopback. `TargetAuth.TrustPrivateNetwork` allows literal private IPs, and
 `TargetAuth.AllowInsecure` allows any host; see
 [plain HTTP guardrails](../operations/remote-daemon.md#plain-http-guardrails).
 Set request timeouts with `client.WithTransportOptions`.
+
+## Follow the event stream
+
+`api.Events` reads `/api/v1/events/stream` for you: it frames the stream,
+joins multi-line data and skips keepalives. It yields each event as it arrives:
+
+```go
+opts := client.EventsOptions{LastEventID: cursor} // ProjectID limits to one project
+for event, err := range api.Events(ctx, opts) {
+	if err != nil {
+		break // see below
+	}
+	cursor = event.ID
+	if event.Oversized {
+		// The event passed 8 MiB and was skipped: refetch what you cache, then
+		// carry on after event.ID.
+		continue
+	}
+	if event.Reset != nil {
+		// The cursor fell behind a purge: drop cached state, then resume from
+		// event.Reset.ResetAfterID.
+		continue
+	}
+	handle(event.Type, event.Data) // Data is the event's JSON object
+}
+```
+
+The loop ends with an error. `client.ErrEventStreamEnded` means the daemon
+closed the stream, so reconnect from the last `event.ID`; the daemon also
+closes it after a reset. Cancel `ctx` or `break` to stop. `Events` makes
+one connection and does not reconnect; for the raw response, use
+`StreamEventsRaw`.
 
 ## Handle errors
 
