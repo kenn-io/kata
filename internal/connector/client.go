@@ -479,7 +479,7 @@ func awaitConnectorOutput(ctx context.Context, drained <-chan struct{}, alive fu
 			return false, outputContextCause(ctx, drained)
 		case <-grace:
 			if alive() {
-				return true, nil
+				return !channelClosed(drained), nil
 			}
 			grace = nil
 		}
@@ -487,11 +487,20 @@ func awaitConnectorOutput(ctx context.Context, drained <-chan struct{}, alive fu
 }
 
 func outputContextCause(ctx context.Context, drained <-chan struct{}) error {
-	select {
-	case <-drained:
+	if channelClosed(drained) {
 		return nil
+	}
+	return context.Cause(ctx)
+}
+
+// channelClosed reports whether done is already closed. select picks randomly among
+// ready cases, so callers recheck this before acting on another case.
+func channelClosed(done <-chan struct{}) bool {
+	select {
+	case <-done:
+		return true
 	default:
-		return context.Cause(ctx)
+		return false
 	}
 }
 

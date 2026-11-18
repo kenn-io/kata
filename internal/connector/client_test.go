@@ -851,6 +851,24 @@ func TestAwaitConnectorOutputWaitsWhenDescendantExitsDuringGrace(t *testing.T) {
 	})
 }
 
+func TestAwaitConnectorOutputAcceptsOutputFinishedWhenGraceEnds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		drained := make(chan struct{})
+		var checks atomic.Int32
+		alive := func() bool {
+			if checks.Add(1) == 2 {
+				close(drained)
+			}
+			return true
+		}
+
+		held, contextCause := awaitConnectorOutput(t.Context(), drained, alive)
+
+		assert.False(t, held)
+		assert.NoError(t, contextCause)
+	})
+}
+
 func TestConnectorContextErrorKeepsChildTimeoutAfterParentEnds(t *testing.T) {
 	parent, cancelParent := context.WithCancel(t.Context())
 	commandCtx, cancelCommand := context.WithTimeoutCause( //nolint:kennlint // deadlinetest: the deadline is the expected result; the test waits on commandCtx.Done for it
