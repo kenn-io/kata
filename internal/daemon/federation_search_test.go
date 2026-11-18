@@ -90,6 +90,8 @@ func TestDirectSpokeSearchUnpulledReferenceCannotResolveCollision(t *testing.T) 
 	}
 	require.NoError(t, json.Unmarshal(raw, &result))
 	require.Len(t, result.Results, 1)
+	require.Zero(t, result.Results[0].Issue.ID)
+	require.Equal(t, issue.UID, result.Results[0].Issue.ShortID)
 	server := startTestServer(t, daemon.ServerConfig{DB: spoke.DB})
 	client, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
 	require.NoError(t, err)
