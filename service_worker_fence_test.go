@@ -281,7 +281,7 @@ func seedExpiredWorkerClaim(ctx context.Context, t *testing.T, service *Service)
 	return issue
 }
 
-func TestServiceRunRequiresWorkerFenceWithHostAccess(t *testing.T) {
+func TestServiceRunEntryPointsRequireWorkerFenceWithHostAccess(t *testing.T) {
 	service, err := New(t.Context(), Config{
 		DSN:    filepath.Join(t.TempDir(), "service.db"),
 		Access: allowWorkerFenceAccess{},
@@ -290,5 +290,7 @@ func TestServiceRunRequiresWorkerFenceWithHostAccess(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 
 	err = service.Run(t.Context())
+	assert.EqualError(t, err, "kata: worker transaction fence is required with host access")
+	err = service.RunSemanticIndex(t.Context())
 	assert.EqualError(t, err, "kata: worker transaction fence is required with host access")
 }

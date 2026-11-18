@@ -9,6 +9,17 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Learn from the CLI that a project is archived and how to restore it. When a
+  project route finds an archived project you could read, its
+  `project_not_found` error now carries a hint to run `kata projects restore
+  <name>`. The [HTTP API reference](reference/http-api.md#errors) explains how
+  to tell an archived project from a missing one. Callers who may not read the
+  project, and issue-scoped credentials, still get no hint.
+
+- Follow the event stream from Go with [`api.Events`](reference/go-client.md#follow-the-event-stream), which frames events, skips any over 8 MiB as an oversized event, and reports a required reset as a typed value. `kata tui` reads its live updates through it: an event over 8 MiB now refetches the view like a sync reset instead of being parsed, and `id:`, `event:` and `data:` lines with no space after the colon are now accepted.
+
+- See which issue is blocking a push when the hub refuses it because the issue now belongs to a project the spoke has not joined. The error names the issue and the missing enrollment, instead of reporting a credential failure, and the spoke keeps pulling hub changes while the push waits.
+
 - Start the Windows daemon again after a reboot, even when another account's
   process now has the old daemon's PID. Kata used to treat that process as the
   running daemon until you deleted `daemon.*.json` from the runtime directory.
@@ -38,6 +49,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   would restore as in the new `actor` query parameter. Callers who may restore
   the issue can read it; everyone else still gets `issue_not_found`, as does
   every caller of a daemon embedded under a host access controller.
+
+- Read the job, workflow and issue of a cron run from the run row itself: it
+  carries `job_name`, `workflow_name` and `issue_short_id`, deleted ones
+  included, so a client labels a page of runs without listing jobs, workflows
+  and issues. `kata tui` names runs this way.
 
 - Create native recurring child jobs and adapter prompt jobs with [typed cron flags](reference/cron.md#create-with-typed-flags), without a JSON file.
 

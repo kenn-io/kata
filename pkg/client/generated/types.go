@@ -1521,7 +1521,9 @@ type CronRun struct {
 	EndedAt                    *time.Time      `json:"ended_at,omitempty"`
 	ExecutorLabel              *string         `json:"executor_label,omitempty"`
 	ID                         int64           `json:"id"`
+	IssueShortID               *string         `json:"issue_short_id,omitempty"`
 	IssueUID                   *string         `json:"issue_uid,omitempty"`
+	JobName                    *string         `json:"job_name,omitempty"`
 	JobUID                     *string         `json:"job_uid,omitempty"`
 	OccurrenceKey              *string         `json:"occurrence_key,omitempty"`
 	ProjectID                  int64           `json:"project_id"`
@@ -1533,6 +1535,7 @@ type CronRun struct {
 	UID                        string          `json:"uid" validate:"required"`
 	UpdatedAt                  time.Time       `json:"updated_at" validate:"required"`
 	WorkflowDefinitionEventUID *string         `json:"workflow_definition_event_uid,omitempty"`
+	WorkflowName               *string         `json:"workflow_name,omitempty"`
 	WorkflowUID                *string         `json:"workflow_uid,omitempty"`
 }
 

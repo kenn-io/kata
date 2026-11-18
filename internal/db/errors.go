@@ -428,3 +428,24 @@ func (e *MetadataGuardConflictError) Error() string {
 
 // ErrIssueSyncBindingChanged means an enable snapshot is no longer current.
 var ErrIssueSyncBindingChanged = errors.New("issue sync binding changed during validation")
+
+// FederationProjectNotEnrolledCode is the hub's API error code for
+// FederationProjectNotEnrolledError.
+const FederationProjectNotEnrolledCode = "federation_project_not_enrolled"
+
+// FederationProjectNotEnrolledError reports pushed work that touches an issue
+// whose current project has no matching push enrollment for this spoke and
+// actor. The route credential is valid; only the other project's grant is
+// missing, revoked, or bound to a different spoke or actor. The error names
+// only the issue, which the spoke already holds, and not the project it has
+// not joined.
+type FederationProjectNotEnrolledError struct {
+	IssueUID string
+	Err      error
+}
+
+func (e *FederationProjectNotEnrolledError) Error() string {
+	return fmt.Sprintf("issue %s now belongs to a project where this spoke has no push enrollment with the same actor", e.IssueUID)
+}
+
+func (e *FederationProjectNotEnrolledError) Unwrap() error { return e.Err }
