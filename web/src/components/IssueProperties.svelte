@@ -8,6 +8,7 @@
   import { Typeahead, type TypeaheadOption } from '@kenn-io/kit-ui'
   import { Button, Chip, SelectDropdown } from '@kenn-io/kit-ui'
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
+  import { SvelteDate } from 'svelte/reactivity'
   import type { KataTaskDetail } from '../lib/kata/types'
   import DatePicker from './DatePicker.svelte'
 
@@ -217,7 +218,7 @@
     const day = 86_400_000
     const delta = (Date.parse(`${value}T00:00:00Z`) - Date.parse(`${displayed}T00:00:00Z`)) / day
     if (saved?.endsWith('Z')) {
-      const instant = new Date(saved.replace(',', '.'))
+      const instant = new SvelteDate(saved.replace(',', '.'))
       instant.setDate(instant.getDate() + delta)
       return instant.toISOString().slice(0, 19) + (saved.match(/([.,]\d+)?Z$/)?.[0] ?? 'Z')
     }
