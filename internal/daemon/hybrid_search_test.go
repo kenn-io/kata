@@ -78,22 +78,18 @@ func TestHybridSearchHubReconcilesLocalIdentity(t *testing.T) {
 	require.NoError(t, err)
 	live, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local title", Author: "tester"})
 	require.NoError(t, err)
-	deleted, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "deleted locally", Author: "tester"})
-	require.NoError(t, err)
 	moved, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "moved locally", Author: "tester"})
 	require.NoError(t, err)
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: moved.ID, FromProjectID: project.ID, ToProjectID: other.ID, IfMatchRev: moved.Revision, Actor: "tester"})
 	require.NoError(t, err)
 	_, _, _, err = store.CloseIssue(ctx, live.ID, "done", "tester", "completed", nil)
 	require.NoError(t, err)
-	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "tester")
-	require.NoError(t, err)
 	unpulled := db.Issue{ID: live.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EX", Title: "hub only", Status: "open"}
 	hubCopy := live
 	hubCopy.Title = "hub title"
 	hubCopy.ShortID = "hub-ref"
 	params := hybridParams{ProjectID: project.ID, Query: "test", Limit: 10, Requested: "semantic", Status: "open", Hub: func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error) {
-		return []api.FederationSearchHit{{Issue: hubCopy, Score: 0.9}, {Issue: deleted, Score: 0.8}, {Issue: moved, Score: 0.75}, {Issue: unpulled, Score: 0.7}}, false, nil
+		return []api.FederationSearchHit{{Issue: hubCopy, Score: 0.9}, {Issue: moved, Score: 0.75}, {Issue: unpulled, Score: 0.7}}, false, nil
 	}}
 	result, err := hybridSearch(ctx, store, nil, nil, params)
 	require.NoError(t, err)

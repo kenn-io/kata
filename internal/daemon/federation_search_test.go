@@ -58,16 +58,27 @@ func newFederationSearchHub(t *testing.T) (*testenv.Env, *vector.Index, db.Proje
 	require.NoError(t, err)
 	key := emb.Generation().Fingerprint()
 	require.NoError(t, idx.EnsureBuilding(ctx, key, emb.Generation()))
-	_, err = idx.Fill(ctx, key, func(_ context.Context, inputs []string) ([][]float32, error) {
-		vectors := make([][]float32, len(inputs))
-		for i := range vectors {
-			vectors[i] = []float32{1, 0}
-		}
-		return vectors, nil
-	}, 64, nil, nil)
+	_, err = idx.Fill(ctx, key, leaseRecoveryEmbedder{}.EncodeFunc(), 64, nil, nil)
 	require.NoError(t, err)
 	require.NoError(t, idx.CutOver(ctx, key))
 	return hub, idx, project, issue, key
+}
+
+func connectSearchMCP(t *testing.T, cfg daemon.ServerConfig) *sdkmcp.ClientSession {
+	t.Helper()
+	server := startTestServer(t, cfg)
+	client, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
+	require.NoError(t, err)
+	mcp, err := mcpserver.New(mcpserver.Options{Client: client, Actor: "tester", Version: "test", Scope: mcpserver.NewAllScope(), StartupSections: []string{"issue_discovery"}})
+	require.NoError(t, err)
+	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+	serverSession, err := mcp.Connect(t.Context(), serverTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = serverSession.Close() })
+	session, err := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "1"}, nil).Connect(t.Context(), clientTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close() })
+	return session
 }
 
 func TestDirectSpokeSearchUnpulledReferenceCannotResolveCollision(t *testing.T) {
@@ -94,18 +105,7 @@ func TestDirectSpokeSearchUnpulledReferenceCannotResolveCollision(t *testing.T) 
 	require.Len(t, result.Results, 1)
 	require.Zero(t, result.Results[0].Issue.ID)
 	require.Equal(t, issue.UID, result.Results[0].Issue.ShortID)
-	server := startTestServer(t, daemon.ServerConfig{DB: spoke.DB})
-	client, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
-	require.NoError(t, err)
-	mcp, err := mcpserver.New(mcpserver.Options{Client: client, Actor: "tester", Version: "test", Scope: mcpserver.NewAllScope(), StartupSections: []string{"issue_discovery"}})
-	require.NoError(t, err)
-	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
-	serverSession, err := mcp.Connect(ctx, serverTransport, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = serverSession.Close() })
-	session, err := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = session.Close() })
+	session := connectSearchMCP(t, daemon.ServerConfig{DB: spoke.DB})
 	shown, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.show", Arguments: map[string]any{"ref": replica.Name + "#" + result.Results[0].Issue.ShortID}})
 	require.NoError(t, err)
 	require.True(t, shown.IsError, "%+v", shown.Content)
@@ -139,20 +139,15 @@ func TestDirectSpokeSearchPostgresWithoutPgvector(t *testing.T) {
 	require.Contains(t, string(raw), issue.UID)
 }
 
-func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
+func newDirectSpokeSearchFixture(t *testing.T) (*testenv.Env, db.Project, db.Issue, db.Issue) {
+	t.Helper()
 	ctx := t.Context()
 	hub, idx, project, issue, key := newFederationSearchHub(t)
 	unpulled, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "unpulled issue", Author: "tester"})
 	require.NoError(t, err)
 	_, err = idx.RefreshMirror(ctx, hub.DB)
 	require.NoError(t, err)
-	_, err = idx.Fill(ctx, key, func(_ context.Context, inputs []string) ([][]float32, error) {
-		vectors := make([][]float32, len(inputs))
-		for i := range vectors {
-			vectors[i] = []float32{1, 0}
-		}
-		return vectors, nil
-	}, 64, nil, nil)
+	_, err = idx.Fill(ctx, key, leaseRecoveryEmbedder{}.EncodeFunc(), 64, nil, nil)
 	require.NoError(t, err)
 	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{Origin: "https://spoke.example", InstanceID: "spoke"})
 	require.NoError(t, err)
@@ -173,6 +168,11 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	require.NoError(t, spoke.DB.MaterializeFederatedProject(ctx, replica.ID))
 	grant := createClaimEnrollment(t, hub, project.ID, spoke.DB.InstanceUID(), "pull")
 	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: grant.Token}))
+	return spoke, replica, issue, unpulled
+}
+
+func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
+	spoke, replica, issue, unpulled := newDirectSpokeSearchFixture(t)
 	resp, raw := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=concept&mode=semantic", replica.ID))
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	var body struct {
@@ -199,30 +199,34 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	require.NoError(t, json.Unmarshal(raw, &body))
 	require.Empty(t, body.Results)
+}
+
+func TestDirectSpokeSearchLocalWords(t *testing.T) {
+	ctx := t.Context()
+	spoke, replica, _, _ := newDirectSpokeSearchFixture(t)
 	local, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replica.ID, Title: "pending zebra", Author: "tester"})
 	require.NoError(t, err)
-	resp, raw = envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=zebra", replica.ID))
+	resp, raw := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=zebra", replica.ID))
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var body struct {
+		Results []struct {
+			Issue db.Issue `json:"issue"`
+		} `json:"results"`
+	}
 	require.NoError(t, json.Unmarshal(raw, &body))
 	found := false
 	for _, hit := range body.Results {
 		found = found || hit.Issue.UID == local.UID
 	}
 	require.True(t, found)
-	localProject, err := spoke.DB.CreateProject(ctx, "local-only")
+}
+
+func TestDirectSpokeSearchMCPMissingEmbeddings(t *testing.T) {
+	ctx := t.Context()
+	spoke, _, _, unpulled := newDirectSpokeSearchFixture(t)
+	_, err := spoke.DB.CreateProject(ctx, "local-only")
 	require.NoError(t, err)
-	server := startTestServer(t, daemon.ServerConfig{DB: spoke.DB})
-	client, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
-	require.NoError(t, err)
-	mcp, err := mcpserver.New(mcpserver.Options{Client: client, Actor: "tester", Version: "test", Scope: mcpserver.NewAllScope(), StartupSections: []string{"issue_discovery"}})
-	require.NoError(t, err)
-	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
-	serverSession, err := mcp.Connect(ctx, serverTransport, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = serverSession.Close() })
-	session, err := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = session.Close() })
+	session := connectSearchMCP(t, daemon.ServerConfig{DB: spoke.DB})
 	result, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.search", Arguments: map[string]any{"query": "concept", "mode": "semantic"}})
 	require.NoError(t, err)
 	require.False(t, result.IsError, "%+v", result.Content)
@@ -240,6 +244,13 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 		}
 	}
 	require.True(t, foundRemote)
+}
+
+func TestDirectSpokeSearchMCPLocalAndHubSemantic(t *testing.T) {
+	ctx := t.Context()
+	spoke, _, issue, unpulled := newDirectSpokeSearchFixture(t)
+	localProject, err := spoke.DB.CreateProject(ctx, "local-only")
+	require.NoError(t, err)
 	localIssue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: localProject.ID, Title: "local concept", Author: "tester"})
 	require.NoError(t, err)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -273,22 +284,11 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	require.Len(t, inputs, 1)
 	require.Contains(t, inputs[0], "local concept")
 	require.NoError(t, localIndex.CutOver(ctx, localKey))
-	configured := startTestServer(t, daemon.ServerConfig{DB: spoke.DB, Embedder: localEmbedder, VectorIndex: localIndex})
-	configuredClient, err := kataclient.NewWithHTTPClient(configured.URL, configured.Client())
-	require.NoError(t, err)
-	configuredMCP, err := mcpserver.New(mcpserver.Options{Client: configuredClient, Actor: "tester", Version: "test", Scope: mcpserver.NewAllScope(), StartupSections: []string{"issue_discovery"}})
-	require.NoError(t, err)
-	serverTransport, clientTransport = sdkmcp.NewInMemoryTransports()
-	configuredServerSession, err := configuredMCP.Connect(ctx, serverTransport, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = configuredServerSession.Close() })
-	configuredSession, err := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = configuredSession.Close() })
-	result, err = configuredSession.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.search", Arguments: map[string]any{"query": "concept", "mode": "semantic"}})
+	configuredSession := connectSearchMCP(t, daemon.ServerConfig{DB: spoke.DB, Embedder: localEmbedder, VectorIndex: localIndex})
+	result, err := configuredSession.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.search", Arguments: map[string]any{"query": "concept", "mode": "semantic"}})
 	require.NoError(t, err)
 	require.False(t, result.IsError, "%+v", result.Content)
-	hits = result.StructuredContent.(map[string]any)["results"].([]any)
+	hits := result.StructuredContent.(map[string]any)["results"].([]any)
 	require.Len(t, hits, 3)
 	foundUIDs := make(map[string]bool)
 	for _, hit := range hits {
