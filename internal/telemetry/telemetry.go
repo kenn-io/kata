@@ -4,6 +4,7 @@ package telemetry
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -57,6 +58,7 @@ type Options struct {
 // key. Release builds set that key at link time.
 func NewReporter(opts Options) (*Reporter, error) {
 	reporter, err := posthog.NewReporter(posthog.Options{
+		Logger:      slog.New(slog.DiscardHandler),
 		Endpoint:    postHogEndpoint,
 		Application: applicationName,
 		EnvPrefix:   envPrefix,
