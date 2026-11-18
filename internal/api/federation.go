@@ -21,9 +21,8 @@ type FederationSearchRequest struct {
 
 // FederationSearchHit contains a ranked issue from a hub search.
 type FederationSearchHit struct {
-	Issue  db.Issue `json:"issue"`
-	Score  float64  `json:"score"`
-	WebURL string   `json:"web_url,omitempty"`
+	Issue db.Issue `json:"issue"`
+	Score float64  `json:"score"`
 }
 
 // FederationSearchResponse contains the hub's ranked issues and search bound.

@@ -214,7 +214,6 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	}
 	// The vector index ranks only the searched project's chunks, so another
 	// project's closer chunks cannot starve this one out of the window.
-	lookupCtx := db.WithAuthorizedProjects(ctx, nil)
 	ctx = db.WithAuthorizedProjects(ctx, []string{project.UID})
 	if p.Hub != nil {
 		hits, bounded, err := p.Hub(ctx, p, fetch)
@@ -223,18 +222,17 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 		}
 		candidates := make([]db.SearchCandidate, 0, len(hits))
 		for _, hit := range hits {
-			local, err := store.IssueByUID(lookupCtx, hit.Issue.UID, db.IncludeDeletedYes)
+			local, err := store.IssueByUID(ctx, hit.Issue.UID, db.IncludeDeletedNo)
 			if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return nil, false, err
-			}
-			if err == nil && (local.DeletedAt != nil || local.ProjectID != p.ProjectID) {
-				continue
 			}
 			issue := hit.Issue
 			issue.ID, issue.ProjectID = 0, p.ProjectID
 			if err == nil {
 				issue.ID = local.ID
 				issue.ShortID = local.ShortID
+			} else {
+				issue.ShortID = issue.UID
 			}
 			candidates = append(candidates, db.SearchCandidate{Issue: issue, Score: hit.Score, MatchedIn: []string{"semantic"}})
 		}

@@ -207,7 +207,6 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 		DegradedReason string `json:"degraded_reason"`
 		Results        []struct {
 			Issue struct {
-				ID       int64   `json:"id"`
 				ShortID  string  `json:"short_id"`
 				Title    string  `json:"title"`
 				Body     string  `json:"body"`
@@ -218,7 +217,6 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 			} `json:"issue"`
 			Score     float64  `json:"score"`
 			MatchedIn []string `json:"matched_in"`
-			WebURL    string   `json:"web_url"`
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(bs, &b); err != nil {
@@ -247,10 +245,6 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 		}
 		for _, r := range b.Results {
 			excerpt := searchAgentExcerpt(b.Query, r.Issue.Body)
-			remoteURL := ""
-			if r.Issue.ID == 0 {
-				remoteURL = r.WebURL
-			}
 			fields := []agentField{
 				agentRowField("issue", r.Issue.ShortID),
 				agentRowFloatField("score", r.Score),
@@ -261,7 +255,6 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 				agentRowIntField("priority", r.Issue.Priority),
 				agentRowField("revision", fmt.Sprint(r.Issue.Revision)),
 				agentOptionalRowField("excerpt", &excerpt),
-				agentOptionalRowField("web_url", &remoteURL),
 			}
 			if err := writeAgentKVRow(out, fields...); err != nil {
 				return err
@@ -321,11 +314,6 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 			textsafe.Line(r.Issue.Title),
 			strings.Join(r.MatchedIn, ",")); err != nil {
 			return err
-		}
-		if r.Issue.ID == 0 && r.WebURL != "" {
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", textsafe.Line(r.WebURL)); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

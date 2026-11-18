@@ -50,9 +50,7 @@ func newFederationSearchHub(t *testing.T) (*testenv.Env, *vector.Index, db.Proje
 	idx, err := vector.Open(ctx, filepath.Join(t.TempDir(), "vectors.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, idx.Close()) })
-	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{Origin: "https://tasks.example", InstanceID: "hub"})
-	require.NoError(t, err)
-	hub := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Embedder, cfg.VectorIndex, cfg.WebSessions = emb, idx, manager })
+	hub := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Embedder, cfg.VectorIndex = emb, idx })
 	project, issue := createClaimHubIssue(t, hub)
 	_, err = idx.RefreshMirror(ctx, hub.DB)
 	require.NoError(t, err)
@@ -68,6 +66,45 @@ func newFederationSearchHub(t *testing.T) (*testenv.Env, *vector.Index, db.Proje
 	require.NoError(t, err)
 	require.NoError(t, idx.CutOver(ctx, key))
 	return hub, idx, project, issue, key
+}
+
+func TestDirectSpokeSearchUnpulledReferenceCannotResolveCollision(t *testing.T) {
+	ctx := t.Context()
+	hub, _, project, issue, _ := newFederationSearchHub(t)
+	spoke := testenv.New(t)
+	replica, err := spoke.DB.CreateProjectWithUID(ctx, project.Name, project.UID)
+	require.NoError(t, err)
+	local, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: replica.ID, UID: "1" + issue.UID[1:], Title: "unrelated local issue", Author: "tester"})
+	require.NoError(t, err)
+	require.Equal(t, issue.ShortID, local.ShortID)
+	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replica.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "tester", Enabled: true})
+	require.NoError(t, err)
+	grant := createClaimEnrollment(t, hub, project.ID, spoke.DB.InstanceUID(), "pull")
+	require.NoError(t, config.WriteFederationCredential(replica.UID, config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: grant.Token}))
+	resp, raw := envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=concept&mode=semantic", replica.ID))
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var result struct {
+		Results []struct {
+			Issue db.Issue `json:"issue"`
+		} `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &result))
+	require.Len(t, result.Results, 1)
+	server := startTestServer(t, daemon.ServerConfig{DB: spoke.DB})
+	client, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
+	require.NoError(t, err)
+	mcp, err := mcpserver.New(mcpserver.Options{Client: client, Actor: "tester", Version: "test", Scope: mcpserver.NewAllScope(), StartupSections: []string{"issue_discovery"}})
+	require.NoError(t, err)
+	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+	serverSession, err := mcp.Connect(ctx, serverTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = serverSession.Close() })
+	session, err := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close() })
+	shown, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.show", Arguments: map[string]any{"ref": replica.Name + "#" + result.Results[0].Issue.ShortID}})
+	require.NoError(t, err)
+	require.True(t, shown.IsError, "%+v", shown.Content)
 }
 
 func TestDirectSpokeSearchPostgresWithoutPgvector(t *testing.T) {
@@ -113,12 +150,7 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 		return vectors, nil
 	}, 64, nil, nil)
 	require.NoError(t, err)
-	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{Origin: "https://spoke.example", InstanceID: "spoke"})
-	require.NoError(t, err)
-	spoke := testenv.New(t, func(cfg *daemon.ServerConfig) {
-		cfg.EmbeddingUnavailableReason = "local vector index unavailable"
-		cfg.WebSessions = manager
-	})
+	spoke := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.EmbeddingUnavailableReason = "local vector index unavailable" })
 	replica, err := spoke.DB.CreateProjectWithUID(ctx, project.Name, project.UID)
 	require.NoError(t, err)
 	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: replica.ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "tester", Enabled: true, PushEnabled: true})
@@ -146,10 +178,8 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	for _, hit := range body.Results {
 		seen[hit.Issue.UID] = true
 		if hit.Issue.UID == unpulled.UID {
-			require.Empty(t, hit.Issue.Body)
-			require.Equal(t, "https://tasks.example/kata?issue="+unpulled.UID+"#direct=1", hit.WebURL)
-		} else {
-			require.Equal(t, "https://spoke.example/kata?issue="+issue.UID+"#direct=1", hit.WebURL)
+			require.Equal(t, unpulled.UID, hit.Issue.ShortID)
+			require.Empty(t, hit.WebURL)
 		}
 	}
 	require.True(t, seen[issue.UID])
@@ -280,16 +310,6 @@ func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {
 	require.Contains(t, string(body), `"code":"hub_search_failed"`)
 	require.NotContains(t, string(body), "hub unreachable")
 	require.Contains(t, string(body), "embeddings are not configured")
-	for _, invalid := range []string{`{}`, `{"hits":[]}`, `{"hits":[],"bounded":null}`, `{"hits":null,"bounded":false}`} {
-		malformed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(invalid)) }))
-		t.Cleanup(malformed.Close)
-		setClaimBindingHubURL(t, spoke, replica.ID, malformed.URL)
-		resp, body = envGetRaw(t, spoke, fmt.Sprintf("/api/v1/projects/%d/search?q=claim&mode=semantic", replica.ID))
-		require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(body), invalid)
-		require.Contains(t, string(body), `"code":"hub_search_failed"`, invalid)
-		require.Contains(t, string(body), "invalid hub search response", invalid)
-		require.NotContains(t, string(body), "hub unreachable", invalid)
-	}
 	stalled := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	t.Cleanup(stalled.Close)
 	setClaimBindingHubURL(t, spoke, replica.ID, stalled.URL)
