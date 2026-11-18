@@ -4566,6 +4566,9 @@ func (c *Client) OfferRelayDeliveriesWithResponse(ctx context.Context, options *
 				}
 			}
 		}
+		out.Headers200 = &OfferRelayDeliveriesResp200Headers{
+			XKataEventFeatures: resp.Headers.Get("X-Kata-Event-Features"),
+		}
 		return out, nil
 	default:
 		if len(resp.Content) > 0 {
@@ -4620,6 +4623,9 @@ func (c *Client) GetRelayResetWithResponse(ctx context.Context, options *GetRela
 					Err:           err,
 				}
 			}
+		}
+		out.Headers200 = &GetRelayResetResp200Headers{
+			XKataEventFeatures: resp.Headers.Get("X-Kata-Event-Features"),
 		}
 		return out, nil
 	default:
@@ -4677,6 +4683,9 @@ func (c *Client) AcceptRelayDeliveriesWithResponse(ctx context.Context, options 
 				}
 			}
 		}
+		out.Headers200 = &AcceptRelayDeliveriesResp200Headers{
+			XKataEventFeatures: resp.Headers.Get("X-Kata-Event-Features"),
+		}
 		return out, nil
 	default:
 		if len(resp.Content) > 0 {
@@ -4732,6 +4741,9 @@ func (c *Client) AckRelayDeliveriesWithResponse(ctx context.Context, options *Ac
 					Err:           err,
 				}
 			}
+		}
+		out.Headers200 = &AckRelayDeliveriesResp200Headers{
+			XKataEventFeatures: resp.Headers.Get("X-Kata-Event-Features"),
 		}
 		return out, nil
 	default:

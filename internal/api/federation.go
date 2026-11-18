@@ -274,6 +274,7 @@ type RelayHandshake struct {
 
 // RelayOfferRequest selects an authenticated stream prefix or exact offered artifact misses.
 type RelayOfferRequest struct {
+	EventFeatures   string   `header:"X-Kata-Event-Features"`
 	ProjectID       int64    `path:"project_id"`
 	Authorization   string   `header:"Authorization"`
 	Stream          string   `query:"stream" enum:"events,receipts,artifacts"`
@@ -284,28 +285,40 @@ type RelayOfferRequest struct {
 
 // RelayResetRequest requests a checkpoint for the presented project transport grant.
 type RelayResetRequest struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
 	ProjectID     int64  `path:"project_id"`
 	Authorization string `header:"Authorization"`
 }
 
 // RelayResetResponse returns the retained signed checkpoint and its hop translation.
-type RelayResetResponse struct{ Body db.RelayResetCheckpoint }
+type RelayResetResponse struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
+	Body          db.RelayResetCheckpoint
+}
 
 // RelayOfferResponse returns the emitted prefix retained for retry.
-type RelayOfferResponse struct{ Body db.RelayBatch }
+type RelayOfferResponse struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
+	Body          db.RelayBatch
+}
 
 // RelayAcceptRequest submits an authenticated batch for durable prefix acceptance.
 type RelayAcceptRequest struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
 	ProjectID     int64  `path:"project_id"`
 	Authorization string `header:"Authorization"`
 	Body          db.RelayBatch
 }
 
 // RelayAcceptResponse reports the exact durably accepted prefix.
-type RelayAcceptResponse struct{ Body db.RelayAcceptance }
+type RelayAcceptResponse struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
+	Body          db.RelayAcceptance
+}
 
 // RelayAckRequest acknowledges an emitted prefix in one stream and reset epoch.
 type RelayAckRequest struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
 	ProjectID     int64  `path:"project_id"`
 	Authorization string `header:"Authorization"`
 	Body          struct {
@@ -318,7 +331,8 @@ type RelayAckRequest struct {
 
 // RelayAckResponse reports whether the prefix acknowledgement committed.
 type RelayAckResponse struct {
-	Body struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
+	Body          struct {
 		Acknowledged bool `json:"acknowledged"`
 	}
 }

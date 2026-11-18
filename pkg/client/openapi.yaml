@@ -9808,6 +9808,10 @@ paths:
     get:
       operationId: offerRelayDeliveries
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9858,6 +9862,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/RelayBatchResponse"
           description: OK
+          headers:
+            X-Kata-Event-Features:
+              schema:
+                type: string
         default:
           content:
             application/json:
@@ -9868,6 +9876,10 @@ paths:
     get:
       operationId: getRelayReset
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9885,6 +9897,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/RelayResetCheckpoint"
           description: OK
+          headers:
+            X-Kata-Event-Features:
+              schema:
+                type: string
         default:
           content:
             application/json:
@@ -9895,6 +9911,10 @@ paths:
     post:
       operationId: acceptRelayDeliveries
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9918,6 +9938,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/RelayAcceptance"
           description: OK
+          headers:
+            X-Kata-Event-Features:
+              schema:
+                type: string
         default:
           content:
             application/json:
@@ -9928,6 +9952,10 @@ paths:
     post:
       operationId: ackRelayDeliveries
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9951,6 +9979,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/RelayAckResponseBody"
           description: OK
+          headers:
+            X-Kata-Event-Features:
+              schema:
+                type: string
         default:
           content:
             application/json:
