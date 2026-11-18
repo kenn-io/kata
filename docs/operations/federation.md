@@ -2368,6 +2368,9 @@ upgrade later. You do not need to stop or upgrade every spoke at the same
 time. A hub database migration changes the hub's local database; each spoke
 keeps its own database.
 
+Upgrade the hub and each participating spoke before writing dates with saved
+zones. Older peers reject events containing those dates until upgraded.
+
 1. Back up the hub and update it through its existing deployment procedure.
    Stop other processes using the same SQLite database during migration;
    remote spokes do not share that database. PostgreSQL operators should use

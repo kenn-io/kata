@@ -1,10 +1,6 @@
 package db
 
-import (
-	"context"
-
-	"go.kenn.io/kata/internal/metadata"
-)
+import "context"
 
 // UIStore is the narrow coherent-read contract used by the browser API.
 type UIStore interface {
@@ -91,16 +87,14 @@ func MatchUICalendarView(
 	}
 }
 
-// ProjectUIDeadlineDate gives a selected issue the same browser-calendar
-// deadline projection as collection rows.
-func ProjectUIDeadlineDate(issue *UIIssue, query UISnapshotQuery) error {
-	deadlineDate, _, err := metadata.DeadlineOnCalendarDate(
-		string(issue.Metadata), query.TimeZone, query.DefaultTimezone,
-	)
-	if err != nil {
+// ProjectUIPlanningDates gives a selected issue the same dates as collection rows.
+func ProjectUIPlanningDates(issue *UIIssue, query UISnapshotQuery, scheduledDefaultTimezone string) error {
+	dates := resolvePlanningCalendarDates(string(issue.Metadata), &query.TimeZone, scheduledDefaultTimezone, query.DefaultTimezone)
+	if err := dates.err(); err != nil {
 		return err
 	}
-	issue.DeadlineOnDate = deadlineDate
+	issue.ScheduledOnDate = dates.scheduledOn
+	issue.DeadlineOnDate = dates.deadlineOn
 	return nil
 }
 

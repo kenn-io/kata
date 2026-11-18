@@ -940,8 +940,8 @@ func TestResolveFieldConflictAllowsCoordinatedLocalTimezoneTransition(t *testing
 	require.NoError(t, readErr)
 	values, readErr := metadataObject(issue.Metadata)
 	require.NoError(t, readErr)
-	assert.JSONEq(t, `"2026-08-22T09:30"`, string(values["scheduled_on"]))
-	assert.JSONEq(t, `"America/Los_Angeles"`, string(values["timezone"]))
+	assert.JSONEq(t, `"2026-08-22T09:30[America/Los_Angeles]"`, string(values["scheduled_on"]))
+	assert.NotContains(t, values, "timezone")
 
 	dueState, dueEvents, err := service.ResolveFieldConflict(
 		t.Context(), h.issue.ID, "deadline_on", "external", "operator",
@@ -954,8 +954,8 @@ func TestResolveFieldConflictAllowsCoordinatedLocalTimezoneTransition(t *testing
 	require.NoError(t, readErr)
 	values, readErr = metadataObject(issue.Metadata)
 	require.NoError(t, readErr)
-	assert.JSONEq(t, `"2026-08-22T10:30"`, string(values["deadline_on"]))
-	assert.JSONEq(t, `"America/Los_Angeles"`, string(values["timezone"]))
+	assert.JSONEq(t, `"2026-08-22T10:30[America/Los_Angeles]"`, string(values["deadline_on"]))
+	assert.NotContains(t, values, "timezone")
 }
 
 func TestResolveFieldConflictRequiresCurrentFieldsCapability(t *testing.T) {

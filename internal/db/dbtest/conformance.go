@@ -72,6 +72,7 @@ var storageScenarios = []scenario{
 	{name: "recurring spoke authority", run: checkRecurringSpokeAuthority},
 	{name: "recurring federation", runWithBackend: checkRecurringFederation},
 	{name: "date zone federation", run: checkDateZoneFederation},
+	{name: "selected schedule projection", run: checkSelectedScheduleProjection},
 	{name: "recurring atomic rollback", runWithBackend: checkRecurringAtomicRollback},
 	{name: "recurring lifecycle", run: checkRecurringLifecycle},
 	{name: "recurring metadata protection", run: checkRecurringMetadataProtection},
