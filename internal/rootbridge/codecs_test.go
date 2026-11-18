@@ -82,7 +82,7 @@ func TestScheduleCodecKataPatchPreservesCivilTimesAcrossDST(t *testing.T) {
 	} {
 		patch, err := codec.KataPatch(db.Issue{}, value)
 		require.NoError(t, err)
-		assert.JSONEq(t, `"`+value.Value+`"`, string(patch["scheduled_on"]))
+		assert.JSONEq(t, `"`+value.Value+`[America/New_York]"`, string(patch["scheduled_on"]))
 		assert.JSONEq(t, `"America/New_York"`, string(patch["timezone"]))
 	}
 }
@@ -132,13 +132,13 @@ func TestScheduleCodecKataPatchAdoptsTimezoneWithOtherDateWithoutTimezone(t *tes
 			name:     "scheduled date permits first deadline local timezone",
 			codec:    "deadline_on",
 			metadata: `{"scheduled_on":"2026-08-20"}`,
-			want:     `{"deadline_on":"2026-08-20T09:30","timezone":"America/Los_Angeles"}`,
+			want:     `{"deadline_on":"2026-08-20T09:30[America/Los_Angeles]","timezone":"America/Los_Angeles"}`,
 		},
 		{
 			name:     "deadline date permits first scheduled local timezone",
 			codec:    "scheduled_on",
 			metadata: `{"deadline_on":"2026-08-20"}`,
-			want:     `{"scheduled_on":"2026-08-20T09:30","timezone":"America/Los_Angeles"}`,
+			want:     `{"scheduled_on":"2026-08-20T09:30[America/Los_Angeles]","timezone":"America/Los_Angeles"}`,
 		},
 	}
 	for _, tc := range cases {
@@ -190,7 +190,7 @@ func TestScheduleCodecKataPatchCanonicalizesAndClears(t *testing.T) {
 		value connector.FieldValue
 		want  string
 	}{
-		{"date", date("2026-08-20"), `{"deadline_on":"2026-08-20"}`},
+		{"date", date("2026-08-20"), `{"deadline_on":"2026-08-20[UTC]"}`},
 		{"instant", connector.FieldValue{Kind: "instant", Value: "2026-08-20T09:30:45.120000000Z"}, `{"deadline_on":"2026-08-20T09:30:45.12Z"}`},
 		{"clear", nullValue(), `{"deadline_on":null}`},
 	}

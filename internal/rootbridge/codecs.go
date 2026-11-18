@@ -93,7 +93,7 @@ func (c scheduleCodec) kataPatch(
 	}
 	patch := map[string]jsontext.Value{c.key: mustJSON(canonicalScheduleValue(canonical))}
 	if canonical.Kind != fieldKindLocalDateTime {
-		return patch, nil
+		return metadata.StampScheduleZones(patch, string(issue.Metadata), c.defaultTimezone)
 	}
 
 	values, err := metadataObject(issue.Metadata)
@@ -120,7 +120,7 @@ func (c scheduleCodec) kataPatch(
 		}
 	}
 	patch["timezone"] = mustJSON(canonical.Timezone)
-	return patch, nil
+	return metadata.StampScheduleZones(patch, string(issue.Metadata), c.defaultTimezone)
 }
 
 func kataPatchWithCoordinatedTimezone(
@@ -184,12 +184,7 @@ func kataScheduleFieldValue(
 	metadataValues map[string]jsontext.Value,
 	defaultTimezone string,
 ) (connector.FieldValue, error) {
-	zone := ""
-	if strings.HasSuffix(value, "]") {
-		if i := strings.LastIndexByte(value, '['); i >= 0 {
-			value, zone = value[:i], value[i+1:len(value)-1]
-		}
-	}
+	value, zone := metadata.SplitScheduleZone(value)
 	field := connector.FieldValue{Value: value}
 	switch scheduleKind(value) {
 	case fieldKindDate:

@@ -57,13 +57,13 @@ func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone st
 			return nil, fmt.Errorf("%w: %v", ErrInvalidValue, err)
 		}
 		_ = json.Unmarshal(old[key], &previous)
-		_, explicit := splitScheduleZone(value)
+		_, explicit := SplitScheduleZone(value)
 		if kind == scheduledOnInstant || explicit != "" || (value == previous && patchZone == "") {
 			continue
 		}
 		zone := patchZone
 		if zone == "" {
-			_, zone = splitScheduleZone(previous)
+			_, zone = SplitScheduleZone(previous)
 		}
 		if zone == "" {
 			_ = json.Unmarshal(old["timezone"], &zone)
@@ -176,7 +176,7 @@ func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone s
 	if kind == scheduledOnInstant {
 		return value, "UTC", instant.UTC(), true, nil
 	}
-	wall, zone := splitScheduleZone(value)
+	wall, zone := SplitScheduleZone(value)
 	if zone == "" {
 		zone = values.Timezone
 	}
@@ -200,7 +200,7 @@ func scheduleValueDue(value, issueTimezone string, now time.Time, defaultTimezon
 	}
 	if kind == scheduledOnDate || kind == scheduledOnLocalTime {
 		var zone string
-		value, zone = splitScheduleZone(value)
+		value, zone = SplitScheduleZone(value)
 		if zone != "" {
 			issueTimezone = zone
 		}
@@ -273,7 +273,7 @@ func CalendarDate(
 	if err != nil {
 		return "", false, err
 	}
-	scheduleValue, zone := splitScheduleZone(scheduleValue)
+	scheduleValue, zone := SplitScheduleZone(scheduleValue)
 	if zone != "" {
 		issueTimezone = zone
 	}
@@ -424,7 +424,7 @@ func wallClock(instant time.Time, location *time.Location) time.Time {
 }
 
 func classifyScheduledOn(value string) (scheduledOnKind, string, time.Time, error) {
-	wall, zone := splitScheduleZone(value)
+	wall, zone := SplitScheduleZone(value)
 	if zone != "" {
 		if zone == "Local" {
 			return 0, "", time.Time{}, fmt.Errorf("schedule timezone Local is not portable; set timezone to a named zone")
@@ -456,7 +456,8 @@ func classifyScheduledOn(value string) (scheduledOnKind, string, time.Time, erro
 	)
 }
 
-func splitScheduleZone(value string) (string, string) {
+// SplitScheduleZone separates a trailing named zone from a schedule value.
+func SplitScheduleZone(value string) (string, string) {
 	if strings.HasSuffix(value, "]") {
 		if i := strings.LastIndexByte(value, '['); i >= 0 && i < len(value)-2 {
 			return value[:i], value[i+1 : len(value)-1]
