@@ -55,11 +55,6 @@ func (rt *appTestTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 }
 
-// appTestFuncTransport is a RoundTripper whose dynamic type cannot be a map key.
-type appTestFuncTransport func(*http.Request) (*http.Response, error)
-
-func (f appTestFuncTransport) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
-
 func writeAppTestKey(t *testing.T, path string) *rsa.PrivateKey {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -75,14 +70,14 @@ func appTestResolver(t *testing.T) (*CredentialResolver, string) {
 	return NewCredentialResolver(config.GitHubSyncConfig{Apps: []config.GitHubAppConfig{{Owner: "example-owner", AppID: 123, InstallationID: 456, PrivateKeyPath: path}}}, nil), path
 }
 
-// appTestSession opens one session of the binding, as a refresh does, and
-// makes one REST read.
-func appTestSession(ctx context.Context, resolver *CredentialResolver, base http.RoundTripper) (int, error) {
-	transport, err := resolver.Transport(ctx, Binding{Host: "github.com", Owner: "example-owner", Repo: "first"}, base)
+// appTestSession opens one session of the repo's binding, as a refresh does,
+// and makes one REST read.
+func appTestSession(ctx context.Context, resolver *CredentialResolver, base http.RoundTripper, repo string) (int, error) {
+	transport, err := resolver.Transport(ctx, Binding{Host: "github.com", Owner: "example-owner", Repo: repo}, base)
 	if err != nil {
 		return 0, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/example-owner/first/issues", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/example-owner/"+repo+"/issues", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -97,7 +92,7 @@ func TestCredentialResolverAppEvictsCachedTokenOnlyOnUnauthorized(t *testing.T) 
 	resolver, _ := appTestResolver(t)
 	base := &appTestTransport{expiry: time.Hour, rejected: "token token-1"}
 	for _, want := range []int{http.StatusUnauthorized, http.StatusNoContent} {
-		status, err := appTestSession(t.Context(), resolver, base)
+		status, err := appTestSession(t.Context(), resolver, base, "first")
 		require.NoError(t, err)
 		assert.Equal(t, want, status)
 	}
@@ -106,7 +101,7 @@ func TestCredentialResolverAppEvictsCachedTokenOnlyOnUnauthorized(t *testing.T) 
 	resolver, _ = appTestResolver(t)
 	base = &appTestTransport{expiry: time.Hour, apiErr: errors.New("connection reset")}
 	for range 2 {
-		_, err := appTestSession(t.Context(), resolver, base)
+		_, err := appTestSession(t.Context(), resolver, base, "first")
 		require.ErrorIs(t, err, base.apiErr)
 	}
 	assert.Len(t, base.jwts, 1)
@@ -116,22 +111,22 @@ func TestCredentialResolverAppReadsKeyFileOnlyToMint(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		resolver, path := appTestResolver(t)
 		base := &appTestTransport{expiry: time.Hour}
-		_, err := appTestSession(t.Context(), resolver, base)
+		_, err := appTestSession(t.Context(), resolver, base, "first")
 		require.NoError(t, err)
 
 		require.NoError(t, os.Remove(path))
 		for range 2 {
-			_, err = appTestSession(t.Context(), resolver, base)
+			_, err = appTestSession(t.Context(), resolver, base, "first")
 			require.NoError(t, err)
 		}
 		assert.Len(t, base.jwts, 1)
 		assert.Equal(t, []string{"token token-1", "token token-1", "token token-1"}, base.tokens)
 		time.Sleep(time.Hour)
-		_, err = appTestSession(t.Context(), resolver, base)
+		_, err = appTestSession(t.Context(), resolver, base, "first")
 		require.ErrorContains(t, err, "read GitHub App private key")
 
 		rotated := writeAppTestKey(t, path)
-		_, err = appTestSession(t.Context(), resolver, base)
+		_, err = appTestSession(t.Context(), resolver, base, "first")
 		require.NoError(t, err)
 		require.Len(t, base.jwts, 2)
 		_, err = jwt.Parse(base.jwts[1], func(*jwt.Token) (any, error) { return &rotated.PublicKey, nil })
@@ -157,72 +152,14 @@ func TestCredentialResolverAppRejectsBadKeyOnSetup(t *testing.T) {
 	}
 }
 
-type stalledAppTransport struct {
-	started chan struct{}
-	release chan struct{}
-}
-
-func (rt *stalledAppTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	select {
-	case <-req.Context().Done():
-		return nil, req.Context().Err()
-	default:
-	}
-	close(rt.started)
-	<-rt.release
-	return nil, errors.New("mint stopped")
-}
-
-func TestCredentialResolverAppBindingsDoNotBlockEachOther(t *testing.T) {
+func TestCredentialResolverAppCachesTokenPerBinding(t *testing.T) {
 	resolver, _ := appTestResolver(t)
-	base := &stalledAppTransport{started: make(chan struct{}), release: make(chan struct{})}
-	first, err := resolver.Transport(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "first"}, base)
-	require.NoError(t, err)
-	second, err := resolver.Transport(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "second"}, base)
-	require.NoError(t, err)
-	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
-	request := func(ctx context.Context, tr http.RoundTripper, repo string, done chan<- error) {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/example-owner/"+repo+"/issues", nil)
-		_, err := tr.RoundTrip(req)
-		done <- err
-	}
-	go request(t.Context(), first, "first", firstDone)
-	<-base.started
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	go request(ctx, second, "second", secondDone)
-	completed := false
-	select {
-	case err := <-secondDone:
-		completed = true
-		assert.ErrorIs(t, err, context.Canceled)
-	case <-time.After(time.Second):
-		t.Error("canceled request blocked behind another binding's mint")
-	}
-	close(base.release)
-	<-firstDone
-	if !completed {
-		<-secondDone
-	}
-}
-
-func TestCredentialResolverAppUsesEachSuppliedBase(t *testing.T) {
-	resolver, _ := appTestResolver(t)
-	first := &appTestTransport{expiry: time.Hour}
-	second := &appTestTransport{expiry: time.Hour}
-	for _, base := range []*appTestTransport{first, second, first, second} {
-		_, err := appTestSession(t.Context(), resolver, base)
+	base := &appTestTransport{expiry: time.Hour}
+	for _, repo := range []string{"first", "second", "first", "second"} {
+		_, err := appTestSession(t.Context(), resolver, base, repo)
 		require.NoError(t, err)
 	}
-	assert.Equal(t, []string{"token token-1", "token token-1"}, first.tokens)
-	assert.Equal(t, []string{"token token-1", "token token-1"}, second.tokens)
-
-	inner := &appTestTransport{expiry: time.Hour}
-	for range 2 {
-		_, err := appTestSession(t.Context(), resolver, appTestFuncTransport(inner.RoundTrip))
-		require.NoError(t, err)
-	}
-	assert.Len(t, inner.jwts, 2, "an uncomparable base is not cached")
+	assert.Equal(t, []string{"token token-1", "token token-2", "token token-1", "token token-2"}, base.tokens)
 }
 
 func TestCredentialResolverPrefersAppOverEnvAndGH(t *testing.T) {

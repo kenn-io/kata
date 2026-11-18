@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"reflect"
 	"strings"
 	"sync"
 	"unicode"
@@ -43,13 +42,7 @@ type CredentialResolver struct {
 	runner        CommandRunner
 	baseTransport http.RoundTripper
 	appMu         sync.Mutex
-	apps          map[appTransportKey]*ghinstallation.Transport
-}
-
-type appTransportKey struct {
-	app     config.GitHubAppConfig
-	binding Binding
-	base    http.RoundTripper
+	apps          map[Binding]*ghinstallation.Transport
 }
 
 // NewCredentialResolver returns a resolver using cfg and runner. A nil runner
@@ -62,7 +55,7 @@ func NewCredentialResolver(cfg config.GitHubSyncConfig, runner CommandRunner) *C
 		cfg:           cfg,
 		runner:        runner,
 		baseTransport: http.DefaultTransport,
-		apps:          make(map[appTransportKey]*ghinstallation.Transport),
+		apps:          make(map[Binding]*ghinstallation.Transport),
 	}
 }
 
@@ -109,34 +102,26 @@ func (r *CredentialResolver) credentialTransport(ctx context.Context, binding Bi
 	}
 }
 
-// appTransport returns the cached transport for app, binding, and base, so sessions
-// reuse its installation token until it nears expiry. A base that cannot be a
-// map key gets a transport of its own.
+// appTransport returns the binding's cached transport, so its sessions reuse
+// one installation token until it nears expiry.
 func (r *CredentialResolver) appTransport(app config.GitHubAppConfig, binding Binding, base http.RoundTripper) (http.RoundTripper, error) {
-	key := appTransportKey{app: app, binding: binding, base: base}
-	cacheable := reflect.ValueOf(base).Comparable()
-	if cacheable {
-		r.appMu.Lock()
-		defer r.appMu.Unlock()
-		if tr, ok := r.apps[key]; ok {
-			return &evictOnUnauthorizedTransport{next: tr, resolver: r, key: key}, nil
+	r.appMu.Lock()
+	defer r.appMu.Unlock()
+	tr, ok := r.apps[binding]
+	if !ok {
+		signer := keyFileSigner{path: app.PrivateKeyPath}
+		if _, err := signer.readKey(); err != nil {
+			return nil, err
 		}
+		atr, err := ghinstallation.NewAppsTransportWithOptions(base, app.AppID, ghinstallation.WithSigner(signer))
+		if err != nil {
+			return nil, err
+		}
+		tr = ghinstallation.NewFromAppsTransport(atr, app.InstallationID)
+		tr.BaseURL = githubRESTBaseURL(binding)
+		r.apps[binding] = tr
 	}
-	signer := keyFileSigner{path: app.PrivateKeyPath}
-	if _, err := signer.readKey(); err != nil {
-		return nil, err
-	}
-	atr, err := ghinstallation.NewAppsTransportWithOptions(base, app.AppID, ghinstallation.WithSigner(signer))
-	if err != nil {
-		return nil, err
-	}
-	tr := ghinstallation.NewFromAppsTransport(atr, app.InstallationID)
-	tr.BaseURL = githubRESTBaseURL(binding)
-	if !cacheable {
-		return tr, nil
-	}
-	r.apps[key] = tr
-	return &evictOnUnauthorizedTransport{next: tr, resolver: r, key: key}, nil
+	return &evictOnUnauthorizedTransport{next: tr, resolver: r, binding: binding}, nil
 }
 
 // keyFileSigner reads the App's private key each time a token is minted, so a
@@ -172,15 +157,15 @@ func (s keyFileSigner) readKey() (*rsa.PrivateKey, error) {
 type evictOnUnauthorizedTransport struct {
 	next     *ghinstallation.Transport
 	resolver *CredentialResolver
-	key      appTransportKey
+	binding  Binding
 }
 
 func (t *evictOnUnauthorizedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.next.RoundTrip(req)
 	if err == nil && resp.StatusCode == http.StatusUnauthorized {
 		t.resolver.appMu.Lock()
-		if t.resolver.apps[t.key] == t.next {
-			delete(t.resolver.apps, t.key)
+		if t.resolver.apps[t.binding] == t.next {
+			delete(t.resolver.apps, t.binding)
 		}
 		t.resolver.appMu.Unlock()
 	}
