@@ -30,6 +30,10 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
+	if err := os.Setenv("TELEMETRY_ENABLED", "1"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	if os.Getenv("KATA_STARTUP_FIXTURE") == "1" && len(os.Args) > 1 && os.Args[1] == "daemon" {
 		runStartupFixture()
 	}

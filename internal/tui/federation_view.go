@@ -30,6 +30,9 @@ const (
 	// enroll preview and execution for adoption operations, which rewrite the
 	// local project's event history.
 	federationModeAdoptConfirm
+	federationModeSpokes
+	federationModeSpokeDetail
+	federationModeSpokeName
 )
 
 type federationOperation string
@@ -44,6 +47,7 @@ const (
 )
 
 type federationDraft struct {
+	SpokeName            string
 	Operation            federationOperation
 	SpokeProjectID       int64
 	SpokeProjectName     string
@@ -141,6 +145,7 @@ type federationOp struct {
 // zero-value assignment makes a forgotten field unrepresentable rather than
 // merely absent.
 type federationState struct {
+	spokes              federationHubSpokesState
 	instance            InstanceInfo
 	statuses            []FederationProjectStatus
 	cursor              int
@@ -235,6 +240,7 @@ var (
 
 func (m Model) transitionToFederation() (Model, tea.Cmd) {
 	m = m.invalidateFederationOp()
+	m.federation.spokes.gen++
 	m = m.captureFederationSelectedProject()
 	m.prevView = m.view
 	m.view = viewFederation
@@ -357,6 +363,10 @@ func (m Model) handleFederationEnrollResult(msg federationEnrollResultMsg) (Mode
 func (m Model) routeFederationViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	rows := federationSpokeStatuses(m.federation.statuses)
 	switch m.federation.mode {
+	case federationModeSpokes, federationModeSpokeDetail:
+		return m.routeFederationSpokesKey(msg)
+	case federationModeSpokeName:
+		return m.routeFederationSpokeNameKey(msg)
 	case federationModeDetail:
 		return m.routeFederationDetailKey(msg)
 	case federationModeSelectLocalProject:
@@ -386,6 +396,9 @@ func (m Model) routeFederationViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.escFromFederationView()
 	case "n":
 		return m.startFederationEnrollment()
+	case "s":
+		m.federation.mode = federationModeSpokes
+		return m.loadFederationSpokes()
 	case "r":
 		m.federation.loading = true
 		m.federation.err = nil
@@ -531,6 +544,11 @@ func (m Model) routeFederationBrowseHubsKey(msg tea.KeyPressMsg) (Model, tea.Cmd
 
 func (m Model) routeFederationPreviewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
+	case "N":
+		if m.federation.op.running {
+			return m, nil
+		}
+		return m.startFederationSpokeName("", m.federation.draft.SpokeName)
 	case "esc", "backspace":
 		m.federation.mode = federationModeSelectHubProject
 		return m, nil
@@ -1285,6 +1303,7 @@ func runFederationEnrollment(
 	}
 	enrollment, err := hubAdmin.CreateFederationEnrollment(ctx, CreateFederationEnrollmentInput{
 		SpokeInstanceUID:             instanceUID,
+		SpokeName:                    draft.SpokeName,
 		ProjectID:                    &hubProject.ID,
 		Capabilities:                 draft.APICapabilities,
 		Actor:                        draft.RequestedActor,

@@ -41,7 +41,7 @@ func TestServicePostgresEmbeddingSearch(t *testing.T) {
 	createAccessIssue(t, server, projectID, "refresh dashboard")
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
-	go func() { done <- service.Run(runCtx) }()
+	go func() { done <- service.RunSemanticIndex(runCtx) }()
 	topResult := func(query, mode, want string) func() bool {
 		return func() bool {
 			status, titles, _ := searchTitles(ctx, server, projectID, query, mode)

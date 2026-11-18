@@ -134,16 +134,24 @@ type evidenceCloseAPI interface {
 	CloseWithEvidence(context.Context, int64, string, CloseInput) (*MutationResp, error)
 }
 
+// routeCloseKey closes the issue under the cursor. x closes at once unless
+// the daemon requires evidence; V always opens the evidence form.
 func (m Model) routeCloseKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
-	if !m.keymap.Close.matches(msg) {
+	withEvidence := m.keymap.CloseWithEvidence.matches(msg)
+	if !withEvidence && !m.keymap.Close.matches(msg) {
 		return m, nil, false
 	}
-	target, _, ok := m.activeIssueTarget()
+	target, issue, ok := m.activeIssueTarget()
 	if !ok {
 		return m, nil, true
 	}
-	if m.closeRequiresEvidence {
-		return m.openCloseForm(target), nil, true
+	if withEvidence || m.closeRequiresEvidence {
+		if target.origin == "list" {
+			// Opening a form cancels the priority prompt, as reopen does.
+			m.list.pendingPriority = false
+			m.list.status = ""
+		}
+		return m.openCloseForm(target, issue.attachments()), nil, true
 	}
 	return m, dispatchLegacyClose(m.api, target, m.list.actor), true
 }
@@ -173,9 +181,9 @@ func (m Model) activeIssueTarget() (formTarget, Issue, bool) {
 	}, issue, true
 }
 
-func (m Model) openCloseForm(target formTarget) Model {
+func (m Model) openCloseForm(target formTarget, attachments []closeAttachment) Model {
 	m.nextFormGen++
-	form := newCloseForm(target)
+	form := newCloseForm(target, attachments)
 	form.formGen = m.nextFormGen
 	m.input = form
 	return m
@@ -192,6 +200,43 @@ func dispatchLegacyClose(apiClient KataAPI, target formTarget, actor string) tea
 	}
 }
 
+// syncCloseAttachmentField keeps the Attachment radio in step with the
+// Reason radio: the close action accepts attachment evidence only for done,
+// so any other reason hides the field and a return to done offers it again
+// with no choice made.
+func (s inputState) syncCloseAttachmentField() inputState {
+	if s.kind != inputCloseForm || len(s.attachments) == 0 {
+		return s
+	}
+	offered := s.fieldValue(fieldCloseReason) == "done"
+	idx := slices.IndexFunc(s.fields, func(f inputField) bool { return f.id == fieldCloseAttachment })
+	switch {
+	case offered && idx < 0:
+		choices := []string{"none"}
+		for _, a := range s.attachments {
+			choices = append(choices, a.label())
+		}
+		s.fields = append(slices.Clone(s.fields), inputField{
+			id: fieldCloseAttachment, label: "Attachment evidence", kind: fieldRadio,
+			radio: radioField{choices: choices},
+		})
+	case !offered && idx >= 0:
+		s.fields = slices.Delete(slices.Clone(s.fields), idx, idx+1)
+		s.active = min(s.active, len(s.fields)-1)
+	}
+	return s
+}
+
+// closeAttachmentChoice is the attachment picked on the form, if any. Only
+// done offers the field; a reason change drops it via syncCloseAttachmentField.
+func closeAttachmentChoice(form inputState, reason string) (closeAttachment, bool) {
+	f := form.field(fieldCloseAttachment)
+	if reason != "done" || f == nil || f.radio.index <= 0 || f.radio.index > len(form.attachments) {
+		return closeAttachment{}, false
+	}
+	return form.attachments[f.radio.index-1], true
+}
+
 func closeInputFromForm(form inputState, actor string) (CloseInput, error) {
 	reason := strings.TrimSpace(form.fieldValue(fieldCloseReason))
 	message := strings.TrimSpace(form.fieldValue(fieldCloseMessage))
@@ -202,10 +247,26 @@ func closeInputFromForm(form inputState, actor string) (CloseInput, error) {
 	if reason == "wontfix" && value == "" {
 		return CloseInput{Actor: actor, Reason: reason, Message: message}, nil
 	}
-	if value == "" {
+	cited, hasCited := closeAttachmentChoice(form, reason)
+	if value == "" && !hasCited {
 		return CloseInput{}, fmt.Errorf("evidence value is required")
 	}
-	typ := api.EvidenceType(form.fieldValue(fieldEvidenceType))
+	var items []api.Evidence
+	if value != "" {
+		typed, err := typedCloseEvidence(api.EvidenceType(form.fieldValue(fieldEvidenceType)), value)
+		if err != nil {
+			return CloseInput{}, err
+		}
+		items = append(items, typed)
+	}
+	if hasCited {
+		items = append(items, api.Evidence{Type: api.EvidenceAttachment, AttachmentID: cited.id})
+	}
+	return CloseInput{Actor: actor, Reason: reason, Message: message, Evidence: items}, nil
+}
+
+// typedCloseEvidence builds the evidence item for the form's type and value.
+func typedCloseEvidence(typ api.EvidenceType, value string) (api.Evidence, error) {
 	evidence := api.Evidence{Type: typ}
 	switch typ {
 	case api.EvidenceCommit:
@@ -221,7 +282,7 @@ func closeInputFromForm(form inputState, actor string) (CloseInput, error) {
 			}
 		}
 		if len(evidence.Paths) == 0 {
-			return CloseInput{}, fmt.Errorf("reviewed paths are required")
+			return api.Evidence{}, fmt.Errorf("reviewed paths are required")
 		}
 	case api.EvidenceExternal:
 		evidence.Account = value
@@ -230,11 +291,9 @@ func closeInputFromForm(form inputState, actor string) (CloseInput, error) {
 	case api.EvidenceDuplicateOf, api.EvidenceSupersededBy:
 		evidence.IssueRef = value
 	default:
-		return CloseInput{}, fmt.Errorf("unsupported evidence type %q", typ)
+		return api.Evidence{}, fmt.Errorf("unsupported evidence type %q", typ)
 	}
-	return CloseInput{
-		Actor: actor, Reason: reason, Message: message, Evidence: []api.Evidence{evidence},
-	}, nil
+	return evidence, nil
 }
 
 func dispatchFormClose(

@@ -52,6 +52,7 @@ var federationTransportOperations = map[string]HostFederationOperation{
 	// RefreshProjectFederationBaseline, so this GET writes.
 	"getFederationProjectMetadata":  {ID: "getFederationProjectMetadata", Mutation: true},
 	"pollFederationProjectEvents":   {ID: "pollFederationProjectEvents"},
+	"searchFederationProject":       {ID: "searchFederationProject"},
 	"ingestFederationProjectEvents": {ID: "ingestFederationProjectEvents", Mutation: true},
 }
 

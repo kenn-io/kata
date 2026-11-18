@@ -1521,7 +1521,9 @@ type CronRun struct {
 	EndedAt                    *time.Time      `json:"ended_at,omitempty"`
 	ExecutorLabel              *string         `json:"executor_label,omitempty"`
 	ID                         int64           `json:"id"`
+	IssueShortID               *string         `json:"issue_short_id,omitempty"`
 	IssueUID                   *string         `json:"issue_uid,omitempty"`
+	JobName                    *string         `json:"job_name,omitempty"`
 	JobUID                     *string         `json:"job_uid,omitempty"`
 	OccurrenceKey              *string         `json:"occurrence_key,omitempty"`
 	ProjectID                  int64           `json:"project_id"`
@@ -1533,6 +1535,7 @@ type CronRun struct {
 	UID                        string          `json:"uid" validate:"required"`
 	UpdatedAt                  time.Time       `json:"updated_at" validate:"required"`
 	WorkflowDefinitionEventUID *string         `json:"workflow_definition_event_uid,omitempty"`
+	WorkflowName               *string         `json:"workflow_name,omitempty"`
 	WorkflowUID                *string         `json:"workflow_uid,omitempty"`
 }
 
@@ -3009,6 +3012,48 @@ func (f FederationRootKeyRepinResult) Validate() error {
 	if v, ok := any(f.Status).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Status", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type FederationSearchHit struct {
+	Issue  Issue   `json:"issue"`
+	Score  float64 `json:"score"`
+	WebURL *string `json:"web_url,omitempty"`
+}
+
+func (f FederationSearchHit) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(f.Issue).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Issue", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type FederationSearchResponseBody struct {
+	Bounded bool                  `json:"bounded"`
+	Hits    []FederationSearchHit `json:"hits" validate:"required"`
+}
+
+func (f FederationSearchResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(f.Hits, "required"); err != nil {
+		errors = errors.Append("Hits", err)
+	}
+	for i, item := range f.Hits {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Hits[%d]", i), err)
+			}
 		}
 	}
 	if len(errors) == 0 {

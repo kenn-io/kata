@@ -1,9 +1,11 @@
 package pgstore
 
 import (
+	"context"
 	"database/sql/driver"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
@@ -46,4 +48,51 @@ func TestFederationRunnerLeaseReturnsPermanentConnectionFailure(t *testing.T) {
 	assert.Nil(t, release)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "reserve postgres federation runner lease connection")
+}
+
+func TestFederationRunnerLeaseReleaseAfterQueryCancellation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := t.Context()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	release, err := store.AcquireFederationRunnerLease(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = release() })
+	conn := store.federationLease.conn
+	var pid int
+	require.NoError(t, conn.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid))
+
+	queryCtx, cancel := context.WithCancel(ctx)
+	t.Cleanup(cancel)
+	queryDone := make(chan error, 1)
+	go func() {
+		// Keep a real query in flight so cancellation closes the lease session,
+		// just as cancellation during the runner's lock check can do.
+		_, queryErr := conn.ExecContext(queryCtx, `SELECT pg_sleep(60)`)
+		queryDone <- queryErr
+	}()
+	//nolint:kennlint // sleeptest: wait for PostgreSQL to enter the real query before canceling it.
+	require.Eventually(t, func() bool {
+		var sleeping bool
+		queryErr := store.QueryRowContext(ctx, `
+			SELECT wait_event = 'PgSleep' FROM pg_stat_activity WHERE pid = $1`, pid).Scan(&sleeping)
+		return queryErr == nil && sleeping
+	}, 5*time.Second, 10*time.Millisecond)
+	cancel()
+	require.ErrorIs(t, <-queryDone, context.Canceled)
+
+	require.NoError(t, release())
+	require.NoError(t, release(), "release is idempotent")
+	//nolint:kennlint // sleeptest: PostgreSQL releases session locks after processing the disconnect.
+	require.Eventually(t, func() bool {
+		var held bool
+		queryErr := store.QueryRowContext(ctx, `
+			SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid = $1 AND locktype = 'advisory')`, pid).Scan(&held)
+		return queryErr == nil && !held
+	}, 5*time.Second, 10*time.Millisecond)
 }

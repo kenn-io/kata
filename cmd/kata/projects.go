@@ -481,6 +481,11 @@ func projectsShowCmd() *cobra.Command {
 			} else {
 				var err error
 				project, err = resolveProjectSelector(a, args[0])
+				var cliErr *cliError
+				if errors.As(err, &cliErr) && cliErr.Kind == kindNotFound {
+					// The daemon answers an archived project with the restore hint.
+					project, err = resolveProjectSelectorIncludingArchived(a, args[0])
+				}
 				if err != nil {
 					return err
 				}

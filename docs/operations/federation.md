@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-13
+last_edited: 2026-11-18
 ---
 
 # Federation
@@ -111,6 +111,22 @@ merging the former project can end compatibility; the move returns the current
 reference, and the stable issue UID stays unchanged. If a spoke previously
 assigned a longer short ID to avoid a local collision, that former reference
 also remains reserved while its move history remains.
+
+A spoke that joins the destination after the hub moved an issue may receive
+only the destination's baseline, not the move. When that baseline places the
+issue in the destination while another project joined directly to the same hub
+still holds the local row, the destination's pull moves that row as an applied
+move would. The local issue ID, discussion, labels, and links stay with it, and
+the destination's baseline sets its current fields and short ID. The former
+short ID keeps resolving in the source. Kata does not author a move for this.
+A change the hub made before that baseline and never sent to the spoke, such as
+a removed label or link or an edited comment, may not show on the relocated
+issue until the hub changes it again.
+
+The destination's pull stops with an error, and leaves the issue where it is,
+when the two projects are not both joined directly to the same hub, or when the
+move is one Kata refuses for an applied move, such as an issue in a recurrence
+or an import-mapping collision. Other projects keep syncing.
 
 Destination sync recovers retained source history even when its cursor has
 already passed those events. This preserves missed changes and comments without
@@ -1401,6 +1417,12 @@ enroll a spoke project into a hub from the daemon catalog. The hub browser uses
 catalog entries without switching the active daemon, so spoke and hub auth stay
 separate.
 
+On an active hub daemon, press `s` to list its enrolled spokes. Select a spoke
+and press `N` from the list or its detail to set or change its hub-local name.
+Submit a blank name to clear it. Names apply to that instance across all of its
+project enrollments. The daemon validates names and shows any refusal without
+changing the name.
+
 The screenshots in this section are generated from disposable simulated
 daemons, hosts, actors, and projects. Generate local preview assets with:
 
@@ -1435,7 +1457,9 @@ different hub project:
 
 The preview is the mutation boundary. Confirm the operation type, local spoke
 project, hub daemon, hub auth state, requested actor, capabilities, push
-setting, and `allow_insecure` value before pressing Enter:
+setting, and `allow_insecure` value before pressing Enter. Press `N` to enter an
+optional hub-local spoke name, equivalent to `kata federation enroll --spoke-name`.
+A blank value keeps any existing name:
 
 ![Previewing a simulated federation enrollment](/docs/assets/screenshots/federation-tui/preview.svg)
 
@@ -2061,6 +2085,17 @@ belongs to the bound spoke origin and actor, verifies schema version,
 deduplicates same-hash retries, rejects same-UID/different-hash conflicts,
 materializes the batch, and returns the advanced push cursor.
 
+An event can touch an issue that the hub now keeps in a project the spoke has
+not joined, for example after another peer moved the issue. The hub then
+rejects the batch with `403 federation_project_not_enrolled`. The error names
+the issue but not its current project, because the spoke has not joined that
+project. `auth_invalid` is reserved for a failure of the spoke's own
+credential. The spoke still pulls, so hub changes keep arriving and the move
+takes the issue out of the joined project. Its other unsent changes in that
+project wait behind the refused event. To send them, ask the hub operator which
+project holds the issue, join it with push access and the same actor, then sync
+again.
+
 On SQLite, ordinary issue pushes fold the histories of touched issues and
 reconcile only their projection rows. Cron events add the project's complete
 cron history without widening that scope, so a cron-only push reconciles no
@@ -2653,3 +2688,12 @@ disabled, so those spokes must re-run `kata federation join --actor <actor> --pu
 before local-origin work can sync to the hub again.
 
 Use a shared daemon when those trade-offs are unacceptable.
+
+## Semantic search on direct spokes
+
+Upgrade hubs before direct spokes. A direct spoke searches shared projects by
+meaning through its hub and removes earlier shared-project vectors from its
+local index. An older or unavailable hub leaves automatic search with word
+matches and a reason;
+explicit semantic or hybrid search returns 503. Relay spokes retain their
+existing behavior.

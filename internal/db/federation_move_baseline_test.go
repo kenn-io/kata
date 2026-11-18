@@ -14,11 +14,15 @@ func TestIndexFederatedMoveEvents(t *testing.T) {
 		{UID: "older", IssueUID: "a", Type: "issue.moved", HLCPhysicalMS: 9},
 		{UID: "latest-a", IssueUID: "a", Type: "issue.moved", HLCPhysicalMS: 10, HLCCounter: 1, OriginInstanceUID: "a"},
 		{UID: "second-issue", IssueUID: "b", Type: "issue.moved", HLCPhysicalMS: 2},
+		{UID: "newer-baseline", IssueUID: "b", Type: "issue.snapshot", HLCPhysicalMS: 3},
 	}
-	winners := IndexFederatedMoveEvents(events)
-	require.Len(t, winners, 2)
-	require.Equal(t, "latest-b", winners["a"].UID)
-	require.Equal(t, "second-issue", winners["b"].UID)
+	index := IndexFederatedMoveEvents(events)
+	require.Len(t, index.Winners, 2)
+	require.Equal(t, "latest-b", index.Winners["a"].UID)
+	require.Equal(t, "newer-baseline", index.Winners["b"].UID)
+	require.Len(t, index.Moves, 2)
+	require.Equal(t, "latest-b", index.Moves["a"].UID)
+	require.Equal(t, "second-issue", index.Moves["b"].UID, "a newer baseline does not retire the retained move")
 }
 
 func TestFederationMoveBaselineUsesLatestApplicableSourceSnapshot(t *testing.T) {

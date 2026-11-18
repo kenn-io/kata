@@ -582,6 +582,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		next := m.handleFederationLoaded(fl)
 		return next, nil
 	}
+	if fs, ok := msg.(federationSpokesLoadedMsg); ok {
+		return m.handleFederationSpokesLoaded(fs), nil
+	}
+	if fn, ok := msg.(federationSpokeNamedMsg); ok {
+		return m.handleFederationSpokeNamed(fn), nil
+	}
 	if fhp, ok := msg.(federationHubProjectsLoadedMsg); ok {
 		next := m.handleFederationHubProjectsLoaded(fhp)
 		return next, nil
@@ -880,6 +886,12 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		}
 		return m, nil, true
 	case tea.PasteMsg:
+		if m.view == viewFederation && m.federation.mode == federationModeSpokeName && m.modal == modalNone {
+			if !m.federation.spokes.saving {
+				m.federation.spokes.name, _ = m.federation.spokes.name.Update(msg)
+			}
+			return m, nil, true
+		}
 		if m.view == viewCron && m.cron.filtering && m.modal == modalNone {
 			return m.cronFilter(m.cron.lists[m.cron.tab].query + msg.Content), nil, true
 		}
@@ -1100,7 +1112,7 @@ func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool
 		// Issue-scoped credentials cannot delete or move, whatever else they
 		// may edit.
 		return false, true
-	case m.keymap.Close.matches(msg), m.keymap.Reopen.matches(msg), m.keymap.SetDates.matches(msg):
+	case m.keymap.Close.matches(msg), m.keymap.CloseWithEvidence.matches(msg), m.keymap.Reopen.matches(msg), m.keymap.SetDates.matches(msg):
 		return true, true
 	case !m.detailIsActive():
 		return false, false
@@ -3244,6 +3256,9 @@ func toastExpireCmd(d time.Duration) tea.Cmd {
 // /forms) or a confirm modal (quit or draft discard) is open. Both
 // gates redirect global keys into the field instead of firing.
 func (m Model) canQuit() bool {
+	if m.view == viewFederation && m.federation.mode == federationModeSpokeName {
+		return false
+	}
 	if m.view == viewCron && (m.cron.filtering || m.cron.form != nil) {
 		return false
 	}

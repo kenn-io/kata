@@ -3,10 +3,12 @@ package tui
 import (
 	"strings"
 	"testing"
+	"uuid"
 
 	"github.com/mattn/go-runewidth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // TestEventChunkLines_CloseDetail covers the events-tab rendering for
@@ -96,6 +98,26 @@ func TestEventChunkLines_CloseDetail(t *testing.T) {
 			},
 		},
 		{
+			name: "attachment_names_the_frozen_file",
+			payload: map[string]any{
+				"reason": "done",
+				"evidence": []any{
+					map[string]any{
+						"type": "attachment", "attachment_id": "01KATTACH0000000000000REPT",
+						"attachment": map[string]any{
+							"name": "report.pdf", "media_type": "application/pdf", "size": float64(2048),
+							"docbank_version": "6f1c2e8a-2222-4222-8222-222222222222",
+						},
+					},
+					map[string]any{"type": "attachment", "attachment_id": "01KATTACH0000000000000LOGS"},
+				},
+			},
+			want: []string{
+				"  evidence: attachment 01KATTACH0000000000000REPT: report.pdf · 2048 bytes",
+				"  evidence: attachment 01KATTACH0000000000000LOGS",
+			},
+		},
+		{
 			name: "malformed_evidence_array_dropped",
 			payload: map[string]any{
 				"reason":   "done",
@@ -152,7 +174,7 @@ func TestEventChunkLines_CloseDetail(t *testing.T) {
 			// width=0 keeps the rows un-wrapped so these table cases
 			// can assert the unwrapped shape. The wrapping behaviour
 			// has its own dedicated test below.
-			got := closeDetailLines(e, 0)
+			got := closeDetailLines(e, 0, nil)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -168,7 +190,7 @@ func TestEventChunkLines_HeaderShape(t *testing.T) {
 			Actor:   "wes",
 			Payload: map[string]any{"comment_id": float64(7)},
 		}
-		lines := eventChunkLines(e, 0, false)
+		lines := eventChunkLines(e, 0, false, nil)
 		require.Len(t, lines, 1)
 		assert.Contains(t, lines[0], "[issue.commented]")
 		assert.Contains(t, lines[0], "wes")
@@ -187,7 +209,7 @@ func TestEventChunkLines_HeaderShape(t *testing.T) {
 				},
 			},
 		}
-		lines := eventChunkLines(e, 0, true)
+		lines := eventChunkLines(e, 0, true, nil)
 		require.GreaterOrEqual(t, len(lines), 3)
 		assert.Contains(t, lines[0], "> ", "first line carries cursor marker")
 		assert.Contains(t, lines[0], "[issue.closed]")
@@ -202,7 +224,7 @@ func TestEventChunkLines_HeaderShape(t *testing.T) {
 			Actor:   "wes",
 			Payload: map[string]any{"reason": "done"},
 		}
-		lines := eventChunkLines(e, 0, false)
+		lines := eventChunkLines(e, 0, false, nil)
 		require.Len(t, lines, 1)
 		assert.Contains(t, lines[0], "closed (done)")
 	})
@@ -226,7 +248,7 @@ func TestCloseDetailLines_Wrap(t *testing.T) {
 	// Width 60 forces a wrap on the long message but keeps the
 	// commit-evidence line single. Message prefix "  message: " is
 	// 11 cells wide, so the budget per line is 49.
-	lines := closeDetailLines(e, 60)
+	lines := closeDetailLines(e, 60, nil)
 	require.GreaterOrEqual(t, len(lines), 3, "message must wrap to at least 2 rows + evidence row")
 	assert.True(t, strings.HasPrefix(lines[0], "  message: "), "first row carries the label")
 	assert.True(t, strings.HasPrefix(lines[1], "           "),
@@ -247,4 +269,34 @@ func TestCloseDetailLines_Wrap(t *testing.T) {
 	assert.Equal(t,
 		"FX fetchers now return a typed partial-failure error while preserving successful rates",
 		body)
+}
+
+func TestCloseEvidenceComparesAttachmentsWithTheIssue(t *testing.T) {
+	const same, other = "6f1c2e8a-2222-4222-8222-222222222222", "7a2d3f9b-3333-4333-8333-333333333333"
+	frozen := func(version string) map[string]any {
+		return map[string]any{"name": "report.pdf", "media_type": "application/pdf", "size": float64(2048), "docbank_version": version}
+	}
+	current := func(version string) map[string]metadata.Attachment {
+		return map[string]metadata.Attachment{"R1": {Name: "report.pdf", MediaType: "application/pdf", Size: 2048, DocbankVersion: uuid.MustParse(version)}}
+	}
+	for _, tc := range []struct {
+		name    string
+		item    map[string]any
+		current map[string]metadata.Attachment
+		want    string
+	}{
+		{"unchanged", map[string]any{"attachment_id": "R1", "attachment": frozen(same)}, current(same), "attachment R1: report.pdf · 2048 bytes"},
+		{"changed", map[string]any{"attachment_id": "R1", "attachment": frozen(same)}, current(other), "attachment R1: report.pdf · 2048 bytes (changed)"},
+		{"removed", map[string]any{"attachment_id": "R1", "attachment": frozen(same)}, map[string]metadata.Attachment{}, "attachment R1: report.pdf · 2048 bytes (removed)"},
+		{"issue not loaded", map[string]any{"attachment_id": "R1", "attachment": frozen(same)}, nil, "attachment R1: report.pdf · 2048 bytes"},
+		{"invalid frozen details", map[string]any{"attachment_id": "R1", "attachment": map[string]any{"name": "a/b", "size": float64(1)}}, current(same), "Invalid attachment details: R1"},
+		{"no descriptor, still attached", map[string]any{"attachment_id": "R1"}, current(same), "attachment R1: report.pdf · 2048 bytes"},
+		{"no descriptor, removed", map[string]any{"attachment_id": "R1"}, map[string]metadata.Attachment{}, "attachment R1 (removed)"},
+		{"no descriptor, issue not loaded", map[string]any{"attachment_id": "R1"}, nil, "attachment R1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.item["type"] = "attachment"
+			assert.Equal(t, tc.want, formatEvidenceItem(tc.item, tc.current))
+		})
+	}
 }

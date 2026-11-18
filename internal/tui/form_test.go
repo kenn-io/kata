@@ -25,7 +25,7 @@ func TestCenteredForm_TextareaWrapsWithinPadding(t *testing.T) {
 		{"new issue", newNewIssueForm(), fieldBody},
 		{"edit body", newBodyEditForm(formTarget{}, ""), fieldBody},
 		{"comment", newCommentForm(formTarget{}), fieldComment},
-		{"completion", newCloseForm(formTarget{}), fieldCloseMessage},
+		{"completion", newCloseForm(formTarget{}, nil), fieldCloseMessage},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			s := focusNewIssueField(tt.form, tt.field)

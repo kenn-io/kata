@@ -62,7 +62,7 @@ func TestOpenClawContractSurvivesSlowAgentTelemetry(t *testing.T) {
 	contract := filepath.Join(opts.Home, "contract")
 	require.NoError(t, os.WriteFile(contract, []byte(agentContractText), 0600))
 	cmd := exec.CommandContext(t.Context(), node, "testdata/openclaw/slow-telemetry.mjs", plan.Changes[0].Path, workspace, contract) //nolint:gosec // G204: Node runs a fixed fixture with the generated plugin and test-owned executable.
-	cmd.Env = []string{"SystemRoot=" + os.Getenv("SystemRoot"), "PATH=" + os.Getenv("PATH"), "HOME=" + opts.Home, "USERPROFILE=" + opts.Home, "TEMP=" + opts.Home, "TMP=" + opts.Home, "TMPDIR=" + opts.Home, "KATA_HOME=" + opts.Home, "KATA_SERVER=" + server.URL, "KATA_AUTHOR=user-a"}
+	cmd.Env = []string{"SystemRoot=" + os.Getenv("SystemRoot"), "PATH=" + os.Getenv("PATH"), "HOME=" + opts.Home, "USERPROFILE=" + opts.Home, "TEMP=" + opts.Home, "TMP=" + opts.Home, "TMPDIR=" + opts.Home, "KATA_HOME=" + opts.Home, "KATA_SERVER=" + server.URL, "KATA_AUTHOR=user-a", "TELEMETRY_ENABLED=1"}
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 	require.Equal(t, int32(1), posts.Load(), "contract sends agent activity")

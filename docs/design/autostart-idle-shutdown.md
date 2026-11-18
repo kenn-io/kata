@@ -54,7 +54,7 @@ The idle controller distinguishes work by what it means for residency:
 | GitHub or federation synchronization | No | Yes |
 | Federation configuration reconciliation | No | Yes |
 | Timed-claim sweep | No | Yes |
-| Scheduler wait, backoff, telemetry, or watcher | No | No |
+| Scheduler wait, backoff, or watcher | No | No |
 | Health, ping, or instance probe | No | No; HTTP shutdown joins the handler |
 
 Foreground activity starts a complete new idle interval when the final

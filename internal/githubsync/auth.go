@@ -3,6 +3,7 @@ package githubsync
 import (
 	"bytes"
 	"context"
+	"crypto/rsa"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -12,9 +13,11 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"unicode"
 
 	ghinstallation "github.com/bradleyfalzon/ghinstallation/v2"
+	"github.com/golang-jwt/jwt/v4"
 
 	"go.kenn.io/kata/internal/config"
 )
@@ -38,6 +41,8 @@ type CredentialResolver struct {
 	cfg           config.GitHubSyncConfig
 	runner        CommandRunner
 	baseTransport http.RoundTripper
+	appMu         sync.Mutex
+	apps          map[Binding]*ghinstallation.Transport
 }
 
 // NewCredentialResolver returns a resolver using cfg and runner. A nil runner
@@ -50,6 +55,7 @@ func NewCredentialResolver(cfg config.GitHubSyncConfig, runner CommandRunner) *C
 		cfg:           cfg,
 		runner:        runner,
 		baseTransport: http.DefaultTransport,
+		apps:          make(map[Binding]*ghinstallation.Transport),
 	}
 }
 
@@ -81,16 +87,10 @@ func (r *CredentialResolver) credentialTransport(ctx context.Context, binding Bi
 	base = nextRoundTripper(base)
 	switch credential.kind {
 	case CredentialKindApp:
-		tr, err := ghinstallation.NewKeyFromFile(
-			base,
-			credential.app.AppID,
-			credential.app.InstallationID,
-			credential.app.PrivateKeyPath,
-		)
+		tr, err := r.appTransport(credential.app, credential.binding, base)
 		if err != nil {
 			return nil, "", fmt.Errorf("create GitHub App transport: %w", err)
 		}
-		tr.BaseURL = githubRESTBaseURL(credential.binding)
 		return newOriginGuardTransport(credential.binding, tr), credential.kind, nil
 	case CredentialKindEnv, CredentialKindGH:
 		return newOriginGuardTransport(credential.binding, &staticBearerTransport{
@@ -100,6 +100,76 @@ func (r *CredentialResolver) credentialTransport(ctx context.Context, binding Bi
 	default:
 		return nil, "", fmt.Errorf("unsupported GitHub credential kind %q", credential.kind)
 	}
+}
+
+// appTransport returns the binding's cached transport, so its sessions reuse
+// one installation token until it nears expiry.
+func (r *CredentialResolver) appTransport(app config.GitHubAppConfig, binding Binding, base http.RoundTripper) (http.RoundTripper, error) {
+	r.appMu.Lock()
+	defer r.appMu.Unlock()
+	tr, ok := r.apps[binding]
+	if !ok {
+		signer := keyFileSigner{path: app.PrivateKeyPath}
+		if _, err := signer.readKey(); err != nil {
+			return nil, err
+		}
+		atr, err := ghinstallation.NewAppsTransportWithOptions(base, app.AppID, ghinstallation.WithSigner(signer))
+		if err != nil {
+			return nil, err
+		}
+		tr = ghinstallation.NewFromAppsTransport(atr, app.InstallationID)
+		tr.BaseURL = githubRESTBaseURL(binding)
+		r.apps[binding] = tr
+	}
+	return &evictOnUnauthorizedTransport{next: tr, resolver: r, binding: binding}, nil
+}
+
+// keyFileSigner reads the App's private key each time a token is minted, so a
+// replaced key file takes effect at the next mint without a restart, and a
+// missing file does not fail sessions that a cached token still serves.
+type keyFileSigner struct {
+	path string
+}
+
+func (s keyFileSigner) Sign(claims jwt.Claims) (string, error) {
+	key, err := s.readKey()
+	if err != nil {
+		return "", err
+	}
+	return ghinstallation.NewRSASigner(jwt.SigningMethodRS256, key).Sign(claims)
+}
+
+func (s keyFileSigner) readKey() (*rsa.PrivateKey, error) {
+	pemBytes, err := os.ReadFile(s.path)
+	if err != nil {
+		return nil, fmt.Errorf("read GitHub App private key: %w", err)
+	}
+	key, err := jwt.ParseRSAPrivateKeyFromPEM(pemBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse GitHub App private key: %w", err)
+	}
+	return key, nil
+}
+
+// evictOnUnauthorizedTransport drops a cached App transport when GitHub answers
+// 401, so the next session mints a replacement for a revoked token. The
+// rejected request is not replayed.
+type evictOnUnauthorizedTransport struct {
+	next     *ghinstallation.Transport
+	resolver *CredentialResolver
+	binding  Binding
+}
+
+func (t *evictOnUnauthorizedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.next.RoundTrip(req)
+	if err == nil && resp.StatusCode == http.StatusUnauthorized {
+		t.resolver.appMu.Lock()
+		if t.resolver.apps[t.binding] == t.next {
+			delete(t.resolver.apps, t.binding)
+		}
+		t.resolver.appMu.Unlock()
+	}
+	return resp, err
 }
 
 type resolvedCredential struct {

@@ -8,6 +8,32 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// FederationSearchRequest searches a shared project on its hub.
+type FederationSearchRequest struct {
+	ProjectID     int64    `path:"project_id"`
+	Authorization string   `header:"Authorization"`
+	Query         string   `query:"q" required:"true"`
+	Limit         int      `query:"limit,omitempty"`
+	Status        string   `query:"status,omitempty" enum:"open,closed"`
+	Labels        []string `query:"label,explode"`
+	ExcludeLabels []string `query:"exclude_label,explode"`
+}
+
+// FederationSearchHit contains a ranked issue from a hub search.
+type FederationSearchHit struct {
+	Issue  db.Issue `json:"issue"`
+	Score  float64  `json:"score"`
+	WebURL string   `json:"web_url,omitempty"`
+}
+
+// FederationSearchResponse contains the hub's ranked issues and search bound.
+type FederationSearchResponse struct {
+	Body struct {
+		Hits    []FederationSearchHit `json:"hits"`
+		Bounded bool                  `json:"bounded"`
+	}
+}
+
 // EnableProjectFederationRequest enables pull federation on one hub project.
 type EnableProjectFederationRequest struct {
 	ProjectID int64 `path:"project_id"`
