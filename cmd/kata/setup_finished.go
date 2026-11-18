@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
 	"go.kenn.io/kata/internal/db"
@@ -41,9 +40,6 @@ func captureSetupFinished(ctx context.Context, store db.Storage, reporter teleme
 			err = store.CompleteSetupFinished(ctx, *pending)
 			complete = err == nil
 		}
-	}
-	if err != nil {
-		slog.Warn("telemetry setup capture", "err", err)
 	}
 	return complete
 }

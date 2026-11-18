@@ -156,6 +156,9 @@ func sendCLIEvent(cmd *cobra.Command, body *generated.CaptureTelemetryEventBody,
 	var sends posthog.SendGroup
 	sends.Go(func() {
 		defer close(finished)
+		if !posthog.Eligible("KATA", version.Version) {
+			return
+		}
 		target := target
 		// Detached so a command that ends by cancelling its own context still reports.
 		timeout := cliUseReportTimeout

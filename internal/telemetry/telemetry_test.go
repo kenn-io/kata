@@ -233,3 +233,22 @@ func TestOutcomesProperties(t *testing.T) {
 		require.Equal(t, source, properties["sync_source"])
 	}
 }
+
+func TestTelemetryConsentChangesDuringReporterLifetime(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("TELEMETRY_ENABLED", "")
+	t.Setenv(EnabledEnv, "")
+	binary := filepath.Join(t.TempDir(), "telemetry-test")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	build := exec.CommandContext(t.Context(), "go", "build", "-ldflags", testProjectKeyFlag, "-o", binary, "./testprogram") //nolint:gosec // test-owned output
+	output, err := build.CombinedOutput()
+	require.NoError(t, err, string(output))
+	command := exec.CommandContext(t.Context(), binary, "-consent-changes") //nolint:gosec // test-owned executable
+	output, err = command.CombinedOutput()
+	require.NoError(t, err, string(output))
+	require.Equal(t, "true false disabled true false\n", string(output))
+}
