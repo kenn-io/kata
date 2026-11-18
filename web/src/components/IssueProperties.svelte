@@ -76,6 +76,7 @@
   let activeProperty = $state<PropertyKey | null>(null)
   let scheduledDraft = $state('')
   let dueDraft = $state('')
+  let dateError = $state('')
   let priorityDraft = $state('')
   let assignmentTTLDraft = $state('')
   let addingLabel = $state(false)
@@ -220,6 +221,64 @@
       instant.setDate(instant.getDate() + delta)
       return instant.toISOString().slice(0, 19) + (saved.match(/([.,]\d+)?Z$/)?.[0] ?? 'Z')
     }
+    const savedDate = match[1]!
+    const suffix = match[2]!
+    const zoned = suffix.match(/^(T\d{2}:\d{2}(?::\d{2})?)\[([^\]]+)\]$/)
+    if (zoned) {
+      const time = zoned[1]!
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: zoned[2],
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+      })
+      const wallAt = (instant: number): number => {
+        const parts = Object.fromEntries(
+          formatter.formatToParts(instant).map((part) => [part.type, part.value]),
+        )
+        return Date.parse(
+          `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}Z`,
+        )
+      }
+      const dayMillis = Date.parse(`${value}T00:00:00Z`)
+      const candidates = [-1, 0, 1].map((offset) =>
+        new Date(dayMillis + offset * day).toISOString().slice(0, 10),
+      )
+      candidates.sort(
+        (a, b) =>
+          Math.abs(Date.parse(a) - Date.parse(savedDate)) -
+          Math.abs(Date.parse(b) - Date.parse(savedDate)),
+      )
+      for (const date of candidates) {
+        const wall = Date.parse(`${date}${time}${time.length === 6 ? ':00' : ''}Z`)
+        const offsets = new Set(
+          [wall - 2 * day, wall, wall + 2 * day].map((time) => wallAt(time) - time),
+        )
+        const instants = [...offsets]
+          .map((offset) => wall - offset)
+          .filter((instant) => wallAt(instant) === wall)
+        if (instants.length === 0 && offsets.size > 1) {
+          let low = wall - 2 * day
+          let high = wall + 2 * day
+          const initialOffset = wallAt(low) - low
+          while (high - low > 1000) {
+            const mid = Math.floor((low + high) / 2000) * 1000
+            if (wallAt(mid) - mid === initialOffset) low = mid
+            else high = mid
+          }
+          if (wallAt(high - 1000) < wall && wallAt(high) > wall) instants.push(high)
+        }
+        if (instants.length === 0) continue
+        const local = new Date(Math.min(...instants))
+        const viewerDate = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, '0')}-${String(local.getDate()).padStart(2, '0')}`
+        if (viewerDate === value) return date + suffix
+      }
+      return ''
+    }
     const moved =
       Date.parse(`${match[1]}T00:00:00Z`) +
       Date.parse(`${value}T00:00:00Z`) -
@@ -247,6 +306,7 @@
 
   function openProperty(property: PropertyKey): void {
     if (actionsDisabled) return
+    dateError = ''
     activeProperty = property
     if (property === 'scheduled') {
       scheduledDraft = scheduledDate()
@@ -263,15 +323,21 @@
   async function patchScheduled(value: string): Promise<void> {
     if (actionsDisabled) return
     const property = 'scheduled'
-    scheduledDraft = value
+    dateError = ''
     if (value !== '' && value === scheduledDate()) {
       resetDraft(property)
       return
     }
+    const moved = movedDate(value, scheduledDate(), issue.issue.metadata.scheduled_on)
+    if (moved === '') {
+      dateError = "That day can't keep the saved time and timezone. Pick another day."
+      return
+    }
+    scheduledDraft = value
     const mutationUID = uid()
     const generation = draftResetGeneration
     const ok = await onPatchMetadata(mutationUID, {
-      scheduled_on: movedDate(value, scheduledDate(), issue.issue.metadata.scheduled_on),
+      scheduled_on: moved,
     })
     if (ok) scheduleAcceptedReset(property, mutationUID, generation)
   }
@@ -279,15 +345,21 @@
   async function patchDue(value: string): Promise<void> {
     if (actionsDisabled) return
     const property = 'due'
-    dueDraft = value
+    dateError = ''
     if (value !== '' && value === deadlineDate()) {
       resetDraft(property)
       return
     }
+    const moved = movedDate(value, deadlineDate(), issue.issue.metadata.deadline_on)
+    if (moved === '') {
+      dateError = "That day can't keep the saved time and timezone. Pick another day."
+      return
+    }
+    dueDraft = value
     const mutationUID = uid()
     const generation = draftResetGeneration
     const ok = await onPatchMetadata(mutationUID, {
-      deadline_on: movedDate(value, deadlineDate(), issue.issue.metadata.deadline_on),
+      deadline_on: moved,
     })
     if (ok) scheduleAcceptedReset(property, mutationUID, generation)
   }
@@ -515,6 +587,9 @@
     </button>
   {/if}
 </section>
+{#if dateError && (activeProperty === 'scheduled' || activeProperty === 'due')}
+  <p class="date-error" role="alert">{dateError}</p>
+{/if}
 
 <dl class="detail-properties">
   <div>
@@ -605,6 +680,11 @@
 </section>
 
 <style>
+  .date-error {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    margin: 0.5rem 0 0;
+  }
   .property-pills {
     display: flex;
     flex-wrap: wrap;
