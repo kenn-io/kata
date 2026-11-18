@@ -295,6 +295,24 @@ describe('IssueProperties', () => {
     })
   })
 
+  it('keeps the nearest saved day when a viewer day has two matches', async () => {
+    vi.stubEnv('TZ', 'America/Belize')
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2026-03-09',
+        metadata: { scheduled_on: '2026-03-10T01:30[America/New_York]' },
+      }),
+      onPatchMetadata,
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Mar 8, 2026/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
+      scheduled_on: '2026-03-09T01:30[America/New_York]',
+    })
+  })
+
   it('moves a zoned schedule into a source timezone daylight saving gap', async () => {
     vi.stubEnv('TZ', 'America/New_York')
     const onPatchMetadata = vi.fn(async () => true)
