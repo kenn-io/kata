@@ -100,10 +100,11 @@ A caller the project access policy denies gets `404 not_found`, as for a
 missing id. A caller a host access controller denies gets `not_found` on most
 routes and never gets the hint.
 
-The routes a federation peer calls with its enrollment token
-(`federation/events`, `federation/events:ingest`, `federation/metadata` and
-`federation/search`) check the token against the project first, so a missing
-or archived project answers `403 auth_invalid` there, without the hint.
+The `/federation/` routes a peer calls with its enrollment token check the
+token against the project first, so a missing or archived project answers
+`403 auth_invalid` there, without the hint. `federation/relay:disconnect`
+differs: it revokes the presented relay token whenever the token matches, even
+in an archived project, and otherwise answers `404 not_found`.
 
 ## Editing an issue safely
 
