@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-12
+last_edited: 2026-11-18
 ---
 
 # CLI reference
@@ -954,7 +954,7 @@ descendant's new reference. Old project-qualified short IDs resolve while their 
 original project identity remain. While retained, those IDs stay reserved so
 new issues cannot reuse them. Purging history or merging a former project ends
 that compatibility; use the current reference returned by the move. Stable issue
-UIDs remain unchanged. The target project is resolved the same way as `kata projects show`.
+UIDs remain unchanged. The target project is resolved among active projects the same way as `kata projects show`.
 When an old reference resolves a moved issue, human and agent output from
 `show`, `edit`, and label commands qualifies its current project.
 The issue's target `short_id` is assigned by the daemon during the move, so it
@@ -1753,7 +1753,8 @@ can merge into any target. Projects with a federation binding or an issue sync
 binding cannot be merged.
 
 `projects remove` archives a project (reversible with `restore`). The name
-stays reserved while archived.
+stays reserved while archived. `projects show` with an archived project's name
+or id reports that it is archived and names the `restore` command.
 
 `projects purge` permanently deletes an archived project and frees its name.
 The project must be archived first; purging an active project fails with
