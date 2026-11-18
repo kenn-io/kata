@@ -954,7 +954,7 @@ descendant's new reference. Old project-qualified short IDs resolve while their 
 original project identity remain. While retained, those IDs stay reserved so
 new issues cannot reuse them. Purging history or merging a former project ends
 that compatibility; use the current reference returned by the move. Stable issue
-UIDs remain unchanged. The target project is resolved among active projects the same way as `kata projects show`.
+UIDs remain unchanged. The target must be an active project, named the same way as for `kata projects show`.
 When an old reference resolves a moved issue, human and agent output from
 `show`, `edit`, and label commands qualifies its current project.
 The issue's target `short_id` is assigned by the daemon during the move, so it
