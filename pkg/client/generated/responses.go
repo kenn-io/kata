@@ -1311,21 +1311,12 @@ type SkipFederationQuarantineResp struct {
 	JSONDefault  *SkipFederationQuarantineErrorResponse
 }
 
-type OfferRelayDeliveriesResp200Headers struct {
-	XKataEventFeatures string `header:"X-Kata-Event-Features"`
-}
-
 type OfferRelayDeliveriesResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
 	JSON200      *OfferRelayDeliveriesResponse
-	Headers200   *OfferRelayDeliveriesResp200Headers
 	JSONDefault  *OfferRelayDeliveriesErrorResponse
-}
-
-type GetRelayResetResp200Headers struct {
-	XKataEventFeatures string `header:"X-Kata-Event-Features"`
 }
 
 type GetRelayResetResp struct {
@@ -1333,12 +1324,7 @@ type GetRelayResetResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetRelayResetResponse
-	Headers200   *GetRelayResetResp200Headers
 	JSONDefault  *GetRelayResetErrorResponse
-}
-
-type AcceptRelayDeliveriesResp200Headers struct {
-	XKataEventFeatures string `header:"X-Kata-Event-Features"`
 }
 
 type AcceptRelayDeliveriesResp struct {
@@ -1346,12 +1332,7 @@ type AcceptRelayDeliveriesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *AcceptRelayDeliveriesResponse
-	Headers200   *AcceptRelayDeliveriesResp200Headers
 	JSONDefault  *AcceptRelayDeliveriesErrorResponse
-}
-
-type AckRelayDeliveriesResp200Headers struct {
-	XKataEventFeatures string `header:"X-Kata-Event-Features"`
 }
 
 type AckRelayDeliveriesResp struct {
@@ -1359,7 +1340,6 @@ type AckRelayDeliveriesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *AckRelayDeliveriesResponse
-	Headers200   *AckRelayDeliveriesResp200Headers
 	JSONDefault  *AckRelayDeliveriesErrorResponse
 }
 
