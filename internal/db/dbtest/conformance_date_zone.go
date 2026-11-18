@@ -1,0 +1,47 @@
+package dbtest
+
+import (
+	"encoding/json/jsontext"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
+)
+
+func checkDateZoneFederation(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "zone-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Scheduled", Author: "operator"})
+	require.NoError(t, err)
+	_, err = store.EnableProjectFederation(ctx, project.ID, "operator")
+	require.NoError(t, err)
+	peer, err := uid.New()
+	require.NoError(t, err)
+	event := newRemoteEvent(t, project, &issue.UID, "issue.metadata_updated", "operator", peer, 999, jsontext.Value(`{"diff":{"scheduled_on":{"from":null,"to":"2026-01-15"}},"revision_new":2}`))
+	before, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: project.ID, SpokeInstanceUID: peer, BoundActor: "operator", Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	after, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	got, err := store.IssueByID(ctx, issue.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, `{}`, string(got.Metadata))
+	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-01-15[Europe/Paris]"`)}})
+	require.NoError(t, err)
+	before, err = store.MaxEventID(ctx)
+	require.NoError(t, err)
+	for _, metadata := range []bool{false, true} {
+		read, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: metadata, Limit: 100})
+		require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+		require.Zero(t, read.ResetAfterID)
+		require.Zero(t, read.NextAfterID)
+	}
+	after, err = store.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	return nil
+}

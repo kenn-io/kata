@@ -1,6 +1,6 @@
 {
   "schema": "kata.connector.conformance/v1",
-  "protocol": "kata.connector.v1",
+  "protocol": "kata.connector.v2",
   "name": "optional-capabilities",
   "field_samples": [
     {"value": {"kind": "date", "value": "2026-08-21"}, "advance": {"kind": "date", "value": "2099-12-31"}},
@@ -26,7 +26,7 @@
     },
     {
       "name": "describe",
-      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-describe", "method": "describe", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
+      "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-describe", "method": "describe", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/describe/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/describe/exchange/decode_error"}, "expected": {"literal": false}},
@@ -42,7 +42,7 @@
     },
     {
       "name": "resolve-root",
-      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-resolve", "method": "resolve_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"locator": {"$ref": "/fixture/root_locator"}}},
+      "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-resolve", "method": "resolve_root", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"locator": {"$ref": "/fixture/root_locator"}}},
       "assert": [
         {"op": "equal", "actual": {"path": "/steps/resolve-root/exchange/error"}, "expected": {"literal": false}},
         {"op": "equal", "actual": {"path": "/steps/resolve-root/exchange/decode_error"}, "expected": {"literal": false}},
@@ -69,7 +69,7 @@
     },
     {
       "name": "publish-comment-crash",
-      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-publish-crash", "method": "publish_comment", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "body": "connector conformance publication", "operation_id": "conformance-publication-1"}},
+      "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-publish-crash", "method": "publish_comment", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "body": "connector conformance publication", "operation_id": "conformance-publication-1"}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "publish_comment"}}
       ],
@@ -112,7 +112,7 @@
     },
     {
       "name": "publish-comment-retry",
-      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-publish-retry", "method": "publish_comment", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "body": "connector conformance publication", "operation_id": "conformance-publication-1"}},
+      "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-publish-retry", "method": "publish_comment", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "body": "connector conformance publication", "operation_id": "conformance-publication-1"}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "publish_comment"}}
       ],
@@ -151,7 +151,7 @@
     },
     {
       "name": "list-published-comment",
-      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-comment-readback", "method": "list_comments", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
+      "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-comment-readback", "method": "list_comments", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "publish_comment"}}
       ],
@@ -170,7 +170,7 @@
     },
     {
       "name": "publish-without-capability",
-      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-publish-unsupported", "method": "publish_comment", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "body": "connector conformance publication", "operation_id": "conformance-publication-unsupported"}},
+      "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-publish-unsupported", "method": "publish_comment", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "body": "connector conformance publication", "operation_id": "conformance-publication-unsupported"}},
       "when": [
         {"op": "not_contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "publish_comment"}}
       ],
@@ -188,7 +188,7 @@
     },
     {
       "name": "list-fields-without-capability",
-      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-list-fields-unsupported", "method": "list_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
+      "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-list-fields-unsupported", "method": "list_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
       "when": [
         {"op": "not_contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
       ],
@@ -206,7 +206,7 @@
     },
     {
       "name": "read-fields-without-capability",
-      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read-fields-unsupported", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": []}},
+      "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-read-fields-unsupported", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": []}},
       "when": [
         {"op": "not_contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
       ],
@@ -224,7 +224,7 @@
     },
     {
       "name": "write-fields-without-capability",
-      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write-fields-unsupported", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {}, "expected": {}}},
+      "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-write-fields-unsupported", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {}, "expected": {}}},
       "when": [
         {"op": "not_contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
       ],
@@ -253,7 +253,7 @@
     },
     {
       "name": "list-fields",
-      "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-fields", "method": "list_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
+      "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-fields", "method": "list_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {}},
       "when": [
         {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "fields"}}
       ],
@@ -292,7 +292,7 @@
       "repeat": {"over": {"path": "/captures/field-descriptors"}, "as": "descriptor", "steps": [
         {
           "name": "read-read-only-field",
-          "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read-only", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
+          "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-read-only", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
           "when": [
             {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": false}}
           ],
@@ -320,7 +320,7 @@
           "repeat": {"over": {"path": "/steps/field-samples/samples"}, "as": "sample", "steps": [
             {
               "name": "read-field-before-write",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read-before-write", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
+              "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-read-before-write", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
               "when": [
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
                 {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/value/kind"}}
@@ -332,7 +332,7 @@
             },
             {
               "name": "write-field",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}, "expected": {"$ref": "/steps/read-field-before-write/response/result/fields"}}},
+              "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-write", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}, "expected": {"$ref": "/steps/read-field-before-write/response/result/fields"}}},
               "when": [
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
                 {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/value/kind"}}
@@ -367,7 +367,7 @@
             },
             {
               "name": "read-field",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
+              "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-read", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
               "when": [
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
                 {"op": "contains", "actual": {"path": "/vars/descriptor/accepted_kinds"}, "expected": {"path": "/vars/sample/value/kind"}}
@@ -386,7 +386,7 @@
             },
             {
               "name": "advance-date-field",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-date", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
+              "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-advance-date", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
               "when": [
                 {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
@@ -400,7 +400,7 @@
             },
             {
               "name": "advance-local-datetime-field",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-local", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
+              "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-advance-local", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
               "when": [
                 {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
@@ -414,7 +414,7 @@
             },
             {
               "name": "advance-instant-field",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-instant", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
+              "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-advance-instant", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
               "when": [
                 {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
@@ -428,7 +428,7 @@
             },
             {
               "name": "advance-string-field",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-string", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
+              "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-advance-string", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
               "when": [
                 {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
@@ -442,7 +442,7 @@
             },
             {
               "name": "advance-string-set-field",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-advance-string-set", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
+              "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-advance-string-set", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/advance"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
               "when": [
                 {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
@@ -474,7 +474,7 @@
             },
             {
               "name": "reject-stale-field-write",
-              "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write-stale", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
+              "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-write-stale", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}, "expected": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"$ref": "/vars/sample/value"}}]}}},
               "when": [
                 {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
                 {"op": "contains", "actual": {"path": "/captures/description/capabilities"}, "expected": {"literal": "conditional_fields"}},
@@ -506,7 +506,7 @@
         },
         {
           "name": "read-field-before-null",
-          "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read-before-null", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
+          "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-read-before-null", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
           "when": [
             {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
             {"op": "equal", "actual": {"path": "/vars/descriptor/nullable"}, "expected": {"literal": true}}
@@ -518,7 +518,7 @@
         },
         {
           "name": "write-null-field",
-          "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-write-null", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"kind": "null"}}]}, "expected": {"$ref": "/steps/read-field-before-null/response/result/fields"}}},
+          "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-write-null", "method": "write_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "fields": {"$entries": [{"key": {"$ref": "/vars/descriptor/id"}, "value": {"kind": "null"}}]}, "expected": {"$ref": "/steps/read-field-before-null/response/result/fields"}}},
           "when": [
             {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
             {"op": "equal", "actual": {"path": "/vars/descriptor/nullable"}, "expected": {"literal": true}}
@@ -553,7 +553,7 @@
         },
         {
           "name": "read-null-field",
-          "request": {"protocol": "kata.connector.v1", "id": "transcript-optional-read-null", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
+          "request": {"protocol": "kata.connector.v2", "id": "transcript-optional-read-null", "method": "read_fields", "instance": {"$ref": "/fixture/invocation/instance"}, "settings": {"$ref": "/fixture/invocation/settings"}, "params": {"root_key": {"$ref": "/captures/root/key"}, "field_ids": [{"$ref": "/vars/descriptor/id"}]}},
           "when": [
             {"op": "equal", "actual": {"path": "/vars/descriptor/writable"}, "expected": {"literal": true}},
             {"op": "equal", "actual": {"path": "/vars/descriptor/nullable"}, "expected": {"literal": true}}

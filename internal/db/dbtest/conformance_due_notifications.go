@@ -484,5 +484,15 @@ func checkDueNotificationCandidates(t *testing.T, store db.Storage) error {
 			}
 		})
 	}
+	t.Run("zoned date at cutoff", func(t *testing.T) {
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "zoned date at cutoff", Author: "worker-a",
+			Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-09-17[Pacific/Kiritimati]"`)},
+		})
+		require.NoError(t, err)
+		ids, err := store.ListDueNotificationIssueIDs(ctx, time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC))
+		require.NoError(t, err)
+		assert.Contains(t, ids, issue.ID)
+	})
 	return nil
 }

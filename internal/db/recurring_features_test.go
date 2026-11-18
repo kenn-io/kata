@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -35,6 +36,40 @@ func TestRecurringPayloadFeatures(t *testing.T) {
 		if tc.required != "" {
 			require.ErrorIs(t, db.RequireEventFeatures("", features), db.ErrUnsupportedEventFeatures)
 		}
+	}
+}
+
+func TestZonedSchedulePayloadRequiresFeature(t *testing.T) {
+	for _, payload := range []string{
+		`{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}`,
+		`{"diff":{"deadline_on":{"to":"2026-01-15T10:00[Asia/Tokyo]"}}}`,
+	} {
+		features, err := db.PayloadRequiredFeatures("issue.metadata_updated", payload)
+		require.NoError(t, err)
+		require.ErrorIs(t, db.RequireEventFeatures("", features), db.ErrUnsupportedEventFeatures)
+	}
+}
+
+func TestZonedSchedulePushRequiresFeature(t *testing.T) {
+	_, required, err := db.FederationEventPayloadWireVersion("issue.created", jsontext.Value(`{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}`))
+	require.NoError(t, err)
+	require.ErrorIs(t, db.RequireEventFeatures("", required), db.ErrUnsupportedEventFeatures)
+}
+
+func TestMovedZonedScheduleRequiresFeature(t *testing.T) {
+	features, err := db.PayloadRequiredFeatures("issue.moved", `{"snapshot":{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}}`)
+	require.NoError(t, err)
+	require.ErrorIs(t, db.RequireEventFeatures(db.IssueMoveEventFeature, features), db.ErrUnsupportedEventFeatures)
+}
+
+func TestLegacyScheduleWriteRequiresFeature(t *testing.T) {
+	for _, payload := range []string{
+		`{"metadata":{"scheduled_on":"2026-01-15"}}`,
+		`{"diff":{"deadline_on":{"to":"2026-01-15T10:00"}}}`,
+	} {
+		required, err := db.FederationWriteRequiredFeatures("issue.metadata_updated", payload)
+		require.NoError(t, err)
+		require.ErrorIs(t, db.RequireEventFeatures("", required), db.ErrUnsupportedEventFeatures)
 	}
 }
 
@@ -80,6 +115,9 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	if strings.Contains(query, "SELECT EXISTS") {
 		return &featureProbeRows{presence: true}, nil
 	}
+	if strings.Contains(query, "SELECT i.metadata") {
+		return &featureProbeRows{empty: true}, nil
+	}
 	if strings.Contains(query, "'projection.job'") {
 		c.state.probeQueries++
 		return &featureProbeRows{}, nil
@@ -87,7 +125,7 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 	return nil, errors.New("unexpected feature probe query")
 }
 
-type featureProbeRows struct{ presence, seen bool }
+type featureProbeRows struct{ presence, seen, empty bool }
 
 func (r *featureProbeRows) Columns() []string {
 	if r.presence {
@@ -97,6 +135,9 @@ func (r *featureProbeRows) Columns() []string {
 }
 func (*featureProbeRows) Close() error { return nil }
 func (r *featureProbeRows) Next(values []driver.Value) error {
+	if r.empty {
+		return io.EOF
+	}
 	if r.seen {
 		if r.presence {
 			return io.EOF

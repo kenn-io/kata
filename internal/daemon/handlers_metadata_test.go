@@ -17,6 +17,7 @@ import (
 
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -186,7 +187,7 @@ func TestPatchMetadata_HappyPath_200(t *testing.T) {
 		patch   string // value inside `"patch": {...}`
 		expect  string // substring required in the decoded metadata blob
 	}{
-		{metadataSubjects()[0], `{"scheduled_on":"2026-05-20"}`, `"scheduled_on":"2026-05-20"`},
+		{metadataSubjects()[0], `{"scheduled_on":"2026-05-20"}`, `"scheduled_on":"2026-05-20[UTC]"`},
 		{metadataSubjects()[1], `{"area":"Personal"}`, `"area":"Personal"`},
 	}
 	for _, c := range cases {
@@ -207,6 +208,26 @@ func TestPatchMetadata_HappyPath_200(t *testing.T) {
 			assert.Contains(t, string(raw), `"changed":true`)
 		})
 	}
+}
+
+func TestPatchIssueScheduleKeepsZone(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	url, rev := metadataSubjects()[0].setup(t, env)
+	resp := doPostWithIfMatch(t, env, url, `{"actor":"tester","patch":{"scheduled_on":"2026-05-20T09:00","timezone":"Europe/Paris"}}`, fmt.Sprintf(`"rev-%d"`, rev))
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "%s", raw)
+	stored, _ := decodeMetadataEnvelope(t, raw, "issue")
+	assert.Contains(t, stored, `"scheduled_on":"2026-05-20T09:00[Europe/Paris]"`)
+	_, _, utc, present, err := metadata.ScheduleFieldInstant(stored, "scheduled_on", "UTC")
+	require.NoError(t, err)
+	require.True(t, present)
+	_, _, tokyo, present, err := metadata.ScheduleFieldInstant(stored, "scheduled_on", "Asia/Tokyo")
+	require.NoError(t, err)
+	require.True(t, present)
+	assert.Equal(t, time.Date(2026, 5, 20, 7, 0, 0, 0, time.UTC), utc)
+	assert.Equal(t, utc, tokyo)
 }
 
 // TestPatchMetadata_PresentEmptyIfMatch_400 pins that a present-but-empty

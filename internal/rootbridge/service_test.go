@@ -805,17 +805,18 @@ func TestResolveFieldConflictWritesOnlyTheSelectedSideAndClearsCandidates(t *tes
 			if use == "external" {
 				want = date("2026-08-22")
 			}
-			assert.Equal(t, want, decodeStoredFieldValue(t, state.Baseline))
+			assert.True(t, fieldValuesEqual(want, decodeStoredFieldValue(t, state.Baseline)))
 			if use == "kata" {
 				assert.Equal(t, beforeWrites+1, len(h.client.writeFieldCalls))
 			} else {
 				assert.Equal(t, beforeWrites, len(h.client.writeFieldCalls))
 			}
-			assert.Equal(t, want, h.client.fieldValues["start-date"])
+			assert.True(t, fieldValuesEqual(want, h.client.fieldValues["start-date"]))
 			issue, readErr := h.store.IssueByID(t.Context(), h.issue.ID)
 			require.NoError(t, readErr)
 			kataValue, readErr := fieldCodecs["scheduled_on"].ReadKata(issue)
 			require.NoError(t, readErr)
+			want.Timezone = "UTC"
 			assert.Equal(t, want, kataValue)
 			resolved := requireEventType(t, events, "issue.external_field_resolved")
 			assert.Equal(t, "operator", resolved.Actor)
@@ -940,8 +941,8 @@ func TestResolveFieldConflictAllowsCoordinatedLocalTimezoneTransition(t *testing
 	require.NoError(t, readErr)
 	values, readErr := metadataObject(issue.Metadata)
 	require.NoError(t, readErr)
-	assert.JSONEq(t, `"2026-08-22T09:30"`, string(values["scheduled_on"]))
-	assert.JSONEq(t, `"America/Los_Angeles"`, string(values["timezone"]))
+	assert.JSONEq(t, `"2026-08-22T09:30[America/Los_Angeles]"`, string(values["scheduled_on"]))
+	assert.NotContains(t, values, "timezone")
 
 	dueState, dueEvents, err := service.ResolveFieldConflict(
 		t.Context(), h.issue.ID, "deadline_on", "external", "operator",
@@ -954,8 +955,8 @@ func TestResolveFieldConflictAllowsCoordinatedLocalTimezoneTransition(t *testing
 	require.NoError(t, readErr)
 	values, readErr = metadataObject(issue.Metadata)
 	require.NoError(t, readErr)
-	assert.JSONEq(t, `"2026-08-22T10:30"`, string(values["deadline_on"]))
-	assert.JSONEq(t, `"America/Los_Angeles"`, string(values["timezone"]))
+	assert.JSONEq(t, `"2026-08-22T10:30[America/Los_Angeles]"`, string(values["deadline_on"]))
+	assert.NotContains(t, values, "timezone")
 }
 
 func TestResolveFieldConflictRequiresCurrentFieldsCapability(t *testing.T) {
@@ -1005,7 +1006,7 @@ func TestResolveFieldConflictBypassesFutureNextAttempt(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.False(t, state.Conflicted)
-	assert.Equal(t, date("2026-08-21"), decodeStoredFieldValue(t, state.Baseline))
+	assert.Equal(t, connector.FieldValue{Kind: "date", Value: "2026-08-21", Timezone: "UTC"}, decodeStoredFieldValue(t, state.Baseline))
 	assert.Contains(t, eventTypes(events), "issue.external_field_resolved")
 	binding, readErr := h.store.ExternalRootBindingByID(t.Context(), h.binding.ID)
 	require.NoError(t, readErr)
@@ -1073,7 +1074,7 @@ func TestResolveFieldConflictRejectsProviderDriftDuringWrite(t *testing.T) {
 	assert.Equal(t, date("2026-08-24"), h.client.fieldValues["start-date"])
 	state := h.fieldState(t, "scheduled_on")
 	assert.True(t, state.Conflicted)
-	assert.Equal(t, date("2026-08-21"), decodeStoredFieldValue(t, state.ConflictKata))
+	assert.Equal(t, connector.FieldValue{Kind: "date", Value: "2026-08-21", Timezone: "UTC"}, decodeStoredFieldValue(t, state.ConflictKata))
 	assert.Equal(t, date("2026-08-22"), decodeStoredFieldValue(t, state.ConflictExternal))
 	binding, readErr := h.store.ExternalRootBindingByID(t.Context(), h.binding.ID)
 	require.NoError(t, readErr)
@@ -1116,7 +1117,7 @@ func TestResolveFieldConflictRejectsDriftWithoutMutation(t *testing.T) {
 			assert.Equal(t, beforeIssue.Revision, afterIssue.Revision)
 			state := h.fieldState(t, "scheduled_on")
 			assert.True(t, state.Conflicted)
-			assert.Equal(t, date("2026-08-21"), decodeStoredFieldValue(t, state.ConflictKata))
+			assert.Equal(t, connector.FieldValue{Kind: "date", Value: "2026-08-21", Timezone: "UTC"}, decodeStoredFieldValue(t, state.ConflictKata))
 			assert.Equal(t, date("2026-08-22"), decodeStoredFieldValue(t, state.ConflictExternal))
 			binding, readErr := h.store.ExternalRootBindingByID(t.Context(), h.binding.ID)
 			require.NoError(t, readErr)
@@ -1216,7 +1217,7 @@ func TestResolveFieldConflictUsingExternalValueDoesNotDependOnProviderWrite(t *t
 	require.NoError(t, readErr)
 	value, readErr := fieldCodecs["scheduled_on"].ReadKata(issue)
 	require.NoError(t, readErr)
-	assert.Equal(t, date("2026-08-22"), value)
+	assert.Equal(t, connector.FieldValue{Kind: "date", Value: "2026-08-22", Timezone: "UTC"}, value)
 	binding, readErr := h.store.ExternalRootBindingByID(t.Context(), h.binding.ID)
 	require.NoError(t, readErr)
 	assert.Empty(t, binding.ClaimToken)

@@ -80,6 +80,9 @@ var mcpEventSubscriptionsMigrationSQL string
 //go:embed migrations/000051_event_issue_uid_id_index.up.sql
 var eventIssueUIDIDIndexMigrationSQL string
 
+//go:embed migrations/000052_issue_zones_index.up.sql
+var issueZonesIndexMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -142,6 +145,7 @@ var migrationAssets = []Migration{
 	{FromVersion: 48, ToVersion: 49, Name: "000049_cron_run_uid_index.up.sql", SQL: cronRunUIDIndexMigrationSQL},
 	{FromVersion: 49, ToVersion: 50, Name: "000050_mcp_event_subscriptions.up.sql", SQL: mcpEventSubscriptionsMigrationSQL},
 	{FromVersion: 50, ToVersion: 51, Name: "000051_event_issue_uid_id_index.up.sql", SQL: eventIssueUIDIDIndexMigrationSQL},
+	{FromVersion: 51, ToVersion: 52, Name: "000052_issue_zones_index.up.sql", SQL: issueZonesIndexMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres

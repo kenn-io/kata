@@ -167,7 +167,7 @@ func validateReadFieldsParams(params ReadFieldsParams) error {
 
 // ValidateWriteFieldsParams validates a field write. Expected values are
 // optional: when present they must cover every written field for a
-// compare-and-set write, and plain protocol-v1 requests without them stay
+// compare-and-set write, and plain protocol-v2 requests without them stay
 // valid.
 func ValidateWriteFieldsParams(params WriteFieldsParams) error {
 	if err := validateRootKey(params.RootKey); err != nil {

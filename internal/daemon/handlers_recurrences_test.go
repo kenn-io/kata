@@ -612,6 +612,7 @@ func TestPostRecurrenceAcceptedTimezoneProperty(t *testing.T) {
 }
 
 func TestPatchRecurrenceLocalAdvancement(t *testing.T) {
+	t.Setenv("TZ", "Europe/Paris")
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	p := seedProject(t, env, "example-project")
 	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Weekly review", Author: "tester"})
@@ -642,7 +643,7 @@ func TestPatchRecurrenceLocalAdvancement(t *testing.T) {
 	var metadata map[string]any
 	require.NoError(t, json.Unmarshal([]byte(next.Metadata), &metadata))
 	assert.Equal(t, "Local", metadata["timezone"])
-	assert.Equal(t, "2026-08-05", metadata["scheduled_on"])
+	assert.Equal(t, "2026-08-05[Europe/Paris]", metadata["scheduled_on"])
 	require.NotNil(t, current.NextOccurrenceKey)
 	assert.Equal(t, "2026-08-07", *current.NextOccurrenceKey)
 }

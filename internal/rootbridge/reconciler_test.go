@@ -748,7 +748,11 @@ func TestFieldReconcileInitialAndSteadyMatrix(t *testing.T) {
 				assert.Equal(t, 1, result.FieldConflicts)
 				state := h.fieldState(t, "scheduled_on")
 				assert.True(t, state.Conflicted)
-				assert.Equal(t, test.kata, decodeStoredFieldValue(t, state.ConflictKata))
+				wantKata := test.kata
+				if wantKata.Kind == fieldKindDate {
+					wantKata.Timezone = "UTC"
+				}
+				assert.Equal(t, wantKata, decodeStoredFieldValue(t, state.ConflictKata))
 				assert.Equal(t, test.external, decodeStoredFieldValue(t, state.ConflictExternal))
 				return
 			}
@@ -756,13 +760,18 @@ func TestFieldReconcileInitialAndSteadyMatrix(t *testing.T) {
 			assert.Zero(t, result.FieldConflicts)
 			state := h.fieldState(t, "scheduled_on")
 			assert.False(t, state.Conflicted)
-			assert.Equal(t, test.want, decodeStoredFieldValue(t, state.Baseline))
+			baseline := decodeStoredFieldValue(t, state.Baseline)
+			assert.True(t, fieldValuesEqual(test.want, baseline))
 			issue, readErr := h.store.IssueByID(t.Context(), h.issue.ID)
 			require.NoError(t, readErr)
 			kataValue, readErr := fieldCodecs["scheduled_on"].ReadKata(issue)
 			require.NoError(t, readErr)
-			assert.Equal(t, test.want, kataValue)
-			assert.Equal(t, test.want, h.client.fieldValues["start-date"])
+			wantKata := test.want
+			if wantKata.Kind == fieldKindDate {
+				wantKata.Timezone = "UTC"
+			}
+			assert.Equal(t, wantKata, kataValue)
+			assert.True(t, fieldValuesEqual(test.want, h.client.fieldValues["start-date"]))
 			assert.Equal(t, test.wantExtWrite, len(h.client.writeFieldCalls) == 1)
 			if test.wantExtWrite {
 				assert.Equal(t, map[string]connector.FieldValue{"start-date": test.external}, h.client.writeFieldCalls[0].Expected)
@@ -790,7 +799,7 @@ func TestFieldReconcileRejectsConcurrentLocalMetadataEdit(t *testing.T) {
 	require.NoError(t, readErr)
 	value, readErr := fieldCodecs["scheduled_on"].ReadKata(issue)
 	require.NoError(t, readErr)
-	assert.Equal(t, date("2026-08-22"), value)
+	assert.Equal(t, connector.FieldValue{Kind: "date", Value: "2026-08-22", Timezone: "UTC"}, value)
 	state := h.fieldState(t, "scheduled_on")
 	assert.Equal(t, date("2026-08-20"), decodeStoredFieldValue(t, state.Baseline))
 	assert.False(t, state.Conflicted)
@@ -924,7 +933,7 @@ func TestFieldReconcileDescriptorAndValueDriftBecomeSafeConflicts(t *testing.T) 
 			assert.Equal(t, 1, result.FieldConflicts)
 			state := h.fieldState(t, "scheduled_on")
 			assert.True(t, state.Conflicted)
-			assert.Equal(t, date("2026-08-21"), decodeStoredFieldValue(t, state.ConflictKata))
+			assert.Equal(t, connector.FieldValue{Kind: "date", Value: "2026-08-21", Timezone: "UTC"}, decodeStoredFieldValue(t, state.ConflictKata))
 			assert.Equal(t, date("2026-08-20"), decodeStoredFieldValue(t, state.ConflictExternal))
 			assert.NotContains(t, string(state.ConflictExternal), "untrusted-raw-value")
 			assert.Empty(t, h.client.writeFieldCalls)
@@ -1023,7 +1032,7 @@ func TestFieldReconcileLossyWriteReadbackDoesNotAdvanceBaseline(t *testing.T) {
 	state := h.fieldState(t, "scheduled_on")
 	assert.True(t, state.Conflicted)
 	assert.Empty(t, state.Baseline)
-	assert.Equal(t, date("2026-08-21"), decodeStoredFieldValue(t, state.ConflictKata))
+	assert.Equal(t, connector.FieldValue{Kind: "date", Value: "2026-08-21", Timezone: "UTC"}, decodeStoredFieldValue(t, state.ConflictKata))
 	assert.Equal(t, date("2026-08-22"), decodeStoredFieldValue(t, state.ConflictExternal))
 }
 
@@ -1111,7 +1120,7 @@ func TestFieldReconcilePreservesTimezoneAndRejectsIncompatibleLocalSiblings(t *t
 			require.NoError(t, err)
 			values, err := metadataObject(issue.Metadata)
 			require.NoError(t, err)
-			assert.JSONEq(t, `"America/Los_Angeles"`, string(values["timezone"]))
+			assert.JSONEq(t, `"America/New_York"`, string(values["timezone"]))
 		}
 	})
 
@@ -1128,9 +1137,17 @@ func TestFieldReconcilePreservesTimezoneAndRejectsIncompatibleLocalSiblings(t *t
 
 		result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
 		require.NoError(t, err)
-		assert.Equal(t, 1, result.FieldConflicts)
+		assert.Zero(t, result.FieldConflicts)
 		assert.False(t, h.fieldState(t, "scheduled_on").Conflicted)
-		assert.True(t, h.fieldState(t, "deadline_on").Conflicted)
+		assert.False(t, h.fieldState(t, "deadline_on").Conflicted)
+		issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
+		require.NoError(t, err)
+		start, err := fieldCodecs["scheduled_on"].ReadKata(issue)
+		require.NoError(t, err)
+		due, err := fieldCodecs["deadline_on"].ReadKata(issue)
+		require.NoError(t, err)
+		assert.Equal(t, h.client.fieldValues["start-date"], start)
+		assert.Equal(t, h.client.fieldValues["due-date"], due)
 	})
 
 	t.Run("two mapped local fields move to one new timezone together", func(t *testing.T) {
@@ -1164,9 +1181,9 @@ func TestFieldReconcilePreservesTimezoneAndRejectsIncompatibleLocalSiblings(t *t
 		require.NoError(t, readErr)
 		values, readErr := metadataObject(issue.Metadata)
 		require.NoError(t, readErr)
-		assert.JSONEq(t, `"2026-08-22T09:30"`, string(values["scheduled_on"]))
-		assert.JSONEq(t, `"2026-08-22T10:30"`, string(values["deadline_on"]))
-		assert.JSONEq(t, `"America/Los_Angeles"`, string(values["timezone"]))
+		assert.JSONEq(t, `"2026-08-22T09:30[America/Los_Angeles]"`, string(values["scheduled_on"]))
+		assert.JSONEq(t, `"2026-08-22T10:30[America/Los_Angeles]"`, string(values["deadline_on"]))
+		assert.NotContains(t, values, "timezone")
 		assert.Equal(t, newStart, decodeStoredFieldValue(t, h.fieldState(t, "scheduled_on").Baseline))
 		assert.Equal(t, newDue, decodeStoredFieldValue(t, h.fieldState(t, "deadline_on").Baseline))
 	})
@@ -1448,7 +1465,7 @@ func TestFieldReconcileCancellationAfterNativeProjectionPreservesEventAndFinaliz
 	require.NoError(t, readErr)
 	value, readErr := fieldCodecs["scheduled_on"].ReadKata(issue)
 	require.NoError(t, readErr)
-	assert.Equal(t, date("2026-08-21"), value)
+	assert.Equal(t, connector.FieldValue{Kind: "date", Value: "2026-08-21", Timezone: "UTC"}, value)
 }
 
 func TestReconcileSteadyCompleteDoesNotRestoreVerifierRemovedReviewLabel(t *testing.T) {

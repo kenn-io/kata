@@ -111,7 +111,7 @@ func TestTranscriptConditionalWritesFollowAdvertisedCapabilities(t *testing.T) {
 		"steps": map[string]any{},
 	}}
 	step := protocolTranscriptStep{Request: jsontext.Value(`{
-		"protocol":"kata.connector.v1",
+		"protocol":"kata.connector.v2",
 		"id":"conditional-write",
 		"method":"write_fields",
 		"instance":"example-instance",
@@ -315,7 +315,7 @@ func TestBrokenWireExchangeProbe(t *testing.T) {
 		var request connector.Request
 		if err := json.Unmarshal(raw, &request); err != nil {
 			if mode == "accept-malformed" {
-				return []byte(`{"protocol":"kata.connector.v1","id":"accepted","result":{}}` + "\n"), nil
+				return []byte(`{"protocol":"kata.connector.v2","id":"accepted","result":{}}` + "\n"), nil
 			}
 			return nil, err
 		}
@@ -369,9 +369,9 @@ func TestBrokenWireExchangeProbe(t *testing.T) {
 }
 
 func TestProtocolV1TranscriptFixturesAreCommitted(t *testing.T) {
-	entries, err := os.ReadDir("testdata/protocol-v1")
+	entries, err := os.ReadDir("testdata/protocol-v2")
 	if err != nil {
-		t.Fatalf("read protocol-v1 transcript fixtures: %v", err)
+		t.Fatalf("read protocol-v2 transcript fixtures: %v", err)
 	}
 	jsonFiles := 0
 	for _, entry := range entries {
@@ -380,20 +380,20 @@ func TestProtocolV1TranscriptFixturesAreCommitted(t *testing.T) {
 		}
 	}
 	if jsonFiles < 3 {
-		t.Fatalf("protocol-v1 transcript fixture count = %d, want at least 3", jsonFiles)
+		t.Fatalf("protocol-v2 transcript fixture count = %d, want at least 3", jsonFiles)
 	}
 }
 
 func TestProtocolV1TranscriptFixturesAreDeclarative(t *testing.T) {
-	entries, err := os.ReadDir("testdata/protocol-v1")
+	entries, err := os.ReadDir("testdata/protocol-v2")
 	if err != nil {
-		t.Fatalf("read protocol-v1 transcript fixtures: %v", err)
+		t.Fatalf("read protocol-v2 transcript fixtures: %v", err)
 	}
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		encoded, err := os.ReadFile("testdata/protocol-v1/" + entry.Name())
+		encoded, err := os.ReadFile("testdata/protocol-v2/" + entry.Name())
 		if err != nil {
 			t.Fatalf("read %s: %v", entry.Name(), err)
 		}

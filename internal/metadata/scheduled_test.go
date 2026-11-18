@@ -2,12 +2,70 @@ package metadata
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestStampScheduleZonesKeepsDateZoneOnEdit(t *testing.T) {
+	patch := map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-01-15T10:00"`), "deadline_on": jsontext.Value(`"2026-01-16"`)}
+	current := `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]","timezone":"Asia/Tokyo"}`
+	stamped, err := StampScheduleZones(patch, current, "UTC")
+	require.NoError(t, err)
+	assert.JSONEq(t, `"2026-01-15T10:00[Europe/Paris]"`, string(stamped["scheduled_on"]))
+	assert.JSONEq(t, `"2026-01-16[Asia/Tokyo]"`, string(stamped["deadline_on"]))
+}
+
+func TestStampScheduleZonesChoices(t *testing.T) {
+	for _, tc := range []struct {
+		name, patch, current, fallback, want string
+	}{
+		{"daemon fallback", `{"scheduled_on":"2026-01-15"}`, `{}`, "Europe/Paris", `{"scheduled_on":"2026-01-15[Europe/Paris]"}`},
+		{"UTC fallback", `{"deadline_on":"2026-01-15"}`, `{}`, "", `{"deadline_on":"2026-01-15[UTC]"}`},
+		{"patch timezone", `{"scheduled_on":"2026-01-15","timezone":"Asia/Tokyo"}`, `{"timezone":"Europe/Paris"}`, "UTC", `{"scheduled_on":"2026-01-15[Asia/Tokyo]","timezone":"Asia/Tokyo"}`},
+		{"explicit zone", `{"scheduled_on":"2026-01-15[Europe/Paris]"}`, `{}`, "UTC", `{"scheduled_on":"2026-01-15[Europe/Paris]"}`},
+		{"UTC instant", `{"scheduled_on":"2026-01-15T10:00:00Z"}`, `{}`, "UTC", `{"scheduled_on":"2026-01-15T10:00:00Z"}`},
+		{"clear", `{"scheduled_on":null}`, `{}`, "Local", `{"scheduled_on":null}`},
+		{"unchanged legacy", `{"scheduled_on":"2026-01-15"}`, `{"scheduled_on":"2026-01-15"}`, "UTC", `{"scheduled_on":"2026-01-15"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var patch map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal([]byte(tc.patch), &patch))
+			stamped, err := StampScheduleZones(patch, tc.current, tc.fallback)
+			require.NoError(t, err)
+			encoded, err := json.Marshal(stamped)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(encoded))
+		})
+	}
+	t.Setenv("TZ", "Europe/Paris")
+	for _, current := range []string{`{"timezone":"Local"}`, `{}`} {
+		patch := map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-01-15"`)}
+		if current == `{}` {
+			patch["timezone"] = jsontext.Value(`"Local"`)
+		}
+		stamped, err := StampScheduleZones(patch, current, "UTC")
+		require.NoError(t, err)
+		assert.JSONEq(t, `"2026-01-15[Europe/Paris]"`, string(stamped["scheduled_on"]))
+	}
+}
+
+func TestScheduleDateCarriesItsTimezone(t *testing.T) {
+	raw := `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]","deadline_on":"2026-01-15[Asia/Tokyo]","timezone":"America/New_York"}`
+	_, zone, instant, present, err := ScheduleFieldInstant(raw, "scheduled_on", "UTC")
+	require.NoError(t, err)
+	require.True(t, present)
+	assert.Equal(t, "Europe/Paris", zone)
+	assert.Equal(t, time.Date(2026, 1, 15, 8, 0, 0, 0, time.UTC), instant)
+	_, zone, instant, present, err = ScheduleFieldInstant(raw, "deadline_on", "UTC")
+	require.NoError(t, err)
+	require.True(t, present)
+	assert.Equal(t, "Asia/Tokyo", zone)
+	assert.Equal(t, time.Date(2026, 1, 14, 15, 0, 0, 0, time.UTC), instant)
+}
 
 func TestScheduledOnDueDateUsesIssueTimezone(t *testing.T) {
 	now := time.Date(2026, 9, 1, 0, 30, 0, 0, time.UTC)

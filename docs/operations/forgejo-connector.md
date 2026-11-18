@@ -10,7 +10,7 @@ Bind an existing Forgejo issue to one Kata issue with the connector included in
 the Kata binary. Forgejo owns its title, body, and human discussion. Kata owns
 agent work, child issues, dependencies, and verified completion.
 
-The connector uses `kata.connector.v1` and needs no Python installation. It is
+The connector uses `kata.connector.v2` and needs no Python installation. It is
 separate from [GitHub bulk sync](github-sync.md): a bridge shares one selected
 root and leaves its Kata children private.
 

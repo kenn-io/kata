@@ -318,7 +318,9 @@ attacker. It is not the production private-network posture.
 ## Upgrade ceremony
 
 Until a release explicitly documents an online migration, treat every schema
-upgrade as an offline operation:
+upgrade as an offline operation. For schema 52, upgrade every daemon sharing
+the database before restarting any of them. Older daemons cannot read dates
+saved with a zone name.
 
 1. Stop every daemon or scale all replicas to zero. The migration advisory lock
    serializes migrators; it does not quiesce ordinary writes from an old binary.

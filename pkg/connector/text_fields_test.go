@@ -55,7 +55,7 @@ func TestServeOneAcceptsPortableTextFields(t *testing.T) {
 	for _, value := range []string{`{"kind":"string","value":"  café\n東京  "}`, `{"kind":"string"}`, `{"kind":"string_set","values":["","a","東京"]}`, `{"kind":"string_set"}`} {
 		handler := &writeFieldsCallHandler{}
 		var output bytes.Buffer
-		err := ServeOne(t.Context(), bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"text","method":"write_fields","instance":"example-instance","settings":{},"params":{"root_key":"root-1","fields":{"field-1":`+value+`}}}`), &output, handler)
+		err := ServeOne(t.Context(), bytes.NewBufferString(`{"protocol":"kata.connector.v2","id":"text","method":"write_fields","instance":"example-instance","settings":{},"params":{"root_key":"root-1","fields":{"field-1":`+value+`}}}`), &output, handler)
 		require.NoError(t, err)
 		require.True(t, handler.called)
 	}
@@ -94,7 +94,7 @@ func TestServeOneRejectsMalformedPortableFields(t *testing.T) {
 			}
 			handler := &writeFieldsCallHandler{}
 			var output bytes.Buffer
-			err := ServeOne(t.Context(), bytes.NewBufferString(`{"protocol":"kata.connector.v1","id":"bad-text","method":"write_fields","instance":"example-instance","settings":{},"params":{"root_key":"root-1",`+payload+`}}`), &output, handler)
+			err := ServeOne(t.Context(), bytes.NewBufferString(`{"protocol":"kata.connector.v2","id":"bad-text","method":"write_fields","instance":"example-instance","settings":{},"params":{"root_key":"root-1",`+payload+`}}`), &output, handler)
 			require.Error(t, err)
 			require.False(t, handler.called)
 			require.Empty(t, output.Bytes())

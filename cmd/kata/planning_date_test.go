@@ -14,7 +14,7 @@ func TestDeadlineSetsTimedDeadlineAndClearsIt(t *testing.T) {
 	out := runCLI(t, env, dir, "deadline", ref, "2026-09-01T09:30")
 	assert.Contains(t, out, "deadline_on")
 	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
-	require.JSONEq(t, `{"deadline_on":"2026-09-01T09:30"}`, string(issue.Issue.Metadata))
+	require.JSONEq(t, `{"deadline_on":"2026-09-01T09:30[UTC]"}`, string(issue.Issue.Metadata))
 
 	out = runCLI(t, env, dir, "deadline", ref, "-")
 	assert.Contains(t, out, "deadline_on")
@@ -47,7 +47,7 @@ func TestDeadlineHonorsIfMatch(t *testing.T) {
 
 	runCLI(t, env, dir, "deadline", "--if-match", "1", ref, "2026-09-01")
 	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
-	require.JSONEq(t, `{"deadline_on":"2026-09-01"}`, string(issue.Issue.Metadata))
+	require.JSONEq(t, `{"deadline_on":"2026-09-01[UTC]"}`, string(issue.Issue.Metadata))
 }
 
 func TestScheduleSetsTimedGateAndClearsIt(t *testing.T) {
@@ -57,7 +57,7 @@ func TestScheduleSetsTimedGateAndClearsIt(t *testing.T) {
 	out := runCLI(t, env, dir, "schedule", ref, "2026-09-01T09:30")
 	assert.Contains(t, out, "scheduled_on")
 	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
-	require.JSONEq(t, `{"scheduled_on":"2026-09-01T09:30"}`, string(issue.Issue.Metadata))
+	require.JSONEq(t, `{"scheduled_on":"2026-09-01T09:30[UTC]"}`, string(issue.Issue.Metadata))
 
 	out = runCLI(t, env, dir, "schedule", ref, "-")
 	assert.Contains(t, out, "scheduled_on")
@@ -76,5 +76,5 @@ func TestScheduleHonorsIfMatch(t *testing.T) {
 
 	runCLI(t, env, dir, "schedule", "--if-match", "1", ref, "2026-09-01")
 	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
-	require.JSONEq(t, `{"scheduled_on":"2026-09-01"}`, string(issue.Issue.Metadata))
+	require.JSONEq(t, `{"scheduled_on":"2026-09-01[UTC]"}`, string(issue.Issue.Metadata))
 }

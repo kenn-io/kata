@@ -197,6 +197,41 @@ describe('IssueProperties', () => {
     expect(onSetPriority).toHaveBeenCalledWith('issue-1', 1)
   })
 
+  it('moves a zoned scheduled date to the picked day at its saved time and zone', async () => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2026-08-20',
+        metadata: { scheduled_on: '2026-08-20T09:00[Europe/Paris]' },
+      }),
+      onPatchMetadata,
+    })
+    expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toContain('Aug 20')
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Aug 21, 2026/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
+      scheduled_on: '2026-08-21T09:00[Europe/Paris]',
+    })
+  })
+
+  it('moves a zoned due date to the picked day at its saved time and zone', async () => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({
+        deadline_on_date: '2026-08-20',
+        metadata: { deadline_on: '2026-08-20T17:30:15[America/New_York]' },
+      }),
+      onPatchMetadata,
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit due date' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Due:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Aug 18, 2026/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
+      deadline_on: '2026-08-18T17:30:15[America/New_York]',
+    })
+  })
+
   it.each([
     ['UTC instant', '2026-09-01T00:30:00Z'],
     ['local time', '2026-09-01T09:00'],

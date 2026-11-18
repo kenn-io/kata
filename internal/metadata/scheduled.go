@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"go.kenn.io/kata/internal/recurrence"
 )
 
 type scheduledOnKind int
@@ -25,6 +27,67 @@ type scheduleMetadata struct {
 	ScheduledOn *string `json:"scheduled_on"`
 	DeadlineOn  *string `json:"deadline_on"`
 	Timezone    string  `json:"timezone"`
+}
+
+// StampScheduleZones records the zone of each newly written civil date.
+func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone string) (map[string]jsontext.Value, error) {
+	old := map[string]jsontext.Value{}
+	if current != "" {
+		if err := json.Unmarshal([]byte(current), &old); err != nil {
+			return nil, err
+		}
+	}
+	result := make(map[string]jsontext.Value, len(patch))
+	for key, value := range patch {
+		result[key] = value
+	}
+	for _, key := range []string{"scheduled_on", "deadline_on"} {
+		raw, ok := patch[key]
+		if !ok || string(raw) == "null" {
+			continue
+		}
+		var value, previous string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidValue, err)
+		}
+		kind, _, _, err := classifyScheduledOn(value)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidValue, err)
+		}
+		_ = json.Unmarshal(old[key], &previous)
+		_, explicit := splitScheduleZone(value)
+		if kind == scheduledOnInstant || explicit != "" || value == previous {
+			continue
+		}
+		_, zone := splitScheduleZone(previous)
+		if zone == "" {
+			_ = json.Unmarshal(patch["timezone"], &zone)
+		}
+		if zone == "" {
+			_ = json.Unmarshal(old["timezone"], &zone)
+		}
+		if zone == "" {
+			zone = defaultZone
+		}
+		if zone == "" {
+			zone = "UTC"
+		}
+		if zone == "Local" {
+			zone = recurrence.LocalZone("/etc/localtime")
+			if zone == "" {
+				return nil, fmt.Errorf("%w: schedule timezone Local is not portable; set timezone to a named zone", ErrInvalidValue)
+			}
+		}
+		value += "[" + zone + "]"
+		if _, _, _, err := classifyScheduledOn(value); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidValue, err)
+		}
+		result[key], err = json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }
 
 // ScheduleDueCutoff returns a byte-order upper bound for dates that may be due.
@@ -111,14 +174,17 @@ func ScheduleFieldInstant(raw, field, defaultTimezone string) (value, timezone s
 	if kind == scheduledOnInstant {
 		return value, "UTC", instant.UTC(), true, nil
 	}
-	location, err := loadScheduleLocation(values.Timezone, defaultTimezone)
+	wall, zone := splitScheduleZone(value)
+	if zone == "" {
+		zone = values.Timezone
+	}
+	location, err := loadScheduleLocation(zone, defaultTimezone)
 	if err != nil {
 		return
 	}
 	timezone = location.String()
-	wall := value
 	if kind == scheduledOnDate {
-		wall, layout = value+"T00:00", localMinuteLayout
+		wall, layout = wall+"T00:00", localMinuteLayout
 	}
 	at, err = resolveLocalSchedule(wall, layout, location)
 	at = at.UTC()
@@ -131,6 +197,11 @@ func scheduleValueDue(value, issueTimezone string, now time.Time, defaultTimezon
 		return false, err
 	}
 	if kind == scheduledOnDate || kind == scheduledOnLocalTime {
+		var zone string
+		value, zone = splitScheduleZone(value)
+		if zone != "" {
+			issueTimezone = zone
+		}
 		location, err := loadScheduleLocation(issueTimezone, defaultTimezone)
 		if err != nil {
 			return false, err
@@ -199,6 +270,10 @@ func CalendarDate(
 	kind, layout, instant, err := classifyScheduledOn(scheduleValue)
 	if err != nil {
 		return "", false, err
+	}
+	scheduleValue, zone := splitScheduleZone(scheduleValue)
+	if zone != "" {
+		issueTimezone = zone
 	}
 	if kind == scheduledOnDate {
 		return scheduleValue, true, nil
@@ -347,6 +422,19 @@ func wallClock(instant time.Time, location *time.Location) time.Time {
 }
 
 func classifyScheduledOn(value string) (scheduledOnKind, string, time.Time, error) {
+	wall, zone := splitScheduleZone(value)
+	if zone != "" {
+		if zone == "Local" {
+			return 0, "", time.Time{}, fmt.Errorf("schedule timezone Local is not portable; set timezone to a named zone")
+		}
+		if _, err := time.LoadLocation(zone); err != nil {
+			return 0, "", time.Time{}, fmt.Errorf("load schedule timezone %q: %w", zone, err)
+		}
+		if strings.HasSuffix(wall, "Z") {
+			return 0, "", time.Time{}, fmt.Errorf("UTC instant cannot have a schedule timezone")
+		}
+		value = wall
+	}
 	if _, err := time.Parse(time.DateOnly, value); err == nil {
 		return scheduledOnDate, time.DateOnly, time.Time{}, nil
 	}
@@ -364,4 +452,13 @@ func classifyScheduledOn(value string) (scheduledOnKind, string, time.Time, erro
 		"scheduled_on %q must match YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or RFC 3339 UTC with Z",
 		value,
 	)
+}
+
+func splitScheduleZone(value string) (string, string) {
+	if strings.HasSuffix(value, "]") {
+		if i := strings.LastIndexByte(value, '['); i >= 0 && i < len(value)-2 {
+			return value[:i], value[i+1 : len(value)-1]
+		}
+	}
+	return value, ""
 }

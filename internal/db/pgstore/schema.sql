@@ -145,6 +145,7 @@ CREATE TABLE issues (
   CHECK (short_id = lower(substr(uid, 27 - length(short_id), length(short_id))))
 );
 CREATE INDEX idx_issues_uid_prefix ON issues(uid text_pattern_ops);
+CREATE INDEX idx_issues_zone_candidates ON issues(project_id) WHERE ((json(metadata) ->> 'scheduled_on') LIKE '%]' OR (json(metadata) ->> 'deadline_on') LIKE '%]');
 CREATE INDEX idx_issues_project_uid_prefix ON issues(project_id, uid text_pattern_ops);
 CREATE INDEX idx_issues_project_status_updated
   ON issues(project_id, status, updated_at DESC) WHERE deleted_at IS NULL;

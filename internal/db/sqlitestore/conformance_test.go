@@ -136,6 +136,22 @@ hlc_physical_ms,hlc_counter,content_hash
 	})
 }
 
+func TestProjectZonedDateRequiresFeature(t *testing.T) {
+	store, err := testfix.OpenSQLite(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.CreateProject(t.Context(), "zone-project")
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Scheduled", Author: "worker-a",
+		Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-01-15[Europe/Paris]"`)},
+	})
+	require.NoError(t, err)
+	features, err := db.ProjectRequiredEventFeatures(t.Context(), store, project.UID)
+	require.NoError(t, err)
+	require.ErrorIs(t, db.RequireEventFeatures("", features), db.ErrUnsupportedEventFeatures)
+}
+
 // installRelayAckRowCounter counts, with a real row trigger, every outbox row
 // that an acknowledgement UPDATE matches, including rows whose value does not
 // change.

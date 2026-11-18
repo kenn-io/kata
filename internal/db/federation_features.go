@@ -18,6 +18,8 @@ const CronEventFeature = "cron_v1"
 // IssueMoveEventFeature identifies support for moving issues between projects.
 const IssueMoveEventFeature = "issue_move_v1"
 
+const IssueDateZoneEventFeature = "issue_date_zone_v1"
+
 // RepeatedAdoptionEventFeature identifies a peer that understands a repeated
 // adoption. A spoke with it deletes its own adoption snapshot when the hub
 // already held the issue, and a hub accepts a repeated adoption snapshot only
@@ -26,7 +28,7 @@ const IssueMoveEventFeature = "issue_move_v1"
 const RepeatedAdoptionEventFeature = "repeated_adoption_v1"
 
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature + "," + IssueDateZoneEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -61,7 +63,77 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
 	}
+	zoned, err := payloadHasZonedDate(kind, payload)
+	if err != nil {
+		return "", err
+	}
+	if zoned {
+		required = MergeEventFeatures(required, IssueDateZoneEventFeature)
+	}
 	return required, nil
+}
+
+// FederationWriteRequiredFeatures fences peers that cannot preserve date zones.
+func FederationWriteRequiredFeatures(kind, payload string) (string, error) {
+	required, err := PayloadRequiredFeatures(kind, payload)
+	if err != nil || (!strings.HasPrefix(kind, "issue.") && kind != "projection.issue") {
+		return required, err
+	}
+	if payload == "" {
+		payload = "{}"
+	}
+	var body struct {
+		Metadata map[string]jsontext.Value `json:"metadata"`
+		Diff     map[string]jsontext.Value `json:"diff"`
+		Snapshot jsontext.Value            `json:"snapshot"`
+	}
+	if err := json.Unmarshal([]byte(payload), &body); err != nil {
+		return "", err
+	}
+	if kind == "issue.moved" && len(body.Snapshot) > 0 {
+		inner, err := FederationWriteRequiredFeatures("issue.snapshot", string(body.Snapshot))
+		return MergeEventFeatures(required, inner), err
+	}
+	for _, key := range []string{"scheduled_on", "deadline_on"} {
+		if _, ok := body.Metadata[key]; ok {
+			return MergeEventFeatures(required, IssueDateZoneEventFeature), nil
+		}
+		if _, ok := body.Diff[key]; ok {
+			return MergeEventFeatures(required, IssueDateZoneEventFeature), nil
+		}
+	}
+	return required, nil
+}
+
+func payloadHasZonedDate(kind, payload string) (bool, error) {
+	if !strings.HasPrefix(kind, "issue.") && kind != "projection.issue" {
+		return false, nil
+	}
+	if payload == "" {
+		payload = "{}"
+	}
+	var body struct {
+		Metadata map[string]jsontext.Value `json:"metadata"`
+		Diff     map[string]struct {
+			To jsontext.Value `json:"to"`
+		} `json:"diff"`
+		Snapshot jsontext.Value `json:"snapshot"`
+	}
+	if err := json.Unmarshal([]byte(payload), &body); err != nil {
+		return false, err
+	}
+	if kind == "issue.moved" && len(body.Snapshot) > 0 {
+		return payloadHasZonedDate("issue.snapshot", string(body.Snapshot))
+	}
+	for _, key := range []string{"scheduled_on", "deadline_on"} {
+		for _, raw := range []jsontext.Value{body.Metadata[key], body.Diff[key].To} {
+			var value string
+			if len(raw) > 0 && json.Unmarshal(raw, &value) == nil && strings.HasSuffix(value, "]") {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // payloadHasNativeRecurringState identifies hub-owned state independently of
@@ -185,6 +257,33 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		return "", err
 	}
 	required := ""
+	rows, err := q.QueryContext(ctx, `SELECT i.metadata FROM issues i JOIN projects p ON p.id=i.project_id WHERE p.uid=$1 AND ((json(i.metadata) ->> 'scheduled_on') LIKE '%]' OR (json(i.metadata) ->> 'deadline_on') LIKE '%]')`, projectUID)
+	if err != nil {
+		return "", err
+	}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			_ = rows.Close()
+			return "", err
+		}
+		zoned, err := payloadHasZonedDate("issue.created", `{"metadata":`+raw+`}`)
+		if err != nil {
+			_ = rows.Close()
+			return "", err
+		}
+		if zoned {
+			required = MergeEventFeatures(required, IssueDateZoneEventFeature)
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return "", err
+	}
+	if err := rows.Close(); err != nil {
+		return "", err
+	}
 	if issueMoved {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
 	}

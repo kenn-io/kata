@@ -23,7 +23,8 @@ func newDeadlineCmd() *cobra.Command {
 	cmd.Flags().StringVar(&ifMatch, "if-match", "", "expected issue revision (N or rev-N)")
 	cmd.Long = `Set deadline_on. A deadline does not park the issue; use kata schedule for that.
 "-" clears it. Formats: YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or RFC 3339
-UTC ending in Z. Relative words like "monday" are rejected; compute the date.
+UTC ending in Z. Add [Zone] to a date or local time to choose its IANA zone.
+Relative words like "monday" are rejected; compute the date.
 When it is reached, the owner (or author if unowned) gets an inbox request.`
 	cmd.Example = `  kata deadline abc4 2026-11-15 --agent
   kata deadline abc4 - --agent`
@@ -55,7 +56,8 @@ func newScheduleCmd() *cobra.Command {
 kata next. "-" clears it. For no date at all: kata meta set <ref> someday
 true --json-value.
 Formats: YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or RFC 3339 UTC ending
-in Z. Relative words like "monday" are rejected; compute the date.
+in Z. Add [Zone] to a date or local time to choose its IANA zone. Relative
+words like "monday" are rejected; compute the date.
 When it is reached, the owner (or author if unowned) gets an inbox request.
 
 --repeat '<rrule>' makes the issue the first occurrence of a recurrence that
