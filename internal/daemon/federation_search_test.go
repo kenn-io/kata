@@ -50,7 +50,9 @@ func newFederationSearchHub(t *testing.T) (*testenv.Env, *vector.Index, db.Proje
 	idx, err := vector.Open(ctx, filepath.Join(t.TempDir(), "vectors.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, idx.Close()) })
-	hub := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Embedder, cfg.VectorIndex = emb, idx })
+	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{Origin: "https://tasks.example", InstanceID: "hub"})
+	require.NoError(t, err)
+	hub := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Embedder, cfg.VectorIndex, cfg.WebSessions = emb, idx, manager })
 	project, issue := createClaimHubIssue(t, hub)
 	_, err = idx.RefreshMirror(ctx, hub.DB)
 	require.NoError(t, err)
@@ -181,7 +183,7 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 		seen[hit.Issue.UID] = true
 		if hit.Issue.UID == unpulled.UID {
 			require.Equal(t, unpulled.UID, hit.Issue.ShortID)
-			require.Empty(t, hit.WebURL)
+			require.Equal(t, "https://tasks.example/kata?issue="+unpulled.UID+"#direct=1", hit.WebURL)
 		}
 	}
 	require.True(t, seen[issue.UID])
@@ -279,6 +281,23 @@ func TestDirectSpokeSearchUsesHubResults(t *testing.T) {
 	require.True(t, foundUIDs[issue.UID])
 	require.True(t, foundUIDs[unpulled.UID])
 	require.True(t, foundUIDs[localIssue.UID])
+	failingHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":503,"error":{"code":"unavailable","message":"hub search unavailable"}}`))
+	}))
+	t.Cleanup(failingHub.Close)
+	setClaimBindingHubURL(t, spoke, replica.ID, failingHub.URL)
+	result, err = configuredSession.CallTool(ctx, &sdkmcp.CallToolParams{Name: "kata.search", Arguments: map[string]any{"query": "concept", "mode": "semantic"}})
+	require.NoError(t, err)
+	require.False(t, result.IsError, "%+v", result.Content)
+	output = result.StructuredContent.(map[string]any)
+	hits = output["results"].([]any)
+	require.Len(t, hits, 1)
+	require.Equal(t, localIssue.UID, hits[0].(map[string]any)["issue"].(map[string]any)["uid"])
+	require.Equal(t, true, output["degraded"])
+	require.Equal(t, false, output["complete"])
+	require.Contains(t, output["degraded_reason"], replica.Name+":")
+	require.Contains(t, output["degraded_reason"], "hub search unavailable")
 }
 
 func TestDirectSpokeSearchReportsUnavailableHub(t *testing.T) {

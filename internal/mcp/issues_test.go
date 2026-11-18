@@ -124,8 +124,8 @@ func TestSearchFanoutWhenOneProjectFails(t *testing.T) {
 		empty    bool
 	}{
 		{name: "local unavailable", status: 503, code: "unavailable", message: "vector index unavailable", retained: true},
-		{name: "hub search failed", status: 503, code: "hub_search_failed", message: "invalid hub search response"},
-		{name: "hub unavailable", status: 503, code: "hub_unreachable", message: "hub unreachable: connection refused"},
+		{name: "hub search failed", status: 503, code: "hub_search_failed", message: "invalid hub search response", retained: true},
+		{name: "hub unavailable", status: 503, code: "hub_unreachable", message: "hub unreachable: connection refused", retained: true},
 		{name: "retained semantic", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, retained: true},
 		{name: "retained hybrid", status: 400, message: `mode "hybrid" is unavailable: embeddings are not configured`, retained: true},
 		{name: "empty successful project", status: 400, message: `mode "semantic" is unavailable: embeddings are not configured`, retained: true, empty: true},

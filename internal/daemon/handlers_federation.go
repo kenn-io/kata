@@ -146,7 +146,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out := &api.FederationSearchResponse{}
 		out.Body.Hits = make([]api.FederationSearchHit, 0, len(res.Hits))
 		for _, hit := range res.Hits {
-			out.Body.Hits = append(out.Body.Hits, api.FederationSearchHit{Issue: hit.Issue, Score: hit.Score})
+			out.Body.Hits = append(out.Body.Hits, api.FederationSearchHit{Issue: hit.Issue, Score: hit.Score, WebURL: issueWebURL(cfg, hit.Issue.UID)})
 		}
 		out.Body.Bounded = res.Degraded
 		return out, nil

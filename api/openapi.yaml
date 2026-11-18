@@ -2967,6 +2967,8 @@ components:
         score:
           format: double
           type: number
+        web_url:
+          type: string
       required:
         - issue
         - score

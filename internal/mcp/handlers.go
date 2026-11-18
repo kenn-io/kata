@@ -123,7 +123,7 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 				},
 			})
 			searches[index] = projectSearch{response: response, err: searchErr}
-			if searchErr != nil && !localSearchUnavailable(searchErr, input.Mode) {
+			if searchErr != nil && !searchUnavailable(searchErr, input.Mode) {
 				return fmt.Errorf("search project %q: %w", projects[index].Name, searchErr)
 			}
 			return nil
@@ -227,13 +227,16 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	}, nil
 }
 
-func localSearchUnavailable(err error, mode string) bool {
+func searchUnavailable(err error, mode string) bool {
 	envelope, ok := errors.AsType[generated.ErrorEnvelope](err)
 	if !ok {
 		return false
 	}
-	if isHTTPStatus(err, http.StatusServiceUnavailable) && envelope.Status == http.StatusServiceUnavailable && envelope.ErrorData.Code == "unavailable" {
-		return true
+	if isHTTPStatus(err, http.StatusServiceUnavailable) && envelope.Status == http.StatusServiceUnavailable {
+		switch envelope.ErrorData.Code {
+		case "unavailable", "hub_search_failed", "hub_unreachable":
+			return true
+		}
 	}
 	return (mode == "semantic" || mode == "hybrid") && isHTTPStatus(err, http.StatusBadRequest) && envelope.Status == http.StatusBadRequest && envelope.ErrorData.Code == "validation" && envelope.ErrorData.Message == fmt.Sprintf("mode %q is unavailable: embeddings are not configured", mode)
 }
