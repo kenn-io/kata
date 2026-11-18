@@ -697,7 +697,7 @@ func (d *Store) materializeNext(
 		return db.MaterializeNextOut{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	out, err := d.materializeNextTx(ctx, tx, recurrenceID, afterKey, actor)
+	out, err := d.materializeNextTx(ctx, tx, recurrenceID, afterKey, actor, "")
 	if err != nil {
 		return db.MaterializeNextOut{}, err
 	}
@@ -717,7 +717,7 @@ func (d *Store) materializeNext(
 // next_occurrence_key is set to NULL — consumers derive "exhausted" state
 // from that NULL rather than a dedicated event.
 func (d *Store) materializeNextTx(
-	ctx context.Context, tx *sql.Tx, recurrenceID int64, afterKey, actor string,
+	ctx context.Context, tx *sql.Tx, recurrenceID int64, afterKey, actor, defaultTimezone string,
 ) (db.MaterializeNextOut, error) {
 	var out db.MaterializeNextOut
 
@@ -778,7 +778,7 @@ func (d *Store) materializeNextTx(
 	nextKey := *next
 
 	issueMetadata, err := db.ComposeRecurrenceIssueMetadata(
-		jsontext.Value(r.TemplateMetadata), nextKey, r.Timezone,
+		jsontext.Value(r.TemplateMetadata), nextKey, r.Timezone, defaultTimezone,
 	)
 	if err != nil {
 		return out, fmt.Errorf("compose recurrence issue metadata: %w", err)

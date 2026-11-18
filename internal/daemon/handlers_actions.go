@@ -221,7 +221,8 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			events = nil
 			updated, events, changed, err = cfg.DB.CloseIssueGuarded(ctx, db.CloseIssueParams{
 				IssueID: issue.ID, ExpectedProjectID: issue.ProjectID,
-				Reason: in.Body.Reason, Actor: actor,
+				DefaultTimezone: cfg.DefaultTimezone,
+				Reason:          in.Body.Reason, Actor: actor,
 				Message: in.Body.Message, Evidence: dbEvidence, IfMatchRev: ifMatchRev,
 				Transcript:     recordedTranscript,
 				IdempotencyKey: in.IdempotencyKey, IdempotencyFingerprint: idempotencyFingerprint,

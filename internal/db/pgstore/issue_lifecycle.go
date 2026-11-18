@@ -463,7 +463,7 @@ func (s *Store) closeIssueWithEvents(
 		}
 		if p.Reason == "done" && current.RecurrenceID != nil && current.OccurrenceKey != nil {
 			if _, err := s.materializeNextTx(
-				ctx, tx, *current.RecurrenceID, *current.OccurrenceKey, p.Actor,
+				ctx, tx, *current.RecurrenceID, *current.OccurrenceKey, p.Actor, p.DefaultTimezone,
 			); err != nil {
 				return fmt.Errorf("materialize next recurrence: %w", err)
 			}

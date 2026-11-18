@@ -53,8 +53,9 @@ func ComposeRecurrenceIssueMetadata(
 	templateMetadata jsontext.Value,
 	occurrenceKey string,
 	timezone string,
+	defaultTimezone string,
 ) (jsontext.Value, error) {
-	return composeRecurrenceIssueMetadata(templateMetadata, occurrenceKey, timezone, timezone, true)
+	return composeRecurrenceIssueMetadata(templateMetadata, occurrenceKey, timezone, defaultTimezone, true)
 }
 
 // ComposeExistingRecurrenceIssueMetadata updates recurrence fields on an
@@ -80,11 +81,7 @@ func composeRecurrenceIssueMetadata(
 		return nil, err
 	}
 	if deadline, ok := object["deadline_on"]; ok {
-		current := string(metadataValue)
-		if template {
-			current = ""
-		}
-		stamped, err := metadata.StampScheduleZones(map[string]jsontext.Value{"deadline_on": deadline}, current, defaultTimezone)
+		stamped, err := metadata.StampScheduleZones(map[string]jsontext.Value{"deadline_on": deadline}, string(metadataValue), defaultTimezone)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidRecurrence, err)
 		}
