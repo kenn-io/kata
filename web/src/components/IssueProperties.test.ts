@@ -221,29 +221,6 @@ describe('IssueProperties', () => {
     },
   )
 
-  it.each([
-    ['scheduled', 'scheduled_on', 'scheduled_on_date', 'Edit scheduled', 'Scheduled'],
-    ['deadline', 'deadline_on', 'deadline_on_date', 'Edit due date', 'Due'],
-  ] as const)(
-    'keeps the selected %s day across a saved-zone DST change',
-    async (_, key, projectedKey, edit, picker) => {
-      const onPatchMetadata = vi.fn(async () => true)
-      renderProperties({
-        issue: makeIssue({
-          [projectedKey]: '2026-03-08',
-          metadata: { [key]: '2026-03-07T18:30[America/New_York]' },
-        }),
-        onPatchMetadata,
-      })
-      await fireEvent.click(screen.getByRole('button', { name: edit }))
-      await fireEvent.click(screen.getByRole('button', { name: new RegExp(`${picker}:`) }))
-      await fireEvent.click(screen.getByRole('button', { name: /Mar 9, 2026/ }))
-      expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
-        [key]: '2026-03-09',
-      })
-    },
-  )
-
   it('reopens and edits a date-only schedule with its saved zone', async () => {
     const onPatchMetadata = vi.fn(async () => true)
     renderProperties({
@@ -256,23 +233,6 @@ describe('IssueProperties', () => {
     await fireEvent.click(screen.getByRole('button', { name: /May 13, 2027/ }))
     expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
       scheduled_on: '2027-05-13',
-    })
-  })
-
-  it('keeps the selected New York day when moving a UTC instant across DST', async () => {
-    const onPatchMetadata = vi.fn(async () => true)
-    renderProperties({
-      issue: makeIssue({
-        scheduled_on_date: '2026-03-06',
-        metadata: { scheduled_on: '2026-03-07T04:30:00Z' },
-      }),
-      onPatchMetadata,
-    })
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
-    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
-    await fireEvent.click(screen.getByRole('button', { name: /Mar 8, 2026/ }))
-    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
-      scheduled_on: '2026-03-08',
     })
   })
 

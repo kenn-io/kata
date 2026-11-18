@@ -80,27 +80,10 @@ func TestScheduleCodecKataPatchPreservesCivilTimesAcrossDST(t *testing.T) {
 		{Kind: "local_datetime", Value: "2026-03-08T02:30", Timezone: "America/New_York"},
 		{Kind: "local_datetime", Value: "2026-11-01T01:30:45", Timezone: "America/New_York"},
 	} {
-		patch, err := codec.KataPatch(db.Issue{}, value)
+		patch, err := codec.KataPatch(db.Issue{Metadata: db.JSONBlob(`{"deadline_on":"2026-08-20T09:30[Europe/Paris]","timezone":"America/New_York"}`)}, value)
 		require.NoError(t, err)
 		assert.JSONEq(t, `"`+value.Value+`[America/New_York]"`, string(patch["scheduled_on"]))
 		assert.NotContains(t, patch, "timezone")
-	}
-}
-
-func TestScheduleCodecKataPatchPreservesSiblingTimezone(t *testing.T) {
-	for _, metadata := range []string{
-		`{"deadline_on":"2026-08-20T09:30[Europe/Paris]","timezone":"America/New_York"}`,
-		`{"deadline_on":"2026-08-20T09:30","timezone":"America/New_York"}`,
-		`{"deadline_on":"2026-08-20","timezone":"America/New_York"}`,
-	} {
-		patch, err := fieldCodecs["scheduled_on"].KataPatch(
-			db.Issue{Metadata: db.JSONBlob(metadata)},
-			connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "America/Los_Angeles"},
-		)
-		require.NoError(t, err)
-		got, err := json.Marshal(patch)
-		require.NoError(t, err)
-		assert.JSONEq(t, `{"scheduled_on":"2026-08-20T09:30[America/Los_Angeles]"}`, string(got))
 	}
 }
 

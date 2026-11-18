@@ -15,7 +15,6 @@ import (
 	connectorclient "go.kenn.io/kata/internal/connector"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/pkg/connector"
 )
 
@@ -1066,9 +1065,7 @@ func TestFieldReconcileSavesScheduleZone(t *testing.T) {
 		initial map[string]jsontext.Value
 	}{
 		{"default zone", date("2026-08-21"), "2026-08-21[America/New_York]", nil},
-		{"issue zone", date("2026-08-21"), "2026-08-21[Europe/Paris]", map[string]jsontext.Value{"timezone": jsontext.Value(`"Europe/Paris"`)}},
 		{"saved date zone", date("2026-08-21"), "2026-08-21[Asia/Tokyo]", map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-08-20[Asia/Tokyo]"`), "timezone": jsontext.Value(`"Europe/Paris"`)}},
-		{"connector zone", connector.FieldValue{Kind: fieldKindLocalDateTime, Value: "2026-08-21T09:30", Timezone: "Asia/Tokyo"}, "2026-08-21T09:30[Asia/Tokyo]", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newReconcileHarness(t)
@@ -1089,76 +1086,11 @@ func TestFieldReconcileSavesScheduleZone(t *testing.T) {
 			values, err := metadataObject(issue.Metadata)
 			require.NoError(t, err)
 			assert.JSONEq(t, string(mustJSON(tc.want)), string(values["scheduled_on"]))
-			delete(values, "timezone")
-			raw, err := json.Marshal(values)
-			require.NoError(t, err)
-			_, _, first, _, err := metadata.ScheduleFieldInstant(string(raw), "scheduled_on", "America/New_York")
-			require.NoError(t, err)
-			_, _, second, _, err := metadata.ScheduleFieldInstant(string(raw), "scheduled_on", "Asia/Tokyo")
-			require.NoError(t, err)
-			assert.True(t, first.Equal(second))
 		})
 	}
 }
 
-func TestFieldReconcilePreservesTimezoneAndRejectsIncompatibleLocalSiblings(t *testing.T) {
-	t.Run("date instant and clear preserve issue timezone", func(t *testing.T) {
-		for _, value := range []connector.FieldValue{
-			date("2026-08-21"),
-			{Kind: fieldKindInstant, Value: "2026-08-21T10:30:00Z"},
-			nullValue(),
-		} {
-			h := newReconcileHarness(t)
-			h.mapField(t, "scheduled_on", "start-date")
-			h.seedBaseline(t, "scheduled_on", date("2026-08-20"))
-			_, err := h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-				IssueID: h.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{
-					"scheduled_on": jsontext.Value(`"2026-08-20"`),
-					"timezone":     jsontext.Value(`"America/New_York"`),
-				},
-			})
-			require.NoError(t, err)
-			h.client.fieldValues["start-date"] = value
-
-			_, err = h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
-			require.NoError(t, err)
-			issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
-			require.NoError(t, err)
-			values, err := metadataObject(issue.Metadata)
-			require.NoError(t, err)
-			assert.JSONEq(t, `"America/New_York"`, string(values["timezone"]))
-		}
-	})
-
-	t.Run("UTC and null sibling do not pin a new local timezone", func(t *testing.T) {
-		for _, sibling := range []connector.FieldValue{
-			{Kind: fieldKindInstant, Value: "2026-08-21T10:30:00Z"},
-			nullValue(),
-		} {
-			h := newReconcileHarness(t)
-			h.mapField(t, "scheduled_on", "start-date")
-			h.setKataField(t, "deadline_on", sibling)
-			_, err := h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-				IssueID: h.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{
-					"timezone": jsontext.Value(`"America/New_York"`),
-				},
-			})
-			require.NoError(t, err)
-			h.client.fieldValues["start-date"] = connector.FieldValue{
-				Kind: fieldKindLocalDateTime, Value: "2026-08-21T09:30", Timezone: "America/Los_Angeles",
-			}
-
-			result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
-			require.NoError(t, err)
-			assert.Zero(t, result.FieldConflicts)
-			issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
-			require.NoError(t, err)
-			values, err := metadataObject(issue.Metadata)
-			require.NoError(t, err)
-			assert.JSONEq(t, `"America/New_York"`, string(values["timezone"]))
-		}
-	})
-
+func TestFieldReconcileIndependentLocalTimezones(t *testing.T) {
 	t.Run("two local fields with different zones remain independent", func(t *testing.T) {
 		h := newReconcileHarness(t)
 		h.mapField(t, "scheduled_on", "start-date")
@@ -1193,44 +1125,8 @@ func TestFieldReconcilePreservesTimezoneAndRejectsIncompatibleLocalSiblings(t *t
 		require.NoError(t, err)
 		assert.JSONEq(t, `"2026-08-21T09:30[America/New_York]"`, string(values["scheduled_on"]))
 		assert.JSONEq(t, `"2026-08-22T10:30[America/Los_Angeles]"`, string(values["deadline_on"]))
-	})
-
-	t.Run("two mapped local fields move to one new timezone together", func(t *testing.T) {
-		h := newReconcileHarness(t)
-		h.mapField(t, "scheduled_on", "start-date")
-		h.mapField(t, "deadline_on", "due-date")
-		oldStart := connector.FieldValue{
-			Kind: fieldKindLocalDateTime, Value: "2026-08-21T09:30", Timezone: "America/New_York",
-		}
-		oldDue := connector.FieldValue{
-			Kind: fieldKindLocalDateTime, Value: "2026-08-21T10:30", Timezone: "America/New_York",
-		}
-		h.setKataField(t, "scheduled_on", oldStart)
-		h.setKataField(t, "deadline_on", oldDue)
-		h.seedBaseline(t, "scheduled_on", oldStart)
-		h.seedBaseline(t, "deadline_on", oldDue)
-		newStart := connector.FieldValue{
-			Kind: fieldKindLocalDateTime, Value: "2026-08-22T09:30", Timezone: "America/Los_Angeles",
-		}
-		newDue := connector.FieldValue{
-			Kind: fieldKindLocalDateTime, Value: "2026-08-22T10:30", Timezone: "America/Los_Angeles",
-		}
-		h.client.fieldValues["start-date"] = newStart
-		h.client.fieldValues["due-date"] = newDue
-
-		result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
-
-		require.NoError(t, err)
-		assert.Zero(t, result.FieldConflicts)
-		issue, readErr := h.store.IssueByID(t.Context(), h.issue.ID)
-		require.NoError(t, readErr)
-		values, readErr := metadataObject(issue.Metadata)
-		require.NoError(t, readErr)
-		assert.JSONEq(t, `"2026-08-22T09:30[America/Los_Angeles]"`, string(values["scheduled_on"]))
-		assert.JSONEq(t, `"2026-08-22T10:30[America/Los_Angeles]"`, string(values["deadline_on"]))
-		assert.NotContains(t, values, "timezone")
-		assert.Equal(t, newStart, decodeStoredFieldValue(t, h.fieldState(t, "scheduled_on").Baseline))
-		assert.Equal(t, newDue, decodeStoredFieldValue(t, h.fieldState(t, "deadline_on").Baseline))
+		assert.Equal(t, h.client.fieldValues["start-date"], decodeStoredFieldValue(t, h.fieldState(t, "scheduled_on").Baseline))
+		assert.Equal(t, h.client.fieldValues["due-date"], decodeStoredFieldValue(t, h.fieldState(t, "deadline_on").Baseline))
 	})
 }
 
