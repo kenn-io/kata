@@ -343,6 +343,10 @@ type DisconnectRelayEnrollmentResponse = DisconnectRelayResponseBody
 
 type DisconnectRelayEnrollmentErrorResponse = ErrorEnvelope
 
+type SearchFederationProjectResponse = FederationSearchResponseBody
+
+type SearchFederationProjectErrorResponse = ErrorEnvelope
+
 type GetProjectFederationStatusResponse = FederationStatusBody
 
 type GetProjectFederationStatusErrorResponse = ErrorEnvelope
@@ -1349,6 +1353,14 @@ type DisconnectRelayEnrollmentResp struct {
 	StatusCode   int
 	JSON200      *DisconnectRelayEnrollmentResponse
 	JSONDefault  *DisconnectRelayEnrollmentErrorResponse
+}
+
+type SearchFederationProjectResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *SearchFederationProjectResponse
+	JSONDefault  *SearchFederationProjectErrorResponse
 }
 
 type GetProjectFederationStatusResp struct {

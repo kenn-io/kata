@@ -13,11 +13,147 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
 )
+
+func TestHybridSearchHubFiltersAndCeiling(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "shared")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "login", Author: "tester"})
+	require.NoError(t, err)
+	_, err = store.AddLabel(ctx, issue.ID, "bug", "tester")
+	require.NoError(t, err)
+	params := hybridParams{ProjectID: project.ID, Query: "login", Limit: 2, Requested: "semantic", Labels: []string{"bug"}, Hub: func(_ context.Context, p hybridParams, _ int) ([]api.FederationSearchHit, bool, error) {
+		require.Equal(t, []string{"bug"}, p.Labels)
+		return []api.FederationSearchHit{{Issue: issue, Score: 0.9}}, true, nil
+	}}
+	_, err = hybridSearch(ctx, store, nil, nil, params)
+	require.ErrorContains(t, err, filterCeilingReason)
+	params.Requested = "auto"
+	result, err := hybridSearch(ctx, store, nil, nil, params)
+	require.NoError(t, err)
+	require.True(t, result.Degraded)
+	require.Equal(t, filterCeilingReason, result.DegradedReason)
+	require.Len(t, result.Hits, 1)
+	require.Equal(t, issue.UID, result.Hits[0].Issue.UID)
+}
+
+func TestHybridSearchHubFindsLiveHitAfterDeletedWindow(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "shared")
+	require.NoError(t, err)
+	hits := make([]api.FederationSearchHit, 0, 51)
+	for range 50 {
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "deleted locally", Author: "tester"})
+		require.NoError(t, err)
+		_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "tester")
+		require.NoError(t, err)
+		hits = append(hits, api.FederationSearchHit{Issue: issue, Score: 0.9})
+	}
+	live, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "live issue", Author: "tester"})
+	require.NoError(t, err)
+	hits = append(hits, api.FederationSearchHit{Issue: live, Score: 0.8})
+	params := hybridParams{ProjectID: project.ID, Query: "test", Limit: 1, Requested: "semantic", Hub: func(_ context.Context, _ hybridParams, fetch int) ([]api.FederationSearchHit, bool, error) {
+		return hits[:min(fetch, len(hits))], false, nil
+	}}
+	result, err := hybridSearch(ctx, store, nil, nil, params)
+	require.NoError(t, err)
+	require.Len(t, result.Hits, 1)
+	require.Equal(t, live.UID, result.Hits[0].Issue.UID)
+}
+
+func TestHybridSearchHubReconcilesLocalIdentity(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "shared")
+	require.NoError(t, err)
+	other, err := store.CreateProject(ctx, "other")
+	require.NoError(t, err)
+	live, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local title", Author: "tester"})
+	require.NoError(t, err)
+	moved, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "moved locally", Author: "tester"})
+	require.NoError(t, err)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: moved.ID, FromProjectID: project.ID, ToProjectID: other.ID, IfMatchRev: moved.Revision, Actor: "tester"})
+	require.NoError(t, err)
+	_, _, _, err = store.CloseIssue(ctx, live.ID, "done", "tester", "completed", nil)
+	require.NoError(t, err)
+	unpulled := db.Issue{ID: live.ID, UID: "01HZNQ7VFPK1XGD8R5MABXD4EX", Title: "hub only", Status: "open"}
+	hubCopy := live
+	hubCopy.Title = "hub title"
+	hubCopy.ShortID = "hub-ref"
+	params := hybridParams{ProjectID: project.ID, Query: "test", Limit: 10, Requested: "semantic", Status: "open", Hub: func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error) {
+		return []api.FederationSearchHit{{Issue: hubCopy, Score: 0.9}, {Issue: moved, Score: 0.75}, {Issue: unpulled, Score: 0.7}}, false, nil
+	}}
+	result, err := hybridSearch(ctx, store, nil, nil, params)
+	require.NoError(t, err)
+	require.Len(t, result.Hits, 3)
+	require.Equal(t, live.ID, result.Hits[0].Issue.ID)
+	require.Equal(t, live.ShortID, result.Hits[0].Issue.ShortID)
+	require.Equal(t, "hub title", result.Hits[0].Issue.Title)
+	require.Equal(t, "open", result.Hits[0].Issue.Status)
+	require.Equal(t, moved.UID, result.Hits[1].Issue.ShortID)
+	require.Zero(t, result.Hits[1].Issue.ID)
+	require.Equal(t, unpulled.UID, result.Hits[2].Issue.ShortID)
+	require.Zero(t, result.Hits[2].Issue.ID)
+	require.Equal(t, project.ID, result.Hits[2].Issue.ProjectID)
+	params.Labels = []string{"absent-locally"}
+	result, err = hybridSearch(ctx, store, nil, nil, params)
+	require.NoError(t, err)
+	require.Len(t, result.Hits, 3)
+	require.Equal(t, live.UID, result.Hits[0].Issue.UID)
+	require.Equal(t, unpulled.UID, result.Hits[2].Issue.UID)
+}
+
+func TestHybridSearchHubDeletedHitsExhaustCap(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "shared")
+	require.NoError(t, err)
+	hits := make([]api.FederationSearchHit, 0, 201)
+	for range 200 {
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "deleted locally", Author: "tester"})
+		require.NoError(t, err)
+		_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "tester")
+		require.NoError(t, err)
+		hits = append(hits, api.FederationSearchHit{Issue: issue, Score: 0.9})
+	}
+	live, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "live issue", Author: "tester"})
+	require.NoError(t, err)
+	hits = append(hits, api.FederationSearchHit{Issue: live, Score: 0.8})
+	params := hybridParams{ProjectID: project.ID, Query: "test", Limit: 1, Requested: "semantic", Hub: func(_ context.Context, _ hybridParams, fetch int) ([]api.FederationSearchHit, bool, error) {
+		return hits[:min(fetch, len(hits))], false, nil
+	}}
+	_, err = hybridSearch(ctx, store, nil, nil, params)
+	require.ErrorContains(t, err, filterCeilingReason)
+	var modeErr *modeError
+	require.ErrorAs(t, err, &modeErr)
+	require.Equal(t, http.StatusServiceUnavailable, modeErr.Status())
+}
+
+func TestHybridSearchHubPreservesLexicalTitle(t *testing.T) {
+	ctx := t.Context()
+	store := newReconcilerTestStore(t)
+	project, err := store.CreateProject(ctx, "shared")
+	require.NoError(t, err)
+	local, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local title", Author: "tester"})
+	require.NoError(t, err)
+	hubCopy := local
+	hubCopy.Title = "hub title"
+	params := hybridParams{ProjectID: project.ID, Query: "local", Limit: 10, Requested: "hybrid", Hub: func(context.Context, hybridParams, int) ([]api.FederationSearchHit, bool, error) {
+		return []api.FederationSearchHit{{Issue: hubCopy, Score: 0.9}}, false, nil
+	}}
+	result, err := hybridSearch(ctx, store, nil, nil, params)
+	require.NoError(t, err)
+	require.Len(t, result.Hits, 1)
+	require.Equal(t, "local title", result.Hits[0].Issue.Title)
+}
 
 func TestHybridSearchLexicalWhenUnconfigured(t *testing.T) {
 	ctx := t.Context()

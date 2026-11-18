@@ -2902,6 +2902,31 @@ components:
         - method
         - active_relay_enrollments
       type: object
+    FederationSearchHit:
+      properties:
+        issue:
+          $ref: "#/components/schemas/Issue"
+        score:
+          format: double
+          type: number
+        web_url:
+          type: string
+      required:
+        - issue
+        - score
+      type: object
+    FederationSearchResponseBody:
+      properties:
+        bounded:
+          type: boolean
+        hits:
+          items:
+            $ref: "#/components/schemas/FederationSearchHit"
+          type: array
+      required:
+        - hits
+        - bounded
+      type: object
     FederationSpokeNameOut:
       properties:
         spoke_instance_uid:
@@ -9971,6 +9996,67 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
       summary: Revoke only the presented relay transport grant
+  /api/v1/projects/{project_id}/federation/search:
+    get:
+      operationId: searchFederationProject
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: q
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - open
+              - closed
+            type: string
+        - explode: true
+          in: query
+          name: label
+          schema:
+            items:
+              type: string
+            type: array
+        - explode: true
+          in: query
+          name: exclude_label
+          schema:
+            items:
+              type: string
+            type: array
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationSearchResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
   /api/v1/projects/{project_id}/federation/status:
     get:
       operationId: getProjectFederationStatus
