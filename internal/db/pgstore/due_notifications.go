@@ -28,9 +28,11 @@ func (s *Store) ListDueNotificationIssueIDs(ctx context.Context, now time.Time) 
 		   AND NOT (COALESCE(fb.enabled, 0) = 1 AND fb.role = 'spoke')
 		   AND (
 			 (jsonb_typeof((i.metadata)::jsonb -> 'scheduled_on') = 'string'
-			  AND substr((i.metadata)::jsonb ->> 'scheduled_on', 1, 10) COLLATE "C" <= $1)
+			  AND (CASE WHEN substr((i.metadata)::jsonb ->> 'scheduled_on', 11, 1) = 'T'
+			    THEN (i.metadata)::jsonb ->> 'scheduled_on' ELSE substr((i.metadata)::jsonb ->> 'scheduled_on', 1, 10) END) COLLATE "C" <= $1)
 			 OR (jsonb_typeof((i.metadata)::jsonb -> 'deadline_on') = 'string'
-			  AND substr((i.metadata)::jsonb ->> 'deadline_on', 1, 10) COLLATE "C" <= $1)
+			  AND (CASE WHEN substr((i.metadata)::jsonb ->> 'deadline_on', 11, 1) = 'T'
+			    THEN (i.metadata)::jsonb ->> 'deadline_on' ELSE substr((i.metadata)::jsonb ->> 'deadline_on', 1, 10) END) COLLATE "C" <= $1)
 			 OR EXISTS (
 				 SELECT 1 FROM jsonb_each((i.metadata)::jsonb) AS entry(key, value)
 				  WHERE entry.key LIKE 'notify.%'
