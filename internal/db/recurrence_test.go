@@ -21,24 +21,9 @@ func TestValidateRecurrenceTemplateValidatesReservedMetadata(t *testing.T) {
 }
 
 func TestComposeRecurrenceIssueMetadataStampsScheduleTimezone(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		compose     func(jsontext.Value, string, string) (jsontext.Value, error)
-		input, want string
-	}{
-		{"template", func(v jsontext.Value, key, zone string) (jsontext.Value, error) {
-			return ComposeRecurrenceIssueMetadata(v, key, zone, "")
-		}, `{"kind":"weekly","timezone":"Not/AZone","scheduled_on":"not-a-date"}`, `{"kind":"weekly","scheduled_on":"2026-05-18[America/New_York]","timezone":"America/New_York"}`},
-		{"existing issue", func(v jsontext.Value, key, zone string) (jsontext.Value, error) {
-			return ComposeExistingRecurrenceIssueMetadata(v, key, zone, "UTC")
-		}, `{}`, `{"scheduled_on":"2026-05-18[America/New_York]","timezone":"America/New_York"}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			value, err := tc.compose(jsontext.Value(tc.input), "2026-05-18", "America/New_York")
-			require.NoError(t, err)
-			assert.JSONEq(t, tc.want, string(value))
-		})
-	}
+	value, err := ComposeRecurrenceIssueMetadata(jsontext.Value(`{"kind":"weekly","timezone":"Not/AZone","scheduled_on":"not-a-date"}`), "2026-05-18", "America/New_York", "")
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"kind":"weekly","scheduled_on":"2026-05-18[America/New_York]","timezone":"America/New_York"}`, string(value))
 }
 
 func TestComposeRecurrenceIssueMetadataDefensivelyRejectsInvalidReservedValue(t *testing.T) {

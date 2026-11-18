@@ -812,7 +812,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 			timezone  string
 		}{
 			{name: "named zone schedule", scheduled: true, timezone: "America/New_York", metadata: map[string]jsontext.Value{
-				"scheduled_on": jsontext.Value(`"2027-05-12T00:30[Asia/Tokyo]"`),
+				"scheduled_on": jsontext.Value(`"2027-05-12T08:30[Asia/Tokyo]"`),
 			}},
 			{name: "UTC instant", metadata: map[string]jsontext.Value{
 				"deadline_on": jsontext.Value(`"2026-09-01T00:30:00Z"`),

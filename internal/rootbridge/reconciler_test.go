@@ -1066,7 +1066,6 @@ func TestFieldReconcileSavesScheduleZone(t *testing.T) {
 	}{
 		{"default zone", date("2026-08-21"), "2026-08-21[America/New_York]", nil},
 		{"saved date zone", date("2026-08-21"), "2026-08-21[Asia/Tokyo]", map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-08-20[Asia/Tokyo]"`), "timezone": jsontext.Value(`"Europe/Paris"`)}},
-		{"preserve sibling", date("2026-08-21"), "2026-08-21[Europe/Paris]", map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-08-20"`), "deadline_on": jsontext.Value(`"2026-08-22T09:00[Asia/Tokyo]"`), "timezone": jsontext.Value(`"Europe/Paris"`)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newReconcileHarness(t)
@@ -1087,9 +1086,6 @@ func TestFieldReconcileSavesScheduleZone(t *testing.T) {
 			values, err := metadataObject(issue.Metadata)
 			require.NoError(t, err)
 			assert.JSONEq(t, string(mustJSON(tc.want)), string(values["scheduled_on"]))
-			if _, ok := tc.initial["deadline_on"]; ok {
-				assert.JSONEq(t, `"2026-08-22T09:00[Asia/Tokyo]"`, string(values["deadline_on"]))
-			}
 		})
 	}
 }

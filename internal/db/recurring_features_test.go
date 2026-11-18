@@ -40,7 +40,7 @@ func TestRecurringPayloadFeatures(t *testing.T) {
 }
 
 func TestZonedDatePayloadWireVersion(t *testing.T) {
-	_, required, err := db.FederationEventPayloadWireVersion("issue.created", jsontext.Value(`{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}`))
+	_, required, err := db.FederationEventPayloadWireVersion("issue.metadata_updated", jsontext.Value(`{"diff":{"scheduled_on":{"to":"2026-01-15[Europe/Paris]"}}}`))
 	require.NoError(t, err)
 	require.Equal(t, "issue_date_zone_v1", required)
 }

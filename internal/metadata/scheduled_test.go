@@ -55,6 +55,11 @@ func TestScheduleDateCarriesItsTimezone(t *testing.T) {
 	require.True(t, present)
 	assert.Equal(t, "Asia/Tokyo", zone)
 	assert.Equal(t, time.Date(2026, 1, 14, 15, 0, 0, 0, time.UTC), instant)
+
+	_, present, due, err := ScheduleFieldDue(raw, "deadline_on", time.Date(2026, 1, 14, 18, 0, 0, 0, time.UTC), "UTC")
+	require.NoError(t, err)
+	require.True(t, present)
+	assert.True(t, due)
 }
 
 func TestScheduledOnDueDateUsesIssueTimezone(t *testing.T) {

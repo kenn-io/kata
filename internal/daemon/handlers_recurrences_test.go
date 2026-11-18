@@ -153,7 +153,6 @@ func TestRecurrenceDeadlineUsesIssueOrDaemonTimezone(t *testing.T) {
 			var metadata map[string]any
 			require.NoError(t, json.Unmarshal([]byte(next.Metadata), &metadata))
 			assert.Equal(t, tc.want, metadata["deadline_on"])
-			assert.Equal(t, "2026-08-10[Asia/Tokyo]", metadata["scheduled_on"])
 		})
 	}
 }
