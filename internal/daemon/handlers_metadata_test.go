@@ -209,6 +209,25 @@ func TestPatchMetadata_HappyPath_200(t *testing.T) {
 	}
 }
 
+func TestPatchMetadataLegacyRecurrenceZone(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	p, issue := seedProjectAndIssue(t, env)
+	_, err := env.DB.CreateRecurrenceForIssue(t.Context(), db.CreateRecurrenceForIssueIn{
+		IssueID:    issue.ID,
+		Recurrence: db.CreateRecurrenceIn{ProjectID: p.ID, Actor: "tester", Rule: "FREQ=WEEKLY", DTStart: "2026-08-03", Timezone: "America/Los_Angeles", Template: db.RecurrenceTemplate{Title: "Weekly"}},
+	})
+	require.NoError(t, err)
+	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-08-03T09:00"`), "timezone": jsontext.Value(`null`)}})
+	require.NoError(t, err)
+	url := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/metadata", env.URL, p.ID, issue.ShortID)
+	resp := doPost(t, env, url, `{"actor":"tester","patch":{"scheduled_on":"2026-08-04T09:00","deadline_on":"2026-08-05T09:00"}}`)
+	raw := readClose(t, resp)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
+	metadata, _ := decodeMetadataEnvelope(t, raw, "issue")
+	assert.Contains(t, metadata, `"scheduled_on":"2026-08-04T09:00[America/Los_Angeles]"`)
+	assert.Contains(t, metadata, `"deadline_on":"2026-08-05T09:00[UTC]"`)
+}
+
 // TestPatchMetadata_PresentEmptyIfMatch_400 pins that a present-but-empty
 // If-Match header is treated as a malformed conditional write, not as an
 // absent header. Huma's typed binding reads headers via Header.Get, which
