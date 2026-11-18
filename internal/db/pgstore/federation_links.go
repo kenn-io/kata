@@ -337,9 +337,10 @@ func federationFoldEventsOfTypes(
 // TestFederationFoldEventsBudget guards that plan.
 //
 // A recorded snapshot relocation joins the issue's history in both of its
-// projects, as a retained move does. A project's snapshot that is newer, in fold
-// order, than a relocation that took the issue away from that project stays
-// out: it is a relocation only that project's own pull may accept.
+// projects, as a retained move does. A project's snapshot stays out when, in fold
+// order, a relocation took the issue away from that project before it and no
+// accepted relocation brought the issue back in between: only that project's own
+// pull may accept it.
 func federationFoldEventsQuery(projectID int64, eventTypes []string) (string, []any) {
 	query := `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
 e.related_issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at
@@ -357,7 +358,14 @@ FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (e.
  JOIN events m ON m.uid = reset.payload::jsonb->>'move_event_uid' AND m.type='issue.snapshot'
  WHERE reset.type='sync.reset_required' AND reset.issue_uid=e.issue_uid AND reset.project_id=e.project_id
  AND (e.hlc_physical_ms, e.hlc_counter, e.origin_instance_uid COLLATE "C", e.uid COLLATE "C")
-   > (m.hlc_physical_ms, m.hlc_counter, m.origin_instance_uid COLLATE "C", m.uid COLLATE "C")))))))`
+   > (m.hlc_physical_ms, m.hlc_counter, m.origin_instance_uid COLLATE "C", m.uid COLLATE "C")
+ AND NOT EXISTS(SELECT 1 FROM events back
+ JOIN events bm ON bm.uid = back.payload::jsonb->>'move_event_uid' AND bm.type='issue.snapshot'
+ WHERE back.type='sync.reset_required' AND back.issue_uid=e.issue_uid AND bm.project_id=e.project_id
+ AND (bm.hlc_physical_ms, bm.hlc_counter, bm.origin_instance_uid COLLATE "C", bm.uid COLLATE "C")
+   > (m.hlc_physical_ms, m.hlc_counter, m.origin_instance_uid COLLATE "C", m.uid COLLATE "C")
+ AND (bm.hlc_physical_ms, bm.hlc_counter, bm.origin_instance_uid COLLATE "C", bm.uid COLLATE "C")
+   <= (e.hlc_physical_ms, e.hlc_counter, e.origin_instance_uid COLLATE "C", e.uid COLLATE "C"))))))))`
 	args := []any{projectID}
 	if len(eventTypes) > 0 {
 		placeholders := make([]string, 0, len(eventTypes))

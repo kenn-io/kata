@@ -1922,17 +1922,24 @@ func federationFoldEventsQuery(projectID int64, eventTypes, issueScope []string)
    UNION SELECT uid FROM issues WHERE project_id=?1`
 	args := []any{projectID}
 	// A recorded snapshot relocation joins the issue's history in both of its
-	// projects, as a retained move does. A project's snapshot that is newer, in
-	// fold order, than a relocation that took the issue away from that project
-	// stays out: it is a relocation only that project's own pull may accept.
+	// projects, as a retained move does. A project's snapshot stays out when, in
+	// fold order, a relocation took the issue away from that project before it
+	// and no accepted relocation brought the issue back in between: only that
+	// project's own pull may accept it. The reset rows are read once per role.
 	const relocations = `FROM events reset
      JOIN events m ON m.uid = json_extract(reset.payload,'$.move_event_uid') AND m.type='issue.snapshot'
      WHERE reset.type='sync.reset_required'`
+	const eventClock = `(e.hlc_physical_ms, e.hlc_counter, e.origin_instance_uid, e.uid)`
+	const departureClock = `(m.hlc_physical_ms, m.hlc_counter, m.origin_instance_uid, m.uid)`
+	const arrivalClock = `(bm.hlc_physical_ms, bm.hlc_counter, bm.origin_instance_uid, bm.uid)`
 	relocated := `((e.issue_uid, e.project_id) IN (SELECT reset.issue_uid, m.project_id ` + relocations + ` AND +reset.issue_uid IS NOT NULL
        UNION ALL SELECT reset.issue_uid, reset.project_id ` + relocations + ` AND +reset.issue_uid IS NOT NULL)
      AND NOT (e.type='issue.snapshot' AND EXISTS(SELECT 1 ` + relocations + `
-       AND reset.issue_uid=e.issue_uid AND reset.project_id=e.project_id
-       AND (e.hlc_physical_ms, e.hlc_counter, e.origin_instance_uid, e.uid) > (m.hlc_physical_ms, m.hlc_counter, m.origin_instance_uid, m.uid))))`
+       AND reset.issue_uid=e.issue_uid AND reset.project_id=e.project_id AND ` + eventClock + ` > ` + departureClock + `
+       AND NOT EXISTS(SELECT 1 FROM events back
+         JOIN events bm ON bm.uid = json_extract(back.payload,'$.move_event_uid') AND bm.type='issue.snapshot'
+         WHERE back.type='sync.reset_required' AND back.issue_uid=e.issue_uid AND bm.project_id=e.project_id
+         AND ` + arrivalClock + ` > ` + departureClock + ` AND ` + arrivalClock + ` <= ` + eventClock + `))))`
 	// Scan events once and collect moved subjects once. The unary + keeps
 	// SQLite from seeking every issue's history through its UID index.
 	selector := `(e.project_id=?1 OR +e.issue_uid IN (

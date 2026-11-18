@@ -664,14 +664,6 @@ func RehomeFederatedMovedIssues(ctx context.Context, tx *sql.Tx, moves Federated
 			return fmt.Errorf("%w: %w", ErrFederationIngestValidation, err)
 		}
 
-		if winner.Type == "issue.snapshot" {
-			// The fold keeps the source's short ID, but the destination's snapshot
-			// carries the one the hub assigned, as an applied move's to_short_id does.
-			if snapshotShort, _ := StringValue(PayloadMap(winner.Payload)["short_id"]); snapshotShort != "" {
-				issue.ShortID = snapshotShort
-				p.Issues[issue.UID] = issue
-			}
-		}
 		short, err := assign(target, issue)
 		if err != nil {
 			return err
