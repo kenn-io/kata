@@ -297,6 +297,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.56.0` | Direct-spoke ingest returns `403 federation_project_not_enrolled` instead of `403 auth_invalid` when pushed work touches an issue whose current project has no matching push enrollment for the spoke and actor. The message names the issue but not the project, which the spoke has not joined. |
 | `0.55.0` | `GET /projects/{project_id}/federation/search` lets a direct spoke ask its hub to answer a search by meaning over a shared project. |
 | `0.54.0` | `GET /api/v1/docbank/probe` makes one read-only request to Docbank and reports whether it answered and accepted the daemon's key. |
 | `0.53.0` | Issue responses carry `content_revision`, which moves when a title or body edit changes the text. `PATCH /projects/{project_id}/issues/{ref}` accepts `expected_content_revision`; a different current value returns 412 `revision_conflict` and writes nothing. Older daemons reject the unknown field. |
