@@ -85,41 +85,17 @@ func (c scheduleCodec) KataPatch(issue db.Issue, value connector.FieldValue) (ma
 func (c scheduleCodec) kataPatch(
 	issue db.Issue,
 	value connector.FieldValue,
-	coordinatedTimezone string,
+	_ string,
 ) (map[string]jsontext.Value, error) {
 	canonical, err := canonicalFieldValue(value)
 	if err != nil {
 		return nil, err
 	}
-	patch := map[string]jsontext.Value{c.key: mustJSON(canonicalScheduleValue(canonical))}
-	if canonical.Kind != fieldKindLocalDateTime {
-		return metadata.StampScheduleZones(patch, string(issue.Metadata), c.defaultTimezone)
+	stored := canonicalScheduleValue(canonical)
+	if canonical.Kind == fieldKindLocalDateTime {
+		stored = canonical.Value + "[" + canonical.Timezone + "]"
 	}
-
-	values, err := metadataObject(issue.Metadata)
-	if err != nil {
-		return nil, err
-	}
-	otherKey := "scheduled_on"
-	if c.key == otherKey {
-		otherKey = "deadline_on"
-	}
-	if other, err := kataScheduleFieldValueFromMetadata(otherKey, values, c.defaultTimezone); err != nil {
-		return nil, err
-	} else if other.Kind == fieldKindLocalDateTime {
-		if other.Timezone != canonical.Timezone && coordinatedTimezone != canonical.Timezone {
-			return nil, fmt.Errorf("%s local timezone %q conflicts with %s timezone %q", c.key, canonical.Timezone, otherKey, other.Timezone)
-		}
-	} else if other.Kind == fieldKindDate {
-		timezone, present, err := optionalMetadataTimezone(values)
-		if err != nil {
-			return nil, fmt.Errorf("read %s timezone: %w", otherKey, err)
-		}
-		if present && timezone != canonical.Timezone && coordinatedTimezone != canonical.Timezone {
-			return nil, fmt.Errorf("%s local timezone %q conflicts with %s timezone %q", c.key, canonical.Timezone, otherKey, timezone)
-		}
-	}
-	patch["timezone"] = mustJSON(canonical.Timezone)
+	patch := map[string]jsontext.Value{c.key: mustJSON(stored)}
 	return metadata.StampScheduleZones(patch, string(issue.Metadata), c.defaultTimezone)
 }
 
@@ -206,25 +182,6 @@ func kataScheduleFieldValue(
 		return connector.FieldValue{}, fmt.Errorf("invalid schedule value %q", value)
 	}
 	return canonicalFieldValue(field)
-}
-
-func kataScheduleFieldValueFromMetadata(
-	key string,
-	values map[string]jsontext.Value,
-	defaultTimezone string,
-) (connector.FieldValue, error) {
-	raw, ok := values[key]
-	if !ok || string(raw) == "null" {
-		return nullFieldValue(), nil
-	}
-	if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
-		return connector.FieldValue{}, fmt.Errorf("validate %s: %w", key, err)
-	}
-	var value string
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return connector.FieldValue{}, fmt.Errorf("decode %s: %w", key, err)
-	}
-	return kataScheduleFieldValue(value, values, defaultTimezone)
 }
 
 func metadataTimezone(values map[string]jsontext.Value, defaultTimezone string) (string, error) {

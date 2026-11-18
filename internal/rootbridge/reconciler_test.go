@@ -1155,7 +1155,7 @@ func TestFieldReconcilePreservesTimezoneAndRejectsIncompatibleLocalSiblings(t *t
 			require.NoError(t, err)
 			values, err := metadataObject(issue.Metadata)
 			require.NoError(t, err)
-			assert.JSONEq(t, `"America/Los_Angeles"`, string(values["timezone"]))
+			assert.JSONEq(t, `"America/New_York"`, string(values["timezone"]))
 		}
 	})
 
@@ -1172,9 +1172,27 @@ func TestFieldReconcilePreservesTimezoneAndRejectsIncompatibleLocalSiblings(t *t
 
 		result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
 		require.NoError(t, err)
-		assert.Equal(t, 1, result.FieldConflicts)
+		assert.Zero(t, result.FieldConflicts)
 		assert.False(t, h.fieldState(t, "scheduled_on").Conflicted)
-		assert.True(t, h.fieldState(t, "deadline_on").Conflicted)
+		assert.False(t, h.fieldState(t, "deadline_on").Conflicted)
+		issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
+		require.NoError(t, err)
+		values, err := metadataObject(issue.Metadata)
+		require.NoError(t, err)
+		assert.JSONEq(t, `"2026-08-21T09:30[America/New_York]"`, string(values["scheduled_on"]))
+		assert.JSONEq(t, `"2026-08-21T10:30[America/Los_Angeles]"`, string(values["deadline_on"]))
+		h.client.fieldValues["due-date"] = connector.FieldValue{
+			Kind: fieldKindLocalDateTime, Value: "2026-08-22T10:30", Timezone: "America/Los_Angeles",
+		}
+		result, err = h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
+		require.NoError(t, err)
+		assert.Zero(t, result.FieldConflicts)
+		issue, err = h.store.IssueByID(t.Context(), h.issue.ID)
+		require.NoError(t, err)
+		values, err = metadataObject(issue.Metadata)
+		require.NoError(t, err)
+		assert.JSONEq(t, `"2026-08-21T09:30[America/New_York]"`, string(values["scheduled_on"]))
+		assert.JSONEq(t, `"2026-08-22T10:30[America/Los_Angeles]"`, string(values["deadline_on"]))
 	})
 
 	t.Run("two mapped local fields move to one new timezone together", func(t *testing.T) {
@@ -1210,7 +1228,7 @@ func TestFieldReconcilePreservesTimezoneAndRejectsIncompatibleLocalSiblings(t *t
 		require.NoError(t, readErr)
 		assert.JSONEq(t, `"2026-08-22T09:30[America/Los_Angeles]"`, string(values["scheduled_on"]))
 		assert.JSONEq(t, `"2026-08-22T10:30[America/Los_Angeles]"`, string(values["deadline_on"]))
-		assert.JSONEq(t, `"America/Los_Angeles"`, string(values["timezone"]))
+		assert.NotContains(t, values, "timezone")
 		assert.Equal(t, newStart, decodeStoredFieldValue(t, h.fieldState(t, "scheduled_on").Baseline))
 		assert.Equal(t, newDue, decodeStoredFieldValue(t, h.fieldState(t, "deadline_on").Baseline))
 	})

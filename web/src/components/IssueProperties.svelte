@@ -222,7 +222,7 @@
     return calendarDate(issue.issue.deadline_on_date, issue.issue.metadata.deadline_on)
   }
 
-  function projectedTimedDate(wall: string, zone: string): string {
+  function resolveTimedDate(wall: string, zone: string): number {
     const target = Date.parse(`${wall}Z`)
     const local = new Intl.DateTimeFormat('en-CA', {
       timeZone: zone,
@@ -264,6 +264,10 @@
       }
       instant = after
     }
+    return instant
+  }
+
+  function projectedTimedDate(wall: string, zone: string): string {
     const viewer = new Intl.DateTimeFormat('en-CA', {
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       year: 'numeric',
@@ -271,7 +275,7 @@
       day: '2-digit',
     })
     const parts = Object.fromEntries(
-      viewer.formatToParts(instant).map(({ type, value }) => [type, value]),
+      viewer.formatToParts(resolveTimedDate(wall, zone)).map(({ type, value }) => [type, value]),
     )
     return `${parts.year}-${parts.month}-${parts.day}`
   }
@@ -286,6 +290,24 @@
     const savedDay = Date.parse(`${match[1]}T00:00:00Z`)
     if (![displayedDay, pickedDay, savedDay].every(Number.isFinite)) return picked
     const estimated = savedDay + pickedDay - displayedDay
+    if (saved?.endsWith('Z')) {
+      const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+      const viewer = new Intl.DateTimeFormat('en-CA', {
+        timeZone: viewerZone,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+      })
+      const parts = Object.fromEntries(
+        viewer.formatToParts(new Date(saved)).map(({ type, value }) => [type, value]),
+      )
+      const wall = `${picked}T${parts.hour}:${parts.minute}:${parts.second}`
+      const fraction = saved.match(/(\.\d+)Z$/)?.[1] ?? ''
+      return (
+        new Date(resolveTimedDate(wall, viewerZone)).toISOString().slice(0, 19) + fraction + 'Z'
+      )
+    }
     const zoned = match[2]?.match(/^(T[^[]+)\[([^\]]+)\]$/)
     if (zoned?.[1] && zoned[2]) {
       for (const adjustment of [0, -1, 1]) {
