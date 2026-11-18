@@ -198,6 +198,40 @@ describe('IssueProperties', () => {
   })
 
   it.each([
+    ['scheduled', 'scheduled_on', 'scheduled_on_date', 'Edit scheduled', 'Scheduled'],
+    ['deadline', 'deadline_on', 'deadline_on_date', 'Edit due date', 'Due'],
+  ] as const)('edits a zoned %s using its projected calendar date', async (_, key, projectedKey, edit, picker) => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({
+        [projectedKey]: '2027-05-11',
+        metadata: { [key]: '2027-05-12T00:30[Asia/Tokyo]' },
+      }),
+      onPatchMetadata,
+    })
+    expect(screen.getByRole('button', { name: edit }).textContent).toContain('May 11')
+    await fireEvent.click(screen.getByRole('button', { name: edit }))
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(`${picker}:`) }))
+    await fireEvent.click(screen.getByRole('button', { name: /May 12, 2027/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
+      [key]: '2027-05-13T00:30[Asia/Tokyo]',
+    })
+  })
+
+  it('reopens and edits a date-only schedule with its saved zone', async () => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({ metadata: { scheduled_on: '2027-05-12[Europe/Paris]' } }),
+      onPatchMetadata,
+    })
+    expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toContain('May 12')
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled: May 12/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /May 13, 2027/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { scheduled_on: '2027-05-13[Europe/Paris]' })
+  })
+
+  it.each([
     ['UTC instant', '2026-09-01T00:30:00Z'],
     ['local time', '2026-09-01T09:00'],
   ])('uses the projected date for a timed %s deadline without replacing it', async (_, raw) => {
