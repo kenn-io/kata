@@ -45,6 +45,30 @@ func TestHybridSearchHubFiltersAndCeiling(t *testing.T) {
 }
 
 func TestHybridSearchHubReconcilesLocalIdentity(t *testing.T) {
+	t.Run("deleted hits exhaust initial window", func(t *testing.T) {
+		ctx := t.Context()
+		store := newReconcilerTestStore(t)
+		project, err := store.CreateProject(ctx, "shared")
+		require.NoError(t, err)
+		hits := make([]api.FederationSearchHit, 0, 51)
+		for range 50 {
+			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "deleted locally", Author: "tester"})
+			require.NoError(t, err)
+			_, _, _, err = store.SoftDeleteIssue(ctx, issue.ID, "tester")
+			require.NoError(t, err)
+			hits = append(hits, api.FederationSearchHit{Issue: issue, Score: 0.9})
+		}
+		live, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "live issue", Author: "tester"})
+		require.NoError(t, err)
+		hits = append(hits, api.FederationSearchHit{Issue: live, Score: 0.8})
+		params := hybridParams{ProjectID: project.ID, Query: "test", Limit: 1, Requested: "semantic", Hub: func(_ context.Context, _ hybridParams, fetch int) ([]api.FederationSearchHit, bool, error) {
+			return hits[:min(fetch, len(hits))], false, nil
+		}}
+		result, err := hybridSearch(ctx, store, nil, nil, params)
+		require.NoError(t, err)
+		require.Len(t, result.Hits, 1)
+		require.Equal(t, live.UID, result.Hits[0].Issue.UID)
+	})
 	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	project, err := store.CreateProject(ctx, "shared")
@@ -72,24 +96,22 @@ func TestHybridSearchHubReconcilesLocalIdentity(t *testing.T) {
 	}}
 	result, err := hybridSearch(ctx, store, nil, nil, params)
 	require.NoError(t, err)
-	require.Len(t, result.Hits, 4)
+	require.Len(t, result.Hits, 3)
 	require.Equal(t, live.ID, result.Hits[0].Issue.ID)
 	require.Equal(t, live.ShortID, result.Hits[0].Issue.ShortID)
 	require.Equal(t, "hub title", result.Hits[0].Issue.Title)
 	require.Equal(t, "open", result.Hits[0].Issue.Status)
-	require.Equal(t, deleted.UID, result.Hits[1].Issue.ShortID)
+	require.Equal(t, moved.UID, result.Hits[1].Issue.ShortID)
 	require.Zero(t, result.Hits[1].Issue.ID)
-	require.Equal(t, moved.UID, result.Hits[2].Issue.ShortID)
+	require.Equal(t, unpulled.UID, result.Hits[2].Issue.ShortID)
 	require.Zero(t, result.Hits[2].Issue.ID)
-	require.Equal(t, unpulled.UID, result.Hits[3].Issue.ShortID)
-	require.Zero(t, result.Hits[3].Issue.ID)
-	require.Equal(t, project.ID, result.Hits[3].Issue.ProjectID)
+	require.Equal(t, project.ID, result.Hits[2].Issue.ProjectID)
 	params.Labels = []string{"absent-locally"}
 	result, err = hybridSearch(ctx, store, nil, nil, params)
 	require.NoError(t, err)
-	require.Len(t, result.Hits, 4)
+	require.Len(t, result.Hits, 3)
 	require.Equal(t, live.UID, result.Hits[0].Issue.UID)
-	require.Equal(t, unpulled.UID, result.Hits[3].Issue.UID)
+	require.Equal(t, unpulled.UID, result.Hits[2].Issue.UID)
 }
 
 func TestHybridSearchHubPreservesLexicalTitle(t *testing.T) {
