@@ -68,7 +68,7 @@ func checkCronBackupTombstoneRoundTrip(t *testing.T, source db.Storage, backend 
 	restoredRun, err := restored.CronRun(ctx, target.ID, run.UID)
 	require.NoError(t, err)
 	run.ID, run.ProjectID = restoredRun.ID, restoredRun.ProjectID
-	require.Equal(t, run, restoredRun, "run evidence restores exactly")
+	require.Equal(t, run, restoredRun.CronRun, "run evidence restores exactly")
 	return nil
 }
 
@@ -119,7 +119,7 @@ func checkCronProjectPurge(t *testing.T, store db.Storage) error {
 	require.Equal(t, keptWorkflow, gotWorkflow)
 	gotRun, err := store.CronRun(ctx, kept.ID, keptRun.UID)
 	require.NoError(t, err)
-	require.Equal(t, keptRun, gotRun)
+	require.Equal(t, keptRun, gotRun.CronRun)
 	return nil
 }
 
@@ -139,5 +139,5 @@ func observeCompleteRun(t *testing.T, store db.Storage, project db.Project, job 
 		StartedAt: &started, EndedAt: &ended,
 	})
 	require.NoError(t, err)
-	return observed.Run
+	return observed.Run.CronRun
 }

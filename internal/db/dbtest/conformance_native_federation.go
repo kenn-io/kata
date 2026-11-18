@@ -229,7 +229,7 @@ func checkNativeCronAdoptionAuthor(t *testing.T, spoke db.Storage, backend Backe
 		require.NoError(t, err)
 		result, err := spoke.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, OccurrenceKey: &occurrence, Actor: observer, Status: "running", Summary: cron.Summary{Version: 1, InputTokens: 1<<63 - 1}})
 		require.NoError(t, err)
-		runs = append(runs, result.Run)
+		runs = append(runs, result.Run.CronRun)
 	}
 
 	hub := backend.Open(t)

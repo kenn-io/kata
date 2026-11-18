@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -80,6 +81,28 @@ func cronAction(p cronData, j generated.CronJob) string {
 		return "workflow " + cronDefinitionName(p, uid, true)
 	}
 	return "prompt"
+}
+
+// cronRunName is the job a run belongs to, or its workflow when no job ran it.
+// The daemon names both at read time, deleted definitions included. An older
+// daemon sends no names, so the job list names the job, then the bare UID.
+func cronRunName(p cronData, r generated.CronRun) string {
+	if name := deref(r.JobName); name != "" {
+		return name
+	}
+	if name := deref(r.WorkflowName); name != "" {
+		return "workflow " + name
+	}
+	return cronDefinitionName(p, deref(r.JobUID), false)
+}
+
+// cronRunIssue is the run's issue as #short-id, even after the issue was
+// deleted, falling back to its UID.
+func cronRunIssue(r generated.CronRun) string {
+	if id := deref(r.IssueShortID); id != "" {
+		return "#" + id
+	}
+	return deref(r.IssueUID)
 }
 func cronTime(t *time.Time) string {
 	if t == nil {
@@ -166,7 +189,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 			}
 		case cronRuns:
 			for _, r := range runs {
-				add(r.UID, []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
+				add(r.UID, []string{r.Status, cronRunName(*p, r), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
 			}
 		case cronWorkflows:
 			for _, w := range p.workflows {
@@ -233,7 +256,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			}
 			d.field("Action", cronAction(p, *j))
 			if uid := deref(j.Definition.Action.WorkflowUID); uid != "" {
-				cronDefinitionLink(&d, p, uid, "", true)
+				cronDefinitionLink(&d, p, uid, "", "", true)
 			}
 			def := j.Definition
 			if deref(def.Action.Prompt) != "" {
@@ -264,15 +287,15 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			d.field("Actor", r.Actor)
 			d.field("Executor", ownerText(r.ExecutorLabel))
 			d.field("Teammate", ownerText(r.Teammate))
-			d.field("Issue", deref(r.IssueUID))
+			d.field("Issue", cronRunIssue(r))
 			if r.Summary.InputTokens != nil || r.Summary.OutputTokens != nil {
 				d.field("Tokens", fmt.Sprintf("%d input, %d output", deref(r.Summary.InputTokens), deref(r.Summary.OutputTokens)))
 			}
 			d.section("Message")
 			d.text(deref(r.Summary.Message), cronRef{})
 			d.section("Recorded with")
-			cronDefinitionLink(&d, p, deref(r.JobUID), deref(r.DefinitionEventUID), false)
-			cronDefinitionLink(&d, p, deref(r.WorkflowUID), deref(r.WorkflowDefinitionEventUID), true)
+			cronDefinitionLink(&d, p, deref(r.JobUID), deref(r.JobName), deref(r.DefinitionEventUID), false)
+			cronDefinitionLink(&d, p, deref(r.WorkflowUID), deref(r.WorkflowName), deref(r.WorkflowDefinitionEventUID), true)
 		}
 	case cronWorkflows:
 		if w := p.workflow(ref.uid); w != nil {
@@ -313,11 +336,15 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 	}
 	return cronTabNames[ref.kind] + " / " + sanitizeForLine(name), "", d.lines
 }
-func cronDefinitionLink(d *cronDoc, p cronData, uid, revision string, workflow bool) {
+
+// cronDefinitionLink names a definition as currently loaded, else by the name
+// the run recorded, so a deleted job or workflow still reads by name, else by
+// its bare UID.
+func cronDefinitionLink(d *cronDoc, p cronData, uid, recordedName, revision string, workflow bool) {
 	if uid == "" {
 		return
 	}
-	name, event, kind := uid, "", cronJobs
+	name, event, kind := cmp.Or(recordedName, uid), "", cronJobs
 	if workflow {
 		kind = cronWorkflows
 		if w := p.workflow(uid); w != nil {
@@ -344,6 +371,7 @@ func cronDefinitionLink(d *cronDoc, p cronData, uid, revision string, workflow b
 	}
 	d.text(label, cronRef{kind, uid})
 }
+
 func cronHistory(d *cronDoc, p cronData, ref cronRef) {
 	d.section("Run history from the latest 100 project runs")
 	if p.runsErr != nil {

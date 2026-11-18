@@ -343,7 +343,7 @@ func TestCronFederationBackendPairs(t *testing.T) {
 					require.NoError(t, err)
 					result, err := hub.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, WorkflowUID: &workflow.UID, WorkflowDefinitionEventUID: &workflow.DefinitionEventUID, OccurrenceKey: &occurrence, Actor: "worker", Status: "succeeded", Summary: cron.Summary{Version: 1, Message: "Reviewed", InputTokens: 123}})
 					require.NoError(t, err)
-					expectedRuns = append(expectedRuns, result.Run)
+					expectedRuns = append(expectedRuns, result.Run.CronRun)
 				}
 				binding, err := hub.EnableProjectFederation(ctx, project.ID, "worker")
 				require.NoError(t, err)

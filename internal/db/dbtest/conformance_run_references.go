@@ -91,6 +91,9 @@ func checkRunReferenceRestore(t *testing.T, source db.Storage, backend Backend) 
 	require.NoError(t, target.ImportReplay(t.Context(), compacted, db.ImportOptions{}))
 	retained, err := target.CronRun(t.Context(), project.ID, observed.Run.UID)
 	require.NoError(t, err)
+	// Names resolve at read time, so the restored run shows the job's current name.
+	require.Equal(t, "Edited review", *retained.JobName)
+	retained.JobName = observed.Run.JobName
 	require.Equal(t, observed.Run, retained)
 	return nil
 }
