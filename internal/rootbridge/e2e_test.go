@@ -436,12 +436,7 @@ func testE2EPlanningFieldShapes(t *testing.T, executable string, backend e2eBack
 		external  connector.FieldValue
 		metadata  string
 	}{
-		{kataField: "scheduled_on", kind: "date", external: connector.FieldValue{Kind: "date", Value: "2026-08-24"}, metadata: `{"scheduled_on":"2026-08-24[UTC]"}`},
 		{kataField: "scheduled_on", kind: "local", external: connector.FieldValue{Kind: "local_datetime", Value: "2026-08-24T09:30:00", Timezone: "Europe/Paris"}, metadata: `{"scheduled_on":"2026-08-24T09:30:00[Europe/Paris]"}`},
-		{kataField: "scheduled_on", kind: "instant", external: connector.FieldValue{Kind: "instant", Value: "2026-08-24T07:30:00.12Z"}, metadata: `{"scheduled_on":"2026-08-24T07:30:00.12Z"}`},
-		{kataField: "deadline_on", kind: "date", external: connector.FieldValue{Kind: "date", Value: "2026-08-25"}, metadata: `{"deadline_on":"2026-08-25[UTC]"}`},
-		{kataField: "deadline_on", kind: "local", external: connector.FieldValue{Kind: "local_datetime", Value: "2026-08-25T10:45:00", Timezone: "Europe/Paris"}, metadata: `{"deadline_on":"2026-08-25T10:45:00[Europe/Paris]"}`},
-		{kataField: "deadline_on", kind: "instant", external: connector.FieldValue{Kind: "instant", Value: "2026-08-25T08:45:00.12Z"}, metadata: `{"deadline_on":"2026-08-25T08:45:00.12Z"}`},
 	} {
 		t.Run(test.kataField+" "+test.kind, func(t *testing.T) {
 			h := newE2EHarness(t, executable, backend, false)

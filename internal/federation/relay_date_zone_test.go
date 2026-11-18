@@ -16,7 +16,7 @@ import (
 	"go.kenn.io/kata/internal/federation"
 )
 
-func TestRelayOfferRejectsZonedDatesWithoutFeature(t *testing.T) {
+func TestRelayZonedDatesRequireFeature(t *testing.T) {
 	root := newRelayMatrixNode(t, "sqlite", "root-member")
 	leaf := newRelayMatrixNode(t, "sqlite", "leaf-member")
 	project, err := root.store.CreateProject(t.Context(), "shared-project")
@@ -77,23 +77,9 @@ func TestRelayOfferRejectsZonedDatesWithoutFeature(t *testing.T) {
 	require.NoError(t, err)
 	code, raw = offer("")
 	require.Equal(t, http.StatusOK, code, string(raw))
-}
-
-func TestRelayResetRejectsZonedDatesWithoutChangingState(t *testing.T) {
-	root := newRelayMatrixNode(t, "sqlite", "root-member")
-	leaf := newRelayMatrixNode(t, "sqlite", "leaf-member")
-	project, err := root.store.CreateProject(t.Context(), "shared-project")
-	require.NoError(t, err)
-	root.project = project
-	_, err = root.store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
-	require.NoError(t, err)
-	enrollRelayMatrixReplica(t, root, leaf, "leaf-project", false)
-	syncRelayMatrixNode(t, leaf)
-	_, _, err = root.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Author: "member", Title: "Scheduled", Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2027-05-12[Europe/Paris]"`)}})
-	require.NoError(t, err)
-	endpoint := fmt.Sprintf("%s/api/v1/projects/%d/federation/relay/reset", root.http.URL, project.ID)
+	resetEndpoint := fmt.Sprintf("%s/api/v1/projects/%d/federation/relay/reset", root.http.URL, project.ID)
 	reset := func(features string) (int, []byte) {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, endpoint, nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, resetEndpoint, nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+leaf.credential.Token)
 		req.Header.Set(db.EventFeaturesHeader, features)
@@ -106,8 +92,8 @@ func TestRelayResetRejectsZonedDatesWithoutChangingState(t *testing.T) {
 	}
 	before, err := root.store.MaxEventID(t.Context())
 	require.NoError(t, err)
-	state := relayState(t, root.store)
-	code, raw := reset("")
+	state = relayState(t, root.store)
+	code, raw = reset("")
 	require.Equal(t, http.StatusConflict, code, string(raw))
 	after, err := root.store.MaxEventID(t.Context())
 	require.NoError(t, err)
@@ -115,28 +101,6 @@ func TestRelayResetRejectsZonedDatesWithoutChangingState(t *testing.T) {
 	require.Equal(t, state, relayState(t, root.store))
 	code, raw = reset(db.SupportedEventFeatures)
 	require.Equal(t, http.StatusOK, code, string(raw))
-}
-
-func relayState(t *testing.T, store db.Storage) []db.ImportRecord {
-	t.Helper()
-	var result []db.ImportRecord
-	for record, err := range store.ExportRelayState(t.Context()) {
-		require.NoError(t, err)
-		result = append(result, record)
-	}
-	return result
-}
-
-func TestRelayDoesNotEmitZonedDatesToOlderHub(t *testing.T) {
-	root := newRelayMatrixNode(t, "sqlite", "root-member")
-	leaf := newRelayMatrixNode(t, "sqlite", "leaf-member")
-	project, err := root.store.CreateProject(t.Context(), "shared-project")
-	require.NoError(t, err)
-	root.project = project
-	_, err = root.store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleHub, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true})
-	require.NoError(t, err)
-	enrollRelayMatrixReplica(t, root, leaf, "leaf-project", false)
-	syncRelayMatrixNode(t, leaf)
 	_, _, err = leaf.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: leaf.project.ID, Author: "member", Title: "Scheduled", Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2027-05-12[Europe/Paris]"`)}})
 	require.NoError(t, err)
 	original := *root.handler.Load()
@@ -157,13 +121,23 @@ func TestRelayDoesNotEmitZonedDatesToOlderHub(t *testing.T) {
 	root.handler.Store(&handler)
 	binding, err := leaf.store.FederationBindingByProject(t.Context(), leaf.project.ID)
 	require.NoError(t, err)
-	before := relayState(t, leaf.store)
+	leafBefore := relayState(t, leaf.store)
 	maxID, err := root.store.MaxEventID(t.Context())
 	require.NoError(t, err)
 	err = federation.SyncFederationOnce(t.Context(), leaf.store, binding, leaf.credential)
 	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-	require.Equal(t, before, relayState(t, leaf.store))
-	after, err := root.store.MaxEventID(t.Context())
+	require.Equal(t, leafBefore, relayState(t, leaf.store))
+	after, err = root.store.MaxEventID(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, maxID, after)
+}
+
+func relayState(t *testing.T, store db.Storage) []db.ImportRecord {
+	t.Helper()
+	var result []db.ImportRecord
+	for record, err := range store.ExportRelayState(t.Context()) {
+		require.NoError(t, err)
+		result = append(result, record)
+	}
+	return result
 }

@@ -88,19 +88,22 @@ func TestScheduleCodecKataPatchPreservesCivilTimesAcrossDST(t *testing.T) {
 }
 
 func TestScheduleCodecKataPatchCanonicalizesAndClears(t *testing.T) {
-	codec := fieldCodecs["deadline_on"]
 	cases := []struct {
 		name  string
+		field string
 		value connector.FieldValue
 		want  string
 	}{
-		{"date", date("2026-08-20"), `{"deadline_on":"2026-08-20[UTC]"}`},
-		{"instant", connector.FieldValue{Kind: "instant", Value: "2026-08-20T09:30:45.120000000Z"}, `{"deadline_on":"2026-08-20T09:30:45.12Z"}`},
-		{"clear", nullValue(), `{"deadline_on":null}`},
+		{"scheduled date", "scheduled_on", date("2026-08-24"), `{"scheduled_on":"2026-08-24[UTC]"}`},
+		{"scheduled instant", "scheduled_on", connector.FieldValue{Kind: "instant", Value: "2026-08-24T07:30:00.12Z"}, `{"scheduled_on":"2026-08-24T07:30:00.12Z"}`},
+		{"deadline local", "deadline_on", connector.FieldValue{Kind: "local_datetime", Value: "2026-08-25T10:45:00", Timezone: "Europe/Paris"}, `{"deadline_on":"2026-08-25T10:45:00[Europe/Paris]"}`},
+		{"date", "deadline_on", date("2026-08-20"), `{"deadline_on":"2026-08-20[UTC]"}`},
+		{"instant", "deadline_on", connector.FieldValue{Kind: "instant", Value: "2026-08-20T09:30:45.120000000Z"}, `{"deadline_on":"2026-08-20T09:30:45.12Z"}`},
+		{"clear", "deadline_on", nullValue(), `{"deadline_on":null}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			patch, err := codec.KataPatch(db.Issue{}, tc.value)
+			patch, err := fieldCodecs[tc.field].KataPatch(db.Issue{}, tc.value)
 			require.NoError(t, err)
 			got, err := json.Marshal(patch)
 			require.NoError(t, err)

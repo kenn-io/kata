@@ -10,23 +10,6 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-func checkSelectedScheduleProjection(t *testing.T, store db.Storage) error {
-	ctx := t.Context()
-	project, err := store.CreateProject(ctx, "calendar-project")
-	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Scheduled", Author: "operator"})
-	require.NoError(t, err)
-	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2027-05-12T00:30[Asia/Tokyo]"`)}})
-	require.NoError(t, err)
-	snapshot, err := store.(db.UIStore).ReadUISnapshot(ctx, db.UISnapshotQuery{View: "all-open", ProjectUID: project.UID, SelectedIssueUID: issue.UID, TimeZone: "America/New_York", DefaultTimezone: "UTC", Limit: 10})
-	require.NoError(t, err)
-	require.Len(t, snapshot.Issues, 1)
-	require.Equal(t, "2027-05-11", snapshot.Issues[0].ScheduledOnDate)
-	require.NotNil(t, snapshot.SelectedIssue)
-	require.Equal(t, snapshot.Issues[0].ScheduledOnDate, snapshot.SelectedIssue.ScheduledOnDate)
-	return nil
-}
-
 func checkDateZoneFederation(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "zone-project")

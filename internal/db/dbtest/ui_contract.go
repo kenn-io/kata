@@ -804,11 +804,16 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		require.Equal(t, "2026-08-31", snapshot.Issues[0].DeadlineOnDate)
 	})
 
-	t.Run("selected issues project timed deadline dates", func(t *testing.T) {
+	t.Run("selected issues project timed planning dates", func(t *testing.T) {
 		for _, test := range []struct {
-			name     string
-			metadata map[string]jsontext.Value
+			name      string
+			metadata  map[string]jsontext.Value
+			scheduled bool
+			timezone  string
 		}{
+			{name: "named zone schedule", scheduled: true, timezone: "America/New_York", metadata: map[string]jsontext.Value{
+				"scheduled_on": jsontext.Value(`"2027-05-12T00:30[Asia/Tokyo]"`),
+			}},
 			{name: "UTC instant", metadata: map[string]jsontext.Value{
 				"deadline_on": jsontext.Value(`"2026-09-01T00:30:00Z"`),
 			}},
@@ -818,6 +823,9 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 			}},
 		} {
 			t.Run(test.name, func(t *testing.T) {
+				if test.timezone == "" {
+					test.timezone = "America/Los_Angeles"
+				}
 				store := open(t)
 				uiStore := store.(db.UIStore)
 				ctx := t.Context()
@@ -830,11 +838,17 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 
 				snapshot, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
 					ProjectUID: project.UID, View: "all-open", SelectedIssueUID: issue.UID,
-					TimeZone: "America/Los_Angeles", DefaultTimezone: "UTC",
+					TimeZone: test.timezone, DefaultTimezone: "UTC",
 				})
 				require.NoError(t, err)
 				require.NotNil(t, snapshot.SelectedIssue)
-				require.Equal(t, "2026-08-31", snapshot.SelectedIssue.DeadlineOnDate)
+				require.Len(t, snapshot.Issues, 1)
+				if test.scheduled {
+					require.Equal(t, "2027-05-11", snapshot.SelectedIssue.ScheduledOnDate)
+					require.Equal(t, snapshot.Issues[0].ScheduledOnDate, snapshot.SelectedIssue.ScheduledOnDate)
+				} else {
+					require.Equal(t, "2026-08-31", snapshot.SelectedIssue.DeadlineOnDate)
+				}
 			})
 		}
 	})

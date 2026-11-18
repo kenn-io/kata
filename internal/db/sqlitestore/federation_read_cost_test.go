@@ -13,25 +13,35 @@ import (
 	"go.kenn.io/kit/search/sqlquery"
 )
 
-func TestReadFederationQuietPageBudget(t *testing.T) {
+func readFederationPageBudgetStore(t *testing.T, name string) (*sqlitestore.Store, *sqlitestore.Store, *sql.DB, db.Project) {
+	t.Helper()
 	d, path := openTestDBWithPath(t)
-	ctx := t.Context()
-	project := createProject(ctx, t, d, "quiet-project")
-	_, err := d.EnableProjectFederation(ctx, project.ID, "tester")
-	require.NoError(t, err)
-	issue, _ := createTesterIssue(ctx, t, d, project.ID, "Quiet issue")
-	busy := createProject(ctx, t, d, "busy-project")
-	after, err := d.MaxEventID(ctx)
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000)
- INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
- SELECT printf('%026d',x),?,?,'busy-project','project.metadata_updated','tester','{}',1,0,? FROM n`, d.InstanceUID(), busy.ID, strings.Repeat("a", 64))
+	project := createProject(t.Context(), t, d, name)
+	_, err := d.EnableProjectFederation(t.Context(), project.ID, "tester")
 	require.NoError(t, err)
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, raw.Close()) })
 	raw.SetMaxOpenConns(1)
-	store := &sqlitestore.Store{DB: raw}
+	return d, &sqlitestore.Store{DB: raw}, raw, project
+}
+
+func seedFederationPageBudgetHistory(t *testing.T, store *sqlitestore.Store, project db.Project, issueUID any, eventType, payload string) {
+	t.Helper()
+	_, err := store.ExecContext(t.Context(), `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000)
+ INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
+ SELECT printf('%026d',x),?,?,?,?,?,'tester',?,1,0,? FROM n`, store.InstanceUID(), project.ID, project.Name, issueUID, eventType, payload, strings.Repeat("a", 64))
+	require.NoError(t, err)
+}
+
+func TestReadFederationQuietPageBudget(t *testing.T) {
+	d, store, raw, project := readFederationPageBudgetStore(t, "quiet-project")
+	ctx := t.Context()
+	issue, _ := createTesterIssue(ctx, t, d, project.ID, "Quiet issue")
+	busy := createProject(ctx, t, d, "busy-project")
+	after, err := d.MaxEventID(ctx)
+	require.NoError(t, err)
+	seedFederationPageBudgetHistory(t, d, busy, nil, "project.metadata_updated", `{}`)
 	_, err = d.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
  VALUES('00000000000000000000999999',$1,$2,'quiet-project',$3,'sync.reset_required','tester','{}',1,0,$4)`, d.InstanceUID(), project.ID, issue.UID, strings.Repeat("a", 64))
 	require.NoError(t, err)
@@ -63,22 +73,12 @@ func TestReadFederationQuietPageBudget(t *testing.T) {
 }
 
 func TestReadFederationMetadataSupportedFeaturePageBudget(t *testing.T) {
-	d, path := openTestDBWithPath(t)
+	d, store, raw, project := readFederationPageBudgetStore(t, "history-project")
 	ctx := t.Context()
-	project := createProject(ctx, t, d, "history-project")
-	_, err := d.EnableProjectFederation(ctx, project.ID, "tester")
+	issue, _ := createTesterIssue(ctx, t, d, project.ID, "History issue")
+	seedFederationPageBudgetHistory(t, d, project, issue.UID, "issue.metadata_updated", `{"diff":{"description":{"from":null,"to":"value"}}}`)
+	_, err := d.ExecContext(ctx, "ANALYZE")
 	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000)
- INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
- SELECT printf('%026d',x),?,?,'history-project','issue.metadata_updated','tester','{"diff":{}}',1,0,? FROM n`, d.InstanceUID(), project.ID, strings.Repeat("a", 64))
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, "ANALYZE")
-	require.NoError(t, err)
-	raw, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, raw.Close()) })
-	raw.SetMaxOpenConns(1)
-	store := &sqlitestore.Store{DB: raw}
 	pageFetches := func(features string) int {
 		conn, err := raw.Conn(ctx)
 		require.NoError(t, err)
