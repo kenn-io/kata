@@ -127,21 +127,23 @@ func TestRecurrenceDeadlineUsesIssueOrDaemonTimezone(t *testing.T) {
 				require.NoError(t, err)
 				resp = doPatch(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, project.ID, rec.UID), fmt.Sprintf(`{"actor":"tester","template":{"metadata":%s}}`, tc.metadata), fmt.Sprintf(`"rev-%d"`, rec.Revision))
 				require.Equal(t, http.StatusOK, resp.StatusCode, string(readClose(t, resp)))
-				rec, err = env.DB.GetRecurrenceByID(t.Context(), rec.ID)
+			}
+			attached, err := env.DB.IssueByID(t.Context(), issue.ID)
+			require.NoError(t, err)
+			if !tc.legacy {
+				rec, err := env.DB.GetRecurrenceByID(t.Context(), *attached.RecurrenceID)
 				require.NoError(t, err)
 				var saved map[string]any
 				require.NoError(t, json.Unmarshal([]byte(rec.TemplateMetadata), &saved))
 				assert.Equal(t, tc.want, saved["deadline_on"])
 			}
 			if tc.legacy {
-				attached, err := env.DB.IssueByID(t.Context(), issue.ID)
-				require.NoError(t, err)
 				_, err = env.DB.ExecContext(t.Context(), `UPDATE recurrences SET template_metadata = ? WHERE id = ?`, tc.metadata, *attached.RecurrenceID)
 				require.NoError(t, err)
 			}
 			resp = doPost(t, env, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, project.ID, issue.ShortID), `{"actor":"tester","reason":"done","message":"Completed the scheduled review and recorded its outcome.","evidence":[{"type":"reviewed-paths","paths":["review.md"]}]}`)
 			require.Equal(t, http.StatusOK, resp.StatusCode, string(readClose(t, resp)))
-			attached, err := env.DB.IssueByID(t.Context(), issue.ID)
+			attached, err = env.DB.IssueByID(t.Context(), issue.ID)
 			require.NoError(t, err)
 			recurrence, err := env.DB.GetRecurrenceByID(t.Context(), *attached.RecurrenceID)
 			require.NoError(t, err)

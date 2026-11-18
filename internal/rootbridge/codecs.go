@@ -79,14 +79,6 @@ func (c scheduleCodec) ReadKata(issue db.Issue) (connector.FieldValue, error) {
 }
 
 func (c scheduleCodec) KataPatch(issue db.Issue, value connector.FieldValue) (map[string]jsontext.Value, error) {
-	return c.kataPatch(issue, value, "")
-}
-
-func (c scheduleCodec) kataPatch(
-	issue db.Issue,
-	value connector.FieldValue,
-	_ string,
-) (map[string]jsontext.Value, error) {
 	canonical, err := canonicalFieldValue(value)
 	if err != nil {
 		return nil, err
@@ -97,18 +89,6 @@ func (c scheduleCodec) kataPatch(
 	}
 	patch := map[string]jsontext.Value{c.key: mustJSON(stored)}
 	return metadata.StampScheduleZones(patch, string(issue.Metadata), c.defaultTimezone)
-}
-
-func kataPatchWithCoordinatedTimezone(
-	codec FieldCodec,
-	issue db.Issue,
-	value connector.FieldValue,
-	coordinatedTimezone string,
-) (map[string]jsontext.Value, error) {
-	if schedule, ok := codec.(scheduleCodec); ok {
-		return schedule.kataPatch(issue, value, coordinatedTimezone)
-	}
-	return codec.KataPatch(issue, value)
 }
 
 func (c scheduleCodec) ValidateExternalDescriptor(descriptor connector.FieldDescriptor) error {

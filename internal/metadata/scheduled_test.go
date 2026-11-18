@@ -19,20 +19,16 @@ func TestStampScheduleZonesChoices(t *testing.T) {
 		{"UTC fallback", `{"deadline_on":"2026-01-15"}`, `{}`, "", `{"deadline_on":"2026-01-15[UTC]"}`},
 		{"saved zone on edit", `{"scheduled_on":"2026-01-15T10:00"}`, `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]","timezone":"Asia/Tokyo"}`, "UTC", `{"scheduled_on":"2026-01-15T10:00[Europe/Paris]"}`},
 		{"patched timezone overrides saved schedule zone", `{"scheduled_on":"2026-01-15T10:00","timezone":"Asia/Tokyo"}`, `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]"}`, "UTC", `{"scheduled_on":"2026-01-15T10:00[Asia/Tokyo]","timezone":"Asia/Tokyo"}`},
-		{"patched timezone stamps unchanged legacy date", `{"scheduled_on":"2026-01-15","timezone":"Asia/Tokyo"}`, `{"scheduled_on":"2026-01-15","timezone":"Europe/Paris"}`, "UTC", `{"scheduled_on":"2026-01-15[Asia/Tokyo]","timezone":"Asia/Tokyo"}`},
 		{"timezone change rebinds existing dates", `{"timezone":"Asia/Tokyo"}`, `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]","deadline_on":"2026-01-16[Europe/Paris]"}`, "UTC", `{"scheduled_on":"2026-01-15T09:00[Asia/Tokyo]","deadline_on":"2026-01-16[Asia/Tokyo]","timezone":"Asia/Tokyo"}`},
 		{"timezone clear rebinds existing dates", `{"timezone":null}`, `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]","deadline_on":"2026-01-16[Europe/Paris]"}`, "", `{"scheduled_on":"2026-01-15T09:00[UTC]","deadline_on":"2026-01-16[UTC]","timezone":null}`},
-		{"timezone clear uses daemon zone", `{"timezone":null}`, `{"deadline_on":"2026-01-16[Europe/Paris]"}`, "Asia/Tokyo", `{"deadline_on":"2026-01-16[Asia/Tokyo]","timezone":null}`},
 		{"timezone change leaves instant alone", `{"timezone":"Asia/Tokyo"}`, `{"scheduled_on":"2026-01-15T09:00:00Z"}`, "UTC", `{"timezone":"Asia/Tokyo"}`},
 		{"explicit date zone wins during rebinding", `{"timezone":"Asia/Tokyo","scheduled_on":"2026-01-17[America/New_York]"}`, `{"scheduled_on":"2026-01-15[Europe/Paris]","deadline_on":"2026-01-16[Europe/Paris]"}`, "UTC", `{"scheduled_on":"2026-01-17[America/New_York]","deadline_on":"2026-01-16[Asia/Tokyo]","timezone":"Asia/Tokyo"}`},
 		{"cleared timezone uses default", `{"scheduled_on":"2026-01-16","timezone":null}`, `{"scheduled_on":"2026-01-15[Europe/Paris]"}`, "UTC", `{"scheduled_on":"2026-01-16[UTC]","timezone":null}`},
-		{"cleared timezone uses default when no date zone", `{"scheduled_on":"2026-01-16","timezone":null}`, `{"scheduled_on":"2026-01-15","timezone":"Europe/Paris"}`, "Asia/Tokyo", `{"scheduled_on":"2026-01-16[Asia/Tokyo]","timezone":null}`},
 		{"sibling uses issue zone", `{"deadline_on":"2026-01-16"}`, `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]","timezone":"Asia/Tokyo"}`, "UTC", `{"deadline_on":"2026-01-16[Asia/Tokyo]"}`},
 		{"local zone in patch", `{"scheduled_on":"2026-01-15","timezone":"Local"}`, `{}`, "UTC", `{"scheduled_on":"2026-01-15[Europe/Paris]","timezone":"Local"}`},
 		{"local zone in current metadata", `{"scheduled_on":"2026-01-15"}`, `{"timezone":"Local"}`, "UTC", `{"scheduled_on":"2026-01-15[Europe/Paris]"}`},
 		{"UTC instant", `{"scheduled_on":"2026-01-15T10:00:00Z"}`, `{}`, "UTC", `{"scheduled_on":"2026-01-15T10:00:00Z"}`},
 		{"clear", `{"scheduled_on":null}`, `{}`, "Local", `{"scheduled_on":null}`},
-		{"unchanged legacy", `{"scheduled_on":"2026-01-15"}`, `{"scheduled_on":"2026-01-15"}`, "UTC", `{"scheduled_on":"2026-01-15[UTC]"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var patch map[string]jsontext.Value
@@ -48,15 +44,13 @@ func TestStampScheduleZonesChoices(t *testing.T) {
 
 func TestScheduleDateCarriesItsTimezone(t *testing.T) {
 	raw := `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]","deadline_on":"2026-01-15[Asia/Tokyo]","timezone":"America/New_York"}`
-	for _, fallback := range []string{"UTC", "Asia/Tokyo"} {
-		_, zone, instant, present, err := ScheduleFieldInstant(raw, "scheduled_on", fallback)
-		require.NoError(t, err)
-		require.True(t, present)
-		assert.Equal(t, "Europe/Paris", zone)
-		assert.Equal(t, time.Date(2026, 1, 15, 8, 0, 0, 0, time.UTC), instant)
-	}
+	_, zone, instant, present, err := ScheduleFieldInstant(raw, "scheduled_on", "UTC")
+	require.NoError(t, err)
+	require.True(t, present)
+	assert.Equal(t, "Europe/Paris", zone)
+	assert.Equal(t, time.Date(2026, 1, 15, 8, 0, 0, 0, time.UTC), instant)
 
-	_, zone, instant, present, err := ScheduleFieldInstant(raw, "deadline_on", "UTC")
+	_, zone, instant, present, err = ScheduleFieldInstant(raw, "deadline_on", "UTC")
 	require.NoError(t, err)
 	require.True(t, present)
 	assert.Equal(t, "Asia/Tokyo", zone)

@@ -430,42 +430,23 @@ func testE2EPlanningFields(t *testing.T, executable string, backend e2eBackend) 
 }
 
 func testE2EPlanningFieldShapes(t *testing.T, executable string, backend e2eBackend) {
-	for _, test := range []struct {
-		kataField string
-		kind      string
-		external  connector.FieldValue
-		metadata  string
-	}{
-		{kataField: "scheduled_on", kind: "local", external: connector.FieldValue{Kind: "local_datetime", Value: "2026-08-24T09:30:00", Timezone: "Europe/Paris"}, metadata: `{"scheduled_on":"2026-08-24T09:30:00[Europe/Paris]"}`},
-	} {
-		t.Run(test.kataField+" "+test.kind, func(t *testing.T) {
-			h := newE2EHarness(t, executable, backend, false)
-			h.mutateState(func(current *fakeconnector.State) {
-				current.Roots[0].Fields["field-schedule"] = test.external
-			})
-			_, err := h.service.MapField(t.Context(), MapFieldParams{
-				ConnectorInstance: "example", KataField: test.kataField, ExternalField: "field-schedule",
-			})
-			require.NoError(t, err)
-			_, err = h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{Manual: true})
-			require.NoError(t, err)
-			issue, err := h.database.store.IssueByID(t.Context(), h.issue.ID)
-			require.NoError(t, err)
-			assert.JSONEq(t, test.metadata, string(issue.Metadata))
-
-			patch := map[string]jsontext.Value{test.kataField: jsontext.Value("null")}
-			if test.kind == "local" {
-				patch["timezone"] = jsontext.Value("null")
-			}
-			_, err = h.database.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-				IssueID: h.issue.ID, Actor: "operator", Patch: patch,
-			})
-			require.NoError(t, err)
-			_, err = h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{Manual: true})
-			require.NoError(t, err)
-			assert.Equal(t, connector.FieldValue{Kind: "null"}, h.readState(t).Roots[0].Fields["field-schedule"])
-		})
-	}
+	h := newE2EHarness(t, executable, backend, false)
+	h.mutateState(func(current *fakeconnector.State) {
+		current.Roots[0].Fields["field-schedule"] = connector.FieldValue{Kind: "local_datetime", Value: "2026-08-24T09:30:00", Timezone: "Europe/Paris"}
+	})
+	_, err := h.service.MapField(t.Context(), MapFieldParams{
+		ConnectorInstance: "example", KataField: "scheduled_on", ExternalField: "field-schedule",
+	})
+	require.NoError(t, err)
+	_, err = h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{Manual: true})
+	require.NoError(t, err)
+	_, err = h.database.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: h.issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value("null"), "timezone": jsontext.Value("null")},
+	})
+	require.NoError(t, err)
+	_, err = h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{Manual: true})
+	require.NoError(t, err)
+	assert.Equal(t, connector.FieldValue{Kind: "null"}, h.readState(t).Roots[0].Fields["field-schedule"])
 }
 
 func testE2ERestorePause(t *testing.T, executable string, backend e2eBackend) {

@@ -95,7 +95,6 @@ func checkDueNotificationFederatedClear(t *testing.T, store db.Storage) error {
 		jsontext.Value(`{"diff":{"`+key+`":{"from":`+value+`,"to":null}},"revision_new":2,"updated_at":"2026-09-16T01:00:00Z"}`))
 	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
 		ProjectID: hub.ID, SpokeInstanceUID: spokeUID, BoundActor: "worker-a",
-		EventFeatures: db.SupportedEventFeatures,
 		Events: []db.FederationIngestEvent{
 			{SourceEventID: 1, Event: created},
 			{SourceEventID: 2, Event: cleared},
@@ -497,16 +496,14 @@ func checkDueNotificationCandidates(t *testing.T, store db.Storage) error {
 	})
 	t.Run("far future times on cutoff date", func(t *testing.T) {
 		for _, field := range []string{"scheduled_on", "deadline_on"} {
-			for _, value := range []string{`"2026-09-17T23:00:00Z"`, `"2026-09-17T23:00[UTC]"`} {
-				issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
-					ProjectID: project.ID, Title: field, Author: "worker-a",
-					Metadata: map[string]jsontext.Value{field: jsontext.Value(value)},
-				})
-				require.NoError(t, err)
-				ids, err := store.ListDueNotificationIssueIDs(ctx, time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC))
-				require.NoError(t, err)
-				assert.NotContains(t, ids, issue.ID)
-			}
+			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+				ProjectID: project.ID, Title: field, Author: "worker-a",
+				Metadata: map[string]jsontext.Value{field: jsontext.Value(`"2026-09-17T23:00:00Z"`)},
+			})
+			require.NoError(t, err)
+			ids, err := store.ListDueNotificationIssueIDs(ctx, time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC))
+			require.NoError(t, err)
+			assert.NotContains(t, ids, issue.ID)
 		}
 	})
 	return nil

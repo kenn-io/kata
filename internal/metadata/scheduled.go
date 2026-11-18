@@ -30,30 +30,8 @@ type scheduleMetadata struct {
 	Timezone    string  `json:"timezone"`
 }
 
-func schedulePatchWithReboundDates(patch, old map[string]jsontext.Value) map[string]jsontext.Value {
-	result := maps.Clone(patch)
-	if _, ok := patch["timezone"]; !ok {
-		return result
-	}
-	for _, key := range []string{"scheduled_on", "deadline_on"} {
-		if _, ok := patch[key]; ok {
-			continue
-		}
-		var value string
-		if json.Unmarshal(old[key], &value) != nil || value == "" {
-			continue
-		}
-		kind, _, _, err := classifyScheduledOn(value)
-		if err != nil || kind == scheduledOnInstant {
-			continue
-		}
-		value, _ = SplitScheduleZone(value)
-		result[key], _ = json.Marshal(value)
-	}
-	return result
-}
-
 // StampScheduleZones records the zone of each newly written civil date.
+// A patched timezone also rebinds the stored civil dates the patch omits.
 func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone string) (map[string]jsontext.Value, error) {
 	old := map[string]jsontext.Value{}
 	if current != "" {
@@ -61,30 +39,41 @@ func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone st
 			return nil, err
 		}
 	}
-	patch = schedulePatchWithReboundDates(patch, old)
 	result := maps.Clone(patch)
 	var patchZone string
+	_, timezonePatched := patch["timezone"]
 	_ = json.Unmarshal(patch["timezone"], &patchZone)
 	for _, key := range []string{"scheduled_on", "deadline_on"} {
 		raw, ok := patch[key]
-		if !ok || string(raw) == "null" {
+		rebind := !ok && timezonePatched
+		if rebind {
+			raw = old[key]
+		}
+		if len(raw) == 0 || string(raw) == "null" {
 			continue
 		}
-		var value, previous string
-		if err := json.Unmarshal(raw, &value); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidValue, err)
+		var value string
+		var kind scheduledOnKind
+		err := json.Unmarshal(raw, &value)
+		if err == nil {
+			kind, _, _, err = classifyScheduledOn(value)
 		}
-		kind, _, _, err := classifyScheduledOn(value)
 		if err != nil {
+			if rebind {
+				continue
+			}
 			return nil, fmt.Errorf("%w: %v", ErrInvalidValue, err)
 		}
-		_ = json.Unmarshal(old[key], &previous)
-		_, explicit := SplitScheduleZone(value)
-		if kind == scheduledOnInstant || explicit != "" {
+		if rebind {
+			value, _ = SplitScheduleZone(value)
+		}
+		if _, explicit := SplitScheduleZone(value); kind == scheduledOnInstant || explicit != "" {
 			continue
 		}
 		zone := patchZone
-		if _, patched := patch["timezone"]; !patched {
+		if !timezonePatched {
+			var previous string
+			_ = json.Unmarshal(old[key], &previous)
 			if _, zone = SplitScheduleZone(previous); zone == "" {
 				_ = json.Unmarshal(old["timezone"], &zone)
 			}
@@ -101,8 +90,7 @@ func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone st
 				return nil, fmt.Errorf("%w: schedule timezone Local is not portable; set timezone to a named zone", ErrInvalidValue)
 			}
 		}
-		value += "[" + zone + "]"
-		result[key], err = json.Marshal(value)
+		result[key], err = json.Marshal(value + "[" + zone + "]")
 		if err != nil {
 			return nil, err
 		}
