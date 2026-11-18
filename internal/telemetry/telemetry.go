@@ -1,4 +1,5 @@
-// Package telemetry emits anonymous, opt-out daemon, web UI, TUI and CLI usage events.
+// Package telemetry emits anonymous daemon, web UI, TUI and CLI usage events
+// when Kenn's recorded answer is yes or TELEMETRY_ENABLED=1.
 package telemetry
 
 import (
@@ -16,7 +17,7 @@ const (
 
 	applicationName = "kata"
 	envPrefix       = "KATA"
-	// EnabledEnv controls anonymous telemetry; 0/false/no/off disable reporting.
+	// EnabledEnv can disable reporting with 0/false/no/off.
 	EnabledEnv      = "KATA_TELEMETRY_ENABLED"
 	postHogEndpoint = "https://us.i.posthog.com"
 )

@@ -68,13 +68,6 @@ Download the package for your distribution from
 with your system package tool. Upgrade those installations with the same
 package manager; Kata will not replace a package-owned binary itself.
 
-The daemon sends limited anonymous usage reports by default. Set
-`KATA_TELEMETRY_ENABLED=0` or `DO_NOT_TRACK=1` in the daemon's environment
-to turn them off. See [Telemetry](../reference/configuration.md#telemetry) for
-what is collected and [reporting rules](../reference/configuration.md#reporting-rules)
-for CI and build-version requirements. Each CLI, TUI, and MCP process applies
-its own preferences when using an enabled daemon.
-
 ## Updating Kata
 
 Use the same installer or package manager that owns your binary. For a

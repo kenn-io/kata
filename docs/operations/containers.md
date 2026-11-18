@@ -1,7 +1,7 @@
 ---
 title: Containers
 description: Run the stock Kata image using environment settings, mounted secrets, and persistent storage.
-last_edited: 2026-11-04
+last_edited: 2026-11-18
 ---
 
 # Containers
@@ -31,7 +31,6 @@ docker run --name kata --restart unless-stopped \
   -e KATA_TRUST_PRIVATE_NETWORK=1 \
   -e KATA_WEB_PUBLIC_ORIGIN=http://127.0.0.1:7777 \
   -e KATA_BACKUP_DIR=/data/backups \
-  -e KATA_TELEMETRY_ENABLED=off \
   'ghcr.io/kenn-io/kata:<version>'
 ```
 

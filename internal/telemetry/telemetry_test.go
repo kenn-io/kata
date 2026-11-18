@@ -7,12 +7,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kit/telemetry/posthog"
 )
 
 func TestMain(m *testing.M) {
@@ -57,15 +59,37 @@ func TestStandaloneTelemetryAdmission(t *testing.T) {
 	}
 	release := build("telemetry-release", "-ldflags", testProjectKeyFlag)
 	source := build("telemetry-source")
-	for _, tc := range []struct{ name, binary, env, version, want string }{
-		{"enabled", release, EnabledEnv + "=1", "v1.2.3", "enabled"},
-		{"0", release, EnabledEnv + "=0", "v1.2.3", "disabled"},
-		{"development", release, EnabledEnv + "=1", "dev", "disabled"},
-		{"no project key", source, EnabledEnv + "=1", "v1.2.3", "disabled"},
+	for _, tc := range []struct {
+		name, binary, shared, product, version, want string
+		consent                                      *bool
+	}{
+		{"fresh home", release, "", "", "v1.2.3", "disabled", nil},
+		{"consent yes", release, "", "", "v1.2.3", "enabled", new(true)},
+		{"override no", release, "1", "", "v1.2.3", "enabled", new(false)},
+		{"product flag alone", release, "", "1", "v1.2.3", "disabled", nil},
+		{"product veto", release, "", "0", "v1.2.3", "disabled", new(true)},
+		{"development", release, "1", "", "dev", "disabled", nil},
+		{"no project key", source, "1", "", "v1.2.3", "disabled", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+			if tc.consent != nil {
+				require.NoError(t, posthog.RecordConsent(*tc.consent))
+			}
 			command := exec.CommandContext(t.Context(), tc.binary, "-version", tc.version) //nolint:gosec // test-owned standalone fixture
-			command.Env = append(os.Environ(), "KATA_HOME="+scratch, "KATA_DB="+filepath.Join(scratch, "kata.db"), "TELEMETRY_ENABLED=1", EnabledEnv+"=1", tc.env)
+			command.Env = slices.DeleteFunc(os.Environ(), func(entry string) bool {
+				key, _, _ := strings.Cut(entry, "=")
+				return strings.EqualFold(key, "TELEMETRY_ENABLED") || strings.EqualFold(key, EnabledEnv)
+			})
+			command.Env = append(command.Env, "KATA_HOME="+home, "KATA_DB="+filepath.Join(home, "kata.db"))
+			if tc.shared != "" {
+				command.Env = append(command.Env, "TELEMETRY_ENABLED="+tc.shared)
+			}
+			if tc.product != "" {
+				command.Env = append(command.Env, EnabledEnv+"="+tc.product)
+			}
 			output, err := command.CombinedOutput()
 			require.NoError(t, err, string(output))
 			require.Equal(t, tc.want, strings.TrimSpace(string(output)))
@@ -197,7 +221,8 @@ func TestOutcomesProperties(t *testing.T) {
 		require.NoError(t, err)
 		maps.Copy(tc.want, map[string]any{
 			"$geoip_disable": true, "$process_person_profile": false,
-			"application": "", "commit": "", "distribution": "", "source": "", "version": "",
+			"telemetry_consent": true,
+			"application":       "", "commit": "", "distribution": "", "source": "", "version": "",
 			"goarch": runtime.GOARCH, "goos": runtime.GOOS,
 		})
 		require.Equal(t, tc.want, properties)
