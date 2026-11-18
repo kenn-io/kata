@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-16
+last_edited: 2026-11-17
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -10,6 +10,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Press `V` in `kata tui` to open the close form on any daemon and cite an issue's attachment as `done` evidence, alone or with typed evidence. `x` still closes at once and opens the form only when the daemon requires evidence; other close reasons do not offer the choice. The events tab names the cited file, and marks it removed or changed. See [cite a document when closing work](guide/attachments.md#cite-a-document-when-closing-work).
+
+- Start the Windows daemon again after a reboot, even when another account's
+  process now has the old daemon's PID. Kata used to treat that process as the
+  running daemon until you deleted `daemon.*.json` from the runtime directory.
+  Kata now reads the process start time from the Windows process list, so it
+  can tell that the PID belongs to a different process
+  ([#1194](https://github.com/kenn-io/kata/issues/1194)).
 
 - `kata doctor` now asks Docbank once, with a read-only request, whether it
   answers and accepts the daemon's API key, and reports the result in its

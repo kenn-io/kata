@@ -369,6 +369,7 @@ type CreateFederationReplicaInput struct {
 // CreateFederationEnrollmentInput is the hub enrollment creation request body.
 type CreateFederationEnrollmentInput struct {
 	SpokeInstanceUID             string `json:"spoke_instance_uid"`
+	SpokeName                    string `json:"spoke_name,omitempty"`
 	ProjectID                    *int64 `json:"project_id"`
 	Capabilities                 string `json:"capabilities"`
 	Token                        string `json:"token,omitempty"`

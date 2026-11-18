@@ -42,7 +42,7 @@ func resolveMode(requested string, configured bool) (searchMode, error) {
 }
 
 // mergeRRF fuses two ranked legs with reciprocal rank fusion (k=60, equal
-// weights), deduping by issue id and unioning matched_in. Ties break by RRF
+// weights), deduping by issue UID and unioning matched_in. Ties break by RRF
 // score desc, then updated_at desc, then issue id asc. The resulting Score is
 // the RRF score.
 func mergeRRF(lexical, vector []db.SearchCandidate, limit int) ([]db.SearchCandidate, error) {
@@ -50,15 +50,15 @@ func mergeRRF(lexical, vector []db.SearchCandidate, limit int) ([]db.SearchCandi
 		issue   db.Issue
 		matched map[string]bool
 	}
-	byID := map[int64]agg{}
-	add := func(leg []db.SearchCandidate) []int64 {
-		keys := make([]int64, len(leg))
+	byID := map[string]agg{}
+	add := func(leg []db.SearchCandidate) []string {
+		keys := make([]string, len(leg))
 		for position, c := range leg {
-			keys[position] = c.Issue.ID
-			a, exists := byID[c.Issue.ID]
+			keys[position] = c.Issue.UID
+			a, exists := byID[c.Issue.UID]
 			if !exists {
 				a = agg{issue: c.Issue, matched: map[string]bool{}}
-				byID[c.Issue.ID] = a
+				byID[c.Issue.UID] = a
 			}
 			for _, m := range c.MatchedIn {
 				a.matched[m] = true
@@ -66,7 +66,7 @@ func mergeRRF(lexical, vector []db.SearchCandidate, limit int) ([]db.SearchCandi
 		}
 		return keys
 	}
-	hits, err := rrf.Fuse(rrfK, []rrf.Leg[int64]{
+	hits, err := rrf.Fuse(rrfK, []rrf.Leg[string]{
 		{Name: "lexical", Weight: 1, Keys: add(lexical)},
 		{Name: "semantic", Weight: 1, Keys: add(vector)},
 	})
