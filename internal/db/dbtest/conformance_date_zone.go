@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"encoding/json/jsontext"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -56,5 +57,49 @@ func checkDateZoneFederation(t *testing.T, store db.Storage) error {
 	after, err = store.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, before, after)
+	other, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Removed", Author: "operator"})
+	require.NoError(t, err)
+	cursor, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	_, _, _, err = store.SoftDeleteIssue(ctx, other.ID, "operator")
+	require.NoError(t, err)
+	_, err = store.PurgeIssue(ctx, other.ID, "operator", nil)
+	require.NoError(t, err)
+	before, err = store.MaxEventID(ctx)
+	require.NoError(t, err)
+	_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, AfterID: cursor, Limit: 100})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures, "a reset must not discard an older peer's replica before its incompatible baseline is rejected")
+	_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures, "metadata must not refresh an incompatible baseline")
+	after, err = store.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	reset, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, AfterID: cursor, Limit: 100, Features: db.SupportedEventFeatures})
+	require.NoError(t, err)
+	require.Positive(t, reset.ResetAfterID)
+	baseline, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: db.SupportedEventFeatures})
+	require.NoError(t, err)
+	page, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, AfterID: baseline.Binding.ReplayHorizonEventID - 1, Limit: 100, Features: db.SupportedEventFeatures})
+	require.NoError(t, err)
+	require.Contains(t, fmt.Sprint(page.Events), "2026-01-15[Europe/Paris]")
+	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`null`)}})
+	require.NoError(t, err)
+	_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true})
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures, "the retained baseline still contains the earlier zoned date")
+	other, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Removed again", Author: "operator"})
+	require.NoError(t, err)
+	cursor, err = store.MaxEventID(ctx)
+	require.NoError(t, err)
+	_, _, _, err = store.SoftDeleteIssue(ctx, other.ID, "operator")
+	require.NoError(t, err)
+	_, err = store.PurgeIssue(ctx, other.ID, "operator", nil)
+	require.NoError(t, err)
+	reset, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, AfterID: cursor, Limit: 100})
+	require.NoError(t, err)
+	require.Positive(t, reset.ResetAfterID)
+	baseline, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true})
+	require.NoError(t, err)
+	_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, AfterID: baseline.Binding.ReplayHorizonEventID - 1, Limit: 100})
+	require.NoError(t, err)
 	return nil
 }
