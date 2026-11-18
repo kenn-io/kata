@@ -681,9 +681,9 @@
 
 <style>
   .date-error {
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-    margin: 0.5rem 0 0;
+    color: var(--accent-red);
+    font-size: 0.75rem;
+    margin: 0.5rem 0 1rem;
   }
   .property-pills {
     display: flex;
