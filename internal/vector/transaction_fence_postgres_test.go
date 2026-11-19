@@ -27,6 +27,10 @@ func TestPostgresReconcilerWritesHonorTransactionFence(t *testing.T) {
 	require.NoError(t, idx.EnsureBuilding(ctx, "first", generation))
 	require.NoError(t, idx.CutOver(ctx, "first"))
 	require.NoError(t, idx.EnsureBuilding(ctx, "second", generation))
+	var buildingFences int
+	countBuilding := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error { buildingFences++; return nil })
+	require.NoError(t, idx.EnsureBuilding(countBuilding, "second", generation))
+	require.Equal(t, 1, buildingFences, "Kit must fence the building generation write once")
 	var revision int64
 	require.NoError(t, pg.DB.QueryRowContext(ctx, `SELECT content_revision FROM issue_vector_mirror WHERE issue_uid = $1`, issue.UID).Scan(&revision))
 	denied := errors.New("worker authority revoked")
@@ -36,6 +40,7 @@ func TestPostgresReconcilerWritesHonorTransactionFence(t *testing.T) {
 	_, err = idx.RefreshMirror(fenced, store)
 	require.ErrorIs(t, err, denied)
 	require.ErrorIs(t, idx.EnsureBuilding(fenced, "first", generation), denied, "an active generation still checks authority before the provider runs")
+	require.ErrorIs(t, idx.EnsureBuilding(fenced, "second", generation), denied, "Kit must reject a building generation without authority")
 	require.ErrorIs(t, idx.SaveVectorsForTest(fenced, "first", issue.UID, revision, []kitvec.ChunkVector{{ChunkIndex: 0, Vector: kitvec.Vector{1, 0}}}), denied)
 	require.ErrorIs(t, idx.CutOver(fenced, "second"), denied)
 	var mirror, generations, chunks, stamps int
@@ -90,7 +95,7 @@ func TestPostgresCutOverReclaimsRetiredGenerationOnce(t *testing.T) {
 	var fences int
 	fenced := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error {
 		fences++
-		if fences == 3 {
+		if fences == 2 {
 			return denied
 		}
 		return nil
@@ -106,7 +111,7 @@ func TestPostgresCutOverReclaimsRetiredGenerationOnce(t *testing.T) {
 	fences = 0
 	counted := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error { fences++; return nil })
 	require.NoError(t, idx.CutOver(counted, bKey))
-	require.Equal(t, 3, fences, "failed reclamation must be retried")
+	require.Equal(t, 2, fences, "failed reclamation must be retried")
 	var stamps int
 	err = pg.DB.QueryRowContext(ctx, `SELECT count(*) FROM issue_vector_stamps s JOIN issue_vector_generations g ON g.id = s.generation_id WHERE g.gen_key = $1`, aKey).Scan(&stamps)
 	require.NoError(t, err)
@@ -122,7 +127,7 @@ func TestPostgresCutOverReclaimsRetiredGenerationOnce(t *testing.T) {
 	require.NoError(t, idx.SaveVectorsForTest(ctx, bKey, issue.UID, issue.ContentRevision, vectors))
 	fences = 0
 	require.NoError(t, idx.CutOver(counted, bKey))
-	require.Equal(t, 3, fences, "a rebuilt generation must be reclaimed again")
+	require.Equal(t, 2, fences, "a rebuilt generation must be reclaimed again")
 	err = pg.DB.QueryRowContext(ctx, `SELECT count(*) FROM issue_vector_chunks c JOIN issue_vector_generations g ON g.id = c.generation_id WHERE g.gen_key = $1`, aKey).Scan(&chunks)
 	require.NoError(t, err)
 	require.Zero(t, chunks)

@@ -169,3 +169,28 @@ func vectorCatalogShape(ctx context.Context, t *testing.T, admin *sql.DB, schema
 	require.NoError(t, rows.Err())
 	return values
 }
+
+func TestVectorCatalogMigrationWithoutVectorTables(t *testing.T) {
+	ctx := t.Context()
+	dsn, cleanup := testenv.NewPlainPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	const schema = "vector_absent_upgrade"
+	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	_, err = admin.ExecContext(ctx, `UPDATE vector_absent_upgrade.meta SET value='51' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = upgraded.Close() })
+	version, err := upgraded.SchemaVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, db.CurrentSchemaVersion(), version)
+	var count int
+	err = admin.QueryRowContext(ctx, `SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname IN ('issue_vector_mirror', 'issue_vector_generations', 'issue_vector_stamps', 'issue_vector_chunks')`, schema).Scan(&count)
+	require.NoError(t, err)
+	assert.Zero(t, count)
+}

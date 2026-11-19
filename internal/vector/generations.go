@@ -14,20 +14,18 @@ func (ix *Index) EnsureBuilding(ctx context.Context, key string, gen kitvec.Gene
 	if ix.pg != nil && gen.Dimensions > maxPostgresHalfvecDimensions {
 		return fmt.Errorf("vector: postgres halfvec dimensions must not exceed 4,000 (got %d)", gen.Dimensions)
 	}
-	if ix.pg != nil {
-		tx, err := ix.pg.beginReconcilerTx(ctx)
-		if err != nil {
-			return err
-		}
-		if err := tx.Rollback(); err != nil {
-			return err
-		}
-	}
 	state, err := ix.generationState(ctx, key)
 	if err != nil {
 		return err
 	}
 	if state == string(sqlitevec.StateActive) {
+		if ix.pg != nil {
+			tx, err := ix.pg.beginReconcilerTx(ctx)
+			if err != nil {
+				return err
+			}
+			return tx.Rollback()
+		}
 		return nil
 	}
 	store := ix.lifecycleStore()
@@ -46,7 +44,7 @@ func (ix *Index) ActiveGeneration(ctx context.Context) (string, bool, error) {
 }
 
 func (ix *Index) CutOver(ctx context.Context, key string) error {
-	_, _, backlog, err := ix.Coverage(ctx, key)
+	backlog, err := ix.Backlog(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -66,8 +64,10 @@ func (ix *Index) CutOver(ctx context.Context, key string) error {
 		if other == key {
 			continue
 		}
-		if err := store.SetGenerationState(ctx, other, kitvec.StateRetired); err != nil {
-			return err
+		if backlog != 0 {
+			if err := store.SetGenerationState(ctx, other, kitvec.StateRetired); err != nil {
+				return err
+			}
 		}
 		if err := store.Reclaim(ctx, other); err != nil {
 			return err
