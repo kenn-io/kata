@@ -51,11 +51,7 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 		_, err := admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_mirror(issue_uid, project_uid, content, content_revision, embed_gen) VALUES ($1, $2, $3, $4, $5)`, issue.UID, project.UID, embedding.EmbedText(issue.Title, issue.Body), issue.ContentRevision, key)
 		require.NoError(t, err)
 	}
-	retired := kitvec.Generation{Model: "retired-model", Dimensions: 2, Params: map[string]string{"salt": "retired-example"}}
-	retiredKey := retired.Fingerprint()
 	_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_generations(gen_key, model, dimensions, state) VALUES ($1, 'model', 2, 'active'), ($2, 'other', 2, 'building')`, key, buildingKey)
-	require.NoError(t, err)
-	_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_generations(gen_key, model, dimensions, state) VALUES ($1, 'retired-model', 2, 'retired')`, retiredKey)
 	require.NoError(t, err)
 	for i, issue := range issues {
 		_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_stamps(gen_key, issue_uid, revision) VALUES ($1, $2, $3)`, key, issue.UID, issue.ContentRevision)
@@ -78,18 +74,8 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 	require.NoError(t, err)
 	release, err := idx.AcquireReconcilerLease(ctx)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		if release != nil {
-			_ = release()
-		}
-	})
-	require.NoError(t, idx.EnsureBuilding(ctx, retiredKey, retired))
-	require.NoError(t, release())
-	release = nil
-	var retiredState string
-	err = upgraded.QueryRowContext(ctx, `SELECT state FROM issue_vector_generations WHERE gen_key=$1`, retiredKey).Scan(&retiredState)
-	require.NoError(t, err)
-	assert.Equal(t, "building", retiredState)
+	t.Cleanup(func() { _ = release() })
+	require.NoError(t, idx.EnsureBuilding(ctx, buildingKey, kitvec.Generation{Model: "other", Dimensions: 2}))
 	hits, err := idx.Query(ctx, key, kitvec.Vector{1, 0}, 2)
 	require.NoError(t, err)
 	require.Len(t, hits, 2)

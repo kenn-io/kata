@@ -499,7 +499,6 @@ there is no down migration.
 The 51→52 migration converts the optional PostgreSQL vector catalog to Kit's
 layout in place. Stored vectors, revisions, and generation keys stay intact;
 no re-embedding is needed. Databases without the optional tables advance too.
-SQLite advances in place without changing its vector sidecar.
 
 Stop serving daemons and imports, back up the database, and run
 `kata storage postgres migrate` with schema-owner credentials. Allow a stopped

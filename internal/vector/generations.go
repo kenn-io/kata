@@ -28,8 +28,7 @@ func (ix *Index) EnsureBuilding(ctx context.Context, key string, gen kitvec.Gene
 		}
 		return nil
 	}
-	store := ix.lifecycleStore()
-	if err := store.EnsureGeneration(ctx, key, gen, kitvec.StateBuilding); err != nil {
+	if err := ix.lifecycle.EnsureGeneration(ctx, key, gen, kitvec.StateBuilding); err != nil {
 		return fmt.Errorf("vector: ensure generation %s: %w", key, err)
 	}
 	return nil
@@ -48,12 +47,11 @@ func (ix *Index) CutOver(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	store := ix.lifecycleStore()
 	if backlog == 0 {
-		if err := store.Activate(ctx, key); err != nil {
+		if err := ix.lifecycle.Activate(ctx, key); err != nil {
 			return err
 		}
-	} else if err := store.SetGenerationState(ctx, key, kitvec.StateActive); err != nil {
+	} else if err := ix.lifecycle.SetGenerationState(ctx, key, kitvec.StateActive); err != nil {
 		return err
 	}
 	keys, err := ix.generationKeys(ctx)
@@ -65,11 +63,11 @@ func (ix *Index) CutOver(ctx context.Context, key string) error {
 			continue
 		}
 		if backlog != 0 {
-			if err := store.SetGenerationState(ctx, other, kitvec.StateRetired); err != nil {
+			if err := ix.lifecycle.SetGenerationState(ctx, other, kitvec.StateRetired); err != nil {
 				return err
 			}
 		}
-		if err := store.Reclaim(ctx, other); err != nil {
+		if err := ix.lifecycle.Reclaim(ctx, other); err != nil {
 			return err
 		}
 	}
@@ -114,13 +112,6 @@ type lifecycleStore interface {
 	SetGenerationState(context.Context, string, kitvec.State) error
 	Activate(context.Context, string) error
 	Reclaim(context.Context, string) error
-}
-
-func (ix *Index) lifecycleStore() lifecycleStore {
-	if ix.pg != nil {
-		return ix.pgStore
-	}
-	return ix.store
 }
 
 func (ix *Index) generationKeys(ctx context.Context) ([]string, error) {

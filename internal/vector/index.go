@@ -36,6 +36,7 @@ type Index struct {
 	db        *sql.DB
 	store     *sqlitevec.Store[string, string]
 	flowStore kitvec.Store[string, string]
+	lifecycle lifecycleStore
 	pg        *postgresIndex
 	pgStore   *pgvector.Store[string, string]
 
@@ -81,7 +82,7 @@ func Open(ctx context.Context, path string) (*Index, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("vector: init kit store: %w", err)
 	}
-	return &Index{db: db, store: store, flowStore: store}, nil
+	return &Index{db: db, store: store, flowStore: store, lifecycle: store}, nil
 }
 
 // OpenPostgres binds the semantic index to canonical pgvector tables on an
@@ -98,7 +99,7 @@ func OpenPostgres(ctx context.Context, db *sql.DB) (*Index, error) {
 	if err != nil {
 		return nil, fmt.Errorf("vector: init kit postgres store: %w", err)
 	}
-	return &Index{db: db, flowStore: store, pg: pg, pgStore: store}, nil
+	return &Index{db: db, flowStore: store, lifecycle: store, pg: pg, pgStore: store}, nil
 }
 
 // Close releases the sidecar handle. A Postgres-backed index runs on the

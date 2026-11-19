@@ -318,10 +318,10 @@ corresponding mirror, generation, stamp, and chunk rows in its selected Kata
 schema. The schema-owner ceremony creates these optional derived tables; the
 daemon's runtime role needs DML only. Generations carry `id`, `gen_key`,
 `fingerprint`, `dimension`, and `state`; stamps and chunks use `generation_id`
-and `doc_key`. The mirror has no `embed_gen` column. Kit's `pgvector.Store`
-owns these rows. Chunk embeddings use unbounded `public.halfvec`
-so model dimensions can change without runtime DDL. Both forms are derived
-state and portable JSONL restore deliberately rebuilds them from issue content.
+and `doc_key`. The mirror has no `embed_gen` column. Chunk embeddings use
+unbounded `public.halfvec` so model dimensions can change without runtime DDL.
+Both forms are derived state and portable JSONL restore deliberately rebuilds
+them from issue content.
 
 Every PostgreSQL reconciler polls for a database/schema-scoped advisory lease
 on a dedicated connection before touching this derived state and holds it for
