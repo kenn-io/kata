@@ -80,7 +80,3 @@ func (ix *Index) VectorCountForTest(ctx context.Context) (int, error) {
 	err := ix.db.QueryRowContext(ctx, `SELECT count(*) FROM `+table).Scan(&count)
 	return count, err
 }
-
-func (ix *Index) GenerationKeysForTest(ctx context.Context) ([]string, error) {
-	return ix.generationKeys(ctx)
-}
