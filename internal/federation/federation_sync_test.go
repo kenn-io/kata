@@ -5064,7 +5064,7 @@ func TestFederationMoveSourceProofPreservesPlaintextPolicy(t *testing.T) {
 			require.NoError(t, err)
 			credentials := newMoveCredentialStore()
 			require.NoError(t, credentials.StoreFederationCredential(ctx, source.UID, config.FederationCredential{HubURL: "http://daemon.example", HubProjectID: source.ID, Actor: "worker", Token: "source-plaintext-proof", AllowInsecure: test.credentialAllow}))
-			tokens, err := federationMoveSourceTokens(ctx, env.DB, credentials, destinationBinding, destinationBinding.HubURL, move.Events, clientpkg.Opts{})
+			tokens, err := federationMoveSourceTokens(ctx, env.DB, credentials, destinationBinding, destinationBinding.HubURL, move.Events, clientpkg.Opts{AllowInsecure: true})
 			if test.wantError {
 				require.Error(t, err)
 				require.Empty(t, tokens)

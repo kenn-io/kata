@@ -1,9 +1,13 @@
 package db
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/metadata"
@@ -294,4 +298,106 @@ func stringPointersEqual(left, right *string) bool {
 		return left == nil && right == nil
 	}
 	return *left == *right
+}
+
+// DirectLinkAdditionPeers returns only explicit link additions eligible for
+// a supplemental direct-spoke proof. It never modifies the event payload.
+func DirectLinkAdditionPeers(event FoldEvent) (map[string]bool, error) {
+	if event.Type != "issue.created" && event.Type != "issue.links_changed" {
+		return nil, nil
+	}
+	var peers map[string]bool
+	_, _, err := StripCrossProjectLinkAdditions(event, func(uid string) bool {
+		if uid != "" {
+			if peers == nil {
+				peers = make(map[string]bool)
+			}
+			peers[uid] = true
+		}
+		return false
+	})
+	if event.Type == "issue.links_changed" && len(peers) != 0 {
+		// A peer used for a removal in the same edit needs ordinary authority.
+		payload := PayloadMap(event.Payload)
+		removed, _ := StringValue(payload["parent_removed_uid"])
+		delete(peers, removed)
+		for _, key := range []string{"blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
+			for _, uid := range StringSlice(payload[key]) {
+				delete(peers, uid)
+			}
+		}
+	}
+	return peers, err
+}
+
+// DirectParentRemovals identifies the old endpoint of each parent assignment.
+// A later clear cannot undo the fact that setting the parent displaced an edge.
+// Key the removals by event so each displaced endpoint gets ordinary authority.
+func DirectParentRemovals(ctx context.Context, tx Transaction, events []RemoteEvent) (map[string][]string, error) {
+	var ordered []FoldEvent
+	for _, event := range events {
+		switch event.Type {
+		case "issue.created", "issue.links_changed", "issue.linked", "issue.snapshot", "issue.moved":
+			ordered = append(ordered, moveSnapshotFoldEvent(FederationMoveSnapshotEvent(event)))
+		}
+	}
+	slices.SortStableFunc(ordered, func(a, b FoldEvent) int { return compareClock(clockOf(a), clockOf(b)) })
+
+	parents := make(map[string]string)
+	removed := make(map[string][]string)
+	for _, event := range ordered {
+		assignments, err := directParentAssignments(event)
+		if err != nil {
+			return nil, err
+		}
+		for _, key := range assignments {
+			previous, known := parents[key.FromUID]
+			if !known {
+				err := tx.QueryRowContext(ctx, `SELECT to_issue_uid FROM links WHERE from_issue_uid=$1 AND type='parent'`, key.FromUID).Scan(&previous)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return nil, err
+				}
+			}
+			if previous != "" && previous != key.ToUID {
+				removed[event.UID] = append(removed[event.UID], previous)
+			}
+			parents[key.FromUID] = key.ToUID
+		}
+	}
+	return removed, nil
+}
+
+func directParentAssignments(event FoldEvent) ([]FoldLinkKey, error) {
+	switch event.Type {
+	case "issue.links_changed":
+		parent, _ := StringValue(PayloadMap(event.Payload)["parent_set_uid"])
+		if parent != "" {
+			return []FoldLinkKey{{FromUID: event.IssueUID, ToUID: parent, Type: "parent"}}, nil
+		}
+	case "issue.linked":
+		payload := PayloadMap(event.Payload)
+		kind, _ := StringValue(payload["type"])
+		if kind == "parent" {
+			from, _ := StringValue(payload["from_uid"])
+			to, _ := StringValue(payload["to_uid"])
+			if from != "" && to != "" {
+				return []FoldLinkKey{{FromUID: from, ToUID: to, Type: kind}}, nil
+			}
+		}
+	case "issue.created", "issue.snapshot":
+		var doc struct {
+			Links []IssueDocumentLink `json:"links"`
+		}
+		if err := json.Unmarshal(event.Payload, &doc); err != nil {
+			return nil, fmt.Errorf("%w: decode parent links: %v", ErrFederationIngestValidation, err)
+		}
+		var parents []FoldLinkKey
+		for _, link := range doc.Links {
+			if link.Type == "parent" && link.ToIssueUID != "" {
+				parents = append(parents, snapshotLinkKey(event.IssueUID, link))
+			}
+		}
+		return parents, nil
+	}
+	return nil, nil
 }

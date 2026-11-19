@@ -611,6 +611,15 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		EmbeddingProfile:          daemon.EmbeddingProfile(cfg.Profile),
 		Logger:                    logger,
 	}
+	if controller, ok := cfg.FederationAccess.(FederationReferenceAccessController); ok {
+		serverConfig.AuthorizeFederationReference = func(ctx context.Context, tx db.Transaction, route, peer daemon.HostFederationAccessRequest) error {
+			err := controller.AuthorizeFederationReference(ctx, tx, publicFederationRequest(route), publicFederationRequest(peer))
+			if errors.Is(err, ErrAccessDenied) {
+				return errors.Join(daemon.ErrHostAccessDenied, err)
+			}
+			return err
+		}
+	}
 	if reconciler != nil {
 		serverConfig.ReconcilerHealth = reconciler.Health
 		serverConfig.EmbeddingWake = reconciler.RetryNow
@@ -819,14 +828,8 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 	if a.controller == nil {
 		return daemon.HostFederationAccessDecision{}, nil
 	}
-	decision, err := a.controller.AuthorizeFederation(ctx, FederationAccessRequest{
-		Enrollment: publicFederationEnrollment(request.Enrollment, request.Project.UID),
-		Project:    publicProject(request.Project),
-		Capability: FederationCapability(request.Capability),
-		Operation: FederationOperation{
-			ID: request.Operation.ID, Mutation: request.Operation.Mutation,
-		},
-	})
+	decision, err := a.controller.AuthorizeFederation(ctx, publicFederationRequest(request))
+
 	if errors.Is(err, ErrAccessDenied) {
 		return daemon.HostFederationAccessDecision{}, daemon.ErrHostAccessDenied
 	}
@@ -847,6 +850,17 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 		}
 	}
 	return daemon.HostFederationAccessDecision{TransactionFence: transactionFence}, nil
+}
+
+func publicFederationRequest(request daemon.HostFederationAccessRequest) FederationAccessRequest {
+	return FederationAccessRequest{
+		Enrollment: publicFederationEnrollment(request.Enrollment, request.Project.UID),
+		Project:    publicProject(request.Project),
+		Capability: FederationCapability(request.Capability),
+		Operation: FederationOperation{
+			ID: request.Operation.ID, Mutation: request.Operation.Mutation,
+		},
+	}
 }
 
 func (a hostAccessControllerAdapter) Authorize(

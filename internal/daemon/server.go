@@ -201,7 +201,8 @@ type ServerConfig struct {
 
 	// HostFederationAccess optionally adds host-owned authorization after Kata
 	// authenticates a project-scoped federation enrollment.
-	HostFederationAccess HostFederationAccessController
+	HostFederationAccess         HostFederationAccessController
+	AuthorizeFederationReference func(context.Context, db.Transaction, HostFederationAccessRequest, HostFederationAccessRequest) error
 
 	// IdleAdmission admits ordinary HTTP requests as foreground daemon work.
 	// Nil disables idle lifecycle handling.

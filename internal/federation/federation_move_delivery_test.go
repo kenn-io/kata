@@ -30,18 +30,22 @@ func newMoveDeliveryHub(t *testing.T, names ...string) (*testenv.Env, []db.Proje
 	return hub, projects
 }
 
-func newMoveDeliverySpoke(t *testing.T, hub *testenv.Env, projects []db.Project) moveDeliverySpoke {
+func newMoveDeliverySpoke(t *testing.T, hub *testenv.Env, projects []db.Project, actors ...string) moveDeliverySpoke {
 	t.Helper()
 	spoke := moveDeliverySpoke{env: testenv.New(t), projects: make([]db.Project, len(projects)), credentials: newMoveCredentialStore()}
 	for i, project := range projects {
+		actor := "worker"
+		if actors != nil {
+			actor = actors[i]
+		}
 		var err error
 		spoke.projects[i], err = spoke.env.DB.CreateProjectWithUID(t.Context(), project.Name, project.UID)
 		require.NoError(t, err)
-		_, err = spoke.env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: spoke.projects[i].ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: "worker"})
+		_, err = spoke.env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: spoke.projects[i].ID, Role: db.FederationRoleSpoke, HubURL: hub.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: actor})
 		require.NoError(t, err)
-		grant, err := hub.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &project.ID, Capabilities: "push,pull", Actor: "worker"})
+		grant, err := hub.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.env.DB.InstanceUID(), ProjectID: &project.ID, Capabilities: "push,pull", Actor: actor})
 		require.NoError(t, err)
-		spoke.credentials[project.UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: grant.Token, Actor: "worker"}
+		spoke.credentials[project.UID] = config.FederationCredential{HubURL: hub.URL, HubProjectID: project.ID, Token: grant.Token, Actor: actor}
 	}
 	return spoke
 }

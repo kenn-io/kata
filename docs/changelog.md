@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Click another task in the web UI's list and New task stays available while
+  the task's comments, links, and history load. The button had been disabled
+  until that task's snapshot arrived, about a second per click on a large
+  workspace. A new view, filter, project, or graph still pauses changes until
+  its snapshot arrives.
+
 - Sync a Linear team that every run had refused with `linear issue is outside
   selected scope`. For some teams, Linear's issue filter on the team ID returns
   issues from the whole workspace. Kata now reads issues through the team
@@ -150,6 +156,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   requests get HTTP 503 `signing_warming` with `Retry-After: 5` instead of
   `signature_invalid`, so spoke operators retry instead of checking keys and
   clocks. See [federation request signing](operations/federation-signing.md).
+
+- Enroll a spoke on a hub that requires signing and get a join command with the
+  hub's `external_url` and signing key ID and file placeholders. See
+  [federation signing](operations/federation-signing.md).
 
 - Use MCP Events through the daemon's `/mcp` endpoint with static or identity tokens.
 - Start search by meaning on the next SQLite daemon start after enabling the built-in server in a supported app on the same computer. PostgreSQL requires explicit setup. If Kata cannot confirm the shared choice was saved, setup succeeds and Kata logs the failure; other apps may miss the choice if it wasn't saved. Existing providers stay configured. See [semantic search](guide/semantic-search.md#enabling-it).

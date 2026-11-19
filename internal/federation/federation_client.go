@@ -133,7 +133,15 @@ func (c *Client) IngestProjectEventsWithOptions(
 	events []api.FederationIngestEventEnvelope,
 	opts IngestProjectEventsOptions,
 ) (api.FederationIngestEventsBody, error) {
-	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
+	httpClient := c.client
+	if len(opts.MoveSourceTokens) > 0 {
+		// Supplemental credentials belong to this mount. A redirect can name a
+		// different mount on the same origin and can replay the request body.
+		pinned := *httpClient
+		pinned.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		httpClient = &pinned
+	}
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{httpClient}))
 	if err != nil {
 		return api.FederationIngestEventsBody{}, err
 	}
