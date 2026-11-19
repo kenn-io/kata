@@ -51,8 +51,12 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 		CREATE INDEX idx_issue_vector_chunks_generation ON issue_vector_chunks(gen_key);
 		UPDATE meta SET value='51' WHERE key='schema_version'`)
 	require.NoError(t, err)
-	for _, issue := range issues {
-		_, err := admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_mirror(issue_uid, project_uid, content, content_revision, embed_gen) VALUES ($1, $2, $3, $4, $5)`, issue.UID, project.UID, embedding.EmbedText(issue.Title, issue.Body), issue.ContentRevision, key)
+	for i, issue := range issues {
+		embedGen := key
+		if i == 1 {
+			embedGen = buildingKey
+		}
+		_, err := admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_mirror(issue_uid, project_uid, content, content_revision, embed_gen) VALUES ($1, $2, $3, $4, $5)`, issue.UID, project.UID, embedding.EmbedText(issue.Title, issue.Body), issue.ContentRevision, embedGen)
 		require.NoError(t, err)
 	}
 	_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_generations(gen_key, model, dimensions, state) VALUES ($1, 'model', 2, 'active'), ($2, 'other', 2, 'building')`, key, buildingKey)
