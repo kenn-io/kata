@@ -64,6 +64,17 @@ func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	if native {
 		required = MergeEventFeatures(required, CronEventFeature)
 	}
+	return requireZonedDateFeature(kind, payload, required)
+}
+
+func requireZonedDateFeature(kind, payload, required string) (string, error) {
+	zoned, err := payloadHasZonedDate(kind, payload)
+	if err != nil {
+		return "", err
+	}
+	if zoned {
+		required = MergeEventFeatures(required, IssueDateZoneEventFeature)
+	}
 	return required, nil
 }
 
