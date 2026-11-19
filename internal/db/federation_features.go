@@ -378,11 +378,11 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 			}
 			out.Binding = binding
 		}
-		// Older peers clear their project before replaying, so refuse the
-		// metadata read if the replay would carry a zoned date.
+		// Moved issue history can precede the destination replay horizon.
+		// Check it before older peers clear their project for replay.
 		if RequireEventFeatures(in.Features, IssueDateZoneEventFeature) != nil {
 			const limit = 1000
-			cursor := binding.ReplayHorizonEventID - 1
+			cursor := int64(0)
 			for {
 				page, err := readEvents(cursor, limit)
 				if err != nil {
