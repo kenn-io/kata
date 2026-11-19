@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/vector"
@@ -24,7 +25,9 @@ func TestPostgresRuntimeRoleSwitchesModelsWithoutCreate(t *testing.T) {
 	owner, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "vector_runtime", SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = owner.Close() })
-	_, err = owner.DB.ExecContext(ctx, `INSERT INTO issue_vector_mirror(issue_uid, project_uid, content, content_revision) VALUES ('issue-1', 'project-1', 'example', 1)`)
+	project, err := owner.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := owner.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "example", Author: "operator"})
 	require.NoError(t, err)
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
@@ -42,6 +45,8 @@ func TestPostgresRuntimeRoleSwitchesModelsWithoutCreate(t *testing.T) {
 	release, err := ix.AcquireReconcilerLease(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, release()) })
+	_, err = ix.RefreshMirror(ctx, owner)
+	require.NoError(t, err)
 	encode := func(_ context.Context, texts []string) ([][]float32, error) {
 		out := make([][]float32, len(texts))
 		for i := range out {
@@ -63,6 +68,6 @@ func TestPostgresRuntimeRoleSwitchesModelsWithoutCreate(t *testing.T) {
 		hits, err := ix.Query(ctx, key, kitvec.Vector{1, 0}, 1)
 		require.NoError(t, err)
 		require.Len(t, hits, 1)
-		require.Equal(t, "issue-1", hits[0].Doc)
+		require.Equal(t, issue.UID, hits[0].Doc)
 	}
 }
