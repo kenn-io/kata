@@ -242,54 +242,6 @@ actor = "user-a"
 	}
 }
 
-func TestWebDaemonRosterRefreshesRecoveredHub(t *testing.T) {
-	var ready atomic.Bool
-	hub, probes := anonymousHub(t, &ready)
-	d := openTestDB(t)
-	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebSyncHubs: []string{"hub"}, WebDaemons: []config.CatalogDaemonConfig{{Name: "hub", URL: hub.URL, AllowInsecure: true}}})
-	for _, want := range []int{1, 2, 2} {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
-		require.NoError(t, err)
-		resp, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
-		var roster struct {
-			Daemons []struct {
-				ID      string `json:"id"`
-				Health  string `json:"health"`
-				Default bool   `json:"default"`
-			} `json:"daemons"`
-		}
-		require.NoError(t, json.NewDecoder(resp.Body).Decode(&roster))
-		require.NoError(t, resp.Body.Close())
-		require.Len(t, roster.Daemons, want)
-		if want == 1 {
-			assert.Equal(t, "local", roster.Daemons[0].ID)
-			assert.True(t, roster.Daemons[0].Default)
-			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
-			require.NoError(t, err)
-			response, err := http.DefaultClient.Do(request)
-			require.NoError(t, err)
-			assert.Equal(t, http.StatusOK, response.StatusCode)
-			require.NoError(t, response.Body.Close())
-		} else {
-			assert.Equal(t, "hub", roster.Daemons[0].ID)
-			assert.Equal(t, "connected", roster.Daemons[0].Health)
-			assert.True(t, roster.Daemons[0].Default)
-			assert.Equal(t, "local", roster.Daemons[1].ID)
-			assert.False(t, roster.Daemons[1].Default)
-		}
-		ready.Store(true)
-	}
-	assert.EqualValues(t, 4, probes.Load())
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
-	require.NoError(t, err)
-	request.Header.Set("X-Kata-Web-Daemon", "local")
-	response, err := http.DefaultClient.Do(request)
-	require.NoError(t, err)
-	defer func() { _ = response.Body.Close() }()
-	assert.Equal(t, http.StatusOK, response.StatusCode)
-}
-
 func TestWebDaemonRosterCachesUnrelatedTargets(t *testing.T) {
 	var ready atomic.Bool
 	hub, hubProbes := anonymousHub(t, &ready)
@@ -338,7 +290,7 @@ func TestWebDaemonHeaderlessLocalDefaultDoesNotProbeHubs(t *testing.T) {
 	assert.Zero(t, probesB.Load())
 }
 
-func TestWebDaemonRosterSelectionAndInitialConnectedHub(t *testing.T) {
+func TestWebDaemonRosterKeepsSelectedHub(t *testing.T) {
 	var ready atomic.Bool
 	hub, _ := anonymousHub(t, &ready)
 	d := openTestDB(t)

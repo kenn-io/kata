@@ -64,7 +64,12 @@ export async function fetchWebDaemons(
     signal,
     (response) => response.text(),
   )
-  if (response.status === 401) throw rosterAuthenticationError(response)
+  if (response.status === 401) {
+    throw new AuthenticationRequiredError(
+      'Configured daemons are unavailable',
+      responseTriggeredAuthenticationTransition(response),
+    )
+  }
   if (!response.ok) throw new Error('Configured daemons are unavailable')
   const value: unknown = JSON.parse(body as string)
   if (!isRecord(value) || !Array.isArray(value.daemons)) {
@@ -75,13 +80,6 @@ export async function fetchWebDaemons(
     throw new Error('Configured daemons are unavailable')
   }
   return daemons
-}
-
-function rosterAuthenticationError(response: Response): AuthenticationRequiredError {
-  return new AuthenticationRequiredError(
-    'Configured daemons are unavailable',
-    responseTriggeredAuthenticationTransition(response),
-  )
 }
 
 function requestFrom(input: RequestInfo | URL, init?: RequestInit): Request {
