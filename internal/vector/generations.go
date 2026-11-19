@@ -20,6 +20,7 @@ func (ix *Index) EnsureBuilding(ctx context.Context, key string, gen kitvec.Gene
 	}
 	if state == string(sqlitevec.StateActive) {
 		if ix.pg != nil {
+			// Check request authority even when the generation is already active.
 			tx, err := ix.pg.beginReconcilerTx(ctx)
 			if err != nil {
 				return err
