@@ -129,6 +129,7 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 			t.Error("reconciler did not stop")
 		}
 	})
+	//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 	require.Eventually(t, func() bool { return reconciler.Health().LastSuccessAt != nil }, 5*time.Second, 10*time.Millisecond)
 	assert.Zero(t, calls.Load())
 	after, err := idx.Query(ctx, key, kitvec.Vector{1, 0}, 2)
