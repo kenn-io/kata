@@ -264,5 +264,36 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	parent, err = store.ParentOf(ctx, child.ID)
 	require.NoError(t, err)
 	require.Equal(t, peer.ID, parent.ToIssueID)
+	// One edit can add a relationship and remove a different relationship
+	// to the same peer. A reference proof authorizes both changes.
+	mixedPayload, err := json.Marshal(map[string]any{"parent_removed_uid": peer.UID, "related_added_uids": []string{peer.UID}})
+	require.NoError(t, err)
+	mixed := newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+2, mixedPayload)
+	params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: mixed}}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	_, err = store.ParentOf(ctx, child.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	// Replace a parent with the two events emitted by the link endpoint.
+	params.Events = []db.FederationIngestEvent{{SourceEventID: 6, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+8, payload)}}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	unlinked, err := json.Marshal(map[string]string{"from_uid": child.UID, "to_uid": peer.UID, "link_from_uid": child.UID, "link_to_uid": peer.UID, "type": "parent"})
+	require.NoError(t, err)
+	linked, err := json.Marshal(map[string]string{"from_uid": child.UID, "to_uid": second.UID, "type": "parent"})
+	require.NoError(t, err)
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 7, Event: newRemoteEvent(t, route, &child.UID, "issue.unlinked", "worker", origin, at+9, unlinked)},
+		{SourceEventID: 8, Event: newRemoteEvent(t, route, &child.UID, "issue.linked", "worker", origin, at+10, linked)},
+	}
+	params.MoveSourceEnrollmentIDs = nil
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+	params.MoveSourceEnrollmentIDs = map[string]int64{source.UID: peerGrant.Enrollment.ID}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.NoError(t, err)
+	parent, err = store.ParentOf(ctx, child.ID)
+	require.NoError(t, err)
+	require.Equal(t, second.ID, parent.ToIssueID)
 	return nil
 }

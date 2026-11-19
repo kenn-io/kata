@@ -66,8 +66,8 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 			credentials := serviceCredentialStoreAdapter{newServiceFederationCredentialStore()}
 			var projects []db.Project
 			var bindings []db.FederationBinding
-			for i, actor := range []string{"worker", "peer-member"} {
-				name := []string{"route-project", "peer-project"}[i]
+			for i, actor := range []string{"worker", "peer-member", "peer-member"} {
+				name := []string{"route-project", "peer-project", "other-project"}[i]
 				project, err := hub.store.CreateProject(ctx, name)
 				require.NoError(t, err)
 				projects = append(projects, project)
@@ -93,10 +93,13 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 			}
 			peer, _, err := hub.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[1].ID, Title: "Peer issue", Author: "peer-member"})
 			require.NoError(t, err)
+			newPeer, _, err := hub.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[2].ID, Title: "New parent", Author: "peer-member"})
+			require.NoError(t, err)
 			other, _, err := hub.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: projects[0].ID, Title: "Existing child", Author: "worker"})
 			require.NoError(t, err)
 			require.NoError(t, syncProject(0))
 			require.NoError(t, syncProject(1))
+			require.NoError(t, syncProject(2))
 			local, err := spoke.DB.IssueByUID(ctx, peer.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			child, err := spoke.DB.IssueByUID(ctx, other.UID, db.IncludeDeletedNo)
@@ -158,6 +161,74 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				require.Equal(t, original[i].Payload, event.Payload)
 				require.Equal(t, original[i].Actor, event.Actor)
 			}
+			observer := testenv.New(t)
+			observerCredentials := serviceCredentialStoreAdapter{newServiceFederationCredentialStore()}
+			var observerBindings []db.FederationBinding
+			for i, project := range projects {
+				actor := []string{"worker", "peer-member", "peer-member"}[i]
+				grant, err := hub.CreateFederationEnrollment(ctx, FederationEnrollmentSpec{ProjectUID: project.UID, SpokeInstanceUID: observer.DB.InstanceUID(), Capabilities: "pull,push", Actor: actor})
+				require.NoError(t, err)
+				localProject, err := observer.DB.CreateProjectWithUID(ctx, project.Name, project.UID)
+				require.NoError(t, err)
+				binding, err := observer.DB.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: localProject.ID, Role: db.FederationRoleSpoke, HubURL: server.URL, HubProjectID: project.ID, HubProjectUID: project.UID, Enabled: true, PushEnabled: true, Actor: actor})
+				require.NoError(t, err)
+				observerBindings = append(observerBindings, binding)
+				require.NoError(t, observerCredentials.store.StoreFederationCredential(ctx, project.UID, FederationCredential{HubURL: server.URL, HubProjectID: project.ID, Token: grant.Token, Actor: actor}))
+			}
+			checkObserver := func(parentUID string) {
+				t.Helper()
+				for _, b := range observerBindings {
+					binding, err := observer.DB.FederationBindingByProject(ctx, b.ProjectID)
+					require.NoError(t, err)
+					cred, _, err := observerCredentials.FederationCredential(ctx, binding.HubProjectUID)
+					require.NoError(t, err)
+					require.NoError(t, federation.SyncFederationOnce(ctx, observer.DB, binding, cred, observerCredentials))
+				}
+				observed, err := observer.DB.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				link, err := observer.DB.ParentOf(ctx, observed.ID)
+				if parentUID == "" {
+					require.ErrorIs(t, err, db.ErrNotFound)
+					return
+				}
+				require.NoError(t, err)
+				require.Equal(t, parentUID, link.ToIssueUID)
+				observedParent, err := observer.DB.IssueByUID(ctx, parentUID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				children, err := observer.DB.LinksByIssue(ctx, observedParent.ID)
+				require.NoError(t, err)
+				require.Contains(t, children, link)
+			}
+			checkObserver(peer.UID)
+
+			_, err = spoke.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "worker", RemoveParent: &local.ID})
+			require.NoError(t, err)
+			require.NoError(t, syncProject(0))
+			_, err = hub.store.ParentOf(ctx, other.ID)
+			require.ErrorIs(t, err, db.ErrNotFound)
+			checkObserver("")
+			_, err = spoke.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "worker", SetParent: &local.ID})
+			require.NoError(t, err)
+			require.NoError(t, syncProject(0))
+			localNewPeer, err := spoke.DB.IssueByUID(ctx, newPeer.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			_, err = spoke.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "worker", SetParent: &localNewPeer.ID})
+			require.NoError(t, err)
+			require.NoError(t, syncProject(0))
+			checkObserver(newPeer.UID)
+			link, err := spoke.DB.ParentOf(ctx, child.ID)
+			require.NoError(t, err)
+			linkParams := func(eventType string, parent db.Issue) db.LinkEventParams {
+				return db.LinkEventParams{EventType: eventType, EventIssueID: child.ID, FromUID: child.UID, FromShortID: child.ShortID, ToUID: parent.UID, ToShortID: parent.ShortID, Actor: "worker"}
+			}
+			_, err = spoke.DB.ReplaceParentAndEvents(ctx, db.ReplaceParentAndEventsParams{ExpectedParentLinkID: link.ID, ExpectedParentIssueID: localNewPeer.ID, Link: db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: local.ID, Type: "parent", Author: "worker"}, UnlinkEvent: linkParams("issue.unlinked", localNewPeer), LinkEvent: linkParams("issue.linked", local)})
+			require.NoError(t, err)
+			_, later, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Later task", Author: "worker"})
+			require.NoError(t, err)
+			require.NoError(t, syncProject(0))
+			checkObserver(peer.UID)
+			_, err = hub.store.IssueByUID(ctx, *later.IssueUID, db.IncludeDeletedNo)
+			require.NoError(t, err)
 
 			t.Run("direct-link-with-different-actors", func(t *testing.T) {
 				directChild, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Direct child", Author: "worker"})

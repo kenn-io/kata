@@ -57,7 +57,7 @@ type FederationAccessController interface {
 }
 
 // FederationReferenceAccessController lets a host accept direct issue link
-// additions across project-scoped enrollments with different actors. Kata
+// changes across project-scoped enrollments with different actors. Kata
 // authenticates both push credentials for the same spoke and runs both native
 // and host authorization fences before calling this method in the ingest
 // transaction. The route keeps its actor. The host must verify that the two

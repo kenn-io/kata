@@ -300,15 +300,15 @@ func stringPointersEqual(left, right *string) bool {
 	return *left == *right
 }
 
-// DirectLinkAdditionPeers returns only explicit link additions eligible for
+// DirectLinkPeers returns explicit link endpoints eligible for
 // a supplemental direct-spoke proof. It never modifies the event payload.
-func DirectLinkAdditionPeers(event FoldEvent) (map[string]bool, error) {
-	if !directLinkAdditionEligible(event) {
+func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
+	if event.Type != "issue.unlinked" && !directLinkAdditionEligible(event) {
 		return nil, nil
 	}
 	var peers map[string]bool
 	_, _, err := StripCrossProjectLinkAdditions(event, func(uid string) bool {
-		if uid != "" {
+		if uid != "" && uid != event.IssueUID {
 			if peers == nil {
 				peers = make(map[string]bool)
 			}
@@ -316,14 +316,28 @@ func DirectLinkAdditionPeers(event FoldEvent) (map[string]bool, error) {
 		}
 		return false
 	})
-	if event.Type == "issue.links_changed" && len(peers) != 0 {
-		// A peer used for a removal in the same edit needs ordinary authority.
+	if event.Type == "issue.links_changed" || event.Type == "issue.linked" || event.Type == "issue.unlinked" {
 		payload := PayloadMap(event.Payload)
-		removed, _ := StringValue(payload["parent_removed_uid"])
-		delete(peers, removed)
-		for _, key := range []string{"blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
-			for _, uid := range StringSlice(payload[key]) {
-				delete(peers, uid)
+		add := func(uid string) {
+			if uid != "" && uid != event.IssueUID {
+				if peers == nil {
+					peers = make(map[string]bool)
+				}
+				peers[uid] = true
+			}
+		}
+		if event.Type == "issue.links_changed" {
+			uid, _ := StringValue(payload["parent_removed_uid"])
+			add(uid)
+			for _, key := range []string{"blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
+				for _, uid := range StringSlice(payload[key]) {
+					add(uid)
+				}
+			}
+		} else {
+			for _, key := range []string{"from_uid", "to_uid", "from_issue_uid", "to_issue_uid"} {
+				uid, _ := StringValue(payload[key])
+				add(uid)
 			}
 		}
 	}
@@ -350,12 +364,12 @@ func directLinkAdditionEligible(event FoldEvent) bool {
 
 // DirectParentRemovals identifies the old endpoint of each parent assignment.
 // A later clear cannot undo the fact that setting the parent displaced an edge.
-// Key the removals by event so each displaced endpoint gets ordinary authority.
+// Key the removals by event so each displaced endpoint is authorized.
 func DirectParentRemovals(ctx context.Context, tx Transaction, events []RemoteEvent) (map[string][]string, error) {
 	var ordered []FoldEvent
 	for _, event := range events {
 		switch event.Type {
-		case "issue.created", "issue.links_changed", "issue.linked", "issue.snapshot", "issue.moved":
+		case "issue.created", "issue.links_changed", "issue.linked", "issue.unlinked", "issue.snapshot", "issue.moved":
 			ordered = append(ordered, moveSnapshotFoldEvent(FederationMoveSnapshotEvent(event)))
 		}
 	}
@@ -364,6 +378,24 @@ func DirectParentRemovals(ctx context.Context, tx Transaction, events []RemoteEv
 	parents := make(map[string]string)
 	removed := make(map[string][]string)
 	for _, event := range ordered {
+		if event.Type == "issue.unlinked" {
+			payload := PayloadMap(event.Payload)
+			kind, _ := StringValue(payload["type"])
+			from, _ := StringValue(payload["link_from_uid"])
+			to, _ := StringValue(payload["link_to_uid"])
+			if kind == "parent" && from != "" && to != "" {
+				previous, known := parents[from]
+				if !known {
+					err := tx.QueryRowContext(ctx, `SELECT to_issue_uid FROM links WHERE from_issue_uid=$1 AND type='parent'`, from).Scan(&previous)
+					if err != nil && !errors.Is(err, sql.ErrNoRows) {
+						return nil, err
+					}
+				}
+				if previous == to {
+					parents[from] = ""
+				}
+			}
+		}
 		assignments, err := directParentAssignments(event)
 		if err != nil {
 			return nil, err

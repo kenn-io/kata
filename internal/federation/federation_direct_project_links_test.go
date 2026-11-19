@@ -32,6 +32,31 @@ func TestSupplementalProofStaysOnExactMount(t *testing.T) {
 	}
 }
 
+func TestLinkChangeSelectsPeerProof(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "route", "peer")
+	spoke := newMoveDeliverySpoke(t, hub, projects, "worker", "peer-member")
+	peer, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[1].ID, Title: "Parent", Author: "peer-member"})
+	require.NoError(t, err)
+	child, _, err := spoke.env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.projects[0].ID, Title: "Child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: peer.ID}}})
+	require.NoError(t, err)
+	removal, err := spoke.env.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "worker", RemoveParent: &peer.ID})
+	require.NoError(t, err)
+	params := db.LinkEventParams{EventType: "issue.linked", EventIssueID: child.ID, FromUID: child.UID, FromShortID: child.ShortID, ToUID: peer.UID, ToShortID: peer.ShortID, Actor: "worker"}
+	link, added, err := spoke.env.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: peer.ID, Type: "parent", Author: "worker"}, params)
+	require.NoError(t, err)
+	params.EventType = "issue.unlinked"
+	removed, err := spoke.env.DB.DeleteLinkAndEvent(ctx, link, params)
+	require.NoError(t, err)
+	binding, err := spoke.env.DB.FederationBindingByProject(ctx, spoke.projects[0].ID)
+	require.NoError(t, err)
+	for _, events := range [][]db.Event{removal.Events, {removed, added}} {
+		tokens, err := federationMoveSourceTokens(ctx, spoke.env.DB, spoke.credentials, binding, hub.URL, events, clientpkg.Opts{})
+		require.NoError(t, err)
+		require.Equal(t, map[string]string{projects[1].UID: spoke.credentials[projects[1].UID].Token}, tokens)
+	}
+}
+
 func TestLinkPeerProofUsesOwnPlaintextPolicy(t *testing.T) {
 	ctx := t.Context()
 	hub, projects := newMoveDeliveryHub(t, "route", "peer")
