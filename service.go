@@ -977,10 +977,11 @@ func (s *Service) runWorkers(ctx context.Context, selection workerSelection) err
 		close(done)
 		s.mu.Unlock()
 	}()
+	forwardFederationWakes := daemon.SubscribeFederationWakes(s.broadcaster, s.store, s.federationWake.WakeProject, s.federationWake.WakeAll)
 	federationWakeDone := make(chan struct{})
 	go func() {
 		defer close(federationWakeDone)
-		daemon.ForwardFederationWakes(runCtx, s.broadcaster, s.store.InstanceUID(), s.federationWake.WakeProject, s.federationWake.WakeAll)
+		forwardFederationWakes(runCtx)
 	}()
 	embeddingSub := s.broadcaster.Subscribe(daemon.SubFilter{})
 	embeddingWakeDone := make(chan struct{})

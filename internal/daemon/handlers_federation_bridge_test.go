@@ -298,16 +298,15 @@ func TestRelayHTTPPublishesAcceptedEventsAfterCommitWithoutLookup(t *testing.T) 
 		require.NoError(t, err)
 
 		sink := &publisherSink{}
-		var projectWakes []int64
-		allWakes := 0
+		wakes := &recordedWakes{}
 		server := daemon.NewServer(daemon.ServerConfig{
 			DB:                    relayEventLookupFailureStore{Storage: store},
 			RootSigning:           daemon.NewRootSigning(db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}),
 			Broadcaster:           f.broadcaster,
 			Hooks:                 sink,
 			Auth:                  config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true},
-			FederationWakeProject: func(projectID int64) { projectWakes = append(projectWakes, projectID) },
-			FederationWake:        func() { allWakes++ },
+			FederationWakeProject: wakes.project,
+			FederationWake:        wakes.all,
 		})
 		t.Cleanup(func() { require.NoError(t, server.Close()) })
 		httpServer := httptest.NewServer(server.Handler())
@@ -340,8 +339,9 @@ func TestRelayHTTPPublishesAcceptedEventsAfterCommitWithoutLookup(t *testing.T) 
 		require.Equal(t, daemon.StreamKindEvent, msg.Kind)
 		require.NotNil(t, msg.Event)
 		require.Equal(t, committed[0].ID, msg.Event.ID)
-		assert.Equal(t, []int64{f.private.ID}, projectWakes, "accepted work wakes only the binding that owes it upstream")
-		assert.Zero(t, allWakes)
+		projects, all := wakes.snapshot()
+		assert.Equal(t, []int64{f.private.ID}, projects, "accepted work wakes only the binding that owes it upstream")
+		assert.Zero(t, all)
 	})
 }
 

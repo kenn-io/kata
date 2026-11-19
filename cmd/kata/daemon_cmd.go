@@ -2119,9 +2119,8 @@ func startFederationRunner(
 	onSyncComplete ...func(),
 ) *federation.WakeQueue {
 	wake := federation.NewWakeQueue()
-	workers.Go(func() {
-		daemon.ForwardFederationWakes(ctx, publisher.Broadcaster, store.InstanceUID(), wake.WakeProject, wake.WakeAll)
-	})
+	forwardWakes := daemon.SubscribeFederationWakes(publisher.Broadcaster, store, wake.WakeProject, wake.WakeAll)
+	workers.Go(func() { forwardWakes(ctx) })
 	runner := &federation.Runner{
 		DB:             store,
 		Interval:       federationRunnerInterval(),
