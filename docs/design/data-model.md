@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-11-13
+last_edited: 2026-11-19
 ---
 
 # Data model and durability
@@ -218,15 +218,16 @@ partial import writes or replaces the destination's key check. See
 
 ## Schema evolution
 
-SQLite upgrades that only add or drop indexes, or add a table that starts empty, register
-a complete version chain in `inPlaceUpgrades` in
+SQLite upgrades that only advance the version, add or drop indexes, or add an
+empty table register a complete version chain in `inPlaceUpgrades` in
 `internal/db/sqlitestore/schema_upgrade.go`. Startup applies the canonical
 tables and indexes, drops retired indexes, and stamps the schema version in one
-transaction under the cutover lock. Schemas 41 through 50 can reach schema 51
+transaction under the cutover lock. Schemas 41 through 51 can reach schema 52
 this way. The 49→50 step adds the empty `mcp_event_subscriptions` table and its
 indexes. The 50→51 step drops `idx_events_resolved_issue_uid` and adds
 `idx_events_issue_uid_id`; an upgrade that starts before schema 43 skips
-creating the index it would drop.
+creating the index it would drop. The 51→52 step advances the version in place;
+it leaves the SQLite vector sidecar unchanged.
 
 Changes to existing tables, triggers, or FTS use JSONL cutover. Kata exports the current
 database to JSONL exactly as stored, imports that JSONL
