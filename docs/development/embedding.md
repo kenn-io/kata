@@ -562,8 +562,12 @@ internal project name, and a rename does not change the approved identity.
   replica keeps its binding and data. Kata releases the saved request, then
   authorizes a new request UUID and candidate token with the new intent and
   the original `spoke_instance_uid` and `local_project_uid`. The provider must
-  approve the same hub project. Kata repeats an unconfirmed release, so a
-  release of an already released request must return `released`.
+  approve the same hub project. The new approval may name a different
+  `actor`; that actor replaces the replica's bound actor. Kata applies the
+  replacement only after the hub accepted every local change and no claim,
+  claim request, or running cron run belongs to the old actor, and retries
+  until then. Kata repeats an unconfirmed release, so a release of an already
+  released request must return `released`.
 - Normal leave stops transport and asks the saved provider to release the
   exact request. Unconfirmed cleanup remains pending rather than deleting its
   credential. Once confirmed, the secret is removed; a closed marker prevents
@@ -571,7 +575,8 @@ internal project name, and a rename does not change the approved identity.
 
 Kata's credential file can retain the provider operation beside its saved
 token. It stores the request UUID, executable arguments, intent, original local
-project and installation identifiers, and any accepted enrollment and expiry.
+project and installation identifiers, any accepted enrollment and expiry, and,
+after an intent change, the bound actor the new approval replaces.
 Moving a credential to the hub project UID preserves the original request.
 Updates and cleanup compare the whole saved operation by value, so rereading
 the file does not break a retry and stale cleanup cannot delete a newer request.

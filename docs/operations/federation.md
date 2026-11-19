@@ -1373,7 +1373,10 @@ On restart, Kata:
 3. Saves a new request and candidate token with the new intent, for the same
    local and hub projects, and asks the provider to authorize it.
 4. Turns push on or off to match the approved permissions: `pull` alone is
-   read-only; `pull,push` or `claim,pull,push` collaborates.
+   read-only; `pull,push` or `claim,pull,push` collaborates. When the new
+   approval names a different actor, the replica takes that actor in the
+   same step. Local changes made after the switch are authored as the new
+   actor; changes the hub already accepted keep their author.
 
 Until the provider approves the new request, the replica cannot sync with the
 hub. Its local tasks stay readable. Pending approval and temporary failures
@@ -1389,6 +1392,10 @@ claim request, reconciliation reports `binding_conflict`, keeps collaborating,
 and retries. `kata federation status` shows the pending push depth and claim
 counts. Once the hub accepts the pushed changes and you release the claims,
 the change completes on the next attempt.
+
+A change of actor waits the same way in either direction. A cron run that the
+old actor started and that is still running also holds the switch until the
+run finishes, because a run continues only as the actor that started it.
 
 Changing to or from `migrate` is not done in place. Leave the hub first.
 

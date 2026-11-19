@@ -2513,3 +2513,38 @@ var _ config.FederationCredentialStore = (*replicaCredentialStore)(nil)
 var _ config.FederationManagedCredentialStore = (*replicaCredentialStore)(nil)
 var _ config.FederationCredentialReplacer = (*replicaCredentialStore)(nil)
 var _ config.FederationCredentialStore = baseCredentialStore{}
+
+func TestEnsureFederationReplicaReplacesOnlyTheNamedBoundActor(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	credentials := newReplicaCredentialStore()
+	first := replicaServiceParams()
+	first.PushEnabled = false
+	result, err := daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, first)
+	require.NoError(t, err)
+	saved, ok, err := credentials.FederationCredential(t.Context(), result.Project.UID)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	second := replicaServiceParams()
+	second.Credential.Actor = "sync-agent-renewed"
+	second.ExpectedCredential = &saved
+	for _, replaces := range []string{"", "someone-else"} {
+		second.ReplacesBoundActor = replaces
+		_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, second)
+		require.ErrorIs(t, err, daemon.ErrFederationReplicaBindingConflict, "replacing %q must not move the bound actor", replaces)
+		binding, err := store.FederationBindingByProject(t.Context(), result.Project.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "sync-agent", binding.Actor)
+		assert.False(t, binding.PushEnabled)
+	}
+
+	second.ReplacesBoundActor = "sync-agent"
+	replaced, err := daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, second)
+	require.NoError(t, err)
+	assert.Equal(t, "sync-agent-renewed", replaced.Binding.Actor)
+	assert.True(t, replaced.Binding.PushEnabled)
+	stored, ok, err := credentials.FederationCredential(t.Context(), result.Project.UID)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "sync-agent-renewed", stored.Actor)
+}

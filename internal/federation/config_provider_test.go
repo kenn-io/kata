@@ -130,6 +130,10 @@ func TestReconcileProviderProcess(_ *testing.T) {
 			response.ProjectUID = other
 		}
 		response.EnrollmentID, response.Actor = 7, "Example User"
+		if os.Getenv("KATA_TEST_PROVIDER_INTENT_CHANGE") == "1" {
+			// Each approval names its own actor, as a provider may.
+			response.Actor = "Example User (approval " + request.RequestID.String() + ")"
+		}
 		response.Capabilities = "claim,pull,push"
 		if os.Getenv("KATA_TEST_PROVIDER_NO_CLAIM") == "1" {
 			response.Capabilities = "pull,push"

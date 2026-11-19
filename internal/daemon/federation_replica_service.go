@@ -108,9 +108,14 @@ type EnsureFederationReplicaParams struct {
 	ProjectResetSink           func(projectID, cursor int64)
 	PushEnabled, AdoptExisting bool
 	AttachEmpty                bool
-	Relay                      *api.RelayHandshake
-	RelayLocalActor            string
-	RelayServeDownstream       bool
+	// ReplacesBoundActor names the bound actor an approval for a changed
+	// intent replaces. Only that exact actor moves to Credential.Actor, and
+	// only once no work tied to it remains open. Every other caller leaves it
+	// empty, so a changed actor still conflicts.
+	ReplacesBoundActor   string
+	Relay                *api.RelayHandshake
+	RelayLocalActor      string
+	RelayServeDownstream bool
 }
 
 // FederationReplicaCredentialRekeySource identifies the standalone credential
@@ -1183,6 +1188,9 @@ func ensureFederationReplicaState(
 		}
 	}
 
+	if err := replaceProviderBoundActor(ctx, store, p); err != nil {
+		return EnsureFederationReplicaResult{}, err
+	}
 	result, err := ensureReplicaBindingOrAdopt(ctx, store, p)
 	if p.ProjectResetSink != nil {
 		for _, projectID := range result.ResetProjectIDs {
@@ -1290,6 +1298,48 @@ func ensureFederationReplicaState(
 		federationReplicaOperationKey(store, p.ProjectName, p.Credential),
 	)
 	return result, nil
+}
+
+// replaceProviderBoundActor moves an attached replica to the actor of the
+// approval that replaced its earlier one. The binding must still name the
+// replaced actor and the same hub project.
+func replaceProviderBoundActor(ctx context.Context, store db.Storage, p EnsureFederationReplicaParams) error {
+	from, to := strings.TrimSpace(p.ReplacesBoundActor), strings.TrimSpace(p.Credential.Actor)
+	if from == "" || from == to {
+		return nil
+	}
+	project, err := store.ProjectByUID(ctx, p.HubProjectUID)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return ErrFederationReplicaBindingConflict
+		}
+		return err
+	}
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return ErrFederationReplicaBindingConflict
+		}
+		return err
+	}
+	if binding.HubProjectUID != p.HubProjectUID || binding.HubProjectID != p.HubProjectID {
+		return ErrFederationReplicaBindingConflict
+	}
+	_, err = store.ReplaceFederationBoundActorWhenSettled(ctx, project.ID, store.InstanceUID(), from, to)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, db.ErrFederationBoundActorChanged):
+		return ErrFederationReplicaBindingConflict
+	case federationReplicaWorkOpen(err):
+		return errors.Join(ErrFederationProviderIntentChangeBlocked, err)
+	default:
+		return err
+	}
+}
+
+func federationReplicaWorkOpen(err error) bool {
+	return errors.Is(err, db.ErrFederationPushPending) || errors.Is(err, db.ErrFederationClaimsHeld) || errors.Is(err, db.ErrFederationRunsActive)
 }
 
 func revalidateManagedReservation(

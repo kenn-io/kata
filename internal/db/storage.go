@@ -486,11 +486,18 @@ type Storage interface {
 	EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (FederationBinding, error)
 	// DisableFederationPushWhenSettled turns push off for a direct spoke
 	// binding in the same transaction that proves no local-origin event above
-	// the push cursor, no live claim held by this replica, and no open claim
-	// request remains. Otherwise it changes nothing and returns
-	// ErrFederationPushPending or ErrFederationClaimsHeld. A binding whose push
+	// the push cursor, no live claim held by this replica, no open claim
+	// request, and no cron run still running as the bound actor remains.
+	// Otherwise it changes nothing and returns ErrFederationPushPending,
+	// ErrFederationClaimsHeld, or ErrFederationRunsActive. A binding whose push
 	// is already off is returned unchanged.
 	DisableFederationPushWhenSettled(ctx context.Context, projectID int64, originInstanceUID string) (FederationBinding, error)
+	// ReplaceFederationBoundActorWhenSettled changes a direct spoke binding's
+	// bound actor from fromActor to toActor under the same settled checks,
+	// with pending push checked only while push is on. It returns the binding
+	// unchanged when it already has toActor and ErrFederationBoundActorChanged
+	// when it has neither actor.
+	ReplaceFederationBoundActorWhenSettled(ctx context.Context, projectID int64, originInstanceUID, fromActor, toActor string) (FederationBinding, error)
 	ResetFederatedProjectIfNoPendingPush(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64, originInstanceUID string, pushCursorEventID int64) error
 	IngestFederationEvents(ctx context.Context, p FederationIngestParams) (FederationIngestResult, error)
 }

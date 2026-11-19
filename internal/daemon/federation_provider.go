@@ -106,7 +106,7 @@ func prepareFederationProvider(
 		if _, err := matchFederationProvider(previous, project, store.InstanceUID(), base, catalog, kept); err != nil {
 			return previous, false, err
 		}
-		if err := requireBoundProviderReplica(ctx, store, project, previous); err != nil {
+		if _, err := requireBoundProviderReplica(ctx, store, project, previous); err != nil {
 			return previous, false, err
 		}
 		return previous, true, nil
@@ -153,21 +153,21 @@ func intentChangeAllowed(saved config.FederationManagedCredentialReservation, ma
 
 // An unbound request has no local replica to keep, so its intent still
 // conflicts. The binding must already follow the approved hub project.
-func requireBoundProviderReplica(ctx context.Context, store db.Storage, project db.Project, saved config.FederationManagedCredentialReservation) error {
+func requireBoundProviderReplica(ctx context.Context, store db.Storage, project db.Project, saved config.FederationManagedCredentialReservation) (db.FederationBinding, error) {
 	hubProjectUID := saved.Credential.Provider.HubProjectUID
 	binding, err := store.FederationBindingByProject(ctx, project.ID)
 	if errors.Is(err, db.ErrNotFound) {
-		return ErrFederationReplicaCredentialConflict
+		return binding, ErrFederationReplicaCredentialConflict
 	}
 	if err != nil {
-		return err
+		return binding, err
 	}
 	if hubProjectUID == "" || project.UID != hubProjectUID || binding.Role != db.FederationRoleSpoke ||
 		binding.RelayConfig != nil || binding.HubProjectUID != hubProjectUID ||
-		binding.HubProjectID != saved.Credential.HubProjectID {
-		return ErrFederationReplicaBindingConflict
+		binding.HubProjectID != saved.Credential.HubProjectID || strings.TrimSpace(binding.Actor) == "" {
+		return binding, ErrFederationReplicaBindingConflict
 	}
-	return nil
+	return binding, nil
 }
 
 // changeFederationProviderIntent releases the saved request, then saves a new
@@ -198,6 +198,17 @@ func changeFederationProviderIntent(
 	if response.Status != federationprovider.StatusReleased {
 		return saved, errors.New("federation provider release is not confirmed")
 	}
+	// The new approval may name a new actor. Record the actor the binding
+	// holds now so only that actor moves to the new one. The binding still
+	// holds it after an earlier attempt that never applied.
+	project, err := store.ProjectByName(ctx, mapping.SpokeProject)
+	if err != nil {
+		return saved, errors.Join(ErrFederationProviderStorage, err)
+	}
+	binding, err := requireBoundProviderReplica(ctx, store, project, saved)
+	if err != nil {
+		return saved, err
+	}
 	token, err := db.NewFederationToken()
 	if err != nil {
 		return saved, err
@@ -209,6 +220,7 @@ func changeFederationProviderIntent(
 	next.Status = ""
 	next.EnrollmentID = 0
 	next.ExpiresAt = time.Time{}
+	next.PreviousActor = strings.TrimSpace(binding.Actor)
 	replacement := saved
 	replacement.Credential.Token = token
 	replacement.Credential.Provider = &next
@@ -228,7 +240,7 @@ func releaseForIntentChange(
 			return federationprovider.Response{}, errors.Join(ErrFederationProviderStorage, err)
 		}
 		if _, err := store.DisableFederationPushWhenSettled(ctx, project.ID, store.InstanceUID()); err != nil {
-			if errors.Is(err, db.ErrFederationPushPending) || errors.Is(err, db.ErrFederationClaimsHeld) {
+			if federationReplicaWorkOpen(err) {
 				return federationprovider.Response{}, errors.Join(ErrFederationProviderIntentChangeBlocked, err)
 			}
 			return federationprovider.Response{}, errors.Join(ErrFederationProviderStorage, err)

@@ -84,6 +84,7 @@ func reconcileProviderMapping(
 		ManagedReservation: &daemon.FederationReplicaManagedReservation{ProjectUID: reservation.ProjectUID, Expected: credential},
 		ProjectEventSink:   projectEventSink,
 		ProjectResetSink:   projectResetSink,
+		ReplacesBoundActor: decision.PreviousActor,
 	}
 	if reservation.ProjectUID != decision.HubProjectUID {
 		params.CredentialRekey = &daemon.FederationReplicaCredentialRekeySource{ProjectUID: reservation.ProjectUID, Expected: credential}
@@ -201,7 +202,7 @@ func providerReconciliationError(err error) error {
 	case errors.Is(err, config.ErrFederationCredentialConflict), errors.Is(err, daemon.ErrFederationReplicaCredentialConflict):
 		return reconcileError(ErrConfigurationConflict, "federation provider operation conflicts with local state")
 	case errors.Is(err, daemon.ErrFederationProviderIntentChangeBlocked):
-		return reconcileError(ErrBindingConflict, "lowering federation intent waits until the hub accepts local changes and the replica holds no claims")
+		return reconcileError(ErrBindingConflict, "changing federation intent waits until the hub accepts local changes and the replica has no claims, open claim requests, or running cron runs")
 	case errors.Is(err, db.ErrFederationProjectNotEmpty), errors.Is(err, daemon.ErrFederationReplicaBindingConflict):
 		return reconcileError(ErrBindingConflict, "federation attachment requires an empty project or explicit migration approval")
 	case errors.Is(err, daemon.ErrFederationReplicaCredentialIO):

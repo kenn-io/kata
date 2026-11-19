@@ -264,7 +264,8 @@ func (d *Store) enableFederationPush(ctx context.Context, projectID int64, curso
 }
 
 // DisableFederationPushWhenSettled turns push off only while this replica has
-// no unaccepted local-origin events, live claims, or open claim requests.
+// no unaccepted local-origin events, live claims, open claim requests, or
+// unfinished cron runs.
 // Taking the project write lock first makes the checks and the update one
 // decision, so a concurrent local write cannot slip between them.
 func (d *Store) DisableFederationPushWhenSettled(ctx context.Context, projectID int64, originInstanceUID string) (db.FederationBinding, error) {
@@ -293,38 +294,8 @@ func (d *Store) disableFederationPushWhenSettled(ctx context.Context, projectID 
 	if existing.Role != db.FederationRoleSpoke || existing.RelayConfig != nil {
 		return db.FederationBinding{}, fmt.Errorf("disable federation push: only a direct spoke binding can stop pushing")
 	}
-	var pending int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT EXISTS (
-		  SELECT 1 FROM events
-		   WHERE project_id = ?
-		     AND origin_instance_uid = ?
-		     AND id > ?
-		     AND `+federationPushEventTypeCondition("type")+`)`,
-		projectID, originInstanceUID, existing.PushCursorEventID).Scan(&pending); err != nil {
-		return db.FederationBinding{}, fmt.Errorf("check pending federation push: %w", err)
-	}
-	if pending != 0 {
-		return db.FederationBinding{}, db.ErrFederationPushPending
-	}
-	var claims int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT EXISTS (
-		  SELECT 1 FROM issue_claims
-		   WHERE project_id = ?
-		     AND released_at IS NULL
-		     AND (claim_kind = 'hard' OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		     AND (holder_instance_uid = ? OR holder = ?)
-		) OR EXISTS (
-		  SELECT 1 FROM pending_claim_requests
-		   WHERE project_id = ?
-		     AND rejected_at IS NULL
-		     AND resolved_at IS NULL)`,
-		projectID, originInstanceUID, strings.TrimSpace(existing.Actor), projectID).Scan(&claims); err != nil {
-		return db.FederationBinding{}, fmt.Errorf("check federation claims: %w", err)
-	}
-	if claims != 0 {
-		return db.FederationBinding{}, db.ErrFederationClaimsHeld
+	if err := federationReplicaSettledTx(ctx, tx, existing, originInstanceUID); err != nil {
+		return db.FederationBinding{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE federation_bindings
@@ -339,6 +310,119 @@ func (d *Store) disableFederationPushWhenSettled(ctx context.Context, projectID 
 	}
 	if err := tx.Commit(); err != nil {
 		return db.FederationBinding{}, fmt.Errorf("commit disable federation push: %w", err)
+	}
+	return binding, nil
+}
+
+// federationReplicaSettledTx refuses while work tied to the binding's actor
+// is still open: local changes above the push cursor while push is on, live
+// claims or claim requests held through this replica, and cron runs this
+// replica's actor has not finished.
+func federationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.FederationBinding, originInstanceUID string) error {
+	if binding.PushEnabled {
+		var pending int
+		if err := tx.QueryRowContext(ctx, `
+			SELECT EXISTS (
+			  SELECT 1 FROM events
+			   WHERE project_id = ?
+			     AND origin_instance_uid = ?
+			     AND id > ?
+			     AND `+federationPushEventTypeCondition("type")+`)`,
+			binding.ProjectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
+			return fmt.Errorf("check pending federation push: %w", err)
+		}
+		if pending != 0 {
+			return db.ErrFederationPushPending
+		}
+	}
+	actor := strings.TrimSpace(binding.Actor)
+	var claims int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+		  SELECT 1 FROM issue_claims
+		   WHERE project_id = ?
+		     AND released_at IS NULL
+		     AND (claim_kind = 'hard' OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		     AND (holder_instance_uid = ? OR holder = ?)
+		) OR EXISTS (
+		  SELECT 1 FROM pending_claim_requests
+		   WHERE project_id = ?
+		     AND rejected_at IS NULL
+		     AND resolved_at IS NULL)`,
+		binding.ProjectID, originInstanceUID, actor, binding.ProjectID).Scan(&claims); err != nil {
+		return fmt.Errorf("check federation claims: %w", err)
+	}
+	if claims != 0 {
+		return db.ErrFederationClaimsHeld
+	}
+	var runs int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+		  SELECT 1 FROM cron_runs
+		   WHERE project_id = ?
+		     AND status = 'running'
+		     AND actor = ?)`, binding.ProjectID, actor).Scan(&runs); err != nil {
+		return fmt.Errorf("check federation cron runs: %w", err)
+	}
+	if runs != 0 {
+		return db.ErrFederationRunsActive
+	}
+	return nil
+}
+
+// ReplaceFederationBoundActorWhenSettled moves a direct spoke binding from
+// one bound actor to another only while no work tied to the old actor is
+// open, so nothing later presents the old actor to the hub.
+func (d *Store) ReplaceFederationBoundActorWhenSettled(ctx context.Context, projectID int64, originInstanceUID, fromActor, toActor string) (db.FederationBinding, error) {
+	return retryWrite1(ctx, d, func() (db.FederationBinding, error) {
+		return d.replaceFederationBoundActorWhenSettled(ctx, projectID, originInstanceUID, fromActor, toActor)
+	})
+}
+
+func (d *Store) replaceFederationBoundActorWhenSettled(ctx context.Context, projectID int64, originInstanceUID, fromActor, toActor string) (db.FederationBinding, error) {
+	fromActor, toActor = strings.TrimSpace(fromActor), strings.TrimSpace(toActor)
+	if fromActor == "" || toActor == "" {
+		return db.FederationBinding{}, fmt.Errorf("replace federation bound actor: both actors are required")
+	}
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.FederationBinding{}, fmt.Errorf("begin replace federation bound actor: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
+		return db.FederationBinding{}, err
+	}
+	existing, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=?`, projectID))
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	switch strings.TrimSpace(existing.Actor) {
+	case toActor:
+		return existing, nil
+	case fromActor:
+	default:
+		return db.FederationBinding{}, db.ErrFederationBoundActorChanged
+	}
+	if existing.Role != db.FederationRoleSpoke || existing.RelayConfig != nil {
+		return db.FederationBinding{}, fmt.Errorf("replace federation bound actor: only a direct spoke binding has a replaceable actor")
+	}
+	if err := federationReplicaSettledTx(ctx, tx, existing, originInstanceUID); err != nil {
+		return db.FederationBinding{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE federation_bindings
+		   SET bound_actor = ?,
+		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE project_id = ?`, toActor, projectID); err != nil {
+		return db.FederationBinding{}, fmt.Errorf("replace federation bound actor: %w", err)
+	}
+	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id = ?`, projectID))
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.FederationBinding{}, fmt.Errorf("commit replace federation bound actor: %w", err)
 	}
 	return binding, nil
 }

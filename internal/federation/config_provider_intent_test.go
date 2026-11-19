@@ -122,6 +122,12 @@ func TestReconcileProviderUpgradesReadOnlyReplicaInPlace(t *testing.T) {
 	assert.NotEqual(t, before.Credential.Provider.RequestID, after.Credential.Provider.RequestID)
 	assert.False(t, before.Credential.Token == after.Credential.Token, "the new request approves a new token")
 	assert.Equal(t, "claim,pull,push", after.Credential.Capabilities)
+	assert.NotEqual(t, before.Credential.Actor, after.Credential.Actor, "the new approval names a new actor")
+	assert.Equal(t, after.Credential.Actor, upgraded.Actor, "the new actor replaces the bound actor")
+	assert.Equal(t, binding.Actor, after.Credential.Provider.PreviousActor)
+	issue, _, err := f.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "First local task", Author: "someone"})
+	require.NoError(t, err)
+	assert.Equal(t, after.Credential.Actor, issue.Author, "local changes are authored as the new actor")
 
 	requests := f.requests(t)
 	require.Len(t, requests, 3)
@@ -141,6 +147,8 @@ func TestReconcileProviderUpgradesReadOnlyReplicaInPlace(t *testing.T) {
 	assert.Len(t, f.requests(t), 3, "a ready request is reused after restart")
 	assert.Zero(t, f.hub.resolveCalls)
 	assert.Empty(t, f.hub.enrollmentCalls)
+	_, restarted := f.binding(t)
+	assert.Equal(t, after.Credential.Actor, restarted.Actor)
 }
 
 func TestReconcileProviderDowngradeWaitsForLocalWork(t *testing.T) {
@@ -149,9 +157,10 @@ func TestReconcileProviderDowngradeWaitsForLocalWork(t *testing.T) {
 	before := f.saved(t)
 	project, binding := f.binding(t)
 	require.True(t, binding.PushEnabled)
-	issue, _, err := f.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Unpushed local task", Author: "Example User"})
+	issue, _, err := f.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Unpushed local task", Author: "someone"})
 	require.NoError(t, err)
 
+	assert.Equal(t, binding.Actor, issue.Author)
 	err = f.reconcile(t, federationprovider.IntentReadOnly)
 	require.ErrorIs(t, err, federation.ErrBindingConflict, "an unaccepted local change blocks the downgrade")
 	assert.Len(t, f.requests(t), 1, "a blocked downgrade does not contact the provider")
@@ -173,6 +182,11 @@ func TestReconcileProviderDowngradeWaitsForLocalWork(t *testing.T) {
 	require.NoError(t, err, "the downgrade keeps local tasks")
 	assert.Equal(t, federationprovider.IntentReadOnly, after.Credential.Provider.Intent)
 	assert.Equal(t, "pull", after.Credential.Capabilities)
+	assert.NotEqual(t, binding.Actor, after.Credential.Actor)
+	assert.Equal(t, after.Credential.Actor, downgraded.Actor, "the new actor replaces the bound actor")
+	kept, err := f.store.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, binding.Actor, kept.Author, "accepted changes keep their author")
 	requests := f.requests(t)
 	require.Len(t, requests, 3)
 	assert.Equal(t, []string{"authorize", "release", "authorize"}, []string{requests[0].Operation, requests[1].Operation, requests[2].Operation})
@@ -229,4 +243,5 @@ func TestReconcileProviderIntentChangeRefusesAnotherHubProject(t *testing.T) {
 	assert.Equal(t, pending.Credential.Provider.RequestID, f.saved(t).Credential.Provider.RequestID, "the retry reuses the saved request")
 	_, upgraded := f.binding(t)
 	assert.True(t, upgraded.PushEnabled)
+	assert.Equal(t, f.saved(t).Credential.Actor, upgraded.Actor)
 }

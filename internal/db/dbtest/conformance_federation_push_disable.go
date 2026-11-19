@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -91,5 +92,76 @@ func checkFederationPushDisableWaitsForLocalWork(t *testing.T, store db.Storage)
 		_, err := store.IssueByID(ctx, id)
 		require.NoError(t, err, "turning push off keeps local tasks")
 	}
+	return nil
+}
+
+// A spoke's bound actor changes only after work presented to the hub as the
+// old actor is finished: accepted local changes while push is on and cron
+// runs the old actor started. Refusal keeps the old actor.
+func checkFederationBoundActorReplacementWaitsForWork(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	job, _ := nativeFederationDefinitionsAs(t, store, project, "first-actor")
+	runUID, err := uid.New()
+	require.NoError(t, err)
+	started, err := store.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "first-actor", Status: "running", Summary: cron.Summary{Version: 1}})
+	require.NoError(t, err)
+	hubUID, err := uid.New()
+	require.NoError(t, err)
+	adopted, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: hubUID, Actor: "first-actor"})
+	require.NoError(t, err)
+	accepted, err := store.MaxLocalOriginEventID(ctx, project.ID)
+	require.NoError(t, err)
+	_, err = store.EnableFederationPush(ctx, project.ID, max(accepted, adopted.Binding.PushCursorEventID))
+	require.NoError(t, err)
+
+	_, err = store.ReplaceFederationBoundActorWhenSettled(ctx, project.ID, store.InstanceUID(), "first-actor", "second-actor")
+	require.ErrorIs(t, err, db.ErrFederationRunsActive, "a running run must keep the actor that started it")
+	finished, err := store.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "first-actor", Status: "succeeded", Summary: cron.Summary{Version: 1}, ExpectedRevision: started.Run.Revision})
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", finished.Run.Status)
+
+	_, err = store.ReplaceFederationBoundActorWhenSettled(ctx, project.ID, store.InstanceUID(), "first-actor", "second-actor")
+	require.ErrorIs(t, err, db.ErrFederationPushPending, "the finished run is not yet accepted by the hub")
+	accepted, err = store.MaxLocalOriginEventID(ctx, project.ID)
+	require.NoError(t, err)
+	require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, accepted))
+
+	_, err = store.ReplaceFederationBoundActorWhenSettled(ctx, project.ID, store.InstanceUID(), "other-actor", "second-actor")
+	require.ErrorIs(t, err, db.ErrFederationBoundActorChanged)
+	before, err := store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "first-actor", before.Actor)
+
+	replaced, err := store.ReplaceFederationBoundActorWhenSettled(ctx, project.ID, store.InstanceUID(), "first-actor", "second-actor")
+	require.NoError(t, err)
+	assert.Equal(t, "second-actor", replaced.Actor)
+	assert.True(t, replaced.PushEnabled)
+	assert.Equal(t, before.PushCursorEventID, replaced.PushCursorEventID)
+	again, err := store.ReplaceFederationBoundActorWhenSettled(ctx, project.ID, store.InstanceUID(), "first-actor", "second-actor")
+	require.NoError(t, err)
+	assert.Equal(t, "second-actor", again.Actor)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "after the change", Author: "someone"})
+	require.NoError(t, err)
+	assert.Equal(t, "second-actor", issue.Author, "later local changes carry the new bound actor")
+
+	// A read-only binding never pushes its local events, so they do not wait.
+	readOnly, err := store.CreateProject(ctx, "read-only-project")
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: readOnly.ID, Title: "before attach", Author: "someone"})
+	require.NoError(t, err)
+	readOnlyHub, err := uid.New()
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: readOnly.ID, Role: db.FederationRoleSpoke,
+		HubURL: "https://hub.example", HubProjectID: 43, HubProjectUID: readOnlyHub,
+		ReplayHorizonEventID: 1, Actor: "first-actor", Enabled: true,
+	})
+	require.NoError(t, err)
+	upgraded, err := store.ReplaceFederationBoundActorWhenSettled(ctx, readOnly.ID, store.InstanceUID(), "first-actor", "second-actor")
+	require.NoError(t, err)
+	assert.Equal(t, "second-actor", upgraded.Actor)
+	assert.False(t, upgraded.PushEnabled)
 	return nil
 }

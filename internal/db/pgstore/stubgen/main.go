@@ -109,6 +109,8 @@ var alreadyImplemented = map[string]bool{
 	"AttributionReceiptsAfter": true, // federation_provenance.go
 	"ExportAttribution":        true, // federation_provenance.go
 
+	"ReplaceFederationBoundActorWhenSettled": true, // federation_control.go
+
 	"CreateTeam":                           true, // project_access.go
 	"TeamByUID":                            true, // project_access.go
 	"ListTeams":                            true, // project_access.go

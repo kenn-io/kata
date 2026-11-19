@@ -277,6 +277,15 @@ var (
 	// waiting for the hub.
 	ErrFederationClaimsHeld = errors.New("federation replica holds live claims or pending claim requests")
 
+	// ErrFederationRunsActive is returned when a spoke's bound actor still has
+	// a running cron run, which a later observation must continue as the same
+	// actor.
+	ErrFederationRunsActive = errors.New("federation replica has unfinished cron runs")
+
+	// ErrFederationBoundActorChanged is returned when a binding's bound actor
+	// is neither the expected old actor nor the requested new one.
+	ErrFederationBoundActorChanged = errors.New("federation bound actor changed")
+
 	// ErrFederationResetBlockedByQuarantine is returned when a federation reset
 	// cannot proceed due to an active quarantine.
 	ErrFederationResetBlockedByQuarantine = errors.New("federation reset blocked by quarantine")
