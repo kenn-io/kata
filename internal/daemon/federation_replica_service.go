@@ -1146,6 +1146,12 @@ func ensureFederationReplicaState(
 	credentials config.FederationCredentialStore,
 	p EnsureFederationReplicaParams,
 ) (EnsureFederationReplicaResult, error) {
+	// Taken before the replica mutex, the same order as rebind.
+	finishDrain, err := drainSyncForIntentChange(ctx, store, p)
+	if err != nil {
+		return EnsureFederationReplicaResult{}, err
+	}
+	defer finishDrain()
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
 
@@ -1298,6 +1304,35 @@ func ensureFederationReplicaState(
 		federationReplicaOperationKey(store, p.ProjectName, p.Credential),
 	)
 	return result, nil
+}
+
+// drainSyncForIntentChange waits for running syncs and holds new ones while
+// an intent change moves the bound actor or turns push on or off. A sync turn
+// reads the binding once; one that started read-only resets the project
+// without checking for local changes, which would delete changes made after
+// writes turn on. Everything after the drain rereads the binding.
+func drainSyncForIntentChange(ctx context.Context, store db.Storage, p EnsureFederationReplicaParams) (func(), error) {
+	if strings.TrimSpace(p.ReplacesBoundActor) == "" {
+		return func() {}, nil
+	}
+	project, err := store.ProjectByUID(ctx, p.HubProjectUID)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, ErrFederationReplicaBindingConflict
+		}
+		return nil, err
+	}
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, ErrFederationReplicaBindingConflict
+		}
+		return nil, err
+	}
+	if binding.PushEnabled == p.PushEnabled && strings.TrimSpace(binding.Actor) == strings.TrimSpace(p.Credential.Actor) {
+		return func() {}, nil
+	}
+	return federationcoord.BeginRebind(ctx, federationcoord.Key(store.InstanceUID(), project.ID), store, project.ID)
 }
 
 // replaceProviderBoundActor moves an attached replica to the actor of the

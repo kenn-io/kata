@@ -1376,7 +1376,8 @@ On restart, Kata:
    read-only; `pull,push` or `claim,pull,push` collaborates. When the new
    approval names a different actor, the replica takes that actor in the
    same step. Local changes made after the switch are authored as the new
-   actor; changes the hub already accepted keep their author.
+   actor; changes the hub already accepted keep their author. A sync that
+   is already running finishes first, and new syncs wait for this step.
 
 Until the provider approves the new request, the replica cannot sync with the
 hub. Its local tasks stay readable. Pending approval and temporary failures
