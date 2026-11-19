@@ -1761,24 +1761,6 @@ describe('App', () => {
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
     )
-    history.replaceState(null, '', '/kata?issue=abc4')
-    render(App)
-
-    const search = screen.getAllByRole('button', { name: 'Search for abc4' })
-    await waitFor(() => expect(document.title).toBe('Invalid route · Kata'))
-    expect(search).toHaveLength(1)
-    expect(window.location.pathname + window.location.search).toBe('/kata?issue=abc4')
-    await fireEvent.click(search[0]!)
-    expect(window.location.pathname).toBe('/kata')
-    expect(new URLSearchParams(window.location.search).getAll('status')).toEqual(['all'])
-    expect(new URLSearchParams(window.location.search).get('text')).toBe('abc4')
-  })
-
-  it('names the invalid route after returning from search', async () => {
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
     history.replaceState(null, '', '/kata?issue=abc4#direct=1')
     vi.stubGlobal(
       'fetch',
@@ -1794,7 +1776,12 @@ describe('App', () => {
       }),
     )
     render(App)
+    await waitFor(() => expect(document.title).toBe('Invalid route · Kata'))
+    expect(window.location.pathname + window.location.search).toBe('/kata?issue=abc4')
     await fireEvent.click(screen.getByRole('button', { name: 'Search for abc4' }))
+    expect(window.location.pathname).toBe('/kata')
+    expect(new URLSearchParams(window.location.search).getAll('status')).toEqual(['all'])
+    expect(new URLSearchParams(window.location.search).get('text')).toBe('abc4')
     await waitFor(() => expect(document.title).toBe('All Open · Kata'))
     history.replaceState(null, '', '/kata?issue=abc4')
     await fireEvent(window, new PopStateEvent('popstate'))
@@ -4263,8 +4250,7 @@ describe('App', () => {
       }),
     )
     render(App)
-    await waitFor(() => expect(document.title).toBe('example-project#a1 Example issue · Kata'))
-
+    await screen.findByRole('region', { name: 'Kata issue detail' })
     window.dispatchEvent(new Event('kata:versionMismatch'))
 
     expect(await screen.findByRole('alert')).not.toBeNull()
