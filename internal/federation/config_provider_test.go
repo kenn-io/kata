@@ -85,14 +85,34 @@ func TestReconcileProviderProcess(_ *testing.T) {
 	if os.Getenv("KATA_TEST_PROVIDER_DECISION") == "exit-two" {
 		os.Exit(2)
 	}
+	if path := os.Getenv("KATA_TEST_PROVIDER_LOG"); path != "" {
+		logged := request
+		logged.CandidateToken = ""
+		line, err := json.Marshal(logged)
+		if err != nil {
+			os.Exit(1)
+		}
+		// #nosec G304 G703 -- the parent test supplies a log path inside its own t.TempDir.
+		file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			os.Exit(1)
+		}
+		_, writeErr := file.Write(append(line, '\n'))
+		if errors.Join(writeErr, file.Close()) != nil {
+			os.Exit(1)
+		}
+	}
 	if request.Operation == "release" {
 		saved, err := config.ReadFederationCredentials()
 		if err != nil {
 			os.Exit(2)
 		}
+		// Leave fences the request first. An intent change keeps the saved
+		// request, unfenced, until this release is confirmed.
+		intentChange := os.Getenv("KATA_TEST_PROVIDER_INTENT_CHANGE") == "1"
 		found := false
 		for _, credential := range saved.Projects {
-			if credential.Provider != nil && credential.LeavePending && credential.Provider.RequestID == request.RequestID {
+			if credential.Provider != nil && (credential.LeavePending || intentChange) && credential.Provider.RequestID == request.RequestID {
 				found = true
 			}
 		}
@@ -106,6 +126,9 @@ func TestReconcileProviderProcess(_ *testing.T) {
 	}
 	if response.Status == "ready" {
 		response.HubURL, response.ProjectID, response.ProjectUID = request.HubURL, 42, hubProjectUID
+		if other := os.Getenv("KATA_TEST_PROVIDER_PROJECT_UID"); other != "" {
+			response.ProjectUID = other
+		}
 		response.EnrollmentID, response.Actor = 7, "Example User"
 		response.Capabilities = "claim,pull,push"
 		if os.Getenv("KATA_TEST_PROVIDER_NO_CLAIM") == "1" {

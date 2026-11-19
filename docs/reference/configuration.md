@@ -938,9 +938,18 @@ plaintext opt-in does not change that contract. Install the hub's CA in the
 daemon's trust store when using a private certificate authority.
 
 `read_only` permits pull only. `collaborate` permits pull and push; the hub may
-also grant task claiming. Both require an empty local project. `migrate` asks
-the hub to approve adoption of an existing project's tasks and authors.
-The helper cannot silently downgrade write access or upgrade read-only access.
+also grant task claiming. Both require an empty local project when the replica
+first attaches. `migrate` asks the hub to approve adoption of an existing
+project's tasks and authors. The helper cannot silently downgrade write access
+or upgrade read-only access.
+
+An attached replica can switch between `read_only` and `collaborate`: edit
+`intent` and restart the daemon. Kata keeps the project, its tasks and history,
+and the binding, then asks the helper for the new access. Lowering to
+`read_only` waits until the hub has accepted every local change and the replica
+holds no claims; see
+[Change replica intent](../operations/federation.md#change-replica-intent).
+Changing to or from `migrate` still requires leaving the hub first.
 
 Kata retains the request across restarts and failed exchanges. A helper that
 exits `2` reports `configuration_conflict` in reconciliation health; check its

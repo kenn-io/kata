@@ -484,6 +484,13 @@ type Storage interface {
 	// while the home has no other history of one of those issues.
 	AcknowledgeFederationPush(ctx context.Context, projectID, nextCursor int64, supersededEventUIDs []string) error
 	EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (FederationBinding, error)
+	// DisableFederationPushWhenSettled turns push off for a direct spoke
+	// binding in the same transaction that proves no local-origin event above
+	// the push cursor, no live claim held by this replica, and no open claim
+	// request remains. Otherwise it changes nothing and returns
+	// ErrFederationPushPending or ErrFederationClaimsHeld. A binding whose push
+	// is already off is returned unchanged.
+	DisableFederationPushWhenSettled(ctx context.Context, projectID int64, originInstanceUID string) (FederationBinding, error)
 	ResetFederatedProjectIfNoPendingPush(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64, originInstanceUID string, pushCursorEventID int64) error
 	IngestFederationEvents(ctx context.Context, p FederationIngestParams) (FederationIngestResult, error)
 }

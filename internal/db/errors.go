@@ -268,6 +268,15 @@ var (
 	// Relay delivery cannot be discarded by advancing the legacy push cursor.
 	ErrRelayQuarantineSkipUnsupported = errors.New("relay quarantine requires retry after compatible recovery; skip is unsupported")
 
+	// ErrFederationPushPending is returned when push cannot be turned off
+	// because local-origin events still wait for the hub to accept them.
+	ErrFederationPushPending = errors.New("federation push has local changes the hub has not accepted")
+
+	// ErrFederationClaimsHeld is returned when push cannot be turned off
+	// because this replica still holds a live claim or has a claim request
+	// waiting for the hub.
+	ErrFederationClaimsHeld = errors.New("federation replica holds live claims or pending claim requests")
+
 	// ErrFederationResetBlockedByQuarantine is returned when a federation reset
 	// cannot proceed due to an active quarantine.
 	ErrFederationResetBlockedByQuarantine = errors.New("federation reset blocked by quarantine")

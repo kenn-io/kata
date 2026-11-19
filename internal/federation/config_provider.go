@@ -200,6 +200,8 @@ func providerReconciliationError(err error) error {
 		return reconcileError(ErrConfigurationConflict, "federation provider rejected its input; check the helper command and protocol version")
 	case errors.Is(err, config.ErrFederationCredentialConflict), errors.Is(err, daemon.ErrFederationReplicaCredentialConflict):
 		return reconcileError(ErrConfigurationConflict, "federation provider operation conflicts with local state")
+	case errors.Is(err, daemon.ErrFederationProviderIntentChangeBlocked):
+		return reconcileError(ErrBindingConflict, "lowering federation intent waits until the hub accepts local changes and the replica holds no claims")
 	case errors.Is(err, db.ErrFederationProjectNotEmpty), errors.Is(err, daemon.ErrFederationReplicaBindingConflict):
 		return reconcileError(ErrBindingConflict, "federation attachment requires an empty project or explicit migration approval")
 	case errors.Is(err, daemon.ErrFederationReplicaCredentialIO):

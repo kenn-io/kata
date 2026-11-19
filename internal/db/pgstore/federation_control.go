@@ -292,6 +292,62 @@ WHERE project_id=$2`, cursor, projectID); err != nil {
 	return output, err
 }
 
+// DisableFederationPushWhenSettled turns push off only while this replica has
+// no unaccepted local-origin events, live claims, or open claim requests. The
+// serializable transaction makes the checks and the update one decision.
+func (s *Store) DisableFederationPushWhenSettled(ctx context.Context, projectID int64, originInstanceUID string) (db.FederationBinding, error) {
+	var output db.FederationBinding
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		output = db.FederationBinding{}
+		if err := db.LockCronProject(ctx, tx, projectID); err != nil {
+			return err
+		}
+		binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
+			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
+		if err != nil {
+			return err
+		}
+		if !binding.PushEnabled {
+			output = binding
+			return nil
+		}
+		if binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil {
+			return fmt.Errorf("disable federation push: only a direct spoke binding can stop pushing")
+		}
+		var pending bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events
+WHERE project_id=$1 AND origin_instance_uid=$2 AND id>$3 AND `+pgFederationPushEventTypeCondition("type")+`)`,
+			projectID, originInstanceUID, binding.PushCursorEventID).Scan(&pending); err != nil {
+			return mapSQLError(err, nil)
+		}
+		if pending {
+			return db.ErrFederationPushPending
+		}
+		var claims bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM issue_claims
+WHERE project_id=$1 AND released_at IS NULL
+  AND (claim_kind='hard' OR expires_at > $2)
+  AND (holder_instance_uid=$3 OR holder=$4))
+OR EXISTS (SELECT 1 FROM pending_claim_requests
+WHERE project_id=$1 AND rejected_at IS NULL AND resolved_at IS NULL)`,
+			projectID, storedTime(time.Now()), originInstanceUID, strings.TrimSpace(binding.Actor)).Scan(&claims); err != nil {
+			return mapSQLError(err, nil)
+		}
+		if claims {
+			return db.ErrFederationClaimsHeld
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE federation_bindings SET push_enabled=0,
+updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+WHERE project_id=$1`, projectID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		output, err = scanFederationBinding(tx.QueryRowContext(ctx,
+			federationBindingSelect+` WHERE project_id=$1`, projectID))
+		return err
+	})
+	return output, err
+}
+
 // FederationSyncStatusByProject returns one binding's persisted worker status.
 func (s *Store) FederationSyncStatusByProject(ctx context.Context, projectID int64) (db.FederationSyncStatus, error) {
 	return scanFederationSyncStatus(s.QueryRowContext(ctx,

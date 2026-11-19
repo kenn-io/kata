@@ -558,6 +558,12 @@ internal project name, and a rename does not change the approved identity.
 - Attachment replaces old local catalog events when the project takes the
   hub identity. Their checksums name the old identity. One new local event
   updates browser readers without pushing empty metadata to the hub.
+- Changing `intent` between `read_only` and `collaborate` on an attached
+  replica keeps its binding and data. Kata releases the saved request, then
+  authorizes a new request UUID and candidate token with the new intent and
+  the original `spoke_instance_uid` and `local_project_uid`. The provider must
+  approve the same hub project. Kata repeats an unconfirmed release, so a
+  release of an already released request must return `released`.
 - Normal leave stops transport and asks the saved provider to release the
   exact request. Unconfirmed cleanup remains pending rather than deleting its
   credential. Once confirmed, the secret is removed; a closed marker prevents

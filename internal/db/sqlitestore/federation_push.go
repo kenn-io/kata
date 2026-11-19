@@ -263,6 +263,86 @@ func (d *Store) enableFederationPush(ctx context.Context, projectID int64, curso
 	return binding, nil
 }
 
+// DisableFederationPushWhenSettled turns push off only while this replica has
+// no unaccepted local-origin events, live claims, or open claim requests.
+// Taking the project write lock first makes the checks and the update one
+// decision, so a concurrent local write cannot slip between them.
+func (d *Store) DisableFederationPushWhenSettled(ctx context.Context, projectID int64, originInstanceUID string) (db.FederationBinding, error) {
+	return retryWrite1(ctx, d, func() (db.FederationBinding, error) {
+		return d.disableFederationPushWhenSettled(ctx, projectID, originInstanceUID)
+	})
+}
+
+func (d *Store) disableFederationPushWhenSettled(ctx context.Context, projectID int64, originInstanceUID string) (db.FederationBinding, error) {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.FederationBinding{}, fmt.Errorf("begin disable federation push: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
+		return db.FederationBinding{}, err
+	}
+	existing, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=?`, projectID))
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	if !existing.PushEnabled {
+		return existing, nil
+	}
+	if existing.Role != db.FederationRoleSpoke || existing.RelayConfig != nil {
+		return db.FederationBinding{}, fmt.Errorf("disable federation push: only a direct spoke binding can stop pushing")
+	}
+	var pending int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+		  SELECT 1 FROM events
+		   WHERE project_id = ?
+		     AND origin_instance_uid = ?
+		     AND id > ?
+		     AND `+federationPushEventTypeCondition("type")+`)`,
+		projectID, originInstanceUID, existing.PushCursorEventID).Scan(&pending); err != nil {
+		return db.FederationBinding{}, fmt.Errorf("check pending federation push: %w", err)
+	}
+	if pending != 0 {
+		return db.FederationBinding{}, db.ErrFederationPushPending
+	}
+	var claims int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+		  SELECT 1 FROM issue_claims
+		   WHERE project_id = ?
+		     AND released_at IS NULL
+		     AND (claim_kind = 'hard' OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		     AND (holder_instance_uid = ? OR holder = ?)
+		) OR EXISTS (
+		  SELECT 1 FROM pending_claim_requests
+		   WHERE project_id = ?
+		     AND rejected_at IS NULL
+		     AND resolved_at IS NULL)`,
+		projectID, originInstanceUID, strings.TrimSpace(existing.Actor), projectID).Scan(&claims); err != nil {
+		return db.FederationBinding{}, fmt.Errorf("check federation claims: %w", err)
+	}
+	if claims != 0 {
+		return db.FederationBinding{}, db.ErrFederationClaimsHeld
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE federation_bindings
+		   SET push_enabled = 0,
+		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE project_id = ?`, projectID); err != nil {
+		return db.FederationBinding{}, fmt.Errorf("disable federation push: %w", err)
+	}
+	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id = ?`, projectID))
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.FederationBinding{}, fmt.Errorf("commit disable federation push: %w", err)
+	}
+	return binding, nil
+}
+
 // ResetFederatedProjectIfNoPendingPush clears a spoke only if no local-origin
 // events remain above pushCursorEventID. The guarded UPDATE takes SQLite's
 // write lock before projection/event deletion, so a concurrent local write

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 	"uuid"
 
 	"go.kenn.io/kata/internal/httpurl"
@@ -18,6 +19,11 @@ import (
 // failed exchange with the credential provider.
 var ErrFederationProviderStorage = errors.New("federation provider local storage failed")
 
+// ErrFederationProviderIntentChangeBlocked reports a lowered intent that
+// waits until the hub accepts this replica's local changes and the replica
+// holds no claims or claim requests. Nothing changes while it is returned.
+var ErrFederationProviderIntentChangeBlocked = errors.New("federation provider intent change waits for local work")
+
 // AuthorizeFederationProvider saves a candidate before contacting the trusted
 // helper. A ready result is retained before the caller may fetch metadata or
 // bind the replica. This operation does not itself enable federation.
@@ -29,9 +35,15 @@ func AuthorizeFederationProvider(
 	if err != nil {
 		return config.FederationManagedCredentialReservation{}, err
 	}
-	reservation, err := prepareFederationProvider(ctx, store, managed, catalog, mapping)
+	reservation, changeIntent, err := prepareFederationProvider(ctx, store, managed, catalog, mapping)
 	if err != nil {
 		return reservation, err
+	}
+	if changeIntent {
+		reservation, err = changeFederationProviderIntent(ctx, store, managed, mapping, reservation)
+		if err != nil {
+			return reservation, err
+		}
 	}
 	switch reservation.Credential.Provider.Status {
 	case federationprovider.StatusReady, federationprovider.StatusDenied, federationprovider.StatusConflict:
@@ -54,50 +66,65 @@ func AuthorizeFederationProvider(
 	return result, exchangeErr
 }
 
+// prepareFederationProvider also reports whether the saved request differs
+// from the mapping only by an intent change that a bound replica can make in
+// place. The caller then releases the saved request before authorizing anew.
 func prepareFederationProvider(
 	ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore,
 	catalog config.CatalogDaemonConfig, mapping config.FederationProjectConfig,
-) (config.FederationManagedCredentialReservation, error) {
+) (config.FederationManagedCredentialReservation, bool, error) {
 	var empty config.FederationManagedCredentialReservation
 	if len(mapping.CredentialProvider) == 0 || mapping.Hub != catalog.Name || catalog.Local ||
 		config.ValidateFederationAuthentication(mapping, catalog) != nil ||
 		config.ValidateProjectName(mapping.SpokeProject) != nil || config.ValidateProjectName(mapping.HubProject) != nil {
-		return empty, ErrFederationReplicaInvalidInput
+		return empty, false, ErrFederationReplicaInvalidInput
 	}
 	base, err := httpurl.CanonicalHTTPBaseURL(catalog.URL)
 	if err != nil {
-		return empty, ErrFederationReplicaInvalidInput
+		return empty, false, ErrFederationReplicaInvalidInput
 	}
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
 	if err := federationReplicaTransitions.leaveBlockedError(federationReplicaTransitionKey(store, mapping.SpokeProject)); err != nil {
-		return empty, err
+		return empty, false, err
 	}
 	project, err := store.ProjectByName(ctx, mapping.SpokeProject)
 	if err != nil {
-		return empty, err
+		return empty, false, err
 	}
 	previous, found, err := config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
 	if err != nil {
-		return empty, err
+		return empty, false, err
 	}
 	if found {
-		return matchFederationProvider(previous, project, store.InstanceUID(), base, catalog, mapping)
+		reservation, err := matchFederationProvider(previous, project, store.InstanceUID(), base, catalog, mapping)
+		if !errors.Is(err, ErrFederationReplicaCredentialConflict) || !intentChangeAllowed(previous, mapping) {
+			return reservation, false, err
+		}
+		kept := mapping
+		kept.Intent = previous.Credential.Provider.Intent
+		if _, err := matchFederationProvider(previous, project, store.InstanceUID(), base, catalog, kept); err != nil {
+			return previous, false, err
+		}
+		if err := requireBoundProviderReplica(ctx, store, project, previous); err != nil {
+			return previous, false, err
+		}
+		return previous, true, nil
 	}
 	if _, found, err := managed.FederationCredential(ctx, project.UID); err != nil {
-		return empty, err
+		return empty, false, err
 	} else if found {
-		return empty, ErrFederationReplicaCredentialConflict
+		return empty, false, ErrFederationReplicaCredentialConflict
 	}
 	if _, err := store.FederationBindingByProject(ctx, project.ID); !errors.Is(err, db.ErrNotFound) {
 		if err != nil {
-			return empty, err
+			return empty, false, err
 		}
-		return empty, ErrFederationReplicaBindingConflict
+		return empty, false, ErrFederationReplicaBindingConflict
 	}
 	token, err := db.NewFederationToken()
 	if err != nil {
-		return empty, err
+		return empty, false, err
 	}
 	reservation := config.FederationManagedCredentialReservation{ProjectUID: project.UID, Credential: config.FederationCredential{
 		HubURL: base, Token: token, ManagedByConfig: true,
@@ -108,9 +135,111 @@ func prepareFederationProvider(
 		},
 	}}
 	if err := managed.ReserveManagedFederationCredential(ctx, reservation); err != nil {
-		return empty, err
+		return empty, false, err
 	}
-	return reservation, nil
+	return reservation, false, nil
+}
+
+// Switching between read-only and collaborating access keeps the replica's
+// tasks and history. Adoption and other identity changes still need an
+// explicit leave.
+func intentChangeAllowed(saved config.FederationManagedCredentialReservation, mapping config.FederationProjectConfig) bool {
+	p := saved.Credential.Provider
+	switchable := func(intent federationprovider.Intent) bool {
+		return intent == federationprovider.IntentReadOnly || intent == federationprovider.IntentCollaborate
+	}
+	return p != nil && p.Intent != mapping.Intent && switchable(p.Intent) && switchable(mapping.Intent)
+}
+
+// An unbound request has no local replica to keep, so its intent still
+// conflicts. The binding must already follow the approved hub project.
+func requireBoundProviderReplica(ctx context.Context, store db.Storage, project db.Project, saved config.FederationManagedCredentialReservation) error {
+	hubProjectUID := saved.Credential.Provider.HubProjectUID
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	if errors.Is(err, db.ErrNotFound) {
+		return ErrFederationReplicaCredentialConflict
+	}
+	if err != nil {
+		return err
+	}
+	if hubProjectUID == "" || project.UID != hubProjectUID || binding.Role != db.FederationRoleSpoke ||
+		binding.RelayConfig != nil || binding.HubProjectUID != hubProjectUID ||
+		binding.HubProjectID != saved.Credential.HubProjectID {
+		return ErrFederationReplicaBindingConflict
+	}
+	return nil
+}
+
+// changeFederationProviderIntent releases the saved request, then saves a new
+// request with the mapping's intent for the same local and hub projects. It
+// never detaches the binding or deletes local data. Lowering the intent first
+// stops pushing, which it does only once the hub accepted every local change
+// and the replica holds no claims. A failure before release confirmation
+// keeps the saved request, so a retry repeats the same release.
+func changeFederationProviderIntent(
+	ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore,
+	mapping config.FederationProjectConfig, saved config.FederationManagedCredentialReservation,
+) (config.FederationManagedCredentialReservation, error) {
+	finish, err := BeginFederationReplicaHubOperation(ctx, store, managed, mapping.SpokeProject, saved)
+	if err != nil {
+		return saved, err
+	}
+	response, releaseErr := releaseForIntentChange(ctx, store, mapping, saved)
+	leavePending, finishErr := finish(ctx, 0)
+	if finishErr != nil {
+		return saved, finishErr
+	}
+	if leavePending {
+		return saved, ErrFederationReplicaLeavePending
+	}
+	if releaseErr != nil {
+		return saved, releaseErr
+	}
+	if response.Status != federationprovider.StatusReleased {
+		return saved, errors.New("federation provider release is not confirmed")
+	}
+	token, err := db.NewFederationToken()
+	if err != nil {
+		return saved, err
+	}
+	p := saved.Credential.Provider
+	next := *p
+	next.RequestID = uuid.New()
+	next.Intent = mapping.Intent
+	next.Status = ""
+	next.EnrollmentID = 0
+	next.ExpiresAt = time.Time{}
+	replacement := saved
+	replacement.Credential.Token = token
+	replacement.Credential.Provider = &next
+	if err := managed.ReplaceManagedFederationCredential(ctx, saved, replacement); err != nil {
+		return saved, err
+	}
+	return replacement, nil
+}
+
+func releaseForIntentChange(
+	ctx context.Context, store db.Storage, mapping config.FederationProjectConfig,
+	saved config.FederationManagedCredentialReservation,
+) (federationprovider.Response, error) {
+	if mapping.Intent == federationprovider.IntentReadOnly {
+		project, err := store.ProjectByName(ctx, mapping.SpokeProject)
+		if err != nil {
+			return federationprovider.Response{}, errors.Join(ErrFederationProviderStorage, err)
+		}
+		if _, err := store.DisableFederationPushWhenSettled(ctx, project.ID, store.InstanceUID()); err != nil {
+			if errors.Is(err, db.ErrFederationPushPending) || errors.Is(err, db.ErrFederationClaimsHeld) {
+				return federationprovider.Response{}, errors.Join(ErrFederationProviderIntentChangeBlocked, err)
+			}
+			return federationprovider.Response{}, errors.Join(ErrFederationProviderStorage, err)
+		}
+	}
+	p := saved.Credential.Provider
+	return federationprovider.Exchange(ctx, p.Command, federationprovider.Request{
+		Version: 1, Operation: "release", RequestID: p.RequestID,
+		HubURL: saved.Credential.HubURL, Project: saved.Credential.HubProjectName,
+		SpokeInstanceUID: p.SpokeInstanceUID, LocalProjectUID: p.LocalProjectUID, Intent: p.Intent,
+	})
 }
 
 func matchFederationProvider(
@@ -155,6 +284,11 @@ func exchangeFederationProvider(
 		response.Actor = strings.TrimSpace(response.Actor)
 		if db.ValidateTokenActor(response.Actor) != nil {
 			return reservation, federationprovider.ErrInvalidResponse
+		}
+		// A request that replaced an earlier approval for a bound replica must
+		// approve the same hub project. Keep it unready rather than rebinding.
+		if p.HubProjectUID != "" && (response.ProjectUID != p.HubProjectUID || response.ProjectID != c.HubProjectID) {
+			return reservation, ErrFederationReplicaBindingConflict
 		}
 		replacement.Credential.HubProjectID = response.ProjectID
 		replacement.Credential.Actor = response.Actor

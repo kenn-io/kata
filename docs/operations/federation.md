@@ -1359,6 +1359,39 @@ Provider mappings differ from catalog-admin mappings when removed:
 - If startup reports `credential_io`, correct the owner-private credential file
   and restart the daemon. Kata does not guess how to repair invalid credentials.
 
+### Change replica intent
+
+An attached replica can switch between `read_only` and `collaborate` without
+leaving the hub. Edit `intent` in the mapping and restart the daemon. Kata
+keeps the local project, its tasks and history, and the binding with its sync
+progress. It never asks the hub to delete anything.
+
+On restart, Kata:
+
+1. Turns push off first when the new intent is `read_only`.
+2. Asks the provider to release the saved request.
+3. Saves a new request and candidate token with the new intent, for the same
+   local and hub projects, and asks the provider to authorize it.
+4. Turns push on or off to match the approved permissions: `pull` alone is
+   read-only; `pull,push` or `claim,pull,push` collaborates.
+
+Until the provider approves the new request, the replica cannot sync with the
+hub. Its local tasks stay readable. Pending approval and temporary failures
+retry as for a first approval. A `denied` decision keeps the replica and its
+data; restore the earlier intent and restart to ask for that access again.
+An approval for a different hub project is refused as `binding_conflict`, and
+the binding is unchanged.
+
+Lowering to `read_only` waits for local work to finish, because a read-only
+replica refuses local edits and cannot push or claim. While the hub has not
+accepted every local change, or this replica holds a live claim or a queued
+claim request, reconciliation reports `binding_conflict`, keeps collaborating,
+and retries. `kata federation status` shows the pending push depth and claim
+counts. Once the hub accepts the pushed changes and you release the claims,
+the change completes on the next attempt.
+
+Changing to or from `migrate` is not done in place. Leave the hub first.
+
 ## Move an existing spoke to a new HTTPS endpoint
 
 Catalog edits are intentionally not applied to existing bindings. After
