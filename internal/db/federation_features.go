@@ -336,7 +336,7 @@ type FederationReadResult struct {
 
 // ReadFederationTransaction supplies common decisions while each backend owns
 // its isolation/retry/fences, baseline event writer and event row decoder.
-func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationReadParams, project Project, binding FederationBinding, refresh func() (FederationBinding, error), readEvents func() ([]Event, error)) (FederationReadResult, error) {
+func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationReadParams, project Project, binding FederationBinding, refresh func() (FederationBinding, error), readEvents func(int64, int) ([]Event, error)) (FederationReadResult, error) {
 	out := FederationReadResult{Project: project, Binding: binding, Events: []Event{}, NextAfterID: in.AfterID}
 	var err error
 	out.RequiredFeatures, err = ProjectRequiredEventFeatures(ctx, tx, project.UID)
@@ -380,13 +380,23 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		}
 		// Older peers clear their project before replaying, so refuse the
 		// metadata read if the replay would carry a zoned date.
-		if featureErr := RequireEventFeatures(in.Features, IssueDateZoneEventFeature); featureErr != nil {
-			var zoned bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE project_id=$1 AND id>=$2 AND type LIKE 'issue.%' AND payload LIKE '%]"%')`, project.ID, binding.ReplayHorizonEventID).Scan(&zoned); err != nil {
-				return out, err
-			}
-			if zoned {
-				return out, featureErr
+		if RequireEventFeatures(in.Features, IssueDateZoneEventFeature) != nil {
+			const limit = 1000
+			cursor := binding.ReplayHorizonEventID - 1
+			for {
+				page, err := readEvents(cursor, limit)
+				if err != nil {
+					return out, err
+				}
+				for _, event := range page {
+					if _, err := requireFederationEventFeatures(in.Features, event); err != nil {
+						return out, err
+					}
+					cursor = event.ID
+				}
+				if len(page) < limit {
+					break
+				}
 			}
 		}
 		err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),$2) FROM events WHERE project_id=$1 AND id >= $2 AND type IN (`+FederationSnapshotEventTypesSQL()+`)`, project.ID, binding.ReplayHorizonEventID).Scan(&out.BaselineThroughEventID)
@@ -400,18 +410,15 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		out.NextAfterID = reset.Int64
 		return out, nil
 	}
-	out.Events, err = readEvents()
+	out.Events, err = readEvents(in.AfterID, in.Limit)
 	if err != nil {
 		return out, err
 	}
 	// Inspect the returned page itself, including when a store was imported from
 	// an earlier snapshot with a missing protocol latch. Never trust a pre-read.
 	for _, event := range out.Events {
-		required, err := PayloadRequiredFeatures(event.Type, event.Payload)
+		required, err := requireFederationEventFeatures(in.Features, event)
 		if err != nil {
-			return out, err
-		}
-		if err := RequireEventFeatures(in.Features, required); err != nil {
 			return out, err
 		}
 		if required != "" {
@@ -420,4 +427,12 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		out.NextAfterID = event.ID
 	}
 	return out, nil
+}
+
+func requireFederationEventFeatures(features string, event Event) (string, error) {
+	required, err := PayloadRequiredFeatures(event.Type, event.Payload)
+	if err != nil {
+		return "", err
+	}
+	return required, RequireEventFeatures(features, required)
 }

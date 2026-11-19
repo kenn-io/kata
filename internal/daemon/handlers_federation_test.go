@@ -2700,6 +2700,22 @@ func TestFederationIngestRejectsSnapshotHistoricalAuthorWithoutAdoptionIntent(t 
 	assertFederationEventCount(t, env.DB, "issue.snapshot", 0)
 }
 
+func TestFederationMetadataAllowsBracketedTitle(t *testing.T) {
+	env := testenv.New(t)
+	project := createFederatedHubProject(t, env, "hub")
+	_, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Plan [draft]", Author: "tester",
+		Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-09-02"`)},
+	})
+	require.NoError(t, err)
+	created, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
+	})
+	require.NoError(t, err)
+	resp, raw := envDoRaw(t, env, http.MethodGet, projectPath(project.ID)+"/federation/metadata", nil, bearer(created.Token))
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
 func TestFederationPullRequiresZonedDateFeature(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()

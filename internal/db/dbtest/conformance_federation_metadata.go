@@ -46,3 +46,32 @@ func checkFederationMetadataZonedDateAfterPurge(t *testing.T, store db.Storage) 
 	require.Greater(t, result.Binding.ReplayHorizonEventID, binding.ReplayHorizonEventID)
 	return nil
 }
+
+func checkFederationMetadataMovedZonedDateHistory(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	for _, tc := range []struct{ name, value string }{{"rewrite", `"2026-09-02"`}, {"clear", `null`}} {
+		t.Run(tc.name, func(t *testing.T) {
+			destination, err := store.CreateProject(ctx, "destination-"+tc.name)
+			require.NoError(t, err)
+			source, err := store.CreateProject(ctx, "source-"+tc.name)
+			require.NoError(t, err)
+			_, err = store.EnableProjectFederation(ctx, destination.ID, "worker")
+			require.NoError(t, err)
+			_, err = store.EnableProjectFederation(ctx, source.ID, "worker")
+			require.NoError(t, err)
+			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "schedule", Author: "worker", Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-09-02[Europe/Paris]"`)}})
+			require.NoError(t, err)
+			patched, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(tc.value)}})
+			require.NoError(t, err)
+			_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: destination.ID, IfMatchRev: patched.Issue.Revision, Actor: "worker"})
+			require.NoError(t, err)
+			features := db.CronEventFeature + "," + db.IssueMoveEventFeature
+			_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: destination.ID, Metadata: true, Features: features})
+			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+			require.Contains(t, err.Error(), db.IssueDateZoneEventFeature)
+			_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: destination.ID, Metadata: true, Features: features + "," + db.IssueDateZoneEventFeature})
+			require.NoError(t, err)
+		})
+	}
+	return nil
+}
