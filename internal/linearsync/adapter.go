@@ -128,6 +128,15 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, startedAt 
 		return prepared, err
 	}
 	issuesync.ReportProgress(ctx, "issues", len(items), len(items))
+	issuesync.ReportProgress(ctx, "comments", 0, 0)
+	comments, err := s.Comments(ctx, c)
+	if err != nil {
+		return prepared, err
+	}
+	byIssue := map[string][]Comment{}
+	for _, comment := range comments {
+		byIssue[comment.IssueID] = append(byIssue[comment.IssueID], comment)
+	}
 	cutoff, err := ParseSince(c.Since)
 	if err != nil {
 		return prepared, err
@@ -135,6 +144,7 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, startedAt 
 	eligible := make([]Issue, 0, len(items))
 	for _, i := range items {
 		if cutoff == nil || i.UpdatedAt.After(*cutoff) {
+			i.Comments = byIssue[i.ID]
 			eligible = append(eligible, i)
 		}
 	}

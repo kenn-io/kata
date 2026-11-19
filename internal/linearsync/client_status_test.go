@@ -120,6 +120,8 @@ func statusTransport(t *testing.T, mutation func(*http.Request, map[string]any) 
 			return dataResponse(map[string]any{"issue": issue()}), nil
 		case strings.Contains(query, "KataLinearUpdate"):
 			return mutation(r, v)
+		case strings.Contains(query, "KataLinearComments"):
+			return dataResponse(map[string]any{"comments": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
 		default:
 			t.Fatalf("unexpected query %s", query)
 			return nil, nil

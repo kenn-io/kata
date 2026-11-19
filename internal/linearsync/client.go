@@ -33,6 +33,7 @@ type Session interface {
 	Scope(context.Context, Config) (Scope, error)
 	States(context.Context, Config) ([]State, error)
 	Issues(context.Context, Config) ([]Issue, error)
+	Comments(context.Context, Config) ([]Comment, error)
 }
 
 // ClientConfig injects transport and clocks; the credential origin is fixed.

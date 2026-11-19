@@ -14,6 +14,7 @@ const projectQuery = `query KataLinearProject($project: String!, $team: ID!) { p
 const statesQuery = `query KataLinearStates($after: String, $filter: WorkflowStateFilter!) { workflowStates(first: 100, after: $after, filter: $filter) { nodes { id type position archivedAt team { id } } pageInfo { hasNextPage endCursor } } }`
 const issueFields = `id identifier title description url priority createdAt updatedAt archivedAt trashed completedAt canceledAt team { id } project { id } state { id } creator { id } assignee { id }`
 const issuesQuery = `query KataLinearIssues($after: String, $filter: IssueFilter!) { issues(first: 100, after: $after, filter: $filter) { nodes { ` + issueFields + ` } pageInfo { hasNextPage endCursor } } }`
+const commentsQuery = `query KataLinearComments($after: String, $filter: CommentFilter!) { comments(first: 100, after: $after, filter: $filter) { nodes { id body createdAt user { id } issue { id } } pageInfo { hasNextPage endCursor } } }`
 
 type identity struct {
 	ID string `json:"id"`
@@ -230,10 +231,7 @@ func decodeIssue(raw jsontext.Value, c Config, content bool) (Issue, error) {
 	}
 	return i, nil
 }
-func (s *clientSession) Issues(ctx context.Context, c Config) ([]Issue, error) {
-	if err := s.validate(c); err != nil {
-		return nil, err
-	}
+func issueFilter(c Config) map[string]any {
 	filter := teamFilter(c)
 	if c.ProjectID != "" {
 		filter["project"] = map[string]any{"id": map[string]any{"eq": c.ProjectID}}
@@ -241,7 +239,52 @@ func (s *clientSession) Issues(ctx context.Context, c Config) ([]Issue, error) {
 	if c.Since != "" {
 		filter["updatedAt"] = map[string]any{"gt": c.Since}
 	}
-	rows, err := readCollection(ctx, s, issuesQuery, "issues", filter)
+	return filter
+}
+
+// Comments reads every comment on the issues Issues selects.
+func (s *clientSession) Comments(ctx context.Context, c Config) ([]Comment, error) {
+	if err := s.validate(c); err != nil {
+		return nil, err
+	}
+	rows, err := readCollection(ctx, s, commentsQuery, "comments", map[string]any{"issue": issueFilter(c)})
+	if err != nil {
+		return nil, err
+	}
+	comments := make([]Comment, 0, len(rows))
+	for _, raw := range rows {
+		var row struct {
+			ID        string    `json:"id"`
+			Body      *string   `json:"body"`
+			CreatedAt time.Time `json:"createdAt"`
+			User      *identity `json:"user"`
+			Issue     *identity `json:"issue"`
+		}
+		if json.Unmarshal(raw, &row) != nil || row.Body == nil || row.Issue == nil || !validTime(row.CreatedAt) {
+			return nil, fmt.Errorf("invalid Linear comment response")
+		}
+		comment := Comment{Body: *row.Body, CreatedAt: row.CreatedAt}
+		if comment.ID, err = CanonicalID(row.ID); err != nil {
+			return nil, err
+		}
+		if comment.IssueID, err = CanonicalID(row.Issue.ID); err != nil {
+			return nil, err
+		}
+		if row.User != nil {
+			if comment.AuthorID, err = CanonicalID(row.User.ID); err != nil {
+				return nil, err
+			}
+		}
+		comments = append(comments, comment)
+	}
+	return comments, nil
+}
+
+func (s *clientSession) Issues(ctx context.Context, c Config) ([]Issue, error) {
+	if err := s.validate(c); err != nil {
+		return nil, err
+	}
+	rows, err := readCollection(ctx, s, issuesQuery, "issues", issueFilter(c))
 	if err != nil {
 		return nil, err
 	}

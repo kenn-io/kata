@@ -70,6 +70,11 @@ keep Linear's title and add the `linear` label. Imported bodies retain Markdown
 and include a Linear link. Private image assets remain hosted and authenticated
 by Linear; Kata does not copy them.
 
+Comments on imported issues arrive with their Linear author and creation time.
+Kata copies each comment once. Later edits or deletions in Linear do not change
+the Kata copy. Comments that no Linear user wrote, such as integration posts,
+show `linear-unknown` as their author.
+
 ## Synchronize completion and reopen
 
 ```sh
@@ -96,6 +101,7 @@ Kata leaves the recurrence schedule in Linear.
 | Data | Ownership |
 | --- | --- |
 | Title, Markdown body, priority, creator, assignee, identifier and link | Linear import |
+| Linear comments | Linear import, copied once |
 | Open/closed | Linear in one-way mode; shared in explicit two-way mode |
 | Native comments, evidence, metadata, other labels | Kata |
 | Due dates, cycles, provider labels, project assignment, recurrence | Remain in Linear; never written back |
