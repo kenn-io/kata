@@ -190,17 +190,10 @@ func normalizeBoundFederationImportActorTx(
 	tx *sql.Tx,
 	params db.ImportBatchParams,
 ) (db.ImportBatchParams, error) {
-	var actor string
-	err := tx.QueryRowContext(ctx, `SELECT bound_actor FROM federation_bindings
-WHERE project_id=$1 AND role=$2 AND enabled=1 AND push_enabled=1`,
-		params.ProjectID, string(db.FederationRoleSpoke)).Scan(&actor)
-	if errors.Is(err, sql.ErrNoRows) {
-		return params, nil
-	}
+	actor, err := effectiveLocalMutationActorTx(ctx, tx, params.ProjectID, "")
 	if err != nil {
-		return params, fmt.Errorf("lookup bound federation actor: %w", mapSQLError(err, nil))
+		return params, fmt.Errorf("lookup bound federation actor: %w", err)
 	}
-	actor = strings.TrimSpace(actor)
 	if actor == "" {
 		return params, nil
 	}
