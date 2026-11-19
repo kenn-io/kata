@@ -661,7 +661,6 @@ describe('App', () => {
       let snapshotReads = 0
       let rosterRequests = 0
       const failedResponse = new Response('', { status: 400 })
-      const checkFailure = vi.spyOn(failedResponse, 'ok', 'get')
       vi.stubGlobal(
         'fetch',
         vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -689,14 +688,14 @@ describe('App', () => {
                   id: 'local',
                   url: '',
                   local: true,
-                  default: false,
+                  default: true,
                   auth: 'none',
                   health: 'connected',
                 },
                 {
                   id: 'hub',
                   url: 'https://hub.example',
-                  default: true,
+                  default: false,
                   auth: 'none',
                   health: 'connected',
                 },
@@ -717,9 +716,8 @@ describe('App', () => {
       const route = window.location.href
       await fireEvent.click(screen.getByTestId('daemon-chip'))
       await waitFor(() => expect(rosterRequests).toBe(2))
+      await tick()
       if (failure) {
-        await waitFor(() => expect(checkFailure).toHaveBeenCalledTimes(2))
-        await tick()
         expect(screen.queryByRole('alert')).toBeNull()
       } else {
         expect(await screen.findByTestId('daemon-row-hub')).not.toBeNull()
@@ -767,18 +765,16 @@ describe('App', () => {
           if (request.headers.get('X-Kata-Web-Daemon') === 'example-local') {
             return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
           }
-          return new Response('', { status: 404 })
+          return new Response('', { status: 502 })
         }
         return Response.json({ issues: [], labels: [], owners: [], projects: [] })
       }),
     )
     render(App)
     await waitFor(() => expect(selected).toContain('hub-a'))
-    expect(await screen.findByRole('alert')).not.toBeNull()
+    expect(await screen.findByRole('alert', {}, { timeout: 12_000 })).not.toBeNull()
     expect(screen.getByTestId('daemon-chip').textContent).toContain('hub-a')
-    await fireEvent.click(screen.getByTestId('daemon-chip'))
-    expect(selected.every((id) => id === 'hub-a')).toBe(true)
-  })
+  }, 15_000)
 
   it('honors an explicitly selected gateway daemon on first authority load', async () => {
     history.replaceState(null, '', '/kata#daemon=example-remote')

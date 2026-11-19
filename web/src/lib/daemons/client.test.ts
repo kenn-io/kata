@@ -146,7 +146,7 @@ describe('web daemon transport', () => {
   })
 
   test('sends the selected daemon with the roster request', async () => {
-    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+    const fetcher = vi.fn<typeof fetch>(async () =>
       Response.json({
         daemons: [{ id: 'hub', url: '', default: true, auth: 'none', health: 'down' }],
       }),

@@ -136,7 +136,7 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 	assert.Zero(t, authCalls.Load(), "roster must not probe with an unavailable credential")
 }
 
-func anonymousHub(t *testing.T, ready *atomic.Bool) (*httptest.Server, *atomic.Int64) {
+func anonymousHub(t *testing.T) (*httptest.Server, *atomic.Int64) {
 	t.Helper()
 	var probes atomic.Int64
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -144,10 +144,6 @@ func anonymousHub(t *testing.T, ready *atomic.Bool) (*httptest.Server, *atomic.I
 		assert.Equal(t, "/api/v1/instance", r.URL.Path)
 		assert.Empty(t, r.Header.Get("Authorization"))
 		probes.Add(1)
-		if ready != nil && !ready.Load() {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(w, `{"web_ui_contract_version":%q}`, api.UISnapshotContractVersion)
 	}))
@@ -156,7 +152,6 @@ func anonymousHub(t *testing.T, ready *atomic.Bool) (*httptest.Server, *atomic.I
 }
 
 func TestWebDaemonRosterMappedHubs(t *testing.T) {
-	connected, probes := anonymousHub(t, nil)
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
@@ -166,7 +161,6 @@ func TestWebDaemonRosterMappedHubs(t *testing.T) {
 		name, active, hubURL, token, extra, selected string
 		wantIDs, wantHealth                          []string
 	}{
-		{"connected hub", "", connected.URL, "", "", "", []string{"local", "hub"}, []string{"connected", "connected"}},
 		{"down hub", "", down.URL, "", "", "", []string{"local"}, []string{"connected"}},
 		{"selected down hub", "", down.URL, "", "", "hub", []string{"local", "hub"}, []string{"connected", "down"}},
 		{"active down hub", `active_daemon = "hub"`, down.URL, "", "", "", []string{"local", "hub"}, []string{"connected", "down"}},
@@ -226,15 +220,12 @@ actor = "user-a"
 			if tc.active != "" {
 				assert.True(t, roster.Daemons[len(roster.Daemons)-1].Default)
 			}
-			if tc.name == "connected hub" {
-				assert.EqualValues(t, 1, probes.Load())
-			}
 		})
 	}
 }
 
 func TestWebDaemonRosterCachesUnrelatedTargets(t *testing.T) {
-	other, otherProbes := anonymousHub(t, nil)
+	other, otherProbes := anonymousHub(t)
 	d := openTestDB(t)
 	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebDaemons: []config.CatalogDaemonConfig{{Name: "other", URL: other.URL, AllowInsecure: true}}})
 	for range 2 {

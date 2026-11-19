@@ -110,15 +110,10 @@ func registerWebDaemonHandlers(mux *http.ServeMux, cfg ServerConfig) {
 }
 
 func (g *webDaemonGateway) includeLocalFallback(catalog, visible []config.CatalogDaemonConfig) bool {
-	hasSyncHub := false
 	for _, daemon := range catalog {
 		if daemon.Local {
 			return false
 		}
-		hasSyncHub = hasSyncHub || g.syncHubs[daemon.Name]
-	}
-	if !hasSyncHub {
-		return false
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
