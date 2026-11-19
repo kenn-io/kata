@@ -613,6 +613,32 @@ The runner polls every 30 seconds by default. Set
 `KATA_FEDERATION_PULL_INTERVAL_MS` on the daemon process to change that interval.
 Shorter intervals increase wakeups and database traffic.
 
+A direct spoke also keeps one held poll open per binding when its hub supports
+held polls. The hub answers a held poll as soon as an event commits in that
+project, or after at most 45 seconds when nothing changes, so hub events reach
+the spoke without waiting for the interval. While a binding's poll is held,
+interval passes skip that binding's pull and still push, renew claims, and
+update sync status. Relay bindings and hubs without held-poll support keep
+pulling on the interval.
+
+Held polls need a few things from the deployment:
+
+- Proxies between the spoke and hub must allow a request to stay idle for at
+  least 45 seconds. Common 60-second idle timeouts are enough.
+- Each idle binding keeps one request open at its hub. A host that limits
+  concurrent requests per instance, such as some managed platforms, holds more
+  open requests than it did with interval polls.
+- A hub holds at most 256 polls, and at most 32 per spoke credential. Signed
+  polls can use at most half of the hub's federation control slots. Past a
+  limit the hub answers at once and the spoke falls back to its interval.
+- The spoke asks for a wait 15 seconds shorter than its request budget, so a
+  `KATA_HTTP_TIMEOUT` under 16 seconds turns held polls off.
+
+The hub checks the poll's full authorization again before it answers a held
+poll, so a revoked credential or removed membership stops the poll when it
+wakes or expires. Hubs that share a PostgreSQL database wake each other's held
+polls with `LISTEN/NOTIFY`; a SQLite hub wakes them in process.
+
 Sync runs in turns. One turn for a project pushes and pulls at most 8 batches
 per stream and direction (1000 deliveries per event or receipt batch, 32
 manifest offers per artifact batch) and then yields, so the runner can serve

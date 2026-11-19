@@ -4504,6 +4504,7 @@ func (c *Client) PollFederationProjectEventsWithResponse(ctx context.Context, op
 		out.Headers200 = &PollFederationProjectEventsResp200Headers{
 			XKataEventFeatures:         resp.Headers.Get("X-Kata-Event-Features"),
 			XKataEventsIssueUID:        resp.Headers.Get("X-Kata-Events-Issue-UID"),
+			XKataFederationPollWaitMax: resp.Headers.Get("X-Kata-Federation-Poll-Wait-Max"),
 			XKataRequiredEventFeatures: resp.Headers.Get("X-Kata-Required-Event-Features"),
 		}
 		return out, nil

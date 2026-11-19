@@ -33,7 +33,10 @@ const (
 	idempotencyMaxIdleConns    = 1
 	federationLockMaxOpenConns = 25
 	federationLockMaxIdleConns = 1
-	defaultConnMaxIdleTime     = 5 * time.Minute
+	// One connection listens for poll wakeups while it is serving; the other
+	// publishes them.
+	pollWakeMaxOpenConns   = 2
+	defaultConnMaxIdleTime = 5 * time.Minute
 )
 
 // Open opens a PG connection pool against dsn using pgx's database/sql
@@ -180,6 +183,9 @@ func openInternal(
 	s.federationLockDB = newPostgresPool(
 		*connConfig, federationLockMaxOpenConns, federationLockMaxIdleConns,
 	)
+	// Opened lazily: only a serving hub listens or publishes poll wakeups.
+	s.pollWakeDB = newPostgresPool(*connConfig, pollWakeMaxOpenConns, pollWakeMaxOpenConns)
+	s.pollWake = &pollWakeState{listeners: map[*context.CancelFunc]struct{}{}}
 	if err := s.federationLockDB.PingContext(ctx); err != nil {
 		_ = s.Close()
 		return nil, fmt.Errorf("ping postgres federation lock coordinator: %w", err)
