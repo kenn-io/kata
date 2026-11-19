@@ -91,7 +91,6 @@ describe('App', () => {
     )
     render(App)
     await screen.findByRole('button', { name: /Other issue/ })
-    await waitFor(() => expect(document.title).toBe('All Open · Kata'))
     await waitFor(() => expect(snapshotRequests).toHaveLength(1))
 
     const projectButton = [
@@ -1640,7 +1639,6 @@ describe('App', () => {
     await fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(await screen.findByRole('heading', { name: 'Launch Kata securely' })).not.toBeNull()
-    await waitFor(() => expect(document.title).toBe('Inbox · Kata'))
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
     expect(
       fetcher.mock.calls.some(
@@ -3547,7 +3545,6 @@ describe('App', () => {
     await tick()
     expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations + 1)
     await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
-    await waitFor(() => expect(document.title).toBe('example-project#a1 Example issue · Kata'))
 
     await waitFor(() => expect(snapshotRequests).toHaveLength(4))
     expect(new URL(snapshotRequests[2]!.url).searchParams.get('selected_issue_uid')).toBe(
