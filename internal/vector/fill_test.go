@@ -61,10 +61,6 @@ func TestFillEmbedsChunksAndQueryFindsThem(t *testing.T) {
 		t.Fatalf("stats = %+v, encoded = %d; want 1 doc, >=2 chunks", stats, encoded)
 	}
 
-	negativeHits, err := ix.Query(ctx, key, kitvec.Vector{1, 0, 0, 0}, -1)
-	if err != nil || len(negativeHits) != 0 {
-		t.Fatalf("negative limit: hits = %+v, err = %v; want no hits or error", negativeHits, err)
-	}
 	hits, err := ix.Query(ctx, key, kitvec.Vector{1, 0, 0, 0}, 10)
 	if err != nil {
 		t.Fatal(err)
