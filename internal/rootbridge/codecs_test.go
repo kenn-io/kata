@@ -27,6 +27,7 @@ func TestScheduleCodecReadKataCanonicalizesValues(t *testing.T) {
 	}{
 		{"empty", `{}`, nullValue()},
 		{"date", `{"scheduled_on":"2026-08-20"}`, date("2026-08-20")},
+		{"zoned date", `{"scheduled_on":"2026-08-20[Asia/Tokyo]"}`, date("2026-08-20")},
 		{"local minute", `{"scheduled_on":"2026-08-20T09:30","timezone":"America/New_York"}`, connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T09:30", Timezone: "America/New_York"}},
 		{"local second", `{"scheduled_on":"2026-08-20T09:30:45","timezone":"America/New_York"}`, connector.FieldValue{Kind: "local_datetime", Value: "2026-08-20T09:30:45", Timezone: "America/New_York"}},
 		{"utc instant", `{"scheduled_on":"2026-08-20T09:30:45.120000000Z"}`, connector.FieldValue{Kind: "instant", Value: "2026-08-20T09:30:45.12Z"}},

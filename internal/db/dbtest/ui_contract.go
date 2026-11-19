@@ -848,6 +848,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 					require.Equal(t, snapshot.Issues[0].ScheduledOnDate, snapshot.SelectedIssue.ScheduledOnDate)
 				} else {
 					require.Equal(t, "2026-08-31", snapshot.SelectedIssue.DeadlineOnDate)
+					require.Equal(t, snapshot.Issues[0].DeadlineOnDate, snapshot.SelectedIssue.DeadlineOnDate)
 				}
 			})
 		}

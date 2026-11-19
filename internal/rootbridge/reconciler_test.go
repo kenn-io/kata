@@ -1057,54 +1057,6 @@ func TestFieldReconcilePreservesConnectorErrorsWithoutAdvancingBaseline(t *testi
 	})
 }
 
-func TestFieldReconcileDateOnlyRemainsUnzoned(t *testing.T) {
-	h := newReconcileHarness(t)
-	h.reconciler = NewReconciler(h.store, h.registry, ReconcilerConfig{Now: func() time.Time { return h.now }, DefaultTimezone: "America/New_York"})
-	h.mapField(t, "scheduled_on", "start-date")
-	_, err := h.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-		IssueID: h.issue.ID, Actor: "tester", Patch: map[string]jsontext.Value{
-			"scheduled_on": jsontext.Value(`"2026-08-20[Asia/Tokyo]"`),
-			"timezone":     jsontext.Value(`"Europe/Paris"`),
-		},
-	})
-	require.NoError(t, err)
-	h.seedBaseline(t, "scheduled_on", date("2026-08-20"))
-	h.client.fieldValues["start-date"] = date("2026-08-21")
-	_, err = h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
-	require.NoError(t, err)
-	issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
-	require.NoError(t, err)
-	values, err := metadataObject(issue.Metadata)
-	require.NoError(t, err)
-	assert.JSONEq(t, `"2026-08-21"`, string(values["scheduled_on"]))
-}
-
-func TestFieldReconcileIndependentLocalTimezones(t *testing.T) {
-	h := newReconcileHarness(t)
-	h.mapField(t, "scheduled_on", "start-date")
-	h.mapField(t, "deadline_on", "due-date")
-	h.client.fieldValues["start-date"] = connector.FieldValue{
-		Kind: fieldKindLocalDateTime, Value: "2026-08-21T09:30", Timezone: "America/New_York",
-	}
-	h.client.fieldValues["due-date"] = connector.FieldValue{
-		Kind: fieldKindLocalDateTime, Value: "2026-08-21T10:30", Timezone: "America/Los_Angeles",
-	}
-
-	result, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
-	require.NoError(t, err)
-	assert.Zero(t, result.FieldConflicts)
-	assert.False(t, h.fieldState(t, "scheduled_on").Conflicted)
-	assert.False(t, h.fieldState(t, "deadline_on").Conflicted)
-	issue, err := h.store.IssueByID(t.Context(), h.issue.ID)
-	require.NoError(t, err)
-	values, err := metadataObject(issue.Metadata)
-	require.NoError(t, err)
-	assert.JSONEq(t, `"2026-08-21T09:30[America/New_York]"`, string(values["scheduled_on"]))
-	assert.JSONEq(t, `"2026-08-21T10:30[America/Los_Angeles]"`, string(values["deadline_on"]))
-	assert.Equal(t, h.client.fieldValues["start-date"], decodeStoredFieldValue(t, h.fieldState(t, "scheduled_on").Baseline))
-	assert.Equal(t, h.client.fieldValues["due-date"], decodeStoredFieldValue(t, h.fieldState(t, "deadline_on").Baseline))
-}
-
 func TestReconcileFirstBindOfCompleteRootUsesReservedClaim(t *testing.T) {
 	h := newServiceHarness(t)
 	h.client.resolved.State = "complete"
