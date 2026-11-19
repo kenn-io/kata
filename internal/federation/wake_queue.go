@@ -22,25 +22,27 @@ func NewWakeQueue() *WakeQueue {
 // WakeAll asks for a pass over every spoke binding.
 func (q *WakeQueue) WakeAll() {
 	q.mu.Lock()
+	defer q.mu.Unlock()
 	q.all = true
 	q.projects = nil
-	q.mu.Unlock()
 	q.signal()
 }
 
 // WakeProject asks for a pass over the spoke binding of one local project.
 func (q *WakeQueue) WakeProject(projectID int64) {
 	q.mu.Lock()
+	defer q.mu.Unlock()
 	if !q.all {
 		if q.projects == nil {
 			q.projects = map[int64]bool{}
 		}
 		q.projects[projectID] = true
 	}
-	q.mu.Unlock()
 	q.signal()
 }
 
+// signal runs under q.mu, so take cannot clear a signal before the wake it
+// announces is pending and leave the signal behind with nothing to take.
 func (q *WakeQueue) signal() {
 	select {
 	case q.ready <- struct{}{}:

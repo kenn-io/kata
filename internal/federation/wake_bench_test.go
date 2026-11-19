@@ -22,6 +22,9 @@ type wakeBench struct {
 	runner    *Runner
 	results   atomic.Int64
 	firstPass chan struct{}
+	// writtenTurns receives a value when the written project's turn ends. It
+	// holds at most one.
+	writtenTurns chan struct{}
 }
 
 func newWakeBench(b *testing.B) *wakeBench {
@@ -29,13 +32,19 @@ func newWakeBench(b *testing.B) *wakeBench {
 	hub, hubURL := newFederationNode(b)
 	spoke, _ := newFederationNode(b)
 	b.Setenv("KATA_HOME", b.TempDir())
-	bench := &wakeBench{hub: newCountingHub(b, hubURL), spoke: spoke, events: daemon.NewEventBroadcaster(), firstPass: make(chan struct{})}
+	bench := &wakeBench{hub: newCountingHub(b, hubURL), spoke: spoke, events: daemon.NewEventBroadcaster(), firstPass: make(chan struct{}), writtenTurns: make(chan struct{}, 1)}
 	bench.bound = bindSpokeProjects(b, hub, spoke, bench.hub.URL, benchBoundProjects)
 	bench.runner = &Runner{
 		DB: spoke,
-		OnSpokeResult: func(int64, error) {
+		OnSpokeResult: func(projectID int64, _ error) {
 			if bench.results.Add(1) == benchBoundProjects {
 				close(bench.firstPass)
+			}
+			if projectID == bench.bound[0].spoke.ID {
+				select {
+				case bench.writtenTurns <- struct{}{}:
+				default:
+				}
 			}
 		},
 		OnError: func(err error) { b.Errorf("federation runner: %v", err) },
@@ -76,7 +85,7 @@ func BenchmarkLocalWriteWakeToPass(b *testing.B) {
 	})
 	ctx, cancel := context.WithCancel(b.Context())
 	defer cancel()
-	attachBenchWakes(ctx, bench.runner, bench.events, bench.spoke.InstanceUID())
+	wakeWithoutWrite := attachBenchWakes(ctx, bench.runner, bench.events, bench.spoke)
 	go func() { _ = bench.runner.Run(ctx) }()
 	bench.awaitInitialPass(b)
 	bench.hub.reset()
@@ -84,13 +93,18 @@ func BenchmarkLocalWriteWakeToPass(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		bench.write(b, "benchmark write")
-		// The runner starts this debounce only after the previous pass ended.
+		// The runner starts this debounce only after the previous pass ended,
+		// so no push from that pass can still arrive.
 		timer := <-debounces
+		clearSignal(bench.writtenTurns)
 		timer.fire <- time.Now()
+		// The written project's turn pushed this write and ended, so the next
+		// write wakes a new pass instead of joining this turn's push.
+		<-bench.writtenTurns
 	}
-	// One more write proves the last measured pass ended; its own pass never
-	// starts because its debounce is never fired.
-	bench.write(b, "sentinel write")
+	// The runner debounces this wake only after the last measured pass ended.
+	// The debounce never fires, so the wake starts no pass.
+	wakeWithoutWrite()
 	<-debounces
 	b.StopTimer()
 	total, _ := bench.hub.counts()
@@ -109,7 +123,7 @@ func BenchmarkSpokeWritingEveryTenSeconds(b *testing.B) {
 	bench.runner.Debounce = 50 * time.Millisecond / scale
 	ctx, cancel := context.WithCancel(b.Context())
 	defer cancel()
-	attachBenchWakes(ctx, bench.runner, bench.events, bench.spoke.InstanceUID())
+	attachBenchWakes(ctx, bench.runner, bench.events, bench.spoke)
 	go func() { _ = bench.runner.Run(ctx) }()
 	bench.awaitInitialPass(b)
 
@@ -136,10 +150,19 @@ func BenchmarkSpokeWritingEveryTenSeconds(b *testing.B) {
 	b.ReportMetric(float64(total)/float64(b.N), "hub-requests/hour")
 }
 
+func clearSignal(signal chan struct{}) {
+	select {
+	case <-signal:
+	default:
+	}
+}
+
 // attachBenchWakes connects runner to the local events on broadcaster the way
-// the daemon does.
-func attachBenchWakes(ctx context.Context, runner *Runner, broadcaster *daemon.EventBroadcaster, localInstanceUID string) {
+// the daemon does. It returns a function that wakes the runner without a
+// write.
+func attachBenchWakes(ctx context.Context, runner *Runner, broadcaster *daemon.EventBroadcaster, store db.Storage) func() {
 	wake := NewWakeQueue()
 	runner.Wake = wake
-	go daemon.ForwardFederationWakes(ctx, broadcaster, localInstanceUID, wake.WakeProject, wake.WakeAll)
+	go daemon.SubscribeFederationWakes(broadcaster, store, wake.WakeProject, wake.WakeAll)(ctx)
+	return wake.WakeAll
 }

@@ -274,7 +274,7 @@ func TestRunnerCatchUpIgnoresWakesFromItsOwnPulls(t *testing.T) {
 			}()
 			wake := federation.NewWakeQueue()
 			runCtx, cancel := context.WithCancel(ctx)
-			go daemon.ForwardFederationWakes(runCtx, broadcaster, relay.store.InstanceUID(), wake.WakeProject, wake.WakeAll)
+			go daemon.SubscribeFederationWakes(broadcaster, relay.store, wake.WakeProject, wake.WakeAll)(runCtx)
 			runner := &federation.Runner{DB: relay.store, Credentials: relay.credentials, Interval: time.Hour, Wake: wake, OnPulledEventsFrom: func(projectID int64, events []db.Event, fork activity.Admission) {
 				publisher.EventsFrom(projectID, events, fork)
 			}}

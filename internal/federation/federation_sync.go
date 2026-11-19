@@ -1231,7 +1231,7 @@ func (r *Runner) runOnce(
 	}
 	var errs []error
 	for _, spoke := range spokes {
-		if refusals.blocked(spoke.binding, r.refusalNow()) || (len(only) > 0 && !only[spoke.binding.ProjectID]) {
+		if refusals.blocked(spoke.binding, r.refusalNow()) {
 			continue
 		}
 		var drain *activity.Lease
