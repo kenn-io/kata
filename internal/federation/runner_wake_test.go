@@ -229,3 +229,41 @@ func TestRunnerKeepsWakesAFullPassDidNotServe(t *testing.T) {
 		})
 	}
 }
+
+func TestRunnerWakePushesMoveIntoLowerIDProjectBeforeTheInterval(t *testing.T) {
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	bound := bindSpokeProjects(t, hub.DB, spoke.DB, hub.URL, 2)
+	// The runner serves bindings in project ID order, so the destination
+	// takes its turn before the source.
+	destination, source := bound[0], bound[1]
+	require.Less(t, destination.spoke.ID, source.spoke.ID)
+
+	wake := NewWakeQueue()
+	results := newSpokeResults()
+	runner, debounces := newWakeRunner(t, spoke, wake, results)
+	ctx := t.Context()
+	go func() { _ = runner.Run(ctx) }()
+	results.await(t, destination.spoke.ID, source.spoke.ID)
+
+	issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.spoke.ID, Title: "moved before its first push", Author: "tester"})
+	require.NoError(t, err)
+	_, err = spoke.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: source.spoke.ID, ToProjectID: destination.spoke.ID,
+		IfMatchRev: issue.Revision, Actor: "tester",
+	})
+	require.NoError(t, err)
+	// The daemon wakes the source for the creation, and both projects for the move.
+	wake.WakeProject(source.spoke.ID)
+	wake.WakeProject(destination.spoke.ID)
+	awaitDebounce(t, debounces).fire <- time.Now()
+	results.await(t, destination.spoke.ID, source.spoke.ID)
+	// The runner debounces this wake only after the pass ends.
+	wake.WakeAll()
+	awaitDebounce(t, debounces)
+
+	got, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err, "the hub has the issue before the next interval")
+	assert.Equal(t, destination.hub.ID, got.ProjectID, "the hub has the move before the next interval")
+}
