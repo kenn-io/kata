@@ -185,7 +185,8 @@ reads `events` and builds the index. See the
 [schema 51 migration requirements](../development/postgres-migrations.md#schema-51-issue-history-index-on-the-event-header)
 for the offline window, grants, and rollback. SQLite replaces the index in place.
 
-The schema 51→52 migration converts existing semantic-search vectors in place; see the [schema 52 migration requirements](../development/postgres-migrations.md#schema-52-shared-vector-catalog).
+The schema 51→52 migration converts existing semantic-search vectors in place;
+see the [schema 52 migration requirements](../development/postgres-migrations.md#schema-52-shared-vector-catalog).
 
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:
