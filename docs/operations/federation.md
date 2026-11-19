@@ -705,9 +705,9 @@ Each interval syncs every bound project. Between intervals, a local write wakes
 a sync for the project it changed only, so its push stays prompt without
 polling the hub for the other projects. Moving an issue wakes both its source
 and destination projects. Work accepted from a downstream relay and a forwarded
-cron write wake only their own project too. Events the runner
-pulled from a hub do not wake it again. Joining, rebinding, leaving, signing
-changes and configuration changes wake a sync for every project.
+cron write each wake only their own project. Events the runner pulled from a
+hub do not wake it again. Joining, rebinding, leaving, signing changes and
+configuration changes wake a sync for every project.
 
 Sync runs in turns. In one turn for a project, the runner pushes and pulls at
 most 8 batches per stream and direction (1000 deliveries per event or receipt
