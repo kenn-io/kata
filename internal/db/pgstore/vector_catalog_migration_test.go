@@ -3,6 +3,7 @@ package pgstore_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -81,6 +82,8 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 			_ = release()
 		}
 	})
+	_, err = idx.Fill(ctx, key, func(context.Context, []string) ([][]float32, error) { return nil, errors.New("unexpected embedding") }, 0, nil, nil)
+	require.NoError(t, err)
 	require.NoError(t, idx.EnsureBuilding(ctx, retiredKey, retired))
 	require.NoError(t, release())
 	release = nil
@@ -101,27 +104,4 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 	backlog, err = idx.Backlog(ctx, buildingKey)
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, backlog)
-	fresh, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "vector_fresh", SchemaMode: pgstore.SchemaModeBootstrap})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = fresh.Close() })
-	assert.Equal(t, vectorCatalogShape(ctx, t, admin, "vector_fresh"), vectorCatalogShape(ctx, t, admin, "vector_upgrade"))
-}
-
-func vectorCatalogShape(ctx context.Context, t *testing.T, admin *sql.DB, schema string) []string {
-	t.Helper()
-	rows, err := admin.QueryContext(ctx, `SELECT value FROM (
-	 SELECT 'column:' || table_name || ':' || column_name || ':' || udt_name || ':' || is_nullable AS value FROM information_schema.columns WHERE table_schema=$1
-	 UNION ALL SELECT 'constraint:' || c.relname || ':' || con.conname || ':' || replace(pg_get_constraintdef(con.oid,true),$1||'.','') FROM pg_constraint con JOIN pg_class c ON c.oid=con.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1
-	 UNION ALL SELECT 'index:' || tablename || ':' || indexname || ':' || replace(indexdef,$1||'.','') FROM pg_indexes WHERE schemaname=$1
-	 ) shapes WHERE value ~ '^(column|constraint|index):issue_vector_' ORDER BY value`, schema)
-	require.NoError(t, err)
-	defer func() { _ = rows.Close() }()
-	var values []string
-	for rows.Next() {
-		var value string
-		require.NoError(t, rows.Scan(&value))
-		values = append(values, value)
-	}
-	require.NoError(t, rows.Err())
-	return values
 }

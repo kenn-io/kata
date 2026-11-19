@@ -55,12 +55,12 @@ damaged database.
 
 ## Slow or interrupted upgrade startup
 
-SQLite in-place upgrades from schemas 41 through 51 to 52 run in one
-transaction. Earlier steps add missing indexes and the empty MCP Events
-subscriptions table. The step to 51 drops the payload-derived issue history
-index. The 51→52 step advances the version without changing the SQLite vector
-sidecar. Allow free space for new indexes, their WAL pages, and temporary sort
-files. These upgrades keep
+SQLite in-place upgrades from schemas 41 through 51 to 52 add the missing
+indexes, and the empty MCP Events subscriptions table, inside the existing
+database in one transaction. The step to 51 also drops the payload-derived
+issue history index. The 51→52 step only advances the version, leaving the SQLite
+vector sidecar unchanged. Allow free space for the new indexes, their WAL
+pages, and temporary sort files. These upgrades keep
 no `kata.db.bak.*` backup. An interrupted or failed transaction leaves the old
 schema version intact, and the next start retries. Take a backup before upgrading
 if you need to return to an older binary.
