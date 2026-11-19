@@ -499,6 +499,9 @@ there is no down migration.
 The 51→52 migration converts the optional PostgreSQL vector catalog to Kit's
 layout in place. Stored vectors, revisions, and generation keys stay intact;
 no re-embedding is needed. Databases without the optional tables advance too.
+The conversion rewrites every chunk and may need space for roughly another copy
+of the chunk data, plus index and WAL space. Ordinary `VACUUM` makes dead-row
+space reusable but usually does not shrink files.
 
 Stop serving daemons and imports, back up the database, and run
 `kata storage postgres migrate` with schema-owner credentials. Allow a stopped
