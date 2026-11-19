@@ -131,9 +131,7 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 	})
 	require.Eventually(t, func() bool { return reconciler.Health().LastSuccessAt != nil }, 5*time.Second, 10*time.Millisecond)
 	assert.Zero(t, calls.Load())
-	hits, err = idx.Query(ctx, key, kitvec.Vector{1, 0}, 2)
+	after, err := idx.Query(ctx, key, kitvec.Vector{1, 0}, 2)
 	require.NoError(t, err)
-	require.Len(t, hits, 2)
-	assert.Equal(t, issues[0].UID, hits[0].Doc)
-	assert.Equal(t, issues[1].UID, hits[1].Doc)
+	assert.Equal(t, hits, after)
 }
