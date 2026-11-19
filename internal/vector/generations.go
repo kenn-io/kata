@@ -130,7 +130,6 @@ func (ix *Index) generationKeys(ctx context.Context) ([]string, error) {
 	rows, err := ix.db.QueryContext(ctx, `
 		SELECT g.gen_key FROM issue_vector_generations g
 		WHERE g.state <> 'retired'
-		   OR EXISTS (SELECT 1 FROM issue_vector_chunks c WHERE c.generation_id = g.id)
 		   OR EXISTS (SELECT 1 FROM issue_vector_stamps s WHERE s.generation_id = g.id)`)
 	if err != nil {
 		return nil, err
