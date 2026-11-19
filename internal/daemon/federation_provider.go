@@ -12,6 +12,7 @@ import (
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/pkg/federationprovider"
 )
 
@@ -181,6 +182,19 @@ func changeFederationProviderIntent(
 	ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore,
 	mapping config.FederationProjectConfig, saved config.FederationManagedCredentialReservation,
 ) (config.FederationManagedCredentialReservation, error) {
+	project, err := store.ProjectByName(ctx, mapping.SpokeProject)
+	if err != nil {
+		return saved, errors.Join(ErrFederationProviderStorage, err)
+	}
+	// A claim request already sent with the saved credential may be granted
+	// by the hub before its response is cached. Wait for it, and keep new
+	// ones out, until the saved request is replaced; otherwise the release
+	// could revoke the only credential able to release that claim.
+	finishTransport, err := federationcoord.BeginRebind(ctx, federationcoord.Key(store.InstanceUID(), project.ID), store, project.ID)
+	if err != nil {
+		return saved, err
+	}
+	defer finishTransport()
 	finish, err := BeginFederationReplicaHubOperation(ctx, store, managed, mapping.SpokeProject, saved)
 	if err != nil {
 		return saved, err
@@ -202,7 +216,7 @@ func changeFederationProviderIntent(
 	// The new approval may name a new actor. Record the actor the binding
 	// holds now so only that actor moves to the new one. The binding still
 	// holds it after an earlier attempt that never applied.
-	project, err := store.ProjectByName(ctx, mapping.SpokeProject)
+	project, err = store.ProjectByName(ctx, mapping.SpokeProject)
 	if err != nil {
 		return saved, errors.Join(ErrFederationProviderStorage, err)
 	}

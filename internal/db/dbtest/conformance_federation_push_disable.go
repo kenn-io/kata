@@ -88,6 +88,23 @@ func checkFederationPushDisableWaitsForLocalWork(t *testing.T, store db.Storage)
 	again, err := store.DisableFederationPushWhenSettled(ctx, project.ID, store.InstanceUID())
 	require.NoError(t, err)
 	assert.False(t, again.PushEnabled)
+
+	// A caller retries after a failed provider release with push already off.
+	// The old credential still forwards claims, so a claim taken in between
+	// must block that retry until it is released.
+	lateClaim, err := uid.New()
+	require.NoError(t, err)
+	require.NoError(t, store.UpsertClaimCache(ctx, db.IssueClaim{
+		ClaimUID: lateClaim, ProjectID: project.ID, IssueUID: issue.UID,
+		Holder: "bound-agent", HolderInstanceUID: store.InstanceUID(), ClientKind: "cli",
+		ClaimKind: "hard", AcquiredAt: now, UpdatedAt: now, Revision: 1,
+	}))
+	_, err = store.DisableFederationPushWhenSettled(ctx, project.ID, store.InstanceUID())
+	require.ErrorIs(t, err, db.ErrFederationClaimsHeld, "a claim taken after push stopped blocks the retry")
+	require.NoError(t, store.ApplyClaimStatus(ctx, project.ID, issue.UID, db.ClaimStatus{Held: false, HubNow: now.Add(2 * time.Second)}))
+	again, err = store.DisableFederationPushWhenSettled(ctx, project.ID, store.InstanceUID())
+	require.NoError(t, err)
+	assert.False(t, again.PushEnabled)
 	for _, id := range []int64{issue.ID, second.ID} {
 		_, err := store.IssueByID(ctx, id)
 		require.NoError(t, err, "turning push off keeps local tasks")

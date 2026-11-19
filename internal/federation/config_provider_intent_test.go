@@ -3,10 +3,12 @@ package federation_test
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -15,6 +17,8 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federation"
+	"go.kenn.io/kata/internal/federationcoord"
+	"go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/federationprovider"
 )
 
@@ -272,4 +276,115 @@ func TestReconcileProviderDowngradeRefusesExternalRoot(t *testing.T) {
 	_, kept := f.binding(t)
 	assert.True(t, kept.PushEnabled)
 	assert.True(t, before.Credential.Equal(f.saved(t).Credential))
+}
+
+// A claim request already on its way to the hub when the downgrade starts can
+// be granted there before Kata caches it. The downgrade waits for that request
+// to finish, so it sees the claim and keeps the replica collaborating instead
+// of releasing the enrollment that could release the claim.
+func TestReconcileProviderDowngradeWaitsForClaimInFlight(t *testing.T) {
+	f := newIntentChangeFixture(t, federationprovider.IntentCollaborate)
+	require.NoError(t, f.reconcile(t, federationprovider.IntentCollaborate))
+	before := f.saved(t)
+	project, binding := f.binding(t)
+	issue, _, err := f.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Claimed elsewhere", Author: "someone"})
+	require.NoError(t, err)
+	accepted, err := f.store.MaxLocalOriginEventID(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.NoError(t, f.store.AdvanceFederationPushCursor(t.Context(), project.ID, accepted))
+
+	key := federationcoord.Key(f.store.InstanceUID(), project.ID)
+	finishClaim, err := federationcoord.BeginSync(t.Context(), key, f.store, project.ID)
+	require.NoError(t, err)
+	claimFinished := false
+	defer func() {
+		if !claimFinished {
+			finishClaim()
+		}
+	}()
+	downgrade := f.mapping
+	downgrade.Intent = federationprovider.IntentReadOnly
+	done := make(chan error, 1)
+	go func() {
+		done <- federation.ReconcileMapping(t.Context(), f.store, f.credentials, f.hub, f.catalog, downgrade, nil)
+	}()
+	// A waiting rebind makes new transport admission report busy.
+	for {
+		select {
+		case err := <-done:
+			require.Failf(t, "downgrade did not wait for the claim request", "reconcile returned %v", err)
+		default:
+		}
+		release, err := federationcoord.TryBeginSync(t.Context(), key, f.store, project.ID)
+		if errors.Is(err, federationcoord.ErrBusy) {
+			break
+		}
+		require.NoError(t, err)
+		release()
+		runtime.Gosched()
+	}
+
+	// The hub granted the claim; its response is cached before the request ends.
+	now := time.Now().UTC()
+	inFlight, err := uid.New()
+	require.NoError(t, err)
+	require.NoError(t, f.store.UpsertClaimCache(t.Context(), db.IssueClaim{
+		ClaimUID: inFlight, ProjectID: project.ID, IssueUID: issue.UID,
+		Holder: binding.Actor, HolderInstanceUID: f.store.InstanceUID(), ClientKind: "cli",
+		ClaimKind: "hard", AcquiredAt: now, UpdatedAt: now, Revision: 1,
+	}))
+	claimFinished = true
+	finishClaim()
+
+	err = <-done
+	require.ErrorIs(t, err, federation.ErrBindingConflict, "the claim granted during the downgrade blocks it")
+	assert.Len(t, f.requests(t), 1, "a blocked downgrade does not release the enrollment")
+	_, kept := f.binding(t)
+	assert.True(t, kept.PushEnabled, "the replica keeps collaborating so the claim can be released")
+	assert.True(t, before.Credential.Equal(f.saved(t).Credential))
+
+	require.NoError(t, f.store.ApplyClaimStatus(t.Context(), project.ID, issue.UID, db.ClaimStatus{Held: false, HubNow: now.Add(time.Second)}))
+	require.NoError(t, f.reconcile(t, federationprovider.IntentReadOnly))
+	_, downgraded := f.binding(t)
+	assert.False(t, downgraded.PushEnabled)
+}
+
+// A downgrade that turned push off and then failed to release keeps the old
+// credential, which still forwards claims. The retry refuses to release while
+// a claim taken in between is live.
+func TestReconcileProviderDowngradeRetryRechecksClaims(t *testing.T) {
+	f := newIntentChangeFixture(t, federationprovider.IntentCollaborate)
+	require.NoError(t, f.reconcile(t, federationprovider.IntentCollaborate))
+	before := f.saved(t)
+	project, binding := f.binding(t)
+	issue, _, err := f.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Claimed between attempts", Author: "someone"})
+	require.NoError(t, err)
+	accepted, err := f.store.MaxLocalOriginEventID(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.NoError(t, f.store.AdvanceFederationPushCursor(t.Context(), project.ID, accepted))
+
+	t.Setenv("KATA_TEST_PROVIDER_RELEASE_DECISION", "denied")
+	require.Error(t, f.reconcile(t, federationprovider.IntentReadOnly))
+	_, stopped := f.binding(t)
+	require.False(t, stopped.PushEnabled, "the failed attempt already turned push off")
+	require.True(t, before.Credential.Equal(f.saved(t).Credential), "an unconfirmed release keeps the old credential")
+
+	now := time.Now().UTC()
+	between, err := uid.New()
+	require.NoError(t, err)
+	require.NoError(t, f.store.UpsertClaimCache(t.Context(), db.IssueClaim{
+		ClaimUID: between, ProjectID: project.ID, IssueUID: issue.UID,
+		Holder: binding.Actor, HolderInstanceUID: f.store.InstanceUID(), ClientKind: "cli",
+		ClaimKind: "hard", AcquiredAt: now, UpdatedAt: now, Revision: 1,
+	}))
+	t.Setenv("KATA_TEST_PROVIDER_RELEASE_DECISION", "released")
+	err = f.reconcile(t, federationprovider.IntentReadOnly)
+	require.ErrorIs(t, err, federation.ErrBindingConflict, "the live claim blocks the retry")
+	requests := f.requests(t)
+	assert.Len(t, requests, 2, "the retry does not release the enrollment again")
+	assert.True(t, before.Credential.Equal(f.saved(t).Credential))
+
+	require.NoError(t, f.store.ApplyClaimStatus(t.Context(), project.ID, issue.UID, db.ClaimStatus{Held: false, HubNow: now.Add(time.Second)}))
+	require.NoError(t, f.reconcile(t, federationprovider.IntentReadOnly))
+	assert.Equal(t, federationprovider.IntentReadOnly, f.saved(t).Credential.Provider.Intent)
 }

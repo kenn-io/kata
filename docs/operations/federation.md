@@ -1393,6 +1393,12 @@ and retries. `kata federation status` shows the pending push depth and claim
 counts. Once the hub accepts the pushed changes and you release the claims,
 the change completes on the next attempt.
 
+A claim request already on its way to the hub finishes before Kata checks for
+claims, and new claim requests wait until the saved request is replaced. If an
+earlier attempt turned push off but the provider did not confirm the release,
+claims still work with the old approval, and a claim taken since then holds
+the switch the same way until you release it.
+
 The local changes and claims stay on this computer while Kata waits; nothing
 is dropped. If the hub no longer accepts this replica's changes, the wait does
 not end on its own. Get write access back, set the earlier intent, and restart

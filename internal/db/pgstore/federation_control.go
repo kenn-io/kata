@@ -309,6 +309,11 @@ func (s *Store) DisableFederationPushWhenSettled(ctx context.Context, projectID 
 			return err
 		}
 		if !binding.PushEnabled {
+			// A retry after a failed provider release finds push already
+			// off while the old credential still forwards claims.
+			if err := pgFederationReplicaSettledTx(ctx, tx, binding, originInstanceUID); err != nil {
+				return err
+			}
 			output = binding
 			return nil
 		}

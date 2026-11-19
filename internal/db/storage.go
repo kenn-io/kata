@@ -493,7 +493,7 @@ type Storage interface {
 	// whose project has an active external root binding returns
 	// ErrExternalRootFederationConflict, as UpsertFederationBinding does for a
 	// read-only spoke. A binding whose push is already off is returned
-	// unchanged.
+	// unchanged once the same claim and cron run checks pass.
 	DisableFederationPushWhenSettled(ctx context.Context, projectID int64, originInstanceUID string) (FederationBinding, error)
 	// ReplaceFederationBoundActorWhenSettled changes a direct spoke binding's
 	// bound actor from fromActor to toActor under the same settled checks,

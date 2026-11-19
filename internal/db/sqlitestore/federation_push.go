@@ -289,6 +289,11 @@ func (d *Store) disableFederationPushWhenSettled(ctx context.Context, projectID 
 		return db.FederationBinding{}, err
 	}
 	if !existing.PushEnabled {
+		// A retry after a failed provider release finds push already off
+		// while the old credential still forwards claims.
+		if err := federationReplicaSettledTx(ctx, tx, existing, originInstanceUID); err != nil {
+			return db.FederationBinding{}, err
+		}
 		return existing, nil
 	}
 	if existing.Role != db.FederationRoleSpoke || existing.RelayConfig != nil {
