@@ -2062,6 +2062,16 @@ describe('AppShell', () => {
       },
     })
     await waitFor(() => expect(document.title).toBe('Today · example-project · Kata'))
+    await view.rerender({
+      route: {
+        kind: 'kata',
+        view: 'inbox',
+        projectUID: '01J00000000000000000000002',
+        graph: false,
+        filters,
+      },
+    })
+    await waitFor(() => expect(document.title).toBe('Inbox · example-project · Kata'))
     await view.rerender({ route: { kind: 'kata', view: 'inbox', graph: false, filters } })
     await waitFor(() => expect(document.title).toBe('Inbox · Kata'))
     await view.rerender({ route: { kind: 'kata', view: 'all-open', graph: false, filters } })
