@@ -1640,6 +1640,7 @@ describe('App', () => {
     await fireEvent.keyDown(input, { key: 'Enter' })
 
     expect(await screen.findByRole('heading', { name: 'Launch Kata securely' })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Inbox · Kata'))
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
     expect(
       fetcher.mock.calls.some(
@@ -2304,68 +2305,6 @@ describe('App', () => {
     releaseCredentials(Response.json({ observed_at: '2026-09-15T12:00:00Z', tokens: [] }))
   })
 
-  it('clears the issue title while switching daemons', async () => {
-    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001')
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    const local = snapshot()
-    const remote = structuredClone(local)
-    remote.collection[0]!.title = 'Remote issue'
-    let releaseRemote!: (response: Response) => void
-    const remoteResponse = new Promise<Response>((resolve) => (releaseRemote = resolve))
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request = requestOf(input, init)
-        const path = new URL(request.url).pathname
-        if (path === '/api/v1/ui/daemons') {
-          return Response.json({
-            daemons: [
-              ...daemonRoster().daemons,
-              {
-                id: 'example-remote',
-                url: 'https://daemon.example',
-                default: false,
-                auth: 'token',
-                health: 'connected',
-              },
-            ],
-          })
-        }
-        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
-        if (path.endsWith('/api/v1/ui/references'))
-          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-        if (path.endsWith('/api/v1/ui/snapshot')) {
-          if (request.headers.get('X-Kata-Web-Daemon') === 'example-remote') return remoteResponse
-          return Response.json({
-            ...local,
-            selected: {
-              state: 'available',
-              issue: local.collection[0],
-              comments: [],
-              labels: [],
-              links: [],
-              recurrences: [],
-              history: [],
-            },
-          })
-        }
-        throw new Error(`Unexpected request: ${request.method} ${path}`)
-      }),
-    )
-    render(App)
-    await waitFor(() => expect(document.title).toBe('example-project#a1 Example issue · Kata'))
-    await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
-    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
-    expect(await screen.findByText('Loading Kata…')).not.toBeNull()
-    await waitFor(() => expect(document.title).toBe('Kata'))
-    releaseRemote(Response.json(remote))
-    await screen.findByRole('button', { name: /Remote issue/ })
-    await waitFor(() => expect(document.title).toBe('All Open · Kata'))
-  })
-
   it('switches configured daemons in place and restores each daemon route', async () => {
     let now = 0
     vi.spyOn(performance, 'now').mockImplementation(() => now)
@@ -2379,6 +2318,8 @@ describe('App', () => {
     const local = snapshot()
     const remote = structuredClone(local)
     remote.collection[0]!.title = 'Remote issue'
+    let releaseRemote!: (response: Response) => void
+    const remoteResponse = new Promise<Response>((resolve) => (releaseRemote = resolve))
     const snapshotRequests: Request[] = []
     const referenceRequests: Request[] = []
     vi.stubGlobal(
@@ -2415,9 +2356,24 @@ describe('App', () => {
         if (path.endsWith('/api/v1/ui/snapshot')) {
           snapshotRequests.push(request)
           const daemon = request.headers.get('X-Kata-Web-Daemon')
-          return Response.json(daemon === 'example-remote' ? remote : local, {
-            headers: { ETag: `"${daemon ?? 'default'}-${snapshotRequests.length}"` },
-          })
+          if (daemon === 'example-remote') return remoteResponse
+          const selected = new URL(request.url).searchParams.has('selected_issue_uid')
+            ? {
+                state: 'available',
+                issue: local.collection[0],
+                comments: [],
+                labels: [],
+                links: [],
+                recurrences: [],
+                history: [],
+              }
+            : undefined
+          return Response.json(
+            { ...local, ...(selected ? { selected } : {}) },
+            {
+              headers: { ETag: `"${daemon ?? 'default'}-${snapshotRequests.length}"` },
+            },
+          )
         }
         throw new Error(`Unexpected request: ${request.method} ${path}`)
       }),
@@ -2425,12 +2381,16 @@ describe('App', () => {
 
     render(App)
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
-    await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
-    await waitFor(() => expect(window.location.search).toBe('?view=today'))
+    await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+    await waitFor(() => expect(document.title).toBe('example-project#a1 Example issue · Kata'))
     now = 120_000
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+    expect(await screen.findByText('Loading Kata…')).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Kata'))
+    releaseRemote(Response.json(remote))
     expect(await screen.findByRole('button', { name: /Remote issue/ })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('All Open · Kata'))
     expect(window.location.search).toBe('?view=all-open')
     now += 10_000
     window.dispatchEvent(new Event('pagehide'))
@@ -2449,7 +2409,9 @@ describe('App', () => {
       screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
     )
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-local/ }))
-    await waitFor(() => expect(window.location.search).toBe('?view=today'))
+    await waitFor(() =>
+      expect(window.location.search).toBe('?view=all-open&issue=01J00000000000000000000001'),
+    )
     expect(snapshotRequests.map((request) => request.headers.get('X-Kata-Web-Daemon'))).toEqual(
       expect.arrayContaining(['example-local', 'example-remote']),
     )
