@@ -158,6 +158,32 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				require.Equal(t, original[i].Payload, event.Payload)
 				require.Equal(t, original[i].Actor, event.Actor)
 			}
+
+			t.Run("delete-peer-before-link-push", func(t *testing.T) {
+				_, linkedEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+					ProjectID: child.ProjectID, Title: "Queued link", Author: "worker",
+					Links: []db.InitialLink{{Type: "related", ToNumber: local.ID}},
+				})
+				require.NoError(t, err)
+				_, _, _, err = spoke.DB.SoftDeleteIssue(ctx, local.ID, "peer-member")
+				require.NoError(t, err)
+				require.NoError(t, syncProject(1))
+				deleted, err := hub.store.IssueByUID(ctx, peer.UID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				require.NotNil(t, deleted.DeletedAt)
+
+				_, laterEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Later work", Author: "worker"})
+				require.NoError(t, err)
+				require.NoError(t, syncProject(0))
+				got, err := hub.store.EventsByUIDs(ctx, projects[0].ID, []string{linkedEvent.UID, laterEvent.UID})
+				require.NoError(t, err)
+				require.Len(t, got, 2)
+				require.Equal(t, linkedEvent.ContentHash, got[0].ContentHash)
+				require.Equal(t, laterEvent.ContentHash, got[1].ContentHash)
+				binding, err := spoke.DB.FederationBindingByProject(ctx, child.ProjectID)
+				require.NoError(t, err)
+				require.Equal(t, laterEvent.ID, binding.PushCursorEventID)
+			})
 		})
 	}
 }

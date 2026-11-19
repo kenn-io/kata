@@ -1849,7 +1849,8 @@ func directLinkProjects(ctx context.Context, store db.Storage, events []db.Event
 	}
 	projects := map[int64]bool{}
 	for uid := range peers {
-		issue, err := store.IssueByUID(ctx, uid, db.IncludeDeletedNo)
+		// Ingest checks the project of a retained issue even after a soft delete.
+		issue, err := store.IssueByUID(ctx, uid, db.IncludeDeletedYes)
 		if errors.Is(err, db.ErrNotFound) {
 			continue
 		}
