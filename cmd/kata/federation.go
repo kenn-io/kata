@@ -2370,8 +2370,14 @@ func formatFederationSyncRetry(retry api.FederationSyncRetry) string {
 	if retry.Failures == 1 {
 		attempts = "attempt"
 	}
-	return fmt.Sprintf("%s (%d) on %d %s; next attempt %s",
+	line := fmt.Sprintf("%s (%d) on %d %s; next attempt %s",
 		reason, retry.HTTPStatus, retry.Failures, attempts, retry.NextAttemptAt.UTC().Format(time.RFC3339))
+	if retry.Reason == "refused" {
+		// A new credential resets the schedule; a hub-side grant waits for
+		// the next attempt.
+		line += "; run kata federation join with a new token to retry now"
+	}
+	return line
 }
 
 func formatProviderStatus(status string) string {
@@ -2474,7 +2480,7 @@ func printFederationStatusAgent(cmd *cobra.Command, body api.FederationStatusBod
 			agentOptionalRowField("sync_retry", &retryReason),
 			agentOptionalRowField("sync_retry_status", &retryStatus),
 			agentOptionalRowField("sync_retry_failures", &retryFailures),
-			agentOptionalRowField("next_attempt", &retryNext),
+			agentOptionalRowField("sync_retry_next_attempt", &retryNext),
 			agentOptionalRowField("root_signing_key", &status.RootSigningKey),
 			agentOptionalRowField("relay_checkpoint_bytes", &checkpointBytes),
 			agentOptionalRowField("relay_checkpoint_capacity_bytes", &checkpointCapacity),

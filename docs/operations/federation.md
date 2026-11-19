@@ -642,19 +642,22 @@ for each one on every interval and every local write:
 
 Each wait doubles after a failure of the same kind, and up to a quarter is
 taken off at random so spokes spread their retries. A `Retry-After` hint, in
-seconds or as an HTTP date, sets the shortest wait, capped at one hour. A
-success clears the schedule. A wait never shortens the sync interval, and a
-wake from a local write does not bring a waiting project forward. A refused
-move of one pushed issue, `403 federation_project_not_enrolled`, does not
-count as a refused credential. Other projects keep syncing.
+seconds or as an HTTP date, sets the shortest wait, capped at one hour; when a
+turn gets several hints, the longest one counts. A `429` or `503` ends the
+turn, so queued lease requests and the pull and push wait for the next
+attempt. A success clears the schedule. A wait never shortens the sync
+interval, and a wake from a local write does not bring a waiting project
+forward. A refused move of one pushed issue, `403
+federation_project_not_enrolled`, does not count as a refused credential.
+Other projects keep syncing.
 
 `kata federation status` shows a waiting project's reason, last status code,
-failure count, and next attempt, for example
-`sync retry: hub refused the credential (403) on 5 attempts; next attempt
-2026-01-01T00:15:00Z`. The JSON form carries them in `sync_retry`. The
-schedule lives in the daemon running the federation runner, so restarting it
-makes a fresh attempt for every project, and with PostgreSQL only the runner
-leader reports it.
+failure count, and next attempt, for example `sync retry: hub refused the
+credential (403) on 5 attempts; next attempt 2026-01-01T00:15:00Z; run kata
+federation join with a new token to retry now`. The JSON form carries them in
+`sync_retry`. The schedule lives in the daemon running the federation runner,
+so restarting it makes a fresh attempt for every project, and with PostgreSQL
+only the runner leader reports it.
 
 ### Relay checkpoint capacity
 

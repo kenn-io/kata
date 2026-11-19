@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 )
@@ -42,25 +43,48 @@ func TestSyncRetryRefusedBackoffDoublesToCap(t *testing.T) {
 		retries.record(1, identity, refusedSyncError(http.StatusForbidden), 30*time.Second, completed)
 		require.True(t, retries.blocked(1, identity, completed.Add(delay-time.Nanosecond)), "attempt %d", i)
 		require.False(t, retries.blocked(1, identity, completed.Add(delay)), "attempt %d", i)
-		status, ok := retries.Status(1)
+		status, ok := retries.FederationSyncRetry(1)
 		require.True(t, ok)
-		require.Equal(t, SyncRetryStatus{
-			Reason: SyncRetryRefused, HTTPStatus: http.StatusForbidden,
+		require.Equal(t, api.FederationSyncRetry{
+			Reason: syncRetryRefused, HTTPStatus: http.StatusForbidden,
 			Failures: i + 1, NextAttemptAt: completed.Add(delay),
 		}, status)
 		completed = completed.Add(delay)
 	}
 }
 
-func TestSyncRetryUnauthorizedIsRefused(t *testing.T) {
-	retries := newSyncRetries(noJitter)
-	completed := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	retries.record(1, [32]byte{}, refusedSyncError(http.StatusUnauthorized), 30*time.Second, completed)
-	status, ok := retries.Status(1)
-	require.True(t, ok)
-	require.Equal(t, SyncRetryRefused, status.Reason)
-	require.Equal(t, http.StatusUnauthorized, status.HTTPStatus)
-	require.Equal(t, completed.Add(time.Minute), status.NextAttemptAt)
+// Jitter spreads retries, but no wait ends before the sync interval: a wake
+// from a local write inside the interval leaves the binding waiting.
+func TestSyncRetryWaitNeverShortensTheInterval(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		interval time.Duration
+	}{
+		{"unavailable", &HubStatusError{StatusCode: http.StatusServiceUnavailable}, 30 * time.Second},
+		{"refused with a long interval", refusedSyncError(http.StatusForbidden), 5 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			retries := newSyncRetries(func(limit time.Duration) time.Duration { return limit - time.Nanosecond })
+			completed := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			retries.record(1, [32]byte{}, tc.err, tc.interval, completed)
+			require.True(t, retries.blocked(1, [32]byte{}, completed.Add(tc.interval-time.Nanosecond)))
+			require.False(t, retries.blocked(1, [32]byte{}, completed.Add(tc.interval)))
+		})
+	}
+}
+
+// A turn that hit several throttled responses waits for the longest hint.
+func TestSyncRetryKeepsTheLongestRetryAfter(t *testing.T) {
+	err := errors.Join(
+		&HubStatusError{StatusCode: http.StatusTooManyRequests, RetryAfter: 30 * time.Second},
+		&HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 10 * time.Minute},
+		&HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: time.Minute},
+	)
+	reason, status, retryAfter := classifySyncRetry(err)
+	require.Equal(t, syncRetryUnavailable, reason)
+	require.Equal(t, http.StatusTooManyRequests, status)
+	require.Equal(t, 10*time.Minute, retryAfter)
 }
 
 func TestSyncRetryJitterOnlyShortensTheDelay(t *testing.T) {
@@ -72,7 +96,7 @@ func TestSyncRetryJitterOnlyShortensTheDelay(t *testing.T) {
 	completed := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for range 6 {
 		retries.record(1, [32]byte{}, refusedSyncError(http.StatusForbidden), 30*time.Second, completed)
-		status, _ := retries.Status(1)
+		status, _ := retries.FederationSyncRetry(1)
 		completed = status.NextAttemptAt
 	}
 	// Jitter takes up to a quarter off each delay; the doubling continues
@@ -92,9 +116,9 @@ func TestSyncRetryUnavailableUsesShorterBackoff(t *testing.T) {
 				30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute, 5 * time.Minute, 5 * time.Minute,
 			} {
 				retries.record(1, [32]byte{}, &HubStatusError{StatusCode: code}, 30*time.Second, completed)
-				status, ok := retries.Status(1)
+				status, ok := retries.FederationSyncRetry(1)
 				require.True(t, ok)
-				require.Equal(t, SyncRetryStatus{Reason: SyncRetryUnavailable, HTTPStatus: code, Failures: i + 1, NextAttemptAt: completed.Add(delay)}, status)
+				require.Equal(t, api.FederationSyncRetry{Reason: syncRetryUnavailable, HTTPStatus: code, Failures: i + 1, NextAttemptAt: completed.Add(delay)}, status)
 				completed = completed.Add(delay)
 			}
 		})
@@ -105,19 +129,19 @@ func TestSyncRetryHonorsRetryAfter(t *testing.T) {
 	retries := newSyncRetries(noJitter)
 	completed := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	retries.record(1, [32]byte{}, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 10 * time.Minute}, 30*time.Second, completed)
-	status, _ := retries.Status(1)
+	status, _ := retries.FederationSyncRetry(1)
 	require.Equal(t, completed.Add(10*time.Minute), status.NextAttemptAt)
 
 	// A shorter hint than the backoff does not shorten it.
 	completed = status.NextAttemptAt
 	retries.record(1, [32]byte{}, &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: time.Second}, 30*time.Second, completed)
-	status, _ = retries.Status(1)
+	status, _ = retries.FederationSyncRetry(1)
 	require.Equal(t, completed.Add(time.Minute), status.NextAttemptAt)
 
 	// A hint beyond the bound waits only for the bound.
 	completed = status.NextAttemptAt
 	retries.record(1, [32]byte{}, &HubStatusError{StatusCode: http.StatusTooManyRequests, RetryAfter: 48 * time.Hour}, 30*time.Second, completed)
-	status, _ = retries.Status(1)
+	status, _ = retries.FederationSyncRetry(1)
 	require.Equal(t, completed.Add(maxHonoredRetryAfter), status.NextAttemptAt)
 }
 
@@ -126,23 +150,23 @@ func TestSyncRetryClassification(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		err    error
-		reason SyncRetryReason
+		reason string
 		status int
 	}{
 		{"success", nil, "", 0},
 		{"local failure", errors.New("disk full"), "", 0},
 		{"bad gateway", &HubStatusError{StatusCode: http.StatusBadGateway}, "", 0},
 		{"server error", &HubStatusError{StatusCode: http.StatusInternalServerError}, "", 0},
-		{"forbidden", refusedSyncError(http.StatusForbidden), SyncRetryRefused, http.StatusForbidden},
-		{"unauthorized", refusedSyncError(http.StatusUnauthorized), SyncRetryRefused, http.StatusUnauthorized},
+		{"forbidden", refusedSyncError(http.StatusForbidden), syncRetryRefused, http.StatusForbidden},
+		{"unauthorized", refusedSyncError(http.StatusUnauthorized), syncRetryRefused, http.StatusUnauthorized},
 		// The hub refused one pushed issue; the pull still runs and the
 		// credential is still accepted.
 		{"project not enrolled", notEnrolled, "", 0},
-		{"refused pull after a refused push", errors.Join(notEnrolled, refusedSyncError(http.StatusForbidden)), SyncRetryRefused, http.StatusForbidden},
-		{"throttled", &HubStatusError{StatusCode: http.StatusTooManyRequests}, SyncRetryUnavailable, http.StatusTooManyRequests},
-		{"unavailable", fmt.Errorf("poll: %w", &HubStatusError{StatusCode: http.StatusServiceUnavailable}), SyncRetryUnavailable, http.StatusServiceUnavailable},
-		{"refusal wins over unavailability", errors.Join(&HubStatusError{StatusCode: http.StatusServiceUnavailable}, refusedSyncError(http.StatusForbidden)), SyncRetryRefused, http.StatusForbidden},
-		{"relay cross-project links", &HubStatusError{StatusCode: http.StatusConflict, relayCrossProjectLinks: true}, SyncRetryRelayCrossProjectLinks, http.StatusConflict},
+		{"refused pull after a refused push", errors.Join(notEnrolled, refusedSyncError(http.StatusForbidden)), syncRetryRefused, http.StatusForbidden},
+		{"throttled", &HubStatusError{StatusCode: http.StatusTooManyRequests}, syncRetryUnavailable, http.StatusTooManyRequests},
+		{"unavailable", fmt.Errorf("poll: %w", &HubStatusError{StatusCode: http.StatusServiceUnavailable}), syncRetryUnavailable, http.StatusServiceUnavailable},
+		{"refusal wins over unavailability", errors.Join(&HubStatusError{StatusCode: http.StatusServiceUnavailable}, refusedSyncError(http.StatusForbidden)), syncRetryRefused, http.StatusForbidden},
+		{"relay cross-project links", &HubStatusError{StatusCode: http.StatusConflict, relayCrossProjectLinks: true}, syncRetryRelayCrossProjectLinks, http.StatusConflict},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reason, status, _ := classifySyncRetry(tc.err)
@@ -173,7 +197,7 @@ func TestSyncRetryResets(t *testing.T) {
 			retries.record(1, identity, refusedSyncError(http.StatusForbidden), 30*time.Second, completed)
 			require.True(t, retries.blocked(1, identity, completed))
 			require.False(t, retries.blocked(1, mustSyncRetryIdentity(t, tc.changed, tc.cred), completed))
-			_, ok := retries.Status(1)
+			_, ok := retries.FederationSyncRetry(1)
 			require.False(t, ok, "the changed binding starts a fresh schedule")
 		})
 	}
@@ -181,10 +205,10 @@ func TestSyncRetryResets(t *testing.T) {
 		retries := newSyncRetries(noJitter)
 		retries.record(1, identity, refusedSyncError(http.StatusForbidden), 30*time.Second, completed)
 		retries.record(1, identity, nil, 30*time.Second, completed.Add(time.Minute))
-		_, ok := retries.Status(1)
+		_, ok := retries.FederationSyncRetry(1)
 		require.False(t, ok)
 		retries.record(1, identity, refusedSyncError(http.StatusForbidden), 30*time.Second, completed.Add(time.Minute))
-		status, _ := retries.Status(1)
+		status, _ := retries.FederationSyncRetry(1)
 		require.Equal(t, 1, status.Failures)
 		require.Equal(t, completed.Add(2*time.Minute), status.NextAttemptAt)
 	})
@@ -193,16 +217,10 @@ func TestSyncRetryResets(t *testing.T) {
 		retries.record(1, identity, refusedSyncError(http.StatusForbidden), 30*time.Second, completed)
 		retries.record(2, identity, refusedSyncError(http.StatusForbidden), 30*time.Second, completed)
 		retries.retain(map[int64]bool{2: true})
-		_, ok := retries.Status(1)
+		_, ok := retries.FederationSyncRetry(1)
 		require.False(t, ok)
-		_, ok = retries.Status(2)
+		_, ok = retries.FederationSyncRetry(2)
 		require.True(t, ok)
-	})
-	t.Run("runner restart", func(t *testing.T) {
-		retries := newSyncRetries(noJitter)
-		retries.record(1, identity, refusedSyncError(http.StatusForbidden), 30*time.Second, completed)
-		retries.reset()
-		require.False(t, retries.blocked(1, identity, completed))
 	})
 }
 
@@ -210,7 +228,7 @@ func TestSyncRetryNilIsInert(t *testing.T) {
 	var retries *SyncRetries
 	retries.record(1, [32]byte{}, refusedSyncError(http.StatusForbidden), 30*time.Second, time.Now())
 	require.False(t, retries.blocked(1, [32]byte{}, time.Now()))
-	_, ok := retries.Status(1)
+	_, ok := retries.FederationSyncRetry(1)
 	require.False(t, ok)
 }
 

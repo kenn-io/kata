@@ -18,7 +18,7 @@ func TestFederationStatusSyncRetryPresentation(t *testing.T) {
 		human string
 	}{
 		{"refused", api.FederationSyncRetry{Reason: "refused", HTTPStatus: 403, Failures: 5, NextAttemptAt: next},
-			"sync retry: hub refused the credential (403) on 5 attempts; next attempt 2026-01-01T00:15:00Z"},
+			"sync retry: hub refused the credential (403) on 5 attempts; next attempt 2026-01-01T00:15:00Z; run kata federation join with a new token to retry now"},
 		{"unavailable", api.FederationSyncRetry{Reason: "unavailable", HTTPStatus: 503, Failures: 1, NextAttemptAt: next},
 			"sync retry: hub unavailable (503) on 1 attempt; next attempt 2026-01-01T00:15:00Z"},
 		{"relay links", api.FederationSyncRetry{Reason: "relay_cross_project_links", HTTPStatus: 409, Failures: 2, NextAttemptAt: next},
@@ -34,7 +34,7 @@ func TestFederationStatusSyncRetryPresentation(t *testing.T) {
 			cmd.SetOut(&agent)
 			require.NoError(t, printFederationStatusAgent(cmd, body))
 			require.Contains(t, agent.String(), "sync_retry="+tc.retry.Reason)
-			require.Contains(t, agent.String(), "next_attempt=2026-01-01T00:15:00Z")
+			require.Contains(t, agent.String(), "sync_retry_next_attempt=2026-01-01T00:15:00Z")
 		})
 	}
 }

@@ -3,10 +3,12 @@ package federation
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -57,8 +59,10 @@ type spokeFleet struct {
 	// refuse makes the hub answer 403 for a project UID; otherwise it
 	// accepts pushes and returns an empty poll.
 	refuse sync.Map
-	runner *Runner
-	now    time.Time
+	// throttleClaims makes the hub answer 503 to every claim request.
+	throttleClaims atomic.Bool
+	runner         *Runner
+	now            time.Time
 }
 
 func newSpokeFleet(tb testing.TB, count int) *spokeFleet {
@@ -81,6 +85,11 @@ func newSpokeFleet(tb testing.TB, count int) *spokeFleet {
 		}
 		var hubProjectID int64
 		_, _ = fmt.Sscanf(r.URL.Path, "/api/v1/projects/%d/", &hubProjectID)
+		if fleet.throttleClaims.Load() && strings.Contains(r.URL.Path, "/lease/") {
+			w.Header().Set("Retry-After", "120")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		if _, refused := fleet.refuse.Load(projectsByHubID[hubProjectID]); refused {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
@@ -179,9 +188,9 @@ func TestRefusedSpokeRetriesAtOnceAfterCredentialChange(t *testing.T) {
 	retries := newSyncRetries(noJitter)
 	fleet.pass(ctx, retries)
 	require.Equal(t, int64(2), fleet.requests.Load())
-	status, ok := retries.Status(fleet.projects[0].ID)
+	status, ok := retries.FederationSyncRetry(fleet.projects[0].ID)
 	require.True(t, ok)
-	require.Equal(t, SyncRetryRefused, status.Reason)
+	require.Equal(t, syncRetryRefused, status.Reason)
 	require.Equal(t, http.StatusForbidden, status.HTTPStatus)
 	require.Equal(t, fleet.now.Add(time.Minute), status.NextAttemptAt)
 
@@ -199,9 +208,9 @@ func TestRefusedSpokeRetriesAtOnceAfterCredentialChange(t *testing.T) {
 	before := fleet.requests.Load()
 	fleet.pass(ctx, retries)
 	require.Positive(t, fleet.requests.Load()-before)
-	_, ok = retries.Status(fleet.projects[0].ID)
+	_, ok = retries.FederationSyncRetry(fleet.projects[0].ID)
 	require.False(t, ok, "the accepted binding has no retry schedule")
-	_, ok = retries.Status(fleet.projects[1].ID)
+	_, ok = retries.FederationSyncRetry(fleet.projects[1].ID)
 	require.True(t, ok)
 }
 
@@ -218,7 +227,7 @@ func TestRefusedSpokeRetriesAtOnceAfterRebind(t *testing.T) {
 	_, err = fleet.store.UpsertFederationBinding(ctx, binding)
 	require.NoError(t, err)
 	fleet.pass(ctx, retries)
-	_, ok := retries.Status(fleet.projects[0].ID)
+	_, ok := retries.FederationSyncRetry(fleet.projects[0].ID)
 	require.False(t, ok, "a disabled binding drops its schedule")
 
 	binding.Enabled = true
@@ -226,6 +235,134 @@ func TestRefusedSpokeRetriesAtOnceAfterRebind(t *testing.T) {
 	require.NoError(t, err)
 	fleet.pass(ctx, retries)
 	require.Equal(t, int64(2), fleet.requests.Load(), "the re-enabled binding is tried at once")
+}
+
+// Disabling and re-enabling a binding between two passes still counts as a
+// change: the next pass tries it at once.
+func TestRefusedSpokeRetriesAtOnceAfterDisableAndEnableBetweenPasses(t *testing.T) {
+	ctx := t.Context()
+	fleet := newSpokeFleet(t, 1)
+	retries := newSyncRetries(noJitter)
+	fleet.pass(ctx, retries)
+	require.Equal(t, int64(1), fleet.requests.Load())
+
+	binding, err := fleet.store.FederationBindingByProject(ctx, fleet.projects[0].ID)
+	require.NoError(t, err)
+	// The store keeps update times to the millisecond, so toggle until the
+	// re-enabled binding's update time has moved.
+	for enabled := binding; enabled.UpdatedAt.Equal(binding.UpdatedAt); {
+		disabled := binding
+		disabled.Enabled = false
+		_, err = fleet.store.UpsertFederationBinding(ctx, disabled)
+		require.NoError(t, err)
+		enabled, err = fleet.store.UpsertFederationBinding(ctx, binding)
+		require.NoError(t, err)
+	}
+	fleet.pass(ctx, retries)
+	require.Equal(t, int64(2), fleet.requests.Load(), "the re-enabled binding is tried at once")
+}
+
+// A turn's schedule belongs to the binding and credential the turn used. A
+// change that lands as the turn ends, here from the result hook while the
+// turn still holds the project's sync lock, makes the next pass try at once.
+func TestRefusedSpokeRetriesAtOnceAfterChangeAtTurnEnd(t *testing.T) {
+	ctx := t.Context()
+	fleet := newSpokeFleet(t, 1)
+	project := fleet.projects[0]
+	changed := false
+	fleet.runner.OnSpokeResult = func(int64, error) {
+		if changed {
+			return
+		}
+		changed = true
+		credential := fleet.credentials.credentials[project.UID]
+		credential.Token = "replacement"
+		fleet.credentials.credentials[project.UID] = credential
+		fleet.refuse.Delete(project.UID)
+	}
+	retries := newSyncRetries(noJitter)
+	fleet.pass(ctx, retries)
+	require.Equal(t, int64(1), fleet.requests.Load())
+
+	fleet.now = fleet.now.Add(30 * time.Second)
+	fleet.pass(ctx, retries)
+	require.Greater(t, fleet.requests.Load(), int64(1), "the replacement credential is tried at once")
+	_, ok := retries.FederationSyncRetry(project.ID)
+	require.False(t, ok)
+}
+
+// When the hub asks a binding to wait, the turn stops: the remaining pending
+// claims stay queued and the turn sends no pull or push.
+func TestThrottledClaimEndsTheTurn(t *testing.T) {
+	ctx := t.Context()
+	fleet := newSpokeFleet(t, 1)
+	project := fleet.projects[0]
+	fleet.refuse.Delete(project.UID)
+	fleet.throttleClaims.Store(true)
+	for i := range 2 {
+		issue, _, err := fleet.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: fmt.Sprintf("claimed %d", i), Author: "worker"})
+		require.NoError(t, err)
+		_, err = fleet.store.EnqueuePendingClaim(ctx, pendingClaimParams(fleet.store, project.ID, issue.ShortID, "worker"))
+		require.NoError(t, err)
+	}
+	retries := newSyncRetries(noJitter)
+	fleet.pass(ctx, retries)
+	require.Equal(t, int64(1), fleet.requests.Load(), "only the first claim reaches the hub")
+	retry, ok := retries.FederationSyncRetry(project.ID)
+	require.True(t, ok)
+	require.Equal(t, syncRetryUnavailable, retry.Reason)
+	require.Equal(t, fleet.now.Add(2*time.Minute), retry.NextAttemptAt)
+	pending, err := fleet.store.ListPendingClaimRequests(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, pending, 2, "both claims stay queued")
+}
+
+// failingCredentialStore cannot read any credential.
+type failingCredentialStore struct{ *mapCredentialStore }
+
+func (failingCredentialStore) FederationCredential(context.Context, string) (config.FederationCredential, bool, error) {
+	return config.FederationCredential{}, false, errors.New("credential store unavailable")
+}
+
+// The relay cross-project-links deadline does not depend on the credential,
+// so a failed credential read does not let the runner contact the relay early.
+func TestRelayRetryHoldsWhenCredentialReadFails(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	runner := &Runner{refusalClock: func() time.Time { return now }}
+	retries := newSyncRetries(noJitter)
+	retries.record(1, [32]byte{}, &HubStatusError{StatusCode: http.StatusConflict, relayCrossProjectLinks: true}, 30*time.Second, now)
+	spoke := activeSpokeBinding{binding: db.FederationBinding{ProjectID: 1}}
+	require.True(t, runner.retryBlocked(t.Context(), retries, spoke, failingCredentialStore{&mapCredentialStore{}}))
+}
+
+// A runner that stops, such as a PostgreSQL leader that loses its lease, stops
+// reporting schedules, and a runner that starts drops schedules from before.
+func TestRunnerReportsSchedulesOnlyWhileRunning(t *testing.T) {
+	fleet := newSpokeFleet(t, 1)
+	project := fleet.projects[0]
+	retries := newSyncRetries(noJitter)
+	retries.record(999, [32]byte{}, refusedSyncError(http.StatusForbidden), 30*time.Second, fleet.now)
+	fleet.runner.Retries = retries
+	// The runner reports a pass's errors after it records the schedules.
+	passed := make(chan struct{}, 1)
+	fleet.runner.OnError = func(error) {
+		select {
+		case passed <- struct{}{}:
+		default:
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- fleet.runner.run(ctx, nil) }()
+	<-passed
+	_, ok := retries.FederationSyncRetry(project.ID)
+	require.True(t, ok, "the refused binding waits")
+	_, ok = retries.FederationSyncRetry(999)
+	require.False(t, ok, "a starting runner drops older schedules")
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+	_, ok = retries.FederationSyncRetry(project.ID)
+	require.False(t, ok, "a stopped runner reports no schedule")
 }
 
 // BenchmarkRunnerPass times one automatic runner pass over 50 bound projects.

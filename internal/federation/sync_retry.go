@@ -33,32 +33,19 @@ const (
 	maxHonoredRetryAfter = time.Hour
 )
 
-// SyncRetryReason names why the automatic runner is waiting before it contacts
-// a binding's hub again.
-type SyncRetryReason string
-
+// Reasons the automatic runner waits before it contacts a binding's hub again,
+// as api.FederationSyncRetry reports them.
 const (
-	// SyncRetryRefused means the hub refused the binding's credential (401
+	// syncRetryRefused means the hub refused the binding's credential (401
 	// or 403).
-	SyncRetryRefused SyncRetryReason = "refused"
-	// SyncRetryUnavailable means the hub throttled the request or was
+	syncRetryRefused = "refused"
+	// syncRetryUnavailable means the hub throttled the request or was
 	// temporarily unavailable (429 or 503).
-	SyncRetryUnavailable SyncRetryReason = "unavailable"
-	// SyncRetryRelayCrossProjectLinks means a relay hub refused the project
+	syncRetryUnavailable = "unavailable"
+	// syncRetryRelayCrossProjectLinks means a relay hub refused the project
 	// because it has cross-project issue links.
-	SyncRetryRelayCrossProjectLinks SyncRetryReason = "relay_cross_project_links"
+	syncRetryRelayCrossProjectLinks = "relay_cross_project_links"
 )
-
-// SyncRetryStatus is one binding's retry schedule as operators see it.
-type SyncRetryStatus struct {
-	Reason     SyncRetryReason
-	HTTPStatus int
-	// Failures counts consecutive attempts that ended with Reason.
-	Failures int
-	// NextAttemptAt is the earliest time the runner contacts the hub again.
-	// The attempt happens on the first pass at or after it.
-	NextAttemptAt time.Time
-}
 
 // SyncRetries holds the automatic runner's per-binding retry schedules. The
 // runner writes it; status readers may read it concurrently. State lives only
@@ -72,7 +59,7 @@ type SyncRetries struct {
 }
 
 type syncRetry struct {
-	SyncRetryStatus
+	api.FederationSyncRetry
 	// delay is the unjittered delay the next failure doubles.
 	delay time.Duration
 	// identity fingerprints the binding and credential the failure used. A
@@ -95,41 +82,28 @@ func newSyncRetries(jitter func(time.Duration) time.Duration) *SyncRetries {
 	return &SyncRetries{states: map[int64]syncRetry{}, jitter: jitter}
 }
 
-// Status returns the binding's retry schedule while the runner is waiting on
-// it.
-func (s *SyncRetries) Status(projectID int64) (SyncRetryStatus, bool) {
+// FederationSyncRetry returns the binding's retry schedule while the runner is
+// waiting on it.
+func (s *SyncRetries) FederationSyncRetry(projectID int64) (api.FederationSyncRetry, bool) {
 	if s == nil {
-		return SyncRetryStatus{}, false
+		return api.FederationSyncRetry{}, false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state, ok := s.states[projectID]
-	return state.SyncRetryStatus, ok
+	return state.FederationSyncRetry, ok
 }
 
-// FederationSyncRetry returns the binding's retry schedule in its federation
-// status form.
-func (s *SyncRetries) FederationSyncRetry(projectID int64) (api.FederationSyncRetry, bool) {
-	status, ok := s.Status(projectID)
-	if !ok {
-		return api.FederationSyncRetry{}, false
-	}
-	return api.FederationSyncRetry{
-		Reason: string(status.Reason), HTTPStatus: status.HTTPStatus,
-		Failures: status.Failures, NextAttemptAt: status.NextAttemptAt.UTC(),
-	}, true
-}
-
-// waiting reports whether the binding has a schedule whose reset depends on
-// its identity, so the caller knows to read the credential before blocked.
-func (s *SyncRetries) waiting(projectID int64) bool {
+// waiting returns the reason of the binding's schedule, if it has one, so the
+// caller knows whether blocked needs the credential's identity.
+func (s *SyncRetries) waiting(projectID int64) (string, bool) {
 	if s == nil {
-		return false
+		return "", false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.states[projectID]
-	return ok
+	state, ok := s.states[projectID]
+	return state.Reason, ok
 }
 
 // blocked reports whether the runner must skip the binding now. A schedule
@@ -146,7 +120,7 @@ func (s *SyncRetries) blocked(projectID int64, identity [32]byte, now time.Time)
 	if !ok {
 		return false
 	}
-	if state.Reason != SyncRetryRelayCrossProjectLinks && state.identity != identity {
+	if state.Reason != syncRetryRelayCrossProjectLinks && state.identity != identity {
 		delete(s.states, projectID)
 		return false
 	}
@@ -178,7 +152,7 @@ func (s *SyncRetries) record(projectID int64, identity [32]byte, err error, inte
 	}
 	wait := time.Duration(0)
 	switch reason {
-	case SyncRetryRelayCrossProjectLinks:
+	case syncRetryRelayCrossProjectLinks:
 		// Unchanged relay refusal schedule: no jitter, doubling to the
 		// reconciler's five-minute cap, never shorter than the interval.
 		next.delay = max(time.Minute, interval)
@@ -186,14 +160,14 @@ func (s *SyncRetries) record(projectID int64, identity [32]byte, err error, inte
 			next.delay = max(interval, doubledDelay(previous.delay))
 		}
 		wait = next.delay
-	case SyncRetryRefused:
+	case syncRetryRefused:
 		next.delay = nextRetryDelay(previous.delay, ok, max(refusedRetryInitialDelay, interval), max(refusedRetryMaxDelay, interval))
-		wait = next.delay - s.jitter(next.delay/4)
-	case SyncRetryUnavailable:
+		wait = max(next.delay-s.jitter(next.delay/4), interval)
+	case syncRetryUnavailable:
 		next.delay = nextRetryDelay(previous.delay, ok, interval, max(unavailableRetryMaxDelay, interval))
-		wait = max(next.delay-s.jitter(next.delay/4), min(retryAfter, maxHonoredRetryAfter))
+		wait = max(next.delay-s.jitter(next.delay/4), interval, min(retryAfter, maxHonoredRetryAfter))
 	}
-	next.NextAttemptAt = completed.Add(wait)
+	next.NextAttemptAt = completed.Add(wait).UTC()
 	s.states[projectID] = next
 }
 
@@ -201,10 +175,7 @@ func nextRetryDelay(previous time.Duration, continuing bool, initial, limit time
 	if !continuing {
 		return min(initial, limit)
 	}
-	if previous >= limit/2 {
-		return limit
-	}
-	return min(previous*2, limit)
+	return doubledDelayTo(previous, limit)
 }
 
 // retain drops schedules for bindings that are no longer active spokes, so a
@@ -233,12 +204,13 @@ func (s *SyncRetries) reset() {
 
 // classifySyncRetry finds the hub response that decides a failed turn's retry
 // schedule. A refused credential outranks a throttled request because only an
-// operator or hub change can clear it. A refusal of one pushed issue's move
-// (federation_project_not_enrolled) is not a credential refusal: the pull still
-// ran with the same credential.
-func classifySyncRetry(err error) (reason SyncRetryReason, status int, retryAfter time.Duration) {
+// operator or hub change can clear it. Among throttled responses the longest
+// Retry-After hint wins. A refusal of one pushed issue's move
+// (federation_project_not_enrolled) is not a credential refusal: the pull
+// still ran with the same credential.
+func classifySyncRetry(err error) (reason string, status int, retryAfter time.Duration) {
 	if errors.Is(err, errRelayCrossProjectLinks) {
-		return SyncRetryRelayCrossProjectLinks, http.StatusConflict, 0
+		return syncRetryRelayCrossProjectLinks, http.StatusConflict, 0
 	}
 	for _, hubErr := range hubStatusErrors(err) {
 		switch hubErr.StatusCode {
@@ -246,14 +218,26 @@ func classifySyncRetry(err error) (reason SyncRetryReason, status int, retryAfte
 			if federationHubErrorCode(hubErr.Body) == db.FederationProjectNotEnrolledCode {
 				continue
 			}
-			return SyncRetryRefused, hubErr.StatusCode, 0
+			return syncRetryRefused, hubErr.StatusCode, 0
 		case http.StatusTooManyRequests, http.StatusServiceUnavailable:
 			if reason == "" {
-				reason, status, retryAfter = SyncRetryUnavailable, hubErr.StatusCode, hubErr.RetryAfter
+				reason, status = syncRetryUnavailable, hubErr.StatusCode
 			}
+			retryAfter = max(retryAfter, hubErr.RetryAfter)
 		}
 	}
 	return reason, status, retryAfter
+}
+
+// hubAskedToWait reports whether the hub throttled a request or said it was
+// temporarily unavailable (429 or 503).
+func hubAskedToWait(err error) bool {
+	for _, hubErr := range hubStatusErrors(err) {
+		if hubErr.StatusCode == http.StatusTooManyRequests || hubErr.StatusCode == http.StatusServiceUnavailable {
+			return true
+		}
+	}
+	return false
 }
 
 // hubStatusErrors walks a joined or wrapped error tree in order.
@@ -282,8 +266,10 @@ func hubStatusErrors(err error) []*HubStatusError {
 
 // syncRetryIdentity fingerprints the binding fields and stored credential a
 // sync turn depends on. A rebind, re-enable, new token, provider refresh, or a
-// successful sync from another path (which moves LastSyncAt) changes it. The
-// token is hashed with the rest and never kept.
+// successful sync from another path (which moves LastSyncAt) changes it.
+// Disabling or enabling a binding rewrites it and moves UpdatedAt, so a binding
+// disabled and enabled again between two passes changes it too. The token is
+// hashed with the rest and never kept.
 func syncRetryIdentity(binding db.FederationBinding, credential config.FederationCredential) ([32]byte, error) {
 	material, err := json.Marshal(struct {
 		HubURL        string
@@ -293,12 +279,13 @@ func syncRetryIdentity(binding db.FederationBinding, credential config.Federatio
 		AllowInsecure bool
 		PushEnabled   bool
 		CreatedAt     time.Time
+		UpdatedAt     time.Time
 		LastSyncAt    *time.Time
 		RelayConfig   *db.RelayBindingConfig
 		Credential    config.FederationCredential
 	}{
 		binding.HubURL, binding.HubProjectID, binding.HubProjectUID, binding.Actor,
-		binding.AllowInsecure, binding.PushEnabled, binding.CreatedAt, binding.LastSyncAt,
+		binding.AllowInsecure, binding.PushEnabled, binding.CreatedAt, binding.UpdatedAt, binding.LastSyncAt,
 		binding.RelayConfig, credential,
 	})
 	if err != nil {
