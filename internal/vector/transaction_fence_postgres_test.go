@@ -45,6 +45,32 @@ func TestPostgresReconcilerWritesHonorTransactionFence(t *testing.T) {
 	var active string
 	require.NoError(t, pg.DB.QueryRowContext(ctx, `SELECT gen_key FROM issue_vector_generations WHERE state = 'active'`).Scan(&active))
 	require.Equal(t, "first", active)
+	require.NoError(t, idx.SaveVectorsForTest(ctx, "first", issue.UID, revision, nil))
+	require.NoError(t, idx.SaveVectorsForTest(ctx, "second", issue.UID, revision, nil))
+	var reclaimFences int
+	reclaimDenied := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error {
+		reclaimFences++
+		if reclaimFences == 2 {
+			return denied
+		}
+		return nil
+	})
+	require.ErrorIs(t, idx.CutOver(reclaimDenied, "second"), denied)
+	var state string
+	err = pg.DB.QueryRowContext(ctx, `SELECT g.state, count(s.doc_key) FROM issue_vector_generations g LEFT JOIN issue_vector_stamps s ON s.generation_id = g.id WHERE g.gen_key = $1 GROUP BY g.state`, "first").Scan(&state, &stamps)
+	require.NoError(t, err)
+	require.Equal(t, "retired", state)
+	require.Equal(t, 1, stamps)
+	reclaimFences = 0
+	reclaimCounted := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error { reclaimFences++; return nil })
+	require.NoError(t, idx.CutOver(reclaimCounted, "second"))
+	require.Equal(t, 2, reclaimFences, "failed reclamation must be retried")
+	err = pg.DB.QueryRowContext(ctx, `SELECT count(*) FROM issue_vector_stamps s JOIN issue_vector_generations g ON g.id = s.generation_id WHERE g.gen_key = $1`, "first").Scan(&stamps)
+	require.NoError(t, err)
+	require.Zero(t, stamps, "reclamation must remove a stamp even when no chunks remain")
+	reclaimFences = 0
+	require.NoError(t, idx.CutOver(reclaimCounted, "second"))
+	require.Equal(t, 1, reclaimFences, "successful reclamation must not repeat")
 	for i := range 504 {
 		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: fmt.Sprintf("task %d", i), Author: "user-a"})
 		require.NoError(t, err)
@@ -65,53 +91,4 @@ func TestPostgresReconcilerWritesHonorTransactionFence(t *testing.T) {
 	rows, err := idx.MirrorRowsForTest(ctx)
 	require.NoError(t, err)
 	require.Len(t, rows, 506)
-}
-
-func TestPostgresCutOverReclaimsRetiredGenerationOnce(t *testing.T) {
-	ctx := t.Context()
-	store, idx := openVectorBackend(t, "postgres")
-	pg := store.(*pgstore.Store)
-	project, err := store.CreateProject(ctx, "example-project")
-	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "first issue", Author: "user-a"})
-	require.NoError(t, err)
-	_, err = idx.RefreshMirror(ctx, store)
-	require.NoError(t, err)
-	a := kitvec.Generation{Model: "model-a", Dimensions: 2}
-	b := kitvec.Generation{Model: "model-b", Dimensions: 2}
-	aKey, bKey := a.Fingerprint(), b.Fingerprint()
-	vectors := []kitvec.ChunkVector{{ChunkIndex: 0, Vector: kitvec.Vector{1, 0}}}
-	require.NoError(t, idx.EnsureBuilding(ctx, aKey, a))
-	require.NoError(t, idx.SaveVectorsForTest(ctx, aKey, issue.UID, issue.ContentRevision, nil))
-	require.NoError(t, idx.CutOver(ctx, aKey))
-	require.NoError(t, idx.EnsureBuilding(ctx, bKey, b))
-	require.NoError(t, idx.SaveVectorsForTest(ctx, bKey, issue.UID, issue.ContentRevision, vectors))
-
-	denied := errors.New("worker authority revoked")
-	var fences int
-	fenced := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error {
-		fences++
-		if fences == 2 {
-			return denied
-		}
-		return nil
-	})
-	require.ErrorIs(t, idx.CutOver(fenced, bKey), denied)
-	var state string
-	var stamps int
-	err = pg.DB.QueryRowContext(ctx, `SELECT g.state, count(s.doc_key) FROM issue_vector_generations g LEFT JOIN issue_vector_stamps s ON s.generation_id = g.id WHERE g.gen_key = $1 GROUP BY g.state`, aKey).Scan(&state, &stamps)
-	require.NoError(t, err)
-	require.Equal(t, "retired", state)
-	require.Equal(t, 1, stamps)
-
-	fences = 0
-	counted := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error { fences++; return nil })
-	require.NoError(t, idx.CutOver(counted, bKey))
-	require.Equal(t, 2, fences, "failed reclamation must be retried")
-	err = pg.DB.QueryRowContext(ctx, `SELECT count(*) FROM issue_vector_stamps s JOIN issue_vector_generations g ON g.id = s.generation_id WHERE g.gen_key = $1`, aKey).Scan(&stamps)
-	require.NoError(t, err)
-	require.Zero(t, stamps, "reclamation must remove a stamp even when no chunks remain")
-	fences = 0
-	require.NoError(t, idx.CutOver(counted, bKey))
-	require.Equal(t, 1, fences, "successful reclamation must not repeat")
 }

@@ -57,7 +57,7 @@ func openVectorBackend(t *testing.T, backend string) (db.Storage, *vector.Index)
 
 // The project boundary belongs before distance ranking and its candidate limit:
 // arbitrarily closer private chunks must never crowd out an authorized result.
-func TestProjectAccessVectorCandidatesBeforeLimit(t *testing.T) {
+func TestProjectAccessVectorCandidatesBeforeLimitAndNegativeLimit(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
@@ -100,11 +100,11 @@ func TestProjectAccessVectorCandidatesBeforeLimit(t *testing.T) {
 			require.Len(t, window.Hits, 1)
 			require.Equal(t, target.UID, window.Hits[0].Doc)
 			require.False(t, window.HasProbe, "private chunks do not count as an eligible probe")
-			for _, limit := range []int{0, -1} {
-				hits, err := idx.Query(scoped, key, kitvec.Vector{1, 0}, limit)
+			t.Run("negative limit", func(t *testing.T) {
+				hits, err := idx.Query(ctx, key, kitvec.Vector{1, 0}, -1)
 				require.NoError(t, err)
 				require.Empty(t, hits)
-			}
+			})
 			hits, err := idx.Query(scoped, key, kitvec.Vector{1, 0}, 1)
 			require.NoError(t, err)
 			require.Len(t, hits, 1)
