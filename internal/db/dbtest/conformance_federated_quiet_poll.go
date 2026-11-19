@@ -3,6 +3,7 @@ package dbtest
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -14,12 +15,24 @@ import (
 // while another store handle on the same database, as another process would,
 // writes every kind of event that can reach the project's feed. Each poll must
 // return what a store that has never polled returns.
+//
+// The quiet project runs once with one issue and once with more issues than
+// any gap below has events, because the store checks a short gap event by
+// event and a long one against the project's issues.
 func checkFederatedQuietPollFeed(t *testing.T, store db.Storage, backend Backend) {
+	for _, extraIssues := range []int{0, 20} {
+		t.Run(fmt.Sprintf("%d extra issues", extraIssues), func(t *testing.T) {
+			checkFederatedQuietPollFeedWith(t, store, backend, extraIssues)
+		})
+	}
+}
+
+func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Backend, extraIssues int) {
 	ctx := t.Context()
 	writer := backend.OpenSame(t, store)
-	quiet, err := writer.CreateProject(ctx, "quiet-project")
+	quiet, err := writer.CreateProject(ctx, fmt.Sprintf("quiet-project-%d", extraIssues))
 	require.NoError(t, err)
-	busy, err := writer.CreateProject(ctx, "busy-project")
+	busy, err := writer.CreateProject(ctx, fmt.Sprintf("busy-project-%d", extraIssues))
 	require.NoError(t, err)
 	for _, p := range []db.Project{quiet, busy} {
 		_, err = writer.EnableProjectFederation(ctx, p.ID, "tester")
@@ -27,6 +40,10 @@ func checkFederatedQuietPollFeed(t *testing.T, store db.Storage, backend Backend
 	}
 	owned, _, err := writer.CreateIssue(ctx, db.CreateIssueParams{ProjectID: quiet.ID, Title: "Owned", Author: "tester"})
 	require.NoError(t, err)
+	for range extraIssues {
+		_, _, err = writer.CreateIssue(ctx, db.CreateIssueParams{ProjectID: quiet.ID, Title: "Extra", Author: "tester"})
+		require.NoError(t, err)
+	}
 	incoming, _, err := writer.CreateIssue(ctx, db.CreateIssueParams{ProjectID: busy.ID, Title: "Incoming", Author: "tester"})
 	require.NoError(t, err)
 	busyIssue, _, err := writer.CreateIssue(ctx, db.CreateIssueParams{ProjectID: busy.ID, Title: "Busy", Author: "tester"})
@@ -57,8 +74,8 @@ func checkFederatedQuietPollFeed(t *testing.T, store db.Storage, backend Backend
 		}
 		return got
 	}
-	// quiet repeats an empty poll across unrelated writes so the store
-	// remembers the quiet range.
+	// quietAt repeats an empty poll across unrelated writes so the store
+	// remembers what those polls found.
 	quietAt := func(after int64) {
 		t.Helper()
 		for range 3 {
@@ -73,13 +90,14 @@ func checkFederatedQuietPollFeed(t *testing.T, store db.Storage, backend Backend
 
 	// An event stamped to another project about an issue the project owns.
 	quietAt(cursor)
+	foreignUID := fmt.Sprintf("01M8%022d", extraIssues)
 	executor := writer.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
 	_, err = executor.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
- VALUES('01M8000000000000000000000A',$1,$2,'busy-project',$3,'issue.updated','tester','{}',1,0,$4)`, writer.InstanceUID(), busy.ID, owned.UID, strings.Repeat("a", 64))
+ VALUES($5,$1,$2,$6,$3,'issue.updated','tester','{}',1,0,$4)`, writer.InstanceUID(), busy.ID, owned.UID, strings.Repeat("a", 64), foreignUID, busy.Name)
 	require.NoError(t, err)
-	foreign, err := writer.EventsByUIDs(ctx, busy.ID, []string{"01M8000000000000000000000A"})
+	foreign, err := writer.EventsByUIDs(ctx, busy.ID, []string{foreignUID})
 	require.NoError(t, err)
 	require.Len(t, foreign, 1)
 	got := poll(cursor, foreign[0].ID)

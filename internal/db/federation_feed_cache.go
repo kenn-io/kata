@@ -2,19 +2,17 @@ package db
 
 import "sync"
 
-// FederationFeedCache remembers, per hub project, event-ID ranges already
-// proven to hold no event that reaches the project's federation feed only
-// because the project owns its issue. Finding such an event otherwise means
-// probing every issue the project owns on each poll.
+// FederationFeedCache remembers, per hub project, the newest event ID through
+// which a poll found no issue.moved event stamped to the project. Without it,
+// each poll of a project that never received a moved issue reads the
+// project's whole event history to learn that again.
 //
-// A remembered range stays true. Event inserts take IDs in commit order, so
-// once a read sees an event ID, no event with a lower ID can appear later; an
-// issue that joins the project gets a move event stamped to the project with a
-// higher ID, which every poll finds through the project's own events. Merging
-// is refused for federated projects, and re-enabling federation or a project
-// revision changes the cache key. Each poll still rereads the project's own
-// events, its outgoing moves, and every event newer than the remembered range,
-// so the cache stays correct when other processes write to the same database.
+// A remembered ID stays true. Event inserts take IDs in commit order, so once
+// a read sees an event ID, no event with a lower ID can appear later. Merging
+// is refused for federated projects, and a project revision or a new replay
+// horizon changes the cache key. Each poll still checks every event newer than
+// the remembered ID, so the cache stays correct when other processes write to
+// the same database.
 type FederationFeedCache struct {
 	mu      sync.Mutex
 	entries map[int64]federationFeedFacts
@@ -28,9 +26,6 @@ type federationFeedKey struct {
 
 type federationFeedFacts struct {
 	key federationFeedKey
-	// No event stamped to another project, about an issue the project owns,
-	// has an ID in (foreignFrom, foreignThrough].
-	foreignFrom, foreignThrough int64
 	// No issue.moved event stamped to the project has an ID at or below
 	// movesThrough.
 	movesThrough int64
@@ -73,8 +68,8 @@ func (r *FederationFeedRead) Commit() {
 	r.cache.mu.Lock()
 	defer r.cache.mu.Unlock()
 	current, ok := r.cache.entries[r.projectID]
-	if ok && current.key == r.learned.key && current.foreignThrough > r.learned.foreignThrough {
-		// A concurrent read proved a later range; keep it.
+	if ok && current.key == r.learned.key && current.movesThrough > r.learned.movesThrough {
+		// A concurrent read proved a later ID; keep it.
 		return
 	}
 	if r.cache.entries == nil {
@@ -96,32 +91,9 @@ func (r *FederationFeedRead) recordMoves(found bool) {
 	}
 }
 
-// foreignChecked returns the ID after which foreign events must be rechecked,
-// when the remembered range covers everything from afterID on.
-func (r *FederationFeedRead) foreignChecked(afterID int64) (int64, bool) {
-	if r == nil || r.known.foreignThrough == 0 || r.known.foreignFrom > afterID {
-		return 0, false
-	}
-	return max(afterID, r.known.foreignThrough), true
-}
-
-// recordQuiet notes that no feed event has an ID in (afterID, maxID], the
-// newest event ID in the read's snapshot.
-func (r *FederationFeedRead) recordQuiet(afterID, maxID int64) {
-	if r == nil {
-		return
-	}
-	// The move check covers the whole snapshot, so it holds even when the
-	// cursor is already at the newest event.
-	if r.noMovesAfter {
+// recordSnapshot notes maxID, the newest event ID in the read's snapshot.
+func (r *FederationFeedRead) recordSnapshot(maxID int64) {
+	if r != nil && r.noMovesAfter {
 		r.learned.movesThrough = max(r.learned.movesThrough, maxID)
 	}
-	if maxID <= afterID {
-		return
-	}
-	from := afterID
-	if r.known.foreignThrough != 0 && r.known.foreignFrom <= afterID && afterID <= r.known.foreignThrough {
-		from = r.known.foreignFrom
-	}
-	r.learned.foreignFrom, r.learned.foreignThrough = from, maxID
 }

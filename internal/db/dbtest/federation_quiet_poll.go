@@ -43,8 +43,7 @@ func RunQuietFederationPollGrowth(t *testing.T, open func(*testing.T) db.Storage
 }
 
 // RunResumedFederationPollGrowth checks that an empty poll resuming after a
-// long gap of unrelated hub writes costs the same whatever the gap's length,
-// even after the store has remembered an earlier quiet range for the project.
+// long gap of unrelated hub writes costs the same whatever the gap's length.
 func RunResumedFederationPollGrowth(t *testing.T, open func(*testing.T) db.Storage, measure growthtest.Measure, floor float64) {
 	t.Helper()
 	growthtest.Run(t, growthtest.Check{
@@ -53,13 +52,39 @@ func RunResumedFederationPollGrowth(t *testing.T, open func(*testing.T) db.Stora
 		Measure: measure,
 		Build: func(_ testing.TB, size int) (run, reset func()) {
 			hub := newQuietPollHub(t, open(t), 100)
-			// One quiet poll past an unrelated write lets the store remember
-			// the project's quiet range before the gap opens.
+			// The project is caught up past an unrelated write before the gap
+			// opens.
 			hub.unrelatedComment()
 			require.Empty(t, hub.poll().Events)
 			return func() { require.Empty(t, hub.poll().Events) }, func() { hub.unrelatedEvents(size) }
 		},
 	})
+}
+
+// RunRememberedFederationPollCost checks that what a store remembers from
+// earlier polls never makes an empty poll cost more than the same poll on a
+// store that remembers nothing, after a short gap of unrelated writes and after
+// a long one. forget clears what a store remembers about earlier polls.
+func RunRememberedFederationPollCost(t *testing.T, open func(*testing.T) db.Storage, forget func(db.Storage), measure growthtest.Measure, floor float64) {
+	t.Helper()
+	for _, gap := range []int{100, 5000} {
+		t.Run(fmt.Sprintf("gap %d", gap), func(t *testing.T) {
+			cost := func(remember bool) float64 {
+				hub := newQuietPollHub(t, open(t), 100)
+				hub.unrelatedComment()
+				require.Empty(t, hub.poll().Events)
+				return measure(func() { require.Empty(t, hub.poll().Events) }, func() {
+					hub.unrelatedEvents(gap)
+					if !remember {
+						forget(hub.store)
+					}
+				})
+			}
+			remembered, forgotten := cost(true), cost(false)
+			t.Logf("remembered=%v forgotten=%v", remembered, forgotten)
+			require.LessOrEqual(t, remembered, max(forgotten*1.2, floor))
+		})
+	}
 }
 
 type quietPollHub struct {

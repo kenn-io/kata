@@ -103,13 +103,6 @@ func (m selfAuthenticatedRouteMatcher) matches(r *http.Request) bool {
 	return m.match(r).matched
 }
 
-// urlProject returns the project whose authority alone admits r, when r
-// addresses a route that takes its authority from its {project_id}.
-func (m selfAuthenticatedRouteMatcher) urlProject(r *http.Request) (int64, bool) {
-	match := m.match(r)
-	return match.urlProjectID, match.urlProjectID != 0
-}
-
 type noProjectDataRouteMatcher struct {
 	mux *http.ServeMux
 }

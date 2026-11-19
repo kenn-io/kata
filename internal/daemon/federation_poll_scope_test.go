@@ -15,18 +15,36 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// federationPollScopeStore counts anonymous project-list reads and can change
-// project policy while a poll's federation token is being checked, after the
-// request was admitted and before its response is released.
+// federationPollScopeStore counts project-list reads and can change project
+// policy while a poll is checking its federation token or after it read its
+// events, after the request was admitted and before its response is released.
 type federationPollScopeStore struct {
 	db.Storage
 	anonymousLists   atomic.Int64
+	actorLists       atomic.Int64
 	duringTokenCheck func() error
+	afterRead        func() error
 }
 
 func (s *federationPollScopeStore) AnonymousAccessibleProjectUIDs(ctx context.Context) ([]string, error) {
 	s.anonymousLists.Add(1)
 	return s.Storage.AnonymousAccessibleProjectUIDs(ctx)
+}
+
+func (s *federationPollScopeStore) AccessibleProjectUIDs(ctx context.Context, actor string) ([]string, error) {
+	s.actorLists.Add(1)
+	return s.Storage.AccessibleProjectUIDs(ctx, actor)
+}
+
+func (s *federationPollScopeStore) ReadFederation(ctx context.Context, params db.FederationReadParams) (db.FederationReadResult, error) {
+	result, err := s.Storage.ReadFederation(ctx, params)
+	if after := s.afterRead; err == nil && after != nil {
+		s.afterRead = nil
+		if err := after(); err != nil {
+			return db.FederationReadResult{}, err
+		}
+	}
+	return result, err
 }
 
 func (s *federationPollScopeStore) AuthorizeFederationToken(ctx context.Context, token string, projectID int64, capability string) (db.FederationEnrollment, error) {
@@ -117,16 +135,19 @@ func TestFederationPollRefusalIgnoresUnrelatedPolicyChanges(t *testing.T) {
 		response := fixture.poll("not-an-enrollment-token")
 		require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 		require.Contains(t, response.Body.String(), "auth_invalid")
+		require.Zero(t, fixture.store.anonymousLists.Load(), "release recheck read the anonymous project list")
 	})
 }
 
-// A refused poll whose own project leaves anonymous visibility while the
-// request is in flight is hidden, as before.
-func TestFederationPollRefusalFollowsItsProjectPolicy(t *testing.T) {
+// A poll whose policy revision moves before its response is released rechecks
+// only its own project.
+func TestFederationPollReleaseRechecksOnlyItsProject(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		fixture := newFederationPollScopeFixture(t, store)
-		fixture.store.duringTokenCheck = fixture.restrictPolicy(fixture.target)
-		response := fixture.poll("not-an-enrollment-token")
-		require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+		fixture.store.afterRead = fixture.restrictPolicy(fixture.other)
+		response := fixture.poll(fixture.token)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		require.Zero(t, fixture.store.actorLists.Load(), "release recheck read the actor's project list")
+		require.Zero(t, fixture.store.anonymousLists.Load(), "release recheck read the anonymous project list")
 	})
 }
