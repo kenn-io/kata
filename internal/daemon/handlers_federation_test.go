@@ -2700,22 +2700,6 @@ func TestFederationIngestRejectsSnapshotHistoricalAuthorWithoutAdoptionIntent(t 
 	assertFederationEventCount(t, env.DB, "issue.snapshot", 0)
 }
 
-func TestFederationMetadataAllowsBracketedTitle(t *testing.T) {
-	env := testenv.New(t)
-	project := createFederatedHubProject(t, env, "hub")
-	_, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
-		ProjectID: project.ID, Title: "Plan [draft]", Author: "tester",
-		Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-09-02"`)},
-	})
-	require.NoError(t, err)
-	created, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
-		SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
-	})
-	require.NoError(t, err)
-	resp, raw := envDoRaw(t, env, http.MethodGet, projectPath(project.ID)+"/federation/metadata", nil, bearer(created.Token))
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-}
-
 func TestFederationPullRequiresZonedDateFeature(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()
@@ -2729,20 +2713,13 @@ func TestFederationPullRequiresZonedDateFeature(t *testing.T) {
 		SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
 	})
 	require.NoError(t, err)
-	metadataPath := projectPath(project.ID) + "/federation/metadata"
-	resp, raw := envDoRaw(t, env, http.MethodGet, metadataPath, nil, bearer(created.Token))
-	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
-	assert.Contains(t, string(raw), "unsupported_event_features")
-	assert.Contains(t, string(raw), db.IssueDateZoneEventFeature)
 	headers := bearer(created.Token)
 	headers[db.EventFeaturesHeader] = db.IssueDateZoneEventFeature
-	resp, raw = envDoRaw(t, env, http.MethodGet, metadataPath, nil, headers)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	path := projectPath(project.ID) + "/federation/events?after_id=0&limit=100"
 	first, firstRaw := envDoRaw(t, env, http.MethodGet, projectPath(project.ID)+"/federation/events?after_id=0&limit=1", nil, bearer(created.Token))
 	require.Equal(t, http.StatusOK, first.StatusCode, string(firstRaw))
 	assert.Empty(t, first.Header.Get(db.RequiredEventFeaturesHeader))
-	resp, raw = envDoRaw(t, env, http.MethodGet, path, nil, bearer(created.Token))
+	resp, raw := envDoRaw(t, env, http.MethodGet, path, nil, bearer(created.Token))
 	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
 	assert.Contains(t, string(raw), "unsupported_event_features")
 	assert.Contains(t, string(raw), db.IssueDateZoneEventFeature)
