@@ -117,8 +117,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   its snapshot arrives.
 
 - Keep existing PostgreSQL semantic-search vectors when upgrading to schema 52
-  without re-embedding.
-  See the [migration requirements](development/postgres-migrations.md#schema-52-shared-vector-catalog).
+  without re-embedding; see the [schema 52 guide](development/postgres-migrations.md#schema-52-shared-vector-catalog).
 
 - Sync a Linear team that every run had refused with `linear issue is outside
   selected scope`. For some teams, Linear's issue filter on the team ID returns
