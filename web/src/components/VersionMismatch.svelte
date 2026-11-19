@@ -9,7 +9,7 @@
 </script>
 
 <svelte:head>
-  <title>Kata was updated · Kata</title>
+  <title>Kata was updated</title>
 </svelte:head>
 
 <section class="version-mismatch" role="alert" aria-labelledby="version-mismatch-heading">

@@ -12,7 +12,7 @@
 </script>
 
 <svelte:head>
-  <title>Invalid route · Kata</title>
+  <title>Invalid address · Kata</title>
 </svelte:head>
 
 <section aria-labelledby="route-error-heading">

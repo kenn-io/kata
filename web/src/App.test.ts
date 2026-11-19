@@ -1785,7 +1785,7 @@ describe('App', () => {
     history.replaceState(null, '', '/kata?issue=abc4')
     await fireEvent(window, new PopStateEvent('popstate'))
     expect(screen.getByRole('heading', { name: 'This Kata route is not valid' })).not.toBeNull()
-    await waitFor(() => expect(document.title).toBe('Invalid route · Kata'))
+    await waitFor(() => expect(document.title).toBe('Invalid address · Kata'))
   })
 
   it('renders the ported collection and navigates through canonical routes after authority loads', async () => {
@@ -4269,7 +4269,7 @@ describe('App', () => {
     expect(await screen.findByRole('alert')).not.toBeNull()
     expect(screen.getByRole('heading', { name: 'Kata was updated' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Reload Kata' })).not.toBeNull()
-    await waitFor(() => expect(document.title).toBe('Kata was updated · Kata'))
+    await waitFor(() => expect(document.title).toBe('Kata was updated'))
     cleanup()
     sessionStorage.clear()
     history.replaceState(null, '', '/kata')
@@ -4277,7 +4277,7 @@ describe('App', () => {
     await waitFor(() => expect(document.title).toBe('Kata'))
     window.dispatchEvent(new Event('kata:versionMismatch'))
     expect(await screen.findByRole('heading', { name: 'Kata was updated' })).not.toBeNull()
-    await waitFor(() => expect(document.title).toBe('Kata was updated · Kata'))
+    await waitFor(() => expect(document.title).toBe('Kata was updated'))
   })
 })
 
