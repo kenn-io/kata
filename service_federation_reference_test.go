@@ -251,6 +251,17 @@ func TestDirectPushWithProjectScopedActors(t *testing.T) {
 				require.Len(t, events, 1)
 			})
 
+			_, err = spoke.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "worker", RemoveParent: &local.ID})
+			require.NoError(t, err)
+			_, err = spoke.DB.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: child.ID, Actor: "worker", SetParent: &localNewPeer.ID})
+			require.NoError(t, err)
+			queued, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: child.ProjectID, Title: "Queued later task", Author: "worker"})
+			require.NoError(t, err)
+			require.NoError(t, syncProject(0))
+			checkObserver(newPeer.UID)
+			_, err = hub.store.IssueByUID(ctx, queued.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+
 			t.Run("delete-peer-before-link-push", func(t *testing.T) {
 				_, linkedEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
 					ProjectID: child.ProjectID, Title: "Queued link", Author: "worker",

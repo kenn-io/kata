@@ -264,6 +264,29 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	parent, err = store.ParentOf(ctx, child.ID)
 	require.NoError(t, err)
 	require.Equal(t, peer.ID, parent.ToIssueID)
+	// A stale removal must not hide the hub's different parent from a later set.
+	staleClear, err := json.Marshal(map[string]string{"parent_removed_uid": second.UID})
+	require.NoError(t, err)
+	params.Events = []db.FederationIngestEvent{
+		{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+6, staleClear)},
+		{SourceEventID: 5, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+7, setLocal)},
+	}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+	parent, err = store.ParentOf(ctx, child.ID)
+	require.NoError(t, err)
+	require.Equal(t, peer.ID, parent.ToIssueID)
+	// A reference proof for a peer does not authorize removing a blocks link.
+	blocksPayload, err := json.Marshal(map[string]any{"blocks_removed_uids": []string{peer.UID}, "related_added_uids": []string{peer.UID}})
+	require.NoError(t, err)
+	params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+7, blocksPayload)}}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+	blocksUnlink, err := json.Marshal(map[string]string{"from_uid": child.UID, "to_uid": peer.UID, "link_from_uid": child.UID, "link_to_uid": peer.UID, "type": "blocks"})
+	require.NoError(t, err)
+	params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.unlinked", "worker", origin, at+7, blocksUnlink)}}
+	_, err = store.IngestFederationEvents(ctx, params)
+	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
 	// One edit can add a relationship and remove a different relationship
 	// to the same peer. A reference proof authorizes both changes.
 	mixedPayload, err := json.Marshal(map[string]any{"parent_removed_uid": peer.UID, "related_added_uids": []string{peer.UID}})

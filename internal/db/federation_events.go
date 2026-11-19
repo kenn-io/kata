@@ -307,35 +307,30 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 		return nil, nil
 	}
 	var peers map[string]bool
-	_, _, err := StripCrossProjectLinkAdditions(event, func(uid string) bool {
+	add := func(uid string) {
 		if uid != "" && uid != event.IssueUID {
 			if peers == nil {
 				peers = make(map[string]bool)
 			}
 			peers[uid] = true
 		}
+	}
+	_, _, err := StripCrossProjectLinkAdditions(event, func(uid string) bool {
+		add(uid)
 		return false
 	})
-	if event.Type == "issue.links_changed" || event.Type == "issue.linked" || event.Type == "issue.unlinked" {
+	if event.Type == "issue.links_changed" || event.Type == "issue.unlinked" {
 		payload := PayloadMap(event.Payload)
-		add := func(uid string) {
-			if uid != "" && uid != event.IssueUID {
-				if peers == nil {
-					peers = make(map[string]bool)
-				}
-				peers[uid] = true
-			}
-		}
 		if event.Type == "issue.links_changed" {
 			uid, _ := StringValue(payload["parent_removed_uid"])
 			add(uid)
 			for _, key := range []string{"blocks_removed_uids", "blocked_by_removed_uids", "related_removed_uids"} {
 				for _, uid := range StringSlice(payload[key]) {
-					add(uid)
+					delete(peers, uid)
 				}
 			}
-		} else {
-			for _, key := range []string{"from_uid", "to_uid", "from_issue_uid", "to_issue_uid"} {
+		} else if kind, _ := StringValue(payload["type"]); kind == "parent" {
+			for _, key := range []string{"from_uid", "to_uid"} {
 				uid, _ := StringValue(payload[key])
 				add(uid)
 			}
@@ -377,19 +372,33 @@ func DirectParentRemovals(ctx context.Context, tx Transaction, events []RemoteEv
 
 	parents := make(map[string]string)
 	removed := make(map[string][]string)
+	parentOf := func(from string) (string, error) {
+		if parent, known := parents[from]; known {
+			return parent, nil
+		}
+		var parent string
+		err := tx.QueryRowContext(ctx, `SELECT to_issue_uid FROM links WHERE from_issue_uid=$1 AND type='parent'`, from).Scan(&parent)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+		parents[from] = parent
+		return parent, nil
+	}
 	for _, event := range ordered {
-		if event.Type == "issue.unlinked" {
+		if event.Type == "issue.unlinked" || event.Type == "issue.links_changed" {
 			payload := PayloadMap(event.Payload)
-			kind, _ := StringValue(payload["type"])
-			from, _ := StringValue(payload["link_from_uid"])
-			to, _ := StringValue(payload["link_to_uid"])
-			if kind == "parent" && from != "" && to != "" {
-				previous, known := parents[from]
-				if !known {
-					err := tx.QueryRowContext(ctx, `SELECT to_issue_uid FROM links WHERE from_issue_uid=$1 AND type='parent'`, from).Scan(&previous)
-					if err != nil && !errors.Is(err, sql.ErrNoRows) {
-						return nil, err
-					}
+			var from, to string
+			if event.Type == "issue.links_changed" {
+				from = event.IssueUID
+				to, _ = StringValue(payload["parent_removed_uid"])
+			} else if kind, _ := StringValue(payload["type"]); kind == "parent" {
+				from, _ = StringValue(payload["link_from_uid"])
+				to, _ = StringValue(payload["link_to_uid"])
+			}
+			if from != "" && to != "" {
+				previous, err := parentOf(from)
+				if err != nil {
+					return nil, err
 				}
 				if previous == to {
 					parents[from] = ""
@@ -401,12 +410,9 @@ func DirectParentRemovals(ctx context.Context, tx Transaction, events []RemoteEv
 			return nil, err
 		}
 		for _, key := range assignments {
-			previous, known := parents[key.FromUID]
-			if !known {
-				err := tx.QueryRowContext(ctx, `SELECT to_issue_uid FROM links WHERE from_issue_uid=$1 AND type='parent'`, key.FromUID).Scan(&previous)
-				if err != nil && !errors.Is(err, sql.ErrNoRows) {
-					return nil, err
-				}
+			previous, err := parentOf(key.FromUID)
+			if err != nil {
+				return nil, err
 			}
 			if previous != "" && previous != key.ToUID {
 				removed[event.UID] = append(removed[event.UID], previous)
