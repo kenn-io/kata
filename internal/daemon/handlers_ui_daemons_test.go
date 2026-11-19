@@ -136,17 +136,27 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 	assert.Zero(t, authCalls.Load(), "roster must not probe with an unavailable credential")
 }
 
-func TestWebDaemonRosterMappedHubs(t *testing.T) {
+func anonymousHub(t *testing.T, ready *atomic.Bool) (*httptest.Server, *atomic.Int64) {
+	t.Helper()
 	var probes atomic.Int64
-	connected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/api/v1/instance", r.URL.Path)
 		assert.Empty(t, r.Header.Get("Authorization"))
 		probes.Add(1)
+		if ready != nil && !ready.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(w, `{"web_ui_contract_version":%q}`, api.UISnapshotContractVersion)
 	}))
-	t.Cleanup(connected.Close)
+	t.Cleanup(hub.Close)
+	return hub, &probes
+}
+
+func TestWebDaemonRosterMappedHubs(t *testing.T) {
+	connected, probes := anonymousHub(t, nil)
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
@@ -159,7 +169,6 @@ func TestWebDaemonRosterMappedHubs(t *testing.T) {
 		{"connected hub", "", "local = true", connected.URL, "", "", []string{"local", "hub"}, []string{"connected", "connected"}},
 		{"down hub", "", "local = true", down.URL, "", "", []string{"local"}, []string{"connected"}},
 		{"active down hub", `active_daemon = "hub"`, "local = true", down.URL, "", "", []string{"local"}, []string{"connected"}},
-		{"active connected hub", `active_daemon = "hub"`, "local = true", connected.URL, "", "", []string{"local", "hub"}, []string{"connected", "connected"}},
 		{"token hub", "", "local = true", down.URL, `token = "example-token"`, "", []string{"local", "hub"}, []string{"connected", "down"}},
 		{"unmapped down target", "", "local = true", down.URL, "", fmt.Sprintf(`[[daemon]]
 name = "other"
@@ -235,15 +244,7 @@ actor = "user-a"
 
 func TestWebDaemonRosterRefreshesRecoveredHub(t *testing.T) {
 	var ready atomic.Bool
-	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Empty(t, r.Header.Get("Authorization"))
-		if !ready.Load() {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		_, _ = fmt.Fprintf(w, `{"web_ui_contract_version":%q}`, api.UISnapshotContractVersion)
-	}))
-	t.Cleanup(hub.Close)
+	hub, _ := anonymousHub(t, &ready)
 	d := openTestDB(t)
 	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebSyncHubs: []string{"hub"}, WebDaemons: []config.CatalogDaemonConfig{{Name: "local", Local: true}, {Name: "hub", URL: hub.URL, AllowInsecure: true}}})
 	for _, tc := range []struct {

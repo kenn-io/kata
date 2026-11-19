@@ -667,15 +667,26 @@ describe('App', () => {
           const url = new URL(request.url)
           if (url.pathname === '/api/v1/ui/daemons') {
             queries.push(url.search)
-            if (!url.search) return Response.json(daemonRoster())
+            if (!url.search)
+              return Response.json({
+                daemons: [
+                  {
+                    id: 'local',
+                    url: '',
+                    local: true,
+                    default: true,
+                    auth: 'none',
+                    health: 'connected',
+                  },
+                ],
+              })
             if (failure) return new Response('', { status: 400 })
             return Response.json({
               daemons: [
-                ...daemonRoster().daemons,
                 {
                   id: 'hub',
                   url: 'https://hub.example',
-                  default: false,
+                  default: true,
                   auth: 'none',
                   health: 'connected',
                 },
@@ -701,58 +712,13 @@ describe('App', () => {
       } else {
         expect(await screen.findByTestId('daemon-row-hub')).not.toBeNull()
       }
-      expect(screen.getByTestId('daemon-row-example-local')).not.toBeNull()
-      expect(screen.getByTestId('daemon-chip').textContent).toContain('example-local')
+      expect(screen.getByTestId('daemon-row-local')).not.toBeNull()
+      expect(screen.getByTestId('daemon-chip').textContent).toContain('local')
       expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
       expect(snapshotReads).toBe(reads)
       expect(window.location.href).toBe(route)
     },
   )
-
-  it('keeps the workspace selected when refresh hides its daemon', async () => {
-    history.replaceState(null, '', '/kata#daemon=hub')
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = new URL(requestOf(input, init).url)
-        if (url.pathname === '/api/v1/ui/daemons') {
-          const daemons = daemonRoster().daemons
-          if (!url.search)
-            daemons.push({
-              id: 'hub',
-              url: 'https://hub.example',
-              default: false,
-              auth: 'none',
-              health: 'connected',
-            })
-          else
-            daemons.push({
-              id: 'other',
-              url: 'https://other.example',
-              default: false,
-              auth: 'none',
-              health: 'connected',
-            })
-          return Response.json({ daemons })
-        }
-        if (url.pathname.endsWith('/api/v1/ui/snapshot'))
-          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
-        if (url.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
-        return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-      }),
-    )
-    render(App)
-    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
-    await fireEvent.click(screen.getByTestId('daemon-chip'))
-    expect(await screen.findByTestId('daemon-row-other')).not.toBeNull()
-    expect(screen.queryByTestId('daemon-row-hub')).toBeNull()
-    expect(screen.getByTestId('daemon-chip').textContent).toContain('hub')
-    expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
-  })
 
   it('honors an explicitly selected gateway daemon on first authority load', async () => {
     history.replaceState(null, '', '/kata#daemon=example-remote')

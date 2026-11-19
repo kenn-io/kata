@@ -153,7 +153,7 @@ type ServerConfig struct {
 	// UI. Credentials remain server-side and are used only by the selected-
 	// daemon proxy. ActiveWebDaemon selects the initial catalog entry.
 	WebDaemons []config.CatalogDaemonConfig
-	// WebSyncHubs names mapped hubs without a browsing token or active selection.
+	// WebSyncHubs names mapped hubs without a browsing token.
 	WebSyncHubs     []string
 	ActiveWebDaemon string
 
@@ -359,7 +359,6 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 	cfg.FederationCatalog = append([]config.CatalogDaemonConfig(nil), cfg.FederationCatalog...)
 	cfg.WebDaemons = append([]config.CatalogDaemonConfig(nil), cfg.WebDaemons...)
-	cfg.WebSyncHubs = append([]string(nil), cfg.WebSyncHubs...)
 	if cfg.UIStore == nil {
 		cfg.UIStore, _ = cfg.DB.(db.UIStore)
 	}

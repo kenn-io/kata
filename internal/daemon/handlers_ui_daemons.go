@@ -626,15 +626,8 @@ func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon
 		return "down"
 	}
 	key := strings.Join([]string{d.id, d.baseURL, d.token}, "\x00")
-	if fresh {
-		state := probeWebDaemon(ctx, d, g.trustPrivateNetwork)
-		g.mu.Lock()
-		g.health[key] = webDaemonHealthEntry{state: state, expires: time.Now().Add(webDaemonHealthTTL)}
-		g.mu.Unlock()
-		return state
-	}
 	g.mu.Lock()
-	if cached, ok := g.health[key]; ok && time.Now().Before(cached.expires) {
+	if cached, ok := g.health[key]; !fresh && ok && time.Now().Before(cached.expires) {
 		g.mu.Unlock()
 		return cached.state
 	}

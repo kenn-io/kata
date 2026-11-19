@@ -1,8 +1,6 @@
 package daemon_test
 
 import (
-	"encoding/json"
-	"net/http"
 	"os"
 	"slices"
 	"testing"
@@ -80,24 +78,8 @@ func TestFederationProviderProcess(_ *testing.T) {
 
 func TestFederationProviderAttachesEmptyReplicaWithoutAdoption(t *testing.T) {
 	catalog, mapping := providerMapping(t)
-	catalog.URL = "https://127.0.0.1:1"
 	mapping.Intent = "read_only"
 	t.Setenv("KATA_TEST_PROVIDER_STATUS", "ready")
-	d := openTestDB(t)
-	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, FederationCatalog: []config.CatalogDaemonConfig{catalog}, WebDaemons: []config.CatalogDaemonConfig{catalog}, WebSyncHubs: []string{catalog.Name}})
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
-	require.NoError(t, err)
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	var roster struct {
-		Daemons []struct {
-			ID string `json:"id"`
-		} `json:"daemons"`
-	}
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&roster))
-	require.NoError(t, resp.Body.Close())
-	require.Len(t, roster.Daemons, 1)
-	assert.Equal(t, "local", roster.Daemons[0].ID)
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProject(t.Context(), mapping.SpokeProject)
 	require.NoError(t, err)

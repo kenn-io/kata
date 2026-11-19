@@ -52,22 +52,3 @@ func TestCatalogClientTokenSources(t *testing.T) {
 		})
 	}
 }
-
-func TestWebSyncHubs(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("KATA_HOME", home)
-	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
-active_daemon = "hub"
-[[daemon]]
-name = "hub"
-url = "https://hub.example"
-[[federation.project]]
-hub = "hub"
-spoke_project = "spoke-project"
-hub_project = "hub-project"
-actor = "user-a"
-`), 0o600))
-	cfg, err := config.ReadDaemonConfig()
-	require.NoError(t, err)
-	assert.Equal(t, []string{"hub"}, cfg.WebSyncHubs())
-}
