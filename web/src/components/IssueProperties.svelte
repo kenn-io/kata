@@ -202,7 +202,7 @@
   }
 
   function scheduledLabel(): string {
-    const value = issue.issue.metadata.scheduled_on
+    const value = scheduledDate(issue.issue)
     return value ? formatDate(value) : 'When'
   }
 

@@ -87,6 +87,16 @@ describe('IssueProperties', () => {
     cleanup()
   })
 
+  it('shows the projected day for a zoned schedule in the property pill', () => {
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2026-12-09',
+        metadata: { scheduled_on: '2026-12-10T09:00[Europe/Paris]' },
+      }),
+    })
+    expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toContain('Dec 9')
+  })
+
   it('adds and removes labels', async () => {
     const onAddLabel = vi.fn(async () => true)
     const onRemoveLabel = vi.fn()
