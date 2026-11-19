@@ -1863,6 +1863,10 @@ func adoptExistingReplica(
 					EmptyOnly:            p.AttachEmpty,
 				})
 				if err != nil {
+					if p.AttachEmpty && errors.Is(err, db.ErrFederationProjectNotEmpty) {
+						// The unbound same-UID project is a rejoin, so retain its history.
+						return db.AdoptProjectIntoFederationResult{}, false, nil
+					}
 					if errors.Is(err, db.ErrIssueSyncFederationBinding) {
 						return db.AdoptProjectIntoFederationResult{}, false, federationReplicaError(
 							errFederationReplicaIssueSyncConflict,
