@@ -116,6 +116,50 @@ describe('App', () => {
     expect(snapshotRequests[1]!.headers.get('If-None-Match')).toBe('"snapshot-1"')
   })
 
+  it('keeps New task available while a clicked task loads its snapshot', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    history.replaceState(null, '', '/kata?view=all-open')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let snapshotReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = new URL(requestOf(input, init).url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+          // The clicked task's snapshot stays in flight.
+          if (snapshotReads > 1) return new Promise<Response>(() => {})
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }
+        return Response.json({ error: { code: 'not_found' } }, { status: 404 })
+      }),
+    )
+    render(App)
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+      ).toBeNull(),
+    )
+
+    await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+
+    expect(new URL(window.location.href).searchParams.get('issue')).toBe(
+      '01J00000000000000000000001',
+    )
+    await waitFor(() => expect(snapshotReads).toBe(2))
+    expect(
+      screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled'),
+    ).toBeNull()
+  })
+
   it('blocks a task-limited New task after leaving the task for its project list', async () => {
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
     const projectUID = '01J00000000000000000000002'

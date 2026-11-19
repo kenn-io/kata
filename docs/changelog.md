@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Click another task in the web UI's list and New task stays available while
+  the task's comments, links, and history load. The button had been disabled
+  until that task's snapshot arrived, about a second per click on a large
+  workspace. A new view, filter, project, or graph still pauses changes until
+  its snapshot arrives.
+
 - Sync a Linear team that every run had refused with `linear issue is outside
   selected scope`. For some teams, Linear's issue filter on the team ID returns
   issues from the whole workspace. Kata now reads issues through the team
