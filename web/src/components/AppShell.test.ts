@@ -2072,6 +2072,12 @@ describe('AppShell', () => {
       },
     })
     await waitFor(() => expect(document.title).toBe('example-project · Delegated · Kata'))
+    await view.rerender({ route: { kind: 'kata', view: 'inbox', graph: false, filters } })
+    await waitFor(() => expect(document.title).toBe('Inbox · Kata'))
+    await view.rerender({ route: { kind: 'kata', view: 'all-open', graph: false, filters } })
+    await waitFor(() => expect(document.title).toBe('All Open · Kata'))
+    await view.rerender({ route: { kind: 'kata', view: 'settings', graph: false, filters } })
+    await waitFor(() => expect(document.title).toBe('Settings · Kata'))
     await view.rerender({ route: { kind: 'kata', view: 'credentials', graph: false, filters } })
     await waitFor(() => expect(document.title).toBe('Credentials · Kata'))
   })
