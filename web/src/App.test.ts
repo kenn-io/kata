@@ -1771,6 +1771,61 @@ describe('App', () => {
     expect(new URLSearchParams(window.location.search).get('text')).toBe('abc4')
   })
 
+  it('names the invalid route after returning from search', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    history.replaceState(null, '', '/kata?issue=abc4#direct=1')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(
+          input instanceof Request ? input.url : String(input),
+          window.location.origin,
+        )
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) return Response.json(snapshot())
+        if (target.pathname.endsWith('/api/v1/ui/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        return Response.json({})
+      }),
+    )
+    render(App)
+    await fireEvent.click(screen.getByRole('button', { name: 'Search for abc4' }))
+    await waitFor(() => expect(document.title).toBe('All Open · Kata'))
+    history.replaceState(null, '', '/kata?issue=abc4')
+    await fireEvent(window, new PopStateEvent('popstate'))
+    expect(screen.getByRole('heading', { name: 'This Kata route is not valid' })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Invalid route · Kata'))
+  })
+
+  it('distinguishes project-scoped views in the tab title', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const project = '01J00000000000000000000002'
+    history.replaceState(null, '', `/kata?view=today&scope=${project}#direct=1`)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(
+          input instanceof Request ? input.url : String(input),
+          window.location.origin,
+        )
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) return Response.json(snapshot())
+        if (target.pathname.endsWith('/api/v1/ui/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        return Response.json({})
+      }),
+    )
+    render(App)
+    await waitFor(() => expect(document.title).toBe('example-project · Today · Kata'))
+    history.replaceState(null, '', `/kata?view=delegated&scope=${project}`)
+    await fireEvent(window, new PopStateEvent('popstate'))
+    await waitFor(() => expect(document.title).toBe('example-project · Delegated · Kata'))
+  })
+
   it('renders the ported collection and navigates through canonical routes after authority loads', async () => {
     history.replaceState(null, '', '/kata?view=all-open')
     sessionStorage.setItem(

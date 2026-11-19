@@ -11,6 +11,10 @@
   let { route, onSearch }: Props = $props()
 </script>
 
+<svelte:head>
+  <title>Invalid route · Kata</title>
+</svelte:head>
+
 <section aria-labelledby="route-error-heading">
   <h2 id="route-error-heading">This Kata route is not valid</h2>
   <p>The address was left unchanged so it can be corrected or searched.</p>

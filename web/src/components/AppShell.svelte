@@ -624,6 +624,10 @@
 
   function scopeLabel(): string {
     if (selectedProject) return selectedProject.name
+    return viewLabel()
+  }
+
+  function viewLabel(): string {
     return (
       [
         { name: 'inbox', label: 'Inbox' },
@@ -645,7 +649,9 @@
         ? 'Credentials'
         : route.issueUID && projection.selected_detail?.issue.uid === route.issueUID
           ? `${projection.selected_detail.issue.qualified_id} ${projection.selected_detail.issue.title}`
-          : scopeLabel()} · Kata</title
+          : selectedProject && viewName !== 'all'
+            ? `${selectedProject.name} · ${viewLabel()}`
+            : scopeLabel()} · Kata</title
   >
 </svelte:head>
 
