@@ -161,10 +161,6 @@ func TestWebDaemonRosterListsRecoveredHubAndKeepsLocalFallback(t *testing.T) {
 	assert.Equal(t, "local", down[0].ID)
 	assert.True(t, down[0].Default)
 	readLocal()
-	request := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1/api/v1/ui/snapshot", nil)
-	response := httptest.NewRecorder()
-	gateway.ServeHTTP(response, request)
-	assert.Equal(t, "local snapshot", response.Body.String())
 
 	ready.Store(true)
 	recovered := roster()

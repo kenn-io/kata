@@ -163,18 +163,19 @@ func TestWebDaemonRosterMappedHubs(t *testing.T) {
 	t.Cleanup(down.Close)
 
 	for _, tc := range []struct {
-		name, active, hubURL, token, extra string
-		wantIDs, wantHealth                []string
+		name, active, hubURL, token, extra, selected string
+		wantIDs, wantHealth                          []string
 	}{
-		{"connected hub", "", connected.URL, "", "", []string{"local", "hub"}, []string{"connected", "connected"}},
-		{"down hub", "", down.URL, "", "", []string{"local"}, []string{"connected"}},
-		{"active down hub", `active_daemon = "hub"`, down.URL, "", "", []string{"local", "hub"}, []string{"connected", "down"}},
-		{"token hub", "", down.URL, `token = "example-token"`, "", []string{"local", "hub"}, []string{"connected", "down"}},
+		{"connected hub", "", connected.URL, "", "", "", []string{"local", "hub"}, []string{"connected", "connected"}},
+		{"down hub", "", down.URL, "", "", "", []string{"local"}, []string{"connected"}},
+		{"selected down hub", "", down.URL, "", "", "hub", []string{"local", "hub"}, []string{"connected", "down"}},
+		{"active down hub", `active_daemon = "hub"`, down.URL, "", "", "", []string{"local", "hub"}, []string{"connected", "down"}},
+		{"token hub", "", down.URL, `token = "example-token"`, "", "", []string{"local", "hub"}, []string{"connected", "down"}},
 		{"unmapped down target", "", down.URL, "", fmt.Sprintf(`[[daemon]]
 name = "other"
 url = %q
 allow_insecure = true
-`, down.URL), []string{"local", "other"}, []string{"connected", "down"}},
+`, down.URL), "", []string{"local", "other"}, []string{"connected", "down"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -202,6 +203,9 @@ actor = "user-a"
 			server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebDaemons: cfg.Daemons, WebSyncHubs: cfg.WebSyncHubs(), ActiveWebDaemon: cfg.ActiveDaemon})
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
 			require.NoError(t, err)
+			if tc.selected != "" {
+				req.Header.Set("X-Kata-Web-Daemon", tc.selected)
+			}
 			response, err := http.DefaultClient.Do(req)
 			require.NoError(t, err)
 			defer func() { _ = response.Body.Close() }()
@@ -230,10 +234,9 @@ actor = "user-a"
 }
 
 func TestWebDaemonRosterCachesUnrelatedTargets(t *testing.T) {
-	hub, hubProbes := anonymousHub(t, nil)
 	other, otherProbes := anonymousHub(t, nil)
 	d := openTestDB(t)
-	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebSyncHubs: []string{"hub"}, WebDaemons: []config.CatalogDaemonConfig{{Name: "local", Local: true}, {Name: "hub", URL: hub.URL, AllowInsecure: true}, {Name: "other", URL: other.URL, AllowInsecure: true}}})
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebDaemons: []config.CatalogDaemonConfig{{Name: "other", URL: other.URL, AllowInsecure: true}}})
 	for range 2 {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
 		require.NoError(t, err)
@@ -242,93 +245,7 @@ func TestWebDaemonRosterCachesUnrelatedTargets(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		require.NoError(t, resp.Body.Close())
 	}
-	assert.EqualValues(t, 2, hubProbes.Load())
 	assert.EqualValues(t, 1, otherProbes.Load())
-}
-
-func TestWebDaemonHeaderlessLocalDefaultDoesNotProbeHubs(t *testing.T) {
-	hubA, probesA := anonymousHub(t, nil)
-	hubB, probesB := anonymousHub(t, nil)
-	d := openTestDB(t)
-	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "local", WebSyncHubs: []string{"hub-a", "hub-b"}, WebDaemons: []config.CatalogDaemonConfig{{Name: "local", Local: true}, {Name: "hub-a", URL: hubA.URL, AllowInsecure: true}, {Name: "hub-b", URL: hubB.URL, AllowInsecure: true}}})
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
-	require.NoError(t, err)
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	require.NoError(t, resp.Body.Close())
-	assert.Zero(t, probesA.Load())
-	assert.Zero(t, probesB.Load())
-}
-
-func TestWebDaemonHeaderlessRemoteDefaultDoesNotProbe(t *testing.T) {
-	var probes atomic.Int64
-	var pings atomic.Int64
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/instance" {
-			probes.Add(1)
-		}
-		if r.URL.Path == "/api/v1/ping" {
-			pings.Add(1)
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(remote.Close)
-	d := openTestDB(t)
-	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebDaemons: []config.CatalogDaemonConfig{{Name: "remote", URL: remote.URL, AllowInsecure: true}}})
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
-	require.NoError(t, err)
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	require.NoError(t, resp.Body.Close())
-	assert.Zero(t, probes.Load())
-	assert.EqualValues(t, 1, pings.Load())
-}
-
-func TestWebDaemonHeaderlessFallbackCachesHubHealth(t *testing.T) {
-	hubA, probesA := anonymousHub(t, new(atomic.Bool))
-	hubB, probesB := anonymousHub(t, new(atomic.Bool))
-	d := openTestDB(t)
-	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebSyncHubs: []string{"hub-a", "hub-b"}, WebDaemons: []config.CatalogDaemonConfig{{Name: "hub-a", URL: hubA.URL, AllowInsecure: true}, {Name: "hub-b", URL: hubB.URL, AllowInsecure: true}}})
-	for range 2 {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
-		require.NoError(t, err)
-		resp, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
-		require.NoError(t, resp.Body.Close())
-	}
-	assert.EqualValues(t, 1, probesA.Load())
-	assert.EqualValues(t, 1, probesB.Load())
-}
-
-func TestWebDaemonRosterKeepsSelectedHub(t *testing.T) {
-	hub, _ := anonymousHub(t, new(atomic.Bool))
-	d := openTestDB(t)
-	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebSyncHubs: []string{"hub"}, WebDaemons: []config.CatalogDaemonConfig{{Name: "hub", URL: hub.URL, AllowInsecure: true}}})
-	get := func(selected string) []string {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
-		require.NoError(t, err)
-		if selected != "" {
-			req.Header.Set("X-Kata-Web-Daemon", selected)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
-		defer func() { _ = resp.Body.Close() }()
-		var roster struct {
-			Daemons []struct {
-				ID string `json:"id"`
-			} `json:"daemons"`
-		}
-		require.NoError(t, json.NewDecoder(resp.Body).Decode(&roster))
-		var ids []string
-		for _, daemon := range roster.Daemons {
-			ids = append(ids, daemon.ID)
-		}
-		return ids
-	}
-	assert.Equal(t, []string{"hub"}, get("hub"))
 }
 
 func TestWebDaemonRosterReportsTargetsWithoutWebUIContract(t *testing.T) {

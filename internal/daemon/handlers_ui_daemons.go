@@ -109,21 +109,7 @@ func registerWebDaemonHandlers(mux *http.ServeMux, cfg ServerConfig) {
 	mux.Handle(webDaemonProxyPrefix+"/", http.StripPrefix(webDaemonProxyPrefix, gateway))
 }
 
-func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
-	out, err := g.roster(r.Context(), r.Header.Get(webDaemonHeaderName), true)
-	if err != nil {
-		slog.Error("web daemon roster project authority", "err", err)
-		writeWebDaemonError(w, http.StatusInternalServerError, "internal")
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "private, no-store")
-	if err := json.MarshalWrite(w, out); err != nil {
-		slog.Debug("write web daemon roster", "err", err)
-	}
-}
-
-func (g *webDaemonGateway) includeLocalFallback(catalog, visible []config.CatalogDaemonConfig, record bool) bool {
+func (g *webDaemonGateway) includeLocalFallback(catalog, visible []config.CatalogDaemonConfig) bool {
 	hasSyncHub := false
 	for _, daemon := range catalog {
 		if daemon.Local {
@@ -137,19 +123,20 @@ func (g *webDaemonGateway) includeLocalFallback(catalog, visible []config.Catalo
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if len(visible) == 0 {
-		if record {
-			g.fallbackShown = true
-		}
+		g.fallbackShown = true
 		return true
 	}
 	return g.fallbackShown
 }
 
-func (g *webDaemonGateway) roster(ctx context.Context, selected string, record bool) (webDaemonRosterResponse, error) {
-	catalog, err := g.visibleCatalog(ctx)
+func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
+	catalog, err := g.visibleCatalog(r.Context())
 	if err != nil {
-		return webDaemonRosterResponse{}, err
+		slog.Error("web daemon roster project authority", "err", err)
+		writeWebDaemonError(w, http.StatusInternalServerError, "internal")
+		return
 	}
+	selected := r.Header.Get(webDaemonHeaderName)
 	resolved := make([]resolvedWebDaemon, len(catalog))
 	states := make([]string, len(catalog))
 	var wg sync.WaitGroup
@@ -163,7 +150,7 @@ func (g *webDaemonGateway) roster(ctx context.Context, selected string, record b
 				states[i] = "auth_required"
 				return
 			}
-			states[i] = g.daemonHealth(ctx, resolved[i], record && g.syncHubs[catalog[i].Name])
+			states[i] = g.daemonHealth(r.Context(), resolved[i], g.syncHubs[catalog[i].Name])
 		}()
 	}
 	wg.Wait()
@@ -177,7 +164,7 @@ func (g *webDaemonGateway) roster(ctx context.Context, selected string, record b
 		}
 	}
 	defaultID := g.defaultID(visible)
-	if g.includeLocalFallback(catalog, visible, record) {
+	if g.includeLocalFallback(catalog, visible) {
 		fallback := g.localFallbackDaemon()
 		visible = append(visible, fallback)
 		catalog = append(catalog, fallback)
@@ -209,7 +196,11 @@ func (g *webDaemonGateway) roster(ctx context.Context, selected string, record b
 			Health: states[i], Hint: hint,
 		})
 	}
-	return out, nil
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, no-store")
+	if err := json.MarshalWrite(w, out); err != nil {
+		slog.Debug("write web daemon roster", "err", err)
+	}
 }
 
 func (g *webDaemonGateway) visibleCatalog(ctx context.Context) ([]config.CatalogDaemonConfig, error) {
@@ -580,10 +571,7 @@ func (g *webDaemonGateway) selectDaemon(ctx context.Context, requested string) (
 	}
 	id := strings.TrimSpace(requested)
 	if id == "" {
-		id, err = g.proxyDefault(ctx, catalog)
-		if err != nil {
-			return resolvedWebDaemon{}, fmt.Errorf("%w: %w", errWebDaemonSourceAuthority, err)
-		}
+		id = g.defaultID(catalog)
 	}
 	for _, d := range catalog {
 		if d.Name == id {
@@ -601,28 +589,6 @@ func (g *webDaemonGateway) selectDaemon(ctx context.Context, requested string) (
 		return resolveWebDaemon(g.localFallbackDaemon())
 	}
 	return resolvedWebDaemon{}, errors.New("unknown_daemon")
-}
-
-func (g *webDaemonGateway) proxyDefault(ctx context.Context, catalog []config.CatalogDaemonConfig) (string, error) {
-	id := g.defaultID(catalog)
-	if id != "" && id == g.active {
-		return id, nil
-	}
-	for _, daemon := range catalog {
-		if daemon.Name == id && (daemon.Local || !g.syncHubs[id]) {
-			return id, nil
-		}
-	}
-	roster, err := g.roster(ctx, "", false)
-	if err != nil {
-		return "", err
-	}
-	for _, daemon := range roster.Daemons {
-		if daemon.Default {
-			return daemon.ID, nil
-		}
-	}
-	return "", nil
 }
 
 func resolveWebDaemon(d config.CatalogDaemonConfig) (resolvedWebDaemon, error) {
@@ -706,9 +672,7 @@ func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon
 	state := probeWebDaemon(ctx, d, g.trustPrivateNetwork)
 	g.mu.Lock()
 	probe.state = state
-	if !fresh {
-		g.health[key] = webDaemonHealthEntry{state: state, expires: time.Now().Add(webDaemonHealthTTL)}
-	}
+	g.health[key] = webDaemonHealthEntry{state: state, expires: time.Now().Add(webDaemonHealthTTL)}
 	delete(g.inflight, key)
 	close(probe.done)
 	g.mu.Unlock()

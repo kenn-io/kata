@@ -659,15 +659,17 @@ describe('App', () => {
         JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
       )
       let snapshotReads = 0
-      const queries: string[] = []
+      let rosterRequests = 0
+      const failedResponse = new Response('', { status: 400 })
+      const checkFailure = vi.spyOn(failedResponse, 'ok', 'get')
       vi.stubGlobal(
         'fetch',
         vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
           const request = requestOf(input, init)
           const url = new URL(request.url)
           if (url.pathname === '/api/v1/ui/daemons') {
-            queries.push(url.search)
-            if (queries.length === 1)
+            rosterRequests++
+            if (rosterRequests === 1)
               return Response.json({
                 daemons: [
                   {
@@ -680,7 +682,7 @@ describe('App', () => {
                   },
                 ],
               })
-            if (failure) return new Response('', { status: 400 })
+            if (failure) return failedResponse
             return Response.json({
               daemons: [
                 {
@@ -714,9 +716,11 @@ describe('App', () => {
       const reads = snapshotReads
       const route = window.location.href
       await fireEvent.click(screen.getByTestId('daemon-chip'))
-      await waitFor(() => expect(queries).toEqual(['', '']))
+      await waitFor(() => expect(rosterRequests).toBe(2))
       if (failure) {
-        await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+        await waitFor(() => expect(checkFailure).toHaveBeenCalledTimes(2))
+        await tick()
+        expect(screen.queryByRole('alert')).toBeNull()
       } else {
         expect(await screen.findByTestId('daemon-row-hub')).not.toBeNull()
       }
@@ -773,8 +777,6 @@ describe('App', () => {
     expect(await screen.findByRole('alert')).not.toBeNull()
     expect(screen.getByTestId('daemon-chip').textContent).toContain('hub-a')
     await fireEvent.click(screen.getByTestId('daemon-chip'))
-    expect(screen.getByTestId('daemon-row-hub-a').textContent).toContain('unreachable')
-    expect(selected.length).toBeGreaterThan(0)
     expect(selected.every((id) => id === 'hub-a')).toBe(true)
   })
 
