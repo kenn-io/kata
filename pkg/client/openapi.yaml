@@ -7431,7 +7431,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.57.0
+  version: 0.58.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -9476,6 +9476,13 @@ paths:
           schema:
             description: Include the effective native close event UID in issue history when available.
             type: boolean
+        - description: Actor the caller acts as. A soft-deleted issue's history is readable when restore would accept this actor; an authenticated principal's own actor takes precedence. Used only with issue= on a soft-deleted issue; ignored otherwise.
+          explode: false
+          in: query
+          name: actor
+          schema:
+            description: Actor the caller acts as. A soft-deleted issue's history is readable when restore would accept this actor; an authenticated principal's own actor takes precedence. Used only with issue= on a soft-deleted issue; ignored otherwise.
+            type: string
       responses:
         "200":
           content:

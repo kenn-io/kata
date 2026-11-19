@@ -303,6 +303,18 @@ History includes events from earlier projects after a move only when the caller
 can access those projects. Scoped credentials receive the same authorized
 history projection as issue detail.
 
+A soft-deleted issue's history, including its `issue.soft_deleted` event, is
+readable by callers the restore action would accept. Send the actor you would
+restore as in the `actor` query parameter; an authenticated principal's own
+actor takes precedence, as it does for restore. The same attributed write and
+claim checks apply, so on a federated project only the claim holder reads it
+while another actor's claim is live. Every refusal (an API error below 500
+other than a hub error), including an anonymous `--insecure-readonly` caller,
+answers `issue_not_found`; 5xx, `federation_offline` and `hub_claim_failed` keep
+their status. When the daemon is embedded under a host access controller, a
+soft-deleted issue's history always answers `issue_not_found`. `actor` is used
+only with `issue=` on a soft-deleted issue and is ignored otherwise.
+
 Clients that need close evidence can set
 `include_effective_close_event_uid=true`. The response includes
 `effective_close_event_uid` when a visible native close currently supplies the
@@ -323,6 +335,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.58.0` | `GET /api/v1/projects/{project_id}/events` accepts `actor` so callers who may restore a soft-deleted issue can read its history. |
 | `0.57.0` | Cron run rows carry `job_name`, `workflow_name` and `issue_short_id`, resolved when read; deleted jobs, workflows and issues still name their runs. |
 | `0.56.0` | Direct-spoke ingest returns `403 federation_project_not_enrolled` instead of `403 auth_invalid` when pushed work touches an issue whose current project has no matching push enrollment for the spoke and actor. The message names the issue but not the project, which the spoke has not joined. |
 | `0.55.0` | `GET /projects/{project_id}/federation/search` lets a direct spoke ask its hub to answer a search by meaning over a shared project. |
