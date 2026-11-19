@@ -1,14 +1,27 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
+import childProcess from 'node:child_process';
+import {syncBuiltinESMExports} from 'node:module';
 import {pathToFileURL} from 'node:url';
-const [userPath,projectPath,workspace,projectExecutable,transition,reason]=process.argv.slice(2),root=process.env.OPENCLAW_TEST_ROOT;
+const [userPath,projectPath,workspace,projectExecutable,transition,reason]=process.argv.slice(2);
+// This fixture checks scope ownership and session identity. Native process startup
+// can exceed the hook's short deadline on busy runners; native execution and
+// timeout behavior are covered by the behavior and timeout fixtures.
+const recordedCalls=[];
+function recordSuccessfulAttentionCommand(executable,args,options,callback) {
+  assert.deepEqual(args.slice(0,3),['agent-hook','attention-native','openclaw']);
+  assert.ok(['start','end'].includes(args[3]));
+  recordedCalls.push({executable,args:[...args],cwd:options.cwd});
+  queueMicrotask(()=>callback(null,'',''));
+  return {};
+}
+childProcess.execFile=recordSuccessfulAttentionCommand;
+syncBuiltinESMExports();
 const user=(await import(pathToFileURL(userPath))).default,project=(await import(pathToFileURL(projectPath))).default;
 const config={plugins:{entries:{[user.id]:{enabled:true,hooks:{allowConversationAccess:true}},[project.id]:{enabled:true,hooks:{allowConversationAccess:true}}}}};
 function capture(plugin){let dispose;const handlers=new Map();plugin.register({config,on:(n,f)=>handlers.set(n,f),lifecycle:{onDispose(fn){dispose=fn}}});return {handlers,dispose:()=>dispose()}}
 const u=capture(user);let p=capture(project);
 const ctx={agentId:'example-agent',sessionId:'one',sessionKey:'agent:example-agent:main',workspaceDir:workspace,hookInvocation:{assertActive(){}}};
-let calls=()=>fs.readFileSync(path.join(root,'calls.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+const calls=()=>recordedCalls;
 function suspendProject(){if(transition==='dispose')p.dispose();else config.plugins.entries[project.id].hooks.allowConversationAccess=false}
 function end(sessionId){const event={sessionId,sessionKey:ctx.sessionKey,reason},nativeContext={sessionId,sessionKey:ctx.sessionKey,agentId:ctx.agentId};return Promise.all([u.handlers.get('session_end')(event,nativeContext),p.handlers.get('session_end')(event,nativeContext)])}
 await p.handlers.get('before_prompt_build')({},ctx);assert.equal(calls().filter(c=>c.args[3]==='start').length,1);
