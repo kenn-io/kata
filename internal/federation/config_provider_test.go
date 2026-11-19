@@ -629,7 +629,7 @@ func TestReconcileProviderRejoinsDetachedProject(t *testing.T) {
 			var issue db.Issue
 			var event db.Event
 			if !tc.empty {
-				issue, event, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local task", Author: "worker"})
+				issue, event, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local task", Author: "Example User"})
 				require.NoError(t, err)
 			}
 			credentials := config.DefaultFederationCredentialStore()
@@ -658,6 +658,9 @@ func TestReconcileProviderRejoinsDetachedProject(t *testing.T) {
 			binding, err := store.FederationBindingByProject(ctx, joined.ID)
 			require.NoError(t, err)
 			assert.Equal(t, tc.intent == "collaborate", binding.PushEnabled)
+			if tc.intent == "collaborate" && !tc.empty {
+				assert.Zero(t, binding.PushCursorEventID)
+			}
 			if tc.empty {
 				events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: joined.ID, Limit: 10})
 				require.NoError(t, err)

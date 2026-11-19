@@ -1327,9 +1327,6 @@ the approved identity and permissions.
   tasks and authors, then use the hub's project identity for federation.
   It is not an automatic fallback when an ordinary connection finds local data.
 
-`read_only` and `collaborate` can also rejoin a detached local project whose
-UID matches the approved hub project, keeping its tasks and event history.
-
 Kata saves its candidate credential before asking the helper for approval.
 Pending approval, sign-in waits, and temporary failures retry the same request,
 including after restart. A `denied` or `conflict` decision stops automatic
