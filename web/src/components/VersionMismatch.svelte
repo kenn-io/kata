@@ -8,10 +8,6 @@
   let { onReload = () => window.location.reload() }: Props = $props()
 </script>
 
-<svelte:head>
-  <title>Kata was updated</title>
-</svelte:head>
-
 <section class="version-mismatch" role="alert" aria-labelledby="version-mismatch-heading">
   <h2 id="version-mismatch-heading">Kata was updated</h2>
   <p>This tab could not load the current application files. Reload it to use the latest version.</p>

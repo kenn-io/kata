@@ -345,8 +345,10 @@
 
   $effect(() => {
     if (
-      !versionMismatch &&
-      (mode === 'loading' || (route.kind !== 'route-error' && !authority?.snapshot))
+      versionMismatch ||
+      mode === 'loading' ||
+      route.kind === 'route-error' ||
+      !authority?.snapshot
     ) {
       document.title = 'Kata'
     }
