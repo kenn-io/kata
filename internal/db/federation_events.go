@@ -308,7 +308,7 @@ func DirectLinkPeers(event FoldEvent) (map[string]bool, error) {
 	}
 	var peers map[string]bool
 	add := func(uid string) {
-		if uid != "" && uid != event.IssueUID {
+		if uid != "" {
 			if peers == nil {
 				peers = make(map[string]bool)
 			}

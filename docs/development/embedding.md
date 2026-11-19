@@ -381,9 +381,10 @@ spoke. Other errors report that authorization is unavailable. The route handles
 ingest admission once for the batch. The peer operation checks project access
 within that admission.
 
-Other link removals, moves, and a displaced parent known only to the hub require ordinary same-actor
-authority. Without that authority, the batch stays pending at its original cursor. Requests with
-an additional in-process principal also require matching project actors.
+Other link removals, moves, and a displaced parent known only to the hub require
+ordinary same-actor authority. Without that authority, the batch stays pending at
+its original cursor. Requests with an additional in-process principal also
+require matching project actors.
 
 ## Restricted embedding profile
 

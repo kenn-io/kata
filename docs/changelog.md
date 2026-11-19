@@ -41,6 +41,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   fix it. Upgrade a federated hub and its spokes in one window: a hub that
   refuses a pushed definition can quarantine that spoke's relay batch.
 
+- Remove or replace a synced cross-project parent when a host supports
+  project-scoped actors. Later changes continue syncing with the updated link.
 - Let a service manager own the local daemon. Set top-level `autostart = false`
   in `config.toml`, and Kata commands, including `kata daemon recover`, wait up
   to 30 seconds for the supervised daemon instead of starting their own. See

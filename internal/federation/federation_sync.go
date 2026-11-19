@@ -1932,11 +1932,7 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 func directLinkProjects(ctx context.Context, store db.Storage, events []db.Event) (map[int64]bool, error) {
 	peers := map[string]bool{}
 	for _, event := range events {
-		fold := db.FoldEvent{Type: event.Type, UID: event.UID, Payload: []byte(event.Payload)}
-		if event.IssueUID != nil {
-			fold.IssueUID = *event.IssueUID
-		}
-		additions, err := db.DirectLinkPeers(fold)
+		additions, err := db.DirectLinkPeers(db.FoldEvent{Type: event.Type, UID: event.UID, Payload: []byte(event.Payload)})
 		if err != nil {
 			return nil, err
 		}
