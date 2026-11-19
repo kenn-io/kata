@@ -7,7 +7,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"strings"
 
@@ -93,8 +92,8 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		if err != nil {
 			return nil, err
 		}
-		ctx = db.WithMetadataPatchHook(ctx, func(ctx context.Context, tx *sql.Tx, issue db.Issue) (map[string]jsontext.Value, error) {
-			return stampIssueMetadataPatch(ctx, tx, issue, in.Body.Patch, cfg.DefaultTimezone)
+		ctx = db.WithMetadataPatchHook(ctx, func(_ context.Context, _ *sql.Tx, issue db.Issue) (map[string]jsontext.Value, error) {
+			return metadata.StampScheduleZones(in.Body.Patch, string(issue.Metadata), cfg.DefaultTimezone)
 		})
 		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 			IssueID:    iss.ID,
@@ -139,24 +138,6 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		}
 		return out, nil
 	}
-}
-
-func stampIssueMetadataPatch(ctx context.Context, tx *sql.Tx, issue db.Issue, patch map[string]jsontext.Value, defaultZone string) (map[string]jsontext.Value, error) {
-	_, timezonePatched := patch["timezone"]
-	if issue.RecurrenceID != nil && len(patch["scheduled_on"]) > 0 && !timezonePatched {
-		var zone string
-		if err := tx.QueryRowContext(ctx, `SELECT timezone FROM recurrences WHERE id=$1 AND project_id=$2`, *issue.RecurrenceID, issue.ProjectID).Scan(&zone); err != nil {
-			return nil, err
-		}
-		schedule := map[string]jsontext.Value{"scheduled_on": patch["scheduled_on"]}
-		stamped, err := metadata.StampScheduleZones(schedule, string(issue.Metadata), zone)
-		if err != nil {
-			return nil, err
-		}
-		patch = maps.Clone(patch)
-		patch["scheduled_on"] = stamped["scheduled_on"]
-	}
-	return metadata.StampScheduleZones(patch, string(issue.Metadata), defaultZone)
 }
 
 func parseMetadataPatchGuard(

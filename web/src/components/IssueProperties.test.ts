@@ -201,18 +201,14 @@ describe('IssueProperties', () => {
     renderProperties({
       issue: makeIssue({
         scheduled_on_date: '2026-08-31',
-        deadline_on_date: '2026-09-02',
         metadata: {
           scheduled_on: '2026-09-01T09:00[Asia/Tokyo]',
-          deadline_on: '2026-09-02T09:00[Europe/Paris]',
         },
       }),
     })
     expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toContain('Aug 31')
     await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
     expect(screen.getByRole('button', { name: /Scheduled: Aug 31/ })).toBeTruthy()
-    await fireEvent.click(screen.getByRole('button', { name: 'Edit due date' }))
-    expect(screen.getByRole('button', { name: /Due: Sep 2/ })).toBeTruthy()
   })
 
   it.each([

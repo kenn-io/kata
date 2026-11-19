@@ -219,7 +219,7 @@ func (s *Store) CreateRecurrenceForIssue(
 			return fmt.Errorf("walk after initial occurrence: %w", err)
 		}
 		updatedMetadata, err := db.ComposeExistingRecurrenceIssueMetadata(
-			jsontext.Value(issue.Metadata), *firstOccurrence, create.Timezone, input.DefaultTimezone,
+			jsontext.Value(issue.Metadata), *firstOccurrence, create.Timezone,
 		)
 		if err != nil {
 			return fmt.Errorf("compose initial recurrence issue metadata: %w", err)
@@ -517,7 +517,7 @@ func (s *Store) MaterializeNext(
 	var output db.MaterializeNextOut
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		var err error
-		output, err = s.materializeNextTx(ctx, tx, recurrenceID, afterKey, actor, "")
+		output, err = s.materializeNextTx(ctx, tx, recurrenceID, afterKey, actor)
 		return err
 	})
 	return output, err
@@ -529,7 +529,6 @@ func (s *Store) materializeNextTx(
 	recurrenceID int64,
 	afterKey string,
 	actor string,
-	defaultTimezone string,
 ) (db.MaterializeNextOut, error) {
 	var buffer recurrenceScanBuffer
 	var projectUID, projectName string
@@ -566,7 +565,7 @@ revision=revision+1, updated_at=$1 WHERE id=$2`, storedTime(time.Now()), current
 		}
 		return db.MaterializeNextOut{}, mapSQLError(err, nil)
 	}
-	return s.materializeOccurrenceTx(ctx, tx, current, projectUID, projectName, *next, actor, defaultTimezone)
+	return s.materializeOccurrenceTx(ctx, tx, current, projectUID, projectName, *next, actor)
 }
 
 func (s *Store) materializeOccurrenceTx(
@@ -577,10 +576,9 @@ func (s *Store) materializeOccurrenceTx(
 	projectName string,
 	occurrenceKey string,
 	actor string,
-	defaultTimezone string,
 ) (db.MaterializeNextOut, error) {
 	issueMetadata, err := db.ComposeRecurrenceIssueMetadata(
-		jsontext.Value(current.TemplateMetadata), occurrenceKey, current.Timezone, defaultTimezone,
+		jsontext.Value(current.TemplateMetadata), occurrenceKey, current.Timezone,
 	)
 	if err != nil {
 		return db.MaterializeNextOut{}, fmt.Errorf("compose recurrence issue metadata: %w", err)

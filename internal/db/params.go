@@ -93,7 +93,6 @@ type CreateIssueParams struct {
 // receipt after losing the response.
 type CloseIssueParams struct {
 	IssueID                int64
-	DefaultTimezone        string
 	ExpectedProjectID      int64
 	Reason                 string
 	Actor                  string
@@ -704,8 +703,7 @@ type CreateRecurrenceIn struct {
 // CreateRecurrenceForIssueIn creates a recurrence and attaches an existing
 // issue as its first occurrence in the same transaction.
 type CreateRecurrenceForIssueIn struct {
-	IssueID         int64
-	DefaultTimezone string
+	IssueID int64
 	// IfMatchRev, when set, is the issue revision the caller read; the
 	// attachment fails with RevisionConflictError if the issue moved on.
 	IfMatchRev *int64

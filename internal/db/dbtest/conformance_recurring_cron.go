@@ -737,7 +737,7 @@ func checkRecurringTemplateProtection(t *testing.T, s db.Storage) error {
 		require.ErrorIs(t, err, db.ErrInvalidRecurrence)
 		_, err = s.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{IssueID: issue.ID, Recurrence: bad})
 		require.ErrorIs(t, err, db.ErrInvalidRecurrence)
-		_, err = db.ComposeRecurrenceIssueMetadata(raw, "2026-01-01", "UTC", "")
+		_, err = db.ComposeRecurrenceIssueMetadata(raw, "2026-01-01", "UTC")
 		require.ErrorIs(t, err, db.ErrInvalidRecurrence, "stored templates must also fail closed at materialization")
 		after, err := s.MaxEventID(ctx)
 		require.NoError(t, err)

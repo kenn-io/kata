@@ -1816,7 +1816,7 @@ func (d *Store) closeIssueGuarded(
 	}
 	if p.Reason == "done" && issue.RecurrenceID != nil && issue.OccurrenceKey != nil {
 		if _, err := d.materializeNextTx(ctx, tx, *issue.RecurrenceID,
-			*issue.OccurrenceKey, p.Actor, p.DefaultTimezone); err != nil {
+			*issue.OccurrenceKey, p.Actor); err != nil {
 			return db.Issue{}, nil, false, fmt.Errorf("materialize next recurrence: %w", err)
 		}
 		generated, err := eventsAfterTx(ctx, tx, lastEventID)

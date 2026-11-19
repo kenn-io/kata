@@ -367,7 +367,6 @@ func TestDatesUndoWritesThePreviousDatesBack(t *testing.T) {
 		scheduled, deadline      string
 	}{
 		{"dates", map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-20"}, map[string]string{"scheduled_on": "2026-11-03[UTC]"}, map[string]string{"scheduled_on": "2026-11-02[UTC]", "deadline_on": "2026-11-20[UTC]"}, "tomorrow", ""},
-		{"saved zone", map[string]string{"scheduled_on": "2026-11-02T09:00[Europe/Paris]", "timezone": "Asia/Tokyo"}, map[string]string{"timezone": "Asia/Tokyo"}, map[string]string{"scheduled_on": "2026-11-02T09:00[Europe/Paris]", "timezone": "Asia/Tokyo"}, "", ""},
 		{"legacy zone", map[string]string{"scheduled_on": "2026-11-02T09:00", "timezone": "Europe/Paris"}, map[string]string{"scheduled_on": "2026-11-02T09:00[Asia/Tokyo]", "timezone": "Europe/Paris"}, map[string]string{"scheduled_on": "2026-11-02T09:00[Europe/Paris]", "timezone": "Europe/Paris"}, "2026-11-02T09:00[Asia/Tokyo]", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -383,23 +382,6 @@ func TestDatesUndoWritesThePreviousDatesBack(t *testing.T) {
 			assert.Empty(t, h.m.undoHistory.entries)
 		})
 	}
-}
-
-func TestDatesUndoRestoresLegacyRecurrenceZone(t *testing.T) {
-	h := newDatesHarness(t, nil, viewDetail)
-	_, err := h.env.DB.CreateRecurrenceForIssue(t.Context(), db.CreateRecurrenceForIssueIn{
-		IssueID: h.issue.ID, Recurrence: db.CreateRecurrenceIn{ProjectID: h.issue.ProjectID, Actor: "alice", Rule: "FREQ=WEEKLY", DTStart: "2026-11-02", Timezone: "Europe/Paris", Template: db.RecurrenceTemplate{Title: "Weekly"}},
-	})
-	require.NoError(t, err)
-	_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: h.issue.ID, Actor: "alice", Patch: map[string]jsontext.Value{"timezone": jsontext.Value(`null`)}})
-	require.NoError(t, err)
-	h.patchDaemon(map[string]string{"scheduled_on": "2026-11-02T09:00", "deadline_on": "2026-11-20T09:00"})
-	h.reload()
-	h.openForm()
-	h.fill("2026-11-02T09:00[Asia/Tokyo]", "2026-11-20T09:00[Asia/Tokyo]")
-	h.save()
-	h.undo()
-	assert.Equal(t, map[string]string{"scheduled_on": "2026-11-02T09:00[Europe/Paris]", "deadline_on": "2026-11-20T09:00[UTC]"}, h.stored())
 }
 
 func TestDatesUndoRestoresDatesSetOnAnIssueWithNone(t *testing.T) {

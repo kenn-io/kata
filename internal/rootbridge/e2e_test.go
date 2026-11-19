@@ -390,8 +390,7 @@ func testE2EPlanningFields(t *testing.T, executable string, backend e2eBackend) 
 
 	_, err = h.database.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
 		IssueID: h.issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{
-			"scheduled_on": jsontext.Value(`"2026-08-22T09:00:00"`),
-			"timezone":     jsontext.Value(`"Europe/Paris"`),
+			"scheduled_on": jsontext.Value(`"2026-08-22T09:00:00[Europe/Paris]"`),
 		},
 	})
 	require.NoError(t, err)
@@ -423,7 +422,7 @@ func testE2EPlanningFields(t *testing.T, executable string, backend e2eBackend) 
 	assert.False(t, resolved.Conflicted)
 	issue, err = h.database.store.IssueByID(t.Context(), h.issue.ID)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"scheduled_on":"2026-08-23T09:00:00[Europe/Paris]","timezone":"Europe/Paris"}`, string(issue.Metadata))
+	assert.JSONEq(t, `{"scheduled_on":"2026-08-23T09:00:00[Europe/Paris]"}`, string(issue.Metadata))
 }
 
 func testE2ERestorePause(t *testing.T, executable string, backend e2eBackend) {

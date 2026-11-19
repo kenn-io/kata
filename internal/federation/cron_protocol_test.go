@@ -198,31 +198,6 @@ func TestCronReturnedPageRequiresFeaturesEvenWithoutLatch(t *testing.T) {
 	}
 }
 
-func TestOldPullerRejectsZonedDateEvent(t *testing.T) {
-	store := nativeStore(t, "sqlite")
-	server := nativeHTTP(t, store)
-	project, err := store.CreateProject(t.Context(), "hub-project")
-	require.NoError(t, err)
-	_, err = store.EnableProjectFederation(t.Context(), project.ID, "worker")
-	require.NoError(t, err)
-	origin, err := uid.New()
-	require.NoError(t, err)
-	grant, err := store.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{SpokeInstanceUID: origin, ProjectID: &project.ID, Capabilities: "pull", Actor: "worker"})
-	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Scheduled work", Author: "worker"})
-	require.NoError(t, err)
-	_, err = store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-08-21[Asia/Tokyo]"`)}})
-	require.NoError(t, err)
-	path := fmt.Sprintf("%s/api/v1/projects/%d/federation/events?after_id=0", server.URL, project.ID)
-	resp, data := nativeRequest(t, path, grant.Token, db.CronEventFeature, http.MethodGet, nil)
-	require.Equal(t, http.StatusConflict, resp.StatusCode, string(data))
-	require.Contains(t, string(data), "unsupported_event_features")
-	require.NotContains(t, string(data), "2026-08-21")
-	resp, data = nativeRequest(t, path, grant.Token, db.SupportedEventFeatures, http.MethodGet, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(data))
-	require.Contains(t, string(data), "2026-08-21[Asia/Tokyo]")
-}
-
 func TestCronClientRejectsUnknownRequirementsBeforeReset(t *testing.T) {
 	for _, required := range []string{"future_v2", "cron_notify_children_v1"} {
 		t.Run(required, func(t *testing.T) {
@@ -431,31 +406,25 @@ func TestCronFederationBackendPairs(t *testing.T) {
 	}
 }
 
-func TestZonedDatePublicationRequiresHubFeature(t *testing.T) {
-	posts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set(db.EventFeaturesHeader, db.CronEventFeature)
-		if r.Method == http.MethodPost {
-			posts++
-			return
-		}
-		_, _ = w.Write([]byte(`{"project_id":1,"project_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAA","replay_horizon_event_id":1,"baseline_through_event_id":1}`))
-	}))
-	t.Cleanup(server.Close)
-	client, err := federation.NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
-	require.NoError(t, err)
-	_, err = client.IngestProjectEvents(t.Context(), 1, []api.FederationIngestEventEnvelope{{
-		EventID: 1, Type: "issue.created", Payload: jsontext.Value(`{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}`),
-	}})
-	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-	require.Zero(t, posts)
-}
-
 // Every required format must survive preflight, regardless of event order.
-func TestMixedMoveCronPublicationRequiresAllFeatures(t *testing.T) {
-	for _, first := range []string{"issue.moved", "cron.job.created"} {
-		t.Run(first, func(t *testing.T) {
+func TestPublicationRequiresEventFeatures(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		events []api.FederationIngestEventEnvelope
+	}{
+		{"move first", []api.FederationIngestEventEnvelope{
+			{EventID: 1, Type: "issue.moved", Payload: jsontext.Value(`{}`)},
+			{EventID: 2, Type: "cron.job.created", Payload: jsontext.Value(`{}`)},
+		}},
+		{"cron first", []api.FederationIngestEventEnvelope{
+			{EventID: 1, Type: "cron.job.created", Payload: jsontext.Value(`{}`)},
+			{EventID: 2, Type: "issue.moved", Payload: jsontext.Value(`{}`)},
+		}},
+		{"zoned date", []api.FederationIngestEventEnvelope{
+			{EventID: 1, Type: "issue.created", Payload: jsontext.Value(`{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}`)},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			posts := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -470,17 +439,9 @@ func TestMixedMoveCronPublicationRequiresAllFeatures(t *testing.T) {
 			t.Cleanup(server.Close)
 			client, err := federation.NewClient(t.Context(), server.URL, "token", clientpkg.Opts{})
 			require.NoError(t, err)
-			kinds := []string{"issue.moved", "cron.job.created"}
-			if first == "cron.job.created" {
-				kinds[0], kinds[1] = kinds[1], kinds[0]
-			}
-			events := []api.FederationIngestEventEnvelope{
-				{EventID: 1, Type: kinds[0], Payload: jsontext.Value(`{}`)},
-				{EventID: 2, Type: kinds[1], Payload: jsontext.Value(`{}`)},
-			}
-			_, err = client.IngestProjectEvents(t.Context(), 1, events)
+			_, err = client.IngestProjectEvents(t.Context(), 1, tc.events)
 			require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
-			require.Zero(t, posts, "a cron-only peer cannot receive a move in any batch order")
+			require.Zero(t, posts)
 		})
 	}
 }
