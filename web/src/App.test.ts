@@ -4233,13 +4233,47 @@ describe('App', () => {
   })
 
   it('replaces the shell with a visible version mismatch after guarded recovery fails', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
+    const current = snapshot()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(
+          input instanceof Request ? input.url : String(input),
+          window.location.origin,
+        )
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          return Response.json({
+            ...current,
+            selected: {
+              state: 'available',
+              issue: current.collection[0],
+              comments: [],
+              labels: [],
+              links: [],
+              recurrences: [],
+              history: [],
+            },
+          })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        return Response.json({})
+      }),
+    )
     render(App)
+    await waitFor(() => expect(document.title).toBe('example-project#a1 Example issue · Kata'))
 
     window.dispatchEvent(new Event('kata:versionMismatch'))
 
     expect(await screen.findByRole('alert')).not.toBeNull()
     expect(screen.getByRole('heading', { name: 'Kata was updated' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Reload Kata' })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Kata was updated · Kata'))
   })
 })
 
