@@ -1122,8 +1122,12 @@ type Runner struct {
 	// is nil when the pass has no parent activity lease.
 	OnPulledEventsFrom func(projectID int64, events []db.Event, fork activity.Admission)
 	DrainAdmission     activity.WaitableAdmission
-	// refusalClock reads the time that schedules relay refusal retries. Nil
-	// means time.Now.
+	// Retries holds the automatic runner's per-binding retry schedules so a
+	// status reader can show them. Nil gives Run a private set. Run clears it
+	// when it starts.
+	Retries *SyncRetries
+	// refusalClock reads the time that schedules sync retries. Nil means
+	// time.Now.
 	refusalClock func() time.Time
 	// debounceTimer starts the wait between a wake and the pass it causes. Nil
 	// means a real timer.
@@ -1183,7 +1187,7 @@ func (r *Runner) runOnce(
 	ctx context.Context,
 	validateLease func(context.Context) error,
 	only map[int64]bool,
-	refusals relayRefusalRetries,
+	retries *SyncRetries,
 ) (retry <-chan struct{}, denied bool, remaining map[int64]bool, err error) {
 	var scan *activity.Lease
 	if r.DrainAdmission != nil {
@@ -1220,6 +1224,11 @@ func (r *Runner) runOnce(
 	if err != nil {
 		return nil, false, nil, err
 	}
+	active := make(map[int64]bool, len(spokes))
+	for _, spoke := range spokes {
+		active[spoke.binding.ProjectID] = true
+	}
+	retries.retain(active)
 	if len(spokes) == 0 {
 		return nil, false, nil, nil
 	}
@@ -1229,7 +1238,7 @@ func (r *Runner) runOnce(
 	}
 	var errs []error
 	for _, spoke := range spokes {
-		if refusals.blocked(spoke.binding, r.refusalNow()) || (len(only) > 0 && !only[spoke.binding.ProjectID]) {
+		if (len(only) > 0 && !only[spoke.binding.ProjectID]) || r.retryBlocked(ctx, retries, spoke, credentialStore) {
 			continue
 		}
 		var drain *activity.Lease
@@ -1240,13 +1249,13 @@ func (r *Runner) runOnce(
 				return retry, true, remaining, errors.Join(errs...)
 			}
 		}
-		spokeRemaining, spokeErr := func() (bool, error) {
+		spokeRemaining, identity, spokeErr := func() (bool, [32]byte, error) {
 			if drain != nil {
 				defer drain.Release()
 			}
 			return r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
 		}()
-		refusals.record(spoke.binding, spokeErr, r.effectiveInterval(), r.refusalNow())
+		retries.record(spoke.binding.ProjectID, identity, spokeErr, r.effectiveInterval(), r.refusalNow())
 		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
 			return nil, false, nil, spokeErr
 		}
@@ -1267,32 +1276,95 @@ func (r *Runner) runOnce(
 	return nil, false, remaining, errors.Join(errs...)
 }
 
+// retryBlocked reports whether a retry schedule holds the spoke back from this
+// pass. It reads the stored credential only for a spoke whose schedule depends
+// on it, so a changed credential or binding is noticed on the next pass. A read
+// failure lets the turn run: the turn reads the credential again and records
+// the error without contacting the hub.
+func (r *Runner) retryBlocked(
+	ctx context.Context,
+	retries *SyncRetries,
+	spoke activeSpokeBinding,
+	credentialStore config.FederationCredentialStore,
+) bool {
+	switch retries.waiting(spoke.binding.ProjectID) {
+	case "":
+		return false
+	case syncRetryRelayCrossProjectLinks:
+		return retries.blocked(spoke.binding.ProjectID, [32]byte{}, r.refusalNow())
+	}
+	credential, _, err := credentialStore.FederationCredential(ctx, spoke.project.UID)
+	if err != nil {
+		return false
+	}
+	identity, err := syncRetryIdentity(spoke.binding, credential)
+	if err != nil {
+		return false
+	}
+	return retries.blocked(spoke.binding.ProjectID, identity, r.refusalNow())
+}
+
+// retryIdentityAfterTurn fingerprints a refused or throttled turn, so the next
+// pass can tell whether anything changed since. The binding is read as the
+// turn left it, because a turn can change it, for example by recording an
+// upstream relay revocation. runSpoke calls this while it still holds the
+// project's sync lock, so a rebind that waits on that lock lands after the
+// fingerprint. The credential is the one the turn sent: a join that stores a
+// new token without the lock, while a request with the old token is in flight,
+// still differs from it, and the next pass tries the new token at once.
+func (r *Runner) retryIdentityAfterTurn(
+	ctx context.Context,
+	spoke activeSpokeBinding,
+	credential config.FederationCredential,
+	turnErr error,
+) ([32]byte, error) {
+	if reason, _, _ := classifySyncRetry(turnErr); reason == "" {
+		return [32]byte{}, nil
+	}
+	binding, err := r.DB.FederationBindingByProject(ctx, spoke.binding.ProjectID)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("reload federation binding for retry: %w", err)
+	}
+	return syncRetryIdentity(binding, credential)
+}
+
 // runSpoke gives one spoke a sync turn and reports whether that turn stopped
-// at its budget with deliveries still pending.
+// at its budget with deliveries still pending. A turn that ends with a
+// retryable hub refusal also returns the retry identity it used, read while
+// the turn still holds the project's sync lock.
 func (r *Runner) runSpoke(
 	ctx context.Context,
 	spoke activeSpokeBinding,
 	credentialStore config.FederationCredentialStore,
 	validateLease func(context.Context) error,
 	drain *activity.Lease,
-) (remaining bool, resultErr error) {
+) (remaining bool, identity [32]byte, resultErr error) {
 	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-		return false, err
+		return false, identity, err
 	}
 	finishSync, err := federationcoord.BeginSync(ctx,
 		federationcoord.Key(r.DB.InstanceUID(), spoke.binding.ProjectID), r.DB, spoke.binding.ProjectID)
 	if err != nil {
-		return false, fmt.Errorf("coordinate federation sync: %w", err)
+		return false, identity, fmt.Errorf("coordinate federation sync: %w", err)
 	}
 	defer finishSync()
 	binding, err := r.DB.FederationBindingByProject(ctx, spoke.binding.ProjectID)
 	if err != nil {
-		return false, err
+		return false, identity, err
 	}
 	if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
-		return false, nil
+		return false, identity, nil
 	}
+	// turnCredential is the stored credential this turn sends to the hub.
+	var turnCredential config.FederationCredential
 	defer func() {
+		// Fingerprint before the result hook so the schedule belongs to
+		// the turn, not to a change made after it.
+		var identityErr error
+		identity, identityErr = r.retryIdentityAfterTurn(ctx, spoke, turnCredential, resultErr)
+		if identityErr != nil {
+			resultErr = errors.Join(resultErr, identityErr)
+		}
 		if r.OnSpokeResult != nil && (!remaining || resultErr != nil) && !errors.Is(resultErr, errFederationRunnerLeaseInvalid) {
 			r.OnSpokeResult(spoke.binding.ProjectID, resultErr)
 		}
@@ -1300,8 +1372,9 @@ func (r *Runner) runSpoke(
 
 	cred, _, err := credentialStore.FederationCredential(ctx, spoke.project.UID)
 	if err != nil {
-		return false, errors.Join(err, r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
+		return false, identity, errors.Join(err, r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
 	}
+	turnCredential = cred
 	cred = config.FederationTransportCredential(
 		binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred,
 	)
@@ -1309,7 +1382,11 @@ func (r *Runner) runSpoke(
 	var errs []error
 	if err := retryPendingClaimsOnceWithFence(ctx, r.DB, binding, cred, opts, validateLease); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
-			return false, err
+			return false, identity, err
+		}
+		if hubAskedToWait(err) {
+			// The hub asked this binding to wait; replication waits too.
+			return false, identity, err
 		}
 		errs = append(errs, err)
 	}
@@ -1329,19 +1406,19 @@ func (r *Runner) runSpoke(
 	}
 	if err := syncErr; err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
-			return false, err
+			return false, identity, err
 		}
 		errs = append(errs, err)
 	}
 	if len(errs) == 0 {
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
-			return false, err
+			return false, identity, err
 		}
 		if err := r.DB.ClearFederationSyncError(ctx, binding.ProjectID); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	return remaining, errors.Join(errs...)
+	return remaining, identity, errors.Join(errs...)
 }
 
 // RetryPendingClaimsOnce retries offline spoke claim requests against their
@@ -1437,6 +1514,10 @@ func retryPendingClaimsOnceWithFence(
 				return err
 			}
 			errs = append(errs, err)
+			if hubAskedToWait(err) {
+				// Leave the remaining claims queued for the next turn.
+				break
+			}
 		}
 	}
 	if err := errors.Join(errs...); err != nil {
@@ -1524,7 +1605,9 @@ func retryPendingClaim(
 			}
 		}
 		if markErr := store.MarkPendingClaimAttempt(ctx, pending.RequestUID, err.Error(), now); markErr != nil {
-			return markErr
+			// Keep the hub's answer so a throttled claim still ends the
+			// turn and its Retry-After still counts.
+			return errors.Join(err, markErr)
 		}
 		return err
 	}
@@ -1633,7 +1716,15 @@ func monitorFederationRunnerLease(
 
 func (r *Runner) run(ctx context.Context, validateLease func(context.Context) error) error {
 	interval := r.effectiveInterval()
-	refusals := make(relayRefusalRetries)
+	retries := r.Retries
+	if retries == nil {
+		retries = NewSyncRetries()
+	}
+	retries.reset()
+	// A runner that stops, such as a PostgreSQL leader waiting to win the
+	// lease back, no longer owns these schedules, so status stops showing
+	// them.
+	defer retries.reset()
 	debounce := r.Debounce
 	if debounce <= 0 {
 		debounce = 50 * time.Millisecond
@@ -1649,7 +1740,7 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 				return err
 			}
 		}
-		retry, denied, remaining, err := r.runOnce(ctx, validateLease, pending, refusals)
+		retry, denied, remaining, err := r.runOnce(ctx, validateLease, pending, retries)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 				return err

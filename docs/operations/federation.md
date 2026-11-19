@@ -629,6 +629,38 @@ bounded turn, and it does not make the runner poll unrelated hubs more often.
 A turn that stops before its outbound intent is drained does not request a
 signaled reset checkpoint; a later turn does.
 
+### Refused and unavailable hubs
+
+On current `main` (unreleased), the runner backs off a project whose hub keeps
+turning it away, so a spoke with many projects stops sending the hub a request
+for each one on every interval and every local write:
+
+| Hub response | First wait | Longest wait | Retries at once when |
+| --- | --- | --- | --- |
+| `401` or `403`, the credential was refused | 1 minute | 15 minutes | the credential, binding, or enabled state changes, or another sync of the project succeeds |
+| `429` or `503`, the hub is throttling or unavailable | the sync interval | 5 minutes, or longer when the hub sends `Retry-After` | the credential, binding, or enabled state changes, or another sync of the project succeeds |
+
+Each wait doubles after a failure of the same kind, and up to a quarter is
+taken off at random so spokes spread their retries. A `Retry-After` hint, in
+seconds or as an HTTP date, sets the shortest wait, capped at one hour; when a
+turn gets several hints, the longest one counts, even when a refusal in the
+same turn sets the reason. A `429` or `503` ends the
+turn, so queued lease requests and the pull and push wait for the next
+attempt. A success clears the schedule. A wait never shortens the sync
+interval, and a wake from a local write does not bring a waiting project
+forward. A refused move of one pushed issue, `403
+federation_project_not_enrolled`, does not count as a refused credential.
+Other projects keep syncing.
+
+`kata federation status` shows a waiting project's reason, last status code,
+failure count, and next attempt, for example `sync retry: hub refused the
+credential (403) on 5 attempts; next attempt 2026-01-01T00:15:00Z; to retry
+now, enroll again on the hub and run the join command it prints`. A
+provider-managed spoke gets no join hint; its provider line says what to do.
+The JSON form carries them in `sync_retry`. The schedule lives in the daemon running the federation runner,
+so restarting it makes a fresh attempt for every project, and with PostgreSQL
+only the runner leader reports it.
+
 ### Relay checkpoint capacity
 
 A relay must be able to recover after the root purges or compacts history.
@@ -2612,7 +2644,9 @@ On current `main` (unreleased), automatic retries wait at least the greater of
 one minute and the sync interval, doubling to a ceiling of the greater of five
 minutes and the interval. Other projects keep syncing. Local edits remain
 available locally but wait until the next due attempt to reach the hub.
-Restarting the spoke daemon makes a fresh attempt immediately.
+`kata federation status` shows the wait as
+`sync retry: relay hub refused cross-project links (409)`. Restarting the
+spoke daemon makes a fresh attempt immediately.
 
 ## Purge and reset
 
