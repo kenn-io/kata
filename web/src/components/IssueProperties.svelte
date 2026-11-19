@@ -202,7 +202,7 @@
 
   function scheduleTime(): string {
     return (
-      issue.issue.metadata.scheduled_on?.match(/T\d{2}:\d{2}(?::\d{2})?$/)?.[0].replace('T', ' ') ??
+      issue.issue.metadata.scheduled_on?.match(/T\d{2}:\d{2}(?::[\d.]+)?/)?.[0].replace('T', ' ') ??
       ''
     )
   }
