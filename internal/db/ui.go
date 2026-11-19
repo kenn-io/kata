@@ -1,6 +1,11 @@
 package db
 
-import "context"
+import (
+	"context"
+	"encoding/json/v2"
+
+	"go.kenn.io/kata/internal/metadata"
+)
 
 // UIStore is the narrow coherent-read contract used by the browser API.
 type UIStore interface {
@@ -93,9 +98,22 @@ func ProjectUIPlanningDates(issue *UIIssue, query UISnapshotQuery, scheduledDefa
 	if err := dates.err(); err != nil {
 		return err
 	}
-	issue.ScheduledOnDate = dates.scheduledOn
+	issue.ScheduledOnDate = selectedZonedScheduleDate(issue.Metadata, dates.scheduledOn)
 	issue.DeadlineOnDate = dates.deadlineOn
 	return nil
+}
+
+func selectedZonedScheduleDate(raw JSONBlob, date string) string {
+	var value struct {
+		ScheduledOn string `json:"scheduled_on"`
+	}
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		return ""
+	}
+	if _, zone := metadata.SplitScheduleZone(value.ScheduledOn); zone != "" {
+		return date
+	}
+	return ""
 }
 
 // UILink enriches a stored link with stable display references for each end.

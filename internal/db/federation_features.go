@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // CronEventFeature identifies support for all cron definitions, runs and native delivery state.
@@ -56,26 +58,15 @@ func MergeEventFeatures(values ...string) string {
 
 // PayloadRequiredFeatures supplements type classification with payload features.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
-	required := EventRequiredFeatures(kind)
 	native, err := payloadHasNativeRecurringState(kind, payload)
+	zoned, zoneErr := payloadHasZonedDate(kind, payload)
 	if err != nil {
 		return "", err
 	}
-	if native {
-		required = MergeEventFeatures(required, CronEventFeature)
+	if zoneErr != nil {
+		return "", zoneErr
 	}
-	return requireZonedDateFeature(kind, payload, required)
-}
-
-func requireZonedDateFeature(kind, payload, required string) (string, error) {
-	zoned, err := payloadHasZonedDate(kind, payload)
-	if err != nil {
-		return "", err
-	}
-	if zoned {
-		required = MergeEventFeatures(required, IssueDateZoneEventFeature)
-	}
-	return required, nil
+	return MergeEventFeatures(EventRequiredFeatures(kind), map[bool]string{true: CronEventFeature}[native], map[bool]string{true: IssueDateZoneEventFeature}[zoned]), nil
 }
 
 func payloadHasZonedDate(kind, payload string) (bool, error) {
@@ -101,8 +92,10 @@ func payloadHasZonedDate(kind, payload string) (bool, error) {
 	for _, key := range []string{"scheduled_on", "deadline_on"} {
 		for _, raw := range []jsontext.Value{body.Metadata[key], body.Diff[key].To} {
 			var value string
-			if len(raw) > 0 && json.Unmarshal(raw, &value) == nil && strings.HasSuffix(value, "]") {
-				return true, nil
+			if len(raw) > 0 && json.Unmarshal(raw, &value) == nil {
+				if _, zone := metadata.SplitScheduleZone(value); zone != "" {
+					return true, nil
+				}
 			}
 		}
 	}

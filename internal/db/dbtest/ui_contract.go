@@ -804,6 +804,25 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		require.Equal(t, "2026-08-31", snapshot.Issues[0].DeadlineOnDate)
 	})
 
+	t.Run("selected issue keeps bare schedule unprojected", func(t *testing.T) {
+		store := open(t)
+		ctx := t.Context()
+		project := createCursorProject(ctx, t, store)
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "Bare schedule", Author: "user-a",
+			Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-11-12T23:30"`)},
+		})
+		require.NoError(t, err)
+		snapshot, err := store.(db.UIStore).ReadUISnapshot(ctx, db.UISnapshotQuery{
+			ProjectUID: project.UID, View: "all-open", SelectedIssueUID: issue.UID,
+			TimeZone: "Asia/Tokyo", DefaultTimezone: "UTC",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, snapshot.SelectedIssue)
+		require.Empty(t, snapshot.SelectedIssue.ScheduledOnDate)
+		require.Equal(t, "2026-11-13", snapshot.Issues[0].ScheduledOnDate)
+	})
+
 	t.Run("selected issues project timed planning dates", func(t *testing.T) {
 		for _, test := range []struct {
 			name      string
