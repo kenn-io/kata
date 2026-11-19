@@ -149,7 +149,7 @@ type ServerConfig struct {
 	// operation answer 503, as in embedded Service construction.
 	Telemetry TelemetryReporter
 
-	// WebDaemons is the client daemon catalog exposed to the first-class web
+	// WebDaemons is the browsable daemon catalog exposed to the first-class web
 	// UI. Credentials remain server-side and are used only by the selected-
 	// daemon proxy. ActiveWebDaemon selects the initial catalog entry.
 	WebDaemons      []config.CatalogDaemonConfig
