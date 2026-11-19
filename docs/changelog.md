@@ -1,13 +1,112 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-18
+last_edited: 2026-11-19
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+**Before upgrading**
+
+- Keep a [backup](operations/backup-restore.md) from before the upgrade. This
+  release upgrades the database from schema 50 to schema 51, and older binaries
+  cannot open the result.
+- PostgreSQL: stop daemons and imports, then run
+  `kata storage postgres migrate` with schema-owner credentials. The migration
+  rebuilds an index on `events` and blocks event writes, so allow an offline
+  window that fits the event log's size. Existing grants stay sufficient.
+  SQLite upgrades in place at startup. See the
+  [schema 51 migration requirements](development/postgres-migrations.md#schema-51-issue-history-index-on-the-event-header).
+- Adoption: to repeat or resume an adoption push, run this release on the hub
+  and the pushing spoke. Once a newer copy wins on the hub, every spoke and
+  relay of that project must upgrade before it can pull again. See
+  [repeating an adoption](operations/federation.md#repeating-an-adoption).
+- Zoned dates: upgrade the hub, every spoke and relay, and every daemon that
+  shares the database *before* anyone writes a date with an explicit `[Zone]`.
+  Older peers cannot read them, so newer peers refuse to exchange them. See
+  [compatibility and rolling upgrades](operations/federation.md#compatibility-and-rolling-upgrades).
+- Search by meaning: upgrade hubs before direct spokes (daemon API 0.55.0). A
+  direct spoke now sends the search text for shared projects to its hub, which
+  embeds it with the hub's embedding provider. Against an older hub, automatic
+  search falls back to word matches. See
+  [semantic search on direct spokes](operations/federation.md#semantic-search-on-direct-spokes).
+- Cron: Kata now refuses schedules that never fire, such as `0 0 30 2 *`
+  (February 30), and the `@manual`, `@triggered`, and `@none` descriptors. Open
+  a job saved earlier with such a schedule in `kata cron job edit <job-uid>` to
+  fix it. Upgrade a federated hub and its spokes in one window: a hub that
+  refuses a pushed definition can quarantine that spoke's relay batch.
+
+- Let a service manager own the local daemon. Set top-level `autostart = false`
+  in `config.toml`, and Kata commands, including `kata daemon recover`, wait up
+  to 30 seconds for the supervised daemon instead of starting their own. See
+  [daemon config](reference/configuration.md#daemon-config).
+- See which daemons a Kata command started on its own: `kata daemon status`
+  shows `started: automatically by a kata command`, and JSON adds
+  `auto_started: true`.
+- Read a supervised daemon's diagnostics after it hangs. Foreground daemons also
+  write to `<KATA_HOME>/runtime/<storage-hash>/daemon.log`, including fatal
+  goroutine dumps, even when the supervisor discards stderr on Linux or macOS.
+  See [daemon and diagnostics](reference/cli.md#daemon-and-diagnostics).
+- Search shared projects by meaning from a direct spoke as soon as it joins.
+  The hub ranks shared issues, so the spoke embeds only its local projects.
+  See [semantic search on direct spokes](operations/federation.md#semantic-search-on-direct-spokes).
+- Catch a cron schedule that never fires when you save it: Kata refuses
+  `0 0 30 2 *` and the `@manual`, `@triggered`, and `@none` descriptors, and
+  still accepts `0 0 29 2 *`. See [cron expressions](reference/cron.md#cron-expressions).
+- See why a cron expression is rejected. The error now includes the parser's
+  message, with hints for `@reboot`, `L`, `W`, `#`, `H`, and `@every`, instead
+  of only `invalid cron expression`.
+- Deliver MCP Events to an HTTPS receiver on your private network, such as a
+  Tailscale host, by pinning its origin to private addresses in
+  `[[mcp_events.trusted_callbacks]]`. Other callbacks stay public-only. See
+  [trusted private callbacks](reference/configuration.md#trusted-private-callbacks).
+- Index with the built-in embeddings server on a slow CPU without stalling. It
+  now gets 8 inputs per request and a 5-minute timeout, and a request that
+  times out is split. Configured endpoints keep 64 inputs and 30 seconds, and
+  explicit `batch_size` and `timeout_seconds` still win.
+- See when cross-project links on the hub, not the spoke, block a relay reset.
+  The spoke reports `409 relay_cross_project_links` as a hub-side
+  refusal and backs off for that project, from one minute up to five, or the
+  sync interval if that is longer. Other projects keep syncing.
+- Find the federation signing keys that share a secret. Startup now fails with
+  `federation signing keys share one secret: keys "key-a" and "key-b"` instead
+  of `federation signing key unavailable`, and `kata doctor` fails its new
+  `config.federation_signing` check. Give each key its own secret.
+- See why `kata doctor`'s `config.daemon` check fails on a hub that enables
+  `[federation.ingress]` without `[federation.signing]`: the details now say so.
+- `kata federation status --project <project>` now shows only that project in
+  human, agent, and JSON output, and exits 4 when the project has no federation
+  status.
+- Name, rename, or clear an enrolled spoke from `kata tui`: press `F`, then `s`
+  for the hub's spoke list, and `N` on a spoke. See the
+  [TUI enrollment workflow](operations/federation.md#tui-enrollment-workflow).
+- See how a cron job or workflow has been doing in `kata tui`. Its detail
+  counts outcomes and draws an outcome strip from the project's latest 100
+  runs.
+- Sync a Linear issue that was created already closed. Kata now clamps a
+  closure time a few milliseconds after `updatedAt` to `updatedAt` instead of
+  failing the whole import.
+- Federate again from a SQLite hub with many bulk-moved issues. Folding a
+  project no longer rechecks every move for every event, so a fold that took
+  163 seconds, past the 60-second client timeout, takes about a second.
+- Run only the semantic indexer from a Postgres-backed Go host with
+  `Service.RunSemanticIndex`, without Kata's federation, sync, and cleanup
+  workers. See [semantic search](development/embedding.md#semantic-search).
+- Connector calls no longer fail with `external connector process failed` when
+  the connector answers and exits but its output pipe closes late, as on a busy
+  Windows host. A response that breaks the protocol reports that error instead.
+- Build from source with Go 1.27.4 or later, which fixes the `net/http`
+  vulnerability GO-2026-6859. Release binaries and images use it too.
+- Retry an attachment upload without a duplicate reference:
+  `kata docbank attachments add --reuse-existing` returns the existing
+  attachment when the retry resolves to the same Docbank version. It needs
+  daemon API 0.47.0. See [issue attachments](reference/cli.md#issue-attachments).
+- Click a task or project in the web UI and see it at once. The UI draws it
+  from data it already holds instead of waiting up to half a second for a
+  remote daemon.
 
 - Click another task in the web UI's list and New task stays available while
   the task's comments, links, and history load. The button had been disabled
@@ -45,7 +144,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Follow the event stream from Go with [`api.Events`](reference/go-client.md#follow-the-event-stream), which frames events, skips any over 8 MiB as an oversized event, and reports a required reset as a typed value. `kata tui` reads its live updates through it: an event over 8 MiB now refetches the view like a sync reset instead of being parsed, and `id:`, `event:` and `data:` lines with no space after the colon are now accepted.
 
-- See which issue is blocking a push when the hub refuses it because the issue now belongs to a project the spoke has not joined. The error names the issue and the missing enrollment, instead of reporting a credential failure, and the spoke keeps pulling hub changes while the push waits.
+- See which issue is blocking a push when the hub refuses it because the issue
+  now belongs to a project the spoke has not joined. Since daemon API 0.56.0 the
+  hub answers `403 federation_project_not_enrolled`, naming the issue and the
+  missing enrollment, instead of `403 auth_invalid`, and the spoke keeps
+  pulling hub changes while the push waits.
 
 - Start the Windows daemon again after a reboot, even when another account's
   process now has the old daemon's PID. Kata used to treat that process as the

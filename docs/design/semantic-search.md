@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-11-10
+last_edited: 2026-11-19
 ---
 
 # Semantic search technical notes
@@ -44,8 +44,10 @@ Non-goals for v1 (future levers, in rough order of expected value):
   untouched.
 - LLM reranking and query expansion (qmd-style stages; they need a
   generation model, which this design deliberately does not require).
-- Federating embeddings. They are local derived state; each daemon embeds
-  what it stores.
+- Federating embeddings. Vectors stay local derived state and never sync. A
+  direct spoke does not embed shared projects; it sends each search over them
+  to its hub, which ranks them with its own index and embedding provider. Relay
+  spokes and local-only projects embed what they store.
 - TUI affordances beyond what arrives transparently through the API.
 
 ## Trust, privacy, and credentials
