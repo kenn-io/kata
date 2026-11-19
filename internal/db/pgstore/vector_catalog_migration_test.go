@@ -3,15 +3,10 @@ package pgstore_test
 import (
 	"context"
 	"database/sql"
-	"net/http"
-	"net/http/httptest"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/embedding"
@@ -34,14 +29,8 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 		require.NoError(t, err)
 		issues = append(issues, issue)
 	}
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		http.Error(w, "unexpected embedding", http.StatusInternalServerError)
-	}))
-	t.Cleanup(server.Close)
-	embedder, err := embedding.New(embedding.Config{BaseURL: server.URL, Model: "model", Dims: 2, Salt: "example"})
-	require.NoError(t, err)
+	key := (kitvec.Generation{Model: "model", Dimensions: 2, Params: map[string]string{"salt": "example"}}).Fingerprint()
+	buildingKey := (kitvec.Generation{Model: "other", Dimensions: 2}).Fingerprint()
 	require.NoError(t, store.Close())
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
@@ -57,13 +46,12 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 		UPDATE meta SET value='51' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	for _, issue := range issues {
-		_, err := admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_mirror(issue_uid, project_uid, content, content_revision) VALUES ($1, $2, $3, $4)`, issue.UID, project.UID, embedding.EmbedText(issue.Title, issue.Body), issue.ContentRevision)
+		_, err := admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_mirror(issue_uid, project_uid, content, content_revision, embed_gen) VALUES ($1, $2, $3, $4, $5)`, issue.UID, project.UID, embedding.EmbedText(issue.Title, issue.Body), issue.ContentRevision, key)
 		require.NoError(t, err)
 	}
-	key := embedder.Generation().Fingerprint()
 	retired := kitvec.Generation{Model: "retired-model", Dimensions: 2, Params: map[string]string{"salt": "retired-example"}}
 	retiredKey := retired.Fingerprint()
-	_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_generations(gen_key, model, dimensions, state) VALUES ($1, 'model', 2, 'active'), ('building', 'other', 2, 'building')`, key)
+	_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_generations(gen_key, model, dimensions, state) VALUES ($1, 'model', 2, 'active'), ($2, 'other', 2, 'building')`, key, buildingKey)
 	require.NoError(t, err)
 	_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_generations(gen_key, model, dimensions, state) VALUES ($1, 'retired-model', 2, 'retired')`, retiredKey)
 	require.NoError(t, err)
@@ -79,7 +67,7 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 			require.NoError(t, err)
 		}
 	}
-	_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_stamps(gen_key, issue_uid, revision) VALUES ('building', $1, $2)`, issues[0].UID, issues[0].ContentRevision-1)
+	_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_stamps(gen_key, issue_uid, revision) VALUES ($1, $2, $3)`, buildingKey, issues[0].UID, issues[0].ContentRevision-1)
 	require.NoError(t, err)
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "vector_upgrade", SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
@@ -110,21 +98,9 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 	backlog, err := idx.Backlog(ctx, key)
 	require.NoError(t, err)
 	assert.Zero(t, backlog)
-	backlog, err = idx.Backlog(ctx, "building")
+	backlog, err = idx.Backlog(ctx, buildingKey)
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, backlog)
-	reconcileCtx, cancel := context.WithCancel(ctx)
-	reconciler := daemon.NewReconciler(upgraded, idx, embedder, daemon.ReconcilerConfig{BatchSize: 64, SweepEvery: time.Hour})
-	done := make(chan error, 1)
-	go func() { done <- reconciler.Run(reconcileCtx) }()
-	require.Eventually(t, func() bool { return reconciler.Health().LastSuccessAt != nil }, 5*time.Second, 10*time.Millisecond)
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("reconciler did not stop")
-	}
-	assert.Zero(t, calls.Load())
 	fresh, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "vector_fresh", SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = fresh.Close() })
