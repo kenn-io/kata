@@ -424,6 +424,12 @@ func syncDirectSpoke(
 		}
 		return recordFederationSyncErrorAt(ctx, store, binding.ProjectID, pullErr, at)
 	}
+	if !resumePull && hubHoldsPull(ctx, binding.ProjectID, binding.PullCursorEventID) {
+		// A poll at this cursor is out at the hub, which answers it as soon as
+		// anything new is visible, and that answer wakes the runner. An
+		// ordinary poll now would return an empty page.
+		return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, pullCompletedAt(pullStartedAt))
+	}
 	body, err := client.PollProjectEvents(ctx, hubProjectID, binding.PullCursorEventID, federationPollLimit)
 	if err != nil {
 		return recordPullError(err)
@@ -1126,6 +1132,8 @@ type Runner struct {
 	// debounceTimer starts the wait between a wake and the pass it causes. Nil
 	// means a real timer.
 	debounceTimer func(time.Duration) Timer
+	// longPolls holds polls at hubs that support them while Run leads.
+	longPolls *hubLongPolls
 }
 
 func (r *Runner) newDebounceTimer(delay time.Duration) Timer {
@@ -1218,6 +1226,7 @@ func (r *Runner) runOnce(
 	if err != nil {
 		return nil, false, nil, err
 	}
+	r.longPolls.reconcile(spokes)
 	if len(spokes) == 0 {
 		return nil, false, nil, nil
 	}
@@ -1247,6 +1256,9 @@ func (r *Runner) runOnce(
 		refusals.record(spoke.binding, spokeErr, r.effectiveInterval(), r.refusalNow())
 		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
 			return nil, false, nil, spokeErr
+		}
+		if spokeErr == nil {
+			r.longPolls.start(spoke)
 		}
 		if spokeErr != nil {
 			errs = append(errs, spokeErr)
@@ -1296,6 +1308,7 @@ func (r *Runner) runSpoke(
 		}
 	}()
 
+	ctx = withHubLongPolls(ctx, r.longPolls)
 	cred, _, err := credentialStore.FederationCredential(ctx, spoke.project.UID)
 	if err != nil {
 		return false, errors.Join(err, r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
@@ -1638,6 +1651,16 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	credentials := r.Credentials
+	if credentials == nil {
+		credentials = config.DefaultFederationCredentialStore()
+	}
+	polls := newHubLongPolls(ctx, r.DB, credentials, r.clientOpts(), interval, r.DrainAdmission)
+	r.longPolls = polls
+	defer func() {
+		polls.stopAll()
+		r.longPolls = nil
+	}()
 	// pending holds the spokes whose last turn stopped at its budget; the next
 	// pass serves only them until a tick or wake widens it to every spoke.
 	var pending map[int64]bool
@@ -1648,6 +1671,7 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 			}
 		}
 		retry, denied, remaining, err := r.runOnce(ctx, validateLease, pending, refusals)
+		polls.passCompleted()
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 				return err
@@ -1688,6 +1712,7 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+		case <-polls.changed:
 		case <-r.Wake:
 			timer := r.newDebounceTimer(debounce)
 			select {

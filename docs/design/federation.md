@@ -296,6 +296,21 @@ applies hub events in order, deduplicates by event UID and content hash, folds
 portable payloads into the local projection, and advances its pull cursor only
 after successful application.
 
+The event poll accepts an optional `wait` in seconds. When the cursor is caught
+up, the hub holds the request until an event commits in the project, including
+a move out of it, or until the wait ends, and then answers with the page as it
+would without a wait. Successful event-poll responses advertise the longest wait
+the hub accepts in `X-Kata-Federation-Poll-Wait-Max`, 45 seconds. A spoke holds
+polls only at hubs that send that header and keeps its interval pull
+otherwise. Before answering a held poll, the hub runs the request's full
+federation authorization again without the per-request cache, so revocation
+ends a held poll at its next wake or at its expiry. The hub bounds held polls
+in total, per credential, and for signed requests holding a control slot; past
+a bound it answers at once. Hub processes sharing a PostgreSQL database relay
+commit wakeups to each other with `LISTEN/NOTIFY` on a dedicated connection and
+wake every held poll after the listener reconnects, because notifications sent
+while it was disconnected are lost.
+
 SQLite direct spokes prepare pulled issue histories and projection differences
 before taking the writer lock, then update only the touched issues and changed
 comments, labels and links. Ordinary local issue push echoes need no materialization.

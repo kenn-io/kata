@@ -496,6 +496,17 @@ type FederationPollEventsRequest struct {
 	AfterID       int64       `query:"after_id,omitempty"`
 	IssueUID      string      `query:"issue_uid,omitempty" doc:"Read retained history only for an issue currently owned by this project, independently of the project cursor."`
 	Limit         OptionalInt `query:"limit,omitempty"`
+	Wait          OptionalInt `query:"wait,omitempty" doc:"Seconds the hub may hold a caught-up project poll until an event commits. The hub caps it at the value in X-Kata-Federation-Poll-Wait-Max and answers at once when it cannot hold the request."`
+}
+
+// FederationPollEventsResponse is a project event page. It advertises how long
+// the hub may hold a caught-up poll.
+type FederationPollEventsResponse struct {
+	IssueUID              string `header:"X-Kata-Events-Issue-UID" doc:"Resolved subject UID when the issue filter is applied, including empty pages."`
+	EventFeatures         string `header:"X-Kata-Event-Features"`
+	RequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
+	PollWaitMax           int    `header:"X-Kata-Federation-Poll-Wait-Max" doc:"Longest wait, in seconds, this hub accepts on a project event poll."`
+	Body                  PollEventsBody
 }
 
 // FederationIngestEventsRequest is the enrollment-authenticated push transport

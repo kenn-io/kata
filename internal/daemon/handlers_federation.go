@@ -951,11 +951,12 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		OperationID: "pollFederationProjectEvents",
 		Method:      "GET",
 		Path:        "/api/v1/projects/{project_id}/federation/events",
-	}, func(ctx context.Context, in *api.FederationPollEventsRequest) (*api.PollEventsResponse, error) {
+	}, func(ctx context.Context, in *api.FederationPollEventsRequest) (*api.FederationPollEventsResponse, error) {
+		requestCtx := ctx
+		operation := federationTransportOperation("pollFederationProjectEvents")
 		var err error
 		var principal federationPrincipal
-		ctx, principal, err = authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull",
-			federationTransportOperation("pollFederationProjectEvents"))
+		ctx, principal, err = authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull", operation)
 		if err != nil {
 			return nil, err
 		}
@@ -965,7 +966,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.ProjectID <= 0 {
 			return nil, api.NewError(http.StatusBadRequest, "validation", "project_id must be a positive integer", "", nil)
 		}
-		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
+		if err != nil {
 			return nil, err
 		}
 		ctx = db.WithFederationEventStream(ctx)
@@ -976,11 +978,41 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		result, err := cfg.DB.ReadFederation(ctx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, AfterID: in.AfterID, IssueUID: in.IssueUID, Limit: limit})
+		wait, err := federationPollWait(requestCtx, in.Wait)
 		if err != nil {
-			return nil, federationFeatureError(err)
+			return nil, err
 		}
-		return &api.PollEventsResponse{EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: result.RequiredFeatures, Body: api.PollEventsBody{Events: toEnvelopes(result.Events), NextAfterID: result.NextAfterID, ResetRequired: result.ResetAfterID > 0, ResetAfterID: result.ResetAfterID}}, nil
+		read := func(readCtx context.Context) (db.FederationReadResult, error) {
+			result, err := cfg.DB.ReadFederation(readCtx, db.FederationReadParams{ProjectID: in.ProjectID, Features: in.EventFeatures, AfterID: in.AfterID, IssueUID: in.IssueUID, Limit: limit})
+			if err != nil {
+				return result, federationFeatureError(err)
+			}
+			return result, nil
+		}
+		var waiter *federationPollWaiter
+		if wait > 0 && in.IssueUID == "" && heldFederationPollAllowed(requestCtx) {
+			var admitted bool
+			if waiter, admitted = cfg.federationPollWaits.admit(requestCtx, cfg.Broadcaster, principal.EnrollmentID, project); admitted {
+				defer waiter.release()
+			}
+		}
+		result, err := read(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if waiter != nil {
+			result, err = holdFederationPoll(requestCtx, waiter, wait, result, func() (context.Context, error) {
+				return reauthorizeFederationPoll(requestCtx, cfg, in.Authorization, in.ProjectID, operation)
+			}, read)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return &api.FederationPollEventsResponse{
+			EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: result.RequiredFeatures,
+			PollWaitMax: int(federationPollWaitMax / time.Second),
+			Body:        api.PollEventsBody{Events: toEnvelopes(result.Events), NextAfterID: result.NextAfterID, ResetRequired: result.ResetAfterID > 0, ResetAfterID: result.ResetAfterID},
+		}, nil
 	})
 
 	huma.Register(humaAPI, huma.Operation{

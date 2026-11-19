@@ -1255,6 +1255,7 @@ type EnableProjectFederationResp struct {
 type PollFederationProjectEventsResp200Headers struct {
 	XKataEventFeatures         string `header:"X-Kata-Event-Features"`
 	XKataEventsIssueUID        string `header:"X-Kata-Events-Issue-UID"`
+	XKataFederationPollWaitMax string `header:"X-Kata-Federation-Poll-Wait-Max"`
 	XKataRequiredEventFeatures string `header:"X-Kata-Required-Event-Features"`
 }
 

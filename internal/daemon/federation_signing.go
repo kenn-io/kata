@@ -113,6 +113,9 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		select {
 		case admission <- struct{}{}:
 			defer func() { <-admission }()
+			if admission == s.federationControlAdmission {
+				r = r.WithContext(withFederationControlAdmission(r.Context()))
+			}
 		default:
 			w.Header().Set("Retry-After", "1")
 			api.WriteEnvelope(w, http.StatusTooManyRequests, "admission_limited", "federation admission is full")
