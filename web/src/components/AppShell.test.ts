@@ -2038,20 +2038,6 @@ describe('AppShell', () => {
     })
     await waitFor(() => expect(document.title).toBe('Issue · Kata'))
     current.selected = {
-      state: 'missing',
-      comments: [],
-      labels: [],
-      links: [],
-      recurrences: [],
-      history: [],
-    }
-    await view.rerender({ snapshot: { ...current } })
-    await waitFor(() => expect(document.title).toBe('Issue unavailable · Kata'))
-    await view.rerender({
-      snapshot: { ...current, selected: { ...current.selected, state: 'archived' } },
-    })
-    await waitFor(() => expect(document.title).toBe('Archived issue · Kata'))
-    current.selected = {
       state: 'available',
       issue: current.collection![0]!,
       comments: [],
@@ -2116,6 +2102,7 @@ describe('AppShell', () => {
     expect(
       within(view.container).getByRole('status', { name: 'Selected issue status' }).textContent,
     ).toContain('unavailable from the current authority')
+    await waitFor(() => expect(document.title).toBe('Issue unavailable · Kata'))
 
     const archived = snapshot()
     archived.selected = {
@@ -2131,6 +2118,7 @@ describe('AppShell', () => {
     expect(
       within(view.container).getByRole('status', { name: 'Selected issue status' }).textContent,
     ).toContain('archived')
+    await waitFor(() => expect(document.title).toBe('Archived issue · Kata'))
   })
 
   test('honors issue-scoped allowed actions without exposing project-wide controls', async () => {
