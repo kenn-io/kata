@@ -609,7 +609,7 @@ func (g *webDaemonGateway) proxyDefault(ctx context.Context, catalog []config.Ca
 		return id, nil
 	}
 	for _, daemon := range catalog {
-		if daemon.Name == id && daemon.Local {
+		if daemon.Name == id && (daemon.Local || !g.syncHubs[id]) {
 			return id, nil
 		}
 	}

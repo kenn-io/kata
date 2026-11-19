@@ -261,6 +261,31 @@ func TestWebDaemonHeaderlessLocalDefaultDoesNotProbeHubs(t *testing.T) {
 	assert.Zero(t, probesB.Load())
 }
 
+func TestWebDaemonHeaderlessRemoteDefaultDoesNotProbe(t *testing.T) {
+	var probes atomic.Int64
+	var pings atomic.Int64
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/instance" {
+			probes.Add(1)
+		}
+		if r.URL.Path == "/api/v1/ping" {
+			pings.Add(1)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(remote.Close)
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebDaemons: []config.CatalogDaemonConfig{{Name: "remote", URL: remote.URL, AllowInsecure: true}}})
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
+	assert.Zero(t, probes.Load())
+	assert.EqualValues(t, 1, pings.Load())
+}
+
 func TestWebDaemonHeaderlessFallbackCachesHubHealth(t *testing.T) {
 	hubA, probesA := anonymousHub(t, new(atomic.Bool))
 	hubB, probesB := anonymousHub(t, new(atomic.Bool))
