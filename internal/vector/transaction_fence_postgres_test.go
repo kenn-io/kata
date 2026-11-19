@@ -86,10 +86,12 @@ func TestPostgresCutOverReclaimsAlreadyRetiredGeneration(t *testing.T) {
 	require.NoError(t, idx.EnsureBuilding(ctx, bKey, b))
 	require.NoError(t, idx.SaveVectorsForTest(ctx, bKey, issue.UID, issue.ContentRevision, nil))
 	denied := errors.New("worker authority revoked")
-	var fences int
-	fenced := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error {
-		fences++
-		if fences == 2 {
+	fenced := db.WithTransactionFence(ctx, func(ctx context.Context, tx db.Transaction) error {
+		var state string
+		if err := tx.QueryRowContext(ctx, `SELECT state FROM issue_vector_generations WHERE gen_key = $1`, aKey).Scan(&state); err != nil {
+			return err
+		}
+		if state == "retired" {
 			return denied
 		}
 		return nil
