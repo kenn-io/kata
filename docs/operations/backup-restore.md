@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-11-13
+last_edited: 2026-11-18
 ---
 
 # Backup and restore
@@ -294,7 +294,7 @@ copy_home=$(mktemp -d)
 printf 'Copy home: %s\n' "$copy_home"
 cd "$copy_home"
 env -i PATH="$PATH" HOME="$HOME" KATA_HOME="$copy_home" \
-  KATA_DB="$copy_home/kata.db" KATA_TELEMETRY_ENABLED=0 \
+  KATA_DB="$copy_home/kata.db" \
   "$kata_binary" import --as-standalone \
   --input "$source_export" --target "$copy_home/kata.db"
 EOF

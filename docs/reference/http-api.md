@@ -272,8 +272,7 @@ and MCP Events require `0.43.0`.
 Kata 0.22.0 includes API `0.41.0`, and Kata 0.21.0 includes API `0.40.0`, the
 changes from `0.32.0` through `0.40.0` below.
 
-Kata 0.20.0 includes API `0.31.0`, the changes from `0.29.0` through `0.31.0`
-below. Bridge preflight checks for cross-project issue links require hub API
+Kata 0.20.0 includes API `0.31.0`. Bridge preflight checks for cross-project issue links require hub API
 `0.31.0`; acknowledging a request in the TUI Attention inbox requires `0.13.0`.
 
 Kata 0.19.0 includes API `0.28.0`, the changes from `0.22.0` through `0.28.0`
@@ -304,6 +303,18 @@ History includes events from earlier projects after a move only when the caller
 can access those projects. Scoped credentials receive the same authorized
 history projection as issue detail.
 
+A soft-deleted issue's history, including its `issue.soft_deleted` event, is
+readable by callers the restore action would accept. Send the actor you would
+restore as in the `actor` query parameter; an authenticated principal's own
+actor takes precedence, as it does for restore. The same attributed write and
+claim checks apply, so on a federated project only the claim holder reads it
+while another actor's claim is live. Every refusal (an API error below 500
+other than a hub error), including an anonymous `--insecure-readonly` caller,
+answers `issue_not_found`; 5xx, `federation_offline` and `hub_claim_failed` keep
+their status. When the daemon is embedded under a host access controller, a
+soft-deleted issue's history always answers `issue_not_found`. `actor` is used
+only with `issue=` on a soft-deleted issue and is ignored otherwise.
+
 Clients that need close evidence can set
 `include_effective_close_event_uid=true`. The response includes
 `effective_close_event_uid` when a visible native close currently supplies the
@@ -324,7 +335,8 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
-| `0.58.0` | Notification requests accept `replace: false`, which refuses with `409 notification_held` while the recipient holds a request, and the clear endpoint accepts `if_from` to clear only a request from that sender. |
+| `0.59.0` | Notification requests accept `replace: false`, which refuses with `409 notification_held` while the recipient holds a request, and the clear endpoint accepts `if_from` to clear only a request from that sender. |
+| `0.58.0` | `GET /api/v1/projects/{project_id}/events` accepts `actor` so callers who may restore a soft-deleted issue can read its history. |
 | `0.57.0` | Cron run rows carry `job_name`, `workflow_name` and `issue_short_id`, resolved when read; deleted jobs, workflows and issues still name their runs. |
 | `0.56.0` | Direct-spoke ingest returns `403 federation_project_not_enrolled` instead of `403 auth_invalid` when pushed work touches an issue whose current project has no matching push enrollment for the spoke and actor. The message names the issue but not the project, which the spoke has not joined. |
 | `0.55.0` | `GET /projects/{project_id}/federation/search` lets a direct spoke ask its hub to answer a search by meaning over a shared project. |
@@ -352,8 +364,6 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 | `0.33.0` | Publishes the issue attachment upload and content routes, and UI capabilities include `attachments` when the daemon has Docbank configured. Older daemons omit the field. |
 | `0.32.0` | Project event polling accepts an `issue` filter and acknowledges the resolved subject in `X-Kata-Events-Issue-UID`. |
 | `0.31.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy, or sets `relay_links_checked` when the check passes. Bridge connect returns `hub_links_checked` and preserves this conflict. Older daemons ignore the parameter. |
-| `0.30.0` | Agent activity telemetry returns `full` once the UTC day's top call-count bucket has been queued. Clients use this receipt to stop reporting for the day. Older daemons keep returning `queued`. |
-| `0.29.0` | Create and close accept an optional `X-Kata-Surface` header for daemon-recorded action counts. Missing or unsupported surfaces leave the mutation unchanged and drop the count. Older daemons ignore the header. |
 | `0.28.0` | Comments accept typed replies through `reply_to`, `kind`, and `force`. Issue detail supports `thread`, `inbound`, `kind`, and `since` selectors and includes comment handles, reply targets, backlinks, and edit timestamps. |
 | `0.27.0` | Adds filter-bound creation cursors, `complete`, optional filtered `total`, `priority=none`, and repeatable `project_ids` to issue listing. Explicit lexical search with `sort=oldest` supports continuation beyond the ranked candidate cap. |
 | `0.26.0` | Close requests accept optional transcript provenance, stored alongside evidence in close events and retained in scoped history and retry receipts. |

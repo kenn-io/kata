@@ -41,6 +41,9 @@ func (f *runtimeLinearFetcher) Scope(ctx context.Context, c linearsync.Config) (
 func (f *runtimeLinearFetcher) States(ctx context.Context, _ linearsync.Config) ([]linearsync.State, error) {
 	return []linearsync.State{{ID: runtimeLinearStateID, Type: "started"}}, ctx.Err()
 }
+func (f *runtimeLinearFetcher) Comments(ctx context.Context, _ linearsync.Config, _ []string) ([]linearsync.Comment, error) {
+	return nil, ctx.Err()
+}
 func (f *runtimeLinearFetcher) Issues(ctx context.Context, c linearsync.Config) ([]linearsync.Issue, error) {
 	f.once.Do(func() { close(f.started) })
 	select {

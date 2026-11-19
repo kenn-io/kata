@@ -1,16 +1,20 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -493,4 +497,140 @@ func TestPollProjectEventsMovedIssueRespectsHistoricalProjectAccess(t *testing.T
 			require.Equal(t, tc.wantCreated, found, string(body))
 		}
 	})
+}
+
+// A soft-deleted issue's history is readable by callers the restore action
+// would accept, and stays a 404 for callers it would refuse.
+func TestPollProjectEventsIssueReadsSoftDeletedHistoryForRestoreCaller(t *testing.T) {
+	deletedHistory := func(t *testing.T, env *testenv.Env, project db.Project, ref, query string) (int, []byte) {
+		t.Helper()
+		resp, body := envGetRaw(t, env, scopedProjectPath(project.ID, "events")+"?issue="+url.QueryEscape(ref)+query)
+		return resp.StatusCode, body
+	}
+
+	t.Run("allowed caller reads history including the delete event", func(t *testing.T) {
+		env, project, issue := setupClaimGateIssue(t, false)
+		_, deleted, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
+		require.NoError(t, err)
+
+		for _, ref := range []string{issue.ShortID, issue.UID, project.Name + "#" + issue.ShortID} {
+			status, body := deletedHistory(t, env, project, ref, "&actor=tester")
+			require.Equal(t, http.StatusOK, status, string(body))
+			var page api.PollEventsBody
+			require.NoError(t, json.Unmarshal(body, &page))
+			types := make([]string, 0, len(page.Events))
+			for _, event := range page.Events {
+				types = append(types, event.Type)
+			}
+			require.Equal(t, []string{"issue.created", "issue.soft_deleted"}, types)
+			require.Equal(t, deleted.ID, page.Events[1].EventID)
+			require.Equal(t, "tester", page.Events[1].Actor)
+		}
+	})
+
+	t.Run("claim holder naming itself reads history; other actors get 404", func(t *testing.T) {
+		env, project, issue := setupClaimGateIssue(t, true)
+		acquireClaimGateIssue(t, env, project, issue, "other")
+		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "other")
+		require.NoError(t, err)
+
+		restore, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "actions/restore"),
+			map[string]string{"actor": "agent"}, nil)
+		assertAPIError(t, restore.StatusCode, raw, http.StatusConflict, "claim_denied")
+
+		status, body := deletedHistory(t, env, project, issue.ShortID, "&actor=other")
+		require.Equal(t, http.StatusOK, status, string(body))
+
+		for _, query := range []string{"&actor=agent", ""} {
+			status, body = deletedHistory(t, env, project, issue.ShortID, query)
+			assertAPIError(t, status, body, http.StatusNotFound, "issue_not_found")
+		}
+	})
+
+	t.Run("insecure-readonly anonymous caller gets 404", func(t *testing.T) {
+		env := testenv.New(t, testenv.WithInsecureReadonly())
+		project, issue, _ := setupClaimGateProject(t, env, false)
+		_, _, _, err := env.DB.SoftDeleteIssue(t.Context(), issue.ID, "tester")
+		require.NoError(t, err)
+
+		// Naming an actor keeps actor validation from refusing on its own, so
+		// only the read-only refusal can answer 404 here.
+		status, body := deletedHistory(t, env, project, issue.ShortID, "&actor=tester")
+		assertAPIError(t, status, body, http.StatusNotFound, "issue_not_found")
+	})
+}
+
+// allowAllHostAccess is a host controller that allows every operation.
+type allowAllHostAccess struct{}
+
+func (allowAllHostAccess) Authorize(context.Context, daemon.HostAccessRequest) (daemon.HostAccessDecision, error) {
+	return daemon.HostAccessDecision{
+		TransactionFence: func(context.Context, db.Transaction) error { return nil },
+	}, nil
+}
+
+// Under an embedded host access controller a soft-deleted issue's history is
+// exactly what main answers: issue_not_found, even when the controller allows
+// everything and even when the issue moved to a project that has since been
+// archived, whose own error would otherwise show the issue exists. An active issue's history still reads.
+func TestPollProjectEventsIssueDeletedHistoryIsNotFoundUnderHostAccess(t *testing.T) {
+	cases := []struct {
+		name          string
+		movedArchived bool
+	}{
+		{name: "controller allows everything"},
+		{name: "issue moved to an archived project", movedArchived: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dbh := openTestDB(t)
+			project, err := dbh.db.CreateProject(t.Context(), "host-history")
+			require.NoError(t, err)
+			target, err := dbh.db.CreateProject(t.Context(), "host-history-target")
+			require.NoError(t, err)
+			active, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "active", Author: "agent"})
+			require.NoError(t, err)
+			deleted, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "deleted", Author: "agent"})
+			require.NoError(t, err)
+			if tc.movedArchived {
+				_, err = dbh.db.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+					IssueID: deleted.ID, FromProjectID: project.ID, ToProjectID: target.ID,
+					IfMatchRev: deleted.Revision, Actor: "agent",
+				})
+				require.NoError(t, err)
+			}
+			_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), deleted.ID, "agent")
+			require.NoError(t, err)
+			if tc.movedArchived {
+				_, _, err = dbh.db.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: target.ID, Actor: "agent", Force: true})
+				require.NoError(t, err)
+			}
+
+			server := daemon.NewServer(daemon.ServerConfig{DB: dbh.db, StartedAt: dbh.now, HostAccess: allowAllHostAccess{}})
+			t.Cleanup(func() { _ = server.Close() })
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ctx := daemon.WithPrincipal(r.Context(), daemon.Principal{
+					Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "agent",
+				})
+				server.Handler().ServeHTTP(w, r.WithContext(ctx))
+			}))
+			t.Cleanup(ts.Close)
+
+			get := func(ref string) (int, []byte) {
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+scopedProjectPath(project.ID, "events")+"?issue="+url.QueryEscape(ref)+"&actor=agent", nil)
+				require.NoError(t, err)
+				resp, err := ts.Client().Do(req)
+				require.NoError(t, err)
+				defer func() { _ = resp.Body.Close() }()
+				body, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				return resp.StatusCode, body
+			}
+
+			status, body := get(active.ShortID)
+			require.Equal(t, http.StatusOK, status, string(body))
+			status, body = get(deleted.ShortID)
+			assertAPIError(t, status, body, http.StatusNotFound, "issue_not_found")
+		})
+	}
 }

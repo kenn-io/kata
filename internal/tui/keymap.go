@@ -21,7 +21,7 @@ type keymap struct {
 	ExpandCollapse, Expand, Collapse, ExpandAll                  key
 	SortChildren                                                 key
 	FilterStatus, FilterForm, ClearFilters                       key
-	Close, Reopen, Undo                                          key
+	Close, CloseWithEvidence, Reopen, Undo                       key
 	SetDates, Delete, MoveIssue, SetRecurrence                   key
 	NextTab, PrevTab, JumpRef, Back                              key
 	EditBody, NewComment                                         key
@@ -91,32 +91,33 @@ func newKeymap() keymap {
 		// adaptation #1), so a TUI label filter could not actually
 		// narrow the displayed list. Plan 8 commit 5b will add the
 		// daemon LabelsByIssues hook + the Labels axis.
-		ClearFilters:    key{Keys: []string{"c"}, Help: "clear filters"},
-		Close:           key{Keys: []string{"x"}, Help: "close"},
-		Reopen:          key{Keys: []string{"r"}, Help: "reopen"},
-		Undo:            key{Keys: []string{"u"}, Help: "undo last issue action"},
-		SetDates:        key{Keys: []string{"d"}, Help: "set dates"},
-		Delete:          key{Keys: []string{"X"}, Help: "delete issue"},
-		MoveIssue:       key{Keys: []string{"M"}, Help: "move to another project"},
-		SetRecurrence:   key{Keys: []string{"O"}, Help: "set repeat"},
-		NextTab:         key{Keys: []string{"tab", "ctrl+j"}, Help: "next tab", Display: "tab/C-j"},
-		PrevTab:         key{Keys: []string{"shift+tab", "ctrl+k"}, Help: "prev tab", Display: "shift+tab/C-k"},
-		JumpRef:         key{Keys: []string{"enter"}, Help: "jump to referenced issue"},
-		Back:            key{Keys: []string{"esc", "backspace"}, Help: "back"},
-		EditBody:        key{Keys: []string{"e"}, Help: "edit body"},
-		NewComment:      key{Keys: []string{"c"}, Help: "new comment"},
-		ReplyComment:    key{Keys: []string{"R"}, Help: "typed reply to selected comment"},
-		NextCommentLink: key{Keys: []string{"]"}, Help: "next comment link"},
-		PrevCommentLink: key{Keys: []string{"["}, Help: "previous comment link"},
-		SetParent:       key{Keys: []string{"p"}, Help: "set parent"},
-		AddBlocker:      key{Keys: []string{"b"}, Help: "add blocker"},
-		AddLink:         key{Keys: []string{"l"}, Help: "add related"},
-		AddLabel:        key{Keys: []string{"+"}, Help: "add label"},
-		RemoveLabel:     key{Keys: []string{"-"}, Help: "remove label"},
-		AssignOwner:     key{Keys: []string{"a"}, Help: "assign owner"},
-		ClearOwner:      key{Keys: []string{"A"}, Help: "clear owner"},
-		TimedAssignment: key{Keys: []string{"t"}, Help: "timed assignment"},
-		SetPriority:     key{Keys: []string{"!"}, Help: "set priority"},
+		ClearFilters:      key{Keys: []string{"c"}, Help: "clear filters"},
+		Close:             key{Keys: []string{"x"}, Help: "close"},
+		CloseWithEvidence: key{Keys: []string{"V"}, Help: "close with evidence"},
+		Reopen:            key{Keys: []string{"r"}, Help: "reopen"},
+		Undo:              key{Keys: []string{"u"}, Help: "undo last issue action"},
+		SetDates:          key{Keys: []string{"d"}, Help: "set dates"},
+		Delete:            key{Keys: []string{"X"}, Help: "delete issue"},
+		MoveIssue:         key{Keys: []string{"M"}, Help: "move to another project"},
+		SetRecurrence:     key{Keys: []string{"O"}, Help: "set repeat"},
+		NextTab:           key{Keys: []string{"tab", "ctrl+j"}, Help: "next tab", Display: "tab/C-j"},
+		PrevTab:           key{Keys: []string{"shift+tab", "ctrl+k"}, Help: "prev tab", Display: "shift+tab/C-k"},
+		JumpRef:           key{Keys: []string{"enter"}, Help: "jump to referenced issue"},
+		Back:              key{Keys: []string{"esc", "backspace"}, Help: "back"},
+		EditBody:          key{Keys: []string{"e"}, Help: "edit body"},
+		NewComment:        key{Keys: []string{"c"}, Help: "new comment"},
+		ReplyComment:      key{Keys: []string{"R"}, Help: "typed reply to selected comment"},
+		NextCommentLink:   key{Keys: []string{"]"}, Help: "next comment link"},
+		PrevCommentLink:   key{Keys: []string{"["}, Help: "previous comment link"},
+		SetParent:         key{Keys: []string{"p"}, Help: "set parent"},
+		AddBlocker:        key{Keys: []string{"b"}, Help: "add blocker"},
+		AddLink:           key{Keys: []string{"l"}, Help: "add related"},
+		AddLabel:          key{Keys: []string{"+"}, Help: "add label"},
+		RemoveLabel:       key{Keys: []string{"-"}, Help: "remove label"},
+		AssignOwner:       key{Keys: []string{"a"}, Help: "assign owner"},
+		ClearOwner:        key{Keys: []string{"A"}, Help: "clear owner"},
+		TimedAssignment:   key{Keys: []string{"t"}, Help: "timed assignment"},
+		SetPriority:       key{Keys: []string{"!"}, Help: "set priority"},
 	}
 }
 

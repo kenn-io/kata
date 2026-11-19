@@ -46,4 +46,12 @@ type Issue struct {
 	CreatedAt, UpdatedAt                                                                       time.Time
 	CompletedAt, CanceledAt, ArchivedAt                                                        *time.Time
 	Trashed                                                                                    bool
+	Comments                                                                                   []Comment
+}
+
+// Comment is one Linear comment on an issue in the selected scope. AuthorID is
+// empty for comments that no Linear user wrote, such as integration posts.
+type Comment struct {
+	ID, IssueID, AuthorID, Body string
+	CreatedAt                   time.Time
 }

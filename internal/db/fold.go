@@ -174,6 +174,11 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 	issue.ClosedReason = cloneStringPtr(in.ClosedReason)
 	issue.ClosedAt = cloneStringPtr(in.ClosedAt)
 	issue.DeletedAt = cloneStringPtr(in.DeletedAt)
+	if e.Type == "issue.snapshot" && issue.ProjectUID != "" && issue.ProjectUID != e.ProjectUID && in.ShortID != "" {
+		// A snapshot that relocates the issue carries the short ID the hub gave
+		// it there, as an applied move's to_short_id does.
+		issue.ShortID = in.ShortID
+	}
 	issue.ProjectUID = e.ProjectUID
 	p.Issues[uid] = issue
 	if len(in.Metadata) > 0 && string(in.Metadata) != "null" {

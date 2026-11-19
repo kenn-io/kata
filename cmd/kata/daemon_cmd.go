@@ -1470,9 +1470,7 @@ func runDaemonProcess(
 		if !closeDependencies {
 			return
 		}
-		if err := telemetryReporter.Close(); err != nil {
-			daemonLog.Printf("telemetry: close: %v", err)
-		}
+		_ = telemetryReporter.Close()
 	}()
 	closeThrottleWindow, err := dcfg.Close.Throttle.ThrottleWindow()
 	if err != nil {
@@ -2037,7 +2035,6 @@ func newDaemonTelemetryReporter(ctx context.Context, store db.Storage) telemetry
 	installedAt, err := store.InstanceCreatedAt(ctx)
 	if err != nil {
 		// Zero sends events without an install age instead of going silent.
-		slog.Warn("telemetry install age unavailable: read instance creation time", "err", err)
 		installedAt = time.Time{}
 	}
 	return newTelemetryReporter(telemetry.Options{
@@ -2102,9 +2099,7 @@ func captureDaemonTelemetryEvent(ctx context.Context, store db.Storage, reporter
 	if projects, err := store.ListProjects(ctx); err == nil {
 		properties["project_count"] = telemetry.ProjectCountBucket(len(projects))
 	}
-	if err := reporter.Capture(event, properties); err != nil {
-		slog.Warn("capture telemetry event", "err", err)
-	}
+	_ = reporter.Capture(event, properties)
 }
 
 func startFederationRunner(

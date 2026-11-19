@@ -120,6 +120,16 @@ func TestClientScopesPaginationAndNullableFields(t *testing.T) {
 	require.Empty(t, items[0].AssigneeID)
 	require.Equal(t, 3, calls)
 }
+func TestClientRefusesCommentsOnUnrequestedIssues(t *testing.T) {
+	c := mockClient(t, func(*http.Request) (*http.Response, error) {
+		return dataResponse(map[string]any{"comments": map[string]any{"nodes": []any{
+			map[string]any{"id": "77777777-7777-4777-8777-777777777777", "body": "Another team's note.", "createdAt": "2026-01-03T00:00:00Z", "user": nil, "issue": map[string]any{"id": projectID}},
+		}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
+	})
+	_, err := sessionFor(t, c).Comments(t.Context(), testConfig(), []string{issueID})
+	require.Error(t, err, "a comment on an issue outside the import is a scope leak")
+}
+
 func TestClientRejectsPartialErrorsAndScopeLeaks(t *testing.T) {
 	for _, body := range []string{`{"data":{"issues":{"nodes":[]}},"errors":[{"message":"example-key private body"}]}`, `{"data":{"issues":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":null}}}}`, `{"data":{"issues":{"nodes":null,"pageInfo":{"hasNextPage":false}}}}`} {
 		c := mockClient(t, func(*http.Request) (*http.Response, error) { return response(200, body), nil })

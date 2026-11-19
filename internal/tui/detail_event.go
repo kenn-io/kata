@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/mattn/go-runewidth"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // eventDescriber returns the human-readable description for an event of
@@ -234,7 +236,7 @@ func eventDescription(e EventLogEntry) string {
 // issue.closed events additionally emit indented continuation lines
 // surfacing the close message and each evidence item so reviewers can
 // audit closures directly from the events tab.
-func eventChunkLines(e EventLogEntry, width int, isCursor bool) []string {
+func eventChunkLines(e EventLogEntry, width int, isCursor bool, current map[string]metadata.Attachment) []string {
 	// Type is daemon-authored; Actor and description interpolate
 	// agent-authored payload fields — sanitize both.
 	head := fmt.Sprintf("[%s] %s %s — %s",
@@ -243,7 +245,7 @@ func eventChunkLines(e EventLogEntry, width int, isCursor bool) []string {
 		sanitizeForDisplay(eventDescription(e)))
 	lines := []string{applyActivityCursor(head, isCursor)}
 	if e.Type == "issue.closed" {
-		lines = append(lines, closeDetailLines(e, width)...)
+		lines = append(lines, closeDetailLines(e, width, current)...)
 	}
 	return lines
 }
@@ -259,12 +261,12 @@ func eventChunkLines(e EventLogEntry, width int, isCursor bool) []string {
 // cursor anchoring. Long values are then wrapped to width with a hanging
 // indent so the events tab surfaces the full message on a narrow pane
 // instead of clipping it with an ellipsis.
-func closeDetailLines(e EventLogEntry, width int) []string {
+func closeDetailLines(e EventLogEntry, width int, current map[string]metadata.Attachment) []string {
 	var out []string
 	if msg := payloadString(e, "message"); msg != "" {
 		out = append(out, wrapDetailRow("  message: ", sanitizeForLine(msg), width)...)
 	}
-	for _, line := range closeEvidenceSummaries(e) {
+	for _, line := range closeEvidenceSummaries(e, current) {
 		out = append(out, wrapDetailRow("  evidence: ", sanitizeForLine(line), width)...)
 	}
 	return out
@@ -299,7 +301,7 @@ func wrapDetailRow(prefix, value string, width int) []string {
 // issue.closed event payload and returns one short label per item
 // (e.g. "commit a1b2c3d", "reviewed-paths internal/db/queries.go").
 // Missing or malformed evidence returns nil.
-func closeEvidenceSummaries(e EventLogEntry) []string {
+func closeEvidenceSummaries(e EventLogEntry, current map[string]metadata.Attachment) []string {
 	if e.Payload == nil {
 		return nil
 	}
@@ -317,7 +319,7 @@ func closeEvidenceSummaries(e EventLogEntry) []string {
 		if !ok {
 			continue
 		}
-		out = append(out, formatEvidenceItem(m))
+		out = append(out, formatEvidenceItem(m, current))
 	}
 	return out
 }
@@ -327,9 +329,11 @@ func closeEvidenceSummaries(e EventLogEntry) []string {
 // switch mirrors the EvidenceType union in internal/api/evidence.go;
 // unknown types fall back to the raw type tag so future additions don't
 // disappear silently.
-func formatEvidenceItem(m map[string]any) string {
+func formatEvidenceItem(m map[string]any, current map[string]metadata.Attachment) string {
 	t, _ := m["type"].(string)
 	switch t {
+	case "attachment":
+		return attachmentEvidenceLabel(m, current)
 	case "commit":
 		return evidenceLabel(t, stringField(m, "sha"))
 	case "pr":
@@ -349,6 +353,46 @@ func formatEvidenceItem(m map[string]any) string {
 		return "?"
 	}
 	return t
+}
+
+// attachmentEvidenceLabel renders a cited attachment as `kata show` does:
+// "attachment <id>: name · N bytes". It appends " (removed)" or " (changed)"
+// when current, the issue's attachment references, no longer matches what the
+// close froze; current is nil while the issue is not loaded, and then no state
+// is shown. A frozen descriptor that fails metadata.Valid reads
+// "Invalid attachment details: <id>".
+func attachmentEvidenceLabel(m map[string]any, current map[string]metadata.Attachment) string {
+	id := stringField(m, "attachment_id")
+	live, isLive := current[id]
+	var frozen *closeAttachment
+	if raw, ok := m["attachment"].(map[string]any); ok {
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			return "attachment " + id
+		}
+		ref, valid := metadata.Valid(encoded)
+		if !valid {
+			return "Invalid attachment details: " + id
+		}
+		frozen = &closeAttachment{id: id, ref: ref}
+	} else if isLive {
+		frozen = &closeAttachment{id: id, ref: live}
+	}
+	switch {
+	case frozen == nil && current != nil:
+		return "attachment " + id + " (removed)"
+	case frozen == nil:
+		return "attachment " + id
+	}
+	state := ""
+	if current != nil {
+		if !isLive {
+			state = " (removed)"
+		} else if live.DocbankVersion != frozen.ref.DocbankVersion {
+			state = " (changed)"
+		}
+	}
+	return "attachment " + id + ": " + frozen.label() + state
 }
 
 // evidenceLabel joins a type tag with its payload value, dropping the
