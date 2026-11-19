@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"slices"
 	"testing"
 
@@ -17,17 +16,16 @@ func RunProjectAccessConformance(t *testing.T, store db.Storage) {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "shared-project")
 	require.NoError(t, err)
-	access, ok := store.(projectAccessDecisions)
-	require.True(t, ok, "backend must implement project access decisions")
-	ids, err := access.AccessibleProjectUIDs(ctx, "member")
+	ids, err := store.AccessibleProjectUIDs(ctx, "member")
 	require.NoError(t, err)
 	require.Equal(t, []string{project.UID}, ids)
-	ids, err = access.AccessibleProjectUIDs(ctx, "")
+	ids, err = store.AccessibleProjectUIDs(ctx, "")
 	require.NoError(t, err)
 	require.Empty(t, ids, "all visibility means authenticated users")
 	ids, err = store.AnonymousAccessibleProjectUIDs(ctx)
 	require.NoError(t, err)
 	require.Equal(t, []string{project.UID}, ids, "anonymous reads see all-visibility projects")
+	assertAnonymousProjectAccess(t, store)
 	ids, err = store.AnonymousAccessibleProjectUIDs(db.WithAuthorizedProjects(ctx, []string{}))
 	require.NoError(t, err)
 	require.Empty(t, ids, "anonymous reads retain an existing empty project boundary")
@@ -57,15 +55,16 @@ func RunProjectAccessConformance(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	require.Greater(t, restricted.Revision, initial.Revision)
 	assertProjectAccessAudit(t, store, event, "project.access_changed")
-	assertProjectAccessUIDs(t, access, "member", nil)
-	assertProjectAccessUIDs(t, access, "outsider", nil)
+	assertProjectAccessUIDs(t, store, "member", nil)
+	assertProjectAccessUIDs(t, store, "outsider", nil)
 	ids, err = store.AnonymousAccessibleProjectUIDs(ctx)
 	require.NoError(t, err)
 	require.Empty(t, ids, "anonymous reads do not inherit team memberships")
+	assertAnonymousProjectAccess(t, store)
 	event, err = policy.SetTeamMembership(ctx, team.UID, "member", true, "admin")
 	require.NoError(t, err)
 	assertProjectAccessAudit(t, store, event, "team.membership_changed")
-	assertProjectAccessUIDs(t, access, "member", []string{project.UID})
+	assertProjectAccessUIDs(t, store, "member", []string{project.UID})
 	members, err := policy.TeamMembers(ctx, team.UID)
 	require.NoError(t, err)
 	require.Equal(t, []string{"member"}, members)
@@ -86,13 +85,13 @@ func RunProjectAccessConformance(t *testing.T, store db.Storage) {
 	restricted.TeamUIDs = append(restricted.TeamUIDs, secondary.UID)
 	restricted, _, err = policy.SetProjectAccessPolicy(ctx, restricted, "admin")
 	require.NoError(t, err)
-	assertProjectAccessUIDs(t, access, "second-member", []string{project.UID})
-	assertProjectAccessUIDs(t, access, "member", []string{project.UID})
-	assertProjectAccessUIDs(t, access, "outsider", nil)
+	assertProjectAccessUIDs(t, store, "second-member", []string{project.UID})
+	assertProjectAccessUIDs(t, store, "member", []string{project.UID})
+	assertProjectAccessUIDs(t, store, "outsider", nil)
 	_, err = policy.DeleteTeam(ctx, secondary.UID, "admin")
 	require.NoError(t, err)
-	assertProjectAccessUIDs(t, access, "second-member", nil)
-	assertProjectAccessUIDs(t, access, "member", []string{project.UID})
+	assertProjectAccessUIDs(t, store, "second-member", nil)
+	assertProjectAccessUIDs(t, store, "member", []string{project.UID})
 	restricted, err = policy.ProjectAccessPolicy(ctx, project.UID)
 	require.NoError(t, err)
 
@@ -112,11 +111,11 @@ func RunProjectAccessConformance(t *testing.T, store db.Storage) {
 			PlaintextToken: secret, Actor: "member", AdminActor: "admin",
 		})
 		require.NoError(t, err)
-		assertProjectAccessUIDs(t, access, token.Actor, []string{project.UID})
+		assertProjectAccessUIDs(t, store, token.Actor, []string{project.UID})
 		_, _, err = store.RevokeAPIToken(ctx, token.ID, "admin")
 		require.NoError(t, err)
 	}
-	assertProjectAccessUIDs(t, access, "member", []string{project.UID})
+	assertProjectAccessUIDs(t, store, "member", []string{project.UID})
 
 	// Validation failures cannot broaden or partly replace the current policy.
 	for _, candidate := range []db.ProjectAccessPolicy{
@@ -127,7 +126,7 @@ func RunProjectAccessConformance(t *testing.T, store db.Storage) {
 	} {
 		_, _, err := policy.SetProjectAccessPolicy(ctx, candidate, "admin")
 		require.Error(t, err)
-		assertProjectAccessUIDs(t, access, "outsider", nil)
+		assertProjectAccessUIDs(t, store, "outsider", nil)
 	}
 	_, _, err = policy.SetProjectAccessPolicy(ctx, initial, "admin")
 	require.Error(t, err, "stale policy revision cannot replace current policy")
@@ -145,8 +144,8 @@ func RunProjectAccessConformance(t *testing.T, store db.Storage) {
 	event, err = policy.MigrateTeamActor(ctx, "member", "renamed-member", "admin")
 	require.NoError(t, err)
 	assertProjectAccessAudit(t, store, event, "team.actor_migrated")
-	assertProjectAccessUIDs(t, access, "member", nil)
-	assertProjectAccessUIDs(t, access, "renamed-member", []string{project.UID})
+	assertProjectAccessUIDs(t, store, "member", nil)
+	assertProjectAccessUIDs(t, store, "renamed-member", []string{project.UID})
 
 	// A fence admitted before removal must recheck inside the mutation.
 	fenced := db.WithAdditionalTransactionFence(ctx,
@@ -158,14 +157,14 @@ func RunProjectAccessConformance(t *testing.T, store db.Storage) {
 		ProjectID: project.ID, Title: "Must not commit", Author: "renamed-member",
 	})
 	require.ErrorIs(t, err, db.ErrNotFound)
-	assertProjectAccessUIDs(t, access, "renamed-member", nil)
+	assertProjectAccessUIDs(t, store, "renamed-member", nil)
 
 	_, err = policy.SetTeamMembership(ctx, team.UID, "member", true, "admin")
 	require.NoError(t, err)
 	event, err = policy.DeleteTeam(ctx, team.UID, "admin")
 	require.NoError(t, err)
 	assertProjectAccessAudit(t, store, event, "team.deleted")
-	assertProjectAccessUIDs(t, access, "member", nil)
+	assertProjectAccessUIDs(t, store, "member", nil)
 	empty, err := policy.ProjectAccessPolicy(ctx, project.UID)
 	require.NoError(t, err)
 	require.Equal(t, "teams", empty.Visibility, "deleted last team never widens access")
@@ -175,8 +174,8 @@ func RunProjectAccessConformance(t *testing.T, store db.Storage) {
 	empty.Visibility = "all"
 	_, _, err = policy.SetProjectAccessPolicy(ctx, empty, "admin")
 	require.NoError(t, err)
-	assertProjectAccessUIDs(t, access, "outsider", []string{project.UID})
-	assertProjectAccessUIDs(t, access, "", nil)
+	assertProjectAccessUIDs(t, store, "outsider", []string{project.UID})
+	assertProjectAccessUIDs(t, store, "", nil)
 
 	// A merge can remove an open source while leaving its target outside the
 	// member's policy. The revision invalidates streams that filter project.merged.
@@ -197,7 +196,7 @@ func RunProjectAccessConformance(t *testing.T, store db.Storage) {
 	targetPolicy.Visibility, targetPolicy.TeamUIDs = "teams", []string{targetTeam.UID}
 	_, _, err = mergePolicy.SetProjectAccessPolicy(ctx, targetPolicy, "admin")
 	require.NoError(t, err)
-	mergeVisibleUIDs, err := access.AccessibleProjectUIDs(ctx, "merge-member")
+	mergeVisibleUIDs, err := store.AccessibleProjectUIDs(ctx, "merge-member")
 	require.NoError(t, err)
 	require.Contains(t, mergeVisibleUIDs, mergeSource.UID)
 	require.NotContains(t, mergeVisibleUIDs, mergeTarget.UID)
@@ -208,7 +207,7 @@ func RunProjectAccessConformance(t *testing.T, store db.Storage) {
 	afterMergeRevision, err := mergePolicy.ProjectAccessRevision(ctx)
 	require.NoError(t, err)
 	require.Greater(t, afterMergeRevision, beforeMergeRevision, "merge advances the revision used by project access stream fences")
-	mergeVisibleUIDs, err = access.AccessibleProjectUIDs(ctx, "merge-member")
+	mergeVisibleUIDs, err = store.AccessibleProjectUIDs(ctx, "merge-member")
 	require.NoError(t, err)
 	require.NotContains(t, mergeVisibleUIDs, mergeSource.UID)
 	require.NotContains(t, mergeVisibleUIDs, mergeTarget.UID)
@@ -250,15 +249,9 @@ func RunProjectAccessTokenEnrollment(t *testing.T, store db.Storage) {
 	}
 }
 
-type projectAccessDecisions interface {
-	AccessibleProjectUIDs(context.Context, string) ([]string, error)
-	ProjectAccessibleToActor(context.Context, string, string) (bool, error)
-	ListProjectsIncludingArchived(context.Context) ([]db.Project, error)
-}
-
 // assertProjectAccessUIDs also requires the single-project decision to agree
 // with the full list for every project, the system project included.
-func assertProjectAccessUIDs(t *testing.T, access projectAccessDecisions, actor string, expected []string) {
+func assertProjectAccessUIDs(t *testing.T, access db.Storage, actor string, expected []string) {
 	t.Helper()
 	ids, err := access.AccessibleProjectUIDs(t.Context(), actor)
 	require.NoError(t, err)
@@ -274,6 +267,34 @@ func assertProjectAccessUIDs(t *testing.T, access projectAccessDecisions, actor 
 		require.NoError(t, err)
 		assert.Equal(t, slices.Contains(expected, uid), allowed, "actor %q project %s", actor, uid)
 	}
+}
+
+// assertAnonymousProjectAccess requires the single-project anonymous decision
+// to agree with the anonymous list for every project, the system project and
+// a missing project included.
+func assertAnonymousProjectAccess(t *testing.T, store db.Storage) {
+	t.Helper()
+	ctx := db.WithAuthorizedProjects(t.Context(), nil)
+	expected, err := store.AnonymousAccessibleProjectUIDs(ctx)
+	require.NoError(t, err)
+	projects, err := store.ListProjectsIncludingArchived(ctx)
+	require.NoError(t, err)
+	system, err := store.SystemProject(ctx)
+	require.NoError(t, err)
+	projects = append(projects, system)
+	var maxID int64
+	for _, project := range projects {
+		uid, allowed, err := store.AnonymousProjectAccess(ctx, project.ID)
+		require.NoError(t, err)
+		assert.Equal(t, slices.Contains(expected, project.UID), allowed, "project %s", project.UID)
+		if allowed {
+			assert.Equal(t, project.UID, uid)
+		}
+		maxID = max(maxID, project.ID)
+	}
+	_, allowed, err := store.AnonymousProjectAccess(ctx, maxID+1)
+	require.NoError(t, err)
+	assert.False(t, allowed, "a missing project is not accessible")
 }
 
 func assertProjectAccessAudit(t *testing.T, store db.Storage, event db.Event, kind string) {

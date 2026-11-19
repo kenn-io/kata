@@ -195,7 +195,7 @@ var storageScenarios = []scenario{
 		RunUpstreamAttribution(t, store)
 		return nil
 	}},
-	{name: "project access", methods: []string{"CreateTeam", "TeamByUID", "ListTeams", "DeleteTeam", "TeamMembers", "SetTeamMembership", "MigrateTeamActor", "ProjectAccessPolicy", "SetProjectAccessPolicy", "AccessibleProjectUIDs", "ProjectAccessibleToActor", "AnonymousAccessibleProjectUIDs", "ProjectAccessRevision", "ProjectAccessTransactionFence", "ExportProjectAccess"}, run: func(t *testing.T, store db.Storage) error {
+	{name: "project access", methods: []string{"CreateTeam", "TeamByUID", "ListTeams", "DeleteTeam", "TeamMembers", "SetTeamMembership", "MigrateTeamActor", "ProjectAccessPolicy", "SetProjectAccessPolicy", "AccessibleProjectUIDs", "ProjectAccessibleToActor", "AnonymousAccessibleProjectUIDs", "AnonymousProjectAccess", "ProjectAccessRevision", "ProjectAccessTransactionFence", "ExportProjectAccess"}, run: func(t *testing.T, store db.Storage) error {
 		RunProjectAccessMergeIsolation(t, store)
 		RunProjectAccessConformance(t, store)
 		RunProjectAccessTokenEnrollment(t, store)

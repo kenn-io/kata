@@ -7,6 +7,12 @@ import (
 	"math"
 )
 
+// federationForeignProbeSpan bounds how many event IDs past a remembered quiet
+// range one poll checks one at a time. About a thousand checks costs what the
+// per-issue path costs for a project with about a thousand issues; a wider gap
+// takes that path, whose cost does not grow with the gap.
+const federationForeignProbeSpan int64 = 1024
+
 // ReadFederationEventPage skips unrelated gaps within the caller's snapshot.
 // query appends a suffix to the backend event projection and decodes its rows.
 // ReadFederationTransaction validates issue ownership before reading pages.
@@ -29,12 +35,15 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
 	// The last needs a probe per owned issue unless feed already cleared every
 	// ID up to some point, leaving only newer events to check.
 	foreignAfter, foreignKnown := feed.foreignChecked(afterID)
-	foreign := `CAST($4 AS BIGINT)<0`
+	foreignThrough := foreignAfter + min(federationForeignProbeSpan, math.MaxInt64-foreignAfter)
+	// Both bounds stay bound so the statement has one parameter list.
+	foreign := `(CAST($4 AS BIGINT)<0 AND CAST($5 AS BIGINT)<0)`
 	if foreignKnown {
-		// OFFSET keeps PostgreSQL from turning the ownership check into a
-		// join that walks every owned issue; each newer event is checked alone.
-		foreign = `(SELECT e.id FROM events e WHERE e.id>$4 AND e.project_id<>$1 AND e.type<>'sync.reset_required'
- AND EXISTS(SELECT 1 FROM issues i WHERE i.uid=e.issue_uid AND i.project_id=$1 LIMIT 1 OFFSET 0) ORDER BY e.id LIMIT 1) IS NOT NULL`
+		// The ownership check looks each event's issue up by UID alone, so the
+		// planner can only answer it through the unique UID index; a project
+		// condition inside it lets PostgreSQL walk every owned issue instead.
+		foreign = `(SELECT e.id FROM events e WHERE e.id>$4 AND e.id<=$5 AND e.project_id<>$1 AND e.type<>'sync.reset_required'
+ AND (SELECT i.project_id FROM issues i WHERE i.uid=e.issue_uid)=$1 ORDER BY e.id LIMIT 1) IS NOT NULL`
 	}
 	var maxID int64
 	var own, movedOut, foreignFound bool
@@ -42,10 +51,12 @@ func ReadFederationEventPage(ctx context.Context, tx *sql.Tx, project Project, i
 	err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT MAX(id) FROM events),0),
  EXISTS(SELECT 1 FROM events e`+projectIndex+` WHERE e.project_id=$1 AND e.id>$2 AND e.type<>'sync.reset_required'),
  EXISTS(SELECT 1 FROM events e`+movedIndex+` WHERE e.type='issue.moved' AND `+movedFrom+`=$3 AND e.id>$2),
- `+foreign, project.ID, afterID, project.UID, foreignAfter).Scan(&maxID, &own, &movedOut, &foreignFound)
+ `+foreign, project.ID, afterID, project.UID, foreignAfter, foreignThrough).Scan(&maxID, &own, &movedOut, &foreignFound)
 	if err != nil {
 		return nil, fmt.Errorf("federation event presence: %w", err)
 	}
+	// A gap wider than the probe span takes the per-issue path below.
+	foreignKnown = foreignKnown && maxID <= foreignThrough
 	if maxID <= afterID || (foreignKnown && !own && !movedOut && !foreignFound) {
 		feed.recordQuiet(afterID, maxID)
 		return []Event{}, nil

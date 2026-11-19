@@ -82,22 +82,18 @@ func wrapConn(conn driver.Conn) (driver.Conn, error) {
 		_ = conn.Close()
 		return nil, errors.New("sqlcount: driver connection lacks context support")
 	}
-	if checker, ok := conn.(driver.NamedValueChecker); ok {
-		return &checkingConn{conn0: conn0{inner}, checker: checker}, nil
-	}
 	return &conn0{inner}, nil
 }
 
 type conn0 struct{ inner innerConn }
 
-// checkingConn keeps the driver's own argument conversion, which pgx needs.
-type checkingConn struct {
-	conn0
-	checker driver.NamedValueChecker
-}
-
-func (c *checkingConn) CheckNamedValue(v *driver.NamedValue) error {
-	return c.checker.CheckNamedValue(v)
+// CheckNamedValue keeps the driver's own argument conversion, which pgx
+// needs; ErrSkip gives other drivers database/sql's default conversion.
+func (c *conn0) CheckNamedValue(v *driver.NamedValue) error {
+	if checker, ok := c.inner.(driver.NamedValueChecker); ok {
+		return checker.CheckNamedValue(v)
+	}
+	return driver.ErrSkip
 }
 
 func (c *conn0) Prepare(query string) (driver.Stmt, error) { return c.inner.Prepare(query) }

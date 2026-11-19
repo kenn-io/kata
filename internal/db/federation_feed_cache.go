@@ -105,9 +105,18 @@ func (r *FederationFeedRead) foreignChecked(afterID int64) (int64, bool) {
 	return max(afterID, r.known.foreignThrough), true
 }
 
-// recordQuiet notes that no feed event has an ID in (afterID, maxID].
+// recordQuiet notes that no feed event has an ID in (afterID, maxID], the
+// newest event ID in the read's snapshot.
 func (r *FederationFeedRead) recordQuiet(afterID, maxID int64) {
-	if r == nil || maxID <= afterID {
+	if r == nil {
+		return
+	}
+	// The move check covers the whole snapshot, so it holds even when the
+	// cursor is already at the newest event.
+	if r.noMovesAfter {
+		r.learned.movesThrough = max(r.learned.movesThrough, maxID)
+	}
+	if maxID <= afterID {
 		return
 	}
 	from := afterID
@@ -115,7 +124,4 @@ func (r *FederationFeedRead) recordQuiet(afterID, maxID int64) {
 		from = r.known.foreignFrom
 	}
 	r.learned.foreignFrom, r.learned.foreignThrough = from, maxID
-	if r.noMovesAfter {
-		r.learned.movesThrough = maxID
-	}
 }

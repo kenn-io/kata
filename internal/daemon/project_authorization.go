@@ -137,6 +137,19 @@ func accessibleProjectUIDs(ctx context.Context, store db.Storage, actor string) 
 	return uids, nil
 }
 
+// anonymousURLProjectUIDs is the anonymous decision restricted to one
+// project: that project when anonymous reads may select it, otherwise none.
+func anonymousURLProjectUIDs(ctx context.Context, store db.Storage, projectID int64) ([]string, error) {
+	projectUID, accessible, err := store.AnonymousProjectAccess(db.WithAuthorizedProjects(ctx, nil), projectID)
+	if err != nil {
+		return nil, fmt.Errorf("reading anonymous project access: %w", err)
+	}
+	if !accessible {
+		return []string{}, nil
+	}
+	return []string{projectUID}, nil
+}
+
 // refresh re-reads the caller's projects after the policy revision moved. It
 // reports kept=false when the caller lost a project admitted for this request;
 // otherwise the decision adopts the current set and returns the projects it
@@ -245,12 +258,19 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 			return
 		}
 		decision.PolicyRevision = revision
-		if owner {
+		urlProjectID, urlProject := transportRoutes.urlProject(r)
+		switch {
+		case owner:
 			// Transport handlers resolve their credentials after dispatch, but an
 			// owner principal already present here must retain the same unrestricted
 			// project selection as every other route.
 			decision.ProjectUIDs = nil
-		} else {
+		case !authenticated && urlProject:
+			// The handler authorizes its credential against this project and
+			// narrows the request to it, so until then only this project's
+			// anonymous decision applies.
+			decision.ProjectUIDs, err = anonymousURLProjectUIDs(r.Context(), store, urlProjectID)
+		default:
 			decision.ProjectUIDs, err = accessibleProjectUIDs(r.Context(), store, principal.Actor)
 		}
 		if err != nil {

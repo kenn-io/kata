@@ -396,6 +396,24 @@ func (d *Store) ProjectAccessibleToActor(ctx context.Context, actor, projectUID 
 	return allowed, err
 }
 
+// AnonymousProjectAccess reports whether an unrestricted
+// AnonymousAccessibleProjectUIDs would include the project with projectID,
+// reading only that project. A missing project is not accessible.
+func (d *Store) AnonymousProjectAccess(ctx context.Context, projectID int64) (string, bool, error) {
+	var (
+		projectUID string
+		accessible bool
+	)
+	err := d.readQ.QueryRowContext(ctx, `SELECT p.uid, COALESCE(a.visibility,'all')='all' FROM projects p LEFT JOIN project_access_policies a ON a.project_uid=p.uid WHERE p.id=? AND p.uid<>?`, projectID, db.SystemProjectUID).Scan(&projectUID, &accessible)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return projectUID, accessible, nil
+}
+
 // AnonymousAccessibleProjectUIDs returns the projects, archived ones included,
 // visible without an actor identity. Anonymous access never inherits team
 // membership.

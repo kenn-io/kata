@@ -9,13 +9,11 @@ import (
 )
 
 func BenchmarkFederationPoll(b *testing.B) {
+	b.Cleanup(pgstore.CountStatementsForTest())
 	dsn, cleanup := conformanceTemplate.NewDatabase(b, b.Context())
 	b.Cleanup(cleanup)
 	store, err := pgstore.OpenWithConfig(b.Context(), dsn, conformanceConfig())
 	require.NoError(b, err)
 	b.Cleanup(func() { require.NoError(b, store.Close()) })
-	restore, err := pgstore.CountStatementsForTest(store)
-	require.NoError(b, err)
-	b.Cleanup(func() { require.NoError(b, restore()) })
 	testenv.BenchmarkFederationPoll(b, store)
 }

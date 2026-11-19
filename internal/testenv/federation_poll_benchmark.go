@@ -42,7 +42,8 @@ func BenchmarkFederationPoll(b *testing.B, store db.Storage) {
 		Auth:      config.AuthConfig{Token: "hub-admin-token", TrustPrivateNetwork: true},
 	})
 	b.Cleanup(func() { _ = server.Close() })
-	poll := func(ctx context.Context, afterID int64) api.PollEventsBody {
+	// poll serves one request; decoding is the spoke's work, so it stays out.
+	poll := func(tb testing.TB, ctx context.Context, afterID int64) *httptest.ResponseRecorder {
 		path := fmt.Sprintf("/api/v1/projects/%d/federation/events?after_id=%d&limit=1000", hub.project.ID, afterID)
 		request := httptest.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 		request.RemoteAddr = "100.64.0.9:41000"
@@ -52,22 +53,29 @@ func BenchmarkFederationPoll(b *testing.B, store db.Storage) {
 		recorder := httptest.NewRecorder()
 		server.Handler().ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusOK {
-			b.Fatalf("poll after %d: status %d: %s", afterID, recorder.Code, recorder.Body.String())
+			tb.Fatalf("poll after %d: status %d: %s", afterID, recorder.Code, recorder.Body.String())
 		}
+		return recorder
+	}
+	events := func(tb testing.TB, recorder *httptest.ResponseRecorder) api.PollEventsBody {
 		var body api.PollEventsBody
-		require.NoError(b, json.Unmarshal(recorder.Body.Bytes(), &body))
+		require.NoError(tb, json.Unmarshal(recorder.Body.Bytes(), &body))
 		return body
 	}
 
 	// Catch up the way a spoke does before the project goes quiet.
 	for cursor := int64(0); ; {
-		page := poll(ctx, cursor)
+		page := events(b, poll(b, ctx, cursor))
 		if len(page.Events) == 0 {
 			break
 		}
 		cursor = page.NextAfterID
 	}
 	_, latest, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: hub.issue.ID, Body: "one new event", Author: "tester"})
+	require.NoError(b, err)
+	// Every measured poll has an unrelated event past its cursor, even one
+	// that starts before the busy writer's first commit.
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: hub.busyIssue.ID, Body: "busy", Author: "tester"})
 	require.NoError(b, err)
 
 	busyCtx, stopBusy := context.WithCancel(ctx)
@@ -94,12 +102,12 @@ func BenchmarkFederationPoll(b *testing.B, store db.Storage) {
 		b.Run(name, func(b *testing.B) {
 			var counter sqlcount.Counter
 			pollCtx := counter.Context(b.Context())
-			if got := len(poll(pollCtx, afterID).Events); got != wantEvents {
+			if got := len(events(b, poll(b, pollCtx, afterID)).Events); got != wantEvents {
 				b.Fatalf("poll after %d returned %d events, want %d", afterID, got, wantEvents)
 			}
 			counter.Reset()
 			for b.Loop() {
-				poll(pollCtx, afterID)
+				poll(b, pollCtx, afterID)
 			}
 			b.ReportMetric(float64(counter.Count())/float64(b.N), "stmts/op")
 		})
