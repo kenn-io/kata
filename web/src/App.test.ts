@@ -745,14 +745,14 @@ describe('App', () => {
           return Response.json({
             daemons: [
               ...daemonRoster().daemons,
-              ...(recovered
+              ...(recovered || request.headers.get('X-Kata-Web-Daemon') === 'hub-a'
                 ? [
                     {
                       id: 'hub-a',
                       url: 'https://hub.example',
                       default: false,
                       auth: 'none',
-                      health: 'connected',
+                      health: recovered ? 'connected' : 'down',
                     },
                   ]
                 : []),
@@ -769,7 +769,7 @@ describe('App', () => {
         return Response.json({ issues: [], labels: [], owners: [], projects: [] })
       }),
     )
-    render(App)
+    const view = render(App)
     await waitFor(() => expect(selected).toContain('hub-a'))
     expect(await screen.findByRole('alert')).not.toBeNull()
     expect(screen.getByTestId('daemon-chip').textContent).toContain('hub-a')
@@ -780,7 +780,7 @@ describe('App', () => {
     await fireEvent.click(screen.getByTestId('daemon-row-example-local'))
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
     await fireEvent.click(screen.getByTestId('daemon-chip'))
-    expect(screen.getByTestId('daemon-row-hub-a').textContent).toContain('unreachable')
+    await waitFor(() => expect(screen.queryByTestId('daemon-row-hub-a')).toBeNull())
     recovered = true
     await fireEvent.click(screen.getByTestId('daemon-chip'))
     await fireEvent.click(screen.getByTestId('daemon-chip'))
@@ -788,6 +788,38 @@ describe('App', () => {
       expect(screen.getByTestId('daemon-row-hub-a').textContent).toContain('connected'),
     )
     expect(screen.getByTestId('daemon-chip').textContent).toContain('example-local')
+    view.unmount()
+    history.replaceState(null, '', '/kata')
+    render(App)
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await fireEvent.click(screen.getByTestId('daemon-chip'))
+    expect(await screen.findByTestId('daemon-row-hub-a')).not.toBeNull()
+  })
+
+  it('falls back to the roster default for an unknown launch daemon', async () => {
+    history.replaceState(null, '', '/kata#daemon=removed-server')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const selected: Array<string | null> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (path.startsWith('/api/v1/ui/proxy/'))
+          selected.push(request.headers.get('X-Kata-Web-Daemon'))
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+    render(App)
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    expect(screen.getByTestId('daemon-chip').textContent).toContain('example-local')
+    expect(selected).toContain('example-local')
+    expect(selected).not.toContain('removed-server')
   })
 
   it('honors an explicitly selected gateway daemon on first authority load', async () => {

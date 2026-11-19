@@ -145,6 +145,16 @@ describe('web daemon transport', () => {
     ])
   })
 
+  test('sends the selected daemon with the roster request', async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json({
+        daemons: [{ id: 'hub', url: '', default: true, auth: 'none', health: 'down' }],
+      }),
+    )
+    await fetchWebDaemons(fetcher, new AbortController().signal, 'hub')
+    expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get('X-Kata-Web-Daemon')).toBe('hub')
+  })
+
   test('retains explicit native local authority and treats absent local metadata as remote', async () => {
     const fetcher = vi.fn(async () =>
       Response.json({

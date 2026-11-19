@@ -320,6 +320,57 @@ func TestWebDaemonRosterCachesUnrelatedTargets(t *testing.T) {
 	assert.EqualValues(t, 1, otherProbes.Load())
 }
 
+func TestWebDaemonHeaderlessLocalDefaultDoesNotProbeHubs(t *testing.T) {
+	var ready atomic.Bool
+	hubA, probesA := anonymousHub(t, &ready)
+	hubB, probesB := anonymousHub(t, &ready)
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: "local", WebSyncHubs: []string{"hub-a", "hub-b"}, WebDaemons: []config.CatalogDaemonConfig{{Name: "local", Local: true}, {Name: "hub-a", URL: hubA.URL, AllowInsecure: true}, {Name: "hub-b", URL: hubB.URL, AllowInsecure: true}}})
+	for range 2 {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		require.NoError(t, resp.Body.Close())
+	}
+	assert.Zero(t, probesA.Load())
+	assert.Zero(t, probesB.Load())
+}
+
+func TestWebDaemonRosterSelectionAndInitialConnectedHub(t *testing.T) {
+	var ready atomic.Bool
+	hub, _ := anonymousHub(t, &ready)
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebSyncHubs: []string{"hub"}, WebDaemons: []config.CatalogDaemonConfig{{Name: "hub", URL: hub.URL, AllowInsecure: true}}})
+	ready.Store(true)
+	get := func(selected string) []string {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+		require.NoError(t, err)
+		if selected != "" {
+			req.Header.Set("X-Kata-Web-Daemon", selected)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		var roster struct {
+			Daemons []struct {
+				ID string `json:"id"`
+			} `json:"daemons"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&roster))
+		var ids []string
+		for _, daemon := range roster.Daemons {
+			ids = append(ids, daemon.ID)
+		}
+		return ids
+	}
+	assert.Equal(t, []string{"hub"}, get(""))
+	ready.Store(false)
+	assert.Equal(t, []string{"hub"}, get("hub"))
+	assert.Equal(t, []string{"local"}, get("unknown"))
+}
+
 func TestWebDaemonRosterReportsTargetsWithoutWebUIContract(t *testing.T) {
 	legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
