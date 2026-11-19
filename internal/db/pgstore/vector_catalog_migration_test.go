@@ -31,6 +31,10 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 		require.NoError(t, err)
 		issues = append(issues, issue)
 	}
+	updated, err := store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: issues[0].ID, Actor: "operator", Body: new("updated content")})
+	require.NoError(t, err)
+	issues[0] = updated.Issue
+	require.Positive(t, issues[0].ContentRevision)
 	key := (kitvec.Generation{Model: "model", Dimensions: 2, Params: map[string]string{"salt": "example"}}).Fingerprint()
 	buildingKey := (kitvec.Generation{Model: "other", Dimensions: 2}).Fingerprint()
 	require.NoError(t, store.Close())
@@ -65,7 +69,7 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 			require.NoError(t, err)
 		}
 	}
-	_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_stamps(gen_key, issue_uid, revision) VALUES ($1, $2, $3)`, buildingKey, issues[0].UID, issues[0].ContentRevision)
+	_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_stamps(gen_key, issue_uid, revision) VALUES ($1, $2, $3), ($1, $4, $5)`, buildingKey, issues[0].UID, issues[0].ContentRevision-1, issues[1].UID, issues[1].ContentRevision)
 	require.NoError(t, err)
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "vector_upgrade", SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
