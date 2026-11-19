@@ -1018,11 +1018,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := validateFederationAdoptionBaseline(in.Body.AdoptionBaseline, in.Body.AdoptionBaselineEndEventID); err != nil {
 			return nil, err
 		}
-		moveSources, err := authenticateFederationMoveSources(ctx, cfg, principal, in.Body.MoveSourceTokens)
+		moveSources, hasReference, err := authenticateFederationMoveSources(ctx, cfg, principal, in.Body.MoveSourceTokens)
 		if err != nil {
 			return nil, err
 		}
-		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
+		params := db.FederationIngestParams{
 			MoveSourceEnrollmentIDs: moveSources,
 			AuthorizeMove: func(ctx context.Context, transaction db.Transaction, sourceGrant db.FederationEnrollment, source db.Project) error {
 				return authorizeFederationMoveSource(ctx, cfg, transaction, sourceGrant, source)
@@ -1036,7 +1036,13 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			AdoptionBaseline:                 in.Body.AdoptionBaseline,
 			AdoptionBaselineEndSourceEventID: in.Body.AdoptionBaselineEndEventID,
 			Events:                           federationIngestEventsToDB(in.Body.Events),
-		})
+		}
+		if hasReference {
+			params.AuthorizeReference = func(ctx context.Context, tx db.Transaction, grant db.FederationEnrollment, project db.Project) error {
+				return authorizeFederationReference(ctx, cfg, principal, tx, grant, project)
+			}
+		}
+		result, err := cfg.DB.IngestFederationEvents(ctx, params)
 		if err != nil {
 			return nil, federationIngestError(err)
 		}

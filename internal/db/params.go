@@ -865,6 +865,8 @@ type FederationIngestParams struct {
 	// MoveSourceEnrollmentIDs contains supplemental grants authenticated by transport.
 	// A matching spoke/actor enrollment alone does not prove token possession.
 	MoveSourceEnrollmentIDs map[string]int64
+	// AuthorizeReference checks a different actor only for explicit direct link additions.
+	AuthorizeReference func(context.Context, Transaction, FederationEnrollment, Project) error
 	// AuthorizeMove checks supplemental host authority for move sources and the
 	// current owners of fresh events, using a transactionally fenced native grant.
 	AuthorizeMove                    func(context.Context, Transaction, FederationEnrollment, Project) error
