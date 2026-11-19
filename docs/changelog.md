@@ -40,6 +40,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   a job saved earlier with such a schedule in `kata cron job edit <job-uid>` to
   fix it. Upgrade a federated hub and its spokes in one window: a hub that
   refuses a pushed definition can quarantine that spoke's relay batch.
+- Cross-project parents: upgrade the hub before push-enabled spokes to sync
+  parent removals and replacements across project-scoped actors.
 
 - Remove or replace a synced cross-project parent when a host supports
   project-scoped actors. Later changes continue syncing with the updated link.

@@ -1093,9 +1093,7 @@ func (s *Store) authorizeFederationCurrentIssuesTx(ctx context.Context, tx *sql.
 		if err != nil {
 			return err
 		}
-		for _, previous := range parentRemovals[event.EventUID] {
-			refs = append(refs, previous)
-		}
+		refs = append(refs, parentRemovals[event.EventUID]...)
 		refs = append(refs, primary)
 		for _, issueUID := range refs {
 			if issueUID == "" {
