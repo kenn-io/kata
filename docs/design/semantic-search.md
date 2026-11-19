@@ -44,11 +44,16 @@ Non-goals for v1 (future levers, in rough order of expected value):
   untouched.
 - LLM reranking and query expansion (qmd-style stages; they need a
   generation model, which this design deliberately does not require).
-- Federating embeddings. Vectors stay local derived state and never sync. A
-  direct spoke does not embed shared projects; it sends each search over them
-  to its hub, which ranks them with its own index and embedding provider. Relay
-  spokes and local-only projects embed what they store.
 - TUI affordances beyond what arrives transparently through the API.
+
+Federated projects do not each embed everything they store:
+
+- A direct spoke does not embed shared projects. It sends each search over them
+  to its hub, which ranks them with its own index and embedding provider.
+- Negotiated relays reuse vectors from one selected producer when the recipe
+  matches; only that producer generates missing shared vectors. See
+  [sharing embedding vectors](../operations/federation.md#sharing-embedding-vectors).
+- Local-only projects embed locally.
 
 ## Trust, privacy, and credentials
 
