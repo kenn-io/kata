@@ -243,9 +243,7 @@
   }
 
   function dateZone(saved: unknown): string {
-    return typeof saved === 'string' && /^\d{4}-\d{2}-\d{2}\[[^\]]+\]$/.test(saved)
-      ? saved.slice(10)
-      : ''
+    return typeof saved === 'string' ? (saved.match(/\[[^\]]+\]$/)?.[0] ?? '') : ''
   }
 
   async function patchScheduled(value: string): Promise<void> {

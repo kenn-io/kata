@@ -275,6 +275,21 @@ describe('IssueProperties', () => {
     })
   })
 
+  it.each([
+    ['scheduled', 'scheduled_on', 'Edit scheduled', 'Scheduled:'],
+    ['deadline', 'deadline_on', 'Edit due date', 'Due:'],
+  ])('keeps the zone when changing the day of a timed %s', async (_, key, edit, picker) => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({ metadata: { [key]: '2026-06-01T09:00[Europe/Paris]' } }),
+      onPatchMetadata,
+    })
+    await fireEvent.click(screen.getByRole('button', { name: edit }))
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(picker) }))
+    await fireEvent.click(screen.getByRole('button', { name: /Jun 10, 2026/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { [key]: '2026-06-10[Europe/Paris]' })
+  })
+
   it('patches scheduled and due dates and closes editors on accepted replacement', async () => {
     const onPatchMetadata = vi.fn(async () => true)
     const view = renderProperties({ onPatchMetadata, draftResetGeneration: 0 })
