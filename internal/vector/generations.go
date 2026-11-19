@@ -11,8 +11,17 @@ import (
 )
 
 func (ix *Index) EnsureBuilding(ctx context.Context, key string, gen kitvec.Generation) error {
+	if ix.pg != nil && gen.Dimensions > maxPostgresHalfvecDimensions {
+		return fmt.Errorf("vector: postgres halfvec dimensions must not exceed 4,000 (got %d)", gen.Dimensions)
+	}
 	if ix.pg != nil {
-		return ix.pg.ensureBuilding(ctx, key, gen)
+		tx, err := ix.pg.beginReconcilerTx(ctx)
+		if err != nil {
+			return err
+		}
+		if err := tx.Rollback(); err != nil {
+			return err
+		}
 	}
 	state, err := ix.generationState(ctx, key)
 	if err != nil {
@@ -21,7 +30,8 @@ func (ix *Index) EnsureBuilding(ctx context.Context, key string, gen kitvec.Gene
 	if state == string(sqlitevec.StateActive) {
 		return nil
 	}
-	if err := ix.store.EnsureGeneration(ctx, key, gen, sqlitevec.StateBuilding); err != nil {
+	store := ix.lifecycleStore()
+	if err := store.EnsureGeneration(ctx, key, gen, kitvec.StateBuilding); err != nil {
 		return fmt.Errorf("vector: ensure generation %s: %w", key, err)
 	}
 	return nil
@@ -36,34 +46,30 @@ func (ix *Index) ActiveGeneration(ctx context.Context) (string, bool, error) {
 }
 
 func (ix *Index) CutOver(ctx context.Context, key string) error {
-	if ix.pg != nil {
-		return ix.pg.cutOver(ctx, key)
-	}
-	coverage, err := ix.store.Coverage(ctx, key, "")
+	_, _, backlog, err := ix.Coverage(ctx, key)
 	if err != nil {
 		return err
 	}
-	if coverage.Backlog == 0 {
-		if err := ix.store.Activate(ctx, key); err != nil {
+	store := ix.lifecycleStore()
+	if backlog == 0 {
+		if err := store.Activate(ctx, key); err != nil {
 			return err
 		}
-	} else if err := ix.store.SetGenerationState(ctx, key, sqlitevec.StateActive); err != nil {
+	} else if err := store.SetGenerationState(ctx, key, kitvec.StateActive); err != nil {
 		return err
 	}
-	generations, err := ix.store.Generations(ctx)
+	keys, err := ix.generationKeys(ctx)
 	if err != nil {
 		return err
 	}
-	for _, generation := range generations {
-		if generation.Key == key {
+	for _, other := range keys {
+		if other == key {
 			continue
 		}
-		if generation.State != sqlitevec.StateRetired {
-			if err := ix.store.SetGenerationState(ctx, generation.Key, sqlitevec.StateRetired); err != nil {
-				return err
-			}
+		if err := store.SetGenerationState(ctx, other, kitvec.StateRetired); err != nil {
+			return err
 		}
-		if err := ix.store.Reclaim(ctx, generation.Key); err != nil {
+		if err := store.Reclaim(ctx, other); err != nil {
 			return err
 		}
 	}
@@ -88,8 +94,11 @@ func (ix *Index) Coverage(ctx context.Context, key string) (embedded, skipped, b
 
 func (ix *Index) generationState(ctx context.Context, key string) (string, error) {
 	var state string
-	err := ix.db.QueryRowContext(ctx, fmt.Sprintf(
-		`SELECT state FROM %s_generations WHERE gen_key = ?`, vectorsPrefix), key).Scan(&state)
+	query := fmt.Sprintf(`SELECT state FROM %s_generations WHERE gen_key = ?`, vectorsPrefix)
+	if ix.pg != nil {
+		query = `SELECT state FROM issue_vector_generations WHERE gen_key = $1`
+	}
+	err := ix.db.QueryRowContext(ctx, query, key).Scan(&state)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -97,4 +106,47 @@ func (ix *Index) generationState(ctx context.Context, key string) (string, error
 		return "", fmt.Errorf("vector: generation state: %w", err)
 	}
 	return state, nil
+}
+
+// lifecycleStore holds the lifecycle operations shared by both kit backends.
+type lifecycleStore interface {
+	EnsureGeneration(context.Context, string, kitvec.Generation, kitvec.State) error
+	SetGenerationState(context.Context, string, kitvec.State) error
+	Activate(context.Context, string) error
+	Reclaim(context.Context, string) error
+}
+
+func (ix *Index) lifecycleStore() lifecycleStore {
+	if ix.pg != nil {
+		return ix.pgStore
+	}
+	return ix.store
+}
+
+func (ix *Index) generationKeys(ctx context.Context) ([]string, error) {
+	if ix.pg == nil {
+		generations, err := ix.store.Generations(ctx)
+		if err != nil {
+			return nil, err
+		}
+		keys := make([]string, 0, len(generations))
+		for _, generation := range generations {
+			keys = append(keys, generation.Key)
+		}
+		return keys, nil
+	}
+	rows, err := ix.db.QueryContext(ctx, `SELECT gen_key FROM issue_vector_generations`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
 }

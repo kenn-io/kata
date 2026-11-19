@@ -14,9 +14,9 @@ const (
 	canonicalColumnFingerprint     = "2c573a26533e056618e458d7addc7836bf7d95e98b0ad258b6b7c2a50725186d"
 	canonicalConstraintFingerprint = "21a6429d8b06093928339598c69f71d48d65330c78e3274cbe8bcabc9fd5ed14"
 	canonicalIndexFingerprint      = "29197eb8ed6fdd25df78f73eb2bbeb649f883614735a72cc48adcb7a02259bcd"
-	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
-	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
-	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
+	vectorColumnFingerprint        = "fee1ce70eef6dbbf6bb0bb4bc609d03ddbdedde3b7450b34968a146ff1a58502"
+	vectorConstraintFingerprint    = "f6b16cccad4298a1b9c6ee173c3795c08b2c1f9d92a6ede2f51da4ea53318bd7"
+	vectorIndexFingerprint         = "5c1dfd69d86bac3e4936fdf3ac3197ba3107684a2dff560649110c9b6df47f67"
 	canonicalTriggerFingerprint    = "d027a602b31936d09dee01e5182c092c9245faf34edb2c0445ac36795a4a3b46"
 	canonicalFunctionFingerprint   = "be74ea17e4c0192144ab7f75740b168dc1eb7cc45de15a34aaf3a69c1ffdb7f8"
 	canonicalTextSearchFingerprint = "1206eb613d5e4cf9c00c447998c337ece326819f8b3261668f7a8c685571db06"
@@ -67,10 +67,10 @@ var canonicalTableColumns = map[string]string{
 }
 
 var optionalVectorTableColumns = map[string]string{
-	"issue_vector_chunks":      "gen_key,issue_uid,chunk_index,embedding",
-	"issue_vector_generations": "ordinal,gen_key,model,dimensions,state",
-	"issue_vector_mirror":      "issue_uid,project_uid,content,content_revision,embed_gen",
-	"issue_vector_stamps":      "gen_key,issue_uid,revision",
+	"issue_vector_chunks":      "generation_id,doc_key,chunk_index,embedding",
+	"issue_vector_generations": "id,gen_key,fingerprint,dimension,state",
+	"issue_vector_mirror":      "issue_uid,project_uid,content,content_revision",
+	"issue_vector_stamps":      "generation_id,doc_key,revision",
 }
 
 var canonicalIndexes = strings.Fields(`

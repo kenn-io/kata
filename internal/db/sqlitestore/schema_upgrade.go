@@ -28,6 +28,7 @@ var inPlaceUpgrades = []struct {
 	{48, 49, nil, []string{"idx_events_cron_run_uid"}, nil},
 	{49, 50, []string{"mcp_event_subscriptions"}, []string{"idx_mcp_event_subscriptions_due", "idx_mcp_event_subscriptions_principal_callback", "idx_mcp_event_subscriptions_ended"}, nil},
 	{50, 51, nil, []string{"idx_events_issue_uid_id"}, []string{"idx_events_resolved_issue_uid"}},
+	{51, 52, nil, nil, nil},
 }
 
 // UpgradesInPlace reports whether in-place steps reach the current schema.

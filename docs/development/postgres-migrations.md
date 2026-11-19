@@ -493,3 +493,18 @@ schemas 43 through 50 drop the old index, and schemas 41 and 42 never create it.
 Start the matching schema 51 binary after migration. Older binaries cannot open
 schema 51. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 52: shared vector catalog
+
+The 51→52 migration converts the optional PostgreSQL vector catalog to Kit's
+layout in place. Stored vectors, revisions, and generation keys stay intact;
+no re-embedding is needed. Databases without the optional tables advance too.
+SQLite advances in place without changing its vector sidecar.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Allow a stopped
+window for converting the vector rows and rebuilding their index. Existing
+runtime table and sequence grants remain sufficient, and runtime credentials
+cannot migrate. Start the matching schema 52 binary after migration. Older
+binaries cannot open schema 52; rollback requires the pre-upgrade backup and
+matching older binary.
