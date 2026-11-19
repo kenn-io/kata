@@ -1303,16 +1303,18 @@ func (r *Runner) retryBlocked(
 	return retries.blocked(spoke.binding.ProjectID, identity, r.refusalNow())
 }
 
-// retryIdentityAfterTurn fingerprints the binding and credential as a refused
-// or throttled turn left them, so the next pass can tell whether anything
-// changed since. A turn can change the binding itself, for example by recording
-// an upstream relay revocation. runSpoke calls it while it still holds the
+// retryIdentityAfterTurn fingerprints a refused or throttled turn, so the next
+// pass can tell whether anything changed since. The binding is read as the
+// turn left it, because a turn can change it, for example by recording an
+// upstream relay revocation. runSpoke calls this while it still holds the
 // project's sync lock, so a rebind that waits on that lock lands after the
-// fingerprint and the next pass tries the new binding at once.
+// fingerprint. The credential is the one the turn sent: a join that stores a
+// new token without the lock, while a request with the old token is in flight,
+// still differs from it, and the next pass tries the new token at once.
 func (r *Runner) retryIdentityAfterTurn(
 	ctx context.Context,
 	spoke activeSpokeBinding,
-	credentialStore config.FederationCredentialStore,
+	credential config.FederationCredential,
 	turnErr error,
 ) ([32]byte, error) {
 	if reason, _, _ := classifySyncRetry(turnErr); reason == "" {
@@ -1321,10 +1323,6 @@ func (r *Runner) retryIdentityAfterTurn(
 	binding, err := r.DB.FederationBindingByProject(ctx, spoke.binding.ProjectID)
 	if err != nil {
 		return [32]byte{}, fmt.Errorf("reload federation binding for retry: %w", err)
-	}
-	credential, _, err := credentialStore.FederationCredential(ctx, spoke.project.UID)
-	if err != nil {
-		return [32]byte{}, fmt.Errorf("read federation credential for retry: %w", err)
 	}
 	return syncRetryIdentity(binding, credential)
 }
@@ -1356,11 +1354,13 @@ func (r *Runner) runSpoke(
 	if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
 		return false, identity, nil
 	}
+	// turnCredential is the stored credential this turn sends to the hub.
+	var turnCredential config.FederationCredential
 	defer func() {
 		// Fingerprint before the result hook so the schedule belongs to
 		// the turn, not to a change made after it.
 		var identityErr error
-		identity, identityErr = r.retryIdentityAfterTurn(ctx, spoke, credentialStore, resultErr)
+		identity, identityErr = r.retryIdentityAfterTurn(ctx, spoke, turnCredential, resultErr)
 		if identityErr != nil {
 			resultErr = errors.Join(resultErr, identityErr)
 		}
@@ -1373,6 +1373,7 @@ func (r *Runner) runSpoke(
 	if err != nil {
 		return false, identity, errors.Join(err, r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()))
 	}
+	turnCredential = cred
 	cred = config.FederationTransportCredential(
 		binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred,
 	)

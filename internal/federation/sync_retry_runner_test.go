@@ -61,8 +61,10 @@ type spokeFleet struct {
 	refuse sync.Map
 	// throttleClaims makes the hub answer 503 to every claim request.
 	throttleClaims atomic.Bool
-	runner         *Runner
-	now            time.Time
+	// beforeAnswer, when set, runs before the hub answers each request.
+	beforeAnswer func(projectUID string)
+	runner       *Runner
+	now          time.Time
 }
 
 func newSpokeFleet(tb testing.TB, count int) *spokeFleet {
@@ -85,6 +87,9 @@ func newSpokeFleet(tb testing.TB, count int) *spokeFleet {
 		}
 		var hubProjectID int64
 		_, _ = fmt.Sscanf(r.URL.Path, "/api/v1/projects/%d/", &hubProjectID)
+		if fleet.beforeAnswer != nil {
+			fleet.beforeAnswer(projectsByHubID[hubProjectID])
+		}
 		if fleet.throttleClaims.Load() && strings.Contains(r.URL.Path, "/lease/") {
 			w.Header().Set("Retry-After", "120")
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -287,6 +292,34 @@ func TestRefusedSpokeRetriesAtOnceAfterChangeAtTurnEnd(t *testing.T) {
 	fleet.now = fleet.now.Add(30 * time.Second)
 	fleet.pass(ctx, retries)
 	require.Greater(t, fleet.requests.Load(), int64(1), "the replacement credential is tried at once")
+	_, ok := retries.FederationSyncRetry(project.ID)
+	require.False(t, ok)
+}
+
+// A token replaced while a request with the old token is in flight is not
+// marked refused by that request's answer: the next pass tries it at once.
+func TestRefusedSpokeRetriesAtOnceAfterTokenReplacedMidRequest(t *testing.T) {
+	ctx := t.Context()
+	fleet := newSpokeFleet(t, 1)
+	project := fleet.projects[0]
+	replaced := false
+	fleet.beforeAnswer = func(projectUID string) {
+		if replaced || projectUID != project.UID {
+			return
+		}
+		replaced = true
+		credential := fleet.credentials.credentials[project.UID]
+		credential.Token = "replacement"
+		require.NoError(t, fleet.credentials.StoreFederationCredential(ctx, project.UID, credential))
+	}
+	retries := newSyncRetries(noJitter)
+	fleet.pass(ctx, retries)
+	require.Equal(t, int64(1), fleet.requests.Load())
+	fleet.refuse.Delete(project.UID)
+
+	fleet.now = fleet.now.Add(30 * time.Second)
+	fleet.pass(ctx, retries)
+	require.Greater(t, fleet.requests.Load(), int64(1), "the replacement token is tried at once")
 	_, ok := retries.FederationSyncRetry(project.ID)
 	require.False(t, ok)
 }
