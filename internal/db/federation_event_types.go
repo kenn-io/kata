@@ -100,10 +100,10 @@ func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int
 	if payloadCarriesCommentReply(kind, payload) {
 		version = max(version, commentReplyWireVersion)
 	}
-	if zoned, err := payloadHasZonedDate(kind, string(payload)); err != nil {
+	if zoned, err := payloadZonedDateFeature(kind, string(payload)); err != nil {
 		return 0, "", err
-	} else if zoned {
-		feature = MergeEventFeatures(feature, IssueDateZoneEventFeature)
+	} else if zoned != "" {
+		feature = MergeEventFeatures(feature, zoned)
 	}
 	return version, feature, nil
 }

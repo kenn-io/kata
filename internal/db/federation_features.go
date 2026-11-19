@@ -1,6 +1,7 @@
 package db
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
@@ -58,20 +59,20 @@ func MergeEventFeatures(values ...string) string {
 
 // PayloadRequiredFeatures supplements type classification with payload features.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
-	native, err := payloadHasNativeRecurringState(kind, payload)
-	zoned, zoneErr := payloadHasZonedDate(kind, payload)
-	if err != nil {
+	native, nativeErr := payloadHasNativeRecurringState(kind, payload)
+	zone, zoneErr := payloadZonedDateFeature(kind, payload)
+	if err := cmp.Or(nativeErr, zoneErr); err != nil {
 		return "", err
 	}
-	if zoneErr != nil {
-		return "", zoneErr
+	if native {
+		zone = MergeEventFeatures(zone, CronEventFeature)
 	}
-	return MergeEventFeatures(EventRequiredFeatures(kind), map[bool]string{true: CronEventFeature}[native], map[bool]string{true: IssueDateZoneEventFeature}[zoned]), nil
+	return MergeEventFeatures(EventRequiredFeatures(kind), zone), nil
 }
 
-func payloadHasZonedDate(kind, payload string) (bool, error) {
+func payloadZonedDateFeature(kind, payload string) (string, error) {
 	if !strings.HasPrefix(kind, "issue.") && kind != "projection.issue" {
-		return false, nil
+		return "", nil
 	}
 	if payload == "" {
 		payload = "{}"
@@ -84,22 +85,22 @@ func payloadHasZonedDate(kind, payload string) (bool, error) {
 		Snapshot jsontext.Value `json:"snapshot"`
 	}
 	if err := json.Unmarshal([]byte(payload), &body); err != nil {
-		return false, err
+		return "", err
 	}
 	if kind == "issue.moved" && len(body.Snapshot) > 0 {
-		return payloadHasZonedDate("issue.snapshot", string(body.Snapshot))
+		return payloadZonedDateFeature("issue.snapshot", string(body.Snapshot))
 	}
 	for _, key := range []string{"scheduled_on", "deadline_on"} {
 		for _, raw := range []jsontext.Value{body.Metadata[key], body.Diff[key].To} {
 			var value string
 			if len(raw) > 0 && json.Unmarshal(raw, &value) == nil {
 				if _, zone := metadata.SplitScheduleZone(value); zone != "" {
-					return true, nil
+					return IssueDateZoneEventFeature, nil
 				}
 			}
 		}
 	}
-	return false, nil
+	return "", nil
 }
 
 // payloadHasNativeRecurringState identifies hub-owned state independently of
