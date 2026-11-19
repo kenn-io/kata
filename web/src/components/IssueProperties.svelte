@@ -200,9 +200,16 @@
     })
   }
 
+  function scheduleTime(): string {
+    return (
+      issue.issue.metadata.scheduled_on?.match(/T\d{2}:\d{2}(?::\d{2})?$/)?.[0].replace('T', ' ') ??
+      ''
+    )
+  }
+
   function scheduledLabel(): string {
     const value = scheduledDate()
-    return value ? formatDate(value) : 'When'
+    return value ? formatDate(value) + scheduleTime() : 'When'
   }
 
   function calendarDate(projected: string | undefined, saved: string | undefined): string {

@@ -211,6 +211,24 @@ describe('IssueProperties', () => {
     expect(screen.getByRole('button', { name: /Scheduled: Aug 31/ })).toBeTruthy()
   })
 
+  it('shows the time of a local schedule alongside its projected day', async () => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2026-06-01',
+        metadata: { scheduled_on: '2026-06-02T09:00' },
+      }),
+      onPatchMetadata,
+    })
+    const scheduled = screen.getByRole('button', { name: 'Edit scheduled' })
+    expect(scheduled.textContent).toContain('Jun 1')
+    expect(scheduled.textContent).toContain('09:00')
+    await fireEvent.click(scheduled)
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Jun 10, 2026/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { scheduled_on: '2026-06-10' })
+  })
+
   it.each([
     ['UTC instant', '2026-09-01T00:30:00Z'],
     ['local time', '2026-09-01T09:00'],

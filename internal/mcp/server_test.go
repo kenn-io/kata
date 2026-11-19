@@ -1010,7 +1010,7 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 		Name: "kata.show", Arguments: map[string]any{"ref": ref},
 	})
 	require.NoError(t, err)
-	require.Equal(t, "2026-09-02T09:30[UTC]",
+	require.Equal(t, "2026-09-02T09:30",
 		shown.StructuredContent.(map[string]any)["issue"].(map[string]any)["metadata"].(map[string]any)["scheduled_on"])
 
 	scheduleCleared, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
