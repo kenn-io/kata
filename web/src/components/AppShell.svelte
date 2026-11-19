@@ -644,8 +644,8 @@
     if (route.view === 'settings') return 'Settings'
     if (route.view === 'credentials') return 'Credentials'
     if (route.issueUID) {
-      if (projection.selected_state === 'archived') return 'Archived issue'
-      if (projection.selected_state === 'missing') return 'Issue unavailable'
+      if (projection.selected_state === 'archived') return `Archived issue ${route.issueUID}`
+      if (projection.selected_state === 'missing') return `Issue unavailable ${route.issueUID}`
       const issue = projection.selected_detail?.issue
       if (issue?.uid === route.issueUID) return `${issue.qualified_id} ${issue.title}`
       return 'Issue'

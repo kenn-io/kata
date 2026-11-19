@@ -1703,7 +1703,7 @@ describe('App', () => {
     expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
   })
 
-  it('fences browser authority when a reference request rejects the session', async () => {
+  it('keeps the Inbox title when a reference request requires login', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
