@@ -9,6 +9,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Sync a Linear team that every run had refused with `linear issue is outside
+  selected scope`. For some teams, Linear's issue filter on the team ID returns
+  issues from the whole workspace. Kata now reads issues through the team
+  itself, so it receives only that team's issues.
+
+- See in `kata tui` which issues an agent marked `stuck` or `needs-human`: the list row gets a leading `!`, and the issue detail shows the `work.attention` value with its `work.attention_msg`. See [work conventions](reference/metadata.md#orchestration-conventions-work-keys).
+
 - Keep Linear discussion when you sync a Linear team: comments on imported
   issues now arrive with their Linear author and creation time. Kata copies
   each comment once. See [Linear sync](operations/linear-sync.md).
@@ -21,6 +28,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   stores.
 
 - Press `V` in `kata tui` to open the close form on any daemon and cite an issue's attachment as `done` evidence, alone or with typed evidence. `x` still closes at once and opens the form only when the daemon requires evidence; other close reasons do not offer the choice. The events tab names the cited file, and marks it removed or changed. See [cite a document when closing work](guide/attachments.md#cite-a-document-when-closing-work).
+- Keep scheduled dates and deadlines in their own timezones when issues move between daemons. Add an explicit zone name to a civil date to keep it portable; future timezone rule updates apply to it. Uploads and event pages check whether the receiving peer supports zoned dates; upgrade older peers to sync those events.
 
 - Learn from the CLI that a project is archived and how to restore it. When a
   project route finds an archived project you could read, its
@@ -57,7 +65,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   [HTTP API reference](reference/http-api.md#editing-an-issue-safely).
 - Add semantic and hybrid search to Postgres-backed Go services with `Config.Embeddings`; automatic search falls back to lexical results when pgvector is missing. See [semantic search](development/embedding.md#semantic-search).
 
-- Send a [request without replacing one](reference/cli.md#teammate-requests) the recipient still holds with `kata notify --no-replace`, and clear a request only while its stored `from` field is a given actor with `kata notify --clear --if-from <actor>`. `--no-replace` does not combine with `--broadcast` or `--clear`; `--if-from` needs `--clear`, compares the stored `from` and does not verify who wrote the request, and a plain `--clear` still clears unconditionally. Both need a daemon on API 0.59.0 or newer.
+- Send a [request without replacing one](reference/cli.md#teammate-requests) the recipient still holds with `kata notify --no-replace`, and clear a request only while its stored `from` field is a given actor with `kata notify --clear --if-from <actor>`. `--no-replace` does not combine with `--broadcast` or `--clear`; `--if-from` needs `--clear`, compares the stored `from` and does not verify who wrote the request, and a plain `--clear` still clears unconditionally. Both need a daemon on API 0.60.0 or newer.
 
 - Read a soft-deleted issue's history, including who deleted it and when, from
   `GET /api/v1/projects/{project_id}/events?issue={ref}`. Name the actor you

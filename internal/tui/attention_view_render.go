@@ -137,9 +137,9 @@ func renderAttentionRows(s attentionState, width, budget int) []string {
 			}
 			if col == 2 {
 				switch s.rows[index].workAttention {
-				case "stuck":
+				case workAttentionStuck:
 					cell = cell.Inherit(errorStyle)
-				case "needs-human":
+				case workAttentionNeedsHuman:
 					cell = cell.Inherit(chipActive)
 				default:
 					cell = cell.Inherit(subtleStyle)

@@ -22,6 +22,27 @@ func TestUISnapshotGraphReachContract(t *testing.T) {
 	})
 }
 
+func TestUISnapshotSelectedIssueWithInvalidLegacySchedule(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := openUIStore(t)
+	project := createUIProject(t, store, "example-project")
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Selected issue", Author: "user-a"})
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `UPDATE issues SET metadata = ? WHERE id = ?`, `{"scheduled_on":"legacy-invalid","deadline_on":"2026-09-01T00:30:00Z"}`, issue.ID)
+	require.NoError(t, err)
+	snapshot, err := store.ReadUISnapshot(ctx, db.UISnapshotQuery{
+		View: "all-open", ProjectUID: project.UID, Text: "does not match", SelectedIssueUID: issue.UID,
+		TimeZone: "America/Los_Angeles", DefaultTimezone: "UTC",
+	})
+	require.NoError(t, err)
+	require.Empty(t, snapshot.Issues)
+	require.NotNil(t, snapshot.SelectedIssue)
+	assert.Equal(t, issue.UID, snapshot.SelectedIssue.UID)
+	assert.Empty(t, snapshot.SelectedIssue.ScheduledOnDate)
+	assert.Equal(t, "2026-08-31", snapshot.SelectedIssue.DeadlineOnDate)
+}
+
 func TestUISnapshotMutationCursorContract(t *testing.T) {
 	t.Parallel()
 	dbtest.RunUISnapshotMutationCursorContract(t, func(t *testing.T) db.Storage {

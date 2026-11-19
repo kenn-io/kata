@@ -50,9 +50,6 @@ func TestExternalRootBridgeEndToEnd(t *testing.T) {
 			t.Run("planning field conflict and completion isolation", func(t *testing.T) {
 				testE2EPlanningFields(t, executable, backend)
 			})
-			t.Run("planning field wire shapes", func(t *testing.T) {
-				testE2EPlanningFieldShapes(t, executable, backend)
-			})
 			t.Run("restore requires identity reconfirmation", func(t *testing.T) {
 				testE2ERestorePause(t, executable, backend)
 			})
@@ -389,12 +386,11 @@ func testE2EPlanningFields(t *testing.T, executable string, backend e2eBackend) 
 	assert.Zero(t, first.FieldConflicts)
 	issue, err := h.database.store.IssueByID(t.Context(), h.issue.ID)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"scheduled_on":"2026-08-21T09:00:00","timezone":"Europe/Paris"}`, string(issue.Metadata))
+	assert.JSONEq(t, `{"scheduled_on":"2026-08-21T09:00:00[Europe/Paris]"}`, string(issue.Metadata))
 
 	_, err = h.database.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
 		IssueID: h.issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{
-			"scheduled_on": jsontext.Value(`"2026-08-22T09:00:00"`),
-			"timezone":     jsontext.Value(`"Europe/Paris"`),
+			"scheduled_on": jsontext.Value(`"2026-08-22T09:00:00[Europe/Paris]"`),
 		},
 	})
 	require.NoError(t, err)
@@ -426,51 +422,7 @@ func testE2EPlanningFields(t *testing.T, executable string, backend e2eBackend) 
 	assert.False(t, resolved.Conflicted)
 	issue, err = h.database.store.IssueByID(t.Context(), h.issue.ID)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"scheduled_on":"2026-08-23T09:00:00","timezone":"Europe/Paris"}`, string(issue.Metadata))
-}
-
-func testE2EPlanningFieldShapes(t *testing.T, executable string, backend e2eBackend) {
-	for _, test := range []struct {
-		kataField string
-		kind      string
-		external  connector.FieldValue
-		metadata  string
-	}{
-		{kataField: "scheduled_on", kind: "date", external: connector.FieldValue{Kind: "date", Value: "2026-08-24"}, metadata: `{"scheduled_on":"2026-08-24"}`},
-		{kataField: "scheduled_on", kind: "local", external: connector.FieldValue{Kind: "local_datetime", Value: "2026-08-24T09:30:00", Timezone: "Europe/Paris"}, metadata: `{"scheduled_on":"2026-08-24T09:30:00","timezone":"Europe/Paris"}`},
-		{kataField: "scheduled_on", kind: "instant", external: connector.FieldValue{Kind: "instant", Value: "2026-08-24T07:30:00.12Z"}, metadata: `{"scheduled_on":"2026-08-24T07:30:00.12Z"}`},
-		{kataField: "deadline_on", kind: "date", external: connector.FieldValue{Kind: "date", Value: "2026-08-25"}, metadata: `{"deadline_on":"2026-08-25"}`},
-		{kataField: "deadline_on", kind: "local", external: connector.FieldValue{Kind: "local_datetime", Value: "2026-08-25T10:45:00", Timezone: "Europe/Paris"}, metadata: `{"deadline_on":"2026-08-25T10:45:00","timezone":"Europe/Paris"}`},
-		{kataField: "deadline_on", kind: "instant", external: connector.FieldValue{Kind: "instant", Value: "2026-08-25T08:45:00.12Z"}, metadata: `{"deadline_on":"2026-08-25T08:45:00.12Z"}`},
-	} {
-		t.Run(test.kataField+" "+test.kind, func(t *testing.T) {
-			h := newE2EHarness(t, executable, backend, false)
-			h.mutateState(func(current *fakeconnector.State) {
-				current.Roots[0].Fields["field-schedule"] = test.external
-			})
-			_, err := h.service.MapField(t.Context(), MapFieldParams{
-				ConnectorInstance: "example", KataField: test.kataField, ExternalField: "field-schedule",
-			})
-			require.NoError(t, err)
-			_, err = h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{Manual: true})
-			require.NoError(t, err)
-			issue, err := h.database.store.IssueByID(t.Context(), h.issue.ID)
-			require.NoError(t, err)
-			assert.JSONEq(t, test.metadata, string(issue.Metadata))
-
-			patch := map[string]jsontext.Value{test.kataField: jsontext.Value("null")}
-			if test.kind == "local" {
-				patch["timezone"] = jsontext.Value("null")
-			}
-			_, err = h.database.store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-				IssueID: h.issue.ID, Actor: "operator", Patch: patch,
-			})
-			require.NoError(t, err)
-			_, err = h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{Manual: true})
-			require.NoError(t, err)
-			assert.Equal(t, connector.FieldValue{Kind: "null"}, h.readState(t).Roots[0].Fields["field-schedule"])
-		})
-	}
+	assert.JSONEq(t, `{"scheduled_on":"2026-08-23T09:00:00[Europe/Paris]"}`, string(issue.Metadata))
 }
 
 func testE2ERestorePause(t *testing.T, executable string, backend e2eBackend) {

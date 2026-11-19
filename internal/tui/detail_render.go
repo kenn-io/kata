@@ -218,6 +218,13 @@ func renderDocumentMetadata(
 			metadataLabel("scheduled:")+" "+datesDocumentText(scheduled),
 			metadataLabel("deadline:")+" "+datesDocumentText(deadline), width)...)
 	}
+	if level, msg := iss.workAttention(); level != "" {
+		text := level
+		if msg != "" {
+			text += " - " + msg
+		}
+		rows = append(rows, truncate(metadataLabel("attention:")+" "+sanitizeForLine(text), width))
+	}
 	if len(iss.Labels) > 0 {
 		labelsBudget := width - runewidth.StringWidth("labels: ")
 		labels := metadataLabel("labels:") + " " + labelsDocumentText(iss.Labels, labelsBudget)

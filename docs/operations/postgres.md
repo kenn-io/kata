@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-11-13
+last_edited: 2026-11-19
 ---
 
 # PostgreSQL operations
@@ -316,6 +316,10 @@ issue content, token hashes, and federation state to a network-positioned
 attacker. It is not the production private-network posture.
 
 ## Upgrade ceremony
+
+When daemons share a database, upgrade all of them before writing dates with
+saved zones. Older versions cannot read those dates, even when no schema
+migration is needed.
 
 Until a release explicitly documents an online migration, treat every schema
 upgrade as an offline operation:

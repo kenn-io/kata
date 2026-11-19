@@ -76,6 +76,16 @@
       "permanent": true
     },
     {
+      "source": "/guide/cron-failure-alerts/",
+      "destination": "/docs/guide/cron-failure-alerts/",
+      "permanent": true
+    },
+    {
+      "source": "/guide/cron-failure-alerts.md",
+      "destination": "/docs/guide/cron-failure-alerts.md",
+      "permanent": true
+    },
+    {
       "source": "/guide/semantic-search/",
       "destination": "/docs/guide/semantic-search/",
       "permanent": true

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
@@ -10,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // CronEventFeature identifies support for all cron definitions, runs and native delivery state.
@@ -17,6 +20,9 @@ const CronEventFeature = "cron_v1"
 
 // IssueMoveEventFeature identifies support for moving issues between projects.
 const IssueMoveEventFeature = "issue_move_v1"
+
+// IssueDateZoneEventFeature identifies support for dates carrying zone names.
+const IssueDateZoneEventFeature = "issue_date_zone_v1"
 
 // RepeatedAdoptionEventFeature identifies a peer that understands a repeated
 // adoption. A spoke with it deletes its own adoption snapshot when the hub
@@ -26,7 +32,7 @@ const IssueMoveEventFeature = "issue_move_v1"
 const RepeatedAdoptionEventFeature = "repeated_adoption_v1"
 
 // SupportedEventFeatures lists event capabilities understood by this daemon.
-const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature
+const SupportedEventFeatures = CronEventFeature + "," + IssueMoveEventFeature + "," + RepeatedAdoptionEventFeature + "," + IssueDateZoneEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -51,17 +57,50 @@ func MergeEventFeatures(values ...string) string {
 	return strings.Join(parts, ",")
 }
 
-// PayloadRequiredFeatures supplements type classification with native delivery state.
+// PayloadRequiredFeatures supplements type classification with payload features.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
-	required := EventRequiredFeatures(kind)
-	native, err := payloadHasNativeRecurringState(kind, payload)
-	if err != nil {
+	native, nativeErr := payloadHasNativeRecurringState(kind, payload)
+	zone, zoneErr := payloadZonedDateFeature(kind, payload)
+	if err := cmp.Or(nativeErr, zoneErr); err != nil {
 		return "", err
 	}
 	if native {
-		required = MergeEventFeatures(required, CronEventFeature)
+		zone = MergeEventFeatures(zone, CronEventFeature)
 	}
-	return required, nil
+	return MergeEventFeatures(EventRequiredFeatures(kind), zone), nil
+}
+
+func payloadZonedDateFeature(kind, payload string) (string, error) {
+	if !strings.HasPrefix(kind, "issue.") && kind != "projection.issue" {
+		return "", nil
+	}
+	if payload == "" {
+		payload = "{}"
+	}
+	var body struct {
+		Metadata map[string]jsontext.Value `json:"metadata"`
+		Diff     map[string]struct {
+			To jsontext.Value `json:"to"`
+		} `json:"diff"`
+		Snapshot jsontext.Value `json:"snapshot"`
+	}
+	if err := json.Unmarshal([]byte(payload), &body); err != nil {
+		return "", err
+	}
+	if kind == "issue.moved" && len(body.Snapshot) > 0 {
+		return payloadZonedDateFeature("issue.snapshot", string(body.Snapshot))
+	}
+	for _, key := range []string{"scheduled_on", "deadline_on"} {
+		for _, raw := range []jsontext.Value{body.Metadata[key], body.Diff[key].To} {
+			var value string
+			if len(raw) > 0 && json.Unmarshal(raw, &value) == nil {
+				if _, zone := metadata.SplitScheduleZone(value); zone != "" {
+					return IssueDateZoneEventFeature, nil
+				}
+			}
+		}
+	}
+	return "", nil
 }
 
 // payloadHasNativeRecurringState identifies hub-owned state independently of
@@ -273,7 +312,7 @@ func nativeProjectionRequired(ctx context.Context, q interface {
 
 // FederationReadParams captures metadata, required features, purge boundary and event
 // page in one backend transaction. Metadata may refresh a purged baseline;
-// unsupported readers fail before that write or any returned reset/cursor.
+// unsupported readers fail and roll back that write before returning any reset/cursor.
 // Features is protocol support, independent of enrollment permissions.
 type FederationReadParams struct {
 	ProjectID int64
@@ -297,7 +336,7 @@ type FederationReadResult struct {
 
 // ReadFederationTransaction supplies common decisions while each backend owns
 // its isolation/retry/fences, baseline event writer and event row decoder.
-func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationReadParams, project Project, binding FederationBinding, refresh func() (FederationBinding, error), readEvents func() ([]Event, error)) (FederationReadResult, error) {
+func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationReadParams, project Project, binding FederationBinding, refresh func() (FederationBinding, error), readEvents func(int64, int) ([]Event, error)) (FederationReadResult, error) {
 	out := FederationReadResult{Project: project, Binding: binding, Events: []Event{}, NextAfterID: in.AfterID}
 	var err error
 	out.RequiredFeatures, err = ProjectRequiredEventFeatures(ctx, tx, project.UID)
@@ -339,6 +378,11 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 			}
 			out.Binding = binding
 		}
+		if RequireEventFeatures(in.Features, IssueDateZoneEventFeature) != nil {
+			if err := checkFederationReplayFeatures(in.Features, binding.ReplayHorizonEventID, readEvents); err != nil {
+				return out, err
+			}
+		}
 		err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),$2) FROM events WHERE project_id=$1 AND id >= $2 AND type IN (`+FederationSnapshotEventTypesSQL()+`)`, project.ID, binding.ReplayHorizonEventID).Scan(&out.BaselineThroughEventID)
 		return out, err
 	}
@@ -350,18 +394,15 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		out.NextAfterID = reset.Int64
 		return out, nil
 	}
-	out.Events, err = readEvents()
+	out.Events, err = readEvents(in.AfterID, in.Limit)
 	if err != nil {
 		return out, err
 	}
 	// Inspect the returned page itself, including when a store was imported from
 	// an earlier snapshot with a missing protocol latch. Never trust a pre-read.
 	for _, event := range out.Events {
-		required, err := PayloadRequiredFeatures(event.Type, event.Payload)
+		required, err := requireFederationEventFeatures(in.Features, event)
 		if err != nil {
-			return out, err
-		}
-		if err := RequireEventFeatures(in.Features, required); err != nil {
 			return out, err
 		}
 		if required != "" {
@@ -370,4 +411,57 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		out.NextAfterID = event.ID
 	}
 	return out, nil
+}
+
+// A move in the replay can trigger a backfill from before the replay horizon.
+func checkFederationReplayFeatures(features string, horizon int64, readEvents func(int64, int) ([]Event, error)) error {
+	const limit = 1000
+	moved := map[string]bool{}
+	for cursor := horizon - 1; ; {
+		page, err := readEvents(cursor, limit)
+		if err != nil {
+			return err
+		}
+		for _, event := range page {
+			if _, err := requireFederationEventFeatures(features, event); err != nil {
+				return err
+			}
+			if event.Type == "issue.moved" {
+				moved[EventIssueUID(event.IssueUID)] = true
+			}
+			cursor = event.ID
+		}
+		if len(page) < limit {
+			break
+		}
+	}
+	for cursor := int64(0); len(moved) > 0; {
+		page, err := readEvents(cursor, limit)
+		if err != nil {
+			return err
+		}
+		for _, event := range page {
+			if event.ID >= horizon {
+				return nil
+			}
+			if moved[EventIssueUID(event.IssueUID)] {
+				if _, err := requireFederationEventFeatures(features, event); err != nil {
+					return err
+				}
+			}
+			cursor = event.ID
+		}
+		if len(page) < limit {
+			break
+		}
+	}
+	return nil
+}
+
+func requireFederationEventFeatures(features string, event Event) (string, error) {
+	required, err := PayloadRequiredFeatures(event.Type, event.Payload)
+	if err != nil {
+		return "", err
+	}
+	return required, RequireEventFeatures(features, required)
 }

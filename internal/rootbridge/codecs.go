@@ -79,60 +79,16 @@ func (c scheduleCodec) ReadKata(issue db.Issue) (connector.FieldValue, error) {
 }
 
 func (c scheduleCodec) KataPatch(issue db.Issue, value connector.FieldValue) (map[string]jsontext.Value, error) {
-	return c.kataPatch(issue, value, "")
-}
-
-func (c scheduleCodec) kataPatch(
-	issue db.Issue,
-	value connector.FieldValue,
-	coordinatedTimezone string,
-) (map[string]jsontext.Value, error) {
 	canonical, err := canonicalFieldValue(value)
 	if err != nil {
 		return nil, err
 	}
-	patch := map[string]jsontext.Value{c.key: mustJSON(canonicalScheduleValue(canonical))}
-	if canonical.Kind != fieldKindLocalDateTime {
-		return patch, nil
+	stored := canonicalScheduleValue(canonical)
+	if canonical.Kind == fieldKindLocalDateTime {
+		stored = canonical.Value + "[" + canonical.Timezone + "]"
 	}
-
-	values, err := metadataObject(issue.Metadata)
-	if err != nil {
-		return nil, err
-	}
-	otherKey := "scheduled_on"
-	if c.key == otherKey {
-		otherKey = "deadline_on"
-	}
-	if other, err := kataScheduleFieldValueFromMetadata(otherKey, values, c.defaultTimezone); err != nil {
-		return nil, err
-	} else if other.Kind == fieldKindLocalDateTime {
-		if other.Timezone != canonical.Timezone && coordinatedTimezone != canonical.Timezone {
-			return nil, fmt.Errorf("%s local timezone %q conflicts with %s timezone %q", c.key, canonical.Timezone, otherKey, other.Timezone)
-		}
-	} else if other.Kind == fieldKindDate {
-		timezone, present, err := optionalMetadataTimezone(values)
-		if err != nil {
-			return nil, fmt.Errorf("read %s timezone: %w", otherKey, err)
-		}
-		if present && timezone != canonical.Timezone && coordinatedTimezone != canonical.Timezone {
-			return nil, fmt.Errorf("%s local timezone %q conflicts with %s timezone %q", c.key, canonical.Timezone, otherKey, timezone)
-		}
-	}
-	patch["timezone"] = mustJSON(canonical.Timezone)
+	patch := map[string]jsontext.Value{c.key: mustJSON(stored)}
 	return patch, nil
-}
-
-func kataPatchWithCoordinatedTimezone(
-	codec FieldCodec,
-	issue db.Issue,
-	value connector.FieldValue,
-	coordinatedTimezone string,
-) (map[string]jsontext.Value, error) {
-	if schedule, ok := codec.(scheduleCodec); ok {
-		return schedule.kataPatch(issue, value, coordinatedTimezone)
-	}
-	return codec.KataPatch(issue, value)
 }
 
 func (c scheduleCodec) ValidateExternalDescriptor(descriptor connector.FieldDescriptor) error {
@@ -184,6 +140,7 @@ func kataScheduleFieldValue(
 	metadataValues map[string]jsontext.Value,
 	defaultTimezone string,
 ) (connector.FieldValue, error) {
+	value, zone := metadata.SplitScheduleZone(value)
 	field := connector.FieldValue{Value: value}
 	switch scheduleKind(value) {
 	case fieldKindDate:
@@ -191,9 +148,13 @@ func kataScheduleFieldValue(
 	case fieldKindInstant:
 		field.Kind = fieldKindInstant
 	case fieldKindLocalDateTime:
-		timezone, err := metadataTimezone(metadataValues, defaultTimezone)
-		if err != nil {
-			return connector.FieldValue{}, err
+		timezone := zone
+		if timezone == "" {
+			var err error
+			timezone, err = metadataTimezone(metadataValues, defaultTimezone)
+			if err != nil {
+				return connector.FieldValue{}, err
+			}
 		}
 		field.Kind = fieldKindLocalDateTime
 		field.Timezone = timezone
@@ -201,25 +162,6 @@ func kataScheduleFieldValue(
 		return connector.FieldValue{}, fmt.Errorf("invalid schedule value %q", value)
 	}
 	return canonicalFieldValue(field)
-}
-
-func kataScheduleFieldValueFromMetadata(
-	key string,
-	values map[string]jsontext.Value,
-	defaultTimezone string,
-) (connector.FieldValue, error) {
-	raw, ok := values[key]
-	if !ok || string(raw) == "null" {
-		return nullFieldValue(), nil
-	}
-	if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
-		return connector.FieldValue{}, fmt.Errorf("validate %s: %w", key, err)
-	}
-	var value string
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return connector.FieldValue{}, fmt.Errorf("decode %s: %w", key, err)
-	}
-	return kataScheduleFieldValue(value, values, defaultTimezone)
 }
 
 func metadataTimezone(values map[string]jsontext.Value, defaultTimezone string) (string, error) {
