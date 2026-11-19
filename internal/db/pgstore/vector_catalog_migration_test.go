@@ -1,11 +1,17 @@
 package pgstore_test
 
 import (
+	"context"
 	"database/sql"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/embedding"
@@ -35,7 +41,15 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 	require.NoError(t, err)
 	issues[0] = updated.Issue
 	require.Positive(t, issues[0].ContentRevision)
-	key := (kitvec.Generation{Model: "model", Dimensions: 2, Params: map[string]string{"salt": "example"}}).Fingerprint()
+	var calls atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(w, "unexpected embedding", http.StatusInternalServerError)
+	}))
+	t.Cleanup(provider.Close)
+	embedder, err := embedding.New(embedding.Config{BaseURL: provider.URL, Model: "model", Dims: 2, Salt: "example"})
+	require.NoError(t, err)
+	key := embedder.Generation().Fingerprint()
 	buildingKey := (kitvec.Generation{Model: "other", Dimensions: 2}).Fingerprint()
 	require.NoError(t, store.Close())
 	admin, err := sql.Open("pgx", dsn)
@@ -82,7 +96,11 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 	require.NoError(t, err)
 	release, err := idx.AcquireReconcilerLease(ctx)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = release() })
+	t.Cleanup(func() {
+		if release != nil {
+			_ = release()
+		}
+	})
 	require.NoError(t, idx.EnsureBuilding(ctx, buildingKey, kitvec.Generation{Model: "other", Dimensions: 2}))
 	hits, err := idx.Query(ctx, key, kitvec.Vector{1, 0}, 2)
 	require.NoError(t, err)
@@ -97,4 +115,25 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 	backlog, err = idx.Backlog(ctx, buildingKey)
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, backlog)
+	require.NoError(t, release())
+	release = nil
+	reconcileCtx, cancel := context.WithCancel(ctx)
+	reconciler := daemon.NewReconciler(upgraded, idx, embedder, daemon.ReconcilerConfig{BatchSize: 64, SweepEvery: time.Hour})
+	done := make(chan error, 1)
+	go func() { done <- reconciler.Run(reconcileCtx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("reconciler did not stop")
+		}
+	})
+	require.Eventually(t, func() bool { return reconciler.Health().LastSuccessAt != nil }, 5*time.Second, 10*time.Millisecond)
+	assert.Zero(t, calls.Load())
+	hits, err = idx.Query(ctx, key, kitvec.Vector{1, 0}, 2)
+	require.NoError(t, err)
+	require.Len(t, hits, 2)
+	assert.Equal(t, issues[0].UID, hits[0].Doc)
+	assert.Equal(t, issues[1].UID, hits[1].Doc)
 }
