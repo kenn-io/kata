@@ -2379,7 +2379,9 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
     await screen.findByRole('button', { name: /Remote issue/ })
-    await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }))
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
+    )
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-local/ }))
     await waitFor(() => expect(window.location.search).toBe('?view=today'))
     expect(snapshotRequests.map((request) => request.headers.get('X-Kata-Web-Daemon'))).toEqual(
