@@ -73,5 +73,17 @@ func checkFederationMetadataMovedZonedDateHistory(t *testing.T, store db.Storage
 			require.NoError(t, err)
 		})
 	}
+	t.Run("cleared before enrollment", func(t *testing.T) {
+		project, err := store.CreateProject(ctx, "cleared-before-enrollment")
+		require.NoError(t, err)
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "schedule", Author: "worker", Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-09-02[Europe/Paris]"`)}})
+		require.NoError(t, err)
+		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "worker", Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`null`)}})
+		require.NoError(t, err)
+		_, err = store.EnableProjectFederation(ctx, project.ID, "worker")
+		require.NoError(t, err)
+		_, err = store.ReadFederation(ctx, db.FederationReadParams{ProjectID: project.ID, Metadata: true, Features: db.CronEventFeature + "," + db.IssueMoveEventFeature})
+		require.NoError(t, err)
+	})
 	return nil
 }

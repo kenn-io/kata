@@ -378,25 +378,9 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 			}
 			out.Binding = binding
 		}
-		// Moved issue history can precede the destination replay horizon.
-		// Check it before older peers clear their project for replay.
 		if RequireEventFeatures(in.Features, IssueDateZoneEventFeature) != nil {
-			const limit = 1000
-			cursor := int64(0)
-			for {
-				page, err := readEvents(cursor, limit)
-				if err != nil {
-					return out, err
-				}
-				for _, event := range page {
-					if _, err := requireFederationEventFeatures(in.Features, event); err != nil {
-						return out, err
-					}
-					cursor = event.ID
-				}
-				if len(page) < limit {
-					break
-				}
+			if err := checkFederationReplayFeatures(in.Features, binding.ReplayHorizonEventID, readEvents); err != nil {
+				return out, err
 			}
 		}
 		err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),$2) FROM events WHERE project_id=$1 AND id >= $2 AND type IN (`+FederationSnapshotEventTypesSQL()+`)`, project.ID, binding.ReplayHorizonEventID).Scan(&out.BaselineThroughEventID)
@@ -427,6 +411,51 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 		out.NextAfterID = event.ID
 	}
 	return out, nil
+}
+
+// A move in the replay can trigger a backfill from before the replay horizon.
+func checkFederationReplayFeatures(features string, horizon int64, readEvents func(int64, int) ([]Event, error)) error {
+	const limit = 1000
+	moved := map[string]bool{}
+	for cursor := horizon - 1; ; {
+		page, err := readEvents(cursor, limit)
+		if err != nil {
+			return err
+		}
+		for _, event := range page {
+			if _, err := requireFederationEventFeatures(features, event); err != nil {
+				return err
+			}
+			if event.Type == "issue.moved" {
+				moved[EventIssueUID(event.IssueUID)] = true
+			}
+			cursor = event.ID
+		}
+		if len(page) < limit {
+			break
+		}
+	}
+	for cursor := int64(0); len(moved) > 0; {
+		page, err := readEvents(cursor, limit)
+		if err != nil {
+			return err
+		}
+		for _, event := range page {
+			if event.ID >= horizon {
+				return nil
+			}
+			if moved[EventIssueUID(event.IssueUID)] {
+				if _, err := requireFederationEventFeatures(features, event); err != nil {
+					return err
+				}
+			}
+			cursor = event.ID
+		}
+		if len(page) < limit {
+			break
+		}
+	}
+	return nil
 }
 
 func requireFederationEventFeatures(features string, event Event) (string, error) {
