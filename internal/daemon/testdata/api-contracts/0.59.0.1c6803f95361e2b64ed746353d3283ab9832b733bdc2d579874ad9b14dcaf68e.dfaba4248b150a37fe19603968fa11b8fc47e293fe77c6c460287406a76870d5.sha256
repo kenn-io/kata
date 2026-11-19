@@ -1,1 +1,0 @@
-Schedule and deadline writes save their effective IANA zone on civil dates and times; issue metadata responses can contain a [Zone] suffix.

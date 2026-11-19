@@ -7,9 +7,6 @@ import (
 	"slices"
 	"sync"
 	"time"
-
-	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/metadata"
 )
 
 // undoAttempt travels on a mutation response, even when the write failed.
@@ -144,45 +141,6 @@ func (c *undoClient) edit(ctx context.Context, projectID int64, ref, actor, kind
 	if issue.UID == "" {
 		return &MutationResp{undo: attempt}, errors.New("issue preflight returned no UID")
 	}
-	var dateZones map[string]string
-	var dateZoneErr error
-	if kind == "dates" {
-		for _, key := range dateKeys {
-			value := issueDate(&issue, key)
-			_, zone := metadata.SplitScheduleZone(value)
-			if value != "" && zone == "" && value[len(value)-1] != 'Z' {
-				reader, ok := c.KataAPI.(interface {
-					issuePlanningDates(context.Context, int64, string) (db.IssuePlanningDates, error)
-				})
-				if !ok {
-					dateZoneErr = errors.New("planning date zones unavailable")
-					break
-				}
-				var dates db.IssuePlanningDates
-				dates, dateZoneErr = reader.issuePlanningDates(ctx, projectID, issue.UID)
-				if dateZoneErr == nil && (dates.IssueUID != issue.UID || dates.Revision != issue.Revision) {
-					dateZoneErr = errors.New("planning dates changed during preflight")
-				}
-				if dateZoneErr == nil {
-					dateZones = map[string]string{}
-					if dates.ScheduledOn != nil {
-						dateZones["scheduled_on"] = dates.ScheduledOn.Timezone
-					}
-					if dates.DeadlineOn != nil {
-						dateZones["deadline_on"] = dates.DeadlineOn.Timezone
-					}
-					for _, dateKey := range dateKeys {
-						previous := issueDate(&issue, dateKey)
-						_, savedZone := metadata.SplitScheduleZone(previous)
-						if previous != "" && savedZone == "" && previous[len(previous)-1] != 'Z' && dateZones[dateKey] == "" {
-							dateZoneErr = errors.New("planning date timezone is missing")
-						}
-					}
-				}
-				break
-			}
-		}
-	}
 	resp, err := write(issue.UID)
 	if resp == nil {
 		resp = &MutationResp{}
@@ -207,11 +165,6 @@ func (c *undoClient) edit(ctx context.Context, projectID int64, ref, actor, kind
 	entry := &undoEntry{kind: kind, uid: issue.UID, projectID: projectID,
 		projectUID: issue.ProjectUID, actor: actor, before: issue,
 		after: *resp.Issue, revision: resp.Issue.Revision, instanceUID: instance.InstanceUID, auth: instance.Auth}
-	if kind == "dates" && dateZoneErr != nil {
-		attempt.boundary = "date timezones could not be read for undo"
-		return resp, nil
-	}
-	entry.dateZones = dateZones
 	if kind == "owner.assign" && (issue.AssignmentExpiresOn != nil || resp.Issue.AssignmentExpiresOn != nil) {
 		attempt.boundary = "owner edit involving an expiry cannot be undone"
 		return resp, nil

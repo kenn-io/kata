@@ -87,11 +87,6 @@ func composeRecurrenceIssueMetadata(
 	}
 	object["scheduled_on"] = scheduledOn
 	object["timezone"] = timezoneValue
-	stamped, err := metadata.StampScheduleZones(map[string]jsontext.Value{"scheduled_on": scheduledOn}, "", timezone)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidRecurrence, err)
-	}
-	object["scheduled_on"] = stamped["scheduled_on"]
 	validate := validateRecurrenceIssueMetadataObject
 	if template {
 		validate = validateRecurrenceTemplateMetadataObject

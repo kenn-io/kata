@@ -29,7 +29,7 @@ func TestComposeRecurrenceIssueMetadataStampsScheduleTimezone(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `{
 		"kind":"weekly",
-		"scheduled_on":"2026-05-18[America/New_York]",
+		"scheduled_on":"2026-05-18",
 		"timezone":"America/New_York"
 	}`, string(value))
 }

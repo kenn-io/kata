@@ -4,11 +4,8 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"maps"
 	"strings"
 	"time"
-
-	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 type scheduledOnKind int
@@ -28,71 +25,6 @@ type scheduleMetadata struct {
 	ScheduledOn *string `json:"scheduled_on"`
 	DeadlineOn  *string `json:"deadline_on"`
 	Timezone    string  `json:"timezone"`
-}
-
-// StampScheduleZones records the zone of each newly written civil date.
-// A patched timezone also binds legacy unzoned dates the patch omits.
-func StampScheduleZones(patch map[string]jsontext.Value, current, defaultZone string) (map[string]jsontext.Value, error) {
-	old := map[string]jsontext.Value{}
-	if current != "" {
-		if err := json.Unmarshal([]byte(current), &old); err != nil {
-			return nil, err
-		}
-	}
-	result := maps.Clone(patch)
-	var patchZone string
-	_, timezonePatched := patch["timezone"]
-	_ = json.Unmarshal(patch["timezone"], &patchZone)
-	for _, key := range []string{"scheduled_on", "deadline_on"} {
-		raw, ok := patch[key]
-		rebind := !ok && timezonePatched
-		if rebind {
-			raw = old[key]
-		}
-		if len(raw) == 0 || string(raw) == "null" {
-			continue
-		}
-		var value string
-		var kind scheduledOnKind
-		err := json.Unmarshal(raw, &value)
-		if err == nil {
-			kind, _, _, err = classifyScheduledOn(value)
-		}
-		if err != nil {
-			if rebind {
-				continue
-			}
-			return nil, fmt.Errorf("%w: %v", ErrInvalidValue, err)
-		}
-		if _, explicit := SplitScheduleZone(value); kind == scheduledOnInstant || explicit != "" {
-			continue
-		}
-		zone := patchZone
-		if !timezonePatched {
-			var previous string
-			_ = json.Unmarshal(old[key], &previous)
-			if _, zone = SplitScheduleZone(previous); zone == "" {
-				_ = json.Unmarshal(old["timezone"], &zone)
-			}
-		}
-		if zone == "" {
-			zone = defaultZone
-		}
-		if zone == "" {
-			zone = "UTC"
-		}
-		if zone == "Local" {
-			zone = recurrenceclient.LocalZone(recurrenceclient.DefaultLocaltimePath)
-			if zone == "" {
-				return nil, fmt.Errorf("%w: schedule timezone Local is not portable; set timezone to a named zone", ErrInvalidValue)
-			}
-		}
-		result[key], err = json.Marshal(value + "[" + zone + "]")
-		if err != nil {
-			return nil, err
-		}
-	}
-	return result, nil
 }
 
 // ScheduleDueCutoff returns a byte-order upper bound for dates that may be due.

@@ -118,9 +118,6 @@ func scheduledValueSetAt(history []Event, value string) time.Time {
 			occurrence := scheduledString(payload["occurrence_key"])
 			if occurrence != "" {
 				setValue, setAt = occurrence, event.CreatedAt
-				if wall, _ := metadata.SplitScheduleZone(value); wall == occurrence {
-					setValue = value
-				}
 			}
 		}
 	}

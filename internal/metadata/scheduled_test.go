@@ -2,45 +2,12 @@ package metadata
 
 import (
 	"encoding/json"
-	"encoding/json/jsontext"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestStampScheduleZonesChoices(t *testing.T) {
-	t.Setenv("TZ", "Europe/Paris")
-	for _, tc := range []struct {
-		name, patch, current, fallback, want string
-	}{
-		{"daemon fallback", `{"scheduled_on":"2026-01-15"}`, `{}`, "Europe/Paris", `{"scheduled_on":"2026-01-15[Europe/Paris]"}`},
-		{"UTC fallback", `{"deadline_on":"2026-01-15"}`, `{}`, "", `{"deadline_on":"2026-01-15[UTC]"}`},
-		{"saved zone on edit", `{"scheduled_on":"2026-01-15T10:00"}`, `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]","timezone":"Asia/Tokyo"}`, "UTC", `{"scheduled_on":"2026-01-15T10:00[Europe/Paris]"}`},
-		{"patched timezone overrides saved schedule zone", `{"scheduled_on":"2026-01-15T10:00","timezone":"Asia/Tokyo"}`, `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]"}`, "UTC", `{"scheduled_on":"2026-01-15T10:00[Asia/Tokyo]","timezone":"Asia/Tokyo"}`},
-		{"timezone change keeps zoned dates", `{"timezone":"Asia/Tokyo"}`, `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]","deadline_on":"2026-01-16[Europe/Paris]"}`, "UTC", `{"timezone":"Asia/Tokyo"}`},
-		{"timezone clear rebinds legacy dates", `{"timezone":null}`, `{"scheduled_on":"2026-01-15T09:00","deadline_on":"2026-01-16"}`, "", `{"scheduled_on":"2026-01-15T09:00[UTC]","deadline_on":"2026-01-16[UTC]","timezone":null}`},
-		{"timezone change leaves instant alone", `{"timezone":"Asia/Tokyo"}`, `{"scheduled_on":"2026-01-15T09:00:00Z"}`, "UTC", `{"timezone":"Asia/Tokyo"}`},
-		{"explicit date zone wins during rebinding", `{"timezone":"Asia/Tokyo","scheduled_on":"2026-01-17[America/New_York]"}`, `{"scheduled_on":"2026-01-15[Europe/Paris]","deadline_on":"2026-01-16[Europe/Paris]"}`, "UTC", `{"scheduled_on":"2026-01-17[America/New_York]","timezone":"Asia/Tokyo"}`},
-		{"cleared timezone uses default", `{"scheduled_on":"2026-01-16","timezone":null}`, `{"scheduled_on":"2026-01-15[Europe/Paris]"}`, "UTC", `{"scheduled_on":"2026-01-16[UTC]","timezone":null}`},
-		{"sibling uses issue zone", `{"deadline_on":"2026-01-16"}`, `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]","timezone":"Asia/Tokyo"}`, "UTC", `{"deadline_on":"2026-01-16[Asia/Tokyo]"}`},
-		{"local zone in patch", `{"scheduled_on":"2026-01-15","timezone":"Local"}`, `{}`, "UTC", `{"scheduled_on":"2026-01-15[Europe/Paris]","timezone":"Local"}`},
-		{"local zone in current metadata", `{"scheduled_on":"2026-01-15"}`, `{"timezone":"Local"}`, "UTC", `{"scheduled_on":"2026-01-15[Europe/Paris]"}`},
-		{"UTC instant", `{"scheduled_on":"2026-01-15T10:00:00Z"}`, `{}`, "UTC", `{"scheduled_on":"2026-01-15T10:00:00Z"}`},
-		{"clear", `{"scheduled_on":null}`, `{}`, "Local", `{"scheduled_on":null}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var patch map[string]jsontext.Value
-			require.NoError(t, json.Unmarshal([]byte(tc.patch), &patch))
-			stamped, err := StampScheduleZones(patch, tc.current, tc.fallback)
-			require.NoError(t, err)
-			encoded, err := json.Marshal(stamped)
-			require.NoError(t, err)
-			assert.JSONEq(t, tc.want, string(encoded))
-		})
-	}
-}
 
 func TestScheduleDateCarriesItsTimezone(t *testing.T) {
 	raw := `{"scheduled_on":"2026-01-15T09:00[Europe/Paris]","deadline_on":"2026-01-15[Asia/Tokyo]","timezone":"America/New_York"}`

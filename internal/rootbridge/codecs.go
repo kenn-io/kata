@@ -88,7 +88,7 @@ func (c scheduleCodec) KataPatch(issue db.Issue, value connector.FieldValue) (ma
 		stored = canonical.Value + "[" + canonical.Timezone + "]"
 	}
 	patch := map[string]jsontext.Value{c.key: mustJSON(stored)}
-	return metadata.StampScheduleZones(patch, string(issue.Metadata), c.defaultTimezone)
+	return patch, nil
 }
 
 func (c scheduleCodec) ValidateExternalDescriptor(descriptor connector.FieldDescriptor) error {

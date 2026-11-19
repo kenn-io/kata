@@ -648,10 +648,8 @@ GitHub/Notion/Plane/Linear/Twenty/TickTick sync, federation, or timed-claim main
 scheduled without a client present.
 
 The optional top-level `timezone` supplies the default for date-only and local
-date-time schedules and deadlines. Kata saves each date's named zone, using an
-explicit date zone, the existing date's zone, the issue timezone, this setting,
-or UTC. A `Local` timezone must resolve to a named IANA zone on the host;
-otherwise the write fails. UTC instants ending in `Z` do not use this setting.
+date-time schedules and deadlines without an explicit zone or issue timezone.
+Kata uses UTC when neither is set. UTC instants ending in `Z` do not use this setting.
 
 The web UI's daemon selector lists URL entries and home-less local entries.
 Home-bearing profiles are omitted and cannot alias the serving daemon. A plain

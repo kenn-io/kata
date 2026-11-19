@@ -125,8 +125,8 @@ func (h *datesHarness) undo() {
 
 func TestDatesFormWritesRelativeAndLocalTimeForms(t *testing.T) {
 	for _, tt := range []struct{ name, typed, want string }{
-		{"local minute", "2026-11-15T09:00", "2026-11-15T09:00[UTC]"},
-		{"weeks", "+2w", "2026-11-16[UTC]"},
+		{"local minute", "2026-11-15T09:00", "2026-11-15T09:00"},
+		{"weeks", "+2w", "2026-11-16"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newDatesHarness(t, nil, viewDetail)
@@ -158,7 +158,7 @@ func TestDatesFormWritesOnlyChangedKeysInOneRequest(t *testing.T) {
 	h.fill("2026-09-01T09:00", "+1w")
 	h.save()
 
-	assert.Equal(t, map[string]string{"scheduled_on": "2026-09-01T09:00", "deadline_on": "2026-11-09[UTC]"}, h.stored(),
+	assert.Equal(t, map[string]string{"scheduled_on": "2026-09-01T09:00", "deadline_on": "2026-11-09"}, h.stored(),
 		"the untouched Scheduled keeps its time")
 	assert.Equal(t, before+1, h.revision(), "both keys travel in one patch")
 }
@@ -237,7 +237,7 @@ func TestDatesFormReloadsWhenTheIssueChangedMeanwhile(t *testing.T) {
 	h.save()
 
 	assert.Equal(t, inputNone, h.m.input.kind)
-	assert.Equal(t, map[string]string{"scheduled_on": "2026-11-09[UTC]", "deadline_on": "2026-12-01"}, h.stored(),
+	assert.Equal(t, map[string]string{"scheduled_on": "2026-11-09", "deadline_on": "2026-12-01"}, h.stored(),
 		"the next save is guarded on the revision just read")
 }
 
@@ -361,27 +361,18 @@ func TestDatesFormConflictRemovesRemotelyClosedIssueFromToday(t *testing.T) {
 }
 
 func TestDatesUndoWritesThePreviousDatesBack(t *testing.T) {
-	for _, tc := range []struct {
-		name                     string
-		initial, after, restored map[string]string
-		scheduled, deadline      string
-	}{
-		{"dates", map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-20"}, map[string]string{"scheduled_on": "2026-11-03[UTC]"}, map[string]string{"scheduled_on": "2026-11-02[UTC]", "deadline_on": "2026-11-20[UTC]"}, "tomorrow", ""},
-		{"legacy zone", map[string]string{"scheduled_on": "2026-11-02T09:00", "timezone": "Europe/Paris"}, map[string]string{"scheduled_on": "2026-11-02T09:00[Asia/Tokyo]", "timezone": "Europe/Paris"}, map[string]string{"scheduled_on": "2026-11-02T09:00[Europe/Paris]", "timezone": "Europe/Paris"}, "2026-11-02T09:00[Asia/Tokyo]", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newDatesHarness(t, tc.initial, viewDetail)
-			h.openForm()
-			h.fill(tc.scheduled, tc.deadline)
-			h.save()
-			require.Equal(t, tc.after, h.stored())
-			changed := h.revision()
-			h.undo()
-			assert.Equal(t, tc.restored, h.stored())
-			assert.Equal(t, changed+1, h.revision(), "one patch")
-			assert.Empty(t, h.m.undoHistory.entries)
-		})
-	}
+	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-20"}, viewDetail)
+	h.openForm()
+	h.fill("tomorrow", "")
+	h.save()
+	require.Equal(t, map[string]string{"scheduled_on": "2026-11-03"}, h.stored())
+	changed := h.revision()
+
+	h.undo()
+
+	assert.Equal(t, map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-20"}, h.stored())
+	assert.Equal(t, changed+1, h.revision(), "one patch")
+	assert.Empty(t, h.m.undoHistory.entries)
 }
 
 func TestDatesUndoRestoresDatesSetOnAnIssueWithNone(t *testing.T) {

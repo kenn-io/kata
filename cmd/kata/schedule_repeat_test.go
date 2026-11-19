@@ -61,7 +61,7 @@ func TestScheduleRepeatStartsRecurrenceFromTheIssue(t *testing.T) {
 	ref := created.Issue.ShortID
 
 	out := runCLI(t, env, dir, "schedule", ref, "2026-11-02", "--repeat", "FREQ=WEEKLY", "--timezone", "Europe/Paris")
-	assert.Contains(t, out, "scheduled_on: 2026-11-02[Europe/Paris]")
+	assert.Contains(t, out, "scheduled_on: 2026-11-02")
 	assert.Contains(t, out, "timezone: Europe/Paris")
 
 	recs := listRecurrencesViaHTTP(t, env, pid)
@@ -77,7 +77,7 @@ func TestScheduleRepeatStartsRecurrenceFromTheIssue(t *testing.T) {
 	assert.Nil(t, recs[0].TemplateOwner, "the owner must not carry to later occurrences")
 
 	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
-	require.JSONEq(t, `{"scheduled_on":"2026-11-02[Europe/Paris]","timezone":"Europe/Paris"}`, string(issue.Issue.Metadata))
+	require.JSONEq(t, `{"scheduled_on":"2026-11-02","timezone":"Europe/Paris"}`, string(issue.Issue.Metadata))
 }
 
 // A daemon older than API 0.24.0 returns labels only in the top-level labels
@@ -191,7 +191,7 @@ func TestScheduleRepeatJSONOutput(t *testing.T) {
 	var start map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(started), &start))
 	assert.JSONEq(t, `"started"`, string(start["action"]))
-	assert.JSONEq(t, `"2026-11-02[Europe/Paris]"`, string(start["scheduled_on"]))
+	assert.JSONEq(t, `"2026-11-02"`, string(start["scheduled_on"]))
 	assert.JSONEq(t, `"Europe/Paris"`, string(start["timezone"]))
 	var startedRec recurrenceView
 	require.NoError(t, json.Unmarshal(start["recurrence"], &startedRec))
@@ -201,7 +201,7 @@ func TestScheduleRepeatJSONOutput(t *testing.T) {
 	var change map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(changed), &change))
 	assert.JSONEq(t, `"changed"`, string(change["action"]))
-	assert.JSONEq(t, `"2026-11-02[Europe/Paris]"`, string(change["scheduled_on"]))
+	assert.JSONEq(t, `"2026-11-02"`, string(change["scheduled_on"]))
 	assert.JSONEq(t, `"Europe/Paris"`, string(change["timezone"]), "the issue's own zone is reported on a change too")
 	var changedRec recurrenceView
 	require.NoError(t, json.Unmarshal(change["recurrence"], &changedRec))
@@ -247,7 +247,7 @@ func TestScheduleRepeatChangesAnExistingRecurrence(t *testing.T) {
 
 	out := runCLI(t, env, dir, "schedule", ref, "2026-11-09", "--repeat", "FREQ=DAILY", "--timezone", "Asia/Tokyo")
 	assert.Contains(t, out, "repeat: FREQ=DAILY, start 2026-11-09, timezone Asia/Tokyo")
-	assert.Contains(t, out, "scheduled_on: 2026-11-02[Europe/Paris] (this issue's date did not move)")
+	assert.Contains(t, out, "scheduled_on: 2026-11-02 (this issue's date did not move)")
 	assert.Contains(t, out, "timezone: Europe/Paris (this issue's zone did not change)")
 
 	after := listRecurrencesViaHTTP(t, env, pid)

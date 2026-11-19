@@ -224,8 +224,7 @@ const fragScheduling = `7. Use native planning dates deliberately:
 
    Date and time values accept YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS],
    optionally followed by [IANA/Zone], or an RFC 3339 UTC instant ending in Z.
-   Without a zone, Kata saves the existing date zone, issue timezone, daemon
-   timezone, or UTC.
+   Without a zone, Kata uses the issue timezone, daemon timezone, or UTC when resolving it.
 
    Reached schedules and deadlines use notify.* to surface in the current
    owner's inbox, or the author's inbox when unowned. They wait behind an

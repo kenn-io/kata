@@ -186,7 +186,7 @@ func TestPatchMetadata_HappyPath_200(t *testing.T) {
 		patch   string // value inside `"patch": {...}`
 		expect  string // substring required in the decoded metadata blob
 	}{
-		{metadataSubjects()[0], `{"scheduled_on":"2026-05-20"}`, `"scheduled_on":"2026-05-20[UTC]"`},
+		{metadataSubjects()[0], `{"scheduled_on":"2026-05-20"}`, `"scheduled_on":"2026-05-20"`},
 		{metadataSubjects()[1], `{"area":"Personal"}`, `"area":"Personal"`},
 	}
 	for _, c := range cases {

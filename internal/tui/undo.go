@@ -68,7 +68,6 @@ type undoEntry struct {
 	before      Issue
 	after       Issue
 	revision    int64
-	dateZones   map[string]string
 	link        *LinkEntry
 	label       string
 }

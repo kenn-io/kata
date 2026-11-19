@@ -426,7 +426,7 @@ func checkScheduledReachedFloor(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	out = reconcile(recurrenceIssue.ID, behaviorNow, &floor)
 	require.NotNil(t, out.Reached, "attaching a recurrence records the reached event for its already-past first occurrence")
-	assert.Contains(t, out.Reached.Payload, `"value":"2020-02-04[UTC]"`)
+	assert.Contains(t, out.Reached.Payload, `"value":"2020-02-04"`)
 	return nil
 }
 

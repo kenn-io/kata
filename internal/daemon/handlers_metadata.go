@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -92,9 +91,6 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		if err != nil {
 			return nil, err
 		}
-		ctx = db.WithMetadataPatchHook(ctx, func(_ context.Context, _ *sql.Tx, issue db.Issue) (map[string]jsontext.Value, error) {
-			return metadata.StampScheduleZones(in.Body.Patch, string(issue.Metadata), cfg.DefaultTimezone)
-		})
 		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 			IssueID:    iss.ID,
 			IfMatchRev: rev,

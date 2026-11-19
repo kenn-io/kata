@@ -247,6 +247,20 @@ describe('IssueProperties', () => {
     expect(onPatchMetadata).not.toHaveBeenCalled()
   })
 
+  it('keeps the saved zone when changing a date-only schedule', async () => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({ metadata: { scheduled_on: '2026-06-01[Europe/Paris]' } }),
+      onPatchMetadata,
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Jun 10, 2026/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
+      scheduled_on: '2026-06-10[Europe/Paris]',
+    })
+  })
+
   it('patches scheduled and due dates and closes editors on accepted replacement', async () => {
     const onPatchMetadata = vi.fn(async () => true)
     const view = renderProperties({ onPatchMetadata, draftResetGeneration: 0 })

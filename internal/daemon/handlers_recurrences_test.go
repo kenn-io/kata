@@ -100,45 +100,6 @@ func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
 	assert.Equal(t, "2026-08-10", *created.OccurrenceKey)
 }
 
-func TestRecurrenceDeadlineUsesIssueOrRecurrenceTimezone(t *testing.T) {
-	for _, tc := range []struct {
-		name, metadata, want string
-		patch                bool
-	}{
-		{"recurrence timezone", `{"deadline_on":"2026-08-12T23:30"}`, "2026-08-12T23:30[Asia/Tokyo]", false},
-		{"patched recurrence timezone", `{"deadline_on":"2026-08-12T23:30"}`, "2026-08-12T23:30[Asia/Tokyo]", true},
-		{"template timezone", `{"deadline_on":"2026-08-12T23:30","timezone":"Europe/Paris"}`, "2026-08-12T23:30[Europe/Paris]", false},
-		{"template patch", `{"deadline_on":"2026-08-12T23:30","timezone":"Europe/Paris"}`, "2026-08-12T23:30[Europe/Paris]", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			env := testenv.New(t, testenv.WithAuthToken("tok"), func(cfg *daemon.ServerConfig) { cfg.DefaultTimezone = "America/New_York" })
-			project, issue := seedProjectAndIssue(t, env)
-			initialMetadata := tc.metadata
-			if tc.patch {
-				initialMetadata = `{}`
-			}
-			body := fmt.Sprintf(`{"actor":"tester","initial_issue_ref":%q,"rrule":"FREQ=WEEKLY","dtstart":"2026-08-03","timezone":"Asia/Tokyo","template":{"title":"Weekly review","metadata":%s}}`, issue.ShortID, initialMetadata)
-			resp := doPost(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, project.ID), body)
-			require.Equal(t, http.StatusCreated, resp.StatusCode, string(readClose(t, resp)))
-			if tc.patch {
-				attached, err := env.DB.IssueByID(t.Context(), issue.ID)
-				require.NoError(t, err)
-				rec, err := env.DB.GetRecurrenceByID(t.Context(), *attached.RecurrenceID)
-				require.NoError(t, err)
-				resp = doPatch(t, env, fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, project.ID, rec.UID), fmt.Sprintf(`{"actor":"tester","template":{"metadata":%s}}`, tc.metadata), fmt.Sprintf(`"rev-%d"`, rec.Revision))
-				require.Equal(t, http.StatusOK, resp.StatusCode, string(readClose(t, resp)))
-			}
-			attached, err := env.DB.IssueByID(t.Context(), issue.ID)
-			require.NoError(t, err)
-			rec, err := env.DB.GetRecurrenceByID(t.Context(), *attached.RecurrenceID)
-			require.NoError(t, err)
-			var saved map[string]any
-			require.NoError(t, json.Unmarshal([]byte(rec.TemplateMetadata), &saved))
-			assert.Equal(t, tc.want, saved["deadline_on"])
-		})
-	}
-}
-
 func TestPostRecurrence_InitialIssueRequiresFederatedClaim(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -651,7 +612,6 @@ func TestPostRecurrenceAcceptedTimezoneProperty(t *testing.T) {
 }
 
 func TestPatchRecurrenceLocalAdvancement(t *testing.T) {
-	t.Setenv("TZ", "Europe/Paris")
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	p := seedProject(t, env, "example-project")
 	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Weekly review", Author: "tester"})
@@ -682,7 +642,7 @@ func TestPatchRecurrenceLocalAdvancement(t *testing.T) {
 	var metadata map[string]any
 	require.NoError(t, json.Unmarshal([]byte(next.Metadata), &metadata))
 	assert.Equal(t, "Local", metadata["timezone"])
-	assert.Equal(t, "2026-08-05[Europe/Paris]", metadata["scheduled_on"])
+	assert.Equal(t, "2026-08-05", metadata["scheduled_on"])
 	require.NotNil(t, current.NextOccurrenceKey)
 	assert.Equal(t, "2026-08-07", *current.NextOccurrenceKey)
 }

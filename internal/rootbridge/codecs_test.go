@@ -94,7 +94,7 @@ func TestScheduleCodecKataPatchCanonicalizesAndClears(t *testing.T) {
 		value connector.FieldValue
 		want  string
 	}{
-		{"date", date("2026-08-20"), `{"deadline_on":"2026-08-20[UTC]"}`},
+		{"date", date("2026-08-20"), `{"deadline_on":"2026-08-20"}`},
 		{"instant", connector.FieldValue{Kind: "instant", Value: "2026-08-20T09:30:45.120000000Z"}, `{"deadline_on":"2026-08-20T09:30:45.12Z"}`},
 		{"clear", nullValue(), `{"deadline_on":null}`},
 	}

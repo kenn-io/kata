@@ -252,7 +252,14 @@
     }
     const mutationUID = uid()
     const generation = draftResetGeneration
-    const ok = await onPatchMetadata(mutationUID, { scheduled_on: value === '' ? null : value })
+    const saved = issue.issue.metadata?.scheduled_on
+    const zone =
+      typeof saved === 'string' && /^\d{4}-\d{2}-\d{2}\[[^\]]+\]$/.test(saved)
+        ? saved.slice(10)
+        : ''
+    const ok = await onPatchMetadata(mutationUID, {
+      scheduled_on: value === '' ? null : value + zone,
+    })
     if (ok) scheduleAcceptedReset(property, mutationUID, generation)
   }
 

@@ -159,20 +159,15 @@ func TestPlanScheduledReachedUsesOrderedScheduleProvenance(t *testing.T) {
 		}
 	})
 
-	for _, tc := range []struct{ name, value, zone string }{
-		{"legacy", "2026-09-01", "UTC"},
-		{"zoned", "2026-09-01[Europe/Paris]", "Europe/Paris"},
-	} {
-		t.Run("recurrence materialization assigns "+tc.name+" occurrence date", func(t *testing.T) {
-			history := []Event{
-				event("created", "issue.created", 100, floor.Add(-time.Hour), `{"metadata":{}}`),
-				event("materialized", "recurrence.materialized", 200, floor.Add(time.Minute), `{"occurrence_key":"2026-09-01"}`),
-			}
-			reached, err := PlanScheduledReached(json.RawMessage(`{"scheduled_on":"`+tc.value+`"}`), now, floor, "UTC", history)
-			require.NoError(t, err)
-			require.NotNil(t, reached, "a recurrence attached after the floor assigns its first occurrence after the floor")
-			assert.Equal(t, tc.value, reached.Value)
-			assert.Equal(t, tc.zone, reached.Timezone)
-		})
-	}
+	t.Run("recurrence materialization assigns its occurrence date", func(t *testing.T) {
+		history := []Event{
+			event("created", "issue.created", 100, floor.Add(-time.Hour), `{"metadata":{}}`),
+			event("materialized", "recurrence.materialized", 200, floor.Add(time.Minute), `{"occurrence_key":"2026-09-01"}`),
+		}
+
+		reached, err := PlanScheduledReached(json.RawMessage(`{"scheduled_on":"2026-09-01"}`), now, floor, "UTC", history)
+		require.NoError(t, err)
+		require.NotNil(t, reached, "a recurrence attached after the floor assigns its first occurrence after the floor")
+		assert.Equal(t, "2026-09-01", reached.Value)
+	})
 }

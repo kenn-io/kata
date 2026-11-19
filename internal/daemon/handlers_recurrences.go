@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strconv"
@@ -13,28 +12,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/metadata"
 )
-
-func stampRecurrenceDeadline(raw jsontext.Value, defaultTimezone string) (jsontext.Value, error) {
-	if len(raw) == 0 || string(raw) == "null" {
-		return raw, nil
-	}
-	var values map[string]jsontext.Value
-	if err := json.Unmarshal(raw, &values); err != nil {
-		return nil, err
-	}
-	deadline, ok := values["deadline_on"]
-	if !ok {
-		return raw, nil
-	}
-	stamped, err := metadata.StampScheduleZones(map[string]jsontext.Value{"deadline_on": deadline}, string(raw), defaultTimezone)
-	if err != nil {
-		return nil, err
-	}
-	values["deadline_on"] = stamped["deadline_on"]
-	return json.Marshal(values)
-}
 
 // registerRecurrencesHandlers installs the five recurrence CRUD routes.
 func registerRecurrencesHandlers(humaAPI huma.API, cfg ServerConfig) {
@@ -152,10 +130,6 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 				Labels:   in.Body.Template.Labels,
 				Metadata: jsontext.Value(in.Body.Template.Metadata),
 			},
-		}
-		createInput.Template.Metadata, err = stampRecurrenceDeadline(createInput.Template.Metadata, createInput.Timezone)
-		if err != nil {
-			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
 		var ifMatchRev *int64
 		if in.IfMatch != "" {
@@ -288,17 +262,6 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 			update.ClearTemplatePriority = in.Body.Template.ClearPriority
 			update.TemplateLabels = in.Body.Template.Labels
 			update.TemplateMetadata = (*jsontext.Value)(in.Body.Template.Metadata)
-			if update.TemplateMetadata != nil {
-				zone := rec.Timezone
-				if update.Timezone != nil {
-					zone = *update.Timezone
-				}
-				stamped, err := stampRecurrenceDeadline(*update.TemplateMetadata, zone)
-				if err != nil {
-					return nil, api.NewError(400, "validation", err.Error(), "", nil)
-				}
-				update.TemplateMetadata = &stamped
-			}
 		}
 		res, err := cfg.DB.PatchRecurrence(ctx, db.PatchRecurrenceIn{
 			RecurrenceID: rec.ID,

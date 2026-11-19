@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/metadata"
 )
 
 // undoBacklogLookupTimeout bounds the optional backlog lookup so a slow read
@@ -201,9 +200,6 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, opts undoOptions
 		restore := DatesInput{Actor: entry.actor, IfMatchRevision: entry.revision, Set: map[string]*string{}}
 		for _, key := range keys {
 			if value := issueDate(&entry.before, key); value != "" {
-				if _, zone := metadata.SplitScheduleZone(value); zone == "" && value[len(value)-1] != 'Z' && entry.dateZones[key] != "" {
-					value += "[" + entry.dateZones[key] + "]"
-				}
 				restore.Set[key] = &value
 			} else {
 				restore.Set[key] = nil
