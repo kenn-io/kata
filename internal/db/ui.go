@@ -93,8 +93,8 @@ func MatchUICalendarView(
 }
 
 // ProjectUIPlanningDates gives a selected issue the same dates as collection rows.
-func ProjectUIPlanningDates(issue *UIIssue, query UISnapshotQuery, scheduledDefaultTimezone string) error {
-	dates := resolvePlanningCalendarDates(string(issue.Metadata), &query.TimeZone, scheduledDefaultTimezone, query.DefaultTimezone)
+func ProjectUIPlanningDates(issue *UIIssue, query UISnapshotQuery) error {
+	dates := resolvePlanningCalendarDates(string(issue.Metadata), &query.TimeZone, query.DefaultTimezone, query.DefaultTimezone)
 	// A legacy schedule may be unreadable; it must not hide the selected issue.
 	if dates.deadlineErr != nil {
 		return dates.deadlineErr
