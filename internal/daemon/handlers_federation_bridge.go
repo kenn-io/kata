@@ -115,10 +115,11 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if len(result.InsertedEvents) > 0 {
 			cfg.Publish().Events(in.ProjectID, result.InsertedEvents)
 		}
-		// Work accepted from a downstream relay is owed upstream; the wake
-		// forwarder ignores these remote-origin events, so wake here.
-		if in.Body.Stream != db.RelayStreamArtifact && result.Through > 0 && cfg.FederationWake != nil {
-			cfg.FederationWake()
+		// Work accepted from a downstream relay is owed upstream by this
+		// project's binding; the wake forwarder ignores these remote-origin
+		// events, so wake here.
+		if in.Body.Stream != db.RelayStreamArtifact && result.Through > 0 && cfg.FederationWakeProject != nil {
+			cfg.FederationWakeProject(in.ProjectID)
 		}
 		if in.Body.Stream == db.RelayStreamArtifact && cfg.EmbeddingWake != nil && (len(in.Body.Artifacts) > 0 || result.Through > 0) {
 			cfg.EmbeddingWake()

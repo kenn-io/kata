@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/api"
@@ -489,4 +490,19 @@ func TestCronSpokeForwardPreservesUIDPath(t *testing.T) {
 	current, err := f.hub.DB.CronJob(t.Context(), f.hp.ID, uid)
 	require.NoError(t, err)
 	require.Equal(t, initial.Body.Job.DefinitionEventUID, current.DefinitionEventUID)
+}
+
+// The hub now holds the forwarded write, so the spoke pulls it promptly, but
+// only through the binding of the project that forwarded it.
+func TestCronSpokeForwardWakesOnlyItsProjectBinding(t *testing.T) {
+	var projectWakes []int64
+	allWakes := 0
+	f := newCronForwardFixture(t, func(_ *cronForwardFixture, cfg *daemon.ServerConfig) {
+		cfg.FederationWakeProject = func(projectID int64) { projectWakes = append(projectWakes, projectID) }
+		cfg.FederationWake = func() { allWakes++ }
+	})
+	response, raw := f.put(t, cronHTTPUID(t), "")
+	require.Equalf(t, 200, response.StatusCode, "%s", raw)
+	assert.Equal(t, []int64{f.sp.ID}, projectWakes)
+	assert.Zero(t, allWakes)
 }

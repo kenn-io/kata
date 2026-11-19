@@ -134,8 +134,9 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 	}
 	localCronIdentity(&out.Body.Job, projectID)
 	out.Body.Events = nil
-	if cfg.FederationWake != nil {
-		cfg.FederationWake()
+	// Only this project's binding pulls the write back from the hub.
+	if cfg.FederationWakeProject != nil {
+		cfg.FederationWakeProject(projectID)
 	}
 	return out, true, nil
 }
