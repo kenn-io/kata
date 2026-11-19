@@ -2080,6 +2080,29 @@ describe('AppShell', () => {
     await waitFor(() => expect(document.title).toBe('Settings · Kata'))
     await view.rerender({ route: { kind: 'kata', view: 'credentials', graph: false, filters } })
     await waitFor(() => expect(document.title).toBe('Credentials · Kata'))
+    const issueRoute = {
+      kind: 'kata' as const,
+      issueUID: '01J00000000000000000000001',
+      graph: false,
+      filters,
+    }
+    current.selected = {
+      state: 'missing',
+      comments: [],
+      labels: [],
+      links: [],
+      recurrences: [],
+      history: [],
+    }
+    await view.rerender({ route: issueRoute, snapshot: current })
+    await waitFor(() =>
+      expect(document.title).toBe('Issue unavailable 01J00000000000000000000001 · Kata'),
+    )
+    current.selected = { ...current.selected, state: 'archived' }
+    await view.rerender({ snapshot: current })
+    await waitFor(() =>
+      expect(document.title).toBe('Archived issue 01J00000000000000000000001 · Kata'),
+    )
   })
 
   test('keeps the canonical issue route while authority is missing or archived', async () => {
@@ -2112,9 +2135,6 @@ describe('AppShell', () => {
     expect(
       within(view.container).getByRole('status', { name: 'Selected issue status' }).textContent,
     ).toContain('unavailable from the current authority')
-    await waitFor(() =>
-      expect(document.title).toBe('Issue unavailable 01J00000000000000000000001 · Kata'),
-    )
 
     const archived = snapshot()
     archived.selected = {
@@ -2130,9 +2150,6 @@ describe('AppShell', () => {
     expect(
       within(view.container).getByRole('status', { name: 'Selected issue status' }).textContent,
     ).toContain('archived')
-    await waitFor(() =>
-      expect(document.title).toBe('Archived issue 01J00000000000000000000001 · Kata'),
-    )
   })
 
   test('honors issue-scoped allowed actions without exposing project-wide controls', async () => {

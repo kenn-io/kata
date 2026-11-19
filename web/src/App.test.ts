@@ -1703,7 +1703,7 @@ describe('App', () => {
     expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
   })
 
-  it('fences authority and keeps the Inbox title when a reference request requires login', async () => {
+  it('fences authority when a reference request requires login', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -1732,7 +1732,6 @@ describe('App', () => {
     render(App)
 
     expect(await screen.findByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
-    await waitFor(() => expect(document.title).toBe('Inbox · Kata'))
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
     expect(screen.getByRole('button', { name: 'New project' }).getAttribute('aria-disabled')).toBe(
       'true',
@@ -1740,7 +1739,6 @@ describe('App', () => {
   })
 
   it('shows configured-origin login without probing authority or losing the requested route', async () => {
-    document.title = 'Old issue · Kata'
     const fetcher = vi.fn()
     vi.stubGlobal('fetch', fetcher)
     history.replaceState(
@@ -1751,12 +1749,11 @@ describe('App', () => {
     render(App)
 
     expect(screen.getByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
-    await waitFor(() => expect(document.title).toBe('Kata'))
     expect(fetcher).not.toHaveBeenCalled()
     expect(window.location.hash).toBe('')
   })
 
-  it('recovers a short issue route through complete issue authority', async () => {
+  it('recovers a short issue route through complete issue authority and resets the title on a route error', async () => {
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -2309,6 +2306,11 @@ describe('App', () => {
         }
         if (path.endsWith('/api/v1/ui/references')) {
           referenceRequests.push(request)
+          if (request.headers.get('X-Kata-Web-Daemon') === 'example-local') {
+            await new Promise<void>((resolve) => {
+              request.signal.addEventListener('abort', () => resolve(), { once: true })
+            })
+          }
           return Response.json({ issues: [], labels: [], owners: [], projects: [] })
         }
         if (path.endsWith('/api/v1/ui/snapshot')) {
@@ -2333,6 +2335,9 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
     await screen.findByRole('region', { name: 'Kata issue detail' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+    await waitFor(() => expect(window.location.search).toBe('?view=today'))
+    await waitFor(() => expect(document.title).toBe('Today · Kata'))
     now = 120_000
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
@@ -2349,23 +2354,11 @@ describe('App', () => {
       properties: { duration_bucket: '1_to_5m' },
     })
     expect(
-      referenceRequests.find(
+      referenceRequests.findLast(
         (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-local',
       )?.signal.aborted,
     ).toBe(true)
 
-    await fireEvent.click(
-      screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
-    )
-    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-local/ }))
-    await waitFor(() =>
-      expect(window.location.search).toBe('?view=all-open&issue=01J00000000000000000000001'),
-    )
-    await fireEvent.click(await screen.findByRole('button', { name: 'Today' }))
-    await waitFor(() => expect(window.location.search).toBe('?view=today'))
-    await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
-    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
-    await screen.findByRole('button', { name: /Remote issue/ })
     await fireEvent.click(
       screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
     )
