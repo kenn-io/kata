@@ -133,7 +133,7 @@ func TestClientRefusesCommentsOnUnrequestedIssues(t *testing.T) {
 }
 
 func TestClientRejectsPartialErrorsAndScopeLeaks(t *testing.T) {
-	for _, body := range []string{`{"data":{"team":{"issues":{"nodes":[]}}},"errors":[{"message":"example-key private body"}]}`, `{"data":{"team":{"issues":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":null}}}}}`, `{"data":{"team":{"issues":{"nodes":null,"pageInfo":{"hasNextPage":false}}}}}`} {
+	for _, body := range []string{`{"data":{"team":{"issues":{"nodes":[],"pageInfo":{"hasNextPage":false}}}},"errors":[{"message":"example-key private body"}]}`, `{"data":{"team":{"issues":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":null}}}}}`, `{"data":{"team":{"issues":{"nodes":null,"pageInfo":{"hasNextPage":false}}}}}`} {
 		c := mockClient(t, func(*http.Request) (*http.Response, error) { return response(200, body), nil })
 		_, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 		require.Error(t, err)
