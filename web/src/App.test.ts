@@ -1739,7 +1739,8 @@ describe('App', () => {
     )
   })
 
-  it('shows configured-origin login without probing authority or losing the requested route', () => {
+  it('shows configured-origin login without probing authority or losing the requested route', async () => {
+    document.title = 'Old issue · Kata'
     const fetcher = vi.fn()
     vi.stubGlobal('fetch', fetcher)
     history.replaceState(
@@ -1750,6 +1751,7 @@ describe('App', () => {
     render(App)
 
     expect(screen.getByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Kata'))
     expect(fetcher).not.toHaveBeenCalled()
     expect(window.location.hash).toBe('')
   })
@@ -2300,6 +2302,68 @@ describe('App', () => {
     expect(credentialRequests[0]?.signal.aborted).toBe(false)
 
     releaseCredentials(Response.json({ observed_at: '2026-09-15T12:00:00Z', tokens: [] }))
+  })
+
+  it('clears the issue title while switching daemons', async () => {
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const local = snapshot()
+    const remote = structuredClone(local)
+    remote.collection[0]!.title = 'Remote issue'
+    let releaseRemote!: (response: Response) => void
+    const remoteResponse = new Promise<Response>((resolve) => (releaseRemote = resolve))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = requestOf(input, init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') {
+          return Response.json({
+            daemons: [
+              ...daemonRoster().daemons,
+              {
+                id: 'example-remote',
+                url: 'https://daemon.example',
+                default: false,
+                auth: 'token',
+                health: 'connected',
+              },
+            ],
+          })
+        }
+        if (path === '/api/v1/ui/telemetry') return telemetryAccepted()
+        if (path.endsWith('/api/v1/ui/references'))
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        if (path.endsWith('/api/v1/ui/snapshot')) {
+          if (request.headers.get('X-Kata-Web-Daemon') === 'example-remote') return remoteResponse
+          return Response.json({
+            ...local,
+            selected: {
+              state: 'available',
+              issue: local.collection[0],
+              comments: [],
+              labels: [],
+              links: [],
+              recurrences: [],
+              history: [],
+            },
+          })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${path}`)
+      }),
+    )
+    render(App)
+    await waitFor(() => expect(document.title).toBe('example-project#a1 Example issue · Kata'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+    expect(await screen.findByText('Loading Kata…')).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Kata'))
+    releaseRemote(Response.json(remote))
+    await screen.findByRole('button', { name: /Remote issue/ })
+    await waitFor(() => expect(document.title).toBe('All Open · Kata'))
   })
 
   it('switches configured daemons in place and restores each daemon route', async () => {

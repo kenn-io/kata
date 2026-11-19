@@ -2018,6 +2018,25 @@ describe('AppShell', () => {
     ).toBe('true')
   })
 
+  test('names an issue while its detail is loading', async () => {
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          issueUID: '01J00000000000000000000001',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: snapshot(),
+        loading: true,
+        ...mutationProps(),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    await waitFor(() => expect(document.title).toBe('Issue · Kata'))
+  })
+
   test('keeps the canonical issue route while authority is missing or archived', async () => {
     const missing = snapshot()
     missing.selected = {

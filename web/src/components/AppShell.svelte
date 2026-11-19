@@ -648,6 +648,7 @@
       if (projection.selected_state === 'missing') return 'Issue unavailable'
       const issue = projection.selected_detail?.issue
       if (issue?.uid === route.issueUID) return `${issue.qualified_id} ${issue.title}`
+      return 'Issue'
     }
     if (selectedProject && viewName !== 'all') return `${selectedProject.name} · ${viewLabel()}`
     return scopeLabel()

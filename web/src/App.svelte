@@ -343,6 +343,15 @@
     setThemeMode(preferences.theme)
   })
 
+  $effect(() => {
+    if (
+      !versionMismatch &&
+      (mode === 'loading' || (route.kind !== 'route-error' && !authority?.snapshot))
+    ) {
+      document.title = 'Kata'
+    }
+  })
+
   onMount(() => {
     const visibility = () => {
       scheduler.visibilityChanged(!document.hidden)
