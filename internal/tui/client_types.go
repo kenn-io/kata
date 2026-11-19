@@ -60,13 +60,15 @@ type Issue struct {
 	DeadlineOnDate  string `json:"deadline_on_date,omitempty"`
 }
 
-// issueMetadata keeps the two planning-date keys, the timezone and the
-// attachment references of an issue's metadata as the daemon stores them.
-// Other keys are not read by the TUI.
+// issueMetadata keeps the two planning-date keys, the timezone, the work
+// attention pair and the attachment references of an issue's metadata as the
+// daemon stores them. Other keys are not read by the TUI.
 type issueMetadata struct {
-	ScheduledOn jsontext.Value `json:"scheduled_on,omitzero"`
-	DeadlineOn  jsontext.Value `json:"deadline_on,omitzero"`
-	Timezone    jsontext.Value `json:"timezone,omitzero"`
+	ScheduledOn      jsontext.Value `json:"scheduled_on,omitzero"`
+	DeadlineOn       jsontext.Value `json:"deadline_on,omitzero"`
+	Timezone         jsontext.Value `json:"timezone,omitzero"`
+	WorkAttention    jsontext.Value `json:"work.attention,omitzero"`
+	WorkAttentionMsg jsontext.Value `json:"work.attention_msg,omitzero"`
 	// Attachments holds the raw "attachment.<id>" members, keyed by the
 	// full key, and nothing else from the unknown members.
 	Attachments map[string]jsontext.Value `json:"-"`
@@ -81,6 +83,7 @@ func (m *issueMetadata) UnmarshalJSON(data []byte) error {
 	}
 	*m = issueMetadata{
 		ScheduledOn: members["scheduled_on"], DeadlineOn: members["deadline_on"], Timezone: members["timezone"],
+		WorkAttention: members["work.attention"], WorkAttentionMsg: members["work.attention_msg"],
 	}
 	for key, value := range members {
 		if strings.HasPrefix(key, metadata.AttachmentPrefix) {
@@ -134,6 +137,45 @@ func (i Issue) attachments() []closeAttachment {
 func (i Issue) scheduledOn() string { return rawString(i.Metadata.ScheduledOn) }
 func (i Issue) deadlineOn() string  { return rawString(i.Metadata.DeadlineOn) }
 func (i Issue) timezone() string    { return rawString(i.Metadata.Timezone) }
+
+// The work.attention levels the TUI shows, in the issue list, the issue
+// detail and the Attention view. cmd/kata keeps its own copy in package main.
+const (
+	workAttentionOK         = "ok"
+	workAttentionStuck      = "stuck"
+	workAttentionNeedsHuman = "needs-human"
+)
+
+// knownWorkAttention returns level when it is one of the documented
+// work.attention levels and "" otherwise, so third-party values show nothing.
+func knownWorkAttention(level string) string {
+	switch level {
+	case workAttentionOK, workAttentionStuck, workAttentionNeedsHuman:
+		return level
+	default:
+		return ""
+	}
+}
+
+// workAttention returns the agent-set work.attention level and its message.
+// Closed and deleted issues, and values outside ok, stuck and needs-human,
+// report no level: work.* is meaningful only while an issue is open.
+func (i Issue) workAttention() (level, msg string) {
+	if i.Status == "closed" || i.DeletedAt != nil {
+		return "", ""
+	}
+	if level = knownWorkAttention(rawString(i.Metadata.WorkAttention)); level == "" {
+		return "", ""
+	}
+	return level, rawString(i.Metadata.WorkAttentionMsg)
+}
+
+// marksRowForAttention decides the list-row marker: only stuck and needs-human
+// get one; ok shows in the detail line alone.
+func (i Issue) marksRowForAttention() bool {
+	level, _ := i.workAttention()
+	return level == workAttentionStuck || level == workAttentionNeedsHuman
+}
 
 func rawString(v jsontext.Value) string {
 	var s string

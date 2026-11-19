@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-11-06
+last_edited: 2026-11-16
 ---
 
 # Metadata
@@ -278,6 +278,10 @@ recipe.
     - `stuck`: the agent cannot proceed.
 - **`work.attention_msg`** (string): a one-line current-state message that
   accompanies the attention level.
+
+The TUI marks a list row with a leading `!` when `work.attention` is `stuck` or
+`needs-human`, and shows the level with `work.attention_msg` as an `attention:`
+line in the issue detail.
 
 ### Scope
 

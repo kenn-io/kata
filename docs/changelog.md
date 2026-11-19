@@ -14,6 +14,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   issues from the whole workspace. Kata now reads issues through the team
   itself, so it receives only that team's issues.
 
+- See in `kata tui` which issues an agent marked `stuck` or `needs-human`: the list row gets a leading `!`, and the issue detail shows the `work.attention` value with its `work.attention_msg`. See [work conventions](reference/metadata.md#orchestration-conventions-work-keys).
+
 - Keep Linear discussion when you sync a Linear team: comments on imported
   issues now arrive with their Linear author and creation time. Kata copies
   each comment once. See [Linear sync](operations/linear-sync.md).
