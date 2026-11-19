@@ -2784,6 +2784,9 @@ components:
             - available
             - unavailable
           type: string
+        sync_retry:
+          $ref: "#/components/schemas/FederationSyncRetry"
+          description: Present while this daemon's federation runner waits before it contacts the hub for this spoke binding again.
         unresolved_violation_count:
           format: int64
           type: integer
@@ -2935,6 +2938,33 @@ components:
           type: array
       required:
         - statuses
+      type: object
+    FederationSyncRetry:
+      properties:
+        failures:
+          description: Consecutive attempts that ended for this reason.
+          format: int64
+          type: integer
+        http_status:
+          description: Hub response status of the last attempt.
+          format: int64
+          type: integer
+        next_attempt_at:
+          description: Earliest time the runner contacts the hub again. The attempt happens on the runner's first pass at or after this time.
+          format: date-time
+          type: string
+        reason:
+          description: "refused: the hub rejected the credential (401 or 403); it waits up to 15 minutes between attempts and retries at once when the credential or binding changes. unavailable: the hub throttled the request or was unavailable (429 or 503); it waits up to 5 minutes, or longer when the hub sent Retry-After. relay_cross_project_links: a relay hub refused the project's cross-project issue links."
+          enum:
+            - refused
+            - unavailable
+            - relay_cross_project_links
+          type: string
+      required:
+        - reason
+        - http_status
+        - failures
+        - next_attempt_at
       type: object
     FederationViolationSummary:
       properties:
@@ -7431,7 +7461,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.59.0
+  version: 0.60.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:

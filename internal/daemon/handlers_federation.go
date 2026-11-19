@@ -234,6 +234,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := addFederationRelayCapacityStatus(ctx, cfg, &body); err != nil {
 			return nil, err
 		}
+		addFederationSyncRetryStatus(cfg, &body)
 		return &api.FederationStatusResponse{Body: body}, nil
 	})
 
@@ -1500,6 +1501,7 @@ func federationStatusBindings(ctx context.Context, store db.Storage, projectID *
 // relay checkpoint measurement; omitErrors then removes error text, which the
 // browser must not receive.
 func finishFederationProjectStatus(ctx context.Context, cfg ServerConfig, body *api.FederationStatusBody, compact, omitErrors bool) error {
+	addFederationSyncRetryStatus(cfg, body)
 	if !compact {
 		if err := addFederationRelayCapacityStatus(ctx, cfg, body); err != nil {
 			return err
@@ -1509,6 +1511,23 @@ func finishFederationProjectStatus(ctx context.Context, cfg ServerConfig, body *
 		omitFederationStatusErrors(body.Statuses)
 	}
 	return nil
+}
+
+// addFederationSyncRetryStatus attaches the runner's retry schedule to each
+// spoke binding it is holding back.
+func addFederationSyncRetryStatus(cfg ServerConfig, body *api.FederationStatusBody) {
+	if cfg.FederationSyncRetry == nil {
+		return
+	}
+	for i := range body.Statuses {
+		status := &body.Statuses[i]
+		if status.Role != string(db.FederationRoleSpoke) {
+			continue
+		}
+		if retry, ok := cfg.FederationSyncRetry(status.ProjectID); ok {
+			status.SyncRetry = &retry
+		}
+	}
 }
 
 // omitFederationStatusErrors clears every error text in statuses and flags a

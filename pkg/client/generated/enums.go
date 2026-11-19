@@ -391,6 +391,25 @@ func (f FederationRootKeyRepinResultStatus) Validate() error {
 	}
 }
 
+// FederationSyncRetryReason refused: the hub rejected the credential (401 or 403); it waits up to 15 minutes between attempts and retries at once when the credential or binding changes. unavailable: the hub throttled the request or was unavailable (429 or 503); it waits up to 5 minutes, or longer when the hub sent Retry-After. relay_cross_project_links: a relay hub refused the project's cross-project issue links.
+type FederationSyncRetryReason string
+
+const (
+	FederationSyncRetryReasonUnavailable FederationSyncRetryReason = "unavailable"
+	Refused                              FederationSyncRetryReason = "refused"
+	RelayCrossProjectLinks               FederationSyncRetryReason = "relay_cross_project_links"
+)
+
+// Validate checks if the FederationSyncRetryReason value is valid
+func (f FederationSyncRetryReason) Validate() error {
+	switch f {
+	case FederationSyncRetryReasonUnavailable, Refused, RelayCrossProjectLinks:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid FederationSyncRetryReason value, got: %v", f))
+	}
+}
+
 type IdleShutdownHealthState string
 
 const (
