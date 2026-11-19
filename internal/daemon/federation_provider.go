@@ -19,9 +19,10 @@ import (
 // failed exchange with the credential provider.
 var ErrFederationProviderStorage = errors.New("federation provider local storage failed")
 
-// ErrFederationProviderIntentChangeBlocked reports a lowered intent that
-// waits until the hub accepts this replica's local changes and the replica
-// holds no claims or claim requests. Nothing changes while it is returned.
+// ErrFederationProviderIntentChangeBlocked reports an intent change that
+// waits until the hub accepts this replica's local changes, the replica holds
+// no claims or claim requests, and no cron run of the bound actor is still
+// running. Nothing changes and no local data is dropped while it is returned.
 var ErrFederationProviderIntentChangeBlocked = errors.New("federation provider intent change waits for local work")
 
 // AuthorizeFederationProvider saves a candidate before contacting the trusted
@@ -242,6 +243,9 @@ func releaseForIntentChange(
 		if _, err := store.DisableFederationPushWhenSettled(ctx, project.ID, store.InstanceUID()); err != nil {
 			if federationReplicaWorkOpen(err) {
 				return federationprovider.Response{}, errors.Join(ErrFederationProviderIntentChangeBlocked, err)
+			}
+			if errors.Is(err, db.ErrExternalRootFederationConflict) {
+				return federationprovider.Response{}, errors.Join(ErrFederationReplicaBindingConflict, err)
 			}
 			return federationprovider.Response{}, errors.Join(ErrFederationProviderStorage, err)
 		}

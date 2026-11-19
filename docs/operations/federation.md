@@ -1393,6 +1393,15 @@ and retries. `kata federation status` shows the pending push depth and claim
 counts. Once the hub accepts the pushed changes and you release the claims,
 the change completes on the next attempt.
 
+The local changes and claims stay on this computer while Kata waits; nothing
+is dropped. If the hub no longer accepts this replica's changes, the wait does
+not end on its own. Get write access back, set the earlier intent, and restart
+so Kata can send them. Then lower the intent again.
+
+A project with an active external root binding cannot become read-only.
+Lowering its intent reports `binding_conflict` and keeps collaborating; unbind
+the external root first.
+
 A change of actor waits the same way in either direction. A cron run that the
 old actor started and that is still running also holds the switch until the
 run finishes, because a run continues only as the actor that started it.

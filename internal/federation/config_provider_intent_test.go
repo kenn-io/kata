@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -163,6 +164,8 @@ func TestReconcileProviderDowngradeWaitsForLocalWork(t *testing.T) {
 	assert.Equal(t, binding.Actor, issue.Author)
 	err = f.reconcile(t, federationprovider.IntentReadOnly)
 	require.ErrorIs(t, err, federation.ErrBindingConflict, "an unaccepted local change blocks the downgrade")
+	assert.Contains(t, err.Error(), "they stay on this computer and are not dropped", "the person learns the changes are kept")
+	assert.Contains(t, err.Error(), "set the earlier intent")
 	assert.Len(t, f.requests(t), 1, "a blocked downgrade does not contact the provider")
 	_, blocked := f.binding(t)
 	assert.True(t, blocked.PushEnabled, "the replica keeps collaborating")
@@ -244,4 +247,29 @@ func TestReconcileProviderIntentChangeRefusesAnotherHubProject(t *testing.T) {
 	_, upgraded := f.binding(t)
 	assert.True(t, upgraded.PushEnabled)
 	assert.Equal(t, f.saved(t).Credential.Actor, upgraded.Actor)
+}
+
+func TestReconcileProviderDowngradeRefusesExternalRoot(t *testing.T) {
+	f := newIntentChangeFixture(t, federationprovider.IntentCollaborate)
+	require.NoError(t, f.reconcile(t, federationprovider.IntentCollaborate))
+	before := f.saved(t)
+	project, _ := f.binding(t)
+	issue, _, err := f.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Bound root", Author: "someone"})
+	require.NoError(t, err)
+	_, _, err = f.store.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
+		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "notes", ExternalRootKey: "root-key",
+		ExternalAccountKey: "account-key", Actor: "someone", ReceiveCommentsAfter: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	accepted, err := f.store.MaxLocalOriginEventID(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.NoError(t, f.store.AdvanceFederationPushCursor(t.Context(), project.ID, accepted))
+
+	err = f.reconcile(t, federationprovider.IntentReadOnly)
+	require.ErrorIs(t, err, federation.ErrBindingConflict)
+	assert.Contains(t, err.Error(), "active external root binding")
+	assert.Len(t, f.requests(t), 1, "a refused downgrade does not contact the provider")
+	_, kept := f.binding(t)
+	assert.True(t, kept.PushEnabled)
+	assert.True(t, before.Credential.Equal(f.saved(t).Credential))
 }

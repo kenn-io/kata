@@ -165,3 +165,40 @@ func checkFederationBoundActorReplacementWaitsForWork(t *testing.T, store db.Sto
 	assert.False(t, upgraded.PushEnabled)
 	return nil
 }
+
+// Turning push off makes a spoke read-only, which cannot own an active
+// external root binding. The refusal keeps pushing and keeps the binding.
+func checkFederationPushDisableRefusesExternalRoot(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "bound root", Author: "bound-agent"})
+	require.NoError(t, err)
+	root, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "notes", ExternalRootKey: "root-key",
+		ExternalAccountKey: "account-key", Actor: "bound-agent", ReceiveCommentsAfter: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	hubUID, err := uid.New()
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke,
+		HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: hubUID,
+		ReplayHorizonEventID: 9, PullCursorEventID: 8, PushEnabled: true,
+		Actor: "bound-agent", Enabled: true,
+	})
+	require.NoError(t, err)
+	accepted, err := store.MaxLocalOriginEventID(ctx, project.ID)
+	require.NoError(t, err)
+	require.NoError(t, store.AdvanceFederationPushCursor(ctx, project.ID, accepted))
+
+	_, err = store.DisableFederationPushWhenSettled(ctx, project.ID, store.InstanceUID())
+	require.ErrorIs(t, err, db.ErrExternalRootFederationConflict)
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.True(t, binding.PushEnabled, "refusal keeps the replica collaborating")
+	kept, err := store.ExternalRootBindingByID(ctx, root.ID)
+	require.NoError(t, err)
+	assert.True(t, kept.Active, "refusal keeps the external root binding")
+	return nil
+}

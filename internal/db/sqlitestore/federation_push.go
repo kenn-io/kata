@@ -294,6 +294,13 @@ func (d *Store) disableFederationPushWhenSettled(ctx context.Context, projectID 
 	if existing.Role != db.FederationRoleSpoke || existing.RelayConfig != nil {
 		return db.FederationBinding{}, fmt.Errorf("disable federation push: only a direct spoke binding can stop pushing")
 	}
+	// An enabled read-only spoke cannot own an external root binding, the
+	// same rule upsertFederationBinding enforces.
+	if existing.Enabled {
+		if err := rejectExternalRootFederationProject(ctx, tx, projectID); err != nil {
+			return db.FederationBinding{}, err
+		}
+	}
 	if err := federationReplicaSettledTx(ctx, tx, existing, originInstanceUID); err != nil {
 		return db.FederationBinding{}, err
 	}

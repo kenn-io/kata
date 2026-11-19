@@ -489,8 +489,11 @@ type Storage interface {
 	// the push cursor, no live claim held by this replica, no open claim
 	// request, and no cron run still running as the bound actor remains.
 	// Otherwise it changes nothing and returns ErrFederationPushPending,
-	// ErrFederationClaimsHeld, or ErrFederationRunsActive. A binding whose push
-	// is already off is returned unchanged.
+	// ErrFederationClaimsHeld, or ErrFederationRunsActive. An enabled binding
+	// whose project has an active external root binding returns
+	// ErrExternalRootFederationConflict, as UpsertFederationBinding does for a
+	// read-only spoke. A binding whose push is already off is returned
+	// unchanged.
 	DisableFederationPushWhenSettled(ctx context.Context, projectID int64, originInstanceUID string) (FederationBinding, error)
 	// ReplaceFederationBoundActorWhenSettled changes a direct spoke binding's
 	// bound actor from fromActor to toActor under the same settled checks,
