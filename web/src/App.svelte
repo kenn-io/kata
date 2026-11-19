@@ -165,6 +165,7 @@
   let activeDaemonID = $state<string | undefined>()
   let daemonRosterLoaded = false
   let daemonRosterAbort: AbortController | undefined
+  let daemonRefreshAbort: AbortController | undefined
   let authenticationRecoveryPending = false
   let authenticationRecoveryCompletion: Promise<boolean> | undefined
   let daemonSwitching = $state(false)
@@ -404,6 +405,7 @@
       invalidations.stop()
       snapshots.abort()
       daemonRosterAbort?.abort()
+      daemonRefreshAbort?.abort()
       referenceGeneration += 1
       referenceAbort?.abort()
       fenceCredentialAudit()
@@ -425,6 +427,7 @@
 
   function invalidateDaemonRoster(): void {
     daemonRosterAbort?.abort()
+    daemonRefreshAbort?.abort()
     if (!directDaemonTarget) daemonRosterLoaded = false
   }
 
@@ -1171,6 +1174,21 @@
     return true
   }
 
+  async function refreshDaemonRoster(): Promise<void> {
+    if (directDaemonTarget) return
+    daemonRefreshAbort?.abort()
+    const abort = (daemonRefreshAbort = new AbortController())
+    try {
+      const loaded = await fetchWebDaemons(browserFetch, abort.signal, { refresh: true })
+      if (abort.signal.aborted || destroyed) return
+      daemonInfos = loaded
+    } catch {
+      // Keep the current roster when refresh fails.
+    } finally {
+      if (daemonRefreshAbort === abort) daemonRefreshAbort = undefined
+    }
+  }
+
   async function switchDaemon(id: string): Promise<void> {
     if (daemonSwitching || authenticationRecoveryPending || id === activeDaemonID) return
     if (daemonInfos.find((daemon) => daemon.id === id)?.health === 'upgrade_required') return
@@ -1340,6 +1358,7 @@
             activeStatusTone="error"
             disabled={daemonSwitching}
             onSelect={(id) => void switchDaemon(id)}
+            onOpen={() => void refreshDaemonRoster()}
           />
         {/if}
       </section>
@@ -1355,6 +1374,7 @@
             activeStatusTone={daemonError ? 'error' : undefined}
             disabled={daemonSwitching}
             onSelect={(id) => void switchDaemon(id)}
+            onOpen={() => void refreshDaemonRoster()}
           />
         {/if}
       </section>
@@ -1377,6 +1397,7 @@
         activeStatusTone={daemonError ? 'error' : undefined}
         disabled={daemonSwitching}
         onSelect={(id) => void switchDaemon(id)}
+        onOpen={() => void refreshDaemonRoster()}
       />
     {/if}
     {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
@@ -1409,6 +1430,7 @@
         canAdministerDaemon={canAdministerDaemon()}
         onBackFromCredentials={returnFromCredentials}
         onSelectDaemon={(id) => void switchDaemon(id)}
+        onOpenDaemon={() => void refreshDaemonRoster()}
         onPreferencesChange={updatePreferences}
         ownerOptions={(references?.owners ?? []).map((owner) => ({ name: owner, label: owner }))}
         onNavigate={navigate}

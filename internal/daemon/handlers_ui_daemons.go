@@ -128,15 +128,17 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 				states[i] = "auth_required"
 				return
 			}
-			states[i] = g.daemonHealth(r.Context(), resolved[i])
+			states[i] = g.daemonHealth(r.Context(), resolved[i], r.URL.Query().Get("refresh") == "1")
 		}()
 	}
 	wg.Wait()
 
 	visible := make([]config.CatalogDaemonConfig, 0, len(catalog))
+	var visibleIndexes []int
 	for i, configured := range catalog {
 		if !g.syncHubs[configured.Name] || states[i] == "connected" {
 			visible = append(visible, configured)
+			visibleIndexes = append(visibleIndexes, i)
 		}
 	}
 	if len(visible) == 0 {
@@ -145,13 +147,12 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 		catalog = append(catalog, fallback)
 		resolved = append(resolved, resolvedWebDaemon{id: fallback.Name, local: true})
 		states = append(states, "connected")
+		visibleIndexes = append(visibleIndexes, len(catalog)-1)
 	}
 	defaultID := g.defaultID(visible)
 	out := webDaemonRosterResponse{Daemons: make([]webDaemonResponse, 0, len(catalog))}
-	for i, configured := range catalog {
-		if g.syncHubs[configured.Name] && states[i] != "connected" {
-			continue
-		}
+	for _, i := range visibleIndexes {
+		configured := catalog[i]
 		d := resolved[i]
 		auth := "none"
 		if d.credentialConfigured {
@@ -617,7 +618,7 @@ func webDaemonLogValue(value string) string {
 	return textsafe.Line(value)
 }
 
-func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon) string {
+func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon, fresh bool) string {
 	if d.local {
 		return "connected"
 	}
@@ -625,6 +626,13 @@ func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon
 		return "down"
 	}
 	key := strings.Join([]string{d.id, d.baseURL, d.token}, "\x00")
+	if fresh {
+		state := probeWebDaemon(ctx, d, g.trustPrivateNetwork)
+		g.mu.Lock()
+		g.health[key] = webDaemonHealthEntry{state: state, expires: time.Now().Add(webDaemonHealthTTL)}
+		g.mu.Unlock()
+		return state
+	}
 	g.mu.Lock()
 	if cached, ok := g.health[key]; ok && time.Now().Before(cached.expires) {
 		g.mu.Unlock()

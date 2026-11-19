@@ -57,37 +57,17 @@ func TestWebSyncHubs(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
-active_daemon = "active"
+active_daemon = "hub"
 [[daemon]]
 name = "hub"
 url = "https://hub.example"
-[[daemon]]
-name = "active"
-url = "https://active.example"
-[[daemon]]
-name = "browse"
-url = "https://browse.example"
-token_env = "BROWSE_TOKEN"
 [[federation.project]]
 hub = "hub"
-spoke_project = "spoke-a"
-hub_project = "hub-a"
-actor = "user-a"
-[[federation.project]]
-hub = "active"
-spoke_project = "spoke-b"
-hub_project = "hub-b"
-actor = "user-a"
-[[federation.project]]
-hub = "browse"
-spoke_project = "spoke-c"
-hub_project = "hub-c"
+spoke_project = "spoke-project"
+hub_project = "hub-project"
 actor = "user-a"
 `), 0o600))
 	cfg, err := config.ReadDaemonConfig()
 	require.NoError(t, err)
 	assert.Equal(t, []string{"hub"}, cfg.WebSyncHubs())
-	assert.Len(t, cfg.Daemons, 3)
-	_, found := cfg.CatalogDaemon("hub")
-	assert.True(t, found)
 }

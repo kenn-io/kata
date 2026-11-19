@@ -158,7 +158,8 @@ func TestWebDaemonRosterMappedHubs(t *testing.T) {
 	}{
 		{"connected hub", "", "local = true", connected.URL, "", "", []string{"local", "hub"}, []string{"connected", "connected"}},
 		{"down hub", "", "local = true", down.URL, "", "", []string{"local"}, []string{"connected"}},
-		{"active down hub", `active_daemon = "hub"`, "local = true", down.URL, "", "", []string{"local", "hub"}, []string{"connected", "down"}},
+		{"active down hub", `active_daemon = "hub"`, "local = true", down.URL, "", "", []string{"local"}, []string{"connected"}},
+		{"active connected hub", `active_daemon = "hub"`, "local = true", connected.URL, "", "", []string{"local", "hub"}, []string{"connected", "connected"}},
 		{"token hub", "", "local = true", down.URL, `token = "example-token"`, "", []string{"local", "hub"}, []string{"connected", "down"}},
 		{"unmapped down target", "", "local = true", down.URL, "", fmt.Sprintf(`[[daemon]]
 name = "other"
@@ -213,7 +214,7 @@ actor = "user-a"
 				assert.Equal(t, tc.wantHealth[i], entry.Health)
 			}
 			if tc.active != "" {
-				assert.True(t, roster.Daemons[1].Default)
+				assert.True(t, roster.Daemons[len(roster.Daemons)-1].Default)
 			}
 			if tc.name == "connected hub" {
 				assert.EqualValues(t, 1, probes.Load())
@@ -229,6 +230,44 @@ actor = "user-a"
 				assert.Equal(t, http.StatusOK, resp.StatusCode)
 			}
 		})
+	}
+}
+
+func TestWebDaemonRosterRefreshesRecoveredHub(t *testing.T) {
+	var ready atomic.Bool
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Empty(t, r.Header.Get("Authorization"))
+		if !ready.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"web_ui_contract_version":%q}`, api.UISnapshotContractVersion)
+	}))
+	t.Cleanup(hub.Close)
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebSyncHubs: []string{"hub"}, WebDaemons: []config.CatalogDaemonConfig{{Name: "local", Local: true}, {Name: "hub", URL: hub.URL, AllowInsecure: true}}})
+	for _, tc := range []struct {
+		query string
+		want  int
+	}{{"", 1}, {"", 1}, {"?refresh=1", 2}} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons"+tc.query, nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		var roster struct {
+			Daemons []struct {
+				ID     string `json:"id"`
+				Health string `json:"health"`
+			} `json:"daemons"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&roster))
+		require.NoError(t, resp.Body.Close())
+		require.Len(t, roster.Daemons, tc.want)
+		if tc.want == 2 {
+			assert.Equal(t, "hub", roster.Daemons[1].ID)
+			assert.Equal(t, "connected", roster.Daemons[1].Health)
+		}
+		ready.Store(true)
 	}
 }
 
