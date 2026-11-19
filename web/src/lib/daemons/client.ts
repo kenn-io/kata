@@ -50,11 +50,10 @@ export function createDaemonFetch(
 export async function fetchWebDaemons(
   fetcher: typeof fetch,
   signal: AbortSignal,
-  options: { refresh?: boolean } = {},
 ): Promise<WebDaemonInfo[]> {
   const { response, body } = await retryTransientRead(
     () =>
-      fetcher(`/api/v1/ui/daemons${options.refresh ? '?refresh=1' : ''}`, {
+      fetcher('/api/v1/ui/daemons', {
         method: 'GET',
         credentials: 'same-origin',
         redirect: 'error',

@@ -173,7 +173,8 @@ your project limits, so the gateway refuses to use them for you. If you can
 see every project, or you are signed in as the daemon owner, the switcher
 lists configured daemons. A server used only for project sync, with no token
 saved for browsing, stays out of the switcher while browser access is unavailable
-and returns when access recovers. Its projects keep syncing. See
+and returns when access recovers. An explicitly selected server stays listed with
+its connection status. Projects keep syncing. See
 [Project access](../reference/http-api.md#project-access) for the exact rules.
 
 ![Kata Web UI switching between two synthetic configured daemons](/docs/assets/screenshots/web-ui/daemon-switcher.png)

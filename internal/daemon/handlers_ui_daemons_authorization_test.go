@@ -526,8 +526,8 @@ func TestWebDaemonGatewayRejectsMutationsForNonWritableSourcePrincipals(t *testi
 		catalog: []config.CatalogDaemonConfig{{
 			Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
 		}},
-		health: make(map[string]webDaemonHealthEntry), inflight: make(map[string]*webDaemonInflightProbe),
-		proxies: make(map[string]http.Handler),
+		inflight: make(map[string]*webDaemonInflightProbe),
+		proxies:  make(map[string]http.Handler),
 	}
 	for _, principal := range []Principal{
 		{Kind: PrincipalBootstrap},
@@ -572,8 +572,8 @@ func TestWebDaemonGatewayRejectsNestedProxyRoutesWithoutContactingTarget(t *test
 		catalog: []config.CatalogDaemonConfig{{
 			Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
 		}},
-		health: make(map[string]webDaemonHealthEntry), inflight: make(map[string]*webDaemonInflightProbe),
-		proxies: make(map[string]http.Handler),
+		inflight: make(map[string]*webDaemonInflightProbe),
+		proxies:  make(map[string]http.Handler),
 	}
 	mux := http.NewServeMux()
 	mux.Handle(webDaemonProxyPrefix+"/", http.StripPrefix(webDaemonProxyPrefix, gateway))

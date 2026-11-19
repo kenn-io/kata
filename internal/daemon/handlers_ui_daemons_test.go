@@ -168,7 +168,7 @@ func TestWebDaemonRosterMappedHubs(t *testing.T) {
 	}{
 		{"connected hub", "", "local = true", connected.URL, "", "", []string{"local", "hub"}, []string{"connected", "connected"}},
 		{"down hub", "", "local = true", down.URL, "", "", []string{"local"}, []string{"connected"}},
-		{"active down hub", `active_daemon = "hub"`, "local = true", down.URL, "", "", []string{"local"}, []string{"connected"}},
+		{"active down hub", `active_daemon = "hub"`, "local = true", down.URL, "", "", []string{"local", "hub"}, []string{"connected", "down"}},
 		{"token hub", "", "local = true", down.URL, `token = "example-token"`, "", []string{"local", "hub"}, []string{"connected", "down"}},
 		{"unmapped down target", "", "local = true", down.URL, "", fmt.Sprintf(`[[daemon]]
 name = "other"
@@ -244,32 +244,44 @@ actor = "user-a"
 
 func TestWebDaemonRosterRefreshesRecoveredHub(t *testing.T) {
 	var ready atomic.Bool
-	hub, _ := anonymousHub(t, &ready)
+	hub, probes := anonymousHub(t, &ready)
 	d := openTestDB(t)
-	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebSyncHubs: []string{"hub"}, WebDaemons: []config.CatalogDaemonConfig{{Name: "local", Local: true}, {Name: "hub", URL: hub.URL, AllowInsecure: true}}})
-	for _, tc := range []struct {
-		query string
-		want  int
-	}{{"", 1}, {"", 1}, {"?refresh=1", 2}} {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons"+tc.query, nil)
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebSyncHubs: []string{"hub"}, WebDaemons: []config.CatalogDaemonConfig{{Name: "hub", URL: hub.URL, AllowInsecure: true}}})
+	for _, want := range []int{1, 2, 2} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
 		require.NoError(t, err)
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		var roster struct {
 			Daemons []struct {
-				ID     string `json:"id"`
-				Health string `json:"health"`
+				ID      string `json:"id"`
+				Health  string `json:"health"`
+				Default bool   `json:"default"`
 			} `json:"daemons"`
 		}
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&roster))
 		require.NoError(t, resp.Body.Close())
-		require.Len(t, roster.Daemons, tc.want)
-		if tc.want == 2 {
-			assert.Equal(t, "hub", roster.Daemons[1].ID)
-			assert.Equal(t, "connected", roster.Daemons[1].Health)
+		require.Len(t, roster.Daemons, want)
+		if want == 1 {
+			assert.Equal(t, "local", roster.Daemons[0].ID)
+			assert.True(t, roster.Daemons[0].Default)
+		} else {
+			assert.Equal(t, "hub", roster.Daemons[0].ID)
+			assert.Equal(t, "connected", roster.Daemons[0].Health)
+			assert.True(t, roster.Daemons[0].Default)
+			assert.Equal(t, "local", roster.Daemons[1].ID)
+			assert.False(t, roster.Daemons[1].Default)
 		}
 		ready.Store(true)
 	}
+	assert.EqualValues(t, 3, probes.Load())
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
+	require.NoError(t, err)
+	request.Header.Set("X-Kata-Web-Daemon", "local")
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	assert.Equal(t, http.StatusOK, response.StatusCode)
 }
 
 func TestWebDaemonRosterReportsTargetsWithoutWebUIContract(t *testing.T) {

@@ -1101,13 +1101,6 @@
     return accepted
   }
 
-  function keepLocalFallback(loaded: WebDaemonInfo[]): WebDaemonInfo[] {
-    const local = daemonInfos.find(
-      (daemon) => daemon.local && !loaded.some((item) => item.id === daemon.id),
-    )
-    return local ? [...loaded, { ...local, default: false }] : loaded
-  }
-
   async function loadDaemonRoster(): Promise<boolean> {
     if (daemonRosterLoaded) return directDaemonTarget || activeDaemonID !== undefined
     if (directDaemonTarget) {
@@ -1120,7 +1113,7 @@
     daemonRosterAbort?.abort()
     const abort = (daemonRosterAbort = new AbortController())
     try {
-      const loadedDaemons = keepLocalFallback(await fetchWebDaemons(browserFetch, abort.signal))
+      const loadedDaemons = await fetchWebDaemons(browserFetch, abort.signal)
       if (abort.signal.aborted || destroyed) return false
       const nextDaemonID =
         loadedDaemons.find(
@@ -1186,9 +1179,9 @@
     daemonRefreshAbort?.abort()
     const abort = (daemonRefreshAbort = new AbortController())
     try {
-      const loaded = await fetchWebDaemons(browserFetch, abort.signal, { refresh: true })
+      const loaded = await fetchWebDaemons(browserFetch, abort.signal)
       if (abort.signal.aborted || destroyed) return
-      daemonInfos = keepLocalFallback(loaded)
+      daemonInfos = loaded
     } catch {
       // Keep the current roster when refresh fails.
     } finally {

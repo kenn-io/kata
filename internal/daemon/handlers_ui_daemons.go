@@ -32,7 +32,6 @@ import (
 const (
 	webDaemonHeaderName   = "X-Kata-Web-Daemon"
 	webDaemonProxyPrefix  = "/api/v1/ui/proxy"
-	webDaemonHealthTTL    = 5 * time.Second
 	webDaemonProxyTimeout = 30 * time.Second
 )
 
@@ -65,11 +64,6 @@ type resolvedWebDaemon struct {
 	allowInsecure        bool
 }
 
-type webDaemonHealthEntry struct {
-	state   string
-	expires time.Time
-}
-
 type webDaemonInflightProbe struct {
 	done  chan struct{}
 	state string
@@ -85,7 +79,6 @@ type webDaemonGateway struct {
 	trustPrivateNetwork bool
 
 	mu       sync.Mutex
-	health   map[string]webDaemonHealthEntry
 	inflight map[string]*webDaemonInflightProbe
 	proxies  map[string]http.Handler
 }
@@ -97,7 +90,6 @@ func registerWebDaemonHandlers(mux *http.ServeMux, cfg ServerConfig) {
 		active:   strings.TrimSpace(cfg.ActiveWebDaemon), localMux: mux,
 		sessions: cfg.WebSessions, insecureReadonly: cfg.InsecureReadonly,
 		trustPrivateNetwork: cfg.Auth.TrustPrivateNetwork,
-		health:              make(map[string]webDaemonHealthEntry),
 		inflight:            make(map[string]*webDaemonInflightProbe),
 		proxies:             make(map[string]http.Handler),
 	}
@@ -128,7 +120,7 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 				states[i] = "auth_required"
 				return
 			}
-			states[i] = g.daemonHealth(r.Context(), resolved[i], r.URL.Query().Get("refresh") == "1")
+			states[i] = g.daemonHealth(r.Context(), resolved[i])
 		}()
 	}
 	wg.Wait()
@@ -136,12 +128,18 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 	visible := make([]config.CatalogDaemonConfig, 0, len(catalog))
 	var visibleIndexes []int
 	for i, configured := range catalog {
-		if !g.syncHubs[configured.Name] || states[i] == "connected" {
+		if !g.syncHubs[configured.Name] || configured.Name == g.active || states[i] == "connected" {
 			visible = append(visible, configured)
 			visibleIndexes = append(visibleIndexes, i)
 		}
 	}
-	if len(visible) == 0 {
+	defaultID := g.defaultID(visible)
+	hasLocal, hasSyncHub := false, false
+	for _, configured := range catalog {
+		hasLocal = hasLocal || configured.Local
+		hasSyncHub = hasSyncHub || g.syncHubs[configured.Name]
+	}
+	if len(visible) == 0 || (hasSyncHub && !hasLocal) {
 		fallback := g.localFallbackDaemon()
 		visible = append(visible, fallback)
 		catalog = append(catalog, fallback)
@@ -149,7 +147,9 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 		states = append(states, "connected")
 		visibleIndexes = append(visibleIndexes, len(catalog)-1)
 	}
-	defaultID := g.defaultID(visible)
+	if defaultID == "" {
+		defaultID = g.defaultID(visible)
+	}
 	out := webDaemonRosterResponse{Daemons: make([]webDaemonResponse, 0, len(catalog))}
 	for _, i := range visibleIndexes {
 		configured := catalog[i]
@@ -618,7 +618,7 @@ func webDaemonLogValue(value string) string {
 	return textsafe.Line(value)
 }
 
-func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon, fresh bool) string {
+func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon) string {
 	if d.local {
 		return "connected"
 	}
@@ -627,10 +627,6 @@ func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon
 	}
 	key := strings.Join([]string{d.id, d.baseURL, d.token}, "\x00")
 	g.mu.Lock()
-	if cached, ok := g.health[key]; !fresh && ok && time.Now().Before(cached.expires) {
-		g.mu.Unlock()
-		return cached.state
-	}
 	if probe, ok := g.inflight[key]; ok {
 		g.mu.Unlock()
 		select {
@@ -647,7 +643,6 @@ func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon
 	state := probeWebDaemon(ctx, d, g.trustPrivateNetwork)
 	g.mu.Lock()
 	probe.state = state
-	g.health[key] = webDaemonHealthEntry{state: state, expires: time.Now().Add(webDaemonHealthTTL)}
 	delete(g.inflight, key)
 	close(probe.done)
 	g.mu.Unlock()

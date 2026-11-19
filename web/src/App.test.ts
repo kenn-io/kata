@@ -667,7 +667,7 @@ describe('App', () => {
           const url = new URL(request.url)
           if (url.pathname === '/api/v1/ui/daemons') {
             queries.push(url.search)
-            if (!url.search)
+            if (queries.length === 1)
               return Response.json({
                 daemons: [
                   {
@@ -683,6 +683,14 @@ describe('App', () => {
             if (failure) return new Response('', { status: 400 })
             return Response.json({
               daemons: [
+                {
+                  id: 'local',
+                  url: '',
+                  local: true,
+                  default: false,
+                  auth: 'none',
+                  health: 'connected',
+                },
                 {
                   id: 'hub',
                   url: 'https://hub.example',
@@ -706,7 +714,7 @@ describe('App', () => {
       const reads = snapshotReads
       const route = window.location.href
       await fireEvent.click(screen.getByTestId('daemon-chip'))
-      await waitFor(() => expect(queries).toContain('?refresh=1'))
+      await waitFor(() => expect(queries).toEqual(['', '']))
       if (failure) {
         await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
       } else {
