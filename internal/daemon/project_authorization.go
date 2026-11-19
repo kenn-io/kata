@@ -159,23 +159,27 @@ func (d *ProjectAccessDecision) admitURLProject(ctx context.Context, projectID i
 
 // selectableProjectUIDs returns the projects the decision's actor may select
 // under the current policy. A request admitted for its URL project alone, and
-// still holding no other project, rechecks only that project; its release
-// then also holds exposed issues to that project.
+// still holding no other project, rechecks only that project, even one that
+// did not exist at admission; its release then also holds exposed issues to
+// that project.
 func (d *ProjectAccessDecision) selectableProjectUIDs(ctx context.Context) ([]string, error) {
-	if d.urlProjectUID == "" || slices.ContainsFunc(d.ProjectUIDs, func(uid string) bool { return uid != d.urlProjectUID }) {
+	if d.urlProjectID == 0 || slices.ContainsFunc(d.ProjectUIDs, func(uid string) bool { return uid != d.urlProjectUID }) {
 		return accessibleProjectUIDs(ctx, d.store, d.Actor)
 	}
-	var (
-		allowed bool
-		err     error
-	)
 	if d.Actor == "" {
-		var projectUID string
-		projectUID, allowed, err = d.store.AnonymousProjectAccess(ctx, d.urlProjectID)
-		allowed = allowed && projectUID == d.urlProjectUID
-	} else {
-		allowed, err = d.store.ProjectAccessibleToActor(ctx, d.Actor, d.urlProjectUID)
+		projectUID, allowed, err := d.store.AnonymousProjectAccess(ctx, d.urlProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("reading anonymous project access: %w", err)
+		}
+		if !allowed || (d.urlProjectUID != "" && projectUID != d.urlProjectUID) {
+			return []string{}, nil
+		}
+		return []string{projectUID}, nil
 	}
+	if d.urlProjectUID == "" {
+		return []string{}, nil
+	}
+	allowed, err := d.store.ProjectAccessibleToActor(ctx, d.Actor, d.urlProjectUID)
 	if err != nil {
 		return nil, fmt.Errorf("reading project access: %w", err)
 	}

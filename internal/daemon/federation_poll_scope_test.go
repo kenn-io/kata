@@ -63,6 +63,7 @@ type federationPollScopeFixture struct {
 	token          string
 	restrictPolicy func(db.Project) func() error
 	poll           func(token string) *httptest.ResponseRecorder
+	pollProject    func(projectID int64, token string) *httptest.ResponseRecorder
 }
 
 func newFederationPollScopeFixture(t *testing.T, store db.Storage) federationPollScopeFixture {
@@ -91,6 +92,17 @@ func newFederationPollScopeFixture(t *testing.T, store db.Storage) federationPol
 		Auth:      config.AuthConfig{Token: "hub-admin-token", TrustPrivateNetwork: true},
 	})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	pollProject := func(projectID int64, token string) *httptest.ResponseRecorder {
+		request := httptest.NewRequestWithContext(ctx, http.MethodGet,
+			projectPath(projectID)+"/federation/events?after_id=0&limit=10", nil)
+		request.RemoteAddr = "100.64.0.9:41000"
+		request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey,
+			&net.TCPAddr{IP: net.ParseIP("100.64.0.5"), Port: 7777}))
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		return response
+	}
 	return federationPollScopeFixture{
 		store: scope, target: target, other: other, token: enrollment.Token,
 		restrictPolicy: func(project db.Project) func() error {
@@ -101,17 +113,8 @@ func newFederationPollScopeFixture(t *testing.T, store db.Storage) federationPol
 				return err
 			}
 		},
-		poll: func(token string) *httptest.ResponseRecorder {
-			request := httptest.NewRequestWithContext(ctx, http.MethodGet,
-				projectPath(target.ID)+"/federation/events?after_id=0&limit=10", nil)
-			request.RemoteAddr = "100.64.0.9:41000"
-			request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey,
-				&net.TCPAddr{IP: net.ParseIP("100.64.0.5"), Port: 7777}))
-			request.Header.Set("Authorization", "Bearer "+token)
-			response := httptest.NewRecorder()
-			server.Handler().ServeHTTP(response, request)
-			return response
-		},
+		poll:        func(token string) *httptest.ResponseRecorder { return pollProject(target.ID, token) },
+		pollProject: pollProject,
 	}
 }
 
@@ -148,6 +151,30 @@ func TestFederationPollReleaseRechecksOnlyItsProject(t *testing.T) {
 		response := fixture.poll(fixture.token)
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 		require.Zero(t, fixture.store.actorLists.Load(), "release recheck read the actor's project list")
+		require.Zero(t, fixture.store.anonymousLists.Load(), "release recheck read the anonymous project list")
+	})
+}
+
+// A refused poll whose own project leaves anonymous visibility while the
+// request is in flight is hidden, as before.
+func TestFederationPollRefusalFollowsItsProjectPolicy(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		fixture := newFederationPollScopeFixture(t, store)
+		fixture.store.duringTokenCheck = fixture.restrictPolicy(fixture.target)
+		response := fixture.poll("not-an-enrollment-token")
+		require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+		require.Zero(t, fixture.store.anonymousLists.Load(), "release recheck read the anonymous project list")
+	})
+}
+
+// A refused poll for a project that does not exist keeps its refusal scoped
+// to that project when policy changes while the request is in flight.
+func TestFederationPollRefusalForMissingProjectStaysScoped(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		fixture := newFederationPollScopeFixture(t, store)
+		fixture.store.duringTokenCheck = fixture.restrictPolicy(fixture.other)
+		response := fixture.pollProject(fixture.target.ID+1000, fixture.token)
+		require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 		require.Zero(t, fixture.store.anonymousLists.Load(), "release recheck read the anonymous project list")
 	})
 }

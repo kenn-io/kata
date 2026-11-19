@@ -1,14 +1,13 @@
 package db
 
-import (
-	"math"
-	"sync"
-)
+import "sync"
 
 // FederationFeedCache remembers, per hub project, event-ID ranges already
 // proven to hold no event that reaches the project's federation feed only
 // because the project owns its issue. Finding such an event otherwise means
-// probing every issue the project owns on each poll.
+// probing every issue the project owns on each poll. It also remembers the
+// newest event ID through which no moved issue entered the project, so a poll
+// need not reread the project's move history.
 //
 // A remembered range stays true. Event inserts take IDs in commit order, so
 // once a read sees an event ID, no event with a lower ID can appear later; an
@@ -38,8 +37,8 @@ type federationFeedFacts struct {
 	// movesThrough.
 	movesThrough int64
 	// issues is how many issues the project owned when a read last counted
-	// them. It only sizes the probe of newer events: a stale count changes
-	// what a poll costs, never what it returns.
+	// them. It only sizes page windows: a stale count changes what a poll
+	// costs, never what it returns.
 	issues int64
 }
 
@@ -79,15 +78,18 @@ func (r *FederationFeedRead) Commit() {
 	}
 	r.cache.mu.Lock()
 	defer r.cache.mu.Unlock()
-	current, ok := r.cache.entries[r.projectID]
-	if ok && current.key == r.learned.key && current.foreignThrough > r.learned.foreignThrough {
-		// A concurrent read proved a later range; keep it.
-		return
+	learned := r.learned
+	if current, ok := r.cache.entries[r.projectID]; ok && current.key == learned.key {
+		// Keep the newest proof of each kind a concurrent read committed.
+		learned.movesThrough = max(learned.movesThrough, current.movesThrough)
+		if current.foreignThrough > learned.foreignThrough {
+			learned.foreignFrom, learned.foreignThrough = current.foreignFrom, current.foreignThrough
+		}
 	}
 	if r.cache.entries == nil {
 		r.cache.entries = map[int64]federationFeedFacts{}
 	}
-	r.cache.entries[r.projectID] = r.learned
+	r.cache.entries[r.projectID] = learned
 }
 
 func (r *FederationFeedRead) movesAfter() int64 {
@@ -104,23 +106,20 @@ func (r *FederationFeedRead) recordMoves(found bool) {
 }
 
 // foreignChecked returns the ID after which foreign events must be rechecked,
-// when the remembered range covers everything from afterID on, and the newest
-// ID worth checking one event at a time: past it, checking the project's
-// issues instead reads less.
-func (r *FederationFeedRead) foreignChecked(afterID int64) (after, through int64, ok bool) {
-	if r == nil || r.known.foreignThrough == 0 || r.known.foreignFrom > afterID || r.known.issues == 0 {
-		return 0, 0, false
+// when the remembered range covers everything from afterID on.
+func (r *FederationFeedRead) foreignChecked(afterID int64) (int64, bool) {
+	if r == nil || r.known.foreignThrough == 0 || r.known.foreignFrom > afterID {
+		return 0, false
 	}
-	after = max(afterID, r.known.foreignThrough)
-	return after, after + min(r.known.issues, math.MaxInt64-after), true
+	return max(afterID, r.known.foreignThrough), true
 }
 
-// knownIssues returns the remembered issue count, or zero.
-func (r *FederationFeedRead) knownIssues() int64 {
-	if r == nil {
-		return 0
+// knownIssues returns the remembered issue count, when there is one.
+func (r *FederationFeedRead) knownIssues() (int64, bool) {
+	if r == nil || r.known.issues == 0 {
+		return 0, false
 	}
-	return r.known.issues
+	return r.known.issues, true
 }
 
 // recordIssues notes how many issues the project owns.
@@ -130,22 +129,21 @@ func (r *FederationFeedRead) recordIssues(issues int64) {
 	}
 }
 
-// recordQuiet notes that no feed event has an ID in (afterID, maxID], the
-// newest event ID in the read's snapshot.
-func (r *FederationFeedRead) recordQuiet(afterID, maxID int64) {
-	if r == nil {
-		return
-	}
-	// The move check covers the whole snapshot, so it holds even when the
-	// cursor is already at the newest event.
-	if r.noMovesAfter {
+// recordSnapshot notes maxID, the newest event ID in the read's snapshot. The
+// move check covers the whole snapshot, whatever the read returned.
+func (r *FederationFeedRead) recordSnapshot(maxID int64) {
+	if r != nil && r.noMovesAfter {
 		r.learned.movesThrough = max(r.learned.movesThrough, maxID)
 	}
-	if maxID <= afterID {
+}
+
+// recordQuiet notes that no feed event has an ID in (afterID, maxID].
+func (r *FederationFeedRead) recordQuiet(afterID, maxID int64) {
+	if r == nil || maxID <= afterID {
 		return
 	}
 	from := afterID
-	if r.known.foreignThrough != 0 && r.known.foreignFrom <= afterID && afterID <= r.known.foreignThrough {
+	if r.known.foreignFrom <= afterID && afterID <= r.known.foreignThrough {
 		from = r.known.foreignFrom
 	}
 	r.learned.foreignFrom, r.learned.foreignThrough = from, maxID

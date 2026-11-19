@@ -28,6 +28,7 @@ func RunQuietFederationPollGrowth(t *testing.T, open func(*testing.T) db.Storage
 	}{
 		{name: "busy hub", hubWrites: true},
 		{name: "busy hub long after the cursor", behind: 3000, hubWrites: true},
+		{name: "idle hub after writes past the cursor", behind: 500},
 		{name: "idle hub"},
 	} {
 		t.Run(hubCase.name, func(t *testing.T) {
