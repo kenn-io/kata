@@ -639,20 +639,23 @@
       ].find((view) => view.name === viewName)?.label ?? 'Kata'
     )
   }
+
+  function tabTitle(): string {
+    if (route.view === 'settings') return 'Settings'
+    if (route.view === 'credentials') return 'Credentials'
+    if (route.issueUID) {
+      if (projection.selected_state === 'archived') return 'Archived issue'
+      if (projection.selected_state === 'missing') return 'Issue unavailable'
+      const issue = projection.selected_detail?.issue
+      if (issue?.uid === route.issueUID) return `${issue.qualified_id} ${issue.title}`
+    }
+    if (selectedProject && viewName !== 'all') return `${selectedProject.name} · ${viewLabel()}`
+    return scopeLabel()
+  }
 </script>
 
 <svelte:head>
-  <title
-    >{route.view === 'settings'
-      ? 'Settings'
-      : route.view === 'credentials'
-        ? 'Credentials'
-        : route.issueUID && projection.selected_detail?.issue.uid === route.issueUID
-          ? `${projection.selected_detail.issue.qualified_id} ${projection.selected_detail.issue.title}`
-          : selectedProject && viewName !== 'all'
-            ? `${selectedProject.name} · ${viewLabel()}`
-            : scopeLabel()} · Kata</title
-  >
+  <title>{tabTitle()} · Kata</title>
 </svelte:head>
 
 {#snippet newTaskButton()}

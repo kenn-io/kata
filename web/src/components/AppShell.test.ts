@@ -2048,6 +2048,7 @@ describe('AppShell', () => {
     expect(
       within(view.container).getByRole('status', { name: 'Selected issue status' }).textContent,
     ).toContain('unavailable from the current authority')
+    await waitFor(() => expect(document.title).toBe('Issue unavailable · Kata'))
 
     const archived = snapshot()
     archived.selected = {
@@ -2063,6 +2064,7 @@ describe('AppShell', () => {
     expect(
       within(view.container).getByRole('status', { name: 'Selected issue status' }).textContent,
     ).toContain('archived')
+    await waitFor(() => expect(document.title).toBe('Archived issue · Kata'))
   })
 
   test('honors issue-scoped allowed actions without exposing project-wide controls', async () => {
