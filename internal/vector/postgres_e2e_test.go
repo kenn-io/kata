@@ -71,6 +71,9 @@ func TestPostgresPgvectorIndexesAndRanksSemanticIssue(t *testing.T) {
 
 	queryVectors, err := embedder.EncodeFunc()(ctx, []string{"database contention"})
 	require.NoError(t, err)
+	negativeHits, err := idx.Query(ctx, key, queryVectors[0], -1)
+	require.NoError(t, err)
+	require.Empty(t, negativeHits)
 	hits, err := idx.Query(ctx, key, queryVectors[0], 2)
 	require.NoError(t, err)
 	rolledUp, err := kitvec.RollupByDocument(hits)

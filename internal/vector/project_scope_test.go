@@ -100,11 +100,6 @@ func TestProjectAccessVectorCandidatesBeforeLimit(t *testing.T) {
 			require.Len(t, window.Hits, 1)
 			require.Equal(t, target.UID, window.Hits[0].Doc)
 			require.False(t, window.HasProbe, "private chunks do not count as an eligible probe")
-			t.Run("negative limit", func(t *testing.T) {
-				hits, err := idx.Query(ctx, key, kitvec.Vector{1, 0}, -1)
-				require.NoError(t, err)
-				require.Empty(t, hits)
-			})
 			hits, err := idx.Query(scoped, key, kitvec.Vector{1, 0}, 1)
 			require.NoError(t, err)
 			require.Len(t, hits, 1)
