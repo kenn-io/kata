@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/teammate"
 )
 
@@ -82,6 +83,44 @@ func remoteEventCreatedAt(event RemoteEvent) string {
 // embedded comments and links to be JSON objects on created and snapshot events.
 // Ingest and pull paths must call it before persisting the event.
 func ValidateFederationEntries(eventType, eventUID string, payloadJSON jsontext.Value) error {
+	if err := validateFederationPlanningZones(eventType, eventUID, payloadJSON); err != nil {
+		return err
+	}
+	return validateFederationEntries(eventType, eventUID, payloadJSON)
+}
+
+func validateFederationPlanningZones(eventType, eventUID string, payloadJSON jsontext.Value) error {
+	switch eventType {
+	case "issue.created", "issue.snapshot", "issue.metadata_updated", RepeatedImportEventType, "projection.issue":
+	default:
+		return nil
+	}
+	var payload struct {
+		Metadata map[string]jsontext.Value `json:"metadata"`
+		Diff     map[string]struct {
+			To jsontext.Value `json:"to"`
+		} `json:"diff"`
+	}
+	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
+		return nil
+	}
+	for _, key := range []string{"scheduled_on", "deadline_on"} {
+		for _, raw := range []jsontext.Value{payload.Metadata[key], payload.Diff[key].To} {
+			var value string
+			if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
+				continue
+			}
+			if _, zone := metadata.SplitScheduleZone(value); zone != "" {
+				if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+					return fmt.Errorf("%w: event %s %s: %v", ErrFederationIngestValidation, eventUID, key, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateFederationEntries(eventType, eventUID string, payloadJSON jsontext.Value) error {
 	if eventType == "issue.moved" {
 		snapshot := PayloadMap(payloadJSON)["snapshot"]
 		// Historical local moves have no snapshot; federation ingest separately

@@ -15,6 +15,17 @@ All notable changes to kata, grouped by release. Versioned releases start with
   workspace. A new view, filter, project, or graph still pauses changes until
   its snapshot arrives.
 
+- Sync a Linear team that every run had refused with `linear issue is outside
+  selected scope`. For some teams, Linear's issue filter on the team ID returns
+  issues from the whole workspace. Kata now reads issues through the team
+  itself, so it receives only that team's issues.
+
+- See in `kata tui` which issues an agent marked `stuck` or `needs-human`: the list row gets a leading `!`, and the issue detail shows the `work.attention` value with its `work.attention_msg`. See [work conventions](reference/metadata.md#orchestration-conventions-work-keys).
+
+- Keep Linear discussion when you sync a Linear team: comments on imported
+  issues now arrive with their Linear author and creation time. Kata copies
+  each comment once. See [Linear sync](operations/linear-sync.md).
+
 - External imports into a relayed project on PostgreSQL, such as
   `kata import --source beads`, now record the import's actor and the source
   authors, as they do on SQLite. They had recorded the relay connection's bound
@@ -23,6 +34,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   stores.
 
 - Press `V` in `kata tui` to open the close form on any daemon and cite an issue's attachment as `done` evidence, alone or with typed evidence. `x` still closes at once and opens the form only when the daemon requires evidence; other close reasons do not offer the choice. The events tab names the cited file, and marks it removed or changed. See [cite a document when closing work](guide/attachments.md#cite-a-document-when-closing-work).
+- Keep scheduled dates and deadlines in their own timezones when issues move between daemons. Add an explicit zone name to a civil date to keep it portable; future timezone rule updates apply to it. Uploads and event pages check whether the receiving peer supports zoned dates; upgrade older peers to sync those events.
 
 - Learn from the CLI that a project is archived and how to restore it. When a
   project route finds an archived project you could read, its

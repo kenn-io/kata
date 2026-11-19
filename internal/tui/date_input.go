@@ -14,7 +14,7 @@ import (
 
 // dateInputHint names the forms the Dates form reads, for the message that
 // refuses anything else.
-const dateInputHint = "YYYY-MM-DD, YYYY-MM-DDTHH:MM[:SS], YYYY-MM-DDTHH:MM:SSZ, today, tomorrow, +Nd or +Nw"
+const dateInputHint = "YYYY-MM-DD or YYYY-MM-DDTHH:MM[:SS] with optional [IANA/Zone], YYYY-MM-DDTHH:MM:SSZ, today, tomorrow, +Nd or +Nw"
 
 var relativeDate = regexp.MustCompile(`^\+(\d{1,4})([dw])$`)
 

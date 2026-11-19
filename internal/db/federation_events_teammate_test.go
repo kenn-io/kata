@@ -93,3 +93,23 @@ func TestValidateFederationEntries(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateFederationPlanningZones(t *testing.T) {
+	for _, test := range []struct {
+		kind, payload string
+		invalid       bool
+	}{
+		{"issue.created", `{"metadata":{"scheduled_on":"2026-01-15T09:00[Europe/Paris]"}}`, false},
+		{"issue.created", `{"metadata":{"scheduled_on":"2026-01-15T09:00[Example/SenderOnly]"}}`, true},
+		{"issue.metadata_updated", `{"diff":{"deadline_on":{"to":"2026-01-15[Example/SenderOnly]"}}}`, true},
+		{"issue.moved", `{"snapshot":{"metadata":{"scheduled_on":"2026-01-15[Example/SenderOnly]"}}}`, true},
+		{"issue.snapshot", `{"metadata":{"scheduled_on":"2026-01-15T09:00"}}`, false},
+	} {
+		err := ValidateFederationEntries(test.kind, "event-1", jsontext.Value(test.payload))
+		if test.invalid {
+			require.ErrorIs(t, err, ErrFederationIngestValidation, test.kind)
+		} else {
+			require.NoError(t, err, test.kind)
+		}
+	}
+}

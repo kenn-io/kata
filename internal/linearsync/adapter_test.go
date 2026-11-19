@@ -41,6 +41,9 @@ func (s *adapterSource) Issues(ctx context.Context, _ Config) ([]Issue, error) {
 	}
 	return s.items, ctx.Err()
 }
+func (s *adapterSource) Comments(ctx context.Context, _ Config, _ []string) ([]Comment, error) {
+	return nil, ctx.Err()
+}
 func (s *adapterSource) ReadStatus(_ context.Context, _ Config, id string) (issuesync.StatusObservation, error) {
 	s.statusReads++
 	if s.statusErr != nil {
@@ -228,7 +231,7 @@ func TestClientRunnerImportAndStateOnlyWriteback(t *testing.T) {
 		require.NoError(t, err)
 		r.Body = io.NopCloser(bytes.NewReader(raw))
 		if bytes.Contains(raw, []byte("KataLinearIssues")) {
-			return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{issue()}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
+			return dataResponse(map[string]any{"team": map[string]any{"issues": map[string]any{"nodes": []any{issue()}, "pageInfo": map[string]any{"hasNextPage": false}}}}), nil
 		}
 		return statusAPI(r)
 	})
@@ -253,6 +256,44 @@ func TestClientRunnerImportAndStateOnlyWriteback(t *testing.T) {
 	require.Equal(t, stateID, current)
 	require.Equal(t, 2, writes)
 	require.Zero(t, pendingCount(t, store, b))
+}
+
+func TestClientRunnerImportsIssueComments(t *testing.T) {
+	ctx := t.Context()
+	store := adapterStore(t)
+	b := adapterBinding(t, store, testConfig())
+	const commenterID = "66666666-6666-4666-8666-666666666666"
+	statusAPI := statusTransport(t, nil, wireIssue)
+	client := mockClient(t, func(r *http.Request) (*http.Response, error) {
+		raw, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		switch {
+		case bytes.Contains(raw, []byte("KataLinearIssues")):
+			return dataResponse(map[string]any{"team": map[string]any{"issues": map[string]any{"nodes": []any{wireIssue()}, "pageInfo": map[string]any{"hasNextPage": false}}}}), nil
+		case bytes.Contains(raw, []byte("KataLinearComments")):
+			_, v := requestBody(t, r)
+			require.Equal(t, map[string]any{"issue": map[string]any{"id": map[string]any{"in": []any{issueID}}}}, v["filter"],
+				"comments are read only for the imported issues")
+			return dataResponse(map[string]any{"comments": map[string]any{"nodes": []any{
+				map[string]any{"id": "77777777-7777-4777-8777-777777777777", "body": "Confirmed the renewal date.", "createdAt": "2026-01-03T04:05:06.789Z", "user": map[string]any{"id": commenterID}, "issue": map[string]any{"id": issueID}},
+				map[string]any{"id": "88888888-8888-4888-8888-888888888888", "body": "Posted by an integration.", "createdAt": "2026-01-04T00:00:00Z", "user": nil, "issue": map[string]any{"id": issueID}},
+			}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
+		}
+		return statusAPI(r)
+	})
+	for range 2 {
+		_, err := NewRunner(RunnerConfig{Store: store, Fetcher: client}).RunOnce(ctx, b.ID)
+		require.NoError(t, err)
+	}
+	comments, err := store.CommentsByIssue(ctx, mappedIssue(t, store, b, issueID).ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 2, "a repeated run updates the same comments")
+	require.Equal(t, "linear:"+commenterID, comments[0].Author)
+	require.Equal(t, "Confirmed the renewal date.", comments[0].Body)
+	require.Equal(t, time.Date(2026, 1, 3, 4, 5, 6, 789_000_000, time.UTC), comments[0].CreatedAt.UTC())
+	require.Equal(t, "linear-unknown", comments[1].Author)
+	require.Equal(t, "Posted by an integration.", comments[1].Body)
 }
 
 // Two-way binary observations preserve closure metadata; newer one-way content owns it.
