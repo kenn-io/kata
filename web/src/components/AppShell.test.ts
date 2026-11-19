@@ -2047,7 +2047,7 @@ describe('AppShell', () => {
       history: [],
     }
     await view.rerender({ snapshot: current })
-    await waitFor(() => expect(document.title).toBe('example-project#a1 Example issue · Kata'))
+    await waitFor(() => expect(document.title).toBe('Example issue (example-project#a1) · Kata'))
     await view.rerender({
       route: { kind: 'kata', projectUID: '01J00000000000000000000002', graph: false, filters },
     })
@@ -2061,7 +2061,7 @@ describe('AppShell', () => {
         filters,
       },
     })
-    await waitFor(() => expect(document.title).toBe('example-project · Today · Kata'))
+    await waitFor(() => expect(document.title).toBe('Today · example-project · Kata'))
     await view.rerender({ route: { kind: 'kata', view: 'inbox', graph: false, filters } })
     await waitFor(() => expect(document.title).toBe('Inbox · Kata'))
     await view.rerender({ route: { kind: 'kata', view: 'all-open', graph: false, filters } })

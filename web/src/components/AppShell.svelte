@@ -647,10 +647,10 @@
       if (projection.selected_state === 'archived') return `Archived issue ${route.issueUID}`
       if (projection.selected_state === 'missing') return `Issue unavailable ${route.issueUID}`
       const issue = projection.selected_detail?.issue
-      if (issue?.uid === route.issueUID) return `${issue.qualified_id} ${issue.title}`
+      if (issue?.uid === route.issueUID) return `${issue.title} (${issue.qualified_id})`
       return 'Issue'
     }
-    if (selectedProject && viewName !== 'all') return `${selectedProject.name} · ${viewLabel()}`
+    if (selectedProject && viewName !== 'all') return `${viewLabel()} · ${selectedProject.name}`
     return scopeLabel()
   }
 </script>
