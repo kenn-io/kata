@@ -97,12 +97,17 @@ func TestPostgresCutOverReclaimsRetiredGenerationOnce(t *testing.T) {
 		return nil
 	})
 	require.ErrorIs(t, idx.CutOver(fenced, bKey), denied)
+	var state string
+	var stamps int
+	err = pg.DB.QueryRowContext(ctx, `SELECT g.state, count(s.doc_key) FROM issue_vector_generations g LEFT JOIN issue_vector_stamps s ON s.generation_id = g.id WHERE g.gen_key = $1 GROUP BY g.state`, aKey).Scan(&state, &stamps)
+	require.NoError(t, err)
+	require.Equal(t, "retired", state)
+	require.Equal(t, 1, stamps)
 
 	fences = 0
 	counted := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error { fences++; return nil })
 	require.NoError(t, idx.CutOver(counted, bKey))
 	require.Equal(t, 2, fences, "failed reclamation must be retried")
-	var stamps int
 	err = pg.DB.QueryRowContext(ctx, `SELECT count(*) FROM issue_vector_stamps s JOIN issue_vector_generations g ON g.id = s.generation_id WHERE g.gen_key = $1`, aKey).Scan(&stamps)
 	require.NoError(t, err)
 	require.Zero(t, stamps, "reclamation must remove a stamp even when no chunks remain")
