@@ -637,6 +637,18 @@
   }
 </script>
 
+<svelte:head>
+  <title
+    >{route.view === 'settings'
+      ? 'Settings'
+      : route.view === 'credentials'
+        ? 'Credentials'
+        : route.issueUID && projection.selected_detail?.issue.uid === route.issueUID
+          ? `${projection.selected_detail.issue.qualified_id} ${projection.selected_detail.issue.title}`
+          : scopeLabel()} · Kata</title
+  >
+</svelte:head>
+
 {#snippet newTaskButton()}
   <!-- aria-disabled keeps the blocked button focusable so keyboard users reach its reason. -->
   <button

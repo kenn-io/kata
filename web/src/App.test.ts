@@ -91,6 +91,7 @@ describe('App', () => {
     )
     render(App)
     await screen.findByRole('button', { name: /Other issue/ })
+    await waitFor(() => expect(document.title).toBe('All Open · Kata'))
     await waitFor(() => expect(snapshotRequests).toHaveLength(1))
 
     const projectButton = [
@@ -100,6 +101,7 @@ describe('App', () => {
 
     expect(new URL(window.location.href).searchParams.get('scope')).toBe(otherProjectUID)
     expect(screen.getByRole('heading', { name: 'other-project' })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('other-project · Kata'))
     expect(screen.getByRole('button', { name: /Other issue/ })).not.toBeNull()
     expect(screen.queryByRole('button', { name: /Example issue/ })).toBeNull()
     expect(screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled')).not.toBe(
@@ -1856,6 +1858,7 @@ describe('App', () => {
     expect(snapshotViews).toEqual(['all-open', 'all-open'])
     expect(tokenReads).toBe(1)
     expect(window.location.search).toBe('?view=credentials')
+    await waitFor(() => expect(document.title).toBe('Credentials · Kata'))
 
     cleanup()
     render(App)
@@ -3462,6 +3465,7 @@ describe('App', () => {
     await tick()
     expect(normalizeKataUISnapshot).toHaveBeenCalledTimes(normalizations + 1)
     await fireEvent.click(screen.getByRole('button', { name: /Example issue/ }))
+    await waitFor(() => expect(document.title).toBe('example-project#a1 Example issue · Kata'))
 
     await waitFor(() => expect(snapshotRequests).toHaveLength(4))
     expect(new URL(snapshotRequests[2]!.url).searchParams.get('selected_issue_uid')).toBe(
