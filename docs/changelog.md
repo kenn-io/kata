@@ -12,14 +12,16 @@ All notable changes to kata, grouped by release. Versioned releases start with
 **Before upgrading**
 
 - Keep a [backup](operations/backup-restore.md) from before the upgrade. This
-  release upgrades the database from schema 50 to schema 51, and older binaries
-  cannot open the result.
+  release upgrades the database from schema 50 through 51 to 52, and older
+  binaries cannot open the result.
 - PostgreSQL: stop daemons and imports, then run
   `kata storage postgres migrate` with schema-owner credentials. The migration
-  rebuilds an index on `events` and blocks event writes, so allow an offline
-  window that fits the event log's size. Existing grants stay sufficient.
+  rebuilds an index on `events` and blocks event writes, then converts existing
+  vector rows and rebuilds their index. Allow an offline window for both steps
+  that fits the event log and vector data sizes. Existing grants stay sufficient.
   SQLite upgrades in place at startup. See the
-  [schema 51 migration requirements](development/postgres-migrations.md#schema-51-issue-history-index-on-the-event-header).
+  [schema 51 migration requirements](development/postgres-migrations.md#schema-51-issue-history-index-on-the-event-header)
+  and [schema 52 migration requirements](development/postgres-migrations.md#schema-52-shared-vector-catalog).
 - Adoption: to repeat or resume an adoption push, run this release on the hub
   and the pushing spoke. Once a newer copy wins on the hub, every spoke and
   relay of that project must upgrade before it can pull again. See
