@@ -1179,10 +1179,10 @@ model    = "nomic-embed-text"
 # query_suffix = ""
 # request_dimensions = false    # send dims only if the provider supports it
 # dims                          # expected vector dimensionality (default 768)
-# batch_size                    # inputs per request (default 64)
+# batch_size                    # inputs per request (default 64; built-in server 8)
 # model_context_tokens          # model's maximum tokens for one input
 # max_batch_tokens              # provider's aggregate input-token cap per request
-# timeout_seconds               # per-request timeout (default 30)
+# timeout_seconds               # per-request timeout (default 30; built-in server 300)
 # trust_private_network = false # allow plaintext HTTP to literal non-public IPs
 ```
 

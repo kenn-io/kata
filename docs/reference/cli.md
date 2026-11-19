@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-18
+last_edited: 2026-11-19
 ---
 
 # CLI reference
@@ -2523,8 +2523,10 @@ kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --re
 `kata federation status --project <project>` shows detailed sync status for one
 project using the selected daemon. Project readers need a CLI with scoped
 status support and daemon API 0.49.0 or later. Owners can use this command
-with older daemons. Without `--project`, status covers all bound projects and
-requires daemon-owner authority.
+with older daemons. If the project has no federation status, the command prints
+`no federation status for project "<project>"` and exits 4 (not found). Without
+`--project`, status covers all bound projects and requires daemon-owner
+authority.
 
 `kata federation embedding-recipe` exports JSON for the exact document recipe
 in the selected local Kata home's configuration. It makes no daemon or provider
