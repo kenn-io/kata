@@ -2321,15 +2321,7 @@ describe('App', () => {
             return remoteResponse
           }
           const selected = new URL(request.url).searchParams.has('selected_issue_uid')
-            ? {
-                state: 'available',
-                issue: local.collection[0],
-                comments: [],
-                labels: [],
-                links: [],
-                recurrences: [],
-                history: [],
-              }
+            ? availableSelection(local.collection[0])
             : undefined
           return Response.json(
             { ...local, ...(selected ? { selected } : {}) },
@@ -3484,15 +3476,7 @@ describe('App', () => {
             return Response.json(
               {
                 ...current,
-                selected: {
-                  state: 'available',
-                  issue: current.collection[0],
-                  comments: [],
-                  labels: [],
-                  links: [],
-                  recurrences: [],
-                  history: [],
-                },
+                selected: availableSelection(current.collection[0]),
               },
               { headers: { ETag: '"snapshot-selected"' } },
             )
@@ -4246,15 +4230,7 @@ describe('App', () => {
         if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
           return Response.json({
             ...current,
-            selected: {
-              state: 'available',
-              issue: current.collection[0],
-              comments: [],
-              labels: [],
-              links: [],
-              recurrences: [],
-              history: [],
-            },
+            selected: availableSelection(current.collection[0]),
           })
         }
         if (target.pathname.endsWith('/api/v1/ui/references'))
@@ -4280,6 +4256,18 @@ describe('App', () => {
     await waitFor(() => expect(document.title).toBe('Kata'))
   })
 })
+
+function availableSelection(issue: ReturnType<typeof snapshot>['collection'][number] | undefined) {
+  return {
+    state: 'available',
+    issue,
+    comments: [],
+    labels: [],
+    links: [],
+    recurrences: [],
+    history: [],
+  }
+}
 
 function snapshot() {
   return {
