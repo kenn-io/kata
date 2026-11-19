@@ -62,7 +62,7 @@ type spokeFleet struct {
 	// throttleClaims makes the hub answer 503 to every claim request.
 	throttleClaims atomic.Bool
 	// beforeAnswer, when set, runs before the hub answers each request.
-	beforeAnswer func(projectUID string)
+	beforeAnswer func()
 	runner       *Runner
 	now          time.Time
 }
@@ -88,7 +88,7 @@ func newSpokeFleet(tb testing.TB, count int) *spokeFleet {
 		var hubProjectID int64
 		_, _ = fmt.Sscanf(r.URL.Path, "/api/v1/projects/%d/", &hubProjectID)
 		if fleet.beforeAnswer != nil {
-			fleet.beforeAnswer(projectsByHubID[hubProjectID])
+			fleet.beforeAnswer()
 		}
 		if fleet.throttleClaims.Load() && strings.Contains(r.URL.Path, "/lease/") {
 			w.Header().Set("Retry-After", "120")
@@ -303,8 +303,8 @@ func TestRefusedSpokeRetriesAtOnceAfterTokenReplacedMidRequest(t *testing.T) {
 	fleet := newSpokeFleet(t, 1)
 	project := fleet.projects[0]
 	replaced := false
-	fleet.beforeAnswer = func(projectUID string) {
-		if replaced || projectUID != project.UID {
+	fleet.beforeAnswer = func() {
+		if replaced {
 			return
 		}
 		replaced = true
