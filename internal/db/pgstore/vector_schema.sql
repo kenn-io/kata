@@ -17,21 +17,17 @@ CREATE TABLE issue_vector_generations (
 );
 
 CREATE TABLE issue_vector_stamps (
-  generation_id BIGINT NOT NULL,
-  doc_key TEXT NOT NULL,
+  generation_id BIGINT NOT NULL REFERENCES issue_vector_generations(id) ON DELETE CASCADE,
+  doc_key TEXT NOT NULL REFERENCES issue_vector_mirror(issue_uid) ON DELETE CASCADE,
   revision BIGINT NOT NULL,
-  CONSTRAINT issue_vector_stamps_pkey PRIMARY KEY(generation_id, doc_key),
-  CONSTRAINT issue_vector_stamps_generation_id_fkey FOREIGN KEY(generation_id) REFERENCES issue_vector_generations(id) ON DELETE CASCADE,
-  CONSTRAINT issue_vector_stamps_doc_key_fkey FOREIGN KEY(doc_key) REFERENCES issue_vector_mirror(issue_uid) ON DELETE CASCADE
+  PRIMARY KEY(generation_id, doc_key)
 );
 
 CREATE TABLE issue_vector_chunks (
-  generation_id BIGINT NOT NULL,
-  doc_key TEXT NOT NULL,
+  generation_id BIGINT NOT NULL REFERENCES issue_vector_generations(id) ON DELETE CASCADE,
+  doc_key TEXT NOT NULL REFERENCES issue_vector_mirror(issue_uid) ON DELETE CASCADE,
   chunk_index INTEGER NOT NULL,
   embedding  public.halfvec NOT NULL,
-  CONSTRAINT issue_vector_chunks_pkey PRIMARY KEY(generation_id, doc_key, chunk_index),
-  CONSTRAINT issue_vector_chunks_generation_id_fkey FOREIGN KEY(generation_id) REFERENCES issue_vector_generations(id) ON DELETE CASCADE,
-  CONSTRAINT issue_vector_chunks_doc_key_fkey FOREIGN KEY(doc_key) REFERENCES issue_vector_mirror(issue_uid) ON DELETE CASCADE
+  PRIMARY KEY(generation_id, doc_key, chunk_index)
 );
 CREATE INDEX idx_issue_vector_chunks_generation ON issue_vector_chunks(generation_id);
