@@ -23,10 +23,12 @@ func TestRecurringPayloadFeatures(t *testing.T) {
 	}{
 		{"cron.job.created", `{"definition":{"action":{"kind":"notify"},"issue":{"kind":"per-run","parent_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV"}}}`, "cron_v1"},
 		{"issue.created", `{"metadata":{"cron.occurrence":{"version":1}}}`, "cron_v1"},
+		{"issue.created", `{"metadata":{"cron.occurrence":{"version":1},"deadline_on":"2026-01-15[Europe/Paris]"}}`, "cron_v1,issue_date_zone_v1"},
 		{"issue.metadata_updated", `{"diff":{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{"to":null}}}`, "cron_v1"},
 		{"cron.job.deleted", `{"definition":{"action":{"kind":"notify"},"issue":{"kind":"per-run"}}}`, "cron_v1"},
 		{"cron.job.created", `{"definition":{"action":{"kind":"execute"},"issue":{"kind":"per-run"}}}`, "cron_v1"},
 		{"issue.created", `{"metadata":{"description":"cron.occurrence"}}`, ""},
+		{"issue.created", `{"metadata":{"scheduled_on":"2026-01-15]"}}`, ""},
 		{"project.metadata_updated", `{"diff":{"cron.progress.custom":{"to":"value"}}}`, ""},
 	} {
 		features, e := db.PayloadRequiredFeatures(tc.kind, tc.payload)

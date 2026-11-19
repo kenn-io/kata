@@ -674,6 +674,9 @@ See [Cron triggers](#triggers) for the expression rules.
 
 ## Independent run evidence
 
+To notify an inbox recipient when an observation reports a failure, see
+[Alert on cron run failures](../guide/cron-failure-alerts.md).
+
 An adapter creates one independent run UID and retains it across retries:
 
 ```sh

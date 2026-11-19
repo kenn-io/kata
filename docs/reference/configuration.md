@@ -661,10 +661,9 @@ its full lifetime. Use an explicit daemon service when
 GitHub/Notion/Plane/Linear/Twenty/TickTick sync, federation, or timed-claim maintenance must remain continuously
 scheduled without a client present.
 
-The optional top-level `timezone` is the IANA timezone for date-only and local
-date-time `scheduled_on` values that do not have an issue-level `timezone`. If
-both are unset, Kata uses UTC. RFC 3339 `scheduled_on` values ending in `Z` are
-UTC instants and do not use this setting.
+The optional top-level `timezone` supplies the default for date-only and local
+date-time schedules and deadlines without an explicit zone or issue timezone.
+Kata uses UTC when neither is set. UTC instants ending in `Z` do not use this setting.
 
 The web UI's daemon selector lists URL entries and home-less local entries.
 Home-bearing profiles are omitted and cannot alias the serving daemon. A plain

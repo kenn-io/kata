@@ -911,7 +911,8 @@ func buildRows(queueRows []queueRow, cursor, titleW int, narrow bool, chrome vie
 // a row belongs to under the R toggle. The prefix is rendered as
 // "[name] " (or "[#PID] " when projectsByID is missing the entry, e.g.
 // after a freshly-created project before the cache refresh) and is
-// truncated together with the title to fit titleW.
+// truncated together with the title to fit titleW. A leading "! " marks an
+// issue whose work.attention is stuck or needs-human.
 //
 // In single-project scope the prefix is omitted — every row belongs to
 // the same project so repeating the name on every line is noise.
@@ -919,6 +920,9 @@ func titleForRow(iss Issue, chrome viewChrome, titleW int) string {
 	clean := sanitizeForDisplay(iss.Title)
 	if chrome.scope.allProjects {
 		clean = projectPrefix(iss.ProjectID, chrome.projectsByID) + clean
+	}
+	if iss.marksRowForAttention() {
+		clean = "! " + clean
 	}
 	dates := rowDatesText(iss)
 	// Keep at least rowDatesMinTitle cells of title; on a cell too narrow

@@ -74,15 +74,10 @@ func (c *Client) ListAttentionRequests(ctx context.Context, projectID *int64, re
 			skipped++
 			continue
 		}
-		var work string
-		_ = json.Unmarshal(row.Metadata["work.attention"], &work)
-		if work != "needs-human" && work != "stuck" && work != "ok" {
-			work = ""
-		}
 		rows = append(rows, attentionRequest{
 			issue: row.Issue, from: value.From, teammate: value.Teammate, message: value.Message,
 			re: value.Re, kind: value.Kind, broadcast: value.Broadcast,
-			workAttention: work, key: key, raw: raw,
+			workAttention: knownWorkAttention(rawString(row.Metadata["work.attention"])), key: key, raw: raw,
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool {
