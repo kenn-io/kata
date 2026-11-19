@@ -14,6 +14,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
   issues from the whole workspace. Kata now reads issues through the team
   itself, so it receives only that team's issues.
 
+- Set `[close.transcript] enabled = "auto"`, or
+  `KATA_CLOSE_TRANSCRIPT_ENABLED=auto`, to attach the closing session when one
+  is named and close without a warning when none is. `true` still warns. A
+  mistyped `enabled` value only warns when you close; it no longer stops the
+  daemon. A `[close.transcript.project.<name>]` entry takes the same values, so
+  `"auto"` there records when a session is named. A close that names no session
+  warns only when some target is `true`.
+
 - Keep Linear discussion when you sync a Linear team: comments on imported
   issues now arrive with their Linear author and creation time. Kata copies
   each comment once. See [Linear sync](operations/linear-sync.md).
