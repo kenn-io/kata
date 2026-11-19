@@ -261,6 +261,20 @@ describe('IssueProperties', () => {
     })
   })
 
+  it('keeps the saved zone when changing a date-only deadline', async () => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({ metadata: { deadline_on: '2026-06-01[Europe/Paris]' } }),
+      onPatchMetadata,
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit due date' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Due:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Jun 10, 2026/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', {
+      deadline_on: '2026-06-10[Europe/Paris]',
+    })
+  })
+
   it('patches scheduled and due dates and closes editors on accepted replacement', async () => {
     const onPatchMetadata = vi.fn(async () => true)
     const view = renderProperties({ onPatchMetadata, draftResetGeneration: 0 })
