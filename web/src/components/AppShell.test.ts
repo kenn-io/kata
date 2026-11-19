@@ -2039,7 +2039,7 @@ describe('AppShell', () => {
     await waitFor(() => expect(document.title).toBe('Issue · Kata'))
     current.selected = {
       state: 'available',
-      issue: current.collection![0],
+      issue: current.collection![0]!,
       comments: [],
       labels: [],
       links: [],
