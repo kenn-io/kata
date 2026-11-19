@@ -1703,7 +1703,7 @@ describe('App', () => {
     expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
   })
 
-  it('keeps the Inbox title when a reference request requires login', async () => {
+  it('fences authority and keeps the Inbox title when a reference request requires login', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
@@ -2276,9 +2276,8 @@ describe('App', () => {
     const local = snapshot()
     const remote = structuredClone(local)
     remote.collection[0]!.title = 'Remote issue'
-    let releaseRemote!: (response: Response) => void
-    const remoteResponse = new Promise<Response>((resolve) => (releaseRemote = resolve))
-    let remoteHeld = false
+    let releaseRemote!: () => void
+    const remoteReleased = new Promise<void>((resolve) => (releaseRemote = resolve))
     const snapshotRequests: Request[] = []
     const referenceRequests: Request[] = []
     vi.stubGlobal(
@@ -2315,11 +2314,7 @@ describe('App', () => {
         if (path.endsWith('/api/v1/ui/snapshot')) {
           snapshotRequests.push(request)
           const daemon = request.headers.get('X-Kata-Web-Daemon')
-          if (daemon === 'example-remote') {
-            if (remoteHeld) return Response.json(remote)
-            remoteHeld = true
-            return remoteResponse
-          }
+          if (daemon === 'example-remote') return remoteReleased.then(() => Response.json(remote))
           const selected = new URL(request.url).searchParams.has('selected_issue_uid')
             ? availableSelection(local.collection[0])
             : undefined
@@ -2343,7 +2338,7 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
     expect(await screen.findByText('Loading Kata…')).not.toBeNull()
     await waitFor(() => expect(document.title).toBe('Kata'))
-    releaseRemote(Response.json(remote))
+    releaseRemote()
     expect(await screen.findByRole('button', { name: /Remote issue/ })).not.toBeNull()
     expect(window.location.search).toBe('?view=all-open')
     now += 10_000
