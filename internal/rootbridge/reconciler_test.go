@@ -1057,7 +1057,7 @@ func TestFieldReconcilePreservesConnectorErrorsWithoutAdvancingBaseline(t *testi
 	})
 }
 
-func TestFieldReconcileSavesScheduleZone(t *testing.T) {
+func TestFieldReconcileDateOnlyRemainsUnzoned(t *testing.T) {
 	h := newReconcileHarness(t)
 	h.reconciler = NewReconciler(h.store, h.registry, ReconcilerConfig{Now: func() time.Time { return h.now }, DefaultTimezone: "America/New_York"})
 	h.mapField(t, "scheduled_on", "start-date")
@@ -1076,7 +1076,7 @@ func TestFieldReconcileSavesScheduleZone(t *testing.T) {
 	require.NoError(t, err)
 	values, err := metadataObject(issue.Metadata)
 	require.NoError(t, err)
-	assert.JSONEq(t, `"2026-08-21[Asia/Tokyo]"`, string(values["scheduled_on"]))
+	assert.JSONEq(t, `"2026-08-21"`, string(values["scheduled_on"]))
 }
 
 func TestFieldReconcileIndependentLocalTimezones(t *testing.T) {
