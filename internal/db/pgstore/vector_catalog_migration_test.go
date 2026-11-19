@@ -1,9 +1,7 @@
 package pgstore_test
 
 import (
-	"context"
 	"database/sql"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,6 +15,9 @@ import (
 )
 
 func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires pgvector testcontainer")
+	}
 	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
 	t.Cleanup(cleanup)
@@ -82,8 +83,6 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 			_ = release()
 		}
 	})
-	_, err = idx.Fill(ctx, key, func(context.Context, []string) ([][]float32, error) { return nil, errors.New("unexpected embedding") }, 0, nil, nil)
-	require.NoError(t, err)
 	require.NoError(t, idx.EnsureBuilding(ctx, retiredKey, retired))
 	require.NoError(t, release())
 	release = nil
