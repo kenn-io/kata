@@ -2,8 +2,13 @@ package pgstore
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
+	"go.kenn.io/kata/internal/testenv/sqlcount"
 )
 
 const BatchProjectStatsSQLForTest = batchProjectStatsSQL
@@ -58,3 +63,26 @@ func SetStatementTimeoutForTest(t testing.TB, timeout string) {
 // FederationFoldEventsQueryForTest returns the SQL and arguments that the
 // federation fold runs for projectID, so cost tests can EXPLAIN it.
 var FederationFoldEventsQueryForTest = federationFoldEventsQuery
+
+// CountStatementsForTest replaces store's main pool with one that counts
+// statements run under a sqlcount.Counter context. The restore function puts
+// the original pool back and closes the counting one.
+func CountStatementsForTest(store *Store) (func() error, error) {
+	connConfig, err := pgx.ParseConfig(store.dsn)
+	if err != nil {
+		return nil, err
+	}
+	connConfig.RuntimeParams["application_name"] = "kata"
+	connConfig.RuntimeParams["statement_timeout"] = statementTimeout
+	connConfig.RuntimeParams["idle_in_transaction_session_timeout"] = "60s"
+	connConfig.RuntimeParams["search_path"] = quoteIdentifier(store.schema)
+	previous := store.DB
+	store.DB = sql.OpenDB(sqlcount.WrapConnector(stdlib.GetConnector(*connConfig)))
+	store.SetMaxOpenConns(defaultMaxOpenConns)
+	store.SetMaxIdleConns(defaultMaxIdleConns)
+	counting := store.DB
+	return func() error {
+		store.DB = previous
+		return counting.Close()
+	}, nil
+}

@@ -2,7 +2,10 @@ package sqlitestore
 
 import (
 	"context"
+	"database/sql/driver"
 	"time"
+
+	"go.kenn.io/kata/internal/testenv/sqlcount"
 )
 
 // LinksChangedPayloadForTest exposes linksChangedPayload to external tests so
@@ -45,3 +48,17 @@ func MaterializeFederatedProjectOnceForTest(ctx context.Context, store *Store, p
 const EventSelectForTest = eventSelect
 
 var ScanEventForTest = scanEvent
+
+// CountStatementsForTest wraps the SQLite driver used by stores opened after
+// this call, so they count statements run under a sqlcount.Counter context.
+func CountStatementsForTest() func() {
+	previous := registeredSQLiteDriver
+	registeredSQLiteDriver = func() (driver.Driver, error) {
+		inner, err := previous()
+		if err != nil {
+			return nil, err
+		}
+		return sqlcount.WrapDriver(inner), nil
+	}
+	return func() { registeredSQLiteDriver = previous }
+}
