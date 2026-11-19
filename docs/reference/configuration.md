@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-18
+last_edited: 2026-11-19
 ---
 
 # Configuration
@@ -1353,6 +1353,15 @@ During that backfill the vector leg is unavailable (queries embedded under
 the new configuration cannot be scored against the old generation's vectors), so
 `auto` searches degrade to labeled lexical results and explicit
 `--hybrid`/`--semantic` requests return 503 until the cutover.
+
+<a id="telemetry"></a><a id="reporting-rules"></a>
+
+## Usage reporting
+
+Kata can send general, anonymous usage telemetry. Usage telemetry is off
+unless you have opted in or set `TELEMETRY_ENABLED=1`. Any of these turns it
+off: `KATA_TELEMETRY_ENABLED=0`, `TELEMETRY_ENABLED=0`,
+`DO_NOT_TRACK`, or `CI`. Development builds never send it.
 
 ## Federation credentials
 
