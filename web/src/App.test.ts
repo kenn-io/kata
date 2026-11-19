@@ -1734,6 +1734,7 @@ describe('App', () => {
     render(App)
 
     expect(await screen.findByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Inbox · Kata'))
     expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
     expect(screen.getByRole('button', { name: 'New project' }).getAttribute('aria-disabled')).toBe(
       'true',
