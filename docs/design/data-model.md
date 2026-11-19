@@ -226,8 +226,7 @@ transaction under the cutover lock. Schemas 41 through 51 can reach schema 52
 this way. The 49→50 step adds the empty `mcp_event_subscriptions` table and its
 indexes. The 50→51 step drops `idx_events_resolved_issue_uid` and adds
 `idx_events_issue_uid_id`; an upgrade that starts before schema 43 skips
-creating the index it would drop. The 51→52 step advances the version in place;
-it leaves the SQLite vector sidecar unchanged.
+creating the index it would drop.
 
 Changes to existing tables, triggers, or FTS use JSONL cutover. Kata exports the current
 database to JSONL exactly as stored, imports that JSONL
