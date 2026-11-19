@@ -2368,10 +2368,10 @@ upgrade later. You do not need to stop or upgrade every spoke at the same
 time. A hub database migration changes the hub's local database; each spoke
 keeps its own database.
 
-Upgrade the hub and each participating spoke before writing dates with saved
-zones. Uploads to an older hub are refused. A newer hub refuses to send an
-event page containing a zoned date to a spoke that lacks support. Upgrade all
-participating peers, including relays, before syncing zoned dates.
+Upgrade the hub and each participating spoke, including relays, before writing
+dates with saved zones. Uploads to an older hub are refused. A newer hub
+refuses to send an event page containing a zoned date to a spoke that lacks
+support.
 
 1. Back up the hub and update it through its existing deployment procedure.
    Stop other processes using the same SQLite database during migration;

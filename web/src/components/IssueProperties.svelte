@@ -9,6 +9,7 @@
   import { Button, Chip, SelectDropdown } from '@kenn-io/kit-ui'
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
   import type { KataTaskDetail } from '../lib/kata/types'
+  import { deadlineDate, scheduledDate } from '../lib/kata/view'
   import DatePicker from './DatePicker.svelte'
 
   interface Props {
@@ -200,33 +201,14 @@
     })
   }
 
-  function scheduleTime(): string {
-    return (
-      issue.issue.metadata.scheduled_on?.match(/T\d{2}:\d{2}(?::[\d.]+)?/)?.[0].replace('T', ' ') ??
-      ''
-    )
-  }
-
   function scheduledLabel(): string {
-    const value = scheduledDate()
-    return value ? formatDate(value) + scheduleTime() : 'When'
-  }
-
-  function calendarDate(projected: string | undefined, saved: string | undefined): string {
-    return projected ?? saved?.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? ''
-  }
-
-  function scheduledDate(): string {
-    return calendarDate(issue.issue.scheduled_on_date, issue.issue.metadata.scheduled_on)
+    const value = issue.issue.metadata.scheduled_on
+    return value ? formatDate(value) : 'When'
   }
 
   function dueLabel(): string {
-    const value = deadlineDate()
+    const value = deadlineDate(issue.issue)
     return value ? formatDate(value) : 'No due date'
-  }
-
-  function deadlineDate(): string {
-    return calendarDate(issue.issue.deadline_on_date, issue.issue.metadata.deadline_on)
   }
 
   function priorityLabel(): string {
@@ -238,9 +220,9 @@
     if (actionsDisabled) return
     activeProperty = property
     if (property === 'scheduled') {
-      scheduledDraft = scheduledDate()
+      scheduledDraft = scheduledDate(issue.issue) ?? ''
     } else if (property === 'due') {
-      dueDraft = deadlineDate()
+      dueDraft = deadlineDate(issue.issue) ?? ''
     } else {
       priorityDraft =
         issue.issue.priority === undefined || issue.issue.priority === null
@@ -257,7 +239,7 @@
     if (actionsDisabled) return
     const property = 'scheduled'
     scheduledDraft = value
-    if (value !== '' && value === scheduledDate()) {
+    if (value !== '' && value === (scheduledDate(issue.issue) ?? '')) {
       resetDraft(property)
       return
     }
@@ -273,7 +255,7 @@
     if (actionsDisabled) return
     const property = 'due'
     dueDraft = value
-    if (value !== '' && value === deadlineDate()) {
+    if (value !== '' && value === (deadlineDate(issue.issue) ?? '')) {
       resetDraft(property)
       return
     }

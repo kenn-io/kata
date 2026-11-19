@@ -421,7 +421,7 @@ func TestPublicationRequiresEventFeatures(t *testing.T) {
 			{EventID: 2, Type: "issue.moved", Payload: jsontext.Value(`{}`)},
 		}},
 		{"zoned date", []api.FederationIngestEventEnvelope{
-			{EventID: 1, Type: "issue.created", Payload: jsontext.Value(`{"metadata":{"scheduled_on":"2026-01-15[Europe/Paris]"}}`)},
+			{EventID: 1, Type: "issue.metadata_updated", Payload: jsontext.Value(`{"diff":{"scheduled_on":{"to":"2026-01-15[Europe/Paris]"}}}`)},
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -112,8 +112,7 @@ remains supported, and building from a clone is still useful for development
 builds.
 
 For normal federated issue synchronization, upgrade the hub first. Spokes can
-upgrade later; upgrade all participating spokes before writing dates with saved
-zones. See
+upgrade later; you do not need to coordinate every user's installation. See
 [Federation upgrades](../operations/federation.md#compatibility-and-rolling-upgrades)
 for the procedure and the separate limits for projects that use cron.
 
