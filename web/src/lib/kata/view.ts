@@ -21,11 +21,11 @@ function issueDate(value: string | undefined): string | undefined {
   return value?.slice(0, 10)
 }
 
-function scheduledDate(issue: KataTaskSummary): string | undefined {
+export function scheduledDate(issue: KataTaskSummary): string | undefined {
   return issue.scheduled_on_date ?? issueDate(issue.metadata.scheduled_on)
 }
 
-function deadlineDate(issue: KataTaskSummary): string | undefined {
+export function deadlineDate(issue: KataTaskSummary): string | undefined {
   return issue.deadline_on_date ?? issueDate(issue.metadata.deadline_on)
 }
 

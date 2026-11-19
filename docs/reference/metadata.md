@@ -57,8 +57,14 @@ rejected. Everything else is stored verbatim.
 
 A date-only `scheduled_on` value becomes ready on that calendar day. A local
 date-time (`YYYY-MM-DDTHH:MM` or `YYYY-MM-DDTHH:MM:SS`) becomes ready at that
-wall-clock time. Both use the issue `timezone`, then the daemon's top-level
-`timezone`, then UTC. An RFC 3339 value ending in `Z` is an exact UTC instant
+wall-clock time. Add a zone name in brackets, such as
+`2026-11-15T09:00[Europe/Paris]`, to choose its zone. Without a zone,
+Kata resolves dates using the issue timezone, recurrence timezone for scheduled
+occurrences, daemon timezone, then UTC. Changing the issue timezone changes how
+unzoned dates resolve. Dates with an explicit `[Zone]` keep their zone.
+Kata resolves zone names using the installed timezone rules, so a
+local time stays at the same wall-clock time when those rules change.
+An RFC 3339 value ending in `Z` is an exact UTC instant
 and does not use those timezones. If a local time repeats during a daylight
 saving transition, the first occurrence opens the gate. If a local time does
 not exist, the gate opens at the first valid instant after the gap. Numeric
@@ -74,8 +80,8 @@ rules. It is a deadline only; it does not control `ready` or `next`.
 its key is absent or its stored value cannot be read, so one bad value never
 fails the list. These are the names and values the web UI's snapshot
 uses, resolved by one shared rule. A date-only value keeps its written date. A
-local date-time resolves in the issue `timezone`, then the daemon's top-level
-`timezone`, then UTC, as above. For a recurring occurrence without `timezone`
+local date-time resolves in its saved zone, then the issue `timezone`, the
+daemon's top-level `timezone`, then UTC, as above. For a recurring occurrence without `timezone`
 metadata, `scheduled_on` resolves in the recurrence's timezone before the
 daemon's; `deadline_on` does not. An RFC 3339 `Z` instant is read in that same
 zone chain, so it can fall on a different calendar date than its UTC date.

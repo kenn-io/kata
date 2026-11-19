@@ -2700,6 +2700,37 @@ func TestFederationIngestRejectsSnapshotHistoricalAuthorWithoutAdoptionIntent(t 
 	assertFederationEventCount(t, env.DB, "issue.snapshot", 0)
 }
 
+func TestFederationPullRequiresZonedDateFeature(t *testing.T) {
+	env := testenv.New(t)
+	ctx := t.Context()
+	project := createFederatedHubProject(t, env, "hub")
+	_, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "zoned schedule", Author: "tester",
+		Metadata: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-09-02[Europe/Paris]"`)},
+	})
+	require.NoError(t, err)
+	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
+	})
+	require.NoError(t, err)
+	headers := bearer(created.Token)
+	headers[db.EventFeaturesHeader] = db.IssueDateZoneEventFeature
+	path := projectPath(project.ID) + "/federation/events?after_id=0&limit=100"
+	first, firstRaw := envDoRaw(t, env, http.MethodGet, projectPath(project.ID)+"/federation/events?after_id=0&limit=1", nil, bearer(created.Token))
+	require.Equal(t, http.StatusOK, first.StatusCode, string(firstRaw))
+	assert.Empty(t, first.Header.Get(db.RequiredEventFeaturesHeader))
+	resp, raw := envDoRaw(t, env, http.MethodGet, path, nil, bearer(created.Token))
+	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
+	assert.Contains(t, string(raw), "unsupported_event_features")
+	assert.Contains(t, string(raw), db.IssueDateZoneEventFeature)
+	assert.NotContains(t, string(raw), "2026-09-02[Europe/Paris]")
+
+	resp, raw = envDoRaw(t, env, http.MethodGet, path, nil, headers)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	assert.Contains(t, resp.Header.Get(db.RequiredEventFeaturesHeader), db.IssueDateZoneEventFeature)
+	assert.Contains(t, string(raw), "2026-09-02[Europe/Paris]")
+}
+
 func TestFederationTransportPullMatchesProjectPollBody(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()

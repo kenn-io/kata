@@ -335,6 +335,7 @@ This table highlights notable changes. Marker history starts at `0.44.0`.
 
 | Version | Change |
 | --- | --- |
+| `0.59.0` | Schedule and deadline civil dates and times accept an explicit `[Zone]` suffix. |
 | `0.58.0` | `GET /api/v1/projects/{project_id}/events` accepts `actor` so callers who may restore a soft-deleted issue can read its history. |
 | `0.57.0` | Cron run rows carry `job_name`, `workflow_name` and `issue_short_id`, resolved when read; deleted jobs, workflows and issues still name their runs. |
 | `0.56.0` | Direct-spoke ingest returns `403 federation_project_not_enrolled` instead of `403 auth_invalid` when pushed work touches an issue whose current project has no matching push enrollment for the spoke and actor. The message names the issue but not the project, which the spoke has not joined. |

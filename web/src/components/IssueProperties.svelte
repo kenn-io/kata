@@ -9,6 +9,7 @@
   import { Button, Chip, SelectDropdown } from '@kenn-io/kit-ui'
   import { formatTimestamp } from '@kenn-io/kit-ui/utils/time'
   import type { KataTaskDetail } from '../lib/kata/types'
+  import { deadlineDate, scheduledDate } from '../lib/kata/view'
   import DatePicker from './DatePicker.svelte'
 
   interface Props {
@@ -201,17 +202,14 @@
   }
 
   function scheduledLabel(): string {
-    const value = issue.issue.metadata.scheduled_on
+    const saved = issue.issue.metadata.scheduled_on
+    const value = dateZone(saved) ? scheduledDate(issue.issue) : saved
     return value ? formatDate(value) : 'When'
   }
 
   function dueLabel(): string {
-    const value = deadlineDate()
+    const value = deadlineDate(issue.issue)
     return value ? formatDate(value) : 'No due date'
-  }
-
-  function deadlineDate(): string {
-    return issue.issue.deadline_on_date ?? issue.issue.metadata.deadline_on ?? ''
   }
 
   function priorityLabel(): string {
@@ -223,9 +221,10 @@
     if (actionsDisabled) return
     activeProperty = property
     if (property === 'scheduled') {
-      scheduledDraft = issue.issue.metadata.scheduled_on ?? ''
+      const saved = issue.issue.metadata.scheduled_on
+      scheduledDraft = (dateZone(saved) ? scheduledDate(issue.issue) : saved?.slice(0, 10)) ?? ''
     } else if (property === 'due') {
-      dueDraft = deadlineDate()
+      dueDraft = deadlineDate(issue.issue) ?? ''
     } else {
       priorityDraft =
         issue.issue.priority === undefined || issue.issue.priority === null
@@ -234,13 +233,27 @@
     }
   }
 
+  function dateZone(saved: unknown): string {
+    return typeof saved === 'string' ? (saved.match(/\[[^\]]+\]$/)?.[0] ?? '') : ''
+  }
+
   async function patchScheduled(value: string): Promise<void> {
     if (actionsDisabled) return
     const property = 'scheduled'
     scheduledDraft = value
+    if (
+      dateZone(issue.issue.metadata.scheduled_on) &&
+      value !== '' &&
+      value === (scheduledDate(issue.issue) ?? '')
+    ) {
+      resetDraft(property)
+      return
+    }
     const mutationUID = uid()
     const generation = draftResetGeneration
-    const ok = await onPatchMetadata(mutationUID, { scheduled_on: value === '' ? null : value })
+    const ok = await onPatchMetadata(mutationUID, {
+      scheduled_on: value === '' ? null : value + dateZone(issue.issue.metadata?.scheduled_on),
+    })
     if (ok) scheduleAcceptedReset(property, mutationUID, generation)
   }
 
@@ -248,13 +261,15 @@
     if (actionsDisabled) return
     const property = 'due'
     dueDraft = value
-    if (value !== '' && value === deadlineDate()) {
+    if (value !== '' && value === (deadlineDate(issue.issue) ?? '')) {
       resetDraft(property)
       return
     }
     const mutationUID = uid()
     const generation = draftResetGeneration
-    const ok = await onPatchMetadata(mutationUID, { deadline_on: value === '' ? null : value })
+    const ok = await onPatchMetadata(mutationUID, {
+      deadline_on: value === '' ? null : value + dateZone(issue.issue.metadata?.deadline_on),
+    })
     if (ok) scheduleAcceptedReset(property, mutationUID, generation)
   }
 

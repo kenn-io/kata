@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json/v2"
 
 	"go.kenn.io/kata/internal/metadata"
 )
@@ -91,17 +92,29 @@ func MatchUICalendarView(
 	}
 }
 
-// ProjectUIDeadlineDate gives a selected issue the same browser-calendar
-// deadline projection as collection rows.
-func ProjectUIDeadlineDate(issue *UIIssue, query UISnapshotQuery) error {
-	deadlineDate, _, err := metadata.DeadlineOnCalendarDate(
-		string(issue.Metadata), query.TimeZone, query.DefaultTimezone,
-	)
-	if err != nil {
-		return err
+// ProjectUIPlanningDates gives a selected issue the same dates as collection rows.
+func ProjectUIPlanningDates(issue *UIIssue, query UISnapshotQuery) error {
+	dates := resolvePlanningCalendarDates(string(issue.Metadata), &query.TimeZone, query.DefaultTimezone, query.DefaultTimezone)
+	// A legacy schedule may be unreadable; it must not hide the selected issue.
+	if dates.deadlineErr != nil {
+		return dates.deadlineErr
 	}
-	issue.DeadlineOnDate = deadlineDate
+	issue.ScheduledOnDate = selectedZonedScheduleDate(issue.Metadata, dates.scheduledOn)
+	issue.DeadlineOnDate = dates.deadlineOn
 	return nil
+}
+
+func selectedZonedScheduleDate(raw JSONBlob, date string) string {
+	var value struct {
+		ScheduledOn string `json:"scheduled_on"`
+	}
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		return ""
+	}
+	if _, zone := metadata.SplitScheduleZone(value.ScheduledOn); zone != "" {
+		return date
+	}
+	return ""
 }
 
 // UILink enriches a stored link with stable display references for each end.
