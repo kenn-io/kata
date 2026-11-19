@@ -15,6 +15,7 @@ import { preferencesStorageKey } from './lib/state/preferences'
 
 describe('App', () => {
   beforeEach(() => {
+    document.title = ''
     sessionStorage.clear()
     localStorage.clear()
     document.documentElement.classList.remove('dark')
@@ -100,7 +101,6 @@ describe('App', () => {
 
     expect(new URL(window.location.href).searchParams.get('scope')).toBe(otherProjectUID)
     expect(screen.getByRole('heading', { name: 'other-project' })).not.toBeNull()
-    await waitFor(() => expect(document.title).toBe('other-project · Kata'))
     expect(screen.getByRole('button', { name: /Other issue/ })).not.toBeNull()
     expect(screen.queryByRole('button', { name: /Example issue/ })).toBeNull()
     expect(screen.getByRole('button', { name: 'New task' }).getAttribute('aria-disabled')).not.toBe(
@@ -1765,6 +1765,7 @@ describe('App', () => {
     render(App)
 
     const search = screen.getAllByRole('button', { name: 'Search for abc4' })
+    await waitFor(() => expect(document.title).toBe('Invalid route · Kata'))
     expect(search).toHaveLength(1)
     expect(window.location.pathname + window.location.search).toBe('/kata?issue=abc4')
     await fireEvent.click(search[0]!)
@@ -1799,33 +1800,6 @@ describe('App', () => {
     await fireEvent(window, new PopStateEvent('popstate'))
     expect(screen.getByRole('heading', { name: 'This Kata route is not valid' })).not.toBeNull()
     await waitFor(() => expect(document.title).toBe('Invalid route · Kata'))
-  })
-
-  it('distinguishes project-scoped views in the tab title', async () => {
-    sessionStorage.setItem(
-      'kata.web.session.v1',
-      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
-    )
-    const project = '01J00000000000000000000002'
-    history.replaceState(null, '', `/kata?view=today&scope=${project}#direct=1`)
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const target = new URL(
-          input instanceof Request ? input.url : String(input),
-          window.location.origin,
-        )
-        if (target.pathname.endsWith('/api/v1/ui/snapshot')) return Response.json(snapshot())
-        if (target.pathname.endsWith('/api/v1/ui/references'))
-          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
-        return Response.json({})
-      }),
-    )
-    render(App)
-    await waitFor(() => expect(document.title).toBe('example-project · Today · Kata'))
-    history.replaceState(null, '', `/kata?view=delegated&scope=${project}`)
-    await fireEvent(window, new PopStateEvent('popstate'))
-    await waitFor(() => expect(document.title).toBe('example-project · Delegated · Kata'))
   })
 
   it('renders the ported collection and navigates through canonical routes after authority loads', async () => {
@@ -1915,7 +1889,6 @@ describe('App', () => {
     expect(snapshotViews).toEqual(['all-open', 'all-open'])
     expect(tokenReads).toBe(1)
     expect(window.location.search).toBe('?view=credentials')
-    await waitFor(() => expect(document.title).toBe('Credentials · Kata'))
 
     cleanup()
     render(App)
@@ -4297,6 +4270,14 @@ describe('App', () => {
     expect(await screen.findByRole('alert')).not.toBeNull()
     expect(screen.getByRole('heading', { name: 'Kata was updated' })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Reload Kata' })).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe('Kata was updated · Kata'))
+    cleanup()
+    sessionStorage.clear()
+    history.replaceState(null, '', '/kata')
+    render(App)
+    await waitFor(() => expect(document.title).toBe('Kata'))
+    window.dispatchEvent(new Event('kata:versionMismatch'))
+    expect(await screen.findByRole('heading', { name: 'Kata was updated' })).not.toBeNull()
     await waitFor(() => expect(document.title).toBe('Kata was updated · Kata'))
   })
 })

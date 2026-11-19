@@ -2018,23 +2018,62 @@ describe('AppShell', () => {
     ).toBe('true')
   })
 
-  test('names an issue while its detail is loading', async () => {
-    render(AppShell, {
+  test('names the current issue, project, or view in the tab', async () => {
+    const current = snapshot()
+    const filters = { status: [], owner: [], label: [], relationship: [] }
+    const view = render(AppShell, {
       props: {
         route: {
           kind: 'kata',
           issueUID: '01J00000000000000000000001',
           graph: false,
-          filters: { status: [], owner: [], label: [], relationship: [] },
+          filters,
         },
-        snapshot: snapshot(),
-        loading: true,
+        snapshot: current,
+        loading: false,
         ...mutationProps(),
         onNavigate: vi.fn(),
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
     })
     await waitFor(() => expect(document.title).toBe('Issue · Kata'))
+    current.selected = {
+      state: 'available',
+      issue: current.collection![0],
+      comments: [],
+      labels: [],
+      links: [],
+      recurrences: [],
+      history: [],
+    }
+    await view.rerender({ snapshot: current })
+    await waitFor(() => expect(document.title).toBe('example-project#a1 Example issue · Kata'))
+    await view.rerender({
+      route: { kind: 'kata', projectUID: '01J00000000000000000000002', graph: false, filters },
+    })
+    await waitFor(() => expect(document.title).toBe('example-project · Kata'))
+    await view.rerender({
+      route: {
+        kind: 'kata',
+        view: 'today',
+        projectUID: '01J00000000000000000000002',
+        graph: false,
+        filters,
+      },
+    })
+    await waitFor(() => expect(document.title).toBe('example-project · Today · Kata'))
+    await view.rerender({
+      route: {
+        kind: 'kata',
+        view: 'delegated',
+        projectUID: '01J00000000000000000000002',
+        graph: false,
+        filters,
+      },
+    })
+    await waitFor(() => expect(document.title).toBe('example-project · Delegated · Kata'))
+    await view.rerender({ route: { kind: 'kata', view: 'credentials', graph: false, filters } })
+    await waitFor(() => expect(document.title).toBe('Credentials · Kata'))
   })
 
   test('keeps the canonical issue route while authority is missing or archived', async () => {
