@@ -30,7 +30,7 @@ func TestFederationUnknownZoneSender(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "Example"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, zone), contents, 0o600))
-	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestFederationUnknownZoneSender$")
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestFederationUnknownZoneSender$") //nolint:gosec // G204: rerun this test binary with the sender's timezone data.
 	cmd.Env = append(os.Environ(), "KATA_TEST_ZONE_SENDER=1", "ZONEINFO="+dir)
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
