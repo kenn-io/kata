@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -65,19 +66,11 @@ func (c *DaemonConfig) CatalogDaemon(name string) (CatalogDaemonConfig, bool) {
 func (c *DaemonConfig) WebCatalog() []CatalogDaemonConfig {
 	var catalog []CatalogDaemonConfig
 	for _, daemon := range c.Daemons {
-		if !daemon.Local && !daemon.HasClientToken() && daemon.Name != c.ActiveDaemon {
-			syncOnly := false
-			for _, project := range c.Federation.Projects {
-				if project.Hub == daemon.Name {
-					syncOnly = true
-					break
-				}
-			}
-			if syncOnly {
-				continue
-			}
+		syncOnly := !daemon.Local && !daemon.HasClientToken() && daemon.Name != c.ActiveDaemon &&
+			slices.ContainsFunc(c.Federation.Projects, func(p FederationProjectConfig) bool { return p.Hub == daemon.Name })
+		if !syncOnly {
+			catalog = append(catalog, daemon)
 		}
-		catalog = append(catalog, daemon)
 	}
 	return catalog
 }
