@@ -221,6 +221,7 @@ var storageScenarios = []scenario{
 	{name: "cron reads tolerate tightened rules", methods: []string{"PutCronJob", "CronJob", "ListCronJobs", "ExportCronJobs"}, run: checkCronReadsTolerateTightenedRules},
 	{name: "cron rejects impossible schedules", methods: []string{"PutCronJob", "CronJob", "ListCronJobs", "DispatchRecurringCron"}, run: checkCronRejectsImpossibleSchedules},
 	{name: "federation metadata requires enabled hub", methods: []string{"CreateProject", "AdoptProjectIntoFederation", "ReadFederation"}, run: checkFederationMetadataRequiresEnabledHub},
+	{name: "federation metadata zoned date after purge", methods: []string{"CreateProject", "CreateIssue", "EnableProjectFederation", "PurgeIssue", "ReadFederation", "FederationBindingByProject"}, run: checkFederationMetadataZonedDateAfterPurge},
 	{name: "peer ingest committed events", methods: []string{"IngestFederationEvents"}, run: checkPeerIngestCommittedEvents},
 	{name: "issue events require header identity", methods: []string{"CreateProject", "EnableProjectFederation", "EventsByUIDs", "IngestFederationEvents", "InsertRemoteEvents"}, run: checkIssueEventsRequireHeaderIdentity},
 	{name: "relay rejects header-less issue events", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "EventsByUIDs", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {

@@ -312,7 +312,7 @@ func nativeProjectionRequired(ctx context.Context, q interface {
 
 // FederationReadParams captures metadata, required features, purge boundary and event
 // page in one backend transaction. Metadata may refresh a purged baseline;
-// unsupported readers fail before that write or any returned reset/cursor.
+// unsupported readers fail and roll back that write before returning any reset/cursor.
 // Features is protocol support, independent of enrollment permissions.
 type FederationReadParams struct {
 	ProjectID int64
@@ -377,6 +377,17 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 				return out, err
 			}
 			out.Binding = binding
+		}
+		// Older peers clear their project before replaying, so refuse the
+		// metadata read if the replay would carry a zoned date.
+		if featureErr := RequireEventFeatures(in.Features, IssueDateZoneEventFeature); featureErr != nil {
+			var zoned bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE project_id=$1 AND id>=$2 AND type LIKE 'issue.%' AND payload LIKE '%]"%')`, project.ID, binding.ReplayHorizonEventID).Scan(&zoned); err != nil {
+				return out, err
+			}
+			if zoned {
+				return out, featureErr
+			}
 		}
 		err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),$2) FROM events WHERE project_id=$1 AND id >= $2 AND type IN (`+FederationSnapshotEventTypesSQL()+`)`, project.ID, binding.ReplayHorizonEventID).Scan(&out.BaselineThroughEventID)
 		return out, err

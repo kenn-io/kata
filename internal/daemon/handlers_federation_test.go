@@ -2713,18 +2713,25 @@ func TestFederationPullRequiresZonedDateFeature(t *testing.T) {
 		SpokeInstanceUID: federationTestSpokeUID, ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
 	})
 	require.NoError(t, err)
+	metadataPath := projectPath(project.ID) + "/federation/metadata"
+	resp, raw := envDoRaw(t, env, http.MethodGet, metadataPath, nil, bearer(created.Token))
+	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
+	assert.Contains(t, string(raw), "unsupported_event_features")
+	assert.Contains(t, string(raw), db.IssueDateZoneEventFeature)
+	headers := bearer(created.Token)
+	headers[db.EventFeaturesHeader] = db.IssueDateZoneEventFeature
+	resp, raw = envDoRaw(t, env, http.MethodGet, metadataPath, nil, headers)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	path := projectPath(project.ID) + "/federation/events?after_id=0&limit=100"
 	first, firstRaw := envDoRaw(t, env, http.MethodGet, projectPath(project.ID)+"/federation/events?after_id=0&limit=1", nil, bearer(created.Token))
 	require.Equal(t, http.StatusOK, first.StatusCode, string(firstRaw))
 	assert.Empty(t, first.Header.Get(db.RequiredEventFeaturesHeader))
-	resp, raw := envDoRaw(t, env, http.MethodGet, path, nil, bearer(created.Token))
+	resp, raw = envDoRaw(t, env, http.MethodGet, path, nil, bearer(created.Token))
 	require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
 	assert.Contains(t, string(raw), "unsupported_event_features")
 	assert.Contains(t, string(raw), db.IssueDateZoneEventFeature)
 	assert.NotContains(t, string(raw), "2026-09-02[Europe/Paris]")
 
-	headers := bearer(created.Token)
-	headers[db.EventFeaturesHeader] = db.IssueDateZoneEventFeature
 	resp, raw = envDoRaw(t, env, http.MethodGet, path, nil, headers)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	assert.Contains(t, resp.Header.Get(db.RequiredEventFeaturesHeader), db.IssueDateZoneEventFeature)
