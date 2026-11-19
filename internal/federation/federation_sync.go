@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"regexp"
@@ -18,6 +19,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
+	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/httpurl"
 )
 
@@ -1725,22 +1727,34 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		projectUIDs = append(projectUIDs, fromUID)
 		requiredSources[fromUID] = true
 	}
+	destinationBase, err := httpurl.CanonicalHTTPBaseURL(hubURL)
+	if err != nil {
+		return nil, err
+	}
+	var linkProjects map[int64]bool
 	if issueWork {
 		bindings, err := store.ListFederationBindings(ctx)
 		if err != nil {
 			return nil, err
 		}
-		destinationOrigin, err := httpurl.CanonicalHTTPOrigin(hubURL)
-		if err != nil {
-			return nil, err
-		}
 		for _, binding := range bindings {
-			if binding.ProjectID == destination.ProjectID || binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil || !binding.Enabled || !binding.PushEnabled || binding.Actor != destination.Actor || binding.HubProjectUID == "" {
+			if binding.ProjectID == destination.ProjectID || binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil || !binding.Enabled || !binding.PushEnabled || binding.HubProjectUID == "" {
 				continue
 			}
-			origin, err := httpurl.CanonicalHTTPOrigin(binding.HubURL)
-			if err != nil || origin != destinationOrigin {
+			base, err := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
+			if err != nil || base != destinationBase {
 				continue
+			}
+			if binding.Actor != destination.Actor {
+				if linkProjects == nil {
+					linkProjects, err = directLinkProjects(ctx, store, events)
+					if err != nil {
+						return nil, err
+					}
+				}
+				if !linkProjects[binding.ProjectID] {
+					continue
+				}
 			}
 			project, err := store.ProjectByUID(ctx, binding.HubProjectUID)
 			if err != nil {
@@ -1763,20 +1777,12 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		if err != nil {
 			return nil, err
 		}
-		if project.DeletedAt != nil || source.Role != db.FederationRoleSpoke || !source.Enabled || !source.PushEnabled || source.HubProjectUID != fromUID || source.Actor != destination.Actor {
+		if project.DeletedAt != nil || source.Role != db.FederationRoleSpoke || !source.Enabled || !source.PushEnabled || source.HubProjectUID != fromUID || (source.Actor != destination.Actor && (requiredSources[fromUID] || source.RelayConfig != nil || !linkProjects[source.ProjectID])) {
 			return nil, db.ErrFederationMoveSourceUnauthorized
 		}
-		destinationOrigin, err := httpurl.CanonicalHTTPOrigin(hubURL)
-		if err != nil {
-			return nil, err
-		}
 		sourceURL, err := httpurl.CanonicalHTTPBaseURL(source.HubURL)
-		if err != nil {
-			return nil, errors.New("move source binding origin is invalid")
-		}
-		sourceOrigin, err := httpurl.CanonicalHTTPOrigin(sourceURL)
-		if err != nil || sourceOrigin != destinationOrigin {
-			return nil, errors.New("move source binding origin differs from destination")
+		if err != nil || sourceURL != destinationBase {
+			return nil, errors.New("move source binding origin or path differs from destination")
 		}
 		credential, found, err := credentials.FederationCredential(ctx, fromUID)
 		if err != nil {
@@ -1805,15 +1811,23 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		if err != nil {
 			return nil, errors.New("move source credential origin is invalid")
 		}
-		credentialOrigin, err := httpurl.CanonicalHTTPOrigin(credentialBase)
-		if err != nil || credentialOrigin != sourceOrigin {
-			return nil, errors.New("move source credential origin differs from binding")
+		if credentialBase != sourceURL {
+			return nil, errors.New("move source credential origin or path differs from binding")
 		}
 		// Validate the source's own plaintext policy before including its token.
 		// The destination credential's opt-in does not authorize source transport.
 		sourceCredential := config.FederationTransportCredential(source.HubURL, source.HubProjectID, source.AllowInsecure, credential)
-		if _, err := NewClient(ctx, sourceCredential.HubURL, sourceCredential.Token, clientOptsForCredential(opts, sourceCredential)); err != nil {
+		sourceClient, err := clientpkg.NewHTTPClientForTarget(ctx, sourceURL, clientpkg.TargetAuth{
+			Token: sourceCredential.Token, AllowInsecure: sourceCredential.AllowInsecure,
+			TrustPrivateNetwork: config.ResolvedBearerTrustPrivateNetwork(),
+		}, opts)
+		if err != nil {
 			return nil, err
+		}
+		if sourceCredential.Signing != nil {
+			if err := federationsigning.ConfigureClient(sourceClient, sourceURL, sourceCredential.Token, *sourceCredential.Signing); err != nil {
+				return nil, err
+			}
 		}
 		if tokens == nil {
 			tokens = map[string]string{}
@@ -1821,4 +1835,28 @@ func federationMoveSourceTokens(ctx context.Context, store db.Storage, credentia
 		tokens[fromUID] = credential.Token
 	}
 	return tokens, nil
+}
+
+// Only explicit link peers can use credentials with a different project actor.
+func directLinkProjects(ctx context.Context, store db.Storage, events []db.Event) (map[int64]bool, error) {
+	peers := map[string]bool{}
+	for _, event := range events {
+		additions, err := db.DirectLinkAdditionPeers(db.FoldEvent{Type: event.Type, UID: event.UID, Payload: []byte(event.Payload)})
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(peers, additions)
+	}
+	projects := map[int64]bool{}
+	for uid := range peers {
+		issue, err := store.IssueByUID(ctx, uid, db.IncludeDeletedNo)
+		if errors.Is(err, db.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		projects[issue.ProjectID] = true
+	}
+	return projects, nil
 }
