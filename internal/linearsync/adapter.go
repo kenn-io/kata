@@ -128,8 +128,20 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, startedAt 
 		return prepared, err
 	}
 	issuesync.ReportProgress(ctx, "issues", len(items), len(items))
+	cutoff, err := ParseSince(c.Since)
+	if err != nil {
+		return prepared, err
+	}
+	eligible := make([]Issue, 0, len(items))
+	ids := make([]string, 0, len(items))
+	for _, i := range items {
+		if cutoff == nil || i.UpdatedAt.After(*cutoff) {
+			eligible = append(eligible, i)
+			ids = append(ids, i.ID)
+		}
+	}
 	issuesync.ReportProgress(ctx, "comments", 0, 0)
-	comments, err := s.Comments(ctx, c)
+	comments, err := s.Comments(ctx, c, ids)
 	if err != nil {
 		return prepared, err
 	}
@@ -137,16 +149,8 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, startedAt 
 	for _, comment := range comments {
 		byIssue[comment.IssueID] = append(byIssue[comment.IssueID], comment)
 	}
-	cutoff, err := ParseSince(c.Since)
-	if err != nil {
-		return prepared, err
-	}
-	eligible := make([]Issue, 0, len(items))
-	for _, i := range items {
-		if cutoff == nil || i.UpdatedAt.After(*cutoff) {
-			i.Comments = byIssue[i.ID]
-			eligible = append(eligible, i)
-		}
+	for n := range eligible {
+		eligible[n].Comments = byIssue[eligible[n].ID]
 	}
 	batch, err := BuildImportBatch(b.SourceKey, c, scope, states, eligible)
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 )
 
@@ -231,25 +232,27 @@ func decodeIssue(raw jsontext.Value, c Config, content bool) (Issue, error) {
 	}
 	return i, nil
 }
-func issueFilter(c Config) map[string]any {
-	filter := teamFilter(c)
-	if c.ProjectID != "" {
-		filter["project"] = map[string]any{"id": map[string]any{"eq": c.ProjectID}}
-	}
-	if c.Since != "" {
-		filter["updatedAt"] = map[string]any{"gt": c.Since}
-	}
-	return filter
-}
-
-// Comments reads every comment on the issues Issues selects.
-func (s *clientSession) Comments(ctx context.Context, c Config) ([]Comment, error) {
+// Comments reads every comment on the given issues. It filters by issue ID
+// because Linear's comment filter on an issue's team can return other teams'
+// comments.
+func (s *clientSession) Comments(ctx context.Context, c Config, issueIDs []string) ([]Comment, error) {
 	if err := s.validate(c); err != nil {
 		return nil, err
 	}
-	rows, err := readCollection(ctx, s, commentsQuery, "comments", map[string]any{"issue": issueFilter(c)})
-	if err != nil {
-		return nil, err
+	requested := map[string]bool{}
+	var rows []jsontext.Value
+	for chunk := range slices.Chunk(issueIDs, 100) {
+		for _, id := range chunk {
+			requested[id] = true
+		}
+		page, err := readCollection(ctx, s, commentsQuery, "comments", map[string]any{"issue": map[string]any{"id": map[string]any{"in": chunk}}})
+		if err != nil {
+			return nil, err
+		}
+		if len(rows)+len(page) > maxItems {
+			return nil, fmt.Errorf("linear collection exceeds 10000 comments")
+		}
+		rows = append(rows, page...)
 	}
 	comments := make([]Comment, 0, len(rows))
 	for _, raw := range rows {
@@ -264,11 +267,15 @@ func (s *clientSession) Comments(ctx context.Context, c Config) ([]Comment, erro
 			return nil, fmt.Errorf("invalid Linear comment response")
 		}
 		comment := Comment{Body: *row.Body, CreatedAt: row.CreatedAt}
+		var err error
 		if comment.ID, err = CanonicalID(row.ID); err != nil {
 			return nil, err
 		}
 		if comment.IssueID, err = CanonicalID(row.Issue.ID); err != nil {
 			return nil, err
+		}
+		if !requested[comment.IssueID] {
+			return nil, fmt.Errorf("linear comment is outside selected scope")
 		}
 		if row.User != nil {
 			if comment.AuthorID, err = CanonicalID(row.User.ID); err != nil {
@@ -284,7 +291,14 @@ func (s *clientSession) Issues(ctx context.Context, c Config) ([]Issue, error) {
 	if err := s.validate(c); err != nil {
 		return nil, err
 	}
-	rows, err := readCollection(ctx, s, issuesQuery, "issues", issueFilter(c))
+	filter := teamFilter(c)
+	if c.ProjectID != "" {
+		filter["project"] = map[string]any{"id": map[string]any{"eq": c.ProjectID}}
+	}
+	if c.Since != "" {
+		filter["updatedAt"] = map[string]any{"gt": c.Since}
+	}
+	rows, err := readCollection(ctx, s, issuesQuery, "issues", filter)
 	if err != nil {
 		return nil, err
 	}

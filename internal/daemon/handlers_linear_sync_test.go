@@ -42,7 +42,7 @@ func (f *lifecycleLinearFetcher) Scope(ctx context.Context, _ linearsync.Config)
 func (f *lifecycleLinearFetcher) States(ctx context.Context, _ linearsync.Config) ([]linearsync.State, error) {
 	return f.states, ctx.Err()
 }
-func (f *lifecycleLinearFetcher) Comments(ctx context.Context, _ linearsync.Config) ([]linearsync.Comment, error) {
+func (f *lifecycleLinearFetcher) Comments(ctx context.Context, _ linearsync.Config, _ []string) ([]linearsync.Comment, error) {
 	return nil, ctx.Err()
 }
 func (f *lifecycleLinearFetcher) Issues(ctx context.Context, _ linearsync.Config) ([]linearsync.Issue, error) {

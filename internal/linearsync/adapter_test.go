@@ -41,7 +41,7 @@ func (s *adapterSource) Issues(ctx context.Context, _ Config) ([]Issue, error) {
 	}
 	return s.items, ctx.Err()
 }
-func (s *adapterSource) Comments(ctx context.Context, _ Config) ([]Comment, error) {
+func (s *adapterSource) Comments(ctx context.Context, _ Config, _ []string) ([]Comment, error) {
 	return nil, ctx.Err()
 }
 func (s *adapterSource) ReadStatus(_ context.Context, _ Config, id string) (issuesync.StatusObservation, error) {
@@ -273,8 +273,8 @@ func TestClientRunnerImportsIssueComments(t *testing.T) {
 			return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{wireIssue()}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
 		case bytes.Contains(raw, []byte("KataLinearComments")):
 			_, v := requestBody(t, r)
-			require.Equal(t, map[string]any{"issue": map[string]any{"team": map[string]any{"id": map[string]any{"eq": teamID}}}}, v["filter"],
-				"comments come from the same issue scope as the import")
+			require.Equal(t, map[string]any{"issue": map[string]any{"id": map[string]any{"in": []any{issueID}}}}, v["filter"],
+				"comments are read only for the imported issues")
 			return dataResponse(map[string]any{"comments": map[string]any{"nodes": []any{
 				map[string]any{"id": "77777777-7777-4777-8777-777777777777", "body": "Confirmed the renewal date.", "createdAt": "2026-01-03T04:05:06.789Z", "user": map[string]any{"id": commenterID}, "issue": map[string]any{"id": issueID}},
 				map[string]any{"id": "88888888-8888-4888-8888-888888888888", "body": "Posted by an integration.", "createdAt": "2026-01-04T00:00:00Z", "user": nil, "issue": map[string]any{"id": issueID}},
