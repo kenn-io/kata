@@ -941,6 +941,8 @@ daemon's trust store when using a private certificate authority.
 also grant task claiming. Both attach an empty local project or rejoin a
 detached project whose UID matches the approved hub project. `migrate` asks the
 hub to approve adoption of an existing project's tasks and authors.
+After a collaborative rejoin, Kata reoffers local-origin events; the hub
+deduplicates events it already has. New events must use the enrollment actor.
 The helper cannot silently downgrade write access or upgrade read-only access.
 
 Kata retains the request across restarts and failed exchanges. A helper that

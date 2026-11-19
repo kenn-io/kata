@@ -555,6 +555,8 @@ internal project name, and a rename does not change the approved identity.
   detached project whose UID matches the approved hub project. A project with
   a different UID and existing tasks, recurring tasks, or project metadata
   requires `migrate` approval.
+- After a collaborative rejoin, Kata reoffers local-origin events. The hub
+  deduplicates events it already has; new events must use the enrollment actor.
 - `migrate` uses the existing adoption path to import local data.
 - Push is enabled only when the approved credential permits it.
 - Attachment replaces old local catalog events when the project takes the
