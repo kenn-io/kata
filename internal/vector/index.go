@@ -39,11 +39,6 @@ type Index struct {
 	pg        *postgresIndex
 	pgStore   *pgvector.Store[string, string]
 
-	// A lease holder may rebuild a generation another Index reclaimed.
-	lifecycleMu    sync.Mutex
-	reclaimed      map[string]bool
-	reclaimSession *sql.Conn
-
 	rejectedMu sync.Mutex
 	rejected   map[string]bool
 }
