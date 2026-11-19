@@ -56,13 +56,14 @@ type FederationAccessController interface {
 	) (FederationAccessDecision, error)
 }
 
-// FederationReferenceAccessController lets a host accept direct issue link
-// additions and parent removal or replacement across project-scoped enrollments
-// with different actors. Kata authenticates both push credentials for the same
-// spoke and runs native and host authorization fences before calling this
-// method in the ingest transaction. The route keeps its actor. The host must
-// verify both enrollments represent the same current principal and hold that
-// authority through commit. Return ErrAccessDenied to roll back the batch.
+// FederationReferenceAccessController lets a host accept link additions in
+// issue creation or composite edits, and parent link changes, across
+// project-scoped enrollments with different actors. Kata authenticates both push
+// credentials for the same spoke and runs native and host authorization fences
+// before calling this method in the ingest transaction. The route keeps its
+// actor. The host must verify both enrollments represent the same current
+// principal and hold that authority through commit. Return ErrAccessDenied to
+// roll back the batch.
 type FederationReferenceAccessController interface {
 	AuthorizeFederationReference(ctx context.Context, tx Transaction, route, peer FederationAccessRequest) error
 }

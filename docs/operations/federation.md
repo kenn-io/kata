@@ -2449,6 +2449,11 @@ is not released by upgrading or retrying because kata does not rewrite the
 stored event. Handle it through the normal explicit quarantine disposition
 workflow.
 
+Parent replacement events already queued by v0.19.0 through v0.23.0 also
+omit these fields. Upgrading does not change those events, and the hub still
+rejects them. Inspect the quarantine and choose a disposition as described in
+[other validation quarantines](#other-validation-quarantines).
+
 Older kata builds may already have quarantined a batch after a transient
 schema-skew rejection. After upgrading the hub, upgrade and restart each spoke
 on a build with this compatibility behavior. The next sync auto-releases that

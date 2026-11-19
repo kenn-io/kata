@@ -369,8 +369,9 @@ described above.
 
 A direct spoke can use separate project actors for one principal when its
 host implements `FederationReferenceAccessController` on
-`Config.FederationAccess`. This applies to direct link additions and parent
-removal or replacement. The spoke supplies the referenced project's push
+`Config.FederationAccess`. This applies to link additions in issue creation or
+composite edits, and to parent link additions, removals, or replacements.
+The spoke supplies the referenced project's push
 credential for the same hub URL, including its mount path. Kata calls
 `AuthorizeFederation` for that project with the mutation operation
 `authorizeFederationIssueReference`. After fencing both credentials, Kata calls
