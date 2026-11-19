@@ -38,7 +38,7 @@ func reconcileProviderMapping(
 	if daemon.FederationReplicaMappingSuppressed(store, mapping.SpokeProject) {
 		return nil
 	}
-	project, event, err := resolveOrCreateLocalProject(ctx, store, mapping.SpokeProject)
+	_, event, err := resolveOrCreateLocalProject(ctx, store, mapping.SpokeProject)
 	if event != nil && projectEventSink != nil {
 		projectEventSink(*event)
 	}
@@ -76,25 +76,11 @@ func reconcileProviderMapping(
 	if metadata.ProjectID != credential.HubProjectID || metadata.ProjectUID != decision.HubProjectUID || metadata.ReplayHorizonEventID <= 0 {
 		return reconcileError(ErrBindingConflict, "federation metadata differs from the approved project")
 	}
-	attachEmpty := decision.Intent != federationprovider.IntentMigrate
-	if attachEmpty && project.UID == decision.HubProjectUID && project.DeletedAt == nil {
-		retained, err := store.IsFederationRetainedProject(ctx, project.UID)
-		if err != nil {
-			return reconcileError(ErrLocalStorage, "read retained federation project")
-		}
-		_, err = store.FederationBindingByProject(ctx, project.ID)
-		if err != nil && !errors.Is(err, db.ErrNotFound) {
-			return reconcileError(ErrLocalStorage, "read federation binding")
-		}
-		if !retained && errors.Is(err, db.ErrNotFound) {
-			attachEmpty = false
-		}
-	}
 	params := daemon.EnsureFederationReplicaParams{
 		HubURL: credential.HubURL, HubProjectID: credential.HubProjectID, HubProjectUID: decision.HubProjectUID,
 		ProjectName: mapping.SpokeProject, ReplayHorizonEventID: metadata.ReplayHorizonEventID,
 		Credential: credential, PushEnabled: slices.Contains(strings.Split(credential.Capabilities, ","), "push"),
-		AdoptExisting: decision.Intent == federationprovider.IntentMigrate, AttachEmpty: attachEmpty,
+		AdoptExisting: decision.Intent == federationprovider.IntentMigrate, AttachEmpty: decision.Intent != federationprovider.IntentMigrate,
 		ManagedReservation: &daemon.FederationReplicaManagedReservation{ProjectUID: reservation.ProjectUID, Expected: credential},
 		ProjectEventSink:   projectEventSink,
 		ProjectResetSink:   projectResetSink,

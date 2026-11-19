@@ -292,6 +292,7 @@ func TestReconcileProviderUsesApprovedMetadataWithoutCatalogAdministration(t *te
 		{name: "collaborate without claiming", intent: "collaborate"},
 		{name: "migrate", intent: "migrate", existingData: true},
 		{name: "collaborate refuses existing data", intent: "collaborate", existingData: true},
+		{name: "read_only refuses existing data", intent: "read_only", existingData: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.name == "collaborate without claiming" {
@@ -360,6 +361,7 @@ func TestReconcileProviderUsesApprovedMetadataWithoutCatalogAdministration(t *te
 			if tc.existingData {
 				local, err := store.ProjectByName(t.Context(), mapping.SpokeProject)
 				require.NoError(t, err)
+				require.NotEqual(t, hubProjectUID, local.UID)
 				_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: local.ID, Title: "Import this task", Author: "Original Author"})
 				require.NoError(t, err)
 			}
@@ -606,17 +608,30 @@ func TestReconcileProviderJoinsRestoredPlaceholder(t *testing.T) {
 }
 
 func TestReconcileProviderRejoinsDetachedProject(t *testing.T) {
-	for _, intent := range []federationprovider.Intent{"read_only", "collaborate"} {
-		t.Run(string(intent), func(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		intent federationprovider.Intent
+		empty  bool
+	}{
+		{name: "read_only", intent: "read_only"},
+		{name: "collaborate", intent: "collaborate"},
+		{name: "empty read_only", intent: "read_only", empty: true},
+		{name: "empty collaborate", intent: "collaborate", empty: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			t.Setenv("KATA_TEST_RECONCILE_PROVIDER", "1")
 			t.Setenv("KATA_TEST_PROVIDER_DECISION", "ready")
 			store := openReconcileStore(t)
 			ctx := t.Context()
-			project, err := store.CreateProjectWithUID(ctx, "spoke-project", hubProjectUID)
+			project, projectEvent, err := store.CreateProjectWithUIDAndEvent(ctx, "spoke-project", hubProjectUID, "worker")
 			require.NoError(t, err)
-			issue, event, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local task", Author: "worker"})
-			require.NoError(t, err)
+			var issue db.Issue
+			var event db.Event
+			if !tc.empty {
+				issue, event, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "local task", Author: "worker"})
+				require.NoError(t, err)
+			}
 			credentials := config.DefaultFederationCredentialStore()
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				assert.NoError(t, json.NewEncoder(w).Encode(map[string]any{
@@ -632,7 +647,7 @@ func TestReconcileProviderRejoinsDetachedProject(t *testing.T) {
 			require.NoError(t, err)
 			catalog := config.CatalogDaemonConfig{Name: "team-hub", URL: server.URL + "/tasks"}
 			mapping := config.FederationProjectConfig{
-				Hub: catalog.Name, SpokeProject: project.Name, HubProject: "hub-project", Intent: intent,
+				Hub: catalog.Name, SpokeProject: project.Name, HubProject: "hub-project", Intent: tc.intent,
 				CredentialProvider: []string{executable, "-test.run=^TestReconcileProviderProcess$"},
 			}
 
@@ -642,7 +657,13 @@ func TestReconcileProviderRejoinsDetachedProject(t *testing.T) {
 			assert.Equal(t, project.ID, joined.ID)
 			binding, err := store.FederationBindingByProject(ctx, joined.ID)
 			require.NoError(t, err)
-			assert.Equal(t, intent == "collaborate", binding.PushEnabled)
+			assert.Equal(t, tc.intent == "collaborate", binding.PushEnabled)
+			if tc.empty {
+				events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: joined.ID, Limit: 10})
+				require.NoError(t, err)
+				assert.NotContains(t, events, projectEvent)
+				return
+			}
 			got, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			assert.Equal(t, joined.ID, got.ProjectID)

@@ -938,8 +938,9 @@ plaintext opt-in does not change that contract. Install the hub's CA in the
 daemon's trust store when using a private certificate authority.
 
 `read_only` permits pull only. `collaborate` permits pull and push; the hub may
-also grant task claiming. Both require an empty local project. `migrate` asks
-the hub to approve adoption of an existing project's tasks and authors.
+also grant task claiming. Both attach an empty local project or rejoin a
+detached project whose UID matches the approved hub project. `migrate` asks the
+hub to approve adoption of an existing project's tasks and authors.
 The helper cannot silently downgrade write access or upgrade read-only access.
 
 Kata retains the request across restarts and failed exchanges. A helper that
