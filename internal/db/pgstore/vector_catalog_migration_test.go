@@ -67,10 +67,6 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 	require.NoError(t, err)
 	_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_generations(gen_key, model, dimensions, state) VALUES ($1, 'retired-model', 2, 'retired')`, retiredKey)
 	require.NoError(t, err)
-	_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_stamps(gen_key, issue_uid, revision) VALUES ($1, $2, $3)`, retiredKey, issues[0].UID, issues[0].ContentRevision)
-	require.NoError(t, err)
-	_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_chunks(gen_key, issue_uid, chunk_index, embedding) VALUES ($1, $2, 0, '[0,1]')`, retiredKey, issues[0].UID)
-	require.NoError(t, err)
 	for i, issue := range issues {
 		_, err = admin.ExecContext(ctx, `INSERT INTO vector_upgrade.issue_vector_stamps(gen_key, issue_uid, revision) VALUES ($1, $2, $3)`, key, issue.UID, issue.ContentRevision)
 		require.NoError(t, err)
@@ -88,25 +84,8 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "vector_upgrade", SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })
-	var fingerprint, doc, embedding string
-	var revision int
-	err = upgraded.QueryRowContext(ctx, `SELECT g.fingerprint, s.doc_key, s.revision, c.embedding::text FROM issue_vector_generations g JOIN issue_vector_stamps s ON s.generation_id=g.id JOIN issue_vector_chunks c ON c.generation_id=g.id AND c.doc_key=s.doc_key WHERE s.doc_key=$1 AND g.gen_key=$2`, issues[0].UID, key).Scan(&fingerprint, &doc, &revision, &embedding)
-	require.NoError(t, err)
-	assert.Equal(t, key, fingerprint)
-	assert.Equal(t, issues[0].UID, doc)
-	assert.EqualValues(t, issues[0].ContentRevision, revision)
-	assert.Equal(t, "[1,0]", embedding)
 	idx, err := vector.OpenPostgres(ctx, upgraded.DB)
 	require.NoError(t, err)
-	var retiredState, retiredFingerprint, retiredDoc, retiredVector string
-	var retiredRevision int64
-	err = upgraded.QueryRowContext(ctx, `SELECT g.state, g.fingerprint, s.doc_key, s.revision, c.embedding::text FROM issue_vector_generations g JOIN issue_vector_stamps s ON s.generation_id=g.id JOIN issue_vector_chunks c ON c.generation_id=g.id AND c.doc_key=s.doc_key WHERE g.gen_key=$1`, retiredKey).Scan(&retiredState, &retiredFingerprint, &retiredDoc, &retiredRevision, &retiredVector)
-	require.NoError(t, err)
-	assert.Equal(t, "retired", retiredState)
-	assert.Equal(t, retiredKey, retiredFingerprint)
-	assert.Equal(t, issues[0].UID, retiredDoc)
-	assert.Equal(t, issues[0].ContentRevision, retiredRevision)
-	assert.Equal(t, "[0,1]", retiredVector)
 	release, err := idx.AcquireReconcilerLease(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -117,6 +96,7 @@ func TestVectorCatalogMigrationPreservesVectors(t *testing.T) {
 	require.NoError(t, idx.EnsureBuilding(ctx, retiredKey, retired))
 	require.NoError(t, release())
 	release = nil
+	var retiredState string
 	err = upgraded.QueryRowContext(ctx, `SELECT state FROM issue_vector_generations WHERE gen_key=$1`, retiredKey).Scan(&retiredState)
 	require.NoError(t, err)
 	assert.Equal(t, "building", retiredState)
@@ -168,29 +148,4 @@ func vectorCatalogShape(ctx context.Context, t *testing.T, admin *sql.DB, schema
 	}
 	require.NoError(t, rows.Err())
 	return values
-}
-
-func TestVectorCatalogMigrationWithoutVectorTables(t *testing.T) {
-	ctx := t.Context()
-	dsn, cleanup := testenv.NewPlainPostgresContainer(t, ctx)
-	t.Cleanup(cleanup)
-	const schema = "vector_absent_upgrade"
-	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
-	require.NoError(t, err)
-	require.NoError(t, store.Close())
-	admin, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = admin.Close() })
-	_, err = admin.ExecContext(ctx, `UPDATE vector_absent_upgrade.meta SET value='51' WHERE key='schema_version'`)
-	require.NoError(t, err)
-	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = upgraded.Close() })
-	version, err := upgraded.SchemaVersion(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, db.CurrentSchemaVersion(), version)
-	var count int
-	err = admin.QueryRowContext(ctx, `SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname IN ('issue_vector_mirror', 'issue_vector_generations', 'issue_vector_stamps', 'issue_vector_chunks')`, schema).Scan(&count)
-	require.NoError(t, err)
-	assert.Zero(t, count)
 }

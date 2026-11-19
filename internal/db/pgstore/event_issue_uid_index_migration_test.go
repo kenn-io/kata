@@ -61,9 +61,9 @@ func eventIssueIndexes(ctx context.Context, t *testing.T, admin *sql.DB, schema 
 	return indexes
 }
 
-// Contract: upgrading from schema 50 replaces the payload-derived issue index
-// with the header issue_uid and event ID index, matching a fresh install, and
-// per-issue history still reads through it.
+// Contract: schema 50 upgrades to 51 by replacing the payload-derived issue
+// index with one on the header issue_uid and event ID, matching a fresh
+// install, and per-issue history still reads through it.
 func TestEventIssueUIDIndexMigrationUpgradesVersion50(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires PostgreSQL")
