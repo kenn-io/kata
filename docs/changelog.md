@@ -9,6 +9,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Keep Linear discussion when you sync a Linear team: comments on imported
+  issues now arrive with their Linear author and creation time. Kata copies
+  each comment once. See [Linear sync](operations/linear-sync.md).
+
 - External imports into a relayed project on PostgreSQL, such as
   `kata import --source beads`, now record the import's actor and the source
   authors, as they do on SQLite. They had recorded the relay connection's bound
