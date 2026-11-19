@@ -57,7 +57,7 @@ func openVectorBackend(t *testing.T, backend string) (db.Storage, *vector.Index)
 
 // The project boundary belongs before distance ranking and its candidate limit:
 // arbitrarily closer private chunks must never crowd out an authorized result.
-func TestProjectAccessVectorCandidatesBeforeLimitAndNegativeLimit(t *testing.T) {
+func TestProjectAccessVectorCandidatesBeforeLimit(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
