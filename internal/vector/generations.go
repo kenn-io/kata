@@ -11,6 +11,8 @@ import (
 )
 
 func (ix *Index) EnsureBuilding(ctx context.Context, key string, gen kitvec.Generation) error {
+	ix.lifecycleMu.Lock()
+	defer ix.lifecycleMu.Unlock()
 	if ix.pg != nil && gen.Dimensions > maxPostgresHalfvecDimensions {
 		return fmt.Errorf("vector: postgres halfvec dimensions must not exceed 4,000 (got %d)", gen.Dimensions)
 	}
@@ -30,6 +32,7 @@ func (ix *Index) EnsureBuilding(ctx context.Context, key string, gen kitvec.Gene
 	if state == string(sqlitevec.StateActive) {
 		return nil
 	}
+	delete(ix.reclaimed, key)
 	store := ix.lifecycleStore()
 	if err := store.EnsureGeneration(ctx, key, gen, kitvec.StateBuilding); err != nil {
 		return fmt.Errorf("vector: ensure generation %s: %w", key, err)
@@ -46,6 +49,18 @@ func (ix *Index) ActiveGeneration(ctx context.Context) (string, bool, error) {
 }
 
 func (ix *Index) CutOver(ctx context.Context, key string) error {
+	ix.lifecycleMu.Lock()
+	defer ix.lifecycleMu.Unlock()
+	if ix.pg != nil {
+		session, err := ix.pg.leaseSession()
+		if err != nil {
+			return err
+		}
+		if ix.reclaimSession != session {
+			clear(ix.reclaimed)
+			ix.reclaimSession = session
+		}
+	}
 	_, _, backlog, err := ix.Coverage(ctx, key)
 	if err != nil {
 		return err
@@ -63,7 +78,7 @@ func (ix *Index) CutOver(ctx context.Context, key string) error {
 		return err
 	}
 	for _, other := range keys {
-		if other == key {
+		if other == key || ix.reclaimed[other] {
 			continue
 		}
 		if err := store.SetGenerationState(ctx, other, kitvec.StateRetired); err != nil {
@@ -72,6 +87,10 @@ func (ix *Index) CutOver(ctx context.Context, key string) error {
 		if err := store.Reclaim(ctx, other); err != nil {
 			return err
 		}
+		if ix.reclaimed == nil {
+			ix.reclaimed = make(map[string]bool)
+		}
+		ix.reclaimed[other] = true
 	}
 	return nil
 }
