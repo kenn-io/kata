@@ -3,7 +3,7 @@
  */
 
 /**
- * refused: the hub rejected the credential (401 or 403); it waits up to 15 minutes between attempts and retries at once when the credential or binding changes. unavailable: the hub throttled the request or was unavailable (429 or 503); it waits up to 5 minutes, or longer when the hub sent Retry-After. relay_cross_project_links: a relay hub refused the project's cross-project issue links.
+ * refused: the hub rejected the credential (401 or 403); it waits up to 15 minutes between attempts, or longer when the hub also sent Retry-After, and retries at once when the credential or binding changes. unavailable: the hub throttled the request or was unavailable (429 or 503); it waits up to 5 minutes, or longer when the hub sent Retry-After. relay_cross_project_links: a relay hub refused the project's cross-project issue links.
  */
 export type FederationSyncRetryReason =
   (typeof FederationSyncRetryReason)[keyof typeof FederationSyncRetryReason]

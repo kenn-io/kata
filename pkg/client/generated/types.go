@@ -3111,7 +3111,7 @@ type FederationSyncRetry struct {
 	// NextAttemptAt Earliest time the runner contacts the hub again. The attempt happens on the runner's first pass at or after this time.
 	NextAttemptAt time.Time `json:"next_attempt_at" validate:"required"`
 
-	// Reason refused: the hub rejected the credential (401 or 403); it waits up to 15 minutes between attempts and retries at once when the credential or binding changes. unavailable: the hub throttled the request or was unavailable (429 or 503); it waits up to 5 minutes, or longer when the hub sent Retry-After. relay_cross_project_links: a relay hub refused the project's cross-project issue links.
+	// Reason refused: the hub rejected the credential (401 or 403); it waits up to 15 minutes between attempts, or longer when the hub also sent Retry-After, and retries at once when the credential or binding changes. unavailable: the hub throttled the request or was unavailable (429 or 503); it waits up to 5 minutes, or longer when the hub sent Retry-After. relay_cross_project_links: a relay hub refused the project's cross-project issue links.
 	Reason FederationSyncRetryReason `json:"reason" validate:"required"`
 }
 

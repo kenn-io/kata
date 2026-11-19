@@ -2323,7 +2323,7 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 			lines = append(lines, "access expires: "+formatFederationStatusTime(status.CredentialExpiresAt))
 		}
 		if status.SyncRetry != nil {
-			lines = append(lines, "sync retry: "+formatFederationSyncRetry(*status.SyncRetry))
+			lines = append(lines, "sync retry: "+formatFederationSyncRetry(*status.SyncRetry, status.ProviderStatus != ""))
 		}
 		for _, line := range lines {
 			if _, err := fmt.Fprintf(out, "  %s\n", line); err != nil {
@@ -2356,7 +2356,10 @@ func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) er
 	return nil
 }
 
-func formatFederationSyncRetry(retry api.FederationSyncRetry) string {
+// formatFederationSyncRetry describes a binding's retry schedule. A refused
+// manually joined spoke also learns how to retry at once; a provider-managed
+// spoke's provider line already says what to do.
+func formatFederationSyncRetry(retry api.FederationSyncRetry, providerManaged bool) string {
 	reason := textsafe.Line(retry.Reason)
 	switch retry.Reason {
 	case "refused":
@@ -2372,10 +2375,10 @@ func formatFederationSyncRetry(retry api.FederationSyncRetry) string {
 	}
 	line := fmt.Sprintf("%s (%d) on %d %s; next attempt %s",
 		reason, retry.HTTPStatus, retry.Failures, attempts, retry.NextAttemptAt.UTC().Format(time.RFC3339))
-	if retry.Reason == "refused" {
+	if retry.Reason == "refused" && !providerManaged {
 		// A new credential resets the schedule; a hub-side grant waits for
 		// the next attempt.
-		line += "; run kata federation join with a new token to retry now"
+		line += "; to retry now, enroll again on the hub and run the join command it prints"
 	}
 	return line
 }

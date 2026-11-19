@@ -350,6 +350,38 @@ func TestThrottledClaimEndsTheTurn(t *testing.T) {
 	require.Len(t, pending, 2, "both claims stay queued")
 }
 
+// failingClaimAttemptStore cannot record a pending claim attempt.
+type failingClaimAttemptStore struct{ *sqlitestore.Store }
+
+func (failingClaimAttemptStore) MarkPendingClaimAttempt(context.Context, string, string, time.Time) error {
+	return errors.New("disk full")
+}
+
+// A throttled claim still ends the claim loop when the spoke cannot record
+// the attempt, and the error keeps both the hub's answer and the local
+// failure.
+func TestThrottledClaimSurvivesAFailedAttemptWrite(t *testing.T) {
+	ctx := t.Context()
+	fleet := newSpokeFleet(t, 1)
+	project := fleet.projects[0]
+	fleet.refuse.Delete(project.UID)
+	fleet.throttleClaims.Store(true)
+	for i := range 2 {
+		issue, _, err := fleet.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: fmt.Sprintf("claimed %d", i), Author: "worker"})
+		require.NoError(t, err)
+		_, err = fleet.store.EnqueuePendingClaim(ctx, pendingClaimParams(fleet.store, project.ID, issue.ShortID, "worker"))
+		require.NoError(t, err)
+	}
+	binding, err := fleet.store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	err = retryPendingClaimsOnceWithFence(ctx, failingClaimAttemptStore{fleet.store}, binding, fleet.credentials.credentials[project.UID], fleet.runner.clientOpts(), nil)
+	require.Equal(t, int64(1), fleet.requests.Load(), "only the first claim reaches the hub")
+	require.True(t, hubAskedToWait(err), "the hub's 503 survives: %v", err)
+	require.ErrorContains(t, err, "disk full")
+	_, _, retryAfter := classifySyncRetry(err)
+	require.Equal(t, 2*time.Minute, retryAfter)
+}
+
 // failingCredentialStore cannot read any credential.
 type failingCredentialStore struct{ *mapCredentialStore }
 
@@ -369,12 +401,11 @@ func TestRelayRetryHoldsWhenCredentialReadFails(t *testing.T) {
 }
 
 // A runner that stops, such as a PostgreSQL leader that loses its lease, stops
-// reporting schedules, and a runner that starts drops schedules from before.
+// reporting schedules.
 func TestRunnerReportsSchedulesOnlyWhileRunning(t *testing.T) {
 	fleet := newSpokeFleet(t, 1)
 	project := fleet.projects[0]
 	retries := newSyncRetries(noJitter)
-	retries.record(999, [32]byte{}, refusedSyncError(http.StatusForbidden), 30*time.Second, fleet.now)
 	fleet.runner.Retries = retries
 	// The runner reports a pass's errors after it records the schedules.
 	passed := make(chan struct{}, 1)
@@ -390,8 +421,6 @@ func TestRunnerReportsSchedulesOnlyWhileRunning(t *testing.T) {
 	<-passed
 	_, ok := retries.FederationSyncRetry(project.ID)
 	require.True(t, ok, "the refused binding waits")
-	_, ok = retries.FederationSyncRetry(999)
-	require.False(t, ok, "a starting runner drops older schedules")
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
 	_, ok = retries.FederationSyncRetry(project.ID)

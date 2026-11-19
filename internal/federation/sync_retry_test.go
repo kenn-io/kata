@@ -74,6 +74,18 @@ func TestSyncRetryWaitNeverShortensTheInterval(t *testing.T) {
 	}
 }
 
+// A refused turn that was also throttled waits at least as long as the hub
+// asked, and still reports the refusal.
+func TestSyncRetryRefusalKeepsTheTurnsRetryAfter(t *testing.T) {
+	retries := newSyncRetries(noJitter)
+	completed := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	err := errors.Join(refusedSyncError(http.StatusUnauthorized), &HubStatusError{StatusCode: http.StatusServiceUnavailable, RetryAfter: 10 * time.Minute})
+	retries.record(1, [32]byte{}, err, 30*time.Second, completed)
+	retry, ok := retries.FederationSyncRetry(1)
+	require.True(t, ok)
+	require.Equal(t, api.FederationSyncRetry{Reason: syncRetryRefused, HTTPStatus: http.StatusUnauthorized, Failures: 1, NextAttemptAt: completed.Add(10 * time.Minute)}, retry)
+}
+
 // A turn that hit several throttled responses waits for the longest hint.
 func TestSyncRetryKeepsTheLongestRetryAfter(t *testing.T) {
 	err := errors.Join(

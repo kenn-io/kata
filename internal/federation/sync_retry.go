@@ -94,16 +94,15 @@ func (s *SyncRetries) FederationSyncRetry(projectID int64) (api.FederationSyncRe
 	return state.FederationSyncRetry, ok
 }
 
-// waiting returns the reason of the binding's schedule, if it has one, so the
-// caller knows whether blocked needs the credential's identity.
-func (s *SyncRetries) waiting(projectID int64) (string, bool) {
+// waiting returns the reason of the binding's schedule, or "" when it has
+// none, so the caller knows whether blocked needs the credential's identity.
+func (s *SyncRetries) waiting(projectID int64) string {
 	if s == nil {
-		return "", false
+		return ""
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	state, ok := s.states[projectID]
-	return state.Reason, ok
+	return s.states[projectID].Reason
 }
 
 // blocked reports whether the runner must skip the binding now. A schedule
@@ -162,7 +161,7 @@ func (s *SyncRetries) record(projectID int64, identity [32]byte, err error, inte
 		wait = next.delay
 	case syncRetryRefused:
 		next.delay = nextRetryDelay(previous.delay, ok, max(refusedRetryInitialDelay, interval), max(refusedRetryMaxDelay, interval))
-		wait = max(next.delay-s.jitter(next.delay/4), interval)
+		wait = max(next.delay-s.jitter(next.delay/4), interval, min(retryAfter, maxHonoredRetryAfter))
 	case syncRetryUnavailable:
 		next.delay = nextRetryDelay(previous.delay, ok, interval, max(unavailableRetryMaxDelay, interval))
 		wait = max(next.delay-s.jitter(next.delay/4), interval, min(retryAfter, maxHonoredRetryAfter))
@@ -204,10 +203,10 @@ func (s *SyncRetries) reset() {
 
 // classifySyncRetry finds the hub response that decides a failed turn's retry
 // schedule. A refused credential outranks a throttled request because only an
-// operator or hub change can clear it. Among throttled responses the longest
-// Retry-After hint wins. A refusal of one pushed issue's move
-// (federation_project_not_enrolled) is not a credential refusal: the pull
-// still ran with the same credential.
+// operator or hub change can clear it. The longest Retry-After hint from any
+// throttled response in the turn still applies, even under a refusal. A
+// refusal of one pushed issue's move (federation_project_not_enrolled) is not
+// a credential refusal: the pull still ran with the same credential.
 func classifySyncRetry(err error) (reason string, status int, retryAfter time.Duration) {
 	if errors.Is(err, errRelayCrossProjectLinks) {
 		return syncRetryRelayCrossProjectLinks, http.StatusConflict, 0
@@ -218,7 +217,9 @@ func classifySyncRetry(err error) (reason string, status int, retryAfter time.Du
 			if federationHubErrorCode(hubErr.Body) == db.FederationProjectNotEnrolledCode {
 				continue
 			}
-			return syncRetryRefused, hubErr.StatusCode, 0
+			if reason != syncRetryRefused {
+				reason, status = syncRetryRefused, hubErr.StatusCode
+			}
 		case http.StatusTooManyRequests, http.StatusServiceUnavailable:
 			if reason == "" {
 				reason, status = syncRetryUnavailable, hubErr.StatusCode

@@ -1285,11 +1285,10 @@ func (r *Runner) retryBlocked(
 	spoke activeSpokeBinding,
 	credentialStore config.FederationCredentialStore,
 ) bool {
-	reason, waiting := retries.waiting(spoke.binding.ProjectID)
-	if !waiting {
+	switch retries.waiting(spoke.binding.ProjectID) {
+	case "":
 		return false
-	}
-	if reason == syncRetryRelayCrossProjectLinks {
+	case syncRetryRelayCrossProjectLinks:
 		return retries.blocked(spoke.binding.ProjectID, [32]byte{}, r.refusalNow())
 	}
 	credential, _, err := credentialStore.FederationCredential(ctx, spoke.project.UID)
@@ -1604,7 +1603,9 @@ func retryPendingClaim(
 			}
 		}
 		if markErr := store.MarkPendingClaimAttempt(ctx, pending.RequestUID, err.Error(), now); markErr != nil {
-			return markErr
+			// Keep the hub's answer so a throttled claim still ends the
+			// turn and its Retry-After still counts.
+			return errors.Join(err, markErr)
 		}
 		return err
 	}
