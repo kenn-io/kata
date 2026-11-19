@@ -9,6 +9,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Sync a Linear team that every run had refused with `linear issue is outside
+  selected scope`. For some teams, Linear's issue filter on the team ID returns
+  issues from the whole workspace. Kata now reads issues through the team
+  itself, so it receives only that team's issues.
+
 - Keep Linear discussion when you sync a Linear team: comments on imported
   issues now arrive with their Linear author and creation time. Kata copies
   each comment once. See [Linear sync](operations/linear-sync.md).

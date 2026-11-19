@@ -231,7 +231,7 @@ func TestClientRunnerImportAndStateOnlyWriteback(t *testing.T) {
 		require.NoError(t, err)
 		r.Body = io.NopCloser(bytes.NewReader(raw))
 		if bytes.Contains(raw, []byte("KataLinearIssues")) {
-			return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{issue()}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
+			return dataResponse(map[string]any{"team": map[string]any{"issues": map[string]any{"nodes": []any{issue()}, "pageInfo": map[string]any{"hasNextPage": false}}}}), nil
 		}
 		return statusAPI(r)
 	})
@@ -270,7 +270,7 @@ func TestClientRunnerImportsIssueComments(t *testing.T) {
 		r.Body = io.NopCloser(bytes.NewReader(raw))
 		switch {
 		case bytes.Contains(raw, []byte("KataLinearIssues")):
-			return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{wireIssue()}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
+			return dataResponse(map[string]any{"team": map[string]any{"issues": map[string]any{"nodes": []any{wireIssue()}, "pageInfo": map[string]any{"hasNextPage": false}}}}), nil
 		case bytes.Contains(raw, []byte("KataLinearComments")):
 			_, v := requestBody(t, r)
 			require.Equal(t, map[string]any{"issue": map[string]any{"id": map[string]any{"in": []any{issueID}}}}, v["filter"],
