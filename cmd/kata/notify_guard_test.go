@@ -58,7 +58,7 @@ func TestNotifyGuardFlagsRejectOldDaemon(t *testing.T) {
 		{"--clear", "--if-from", "agent-a"},
 	} {
 		_, err := runCLICapture(t, &old, dir, append([]string{"notify", ref, "--to", "reviewer"}, args...)...)
-		require.ErrorContains(t, err, "requires daemon API 0.58.0")
+		require.ErrorContains(t, err, "requires daemon API 0.59.0")
 	}
 	assert.Zero(t, writes.Load())
 }
