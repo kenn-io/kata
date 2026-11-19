@@ -1230,43 +1230,165 @@ func (r *Runner) runOnce(
 		credentialStore = config.DefaultFederationCredentialStore()
 	}
 	var errs []error
+	// awaiting holds the turns the hub refused because a move they push
+	// arrived before the hub had the moved issue's creation from the source
+	// project. A source that pushes cleanly later in this pass delivers that
+	// creation, so the refused turn runs once more after the others.
+	var awaiting []*awaitingMoveSource
 	for _, spoke := range spokes {
 		if refusals.blocked(spoke.binding, r.refusalNow()) {
 			continue
 		}
-		var drain *activity.Lease
-		if r.DrainAdmission != nil {
-			var admitted bool
-			drain, admitted, retry = r.DrainAdmission()
-			if !admitted {
-				return retry, true, remaining, errors.Join(errs...)
-			}
+		turn := r.runSpokeTurn(ctx, spoke, credentialStore, validateLease, refusals)
+		if turn.denied {
+			return turn.retry, true, remaining, errors.Join(append(errs, refusedMoveErrors(awaiting)...)...)
 		}
-		spokeRemaining, spokeErr := func() (bool, error) {
-			if drain != nil {
-				defer drain.Release()
-			}
-			return r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
-		}()
-		refusals.record(spoke.binding, spokeErr, r.effectiveInterval(), r.refusalNow())
-		if errors.Is(spokeErr, context.Canceled) || errors.Is(spokeErr, errFederationRunnerLeaseInvalid) {
-			return nil, false, nil, spokeErr
+		if endsFederationPass(turn.err) {
+			return nil, false, nil, turn.err
 		}
-		if spokeErr != nil {
-			errs = append(errs, spokeErr)
+		if turn.err != nil {
+			sources, err := pendingMoveSources(ctx, r.DB, spoke.binding.ProjectID, turn.err)
+			if err != nil {
+				errs = append(errs, err)
+			}
+			if len(sources) > 0 {
+				awaiting = append(awaiting, &awaitingMoveSource{spoke: spoke, sources: sources, err: turn.err})
+				continue
+			}
+			errs = append(errs, turn.err)
 			// A turn that failed anywhere, including its claim retries, waits
 			// for the interval like a drained project; only a clean turn that
 			// used its budget runs again at once.
 			continue
 		}
-		if spokeRemaining {
-			if remaining == nil {
-				remaining = map[int64]bool{}
-			}
-			remaining[spoke.binding.ProjectID] = true
+		if turn.remaining {
+			remaining = withProject(remaining, spoke.binding.ProjectID)
+			continue
+		}
+		for _, refused := range awaiting {
+			refused.sourcePushed = refused.sourcePushed || refused.sources[spoke.binding.HubProjectUID]
+		}
+	}
+	for i, refused := range awaiting {
+		if !refused.sourcePushed {
+			errs = append(errs, refused.err)
+			continue
+		}
+		turn := r.runSpokeTurn(ctx, refused.spoke, credentialStore, validateLease, refusals)
+		if turn.denied {
+			return turn.retry, true, remaining, errors.Join(append(errs, refusedMoveErrors(awaiting[i:])...)...)
+		}
+		if endsFederationPass(turn.err) {
+			return nil, false, nil, turn.err
+		}
+		if turn.err != nil {
+			errs = append(errs, turn.err)
+		} else if turn.remaining {
+			remaining = withProject(remaining, refused.spoke.binding.ProjectID)
 		}
 	}
 	return nil, false, remaining, errors.Join(errs...)
+}
+
+func refusedMoveErrors(awaiting []*awaitingMoveSource) []error {
+	errs := make([]error, 0, len(awaiting))
+	for _, refused := range awaiting {
+		errs = append(errs, refused.err)
+	}
+	return errs
+}
+
+func withProject(projects map[int64]bool, projectID int64) map[int64]bool {
+	if projects == nil {
+		projects = map[int64]bool{}
+	}
+	projects[projectID] = true
+	return projects
+}
+
+func endsFederationPass(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid)
+}
+
+// awaitingMoveSource is a spoke turn the hub refused until a move's source
+// project pushes the moved issue's creation.
+type awaitingMoveSource struct {
+	spoke activeSpokeBinding
+	// sources holds the hub project UIDs the refused moves came from.
+	sources      map[string]bool
+	err          error
+	sourcePushed bool
+}
+
+// spokeTurn is the outcome of one spoke's sync turn. denied reports that the
+// drain admission refused the turn, and retry fires when it may admit one.
+type spokeTurn struct {
+	remaining bool
+	err       error
+	denied    bool
+	retry     <-chan struct{}
+}
+
+// runSpokeTurn gives one spoke a sync turn under the drain admission and
+// records its relay refusal state.
+func (r *Runner) runSpokeTurn(
+	ctx context.Context,
+	spoke activeSpokeBinding,
+	credentialStore config.FederationCredentialStore,
+	validateLease func(context.Context) error,
+	refusals relayRefusalRetries,
+) spokeTurn {
+	var drain *activity.Lease
+	if r.DrainAdmission != nil {
+		var admitted bool
+		var retry <-chan struct{}
+		drain, admitted, retry = r.DrainAdmission()
+		if !admitted {
+			return spokeTurn{denied: true, retry: retry}
+		}
+	}
+	var turn spokeTurn
+	func() {
+		if drain != nil {
+			defer drain.Release()
+		}
+		turn.remaining, turn.err = r.runSpoke(ctx, spoke, credentialStore, validateLease, drain)
+	}()
+	refusals.record(spoke.binding, turn.err, r.effectiveInterval(), r.refusalNow())
+	return turn
+}
+
+// pendingMoveSources returns the hub project UIDs that the project's pending
+// moves came from when the hub refused its push with 404 Not Found, the
+// answer for a move whose source creation has not arrived.
+func pendingMoveSources(ctx context.Context, store db.Storage, projectID int64, pushErr error) (map[string]bool, error) {
+	status, ok := errors.AsType[*HubStatusError](pushErr)
+	if !ok || status.StatusCode != http.StatusNotFound {
+		return nil, nil
+	}
+	binding, err := store.FederationBindingByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	pending, err := store.PendingFederationPushEvents(ctx, projectID, store.InstanceUID(), binding.PushCursorEventID, federationPollLimit)
+	if err != nil {
+		return nil, err
+	}
+	var sources map[string]bool
+	for _, event := range pending {
+		if event.Type != "issue.moved" {
+			continue
+		}
+		fromUID, _ := db.StringValue(db.PayloadMap([]byte(event.Payload))["from_project_uid"])
+		if fromUID == "" {
+			continue
+		}
+		if sources == nil {
+			sources = map[string]bool{}
+		}
+		sources[fromUID] = true
+	}
+	return sources, nil
 }
 
 // runSpoke gives one spoke a sync turn and reports whether that turn stopped
