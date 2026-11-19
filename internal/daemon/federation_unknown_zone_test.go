@@ -1,14 +1,11 @@
 package daemon_test
 
 import (
-	"archive/zip"
 	"encoding/json/jsontext"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -26,21 +23,10 @@ func TestFederationUnknownZoneSender(t *testing.T) {
 	}
 	_, err := time.LoadLocation(zone)
 	require.Error(t, err)
-	archive, err := zip.OpenReader(filepath.Join(runtime.GOROOT(), "lib", "time", "zoneinfo.zip"))
-	require.NoError(t, err)
-	defer archive.Close()
-	var contents []byte
-	for _, file := range archive.File {
-		if file.Name == "UTC" {
-			reader, openErr := file.Open()
-			require.NoError(t, openErr)
-			contents, err = io.ReadAll(reader)
-			require.NoError(t, err)
-			require.NoError(t, reader.Close())
-			break
-		}
-	}
-	require.NotEmpty(t, contents)
+	// TZif v1 with one UTC zone and no transitions.
+	contents := []byte("TZif\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00" +
+		"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00" +
+		"\x00\x00\x00\x01\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00UTC\x00")
 	dir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "Example"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, zone), contents, 0o600))
