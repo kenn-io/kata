@@ -106,6 +106,17 @@ describe('IssueProperties', () => {
     )
   })
 
+  it('opens a bare timed schedule on its saved day', async () => {
+    renderProperties({
+      issue: makeIssue({
+        scheduled_on_date: '2026-08-31',
+        metadata: { scheduled_on: '2026-09-01T09:00' },
+      }),
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+    expect(screen.getByRole('button', { name: /Scheduled:/ }).textContent).toContain('Sep 1')
+  })
+
   it('replaces a bare timed schedule when selecting the same day', async () => {
     const onPatchMetadata = vi.fn(async () => true)
     renderProperties({

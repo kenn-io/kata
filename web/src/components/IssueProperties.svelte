@@ -221,7 +221,8 @@
     if (actionsDisabled) return
     activeProperty = property
     if (property === 'scheduled') {
-      scheduledDraft = scheduledDate(issue.issue) ?? ''
+      const saved = issue.issue.metadata.scheduled_on
+      scheduledDraft = (dateZone(saved) ? scheduledDate(issue.issue) : saved?.slice(0, 10)) ?? ''
     } else if (property === 'due') {
       dueDraft = deadlineDate(issue.issue) ?? ''
     } else {
