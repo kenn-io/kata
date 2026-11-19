@@ -1101,6 +1101,14 @@
     return accepted
   }
 
+  function keepLaunchDaemon(loaded: WebDaemonInfo[]): WebDaemonInfo[] {
+    if (!launchDaemonID || loaded.some((daemon) => daemon.id === launchDaemonID)) return loaded
+    return [
+      ...loaded,
+      { id: launchDaemonID, url: '', default: false, auth: 'none', health: 'down' },
+    ]
+  }
+
   async function loadDaemonRoster(): Promise<boolean> {
     if (daemonRosterLoaded) return directDaemonTarget || activeDaemonID !== undefined
     if (directDaemonTarget) {
@@ -1113,7 +1121,7 @@
     daemonRosterAbort?.abort()
     const abort = (daemonRosterAbort = new AbortController())
     try {
-      const loadedDaemons = await fetchWebDaemons(browserFetch, abort.signal)
+      const loadedDaemons = keepLaunchDaemon(await fetchWebDaemons(browserFetch, abort.signal))
       if (abort.signal.aborted || destroyed) return false
       const nextDaemonID =
         loadedDaemons.find(
@@ -1181,7 +1189,7 @@
     try {
       const loaded = await fetchWebDaemons(browserFetch, abort.signal)
       if (abort.signal.aborted || destroyed) return
-      daemonInfos = loaded
+      daemonInfos = keepLaunchDaemon(loaded)
     } catch {
       // Keep the current roster when refresh fails.
     } finally {

@@ -32,6 +32,7 @@ import (
 const (
 	webDaemonHeaderName   = "X-Kata-Web-Daemon"
 	webDaemonProxyPrefix  = "/api/v1/ui/proxy"
+	webDaemonHealthTTL    = 5 * time.Second
 	webDaemonProxyTimeout = 30 * time.Second
 )
 
@@ -64,6 +65,11 @@ type resolvedWebDaemon struct {
 	allowInsecure        bool
 }
 
+type webDaemonHealthEntry struct {
+	state   string
+	expires time.Time
+}
+
 type webDaemonInflightProbe struct {
 	done  chan struct{}
 	state string
@@ -79,6 +85,7 @@ type webDaemonGateway struct {
 	trustPrivateNetwork bool
 
 	mu       sync.Mutex
+	health   map[string]webDaemonHealthEntry
 	inflight map[string]*webDaemonInflightProbe
 	proxies  map[string]http.Handler
 }
@@ -90,6 +97,7 @@ func registerWebDaemonHandlers(mux *http.ServeMux, cfg ServerConfig) {
 		active:   strings.TrimSpace(cfg.ActiveWebDaemon), localMux: mux,
 		sessions: cfg.WebSessions, insecureReadonly: cfg.InsecureReadonly,
 		trustPrivateNetwork: cfg.Auth.TrustPrivateNetwork,
+		health:              make(map[string]webDaemonHealthEntry),
 		inflight:            make(map[string]*webDaemonInflightProbe),
 		proxies:             make(map[string]http.Handler),
 	}
@@ -101,11 +109,23 @@ func registerWebDaemonHandlers(mux *http.ServeMux, cfg ServerConfig) {
 }
 
 func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
-	catalog, err := g.visibleCatalog(r.Context())
+	out, err := g.roster(r.Context())
 	if err != nil {
 		slog.Error("web daemon roster project authority", "err", err)
 		writeWebDaemonError(w, http.StatusInternalServerError, "internal")
 		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, no-store")
+	if err := json.MarshalWrite(w, out); err != nil {
+		slog.Debug("write web daemon roster", "err", err)
+	}
+}
+
+func (g *webDaemonGateway) roster(ctx context.Context) (webDaemonRosterResponse, error) {
+	catalog, err := g.visibleCatalog(ctx)
+	if err != nil {
+		return webDaemonRosterResponse{}, err
 	}
 	resolved := make([]resolvedWebDaemon, len(catalog))
 	states := make([]string, len(catalog))
@@ -120,7 +140,7 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 				states[i] = "auth_required"
 				return
 			}
-			states[i] = g.daemonHealth(r.Context(), resolved[i])
+			states[i] = g.daemonHealth(ctx, resolved[i], g.syncHubs[catalog[i].Name])
 		}()
 	}
 	wg.Wait()
@@ -139,7 +159,7 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 		hasLocal = hasLocal || configured.Local
 		hasSyncHub = hasSyncHub || g.syncHubs[configured.Name]
 	}
-	if len(visible) == 0 || (hasSyncHub && !hasLocal) {
+	if hasSyncHub && !hasLocal {
 		fallback := g.localFallbackDaemon()
 		visible = append(visible, fallback)
 		catalog = append(catalog, fallback)
@@ -171,11 +191,7 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 			Health: states[i], Hint: hint,
 		})
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "private, no-store")
-	if err := json.MarshalWrite(w, out); err != nil {
-		slog.Debug("write web daemon roster", "err", err)
-	}
+	return out, nil
 }
 
 func (g *webDaemonGateway) visibleCatalog(ctx context.Context) ([]config.CatalogDaemonConfig, error) {
@@ -546,7 +562,16 @@ func (g *webDaemonGateway) selectDaemon(ctx context.Context, requested string) (
 	}
 	id := strings.TrimSpace(requested)
 	if id == "" {
-		id = g.defaultID(catalog)
+		roster, err := g.roster(ctx)
+		if err != nil {
+			return resolvedWebDaemon{}, fmt.Errorf("%w: %w", errWebDaemonSourceAuthority, err)
+		}
+		for _, daemon := range roster.Daemons {
+			if daemon.Default {
+				id = daemon.ID
+				break
+			}
+		}
 	}
 	for _, d := range catalog {
 		if d.Name == id {
@@ -618,7 +643,7 @@ func webDaemonLogValue(value string) string {
 	return textsafe.Line(value)
 }
 
-func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon) string {
+func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon, fresh bool) string {
 	if d.local {
 		return "connected"
 	}
@@ -627,6 +652,10 @@ func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon
 	}
 	key := strings.Join([]string{d.id, d.baseURL, d.token}, "\x00")
 	g.mu.Lock()
+	if cached, ok := g.health[key]; !fresh && ok && time.Now().Before(cached.expires) {
+		g.mu.Unlock()
+		return cached.state
+	}
 	if probe, ok := g.inflight[key]; ok {
 		g.mu.Unlock()
 		select {
@@ -643,6 +672,12 @@ func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon
 	state := probeWebDaemon(ctx, d, g.trustPrivateNetwork)
 	g.mu.Lock()
 	probe.state = state
+	if !fresh {
+		if g.health == nil {
+			g.health = make(map[string]webDaemonHealthEntry)
+		}
+		g.health[key] = webDaemonHealthEntry{state: state, expires: time.Now().Add(webDaemonHealthTTL)}
+	}
 	delete(g.inflight, key)
 	close(probe.done)
 	g.mu.Unlock()

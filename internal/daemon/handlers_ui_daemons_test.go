@@ -265,6 +265,12 @@ func TestWebDaemonRosterRefreshesRecoveredHub(t *testing.T) {
 		if want == 1 {
 			assert.Equal(t, "local", roster.Daemons[0].ID)
 			assert.True(t, roster.Daemons[0].Default)
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
+			require.NoError(t, err)
+			response, err := http.DefaultClient.Do(request)
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusOK, response.StatusCode)
+			require.NoError(t, response.Body.Close())
 		} else {
 			assert.Equal(t, "hub", roster.Daemons[0].ID)
 			assert.Equal(t, "connected", roster.Daemons[0].Health)
@@ -274,7 +280,7 @@ func TestWebDaemonRosterRefreshesRecoveredHub(t *testing.T) {
 		}
 		ready.Store(true)
 	}
-	assert.EqualValues(t, 3, probes.Load())
+	assert.EqualValues(t, 4, probes.Load())
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "local")
@@ -282,6 +288,36 @@ func TestWebDaemonRosterRefreshesRecoveredHub(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	assert.Equal(t, http.StatusOK, response.StatusCode)
+}
+
+func TestWebDaemonRosterCachesUnrelatedTargets(t *testing.T) {
+	var ready atomic.Bool
+	hub, hubProbes := anonymousHub(t, &ready)
+	other, otherProbes := anonymousHub(t, nil)
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebSyncHubs: []string{"hub"}, WebDaemons: []config.CatalogDaemonConfig{{Name: "local", Local: true}, {Name: "hub", URL: hub.URL, AllowInsecure: true}, {Name: "other", URL: other.URL, AllowInsecure: true}}})
+	for i := range 2 {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		var roster struct {
+			Daemons []struct {
+				ID string `json:"id"`
+			} `json:"daemons"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&roster))
+		require.NoError(t, resp.Body.Close())
+		if i == 0 {
+			require.Len(t, roster.Daemons, 2)
+		} else {
+			require.Len(t, roster.Daemons, 3)
+			assert.Equal(t, "hub", roster.Daemons[1].ID)
+		}
+		ready.Store(true)
+	}
+	assert.EqualValues(t, 2, hubProbes.Load())
+	assert.EqualValues(t, 1, otherProbes.Load())
 }
 
 func TestWebDaemonRosterReportsTargetsWithoutWebUIContract(t *testing.T) {
