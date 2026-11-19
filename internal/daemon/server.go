@@ -149,10 +149,12 @@ type ServerConfig struct {
 	// operation answer 503, as in embedded Service construction.
 	Telemetry TelemetryReporter
 
-	// WebDaemons is the browsable daemon catalog exposed to the first-class web
+	// WebDaemons is the daemon catalog exposed to the first-class web
 	// UI. Credentials remain server-side and are used only by the selected-
 	// daemon proxy. ActiveWebDaemon selects the initial catalog entry.
-	WebDaemons      []config.CatalogDaemonConfig
+	WebDaemons []config.CatalogDaemonConfig
+	// WebSyncHubs names mapped hubs without a browsing token or active selection.
+	WebSyncHubs     []string
 	ActiveWebDaemon string
 
 	// InsecureReadonly permits unauthenticated GETs on non-loopback TCP
@@ -357,6 +359,7 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 	cfg.FederationCatalog = append([]config.CatalogDaemonConfig(nil), cfg.FederationCatalog...)
 	cfg.WebDaemons = append([]config.CatalogDaemonConfig(nil), cfg.WebDaemons...)
+	cfg.WebSyncHubs = append([]string(nil), cfg.WebSyncHubs...)
 	if cfg.UIStore == nil {
 		cfg.UIStore, _ = cfg.DB.(db.UIStore)
 	}

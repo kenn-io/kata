@@ -172,7 +172,8 @@ the switcher lists only the local daemon. Configured target tokens do not carry
 your project limits, so the gateway refuses to use them for you. If you can
 see every project, or you are signed in as the daemon owner, the switcher
 lists configured daemons. A server used only for project sync, with no token
-saved for browsing, stays out of the switcher while its projects keep syncing. See
+saved for browsing, appears when browser access works and disappears when it
+doesn't. Its projects keep syncing. See
 [Project access](../reference/http-api.md#project-access) for the exact rules.
 
 ![Kata Web UI switching between two synthetic configured daemons](/docs/assets/screenshots/web-ui/daemon-switcher.png)

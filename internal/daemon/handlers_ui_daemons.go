@@ -77,6 +77,7 @@ type webDaemonInflightProbe struct {
 
 type webDaemonGateway struct {
 	catalog             []config.CatalogDaemonConfig
+	syncHubs            map[string]bool
 	active              string
 	localMux            *http.ServeMux
 	sessions            *WebSessionManager
@@ -91,13 +92,17 @@ type webDaemonGateway struct {
 
 func registerWebDaemonHandlers(mux *http.ServeMux, cfg ServerConfig) {
 	gateway := &webDaemonGateway{
-		catalog: append([]config.CatalogDaemonConfig(nil), cfg.WebDaemons...),
-		active:  strings.TrimSpace(cfg.ActiveWebDaemon), localMux: mux,
+		catalog:  append([]config.CatalogDaemonConfig(nil), cfg.WebDaemons...),
+		syncHubs: make(map[string]bool, len(cfg.WebSyncHubs)),
+		active:   strings.TrimSpace(cfg.ActiveWebDaemon), localMux: mux,
 		sessions: cfg.WebSessions, insecureReadonly: cfg.InsecureReadonly,
 		trustPrivateNetwork: cfg.Auth.TrustPrivateNetwork,
 		health:              make(map[string]webDaemonHealthEntry),
 		inflight:            make(map[string]*webDaemonInflightProbe),
 		proxies:             make(map[string]http.Handler),
+	}
+	for _, name := range cfg.WebSyncHubs {
+		gateway.syncHubs[name] = true
 	}
 	mux.HandleFunc(http.MethodGet+" /api/v1/ui/daemons", gateway.list)
 	mux.Handle(webDaemonProxyPrefix+"/", http.StripPrefix(webDaemonProxyPrefix, gateway))
@@ -128,9 +133,25 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 
-	defaultID := g.defaultID(catalog)
+	visible := make([]config.CatalogDaemonConfig, 0, len(catalog))
+	for i, configured := range catalog {
+		if !g.syncHubs[configured.Name] || states[i] == "connected" {
+			visible = append(visible, configured)
+		}
+	}
+	if len(visible) == 0 {
+		fallback := g.localFallbackDaemon()
+		visible = append(visible, fallback)
+		catalog = append(catalog, fallback)
+		resolved = append(resolved, resolvedWebDaemon{id: fallback.Name, local: true})
+		states = append(states, "connected")
+	}
+	defaultID := g.defaultID(visible)
 	out := webDaemonRosterResponse{Daemons: make([]webDaemonResponse, 0, len(catalog))}
 	for i, configured := range catalog {
+		if g.syncHubs[configured.Name] && states[i] != "connected" {
+			continue
+		}
 		d := resolved[i]
 		auth := "none"
 		if d.credentialConfigured {
@@ -537,6 +558,9 @@ func (g *webDaemonGateway) selectDaemon(ctx context.Context, requested string) (
 			}
 			return resolved, nil
 		}
+	}
+	if id == g.localFallbackDaemon().Name && len(g.syncHubs) > 0 {
+		return resolveWebDaemon(g.localFallbackDaemon())
 	}
 	return resolvedWebDaemon{}, errors.New("unknown_daemon")
 }

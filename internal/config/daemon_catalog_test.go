@@ -53,55 +53,41 @@ func TestCatalogClientTokenSources(t *testing.T) {
 	}
 }
 
-func TestWebCatalogOmitsSyncOnlyHubs(t *testing.T) {
-	for _, tt := range []struct {
-		name, active, token, mapping, extra string
-		want                                []string
-	}{
-		{"sync only", "", "", `credential_provider = ["example-provider"]` + "\n" + `intent = "collaborate"`, `
+func TestWebSyncHubs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+active_daemon = "active"
+[[daemon]]
+name = "hub"
+url = "https://hub.example"
+[[daemon]]
+name = "active"
+url = "https://active.example"
 [[daemon]]
 name = "browse"
 url = "https://browse.example"
 token_env = "BROWSE_TOKEN"
-[[daemon]]
-name = "plain"
-url = "https://plain.example"
-`, []string{"local", "browse", "plain"}},
-		{"active hub", `active_daemon = "hub"` + "\n", "", `credential_provider = ["example-provider"]` + "\n" + `intent = "collaborate"`, "", []string{"local", "hub"}},
-		{"hub with token", "", `token = "example-token"` + "\n", `actor = "user-a"`, "", []string{"local", "hub"}},
-		{"only sync remote", "", "", `credential_provider = ["example-provider"]` + "\n" + `intent = "collaborate"`, "", []string{"local"}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("KATA_HOME", home)
-			body := tt.active + `
-[[daemon]]
-name = "local"
-local = true
-[[daemon]]
-name = "hub"
-url = "https://hub.example"
-` + tt.token + tt.extra + `
 [[federation.project]]
 hub = "hub"
-spoke_project = "spoke-project"
-hub_project = "hub-project"
-` + tt.mapping + "\n"
-			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0o600))
-			cfg, err := config.ReadDaemonConfig()
-			require.NoError(t, err)
-			var names []string
-			for _, daemon := range cfg.WebCatalog() {
-				names = append(names, daemon.Name)
-			}
-			assert.Equal(t, tt.want, names)
-			_, found := cfg.CatalogDaemon("hub")
-			assert.True(t, found)
-			if tt.extra != "" {
-				assert.Len(t, cfg.Daemons, 4)
-			} else {
-				assert.Len(t, cfg.Daemons, 2)
-			}
-		})
-	}
+spoke_project = "spoke-a"
+hub_project = "hub-a"
+actor = "user-a"
+[[federation.project]]
+hub = "active"
+spoke_project = "spoke-b"
+hub_project = "hub-b"
+actor = "user-a"
+[[federation.project]]
+hub = "browse"
+spoke_project = "spoke-c"
+hub_project = "hub-c"
+actor = "user-a"
+`), 0o600))
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"hub"}, cfg.WebSyncHubs())
+	assert.Len(t, cfg.Daemons, 3)
+	_, found := cfg.CatalogDaemon("hub")
+	assert.True(t, found)
 }

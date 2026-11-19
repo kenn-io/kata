@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"net/url"
-	"slices"
 	"strings"
 )
 
@@ -62,17 +61,16 @@ func (c *DaemonConfig) CatalogDaemon(name string) (CatalogDaemonConfig, bool) {
 	return CatalogDaemonConfig{}, false
 }
 
-// WebCatalog returns the browser menu catalog; sync uses Daemons directly.
-func (c *DaemonConfig) WebCatalog() []CatalogDaemonConfig {
-	var catalog []CatalogDaemonConfig
-	for _, daemon := range c.Daemons {
-		syncOnly := !daemon.Local && !daemon.HasClientToken() && daemon.Name != c.ActiveDaemon &&
-			slices.ContainsFunc(c.Federation.Projects, func(p FederationProjectConfig) bool { return p.Hub == daemon.Name })
-		if !syncOnly {
-			catalog = append(catalog, daemon)
+// WebSyncHubs names mapped hubs without browsing credentials or active selection.
+func (c *DaemonConfig) WebSyncHubs() []string {
+	var hubs []string
+	for _, project := range c.Federation.Projects {
+		daemon, ok := c.CatalogDaemon(project.Hub)
+		if ok && !daemon.HasClientToken() && daemon.Name != c.ActiveDaemon {
+			hubs = append(hubs, daemon.Name)
 		}
 	}
-	return catalog
+	return hubs
 }
 
 // ActiveCatalogDaemon returns the entry active_daemon names.
