@@ -85,6 +85,7 @@
     collectionIntentKey,
     createUISnapshotRequest,
     projectUISnapshot,
+    selectsInSameList,
     SnapshotController,
     snapshotIntentForRoute,
     snapshotRequestIntent,
@@ -251,7 +252,11 @@
   $effect(() => {
     reportScreenViewed()
   })
-  const snapshots = new SnapshotController(createUISnapshotRequest(), uiSnapshotIntentKey)
+  const snapshots = new SnapshotController(
+    createUISnapshotRequest(),
+    uiSnapshotIntentKey,
+    selectsInSameList,
+  )
   const mutations = new MutationController({
     authority: () => ({
       canMutate: authority?.canMutate ?? false,

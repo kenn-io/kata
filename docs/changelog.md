@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Click another task in the web UI's list and New task stays available while
+  the task's comments, links, and history load. The button had been disabled
+  until that task's snapshot arrived, about a second per click on a large
+  workspace. A new view, filter, project, or graph still pauses changes until
+  its snapshot arrives.
+
 - External imports into a relayed project on PostgreSQL, such as
   `kata import --source beads`, now record the import's actor and the source
   authors, as they do on SQLite. They had recorded the relay connection's bound
