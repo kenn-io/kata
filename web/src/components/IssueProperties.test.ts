@@ -97,6 +97,27 @@ describe('IssueProperties', () => {
     expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toContain('Dec 9')
   })
 
+  it('shows the saved time for a bare timed schedule', () => {
+    renderProperties({
+      issue: makeIssue({ metadata: { scheduled_on: '2026-09-01T09:00' } }),
+    })
+    expect(screen.getByRole('button', { name: 'Edit scheduled' }).textContent).toContain(
+      '2026-09-01T09:00',
+    )
+  })
+
+  it('replaces a bare timed schedule when selecting the same day', async () => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({ metadata: { scheduled_on: '2026-09-01T09:00' } }),
+      onPatchMetadata,
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit scheduled' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Scheduled:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Sep 1, 2026/ }))
+    expect(onPatchMetadata).toHaveBeenCalledWith('issue-1', { scheduled_on: '2026-09-01' })
+  })
+
   it('adds and removes labels', async () => {
     const onAddLabel = vi.fn(async () => true)
     const onRemoveLabel = vi.fn()

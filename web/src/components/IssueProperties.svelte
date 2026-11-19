@@ -202,7 +202,8 @@
   }
 
   function scheduledLabel(): string {
-    const value = scheduledDate(issue.issue)
+    const saved = issue.issue.metadata.scheduled_on
+    const value = dateZone(saved) ? scheduledDate(issue.issue) : saved
     return value ? formatDate(value) : 'When'
   }
 
@@ -239,7 +240,11 @@
     if (actionsDisabled) return
     const property = 'scheduled'
     scheduledDraft = value
-    if (value !== '' && value === (scheduledDate(issue.issue) ?? '')) {
+    if (
+      dateZone(issue.issue.metadata.scheduled_on) &&
+      value !== '' &&
+      value === (scheduledDate(issue.issue) ?? '')
+    ) {
       resetDraft(property)
       return
     }
