@@ -39,7 +39,7 @@ SELECT lpad(x::text,26,'0'),'00000000000000000000000000',$1,'shared-project',lpa
 		require.NoError(t, err)
 		defer func() { _ = tx.Rollback() }()
 		var plan []string
-		_, err = db.ReadFederationEventPage(t.Context(), tx, f.public, f.visible.UID, 0, 100, postgres, func(where string, args ...any) ([]db.Event, error) {
+		_, err = db.ReadFederationEventPage(t.Context(), tx, f.public, f.visible.UID, 0, 100, postgres, nil, func(where string, args ...any) ([]db.Event, error) {
 			rows, err := tx.QueryContext(t.Context(), explain+"SELECT e.id FROM events e"+where, args...)
 			require.NoError(t, err)
 			defer func() { require.NoError(t, rows.Close()) }()

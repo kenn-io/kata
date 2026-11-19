@@ -50,6 +50,7 @@ type Store struct {
 	externalRootNow              func() time.Time
 	relayHistoryFullScanObserver func()
 	relayCheckpointCapacityBytes int64
+	federationFeed               *db.FederationFeedCache
 	relayHistoryCache            *relayHistoryValidationCache
 	// federationFoldObserver, when non-nil, is called with each project ID
 	// whose raw event log a federated materialization reads. Tests use it to

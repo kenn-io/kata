@@ -77,7 +77,7 @@ func TestReadFederationBulkMovePageBudget(t *testing.T) {
 			require.NoError(t, conn.Close())
 			tx, err := raw.BeginTx(t.Context(), nil)
 			require.NoError(t, err)
-			events, err := db.ReadFederationEventPage(t.Context(), tx, project, "", after, 1, false, func(where string, args ...any) ([]db.Event, error) {
+			events, err := db.ReadFederationEventPage(t.Context(), tx, project, "", after, 1, false, nil, func(where string, args ...any) ([]db.Event, error) {
 				return (sqlquery.Query{SQL: sqlitestore.EventSelectForTest + where, Args: args}).All(t.Context(), tx, func(rows *sql.Rows) (db.Event, error) { return sqlitestore.ScanEventForTest(rows) })
 			})
 			require.NoError(t, err)
@@ -133,7 +133,7 @@ func TestReadFederationSparseCatchupPageBudget(t *testing.T) {
 		windows++
 		return (sqlquery.Query{SQL: sqlitestore.EventSelectForTest + where, Args: args}).All(ctx, tx, func(rows *sql.Rows) (db.Event, error) { return sqlitestore.ScanEventForTest(rows) })
 	}
-	events, err := db.ReadFederationEventPage(ctx, tx, project, "", after, limit, false, query)
+	events, err := db.ReadFederationEventPage(ctx, tx, project, "", after, limit, false, nil, query)
 	require.NoError(t, err)
 	require.Len(t, events, limit)
 	for i, event := range events {

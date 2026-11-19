@@ -382,6 +382,20 @@ func (d *Store) AccessibleProjectUIDs(ctx context.Context, actor string) ([]stri
 	return result, rows.Err()
 }
 
+// ProjectAccessibleToActor reports whether AccessibleProjectUIDs(actor) would
+// include projectUID, reading only that project.
+func (d *Store) ProjectAccessibleToActor(ctx context.Context, actor, projectUID string) (bool, error) {
+	if actor == "" {
+		return false, nil
+	}
+	if err := db.ValidateTokenActor(actor); err != nil {
+		return false, err
+	}
+	var allowed bool
+	err := d.readQ.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM projects p LEFT JOIN project_access_policies a ON a.project_uid=p.uid WHERE p.uid=? AND p.uid<>? AND (COALESCE(a.visibility,'all')='all' OR EXISTS(SELECT 1 FROM project_access_teams pat JOIN team_memberships tm ON tm.team_uid=pat.team_uid WHERE pat.project_uid=p.uid AND tm.actor=?)))`, projectUID, db.SystemProjectUID, strings.TrimSpace(actor)).Scan(&allowed)
+	return allowed, err
+}
+
 // AnonymousAccessibleProjectUIDs returns the projects, archived ones included,
 // visible without an actor identity. Anonymous access never inherits team
 // membership.

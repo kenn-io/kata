@@ -85,7 +85,7 @@ func checkFederatedReadPages(t *testing.T, store db.Storage, backend Backend) {
 	for _, limit := range []int{1, 2, 3, 100} {
 		ids := []int64{}
 		for cursor := after; ; {
-			events, err := db.ReadFederationEventPage(ctx, tx, quiet, "", cursor, limit, backend.Name == "postgres", func(where string, args ...any) ([]db.Event, error) {
+			events, err := db.ReadFederationEventPage(ctx, tx, quiet, "", cursor, limit, backend.Name == "postgres", nil, func(where string, args ...any) ([]db.Event, error) {
 				return (sqlquery.Query{SQL: `SELECT e.id FROM events e` + where, Args: args}).All(ctx, tx, func(rows *sql.Rows) (db.Event, error) { //nolint:gosec // G202: helper-built SQL; values stay bound.
 					var event db.Event
 					return event, rows.Scan(&event.ID)

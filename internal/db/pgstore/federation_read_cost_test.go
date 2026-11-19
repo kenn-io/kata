@@ -52,7 +52,7 @@ func TestReadFederationQuietPageBudget(t *testing.T) {
 				require.NoError(t, err)
 				defer func() { _ = tx.Rollback() }()
 				var visited float64
-				events, err := db.ReadFederationEventPage(t.Context(), tx, project, subject, after, 1000, true, explainedEventPage(t, tx, &visited))
+				events, err := db.ReadFederationEventPage(t.Context(), tx, project, subject, after, 1000, true, nil, explainedEventPage(t, tx, &visited))
 				require.NoError(t, err)
 				require.Empty(t, events)
 				t.Logf("%.0f event rows visited", visited)
@@ -186,7 +186,7 @@ func TestReadFederationBulkMovePageBudget(t *testing.T) {
 			require.NoError(t, err)
 			defer func() { _ = tx.Rollback() }()
 			var visited float64
-			events, err := db.ReadFederationEventPage(t.Context(), tx, project, "", after, 1, true, explainedEventPage(t, tx, &visited))
+			events, err := db.ReadFederationEventPage(t.Context(), tx, project, "", after, 1, true, nil, explainedEventPage(t, tx, &visited))
 			require.NoError(t, err)
 			require.Len(t, events, 1)
 			stride := int64(1)

@@ -144,6 +144,7 @@ func openInternal(
 		federationLease:     &federationRunnerLeaseState{},
 		federationLockSlots: make(chan struct{}, federationLockMaxOpenConns),
 		relayHistoryCache:   newRelayHistoryValidationCache(),
+		federationFeed:      &db.FederationFeedCache{},
 	}
 	if bypassLifecycle {
 		return s, nil

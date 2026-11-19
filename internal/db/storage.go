@@ -121,6 +121,7 @@ type Storage interface {
 	ProjectAccessPolicy(ctx context.Context, projectUID string) (ProjectAccessPolicy, error)
 	SetProjectAccessPolicy(ctx context.Context, policy ProjectAccessPolicy, adminActor string) (ProjectAccessPolicy, Event, error)
 	AccessibleProjectUIDs(ctx context.Context, actor string) ([]string, error)
+	ProjectAccessibleToActor(ctx context.Context, actor, projectUID string) (bool, error)
 	AnonymousAccessibleProjectUIDs(ctx context.Context) ([]string, error)
 	ProjectAccessRevision(ctx context.Context) (int64, error)
 	ProjectAccessTransactionFence(actor string, projectUIDs []string) TransactionFence

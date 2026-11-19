@@ -207,11 +207,18 @@ func EventRequiredFeatures(kind string) string {
 	return ""
 }
 
-// ProjectRequiredEventFeatures inspects current cron data and native issue state.
-func ProjectRequiredEventFeatures(ctx context.Context, q interface {
+type featureQuerier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, projectUID string) (string, error) {
+}
+
+// ProjectRequiredEventFeatures inspects current cron data and native issue state.
+func ProjectRequiredEventFeatures(ctx context.Context, q featureQuerier, projectUID string) (string, error) {
+	return projectRequiredEventFeatures(ctx, q, projectUID, nil)
+}
+
+// projectRequiredEventFeatures skips the move events feed has already checked.
+func projectRequiredEventFeatures(ctx context.Context, q featureQuerier, projectUID string, feed *FederationFeedRead) (string, error) {
 	var cronPresent, issueMoved bool
 	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND (
  EXISTS(SELECT 1 FROM cron_jobs WHERE project_id=p.id) OR
@@ -219,10 +226,11 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
  EXISTS(SELECT 1 FROM cron_runs WHERE project_id=p.id) OR
 	 EXISTS(SELECT 1 FROM events WHERE project_id=p.id AND type LIKE 'cron.%'))),
  EXISTS(SELECT 1 FROM projects p WHERE p.uid=$1 AND p.name<>$2 AND EXISTS(
-  SELECT 1 FROM events e WHERE e.project_id=p.id AND e.type='issue.moved'))`, projectUID, SystemProjectName).Scan(&cronPresent, &issueMoved)
+  SELECT 1 FROM events e WHERE e.project_id=p.id AND e.id>$3 AND e.type='issue.moved'))`, projectUID, SystemProjectName, feed.movesAfter()).Scan(&cronPresent, &issueMoved)
 	if err != nil {
 		return "", err
 	}
+	feed.recordMoves(issueMoved)
 	required := ""
 	if issueMoved {
 		required = MergeEventFeatures(required, IssueMoveEventFeature)
@@ -336,10 +344,11 @@ type FederationReadResult struct {
 
 // ReadFederationTransaction supplies common decisions while each backend owns
 // its isolation/retry/fences, baseline event writer and event row decoder.
-func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationReadParams, project Project, binding FederationBinding, refresh func() (FederationBinding, error), readEvents func(int64, int) ([]Event, error)) (FederationReadResult, error) {
+// feed is the read's federation feed cache view, shared with readEvents.
+func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationReadParams, project Project, binding FederationBinding, feed *FederationFeedRead, refresh func() (FederationBinding, error), readEvents func(int64, int) ([]Event, error)) (FederationReadResult, error) {
 	out := FederationReadResult{Project: project, Binding: binding, Events: []Event{}, NextAfterID: in.AfterID}
 	var err error
-	out.RequiredFeatures, err = ProjectRequiredEventFeatures(ctx, tx, project.UID)
+	out.RequiredFeatures, err = projectRequiredEventFeatures(ctx, tx, project.UID, feed)
 	if err != nil {
 		return out, err
 	}

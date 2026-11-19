@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,9 +17,7 @@ func RunProjectAccessConformance(t *testing.T, store db.Storage) {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "shared-project")
 	require.NoError(t, err)
-	access, ok := store.(interface {
-		AccessibleProjectUIDs(context.Context, string) ([]string, error)
-	})
+	access, ok := store.(projectAccessDecisions)
 	require.True(t, ok, "backend must implement project access decisions")
 	ids, err := access.AccessibleProjectUIDs(ctx, "member")
 	require.NoError(t, err)
@@ -251,13 +250,30 @@ func RunProjectAccessTokenEnrollment(t *testing.T, store db.Storage) {
 	}
 }
 
-func assertProjectAccessUIDs(t *testing.T, access interface {
+type projectAccessDecisions interface {
 	AccessibleProjectUIDs(context.Context, string) ([]string, error)
-}, actor string, expected []string) {
+	ProjectAccessibleToActor(context.Context, string, string) (bool, error)
+	ListProjectsIncludingArchived(context.Context) ([]db.Project, error)
+}
+
+// assertProjectAccessUIDs also requires the single-project decision to agree
+// with the full list for every project, the system project included.
+func assertProjectAccessUIDs(t *testing.T, access projectAccessDecisions, actor string, expected []string) {
 	t.Helper()
 	ids, err := access.AccessibleProjectUIDs(t.Context(), actor)
 	require.NoError(t, err)
 	assert.ElementsMatch(t, expected, ids)
+	projects, err := access.ListProjectsIncludingArchived(t.Context())
+	require.NoError(t, err)
+	uids := []string{db.SystemProjectUID}
+	for _, project := range projects {
+		uids = append(uids, project.UID)
+	}
+	for _, uid := range uids {
+		allowed, err := access.ProjectAccessibleToActor(t.Context(), actor, uid)
+		require.NoError(t, err)
+		assert.Equal(t, slices.Contains(expected, uid), allowed, "actor %q project %s", actor, uid)
+	}
 }
 
 func assertProjectAccessAudit(t *testing.T, store db.Storage, event db.Event, kind string) {
