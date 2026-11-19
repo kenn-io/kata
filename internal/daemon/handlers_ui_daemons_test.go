@@ -261,6 +261,23 @@ func TestWebDaemonHeaderlessLocalDefaultDoesNotProbeHubs(t *testing.T) {
 	assert.Zero(t, probesB.Load())
 }
 
+func TestWebDaemonHeaderlessFallbackCachesHubHealth(t *testing.T) {
+	hubA, probesA := anonymousHub(t, new(atomic.Bool))
+	hubB, probesB := anonymousHub(t, new(atomic.Bool))
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, WebSyncHubs: []string{"hub-a", "hub-b"}, WebDaemons: []config.CatalogDaemonConfig{{Name: "hub-a", URL: hubA.URL, AllowInsecure: true}, {Name: "hub-b", URL: hubB.URL, AllowInsecure: true}}})
+	for range 2 {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		require.NoError(t, resp.Body.Close())
+	}
+	assert.EqualValues(t, 1, probesA.Load())
+	assert.EqualValues(t, 1, probesB.Load())
+}
+
 func TestWebDaemonRosterKeepsSelectedHub(t *testing.T) {
 	hub, _ := anonymousHub(t, new(atomic.Bool))
 	d := openTestDB(t)

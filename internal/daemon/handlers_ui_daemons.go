@@ -163,7 +163,7 @@ func (g *webDaemonGateway) roster(ctx context.Context, selected string, record b
 				states[i] = "auth_required"
 				return
 			}
-			states[i] = g.daemonHealth(ctx, resolved[i], g.syncHubs[catalog[i].Name])
+			states[i] = g.daemonHealth(ctx, resolved[i], record && g.syncHubs[catalog[i].Name])
 		}()
 	}
 	wg.Wait()
@@ -604,14 +604,13 @@ func (g *webDaemonGateway) selectDaemon(ctx context.Context, requested string) (
 }
 
 func (g *webDaemonGateway) proxyDefault(ctx context.Context, catalog []config.CatalogDaemonConfig) (string, error) {
-	for _, daemon := range catalog {
-		if g.active != "" && daemon.Name == g.active {
-			return daemon.Name, nil
-		}
+	id := g.defaultID(catalog)
+	if id != "" && id == g.active {
+		return id, nil
 	}
 	for _, daemon := range catalog {
-		if daemon.Local {
-			return daemon.Name, nil
+		if daemon.Name == id && daemon.Local {
+			return id, nil
 		}
 	}
 	roster, err := g.roster(ctx, "", false)
