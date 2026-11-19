@@ -13,26 +13,33 @@ import (
 )
 
 // RunQuietFederationPollGrowth checks that repeating an empty federation poll
-// of a quiet hub project costs the same whatever the project's size, both
-// while an unrelated project keeps writing past the poll's cursor and while
-// nothing on the hub writes at all. The caller chooses the cost measure and
-// its minimum meaningful value.
+// of a quiet hub project costs the same whatever the project's size: while an
+// unrelated project keeps writing past the poll's cursor, after the hub wrote
+// long past it, and while nothing on the hub writes at all. An empty poll
+// never moves the spoke's cursor, so a project that stays quiet for long sits
+// behind every write the hub made since. The caller chooses the cost measure
+// and its minimum meaningful value.
 func RunQuietFederationPollGrowth(t *testing.T, open func(*testing.T) db.Storage, measure growthtest.Measure, floor float64) {
 	t.Helper()
-	for _, busy := range []bool{true, false} {
-		name := "idle hub"
-		if busy {
-			name = "busy hub"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, hubCase := range []struct {
+		name      string
+		behind    int
+		hubWrites bool
+	}{
+		{name: "busy hub", hubWrites: true},
+		{name: "busy hub long after the cursor", behind: 3000, hubWrites: true},
+		{name: "idle hub"},
+	} {
+		t.Run(hubCase.name, func(t *testing.T) {
 			growthtest.Run(t, growthtest.Check{
 				Small: 100, Large: 1000,
 				MaxRatio: 2, Floor: floor,
 				Measure: measure,
 				Build: func(_ testing.TB, size int) (run, reset func()) {
 					hub := newQuietPollHub(t, open(t), size)
+					hub.unrelatedEvents(hubCase.behind)
 					reset = func() {}
-					if busy {
+					if hubCase.hubWrites {
 						reset = hub.unrelatedComment
 					}
 					return func() { require.Empty(t, hub.poll().Events) }, reset
@@ -137,27 +144,35 @@ func (h *quietPollHub) unrelatedComment() {
 	require.NoError(h.t, err)
 }
 
-// unrelatedEvents appends n busy-project events in one transaction; creating
-// thousands through the store API would dominate the test's run time.
+// unrelatedEvents appends n busy-project events.
 func (h *quietPollHub) unrelatedEvents(n int) {
 	h.t.Helper()
-	ctx := h.t.Context()
-	beginner, ok := h.store.(interface {
+	appendUnrelatedEvents(h.t, h.store, h.busy, h.busyIssue, h.inserted, n)
+	h.inserted += n
+}
+
+// appendUnrelatedEvents appends n events about issue, stamped to project, in
+// one transaction; creating thousands through the store API would dominate a
+// test's run time. Event UIDs continue from first, so each caller keeps its
+// own count.
+func appendUnrelatedEvents(t *testing.T, store db.Storage, project db.Project, issue db.Issue, first, n int) {
+	t.Helper()
+	ctx := t.Context()
+	beginner, ok := store.(interface {
 		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 	})
-	require.True(h.t, ok, "backend must expose its database handle")
+	require.True(t, ok, "backend must expose its database handle")
 	tx, err := beginner.BeginTx(ctx, nil)
-	require.NoError(h.t, err)
+	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
  VALUES($1,$2,$3,$4,$5,'issue.updated','tester','{}',1,0,$6)`)
-	require.NoError(h.t, err)
+	require.NoError(t, err)
 	hash := strings.Repeat("b", 64)
-	for range n {
-		h.inserted++
-		_, err = stmt.ExecContext(ctx, fmt.Sprintf("01M9%022d", h.inserted), h.store.InstanceUID(), h.busy.ID, h.busy.Name, h.busyIssue.UID, hash)
-		require.NoError(h.t, err)
+	for i := range n {
+		_, err = stmt.ExecContext(ctx, fmt.Sprintf("01M9%022d", first+i+1), store.InstanceUID(), project.ID, project.Name, issue.UID, hash)
+		require.NoError(t, err)
 	}
-	require.NoError(h.t, stmt.Close())
-	require.NoError(h.t, tx.Commit())
+	require.NoError(t, stmt.Close())
+	require.NoError(t, tx.Commit())
 }

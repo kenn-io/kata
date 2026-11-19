@@ -17,7 +17,7 @@ import (
 // return what a store that has never polled returns.
 //
 // The quiet project runs once with one issue and once with more issues than
-// any gap below has events, because the store checks a short gap event by
+// most gaps below have events, because the store checks a short gap event by
 // event and a long one against the project's issues.
 func checkFederatedQuietPollFeed(t *testing.T, store db.Storage, backend Backend) {
 	for _, extraIssues := range []int{0, 20} {
@@ -88,7 +88,10 @@ func checkFederatedQuietPollFeedWith(t *testing.T, store db.Storage, backend Bac
 		cursor = page[len(page)-1]
 	}
 
-	// An event stamped to another project about an issue the project owns.
+	// An event stamped to another project about an issue the project owns,
+	// arriving after the hub wrote more than one page window past the cursor,
+	// where the store checks newer events one at a time.
+	appendUnrelatedEvents(t, writer, busy, busyIssue, extraIssues*10000, 1100)
 	quietAt(cursor)
 	foreignUID := fmt.Sprintf("01M8%022d", extraIssues)
 	executor := writer.(interface {
