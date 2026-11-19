@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"regexp"
@@ -1103,11 +1104,14 @@ func remoteEventFromEnvelope(ev api.EventEnvelope) db.RemoteEvent {
 
 // Runner quietly pulls every enabled spoke binding.
 type Runner struct {
-	DB            db.Storage
-	Credentials   config.FederationCredentialStore
-	Opts          clientpkg.Opts
-	Interval      time.Duration
-	Wake          <-chan struct{}
+	DB          db.Storage
+	Credentials config.FederationCredentialStore
+	Opts        clientpkg.Opts
+	Interval    time.Duration
+	// Wake carries wakes that ask for a pass before the next interval: for
+	// every spoke, or for the spokes of the projects that changed. Nil leaves
+	// only the interval.
+	Wake          *WakeQueue
 	Debounce      time.Duration
 	OnError       func(error)
 	OnSpokeResult func(projectID int64, err error)
@@ -1201,7 +1205,7 @@ func (r *Runner) runOnce(
 		}
 		active := make([]activeSpokeBinding, 0, len(bindings))
 		for _, binding := range bindings {
-			if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
+			if !binding.Enabled || binding.Role != db.FederationRoleSpoke || (len(only) > 0 && !only[binding.ProjectID]) {
 				continue
 			}
 			project, err := r.DB.ProjectByID(ctx, binding.ProjectID)
@@ -1638,16 +1642,22 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	// pending holds the spokes whose last turn stopped at its budget; the next
-	// pass serves only them until a tick or wake widens it to every spoke.
-	var pending map[int64]bool
+	// only names the spokes the next pass serves; nil serves every spoke. The
+	// first pass and every tick serve every spoke, a project wake serves the
+	// projects it names, and a budgeted turn that left deliveries pending
+	// serves those spokes again at once.
+	var only map[int64]bool
 	for {
 		if validateLease != nil {
 			if err := validateLease(ctx); err != nil {
 				return err
 			}
 		}
-		retry, denied, remaining, err := r.runOnce(ctx, validateLease, pending, refusals)
+		if only == nil {
+			// This pass serves every spoke, which covers the wakes queued so far.
+			r.Wake.take()
+		}
+		retry, denied, remaining, err := r.runOnce(ctx, validateLease, only, refusals)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 				return err
@@ -1668,36 +1678,67 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 			<-ctx.Done()
 			return ctx.Err()
 		}
-		pending = remaining
-		if len(pending) > 0 {
+		if len(remaining) > 0 {
 			// A budgeted turn left deliveries pending. Serve those spokes again
-			// now instead of after an interval; a tick or wake that has already
-			// arrived widens the pass to every spoke.
+			// now instead of after an interval, together with any wake that has
+			// already arrived; a tick widens the pass to every spoke.
+			only = remaining
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-ticker.C:
-				pending = nil
-			case <-r.Wake:
-				pending = nil
+				only = nil
+			case <-r.Wake.readyC():
+				only = mergeWake(only, r.Wake)
 			default:
 			}
 			continue
 		}
+		next, err := r.awaitPass(ctx, ticker.C, debounce)
+		if err != nil {
+			return err
+		}
+		only = next
+	}
+}
+
+// awaitPass waits for the next tick or wake and returns the spokes the pass
+// it causes serves; nil means every spoke.
+func (r *Runner) awaitPass(ctx context.Context, tick <-chan time.Time, debounce time.Duration) (map[int64]bool, error) {
+	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		case <-r.Wake:
+			return nil, ctx.Err()
+		case <-tick:
+			return nil, nil
+		case <-r.Wake.readyC():
 			timer := r.newDebounceTimer(debounce)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return ctx.Err()
+				return nil, ctx.Err()
 			case <-timer.C():
+			}
+			if woken, only := r.Wake.take(); woken {
+				return only, nil
 			}
 		}
 	}
+}
+
+// mergeWake adds the pending wakes to only. A wake for every spoke widens the
+// pass to every spoke.
+func mergeWake(only map[int64]bool, wake *WakeQueue) map[int64]bool {
+	woken, projects := wake.take()
+	if !woken {
+		return only
+	}
+	if projects == nil {
+		return nil
+	}
+	merged := maps.Clone(only)
+	maps.Copy(merged, projects)
+	return merged
 }
 
 // Supplemental proofs use joined credentials without crossing their configured

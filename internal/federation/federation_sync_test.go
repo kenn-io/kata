@@ -3396,7 +3396,7 @@ func TestFederationRunnerRetriesAfterSyncError(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	wake := make(chan struct{}, 1)
+	wake := NewWakeQueue()
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	errCh := make(chan error, 1)
@@ -3424,7 +3424,7 @@ func TestFederationRunnerRetriesAfterSyncError(t *testing.T) {
 	binding, err := spoke.DB.FederationBindingByProject(ctx, spokeProject.ID)
 	require.NoError(t, err)
 	setFederationBindingHubURL(t, spoke.DB, binding, hub.URL)
-	wake <- struct{}{}
+	wake.WakeAll()
 	require.Eventually(t, func() bool {
 		_, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 		return err == nil
