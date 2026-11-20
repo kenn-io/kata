@@ -453,8 +453,20 @@ jobs:
             ~/go/pkg/mod
           key: linux-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ github.sha }}
 
-      - name: Build release targets
+      - name: Restore release Go cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: restore-release-go-cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: release-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ github.sha }}
+          restore-keys: |
+            release-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-
+
+      - name: Build release targets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-release-go-cache.outputs.cache-hit != 'true'
         run: |
           make web-embed
           # Mirror the targets in .goreleaser.yaml.
@@ -465,7 +477,7 @@ jobs:
           done
 
       - name: Save release Go cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-release-go-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6.1.0
         with:
           path: |
