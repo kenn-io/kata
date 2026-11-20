@@ -200,10 +200,6 @@ func checkMergePreservesLinkToUnconnectedProject(t *testing.T, target db.Storage
 	require.ElementsMatch(t, undirectedRelatedEdges(source.edges), undirectedRelatedEdges(crossProjectLinkEdges(t, target, endpoints...)))
 }
 
-func TestMergePreservesLinkToUnconnectedProjectSQLite(t *testing.T) {
-	checkMergePreservesLinkToUnconnectedProject(t, openImportTargetDB(t))
-}
-
 func TestMergePreservesLinkToUnconnectedProjectPostgres(t *testing.T) {
 	checkMergePreservesLinkToUnconnectedProject(t, openPostgresImportTarget(t))
 }

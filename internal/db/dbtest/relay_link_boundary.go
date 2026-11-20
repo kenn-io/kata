@@ -207,7 +207,7 @@ func RunLinkServerBoundary(t *testing.T, store db.Storage) {
 	for _, pair := range [][2]db.Issue{{ai, bi}, {bi, ai}} {
 		err := link(pair[0], pair[1])
 		require.ErrorIs(t, err, db.ErrFederatedReadOnly)
-		require.EqualError(t, err, "can't link: project server-b isn't synced to the same server as server-a; connect server-b first")
+		require.EqualError(t, err, "can't link: connect project server-b to the same server as server-a first")
 	}
 	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: a.ID, Title: "Rejected", Author: "member", Links: []db.InitialLink{{Type: "parent", ToNumber: bi.ID}}})
 	require.ErrorIs(t, err, db.ErrFederatedReadOnly)

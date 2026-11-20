@@ -306,7 +306,7 @@ type LinkServerMismatchError struct {
 }
 
 func (e *LinkServerMismatchError) Error() string {
-	return fmt.Sprintf("can't link: project %s isn't synced to the same server as %s; connect %s first", e.To, e.From, e.To)
+	return fmt.Sprintf("can't link: connect project %s to the same server as %s first", e.To, e.From)
 }
 
 func (e *LinkServerMismatchError) Unwrap() error {
