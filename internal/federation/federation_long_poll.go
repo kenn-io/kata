@@ -198,6 +198,21 @@ func (p *hubLongPolls) reconcile(spokes []activeSpokeBinding) {
 	}
 }
 
+// stop ends the binding's watcher after a pass for it failed, so a binding
+// whose hub refused or throttled it holds no poll until its retry is due. The
+// next clean pass starts a new watcher.
+func (p *hubLongPolls) stop(projectID int64) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if poll := p.polls[projectID]; poll != nil {
+		poll.cancel()
+		delete(p.polls, projectID)
+	}
+}
+
 // start opens a watcher for a direct spoke binding after the runner's pass
 // for it succeeded. Relay spokes keep the interval.
 func (p *hubLongPolls) start(spoke activeSpokeBinding) {

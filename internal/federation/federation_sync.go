@@ -1273,6 +1273,7 @@ func (r *Runner) runOnce(
 			r.longPolls.start(spoke)
 		}
 		if spokeErr != nil {
+			r.longPolls.stop(spoke.binding.ProjectID)
 			errs = append(errs, spokeErr)
 			// A turn that failed anywhere, including its claim retries, waits
 			// for the interval like a drained project; only a clean turn that
