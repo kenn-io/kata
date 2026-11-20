@@ -381,7 +381,7 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 		checked := make(map[string]bool)
 		_, eligibilityDeferred, fillErr = r.idx.FillWithArtifactsDetailed(ctx, key, r.store, *portableRecipe, r.emb.EncodeFunc(), r.cfg.BatchSize, r.cfg.BatchOptions, r.markDocumentFilled, r.cfg.EmbeddingProjectAllowed, func(ctx context.Context, projectUID string) (bool, error) {
 			previous, exists := checked[projectUID]
-			if exists && !previous && r.cfg.EmbeddingProjectAllowed == nil {
+			if exists && !previous {
 				return false, nil
 			}
 			allowed, err := r.projectGenerationAllowed(ctx, projectUID, *portableRecipe, !exists)
