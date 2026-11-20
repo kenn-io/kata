@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -270,7 +271,7 @@ func TestEnsureRunningReportsUnreachableDaemonWhenStartLockWaitExpires(t *testin
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
 		assert.Contains(t, err.Error(), address)
-		assert.Contains(t, err.Error(), filepath.Join(ns.DataDir, "daemon.log"))
+		assert.Contains(t, err.Error(), strconv.Quote(filepath.Join(ns.DataDir, "daemon.log")))
 		assert.Contains(t, err.Error(), fmt.Sprintf("pid %d", os.Getpid()))
 	})
 }
