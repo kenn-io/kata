@@ -171,9 +171,9 @@ output it appears as a `mode` field (`lexical`, `hybrid`, or `semantic`); see th
 find an issue by what it is about, press `/` in a project, then `ctrl+t` to ask
 the daemon instead. The daemon ranks the project's issues in auto mode, so
 the results follow its order and the best 50 show, flat rather than nested. The
-other list filters (status, labels, owner, author, date) still narrow those
-hits, so fewer than 50 can show. A note beside the search line says whether the
-daemon ranked by words and meaning or by words only.
+other list filters (status, labels, owner, date) still narrow those hits, so
+fewer than 50 can show. A note beside the search line says whether the daemon
+ranked by words and meaning or by words only.
 
 The choice lasts until you quit. Press `ctrl+t` again to filter the loaded rows
 by text. Results come after you stop typing; a blank query shows the normal
