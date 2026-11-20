@@ -1378,7 +1378,8 @@ func replaceProviderBoundActor(ctx context.Context, store db.Storage, p EnsureFe
 }
 
 func federationReplicaWorkOpen(err error) bool {
-	return errors.Is(err, db.ErrFederationPushPending) || errors.Is(err, db.ErrFederationClaimsHeld) || errors.Is(err, db.ErrFederationRunsActive)
+	return errors.Is(err, db.ErrFederationPushPending) || errors.Is(err, db.ErrFederationClaimsHeld) ||
+		errors.Is(err, db.ErrFederationRunsActive) || errors.Is(err, db.ErrFederationResetBlockedByPendingPush)
 }
 
 func revalidateManagedReservation(

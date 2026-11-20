@@ -353,6 +353,11 @@ WHERE project_id=$1`, projectID); err != nil {
 // claims or claim requests held through this replica, and cron runs this
 // replica's actor has not finished.
 func pgFederationReplicaSettledTx(ctx context.Context, tx *sql.Tx, binding db.FederationBinding, originInstanceUID string) error {
+	// A destination that still owes a move out of this project needs this
+	// project's current credential and actor to deliver it.
+	if err := db.CheckFederationMoveSourceLifecycle(ctx, tx, binding.ProjectID, originInstanceUID); err != nil {
+		return err
+	}
 	if binding.PushEnabled {
 		var pending bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events
