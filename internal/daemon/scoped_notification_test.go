@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/notification"
 )
 
 func TestScopedNotificationPointersHiddenAcrossReads(t *testing.T) {
@@ -43,5 +44,83 @@ func TestScopedNotificationProjectionIsDeterministic(t *testing.T) {
 		resp, body := envDoRaw(t, env, http.MethodGet, path, nil, headers)
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 		require.Equal(t, string(first), string(body))
+	}
+}
+
+// An issue-subtree credential can clear a held notification with if_from; the
+// route sits behind the same allowlist as sending one.
+func TestScopedTokenClearsNotificationIfFrom(t *testing.T) {
+	env, p, source, _, _ := scopedReplyFixture(t, false)
+	key := "notify.cmVhZGVy"
+	_, e := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: source.ID, Actor: "coordinator", Patch: map[string]jsontext.Value{
+		key: jsontext.Value(`{"from":"worker","message":"look"}`),
+	}})
+	require.NoError(t, e)
+	path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/notifications/clear", p.ID, source.ShortID)
+	body := map[string]any{"to": "reader", "if_from": "worker"}
+	resp, raw := envDoRaw(t, env, http.MethodPost, path, body, map[string]string{"Authorization": "Bearer worker-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.Equal(t, notification.Value{}, readNotifySlot(t, env.DB, source.ID, key))
+}
+
+// A refused replace:false names the held request only to a caller who may read
+// what that request points at; reads drop such a request, so the conflict does
+// too. The refusal and the stored request stay the same either way.
+func TestScopedNoReplaceConflictHidesRestrictedHeldRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		outside     bool
+		wantDetails bool
+	}{
+		{name: "reference outside scope", outside: true, wantDetails: false},
+		{name: "reference inside scope", outside: false, wantDetails: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, p, source, target, _ := scopedReplyFixture(t, tc.outside)
+			key := "notify.cmVhZGVy"
+			_, e := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: source.ID, Actor: "coordinator", Patch: map[string]jsontext.Value{
+				key: jsontext.Value(fmt.Sprintf(`{"from":"lead","message":"private","re":%q}`, target.UID)),
+			}})
+			require.NoError(t, e)
+			held := readNotifySlot(t, env.DB, source.ID, key)
+			path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/notifications", p.ID, source.ShortID)
+			resp, body := envDoRaw(t, env, http.MethodPost, path, map[string]any{"to": "reader", "message": "mine", "replace": false}, map[string]string{"Authorization": "Bearer worker-token"})
+			require.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
+			require.Contains(t, string(body), "notification_held")
+			if tc.wantDetails {
+				require.Contains(t, string(body), "private")
+				require.Contains(t, string(body), "lead")
+			} else {
+				require.NotContains(t, string(body), "private")
+				require.NotContains(t, string(body), "lead")
+				require.NotContains(t, string(body), target.UID)
+			}
+			require.Equal(t, held, readNotifySlot(t, env.DB, source.ID, key))
+		})
+	}
+}
+
+func TestScopedNoReplaceConflictHidesHeldRequestWithUnusableReference(t *testing.T) {
+	for _, tc := range []struct{ name, slot string }{
+		{name: "number", slot: `{"from":"lead","message":"private","re":42}`},
+		{name: "empty string", slot: `{"from":"lead","message":"private","re":""}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, p, source, _, _ := scopedReplyFixture(t, false)
+			key := "notify.cmVhZGVy"
+			_, e := env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: source.ID, Actor: "coordinator", Patch: map[string]jsontext.Value{key: jsontext.Value(tc.slot)}})
+			require.NoError(t, e)
+			before, e := env.DB.IssueByID(t.Context(), source.ID)
+			require.NoError(t, e)
+			path := fmt.Sprintf("/api/v1/projects/%d/issues/%s/notifications", p.ID, source.ShortID)
+			resp, body := envDoRaw(t, env, http.MethodPost, path, map[string]any{"to": "reader", "message": "mine", "replace": false}, map[string]string{"Authorization": "Bearer worker-token"})
+			require.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
+			require.Contains(t, string(body), "notification_held")
+			require.NotContains(t, string(body), "private")
+			require.NotContains(t, string(body), "lead")
+			after, e := env.DB.IssueByID(t.Context(), source.ID)
+			require.NoError(t, e)
+			require.Equal(t, before.Metadata, after.Metadata)
+		})
 	}
 }

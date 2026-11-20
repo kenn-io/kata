@@ -732,6 +732,16 @@ func (n NotifyIssuePath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(n))
 }
 
+type ClearNotificationIfFromPath struct {
+	// ProjectID Numeric project ID or name:<project name>; name: alone requires an alias
+	ProjectID string `json:"project_id" validate:"required"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (c ClearNotificationIfFromPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
 type IssuePlanningDatesPath struct {
 	ProjectID int64  `json:"project_id"`
 	Ref       string `json:"ref" validate:"required"`

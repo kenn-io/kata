@@ -668,6 +668,20 @@ func (c ClaimViolationOut) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
+type ClearNotificationRequestBody struct {
+	Actor *string `json:"actor,omitempty"`
+
+	// IfFrom Remove the request only while its stored from field equals this actor. A stored-field check, not proof of who wrote it
+	IfFrom string `json:"if_from" validate:"required"`
+
+	// To Recipient address: <actor> or <actor>/<teammate>
+	To string `json:"to" validate:"required"`
+}
+
+func (c ClearNotificationRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
 type CloseActionRequestBody struct {
 	Actor               *string                              `json:"actor,omitempty"`
 	DryRun              *bool                                `json:"dry_run,omitempty"`
@@ -5065,6 +5079,9 @@ type NotifyIssueRequestBody struct {
 	Broadcast *bool   `json:"broadcast,omitempty"`
 	Message   string  `json:"message" validate:"required"`
 	Re        *string `json:"re,omitempty"`
+
+	// Replace false answers 409 notification_held instead of replacing the recipient's held request; absent means true
+	Replace   *bool   `json:"replace,omitempty"`
 	Teammate  *string `json:"teammate,omitempty"`
 	Teammates *bool   `json:"teammates,omitempty"`
 	To        *string `json:"to,omitempty"`

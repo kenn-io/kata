@@ -26,7 +26,7 @@ func registerTaskOperationPolicies(policies map[string]HostOperationPolicy) {
 
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationTaskMutation, Capability: hostCapabilityWrite, Mutation: true,
-	}, "notifyIssue", "createIssue", "editIssue", "createComment", "editComment", "addLabel", "removeLabel",
+	}, "notifyIssue", "clearNotificationIfFrom", "createIssue", "editIssue", "createComment", "editComment", "addLabel", "removeLabel",
 		"createLink", "deleteLink", "assignIssue", "unassignIssue", "claimIssue",
 		"setIssuePriority", "closeIssue", "reopenIssue", "deleteIssue", "restoreIssue",
 		"createRecurrence", "patchRecurrence", "deleteRecurrence", "patchIssueMetadata", "addAttachment", "linkAttachment",

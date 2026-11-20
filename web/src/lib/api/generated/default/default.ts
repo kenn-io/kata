@@ -32,6 +32,8 @@ import type {
   ClaimResponseBody,
   ClaimStatusBody,
   ClearFederationSpokeNamePathParameters,
+  ClearNotificationIfFromPathParameters,
+  ClearNotificationRequestBody,
   CloseActionRequestBody,
   CloseIssuePathParameters,
   CommentRequestBody,
@@ -6200,6 +6202,58 @@ export const notifyIssue = async (
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(notifyIssueRequestBody),
   })
+}
+
+export type clearNotificationIfFromResponse200 = {
+  data: NotifyIssueResponseBody
+  status: 200
+}
+
+export type clearNotificationIfFromResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type clearNotificationIfFromResponseSuccess = clearNotificationIfFromResponse200 & {
+  headers: Headers
+}
+export type clearNotificationIfFromResponseError = clearNotificationIfFromResponseDefault & {
+  headers: Headers
+}
+
+export type clearNotificationIfFromResponse =
+  | clearNotificationIfFromResponseSuccess
+  | clearNotificationIfFromResponseError
+
+export const getClearNotificationIfFromUrl = ({
+  projectId,
+  ref,
+}: ClearNotificationIfFromPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/notifications/clear`
+}
+
+export const clearNotificationIfFrom = async (
+  { projectId, ref }: ClearNotificationIfFromPathParameters,
+  clearNotificationRequestBody: ClearNotificationRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<clearNotificationIfFromResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<clearNotificationIfFromResponse>(
+    getClearNotificationIfFromUrl({ projectId, ref }),
+    {
+      ...options,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+      body: JSON.stringify(clearNotificationRequestBody),
+    },
+  )
 }
 
 export type issuePlanningDatesResponse200 = {

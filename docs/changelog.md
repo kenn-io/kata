@@ -189,6 +189,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   [HTTP API reference](reference/http-api.md#editing-an-issue-safely).
 - Add semantic and hybrid search to Postgres-backed Go services with `Config.Embeddings`; automatic search falls back to lexical results when pgvector is missing. See [semantic search](development/embedding.md#semantic-search).
 
+- Send a [request without replacing one](reference/cli.md#teammate-requests) the recipient still holds with `kata notify --no-replace`, and clear a request only while its stored `from` field is a given actor with `kata notify --clear --if-from <actor>`. `--no-replace` does not combine with `--broadcast` or `--clear`; `--if-from` needs `--clear`, compares the stored `from` and does not verify who wrote the request, and a plain `--clear` still clears unconditionally. Both need a daemon on API 0.63.0 or newer.
+
 - Read a soft-deleted issue's history, including who deleted it and when, from
   `GET /api/v1/projects/{project_id}/events?issue={ref}`. Name the actor you
   would restore as in the new `actor` query parameter. Callers who may restore
