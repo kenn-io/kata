@@ -652,14 +652,13 @@ forward. A refused move of one pushed issue, `403
 federation_project_not_enrolled`, does not count as a refused credential.
 Other projects keep syncing.
 
-`kata federation status` shows a waiting project's reason, last status code,
-failure count, and next attempt, for example `sync retry: hub refused the
-credential (403) on 5 attempts; next attempt 2026-01-01T00:15:00Z; to retry
-now, enroll again on the hub and run the join command it prints`. A
-provider-managed spoke gets no join hint; its provider line says what to do.
-The JSON form carries them in `sync_retry`. The schedule lives in the daemon running the federation runner,
-so restarting it makes a fresh attempt for every project, and with PostgreSQL
-only the runner leader reports it.
+`kata federation status` shows a waiting project's reason, the status code
+that set it, failure count, and next attempt, for example `sync retry: hub
+refused the credential (403) on 5 attempts; next attempt
+2026-01-01T00:15:00Z`. The JSON form carries them in `sync_retry`. The
+schedule lives in the daemon running the federation runner, so restarting it
+makes a fresh attempt for every project, and with PostgreSQL only the runner
+leader reports it.
 
 ### Relay checkpoint capacity
 

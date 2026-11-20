@@ -149,23 +149,23 @@ func (s *SyncRetries) record(projectID int64, identity [32]byte, err error, inte
 	if ok {
 		next.Failures = previous.Failures + 1
 	}
-	wait := time.Duration(0)
-	switch reason {
-	case syncRetryRelayCrossProjectLinks:
+	if reason == syncRetryRelayCrossProjectLinks {
 		// Unchanged relay refusal schedule: no jitter, doubling to the
 		// reconciler's five-minute cap, never shorter than the interval.
 		next.delay = max(time.Minute, interval)
 		if ok {
 			next.delay = max(interval, doubledDelay(previous.delay))
 		}
-		wait = next.delay
-	case syncRetryRefused:
-		next.delay = nextRetryDelay(previous.delay, ok, max(refusedRetryInitialDelay, interval), max(refusedRetryMaxDelay, interval))
-		wait = max(next.delay-s.jitter(next.delay/4), interval, min(retryAfter, maxHonoredRetryAfter))
-	case syncRetryUnavailable:
-		next.delay = nextRetryDelay(previous.delay, ok, interval, max(unavailableRetryMaxDelay, interval))
-		wait = max(next.delay-s.jitter(next.delay/4), interval, min(retryAfter, maxHonoredRetryAfter))
+		next.NextAttemptAt = completed.Add(next.delay).UTC()
+		s.states[projectID] = next
+		return
 	}
+	initial, limit := interval, max(unavailableRetryMaxDelay, interval)
+	if reason == syncRetryRefused {
+		initial, limit = max(refusedRetryInitialDelay, interval), max(refusedRetryMaxDelay, interval)
+	}
+	next.delay = nextRetryDelay(previous.delay, ok, initial, limit)
+	wait := max(next.delay-s.jitter(next.delay/4), interval, min(retryAfter, maxHonoredRetryAfter))
 	next.NextAttemptAt = completed.Add(wait).UTC()
 	s.states[projectID] = next
 }
@@ -200,6 +200,10 @@ func (s *SyncRetries) reset() {
 	defer s.mu.Unlock()
 	clear(s.states)
 }
+
+// hubCredentialRefusedCode is the error code a hub sends when it refuses the
+// spoke's credential.
+const hubCredentialRefusedCode = "auth_invalid"
 
 // classifySyncRetry finds the hub response that decides a failed turn's retry
 // schedule. A refused credential outranks a throttled request because only an

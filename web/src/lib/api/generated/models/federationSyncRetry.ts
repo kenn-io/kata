@@ -6,7 +6,7 @@ import type { FederationSyncRetryReason } from './federationSyncRetryReason.ts'
 export interface FederationSyncRetry {
   /** Consecutive attempts that ended for this reason. */
   failures: number
-  /** Hub response status of the last attempt. */
+  /** Hub response status that set the retry reason. */
   http_status: number
   /** Earliest time the runner contacts the hub again. The attempt happens on the runner's first pass at or after this time. */
   next_attempt_at: string

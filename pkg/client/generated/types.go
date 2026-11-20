@@ -3105,7 +3105,7 @@ type FederationSyncRetry struct {
 	// Failures Consecutive attempts that ended for this reason.
 	Failures int64 `json:"failures"`
 
-	// HTTPStatus Hub response status of the last attempt.
+	// HTTPStatus Hub response status that set the retry reason.
 	HTTPStatus int64 `json:"http_status"`
 
 	// NextAttemptAt Earliest time the runner contacts the hub again. The attempt happens on the runner's first pass at or after this time.

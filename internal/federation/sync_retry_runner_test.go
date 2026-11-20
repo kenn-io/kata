@@ -350,6 +350,37 @@ func TestThrottledClaimEndsTheTurn(t *testing.T) {
 	require.Len(t, pending, 2, "both claims stay queued")
 }
 
+// A claim refused with 403 auth_invalid and a later claim throttled with
+// 503 in the same turn leave the binding refused, with the hub's
+// Retry-After as the floor. The refused claim is still rejected.
+func TestRefusedClaimOutranksALaterThrottledClaim(t *testing.T) {
+	ctx := t.Context()
+	fleet := newSpokeFleet(t, 1)
+	project := fleet.projects[0]
+	fleet.beforeAnswer = func() {
+		if fleet.requests.Load() == 2 {
+			fleet.throttleClaims.Store(true)
+		}
+	}
+	for i := range 2 {
+		issue, _, err := fleet.store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: fmt.Sprintf("claimed %d", i), Author: "worker"})
+		require.NoError(t, err)
+		_, err = fleet.store.EnqueuePendingClaim(ctx, pendingClaimParams(fleet.store, project.ID, issue.ShortID, "worker"))
+		require.NoError(t, err)
+	}
+	retries := newSyncRetries(noJitter)
+	fleet.pass(ctx, retries)
+	require.Equal(t, int64(2), fleet.requests.Load(), "the throttled claim ends the turn")
+	retry, ok := retries.FederationSyncRetry(project.ID)
+	require.True(t, ok)
+	require.Equal(t, syncRetryRefused, retry.Reason)
+	require.Equal(t, http.StatusForbidden, retry.HTTPStatus)
+	require.Equal(t, fleet.now.Add(2*time.Minute), retry.NextAttemptAt)
+	pending, err := fleet.store.ListPendingClaimRequests(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, pending, 1, "the refused claim is rejected; the throttled one stays queued")
+}
+
 // failingClaimAttemptStore cannot record a pending claim attempt.
 type failingClaimAttemptStore struct{ *sqlitestore.Store }
 

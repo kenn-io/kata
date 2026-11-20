@@ -3023,7 +3023,7 @@ components:
           format: int64
           type: integer
         http_status:
-          description: Hub response status of the last attempt.
+          description: Hub response status that set the retry reason.
           format: int64
           type: integer
         next_attempt_at:
