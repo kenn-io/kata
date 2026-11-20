@@ -140,12 +140,7 @@ func discoverDaemonResolved(ctx context.Context) (client.ResolvedDaemon, error) 
 			return resolved, diagnosisError(diagnosis)
 		}
 		if err != nil {
-			mapped := cliDaemonTargetError(err)
-			var target *cliError
-			if resolved.LocalProfile != nil && !errors.As(mapped, &target) {
-				return resolved, &cliError{Message: err.Error(), Code: "local_unreachable", Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
-			}
-			return resolved, mapped
+			return resolved, cliDaemonTargetError(err)
 		}
 		return resolved, noDaemonRunningError()
 	}
