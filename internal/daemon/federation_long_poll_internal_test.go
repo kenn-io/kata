@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
@@ -161,4 +162,10 @@ func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.
 	assert.Equal(t, http.StatusOK, status)
 	assert.Less(t, elapsed, 5*time.Second, "a poll beyond the per-credential bound must answer like an ordinary poll")
 	assert.Equal(t, federationPollMaxWaitersPerCredential, waits.heldFor(id))
+}
+
+func TestFederationPollWaitCapsOversizedWaits(t *testing.T) {
+	wait, err := federationPollWait(t.Context(), api.OptionalInt{IsSet: true, Value: 9223372037})
+	require.NoError(t, err)
+	assert.Equal(t, federationPollWaitMax, wait)
 }

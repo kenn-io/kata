@@ -77,7 +77,8 @@ func federationPollWait(ctx context.Context, requested api.OptionalInt) (time.Du
 	if requested.Value < 0 {
 		return 0, api.NewError(http.StatusBadRequest, "validation", "wait must be a non-negative integer", "", nil)
 	}
-	wait := min(time.Duration(requested.Value)*time.Second, federationPollWaitMax)
+	// Clamp the seconds before converting, so a huge value cannot overflow.
+	wait := time.Duration(min(requested.Value, int(federationPollWaitMax/time.Second))) * time.Second
 	if deadline, ok := ctx.Deadline(); ok {
 		wait = min(wait, time.Until(deadline)-federationPollWaitMargin)
 	}
