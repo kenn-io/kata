@@ -344,17 +344,19 @@ func startFederationPollBridge(cfg ServerConfig) func() {
 }
 
 // holdFederationPoll waits on a caught-up page until the project may have new
-// events or the wait ends. Before it returns any page it authorizes the
-// request again from scratch, so revocation during the wait still applies.
+// events or the wait ends, then reads the page again. Before each read it
+// authorizes the request again from scratch, so revocation during the wait
+// still applies. The read after the wait ends returns events whose wakeup was
+// lost. The hold ends at deadline, fixed before the poll's first read, so a
+// slow first read shortens the hold.
 func holdFederationPoll(
 	ctx context.Context,
 	waiter *federationPollWaiter,
-	wait time.Duration,
+	deadline time.Time,
 	result db.FederationReadResult,
 	reauthorize func() (context.Context, error),
 	read func(context.Context) (db.FederationReadResult, error),
 ) (db.FederationReadResult, error) {
-	deadline := time.Now().Add(wait)
 	for federationPollCaughtUp(result) && time.Now().Before(deadline) {
 		woke, err := waiter.wait(ctx, deadline)
 		if err != nil {
@@ -364,11 +366,11 @@ func holdFederationPoll(
 		if err != nil {
 			return result, err
 		}
-		if !woke {
-			break
-		}
 		if result, err = read(readCtx); err != nil {
 			return result, err
+		}
+		if !woke {
+			break
 		}
 	}
 	return result, nil
@@ -383,9 +385,13 @@ func heldFederationPollAllowed(ctx context.Context) bool {
 }
 
 // reauthorizeFederationPoll repeats the poll's federation authorization
-// without the authorization cached for the request: credential, project
-// membership and the host federation decision are all read again.
+// without the authorization cached for the request: the signing key,
+// credential, project membership and the host federation decision are all
+// checked again.
 func reauthorizeFederationPoll(ctx context.Context, cfg ServerConfig, authHeader string, projectID int64, operation HostFederationOperation) (context.Context, error) {
+	if err := recheckFederationSigningKey(ctx); err != nil {
+		return ctx, err
+	}
 	authorization, err := evaluateFederationRequestForCapabilities(ctx, cfg, authHeader, projectID, []string{"pull"}, operation)
 	if err != nil {
 		return ctx, err

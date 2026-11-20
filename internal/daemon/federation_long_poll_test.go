@@ -12,19 +12,112 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
+// federationReadProbe wraps a hub store to count the ReadFederation calls that
+// have returned and to run a hook before a chosen call. Polls read on server
+// goroutines while the test watches, so mu guards every field.
+type federationReadProbe struct {
+	db.Storage
+	mu       sync.Mutex
+	started  int
+	returned int
+	changed  chan struct{}
+	before   func(read int) error
+}
+
+func newFederationReadProbe(store db.Storage) *federationReadProbe {
+	return &federationReadProbe{Storage: store, changed: make(chan struct{})}
+}
+
+// storage returns the probe as the hub's store. A store shared by several hub
+// processes must stay a wake bus, or the server never starts the bridge that
+// carries their wakeups.
+func (p *federationReadProbe) storage() db.Storage {
+	if bus, ok := p.Storage.(db.FederationPollWakeBus); ok {
+		return struct {
+			*federationReadProbe
+			db.FederationPollWakeBus
+		}{p, bus}
+	}
+	return p
+}
+
+// beforeRead runs hook before each later ReadFederation call, with the call's
+// 1-based number.
+func (p *federationReadProbe) beforeRead(hook func(read int) error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.before = hook
+}
+
+func (p *federationReadProbe) ReadFederation(ctx context.Context, params db.FederationReadParams) (db.FederationReadResult, error) {
+	p.mu.Lock()
+	p.started++
+	read, before := p.started, p.before
+	p.mu.Unlock()
+	if before != nil {
+		if err := before(read); err != nil {
+			return db.FederationReadResult{}, err
+		}
+	}
+	result, err := p.Storage.ReadFederation(ctx, params)
+	p.mu.Lock()
+	p.returned++
+	close(p.changed)
+	p.changed = make(chan struct{})
+	p.mu.Unlock()
+	return result, err
+}
+
+func (p *federationReadProbe) readsReturned() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.returned
+}
+
+// waitForReads blocks until n ReadFederation calls have returned.
+func (p *federationReadProbe) waitForReads(t testing.TB, n int) {
+	t.Helper()
+	//nolint:kennlint // deadlinetest: bounds a read made by a hub handler reached over real HTTP.
+	deadline := time.After(10 * time.Second)
+	for {
+		p.mu.Lock()
+		returned, changed := p.returned, p.changed
+		p.mu.Unlock()
+		if returned >= n {
+			return
+		}
+		select {
+		case <-changed:
+		case <-deadline:
+			t.Fatalf("the hub returned %d federation reads, want %d", returned, n)
+		}
+	}
+}
+
+// withFederationReadProbe installs a probe around the test daemon's store.
+func withFederationReadProbe(probe **federationReadProbe) testenv.Option {
+	return func(cfg *daemon.ServerConfig) {
+		*probe = newFederationReadProbe(cfg.DB)
+		cfg.DB = (*probe).storage()
+	}
+}
+
 type longPollFixture struct {
 	env        *testenv.Env
+	reads      *federationReadProbe
 	project    db.Project
 	enrollment db.CreatedFederationEnrollment
 }
 
 func newLongPollFixture(t *testing.T) longPollFixture {
 	t.Helper()
-	env := testenv.New(t)
+	var reads *federationReadProbe
+	env := testenv.New(t, withFederationReadProbe(&reads))
 	project := createFederatedHubProject(t, env, "hub-project")
 	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
 		Token:            "long-poll-token",
@@ -34,7 +127,7 @@ func newLongPollFixture(t *testing.T) longPollFixture {
 		Actor:            "tester",
 	})
 	require.NoError(t, err)
-	return longPollFixture{env: env, project: project, enrollment: enrollment}
+	return longPollFixture{env: env, reads: reads, project: project, enrollment: enrollment}
 }
 
 type longPollResult struct {
@@ -124,17 +217,15 @@ func sendLongPoll(ctx context.Context, client *http.Client, url string) longPoll
 	return out
 }
 
-// waitForHeldPoll gives the poll goroutine time to reach the hub and park.
-// A commit that lands before the poll's first read is still returned at once,
-// so this only keeps the test about the held path.
-func waitForHeldPoll(t testing.TB, done <-chan longPollResult) {
+// startHeldPoll sends a held poll and returns once the hub has finished the
+// poll's first read. The poll subscribes to wakeups before that read, so a
+// commit the test makes afterwards reaches the poll only by waking it.
+func (f longPollFixture) startHeldPoll(t *testing.T, afterID int64, wait string) <-chan longPollResult {
 	t.Helper()
-	select {
-	case result := <-done:
-		t.Fatalf("poll returned before it was held: %d %s", result.status, result.raw)
-	//nolint:kennlint // deadlinetest: a held poll is observable only as a response that has not arrived over real HTTP.
-	case <-time.After(300 * time.Millisecond):
-	}
+	reads := f.reads.readsReturned()
+	done := startLongPoll(t, f, afterID, wait)
+	f.reads.waitForReads(t, reads+1)
+	return done
 }
 
 func TestFederationPollAdvertisesWaitMaximum(t *testing.T) {
@@ -156,8 +247,7 @@ func TestFederationPollWithoutWaitAnswersAtOnce(t *testing.T) {
 func TestFederationPollWaitHoldsUntilProjectEventCommits(t *testing.T) {
 	f := newLongPollFixture(t)
 	cursor := f.cursor(t)
-	done := startLongPoll(t, f, cursor, "30")
-	waitForHeldPoll(t, done)
+	done := f.startHeldPoll(t, cursor, "30")
 	committed := time.Now()
 	createIssueAs(t, f.env, f.project.ID, "tester", "Wakes the held poll")
 	var result longPollResult
@@ -190,14 +280,17 @@ func TestFederationPollWaitIgnoresOtherProjects(t *testing.T) {
 	other, err := f.env.DB.CreateProject(t.Context(), "other-project")
 	require.NoError(t, err)
 	cursor := f.cursor(t)
-	done := startLongPoll(t, f, cursor, "2")
-	waitForHeldPoll(t, done)
+	reads := f.reads.readsReturned()
+	done := f.startHeldPoll(t, cursor, "2")
 	createIssueAs(t, f.env, other.ID, "tester", "Belongs to another project")
 	result := <-done
 	require.NoError(t, result.err)
 	require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
 	assert.Empty(t, result.body.Events)
 	assert.GreaterOrEqual(t, result.elapsed, 2*time.Second)
+	// The poll reads once before it waits and once when the wait ends. A
+	// wakeup for the other project would add a read in between.
+	assert.Equal(t, reads+2, f.reads.readsReturned())
 }
 
 func TestFederationPollWaitAnswersAtOnceWhenEventsArePending(t *testing.T) {
@@ -212,8 +305,7 @@ func TestFederationPollWaitAnswersAtOnceWhenEventsArePending(t *testing.T) {
 func TestFederationPollWaitReauthorizesAfterWake(t *testing.T) {
 	f := newLongPollFixture(t)
 	cursor := f.cursor(t)
-	done := startLongPoll(t, f, cursor, "30")
-	waitForHeldPoll(t, done)
+	done := f.startHeldPoll(t, cursor, "30")
 	require.NoError(t, f.env.DB.RevokeFederationEnrollment(t.Context(), f.enrollment.Enrollment.ID))
 	createIssueAs(t, f.env, f.project.ID, "tester", "Committed after revocation")
 	var result longPollResult
@@ -230,8 +322,7 @@ func TestFederationPollWaitReauthorizesAfterWake(t *testing.T) {
 func TestFederationPollWaitReauthorizesWhenWaitExpires(t *testing.T) {
 	f := newLongPollFixture(t)
 	cursor := f.cursor(t)
-	done := startLongPoll(t, f, cursor, "2")
-	waitForHeldPoll(t, done)
+	done := f.startHeldPoll(t, cursor, "2")
 	require.NoError(t, f.env.DB.RevokeFederationEnrollment(t.Context(), f.enrollment.Enrollment.ID))
 	result := <-done
 	require.NoError(t, result.err)
@@ -244,36 +335,4 @@ func TestFederationPollWaitRejectsInvalidWait(t *testing.T) {
 		result := f.poll(t, 0, wait)
 		assert.Equal(t, http.StatusBadRequest, result.status, "wait=%s: %s", wait, result.raw)
 	}
-}
-
-func TestFederationPollWaitReleasesWaitersWhenClientsDisconnect(t *testing.T) {
-	f := newLongPollFixture(t)
-	cursor := f.cursor(t)
-	ctx, cancel := context.WithCancel(t.Context())
-	var held sync.WaitGroup
-	for range 32 {
-		held.Go(func() {
-			request, err := http.NewRequestWithContext(ctx, http.MethodGet,
-				fmt.Sprintf("%s%s/federation/events?after_id=%d&wait=30", f.env.URL, projectPath(f.project.ID), cursor), nil)
-			if !assert.NoError(t, err) {
-				return
-			}
-			request.Header.Set("Authorization", "Bearer long-poll-token")
-			response, err := http.DefaultClient.Do(request) //nolint:gosec // test-owned loopback daemon
-			if err == nil {
-				_ = response.Body.Close()
-				t.Errorf("held poll answered before its client disconnected: %d", response.StatusCode)
-			}
-		})
-	}
-	//nolint:kennlint // sleeptest: the polls park in the hub over real HTTP; no event marks that.
-	time.Sleep(500 * time.Millisecond)
-	cancel()
-	held.Wait()
-	// Every bound slot is free again, so this poll is held rather than
-	// answered at once.
-	//nolint:kennlint // sleeptest: disconnect cleanup runs in hub handlers reached over real HTTP.
-	require.Eventually(t, func() bool {
-		return f.poll(t, cursor, "1").elapsed >= time.Second
-	}, 5*time.Second, 50*time.Millisecond)
 }

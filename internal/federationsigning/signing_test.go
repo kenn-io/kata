@@ -52,6 +52,13 @@ func signed(t *testing.T, source signingpolicy.Source) *http.Request {
 	return r
 }
 
+// verifyRequest reports whether v admits r, for tests about admission
+// itself rather than the admitting key.
+func verifyRequest(v *Verifier, r *http.Request, enrollmentID int64) error {
+	_, err := v.Verify(r, enrollmentID)
+	return err
+}
+
 // Contract: method, exact public target, query, digest and bearer are signed.
 func TestTamperingAndPrefix(t *testing.T) {
 	s := testSource(t)
@@ -82,7 +89,7 @@ func TestTamperingAndPrefix(t *testing.T) {
 				r.Header.Set("X-Forwarded-Prefix", "/other")
 			}
 			v := testVerifier(t, "https://hub.example/federation", s)
-			err := v.Verify(r, 7)
+			err := verifyRequest(v, r, 7)
 			if change == "none" || change == "forwarded" {
 				require.NoError(t, err)
 			} else {
@@ -103,7 +110,7 @@ func TestReplayConcurrencyRestartAndPressure(t *testing.T) {
 		wg.Go(func() {
 			cloned := r.Clone(t.Context())
 			cloned.Body = io.NopCloser(strings.NewReader(`{"events":[]}`))
-			results <- v.Verify(cloned, 7)
+			results <- verifyRequest(v, cloned, 7)
 		})
 	}
 	wg.Wait()
@@ -124,21 +131,21 @@ func TestReplayConcurrencyRestartAndPressure(t *testing.T) {
 		}
 	})
 	require.NoError(t, err)
-	require.ErrorIs(t, restarted.Verify(signed(t, s), 7), ErrWarming)
+	require.ErrorIs(t, verifyRequest(restarted, signed(t, s), 7), ErrWarming)
 	v.capacity = 1
-	require.ErrorIs(t, v.Verify(signed(t, s), 7), ErrCapacity)
+	require.ErrorIs(t, verifyRequest(v, signed(t, s), 7), ErrCapacity)
 }
 
 func TestSecretSourcesScopeAndBodyLimit(t *testing.T) {
 	s := testSource(t)
 	v := testVerifier(t, "https://hub.example", s)
-	require.Error(t, v.Verify(signed(t, s), 8))
+	require.Error(t, verifyRequest(v, signed(t, s), 8))
 	r := signed(t, s)
 	r.Body = io.NopCloser(bytes.NewReader(make([]byte, MaxBodyBytes+1)))
-	require.Error(t, v.Verify(r, 7))
+	require.Error(t, verifyRequest(v, r, 7))
 	t.Setenv(s.KeyEnv, "")
 	require.Error(t, Sign(signedWithoutKey(t), s))
-	require.Error(t, v.Verify(signedWithoutKey(t), 7))
+	require.Error(t, verifyRequest(v, signedWithoutKey(t), 7))
 }
 
 func TestVerifierPreservesRequestBodyLimitError(t *testing.T) {
@@ -147,7 +154,7 @@ func TestVerifierPreservesRequestBodyLimitError(t *testing.T) {
 	req := signed(t, source)
 	req.Body = http.MaxBytesReader(nil, req.Body, 1)
 
-	err := v.Verify(req, 7)
+	err := verifyRequest(v, req, 7)
 	require.ErrorIs(t, err, signingpolicy.ErrInvalid)
 	var limitErr *http.MaxBytesError
 	require.ErrorAs(t, err, &limitErr)
@@ -181,8 +188,8 @@ func TestVerifierKeepsUnavailableKeysRejectedUntilSourceReturns(t *testing.T) {
 			t.Cleanup(func() { _ = v.Close() })
 			v.started = time.Now().Add(-Quarantine)
 
-			require.Error(t, v.Verify(rejected, 7), "unavailable source must reject its signed requests")
-			require.NoError(t, v.Verify(signed(t, other), 8), "another enrollment remains available")
+			require.Error(t, verifyRequest(v, rejected, 7), "unavailable source must reject its signed requests")
+			require.NoError(t, verifyRequest(v, signed(t, other), 8), "another enrollment remains available")
 			require.Error(t, signingpolicy.ValidatePolicy("https://hub.example", keys), "explicit configuration stays strict")
 			if source.KeyEnv != "" {
 				t.Setenv(source.KeyEnv, strings.Repeat("a", 64))
@@ -192,7 +199,7 @@ func TestVerifierKeepsUnavailableKeysRejectedUntilSourceReturns(t *testing.T) {
 				}
 				require.NoError(t, os.WriteFile(source.KeyFile, []byte(strings.Repeat("a", 64)), 0600))
 			}
-			require.NoError(t, v.Verify(signed(t, source), 7), "restoring the source requires no verifier restart")
+			require.NoError(t, verifyRequest(v, signed(t, source), 7), "restoring the source requires no verifier restart")
 		})
 	}
 }
@@ -208,9 +215,9 @@ func TestVerifierStartsAfterRetiredSourceRemoval(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = v.Close() })
 	v.started = time.Now().Add(-Quarantine)
-	require.ErrorIs(t, v.Verify(retiredRequest, 7), signingpolicy.ErrKeyRejected)
+	require.ErrorIs(t, verifyRequest(v, retiredRequest, 7), signingpolicy.ErrKeyRejected)
 	t.Setenv(source.KeyEnv, strings.Repeat("a", 64))
-	require.ErrorIs(t, v.Verify(signed(t, source), 7), signingpolicy.ErrKeyRejected)
+	require.ErrorIs(t, verifyRequest(v, signed(t, source), 7), signingpolicy.ErrKeyRejected)
 }
 
 func TestVerifierRejectsDuplicateAvailableSecrets(t *testing.T) {
@@ -267,7 +274,7 @@ func TestDurableReplayWatermarkAndRollback(t *testing.T) {
 	v, err := NewVerifier("https://hub.example", []signingpolicy.Key{{Source: s, EnrollmentID: 7}}, p)
 	require.NoError(t, err)
 	v.started = time.Now().Add(-Quarantine)
-	require.NoError(t, v.Verify(signed(t, s), 7))
+	require.NoError(t, verifyRequest(v, signed(t, s), 7))
 	_, err = NewVerifier("https://hub.example", []signingpolicy.Key{{Source: s, EnrollmentID: 7}}, p)
 	require.Error(t, err, "one process lock protects all verifier instances")
 	watermark, err := os.ReadFile(p) //nolint:gosec // G304: replay evidence in t.TempDir.
@@ -278,7 +285,7 @@ func TestDurableReplayWatermarkAndRollback(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = restarted.Close() })
 	restarted.started = time.Now().Add(-Quarantine)
-	require.ErrorIs(t, restarted.Verify(signed(t, s), 7), ErrWarming, "persisted expiry also gates startup")
+	require.ErrorIs(t, verifyRequest(restarted, signed(t, s), 7), ErrWarming, "persisted expiry also gates startup")
 	require.Error(t, InitializeReplayState(p), "never reset retained replay evidence")
 }
 
@@ -304,10 +311,10 @@ func TestConcurrentClockSamplingDoesNotFenceHealthyTraffic(t *testing.T) {
 
 	firstResult := make(chan error, 1)
 	go func() {
-		firstResult <- v.Verify(firstRequest, 7)
+		firstResult <- verifyRequest(v, firstRequest, 7)
 	}()
 	<-firstSampled
-	secondErr := v.Verify(secondRequest, 7)
+	secondErr := verifyRequest(v, secondRequest, 7)
 	close(resumeFirst)
 	firstErr := <-firstResult
 
@@ -337,7 +344,7 @@ func TestBodyVerificationRespectsUploadBudgetAndExpiry(t *testing.T) {
 					v.now = func() time.Time { return now.Add(tc.elapsed) }
 				},
 			}
-			require.ErrorIs(t, v.Verify(r, 7), tc.want)
+			require.ErrorIs(t, verifyRequest(v, r, 7), tc.want)
 		})
 	}
 }
@@ -370,7 +377,7 @@ func FuzzSignatureInput(f *testing.F) {
 		r.Header.Set("Signature", "sig1=:AA==:")
 		r.Header.Set("Content-Digest", "sha-256=:AA==:")
 		v := &Verifier{now: time.Now, started: time.Now().Add(-Quarantine), keys: map[string]signingpolicy.Key{}, seen: map[string]time.Time{}, capacity: 1}
-		require.Error(t, v.Verify(r, 7))
+		require.Error(t, verifyRequest(v, r, 7))
 	})
 }
 
@@ -425,7 +432,7 @@ func TestFreshnessRotationAndBodyCancellation(t *testing.T) {
 			if mode == "rollback" {
 				want = ErrWarming
 			}
-			require.ErrorIs(t, v.Verify(r, 7), want)
+			require.ErrorIs(t, verifyRequest(v, r, 7), want)
 			require.Empty(t, v.seen)
 		})
 	}
@@ -548,4 +555,29 @@ func TestTransportCannotReplaySignatureAfterLostResponse(t *testing.T) {
 	defer mu.Unlock()
 	require.Len(t, retryInputs, 2)
 	require.NotEqual(t, retryInputs[0], retryInputs[1], "native retry generates a fresh nonce")
+}
+
+// Contract: a verified request's admission stays current only while its key
+// would still admit the request: before NotAfter and with the same secret.
+func TestAdmissionTracksItsKey(t *testing.T) {
+	source := testSource(t)
+	started := time.Now()
+	state := filepath.Join(t.TempDir(), "replay.state")
+	require.NoError(t, InitializeReplayState(state))
+	key := signingpolicy.Key{Source: source, EnrollmentID: 7, NotAfter: started.Add(time.Hour).Unix()}
+	v, err := NewVerifier("https://hub.example", []signingpolicy.Key{key}, state)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = v.Close() })
+	v.started = started.Add(-Quarantine)
+	admission, err := v.Verify(signed(t, source), 7)
+	require.NoError(t, err)
+	require.NoError(t, admission.Current())
+
+	t.Setenv(source.KeyEnv, strings.Repeat("b", 64))
+	require.ErrorIs(t, admission.Current(), signingpolicy.ErrKeyRejected, "a replaced secret no longer admits the request")
+	t.Setenv(source.KeyEnv, strings.Repeat("a", 64))
+	require.NoError(t, admission.Current())
+
+	v.now = func() time.Time { return started.Add(time.Hour) }
+	require.ErrorIs(t, admission.Current(), signingpolicy.ErrKeyRejected, "an expired key no longer admits the request")
 }

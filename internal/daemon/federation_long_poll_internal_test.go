@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -96,7 +97,23 @@ func (w *federationPollWaits) heldFor(enrollmentID int64) int {
 	return w.byCredential[enrollmentID]
 }
 
-func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.T) {
+func (w *federationPollWaits) heldTotal() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.total
+}
+
+// internalLongPollHub serves a hub over real HTTP with one pull enrollment
+// for one federated project, and exposes the hub's held-poll bookkeeping.
+type internalLongPollHub struct {
+	waits        *federationPollWaits
+	url          string
+	projectID    int64
+	enrollmentID int64
+}
+
+func newInternalLongPollHub(t *testing.T) internalLongPollHub {
+	t.Helper()
 	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "hub.db"))
 	require.NoError(t, err)
@@ -114,51 +131,88 @@ func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.
 	t.Cleanup(func() { _ = hub.Close() })
 	server := httptest.NewServer(hub.Handler())
 	t.Cleanup(server.Close)
-
-	var cursor int64
-	poll := func(ctx context.Context, wait string) (int, time.Duration, error) {
-		url := fmt.Sprintf("%s/api/v1/projects/%d/federation/events?after_id=%d&wait=%s", server.URL, project.ID, cursor, wait)
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			return 0, 0, err
-		}
-		request.Header.Set("Authorization", "Bearer long-poll-token")
-		started := time.Now()
-		response, err := http.DefaultClient.Do(request) //nolint:gosec // test-owned loopback hub
-		if err != nil {
-			return 0, 0, err
-		}
-		defer func() { _ = response.Body.Close() }()
-		var page struct {
-			NextAfterID int64 `json:"next_after_id"`
-		}
-		if err := json.NewDecoder(response.Body).Decode(&page); err != nil {
-			return response.StatusCode, 0, err
-		}
-		if wait == "0" {
-			cursor = page.NextAfterID
-		}
-		return response.StatusCode, time.Since(started), nil
+	return internalLongPollHub{
+		waits: hub.cfg.federationPollWaits, url: server.URL,
+		projectID: project.ID, enrollmentID: enrollment.Enrollment.ID,
 	}
-	initial, _, err := poll(ctx, "0")
+}
+
+// poll returns the response status, the page's next cursor and how long the
+// hub took to answer.
+func (h internalLongPollHub) poll(ctx context.Context, afterID int64, wait string) (int, int64, time.Duration, error) {
+	url := fmt.Sprintf("%s/api/v1/projects/%d/federation/events?after_id=%d&wait=%s", h.url, h.projectID, afterID, wait)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	request.Header.Set("Authorization", "Bearer long-poll-token")
+	started := time.Now()
+	response, err := http.DefaultClient.Do(request) //nolint:gosec // test-owned loopback hub
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	var page struct {
+		NextAfterID int64 `json:"next_after_id"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&page); err != nil {
+		return response.StatusCode, 0, 0, err
+	}
+	return response.StatusCode, page.NextAfterID, time.Since(started), nil
+}
+
+// holdEveryCredentialSlot parks as many held polls as one credential may hold
+// and returns once the hub holds all of them. Canceling ctx disconnects them;
+// the returned function waits for those polls to end.
+func (h internalLongPollHub) holdEveryCredentialSlot(ctx context.Context, t *testing.T, cursor int64) func() {
+	t.Helper()
+	var polls sync.WaitGroup
+	for range federationPollMaxWaitersPerCredential {
+		polls.Go(func() {
+			if status, _, _, err := h.poll(ctx, cursor, "45"); err == nil {
+				t.Errorf("held poll answered before its client disconnected: %d", status)
+			}
+		})
+	}
+	//nolint:kennlint // sleeptest: the polls reach the hub over real HTTP; the waiter count is the signal.
+	require.Eventually(t, func() bool { return h.waits.heldFor(h.enrollmentID) == federationPollMaxWaitersPerCredential },
+		10*time.Second, 5*time.Millisecond, "the hub never held every poll")
+	return polls.Wait
+}
+
+func TestFederationPollWaitAnswersAtOnceWhenCredentialWaitersAreFull(t *testing.T) {
+	ctx := t.Context()
+	hub := newInternalLongPollHub(t)
+	status, cursor, _, err := hub.poll(ctx, 0, "0")
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, initial)
+	require.Equal(t, http.StatusOK, status)
 	require.Positive(t, cursor)
 
 	held, release := context.WithCancel(ctx)
-	defer release()
-	for range federationPollMaxWaitersPerCredential {
-		go func() { _, _, _ = poll(held, "45") }()
-	}
-	waits := hub.cfg.federationPollWaits
-	id := enrollment.Enrollment.ID
-	//nolint:kennlint // sleeptest: the polls reach the hub over real HTTP; the waiter count is the signal.
-	require.Eventually(t, func() bool { return waits.heldFor(id) == federationPollMaxWaitersPerCredential },
-		10*time.Second, 5*time.Millisecond, "the hub never held every poll")
+	ended := hub.holdEveryCredentialSlot(held, t, cursor)
+	defer func() { release(); ended() }()
 
-	status, elapsed, err := poll(ctx, "45")
+	status, _, elapsed, err := hub.poll(ctx, cursor, "45")
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, status)
 	assert.Less(t, elapsed, 5*time.Second, "a poll beyond the per-credential bound must answer like an ordinary poll")
-	assert.Equal(t, federationPollMaxWaitersPerCredential, waits.heldFor(id))
+	assert.Equal(t, federationPollMaxWaitersPerCredential, hub.waits.heldFor(hub.enrollmentID))
+}
+
+func TestFederationPollWaitReleasesWaitersWhenClientsDisconnect(t *testing.T) {
+	ctx := t.Context()
+	hub := newInternalLongPollHub(t)
+	status, cursor, _, err := hub.poll(ctx, 0, "0")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+
+	held, disconnect := context.WithCancel(ctx)
+	defer disconnect()
+	ended := hub.holdEveryCredentialSlot(held, t, cursor)
+	disconnect()
+	ended()
+	//nolint:kennlint // sleeptest: disconnect cleanup runs in hub handlers reached over real HTTP.
+	require.Eventually(t, func() bool {
+		return hub.waits.heldFor(hub.enrollmentID) == 0 && hub.waits.heldTotal() == 0
+	}, 5*time.Second, 5*time.Millisecond, "the hub kept slots for polls whose clients disconnected")
 }
