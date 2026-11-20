@@ -12,9 +12,10 @@ import (
 // write after this call goes unnoticed.
 //
 // Each wake names the event's project, so the runner syncs only that
-// project's spoke binding. A move also wakes its source project, whose
-// binding may still owe the hub the moved issue's earlier events. An event
-// without a project wakes every spoke. Events the runner pulled from a hub
+// project's spoke binding. A move wakes every spoke: the destination push can
+// depend on the moved issue's earlier events in any project the issue passed
+// through, and those bindings may still owe the hub those events. An event
+// without a project also wakes every spoke. Events the runner pulled from a hub
 // are broadcast too, for clients and hooks, but they are the runner's own
 // work and must not schedule another pass; pushes accepted from downstream
 // relays wake the runner from their handler.
@@ -57,19 +58,9 @@ func forwardFederationWakes(ctx context.Context, sub Subscription, store db.Stor
 			if msg.Kind != StreamKindEvent || msg.Event == nil || msg.Event.OriginInstanceUID != localInstanceUID {
 				continue
 			}
-			if msg.Event.ProjectID == 0 {
+			if msg.Event.ProjectID == 0 || msg.movedFromProjectUID != "" {
 				wakeAll()
 				continue
-			}
-			if msg.movedFromProjectUID != "" {
-				source, err := store.ProjectByUID(ctx, msg.movedFromProjectUID)
-				if err != nil {
-					// Without the source project, wake every spoke so the
-					// source binding still runs.
-					wakeAll()
-					continue
-				}
-				wakeProject(source.ID)
 			}
 			wakeProject(msg.Event.ProjectID)
 		}

@@ -92,14 +92,7 @@ func TestFederationWakesNameTheProjectOfEachLocalEvent(t *testing.T) {
 			Payload: `{"from_project_uid":"` + source.UID + `"}`,
 		}))
 		synctest.Wait()
-		assert.Equal(t, []int64{source.ID, 12}, log.taken(), "a move wakes its source project and its destination")
-
-		broadcaster.Broadcast(daemon.NewEventMsg(12, db.Event{
-			ProjectID: 12, Type: "issue.moved", OriginInstanceUID: store.InstanceUID(),
-			Payload: `{"from_project_uid":"01HZNQ7VFPK1XGD8R5MABCD4EX"}`,
-		}))
-		synctest.Wait()
-		assert.Equal(t, []int64{-1}, log.taken(), "a move from an unknown project wakes every spoke")
+		assert.Equal(t, []int64{-1}, log.taken(), "a move wakes every spoke")
 
 		cancel()
 		<-done
