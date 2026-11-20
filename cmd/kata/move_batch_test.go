@@ -72,6 +72,50 @@ func TestMoveBatchUnknownStopsNewRowsAndFinishesInflight(t *testing.T) {
 	require.Equal(t, source.ID, stored.ProjectID)
 }
 
+func TestMoveBatchUnknownStopsMoveAfterLookup(t *testing.T) {
+	env, _, source, target, first := setupMoveCLIProjects(t)
+	second, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "second", Author: "tester"})
+	require.NoError(t, err)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var posts atomic.Int32
+	baseURL := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/issues/"+second.ShortID) {
+			close(started)
+			<-release
+		}
+		if strings.HasSuffix(r.URL.Path, "/actions/move") {
+			if strings.Contains(r.URL.Path, first.ShortID) {
+				w.WriteHeader(http.StatusBadGateway)
+				return true
+			}
+			posts.Add(1)
+		}
+		return false
+	})
+	a := daemonAPI{ctx: t.Context(), baseURL: baseURL, client: http.DefaultClient}
+	client, err := kataclient.NewWithHTTPClient(baseURL, a.client)
+	require.NoError(t, err)
+	projects, err := loadProjectRefs(a)
+	require.NoError(t, err)
+	var halt atomic.Bool
+	secondResult := moveBatchResult{Result: "unattempted", Hint: "not sent; safe to rerun"}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		moveBatchOne(a, client, projects, moveBatchRow{Ref: source.Name + "#" + second.ShortID, Target: target.Name}, &secondResult, "tester", true, &halt)
+	}()
+	<-started
+	firstResult := moveBatchResult{Result: "unattempted"}
+	moveBatchOne(a, client, projects, moveBatchRow{Ref: source.Name + "#" + first.ShortID, Target: target.Name}, &firstResult, "tester", true, &halt)
+	close(release)
+	<-done
+	require.Equal(t, "unknown", firstResult.Result)
+	require.Equal(t, "unattempted", secondResult.Result)
+	require.Equal(t, "not sent; safe to rerun", secondResult.Hint)
+	require.Zero(t, posts.Load())
+}
+
 func TestMoveBatchInvalidSuccessSkipsComment(t *testing.T) {
 	env, dir, _, target, issue := setupMoveCLIProjects(t)
 	var comments atomic.Int32

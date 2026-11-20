@@ -312,7 +312,7 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 		refuse("issue_lookup", errors.New("source project not found"))
 		return
 	}
-	if a.ctx.Err() != nil {
+	if a.ctx.Err() != nil || halt.Load() {
 		return
 	}
 	etag := fmt.Sprintf(`"rev-%d"`, issue.Revision)
