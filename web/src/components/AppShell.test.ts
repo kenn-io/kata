@@ -2082,7 +2082,7 @@ describe('AppShell', () => {
     await waitFor(() => expect(document.title).toBe('Credentials · Kata'))
     const issueRoute = {
       kind: 'kata' as const,
-      issueUID: '01J00000000000000000000001',
+      issueUID: '01J00000000000000000000003',
       graph: false,
       filters,
     }
@@ -2096,12 +2096,12 @@ describe('AppShell', () => {
     }
     await view.rerender({ route: issueRoute, snapshot: current })
     await waitFor(() =>
-      expect(document.title).toBe('Issue unavailable 01J00000000000000000000001 · Kata'),
+      expect(document.title).toBe('Issue unavailable 01J00000000000000000000003 · Kata'),
     )
     current.selected = { ...current.selected, state: 'archived' }
     await view.rerender({ snapshot: current })
     await waitFor(() =>
-      expect(document.title).toBe('Archived issue 01J00000000000000000000001 · Kata'),
+      expect(document.title).toBe('Archived issue 01J00000000000000000000003 · Kata'),
     )
   })
 
