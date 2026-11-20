@@ -222,7 +222,7 @@ dispatch:
 	} else if unattempted > 0 {
 		outcome = &cliError{Message: fmt.Sprintf("%d rows not attempted", unattempted), Kind: kindDaemonUnavail, ExitCode: ExitDaemonUnavail}
 	} else if refused > 0 {
-		outcome = moveBatchRefusalError()
+		outcome = moveBatchRefusalError(printErr)
 	}
 	if len(commentErrs) > 0 {
 		combined := errors.Join(outcome, errors.Join(commentErrs...))
@@ -339,7 +339,7 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 		unknown()
 		return
 	}
-	if response.StatusCode >= 502 && response.StatusCode <= 504 {
+	if response.StatusCode >= 500 && response.StatusCode <= 599 {
 		var envelope struct {
 			Error struct {
 				Code    string `json:"code"`
@@ -367,9 +367,11 @@ func moveBatchOne(a daemonAPI, client *kataclient.Client, projects []projectRef,
 	result.NewShortID, result.EventID = moved.NewShortID, moved.EventID
 }
 
-func moveBatchRefusalError() error {
+func moveBatchRefusalError(printErr error) error {
 	err := &cliError{Message: "some issues were refused", Kind: kindConflict, ExitCode: ExitConflict}
-	if currentOutputMode() == outputHuman && !flags.Quiet {
+	if printErr != nil {
+		err.Message += ": " + printErr.Error()
+	} else if currentOutputMode() == outputHuman {
 		err.Code = "batch_refused_reported"
 	}
 	return err

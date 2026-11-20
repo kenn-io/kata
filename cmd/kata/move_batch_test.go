@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/v2"
 	"fmt"
@@ -315,6 +316,7 @@ func TestMoveBatchGatewayAndResponseOutcomes(t *testing.T) {
 		status     int
 		body, want string
 	}{
+		{"gateway 500", 500, "internal server error", "unknown"},
 		{"gateway 502", 502, "bad gateway", "unknown"},
 		{"gateway 503", 503, "service unavailable", "unknown"},
 		{"gateway 504", 504, "gateway timeout", "unknown"},
@@ -373,6 +375,33 @@ func TestMoveBatchGatewayAndResponseOutcomes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMoveBatchRefusalOutputErrors(t *testing.T) {
+	env, dir, _, target, _ := setupMoveCLIProjects(t)
+	path := filepath.Join(t.TempDir(), "refs")
+	require.NoError(t, os.WriteFile(path, []byte("invalid\n"), 0600))
+	args := []string{"--workspace", dir, "move", target.Name, "--refs-from", path}
+	resetFlags(t)
+	cmd := newRootCmd()
+	cmd.SetOut(cliSearchErrorWriter{})
+	cmd.SetArgs(args)
+	err := cmd.ExecuteContext(contextWithBaseURL(t.Context(), env.URL))
+	require.ErrorIs(t, err, errCLISearchWrite)
+	var stderr bytes.Buffer
+	emitRootError(&stderr, cmd, args, err, runEEntered)
+	require.Contains(t, stderr.String(), errCLISearchWrite.Error())
+}
+
+func TestMoveBatchQuietRefusalReportedOnce(t *testing.T) {
+	env, dir, _, target, _ := setupMoveCLIProjects(t)
+	path := filepath.Join(t.TempDir(), "refs")
+	require.NoError(t, os.WriteFile(path, []byte("invalid\n"), 0600))
+	out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL), "--workspace", dir, "move", target.Name, "--refs-from", path, "--quiet")
+	require.Error(t, err)
+	require.Equal(t, ExitConflict, exitCodeForErr(err, true))
+	require.Contains(t, out, "1 refused")
+	require.Empty(t, stderr)
 }
 
 func TestMoveBatchLookupTransportFailureIsUnattempted(t *testing.T) {
