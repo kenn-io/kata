@@ -177,49 +177,62 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	parent, err := store.ParentOf(ctx, child.ID)
 	require.NoError(t, err)
 	require.Equal(t, peer.ID, parent.ToIssueID)
+	{
 
-	directChild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Direct link", Author: "worker"})
-	require.NoError(t, err)
-	directPayload, err := json.Marshal(map[string]string{"from_uid": directChild.UID, "to_uid": peer.UID, "type": "parent"})
-	require.NoError(t, err)
-	direct := newRemoteEvent(t, route, &directChild.UID, "issue.linked", "worker", origin, at+1, directPayload)
-	direct.RelatedIssueUID = &peer.UID
-	direct.ContentHash, err = db.RemoteEventContentHash(direct)
-	require.NoError(t, err)
-	params.Events = []db.FederationIngestEvent{{SourceEventID: 2, Event: direct}}
-	_, err = store.IngestFederationEvents(ctx, params)
-	require.NoError(t, err)
-	parent, err = store.ParentOf(ctx, directChild.ID)
-	require.NoError(t, err)
-	require.Equal(t, peer.ID, parent.ToIssueID)
+		directChild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Direct link", Author: "worker"})
+		require.NoError(t, err)
+		directPayload, err := json.Marshal(map[string]string{"from_uid": directChild.UID, "to_uid": peer.UID, "type": "parent"})
+		require.NoError(t, err)
+		direct := newRemoteEvent(t, route, &directChild.UID, "issue.linked", "worker", origin, at+1, directPayload)
+		direct.RelatedIssueUID = &peer.UID
+		direct.ContentHash, err = db.RemoteEventContentHash(direct)
+		require.NoError(t, err)
+		params.Events = []db.FederationIngestEvent{{SourceEventID: 2, Event: direct}}
+		_, err = store.IngestFederationEvents(ctx, params)
+		require.NoError(t, err)
+		parent, err = store.ParentOf(ctx, directChild.ID)
+		require.NoError(t, err)
+		require.Equal(t, peer.ID, parent.ToIssueID)
 
-	peerChild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Peer child", Author: "peer-member"})
-	require.NoError(t, err)
-	forgedPayload, err := json.Marshal(map[string]string{"from_uid": peerChild.UID, "to_uid": directChild.UID, "type": "parent"})
-	require.NoError(t, err)
-	forged := newRemoteEvent(t, route, &directChild.UID, "issue.linked", "worker", origin, at+2, forgedPayload)
-	forged.RelatedIssueUID = &peerChild.UID
-	forged.ContentHash, err = db.RemoteEventContentHash(forged)
-	require.NoError(t, err)
-	params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: forged}}
-	_, err = store.IngestFederationEvents(ctx, params)
-	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
-	_, err = store.ParentOf(ctx, peerChild.ID)
-	require.ErrorIs(t, err, db.ErrNotFound)
-	_, err = store.EventsByUIDs(ctx, route.ID, []string{forged.EventUID})
-	require.ErrorIs(t, err, db.ErrNotFound)
+		peerChild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Peer child", Author: "peer-member"})
+		require.NoError(t, err)
+		forgedPayload, err := json.Marshal(map[string]string{"from_uid": peerChild.UID, "to_uid": directChild.UID, "type": "parent"})
+		require.NoError(t, err)
+		forged := newRemoteEvent(t, route, &directChild.UID, "issue.linked", "worker", origin, at+2, forgedPayload)
+		forged.RelatedIssueUID = &peerChild.UID
+		forged.ContentHash, err = db.RemoteEventContentHash(forged)
+		require.NoError(t, err)
+		params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: forged}}
+		_, err = store.IngestFederationEvents(ctx, params)
+		require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+		_, err = store.ParentOf(ctx, peerChild.ID)
+		require.ErrorIs(t, err, db.ErrNotFound)
+		_, err = store.EventsByUIDs(ctx, route.ID, []string{forged.EventUID})
+		require.ErrorIs(t, err, db.ErrNotFound)
 
-	// One edit can add a relationship and remove a different relationship
-	// to the same peer. Removing the parent still needs ordinary authority.
-	mixedPayload, err := json.Marshal(map[string]any{"parent_removed_uid": peer.UID, "related_added_uids": []string{peer.UID}})
-	require.NoError(t, err)
-	mixed := newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+2, mixedPayload)
-	params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: mixed}}
-	_, err = store.IngestFederationEvents(ctx, params)
-	require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
-	parent, err = store.ParentOf(ctx, child.ID)
-	require.NoError(t, err)
-	require.Equal(t, peer.ID, parent.ToIssueID)
+		// One edit can add a relationship and remove a different relationship
+		// to the same peer. Removing the parent still needs ordinary authority.
+		mixedPayload, err := json.Marshal(map[string]any{"parent_removed_uid": peer.UID, "related_added_uids": []string{peer.UID}})
+		require.NoError(t, err)
+		mixed := newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+2, mixedPayload)
+		params.Events = []db.FederationIngestEvent{{SourceEventID: 3, Event: mixed}}
+		_, err = store.IngestFederationEvents(ctx, params)
+		require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+		parent, err = store.ParentOf(ctx, child.ID)
+		require.NoError(t, err)
+		require.Equal(t, peer.ID, parent.ToIssueID)
+	}
+	t.Run("parent-add-with-reverse-primary", func(t *testing.T) {
+		primary, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Reverse primary", Author: "worker"})
+		require.NoError(t, err)
+		payload, err := json.Marshal(map[string]string{"type": "parent", "from_uid": peer.UID, "to_uid": primary.UID})
+		require.NoError(t, err)
+		params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: newRemoteEvent(t, route, &primary.UID, "issue.linked", "worker", origin, at+1, payload)}}
+		_, err = store.IngestFederationEvents(ctx, params)
+		require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+		_, err = store.ParentOf(ctx, peer.ID)
+		require.ErrorIs(t, err, db.ErrNotFound)
+	})
 	// A spoke that has not pulled this parent sees only its new parent.
 	// Authorizing that addition cannot also authorize removing the hub's parent.
 	second, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "New parent", Author: "peer-member"})
@@ -277,6 +290,46 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 	parent, err = store.ParentOf(ctx, child.ID)
 	require.NoError(t, err)
 	require.Equal(t, peer.ID, parent.ToIssueID)
+	t.Run("legacy-replacement-without-reference-callback", func(t *testing.T) {
+		unlink, err := json.Marshal(map[string]string{"type": "parent", "from_uid": child.UID, "to_uid": other.UID})
+		require.NoError(t, err)
+		replacement, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Replacement", Author: "worker"})
+		require.NoError(t, err)
+		linked, err := json.Marshal(map[string]string{"type": "parent", "from_uid": child.UID, "to_uid": replacement.UID})
+		require.NoError(t, err)
+		params.Events = []db.FederationIngestEvent{
+			{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.unlinked", "worker", origin, at+6, unlink)},
+			{SourceEventID: 5, Event: newRemoteEvent(t, route, &child.UID, "issue.linked", "worker", origin, at+7, linked)},
+		}
+		authorize := params.AuthorizeReference
+		params.AuthorizeReference = nil
+		_, err = store.IngestFederationEvents(ctx, params)
+		params.AuthorizeReference = authorize
+		require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+		parent, err := store.ParentOf(ctx, child.ID)
+		require.NoError(t, err)
+		require.Equal(t, peer.ID, parent.ToIssueID)
+	})
+	t.Run("stale-unlink-before-parent-set", func(t *testing.T) {
+		staleChild, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Stale child", Author: "worker", Links: []db.InitialLink{{Type: "parent", ToNumber: peer.ID}}})
+		require.NoError(t, err)
+		removed, err := store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: staleChild.ID, Actor: "worker", RemoveParent: &peer.ID})
+		require.NoError(t, err)
+		require.Len(t, removed.Events, 1)
+		_, err = store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: staleChild.ID, Actor: "worker", SetParent: &peer.ID})
+		require.NoError(t, err)
+		clear, err := json.Marshal(map[string]string{"parent_removed_uid": peer.UID})
+		require.NoError(t, err)
+		params.Events = []db.FederationIngestEvent{
+			{SourceEventID: 4, Event: newRemoteEvent(t, route, &staleChild.UID, "issue.links_changed", "worker", origin, removed.Events[0].HLCPhysicalMS, clear)},
+			{SourceEventID: 5, Event: newRemoteEvent(t, route, &staleChild.UID, "issue.links_changed", "worker", origin, at+3600000, setLocal)},
+		}
+		_, err = store.IngestFederationEvents(ctx, params)
+		require.ErrorIs(t, err, db.ErrFederationMoveSourceUnauthorized)
+		parent, err := store.ParentOf(ctx, staleChild.ID)
+		require.NoError(t, err)
+		require.Equal(t, peer.ID, parent.ToIssueID)
+	})
 	t.Run("legacy-reverse-primary", func(t *testing.T) {
 		for _, batch := range []bool{false, true} {
 			t.Run(fmt.Sprint(batch), func(t *testing.T) {
@@ -311,6 +364,44 @@ func checkFederatedReferenceBatchAuthority(t *testing.T, store db.Storage) error
 				}
 			})
 		}
+	})
+	t.Run("legacy-direction-at-event-time", func(t *testing.T) {
+		parent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Former parent", Author: "worker"})
+		require.NoError(t, err)
+		child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Former child", Author: "worker"})
+		require.NoError(t, err)
+		set, err := json.Marshal(map[string]string{"parent_set_uid": parent.UID})
+		require.NoError(t, err)
+		clear, err := json.Marshal(map[string]string{"parent_removed_uid": parent.UID})
+		require.NoError(t, err)
+		reverse, err := json.Marshal(map[string]string{"parent_set_uid": child.UID})
+		require.NoError(t, err)
+		params.Events = []db.FederationIngestEvent{
+			{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+100, set)},
+			{SourceEventID: 5, Event: newRemoteEvent(t, route, &child.UID, "issue.links_changed", "worker", origin, at+300, clear)},
+			{SourceEventID: 6, Event: newRemoteEvent(t, route, &parent.UID, "issue.links_changed", "worker", origin, at+500, reverse)},
+		}
+		_, err = store.IngestFederationEvents(ctx, params)
+		require.NoError(t, err)
+		payload, err := json.Marshal(map[string]string{"type": "parent", "from_uid": child.UID, "to_uid": parent.UID})
+		require.NoError(t, err)
+		params.Events = []db.FederationIngestEvent{{SourceEventID: 7, Event: newRemoteEvent(t, route, &child.UID, "issue.unlinked", "worker", origin, at+200, payload)}}
+		_, err = store.IngestFederationEvents(ctx, params)
+		require.NoError(t, err)
+		link, err := store.ParentOf(ctx, parent.ID)
+		require.NoError(t, err)
+		require.Equal(t, child.ID, link.ToIssueID)
+	})
+	t.Run("legacy-direction-without-evidence", func(t *testing.T) {
+		child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Unlinked child", Author: "worker"})
+		require.NoError(t, err)
+		parent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: route.ID, Title: "Unlinked parent", Author: "worker"})
+		require.NoError(t, err)
+		payload, err := json.Marshal(map[string]string{"type": "parent", "from_uid": child.UID, "to_uid": parent.UID})
+		require.NoError(t, err)
+		params.Events = []db.FederationIngestEvent{{SourceEventID: 4, Event: newRemoteEvent(t, route, &child.UID, "issue.unlinked", "worker", origin, at+20, payload)}}
+		_, err = store.IngestFederationEvents(ctx, params)
+		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 	})
 	t.Run("implicit-displacement-with-reference", func(t *testing.T) {
 		payload, err := json.Marshal(map[string]any{"parent_set_uid": other.UID, "related_added_uids": []string{peer.UID}})

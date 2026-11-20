@@ -45,6 +45,27 @@ func RunRelayCrossProjectRemoval(t *testing.T, store db.Storage) {
 // by a root-local notification. The relay must receive the introduction first,
 // retaining original source identity without manufacturing root attribution.
 func RunRelayOffersLegacyIngestedEvents(t *testing.T, store db.Storage) {
+	t.Run("ambiguous parent unlink", func(t *testing.T) {
+		ctx := t.Context()
+		fixture := newRelayLinkBoundaryFixture(t, store, "relay-ambiguous-parent")
+		child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Child", Author: "relay-member"})
+		require.NoError(t, err)
+		parent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Parent", Author: "relay-member"})
+		require.NoError(t, err)
+		peer, err := uid.New()
+		require.NoError(t, err)
+		grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: fixture.project.ID, ParentTokenID: fixture.parentTokenID, SpokeInstanceUID: peer, ProtocolVersion: db.RelayProtocolVersion})
+		require.NoError(t, err)
+		payload := jsontext.Value(`{"type":"parent","from_uid":"` + child.UID + `","to_uid":"` + parent.UID + `"}`)
+		event := newRemoteEvent(t, fixture.project, &child.UID, "issue.unlinked", "relay-member", peer, time.Now().Add(time.Hour).UnixMilli(), payload)
+		body, err := db.EncodeRelaySourceEvent(event)
+		require.NoError(t, err)
+		envelope, err := db.SealRelayEnvelope(db.RelayEnvelope{Version: db.RelayProtocolVersion, BindingUID: grant.Enrollment.RelayBindingUID, ProjectUID: fixture.project.UID, AuthorityUID: store.InstanceUID(), SenderInstanceUID: peer, ReceiverInstanceUID: store.InstanceUID(), Epoch: grant.Enrollment.RelayResetEpoch, Sequence: 1, Stream: db.RelayStreamEvent, Path: []string{peer}, SourceUID: event.EventUID, SourceHash: event.ContentHash, Body: body})
+		require.NoError(t, err)
+		writeCtx := db.WithRootAttribution(ctx, fixture.signer, "relay-member")
+		_, err = store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{envelope}})
+		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+	})
 	t.Run("creation before update", func(t *testing.T) {
 		ctx := t.Context()
 		fixture := newRelayLinkBoundaryFixture(t, store, "legacy-ingest-relay")

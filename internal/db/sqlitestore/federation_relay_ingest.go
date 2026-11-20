@@ -96,6 +96,7 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 		// unrelated event or another project's definition.
 		cronValidator := db.NewCronReplayValidator(tx, false)
 		linksAffected := false
+		var acceptedSources []db.RemoteEvent
 		for _, envelope := range batch.Envelopes {
 			if err := db.ValidateRelayEnvelope(authority, envelope); err != nil {
 				return err
@@ -177,6 +178,7 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 					}
 					result.InsertedEventUIDs = append(result.InsertedEventUIDs, source.EventUID)
 					result.InsertedEvents = append(result.InsertedEvents, insertedEvent)
+					acceptedSources = append(acceptedSources, source)
 					linksAffected = linksAffected || db.FederationEventAffectsLinks(source.Type)
 					sourceInserted = true
 				}
@@ -247,6 +249,9 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 			}
 			result.Through = envelope.Sequence
 			result.Digest = envelope.Digest
+		}
+		if _, err := db.DirectParentRemovals(ctx, tx, acceptedSources); err != nil {
+			return err
 		}
 		if len(result.InsertedEventUIDs) > 0 {
 			if err := d.materializeFederatedProjectTx(ctx, tx, projectID, linksAffected, result.InsertedEventUIDs, cronValidator); err != nil {
