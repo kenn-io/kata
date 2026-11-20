@@ -309,19 +309,22 @@ per-request cache. For a signed request this also confirms that the signing
 key has not passed its `not_after` and still holds the secret the request was
 verified with. Every event-poll read, held or not, is followed by one more
 authorization check, and the hub releases the page only if it still passes.
-Revocation therefore ends a held poll at its next wake or at its expiry. When
-the wait ends without a wake, the hub reads once more, so events whose wakeup
-was lost still arrive. The hub bounds held polls in total, per credential, and
-for signed requests holding a control slot; past a bound it answers at once.
+Revocation or a retired key therefore ends a held poll at its next wake or at
+its expiry. When the wait ends without a wake, the hub reads once more, so
+events whose wakeup was lost still arrive. The hub bounds held polls in total,
+per credential, and for signed requests holding a control slot; past a bound it
+answers at once.
 
 Hub processes sharing a PostgreSQL database and schema relay commit wakeups to
-each other with `LISTEN/NOTIFY` on a dedicated connection. The channel name
-and an AES-GCM payload key come from HKDF-SHA256 over the installation's
-`meta.instance_uid` and the schema name. A database role without access to the
-kata schema therefore cannot find the channel, read which project committed,
-or forge a wake. Each notification carries a sender ID and counter, and
-listeners drop replayed ones. A hub wakes every held poll after its listener
-reconnects, because notifications sent while it was disconnected are lost.
+each other with `LISTEN/NOTIFY` on a dedicated connection. Any role that can
+connect to the database can listen or notify on any channel, so the channel
+name and an AES-GCM payload key come from HKDF-SHA256 over the installation's
+`meta.instance_uid` and the schema name. A role without access to the kata
+schema therefore cannot find the channel, read a wake, or forge one. A
+wakeup also names no project, so it wakes every held poll in the
+receiving process, and each poll reads its own project again. Each process
+wakes every held poll after its listener reconnects, because notifications
+sent while it was disconnected are lost.
 
 SQLite direct spokes prepare pulled issue histories and projection differences
 before taking the writer lock, then update only the touched issues and changed

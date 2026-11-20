@@ -52,39 +52,29 @@ func TestFederationPollWaitWakesAcrossPostgresHubProcesses(t *testing.T) {
 		ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
 	})
 	require.NoError(t, err)
-	cursor := pollPostgresHub(t, poller.server.URL, project.ID, 0, "").body.NextAfterID
+	eventsURL := fmt.Sprintf("%s%s/federation/events", poller.server.URL, projectPath(project.ID))
+	first := sendLongPoll(t.Context(), http.DefaultClient, eventsURL+"?after_id=0")
+	require.NoError(t, first.err)
+	cursor := first.body.NextAfterID
 
 	reads := poller.reads.readsReturned()
 	done := make(chan longPollResult, 1)
-	go func() { done <- pollPostgresHub(t, poller.server.URL, project.ID, cursor, "30") }()
+	go func() {
+		done <- sendLongPoll(t.Context(), http.DefaultClient, fmt.Sprintf("%s?after_id=%d&wait=30", eventsURL, cursor))
+	}()
 	// The poll subscribes to wakeups before its first read, so the commit
 	// below reaches it only through the wake bridge.
 	poller.reads.waitForReads(t, reads+1)
 	createIssueOnPostgresHub(t, writer.server.URL, project.ID, "Committed by another hub process")
 	select {
 	case result := <-done:
+		require.NoError(t, result.err)
 		require.Equal(t, http.StatusOK, result.status, "%s", result.raw)
 		require.NotEmpty(t, result.body.Events)
 		require.Less(t, result.elapsed, 10*time.Second)
 	case <-time.After(15 * time.Second):
 		t.Fatal("held poll on one hub process did not wake for an event committed by another")
 	}
-}
-
-func pollPostgresHub(t testing.TB, baseURL string, projectID, afterID int64, wait string) longPollResult {
-	t.Helper()
-	url := fmt.Sprintf("%s%s/federation/events?after_id=%d", baseURL, projectPath(projectID), afterID)
-	if wait != "" {
-		url += "&wait=" + wait
-	}
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
-	require.NoError(t, err)
-	request.Header.Set("Authorization", "Bearer long-poll-token")
-	started := time.Now()
-	response, err := http.DefaultClient.Do(request) //nolint:gosec // test-owned loopback daemon
-	require.NoError(t, err)
-	defer func() { _ = response.Body.Close() }()
-	return decodeLongPollResponse(t, response, time.Since(started))
 }
 
 func createIssueOnPostgresHub(t testing.TB, baseURL string, projectID int64, title string) {

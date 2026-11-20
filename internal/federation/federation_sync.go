@@ -411,18 +411,12 @@ func syncDirectSpoke(
 			}()
 		}
 	}
-	if hubHoldsPull(ctx, binding) {
-		interrupted, err := federationPullInterrupted(ctx, store, binding.ProjectID)
-		if err != nil {
-			return err
-		}
-		if !interrupted {
-			// A poll at this cursor is out at the hub, which answers it as
-			// soon as anything new is visible, and that answer wakes the
-			// runner. An ordinary poll now would return an empty page. The
-			// watcher records the pull when the hub answers.
-			return nil
-		}
+	if hubHoldsPull(ctx, binding.ProjectID, binding.PullCursorEventID, client.heldPollTarget(hubProjectID)) {
+		// A poll at this cursor is out at the hub, which answers it as soon as
+		// anything new is visible, and that answer wakes the runner. An
+		// ordinary poll now would return an empty page. The watcher records
+		// the pull when the hub answers.
+		return nil
 	}
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
 	if err != nil {
@@ -683,7 +677,8 @@ func startFederationPull(ctx context.Context, store db.Storage, projectID int64)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
 		return false, time.Time{}, err
 	}
-	resumePull := pullInterrupted(previousPull)
+	resumePull := previousPull.LastPullStartedAt != nil &&
+		(previousPull.LastPullSuccessAt == nil || previousPull.LastPullStartedAt.After(*previousPull.LastPullSuccessAt))
 	startedAt := time.Now().UTC().Truncate(time.Millisecond)
 	for _, previous := range []*time.Time{previousPull.LastPullStartedAt, previousPull.LastPullSuccessAt} {
 		if previous != nil && !startedAt.After(*previous) {
@@ -694,24 +689,6 @@ func startFederationPull(ctx context.Context, store db.Storage, projectID int64)
 		return false, time.Time{}, err
 	}
 	return resumePull, startedAt, nil
-}
-
-// federationPullInterrupted reports whether the binding's last pull started
-// and never completed.
-func federationPullInterrupted(ctx context.Context, store db.Storage, projectID int64) (bool, error) {
-	status, err := store.FederationSyncStatusByProject(ctx, projectID)
-	if errors.Is(err, db.ErrNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return pullInterrupted(status), nil
-}
-
-func pullInterrupted(status db.FederationSyncStatus) bool {
-	return status.LastPullStartedAt != nil &&
-		(status.LastPullSuccessAt == nil || status.LastPullStartedAt.After(*status.LastPullSuccessAt))
 }
 
 func validateFederationRunnerLease(ctx context.Context, validate func(context.Context) error) error {
@@ -1296,7 +1273,6 @@ func (r *Runner) runOnce(
 			r.longPolls.start(spoke)
 		}
 		if spokeErr != nil {
-			r.longPolls.stop(spoke.binding.ProjectID)
 			errs = append(errs, spokeErr)
 			// A turn that failed anywhere, including its claim retries, waits
 			// for the interval like a drained project; only a clean turn that
@@ -1773,7 +1749,7 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 	if credentials == nil {
 		credentials = config.DefaultFederationCredentialStore()
 	}
-	polls := newHubLongPolls(ctx, r.DB, credentials, r.clientOpts(), interval, r.DrainAdmission)
+	polls := newHubLongPolls(ctx, r.DB, credentials, r.clientOpts(), interval, r.DrainAdmission, r.OnError)
 	r.longPolls = polls
 	defer func() {
 		polls.stopAll()

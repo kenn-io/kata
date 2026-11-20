@@ -182,12 +182,9 @@ func openInternal(
 	s.federationLockDB = newPostgresPool(
 		*connConfig, federationLockMaxOpenConns, federationLockMaxIdleConns,
 	)
-	pollWake, err := newPollWakeState()
-	if err != nil {
-		_ = s.Close()
-		return nil, err
-	}
-	s.pollWake = pollWake
+	// The store owns this context's lifetime; Close cancels it. Set it before
+	// anything below can fail, because Close reads it.
+	s.pollWakeCtx, s.stopPollWake = context.WithCancel(context.Background())
 	// Opened lazily: only a serving hub listens or publishes poll wakeups.
 	s.pollWakeDB = newPostgresPool(*connConfig, pollWakeMaxOpenConns, pollWakeMaxOpenConns)
 	if err := s.federationLockDB.PingContext(ctx); err != nil {

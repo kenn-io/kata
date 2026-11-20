@@ -87,7 +87,7 @@ func TestFederationPollWakeHidesChannelAndPayloadFromOtherDatabaseRoles(t *testi
 	}
 }
 
-func TestFederationPollWakeDropsForgedAndReplayedNotifications(t *testing.T) {
+func TestFederationPollWakeDropsForgedNotifications(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
@@ -108,19 +108,6 @@ func TestFederationPollWakeDropsForgedAndReplayedNotifications(t *testing.T) {
 	}
 	require.NoError(t, store.PublishFederationPollWake(ctx, "hub-a 2"))
 	require.Equal(t, "hub-a 2", nextPollWake(t, ctx, wakes), "a forged notification woke the held polls")
-
-	// Every notification on the channel, forged ones included, reaches the
-	// outside listener in commit order; the last one is the genuine wake.
-	var captured string
-	for range 4 {
-		notification, err := outsider.WaitForNotification(ctx)
-		require.NoError(t, err)
-		captured = notification.Payload
-	}
-	_, err = outsider.Exec(ctx, `SELECT pg_notify($1,$2)`, channel, captured)
-	require.NoError(t, err)
-	require.NoError(t, store.PublishFederationPollWake(ctx, "hub-a 3"))
-	require.Equal(t, "hub-a 3", nextPollWake(t, ctx, wakes), "a replayed notification woke the held polls")
 }
 
 func TestFederationPollWakeReachesAnotherProcessOnTheSameSchema(t *testing.T) {

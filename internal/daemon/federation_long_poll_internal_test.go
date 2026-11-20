@@ -10,10 +10,12 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
@@ -50,21 +52,61 @@ func TestFederationPollWaitsBoundEveryHeldPoll(t *testing.T) {
 
 func TestFederationPollWakeIgnoresItsOwnInstance(t *testing.T) {
 	waits := newFederationPollWaits(16)
-	woken, unsubscribe := waits.remote.subscribe(7, "01HZNQ7VFPK1XGD8R5MABCD4EA")
+	woken, unsubscribe := waits.remote.subscribe()
 	defer unsubscribe()
-	waits.receive(waits.message(7, ""))
+	waits.receive(waits.message())
 	select {
 	case <-woken:
 		t.Fatal("a process must ignore the wakeups it published")
 	default:
 	}
 	other := newFederationPollWaits(16)
-	waits.receive(other.message(0, "01HZNQ7VFPK1XGD8R5MABCD4EA"))
+	waits.receive(other.message())
 	select {
 	case <-woken:
 	default:
 		t.Fatal("another process's wakeup was not delivered")
 	}
+}
+
+// recordingPollWakeBus records what a hub process publishes to the others.
+type recordingPollWakeBus struct{ published chan string }
+
+func (b recordingPollWakeBus) PublishFederationPollWake(_ context.Context, payload string) error {
+	b.published <- payload
+	return nil
+}
+
+func (recordingPollWakeBus) ListenFederationPollWake(ctx context.Context, _ func(), _ func(string)) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// Every role that can connect to a shared PostgreSQL database can listen on
+// the wake channel, so a wake names no project.
+func TestFederationPollWakeNamesNoProject(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		waits := newFederationPollWaits(16)
+		broadcaster := NewEventBroadcaster()
+		bus := recordingPollWakeBus{published: make(chan string, 1)}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			runFederationPollWakeBridge(ctx, bus, broadcaster, waits, slog.New(slog.DiscardHandler))
+		}()
+		defer func() { cancel(); <-done }()
+		synctest.Wait()
+		payload := `{"from_project_uid":"01HZNQ7VFPK1XGD8R5MABCD4EA"}`
+		broadcaster.Broadcast(NewEventMsg(4242, db.Event{Type: "issue.moved", Payload: payload}))
+		synctest.Wait()
+		select {
+		case published := <-bus.published:
+			assert.Equal(t, waits.instance, published, "a wake carries only the publishing instance")
+		default:
+			t.Fatal("the commit published no wake")
+		}
+	})
 }
 
 // closedPollWakeBus is a store that has been closed.
@@ -215,4 +257,10 @@ func TestFederationPollWaitReleasesWaitersWhenClientsDisconnect(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return hub.waits.heldFor(hub.enrollmentID) == 0 && hub.waits.heldTotal() == 0
 	}, 5*time.Second, 5*time.Millisecond, "the hub kept slots for polls whose clients disconnected")
+}
+
+func TestFederationPollWaitCapsOversizedWaits(t *testing.T) {
+	wait, err := federationPollWait(t.Context(), api.OptionalInt{IsSet: true, Value: 9223372037})
+	require.NoError(t, err)
+	assert.Equal(t, federationPollWaitMax, wait)
 }
