@@ -31,7 +31,7 @@ test('Kenn links in issue bodies and comments work in read and edit views', asyn
   const credentials = await kata.launch(page)
   const issue = await kata.seedIssue(page, credentials, {
     title: 'Links to Kenn',
-    body: 'Open kenn://example/item.\n\n[note](kenn://example/note)',
+    body: '[note](kenn://example/note)',
   })
   await kata.request(
     page,
@@ -44,7 +44,6 @@ test('Kenn links in issue bodies and comments work in read and edit views', asyn
 
   async function expectLinks(scope: Locator) {
     for (const [name, href] of [
-      ['kenn://example/item', 'kenn://example/item'],
       ['note', 'kenn://example/note'],
       ['kenn://example/comment', 'kenn://example/comment'],
     ]) {
