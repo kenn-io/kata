@@ -3,6 +3,7 @@ package version
 
 import (
 	"runtime/debug"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -43,16 +44,20 @@ func TestVersionFromModuleBuildInfo(t *testing.T) {
 
 	for _, tc := range []struct {
 		name, moduleVersion, revision, want string
+		modified                           bool
 	}{
 		{name: "release", moduleVersion: "v1.2.3", want: "v1.2.3"},
-		{name: "release with revision", moduleVersion: "v1.2.3", revision: "1697674abcdef", want: "v1.2.3"},
+		{name: "release with revision", moduleVersion: "v1.2.3", revision: "1697674abcdef", want: "g1697674"},
+		{name: "pseudo-version", moduleVersion: "v1.2.4-0.20260101000000-1697674abcdef", want: "v1.2.4-0.20260101000000-1697674abcdef"},
+		{name: "checkout with pseudo-version", moduleVersion: "v1.2.4-0.20260101000000-1697674abcdef", revision: "1697674abcdef", want: "g1697674"},
+		{name: "dirty checkout with pseudo-version", moduleVersion: "v1.2.4-0.20260101000000-1697674abcdef+dirty", revision: "1697674abcdef", modified: true, want: "g1697674-dirty"},
 		{name: "development with revision", moduleVersion: "(devel)", revision: "1697674abcdef", want: "g1697674"},
 		{name: "development without revision", moduleVersion: "(devel)", want: "dev"},
 		{name: "empty version", want: "dev"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			readBuildInfo = func() (*debug.BuildInfo, bool) {
-				return &debug.BuildInfo{Main: debug.Module{Version: tc.moduleVersion}, Settings: []debug.BuildSetting{{Key: settingRevision, Value: tc.revision}}}, true
+				return &debug.BuildInfo{Main: debug.Module{Version: tc.moduleVersion}, Settings: []debug.BuildSetting{{Key: settingRevision, Value: tc.revision}, {Key: settingModified, Value: strconv.FormatBool(tc.modified)}}}, true
 			}
 			assert.Equal(t, tc.want, versionFromVCS())
 		})

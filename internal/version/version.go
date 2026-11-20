@@ -55,9 +55,6 @@ func versionFromVCS() string {
 	if !ok {
 		return defaultVersion
 	}
-	if info.Main.Version != "" && info.Main.Version != "(devel)" {
-		return info.Main.Version
-	}
 	var rev string
 	var dirty bool
 	for _, s := range info.Settings {
@@ -69,6 +66,9 @@ func versionFromVCS() string {
 		}
 	}
 	if rev == "" {
+		if info.Main.Version != "" && info.Main.Version != "(devel)" {
+			return info.Main.Version
+		}
 		return defaultVersion
 	}
 	if len(rev) > shortHashLen {
