@@ -230,6 +230,27 @@ func TestShortRequestTimeoutReportsHeldPollsOff(t *testing.T) {
 	assert.Zero(t, h.pollsWithWait.Load())
 }
 
+// allowPush gives the spoke a pull and push enrollment, so its passes push
+// local work to the hub.
+func (h *hubSpokeHarness) allowPush(tb testing.TB) {
+	tb.Helper()
+	ctx := context.WithoutCancel(tb.Context())
+	created, err := h.hubDB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+		Token: "delivery-push-token", SpokeInstanceUID: h.spokeDB.InstanceUID(),
+		ProjectID: &h.hubProject.ID, Capabilities: "pull,push", Actor: "tester",
+	})
+	require.NoError(tb, err)
+	h.pullToken = created.Token
+	binding, err := h.spokeDB.FederationBindingByProject(ctx, h.spokeProject.ID)
+	require.NoError(tb, err)
+	binding.PushEnabled, binding.Actor = true, "worker"
+	_, err = h.spokeDB.UpsertFederationBinding(ctx, binding)
+	require.NoError(tb, err)
+	require.NoError(tb, config.WriteFederationCredential(h.spokeProject.UID, config.FederationCredential{
+		HubURL: binding.HubURL, HubProjectID: h.hubProject.ID, Token: h.pullToken,
+	}))
+}
+
 // bindThrough points the spoke's binding at a front server that sends each
 // request to serve along with a proxy to the hub, and returns its URL.
 func (h *hubSpokeHarness) bindThrough(t *testing.T, serve func(http.ResponseWriter, *http.Request, http.Handler)) string {
@@ -287,6 +308,50 @@ func TestFederationRunnerStopsHoldingPollsWhileItsPassesFail(t *testing.T) {
 	time.Sleep(time.Second)
 	assert.Equal(t, before, held.Load(), "the spoke kept holding polls while every pass failed")
 	assert.Zero(t, h.spokeIssueCount(t))
+}
+
+// A hub that throttles the binding's pass with Retry-After must not see a held
+// poll from the spoke before the delay it asked for ends. The held poll itself
+// stays caught up, so only the retry schedule holds the watcher back.
+func TestThrottledBindingHoldsNoPollBeforeItsRetry(t *testing.T) {
+	h := newHubSpokeHarness(t, false)
+	h.allowPush(t)
+	var held, open atomic.Int64
+	var throttle atomic.Bool
+	h.bindThrough(t, func(w http.ResponseWriter, r *http.Request, hub http.Handler) {
+		if isHeldPoll(r) {
+			held.Add(1)
+			open.Add(1)
+			defer open.Add(-1)
+		}
+		if throttle.Load() && !isHeldPoll(r) {
+			w.Header().Set("Retry-After", "120")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		hub.ServeHTTP(w, r)
+	})
+	retries := NewSyncRetries()
+	h.startConfiguredRunner(t, &Runner{DB: h.spokeDB, Interval: time.Hour, Retries: retries})
+	//nolint:kennlint // sleeptest: the runner and hub exchange held polls over real HTTP.
+	require.Eventually(t, func() bool { return open.Load() > 0 },
+		10*time.Second, 20*time.Millisecond, "the spoke never held a poll at the hub")
+
+	throttle.Store(true)
+	_, _, err := h.spokeDB.CreateIssue(context.WithoutCancel(t.Context()), db.CreateIssueParams{
+		ProjectID: h.spokeProject.ID, Title: "Waiting on the hub's retry", Author: "worker",
+	})
+	require.NoError(t, err)
+	h.wake <- struct{}{}
+	//nolint:kennlint // sleeptest: the runner pushes over real HTTP after the wake.
+	require.Eventually(t, func() bool {
+		_, scheduled := retries.FederationSyncRetry(h.spokeProject.ID)
+		return scheduled && open.Load() == 0
+	}, 10*time.Second, 20*time.Millisecond, "the spoke kept its held poll open after the hub asked it to wait")
+	before := held.Load()
+	//nolint:kennlint // sleeptest: the runner and hub exchange held polls over real HTTP.
+	time.Sleep(time.Second)
+	assert.Equal(t, before, held.Load(), "the spoke held a poll before the hub's Retry-After ended")
 }
 
 // Moving a binding to a new hub address must not leave interval passes
