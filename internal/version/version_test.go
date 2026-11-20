@@ -47,8 +47,9 @@ func TestVersionFromModuleBuildInfo(t *testing.T) {
 		modified                           bool
 	}{
 		{name: "release", moduleVersion: "v1.2.3", want: "v1.2.3"},
+		{name: "prerelease", moduleVersion: "v1.2.3-rc.1", want: "v1.2.3-rc.1"},
 		{name: "release with revision", moduleVersion: "v1.2.3", revision: "1697674abcdef", want: "g1697674"},
-		{name: "pseudo-version", moduleVersion: "v1.2.4-0.20260101000000-1697674abcdef", want: "v1.2.4-0.20260101000000-1697674abcdef"},
+		{name: "pseudo-version", moduleVersion: "v1.2.4-0.20260101000000-1697674abcdef", want: "dev"},
 		{name: "checkout with pseudo-version", moduleVersion: "v1.2.4-0.20260101000000-1697674abcdef", revision: "1697674abcdef", want: "g1697674"},
 		{name: "dirty checkout with pseudo-version", moduleVersion: "v1.2.4-0.20260101000000-1697674abcdef+dirty", revision: "1697674abcdef", modified: true, want: "g1697674-dirty"},
 		{name: "development with revision", moduleVersion: "(devel)", revision: "1697674abcdef", want: "g1697674"},

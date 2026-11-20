@@ -5,7 +5,11 @@
 //nolint:revive // var-naming flags `version` as stdlib-conflicting but no such stdlib package exists.
 package version
 
-import "runtime/debug"
+import (
+	"runtime/debug"
+
+	"golang.org/x/mod/module"
+)
 
 const (
 	defaultVersion   = "dev"
@@ -66,7 +70,7 @@ func versionFromVCS() string {
 		}
 	}
 	if rev == "" {
-		if info.Main.Version != "" && info.Main.Version != "(devel)" {
+		if info.Main.Version != "" && info.Main.Version != "(devel)" && !module.IsPseudoVersion(info.Main.Version) {
 			return info.Main.Version
 		}
 		return defaultVersion
