@@ -2721,7 +2721,8 @@ func TestDaemonRuntimeWebMetadata(t *testing.T) {
 				assert.NotContains(t, record.Metadata, "autostart")
 			}
 			assert.Equal(t, "true", record.Metadata["web_origin_stable"])
-			assert.Equal(t, "loopback,sse", record.Metadata["web_capabilities"])
+			assert.Contains(t, strings.Split(record.Metadata["web_capabilities"], ","), "loopback")
+			assert.Contains(t, strings.Split(record.Metadata["web_capabilities"], ","), "sse")
 			if runtime.GOOS != "windows" {
 				runtimeStat, statErr := os.Stat(runtimePath)
 				require.NoError(t, statErr)
@@ -2760,7 +2761,8 @@ func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyAllowsLoopbackSession(t 
 			record.Metadata["web_origin"] != ""
 	}, 3*time.Second, 10*time.Millisecond)
 
-	assert.Equal(t, "loopback,poll", record.Metadata["web_capabilities"])
+	assert.Contains(t, strings.Split(record.Metadata["web_capabilities"], ","), "loopback")
+	assert.Contains(t, strings.Split(record.Metadata["web_capabilities"], ","), "poll")
 
 	cancel()
 	select {

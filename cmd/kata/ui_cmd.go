@@ -53,7 +53,7 @@ func newUICmd() *cobra.Command {
 				}
 			}
 			if slices.Contains(prepared.Runtime.Capabilities, "placeholder-assets") {
-				return errors.New("the running daemon was built without the web UI; run `kata daemon restart`")
+				return errors.New("the running daemon was built without the web UI; set KATA_HOME to the daemon's home and run `kata daemon restart`")
 			}
 			returnPath := "/kata"
 			if len(args) == 1 {

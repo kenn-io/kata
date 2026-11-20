@@ -42,8 +42,8 @@ func TestUICommandRejectsDaemonWithPlaceholderAssets(t *testing.T) {
 		Runtime: client.DiscoveredWebRuntime{Capabilities: []string{"placeholder-assets"}},
 	})
 
-	_, err := runCmdOutput(t, nil, "ui")
-	require.ErrorContains(t, err, "the running daemon was built without the web UI; run `kata daemon restart`")
+	_, err := runCmdOutput(t, nil, "--daemon", "example-local", "ui")
+	require.ErrorContains(t, err, "set KATA_HOME to the daemon's home and run `kata daemon restart`")
 	assert.Empty(t, openedUIURL)
 }
 
