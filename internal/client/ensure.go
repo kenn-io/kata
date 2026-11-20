@@ -273,12 +273,8 @@ func waitForSupervisedDaemon(
 			message = fmt.Errorf("%w: %w", message, unreachable)
 		}
 	}
-	if ctx.Err() != nil {
-		if errors.Is(message, ctx.Err()) {
-			message = &supervisedWaitError{message: message.Error(), cause: errors.Join(message, ctx.Err())}
-		} else {
-			message = fmt.Errorf("%w: %w", message, ctx.Err())
-		}
+	if ctx.Err() != nil && !errors.Is(message, ctx.Err()) {
+		message = fmt.Errorf("%w: %w", message, ctx.Err())
 	}
 	return RunningDaemon{}, &supervisedWaitError{message: message.Error(), cause: message, advice: advice}
 }
