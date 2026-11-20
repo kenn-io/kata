@@ -225,7 +225,6 @@ func (lm listModel) droppingIssues(anchor string, gone []string) listModel {
 	rows := lm.visibleRows()
 	at := slices.IndexFunc(rows, func(row queueRow) bool { return row.issue.UID == anchor })
 	lm.issues = slices.DeleteFunc(slices.Clone(lm.issues), func(issue Issue) bool { return isGone(issue.UID) })
-	lm.ranked.all = slices.DeleteFunc(slices.Clone(lm.ranked.all), func(issue Issue) bool { return isGone(issue.UID) })
 	lm.ranked.hits = slices.DeleteFunc(slices.Clone(lm.ranked.hits), func(issue Issue) bool { return isGone(issue.UID) })
 	if at < 0 || lm.selectedUID != anchor {
 		return lm.restoreCursorToSelection()

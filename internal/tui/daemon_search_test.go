@@ -352,6 +352,25 @@ func TestDaemonSearch_AnswerBeforeFirstFetchOnATruncatedListCountsHitsBeyondAndF
 	require.Contains(t, m.list.rankedNote(), "1 hit beyond the loaded issues")
 }
 
+func TestDaemonSearch_HitDroppedLikeADeleteReturnsInDaemonOrderWhenRefetchedAgain(t *testing.T) {
+	m, api := daemonSearchFixture(t)
+	alpha, _, gamma := searchTestIssues()
+	api.searchFn = answerWith("hybrid", gamma, alpha)
+	m = openBarFromCmd(t, m, '/')
+	m, _ = stepModel(m, ctrlT)
+	m, cmds := typeText(m, "payments")
+	m = settleSearch(m, cmds...)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	m.list = m.list.droppingIssues(gamma.UID, []string{gamma.UID})
+	require.Equal(t, []string{"01TEST-aaa1"}, visibleUIDs(m))
+
+	// An undo brings the issue back with the next fetch.
+	m.list = m.list.applyFetched(refetchedMsg{issues: append([]Issue{alpha}, gamma)})
+	require.Equal(t, []string{"01TEST-ccc3", "01TEST-aaa1"}, visibleUIDs(m))
+}
+
 func TestDaemonSearch_BlankQueryAsksNothingAndShowsTheNormalList(t *testing.T) {
 	m, api := daemonSearchFixture(t)
 	_, _, gamma := searchTestIssues()
