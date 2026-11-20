@@ -829,7 +829,6 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 		return daemon.HostFederationAccessDecision{}, nil
 	}
 	decision, err := a.controller.AuthorizeFederation(ctx, publicFederationRequest(request))
-
 	if errors.Is(err, ErrAccessDenied) {
 		return daemon.HostFederationAccessDecision{}, daemon.ErrHostAccessDenied
 	}
@@ -854,7 +853,7 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 
 func publicFederationRequest(request daemon.HostFederationAccessRequest) FederationAccessRequest {
 	return FederationAccessRequest{
-		Enrollment: publicFederationEnrollment(request.Enrollment, request.Project.UID),
+		Enrollment: publicFederationEnrollment(request.Enrollment, request.EnrollmentProjectUID),
 		Project:    publicProject(request.Project),
 		Capability: FederationCapability(request.Capability),
 		Operation: FederationOperation{

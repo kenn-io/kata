@@ -84,7 +84,7 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 					var details map[string]any
 					visible := true
 					if notificationReadRestricted(ctx) {
-						for _, ref := range notificationReferences(raw) {
+						for _, ref := range notification.References(raw) {
 							visible, err = notificationHistoryVisibleTx(ctx, tx, ref, allowed)
 							if err != nil {
 								return nil, err

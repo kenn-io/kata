@@ -6,7 +6,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
-	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"go.kenn.io/kata/internal/db"
@@ -85,7 +84,7 @@ func projectNotificationEventPayload(ctx context.Context, store db.Storage, even
 	return projectNotificationJSONWithWalker(ctx, store, jsontext.Value(event.Payload), func(
 		raw jsontext.Value, keep func(jsontext.Value) (bool, error),
 	) (jsontext.Value, error) {
-		return walkNotificationEventPayload(raw, event.Type, keep)
+		return notification.WalkEventPayload(raw, event.Type, keep)
 	})
 }
 
@@ -108,7 +107,7 @@ func projectNotificationJSONWithWalker(
 	}
 	uids := map[string]bool{}
 	_, err := walk(raw, func(slot jsontext.Value) (bool, error) {
-		for _, uid := range notificationReferences(slot) {
+		for _, uid := range notification.References(slot) {
 			uids[uid] = true
 		}
 		return true, nil
@@ -133,7 +132,7 @@ func projectNotificationJSONWithWalker(
 	}
 	readable := make(map[int64]bool)
 	return walk(raw, func(slot jsontext.Value) (bool, error) {
-		for _, uid := range notificationReferences(slot) {
+		for _, uid := range notification.References(slot) {
 			id, ok := ids[uid]
 			if !ok {
 				return false, nil
@@ -158,27 +157,6 @@ func projectNotificationJSONWithWalker(
 	})
 }
 
-func notificationReferences(raw jsontext.Value) []string {
-	var object map[string]jsontext.Value
-	if json.Unmarshal(raw, &object) != nil {
-		return nil
-	}
-	var out []string
-	if re, ok := object["re"]; ok {
-		var uid string
-		if json.Unmarshal(re, &uid) != nil || uid == "" {
-			uid = "<invalid>"
-		}
-		out = append(out, uid)
-	}
-	for _, key := range []string{"from", "to"} {
-		if len(object[key]) > 0 && object[key][0] == '{' {
-			out = append(out, notificationReferences(object[key])...)
-		}
-	}
-	return out
-}
-
 // Only event payload and metadata strings are decoded as JSON. Bodies and
 // other user strings remain opaque, including strings that resemble JSON.
 func walkNotificationJSON(raw jsontext.Value, keep func(jsontext.Value) (bool, error)) (jsontext.Value, error) {
@@ -200,7 +178,7 @@ func walkNotificationJSON(raw jsontext.Value, keep func(jsontext.Value) (bool, e
 			case "metadata":
 				value, err = walkNotificationMetadata(value, keep)
 			case "payload":
-				value, err = walkNotificationEventPayload(value, eventType, keep)
+				value, err = notification.WalkEventPayload(value, eventType, keep)
 			default:
 				value, err = walkNotificationJSON(value, keep)
 			}
@@ -254,74 +232,7 @@ func walkNotificationMetadata(raw jsontext.Value, keep func(jsontext.Value) (boo
 	if err := json.Unmarshal(raw, &slots); err != nil {
 		return nil, err
 	}
-	return walkNotificationSlots(slots, keep)
-}
-
-// Notification slots are top-level keys in issue metadata and in an
-// issue.metadata_updated diff. Values below any other key are opaque metadata.
-func walkNotificationSlots(slots map[string]jsontext.Value, keep func(jsontext.Value) (bool, error)) (jsontext.Value, error) {
-	for key, value := range slots {
-		if !strings.HasPrefix(key, notification.KeyPrefix) {
-			continue
-		}
-		ok, err := keep(value)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			delete(slots, key)
-		}
-	}
-	return json.Marshal(slots, json.Deterministic(true))
-}
-
-func walkNotificationEventPayload(raw jsontext.Value, eventType string, keep func(jsontext.Value) (bool, error)) (jsontext.Value, error) {
-	if eventType != "issue.metadata_updated" && eventType != "issue.created" && eventType != "issue.snapshot" && eventType != db.RepeatedImportEventType {
-		return raw, nil
-	}
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 {
-		return raw, nil
-	}
-	if raw[0] == '"' {
-		var encoded string
-		if err := json.Unmarshal(raw, &encoded); err != nil {
-			return nil, err
-		}
-		if !jsontext.Value(encoded).IsValid() {
-			return raw, nil
-		}
-		projected, err := walkNotificationEventPayload(jsontext.Value(encoded), eventType, keep)
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(string(projected))
-	}
-	if raw[0] != '{' {
-		return raw, nil
-	}
-	var payload map[string]jsontext.Value
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, err
-	}
-	field := "metadata"
-	if eventType == "issue.metadata_updated" {
-		field = "diff"
-	}
-	value, ok := payload[field]
-	if !ok || len(value) == 0 || value[0] != '{' {
-		return raw, nil
-	}
-	var slots map[string]jsontext.Value
-	if err := json.Unmarshal(value, &slots); err != nil {
-		return nil, err
-	}
-	projected, err := walkNotificationSlots(slots, keep)
-	if err != nil {
-		return nil, err
-	}
-	payload[field] = projected
-	return json.Marshal(payload, json.Deterministic(true))
+	return notification.WalkSlots(slots, keep)
 }
 
 // Stream frames recheck notification targets after page projection, immediately
@@ -331,8 +242,8 @@ func notificationEventStillVisible(ctx context.Context, store db.Storage, event 
 		return true, nil
 	}
 	var uids []string
-	_, err := walkNotificationEventPayload(jsontext.Value(event.Payload), event.Type, func(slot jsontext.Value) (bool, error) {
-		uids = append(uids, notificationReferences(slot)...)
+	_, err := notification.WalkEventPayload(jsontext.Value(event.Payload), event.Type, func(slot jsontext.Value) (bool, error) {
+		uids = append(uids, notification.References(slot)...)
 		return true, nil
 	})
 	if err != nil {

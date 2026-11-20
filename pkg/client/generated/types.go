@@ -5477,7 +5477,7 @@ type ProjectFederationBody struct {
 	ProjectUID       string          `json:"project_uid" validate:"required"`
 	Relay            *RelayHandshake `json:"relay,omitempty"`
 
-	// RelayLinksChecked True when relay_protocol_version was requested and the project has no cross-project issue links. Older daemons omit it.
+	// RelayLinksChecked True when relay_protocol_version was requested and all existing cross-project links are allowed within the shared group. Older daemons omit it.
 	RelayLinksChecked    *bool `json:"relay_links_checked,omitempty"`
 	ReplayHorizonEventID int64 `json:"replay_horizon_event_id"`
 }
