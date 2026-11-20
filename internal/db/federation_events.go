@@ -372,6 +372,8 @@ func currentParentRemovals(ctx context.Context, tx federationHistoryQuery, order
 	parents := map[string]string{}
 	clocks := map[string]FoldClock{}
 	removed := map[string][]string{}
+	// A parent can own many children; decode its history once for the batch.
+	parentHistory := map[string]map[FoldLinkKey]FoldClock{}
 	parentOf := func(child string) (string, error) {
 		if parent, known := parents[child]; known {
 			return parent, nil
@@ -383,40 +385,20 @@ func currentParentRemovals(ctx context.Context, tx federationHistoryQuery, order
 		}
 		parents[child] = parent
 		if parent != "" {
-			// A retained assignment may be newer than a queued unlink. Read only
-			// events indexed by either endpoint; snapshots can name incoming links.
-			rows, err := tx.QueryContext(ctx, `SELECT uid,origin_instance_uid,issue_uid,type,payload,hlc_physical_ms,hlc_counter
-FROM events WHERE (issue_uid IN ($1,$2) OR related_issue_uid IN ($1,$2))
-AND type IN ('issue.created','issue.snapshot','issue.linked','issue.links_changed')`, child, parent)
+			history, err := parentAssignmentClocks(ctx, tx, child, false)
 			if err != nil {
 				return "", err
 			}
-			for rows.Next() {
-				var event FoldEvent
-				var issue sql.NullString
-				var payload string
-				if err := rows.Scan(&event.UID, &event.OriginInstanceUID, &issue, &event.Type, &payload, &event.HLCPhysicalMS, &event.HLCCounter); err != nil {
-					_ = rows.Close()
-					return "", err
-				}
-				event.IssueUID, event.Payload = issue.String, jsontext.Value(payload)
-				assignments, err := directParentAssignments(event)
+			if _, ok := parentHistory[parent]; !ok {
+				parentHistory[parent], err = parentAssignmentClocks(ctx, tx, parent, true)
 				if err != nil {
-					_ = rows.Close()
 					return "", err
 				}
-				for _, key := range assignments {
-					if key.FromUID == child && key.ToUID == parent && compareClock(clocks[child], clockOf(event)) < 0 {
-						clocks[child] = clockOf(event)
-					}
-				}
 			}
-			if err := rows.Err(); err != nil {
-				_ = rows.Close()
-				return "", err
-			}
-			if err := rows.Close(); err != nil {
-				return "", err
+			key := FoldLinkKey{FromUID: child, ToUID: parent, Type: "parent"}
+			clocks[child] = history[key]
+			if clock := parentHistory[parent][key]; compareClock(clock, clocks[child]) > 0 {
+				clocks[child] = clock
 			}
 		}
 		return parent, nil
@@ -448,13 +430,49 @@ AND type IN ('issue.created','issue.snapshot','issue.linked','issue.links_change
 			if err != nil {
 				return nil, err
 			}
+			if compareClock(clockOf(event), clocks[key.FromUID]) < 0 {
+				continue
+			}
 			if parent != "" && parent != key.ToUID {
 				removed[event.UID] = append(removed[event.UID], parent)
 			}
 			parents[key.FromUID] = key.ToUID
+			clocks[key.FromUID] = clockOf(event)
 		}
 	}
 	return removed, nil
+}
+
+func parentAssignmentClocks(ctx context.Context, tx federationHistoryQuery, uid string, primaryOnly bool) (map[FoldLinkKey]FoldClock, error) {
+	query := `SELECT uid,origin_instance_uid,issue_uid,type,payload,hlc_physical_ms,hlc_counter FROM events WHERE (issue_uid=$1 OR related_issue_uid=$1) AND type IN ('issue.created','issue.snapshot','issue.linked','issue.links_changed')`
+	if primaryOnly {
+		query = `SELECT uid,origin_instance_uid,issue_uid,type,payload,hlc_physical_ms,hlc_counter FROM events WHERE issue_uid=$1 AND type IN ('issue.created','issue.snapshot','issue.linked','issue.links_changed')`
+	}
+	rows, err := tx.QueryContext(ctx, query, uid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	clocks := map[FoldLinkKey]FoldClock{}
+	for rows.Next() {
+		var event FoldEvent
+		var issue sql.NullString
+		var payload string
+		if err := rows.Scan(&event.UID, &event.OriginInstanceUID, &issue, &event.Type, &payload, &event.HLCPhysicalMS, &event.HLCCounter); err != nil {
+			return nil, err
+		}
+		event.IssueUID, event.Payload = issue.String, jsontext.Value(payload)
+		assignments, err := directParentAssignments(event)
+		if err != nil {
+			return nil, err
+		}
+		for _, key := range assignments {
+			if clock := clockOf(event); compareClock(clock, clocks[key]) > 0 {
+				clocks[key] = clock
+			}
+		}
+	}
+	return clocks, rows.Err()
 }
 
 // parentRemovalEndpoints returns the child-to-parent storage endpoints removed
