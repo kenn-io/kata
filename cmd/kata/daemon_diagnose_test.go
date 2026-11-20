@@ -913,20 +913,18 @@ func TestDaemonUnreachableProfileRecoveryAdvice(t *testing.T) {
 			address := strings.TrimPrefix(server.URL, "http://")
 			_, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{Service: "kata", PID: os.Getpid(), Network: "tcp", Address: address})
 			require.NoError(t, err)
-			ctx := t.Context()
 			if tc.managed {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, 300*time.Millisecond)
-				defer cancel()
-			}
-			_, _, err = executeRootCapture(t, ctx, "--daemon", "work", tc.command)
-			cliErr := requireCLIError(t, err, ExitDaemonUnavail)
-			if tc.managed {
-				require.Equal(t, 1, strings.Count(cliErr.Message, "autostart = false"))
-				require.NotContains(t, cliErr.Message, "service manager")
-				require.Equal(t, 1, strings.Count(cliErr.Hint, "service manager"))
+				settledCLIUse(t, func(t *testing.T) {
+					_, _, err := executeRootCapture(t, t.Context(), "--daemon", "work", tc.command)
+					cliErr := requireCLIError(t, err, ExitDaemonUnavail)
+					require.Equal(t, 1, strings.Count(cliErr.Message, "autostart = false"))
+					require.NotContains(t, cliErr.Message, "service manager")
+					require.Equal(t, 1, strings.Count(cliErr.Hint, "service manager"))
+				})
 				return
 			}
+			_, _, err = executeRootCapture(t, t.Context(), "--daemon", "work", tc.command)
+			cliErr := requireCLIError(t, err, ExitDaemonUnavail)
 			require.Equal(t, "local_unreachable", cliErr.Code)
 			require.Contains(t, cliErr.Message, "503")
 			require.Contains(t, cliErr.Message, fmt.Sprintf("%q", filepath.Join(ns.DataDir, "daemon.log")))
