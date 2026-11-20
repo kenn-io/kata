@@ -59,8 +59,12 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 	for _, clear := range []bool{false, true} {
 		t.Run(fmt.Sprintf("clear=%t", clear), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				cause := newUnreachable(t.Context(), "/example/runtime", kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}, errors.New("daemon endpoint unreachable"))
-				cause.ManagedExternally = true
+				probeCtx, cancelProbe := context.WithCancel(t.Context())
+				defer cancelProbe()
+				if !clear {
+					cancelProbe()
+				}
+				cause := newUnreachable(probeCtx, "/example/runtime", kitdaemon.RuntimeRecord{PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:1"}, errors.New("daemon endpoint unreachable"))
 				calls := 0
 				scan := func(context.Context) (ensureDiscovery, error) {
 					calls++
@@ -75,11 +79,13 @@ func TestManagedExternallyUnreachableDetail(t *testing.T) {
 				require.ErrorIs(t, err, ErrDaemonManagedExternally)
 				if clear {
 					require.NotErrorIs(t, err, cause)
+					require.ErrorIs(t, err, context.DeadlineExceeded)
 				} else {
+					require.NotErrorIs(t, cause, ErrLocalDaemonUnreachable)
 					require.ErrorIs(t, err, cause)
+					require.ErrorIs(t, err, context.Canceled)
 					require.ErrorContains(t, err, "service manager")
 					require.ErrorContains(t, err, "autostart = false")
-					require.ErrorIs(t, err, context.DeadlineExceeded)
 				}
 			})
 		})
