@@ -63,12 +63,6 @@ type benchPollPage struct {
 	NextAfterID int64             `json:"next_after_id"`
 }
 
-func (h benchHub) poll(b *testing.B, afterID int64, wait string) benchPollPage {
-	page, err := h.pollPage(b.Context(), afterID, wait)
-	require.NoError(b, err)
-	return page
-}
-
 // pollPage reports failures as an error, so a worker goroutine can hand them
 // back to the benchmark goroutine.
 func (h benchHub) pollPage(ctx context.Context, afterID int64, wait string) (benchPollPage, error) {
@@ -90,7 +84,8 @@ func (h benchHub) pollPage(ctx context.Context, afterID int64, wait string) (ben
 		return benchPollPage{}, fmt.Errorf("poll answered %d", response.StatusCode)
 	}
 	var page benchPollPage
-	return page, json.NewDecoder(response.Body).Decode(&page)
+	err = json.NewDecoder(response.Body).Decode(&page)
+	return page, err
 }
 
 func (h benchHub) commit(b *testing.B) {
@@ -110,7 +105,9 @@ func (h benchHub) commit(b *testing.B) {
 // poll is parked before the commit, so a hub that holds polls answers on the
 // wake; one that does not is polled again after the spoke interval.
 func (h benchHub) run(b *testing.B) {
-	cursor := h.poll(b, 0, "").NextAfterID
+	page, err := h.pollPage(b.Context(), 0, "")
+	require.NoError(b, err)
+	cursor := page.NextAfterID
 	b.ResetTimer()
 	for range b.N {
 		b.StopTimer()

@@ -124,6 +124,9 @@ func waitForHeldPoll(t testing.TB, done <-chan longPollResult) {
 	t.Helper()
 	select {
 	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("poll failed before it was held: %v", result.err)
+		}
 		t.Fatalf("poll returned before it was held: %d %s", result.status, result.raw)
 	//nolint:kennlint // deadlinetest: a held poll is observable only as a response that has not arrived over real HTTP.
 	case <-time.After(300 * time.Millisecond):
